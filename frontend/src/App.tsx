@@ -6,6 +6,7 @@ import AppLayout from "./components/layout/AppLayout";
 import LoginPage from "./pages/login/LoginPage";
 import DashboardPage from "./pages/dashboard/DashboardPage";
 import FMEAListPage from "./pages/fmea/FMEAListPage";
+import FMEAEditorPage from "./pages/fmea/FMEAEditorPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -43,7 +44,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/fmea" element={<FMEAListPage />} />
-        <Route path="/fmea/:id" element={<div>FMEA Editor — Coming Soon</div>} />
+        <Route path="/fmea/:id" element={<FMEAEditorPage />} />
         <Route path="/capa" element={<div>CAPA List — Coming Soon</div>} />
         <Route path="/capa/:id" element={<div>CAPA Detail — Coming Soon</div>} />
       </Route>
