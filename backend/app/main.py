@@ -8,6 +8,7 @@ from app.database import async_session
 from app.models.user import User
 from app.core.security import hash_password
 from app.api.auth import router as auth_router
+from app.api.fmea import router as fmea_router
 
 
 @asynccontextmanager
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(fmea_router)
 
 
 @app.get("/api/health")
