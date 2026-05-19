@@ -1,7 +1,31 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
-app = FastAPI(title="OpenQMS API", version="0.1.0")
+from app.database import async_session
+from app.models.user import User
+from app.core.security import hash_password
+from app.api.auth import router as auth_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with async_session() as db:
+        result = await db.execute(select(User).where(User.username == "admin"))
+        if not result.scalar_one_or_none():
+            db.add(User(
+                username="admin",
+                password_hash=hash_password("Admin@2026"),
+                display_name="系统管理员",
+                role="admin",
+            ))
+            await db.commit()
+    yield
+
+
+app = FastAPI(title="OpenQMS API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -10,6 +34,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 
 @app.get("/api/health")
