@@ -7,6 +7,8 @@ import LoginPage from "./pages/login/LoginPage";
 import DashboardPage from "./pages/dashboard/DashboardPage";
 import FMEAListPage from "./pages/fmea/FMEAListPage";
 import FMEAEditorPage from "./pages/fmea/FMEAEditorPage";
+import CAPAListPage from "./pages/capa/CAPAListPage";
+import CAPADetailPage from "./pages/capa/CAPADetailPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -45,8 +47,8 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/fmea" element={<FMEAListPage />} />
         <Route path="/fmea/:id" element={<FMEAEditorPage />} />
-        <Route path="/capa" element={<div>CAPA List — Coming Soon</div>} />
-        <Route path="/capa/:id" element={<div>CAPA Detail — Coming Soon</div>} />
+        <Route path="/capa" element={<CAPAListPage />} />
+        <Route path="/capa/:id" element={<CAPADetailPage />} />
       </Route>
     </Routes>
   );
