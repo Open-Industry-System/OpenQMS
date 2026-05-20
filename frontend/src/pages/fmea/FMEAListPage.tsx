@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Table, Button, Tag, Typography, Modal, Form, Input, Select, message } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
-import { listFMEAs, createFMEA } from "../../api/fmea";
-import type { FMEADocument } from "../../types";
+import { listFMEAs, createFMEA, updateFMEA } from "../../api/fmea";
+import type { FMEADocument, GraphNode, GraphEdge } from "../../types";
+import GenerationWizard from "../../components/dfmea/GenerationWizard";
 import { useAuthStore } from "../../store/authStore";
 
 const { Title } = Typography;
@@ -40,6 +41,7 @@ export default function FMEAListPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -60,10 +62,34 @@ export default function FMEAListPage() {
   }, []);
 
   const handleCreate = async (values: { title: string; document_no: string; fmea_type: string }) => {
+    if (values.fmea_type === "DFMEA") {
+      setModalOpen(false);
+      setWizardOpen(true);
+      return;
+    }
     try {
       const fmea = await createFMEA(values);
       message.success("FMEA 创建成功");
       setModalOpen(false);
+      form.resetFields();
+      navigate(`/fmea/${fmea.fmea_id}`);
+    } catch {
+      message.error("创建失败");
+    }
+  };
+
+  const handleWizardComplete = async (skeleton: { nodes: GraphNode[]; edges: GraphEdge[] }) => {
+    try {
+      const fmea = await createFMEA({
+        title: form.getFieldValue("title") || "新DFMEA",
+        document_no: form.getFieldValue("document_no") || `DFMEA-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`,
+        fmea_type: "DFMEA",
+      });
+      await updateFMEA(fmea.fmea_id, {
+        graph_data: { nodes: skeleton.nodes, edges: skeleton.edges },
+      });
+      message.success("DFMEA 创建成功");
+      setWizardOpen(false);
       form.resetFields();
       navigate(`/fmea/${fmea.fmea_id}`);
     } catch {
@@ -158,6 +184,12 @@ export default function FMEAListPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <GenerationWizard
+        open={wizardOpen}
+        onCancel={() => setWizardOpen(false)}
+        onComplete={handleWizardComplete}
+      />
     </div>
   );
 }

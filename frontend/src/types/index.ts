@@ -51,6 +51,13 @@ export interface GraphNode {
   revised_occurrence?: number;// 改进后频度
   revised_detection?: number; // 改进后探测度
   revised_ap?: string;       // 改进后措施优先级 (H / M / L)
+
+  p_diagram?: {
+    inputs: string[];
+    outputs: string[];
+    controls: string[];
+    noise_factors: string[];
+  };
 }
 
 

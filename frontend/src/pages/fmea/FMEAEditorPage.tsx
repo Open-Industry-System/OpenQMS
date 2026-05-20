@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Button, Space, Tag, Typography, Input, Table, Card,
+  Button, Space, Tag, Typography, Input, Table, Card, Tabs,
   Row, Col, message, Spin, Popconfirm, Empty, Tooltip,
   Descriptions, Divider,
 } from "antd";
@@ -14,6 +14,9 @@ import type { FMEADocument, GraphNode, GraphEdge } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { calculateAP } from "../../utils/fmea";
 import { buildRows, createRowNodes, type FMEARow } from "../../utils/fmeaTable";
+import StructureTree from "../../components/dfmea/StructureTree";
+import ParameterDiagram from "../../components/dfmea/ParameterDiagram";
+import InlineRecommendations from "../../components/dfmea/InlineRecommendations";
 
 const { Title, Text } = Typography;
 
@@ -71,6 +74,8 @@ export default function FMEAEditorPage() {
   const user = useAuthStore((s) => s.user);
   const isViewer = user?.role === "viewer";
   const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+  const [activeTab, setActiveTab] = useState("failure");
+  const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -662,9 +667,11 @@ export default function FMEAEditorPage() {
         </Descriptions>
       </Card>
 
-      <Row gutter={16}>
-        {/* Left: Structure/Function Tree */}
-        <Col span={5}>
+      <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }}>
+        <Tabs.TabPane tab="失效分析" key="failure">
+          <Row gutter={16}>
+            {/* Left: Structure/Function Tree */}
+            <Col span={5}>
           <Card
             title={isDFMEA ? "结构 / 功能" : "工序 / 功能"}
             size="small"
@@ -750,6 +757,35 @@ export default function FMEAEditorPage() {
           </Card>
         </Col>
       </Row>
+        </Tabs.TabPane>
+        <Tabs.TabPane tab="结构分析" key="structure">
+          <Row gutter={16}>
+            <Col span={8}>
+              <Card title="结构树" size="small">
+                <StructureTree
+                  nodes={nodes}
+                  edges={edges}
+                  onUpdateNodes={setNodes}
+                  onUpdateEdges={setEdges}
+                  isViewer={isViewer}
+                  onSelectNode={(node) => setSelectedStructureNode(node)}
+                />
+              </Card>
+            </Col>
+            <Col span={16}>
+              <Card title="节点详情" size="small">
+                <ParameterDiagram
+                  node={selectedStructureNode}
+                  onUpdateNode={(nodeId, updates) => {
+                    setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, ...updates } : n)));
+                  }}
+                  isViewer={isViewer}
+                />
+              </Card>
+            </Col>
+          </Row>
+        </Tabs.TabPane>
+      </Tabs>
 
       <style>{`
         .fmea-row-highlight td {
