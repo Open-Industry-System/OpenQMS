@@ -50,6 +50,28 @@ async def create_fmea(
         raise ValueError(f"FMEA document number '{document_no}' already exists.")
 
     fmea_id = uuid.uuid4()
+    
+    # Initialize templates based on FMEA type
+    graph_data = {"nodes": [], "edges": []}
+    if fmea_type == "PFMEA":
+        graph_data["nodes"].append({
+            "id": f"pi_{uuid.uuid4().hex[:8]}",
+            "type": "ProcessItem",
+            "name": "新建过程项目",
+            "severity": 0,
+            "occurrence": 0,
+            "detection": 0
+        })
+    elif fmea_type == "DFMEA":
+        graph_data["nodes"].append({
+            "id": f"sys_{uuid.uuid4().hex[:8]}",
+            "type": "System",
+            "name": "新建系统",
+            "severity": 0,
+            "occurrence": 0,
+            "detection": 0
+        })
+
     fmea = FMEADocument(
         fmea_id=fmea_id,
         title=title,
@@ -57,6 +79,7 @@ async def create_fmea(
         fmea_type=fmea_type,
         created_by=user_id,
         updated_by=user_id,
+        graph_data=graph_data,  # Inject template graph
     )
     db.add(fmea)
 
