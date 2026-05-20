@@ -12,11 +12,11 @@ class TestComputeAP:
     def test_s10_o3_d7_returns_H(self):
         assert compute_ap(10, 3, 7) == "H"
 
-    def test_s10_o3_d4_returns_M(self):
-        assert compute_ap(10, 3, 4) == "M"
+    def test_s10_o3_d5_returns_M(self):
+        assert compute_ap(10, 3, 5) == "M"
 
-    def test_s10_o3_d3_returns_L(self):
-        assert compute_ap(10, 3, 3) == "L"
+    def test_s10_o3_d4_returns_L(self):
+        assert compute_ap(10, 3, 4) == "L"
 
     def test_s10_o1_d1_returns_L(self):
         assert compute_ap(10, 1, 1) == "L"

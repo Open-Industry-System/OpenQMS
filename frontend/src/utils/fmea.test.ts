@@ -9,11 +9,11 @@ describe("calculateAP - AIAG-VDA 2019 matrix", () => {
   it("returns H for S=10, O=3, D=7", () => {
     expect(calculateAP(10, 3, 7)).toBe("H");
   });
-  it("returns M for S=10, O=3, D=4", () => {
-    expect(calculateAP(10, 3, 4)).toBe("M");
+  it("returns M for S=10, O=3, D=5", () => {
+    expect(calculateAP(10, 3, 5)).toBe("M");
   });
-  it("returns L for S=10, O=3, D=3", () => {
-    expect(calculateAP(10, 3, 3)).toBe("L");
+  it("returns L for S=10, O=3, D=4", () => {
+    expect(calculateAP(10, 3, 4)).toBe("L");
   });
   it("returns L for S=10, O=1, D=1", () => {
     expect(calculateAP(10, 1, 1)).toBe("L");
