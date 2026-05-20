@@ -8,3 +8,6 @@ venv/
 *.egg-info/
 pgdata/
 .DS_Store
+.agents/
+.superpowers/
+docs/superpowers/
