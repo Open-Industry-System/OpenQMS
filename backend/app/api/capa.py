@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
+from typing import Any
 from app.models.user import User
 
 from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse
@@ -71,24 +72,26 @@ async def update_capa(
     return CAPAResponse.model_validate(capa)
 
 
+async def require_close_permission(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+) -> tuple[User, Any]:
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    if capa.status in ["D7_PREVENTION", "D8_CLOSURE"]:
+        user = await require_manager_or_admin(user)
+    return user, capa
+
+
 @router.post("/{report_id}/advance", response_model=CAPAResponse)
 async def advance_capa(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    result: tuple[User, Any] = Depends(require_close_permission),
 ):
-    capa = await capa_service.get_capa(db, report_id)
-    if capa is None:
-        raise HTTPException(status_code=404, detail="8D report not found")
-    
-    # Restrict advancing to D8_CLOSURE or ARCHIVED to only Admin/Manager
-    # D7_PREVENTION -> D8_CLOSURE, D8_CLOSURE -> ARCHIVED
-    if capa.status in ["D7_PREVENTION", "D8_CLOSURE"] and user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=403,
-            detail="Only Admin and Manager are allowed to close or archive CAPA reports"
-        )
-        
+    user, capa = result
     try:
         capa = await capa_service.advance_capa(db, capa, user.user_id)
     except ValueError as e:
