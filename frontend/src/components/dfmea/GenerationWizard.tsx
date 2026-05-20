@@ -152,23 +152,210 @@ export default function GenerationWizard({ open, onCancel, onComplete }: Generat
     setData(initialWizardData());
   }, [data, onComplete]);
 
+  const updateData = (patch: Partial<WizardData>) => {
+    setData((prev) => ({ ...prev, ...patch }));
+  };
+
+  const canProceed = () => {
+    switch (currentStep) {
+      case 0: return data.scope.team.trim() && data.scope.task.trim();
+      case 1: return data.structureNodes.length > 0;
+      case 2: return Object.keys(data.functions).length > 0;
+      case 3: return data.failures.length > 0;
+      case 4: return data.failures.every((f) => f.s > 0 && f.o > 0 && f.d > 0);
+      default: return true;
+    }
+  };
+
   const renderCurrentStep = () => {
     switch (currentStep) {
       case 0:
         return (
           <div>
-            <Title level={5}>5T范围定义</Title>
-            <Paragraph>请填写DFMEA的5T范围信息（团队、时间、工具、任务、趋势）。</Paragraph>
+            <Title level={5}>5T 范围定义</Title>
+            <Paragraph>请填写 DFMEA 分析的 5T 范围信息。</Paragraph>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <Input placeholder="团队 (Team)" value={data.scope.team} onChange={(e) => updateData({ scope: { ...data.scope, team: e.target.value } })} />
+              <Input placeholder="时间范围 (Timeframe)" value={data.scope.timeframe} onChange={(e) => updateData({ scope: { ...data.scope, timeframe: e.target.value } })} />
+              <Input placeholder="工具 (Tool)" value={data.scope.tool} onChange={(e) => updateData({ scope: { ...data.scope, tool: e.target.value } })} />
+              <Input placeholder="任务 (Task)" value={data.scope.task} onChange={(e) => updateData({ scope: { ...data.scope, task: e.target.value } })} />
+              <Input placeholder="趋势 (Trend)" value={data.scope.trend} onChange={(e) => updateData({ scope: { ...data.scope, trend: e.target.value } })} />
+            </div>
+          </div>
+        );
+      case 1:
+        return (
+          <div>
+            <Title level={5}>结构分析</Title>
+            <Paragraph>构建系统 → 子系统 → 零部件的层级结构。</Paragraph>
+            <Button size="small" icon={<PlusOutlined />} onClick={() => {
+              const node = createNode('System', '新系统');
+              updateData({ structureNodes: [...data.structureNodes, node] });
+            }}>添加系统</Button>
+            <div style={{ marginTop: 12 }}>
+              {data.structureNodes.map((node) => (
+                <Card key={node.id} size="small" style={{ marginBottom: 8, marginLeft: node.type === 'Subsystem' ? 20 : node.type === 'Component' ? 40 : 0 }}>
+                  <Space>
+                    <Tag color={node.type === 'System' ? 'red' : node.type === 'Subsystem' ? 'orange' : 'green'}>{TYPE_LABEL[node.type]}</Tag>
+                    <Input size="small" value={node.name} onChange={(e) => {
+                      updateData({ structureNodes: data.structureNodes.map((n) => n.id === node.id ? { ...n, name: e.target.value } : n) });
+                    }} style={{ width: 200 }} />
+                    {node.type !== 'Component' && (
+                      <Button size="small" onClick={() => {
+                        const childType = CHILD_TYPE[node.type];
+                        const child = createNode(childType, `新${TYPE_LABEL[childType]}`);
+                        updateData({
+                          structureNodes: [...data.structureNodes, child],
+                          structureEdges: [...data.structureEdges, { source: node.id, target: child.id, type: STRUCTURE_EDGE_TYPES[node.type] }],
+                        });
+                      }}>+ {TYPE_LABEL[CHILD_TYPE[node.type]]}</Button>
+                    )}
+                    <Button size="small" danger onClick={() => {
+                      const toDelete = new Set<string>();
+                      const collect = (id: string) => { toDelete.add(id); data.structureEdges.filter((e) => e.source === id).forEach((e) => collect(e.target)); };
+                      collect(node.id);
+                      updateData({
+                        structureNodes: data.structureNodes.filter((n) => !toDelete.has(n.id)),
+                        structureEdges: data.structureEdges.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target)),
+                      });
+                    }}>删除</Button>
+                  </Space>
+                </Card>
+              ))}
+              {data.structureNodes.length === 0 && <Empty description="点击上方按钮添加系统节点" />}
+            </div>
+          </div>
+        );
+      case 2:
+        return (
+          <div>
+            <Title level={5}>功能分析</Title>
+            <Paragraph>为每个零部件定义功能、技术要求和规格参数。</Paragraph>
+            {data.structureNodes.filter((n) => n.type === 'Component').map((comp) => (
+              <Card key={comp.id} size="small" title={comp.name} style={{ marginBottom: 12 }}>
+                <Input placeholder="功能描述" value={data.functions[comp.id]?.name || ''} onChange={(e) => updateData({ functions: { ...data.functions, [comp.id]: { ...data.functions[comp.id], name: e.target.value } } })} style={{ marginBottom: 8 }} />
+                <Input placeholder="技术要求" value={data.functions[comp.id]?.requirement || ''} onChange={(e) => updateData({ functions: { ...data.functions, [comp.id]: { ...data.functions[comp.id], requirement: e.target.value } } })} style={{ marginBottom: 8 }} />
+                <Input placeholder="规格参数" value={data.functions[comp.id]?.specification || ''} onChange={(e) => updateData({ functions: { ...data.functions, [comp.id]: { ...data.functions[comp.id], specification: e.target.value } } })} />
+              </Card>
+            ))}
+          </div>
+        );
+      case 3:
+        return (
+          <div>
+            <Title level={5}>失效分析</Title>
+            <Paragraph>为每个功能定义失效模式、影响和原因。系统将基于功能描述自动推荐失效模式。</Paragraph>
+            {Object.entries(data.functions).map(([funcId, func]) => {
+              if (!func.name.trim()) return null;
+              const funcFailures = data.failures.filter((f) => f.functionId === funcId);
+              const suggestedModes = generateFailureModes(func.name);
+              return (
+                <Card key={funcId} size="small" title={func.name} style={{ marginBottom: 12 }}>
+                  {funcFailures.length === 0 && suggestedModes.length > 0 && (
+                    <div style={{ marginBottom: 8, padding: 8, background: '#f6ffed', borderRadius: 4 }}>
+                      <Tag color="green">推荐</Tag>
+                      <span style={{ fontSize: 12 }}> 基于功能自动推荐：</span>
+                      <Space size={4} style={{ marginTop: 4 }}>
+                        {suggestedModes.slice(0, 3).map((mode) => (
+                          <Button key={mode} size="small" onClick={() => {
+                            const chain = suggestFailureChain(mode);
+                            updateData({ failures: [...data.failures, { functionId: funcId, mode, effect: chain.effects[0] || '', cause: chain.causes[0] || '', s: 0, o: 0, d: 0 }] });
+                          }}>{mode}</Button>
+                        ))}
+                      </Space>
+                    </div>
+                  )}
+                  {funcFailures.map((failure, idx) => {
+                    const globalIdx = data.failures.indexOf(failure);
+                    return (
+                      <div key={globalIdx} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          <Input size="small" value={failure.mode} onChange={(e) => { const u = [...data.failures]; u[globalIdx] = { ...failure, mode: e.target.value }; updateData({ failures: u }); }} addonBefore="失效模式" />
+                          <Input size="small" value={failure.effect} onChange={(e) => { const u = [...data.failures]; u[globalIdx] = { ...failure, effect: e.target.value }; updateData({ failures: u }); }} addonBefore="失效影响" />
+                          <Input size="small" value={failure.cause} onChange={(e) => { const u = [...data.failures]; u[globalIdx] = { ...failure, cause: e.target.value }; updateData({ failures: u }); }} addonBefore="失效原因" />
+                          <Button size="small" danger onClick={() => updateData({ failures: data.failures.filter((_, i) => i !== globalIdx) })}>删除</Button>
+                        </Space>
+                      </div>
+                    );
+                  })}
+                  <Button size="small" type="dashed" onClick={() => updateData({ failures: [...data.failures, { functionId: funcId, mode: '新失效模式', effect: '', cause: '', s: 0, o: 0, d: 0 }] })}>+ 添加失效模式</Button>
+                </Card>
+              );
+            })}
+          </div>
+        );
+      case 4:
+        return (
+          <div>
+            <Title level={5}>风险分析</Title>
+            <Paragraph>为每个失效链评估严重度(S)、发生度(O)、探测度(D)。</Paragraph>
+            <Table
+              size="small"
+              dataSource={data.failures.map((f, i) => ({ ...f, key: i }))}
+              columns={[
+                { title: '失效模式', dataIndex: 'mode', width: 140 },
+                { title: 'S', dataIndex: 's', width: 60, render: (v: number, r: any) => <InputNumber size="small" min={1} max={10} value={v || undefined} style={{ width: 50 }} onChange={(val) => { const u = [...data.failures]; u[r.key] = { ...u[r.key], s: val || 0 }; updateData({ failures: u }); }} /> },
+                { title: 'O', dataIndex: 'o', width: 60, render: (v: number, r: any) => <InputNumber size="small" min={1} max={10} value={v || undefined} style={{ width: 50 }} onChange={(val) => { const u = [...data.failures]; u[r.key] = { ...u[r.key], o: val || 0 }; updateData({ failures: u }); }} /> },
+                { title: 'D', dataIndex: 'd', width: 60, render: (v: number, r: any) => <InputNumber size="small" min={1} max={10} value={v || undefined} style={{ width: 50 }} onChange={(val) => { const u = [...data.failures]; u[r.key] = { ...u[r.key], d: val || 0 }; updateData({ failures: u }); }} /> },
+                { title: 'RPN', width: 60, render: (_: unknown, r: any) => { const rpn = r.s * r.o * r.d; return <Tag color={rpn >= 100 ? 'red' : rpn >= 50 ? 'orange' : 'green'}>{rpn || 0}</Tag>; } },
+                { title: 'AP', width: 80, render: (_: unknown, r: any) => { const { ap, hint } = analyzeRisk(r.s, r.o, r.d); return <div><Tag color={ap === 'H' ? 'red' : ap === 'M' ? 'orange' : 'green'}>{ap || '-'}</Tag>{ap === 'H' && <div style={{ fontSize: 11, color: '#cf1322' }}>必须优化</div>}</div>; } },
+              ]}
+              pagination={false}
+            />
+          </div>
+        );
+      case 5:
+        return (
+          <div>
+            <Title level={5}>优化措施</Title>
+            {(() => {
+              const highRisk = data.failures.map((f, i) => ({ ...f, index: i })).filter((f) => analyzeRisk(f.s, f.o, f.d).ap === 'H');
+              if (highRisk.length === 0) return (
+                <Result icon={<CheckCircleOutlined />} title="无需强制优化" subTitle="所有失效模式 AP 均不为 H，当前风险可接受。" />
+              );
+              return (
+                <div>
+                  <Paragraph style={{ color: '#cf1322' }}>以下 {highRisk.length} 项 AP=H，必须采取优化措施：</Paragraph>
+                  {highRisk.map((failure) => {
+                    const measures = suggestMeasures(failure.mode, 'H');
+                    return (
+                      <Card key={failure.index} size="small" title={failure.mode} style={{ marginBottom: 12 }}>
+                        <Input.TextArea rows={2} placeholder={measures.prevention.join(' / ')} value={data.optimizations.find((o) => o.failureIndex === failure.index)?.prevention || ''} onChange={(e) => {
+                          const opts = [...data.optimizations];
+                          const existing = opts.find((o) => o.failureIndex === failure.index);
+                          if (existing) existing.prevention = e.target.value; else opts.push({ failureIndex: failure.index, prevention: e.target.value, detection: '' });
+                          updateData({ optimizations: opts });
+                        }} style={{ marginBottom: 8 }} />
+                        <Input.TextArea rows={2} placeholder={measures.detection.join(' / ')} value={data.optimizations.find((o) => o.failureIndex === failure.index)?.detection || ''} onChange={(e) => {
+                          const opts = [...data.optimizations];
+                          const existing = opts.find((o) => o.failureIndex === failure.index);
+                          if (existing) existing.detection = e.target.value; else opts.push({ failureIndex: failure.index, prevention: '', detection: e.target.value });
+                          updateData({ optimizations: opts });
+                        }} />
+                      </Card>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        );
+      case 6:
+        return (
+          <div>
+            <Title level={5}>确认创建</Title>
+            <Card size="small" style={{ marginBottom: 12 }}>
+              <div>结构节点: {data.structureNodes.length} 个</div>
+              <div>功能节点: {Object.keys(data.functions).length} 个</div>
+              <div>失效链: {data.failures.length} 条</div>
+              <div>总节点: {generateSkeleton(data).nodes.length} 个</div>
+              <div>总边: {generateSkeleton(data).edges.length} 条</div>
+            </Card>
+            <Paragraph>确认后将创建 DFMEA 文档并进入编辑器，你可以在编辑器中继续完善细节。</Paragraph>
           </div>
         );
       default:
-        return (
-          <Result
-            icon={<CheckCircleOutlined />}
-            title="向导就绪"
-            subTitle="点击完成以生成DFMEA骨架，后续可在编辑器中细化。"
-          />
-        );
+        return null;
     }
   };
 
@@ -184,7 +371,7 @@ export default function GenerationWizard({ open, onCancel, onComplete }: Generat
           <Space>
             {currentStep > 0 && <Button onClick={handlePrev}>上一步</Button>}
             {currentStep < STEP_TITLES.length - 1 ? (
-              <Button type="primary" onClick={handleNext}>下一步</Button>
+              <Button type="primary" onClick={handleNext} disabled={!canProceed()}>下一步</Button>
             ) : (
               <Button type="primary" onClick={handleFinish}>完成</Button>
             )}

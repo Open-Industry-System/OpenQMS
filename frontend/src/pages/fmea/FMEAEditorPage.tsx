@@ -76,6 +76,8 @@ export default function FMEAEditorPage() {
   const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
   const [activeTab, setActiveTab] = useState("failure");
   const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
+  const [recommendationTrigger, setRecommendationTrigger] = useState<"function" | "failureMode" | "risk" | null>(null);
+  const [recommendationCtx, setRecommendationCtx] = useState<{ functionDesc?: string; failureMode?: string; s?: number; o?: number; d?: number }>({});
 
   useEffect(() => {
     if (!id) return;
@@ -755,6 +757,14 @@ export default function FMEAEditorPage() {
               </div>
             )}
           </Card>
+          <InlineRecommendations
+            trigger={recommendationTrigger}
+            {...recommendationCtx}
+            onApplySuggestion={(suggestion, field) => {
+              message.success(`已采用建议: ${suggestion}`);
+              setRecommendationTrigger(null);
+            }}
+          />
         </Col>
       </Row>
         </Tabs.TabPane>
