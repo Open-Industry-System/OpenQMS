@@ -49,7 +49,7 @@ describe("createRowNodes", () => {
   it("creates expected nodes and edges for PFMEA", () => {
     const result = createRowNodes("fn1", "PFMEA");
     expect(result.newNodes).toHaveLength(5);
-    expect(result.newEdges).toHaveLength(4);
+    expect(result.newEdges).toHaveLength(5);
     expect(result.row.functionNodeId).toBe("fn1");
     expect(result.row.failureModeNodeId).toBeTruthy();
     expect(result.row.failureEffectNodeId).toBeTruthy();
