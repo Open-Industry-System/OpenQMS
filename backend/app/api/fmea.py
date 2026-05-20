@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
 from app.models.user import User
+
 from app.schemas.fmea import (
     FMEACreate, FMEAUpdate, FMEAResponse, FMEAListResponse, TransitionRequest,
 )
@@ -35,7 +36,7 @@ async def list_fmeas(
 async def create_fmea(
     req: FMEACreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_engineer_or_admin),
 ):
     fmea = await fmea_service.create_fmea(db, req.title, req.document_no, req.fmea_type, user.user_id)
     return FMEAResponse.model_validate(fmea)
@@ -58,7 +59,7 @@ async def update_fmea(
     fmea_id: uuid.UUID,
     req: FMEAUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_engineer_or_admin),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
@@ -73,11 +74,18 @@ async def transition_fmea(
     fmea_id: uuid.UUID,
     req: TransitionRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_engineer_or_admin),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
+    
+    if req.target_status == "approved" and user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Only Admin and Manager are allowed to approve FMEA"
+        )
+        
     try:
         fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, user.user_id)
     except ValueError as e:

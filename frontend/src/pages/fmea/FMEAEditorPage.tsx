@@ -11,6 +11,8 @@ import {
 } from "@ant-design/icons";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../api/fmea";
 import type { FMEADocument, GraphNode, GraphEdge } from "../../types";
+import { useAuthStore } from "../../store/authStore";
+
 
 const { Title, Text } = Typography;
 
@@ -64,6 +66,10 @@ export default function FMEAEditorPage() {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
+
+  const user = useAuthStore((s) => s.user);
+  const isViewer = user?.role === "viewer";
+  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
 
   useEffect(() => {
     if (!id) return;
@@ -176,18 +182,26 @@ export default function FMEAEditorPage() {
           </Text>
         </Space>
         <Space>
-          {nextTransitions[fmea.status]?.map((t) => (
-            <Popconfirm
-              key={t.target}
-              title={`确认${t.label}？`}
-              onConfirm={() => handleTransition(t.target)}
-            >
-              <Button icon={t.icon}>{t.label}</Button>
-            </Popconfirm>
-          ))}
-          <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>
-            保存
-          </Button>
+          {nextTransitions[fmea.status]
+            ?.filter((t) => {
+              if (isViewer) return false;
+              if (t.target === "approved" && !isAdminOrManager) return false;
+              return true;
+            })
+            ?.map((t) => (
+              <Popconfirm
+                key={t.target}
+                title={`确认${t.label}？`}
+                onConfirm={() => handleTransition(t.target)}
+              >
+                <Button icon={t.icon}>{t.label}</Button>
+              </Popconfirm>
+            ))}
+          {!isViewer && (
+            <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>
+              保存
+            </Button>
+          )}
         </Space>
       </div>
 
@@ -198,9 +212,11 @@ export default function FMEAEditorPage() {
             title="工序流"
             size="small"
             extra={
-              <Button size="small" icon={<PlusOutlined />} onClick={addNode}>
-                添加工序
-              </Button>
+              !isViewer && (
+                <Button size="small" icon={<PlusOutlined />} onClick={addNode}>
+                  添加工序
+                </Button>
+              )
             }
           >
             {processNodes.map((node) => (
@@ -240,14 +256,16 @@ export default function FMEAEditorPage() {
             title="FMEA 数据"
             size="small"
             extra={
-              <Space>
-                <Button size="small" icon={<PlusOutlined />} onClick={addNode}>
-                  添加节点
-                </Button>
-                <Button size="small" icon={<NodeIndexOutlined />} onClick={addEdge}>
-                  添加关系
-                </Button>
-              </Space>
+              !isViewer && (
+                <Space>
+                  <Button size="small" icon={<PlusOutlined />} onClick={addNode}>
+                    添加节点
+                  </Button>
+                  <Button size="small" icon={<NodeIndexOutlined />} onClick={addEdge}>
+                    添加关系
+                  </Button>
+                </Space>
+              )
             }
           >
             {/* Node Table */}
@@ -267,6 +285,7 @@ export default function FMEAEditorPage() {
                     <Select
                       value={t}
                       size="small"
+                      disabled={isViewer}
                       style={{ width: 110 }}
                       options={nodeTypes}
                       onChange={(v) => updateNode(record.id, "type", v)}
@@ -281,6 +300,7 @@ export default function FMEAEditorPage() {
                     <Input
                       value={t}
                       size="small"
+                      disabled={isViewer}
                       onChange={(e) => updateNode(record.id, "name", e.target.value)}
                     />
                   ),
@@ -295,6 +315,7 @@ export default function FMEAEditorPage() {
                       <Input
                         value={t}
                         size="small"
+                        disabled={isViewer}
                         onChange={(e) =>
                           updateNode(record.id, "process_number", e.target.value)
                         }
@@ -312,6 +333,7 @@ export default function FMEAEditorPage() {
                         type="number"
                         min={1}
                         max={10}
+                        disabled={isViewer}
                         value={record.severity || ""}
                         onChange={(e) =>
                           updateNode(record.id, "severity", Number(e.target.value))
@@ -330,6 +352,7 @@ export default function FMEAEditorPage() {
                         type="number"
                         min={1}
                         max={10}
+                        disabled={isViewer}
                         value={record.occurrence || ""}
                         onChange={(e) =>
                           updateNode(record.id, "occurrence", Number(e.target.value))
@@ -348,6 +371,7 @@ export default function FMEAEditorPage() {
                         type="number"
                         min={1}
                         max={10}
+                        disabled={isViewer}
                         value={record.detection || ""}
                         onChange={(e) =>
                           updateNode(record.id, "detection", Number(e.target.value))
@@ -376,6 +400,7 @@ export default function FMEAEditorPage() {
                       type="text"
                       danger
                       size="small"
+                      disabled={isViewer}
                       icon={<DeleteOutlined />}
                       onClick={() => deleteNode(record.id)}
                     />
@@ -404,6 +429,7 @@ export default function FMEAEditorPage() {
                     <Select
                       value={record.source}
                       size="small"
+                      disabled={isViewer}
                       style={{ width: 180 }}
                       onChange={(v) => {
                         const newEdges = [...edges];
@@ -426,6 +452,7 @@ export default function FMEAEditorPage() {
                     <Select
                       value={record.type}
                       size="small"
+                      disabled={isViewer}
                       style={{ width: 130 }}
                       options={edgeTypes}
                       onChange={(v) => {
@@ -445,6 +472,7 @@ export default function FMEAEditorPage() {
                     <Select
                       value={record.target}
                       size="small"
+                      disabled={isViewer}
                       style={{ width: 180 }}
                       onChange={(v) => {
                         const newEdges = [...edges];
@@ -468,6 +496,7 @@ export default function FMEAEditorPage() {
                       type="text"
                       danger
                       size="small"
+                      disabled={isViewer}
                       icon={<DeleteOutlined />}
                       onClick={() => deleteEdge(index)}
                     />

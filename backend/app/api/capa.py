@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_engineer_or_admin
 from app.models.user import User
+
 from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse
 from app.services import capa_service
 
@@ -33,7 +34,7 @@ async def list_capas(
 async def create_capa(
     req: CAPACreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_engineer_or_admin),
 ):
     capa = await capa_service.create_capa(
         db, req.title, req.document_no, req.severity, req.due_date, user.user_id
@@ -58,12 +59,12 @@ async def update_capa(
     report_id: uuid.UUID,
     req: CAPAUpdate,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(require_engineer_or_admin),
 ):
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    capa = await capa_service.update_capa(db, capa, req.model_dump(exclude_unset=True))
+    capa = await capa_service.update_capa(db, capa, req.model_dump(exclude_unset=True), user.user_id)
     return CAPAResponse.model_validate(capa)
 
 
@@ -71,13 +72,22 @@ async def update_capa(
 async def advance_capa(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(require_engineer_or_admin),
 ):
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
+    
+    # Restrict advancing to D8_CLOSURE or ARCHIVED to only Admin/Manager
+    # D7_PREVENTION -> D8_CLOSURE, D8_CLOSURE -> ARCHIVED
+    if capa.status in ["D7_PREVENTION", "D8_CLOSURE"] and user.role not in ["admin", "manager"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Only Admin and Manager are allowed to close or archive CAPA reports"
+        )
+        
     try:
-        capa = await capa_service.advance_capa(db, capa)
+        capa = await capa_service.advance_capa(db, capa, user.user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CAPAResponse.model_validate(capa)
@@ -88,10 +98,10 @@ async def link_fmea(
     report_id: uuid.UUID,
     fmea_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(require_engineer_or_admin),
 ):
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    capa = await capa_service.link_fmea(db, capa, fmea_id)
+    capa = await capa_service.link_fmea(db, capa, fmea_id, user.user_id)
     return CAPAResponse.model_validate(capa)
