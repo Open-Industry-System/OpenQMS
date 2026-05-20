@@ -96,6 +96,16 @@ async def transition_fmea(
     return FMEAResponse.model_validate(fmea)
 
 
+@router.post("/{fmea_id}/recommend", response_model=dict)
+async def recommend_fmea(
+    fmea_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """预留：Phase 3 接入历史数据推荐"""
+    raise HTTPException(status_code=501, detail="历史数据推荐功能将在 Phase 3 实现")
+
+
 @router.get("/{fmea_id}/graph")
 async def get_fmea_graph(
     fmea_id: uuid.UUID,

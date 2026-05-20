@@ -3,6 +3,11 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+# DFMEA 专用节点类型（语义标识，字段与现有 Function 节点相同）
+# SystemFunction = "SystemFunction"
+# SubsystemFunction = "SubsystemFunction"
+# ComponentFunction = "ComponentFunction"
+
 class GraphNodeSchema(BaseModel):
     id: str
     type: str
