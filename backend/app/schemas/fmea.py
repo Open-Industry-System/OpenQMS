@@ -11,6 +11,18 @@ class GraphNodeSchema(BaseModel):
     severity: int = 0
     occurrence: int = 0
     detection: int = 0
+    # DFMEA specific fields
+    requirement: str | None = None
+    specification: str | None = None
+    responsible: str | None = None
+    due_date: str | None = None
+    status: str | None = None
+    action_taken: str | None = None
+    completion_date: str | None = None
+    revised_severity: int | None = None
+    revised_occurrence: int | None = None
+    revised_detection: int | None = None
+    revised_ap: str | None = None
 
 
 class GraphEdgeSchema(BaseModel):
