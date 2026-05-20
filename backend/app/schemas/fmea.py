@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # DFMEA 专用节点类型（语义标识，字段与现有 Function 节点相同）
@@ -41,6 +41,15 @@ class GraphNodeSchema(BaseModel):
     revised_occurrence: int = Field(default=0, ge=0, le=10)  # 改进后频度 (1-10)
     revised_detection: int = Field(default=0, ge=0, le=10)   # 改进后探测度 (1-10)
     revised_ap: str | None = None                            # 改进后的措施优先级 (H / M / L)
+
+    @field_validator("revised_ap")
+    @classmethod
+    def validate_revised_ap(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ("H", "M", "L", ""):
+            raise ValueError('revised_ap must be one of "H", "M", "L", or empty')
+        return v
 
 
 class GraphEdgeSchema(BaseModel):
