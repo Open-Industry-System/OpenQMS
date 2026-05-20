@@ -36,9 +36,12 @@ async def create_capa(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_engineer_or_admin),
 ):
-    capa = await capa_service.create_capa(
-        db, req.title, req.document_no, req.severity, req.due_date, user.user_id
-    )
+    try:
+        capa = await capa_service.create_capa(
+            db, req.title, req.document_no, req.severity, req.due_date, user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return CAPAResponse.model_validate(capa)
 
 

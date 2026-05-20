@@ -28,22 +28,29 @@ async def get_dashboard(db: AsyncSession) -> dict:
         )
     )
 
-    fmeas = await db.execute(select(FMEADocument.graph_data))
-    total_rpn = 0
-    rpn_count = 0
-    high_rpn_count = 0
-    for (graph_data,) in fmeas:
-        for node in graph_data.get("nodes", []):
-            if node.get("type") == "FailureMode":
-                s = node.get("severity", 0)
-                o = node.get("occurrence", 0)
-                d = node.get("detection", 0)
-                if s and o and d:
-                    rpn = s * o * d
-                    total_rpn += rpn
-                    rpn_count += 1
-                    if rpn >= 100:
-                        high_rpn_count += 1
+    from sqlalchemy import text
+
+    rpn_stats_query = text("""
+        SELECT 
+            COALESCE(SUM(COALESCE((node->>'severity')::int, 0) * COALESCE((node->>'occurrence')::int, 0) * COALESCE((node->>'detection')::int, 0)), 0) AS total_rpn,
+            COUNT(node) FILTER (WHERE (node->>'severity')::int > 0 AND (node->>'occurrence')::int > 0 AND (node->>'detection')::int > 0) AS rpn_count,
+            COUNT(node) FILTER (WHERE COALESCE((node->>'severity')::int, 0) * COALESCE((node->>'occurrence')::int, 0) * COALESCE((node->>'detection')::int, 0) >= 100) AS high_rpn_count
+        FROM fmea_documents,
+        LATERAL jsonb_array_elements(
+            CASE 
+                WHEN jsonb_typeof(graph_data->'nodes') = 'array' THEN graph_data->'nodes'
+                ELSE '[]'::jsonb
+            END
+        ) AS node
+        WHERE node->>'type' = 'FailureMode';
+    """)
+    stats_result = await db.execute(rpn_stats_query)
+    stats = stats_result.fetchone()
+
+    total_rpn = stats[0] if stats else 0
+    rpn_count = stats[1] if stats else 0
+    high_rpn_count = stats[2] if stats else 0
+
     avg_rpn = round(total_rpn / rpn_count) if rpn_count > 0 else 0
 
     return {

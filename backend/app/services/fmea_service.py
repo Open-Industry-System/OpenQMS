@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.models.fmea import FMEADocument
 from app.state_machines.fmea_state import FMEAState, can_transition
@@ -41,6 +42,13 @@ async def get_fmea(db: AsyncSession, fmea_id: uuid.UUID) -> FMEADocument | None:
 async def create_fmea(
     db: AsyncSession, title: str, document_no: str, fmea_type: str, user_id: uuid.UUID
 ) -> FMEADocument:
+    # Check if duplicate document_no exists
+    existing_result = await db.execute(
+        select(FMEADocument).where(FMEADocument.document_no == document_no)
+    )
+    if existing_result.scalar_one_or_none():
+        raise ValueError(f"FMEA document number '{document_no}' already exists.")
+
     fmea_id = uuid.uuid4()
     fmea = FMEADocument(
         fmea_id=fmea_id,
@@ -67,7 +75,12 @@ async def create_fmea(
     )
     db.add(audit_log)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise ValueError(f"FMEA document number '{document_no}' already exists.")
+
     await db.refresh(fmea)
     return fmea
 

@@ -54,7 +54,7 @@ async def seed():
         )
         manager = User(
             username="manager", display_name="质量经理",
-            password_hash=hash_password("Manager@2026"), role="admin",
+            password_hash=hash_password("Manager@2026"), role="manager",
         )
         viewer = User(
             username="viewer", display_name="只读用户",

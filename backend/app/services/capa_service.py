@@ -2,6 +2,7 @@ import uuid
 from datetime import date, datetime
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.models.capa import CAPAEightD
 from app.state_machines.eightd_state import EightDState, can_transition
@@ -46,6 +47,13 @@ async def create_capa(
     due_date,
     user_id: uuid.UUID,
 ) -> CAPAEightD:
+    # Check if duplicate document_no exists
+    existing_result = await db.execute(
+        select(CAPAEightD).where(CAPAEightD.document_no == document_no)
+    )
+    if existing_result.scalar_one_or_none():
+        raise ValueError(f"CAPA report number '{document_no}' already exists.")
+
     report_id = uuid.uuid4()
     capa = CAPAEightD(
         report_id=report_id,
@@ -73,7 +81,12 @@ async def create_capa(
     )
     db.add(audit_log)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise ValueError(f"CAPA report number '{document_no}' already exists.")
+
     await db.refresh(capa)
     return capa
 

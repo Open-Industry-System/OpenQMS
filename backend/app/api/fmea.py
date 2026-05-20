@@ -38,7 +38,10 @@ async def create_fmea(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_engineer_or_admin),
 ):
-    fmea = await fmea_service.create_fmea(db, req.title, req.document_no, req.fmea_type, user.user_id)
+    try:
+        fmea = await fmea_service.create_fmea(db, req.title, req.document_no, req.fmea_type, user.user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return FMEAResponse.model_validate(fmea)
 
 
