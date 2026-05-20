@@ -26,7 +26,20 @@ export interface GraphNode {
   severity: number;
   occurrence: number;
   detection: number;
+  // DFMEA specific fields
+  requirement?: string;
+  specification?: string;
+  responsible?: string;
+  due_date?: string;
+  status?: string;
+  action_taken?: string;
+  completion_date?: string;
+  revised_severity?: number;
+  revised_occurrence?: number;
+  revised_detection?: number;
+  revised_ap?: string;
 }
+
 
 export interface GraphEdge {
   source: string;
