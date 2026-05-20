@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Button, Tag, Typography, Modal, Form, Input, message } from "antd";
+import { Table, Button, Tag, Typography, Modal, Form, Input, Select, message } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { listFMEAs, createFMEA } from "../../api/fmea";
 import type { FMEADocument } from "../../types";
+import { useAuthStore } from "../../store/authStore";
 
 const { Title } = Typography;
 
@@ -13,6 +14,16 @@ const statusColors: Record<string, string> = {
   approved: "success",
   rework: "warning",
   archived: "default",
+};
+
+const typeLabels: Record<string, string> = {
+  PFMEA: "PFMEA",
+  DFMEA: "DFMEA",
+};
+
+const typeColors: Record<string, string> = {
+  PFMEA: "blue",
+  DFMEA: "green",
 };
 
 const statusLabels: Record<string, string> = {
@@ -31,6 +42,8 @@ export default function FMEAListPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const canEdit = user?.role !== "viewer";
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -46,9 +59,9 @@ export default function FMEAListPage() {
     fetchData();
   }, []);
 
-  const handleCreate = async (values: { title: string; document_no: string }) => {
+  const handleCreate = async (values: { title: string; document_no: string; fmea_type: string }) => {
     try {
-      const fmea = await createFMEA({ ...values, fmea_type: "PFMEA" });
+      const fmea = await createFMEA(values);
       message.success("FMEA 创建成功");
       setModalOpen(false);
       form.resetFields();
@@ -61,7 +74,13 @@ export default function FMEAListPage() {
   const columns = [
     { title: "文档编号", dataIndex: "document_no", key: "document_no", width: 150 },
     { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
-    { title: "类型", dataIndex: "fmea_type", key: "fmea_type", width: 80 },
+    {
+      title: "类型",
+      dataIndex: "fmea_type",
+      key: "fmea_type",
+      width: 80,
+      render: (t: string) => <Tag color={typeColors[t] || "default"}>{typeLabels[t] || t}</Tag>,
+    },
     {
       title: "状态",
       dataIndex: "status",
@@ -93,9 +112,11 @@ export default function FMEAListPage() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
         <Title level={4} style={{ margin: 0 }}>FMEA 管理</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-          新建 PFMEA
-        </Button>
+        {canEdit && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+            新建 FMEA
+          </Button>
+        )}
       </div>
 
       <Table
@@ -115,12 +136,20 @@ export default function FMEAListPage() {
       />
 
       <Modal
-        title="新建 PFMEA"
+        title="新建 FMEA"
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => setModalOpen(false)}
       >
-        <Form form={form} layout="vertical" onFinish={handleCreate}>
+        <Form form={form} layout="vertical" onFinish={handleCreate} initialValues={{ fmea_type: "PFMEA" }}>
+          <Form.Item name="fmea_type" label="FMEA 类型" rules={[{ required: true, message: "请选择 FMEA 类型" }]}>
+            <Select
+              options={[
+                { value: "PFMEA", label: "PFMEA - 过程失效模式分析" },
+                { value: "DFMEA", label: "DFMEA - 设计失效模式分析" },
+              ]}
+            />
+          </Form.Item>
           <Form.Item name="document_no" label="文档编号" rules={[{ required: true, message: "请输入文档编号" }]}>
             <Input placeholder="如 PFMEA-2026-001" />
           </Form.Item>

@@ -11,3 +11,5 @@ pgdata/
 .agents/
 .superpowers/
 docs/superpowers/
+*.tsbuildinfo
+.playwright-mcp/

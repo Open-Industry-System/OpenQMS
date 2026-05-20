@@ -62,6 +62,60 @@ SAMPLE_GRAPH = {
 }
 
 
+SAMPLE_DFMEA_GRAPH = {
+    "nodes": [
+        {"id": "sys_1", "type": "System", "name": "电池管理系统 (BMS)", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "sub_1", "type": "Subsystem", "name": "电池监控单元 (BMU)", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "sub_2", "type": "Subsystem", "name": "热管理系统 (TMS)", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "cmp_1", "type": "Component", "name": "电压采集芯片 LTC6811", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "cmp_2", "type": "Component", "name": "NTC 温度传感器", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "sf_1", "type": "ProcessStepFunction", "name": "实时采集单体电池电压与温度", "specification": "电压精度 ±5mV, 温度精度 ±1°C", "requirement": "每 100ms 完成一轮全电芯扫描", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "cf_1", "type": "ProcessWorkElementFunction", "name": "LTC6811 提供 12通道 16bit ADC 采样", "requirement": "采样噪声 ≤ 0.5mV RMS, 通道间隔离度 ≥ 80dB", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "dfe_1", "type": "FailureEffect", "name": "电池过充/过放未被检测，导致电芯热失控起火", "severity": 10, "severity_plant": 8, "severity_customer": 10, "severity_user": 10, "occurrence": 0, "detection": 0},
+        {"id": "dfm_1", "type": "FailureMode", "name": "电压采集通道漂移导致读取值偏离真实值", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "dfc_1", "type": "FailureCause", "name": "LTC6811 参考电压源温漂超出 datasheet 规格", "severity": 0, "occurrence": 5, "detection": 0},
+        {"id": "dfc_2", "type": "FailureCause", "name": "PCB 布局不当导致采样回路引入共模噪声", "severity": 0, "occurrence": 3, "detection": 0},
+        {"id": "dpc_1", "type": "PreventionControl", "name": "ADC 参考电压选用 AEC-Q100 Grade 0 认证芯片，温漂 ≤ 10ppm/°C", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "ddc_1", "type": "DetectionControl", "name": "BMS 上电自检：注入已知校准电压验证 ADC 通道偏差 ≤ ±3mV", "severity": 0, "occurrence": 0, "detection": 4},
+        {"id": "ddc_2", "type": "DetectionControl", "name": "相邻电芯电压交叉比对：同一模组内最大压差 ≥ 50mV 触发报警", "severity": 0, "occurrence": 0, "detection": 5},
+        {
+            "id": "dra_1",
+            "type": "RecommendedAction",
+            "name": "引入独立 VREF 校准通道，BMS 每次唤醒后执行全量程三点校准",
+            "responsible": "李工",
+            "due_date": "2026-07-30",
+            "status": "in_progress",
+            "action_taken": "已完成方案设计与仿真验证，PCB layout 阶段",
+            "completion_date": "",
+            "severity": 0,
+            "occurrence": 0,
+            "detection": 0,
+            "revised_severity": 10,
+            "revised_occurrence": 3,
+            "revised_detection": 2,
+            "revised_ap": "H"
+        }
+    ],
+    "edges": [
+        {"source": "sys_1", "target": "sub_1", "type": "HAS_PROCESS_STEP"},
+        {"source": "sys_1", "target": "sub_2", "type": "HAS_PROCESS_STEP"},
+        {"source": "sub_1", "target": "cmp_1", "type": "HAS_WORK_ELEMENT"},
+        {"source": "sub_2", "target": "cmp_2", "type": "HAS_WORK_ELEMENT"},
+        {"source": "sub_1", "target": "sf_1", "type": "HAS_FUNCTION"},
+        {"source": "cmp_1", "target": "cf_1", "type": "HAS_FUNCTION"},
+        {"source": "sf_1", "target": "cf_1", "type": "FUNCTION_MAPPED_TO"},
+        {"source": "sf_1", "target": "dfm_1", "type": "HAS_FAILURE_MODE"},
+        {"source": "dfm_1", "target": "dfe_1", "type": "EFFECT_OF"},
+        {"source": "dfc_1", "target": "dfm_1", "type": "CAUSE_OF"},
+        {"source": "dfc_2", "target": "dfm_1", "type": "CAUSE_OF"},
+        {"source": "dfc_1", "target": "dpc_1", "type": "PREVENTED_BY"},
+        {"source": "dfc_1", "target": "ddc_1", "type": "DETECTED_BY"},
+        {"source": "dfm_1", "target": "ddc_2", "type": "DETECTED_BY"},
+        {"source": "dfc_1", "target": "dra_1", "type": "OPTIMIZED_BY"}
+    ]
+}
+
+
 async def seed():
     async with async_session() as db:
         # Check if already seeded
@@ -98,10 +152,18 @@ async def seed():
         fmea2 = FMEADocument(
             document_no="PFMEA-2026-002", title="注塑工序PFMEA",
             fmea_type="PFMEA", status="draft",
-            graph_data={"nodes": [], "edges": []},
+            graph_data={"nodes": [
+                {"id": "pi_draft", "type": "ProcessItem", "name": "新建过程项目", "severity": 0, "occurrence": 0, "detection": 0}
+            ], "edges": []},
             created_by=engineer.user_id, updated_by=engineer.user_id,
         )
-        db.add_all([fmea1, fmea2])
+        fmea3 = FMEADocument(
+            document_no="DFMEA-2026-001", title="电池管理系统 (BMS) DFMEA",
+            fmea_type="DFMEA", status="in_review",
+            graph_data=SAMPLE_DFMEA_GRAPH,
+            created_by=engineer.user_id, updated_by=engineer.user_id,
+        )
+        db.add_all([fmea1, fmea2, fmea3])
         await db.flush()
 
         # CAPA reports
