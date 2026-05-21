@@ -140,6 +140,8 @@ async def update_quality_goal(
 ) -> QualityGoal:
     if goal.status != "draft":
         raise ValueError("only draft goals can be edited")
+    if actual_value is not None and goal.status != "active":
+        raise ValueError("actual_value can only be updated on active goals")
 
     changed = {}
     if name is not None and name != goal.name:
@@ -201,8 +203,12 @@ async def delete_quality_goal(db: AsyncSession, goal: QualityGoal, user_id: uuid
         operated_by=user_id,
     )
     db.add(audit_log)
-    await db.delete(goal)
-    await db.commit()
+    try:
+        await db.delete(goal)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise ValueError("cannot delete goal with child goals")
 
 
 async def submit_for_approval(db: AsyncSession, goal: QualityGoal, user_id: uuid.UUID) -> QualityGoal:
