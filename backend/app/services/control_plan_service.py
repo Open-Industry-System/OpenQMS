@@ -140,6 +140,41 @@ async def update_control_plan(
 
     cp.updated_by = user_id
 
+    # Handle items replacement if provided
+    if data.items is not None:
+        # Delete existing items
+        items_result = await db.execute(
+            select(ControlPlanItem).where(ControlPlanItem.cp_id == cp.cp_id)
+        )
+        existing_items = list(items_result.scalars().all())
+        for item in existing_items:
+            await db.delete(item)
+
+        # Create new items
+        for idx, item_data in enumerate(data.items):
+            new_item = ControlPlanItem(
+                item_id=uuid.uuid4(),
+                cp_id=cp.cp_id,
+                step_no=item_data.step_no,
+                process_name=item_data.process_name,
+                equipment=item_data.equipment,
+                characteristic_no=item_data.characteristic_no,
+                product_characteristic=item_data.product_characteristic,
+                process_characteristic=item_data.process_characteristic,
+                special_class=item_data.special_class,
+                specification_tolerance=item_data.specification_tolerance,
+                evaluation_method=item_data.evaluation_method,
+                sample_size=item_data.sample_size,
+                sample_frequency=item_data.sample_frequency,
+                control_method=item_data.control_method,
+                reaction_plan=item_data.reaction_plan,
+                source_fmea_node_id=item_data.source_fmea_node_id,
+                sort_order=idx,
+            )
+            db.add(new_item)
+
+        changed_fields["items_count"] = len(data.items)
+
     if changed_fields:
         await create_audit_log(
             db,
