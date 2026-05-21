@@ -60,7 +60,7 @@ export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: 
     const processSteps: StepRow[] = (fmea.graph_data?.nodes || [])
       .filter((n: GraphNode) => n.type === "ProcessStep")
       .map((n: GraphNode) => ({
-        key: n.process_number || n.id,
+        key: n.id,
         process_number: n.process_number || "",
         name: n.name,
       }))

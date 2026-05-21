@@ -77,7 +77,8 @@ export default function ControlPlanEditorPage() {
   });
 
   const user = useAuthStore((s) => s.user);
-  const canEdit = user?.role !== "viewer";
+  const isApproved = cp?.status === "approved";
+  const canEdit = user?.role !== "viewer" && !isApproved;
   const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
 
   // Form state

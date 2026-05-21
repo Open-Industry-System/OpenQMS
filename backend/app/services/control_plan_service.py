@@ -42,8 +42,8 @@ async def generate_document_no(db: AsyncSession) -> str:
 async def create_control_plan(
     db: AsyncSession, data: ControlPlanCreate, user_id: uuid.UUID
 ) -> ControlPlan:
-    """Create a new ControlPlan with auto-generated document number."""
-    document_no = await generate_document_no(db)
+    """Create a new ControlPlan. Use provided document_no if given, else auto-generate."""
+    document_no = data.document_no if data.document_no else await generate_document_no(db)
 
     cp = ControlPlan(
         cp_id=uuid.uuid4(),
@@ -239,11 +239,13 @@ async def import_from_fmea(
     db: AsyncSession, cp_id: uuid.UUID, req: ImportFromFMEARequest, user_id: uuid.UUID
 ) -> list[ControlPlanItem]:
     """Import ProcessStep nodes from a PFMEA into control plan items."""
-    # Validate control plan exists
+    # Validate control plan exists and is editable
     cp_result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == cp_id))
     cp = cp_result.scalar_one_or_none()
     if cp is None:
         raise ValueError("Control plan not found.")
+    if cp.status == "approved":
+        raise ValueError("Cannot import into an approved control plan.")
 
     # Validate FMEA exists and is PFMEA
     fmea_result = await db.execute(
