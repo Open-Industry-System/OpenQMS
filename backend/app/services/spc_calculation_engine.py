@@ -57,7 +57,7 @@ def calculate_xbar_r_limits(values_2d: List[List[float]]) -> Dict[str, Optional[
 def calculate_imr_limits(values_1d: List[float]) -> Dict[str, Optional[float]]:
     """Calculate I-MR control limits from individual values."""
     if not values_1d or len(values_1d) < 2:
-        return {"ucl": None, "lcl": None, "cl": None, "mr_ucl": None, "mr_lcl": None, "mr_cl": None}
+        return {"ucl": None, "lcl": None, "cl": None, "r_ucl": None, "r_lcl": None, "r_cl": None}
 
     x_bar = sum(values_1d) / len(values_1d)
     mr_values = [abs(values_1d[i] - values_1d[i - 1]) for i in range(1, len(values_1d))]
@@ -67,9 +67,9 @@ def calculate_imr_limits(values_1d: List[float]) -> Dict[str, Optional[float]]:
         "ucl": round(x_bar + 2.66 * mr_bar, 4),
         "lcl": round(x_bar - 2.66 * mr_bar, 4),
         "cl": round(x_bar, 4),
-        "mr_ucl": round(3.267 * mr_bar, 4),
-        "mr_lcl": 0.0,
-        "mr_cl": round(mr_bar, 4),
+        "r_ucl": round(3.267 * mr_bar, 4),
+        "r_lcl": 0.0,
+        "r_cl": round(mr_bar, 4),
     }
 
 

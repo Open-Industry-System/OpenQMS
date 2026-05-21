@@ -241,10 +241,10 @@ async def lock_unlock_control_limits(
     # If locking, snapshot current limits
     if locked:
         limits = await _get_active_control_limits(db, ic)
-        # Use chart-type-aware keys for the R/MR chart limits
-        r_ucl = limits.get("r_ucl") if ic.chart_type == "xbar_r" else limits.get("mr_ucl")
-        r_lcl = limits.get("r_lcl") if ic.chart_type == "xbar_r" else limits.get("mr_lcl")
-        r_cl = limits.get("r_cl") if ic.chart_type == "xbar_r" else limits.get("mr_cl")
+        # All chart types now use unified r_* key names
+        r_ucl = limits.get("r_ucl")
+        r_lcl = limits.get("r_lcl")
+        r_cl = limits.get("r_cl")
         snapshot = ControlLimitSnapshot(
             ic_id=ic_id,
             ucl=limits.get("ucl") or 0,
