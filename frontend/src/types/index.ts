@@ -137,3 +137,53 @@ export interface DashboardData {
   trends: Record<string, unknown>;
   alerts: unknown[];
 }
+
+export interface ControlPlanItem {
+  item_id: string;
+  step_no: string;
+  process_name: string;
+  equipment: string;
+  characteristic_no: string;
+  product_characteristic: string;
+  process_characteristic: string;
+  special_class: string;
+  specification_tolerance: string;
+  evaluation_method: string;
+  sample_size: string;
+  sample_frequency: string;
+  control_method: string;
+  reaction_plan: string;
+  source_fmea_node_id: string | null;
+  sort_order: number;
+}
+
+export interface ControlPlan {
+  cp_id: string;
+  document_no: string;
+  title: string;
+  fmea_ref_id: string | null;
+  product_line_code: string;
+  status: string;
+  version: number;
+  phase: string;
+  part_no: string;
+  part_name: string;
+  contact_info: string;
+  drawing_rev: string;
+  org_factory: string;
+  core_group: string;
+  items: ControlPlanItem[];
+  created_by: string | null;
+  updated_by: string | null;
+  approved_by: string | null;
+  created_at: string;
+  updated_at: string;
+  approved_at: string | null;
+}
+
+export interface ControlPlanListResponse {
+  items: ControlPlan[];
+  total: number;
+  page: number;
+  page_size: number;
+}
