@@ -336,3 +336,50 @@ async def update_actual_value(
     await db.commit()
     await db.refresh(goal)
     return goal
+
+
+async def get_quality_goal_stats(db: AsyncSession) -> dict:
+    total_result = await db.execute(select(func.count()).select_from(QualityGoal))
+    total = total_result.scalar() or 0
+
+    active_result = await db.execute(
+        select(func.count()).select_from(QualityGoal).where(QualityGoal.status == "active")
+    )
+    active = active_result.scalar() or 0
+
+    pending_result = await db.execute(
+        select(func.count()).select_from(QualityGoal).where(QualityGoal.status == "pending")
+    )
+    pending = pending_result.scalar() or 0
+
+    active_goals_result = await db.execute(
+        select(QualityGoal).where(QualityGoal.status == "active")
+    )
+    active_goals = active_goals_result.scalars().all()
+
+    achieved = 0
+    for g in active_goals:
+        if not g.actual_value:
+            continue
+        tv = g.target_value.strip()
+        av = g.actual_value.strip()
+        try:
+            if tv.startswith("≤") or tv.startswith("<="):
+                threshold = float(tv.lstrip("≤<=").replace("%", ""))
+                actual = float(av.replace("%", ""))
+                if actual <= threshold:
+                    achieved += 1
+            elif tv.startswith("≥") or tv.startswith(">="):
+                threshold = float(tv.lstrip("≥>=").replace("%", ""))
+                actual = float(av.replace("%", ""))
+                if actual >= threshold:
+                    achieved += 1
+            else:
+                threshold = float(tv.replace("%", ""))
+                actual = float(av.replace("%", ""))
+                if actual <= threshold:
+                    achieved += 1
+        except (ValueError, TypeError):
+            continue
+
+    return {"total": total, "active": active, "pending": pending, "achieved": achieved}

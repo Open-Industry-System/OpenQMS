@@ -45,6 +45,13 @@ async def register(
     return UserResponse.model_validate(user)
 
 
+@router.get("/users", response_model=list[UserResponse])
+async def list_users(db: AsyncSession = Depends(get_db), _user: User = Depends(get_current_user)):
+    result = await db.execute(select(User))
+    users = result.scalars().all()
+    return [UserResponse.model_validate(u) for u in users]
+
+
 @router.get("/me", response_model=UserResponse)
 async def me(user: User = Depends(get_current_user)):
     return UserResponse.model_validate(user)

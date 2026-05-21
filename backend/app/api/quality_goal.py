@@ -211,3 +211,12 @@ async def update_actual_value(
         return schemas.quality_goal.QualityGoalResponse.model_validate(goal)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/stats")
+async def get_stats(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    stats = await quality_goal_service.get_quality_goal_stats(db)
+    return stats

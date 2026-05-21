@@ -82,3 +82,8 @@ export async function updateActualValue(id: string, actual_value: string): Promi
   const resp = await client.post(`/quality-goals/${id}/actual-value`, { actual_value });
   return resp.data;
 }
+
+export async function getQualityGoalStats(): Promise<{ total: number; active: number; pending: number; achieved: number }> {
+  const resp = await client.get("/quality-goals/stats");
+  return resp.data;
+}

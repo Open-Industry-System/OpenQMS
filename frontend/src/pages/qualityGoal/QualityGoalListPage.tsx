@@ -40,7 +40,10 @@ import {
   rejectQualityGoal,
   archiveQualityGoal,
   updateActualValue,
+  getQualityGoalStats,
 } from "../../api/qualityGoal";
+import { listUsers } from "../../api/auth";
+import type { User } from "../../types";
 
 const { Option } = Select;
 const { TabPane } = Tabs;
@@ -103,7 +106,26 @@ export default function QualityGoalListPage() {
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [rejectingGoalId, setRejectingGoalId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [users, setUsers] = useState<User[]>([]);
+  const [parentGoals, setParentGoals] = useState<QualityGoal[]>([]);
+  const [stats, setStats] = useState({ total: 0, active: 0, pending: 0, achieved: 0 });
   const [form] = Form.useForm();
+
+  const loadParentGoals = useCallback(async (targetLevel: number) => {
+    if (targetLevel <= 1) {
+      setParentGoals([]);
+      return;
+    }
+    try {
+      const resp = await listQualityGoals({
+        level: targetLevel - 1,
+        page_size: 1000,
+      });
+      setParentGoals(resp.items);
+    } catch {
+      setParentGoals([]);
+    }
+  }, []);
 
   const fetchGoals = useCallback(async () => {
     setLoading(true);
@@ -111,13 +133,17 @@ export default function QualityGoalListPage() {
       const params: Record<string, unknown> = { page, page_size: pageSize };
       if (activeTab === "pending") params.status = "pending";
       else if (activeTab === "draft") params.status = "draft";
-      const resp = await listQualityGoals(params);
+      const [resp, s] = await Promise.all([
+        listQualityGoals(params),
+        getQualityGoalStats(),
+      ]);
       let items = resp.items;
       if (activeTab === "my") {
         items = items.filter((g) => g.owner_id === user?.user_id);
       }
       setGoals(items);
       setTotal(resp.total);
+      setStats(s);
     } catch {
       message.error("加载数据失败");
     } finally {
@@ -129,9 +155,18 @@ export default function QualityGoalListPage() {
     fetchGoals();
   }, [fetchGoals]);
 
+  useEffect(() => {
+    listUsers().then(setUsers).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    getQualityGoalStats().then(setStats).catch(() => {});
+  }, []);
+
   const handleCreate = () => {
     setEditingGoal(null);
     form.resetFields();
+    loadParentGoals(1);
     setModalOpen(true);
   };
 
@@ -148,6 +183,7 @@ export default function QualityGoalListPage() {
       owner_id: goal.owner_id,
       description: goal.description,
     });
+    loadParentGoals(goal.level);
     setModalOpen(true);
   };
 
@@ -266,12 +302,9 @@ export default function QualityGoalListPage() {
     }
   };
 
-  const activeCount = goals.filter((g) => g.status === "active").length;
-  const pendingCount = goals.filter((g) => g.status === "pending").length;
-  const achievedCount = goals.filter(
-    (g) => g.status === "active" && checkAchievement(g.target_value, g.actual_value) === "achieved"
-  ).length;
-  const achievementRate = activeCount > 0 ? Math.round((achievedCount / activeCount) * 100) : 0;
+  const activeCount = stats.active;
+  const pendingCount = stats.pending;
+  const achievementRate = stats.active > 0 ? Math.round((stats.achieved / stats.active) * 100) : 0;
 
   const columns = [
     {
@@ -344,7 +377,10 @@ export default function QualityGoalListPage() {
       title: "责任人",
       dataIndex: "owner_id",
       width: 120,
-      render: (ownerId: string) => ownerId.slice(0, 8),
+      render: (ownerId: string) => {
+        const u = users.find((x) => x.user_id === ownerId);
+        return u?.display_name || u?.username || ownerId.slice(0, 8);
+      },
     },
     {
       title: "状态",
@@ -506,7 +542,11 @@ export default function QualityGoalListPage() {
       >
         <Form form={form} layout="vertical" onFinish={handleSubmitForm}>
           <Form.Item name="level" label="层级" rules={[{ required: true }]}>
-            <Select placeholder="选择层级" disabled={!!editingGoal}>
+            <Select
+              placeholder="选择层级"
+              disabled={!!editingGoal}
+              onChange={(value) => loadParentGoals(value as number)}
+            >
               <Option value={1}>🏢 公司级</Option>
               <Option value={2}>🏭 产品线级</Option>
               <Option value={3}>🔧 过程级</Option>
@@ -514,14 +554,11 @@ export default function QualityGoalListPage() {
           </Form.Item>
           <Form.Item name="parent_id" label="父目标">
             <Select placeholder="选择父目标（公司级无需选择）" allowClear disabled={!!editingGoal}>
-              {goals
-                .filter((g) => (form.getFieldValue("level") || 1) > 1)
-                .filter((g) => g.level === (form.getFieldValue("level") || 1) - 1)
-                .map((g) => (
-                  <Option key={g.goal_id} value={g.goal_id}>
-                    {g.name}
-                  </Option>
-                ))}
+              {parentGoals.map((g) => (
+                <Option key={g.goal_id} value={g.goal_id}>
+                  {g.name}
+                </Option>
+              ))}
             </Select>
           </Form.Item>
           <Form.Item name="product_line" label="产品线">
@@ -544,7 +581,13 @@ export default function QualityGoalListPage() {
             </Select>
           </Form.Item>
           <Form.Item name="owner_id" label="责任人" rules={[{ required: true }]}>
-            <Input placeholder="输入用户 ID" />
+            <Select placeholder="选择责任人">
+              {users.map((u) => (
+                <Option key={u.user_id} value={u.user_id}>
+                  {u.display_name || u.username}
+                </Option>
+              ))}
+            </Select>
           </Form.Item>
           <Form.Item name="description" label="说明">
             <Input.TextArea rows={3} />
