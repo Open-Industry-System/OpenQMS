@@ -11,6 +11,7 @@ import CAPAListPage from "./pages/capa/CAPAListPage";
 import CAPADetailPage from "./pages/capa/CAPADetailPage";
 import ControlPlanListPage from "./pages/control-plan/ControlPlanListPage";
 import ControlPlanEditorPage from "./pages/control-plan/ControlPlanEditorPage";
+import QualityGoalListPage from "./pages/qualityGoal/QualityGoalListPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="/capa/:id" element={<CAPADetailPage />} />
         <Route path="/control-plans" element={<ControlPlanListPage />} />
         <Route path="/control-plans/:id" element={<ControlPlanEditorPage />} />
+        <Route path="/quality-goals" element={<QualityGoalListPage />} />
       </Route>
     </Routes>
   );

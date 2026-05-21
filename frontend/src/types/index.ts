@@ -187,3 +187,31 @@ export interface ControlPlanListResponse {
   page: number;
   page_size: number;
 }
+
+export interface QualityGoal {
+  goal_id: string;
+  doc_no: string;
+  parent_id: string | null;
+  level: number;
+  product_line: string | null;
+  name: string;
+  target_value: string;
+  actual_value: string | null;
+  unit: string;
+  period: string;
+  owner_id: string;
+  status: "draft" | "pending" | "active" | "archived";
+  approved_by: string | null;
+  approved_at: string | null;
+  reject_reason: string | null;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QualityGoalListResponse {
+  items: QualityGoal[];
+  total: number;
+  page: number;
+  page_size: number;
+}
