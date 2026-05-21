@@ -204,4 +204,86 @@ export interface QualityGoalListResponse {
   page_size: number;
 }
 
+export interface AuditProgram {
+  program_id: string;
+  program_year: number;
+  audit_type: "system" | "process" | "product";
+  scope: string;
+  criteria: string;
+  status: "planned" | "active" | "completed";
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface AuditPlan {
+  audit_id: string;
+  program_id: string;
+  audit_scope: string;
+  audit_criteria: string;
+  planned_date: string;
+  actual_date: string | null;
+  lead_auditor: string | null;
+  team_members: { user_id: string; username: string }[];
+  checklist: AuditChecklistItem[];
+  status: "planned" | "in_progress" | "completed" | "cancelled";
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface AuditFinding {
+  finding_id: string;
+  audit_id: string;
+  clause_ref: string | null;
+  finding_type: "major_nc" | "minor_nc" | "ofi" | "observation";
+  description: string;
+  root_cause: string | null;
+  correction: string | null;
+  corrective_action: string | null;
+  capa_ref_id: string | null;
+  status: "open" | "in_progress" | "verified" | "closed";
+  due_date: string | null;
+  closed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface AuditChecklistItem {
+  item_no: string;
+  clause: string;
+  question: string;
+  result: "符合" | "不符合" | "不适用" | "";
+  evidence: string;
+  note: string;
+}
+
+export interface AuditProgramListResponse {
+  items: AuditProgram[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AuditPlanListResponse {
+  items: AuditPlan[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AuditFindingListResponse {
+  items: AuditFinding[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AuditStats {
+  program_count: number;
+  planned_count: number;
+  in_progress_count: number;
+  completed_count: number;
+  open_findings: number;
+  major_nc_count: number;
+}
+
 export * from "./spc";
