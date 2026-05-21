@@ -56,8 +56,15 @@ export async function deleteControlPlan(id: string): Promise<{ message: string }
   return resp.data;
 }
 
-export async function importFromFMEA(id: string): Promise<{ imported_count: number }> {
-  const resp = await client.post(`/control-plans/${id}/import-from-fmea`);
+export async function importFromFMEA(
+  id: string,
+  fmeaId: string,
+  stepNos?: string[]
+): Promise<{ imported_count: number }> {
+  const resp = await client.post(`/control-plans/${id}/import-from-fmea`, {
+    fmea_id: fmeaId,
+    step_nos: stepNos,
+  });
   return resp.data;
 }
 
