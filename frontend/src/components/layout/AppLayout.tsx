@@ -6,6 +6,7 @@ import {
   FileTextOutlined,
   BugOutlined,
   AimOutlined,
+  SafetyOutlined,
   LogoutOutlined,
   UserOutlined,
   MenuFoldOutlined,
@@ -20,6 +21,7 @@ const menuItems = [
   { key: "/fmea", icon: <FileTextOutlined />, label: "FMEA管理" },
   { key: "/control-plans", icon: <FileTextOutlined />, label: "控制计划" },
   { key: "/quality-goals", icon: <AimOutlined />, label: "质量目标" },
+  { key: "/internal-audits", icon: <SafetyOutlined />, label: "内部审核" },
   { key: "/spc", icon: <FileTextOutlined />, label: "SPC控制图" },
   { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA" },
 ];

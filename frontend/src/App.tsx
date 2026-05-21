@@ -12,6 +12,8 @@ import CAPADetailPage from "./pages/capa/CAPADetailPage";
 import ControlPlanListPage from "./pages/control-plan/ControlPlanListPage";
 import ControlPlanEditorPage from "./pages/control-plan/ControlPlanEditorPage";
 import QualityGoalListPage from "./pages/qualityGoal/QualityGoalListPage";
+import InternalAuditListPage from "./pages/internalAudit/InternalAuditListPage";
+import InternalAuditDetailPage from "./pages/internalAudit/InternalAuditDetailPage";
 import SPCListPage from "./pages/spc/SPCListPage";
 import SPCDetailPage from "./pages/spc/SPCDetailPage";
 
@@ -57,6 +59,8 @@ export default function App() {
         <Route path="/control-plans" element={<ControlPlanListPage />} />
         <Route path="/control-plans/:id" element={<ControlPlanEditorPage />} />
         <Route path="/quality-goals" element={<QualityGoalListPage />} />
+        <Route path="/internal-audits" element={<InternalAuditListPage />} />
+        <Route path="/internal-audits/:id" element={<InternalAuditDetailPage />} />
         <Route path="/spc" element={<SPCListPage />} />
         <Route path="/spc/:id" element={<SPCDetailPage />} />
       </Route>
