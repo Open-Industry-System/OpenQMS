@@ -11,6 +11,7 @@ from app.api.auth import router as auth_router
 from app.api.fmea import router as fmea_router
 from app.api.capa import router as capa_router
 from app.api.dashboard import router as dashboard_router
+from app.api.quality_goal import router as quality_goal_router
 
 
 @asynccontextmanager
@@ -42,6 +43,7 @@ app.include_router(auth_router)
 app.include_router(fmea_router)
 app.include_router(capa_router)
 app.include_router(dashboard_router)
+app.include_router(quality_goal_router)
 
 
 @app.get("/api/health")
