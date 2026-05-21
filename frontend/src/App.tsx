@@ -11,6 +11,8 @@ import CAPAListPage from "./pages/capa/CAPAListPage";
 import CAPADetailPage from "./pages/capa/CAPADetailPage";
 import ControlPlanListPage from "./pages/control-plan/ControlPlanListPage";
 import ControlPlanEditorPage from "./pages/control-plan/ControlPlanEditorPage";
+import SPCListPage from "./pages/spc/SPCListPage";
+import SPCDetailPage from "./pages/spc/SPCDetailPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -53,6 +55,8 @@ export default function App() {
         <Route path="/capa/:id" element={<CAPADetailPage />} />
         <Route path="/control-plans" element={<ControlPlanListPage />} />
         <Route path="/control-plans/:id" element={<ControlPlanEditorPage />} />
+        <Route path="/spc" element={<SPCListPage />} />
+        <Route path="/spc/:id" element={<SPCDetailPage />} />
       </Route>
     </Routes>
   );

@@ -187,3 +187,5 @@ export interface ControlPlanListResponse {
   page: number;
   page_size: number;
 }
+
+export * from "./spc";
