@@ -6,7 +6,7 @@ export async function listAuditPrograms(params?: Record<string, unknown>): Promi
   return resp.data;
 }
 
-export async function createAuditProgram(data: Omit<AuditProgram, "program_id" | "created_at" | "status" | "created_by">): Promise<AuditProgram> {
+export async function createAuditProgram(data: Omit<AuditProgram, "program_id" | "program_no" | "created_at" | "status" | "created_by">): Promise<AuditProgram> {
   const resp = await client.post("/audit-programs", data);
   return resp.data;
 }
@@ -30,7 +30,7 @@ export async function listAuditPlans(params?: Record<string, unknown>): Promise<
   return resp.data;
 }
 
-export async function createAuditPlan(data: Omit<AuditPlan, "audit_id" | "created_at" | "status" | "created_by">): Promise<AuditPlan> {
+export async function createAuditPlan(data: Omit<AuditPlan, "audit_id" | "plan_no" | "created_at" | "status" | "created_by">): Promise<AuditPlan> {
   const resp = await client.post("/audit-plans", data);
   return resp.data;
 }

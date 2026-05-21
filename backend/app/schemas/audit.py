@@ -36,12 +36,13 @@ class AuditProgramUpdate(BaseModel):
 
 class AuditProgramResponse(BaseModel):
     program_id: uuid.UUID
+    program_no: str
     program_year: int
     audit_type: str
     scope: str
     criteria: str
     status: str
-    created_by: uuid.UUID | None
+    created_by: uuid.UUID
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -77,6 +78,7 @@ class AuditPlanUpdate(BaseModel):
 
 class AuditPlanResponse(BaseModel):
     audit_id: uuid.UUID
+    plan_no: str
     program_id: uuid.UUID
     audit_scope: str
     audit_criteria: str

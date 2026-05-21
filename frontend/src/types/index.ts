@@ -1,3 +1,9 @@
+export interface AuditorInfo {
+  is_auditor: boolean;
+  qualifications: string[];
+  last_qualification_date: string | null;
+}
+
 export interface User {
   user_id: string;
   username: string;
@@ -5,6 +11,7 @@ export interface User {
   email: string | null;
   role: string;
   is_active: boolean;
+  auditor_info?: AuditorInfo;
 }
 
 export interface LoginRequest {
@@ -206,17 +213,19 @@ export interface QualityGoalListResponse {
 
 export interface AuditProgram {
   program_id: string;
+  program_no: string;
   program_year: number;
   audit_type: "system" | "process" | "product";
   scope: string;
   criteria: string;
   status: "planned" | "active" | "completed";
-  created_by: string | null;
+  created_by: string;
   created_at: string;
 }
 
 export interface AuditPlan {
   audit_id: string;
+  plan_no: string;
   program_id: string;
   audit_scope: string;
   audit_criteria: string;
@@ -226,7 +235,7 @@ export interface AuditPlan {
   team_members: { user_id: string; username: string }[];
   checklist: AuditChecklistItem[];
   status: "planned" | "in_progress" | "completed" | "cancelled";
-  created_by: string | null;
+  created_by: string;
   created_at: string;
 }
 

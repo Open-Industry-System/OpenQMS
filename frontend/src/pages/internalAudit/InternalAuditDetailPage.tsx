@@ -133,17 +133,20 @@ export default function InternalAuditDetailPage() {
   // ECharts pie chart for report tab
   useEffect(() => {
     if (!chartRef.current || findings.length === 0) return;
-    let chart: any;
+    let chartInstance: any = null;
+    let isCancelled = false;
+
     const initChart = async () => {
       const echarts = await import("echarts");
-      chart = echarts.init(chartRef.current!);
+      if (isCancelled || !chartRef.current) return;
+      chartInstance = echarts.init(chartRef.current);
       const data = [
         { value: findings.filter((f) => f.finding_type === "major_nc").length, name: "严重不符合" },
         { value: findings.filter((f) => f.finding_type === "minor_nc").length, name: "一般不符合" },
         { value: findings.filter((f) => f.finding_type === "ofi").length, name: "改进机会" },
         { value: findings.filter((f) => f.finding_type === "observation").length, name: "观察项" },
       ].filter((d) => d.value > 0);
-      chart.setOption({
+      chartInstance.setOption({
         tooltip: { trigger: "item" },
         legend: { bottom: 0 },
         series: [
@@ -158,9 +161,13 @@ export default function InternalAuditDetailPage() {
         ],
       });
     };
+
     initChart();
     return () => {
-      if (chart) chart.dispose();
+      isCancelled = true;
+      if (chartInstance) {
+        chartInstance.dispose();
+      }
     };
   }, [findings]);
 

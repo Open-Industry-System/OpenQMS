@@ -58,10 +58,10 @@ async def _update_program_status(db: AsyncSession, program: AuditProgram) -> Non
     if not plan_statuses:
         return
 
-    if any(s in ("in_progress", "completed") for s in plan_statuses):
-        program.status = "active"
-    elif all(s in ("completed", "cancelled") for s in plan_statuses):
+    if all(s in ("completed", "cancelled") for s in plan_statuses):
         program.status = "completed"
+    elif any(s in ("in_progress", "completed") for s in plan_statuses):
+        program.status = "active"
 
 
 # ───────────────────────────────────────────────

@@ -34,6 +34,7 @@ import { useAuthStore } from "../../store/authStore";
 import type { AuditPlan, AuditProgram, AuditStats, AuditChecklistItem, User } from "../../types";
 import {
   listAuditPlans,
+  listAuditPrograms,
   createAuditProgram,
   createAuditPlan,
   startAuditPlan,
@@ -160,11 +161,7 @@ export default function InternalAuditListPage() {
     listAuditors().then(setAuditors).catch(() => {});
     getChecklistTemplates().then(setChecklistTemplates).catch(() => {});
     // Load programs for plan creation
-    import("../../api/audit").then((m) => {
-      if (m.listAuditPrograms) {
-        m.listAuditPrograms({ page_size: 1000 }).then((resp) => setPrograms(resp.items)).catch(() => {});
-      }
-    });
+    listAuditPrograms({ page_size: 1000 }).then((resp) => setPrograms(resp.items)).catch(() => {});
   }, []);
 
   const handleRefresh = () => {
@@ -185,11 +182,7 @@ export default function InternalAuditListPage() {
       programForm.resetFields();
       fetchStats();
       // Refresh programs list
-      import("../../api/audit").then((m) => {
-        if (m.listAuditPrograms) {
-          m.listAuditPrograms({ page_size: 1000 }).then((resp) => setPrograms(resp.items)).catch(() => {});
-        }
-      });
+      listAuditPrograms({ page_size: 1000 }).then((resp) => setPrograms(resp.items)).catch(() => {});
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
       message.error(err.response?.data?.detail || "创建失败");
@@ -559,7 +552,7 @@ export default function InternalAuditListPage() {
                 // qualifications may be on auditor_info; since User type doesn't have it,
                 // we cast to any for now or show placeholder.
                 // The backend returns auditor_info as part of User when listing auditors.
-                const info = (record as unknown as { auditor_info?: { qualifications?: string[] } }).auditor_info;
+                const info = record.auditor_info;
                 return info?.qualifications?.join(", ") || "—";
               },
             },
@@ -567,7 +560,7 @@ export default function InternalAuditListPage() {
               title: "最近资格日期",
               dataIndex: "last_qualification_date",
               render: (_: unknown, record: User) => {
-                const info = (record as unknown as { auditor_info?: { last_qualification_date?: string } }).auditor_info;
+                const info = record.auditor_info;
                 return info?.last_qualification_date || "—";
               },
             },
@@ -580,7 +573,7 @@ export default function InternalAuditListPage() {
                     size="small"
                     icon={<EditOutlined />}
                     onClick={() => {
-                      const info = (record as unknown as { auditor_info?: { qualifications?: string[]; is_auditor?: boolean } }).auditor_info;
+                      const info = record.auditor_info;
                       const values = {
                         is_auditor: info?.is_auditor ?? true,
                         qualifications: info?.qualifications || [],
