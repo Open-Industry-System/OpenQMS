@@ -20,38 +20,27 @@ export interface TokenResponse {
 
 export interface GraphNode {
   id: string;
-  type: string;  // 节点类型：ProcessItem, ProcessStep, ProcessWorkElement 等
-  name: string;  // 展示名称
-  
-  // 结构分析相关属性
-  process_number?: string;   // 过程步骤工序号，如 "OP30"
-  classification?: string;   // 作业要素的 4M 类别 (Man/Machine等) 或特殊特性分类 (CC/SC)
-  
-  // 功能分析与技术要求
-  requirement?: string;      // 技术要求
-  specification?: string;    // 产品特性公差参数
-  
-  // 风险评估数值
-  severity: number;          // 综合严重度 (1-10)
-  severity_plant?: number;   // 本厂影响严重度
-  severity_customer?: number;// 直接客户/下级工厂影响严重度
-  severity_user?: number;    // 最终用户影响严重度
-  
-  occurrence: number;        // 发生频度 (1-10)
-  detection: number;         // 探测度 (1-10)
-  
-  // 建议优化与改进措施
-  responsible?: string;      // 责任人
-  due_date?: string;         // 计划完成日期
-  status?: string;           // 状态
-  action_taken?: string;     // 实际采取的措施描述
-  completion_date?: string;  // 实际完成日期
-  
-  revised_severity?: number; // 改进后严重度
-  revised_occurrence?: number;// 改进后频度
-  revised_detection?: number; // 改进后探测度
-  revised_ap?: string;       // 改进后措施优先级 (H / M / L)
-
+  type: string;
+  name: string;
+  process_number?: string;
+  classification?: string;
+  requirement?: string;
+  specification?: string;
+  severity: number;
+  severity_plant?: number;
+  severity_customer?: number;
+  severity_user?: number;
+  occurrence: number;
+  detection: number;
+  responsible?: string;
+  due_date?: string;
+  status?: string;
+  action_taken?: string;
+  completion_date?: string;
+  revised_severity?: number;
+  revised_occurrence?: number;
+  revised_detection?: number;
+  revised_ap?: string;
   p_diagram?: {
     inputs: string[];
     outputs: string[];
@@ -59,7 +48,6 @@ export interface GraphNode {
     noise_factors: string[];
   };
 }
-
 
 export interface GraphEdge {
   source: string;
@@ -215,3 +203,5 @@ export interface QualityGoalListResponse {
   page: number;
   page_size: number;
 }
+
+export * from "./spc";
