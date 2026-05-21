@@ -34,6 +34,59 @@ async def _create_audit_log(
     await db.commit()
 
 
+async def _get_active_control_limits(
+    db: AsyncSession, ic: InspectionCharacteristic
+) -> Dict[str, Optional[float]]:
+    """Return current control limits: read snapshot if locked, else recalculate from samples."""
+    if ic.control_limits_locked:
+        result = await db.execute(
+            select(ControlLimitSnapshot)
+            .where(and_(
+                ControlLimitSnapshot.ic_id == ic.ic_id,
+                ControlLimitSnapshot.is_locked == True,
+            ))
+            .order_by(ControlLimitSnapshot.calculated_at.desc())
+            .limit(1)
+        )
+        snapshot = result.scalar_one_or_none()
+        if snapshot:
+            return {
+                "ucl": float(snapshot.ucl),
+                "lcl": float(snapshot.lcl),
+                "cl": float(snapshot.cl),
+                "r_ucl": float(snapshot.r_ucl) if snapshot.r_ucl is not None else None,
+                "r_lcl": float(snapshot.r_lcl) if snapshot.r_lcl is not None else None,
+                "r_cl": float(snapshot.r_cl) if snapshot.r_cl is not None else None,
+            }
+
+    # Not locked (or no snapshot found) — recalculate from samples
+    result = await db.execute(
+        select(SampleBatch, SampleValue)
+        .join(SampleValue, SampleBatch.batch_id == SampleValue.batch_id)
+        .where(SampleBatch.ic_id == ic.ic_id)
+        .where(SampleBatch.is_locked == False)
+        .order_by(SampleBatch.sampled_at, SampleValue.sequence_no)
+    )
+
+    batches: Dict[str, Any] = {}
+    for batch, value in result.all():
+        bid = str(batch.batch_id)
+        if bid not in batches:
+            batches[bid] = {"batch": batch, "values": []}
+        batches[bid]["values"].append(float(value.value))
+
+    batch_list = sorted(batches.values(), key=lambda x: x["batch"].sampled_at)
+
+    if ic.chart_type == "xbar_r":
+        values_2d = [b["values"] for b in batch_list]
+        return calculate_xbar_r_limits(values_2d) if len(values_2d) >= 2 else {}
+    else:
+        values_1d = []
+        for b in batch_list:
+            values_1d.extend(b["values"])
+        return calculate_imr_limits(values_1d) if len(values_1d) >= 2 else {}
+
+
 async def create_inspection_characteristic(
     db: AsyncSession, user_id: uuid.UUID, data: dict
 ) -> InspectionCharacteristic:
@@ -187,15 +240,19 @@ async def lock_unlock_control_limits(
 
     # If locking, snapshot current limits
     if locked:
-        chart_data = await _compute_chart_data(db, ic)
-        limits = chart_data["limits"]
+        limits = await _get_active_control_limits(db, ic)
+        # Use chart-type-aware keys for the R/MR chart limits
+        r_ucl = limits.get("r_ucl") if ic.chart_type == "xbar_r" else limits.get("mr_ucl")
+        r_lcl = limits.get("r_lcl") if ic.chart_type == "xbar_r" else limits.get("mr_lcl")
+        r_cl = limits.get("r_cl") if ic.chart_type == "xbar_r" else limits.get("mr_cl")
         snapshot = ControlLimitSnapshot(
             ic_id=ic_id,
             ucl=limits.get("ucl") or 0,
             lcl=limits.get("lcl") or 0,
             cl=limits.get("cl") or 0,
-            r_ucl=limits.get("r_ucl"),
-            r_lcl=limits.get("r_lcl"),
+            r_ucl=r_ucl,
+            r_lcl=r_lcl,
+            r_cl=r_cl,
             is_locked=True,
         )
         db.add(snapshot)
@@ -243,9 +300,8 @@ async def add_sample_batch(
     await db.commit()
     await db.refresh(batch)
 
-    # Re-evaluate alarms if not locked
-    if not ic.control_limits_locked:
-        await _reevaluate_alarms(db, ic)
+    # Always re-evaluate alarms — Phase II monitoring requires locked limits + alarm detection
+    await _reevaluate_alarms(db, ic)
 
     await _create_audit_log(
         db, user_id, "CREATE", "sample_batches", batch.batch_id,
@@ -255,26 +311,29 @@ async def add_sample_batch(
 
 
 async def _compute_chart_data(db: AsyncSession, ic: InspectionCharacteristic) -> Dict[str, Any]:
-    """Compute chart data and limits for an inspection characteristic."""
+    """Compute chart data points and active control limits for an inspection characteristic."""
+    # Fetch all unlocked batches with values ordered by sequence_no for determinism
     result = await db.execute(
         select(SampleBatch, SampleValue)
         .join(SampleValue, SampleBatch.batch_id == SampleValue.batch_id)
         .where(SampleBatch.ic_id == ic.ic_id)
         .where(SampleBatch.is_locked == False)
-        .order_by(SampleBatch.sampled_at)
+        .order_by(SampleBatch.sampled_at, SampleValue.sequence_no)
     )
 
-    batches = {}
+    batches: Dict[str, Any] = {}
     for batch, value in result.all():
-        if batch.batch_id not in batches:
-            batches[batch.batch_id] = {"batch": batch, "values": []}
-        batches[batch.batch_id]["values"].append(float(value.value))
+        bid = str(batch.batch_id)
+        if bid not in batches:
+            batches[bid] = {"batch": batch, "values": []}
+        batches[bid]["values"].append(float(value.value))
 
     batch_list = sorted(batches.values(), key=lambda x: x["batch"].sampled_at)
 
+    # Use the seam: locked -> snapshot, unlocked -> live calculation
+    limits = await _get_active_control_limits(db, ic)
+
     if ic.chart_type == "xbar_r":
-        values_2d = [b["values"] for b in batch_list]
-        limits = calculate_xbar_r_limits(values_2d) if len(values_2d) >= 2 else {}
         data_points = []
         for i, b in enumerate(batch_list):
             vals = b["values"]
@@ -290,7 +349,6 @@ async def _compute_chart_data(db: AsyncSession, ic: InspectionCharacteristic) ->
         values_1d = []
         for b in batch_list:
             values_1d.extend(b["values"])
-        limits = calculate_imr_limits(values_1d) if len(values_1d) >= 2 else {}
         data_points = []
         idx = 0
         for b in batch_list:

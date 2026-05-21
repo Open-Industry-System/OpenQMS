@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -94,7 +94,7 @@ async def delete_ic(
 @router.post("/inspection-characteristics/{ic_id}/lock-limits")
 async def lock_limits(
     ic_id: UUID,
-    locked: bool = True,
+    locked: bool = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_engineer_or_admin),
 ):

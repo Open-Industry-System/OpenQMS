@@ -83,6 +83,7 @@ def upgrade() -> None:
         sa.Column("cl", sa.Numeric(12, 4), nullable=False),
         sa.Column("r_ucl", sa.Numeric(12, 4), nullable=True),
         sa.Column("r_lcl", sa.Numeric(12, 4), nullable=True),
+        sa.Column("r_cl", sa.Numeric(12, 4), nullable=True),
         sa.Column("calculated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("is_locked", sa.Boolean, nullable=False, server_default="false"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),

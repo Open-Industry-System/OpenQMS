@@ -94,6 +94,7 @@ class ControlLimitSnapshot(Base):
     cl: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
     r_ucl: Mapped[Optional[float]] = mapped_column(Numeric(12, 4), nullable=True)
     r_lcl: Mapped[Optional[float]] = mapped_column(Numeric(12, 4), nullable=True)
+    r_cl: Mapped[Optional[float]] = mapped_column(Numeric(12, 4), nullable=True)
     calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
