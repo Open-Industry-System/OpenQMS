@@ -17,6 +17,7 @@ const { Header, Sider, Content } = Layout;
 const menuItems = [
   { key: "/dashboard", icon: <DashboardOutlined />, label: "仪表盘" },
   { key: "/fmea", icon: <FileTextOutlined />, label: "FMEA管理" },
+  { key: "/control-plans", icon: <FileTextOutlined />, label: "控制计划" },
   { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA" },
 ];
 

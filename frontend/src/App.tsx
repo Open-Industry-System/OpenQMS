@@ -9,6 +9,8 @@ import FMEAListPage from "./pages/fmea/FMEAListPage";
 import FMEAEditorPage from "./pages/fmea/FMEAEditorPage";
 import CAPAListPage from "./pages/capa/CAPAListPage";
 import CAPADetailPage from "./pages/capa/CAPADetailPage";
+import ControlPlanListPage from "./pages/control-plan/ControlPlanListPage";
+import ControlPlanEditorPage from "./pages/control-plan/ControlPlanEditorPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -49,6 +51,8 @@ export default function App() {
         <Route path="/fmea/:id" element={<FMEAEditorPage />} />
         <Route path="/capa" element={<CAPAListPage />} />
         <Route path="/capa/:id" element={<CAPADetailPage />} />
+        <Route path="/control-plans" element={<ControlPlanListPage />} />
+        <Route path="/control-plans/:id" element={<ControlPlanEditorPage />} />
       </Route>
     </Routes>
   );
