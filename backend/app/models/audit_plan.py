@@ -1,0 +1,35 @@
+import uuid
+from datetime import date, datetime
+
+from sqlalchemy import String, ForeignKey, Date, DateTime, Text, func
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database import Base
+
+
+class AuditPlan(Base):
+    __tablename__ = "audit_plans"
+
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    program_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("audit_programs.program_id"), nullable=False
+    )
+    audit_scope: Mapped[str] = mapped_column(Text, nullable=False)
+    audit_criteria: Mapped[str] = mapped_column(Text, nullable=False)
+    planned_date: Mapped[date] = mapped_column(Date, nullable=False)
+    actual_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    lead_auditor: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    team_members: Mapped[list] = mapped_column(JSONB, default=list)
+    checklist: Mapped[list] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
