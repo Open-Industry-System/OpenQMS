@@ -1,5 +1,7 @@
+import json
 import uuid
 from datetime import date
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -10,46 +12,8 @@ from app.services import audit_service
 
 router = APIRouter(prefix="/api/audit-plans", tags=["audit-plans"])
 
-
-CHECKLIST_TEMPLATES = [
-    {
-        "audit_type": "system",
-        "name": "体系审核检查表",
-        "items": [
-            {"item_no": "4.1", "clause": "4.1 理解组织及其环境", "question": "组织是否识别了与其宗旨相关的内外部议题？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "4.2", "clause": "4.2 理解相关方需求", "question": "相关方及其要求是否被识别并监视？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "5.1", "clause": "5.1 领导作用和承诺", "question": "最高管理者是否对质量管理体系的有效性承担责任？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "6.1", "clause": "6.1 应对风险和机遇的措施", "question": "风险和机遇是否被识别并策划应对措施？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "7.1", "clause": "7.1 资源", "question": "组织是否确定和提供了所需的资源？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "8.1", "clause": "8.1 运行的策划和控制", "question": "过程是否被策划、实施、监视和改进？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "9.1", "clause": "9.1 监视、测量、分析和评价", "question": "是否策划并实施了所需的监视和测量活动？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "10.2", "clause": "10.2 不合格和纠正措施", "question": "是否对不合格做出应对并在必要时采取纠正措施？", "result": "", "evidence": "", "note": ""},
-        ],
-    },
-    {
-        "audit_type": "process",
-        "name": "过程审核检查表",
-        "items": [
-            {"item_no": "P1", "clause": "过程输入", "question": "输入要求是否完整、明确并被验证？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "P2", "clause": "过程资源", "question": "人员、设备、环境是否满足过程要求？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "P3", "clause": "过程方法", "question": "作业指导书/控制计划是否被有效执行？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "P4", "clause": "过程监视", "question": "关键过程参数是否被监视并记录？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "P5", "clause": "过程输出", "question": "输出是否满足规定的接收准则？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "P6", "clause": "过程改进", "question": "是否利用过程数据推动持续改进？", "result": "", "evidence": "", "note": ""},
-        ],
-    },
-    {
-        "audit_type": "product",
-        "name": "产品审核检查表",
-        "items": [
-            {"item_no": "D1", "clause": "外观", "question": "产品外观是否符合图纸/规范要求？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "D2", "clause": "尺寸", "question": "关键尺寸是否在公差范围内？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "D3", "clause": "功能", "question": "产品功能测试结果是否满足规范？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "D4", "clause": "标识", "question": "产品标识、追溯信息是否完整正确？", "result": "", "evidence": "", "note": ""},
-            {"item_no": "D5", "clause": "包装", "question": "包装方式和防护是否符合要求？", "result": "", "evidence": "", "note": ""},
-        ],
-    },
-]
+_TEMPLATES_PATH = Path(__file__).parent.parent / "data" / "checklist_templates.json"
+CHECKLIST_TEMPLATES: list[dict] = json.loads(_TEMPLATES_PATH.read_text(encoding="utf-8"))
 
 
 @router.get("", response_model=schemas.audit.AuditPlanListResponse)

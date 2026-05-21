@@ -27,6 +27,7 @@ import {
   DeleteOutlined,
   PrinterOutlined,
   EditOutlined,
+  LinkOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
@@ -602,7 +603,15 @@ export default function InternalAuditDetailPage() {
                   width: 120,
                   render: (_: unknown, record: AuditFinding) =>
                     record.capa_ref_id ? (
-                      <Tag color="blue">已关联</Tag>
+                      <Button
+                        size="small"
+                        type="link"
+                        icon={<LinkOutlined />}
+                        onClick={() => navigate(`/capa/${record.capa_ref_id}`)}
+                        style={{ padding: 0 }}
+                      >
+                        查看CAPA
+                      </Button>
                     ) : (
                       <Tag>未关联</Tag>
                     ),
