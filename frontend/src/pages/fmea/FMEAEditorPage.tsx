@@ -78,6 +78,17 @@ export default function FMEAEditorPage() {
   const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
   const [recommendationTrigger, setRecommendationTrigger] = useState<"function" | "failureMode" | "risk" | null>(null);
   const [recommendationCtx, setRecommendationCtx] = useState<{ functionDesc?: string; failureMode?: string; s?: number; o?: number; d?: number }>({});
+  const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
+
+  const activateRecommendation = (
+    rowKey: string,
+    trigger: "function" | "failureMode" | "risk",
+    ctx: { functionDesc?: string; failureMode?: string; s?: number; o?: number; d?: number }
+  ) => {
+    setFocusedRowKey(rowKey);
+    setRecommendationTrigger(trigger);
+    setRecommendationCtx(ctx);
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -209,7 +220,11 @@ export default function FMEAEditorPage() {
       render: (_: unknown, row: FMEARow) => {
         const funcNode = nodeMap.get(row.functionNodeId);
         return (
-          <div>
+          <div
+            onFocus={() => activateRecommendation(row.key, "function", { functionDesc: funcNode?.name || "" })}
+            tabIndex={0}
+            style={{ outline: "none" }}
+          >
             <div style={{ fontWeight: 600, fontSize: 12 }}>{funcNode?.name || "-"}</div>
             {funcNode?.specification && (
               <Text type="secondary" style={{ fontSize: 10 }}>{funcNode.specification}</Text>
@@ -232,6 +247,7 @@ export default function FMEAEditorPage() {
             value={node?.name || ""}
             rows={2}
             disabled={isViewer}
+            onFocus={() => activateRecommendation(row.key, "failureMode", { failureMode: node?.name || "" })}
             onChange={(e) => updateNode(row.failureModeNodeId, "name", e.target.value)}
           />
         );
@@ -270,6 +286,16 @@ export default function FMEAEditorPage() {
             value={node?.severity || undefined}
             disabled={isViewer}
             style={{ width: 55, textAlign: "center" }}
+            onFocus={() => {
+              const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
+              const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
+              activateRecommendation(row.key, "risk", {
+                failureMode: nodeMap.get(row.failureModeNodeId)?.name,
+                s: node?.severity || 0,
+                o: causeNode?.occurrence || 0,
+                d: detNode?.detection || 0,
+              });
+            }}
             onChange={(e) => updateNode(row.failureEffectNodeId!, "severity", Number(e.target.value) || 0)}
           />
         );
@@ -326,6 +352,16 @@ export default function FMEAEditorPage() {
             value={node?.occurrence || undefined}
             disabled={isViewer}
             style={{ width: 55, textAlign: "center" }}
+            onFocus={() => {
+              const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+              const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
+              activateRecommendation(row.key, "risk", {
+                failureMode: nodeMap.get(row.failureModeNodeId)?.name,
+                s: effectNode?.severity || 0,
+                o: node?.occurrence || 0,
+                d: detNode?.detection || 0,
+              });
+            }}
             onChange={(e) => updateNode(row.failureCauseNodeId!, "occurrence", Number(e.target.value) || 0)}
           />
         );
@@ -381,6 +417,16 @@ export default function FMEAEditorPage() {
             value={node?.detection || undefined}
             disabled={isViewer}
             style={{ width: 55, textAlign: "center" }}
+            onFocus={() => {
+              const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+              const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
+              activateRecommendation(row.key, "risk", {
+                failureMode: nodeMap.get(row.failureModeNodeId)?.name,
+                s: effectNode?.severity || 0,
+                o: causeNode?.occurrence || 0,
+                d: node?.detection || 0,
+              });
+            }}
             onChange={(e) => updateNode(row.detectionControlIds[0], "detection", Number(e.target.value) || 0)}
           />
         );
@@ -761,7 +807,41 @@ export default function FMEAEditorPage() {
             trigger={recommendationTrigger}
             {...recommendationCtx}
             onApplySuggestion={(suggestion, field) => {
-              message.success(`已采用建议: ${suggestion}`);
+              if (!focusedRowKey) {
+                message.warning("请先点击需要填充的单元格");
+                return;
+              }
+              const row = rows.find((r) => r.key === focusedRowKey);
+              if (!row) return;
+
+              let nodeId: string | undefined;
+              let nodeField: keyof GraphNode = "name";
+
+              switch (field) {
+                case "failureMode":
+                  nodeId = row.failureModeNodeId;
+                  break;
+                case "effect":
+                  nodeId = row.failureEffectNodeId ?? undefined;
+                  break;
+                case "cause":
+                  nodeId = row.failureCauseNodeId ?? undefined;
+                  break;
+                case "prevention":
+                  nodeId = row.preventionControlIds[0] ?? undefined;
+                  break;
+                case "detection":
+                  nodeId = row.detectionControlIds[0] ?? undefined;
+                  break;
+                default:
+                  message.warning(`未知字段: ${field}`);
+                  return;
+              }
+
+              if (nodeId) {
+                updateNode(nodeId, nodeField, suggestion);
+                message.success(`已采用建议: ${suggestion}`);
+              }
               setRecommendationTrigger(null);
             }}
           />

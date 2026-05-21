@@ -72,23 +72,25 @@ async def update_fmea(
     return FMEAResponse.model_validate(fmea)
 
 
+async def require_approve_permission(
+    req: TransitionRequest,
+    user: User = Depends(require_engineer_or_admin),
+) -> User:
+    if req.target_status == "approved":
+        return await require_manager_or_admin(user)
+    return user
+
+
 @router.post("/{fmea_id}/transition", response_model=FMEAResponse)
 async def transition_fmea(
     fmea_id: uuid.UUID,
     req: TransitionRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_approve_permission),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    
-    if req.target_status == "approved" and user.role not in ["admin", "manager"]:
-        raise HTTPException(
-            status_code=403,
-            detail="Only Admin and Manager are allowed to approve FMEA"
-        )
-        
     try:
         fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, user.user_id)
     except ValueError as e:
