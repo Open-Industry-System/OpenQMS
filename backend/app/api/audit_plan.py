@@ -16,6 +16,13 @@ _TEMPLATES_PATH = Path(__file__).parent.parent / "data" / "checklist_templates.j
 CHECKLIST_TEMPLATES: list[dict] = json.loads(_TEMPLATES_PATH.read_text(encoding="utf-8"))
 
 
+@router.get("/checklist-templates")
+async def get_checklist_templates(
+    _user: User = Depends(get_current_user),
+):
+    return CHECKLIST_TEMPLATES
+
+
 @router.get("", response_model=schemas.audit.AuditPlanListResponse)
 async def list_audit_plans(
     page: int = Query(1, ge=1),
@@ -183,10 +190,3 @@ async def get_plan_findings(
         page=page,
         page_size=page_size,
     )
-
-
-@router.get("/checklist-templates")
-async def get_checklist_templates(
-    _user: User = Depends(get_current_user),
-):
-    return CHECKLIST_TEMPLATES
