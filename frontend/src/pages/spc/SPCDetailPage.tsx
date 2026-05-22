@@ -33,7 +33,6 @@ import type {
 import { useAuthStore } from "../../store/authStore";
 
 const { Title, Text } = Typography;
-const { TabPane } = Tabs;
 
 const ruleLabels: Record<string, string> = {
   rule1: "规则1: 超出控制限",
@@ -466,281 +465,305 @@ export default function SPCDetailPage() {
         </Space>
       </div>
 
-      <Tabs activeKey={activeTab} onChange={setActiveTab}>
-        {/* Tab 1: 控制图 */}
-        <TabPane tab="控制图" key="chart">
-          <Row gutter={16}>
-            <Col span={18}>
-              <Card loading={refreshing}>
-                <div ref={mainChartRef} style={{ width: "100%", height: 320 }} />
-              </Card>
-              <Card style={{ marginTop: 16 }} loading={refreshing}>
-                <div ref={subChartRef} style={{ width: "100%", height: 280 }} />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card title="基本信息" size="small">
-                <p>
-                  <Text type="secondary">过程名称:</Text> {ic.process_name}
-                </p>
-                <p>
-                  <Text type="secondary">特性名称:</Text> {ic.characteristic_name}
-                </p>
-                <p>
-                  <Text type="secondary">规格上限:</Text> {ic.spec_upper}
-                </p>
-                <p>
-                  <Text type="secondary">规格下限:</Text> {ic.spec_lower}
-                </p>
-                <p>
-                  <Text type="secondary">目标值:</Text> {ic.target_value ?? "-"}
-                </p>
-                <p>
-                  <Text type="secondary">子组大小:</Text> {ic.subgroup_size}
-                </p>
-              </Card>
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: "chart",
+            label: "控制图",
+            children: (
+              <Row gutter={16}>
+                <Col span={18}>
+                  <Card loading={refreshing}>
+                    <div ref={mainChartRef} style={{ width: "100%", height: 320 }} />
+                  </Card>
+                  <Card style={{ marginTop: 16 }} loading={refreshing}>
+                    <div ref={subChartRef} style={{ width: "100%", height: 280 }} />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card title="基本信息" size="small">
+                    <p>
+                      <Text type="secondary">过程名称:</Text> {ic.process_name}
+                    </p>
+                    <p>
+                      <Text type="secondary">特性名称:</Text> {ic.characteristic_name}
+                    </p>
+                    <p>
+                      <Text type="secondary">规格上限:</Text> {ic.spec_upper}
+                    </p>
+                    <p>
+                      <Text type="secondary">规格下限:</Text> {ic.spec_lower}
+                    </p>
+                    <p>
+                      <Text type="secondary">目标值:</Text> {ic.target_value ?? "-"}
+                    </p>
+                    <p>
+                      <Text type="secondary">子组大小:</Text> {ic.subgroup_size}
+                    </p>
+                  </Card>
 
-              <Card title="控制限管理" size="small" style={{ marginTop: 16 }}>
-                <Button
-                  type={ic.control_limits_locked ? "default" : "primary"}
-                  icon={ic.control_limits_locked ? <UnlockOutlined /> : <LockOutlined />}
-                  onClick={handleLockToggle}
-                  disabled={!canEdit}
-                  block
-                >
-                  {ic.control_limits_locked ? "解锁控制限" : "锁定控制限"}
-                </Button>
-              </Card>
-
-              <Card title="判异规则" size="small" style={{ marginTop: 16 }}>
-                {Object.entries(ruleLabels).map(([key, label]) => (
-                  <div
-                    key={key}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: 8,
-                    }}
-                  >
-                    <Text style={{ fontSize: 12 }}>{label}</Text>
-                    <Switch
-                      size="small"
-                      checked={!!ic.rules_config[key]}
-                      onChange={(checked) => handleRuleToggle(key, checked)}
+                  <Card title="控制限管理" size="small" style={{ marginTop: 16 }}>
+                    <Button
+                      type={ic.control_limits_locked ? "default" : "primary"}
+                      icon={ic.control_limits_locked ? <UnlockOutlined /> : <LockOutlined />}
+                      onClick={handleLockToggle}
                       disabled={!canEdit}
-                    />
-                  </div>
-                ))}
-              </Card>
-            </Col>
-          </Row>
-        </TabPane>
+                      block
+                    >
+                      {ic.control_limits_locked ? "解锁控制限" : "锁定控制限"}
+                    </Button>
+                  </Card>
 
-        {/* Tab 2: 过程能力 */}
-        <TabPane tab="过程能力" key="capability">
-          {capability ? (
-            <div>
-              <Row gutter={16} style={{ marginBottom: 24 }}>
-                <Col>
-                  <Tag color={getGradeColor(capability.grade)} style={{ fontSize: 18, padding: "8px 16px" }}>
-                    等级: {capability.grade}
-                  </Tag>
-                </Col>
-              </Row>
-              <Row gutter={[16, 16]}>
-                <Col span={6}>
-                  <Card>
-                    <Statistic title="Cp" value={capability.cp} precision={3} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card>
-                    <Statistic title="Cpk" value={capability.cpk} precision={3} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card>
-                    <Statistic title="Pp" value={capability.pp} precision={3} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card>
-                    <Statistic title="Ppk" value={capability.ppk} precision={3} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card>
-                    <Statistic title="Cm" value={capability.cm} precision={3} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card>
-                    <Statistic title="Cmk" value={capability.cmk} precision={3} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card>
-                    <Statistic title="理论 PPM" value={capability.theoretical_ppm} precision={2} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card>
-                    <Statistic title="实际 PPM" value={capability.actual_ppm} precision={2} />
+                  <Card title="判异规则" size="small" style={{ marginTop: 16 }}>
+                    {Object.entries(ruleLabels).map(([key, label]) => (
+                      <div
+                        key={key}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: 8,
+                        }}
+                      >
+                        <Text style={{ fontSize: 12 }}>{label}</Text>
+                        <Switch
+                          size="small"
+                          checked={!!ic.rules_config[key]}
+                          onChange={(checked) => handleRuleToggle(key, checked)}
+                          disabled={!canEdit}
+                        />
+                      </div>
+                    ))}
                   </Card>
                 </Col>
               </Row>
-              <Card title="分析建议" style={{ marginTop: 16 }}>
-                <Text>{capability.advice}</Text>
-              </Card>
-            </div>
-          ) : (
-            <Spin size="large" style={{ display: "block", margin: "64px auto" }} />
-          )}
-        </TabPane>
-
-        {/* Tab 3: 数据录入 */}
-        <TabPane tab="数据录入" key="data">
-          <Tabs type="card">
-            <TabPane tab="单批录入" key="single">
-              <Card title="录入新批次">
-                <Row gutter={16} style={{ marginBottom: 16 }}>
-                  <Col span={8}>
-                    <Text type="secondary">批次号</Text>
-                    <Input
-                      value={batchNo}
-                      onChange={(e) => setBatchNo(e.target.value)}
-                      placeholder="如 BATCH-20260521-001"
-                    />
-                  </Col>
-                  <Col span={8}>
-                    <Text type="secondary">采样时间</Text>
-                    <DatePicker
-                      showTime
-                      style={{ width: "100%" }}
-                      value={sampledAt}
-                      onChange={setSampledAt}
-                    />
+            ),
+          },
+          {
+            key: "capability",
+            label: "过程能力",
+            children: capability ? (
+              <div>
+                <Row gutter={16} style={{ marginBottom: 24 }}>
+                  <Col>
+                    <Tag color={getGradeColor(capability.grade)} style={{ fontSize: 18, padding: "8px 16px" }}>
+                      等级: {capability.grade}
+                    </Tag>
                   </Col>
                 </Row>
-                <Divider orientation="left">
-                  样本值 (建议 {subgroupSize} 个)
-                </Divider>
-                <Row gutter={[8, 8]}>
-                  {sampleValues.map((val, idx) => (
-                    <Col span={4} key={idx}>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={val}
-                        onChange={(e) => updateSampleValue(idx, e.target.value)}
-                        addonBefore={`#${idx + 1}`}
-                        suffix={
-                          sampleValues.length > 1 ? (
-                            <Button
-                              type="text"
-                              size="small"
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={() => removeSampleInput(idx)}
+                <Row gutter={[16, 16]}>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic title="Cp" value={capability.cp} precision={3} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic title="Cpk" value={capability.cpk} precision={3} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic title="Pp" value={capability.pp} precision={3} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic title="Ppk" value={capability.ppk} precision={3} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic title="Cm" value={capability.cm} precision={3} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic title="Cmk" value={capability.cmk} precision={3} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic title="理论 PPM" value={capability.theoretical_ppm} precision={2} />
+                    </Card>
+                  </Col>
+                  <Col span={6}>
+                    <Card>
+                      <Statistic title="实际 PPM" value={capability.actual_ppm} precision={2} />
+                    </Card>
+                  </Col>
+                </Row>
+                <Card title="分析建议" style={{ marginTop: 16 }}>
+                  <Text>{capability.advice}</Text>
+                </Card>
+              </div>
+            ) : (
+              <Spin size="large" style={{ display: "block", margin: "64px auto" }} />
+            ),
+          },
+          {
+            key: "data",
+            label: "数据录入",
+            children: (
+              <Tabs
+                type="card"
+                items={[
+                  {
+                    key: "single",
+                    label: "单批录入",
+                    children: (
+                      <Card title="录入新批次">
+                        <Row gutter={16} style={{ marginBottom: 16 }}>
+                          <Col span={8}>
+                            <Text type="secondary">批次号</Text>
+                            <Input
+                              value={batchNo}
+                              onChange={(e) => setBatchNo(e.target.value)}
+                              placeholder="如 BATCH-20260521-001"
                             />
-                          ) : null
-                        }
-                      />
-                    </Col>
-                  ))}
-                </Row>
-                <div style={{ marginTop: 16 }}>
-                  <Button icon={<PlusOutlined />} onClick={addSampleInput} style={{ marginRight: 8 }}>
-                    添加样本
-                  </Button>
-                  <Button type="primary" onClick={handleAddSample} disabled={!canEdit}>
-                    提交批次
-                  </Button>
-                </div>
-              </Card>
-            </TabPane>
-
-            <TabPane tab="批量导入" key="batch">
-              <Card>
-                <Upload.Dragger
-                  name="file"
-                  multiple={false}
-                  beforeUpload={() => false}
-                  disabled
-                >
-                  <p className="ant-upload-drag-icon">
-                    <UploadOutlined />
-                  </p>
-                  <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
-                  <p className="ant-upload-hint">
-                    支持 Excel (.xlsx) 或 CSV 格式，每行包含: 批次号, 采样时间, 样本值1, 样本值2, ...
-                  </p>
-                </Upload.Dragger>
-                <Text type="secondary" style={{ display: "block", marginTop: 16 }}>
-                  批量导入功能开发中，请使用单批录入。
-                </Text>
-              </Card>
-            </TabPane>
-
-            <TabPane tab="历史数据" key="history">
-              <Card>
-                <Table
-                  dataSource={chartData?.data_points || []}
-                  rowKey="batch_index"
-                  size="small"
-                  pagination={{ pageSize: 20 }}
-                  columns={[
-                    { title: "序号", dataIndex: "batch_index", width: 70 },
-                    { title: "批次号", dataIndex: "batch_no" },
-                    {
-                      title: "采样时间",
-                      dataIndex: "sampled_at",
-                      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
-                    },
-                    {
-                      title: "均值/X值",
-                      dataIndex: "x_value",
-                      render: (v: number | undefined) => v?.toFixed(3) ?? "-",
-                    },
-                    {
-                      title: "极差/MR值",
-                      dataIndex: "r_value",
-                      render: (v: number | undefined) => v?.toFixed(3) ?? "-",
-                    },
-                    {
-                      title: "告警",
-                      dataIndex: "alarm_flags",
-                      render: (flags: number[]) =>
-                        flags.length > 0 ? (
-                          <Tag color="red">规则 {flags.join(", ")}</Tag>
-                        ) : (
-                          <Tag color="green">正常</Tag>
-                        ),
-                    },
-                  ]}
-                />
-              </Card>
-            </TabPane>
-          </Tabs>
-        </TabPane>
-
-        {/* Tab 4: 告警记录 */}
-        <TabPane tab="告警记录" key="alarms">
-          <Table
-            columns={alarmColumns}
-            dataSource={alarms}
-            rowKey="alarm_id"
-            loading={refreshing}
-            pagination={{
-              current: alarmPage,
-              total: alarmTotal,
-              pageSize: 20,
-              onChange: (p) => setAlarmPage(p),
-            }}
-          />
-        </TabPane>
-      </Tabs>
+                          </Col>
+                          <Col span={8}>
+                            <Text type="secondary">采样时间</Text>
+                            <DatePicker
+                              showTime
+                              style={{ width: "100%" }}
+                              value={sampledAt}
+                              onChange={setSampledAt}
+                            />
+                          </Col>
+                        </Row>
+                        <Divider orientation="left">
+                          样本值 (建议 {subgroupSize} 个)
+                        </Divider>
+                        <Row gutter={[8, 8]}>
+                          {sampleValues.map((val, idx) => (
+                            <Col span={4} key={idx}>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={val}
+                                onChange={(e) => updateSampleValue(idx, e.target.value)}
+                                addonBefore={`#${idx + 1}`}
+                                suffix={
+                                  sampleValues.length > 1 ? (
+                                    <Button
+                                      type="text"
+                                      size="small"
+                                      danger
+                                      icon={<DeleteOutlined />}
+                                      onClick={() => removeSampleInput(idx)}
+                                    />
+                                  ) : null
+                                }
+                              />
+                            </Col>
+                          ))}
+                        </Row>
+                        <div style={{ marginTop: 16 }}>
+                          <Button icon={<PlusOutlined />} onClick={addSampleInput} style={{ marginRight: 8 }}>
+                            添加样本
+                          </Button>
+                          <Button type="primary" onClick={handleAddSample} disabled={!canEdit}>
+                            提交批次
+                          </Button>
+                        </div>
+                      </Card>
+                    ),
+                  },
+                  {
+                    key: "batch",
+                    label: "批量导入",
+                    children: (
+                      <Card>
+                        <Upload.Dragger
+                          name="file"
+                          multiple={false}
+                          beforeUpload={() => false}
+                          disabled
+                        >
+                          <p className="ant-upload-drag-icon">
+                            <UploadOutlined />
+                          </p>
+                          <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
+                          <p className="ant-upload-hint">
+                            支持 Excel (.xlsx) 或 CSV 格式，每行包含: 批次号, 采样时间, 样本值1, 样本值2, ...
+                          </p>
+                        </Upload.Dragger>
+                        <Text type="secondary" style={{ display: "block", marginTop: 16 }}>
+                          批量导入功能开发中，请使用单批录入。
+                        </Text>
+                      </Card>
+                    ),
+                  },
+                  {
+                    key: "history",
+                    label: "历史数据",
+                    children: (
+                      <Card>
+                        <Table
+                          dataSource={chartData?.data_points || []}
+                          rowKey="batch_index"
+                          size="small"
+                          pagination={{ pageSize: 20 }}
+                          columns={[
+                            { title: "序号", dataIndex: "batch_index", width: 70 },
+                            { title: "批次号", dataIndex: "batch_no" },
+                            {
+                              title: "采样时间",
+                              dataIndex: "sampled_at",
+                              render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+                            },
+                            {
+                              title: "均值/X值",
+                              dataIndex: "x_value",
+                              render: (v: number | undefined) => v?.toFixed(3) ?? "-",
+                            },
+                            {
+                              title: "极差/MR值",
+                              dataIndex: "r_value",
+                              render: (v: number | undefined) => v?.toFixed(3) ?? "-",
+                            },
+                            {
+                              title: "告警",
+                              dataIndex: "alarm_flags",
+                              render: (flags: number[]) =>
+                                flags.length > 0 ? (
+                                  <Tag color="red">规则 {flags.join(", ")}</Tag>
+                                ) : (
+                                  <Tag color="green">正常</Tag>
+                                ),
+                            },
+                          ]}
+                        />
+                      </Card>
+                    ),
+                  },
+                ]}
+              />
+            ),
+          },
+          {
+            key: "alarms",
+            label: "告警记录",
+            children: (
+              <Table
+                columns={alarmColumns}
+                dataSource={alarms}
+                rowKey="alarm_id"
+                loading={refreshing}
+                pagination={{
+                  current: alarmPage,
+                  total: alarmTotal,
+                  pageSize: 20,
+                  onChange: (p) => setAlarmPage(p),
+                }}
+              />
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

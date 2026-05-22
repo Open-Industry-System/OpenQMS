@@ -48,7 +48,6 @@ import {
 import { listUsers } from "../../api/auth";
 
 const { Option } = Select;
-const { TabPane } = Tabs;
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
 
@@ -430,12 +429,16 @@ export default function InternalAuditListPage() {
           />
         </Space>
 
-        <Tabs activeKey={activeTab} onChange={setActiveTab}>
-          <TabPane tab="全部" key="all" />
-          <TabPane tab="待执行" key="planned" />
-          <TabPane tab="进行中" key="in_progress" />
-          <TabPane tab="已完成" key="completed" />
-        </Tabs>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            { label: "全部", key: "all" },
+            { label: "待执行", key: "planned" },
+            { label: "进行中", key: "in_progress" },
+            { label: "已完成", key: "completed" },
+          ]}
+        />
 
         <Table
           rowKey="audit_id"

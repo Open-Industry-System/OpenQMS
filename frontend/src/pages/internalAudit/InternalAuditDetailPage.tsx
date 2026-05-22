@@ -50,8 +50,6 @@ import dayjs from "dayjs";
 const { Option } = Select;
 const { TextArea } = Input;
 const { Title, Text } = Typography;
-const { TabPane } = Tabs;
-
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   planned: { label: "待执行", color: "blue" },
   in_progress: { label: "进行中", color: "processing" },
@@ -480,233 +478,248 @@ export default function InternalAuditDetailPage() {
         )}
       </Card>
 
-      <Tabs defaultActiveKey="checklist">
-        <TabPane tab="检查表" key="checklist">
-          <Card
-            extra={
-              isEngineerPlus && (
-                <Button type="primary" icon={<PlusOutlined />} onClick={handleAddChecklistItem}>
-                  添加检查项
-                </Button>
-              )
-            }
-          >
-            <Table
-              rowKey={(record, index) => `${record.item_no}-${index}`}
-              dataSource={plan.checklist}
-              pagination={false}
-              size="small"
-              scroll={{ x: 1200 }}
-              columns={[
-                { title: "序号", dataIndex: "item_no", width: 60 },
-                { title: "条款", dataIndex: "clause", width: 120 },
-                { title: "检查问题", dataIndex: "question", ellipsis: true },
-                {
-                  title: "结果",
-                  dataIndex: "result",
-                  width: 120,
-                  render: (value: string, _record: AuditChecklistItem, index: number) => (
-                    <Select
-                      value={value || undefined}
-                      placeholder="选择结果"
-                      style={{ width: "100%" }}
-                      allowClear
-                      disabled={!isEngineerPlus}
-                      onChange={(v) => handleChecklistChange(index, "result", v || "")}
-                    >
-                      {RESULT_OPTIONS.map((o) => (
-                        <Option key={o.value} value={o.value}>
-                          {o.label}
-                        </Option>
-                      ))}
-                    </Select>
-                  ),
-                },
-                {
-                  title: "证据",
-                  dataIndex: "evidence",
-                  render: (value: string, _record: AuditChecklistItem, index: number) => (
-                    <Input
-                      value={value}
-                      placeholder="输入证据"
-                      disabled={!isEngineerPlus}
-                      onChange={(e) => handleChecklistChange(index, "evidence", e.target.value)}
-                    />
-                  ),
-                },
-                {
-                  title: "备注",
-                  dataIndex: "note",
-                  render: (value: string, _record: AuditChecklistItem, index: number) => (
-                    <Input
-                      value={value}
-                      placeholder="输入备注"
-                      disabled={!isEngineerPlus}
-                      onChange={(e) => handleChecklistChange(index, "note", e.target.value)}
-                    />
-                  ),
-                },
-                {
-                  title: "操作",
-                  width: 80,
-                  render: (_: unknown, _record: AuditChecklistItem, index: number) =>
-                    isEngineerPlus ? (
-                      <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteChecklistItem(index)} />
-                    ) : null,
-                },
-              ]}
-              rowClassName={(record) => (record.result === "不符合" ? "audit-row-nc" : "")}
-            />
-          </Card>
-        </TabPane>
-
-        <TabPane tab="发现项" key="findings">
-          <Card
-            extra={
-              isEngineerPlus && (
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setFindingModalOpen(true)}>
-                  添加发现项
-                </Button>
-              )
-            }
-          >
-            <Table
-              rowKey="finding_id"
-              dataSource={findings}
-              loading={findingsLoading}
-              pagination={false}
-              size="small"
-              columns={[
-                { title: "条款", dataIndex: "clause_ref", width: 100, render: (v: string | null) => v || "—" },
-                {
-                  title: "类型",
-                  dataIndex: "finding_type",
-                  width: 100,
-                  render: (type: string) => {
-                    const cfg = FINDING_TYPE_MAP[type];
-                    return <Tag color={cfg?.color}>{cfg?.label}</Tag>;
-                  },
-                },
-                { title: "描述", dataIndex: "description", ellipsis: true },
-                {
-                  title: "状态",
-                  dataIndex: "status",
-                  width: 90,
-                  render: (status: string) => {
-                    const cfg = FINDING_STATUS_MAP[status];
-                    return <Tag color={cfg?.color}>{cfg?.label}</Tag>;
-                  },
-                },
-                { title: "截止日期", dataIndex: "due_date", width: 110, render: (v: string | null) => v || "—" },
-                {
-                  title: "CAPA",
-                  width: 120,
-                  render: (_: unknown, record: AuditFinding) =>
-                    record.capa_ref_id ? (
-                      <Button
-                        size="small"
-                        type="link"
-                        icon={<LinkOutlined />}
-                        onClick={() => navigate(`/capa/${record.capa_ref_id}`)}
-                        style={{ padding: 0 }}
-                      >
-                        查看CAPA
-                      </Button>
-                    ) : (
-                      <Tag>未关联</Tag>
-                    ),
-                },
-                {
-                  title: "操作",
-                  width: 200,
-                  render: (_: unknown, record: AuditFinding) => (
-                    <Space size="small">
-                      {record.status !== "closed" && isEngineerPlus && (
-                        <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleCloseFinding(record.finding_id)}>
-                          关闭
-                        </Button>
-                      )}
-                      {!record.capa_ref_id && isEngineerPlus && (
-                        <Button size="small" onClick={() => handleCreateCAPA(record.finding_id)}>
-                          创建CAPA
-                        </Button>
-                      )}
-                    </Space>
-                  ),
-                },
-              ]}
-            />
-          </Card>
-        </TabPane>
-
-        <TabPane tab="审核报告" key="report">
-          <Space style={{ marginBottom: 16 }}>
-            <Button icon={<PrinterOutlined />} onClick={handlePrint}>
-              打印报告
-            </Button>
-          </Space>
-
-          <Row gutter={16} style={{ marginBottom: 24 }}>
-            <Col span={4}>
-              <Card>
-                <Statistic title="发现项总数" value={findings.length} />
+      <Tabs
+        defaultActiveKey="checklist"
+        items={[
+          {
+            key: "checklist",
+            label: "检查表",
+            children: (
+              <Card
+                extra={
+                  isEngineerPlus && (
+                    <Button type="primary" icon={<PlusOutlined />} onClick={handleAddChecklistItem}>
+                      添加检查项
+                    </Button>
+                  )
+                }
+              >
+                <Table
+                  rowKey={(record, index) => `${record.item_no}-${index}`}
+                  dataSource={plan.checklist}
+                  pagination={false}
+                  size="small"
+                  scroll={{ x: 1200 }}
+                  columns={[
+                    { title: "序号", dataIndex: "item_no", width: 60 },
+                    { title: "条款", dataIndex: "clause", width: 120 },
+                    { title: "检查问题", dataIndex: "question", ellipsis: true },
+                    {
+                      title: "结果",
+                      dataIndex: "result",
+                      width: 120,
+                      render: (value: string, _record: AuditChecklistItem, index: number) => (
+                        <Select
+                          value={value || undefined}
+                          placeholder="选择结果"
+                          style={{ width: "100%" }}
+                          allowClear
+                          disabled={!isEngineerPlus}
+                          onChange={(v) => handleChecklistChange(index, "result", v || "")}
+                        >
+                          {RESULT_OPTIONS.map((o) => (
+                            <Option key={o.value} value={o.value}>
+                              {o.label}
+                            </Option>
+                          ))}
+                        </Select>
+                      ),
+                    },
+                    {
+                      title: "证据",
+                      dataIndex: "evidence",
+                      render: (value: string, _record: AuditChecklistItem, index: number) => (
+                        <Input
+                          value={value}
+                          placeholder="输入证据"
+                          disabled={!isEngineerPlus}
+                          onChange={(e) => handleChecklistChange(index, "evidence", e.target.value)}
+                        />
+                      ),
+                    },
+                    {
+                      title: "备注",
+                      dataIndex: "note",
+                      render: (value: string, _record: AuditChecklistItem, index: number) => (
+                        <Input
+                          value={value}
+                          placeholder="输入备注"
+                          disabled={!isEngineerPlus}
+                          onChange={(e) => handleChecklistChange(index, "note", e.target.value)}
+                        />
+                      ),
+                    },
+                    {
+                      title: "操作",
+                      width: 80,
+                      render: (_: unknown, _record: AuditChecklistItem, index: number) =>
+                        isEngineerPlus ? (
+                          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteChecklistItem(index)} />
+                        ) : null,
+                    },
+                  ]}
+                  rowClassName={(record) => (record.result === "不符合" ? "audit-row-nc" : "")}
+                />
               </Card>
-            </Col>
-            <Col span={5}>
-              <Card>
-                <Statistic title="严重不符合" value={majorCount} valueStyle={{ color: "#ff4d4f" }} />
-              </Card>
-            </Col>
-            <Col span={5}>
-              <Card>
-                <Statistic title="一般不符合" value={minorCount} valueStyle={{ color: "#faad14" }} />
-              </Card>
-            </Col>
-            <Col span={5}>
-              <Card>
-                <Statistic title="改进机会" value={ofiCount} valueStyle={{ color: "#1890ff" }} />
-              </Card>
-            </Col>
-            <Col span={5}>
-              <Card>
-                <Statistic title="未关闭" value={openCount} valueStyle={{ color: openCount > 0 ? "#ff4d4f" : "#52c41a" }} />
-              </Card>
-            </Col>
-          </Row>
-
-          <Row gutter={24}>
-            <Col span={12}>
-              <Card title="发现项分布">
-                <div ref={chartRef} style={{ width: "100%", height: 300 }} />
-              </Card>
-            </Col>
-            <Col span={12}>
-              <Card title="发现项清单">
-                {findings.length === 0 ? (
-                  <Text type="secondary">暂无发现项</Text>
-                ) : (
-                  <Space direction="vertical" style={{ width: "100%" }}>
-                    {findings.map((f) => (
-                      <div key={f.finding_id} style={{ padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>
-                        <Space>
-                          <Tag color={FINDING_TYPE_MAP[f.finding_type]?.color}>{FINDING_TYPE_MAP[f.finding_type]?.label}</Tag>
-                          <Text strong>{f.clause_ref || "—"}</Text>
+            ),
+          },
+          {
+            key: "findings",
+            label: "发现项",
+            children: (
+              <Card
+                extra={
+                  isEngineerPlus && (
+                    <Button type="primary" icon={<PlusOutlined />} onClick={() => setFindingModalOpen(true)}>
+                      添加发现项
+                    </Button>
+                  )
+                }
+              >
+                <Table
+                  rowKey="finding_id"
+                  dataSource={findings}
+                  loading={findingsLoading}
+                  pagination={false}
+                  size="small"
+                  columns={[
+                    { title: "条款", dataIndex: "clause_ref", width: 100, render: (v: string | null) => v || "—" },
+                    {
+                      title: "类型",
+                      dataIndex: "finding_type",
+                      width: 100,
+                      render: (type: string) => {
+                        const cfg = FINDING_TYPE_MAP[type];
+                        return <Tag color={cfg?.color}>{cfg?.label}</Tag>;
+                      },
+                    },
+                    { title: "描述", dataIndex: "description", ellipsis: true },
+                    {
+                      title: "状态",
+                      dataIndex: "status",
+                      width: 90,
+                      render: (status: string) => {
+                        const cfg = FINDING_STATUS_MAP[status];
+                        return <Tag color={cfg?.color}>{cfg?.label}</Tag>;
+                      },
+                    },
+                    { title: "截止日期", dataIndex: "due_date", width: 110, render: (v: string | null) => v || "—" },
+                    {
+                      title: "CAPA",
+                      width: 120,
+                      render: (_: unknown, record: AuditFinding) =>
+                        record.capa_ref_id ? (
+                          <Button
+                            size="small"
+                            type="link"
+                            icon={<LinkOutlined />}
+                            onClick={() => navigate(`/capa/${record.capa_ref_id}`)}
+                            style={{ padding: 0 }}
+                          >
+                            查看CAPA
+                          </Button>
+                        ) : (
+                          <Tag>未关联</Tag>
+                        ),
+                    },
+                    {
+                      title: "操作",
+                      width: 200,
+                      render: (_: unknown, record: AuditFinding) => (
+                        <Space size="small">
+                          {record.status !== "closed" && isEngineerPlus && (
+                            <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleCloseFinding(record.finding_id)}>
+                              关闭
+                            </Button>
+                          )}
+                          {!record.capa_ref_id && isEngineerPlus && (
+                            <Button size="small" onClick={() => handleCreateCAPA(record.finding_id)}>
+                              创建CAPA
+                            </Button>
+                          )}
                         </Space>
-                        <div style={{ marginTop: 4 }}>{f.description}</div>
-                        <div style={{ marginTop: 4 }}>
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            状态: {FINDING_STATUS_MAP[f.status]?.label} | 截止: {f.due_date || "—"}
-                          </Text>
-                        </div>
-                      </div>
-                    ))}
-                  </Space>
-                )}
+                      ),
+                    },
+                  ]}
+                />
               </Card>
-            </Col>
-          </Row>
-        </TabPane>
-      </Tabs>
+            ),
+          },
+          {
+            key: "report",
+            label: "审核报告",
+            children: (
+              <>
+                <Space style={{ marginBottom: 16 }}>
+                  <Button icon={<PrinterOutlined />} onClick={handlePrint}>
+                    打印报告
+                  </Button>
+                </Space>
+
+                <Row gutter={16} style={{ marginBottom: 24 }}>
+                  <Col span={4}>
+                    <Card>
+                      <Statistic title="发现项总数" value={findings.length} />
+                    </Card>
+                  </Col>
+                  <Col span={5}>
+                    <Card>
+                      <Statistic title="严重不符合" value={majorCount} valueStyle={{ color: "#ff4d4f" }} />
+                    </Card>
+                  </Col>
+                  <Col span={5}>
+                    <Card>
+                      <Statistic title="一般不符合" value={minorCount} valueStyle={{ color: "#faad14" }} />
+                    </Card>
+                  </Col>
+                  <Col span={5}>
+                    <Card>
+                      <Statistic title="改进机会" value={ofiCount} valueStyle={{ color: "#1890ff" }} />
+                    </Card>
+                  </Col>
+                  <Col span={5}>
+                    <Card>
+                      <Statistic title="未关闭" value={openCount} valueStyle={{ color: openCount > 0 ? "#ff4d4f" : "#52c41a" }} />
+                    </Card>
+                  </Col>
+                </Row>
+
+                <Row gutter={24}>
+                  <Col span={12}>
+                    <Card title="发现项分布">
+                      <div ref={chartRef} style={{ width: "100%", height: 300 }} />
+                    </Card>
+                  </Col>
+                  <Col span={12}>
+                    <Card title="发现项清单">
+                      {findings.length === 0 ? (
+                        <Text type="secondary">暂无发现项</Text>
+                      ) : (
+                        <Space direction="vertical" style={{ width: "100%" }}>
+                          {findings.map((f) => (
+                            <div key={f.finding_id} style={{ padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>
+                              <Space>
+                                <Tag color={FINDING_TYPE_MAP[f.finding_type]?.color}>{FINDING_TYPE_MAP[f.finding_type]?.label}</Tag>
+                                <Text strong>{f.clause_ref || "—"}</Text>
+                              </Space>
+                              <div style={{ marginTop: 4 }}>{f.description}</div>
+                              <div style={{ marginTop: 4 }}>
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  状态: {FINDING_STATUS_MAP[f.status]?.label} | 截止: {f.due_date || "—"}
+                                </Text>
+                              </div>
+                            </div>
+                          ))}
+                        </Space>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
+              </>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         title="添加发现项"

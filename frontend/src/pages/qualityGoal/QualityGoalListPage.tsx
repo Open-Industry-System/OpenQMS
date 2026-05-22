@@ -46,7 +46,6 @@ import { listUsers } from "../../api/auth";
 import type { User } from "../../types";
 
 const { Option } = Select;
-const { TabPane } = Tabs;
 
 const LEVEL_MAP: Record<number, { label: string; color: string; icon: string }> = {
   1: { label: "公司级", color: "blue", icon: "🏢" },
@@ -510,12 +509,16 @@ export default function QualityGoalListPage() {
           )
         }
       >
-        <Tabs activeKey={activeTab} onChange={setActiveTab}>
-          <TabPane tab="全部" key="all" />
-          {isManagerPlus && <TabPane tab="待我审批" key="pending" />}
-          <TabPane tab="我的目标" key="my" />
-          {isEngineerPlus && <TabPane tab="草稿" key="draft" />}
-        </Tabs>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            { label: "全部", key: "all" },
+            ...(isManagerPlus ? [{ label: "待我审批", key: "pending" }] : []),
+            { label: "我的目标", key: "my" },
+            ...(isEngineerPlus ? [{ label: "草稿", key: "draft" }] : []),
+          ]}
+        />
         <Table
           rowKey="goal_id"
           columns={columns}

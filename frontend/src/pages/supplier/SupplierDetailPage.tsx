@@ -132,7 +132,7 @@ export default function SupplierDetailPage() {
   const [transitioning, setTransitioning] = useState(false);
 
   const loadSupplier = useCallback(async () => {
-    if (!id) return;
+    if (!id || id === "new") return;
     setLoading(true);
     try {
       const s = await getSupplier(id);
@@ -145,7 +145,7 @@ export default function SupplierDetailPage() {
   }, [id]);
 
   const loadCerts = useCallback(async () => {
-    if (!id) return;
+    if (!id || id === "new") return;
     setCertsLoading(true);
     try {
       const data = await listCertifications(id);
@@ -158,7 +158,7 @@ export default function SupplierDetailPage() {
   }, [id]);
 
   const loadEvals = useCallback(async () => {
-    if (!id) return;
+    if (!id || id === "new") return;
     setEvalsLoading(true);
     try {
       const data = await listEvaluations(id);
@@ -182,11 +182,6 @@ export default function SupplierDetailPage() {
   useEffect(() => {
     Promise.all([loadSupplier(), loadCerts(), loadEvals(), loadAuditPlans()]);
   }, [loadSupplier, loadCerts, loadEvals, loadAuditPlans]);
-
-  // Initialize eval form defaults on mount
-  useEffect(() => {
-    evalForm.setFieldsValue({ quality_score: 80, delivery_score: 80, service_score: 80 });
-  }, [evalForm]);
 
   // Populate info form when supplier loads or editing starts
   useEffect(() => {
