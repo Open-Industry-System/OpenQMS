@@ -114,6 +114,8 @@ class ControlLimits(BaseModel):
     lcl_list: Optional[List[float]] = None
 
 
+# ============ Control Limit Snapshots ============
+
 class ControlLimitSnapshotOut(BaseModel):
     snapshot_id: UUID
     ic_id: UUID
@@ -130,9 +132,6 @@ class ControlLimitSnapshotOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
-
-
-# ============ Control Limit Snapshots ============
 
 
 class ChartDataResponse(BaseModel):
