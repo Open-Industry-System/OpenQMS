@@ -145,6 +145,7 @@ async def create_supplier(
         created_by=user_id,
     )
     db.add(supplier)
+    await db.flush()
 
     audit_log = AuditLog(
         table_name="suppliers",
@@ -341,6 +342,7 @@ async def create_certification(
         expiry_date=expiry_date,
     )
     db.add(cert)
+    await db.flush()
 
     audit_log = AuditLog(
         table_name="supplier_certifications",
@@ -499,6 +501,7 @@ async def create_evaluation(
         evaluated_by=user_id,
     )
     db.add(evaluation)
+    await db.flush()
 
     audit_log = AuditLog(
         table_name="supplier_evaluations",
