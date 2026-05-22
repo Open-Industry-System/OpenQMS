@@ -102,12 +102,8 @@ export default function SupplierListPage() {
   }, [page, pageSize, filterName, filterStatus]);
 
   useEffect(() => {
-    fetchSuppliers();
-  }, [fetchSuppliers]);
-
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+    Promise.all([fetchSuppliers(), fetchStats()]);
+  }, [fetchSuppliers, fetchStats]);
 
   const handleRefresh = () => {
     fetchSuppliers();

@@ -534,33 +534,30 @@ async def create_evaluation(
 # ─── Stats ───
 
 async def get_supplier_stats(db: AsyncSession) -> dict:
-    total_result = await db.execute(select(func.count()).select_from(Supplier))
-    total_count = total_result.scalar() or 0
+    from sqlalchemy import case
 
-    pending_result = await db.execute(
-        select(func.count()).where(Supplier.status == "pending_review")
+    result = await db.execute(
+        select(
+            func.count().label("total_count"),
+            func.count(case((Supplier.status == "pending_review", 1))).label("pending_review_count"),
+            func.count(case((Supplier.status == "approved", 1))).label("approved_count"),
+        ).select_from(Supplier)
     )
-    pending_review_count = pending_result.scalar() or 0
-
-    approved_result = await db.execute(
-        select(func.count()).where(Supplier.status == "approved")
-    )
-    approved_count = approved_result.scalar() or 0
+    row = result.one()
 
     today = date.today()
-    in_30_days = today + timedelta(days=30)
     expiry_result = await db.execute(
         select(func.count()).select_from(SupplierCertification).where(
             SupplierCertification.expiry_date >= today,
-            SupplierCertification.expiry_date <= in_30_days,
+            SupplierCertification.expiry_date <= today + timedelta(days=30),
         )
     )
     cert_expiry_30d_count = expiry_result.scalar() or 0
 
     return {
-        "total_count": total_count,
-        "pending_review_count": pending_review_count,
-        "approved_count": approved_count,
+        "total_count": row.total_count,
+        "pending_review_count": row.pending_review_count,
+        "approved_count": row.approved_count,
         "cert_expiry_30d_count": cert_expiry_30d_count,
     }
 

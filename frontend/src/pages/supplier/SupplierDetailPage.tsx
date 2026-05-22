@@ -180,10 +180,7 @@ export default function SupplierDetailPage() {
   }, []);
 
   useEffect(() => {
-    loadSupplier();
-    loadCerts();
-    loadEvals();
-    loadAuditPlans();
+    Promise.all([loadSupplier(), loadCerts(), loadEvals(), loadAuditPlans()]);
   }, [loadSupplier, loadCerts, loadEvals, loadAuditPlans]);
 
   // Initialize eval form defaults on mount
