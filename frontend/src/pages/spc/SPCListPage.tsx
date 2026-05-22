@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Table, Button, Tag, Typography, Modal, Form, Input, Select,
-  Popconfirm, message, Card, Row, Col, Statistic, Space, Alert,
+  Popconfirm, App, Card, Row, Col, Statistic, Space, Alert,
 } from "antd";
 import {
   PlusOutlined, FileTextOutlined, DeleteOutlined,
@@ -29,6 +29,7 @@ const chartTypeLabels: Record<string, string> = {
 };
 
 export default function SPCListPage() {
+  const { message } = App.useApp();
   const [data, setData] = useState<InspectionCharacteristic[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);

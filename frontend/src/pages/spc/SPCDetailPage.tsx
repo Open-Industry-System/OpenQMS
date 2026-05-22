@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Tabs, Card, Form, Input,
-  DatePicker, Table, Popconfirm, message, Spin, Row, Col,
+  DatePicker, Table, Popconfirm, App, Spin, Row, Col,
   Switch, Upload, Divider, Badge, Statistic, Empty,
 } from "antd";
 import {
@@ -82,6 +82,7 @@ function getGradeColor(grade: string): string {
 }
 
 export default function SPCDetailPage() {
+  const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 

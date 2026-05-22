@@ -9,7 +9,7 @@ import {
   Form,
   Input,
   Select,
-  message,
+  App,
   Tabs,
   Row,
   Col,
@@ -90,6 +90,7 @@ function getProgressPercent(target: string, actual: string | null): number {
 }
 
 export default function QualityGoalListPage() {
+  const { message } = App.useApp();
   const user = useAuthStore((s) => s.user);
   const isEngineerPlus = user?.role === "admin" || user?.role === "manager" || user?.role === "quality_engineer";
   const isManagerPlus = user?.role === "admin" || user?.role === "manager";

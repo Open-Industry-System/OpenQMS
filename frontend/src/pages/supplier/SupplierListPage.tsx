@@ -7,7 +7,7 @@ import {
   Space,
   Input,
   Select,
-  message,
+  App,
   Row,
   Col,
   Statistic,
@@ -49,6 +49,7 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 };
 
 export default function SupplierListPage() {
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isViewer = user?.role === "viewer";

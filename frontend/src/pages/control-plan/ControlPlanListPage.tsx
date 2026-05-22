@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Button, Tag, Typography, Modal, Form, Input, Popconfirm, message } from "antd";
+import { Table, Button, Tag, Typography, Modal, Form, Input, Popconfirm, App } from "antd";
 import { PlusOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icons";
 import { listControlPlans, createControlPlan, deleteControlPlan } from "../../api/controlPlan";
 import type { ControlPlan } from "../../types";
@@ -25,6 +25,7 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function ControlPlanListPage() {
+  const { message } = App.useApp();
   const [data, setData] = useState<ControlPlan[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
