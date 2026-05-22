@@ -2,3 +2,10 @@ from app.schemas import quality_goal
 from app.schemas import audit
 from app.schemas import spc
 from app.schemas import supplier
+from app.schemas import gauge
+from app.schemas import grr
+from app.schemas import bias
+from app.schemas import linearity
+from app.schemas import stability
+from app.schemas import attribute
+from app.schemas import msa
