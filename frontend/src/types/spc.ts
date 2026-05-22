@@ -7,7 +7,7 @@ export interface InspectionCharacteristic {
   spec_upper: number;
   spec_lower: number;
   target_value?: number;
-  chart_type: "xbar_r" | "imr" | "histogram";
+  chart_type: "xbar_r" | "imr" | "histogram" | "p" | "np" | "c" | "u";
   subgroup_size: number;
   control_limits_locked: boolean;
   rules_config: Record<string, boolean>;
@@ -30,7 +30,7 @@ export interface CreateICRequest {
   spec_upper: number;
   spec_lower: number;
   target_value?: number;
-  chart_type: "xbar_r" | "imr" | "histogram";
+  chart_type: "xbar_r" | "imr" | "histogram" | "p" | "np" | "c" | "u";
   subgroup_size?: number;
   rules_config?: Record<string, boolean>;
 }
@@ -42,6 +42,8 @@ export interface SampleBatch {
   sampled_at: string;
   subgroup_size: number;
   values: number[];
+  inspected_count?: number;
+  defect_count?: number;
 }
 
 export interface ChartDataPoint {
@@ -60,6 +62,24 @@ export interface ControlLimits {
   r_ucl?: number;
   r_lcl?: number;
   r_cl?: number;
+  ucl_list?: number[];
+  lcl_list?: number[];
+}
+
+export interface ControlLimitSnapshot {
+  snapshot_id: string;
+  ic_id: string;
+  ucl: number;
+  lcl: number;
+  cl: number;
+  r_ucl?: number;
+  r_lcl?: number;
+  r_cl?: number;
+  version_no: number;
+  is_active: boolean;
+  is_locked: boolean;
+  calculated_at: string;
+  created_at: string;
 }
 
 export interface ChartDataResponse {
@@ -67,6 +87,7 @@ export interface ChartDataResponse {
   data_points: ChartDataPoint[];
   limits: ControlLimits;
   total_batches: number;
+  active_snapshot?: ControlLimitSnapshot;
 }
 
 export interface CapabilityResponse {
