@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Tabs, Card, Form, Input,
   DatePicker, Table, Popconfirm, message, Spin, Row, Col,
-  Switch, Upload, Divider, Badge, Statistic,
+  Switch, Upload, Divider, Badge, Statistic, Empty,
 } from "antd";
 import {
   ArrowLeftOutlined, LockOutlined, UnlockOutlined,
@@ -115,13 +115,16 @@ export default function SPCDetailPage() {
     if (!id) return;
     setRefreshing(true);
     try {
-      const [icData, chart, cap, alarmRes] = await Promise.all([
-        getInspectionCharacteristic(id),
+      const icData = await getInspectionCharacteristic(id);
+      setIc(icData);
+
+      const isAttribute = ["p", "np", "c", "u"].includes(icData.chart_type);
+      const [chart, cap, alarmRes] = await Promise.all([
         getChartData(id),
-        getCapability(id),
+        isAttribute ? Promise.resolve(null) : getCapability(id).catch(() => null),
         listAlarms(id, { page: alarmPage, page_size: 20 }),
       ]);
-      setIc(icData);
+
       setChartData(chart);
       setCapability(cap);
       setAlarms(alarmRes.items);
@@ -680,8 +683,13 @@ export default function SPCDetailPage() {
                     <Text>{capability.advice}</Text>
                   </Card>
                 </div>
-              ) : (
+              ) : loading ? (
                 <Spin size="large" style={{ display: "block", margin: "64px auto" }} />
+              ) : (
+                <Empty
+                  description="数据不足，无法进行过程能力分析（需要至少2个批次/样本数据）"
+                  style={{ margin: "64px auto" }}
+                />
               ),
             }
           ] : []),
