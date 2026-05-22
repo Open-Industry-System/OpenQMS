@@ -295,4 +295,78 @@ export interface AuditStats {
   major_nc_count: number;
 }
 
+export interface Supplier {
+  supplier_id: string;
+  supplier_no: string;
+  name: string;
+  short_name: string;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  address: string | null;
+  product_scope: string | null;
+  status: "pending_review" | "audit_required" | "approved" | "rejected" | "suspended";
+  audit_plan_id: string | null;
+  reject_reason: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SupplierCertification {
+  cert_id: string;
+  supplier_id: string;
+  cert_type: string;
+  cert_no: string;
+  issued_by: string | null;
+  issue_date: string | null;
+  expiry_date: string | null;
+  file_url: string | null;
+  created_at: string;
+}
+
+export interface SupplierEvaluation {
+  eval_id: string;
+  supplier_id: string;
+  eval_period: string;
+  eval_type: "quarterly" | "annual";
+  quality_score: number;
+  delivery_score: number;
+  service_score: number;
+  capa_count: number;
+  finding_count: number;
+  capa_penalty: number;
+  finding_penalty: number;
+  total_score: number;
+  grade: "A" | "B" | "C" | "D";
+  notes: string | null;
+  evaluated_by: string;
+  created_at: string;
+}
+
+export interface SupplierListResponse {
+  items: Supplier[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface SupplierStats {
+  total_count: number;
+  pending_review_count: number;
+  approved_count: number;
+  cert_expiry_30d_count: number;
+}
+
+export interface SupplierExpiryAlert {
+  cert_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_short_name: string;
+  cert_type: string;
+  cert_no: string;
+  expiry_date: string;
+  days_remaining: number;
+}
+
 export * from "./spc";
