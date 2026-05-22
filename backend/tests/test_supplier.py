@@ -54,50 +54,49 @@ def test_calculate_evaluation_perfect_score():
     check("perfect: capa_penalty == 0", capa_pen == 0)
     check("perfect: finding_penalty == 0", finding_pen == 0)
     check("perfect: total == 80.0", total == 80.0)
-    check("perfect: grade == 'B'", grade == "B")
+    check("perfect: grade == 'A'", grade == "A")
 
 
 def test_calculate_evaluation_grade_a():
-    # Need total >= 90. With no penalties: base = q*0.35 + d*0.30 + s*0.15 = 90
-    # Set all to 100 and also push service higher — easiest: use weights directly.
-    # base = 100*0.35 + 100*0.30 + 100*0.15 = 80; can't reach 90 via 3 scores alone
-    # (missing 0.20 weight column). Use 100/100/100 and verify grade boundary logic
-    # by testing at exact boundary inputs via score overrides.
-    # Grade A boundary: total >= 90
-    # base with 100 quality, 100 delivery, 100 service = 80 < 90, so pure A isn't
-    # reachable without the 4th column. Test boundary at 90.0 via crafted inputs:
-    # quality=100, delivery=100, service=100 → base=80; but with 0 penalties total=80 → B
-    # To get A we need base >= 90: quality=100*0.35=35, delivery=100*0.30=30,
-    # service=100*0.15=15 → max base = 80. Grade A requires a score outside these
-    # three columns (impossible). Confirm grade A is unreachable with normal inputs
-    # and instead test the boundary case: at total=90 grade should be A.
-    # We verify the grade logic directly by using grade output on a contrived result.
-    # Note: _calculate_evaluation caps total at max(0, ...) so we can't feed total=90
-    # directly. Instead verify that grade B boundary is correct (total in [75, 90)).
+    # Grade A threshold is now >= 72 (90% of max 80).
+    # A perfect score (100/100/100, 0 CAPAs, 0 findings) gives total=80 → grade A.
     _, _, _, total, grade = _calculate_evaluation(100, 100, 100, 0, 0)
-    # total = 80, which is in [75, 90) range
-    check("grade B for total=80.0", grade == "B")
+    check("grade A for perfect total=80.0", grade == "A")
+
+    # Boundary at exactly 72: q=d=s=90 → base=90*0.80=72
+    _, _, _, total72, grade72 = _calculate_evaluation(90, 90, 90, 0, 0)
+    check("grade A boundary: total == 72.0", abs(total72 - 72.0) < 0.001)
+    check("grade A boundary: grade == 'A'", grade72 == "A")
 
 
 def test_calculate_evaluation_grade_b_boundary():
-    # total = 75 exactly → grade B
-    # base = q*0.35 + d*0.30 + s*0.15; solve for q=d=s=x: x*0.80 = 75 → x=93.75
-    base, capa_pen, finding_pen, total, grade = _calculate_evaluation(93.75, 93.75, 93.75, 0, 0)
-    check("grade B boundary: total == 75.0", abs(total - 75.0) < 0.001)
+    # Grade B threshold is now >= 60 (75% of max 80).
+    # Boundary at exactly 60: q=d=s=75 → base=75*0.80=60.0 → grade B
+    base, capa_pen, finding_pen, total, grade = _calculate_evaluation(75, 75, 75, 0, 0)
+    check("grade B boundary: total == 60.0", abs(total - 60.0) < 0.001)
     check("grade B boundary: grade == 'B'", grade == "B")
+
+    # Just below A threshold (total=71.9...) → grade B
+    # q=d=s=89.9 → base=89.9*0.80=71.92 → grade B
+    _, _, _, total_below_a, grade_below_a = _calculate_evaluation(89.9, 89.9, 89.9, 0, 0)
+    check("grade B just below A threshold", grade_below_a == "B")
 
 
 def test_calculate_evaluation_grade_c():
-    # total in [60, 75): use lower scores
-    # q=d=s=75 → base = 75*0.80 = 60.0
-    _, _, _, total, grade = _calculate_evaluation(75, 75, 75, 0, 0)
-    check("grade C boundary: total == 60.0", abs(total - 60.0) < 0.001)
+    # Grade C threshold is now >= 48 (60% of max 80).
+    # Boundary at exactly 48: q=d=s=60 → base=60*0.80=48.0 → grade C
+    _, _, _, total, grade = _calculate_evaluation(60, 60, 60, 0, 0)
+    check("grade C boundary: total == 48.0", abs(total - 48.0) < 0.001)
     check("grade C boundary: grade == 'C'", grade == "C")
+
+    # Just below B threshold (total=59.9...) → grade C
+    _, _, _, total_below_b, grade_below_b = _calculate_evaluation(74.9, 74.9, 74.9, 0, 0)
+    check("grade C just below B threshold", grade_below_b == "C")
 
 
 def test_calculate_evaluation_grade_d():
-    # total < 60: use low scores
-    # q=d=s=50 → base = 50*0.80 = 40.0
+    # Grade D is now < 48.
+    # q=d=s=50 → base = 50*0.80 = 40.0 → grade D
     _, _, _, total, grade = _calculate_evaluation(50, 50, 50, 0, 0)
     check("grade D: total == 40.0", abs(total - 40.0) < 0.001)
     check("grade D: grade == 'D'", grade == "D")
@@ -145,7 +144,7 @@ def test_calculate_evaluation_combined_penalties():
     check("combined capa_penalty == 6", capa_pen == 6)
     check("combined finding_penalty == 6", finding_pen == 6)
     check("combined total == 68.0", abs(total - 68.0) < 0.001)
-    check("combined grade == 'C'", grade == "C")
+    check("combined grade == 'B'", grade == "B")
 
 
 # ─── _transition_status ─────────────────────────────────────────────────────

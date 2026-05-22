@@ -34,11 +34,11 @@ def _calculate_evaluation(
     finding_penalty = min(finding_count * 3, 10)
     total_score = max(0.0, base - capa_penalty - finding_penalty)
 
-    if total_score >= 90:
+    if total_score >= 72:
         grade = "A"
-    elif total_score >= 75:
-        grade = "B"
     elif total_score >= 60:
+        grade = "B"
+    elif total_score >= 48:
         grade = "C"
     else:
         grade = "D"
