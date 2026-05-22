@@ -10,6 +10,10 @@ from app.services.spc_calculation_engine import (
     calculate_ppm,
     get_capability_grade,
     get_capability_advice,
+    calculate_p_limits,
+    calculate_np_limits,
+    calculate_c_limits,
+    calculate_u_limits,
 )
 
 
@@ -154,6 +158,94 @@ def test_western_electric_disabled_rules():
     alarms = evaluate_western_electric(stats, limits, config)
     assert len(alarms) == 0
     print("Pass: Disabled rules don't trigger")
+
+
+# ============ Attribute Chart Tests ============
+
+
+def test_calculate_p_limits_basic():
+    batches = [
+        {"inspected_count": 100, "defect_count": 5},
+        {"inspected_count": 100, "defect_count": 3},
+        {"inspected_count": 100, "defect_count": 7},
+        {"inspected_count": 100, "defect_count": 4},
+        {"inspected_count": 100, "defect_count": 6},
+    ]
+    result = calculate_p_limits(batches)
+    assert "cl" in result
+    assert "ucl_list" in result
+    assert "lcl_list" in result
+    assert len(result["ucl_list"]) == 5
+    assert len(result["lcl_list"]) == 5
+    assert abs(result["cl"] - 0.05) < 0.001
+    expected_ucl = 0.05 + 3 * (0.05 * 0.95 / 100) ** 0.5
+    assert abs(result["ucl_list"][0] - round(expected_ucl, 4)) < 0.001
+    assert all(v >= 0 for v in result["lcl_list"])
+
+
+def test_calculate_np_limits_basic():
+    batches = [
+        {"inspected_count": 50, "defect_count": 2},
+        {"inspected_count": 50, "defect_count": 3},
+        {"inspected_count": 50, "defect_count": 1},
+        {"inspected_count": 50, "defect_count": 4},
+        {"inspected_count": 50, "defect_count": 2},
+    ]
+    result = calculate_np_limits(batches)
+    assert "cl" in result
+    assert "ucl" in result
+    assert "lcl" in result
+    assert abs(result["cl"] - 2.4) < 0.001
+    assert result["lcl"] >= 0
+
+
+def test_calculate_np_limits_variable_n_raises():
+    batches = [
+        {"inspected_count": 50, "defect_count": 2},
+        {"inspected_count": 60, "defect_count": 3},
+    ]
+    try:
+        calculate_np_limits(batches)
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "固定" in str(e) or "fixed" in str(e).lower()
+
+
+def test_calculate_c_limits_basic():
+    batches = [
+        {"inspected_count": 1, "defect_count": 3},
+        {"inspected_count": 1, "defect_count": 5},
+        {"inspected_count": 1, "defect_count": 2},
+        {"inspected_count": 1, "defect_count": 4},
+        {"inspected_count": 1, "defect_count": 6},
+    ]
+    result = calculate_c_limits(batches)
+    assert abs(result["cl"] - 4.0) < 0.001
+    assert abs(result["ucl"] - 10.0) < 0.001
+    assert result["lcl"] >= 0
+
+
+def test_calculate_u_limits_basic():
+    batches = [
+        {"inspected_count": 10, "defect_count": 3},
+        {"inspected_count": 20, "defect_count": 8},
+        {"inspected_count": 15, "defect_count": 5},
+        {"inspected_count": 10, "defect_count": 2},
+        {"inspected_count": 20, "defect_count": 6},
+    ]
+    result = calculate_u_limits(batches)
+    assert "cl" in result
+    assert "ucl_list" in result
+    assert "lcl_list" in result
+    assert len(result["ucl_list"]) == 5
+    assert all(v >= 0 for v in result["lcl_list"])
+
+
+def test_lcl_truncated_to_zero():
+    batches = [{"inspected_count": 100, "defect_count": 0} for _ in range(5)]
+    batches[0]["defect_count"] = 1
+    result = calculate_p_limits(batches)
+    assert all(v >= 0 for v in result["lcl_list"])
 
 
 if __name__ == "__main__":

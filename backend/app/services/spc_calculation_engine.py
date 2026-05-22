@@ -319,3 +319,80 @@ def get_capability_advice(cpk: float) -> str:
         return "过程能力不足，需分析变异来源并采取改进措施。"
     else:
         return "过程能力严重不足，立即停止生产并启动整改。"
+
+
+def calculate_p_limits(batches: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """P chart: proportion nonconforming. Variable sample size supported."""
+    if not batches:
+        return {"cl": None, "ucl_list": [], "lcl_list": []}
+    total_defects = sum(b["defect_count"] for b in batches)
+    total_inspected = sum(b["inspected_count"] for b in batches)
+    if total_inspected == 0:
+        return {"cl": None, "ucl_list": [], "lcl_list": []}
+    p_bar = total_defects / total_inspected
+    ucl_list = []
+    lcl_list = []
+    for b in batches:
+        n = b["inspected_count"]
+        if n == 0:
+            ucl_list.append(None)
+            lcl_list.append(0.0)
+            continue
+        spread = 3 * math.sqrt(p_bar * (1 - p_bar) / n)
+        ucl_list.append(round(p_bar + spread, 4))
+        lcl_list.append(max(0.0, round(p_bar - spread, 4)))
+    return {"cl": round(p_bar, 4), "ucl_list": ucl_list, "lcl_list": lcl_list}
+
+
+def calculate_np_limits(batches: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """NP chart: number nonconforming. Fixed sample size required."""
+    if not batches:
+        return {"cl": None, "ucl": None, "lcl": None}
+    n_values = [b["inspected_count"] for b in batches]
+    if len(set(n_values)) > 1:
+        raise ValueError("NP图要求每批次样本量固定一致")
+    n = n_values[0]
+    np_bar = sum(b["defect_count"] for b in batches) / len(batches)
+    p_bar = np_bar / n if n > 0 else 0
+    spread = 3 * math.sqrt(np_bar * (1 - p_bar))
+    return {
+        "cl": round(np_bar, 4),
+        "ucl": round(np_bar + spread, 4),
+        "lcl": max(0.0, round(np_bar - spread, 4)),
+    }
+
+
+def calculate_c_limits(batches: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """C chart: count of defects per inspection unit. Fixed unit size assumed."""
+    if not batches:
+        return {"cl": None, "ucl": None, "lcl": None}
+    c_bar = sum(b["defect_count"] for b in batches) / len(batches)
+    spread = 3 * math.sqrt(c_bar)
+    return {
+        "cl": round(c_bar, 4),
+        "ucl": round(c_bar + spread, 4),
+        "lcl": max(0.0, round(c_bar - spread, 4)),
+    }
+
+
+def calculate_u_limits(batches: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """U chart: defects per unit. Variable sample size supported."""
+    if not batches:
+        return {"cl": None, "ucl_list": [], "lcl_list": []}
+    total_defects = sum(b["defect_count"] for b in batches)
+    total_inspected = sum(b["inspected_count"] for b in batches)
+    if total_inspected == 0:
+        return {"cl": None, "ucl_list": [], "lcl_list": []}
+    u_bar = total_defects / total_inspected
+    ucl_list = []
+    lcl_list = []
+    for b in batches:
+        n = b["inspected_count"]
+        if n == 0:
+            ucl_list.append(None)
+            lcl_list.append(0.0)
+            continue
+        spread = 3 * math.sqrt(u_bar / n)
+        ucl_list.append(round(u_bar + spread, 4))
+        lcl_list.append(max(0.0, round(u_bar - spread, 4)))
+    return {"cl": round(u_bar, 4), "ucl_list": ucl_list, "lcl_list": lcl_list}
