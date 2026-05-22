@@ -8,6 +8,7 @@ import type {
   CapabilityResponse,
   SPCAlarm,
   SPCAlarmListResponse,
+  ControlLimitSnapshot,
 } from "../types/spc";
 
 export async function listInspectionCharacteristics(params: {
@@ -50,9 +51,25 @@ export async function lockControlLimits(id: string, locked: boolean): Promise<In
 
 export async function addSampleBatch(
   id: string,
-  data: { batch_no: string; sampled_at: string; values: number[] }
+  data: {
+    batch_no: string;
+    sampled_at: string;
+    values?: number[];
+    inspected_count?: number;
+    defect_count?: number;
+  }
 ): Promise<SampleBatch> {
   const resp = await client.post(`/spc/inspection-characteristics/${id}/samples`, data);
+  return resp.data;
+}
+
+export async function getSnapshots(icId: string): Promise<ControlLimitSnapshot[]> {
+  const resp = await client.get(`/spc/inspection-characteristics/${icId}/snapshots`);
+  return resp.data;
+}
+
+export async function activateSnapshot(icId: string, snapshotId: string): Promise<ControlLimitSnapshot> {
+  const resp = await client.patch(`/spc/inspection-characteristics/${icId}/snapshots/${snapshotId}/activate`);
   return resp.data;
 }
 

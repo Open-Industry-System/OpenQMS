@@ -1,8 +1,9 @@
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import List, Tuple, Optional, Dict, Any
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,9 +15,10 @@ from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.services.spc_calculation_engine import (
     calculate_xbar_r_limits, calculate_imr_limits,
-    evaluate_western_electric, calculate_cp_cpk,
-    calculate_pp_ppk, calculate_cm, calculate_ppm,
+    calculate_histogram_data, evaluate_western_electric,
+    calculate_cp_cpk, calculate_pp_ppk, calculate_cm, calculate_ppm,
     get_capability_grade, get_capability_advice,
+    calculate_p_limits, calculate_np_limits, calculate_c_limits, calculate_u_limits,
 )
 
 
@@ -36,28 +38,75 @@ async def _create_audit_log(
 
 async def _get_active_control_limits(
     db: AsyncSession, ic: InspectionCharacteristic
-) -> Dict[str, Optional[float]]:
+) -> Dict[str, Any]:
     """Return current control limits: read snapshot if locked, else recalculate from samples."""
     if ic.control_limits_locked:
+        # First, try to get the active snapshot
         result = await db.execute(
             select(ControlLimitSnapshot)
             .where(and_(
                 ControlLimitSnapshot.ic_id == ic.ic_id,
                 ControlLimitSnapshot.is_locked == True,
+                ControlLimitSnapshot.is_active == True,
             ))
             .order_by(ControlLimitSnapshot.calculated_at.desc())
             .limit(1)
         )
         snapshot = result.scalar_one_or_none()
+
+        # Fall back to latest locked snapshot if no active snapshot is found
+        if not snapshot:
+            result = await db.execute(
+                select(ControlLimitSnapshot)
+                .where(and_(
+                    ControlLimitSnapshot.ic_id == ic.ic_id,
+                    ControlLimitSnapshot.is_locked == True,
+                ))
+                .order_by(ControlLimitSnapshot.calculated_at.desc())
+                .limit(1)
+            )
+            snapshot = result.scalar_one_or_none()
+
         if snapshot:
-            return {
-                "ucl": float(snapshot.ucl),
-                "lcl": float(snapshot.lcl),
-                "cl": float(snapshot.cl),
-                "r_ucl": float(snapshot.r_ucl) if snapshot.r_ucl is not None else None,
-                "r_lcl": float(snapshot.r_lcl) if snapshot.r_lcl is not None else None,
-                "r_cl": float(snapshot.r_cl) if snapshot.r_cl is not None else None,
-            }
+            if ic.chart_type in {"p", "u"}:
+                result_batches = await db.execute(
+                    select(SampleBatch)
+                    .where(SampleBatch.ic_id == ic.ic_id)
+                    .where(SampleBatch.is_locked == False)
+                    .order_by(SampleBatch.sampled_at)
+                )
+                attr_batches = result_batches.scalars().all()
+                cl_val = float(snapshot.cl)
+                ucl_list = []
+                lcl_list = []
+                for b in attr_batches:
+                    n = b.inspected_count
+                    if n is None or n == 0:
+                        ucl_list.append(None)
+                        lcl_list.append(0.0)
+                        continue
+                    if ic.chart_type == "p":
+                        spread = 3 * math.sqrt(cl_val * (1 - cl_val) / n)
+                    else:  # u chart
+                        spread = 3 * math.sqrt(cl_val / n)
+                    ucl_list.append(round(cl_val + spread, 4))
+                    lcl_list.append(max(0.0, round(cl_val - spread, 4)))
+                return {
+                    "cl": cl_val,
+                    "ucl_list": ucl_list,
+                    "lcl_list": lcl_list,
+                    "ucl": cl_val,  # Nominal value to bypass the old scalar check
+                    "lcl": cl_val,
+                }
+            else:
+                return {
+                    "ucl": float(snapshot.ucl),
+                    "lcl": float(snapshot.lcl),
+                    "cl": float(snapshot.cl),
+                    "r_ucl": float(snapshot.r_ucl) if snapshot.r_ucl is not None else None,
+                    "r_lcl": float(snapshot.r_lcl) if snapshot.r_lcl is not None else None,
+                    "r_cl": float(snapshot.r_cl) if snapshot.r_cl is not None else None,
+                }
 
     # Not locked (or no snapshot found) — recalculate from samples
     result = await db.execute(
@@ -80,6 +129,29 @@ async def _get_active_control_limits(
     if ic.chart_type == "xbar_r":
         values_2d = [b["values"] for b in batch_list]
         return calculate_xbar_r_limits(values_2d) if len(values_2d) >= 2 else {}
+    elif ic.chart_type in {"p", "np", "c", "u"}:
+        result = await db.execute(
+            select(SampleBatch)
+            .where(SampleBatch.ic_id == ic.ic_id)
+            .where(SampleBatch.is_locked == False)
+            .order_by(SampleBatch.sampled_at)
+        )
+        attr_batches = result.scalars().all()
+        if len(attr_batches) < 2:
+            return {}
+        batch_data = [
+            {"inspected_count": b.inspected_count, "defect_count": b.defect_count}
+            for b in attr_batches
+            if b.inspected_count is not None and b.defect_count is not None
+        ]
+        if ic.chart_type == "p":
+            return calculate_p_limits(batch_data)
+        elif ic.chart_type == "np":
+            return calculate_np_limits(batch_data)
+        elif ic.chart_type == "c":
+            return calculate_c_limits(batch_data)
+        else:
+            return calculate_u_limits(batch_data)
     else:
         values_1d = []
         for b in batch_list:
@@ -241,7 +313,21 @@ async def lock_unlock_control_limits(
     # If locking, snapshot current limits
     if locked:
         limits = await _get_active_control_limits(db, ic)
-        # All chart types now use unified r_* key names
+        # Compute next version_no for this ic
+        version_result = await db.execute(
+            select(func.max(ControlLimitSnapshot.version_no))
+            .where(ControlLimitSnapshot.ic_id == ic_id)
+        )
+        max_version = version_result.scalar() or 0
+        next_version = max_version + 1
+
+        # Deactivate all existing snapshots for this ic
+        await db.execute(
+            update(ControlLimitSnapshot)
+            .where(ControlLimitSnapshot.ic_id == ic_id)
+            .values(is_active=False)
+        )
+
         r_ucl = limits.get("r_ucl")
         r_lcl = limits.get("r_lcl")
         r_cl = limits.get("r_cl")
@@ -254,6 +340,8 @@ async def lock_unlock_control_limits(
             r_lcl=r_lcl,
             r_cl=r_cl,
             is_locked=True,
+            version_no=next_version,
+            is_active=True,
         )
         db.add(snapshot)
 
@@ -275,21 +363,38 @@ async def add_sample_batch(
     if not ic:
         raise ValueError("Inspection characteristic not found")
 
-    values = data["values"]
-    if not values:
-        raise ValueError("Values cannot be empty")
+    inspected_count = None
+    defect_count = None
 
-    if ic.chart_type == "xbar_r" and len(values) != ic.subgroup_size:
-        raise ValueError(f"Expected {ic.subgroup_size} values for xbar_r, got {len(values)}")
-
-    if ic.chart_type == "imr" and len(values) != 1:
-        raise ValueError(f"Expected 1 value for imr, got {len(values)}")
+    # Differentiate between attribute and variable charts
+    attribute_charts = {"p", "np", "c", "u"}
+    if ic.chart_type in attribute_charts:
+        inspected_count = data.get("inspected_count")
+        defect_count = data.get("defect_count")
+        if inspected_count is None or defect_count is None:
+            raise ValueError(f"计数值图（{ic.chart_type}）必须提供 inspected_count 和 defect_count")
+        if defect_count > inspected_count:
+            raise ValueError("defect_count 不能超过 inspected_count")
+        values = []  # attribute charts don't use measurement values
+    else:
+        values = data.get("values")
+        if not values:
+            raise ValueError("Values cannot be empty")
+        if ic.chart_type == "xbar_r" and len(values) != ic.subgroup_size:
+            raise ValueError(f"Expected {ic.subgroup_size} values for xbar_r, got {len(values)}")
+        if ic.chart_type == "imr" and len(values) != 1:
+            raise ValueError(f"Expected 1 value for imr, got {len(values)}")
+    sampled_at = data["sampled_at"]
+    if isinstance(sampled_at, str):
+        sampled_at = datetime.fromisoformat(sampled_at.replace("Z", "+00:00"))
 
     batch = SampleBatch(
         ic_id=ic_id,
         batch_no=data["batch_no"],
-        sampled_at=data["sampled_at"],
+        sampled_at=sampled_at,
         subgroup_size=len(values),
+        inspected_count=inspected_count,
+        defect_count=defect_count,
     )
     db.add(batch)
     await db.flush()
@@ -345,6 +450,31 @@ async def _compute_chart_data(db: AsyncSession, ic: InspectionCharacteristic) ->
                 "r_value": round(max(vals) - min(vals), 4) if vals else None,
                 "alarm_flags": [],
             })
+    elif ic.chart_type in {"p", "np", "c", "u"}:
+        attr_result = await db.execute(
+            select(SampleBatch)
+            .where(SampleBatch.ic_id == ic.ic_id)
+            .where(SampleBatch.is_locked == False)
+            .order_by(SampleBatch.sampled_at)
+        )
+        attr_batches = attr_result.scalars().all()
+        data_points = []
+        for i, b in enumerate(attr_batches):
+            if b.inspected_count is None or b.defect_count is None:
+                continue
+            if ic.chart_type in {"p", "u"}:
+                stat = b.defect_count / b.inspected_count if b.inspected_count > 0 else 0
+            else:
+                stat = float(b.defect_count)
+            data_points.append({
+                "batch_index": i,
+                "batch_no": b.batch_no,
+                "sampled_at": b.sampled_at,
+                "x_value": round(stat, 4),
+                "r_value": None,
+                "alarm_flags": [],
+            })
+        batch_list = []  # cleared so total uses data_points length below
     else:  # imr
         values_1d = []
         for b in batch_list:
@@ -366,11 +496,12 @@ async def _compute_chart_data(db: AsyncSession, ic: InspectionCharacteristic) ->
                 })
                 idx += 1
 
+    total = len(batch_list) if ic.chart_type not in {"p", "np", "c", "u"} else len(data_points)
     return {
         "chart_type": ic.chart_type,
         "data_points": data_points,
         "limits": limits,
-        "total_batches": len(batch_list),
+        "total_batches": total,
     }
 
 
@@ -380,12 +511,17 @@ async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> 
     data_points = chart_data["data_points"]
     limits = chart_data["limits"]
 
-    if not data_points or not limits.get("ucl"):
+    if not data_points or (limits.get("ucl") is None and limits.get("ucl_list") is None):
         return
 
     # Evaluate rules
     subgroup_stats = [dp["x_value"] for dp in data_points if dp["x_value"] is not None]
-    alarms = evaluate_western_electric(subgroup_stats, limits, ic.rules_config)
+    # Attribute charts: only Rule 1 (beyond control limits) applies
+    if ic.chart_type in {"p", "np", "c", "u"}:
+        effective_rules = {k: (v if k == "rule_1" else False) for k, v in ic.rules_config.items()}
+    else:
+        effective_rules = ic.rules_config
+    alarms = evaluate_western_electric(subgroup_stats, limits, effective_rules)
 
     # Create alarm records for new violations
     for alarm in alarms:
@@ -570,3 +706,47 @@ async def ingest_external_data(db: AsyncSession, data: dict) -> SampleBatch:
         "sampled_at": data["sampled_at"],
         "values": data["values"],
     })
+
+
+async def list_snapshots(db: AsyncSession, ic_id: uuid.UUID) -> list:
+    ic = await get_inspection_characteristic(db, ic_id)
+    if not ic:
+        raise ValueError("Inspection characteristic not found")
+    result = await db.execute(
+        select(ControlLimitSnapshot)
+        .where(ControlLimitSnapshot.ic_id == ic_id)
+        .order_by(ControlLimitSnapshot.version_no.desc())
+    )
+    return result.scalars().all()
+
+
+async def activate_snapshot(
+    db: AsyncSession, user_id: uuid.UUID, ic_id: uuid.UUID, snapshot_id: uuid.UUID
+) -> ControlLimitSnapshot:
+    ic = await get_inspection_characteristic(db, ic_id)
+    if not ic:
+        raise ValueError("Inspection characteristic not found")
+    snap_result = await db.execute(
+        select(ControlLimitSnapshot).where(
+            and_(
+                ControlLimitSnapshot.snapshot_id == snapshot_id,
+                ControlLimitSnapshot.ic_id == ic_id,
+            )
+        )
+    )
+    snapshot = snap_result.scalar_one_or_none()
+    if not snapshot:
+        raise ValueError("Snapshot not found for this characteristic")
+    await db.execute(
+        update(ControlLimitSnapshot)
+        .where(ControlLimitSnapshot.ic_id == ic_id)
+        .values(is_active=False)
+    )
+    snapshot.is_active = True
+    await db.commit()
+    await db.refresh(snapshot)
+    await _create_audit_log(
+        db, user_id, "TRANSITION", "control_limit_snapshots", snapshot_id,
+        {"action": "activate", "version_no": snapshot.version_no}
+    )
+    return snapshot

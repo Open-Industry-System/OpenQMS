@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -9,6 +9,7 @@ from app.core.deps import get_current_user, require_engineer_or_admin
 from app.models.user import User
 from app.models.spc import SampleValue
 from app import schemas
+from app.schemas.spc import ControlLimitSnapshotOut
 from app.services import spc_service
 from sqlalchemy import select as sa_select
 
@@ -200,6 +201,39 @@ async def create_capa_from_alarm(
         return {"capa_id": capa.report_id, "document_number": capa.document_no}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ============ Control Limit Snapshots ============
+
+@router.get(
+    "/inspection-characteristics/{ic_id}/snapshots",
+    response_model=List[ControlLimitSnapshotOut],
+)
+async def get_snapshots(
+    ic_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        return await spc_service.list_snapshots(db, ic_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.patch(
+    "/inspection-characteristics/{ic_id}/snapshots/{snapshot_id}/activate",
+    response_model=ControlLimitSnapshotOut,
+)
+async def activate_snapshot(
+    ic_id: UUID,
+    snapshot_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        return await spc_service.activate_snapshot(db, current_user.user_id, ic_id, snapshot_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ============ External Ingestion ============

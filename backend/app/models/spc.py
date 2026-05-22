@@ -48,6 +48,8 @@ class SampleBatch(Base):
     sampled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     subgroup_size: Mapped[int] = mapped_column(Integer, nullable=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    inspected_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    defect_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     characteristic: Mapped["InspectionCharacteristic"] = relationship("InspectionCharacteristic", back_populates="batches")
@@ -97,6 +99,8 @@ class ControlLimitSnapshot(Base):
     r_cl: Mapped[Optional[float]] = mapped_column(Numeric(12, 4), nullable=True)
     calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     characteristic: Mapped["InspectionCharacteristic"] = relationship("InspectionCharacteristic", back_populates="snapshots")

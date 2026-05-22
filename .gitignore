@@ -14,3 +14,4 @@ docs/superpowers/
 *.tsbuildinfo
 .playwright-mcp/
 .worktrees/
+node_modules
