@@ -16,6 +16,8 @@ import InternalAuditListPage from "./pages/internalAudit/InternalAuditListPage";
 import InternalAuditDetailPage from "./pages/internalAudit/InternalAuditDetailPage";
 import SPCListPage from "./pages/spc/SPCListPage";
 import SPCDetailPage from "./pages/spc/SPCDetailPage";
+import SupplierListPage from "./pages/supplier/SupplierListPage";
+import SupplierDetailPage from "./pages/supplier/SupplierDetailPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -63,6 +65,8 @@ export default function App() {
         <Route path="/internal-audits/:id" element={<InternalAuditDetailPage />} />
         <Route path="/spc" element={<SPCListPage />} />
         <Route path="/spc/:id" element={<SPCDetailPage />} />
+        <Route path="/suppliers" element={<SupplierListPage />} />
+        <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
       </Route>
     </Routes>
   );
