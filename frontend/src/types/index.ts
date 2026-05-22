@@ -370,3 +370,4 @@ export interface SupplierExpiryAlert {
 }
 
 export * from "./spc";
+export * from "./msa";
