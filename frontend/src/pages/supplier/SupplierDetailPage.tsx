@@ -188,9 +188,8 @@ export default function SupplierDetailPage() {
 
   // Initialize eval form defaults on mount
   useEffect(() => {
-    initEvalForm();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    evalForm.setFieldsValue({ quality_score: 80, delivery_score: 80, service_score: 80 });
+  }, [evalForm]);
 
   // Populate info form when supplier loads or editing starts
   useEffect(() => {
@@ -218,7 +217,8 @@ export default function SupplierDetailPage() {
       setEditing(false);
       message.success("保存成功");
     } catch (err: unknown) {
-      if (err && typeof err === "object" && "errorFields" in err) return;
+      if (err && typeof err === "object" && "errorFields" in err) return; // Ant Design form validation error
+      console.error(err);
       message.error("保存失败");
     } finally {
       setSaving(false);
@@ -265,9 +265,10 @@ export default function SupplierDetailPage() {
         message.success("证书已添加");
       }
       setCertModalOpen(false);
-      loadCerts();
+      await loadCerts();
     } catch (err: unknown) {
-      if (err && typeof err === "object" && "errorFields" in err) return;
+      if (err && typeof err === "object" && "errorFields" in err) return; // Ant Design form validation error
+      console.error(err);
       message.error("保存证书失败");
     } finally {
       setCertSaving(false);
@@ -279,21 +280,13 @@ export default function SupplierDetailPage() {
     try {
       await deleteCertification(id, certId);
       message.success("证书已删除");
-      loadCerts();
+      await loadCerts();
     } catch {
       message.error("删除证书失败");
     }
   };
 
   // --- Eval form (inline) ---
-  const initEvalForm = () => {
-    evalForm.setFieldsValue({
-      quality_score: 80,
-      delivery_score: 80,
-      service_score: 80,
-    });
-    setEvalPreview(calcBaseScore(80, 80, 80));
-  };
 
   const handleEvalValuesChange = () => {
     const vals = evalForm.getFieldsValue();
@@ -308,16 +301,18 @@ export default function SupplierDetailPage() {
     try {
       const values = await evalForm.validateFields();
       setEvalSaving(true);
-      const { ...payload } = values;
+      const payload = { ...values };
       delete payload.capa_count;
       delete payload.finding_count;
       await createEvaluation(id, payload);
       message.success("评价已提交");
       evalForm.resetFields();
-      initEvalForm();
-      loadEvals();
+      evalForm.setFieldsValue({ quality_score: 80, delivery_score: 80, service_score: 80 });
+      setEvalPreview(calcBaseScore(80, 80, 80));
+      await loadEvals();
     } catch (err: unknown) {
-      if (err && typeof err === "object" && "errorFields" in err) return;
+      if (err && typeof err === "object" && "errorFields" in err) return; // Ant Design form validation error
+      console.error(err);
       message.error("提交评价失败");
     } finally {
       setEvalSaving(false);
