@@ -18,7 +18,7 @@ async def get_stats(db=Depends(get_db), _user=Depends(get_current_user)):
 
 
 # Expiry alerts MUST be before "/{supplier_id}" to avoid routing conflict
-@router.get("/expiry-alerts")
+@router.get("/expiry-alerts", response_model=list[schemas.supplier.SupplierExpiryAlertResponse])
 async def get_expiry_alerts(
     days: int = Query(90, ge=1, le=365),
     db=Depends(get_db),
