@@ -31,6 +31,7 @@ import { useAuthStore } from "../../store/authStore";
 import type { Supplier, SupplierCertification, SupplierEvaluation, AuditPlan } from "../../types";
 import {
   getSupplier,
+  createSupplier,
   updateSupplier,
   listCertifications,
   createCertification,
@@ -105,8 +106,9 @@ export default function SupplierDetailPage() {
     user?.role === "manager" || user?.role === "admin";
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
+  const isNew = id === "new";
+  const [loading, setLoading] = useState(!isNew);
+  const [editing, setEditing] = useState(isNew);
   const [saving, setSaving] = useState(false);
   const [infoForm] = Form.useForm();
 
@@ -200,26 +202,36 @@ export default function SupplierDetailPage() {
   }, [supplier, editing, infoForm]);
 
   const handleSaveInfo = async () => {
-    if (!id) return;
+    if (!id && !isNew) return;
     try {
       const values = await infoForm.validateFields();
       setSaving(true);
-      const updated = await updateSupplier(id, values);
-      setSupplier(updated);
-      setEditing(false);
-      message.success("保存成功");
+      if (isNew) {
+        const created = await createSupplier(values);
+        message.success("供应商创建成功");
+        navigate(`/suppliers/${created.supplier_id}`, { replace: true });
+      } else {
+        const updated = await updateSupplier(id!, values);
+        setSupplier(updated);
+        setEditing(false);
+        message.success("保存成功");
+      }
     } catch (err: unknown) {
-      if (err && typeof err === "object" && "errorFields" in err) return; // Ant Design form validation error
+      if (err && typeof err === "object" && "errorFields" in err) return;
       console.error(err);
-      message.error("保存失败");
+      message.error(isNew ? "创建失败" : "保存失败");
     } finally {
       setSaving(false);
     }
   };
 
   const handleCancelEdit = () => {
-    setEditing(false);
-    infoForm.resetFields();
+    if (isNew) {
+      navigate("/suppliers");
+    } else {
+      setEditing(false);
+      infoForm.resetFields();
+    }
   };
 
   // --- Cert modal ---
@@ -393,11 +405,13 @@ export default function SupplierDetailPage() {
     );
   }
 
-  if (!supplier) {
+  if (!supplier && !isNew) {
     return <div style={{ padding: 24 }}>供应商不存在</div>;
   }
 
-  const statusInfo = STATUS_MAP[supplier.status] ?? { label: supplier.status, color: "default" };
+  const statusInfo = supplier
+    ? (STATUS_MAP[supplier.status] ?? { label: supplier.status, color: "default" })
+    : { label: "新建", color: "processing" };
 
   // Cert table columns
   const certColumns = [
@@ -483,7 +497,7 @@ export default function SupplierDetailPage() {
             )
           }
         >
-          {supplier.reject_reason && (
+          {supplier?.reject_reason && (
             <div
               style={{
                 background: "#fff2f0",
@@ -535,7 +549,7 @@ export default function SupplierDetailPage() {
               <Form.Item label="产品范围" name="product_scope">
                 <TextArea rows={3} />
               </Form.Item>
-              {supplier.status === "audit_required" && (
+              {supplier?.status === "audit_required" && (
                 <Form.Item label="审核计划" name="audit_plan_id">
                   <Select allowClear placeholder="选择审核计划">
                     {auditPlans.map((p) => (
@@ -547,7 +561,7 @@ export default function SupplierDetailPage() {
                 </Form.Item>
               )}
             </Form>
-          ) : (
+          ) : supplier && (
             <Row gutter={[16, 8]}>
               <Col span={12}>
                 <Text type="secondary">供应商编号</Text>
@@ -581,7 +595,7 @@ export default function SupplierDetailPage() {
                 <Text type="secondary">产品范围</Text>
                 <div style={{ whiteSpace: "pre-wrap" }}>{supplier.product_scope ?? "-"}</div>
               </Col>
-              {supplier.status === "audit_required" && (
+              {supplier?.status === "audit_required" && (
                 <Col span={24}>
                   <Text type="secondary">审核计划</Text>
                   <div>
@@ -812,9 +826,9 @@ export default function SupplierDetailPage() {
         >
           返回
         </Button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>{supplier.name}</h2>
-        <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
-        {isManagerOrAdmin && (
+        <h2 style={{ margin: 0, fontSize: 20 }}>{isNew ? "新建供应商" : supplier!.name}</h2>
+        {!isNew && <Tag color={statusInfo.color}>{statusInfo.label}</Tag>}
+        {!isNew && supplier && isManagerOrAdmin && (
           <Space style={{ marginLeft: "auto" }}>
             {supplier.status === "pending_review" && (
               <>
@@ -881,24 +895,26 @@ export default function SupplierDetailPage() {
       </div>
 
       {/* Approval progress bar */}
-      <Card style={{ marginBottom: 16 }}>
-        <Steps
-          current={statusToStep(supplier.status)}
-          status={
-            supplier.status === "rejected" || supplier.status === "suspended"
-              ? "error"
-              : "process"
-          }
-          items={[
-            { title: "待审核" },
-            { title: "产品审核" },
-            { title: supplier.status === "rejected" ? "已拒绝" : "已批准" },
-          ]}
-        />
-      </Card>
+      {!isNew && (
+        <Card style={{ marginBottom: 16 }}>
+          <Steps
+            current={statusToStep(supplier!.status)}
+            status={
+              supplier!.status === "rejected" || supplier!.status === "suspended"
+                ? "error"
+                : "process"
+            }
+            items={[
+              { title: "待审核" },
+              { title: "产品审核" },
+              { title: supplier!.status === "rejected" ? "已拒绝" : "已批准" },
+            ]}
+          />
+        </Card>
+      )}
 
       {/* Tabs */}
-      <Tabs items={tabItems} />
+      <Tabs items={isNew ? tabItems.filter(t => t.key === "info") : tabItems} />
 
       {/* Certification Modal */}
       <Modal
