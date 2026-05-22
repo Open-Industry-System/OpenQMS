@@ -83,7 +83,9 @@ async def create_gauge(
 ) -> Gauge:
     if not gauge_no:
         gauge_no = await _generate_gauge_no(db)
+    gauge_id = uuid.uuid4()
     gauge = Gauge(
+        gauge_id=gauge_id,
         gauge_no=gauge_no,
         name=name,
         model=model,
@@ -100,7 +102,7 @@ async def create_gauge(
     db.add(
         AuditLog(
             table_name="gauges",
-            record_id=gauge.gauge_id,
+            record_id=gauge_id,
             action="CREATE",
             changed_fields={
                 "gauge_no": gauge_no,
@@ -195,7 +197,9 @@ async def create_calibration(
     next_calibration_date: date | None,
     user_id: uuid.UUID,
 ) -> GaugeCalibration:
+    calibration_id = uuid.uuid4()
     cal = GaugeCalibration(
+        calibration_id=calibration_id,
         gauge_id=gauge_id,
         calibration_date=calibration_date,
         result=result,
@@ -208,7 +212,7 @@ async def create_calibration(
     db.add(
         AuditLog(
             table_name="gauge_calibrations",
-            record_id=cal.calibration_id,
+            record_id=calibration_id,
             action="CREATE",
             changed_fields={
                 "gauge_id": str(gauge_id),

@@ -55,7 +55,9 @@ async def create_study(
     **kwargs,
 ) -> GrrStudy:
     study_no = await _generate_study_no(db)
+    study_id = uuid.uuid4()
     study = GrrStudy(
+        study_id=study_id,
         study_no=study_no,
         title=title,
         method=method,
@@ -68,7 +70,7 @@ async def create_study(
     db.add(
         AuditLog(
             table_name="grr_studies",
-            record_id=study.study_id,
+            record_id=study_id,
             action="CREATE",
             changed_fields={
                 "study_no": study_no,

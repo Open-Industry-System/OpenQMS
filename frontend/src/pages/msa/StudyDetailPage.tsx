@@ -136,7 +136,7 @@ export default function StudyDetailPage() {
 
   const loadGauges = useCallback(async () => {
     try {
-      const resp = await listGauges({ page_size: 200 });
+      const resp = await listGauges({ page_size: 100 });
       setGauges(resp.items);
     } catch {
       // ignore

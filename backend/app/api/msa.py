@@ -1044,7 +1044,7 @@ async def list_spc_characteristics(
             ic_code=c.ic_code,
             process_name=c.process_name,
             characteristic_name=c.characteristic_name,
-            unit=c.unit,
+            unit=None,
             spec_upper=float(c.spec_upper) if c.spec_upper is not None else None,
             spec_lower=float(c.spec_lower) if c.spec_lower is not None else None,
         )
