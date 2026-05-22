@@ -30,7 +30,7 @@ async def get_expiry_alerts(
 @router.get("", response_model=schemas.supplier.SupplierListResponse)
 async def list_suppliers(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     status: str | None = Query(None),
     grade: str | None = Query(None),
     search: str | None = Query(None),

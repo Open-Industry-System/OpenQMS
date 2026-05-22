@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/control-plans", tags=["control-plans"])
 @router.get("", response_model=ControlPlanListResponse)
 async def list_control_plans(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):

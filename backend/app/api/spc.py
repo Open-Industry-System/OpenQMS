@@ -33,7 +33,7 @@ async def create_ic(
 @router.get("/inspection-characteristics", response_model=schemas.spc.InspectionCharacteristicListResponse)
 async def list_ics(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     product_line: Optional[str] = None,
     process_name: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
@@ -163,7 +163,7 @@ async def get_capability(
 async def list_ic_alarms(
     ic_id: UUID,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):

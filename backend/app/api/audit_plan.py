@@ -19,7 +19,7 @@ CHECKLIST_TEMPLATES: list[dict] = json.loads(_TEMPLATES_PATH.read_text(encoding=
 @router.get("", response_model=schemas.audit.AuditPlanListResponse)
 async def list_audit_plans(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     program_id: uuid.UUID | None = Query(None),
     status: str | None = Query(None),
     date_from: date | None = Query(None),
@@ -170,7 +170,7 @@ async def cancel_audit_plan(
 async def get_plan_findings(
     audit_id: uuid.UUID,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):

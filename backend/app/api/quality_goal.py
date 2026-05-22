@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/quality-goals", tags=["quality-goals"])
 @router.get("", response_model=schemas.quality_goal.QualityGoalListResponse)
 async def list_quality_goals(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     level: int | None = Query(None),
     product_line: str | None = Query(None),
     status: str | None = Query(None),

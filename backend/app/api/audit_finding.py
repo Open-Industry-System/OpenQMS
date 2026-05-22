@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/audit-findings", tags=["audit-findings"])
 @router.get("", response_model=schemas.audit.AuditFindingListResponse)
 async def list_audit_findings(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     audit_id: uuid.UUID | None = Query(None),
     finding_type: str | None = Query(None),
     status: str | None = Query(None),

@@ -22,7 +22,7 @@ async def get_audit_stats(
 @router.get("/list", response_model=schemas.audit.AuditProgramListResponse)
 async def list_audit_programs(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     year: int | None = Query(None),
     audit_type: str | None = Query(None),
     status: str | None = Query(None),
