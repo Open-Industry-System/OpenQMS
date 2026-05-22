@@ -10,6 +10,7 @@ import {
   DeleteOutlined, PlusOutlined, CheckCircleOutlined,
   ExclamationCircleOutlined, UploadOutlined,
 } from "@ant-design/icons";
+import VersionPanel from "./VersionPanel";
 import dayjs from "dayjs";
 import * as echarts from "echarts";
 import {
@@ -529,6 +530,9 @@ export default function SPCDetailPage() {
           </Title>
           <Tag color="blue">{ic.ic_code}</Tag>
           <Tag>{chartTypeLabels[ic.chart_type] || ic.chart_type}</Tag>
+          {chartData?.active_snapshot && (
+            <Tag color="blue" style={{ marginLeft: 8 }}>控制限 v{chartData.active_snapshot.version_no}</Tag>
+          )}
         </Space>
         <Space>
           <Tag color={ic.control_limits_locked ? "green" : "orange"}>
@@ -581,6 +585,11 @@ export default function SPCDetailPage() {
                 >
                   {ic.control_limits_locked ? "解锁控制限" : "锁定控制限"}
                 </Button>
+                {id && (
+                  <div style={{ marginTop: 8 }}>
+                    <VersionPanel icId={id} onActivated={fetchAll} />
+                  </div>
+                )}
               </Card>
 
               <Card title="判异规则" size="small" style={{ marginTop: 16 }}>
