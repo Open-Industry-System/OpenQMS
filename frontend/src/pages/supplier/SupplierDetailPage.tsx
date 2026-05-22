@@ -17,7 +17,6 @@ import {
   Col,
   Steps,
   Slider,
-  InputNumber,
   Spin,
   Typography,
 } from "antd";
@@ -39,6 +38,11 @@ import {
   deleteCertification,
   listEvaluations,
   createEvaluation,
+  approveSupplier,
+  rejectSupplier,
+  confirmApproved,
+  suspendSupplier,
+  reinstateSupplier,
 } from "../../api/supplier";
 import { listAuditPlans } from "../../api/audit";
 import dayjs from "dayjs";
@@ -73,28 +77,18 @@ function statusToStep(status: string): number {
     case "rejected":
       return 2;
     case "suspended":
-      return 3;
+      return 2;
     default:
       return 0;
   }
 }
 
-function calcScore(
+function calcBaseScore(
   q: number,
   d: number,
   s: number,
-  capa: number,
-  finding: number
-): { total: number; grade: "A" | "B" | "C" | "D" } {
-  const base = q * 0.35 + d * 0.3 + s * 0.15;
-  const penalty = Math.min(capa * 2, 10) + Math.min(finding * 3, 10);
-  const total = Math.max(0, base - penalty);
-  let grade: "A" | "B" | "C" | "D";
-  if (total >= 90) grade = "A";
-  else if (total >= 75) grade = "B";
-  else if (total >= 60) grade = "C";
-  else grade = "D";
-  return { total: Math.round(total * 10) / 10, grade };
+): number {
+  return Math.round((q * 0.35 + d * 0.3 + s * 0.15) * 10) / 10;
 }
 
 export default function SupplierDetailPage() {
@@ -107,6 +101,8 @@ export default function SupplierDetailPage() {
     user?.role === "quality_engineer" ||
     user?.role === "manager" ||
     user?.role === "admin";
+  const isManagerOrAdmin =
+    user?.role === "manager" || user?.role === "admin";
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [loading, setLoading] = useState(true);
@@ -123,12 +119,17 @@ export default function SupplierDetailPage() {
 
   const [evals, setEvals] = useState<SupplierEvaluation[]>([]);
   const [evalsLoading, setEvalsLoading] = useState(false);
-  const [evalModalOpen, setEvalModalOpen] = useState(false);
   const [evalForm] = Form.useForm();
   const [evalSaving, setEvalSaving] = useState(false);
-  const [evalPreview, setEvalPreview] = useState<{ total: number; grade: "A" | "B" | "C" | "D" } | null>(null);
+  const [evalPreview, setEvalPreview] = useState<number | null>(null);
 
   const [auditPlans, setAuditPlans] = useState<AuditPlan[]>([]);
+
+  const [rejectModalVisible, setRejectModalVisible] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [suspendModalVisible, setSuspendModalVisible] = useState(false);
+  const [suspendReason, setSuspendReason] = useState("");
+  const [transitioning, setTransitioning] = useState(false);
 
   const loadSupplier = useCallback(async () => {
     if (!id) return;
@@ -184,6 +185,12 @@ export default function SupplierDetailPage() {
     loadEvals();
     loadAuditPlans();
   }, [loadSupplier, loadCerts, loadEvals, loadAuditPlans]);
+
+  // Initialize eval form defaults on mount
+  useEffect(() => {
+    initEvalForm();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Populate info form when supplier loads or editing starts
   useEffect(() => {
@@ -278,18 +285,14 @@ export default function SupplierDetailPage() {
     }
   };
 
-  // --- Eval modal ---
-  const openEvalModal = () => {
-    evalForm.resetFields();
+  // --- Eval form (inline) ---
+  const initEvalForm = () => {
     evalForm.setFieldsValue({
       quality_score: 80,
       delivery_score: 80,
       service_score: 80,
-      capa_count: 0,
-      finding_count: 0,
     });
-    setEvalPreview(calcScore(80, 80, 80, 0, 0));
-    setEvalModalOpen(true);
+    setEvalPreview(calcBaseScore(80, 80, 80));
   };
 
   const handleEvalValuesChange = () => {
@@ -297,9 +300,7 @@ export default function SupplierDetailPage() {
     const q = vals.quality_score ?? 0;
     const d = vals.delivery_score ?? 0;
     const s = vals.service_score ?? 0;
-    const capa = vals.capa_count ?? 0;
-    const finding = vals.finding_count ?? 0;
-    setEvalPreview(calcScore(q, d, s, capa, finding));
+    setEvalPreview(calcBaseScore(q, d, s));
   };
 
   const handleEvalSave = async () => {
@@ -307,15 +308,93 @@ export default function SupplierDetailPage() {
     try {
       const values = await evalForm.validateFields();
       setEvalSaving(true);
-      await createEvaluation(id, values);
+      const { ...payload } = values;
+      delete payload.capa_count;
+      delete payload.finding_count;
+      await createEvaluation(id, payload);
       message.success("评价已提交");
-      setEvalModalOpen(false);
+      evalForm.resetFields();
+      initEvalForm();
       loadEvals();
     } catch (err: unknown) {
       if (err && typeof err === "object" && "errorFields" in err) return;
       message.error("提交评价失败");
     } finally {
       setEvalSaving(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!id) return;
+    setTransitioning(true);
+    try {
+      await approveSupplier(id);
+      message.success("已批准准入");
+      loadSupplier();
+    } catch {
+      message.error("操作失败");
+    } finally {
+      setTransitioning(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!id) return;
+    setTransitioning(true);
+    try {
+      await rejectSupplier(id, rejectReason);
+      message.success("已拒绝");
+      setRejectModalVisible(false);
+      setRejectReason("");
+      loadSupplier();
+    } catch {
+      message.error("操作失败");
+    } finally {
+      setTransitioning(false);
+    }
+  };
+
+  const handleConfirmApproved = async () => {
+    if (!id) return;
+    setTransitioning(true);
+    try {
+      await confirmApproved(id);
+      message.success("已确认批准");
+      loadSupplier();
+    } catch {
+      message.error("操作失败");
+    } finally {
+      setTransitioning(false);
+    }
+  };
+
+  const handleSuspend = async () => {
+    if (!id) return;
+    setTransitioning(true);
+    try {
+      await suspendSupplier(id, suspendReason);
+      message.success("已暂停合作");
+      setSuspendModalVisible(false);
+      setSuspendReason("");
+      loadSupplier();
+    } catch {
+      message.error("操作失败");
+    } finally {
+      setTransitioning(false);
+    }
+  };
+
+  const handleReinstate = async () => {
+    if (!id) return;
+    setTransitioning(true);
+    try {
+      await reinstateSupplier(id);
+      message.success("已恢复合作");
+      loadSupplier();
+    } catch {
+      message.error("操作失败");
+    } finally {
+      setTransitioning(false);
     }
   };
 
@@ -561,6 +640,14 @@ export default function SupplierDetailPage() {
             columns={certColumns}
             pagination={false}
             size="middle"
+            onRow={(record) => {
+              const daysLeft = record.expiry_date
+                ? dayjs(record.expiry_date).diff(dayjs(), "day")
+                : null;
+              return {
+                style: daysLeft !== null && daysLeft <= 30 ? { background: "#fff1f0" } : {},
+              };
+            }}
           />
         </Card>
       ),
@@ -569,80 +656,161 @@ export default function SupplierDetailPage() {
       key: "evals",
       label: "绩效评价",
       children: (
-        <Card
-          extra={
-            isEngineerOrAbove && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={openEvalModal}>
-                新建评价
-              </Button>
-            )
-          }
-        >
-          {evalsLoading ? (
-            <div style={{ textAlign: "center", padding: 40 }}>
-              <Spin />
-            </div>
-          ) : evals.length === 0 ? (
-            <div style={{ textAlign: "center", color: "#999", padding: 40 }}>暂无评价记录</div>
-          ) : (
-            <Row gutter={[16, 16]}>
-              {evals.map((ev) => (
-                <Col key={ev.eval_id} span={24}>
-                  <Card
-                    size="small"
-                    title={
-                      <Space>
-                        <span>{ev.eval_period}</span>
-                        <Tag color={GRADE_COLORS[ev.grade]}>{ev.grade} 级</Tag>
-                        <span style={{ fontWeight: 400, color: "#666" }}>
-                          综合得分：{ev.total_score}
-                        </span>
-                        <Tag>{ev.eval_type === "quarterly" ? "季度评价" : "年度评价"}</Tag>
-                      </Space>
-                    }
-                  >
-                    <Row gutter={16}>
-                      <Col span={6}>
-                        <Text type="secondary">质量得分</Text>
-                        <div>{ev.quality_score}</div>
-                      </Col>
-                      <Col span={6}>
-                        <Text type="secondary">交付得分</Text>
-                        <div>{ev.delivery_score}</div>
-                      </Col>
-                      <Col span={6}>
-                        <Text type="secondary">服务得分</Text>
-                        <div>{ev.service_score}</div>
-                      </Col>
-                      <Col span={6}>
-                        <Text type="secondary">评价时间</Text>
-                        <div>{dayjs(ev.created_at).format("YYYY-MM-DD")}</div>
-                      </Col>
-                      {(ev.capa_count > 0 || ev.finding_count > 0) && (
-                        <>
-                          <Col span={6}>
-                            <Text type="secondary">CAPA数量</Text>
-                            <div>{ev.capa_count}</div>
-                          </Col>
-                          <Col span={6}>
-                            <Text type="secondary">发现问题数</Text>
-                            <div>{ev.finding_count}</div>
-                          </Col>
-                        </>
-                      )}
-                      {ev.notes && (
-                        <Col span={24}>
-                          <Text type="secondary">备注</Text>
-                          <div>{ev.notes}</div>
+        <Row gutter={24}>
+          {/* Left: history list */}
+          <Col span={12}>
+            <Card title="历史评价记录" size="small">
+              {evalsLoading ? (
+                <div style={{ textAlign: "center", padding: 40 }}>
+                  <Spin />
+                </div>
+              ) : evals.length === 0 ? (
+                <div style={{ textAlign: "center", color: "#999", padding: 40 }}>暂无评价记录</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {evals.map((ev) => (
+                    <Card
+                      key={ev.eval_id}
+                      size="small"
+                      title={
+                        <Space>
+                          <span>{ev.eval_period}</span>
+                          <Tag color={GRADE_COLORS[ev.grade]}>{ev.grade} 级</Tag>
+                          <span style={{ fontWeight: 400, color: "#666" }}>
+                            综合得分：{ev.total_score}
+                          </span>
+                          <Tag>{ev.eval_type === "quarterly" ? "季度评价" : "年度评价"}</Tag>
+                        </Space>
+                      }
+                    >
+                      <Row gutter={16}>
+                        <Col span={8}>
+                          <Text type="secondary">质量得分</Text>
+                          <div>{ev.quality_score}</div>
                         </Col>
-                      )}
-                    </Row>
-                  </Card>
-                </Col>
-              ))}
-            </Row>
+                        <Col span={8}>
+                          <Text type="secondary">交付得分</Text>
+                          <div>{ev.delivery_score}</div>
+                        </Col>
+                        <Col span={8}>
+                          <Text type="secondary">服务得分</Text>
+                          <div>{ev.service_score}</div>
+                        </Col>
+                        <Col span={8}>
+                          <Text type="secondary">评价时间</Text>
+                          <div>{dayjs(ev.created_at).format("YYYY-MM-DD")}</div>
+                        </Col>
+                        {(ev.capa_count > 0 || ev.finding_count > 0) && (
+                          <>
+                            <Col span={8}>
+                              <Text type="secondary">CAPA数量</Text>
+                              <div>{ev.capa_count}</div>
+                            </Col>
+                            <Col span={8}>
+                              <Text type="secondary">发现问题数</Text>
+                              <div>{ev.finding_count}</div>
+                            </Col>
+                          </>
+                        )}
+                        {ev.notes && (
+                          <Col span={24}>
+                            <Text type="secondary">备注</Text>
+                            <div>{ev.notes}</div>
+                          </Col>
+                        )}
+                      </Row>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </Col>
+
+          {/* Right: inline create form */}
+          {isEngineerOrAbove && (
+            <Col span={12}>
+              <Card title="新建评价" size="small">
+                <Form
+                  form={evalForm}
+                  layout="vertical"
+                  onValuesChange={handleEvalValuesChange}
+                  initialValues={{
+                    quality_score: 80,
+                    delivery_score: 80,
+                    service_score: 80,
+                  }}
+                >
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item
+                        label="评价周期"
+                        name="eval_period"
+                        rules={[{ required: true, message: "请输入评价周期" }]}
+                      >
+                        <Input placeholder="如: 2026-Q1" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        label="评价类型"
+                        name="eval_type"
+                        rules={[{ required: true, message: "请选择评价类型" }]}
+                      >
+                        <Select>
+                          <Option value="quarterly">季度评价</Option>
+                          <Option value="annual">年度评价</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Form.Item label={`质量得分 (${evalForm.getFieldValue("quality_score") ?? 80})`} name="quality_score">
+                    <Slider min={0} max={100} />
+                  </Form.Item>
+                  <Form.Item label={`交付得分 (${evalForm.getFieldValue("delivery_score") ?? 80})`} name="delivery_score">
+                    <Slider min={0} max={100} />
+                  </Form.Item>
+                  <Form.Item label={`服务得分 (${evalForm.getFieldValue("service_score") ?? 80})`} name="service_score">
+                    <Slider min={0} max={100} />
+                  </Form.Item>
+
+                  <div style={{ marginBottom: 16, color: "#888", fontSize: 13 }}>
+                    CAPA 数与发现问题数：提交后由系统自动统计
+                  </div>
+
+                  <Form.Item label="备注" name="notes">
+                    <TextArea rows={2} />
+                  </Form.Item>
+
+                  {evalPreview !== null && (
+                    <div
+                      style={{
+                        background: "#f6ffed",
+                        border: "1px solid #b7eb8f",
+                        borderRadius: 6,
+                        padding: "10px 16px",
+                        marginBottom: 12,
+                      }}
+                    >
+                      预计得分（不含系统扣分）：<strong>{evalPreview}</strong>
+                    </div>
+                  )}
+
+                  <Form.Item>
+                    <Button
+                      type="primary"
+                      loading={evalSaving}
+                      onClick={handleEvalSave}
+                      block
+                    >
+                      提交评价
+                    </Button>
+                  </Form.Item>
+                </Form>
+              </Card>
+            </Col>
           )}
-        </Card>
+        </Row>
       ),
     },
   ];
@@ -659,6 +827,70 @@ export default function SupplierDetailPage() {
         </Button>
         <h2 style={{ margin: 0, fontSize: 20 }}>{supplier.name}</h2>
         <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
+        {isManagerOrAdmin && (
+          <Space style={{ marginLeft: "auto" }}>
+            {supplier.status === "pending_review" && (
+              <>
+                <Button
+                  type="primary"
+                  loading={transitioning}
+                  onClick={handleApprove}
+                >
+                  批准准入
+                </Button>
+                <Button
+                  danger
+                  loading={transitioning}
+                  onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}
+                >
+                  拒绝
+                </Button>
+              </>
+            )}
+            {supplier.status === "audit_required" && (
+              <>
+                <Popconfirm
+                  title="确认批准该供应商？"
+                  onConfirm={handleConfirmApproved}
+                  okText="确认"
+                  cancelText="取消"
+                >
+                  <Button type="primary" loading={transitioning}>
+                    确认批准
+                  </Button>
+                </Popconfirm>
+                <Button
+                  danger
+                  loading={transitioning}
+                  onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}
+                >
+                  拒绝
+                </Button>
+              </>
+            )}
+            {supplier.status === "approved" && (
+              <Button
+                danger
+                loading={transitioning}
+                onClick={() => { setSuspendReason(""); setSuspendModalVisible(true); }}
+              >
+                暂停合作
+              </Button>
+            )}
+            {supplier.status === "suspended" && (
+              <Popconfirm
+                title="确认恢复与该供应商的合作？"
+                onConfirm={handleReinstate}
+                okText="确认"
+                cancelText="取消"
+              >
+                <Button type="primary" loading={transitioning}>
+                  恢复合作
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        )}
       </div>
 
       {/* Approval progress bar */}
@@ -725,103 +957,42 @@ export default function SupplierDetailPage() {
         </Form>
       </Modal>
 
-      {/* Evaluation Modal */}
+      {/* Reject Modal */}
       <Modal
-        title="新建绩效评价"
-        open={evalModalOpen}
-        onCancel={() => setEvalModalOpen(false)}
-        onOk={handleEvalSave}
-        confirmLoading={evalSaving}
-        okText="提交"
+        title="拒绝原因"
+        open={rejectModalVisible}
+        onCancel={() => setRejectModalVisible(false)}
+        onOk={handleReject}
+        confirmLoading={transitioning}
+        okText="确认拒绝"
         cancelText="取消"
-        destroyOnClose
-        width={600}
+        okButtonProps={{ danger: true }}
       >
-        <Form
-          form={evalForm}
-          layout="vertical"
-          onValuesChange={handleEvalValuesChange}
-          initialValues={{
-            quality_score: 80,
-            delivery_score: 80,
-            service_score: 80,
-            capa_count: 0,
-            finding_count: 0,
-          }}
-        >
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                label="评价周期"
-                name="eval_period"
-                rules={[{ required: true, message: "请输入评价周期" }]}
-              >
-                <Input placeholder="如: 2026-Q1" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                label="评价类型"
-                name="eval_type"
-                rules={[{ required: true, message: "请选择评价类型" }]}
-              >
-                <Select>
-                  <Option value="quarterly">季度评价</Option>
-                  <Option value="annual">年度评价</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
+        <TextArea
+          rows={4}
+          placeholder="请输入拒绝原因"
+          value={rejectReason}
+          onChange={(e) => setRejectReason(e.target.value)}
+        />
+      </Modal>
 
-          <Form.Item label={`质量得分 (${evalForm.getFieldValue("quality_score") ?? 80})`} name="quality_score">
-            <Slider min={0} max={100} />
-          </Form.Item>
-          <Form.Item label={`交付得分 (${evalForm.getFieldValue("delivery_score") ?? 80})`} name="delivery_score">
-            <Slider min={0} max={100} />
-          </Form.Item>
-          <Form.Item label={`服务得分 (${evalForm.getFieldValue("service_score") ?? 80})`} name="service_score">
-            <Slider min={0} max={100} />
-          </Form.Item>
-
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item label="CAPA 数量" name="capa_count">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label="发现问题数" name="finding_count">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Form.Item label="备注" name="notes">
-            <TextArea rows={2} />
-          </Form.Item>
-
-          {evalPreview && (
-            <div
-              style={{
-                background: "#f6ffed",
-                border: "1px solid #b7eb8f",
-                borderRadius: 6,
-                padding: "10px 16px",
-                display: "flex",
-                alignItems: "center",
-                gap: 16,
-              }}
-            >
-              <span>综合得分：<strong>{evalPreview.total}</strong></span>
-              <span>
-                等级：
-                <Tag color={GRADE_COLORS[evalPreview.grade]} style={{ marginLeft: 4 }}>
-                  {evalPreview.grade} 级
-                </Tag>
-              </span>
-            </div>
-          )}
-        </Form>
+      {/* Suspend Modal */}
+      <Modal
+        title="暂停合作原因"
+        open={suspendModalVisible}
+        onCancel={() => setSuspendModalVisible(false)}
+        onOk={handleSuspend}
+        confirmLoading={transitioning}
+        okText="确认暂停"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+      >
+        <TextArea
+          rows={4}
+          placeholder="请输入暂停原因"
+          value={suspendReason}
+          onChange={(e) => setSuspendReason(e.target.value)}
+        />
       </Modal>
     </div>
   );
