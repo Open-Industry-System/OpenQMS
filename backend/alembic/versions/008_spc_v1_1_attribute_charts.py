@@ -1,14 +1,14 @@
 """spc v1.1: attribute charts and control limit versioning
 
 Revision ID: 008_spc_v1_1
-Revises: 007_add_supplier_management
+Revises: 007_add_spc_tables
 Create Date: 2026-05-22
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = '008_spc_v1_1'
-down_revision = '007_add_supplier_management'
+down_revision = '007_add_spc_tables'
 branch_labels = None
 depends_on = None
 

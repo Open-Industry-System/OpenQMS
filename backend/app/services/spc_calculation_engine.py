@@ -112,18 +112,20 @@ SEVERITY_MAP = {
 }
 
 
-def evaluate_western_electric(subgroup_stats: List[float], limits: Dict[str, float],
+def evaluate_western_electric(subgroup_stats: List[float], limits: Dict[str, Any],
                                rules_config: Dict[str, bool]) -> List[Dict[str, Any]]:
     """Evaluate Western Electric rules against subgroup statistics."""
     alarms = []
     ucl = limits.get("ucl")
     lcl = limits.get("lcl")
     cl = limits.get("cl")
+    ucl_list = limits.get("ucl_list")
+    lcl_list = limits.get("lcl_list")
 
-    if ucl is None or lcl is None or cl is None or not subgroup_stats:
+    if cl is None or not subgroup_stats or (ucl is None and not ucl_list):
         return alarms
 
-    sigma = (ucl - lcl) / 6
+    sigma = (ucl - lcl) / 6 if ucl is not None and lcl is not None else 0.0
     zone_1u = cl + sigma
     zone_1l = cl - sigma
     zone_2u = cl + 2 * sigma
@@ -139,7 +141,11 @@ def evaluate_western_electric(subgroup_stats: List[float], limits: Dict[str, flo
 
     # Rule 1: Any point beyond 3 sigma
     for i, val in enumerate(subgroup_stats):
-        if val > ucl or val < lcl:
+        curr_ucl = ucl_list[i] if ucl_list and i < len(ucl_list) else ucl
+        curr_lcl = lcl_list[i] if lcl_list and i < len(lcl_list) else lcl
+        if curr_ucl is not None and val > curr_ucl:
+            add_alarm(i, 1)
+        elif curr_lcl is not None and val < curr_lcl:
             add_alarm(i, 1)
 
     # Rule 2: 9 points same side of center line

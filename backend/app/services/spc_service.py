@@ -1,3 +1,4 @@
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import List, Tuple, Optional, Dict, Any
@@ -37,28 +38,75 @@ async def _create_audit_log(
 
 async def _get_active_control_limits(
     db: AsyncSession, ic: InspectionCharacteristic
-) -> Dict[str, Optional[float]]:
+) -> Dict[str, Any]:
     """Return current control limits: read snapshot if locked, else recalculate from samples."""
     if ic.control_limits_locked:
+        # First, try to get the active snapshot
         result = await db.execute(
             select(ControlLimitSnapshot)
             .where(and_(
                 ControlLimitSnapshot.ic_id == ic.ic_id,
                 ControlLimitSnapshot.is_locked == True,
+                ControlLimitSnapshot.is_active == True,
             ))
             .order_by(ControlLimitSnapshot.calculated_at.desc())
             .limit(1)
         )
         snapshot = result.scalar_one_or_none()
+
+        # Fall back to latest locked snapshot if no active snapshot is found
+        if not snapshot:
+            result = await db.execute(
+                select(ControlLimitSnapshot)
+                .where(and_(
+                    ControlLimitSnapshot.ic_id == ic.ic_id,
+                    ControlLimitSnapshot.is_locked == True,
+                ))
+                .order_by(ControlLimitSnapshot.calculated_at.desc())
+                .limit(1)
+            )
+            snapshot = result.scalar_one_or_none()
+
         if snapshot:
-            return {
-                "ucl": float(snapshot.ucl),
-                "lcl": float(snapshot.lcl),
-                "cl": float(snapshot.cl),
-                "r_ucl": float(snapshot.r_ucl) if snapshot.r_ucl is not None else None,
-                "r_lcl": float(snapshot.r_lcl) if snapshot.r_lcl is not None else None,
-                "r_cl": float(snapshot.r_cl) if snapshot.r_cl is not None else None,
-            }
+            if ic.chart_type in {"p", "u"}:
+                result_batches = await db.execute(
+                    select(SampleBatch)
+                    .where(SampleBatch.ic_id == ic.ic_id)
+                    .where(SampleBatch.is_locked == False)
+                    .order_by(SampleBatch.sampled_at)
+                )
+                attr_batches = result_batches.scalars().all()
+                cl_val = float(snapshot.cl)
+                ucl_list = []
+                lcl_list = []
+                for b in attr_batches:
+                    n = b.inspected_count
+                    if n is None or n == 0:
+                        ucl_list.append(None)
+                        lcl_list.append(0.0)
+                        continue
+                    if ic.chart_type == "p":
+                        spread = 3 * math.sqrt(cl_val * (1 - cl_val) / n)
+                    else:  # u chart
+                        spread = 3 * math.sqrt(cl_val / n)
+                    ucl_list.append(round(cl_val + spread, 4))
+                    lcl_list.append(max(0.0, round(cl_val - spread, 4)))
+                return {
+                    "cl": cl_val,
+                    "ucl_list": ucl_list,
+                    "lcl_list": lcl_list,
+                    "ucl": cl_val,  # Nominal value to bypass the old scalar check
+                    "lcl": cl_val,
+                }
+            else:
+                return {
+                    "ucl": float(snapshot.ucl),
+                    "lcl": float(snapshot.lcl),
+                    "cl": float(snapshot.cl),
+                    "r_ucl": float(snapshot.r_ucl) if snapshot.r_ucl is not None else None,
+                    "r_lcl": float(snapshot.r_lcl) if snapshot.r_lcl is not None else None,
+                    "r_cl": float(snapshot.r_cl) if snapshot.r_cl is not None else None,
+                }
 
     # Not locked (or no snapshot found) — recalculate from samples
     result = await db.execute(
@@ -315,17 +363,10 @@ async def add_sample_batch(
     if not ic:
         raise ValueError("Inspection characteristic not found")
 
-    values = data["values"]
-    if not values:
-        raise ValueError("Values cannot be empty")
+    inspected_count = None
+    defect_count = None
 
-    if ic.chart_type == "xbar_r" and len(values) != ic.subgroup_size:
-        raise ValueError(f"Expected {ic.subgroup_size} values for xbar_r, got {len(values)}")
-
-    if ic.chart_type == "imr" and len(values) != 1:
-        raise ValueError(f"Expected 1 value for imr, got {len(values)}")
-
-    # Attribute chart validation
+    # Differentiate between attribute and variable charts
     attribute_charts = {"p", "np", "c", "u"}
     if ic.chart_type in attribute_charts:
         inspected_count = data.get("inspected_count")
@@ -336,13 +377,21 @@ async def add_sample_batch(
             raise ValueError("defect_count 不能超过 inspected_count")
         values = []  # attribute charts don't use measurement values
     else:
-        inspected_count = None
-        defect_count = None
+        values = data.get("values")
+        if not values:
+            raise ValueError("Values cannot be empty")
+        if ic.chart_type == "xbar_r" and len(values) != ic.subgroup_size:
+            raise ValueError(f"Expected {ic.subgroup_size} values for xbar_r, got {len(values)}")
+        if ic.chart_type == "imr" and len(values) != 1:
+            raise ValueError(f"Expected 1 value for imr, got {len(values)}")
+    sampled_at = data["sampled_at"]
+    if isinstance(sampled_at, str):
+        sampled_at = datetime.fromisoformat(sampled_at.replace("Z", "+00:00"))
 
     batch = SampleBatch(
         ic_id=ic_id,
         batch_no=data["batch_no"],
-        sampled_at=data["sampled_at"],
+        sampled_at=sampled_at,
         subgroup_size=len(values),
         inspected_count=inspected_count,
         defect_count=defect_count,
@@ -462,7 +511,7 @@ async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> 
     data_points = chart_data["data_points"]
     limits = chart_data["limits"]
 
-    if not data_points or not limits.get("ucl"):
+    if not data_points or (limits.get("ucl") is None and limits.get("ucl_list") is None):
         return
 
     # Evaluate rules

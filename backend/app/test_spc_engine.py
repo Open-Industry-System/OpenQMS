@@ -248,6 +248,20 @@ def test_lcl_truncated_to_zero():
     assert all(v >= 0 for v in result["lcl_list"])
 
 
+def test_variable_limits_alarm():
+    stats = [0.05, 0.12, 0.04, 0.03]
+    limits = {
+        "cl": 0.05,
+        "ucl_list": [0.10, 0.10, 0.15, 0.15],
+        "lcl_list": [0.0, 0.0, 0.0, 0.0]
+    }
+    config = {f"rule_{i}": (i == 1) for i in range(1, 9)}
+    alarms = evaluate_western_electric(stats, limits, config)
+    assert len(alarms) == 1
+    assert alarms[0]["batch_index"] == 1
+    print("Pass: Rule 1 alarm detected with variable control limits")
+
+
 if __name__ == "__main__":
     try:
         test_xbar_r_limits()
@@ -270,6 +284,7 @@ if __name__ == "__main__":
         test_calculate_c_limits_basic()
         test_calculate_u_limits_basic()
         test_lcl_truncated_to_zero()
+        test_variable_limits_alarm()
         print("\nAll SPC engine tests passed!")
         sys.exit(0)
     except Exception as e:
