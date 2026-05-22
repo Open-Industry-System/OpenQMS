@@ -264,6 +264,12 @@ if __name__ == "__main__":
         test_cm()
         test_capability_grades()
         test_western_electric_disabled_rules()
+        test_calculate_p_limits_basic()
+        test_calculate_np_limits_basic()
+        test_calculate_np_limits_variable_n_raises()
+        test_calculate_c_limits_basic()
+        test_calculate_u_limits_basic()
+        test_lcl_truncated_to_zero()
         print("\nAll SPC engine tests passed!")
         sys.exit(0)
     except Exception as e:
