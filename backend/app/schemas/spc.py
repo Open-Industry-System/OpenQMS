@@ -13,7 +13,7 @@ class InspectionCharacteristicCreate(BaseModel):
     spec_upper: float
     spec_lower: float
     target_value: Optional[float] = None
-    chart_type: str = Field(..., pattern="^(xbar_r|imr|histogram)$")
+    chart_type: str = Field(..., pattern="^(xbar_r|imr|histogram|p|np|c|u)$")
     subgroup_size: int = Field(default=5, ge=1, le=10)
     rules_config: Optional[Dict[str, bool]] = None
 
@@ -74,7 +74,9 @@ class SampleValueCreate(BaseModel):
 class SampleBatchCreate(BaseModel):
     batch_no: str = Field(..., min_length=1, max_length=50)
     sampled_at: datetime
-    values: List[float]
+    values: List[float] = Field(default_factory=list)
+    inspected_count: Optional[int] = Field(default=None, ge=1)
+    defect_count: Optional[int] = Field(default=None, ge=0)
 
 
 class SampleBatchOut(BaseModel):
@@ -84,6 +86,8 @@ class SampleBatchOut(BaseModel):
     sampled_at: datetime
     subgroup_size: int
     values: List[float]
+    inspected_count: Optional[int] = None
+    defect_count: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -100,12 +104,35 @@ class ChartDataPoint(BaseModel):
 
 
 class ControlLimits(BaseModel):
-    ucl: Optional[float]
-    lcl: Optional[float]
-    cl: Optional[float]
-    r_ucl: Optional[float]
-    r_lcl: Optional[float]
-    r_cl: Optional[float]
+    ucl: Optional[float] = None
+    lcl: Optional[float] = None
+    cl: Optional[float] = None
+    r_ucl: Optional[float] = None
+    r_lcl: Optional[float] = None
+    r_cl: Optional[float] = None
+    ucl_list: Optional[List[float]] = None
+    lcl_list: Optional[List[float]] = None
+
+
+class ControlLimitSnapshotOut(BaseModel):
+    snapshot_id: UUID
+    ic_id: UUID
+    ucl: float
+    lcl: float
+    cl: float
+    r_ucl: Optional[float] = None
+    r_lcl: Optional[float] = None
+    r_cl: Optional[float] = None
+    version_no: int
+    is_active: bool
+    is_locked: bool
+    calculated_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ============ Control Limit Snapshots ============
 
 
 class ChartDataResponse(BaseModel):
@@ -113,6 +140,7 @@ class ChartDataResponse(BaseModel):
     data_points: List[ChartDataPoint]
     limits: ControlLimits
     total_batches: int
+    active_snapshot: Optional[ControlLimitSnapshotOut] = None
 
 
 # ============ Capability ============
