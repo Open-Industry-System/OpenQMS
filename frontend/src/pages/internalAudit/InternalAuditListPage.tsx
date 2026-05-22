@@ -10,7 +10,7 @@ import {
   Input,
   Select,
   DatePicker,
-  message,
+  App,
   Tabs,
   Row,
   Col,
@@ -65,6 +65,7 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 };
 
 export default function InternalAuditListPage() {
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";

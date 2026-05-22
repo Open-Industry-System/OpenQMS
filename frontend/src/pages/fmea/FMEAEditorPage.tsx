@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Table, Card, Tabs,
-  Row, Col, message, Spin, Popconfirm, Empty, Tooltip,
+  Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
   Descriptions, Divider,
 } from "antd";
 import {
@@ -62,6 +62,7 @@ function getFunctionNodes(nodes: GraphNode[], fmeaType: string): GraphNode[] {
 }
 
 export default function FMEAEditorPage() {
+  const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [fmea, setFmea] = useState<FMEADocument | null>(null);

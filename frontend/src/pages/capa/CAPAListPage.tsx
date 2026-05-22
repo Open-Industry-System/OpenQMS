@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Button, Tag, Typography, Modal, Form, Input, Select, DatePicker, message } from "antd";
+import { Table, Button, Tag, Typography, Modal, Form, Input, Select, DatePicker, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { listCAPAs, createCAPA } from "../../api/capa";
 import type { CAPAReport } from "../../types";
@@ -20,6 +20,7 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function CAPAListPage() {
+  const { message } = App.useApp();
   const [data, setData] = useState<CAPAReport[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);

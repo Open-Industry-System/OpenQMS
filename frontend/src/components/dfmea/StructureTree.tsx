@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Tree, Button, Space, Input, Modal, Form, message } from "antd";
+import { Tree, Button, Space, Input, Modal, Form, App } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { GraphNode, GraphEdge } from "../../types";
 
@@ -27,6 +27,7 @@ export default function StructureTree({
   isViewer,
   onSelectNode,
 }: StructureTreeProps) {
+  const { message } = App.useApp();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingNode, setEditingNode] = useState<GraphNode | null>(null);
   const [parentId, setParentId] = useState<string | null>(null);
@@ -203,7 +204,7 @@ export default function StructureTree({
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => setModalOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={handleSave}>
           <Form.Item name="type" label="类型" rules={[{ required: true }]}>

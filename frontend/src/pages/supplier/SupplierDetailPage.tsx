@@ -8,7 +8,7 @@ import {
   Input,
   Select,
   DatePicker,
-  message,
+  App,
   Tabs,
   Table,
   Modal,
@@ -93,6 +93,7 @@ function calcBaseScore(
 }
 
 export default function SupplierDetailPage() {
+  const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuthStore();
@@ -512,6 +513,11 @@ export default function SupplierDetailPage() {
               {supplier.reject_reason}
             </div>
           )}
+          {!editing && (
+            <div style={{ display: "none" }}>
+              <Form form={infoForm} />
+            </div>
+          )}
           {editing ? (
             <Form form={infoForm} layout="vertical">
               <Row gutter={16}>
@@ -917,6 +923,11 @@ export default function SupplierDetailPage() {
       <Tabs items={isNew ? tabItems.filter(t => t.key === "info") : tabItems} />
 
       {/* Certification Modal */}
+      {!certModalOpen && (
+        <div style={{ display: "none" }}>
+          <Form form={certForm} />
+        </div>
+      )}
       <Modal
         title={certEditing ? "编辑证书" : "添加证书"}
         open={certModalOpen}
@@ -925,7 +936,7 @@ export default function SupplierDetailPage() {
         confirmLoading={certSaving}
         okText="保存"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={certForm} layout="vertical">
           <Form.Item

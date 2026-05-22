@@ -8,7 +8,7 @@ import {
   Input,
   Select,
   DatePicker,
-  message,
+  App,
   Tabs,
   Table,
   Modal,
@@ -78,6 +78,7 @@ const RESULT_OPTIONS = [
 ];
 
 export default function InternalAuditDetailPage() {
+  const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);

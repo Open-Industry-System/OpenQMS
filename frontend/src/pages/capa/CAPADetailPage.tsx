@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Steps, Card, Form, Input,
-  Select, message, Spin, Empty, Row, Col, Table, Divider,
+  Select, App, Spin, Empty, Row, Col, Table, Divider,
 } from "antd";
 import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
@@ -27,6 +27,7 @@ const stepIndex: Record<string, number> = {
 };
 
 export default function CAPADetailPage() {
+  const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [capa, setCapa] = useState<CAPAReport | null>(null);

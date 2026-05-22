@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Modal, Select, Table, Button, message } from "antd"
+import { Modal, Select, Table, Button, App } from "antd"
 import type { TableRowSelection } from "antd/es/table/interface"
 import { listFMEAs } from "../../api/fmea"
 import { importFromFMEA } from "../../api/controlPlan"
@@ -19,6 +19,7 @@ interface StepRow {
 }
 
 export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: Props) {
+  const { message } = App.useApp();
   const [fmeas, setFmeas] = useState<FMEADocument[]>([])
   const [selectedFmeaId, setSelectedFmeaId] = useState<string | null>(null)
   const [steps, setSteps] = useState<StepRow[]>([])

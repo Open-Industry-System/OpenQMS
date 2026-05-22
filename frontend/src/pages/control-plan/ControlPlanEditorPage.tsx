@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Table, Card, Row, Col,
-  message, Spin, Select, Alert,
+  App, Spin, Select, Alert,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, PlusOutlined, DeleteOutlined,
@@ -63,6 +63,7 @@ function createBlankItem(sortOrder: number): ControlPlanItem {
 }
 
 export default function ControlPlanEditorPage() {
+  const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isNew = id === "new";
