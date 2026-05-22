@@ -18,6 +18,7 @@ from app.api.audit_program import router as audit_program_router
 from app.api.audit_plan import router as audit_plan_router
 from app.api.audit_finding import router as audit_finding_router
 from app.api.auditor import router as auditor_router
+from app.api.supplier import router as supplier_router
 
 
 @asynccontextmanager
@@ -56,6 +57,7 @@ app.include_router(audit_program_router)
 app.include_router(audit_plan_router)
 app.include_router(audit_finding_router)
 app.include_router(auditor_router)
+app.include_router(supplier_router)
 
 
 @app.get("/api/health")
