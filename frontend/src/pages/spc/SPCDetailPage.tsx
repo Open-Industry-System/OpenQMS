@@ -64,6 +64,16 @@ const statusLabels: Record<string, string> = {
   closed: "已关闭",
 };
 
+const chartTypeLabels: Record<string, string> = {
+  xbar_r: "X-bar R",
+  imr: "I-MR",
+  histogram: "直方图",
+  p: "P图",
+  np: "NP图",
+  c: "C图",
+  u: "U图",
+};
+
 function getGradeColor(grade: string): string {
   if (grade.startsWith("A")) return "green";
   if (grade.startsWith("B")) return "blue";
@@ -89,6 +99,8 @@ export default function SPCDetailPage() {
   const [batchNo, setBatchNo] = useState("");
   const [sampledAt, setSampledAt] = useState<dayjs.Dayjs | null>(dayjs());
   const [sampleValues, setSampleValues] = useState<string[]>([""]);
+  const [inspectedCount, setInspectedCount] = useState<string>("");
+  const [defectCount, setDefectCount] = useState<string>("");
 
   // Chart refs
   const mainChartRef = useRef<HTMLDivElement>(null);
@@ -153,6 +165,8 @@ export default function SPCDetailPage() {
       },
     }));
 
+    const isVariableLimit = ["p", "u"].includes(chartData.chart_type);
+
     const mainOption: echarts.EChartsOption = {
       title: {
         text: chartData.chart_type === "xbar_r" ? "X-bar 图" : "I 图 (单值图)",
@@ -169,27 +183,51 @@ export default function SPCDetailPage() {
       yAxis: { type: "value", scale: true },
       series: [
         {
+          name: "统计值",
           type: "line",
           data: mainSeries,
           symbol: "circle",
           symbolSize: 8,
           lineStyle: { color: "#1890ff" },
-          markLine: {
-            silent: true,
-            data: [
-              ...(chartData.limits.ucl !== undefined
-                ? [{ yAxis: chartData.limits.ucl, name: "UCL", lineStyle: { color: "#ff4d4f" } }]
-                : []),
-              ...(chartData.limits.lcl !== undefined
-                ? [{ yAxis: chartData.limits.lcl, name: "LCL", lineStyle: { color: "#ff4d4f" } }]
-                : []),
-              ...(chartData.limits.cl !== undefined
-                ? [{ yAxis: chartData.limits.cl, name: "CL", lineStyle: { color: "#52c41a", type: "dashed" as const } }]
-                : []),
-            ],
-            label: { formatter: "{b}: {c}" },
-          },
+          ...(isVariableLimit ? {} : {
+            markLine: {
+              silent: true,
+              data: [
+                ...(chartData.limits.ucl !== undefined
+                  ? [{ yAxis: chartData.limits.ucl, name: "UCL", lineStyle: { color: "#ff4d4f" } }]
+                  : []),
+                ...(chartData.limits.lcl !== undefined
+                  ? [{ yAxis: chartData.limits.lcl, name: "LCL", lineStyle: { color: "#ff4d4f" } }]
+                  : []),
+                ...(chartData.limits.cl !== undefined
+                  ? [{ yAxis: chartData.limits.cl, name: "CL", lineStyle: { color: "#52c41a", type: "dashed" as const } }]
+                  : []),
+              ],
+              label: { formatter: "{b}: {c}" },
+            },
+          }),
         },
+        ...(isVariableLimit && chartData.limits.ucl_list ? [{
+          name: "UCL",
+          type: "line" as const,
+          data: chartData.limits.ucl_list,
+          lineStyle: { color: "#ff4d4f", type: "dashed" as const },
+          symbol: "none",
+        }] : []),
+        ...(isVariableLimit && chartData.limits.lcl_list ? [{
+          name: "LCL",
+          type: "line" as const,
+          data: chartData.limits.lcl_list,
+          lineStyle: { color: "#ff4d4f", type: "dashed" as const },
+          symbol: "none",
+        }] : []),
+        ...(isVariableLimit && chartData.limits.cl !== undefined ? [{
+          name: "CL",
+          type: "line" as const,
+          data: chartData.data_points.map(() => chartData.limits.cl),
+          lineStyle: { color: "#52c41a", type: "dashed" as const },
+          symbol: "none",
+        }] : []),
       ],
     };
 
@@ -292,6 +330,39 @@ export default function SPCDetailPage() {
     if (!id) return;
     if (!batchNo.trim()) {
       message.warning("请输入批次号");
+      return;
+    }
+    const isAttribute = ["p", "np", "c", "u"].includes(ic?.chart_type || "");
+    if (isAttribute) {
+      const n = parseInt(inspectedCount, 10);
+      const d = parseInt(defectCount, 10);
+      if (isNaN(n) || n <= 0) {
+        message.warning("检验数量必须大于0");
+        return;
+      }
+      if (isNaN(d) || d < 0) {
+        message.warning("不合格品数/缺陷数不能为负数");
+        return;
+      }
+      if (d > n) {
+        message.warning("不合格品数/缺陷数不能大于检验数量");
+        return;
+      }
+      try {
+        await addSampleBatch(id, {
+          batch_no: batchNo.trim(),
+          sampled_at: sampledAt ? sampledAt.format("YYYY-MM-DDTHH:mm:ss") : dayjs().format("YYYY-MM-DDTHH:mm:ss"),
+          inspected_count: n,
+          defect_count: d,
+        });
+        message.success("样本录入成功");
+        setBatchNo("");
+        setInspectedCount("");
+        setDefectCount("");
+        fetchAll();
+      } catch {
+        message.error("录入失败");
+      }
       return;
     }
     const values = sampleValues
@@ -457,7 +528,7 @@ export default function SPCDetailPage() {
             {ic.characteristic_name}
           </Title>
           <Tag color="blue">{ic.ic_code}</Tag>
-          <Tag>{ic.chart_type === "xbar_r" ? "X-bar R" : ic.chart_type === "imr" ? "I-MR" : "直方图"}</Tag>
+          <Tag>{chartTypeLabels[ic.chart_type] || ic.chart_type}</Tag>
         </Space>
         <Space>
           <Tag color={ic.control_limits_locked ? "green" : "orange"}>
@@ -538,6 +609,7 @@ export default function SPCDetailPage() {
         </TabPane>
 
         {/* Tab 2: 过程能力 */}
+        {!(["p", "np", "c", "u"].includes(ic?.chart_type || "")) && (
         <TabPane tab="过程能力" key="capability">
           {capability ? (
             <div>
@@ -598,6 +670,7 @@ export default function SPCDetailPage() {
             <Spin size="large" style={{ display: "block", margin: "64px auto" }} />
           )}
         </TabPane>
+        )}
 
         {/* Tab 3: 数据录入 */}
         <TabPane tab="数据录入" key="data">
@@ -623,37 +696,67 @@ export default function SPCDetailPage() {
                     />
                   </Col>
                 </Row>
-                <Divider orientation="left">
-                  样本值 (建议 {subgroupSize} 个)
-                </Divider>
-                <Row gutter={[8, 8]}>
-                  {sampleValues.map((val, idx) => (
-                    <Col span={4} key={idx}>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={val}
-                        onChange={(e) => updateSampleValue(idx, e.target.value)}
-                        addonBefore={`#${idx + 1}`}
-                        suffix={
-                          sampleValues.length > 1 ? (
-                            <Button
-                              type="text"
-                              size="small"
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={() => removeSampleInput(idx)}
-                            />
-                          ) : null
-                        }
-                      />
-                    </Col>
-                  ))}
-                </Row>
+                {["p", "np", "c", "u"].includes(ic?.chart_type || "") ? (
+                  <>
+                    <Divider orientation="left">属性数据录入</Divider>
+                    <Row gutter={[8, 8]}>
+                      <Col span={6}>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={inspectedCount}
+                          onChange={(e) => setInspectedCount(e.target.value)}
+                          addonBefore="检验数量 n"
+                        />
+                      </Col>
+                      <Col span={6}>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={defectCount}
+                          onChange={(e) => setDefectCount(e.target.value)}
+                          addonBefore="不合格品数/缺陷数"
+                        />
+                      </Col>
+                    </Row>
+                  </>
+                ) : (
+                  <>
+                    <Divider orientation="left">
+                      样本值 (建议 {subgroupSize} 个)
+                    </Divider>
+                    <Row gutter={[8, 8]}>
+                      {sampleValues.map((val, idx) => (
+                        <Col span={4} key={idx}>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={val}
+                            onChange={(e) => updateSampleValue(idx, e.target.value)}
+                            addonBefore={`#${idx + 1}`}
+                            suffix={
+                              sampleValues.length > 1 ? (
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  danger
+                                  icon={<DeleteOutlined />}
+                                  onClick={() => removeSampleInput(idx)}
+                                />
+                              ) : null
+                            }
+                          />
+                        </Col>
+                      ))}
+                    </Row>
+                  </>
+                )}
                 <div style={{ marginTop: 16 }}>
-                  <Button icon={<PlusOutlined />} onClick={addSampleInput} style={{ marginRight: 8 }}>
-                    添加样本
-                  </Button>
+                  {!["p", "np", "c", "u"].includes(ic?.chart_type || "") && (
+                    <Button icon={<PlusOutlined />} onClick={addSampleInput} style={{ marginRight: 8 }}>
+                      添加样本
+                    </Button>
+                  )}
                   <Button type="primary" onClick={handleAddSample} disabled={!canEdit}>
                     提交批次
                   </Button>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Table, Button, Tag, Typography, Modal, Form, Input, Select,
-  Popconfirm, message, Card, Row, Col, Statistic, Space,
+  Popconfirm, message, Card, Row, Col, Statistic, Space, Alert,
 } from "antd";
 import {
   PlusOutlined, FileTextOutlined, DeleteOutlined,
@@ -19,9 +19,13 @@ import { useAuthStore } from "../../store/authStore";
 const { Title } = Typography;
 
 const chartTypeLabels: Record<string, string> = {
-  xbar_r: "X-bar R",
-  imr: "I-MR",
+  xbar_r: "X-bar R（均值-极差图）",
+  imr: "I-MR（单值移动极差图）",
   histogram: "直方图",
+  p: "P图（不合格率）",
+  np: "NP图（不合格品数）",
+  c: "C图（缺陷数）",
+  u: "U图（单位缺陷数）",
 };
 
 export default function SPCListPage() {
@@ -31,6 +35,7 @@ export default function SPCListPage() {
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [searchProcess, setSearchProcess] = useState("");
+  const [createChartType, setCreateChartType] = useState<string>("xbar_r");
   const [form] = Form.useForm();
   const navigate = useNavigate();
 
@@ -58,7 +63,7 @@ export default function SPCListPage() {
   const handleCreate = async (values: {
     process_name: string;
     characteristic_name: string;
-    chart_type: "xbar_r" | "imr" | "histogram";
+    chart_type: "xbar_r" | "imr" | "histogram" | "p" | "np" | "c" | "u";
     subgroup_size: number;
     spec_lower: number;
     spec_upper: number;
@@ -67,7 +72,9 @@ export default function SPCListPage() {
     try {
       const ic = await createInspectionCharacteristic({
         ...values,
-        subgroup_size: values.subgroup_size || (values.chart_type === "xbar_r" ? 5 : 1),
+        subgroup_size: ["p", "np", "c", "u"].includes(values.chart_type)
+          ? 0
+          : values.subgroup_size || (values.chart_type === "xbar_r" ? 5 : 1),
       });
       message.success("检验特性创建成功");
       setModalOpen(false);
@@ -274,20 +281,25 @@ export default function SPCListPage() {
             initialValue="xbar_r"
             rules={[{ required: true }]}
           >
-            <Select
-              options={[
-                { value: "xbar_r", label: "X-bar R" },
-                { value: "imr", label: "I-MR" },
-              ]}
-            />
+            <Select onChange={(v) => setCreateChartType(v)}>
+              <Select.Option value="xbar_r">X-bar R（均值-极差图）</Select.Option>
+              <Select.Option value="imr">I-MR（单值移动极差图）</Select.Option>
+              <Select.Option value="p">P图（不合格率）</Select.Option>
+              <Select.Option value="np">NP图（不合格品数）</Select.Option>
+              <Select.Option value="c">C图（缺陷数）</Select.Option>
+              <Select.Option value="u">U图（单位缺陷数）</Select.Option>
+            </Select>
           </Form.Item>
-          <Form.Item
-            name="subgroup_size"
-            label="子组大小"
-            initialValue={5}
-          >
-            <Input type="number" min={1} />
-          </Form.Item>
+          {!["p", "np", "c", "u"].includes(createChartType) && (
+            <Form.Item name="subgroup_size" label="子组大小" initialValue={5}>
+              <Input type="number" min={1} />
+            </Form.Item>
+          )}
+          {["np", "c"].includes(createChartType) && (
+            <Form.Item>
+              <Alert type="info" showIcon message="使用 NP图/C图 时，每批次样本量需保持固定一致" />
+            </Form.Item>
+          )}
           <Row gutter={16}>
             <Col span={8}>
               <Form.Item
