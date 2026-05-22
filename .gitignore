@@ -13,3 +13,4 @@ pgdata/
 docs/superpowers/
 *.tsbuildinfo
 .playwright-mcp/
+.worktrees/
