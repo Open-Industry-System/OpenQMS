@@ -118,3 +118,13 @@ async def get_fmea_graph(
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
     return fmea.graph_data
+
+
+@router.get("/{fmea_id}/severity-warnings")
+async def severity_warnings(
+    fmea_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    from app.services.special_characteristic_service import check_severity_compliance
+    return await check_severity_compliance(db, fmea_id)
