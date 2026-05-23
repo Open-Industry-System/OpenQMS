@@ -513,7 +513,7 @@ export default function SupplierDetailPage() {
               {supplier.reject_reason}
             </div>
           )}
-          <div style={{ display: editing ? "block" : "none" }}>
+          {editing ? (
             <Form form={infoForm} layout="vertical">
               <Row gutter={16}>
                 <Col span={12}>
