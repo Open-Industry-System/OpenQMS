@@ -22,6 +22,9 @@ import GaugeListPage from "./pages/msa/GaugeListPage";
 import GaugeDetailPage from "./pages/msa/GaugeDetailPage";
 import MsaStudyListPage from "./pages/msa/MsaStudyListPage";
 import StudyDetailPage from "./pages/msa/StudyDetailPage";
+import SCListPage from "./pages/special-characteristic/SCListPage";
+import SCMatrixPage from "./pages/special-characteristic/SCMatrixPage";
+import SCDetailPage from "./pages/special-characteristic/SCDetailPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -75,6 +78,9 @@ export default function App() {
         <Route path="/msa/gauges/:id" element={<GaugeDetailPage />} />
         <Route path="/msa/studies" element={<MsaStudyListPage />} />
         <Route path="/msa/studies/:type/:id" element={<StudyDetailPage />} />
+        <Route path="/special-characteristics" element={<SCListPage />} />
+        <Route path="/special-characteristics/matrix" element={<SCMatrixPage />} />
+        <Route path="/special-characteristics/:id" element={<SCDetailPage />} />
       </Route>
     </Routes>
   );

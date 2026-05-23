@@ -7,6 +7,7 @@ import {
   BugOutlined,
   AimOutlined,
   SafetyOutlined,
+  SafetyCertificateOutlined,
   ShopOutlined,
   ToolOutlined,
   ExperimentOutlined,
@@ -27,6 +28,7 @@ const menuItems = [
   { key: "/internal-audits", icon: <SafetyOutlined />, label: "内部审核" },
   { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
   { key: "/spc", icon: <FileTextOutlined />, label: "SPC控制图" },
+  { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
   { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA" },
   {
     key: "/msa",

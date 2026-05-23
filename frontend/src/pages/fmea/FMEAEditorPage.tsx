@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Button, Space, Tag, Typography, Input, Table, Card, Tabs,
+  Button, Space, Tag, Typography, Input, Select, Table, Card, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
   Descriptions, Divider,
 } from "antd";
@@ -10,6 +10,7 @@ import {
   CheckOutlined, UndoOutlined, PlusOutlined, DeleteOutlined,
 } from "@ant-design/icons";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../api/fmea";
+import { syncFromFMEA, getSeverityWarnings } from "../../api/specialCharacteristic";
 import type { FMEADocument, GraphNode, GraphEdge } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { calculateAP } from "../../utils/fmea";
@@ -80,6 +81,7 @@ export default function FMEAEditorPage() {
   const [recommendationTrigger, setRecommendationTrigger] = useState<"function" | "failureMode" | "risk" | null>(null);
   const [recommendationCtx, setRecommendationCtx] = useState<{ functionDesc?: string; failureMode?: string; s?: number; o?: number; d?: number }>({});
   const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
+  const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
 
   const activateRecommendation = (
     rowKey: string,
@@ -110,6 +112,13 @@ export default function FMEAEditorPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  useEffect(() => {
+    if (!id) return;
+    getSeverityWarnings(id)
+      .then((warnings) => setSeverityWarnings(warnings.map((w) => w.node_id)))
+      .catch(() => {});
+  }, [id]);
+
   const save = useCallback(async () => {
     if (!id || !fmea) return;
     setSaving(true);
@@ -120,6 +129,9 @@ export default function FMEAEditorPage() {
       });
       setFmea(updated);
       message.success("保存成功");
+      try {
+        if (id) await syncFromFMEA(id);
+      } catch { /* silent */ }
     } catch {
       message.error("保存失败");
     } finally {
@@ -303,19 +315,22 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="分类 (CC/SC)">Class</Tooltip>,
+      title: <Tooltip title={fmea.fmea_type === "DFMEA" ? "筛选器代码 (Filter Code)" : "分类 (CC/SC)"}>Class</Tooltip>,
       key: "class",
-      width: 60,
+      width: 70,
       align: "center" as const,
       render: (_: unknown, row: FMEARow) => {
         const node = nodeMap.get(row.failureModeNodeId);
+        const classValue = node?.classification || "";
+        const bgStyle = classValue === "CC" ? { background: "#fff1f0" } : classValue === "SC" ? { background: "#fffbe6" } : {};
         return (
-          <Input
+          <Select
             size="small"
-            value={node?.classification || ""}
+            value={classValue || undefined}
+            onChange={(value) => updateNode(row.failureModeNodeId, "classification", value || "")}
             disabled={isViewer}
-            style={{ width: 55, textAlign: "center" }}
-            onChange={(e) => updateNode(row.failureModeNodeId, "classification", e.target.value)}
+            style={{ width: 60, ...bgStyle }}
+            options={[{ value: "", label: "-" }, { value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
           />
         );
       },
@@ -794,8 +809,10 @@ export default function FMEAEditorPage() {
               scroll={{ x: 1700, y: 520 }}
               bordered
               rowClassName={(row: FMEARow) => {
-                if (selectedFunctionId && row.functionNodeId === selectedFunctionId) return "fmea-row-highlight";
-                return "";
+                const classes = [];
+                if (selectedFunctionId && row.functionNodeId === selectedFunctionId) classes.push("fmea-row-highlight");
+                if (severityWarnings.includes(row.failureModeNodeId)) classes.push("severity-warning-row");
+                return classes.join(" ");
               }}
             />
             {rows.length === 0 && (
@@ -885,6 +902,12 @@ export default function FMEAEditorPage() {
         }
         .fmea-row-highlight td:first-child {
           border-left: 3px solid #1677ff !important;
+        }
+        .severity-warning-row td {
+          background-color: #fffbe6 !important;
+        }
+        .severity-warning-row td:first-child {
+          border-left: 3px solid #faad14 !important;
         }
       `}</style>
 
