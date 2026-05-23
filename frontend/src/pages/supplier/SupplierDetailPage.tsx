@@ -513,12 +513,7 @@ export default function SupplierDetailPage() {
               {supplier.reject_reason}
             </div>
           )}
-          {!editing && (
-            <div style={{ display: "none" }}>
-              <Form form={infoForm} />
-            </div>
-          )}
-          {editing ? (
+          <div style={{ display: editing ? "block" : "none" }}>
             <Form form={infoForm} layout="vertical">
               <Row gutter={16}>
                 <Col span={12}>
@@ -917,6 +912,13 @@ export default function SupplierDetailPage() {
             ]}
           />
         </Card>
+      )}
+
+      {/* Hidden evalForm to keep useForm connected when tab not rendered */}
+      {isNew && (
+        <div style={{ display: "none" }}>
+          <Form form={evalForm} />
+        </div>
       )}
 
       {/* Tabs */}
