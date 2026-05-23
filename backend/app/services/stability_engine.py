@@ -42,9 +42,11 @@ def compute_stability(study: StabilityStudy, measurements: list[StabilityMeasure
     cpk = None
     if study.reference_value is not None:
         sigma = r_bar / D2_TABLE.get(subgroup_size, 2.326)
-        if study.tolerance_upper is not None and study.tolerance_lower is not None:
-            cpu = (study.tolerance_upper - xbar_bar) / (3 * sigma) if sigma > 0 else 0
-            cpl = (xbar_bar - study.tolerance_lower) / (3 * sigma) if sigma > 0 else 0
+        tol_upper = getattr(study, "tolerance_upper", None)
+        tol_lower = getattr(study, "tolerance_lower", None)
+        if tol_upper is not None and tol_lower is not None:
+            cpu = (tol_upper - xbar_bar) / (3 * sigma) if sigma > 0 else 0
+            cpl = (xbar_bar - tol_lower) / (3 * sigma) if sigma > 0 else 0
             cpk = min(cpu, cpl)
         else:
             # Use reference value as target
