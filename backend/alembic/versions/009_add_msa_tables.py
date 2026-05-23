@@ -1,26 +1,21 @@
-"""Add 17 MSA tables: gauges, calibrations, and 5 study types (GRR, bias, linearity, stability, attribute).
+"""Add 17 MSA tables: gauges, calibrations, and 5 study types (GRR, bias, linearity, stability, attribute)."""
 
-Revision ID: 009_add_msa_tables
-Revises: 008_spc_v1_1_attribute_charts
-Create Date: 2026-05-22
-"""
-
+from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects import postgresql
 
-# revision identifiers
-revision = "009_add_msa_tables"
-down_revision = "008_spc_v1_1"
-branch_labels = None
-depends_on = None
+revision: str = "009_add_msa_tables"
+down_revision: Union[str, None] = "008_spc_v1_1"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade():
-    # ─── Gauges ───
+def upgrade() -> None:
+    # Gauges
     op.create_table(
         "gauges",
-        sa.Column("gauge_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("gauge_id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("gauge_no", sa.String(50), unique=True, nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("model", sa.String(255), nullable=True),
@@ -32,15 +27,15 @@ def upgrade():
         sa.Column("status", sa.String(20), nullable=False, server_default="active"),
         sa.Column("calibration_cycle_days", sa.Integer, nullable=True),
         sa.Column("next_calibration_date", sa.Date, nullable=True),
-        sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
     op.create_table(
         "gauge_calibrations",
-        sa.Column("calibration_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("gauge_id", UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="CASCADE"), nullable=False),
+        sa.Column("calibration_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("gauge_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="CASCADE"), nullable=False),
         sa.Column("calibration_date", sa.Date, nullable=False),
         sa.Column("result", sa.String(20), nullable=False),
         sa.Column("certificate_no", sa.String(255), nullable=True),
@@ -50,16 +45,16 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
-    # ─── GRR studies ───
+    # GRR studies
     op.create_table(
         "grr_studies",
-        sa.Column("study_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("study_no", sa.String(50), unique=True, nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
         sa.Column("method", sa.String(30), nullable=False, server_default="average_range"),
-        sa.Column("gauge_id", UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="RESTRICT"), nullable=True),
+        sa.Column("gauge_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="RESTRICT"), nullable=True),
         sa.Column("characteristic_name", sa.String(255), nullable=False),
-        sa.Column("spc_characteristic_id", UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
+        sa.Column("spc_characteristic_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
         sa.Column("unit", sa.String(50), nullable=True),
         sa.Column("tolerance_upper", sa.Float, nullable=True),
         sa.Column("tolerance_lower", sa.Float, nullable=True),
@@ -69,16 +64,16 @@ def upgrade():
         sa.Column("trial_count", sa.Integer, nullable=False, server_default="3"),
         sa.Column("status", sa.String(20), nullable=False, server_default="draft"),
         sa.Column("study_date", sa.Date, nullable=True),
-        sa.Column("accepted_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
-        sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
+        sa.Column("accepted_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
     op.create_table(
         "grr_measurements",
-        sa.Column("measurement_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("grr_studies.study_id", ondelete="CASCADE"), nullable=False),
+        sa.Column("measurement_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("grr_studies.study_id", ondelete="CASCADE"), nullable=False),
         sa.Column("appraiser_name", sa.String(100), nullable=False),
         sa.Column("part_no", sa.String(100), nullable=False),
         sa.Column("trial_no", sa.Integer, nullable=False, server_default="1"),
@@ -89,8 +84,8 @@ def upgrade():
 
     op.create_table(
         "grr_results",
-        sa.Column("result_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("grr_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
+        sa.Column("result_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("grr_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
         sa.Column("ev", sa.Float, nullable=False),
         sa.Column("av", sa.Float, nullable=False),
         sa.Column("grr", sa.Float, nullable=False),
@@ -106,30 +101,30 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
-    # ─── Bias studies ───
+    # Bias studies
     op.create_table(
         "bias_studies",
-        sa.Column("study_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("study_no", sa.String(50), unique=True, nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
-        sa.Column("gauge_id", UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="RESTRICT"), nullable=True),
+        sa.Column("gauge_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="RESTRICT"), nullable=True),
         sa.Column("characteristic_name", sa.String(255), nullable=False),
-        sa.Column("spc_characteristic_id", UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
+        sa.Column("spc_characteristic_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
         sa.Column("unit", sa.String(50), nullable=True),
         sa.Column("reference_value", sa.Float, nullable=False),
         sa.Column("sample_size", sa.Integer, nullable=False, server_default="10"),
         sa.Column("status", sa.String(20), nullable=False, server_default="draft"),
         sa.Column("study_date", sa.Date, nullable=True),
-        sa.Column("accepted_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
-        sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
+        sa.Column("accepted_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
     op.create_table(
         "bias_measurements",
-        sa.Column("measurement_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("bias_studies.study_id", ondelete="CASCADE"), nullable=False),
+        sa.Column("measurement_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("bias_studies.study_id", ondelete="CASCADE"), nullable=False),
         sa.Column("value", sa.Float, nullable=False),
         sa.Column("sequence_no", sa.Integer, nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -138,8 +133,8 @@ def upgrade():
 
     op.create_table(
         "bias_results",
-        sa.Column("result_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("bias_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
+        sa.Column("result_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("bias_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
         sa.Column("mean", sa.Float, nullable=False),
         sa.Column("bias", sa.Float, nullable=False),
         sa.Column("bias_percent", sa.Float, nullable=True),
@@ -152,31 +147,31 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
-    # ─── Linearity studies ───
+    # Linearity studies
     op.create_table(
         "linearity_studies",
-        sa.Column("study_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("study_no", sa.String(50), unique=True, nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
-        sa.Column("gauge_id", UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="RESTRICT"), nullable=True),
+        sa.Column("gauge_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="RESTRICT"), nullable=True),
         sa.Column("characteristic_name", sa.String(255), nullable=False),
-        sa.Column("spc_characteristic_id", UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
+        sa.Column("spc_characteristic_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
         sa.Column("unit", sa.String(50), nullable=True),
         sa.Column("tolerance_upper", sa.Float, nullable=True),
         sa.Column("tolerance_lower", sa.Float, nullable=True),
         sa.Column("sample_size_per_reference", sa.Integer, nullable=False, server_default="5"),
         sa.Column("status", sa.String(20), nullable=False, server_default="draft"),
         sa.Column("study_date", sa.Date, nullable=True),
-        sa.Column("accepted_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
-        sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
+        sa.Column("accepted_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
     op.create_table(
         "linearity_measurements",
-        sa.Column("measurement_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("linearity_studies.study_id", ondelete="CASCADE"), nullable=False),
+        sa.Column("measurement_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("linearity_studies.study_id", ondelete="CASCADE"), nullable=False),
         sa.Column("reference_value", sa.Float, nullable=False),
         sa.Column("measured_value", sa.Float, nullable=False),
         sa.Column("sequence_no", sa.Integer, nullable=False),
@@ -186,8 +181,8 @@ def upgrade():
 
     op.create_table(
         "linearity_results",
-        sa.Column("result_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("linearity_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
+        sa.Column("result_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("linearity_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
         sa.Column("slope", sa.Float, nullable=False),
         sa.Column("intercept", sa.Float, nullable=False),
         sa.Column("r_squared", sa.Float, nullable=False),
@@ -199,30 +194,30 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
-    # ─── Stability studies ───
+    # Stability studies
     op.create_table(
         "stability_studies",
-        sa.Column("study_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("study_no", sa.String(50), unique=True, nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
-        sa.Column("gauge_id", UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="RESTRICT"), nullable=True),
+        sa.Column("gauge_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="RESTRICT"), nullable=True),
         sa.Column("characteristic_name", sa.String(255), nullable=False),
-        sa.Column("spc_characteristic_id", UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
+        sa.Column("spc_characteristic_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
         sa.Column("unit", sa.String(50), nullable=True),
         sa.Column("reference_value", sa.Float, nullable=True),
         sa.Column("subgroup_size", sa.Integer, nullable=False, server_default="5"),
         sa.Column("status", sa.String(20), nullable=False, server_default="draft"),
         sa.Column("study_date", sa.Date, nullable=True),
-        sa.Column("accepted_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
-        sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
+        sa.Column("accepted_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
     op.create_table(
         "stability_measurements",
-        sa.Column("measurement_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("stability_studies.study_id", ondelete="CASCADE"), nullable=False),
+        sa.Column("measurement_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("stability_studies.study_id", ondelete="CASCADE"), nullable=False),
         sa.Column("measurement_date", sa.Date, nullable=False),
         sa.Column("sample_mean", sa.Float, nullable=False),
         sa.Column("sample_range", sa.Float, nullable=False),
@@ -233,8 +228,8 @@ def upgrade():
 
     op.create_table(
         "stability_results",
-        sa.Column("result_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("stability_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
+        sa.Column("result_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("stability_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
         sa.Column("ucl_mean", sa.Float, nullable=False),
         sa.Column("lcl_mean", sa.Float, nullable=True),
         sa.Column("cl_mean", sa.Float, nullable=False),
@@ -246,30 +241,30 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
-    # ─── Attribute studies ───
+    # Attribute studies
     op.create_table(
         "attribute_studies",
-        sa.Column("study_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("study_no", sa.String(50), unique=True, nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
-        sa.Column("gauge_id", UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="SET NULL"), nullable=True),
+        sa.Column("gauge_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("gauges.gauge_id", ondelete="SET NULL"), nullable=True),
         sa.Column("characteristic_name", sa.String(255), nullable=False),
-        sa.Column("spc_characteristic_id", UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
+        sa.Column("spc_characteristic_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True),
         sa.Column("method", sa.String(30), nullable=False, server_default="risk_analysis"),
         sa.Column("sample_size", sa.Integer, nullable=False, server_default="50"),
         sa.Column("known_standard_count", sa.Integer, nullable=True),
         sa.Column("status", sa.String(20), nullable=False, server_default="draft"),
         sa.Column("study_date", sa.Date, nullable=True),
-        sa.Column("accepted_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
-        sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
+        sa.Column("accepted_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
     op.create_table(
         "attribute_measurements",
-        sa.Column("measurement_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("attribute_studies.study_id", ondelete="CASCADE"), nullable=False),
+        sa.Column("measurement_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("attribute_studies.study_id", ondelete="CASCADE"), nullable=False),
         sa.Column("appraiser_name", sa.String(100), nullable=False),
         sa.Column("part_no", sa.String(100), nullable=False),
         sa.Column("known_standard", sa.String(10), nullable=False),
@@ -281,8 +276,8 @@ def upgrade():
 
     op.create_table(
         "attribute_results",
-        sa.Column("result_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("study_id", UUID(as_uuid=True), sa.ForeignKey("attribute_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
+        sa.Column("result_id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("study_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("attribute_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True),
         sa.Column("effectiveness", sa.Float, nullable=False),
         sa.Column("miss_rate", sa.Float, nullable=False),
         sa.Column("false_alarm_rate", sa.Float, nullable=False),
@@ -294,7 +289,7 @@ def upgrade():
     )
 
 
-def downgrade():
+def downgrade() -> None:
     for table in [
         "attribute_results", "attribute_measurements", "attribute_studies",
         "stability_results", "stability_measurements", "stability_studies",

@@ -18,6 +18,10 @@ import SPCListPage from "./pages/spc/SPCListPage";
 import SPCDetailPage from "./pages/spc/SPCDetailPage";
 import SupplierListPage from "./pages/supplier/SupplierListPage";
 import SupplierDetailPage from "./pages/supplier/SupplierDetailPage";
+import GaugeListPage from "./pages/msa/GaugeListPage";
+import GaugeDetailPage from "./pages/msa/GaugeDetailPage";
+import MsaStudyListPage from "./pages/msa/MsaStudyListPage";
+import StudyDetailPage from "./pages/msa/StudyDetailPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -67,6 +71,10 @@ export default function App() {
         <Route path="/spc/:id" element={<SPCDetailPage />} />
         <Route path="/suppliers" element={<SupplierListPage />} />
         <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
+        <Route path="/msa/gauges" element={<GaugeListPage />} />
+        <Route path="/msa/gauges/:id" element={<GaugeDetailPage />} />
+        <Route path="/msa/studies" element={<MsaStudyListPage />} />
+        <Route path="/msa/studies/:type/:id" element={<StudyDetailPage />} />
       </Route>
     </Routes>
   );

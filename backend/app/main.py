@@ -19,6 +19,15 @@ from app.api.audit_plan import router as audit_plan_router
 from app.api.audit_finding import router as audit_finding_router
 from app.api.auditor import router as auditor_router
 from app.api.supplier import router as supplier_router
+from app.api.gauge import router as gauge_router
+from app.api.msa import (
+    grr_router,
+    bias_router,
+    linearity_router,
+    stability_router,
+    attribute_router,
+    overview_router,
+)
 
 
 @asynccontextmanager
@@ -58,6 +67,13 @@ app.include_router(audit_plan_router)
 app.include_router(audit_finding_router)
 app.include_router(auditor_router)
 app.include_router(supplier_router)
+app.include_router(gauge_router)
+app.include_router(grr_router)
+app.include_router(bias_router)
+app.include_router(linearity_router)
+app.include_router(stability_router)
+app.include_router(attribute_router)
+app.include_router(overview_router)
 
 
 @app.get("/api/health")

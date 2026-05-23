@@ -8,6 +8,8 @@ import {
   AimOutlined,
   SafetyOutlined,
   ShopOutlined,
+  ToolOutlined,
+  ExperimentOutlined,
   LogoutOutlined,
   UserOutlined,
   MenuFoldOutlined,
@@ -26,6 +28,15 @@ const menuItems = [
   { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
   { key: "/spc", icon: <FileTextOutlined />, label: "SPC控制图" },
   { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA" },
+  {
+    key: "/msa",
+    icon: <ToolOutlined />,
+    label: "MSA分析",
+    children: [
+      { key: "/msa/gauges", icon: <ToolOutlined />, label: "量具管理" },
+      { key: "/msa/studies", icon: <ExperimentOutlined />, label: "研究管理" },
+    ],
+  },
 ];
 
 export default function AppLayout() {

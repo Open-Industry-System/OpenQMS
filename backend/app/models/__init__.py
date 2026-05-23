@@ -9,6 +9,12 @@ from app.models.audit_plan import AuditPlan
 from app.models.audit_finding import AuditFinding
 from app.models.spc import InspectionCharacteristic, SampleBatch, SampleValue, SPCAlarm, ControlLimitSnapshot
 from app.models.supplier import Supplier, SupplierCertification, SupplierEvaluation
+from app.models.gauge import Gauge, GaugeCalibration
+from app.models.grr import GrrStudy, GrrMeasurement, GrrResult
+from app.models.bias import BiasStudy, BiasMeasurement, BiasResult
+from app.models.linearity import LinearityStudy, LinearityMeasurement, LinearityResult
+from app.models.stability import StabilityStudy, StabilityMeasurement, StabilityResult
+from app.models.attribute import AttributeStudy, AttributeMeasurement, AttributeResult
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -16,4 +22,10 @@ __all__ = [
     "AuditProgram", "AuditPlan", "AuditFinding",
     "InspectionCharacteristic", "SampleBatch", "SampleValue", "SPCAlarm", "ControlLimitSnapshot",
     "Supplier", "SupplierCertification", "SupplierEvaluation",
+    "Gauge", "GaugeCalibration",
+    "GrrStudy", "GrrMeasurement", "GrrResult",
+    "BiasStudy", "BiasMeasurement", "BiasResult",
+    "LinearityStudy", "LinearityMeasurement", "LinearityResult",
+    "StabilityStudy", "StabilityMeasurement", "StabilityResult",
+    "AttributeStudy", "AttributeMeasurement", "AttributeResult",
 ]
