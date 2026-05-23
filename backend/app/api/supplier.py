@@ -238,6 +238,7 @@ async def create_evaluation(supplier_id: uuid.UUID, req: schemas.supplier.Suppli
             db, supplier_id=supplier_id, eval_period=req.eval_period, eval_type=req.eval_type,
             quality_score=req.quality_score, delivery_score=req.delivery_score, service_score=req.service_score,
             capa_count=req.capa_count or 0, finding_count=req.finding_count or 0,
+            premium_freight_count=req.premium_freight_count or 0, customer_disruption_count=req.customer_disruption_count or 0,
             notes=req.notes, user_id=user.user_id,
         )
         return schemas.supplier.SupplierEvaluationResponse.model_validate(evaluation)

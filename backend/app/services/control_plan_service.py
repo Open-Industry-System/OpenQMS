@@ -238,7 +238,14 @@ async def approve_control_plan(
 async def import_from_fmea(
     db: AsyncSession, cp_id: uuid.UUID, req: ImportFromFMEARequest, user_id: uuid.UUID
 ) -> list[ControlPlanItem]:
-    """Import ProcessStep nodes from a PFMEA into control plan items."""
+    """Import PFMEA process step topology into control plan items.
+
+    Traverses the PFMEA graph to map:
+      ProcessStep                  → step_no, process_name
+      ProcessWorkElement           → equipment
+      ProcessStepFunction          → product_characteristic, specification_tolerance, special_class
+      ProcessWorkElementFunction   → process_characteristic
+    """
     # Validate control plan exists and is editable
     cp_result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == cp_id))
     cp = cp_result.scalar_one_or_none()
@@ -270,7 +277,7 @@ async def import_from_fmea(
             n for n in step_nodes if n.get("process_number") in req.step_nos
         ]
 
-    # Build edge map: source -> [targets]
+    # Build edge maps: source -> [targets], target -> [sources]
     edge_map: dict[str, list[str]] = {}
     for e in edges:
         src = e.get("source")
@@ -280,46 +287,116 @@ async def import_from_fmea(
 
     node_map = {n.get("id"): n for n in nodes if n.get("id") is not None}
 
-    created_items: list[ControlPlanItem] = []
+    def _children(parent_id: str, node_type: str) -> list[dict]:
+        """Find direct children of given type via edges."""
+        return [
+            node_map[t]
+            for t in edge_map.get(parent_id, [])
+            if node_map.get(t, {}).get("type") == node_type
+        ]
 
-    for idx, step in enumerate(step_nodes):
+    created_items: list[ControlPlanItem] = []
+    sort_idx = 0
+
+    for step in step_nodes:
         step_id = step.get("id")
         step_no = step.get("process_number") or ""
         process_name = step.get("name") or ""
 
-        targets = edge_map.get(step_id, [])
-        work_elements = [
-            node_map.get(t)
-            for t in targets
-            if node_map.get(t, {}).get("type") == "ProcessWorkElement"
-        ]
-        work_elements = [w for w in work_elements if w is not None]
+        # Structural: process work elements (4M) → equipment
+        work_elements = _children(step_id, "ProcessWorkElement")
 
-        if work_elements:
-            for w in work_elements:
+        # Functional: product characteristic functions
+        step_functions = _children(step_id, "ProcessStepFunction")
+
+        # For each work element, find its process characteristic functions
+        we_func_map: dict[str, list[dict]] = {}
+        for we in work_elements:
+            we_funcs = _children(we.get("id"), "ProcessWorkElementFunction")
+            if we_funcs:
+                we_func_map[we.get("id")] = we_funcs
+
+        # Build CP items by pairing product + process characteristics
+        if step_functions:
+            for sf in step_functions:
+                sf_id = sf.get("id")
+                # Find WEFs linked to this step function via FUNCTION_MAPPED_TO
+                mapped_wef_ids = set(edge_map.get(sf_id, []))
+
+                # Match WEFs against work elements
+                matched_we = None
+                matched_wf = None
+                for we in work_elements:
+                    for wf in we_func_map.get(we.get("id"), []):
+                        if wf.get("id") in mapped_wef_ids or matched_wf is None:
+                            matched_we = we
+                            matched_wf = wf
+                            if wf.get("id") in mapped_wef_ids:
+                                break
+                    if matched_wf and matched_wf.get("id") in mapped_wef_ids:
+                        break
+
                 item = ControlPlanItem(
                     item_id=uuid.uuid4(),
                     cp_id=cp_id,
                     step_no=step_no,
                     process_name=process_name,
-                    equipment=w.get("name") or "",
+                    equipment=matched_we.get("name") if matched_we else None,
+                    product_characteristic=sf.get("name") or "",
+                    specification_tolerance=sf.get("specification") or "",
+                    special_class=sf.get("classification") or "",
+                    process_characteristic=matched_wf.get("name") if matched_wf else None,
                     source_fmea_node_id=step_id,
-                    sort_order=idx,
+                    sort_order=sort_idx,
                 )
                 db.add(item)
                 created_items.append(item)
+                sort_idx += 1
+        elif work_elements:
+            # No step functions — create items from work element functions
+            for we in work_elements:
+                we_funcs = we_func_map.get(we.get("id"), [])
+                if we_funcs:
+                    for wf in we_funcs:
+                        item = ControlPlanItem(
+                            item_id=uuid.uuid4(),
+                            cp_id=cp_id,
+                            step_no=step_no,
+                            process_name=process_name,
+                            equipment=we.get("name") or "",
+                            process_characteristic=wf.get("name") or "",
+                            source_fmea_node_id=step_id,
+                            sort_order=sort_idx,
+                        )
+                        db.add(item)
+                        created_items.append(item)
+                        sort_idx += 1
+                else:
+                    item = ControlPlanItem(
+                        item_id=uuid.uuid4(),
+                        cp_id=cp_id,
+                        step_no=step_no,
+                        process_name=process_name,
+                        equipment=we.get("name") or "",
+                        source_fmea_node_id=step_id,
+                        sort_order=sort_idx,
+                    )
+                    db.add(item)
+                    created_items.append(item)
+                    sort_idx += 1
         else:
-            # Create item even if no work elements found
+            # Minimal item with just process step info
             item = ControlPlanItem(
                 item_id=uuid.uuid4(),
                 cp_id=cp_id,
                 step_no=step_no,
                 process_name=process_name,
                 source_fmea_node_id=step_id,
-                sort_order=idx,
+                sort_order=sort_idx,
             )
             db.add(item)
             created_items.append(item)
+            sort_idx += 1
 
     # Link control plan to FMEA
     cp.fmea_ref_id = req.fmea_id
@@ -349,7 +426,9 @@ async def check_stale_items(
 ) -> list[dict]:
     """Check for stale control plan items by comparing against linked FMEA graph.
 
-    Returns list of dicts with item_id, step_no, status, diff_fields.
+    Compares process_name, step_no, and all functional/structural fields
+    (product_characteristic, process_characteristic, specification_tolerance,
+    special_class, equipment) derived from graph topology.
     """
     cp_result = await db.execute(
         select(ControlPlan).where(ControlPlan.cp_id == cp_id)
@@ -370,12 +449,26 @@ async def check_stale_items(
 
     graph = fmea.graph_data or {"nodes": [], "edges": []}
     nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
     node_map = {n.get("id"): n for n in nodes if n.get("id") is not None}
+
+    edge_map: dict[str, list[str]] = {}
+    for e in edges:
+        src = e.get("source")
+        if src is not None:
+            edge_map.setdefault(src, []).append(e.get("target"))
 
     items_result = await db.execute(
         select(ControlPlanItem).where(ControlPlanItem.cp_id == cp_id)
     )
     items = list(items_result.scalars().all())
+
+    def _children(parent_id: str, node_type: str) -> list[dict]:
+        return [
+            node_map[t]
+            for t in edge_map.get(parent_id, [])
+            if node_map.get(t, {}).get("type") == node_type
+        ]
 
     stale_items: list[dict] = []
 
@@ -395,13 +488,37 @@ async def check_stale_items(
 
         diff_fields: list[str] = []
 
-        node_name = node.get("name") or ""
-        if node_name != (item.process_name or ""):
+        # Check structural fields
+        if (node.get("name") or "") != (item.process_name or ""):
             diff_fields.append("process_name")
-
-        node_process_number = node.get("process_number") or ""
-        if node_process_number != (item.step_no or ""):
+        if (node.get("process_number") or "") != (item.step_no or ""):
             diff_fields.append("step_no")
+
+        # Check derived product characteristic fields from ProcessStepFunction
+        step_funcs = _children(item.source_fmea_node_id, "ProcessStepFunction")
+        if step_funcs:
+            # Match by product_characteristic name
+            for sf in step_funcs:
+                if sf.get("name") == item.product_characteristic:
+                    if (sf.get("specification") or "") != (item.specification_tolerance or ""):
+                        diff_fields.append("specification_tolerance")
+                    if (sf.get("classification") or "") != (item.special_class or ""):
+                        diff_fields.append("special_class")
+                    break
+
+        # Check equipment from ProcessWorkElement
+        work_elements = _children(item.source_fmea_node_id, "ProcessWorkElement")
+        if item.equipment and work_elements:
+            if not any(we.get("name") == item.equipment for we in work_elements):
+                diff_fields.append("equipment")
+
+        # Check process characteristic from ProcessWorkElementFunction
+        for we in work_elements:
+            we_funcs = _children(we.get("id"), "ProcessWorkElementFunction")
+            if item.process_characteristic and we_funcs:
+                if not any(wf.get("name") == item.process_characteristic for wf in we_funcs):
+                    diff_fields.append("process_characteristic")
+                    break
 
         if diff_fields:
             stale_items.append({

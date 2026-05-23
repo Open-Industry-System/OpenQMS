@@ -131,6 +131,8 @@ class SupplierEvaluationCreate(BaseModel):
     service_score: float
     capa_count: int | None = 0
     finding_count: int | None = 0
+    premium_freight_count: int | None = 0
+    customer_disruption_count: int | None = 0
     notes: str | None = None
 
     @field_validator("eval_type")
@@ -158,8 +160,12 @@ class SupplierEvaluationResponse(BaseModel):
     service_score: float
     capa_count: int
     finding_count: int
+    premium_freight_count: int
+    customer_disruption_count: int
     capa_penalty: float
     finding_penalty: float
+    premium_freight_penalty: float
+    customer_disruption_penalty: float
     total_score: float
     grade: str
     notes: str | None

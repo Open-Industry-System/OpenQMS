@@ -143,6 +143,26 @@ export default function FMEAEditorPage() {
     setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, [field]: value } : n)));
   }, []);
 
+  // Auto-compute initial AP on cause nodes when S/O/D risk ratings change
+  const nodesRiskKey = nodes
+    .filter((n) => n.type === "FailureCause")
+    .map((n) => `${n.id}:${n.severity}:${n.occurrence}:${n.detection}`)
+    .join("|");
+
+  useEffect(() => {
+    setNodes((prev) => {
+      let changed = false;
+      const updated = prev.map((n) => {
+        if (n.type !== "FailureCause") return n;
+        const computed = calculateAP(n.severity || 0, n.occurrence || 0, n.detection || 0);
+        if (computed && n.ap !== computed) { changed = true; return { ...n, ap: computed }; }
+        if (!computed && n.ap) { changed = true; return { ...n, ap: undefined }; }
+        return n;
+      });
+      return changed ? updated : prev;
+    });
+  }, [nodesRiskKey]);
+
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   const rows = useMemo(() => buildRows(nodes, edges), [nodes, edges]);

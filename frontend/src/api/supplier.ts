@@ -102,7 +102,7 @@ export async function listEvaluations(supplierId: string): Promise<SupplierEvalu
 
 export async function createEvaluation(
   supplierId: string,
-  data: Omit<SupplierEvaluation, "eval_id" | "supplier_id" | "created_at" | "capa_penalty" | "finding_penalty" | "total_score" | "grade" | "evaluated_by">
+  data: Omit<SupplierEvaluation, "eval_id" | "supplier_id" | "created_at" | "capa_penalty" | "finding_penalty" | "premium_freight_penalty" | "customer_disruption_penalty" | "total_score" | "grade" | "evaluated_by">
 ): Promise<SupplierEvaluation> {
   const resp = await client.post(`/suppliers/${supplierId}/evaluations`, data);
   return resp.data;

@@ -28,11 +28,15 @@ def _calculate_evaluation(
     service_score: float,
     capa_count: int,
     finding_count: int,
-) -> tuple[float, float, float, float, str]:
+    premium_freight_count: int = 0,
+    customer_disruption_count: int = 0,
+) -> tuple[float, float, float, float, float, float, str]:
     base = quality_score * 0.35 + delivery_score * 0.30 + service_score * 0.15
     capa_penalty = min(capa_count * 2, 10)
     finding_penalty = min(finding_count * 3, 10)
-    total_score = max(0.0, base - capa_penalty - finding_penalty)
+    premium_freight_penalty = min(premium_freight_count * 5, 10)
+    customer_disruption_penalty = min(customer_disruption_count * 5, 10)
+    total_score = max(0.0, base - capa_penalty - finding_penalty - premium_freight_penalty - customer_disruption_penalty)
 
     if total_score >= 72:
         grade = "A"
@@ -43,7 +47,7 @@ def _calculate_evaluation(
     else:
         grade = "D"
 
-    return base, capa_penalty, finding_penalty, total_score, grade
+    return base, capa_penalty, finding_penalty, premium_freight_penalty, customer_disruption_penalty, total_score, grade
 
 
 # ─── State machine ───
@@ -477,11 +481,14 @@ async def create_evaluation(
     service_score: float,
     capa_count: int,
     finding_count: int,
+    premium_freight_count: int,
+    customer_disruption_count: int,
     notes: str | None,
     user_id: uuid.UUID,
 ) -> SupplierEvaluation:
-    base_score, capa_penalty, finding_penalty, total_score, grade = _calculate_evaluation(
-        quality_score, delivery_score, service_score, capa_count, finding_count
+    base_score, capa_penalty, finding_penalty, premium_freight_penalty, customer_disruption_penalty, total_score, grade = _calculate_evaluation(
+        quality_score, delivery_score, service_score, capa_count, finding_count,
+        premium_freight_count, customer_disruption_count
     )
 
     evaluation = SupplierEvaluation(
@@ -493,8 +500,12 @@ async def create_evaluation(
         service_score=service_score,
         capa_count=capa_count,
         finding_count=finding_count,
+        premium_freight_count=premium_freight_count,
+        customer_disruption_count=customer_disruption_count,
         capa_penalty=capa_penalty,
         finding_penalty=finding_penalty,
+        premium_freight_penalty=premium_freight_penalty,
+        customer_disruption_penalty=customer_disruption_penalty,
         total_score=total_score,
         grade=grade,
         notes=notes,
@@ -516,8 +527,12 @@ async def create_evaluation(
             "service_score": service_score,
             "capa_count": capa_count,
             "finding_count": finding_count,
+            "premium_freight_count": premium_freight_count,
+            "customer_disruption_count": customer_disruption_count,
             "capa_penalty": capa_penalty,
             "finding_penalty": finding_penalty,
+            "premium_freight_penalty": premium_freight_penalty,
+            "customer_disruption_penalty": customer_disruption_penalty,
             "total_score": total_score,
             "grade": grade,
         },

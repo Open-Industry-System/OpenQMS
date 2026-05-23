@@ -18,6 +18,7 @@ import {
   Steps,
   Slider,
   Spin,
+  InputNumber,
   Typography,
 } from "antd";
 import {
@@ -307,8 +308,6 @@ export default function SupplierDetailPage() {
       const values = await evalForm.validateFields();
       setEvalSaving(true);
       const payload = { ...values };
-      delete payload.capa_count;
-      delete payload.finding_count;
       await createEvaluation(id, payload);
       message.success("评价已提交");
       evalForm.resetFields();
@@ -702,7 +701,7 @@ export default function SupplierDetailPage() {
                           <Text type="secondary">评价时间</Text>
                           <div>{dayjs(ev.created_at).format("YYYY-MM-DD")}</div>
                         </Col>
-                        {(ev.capa_count > 0 || ev.finding_count > 0) && (
+                        {(ev.capa_count > 0 || ev.finding_count > 0 || ev.premium_freight_count > 0 || ev.customer_disruption_count > 0) && (
                           <>
                             <Col span={8}>
                               <Text type="secondary">CAPA数量</Text>
@@ -712,6 +711,18 @@ export default function SupplierDetailPage() {
                               <Text type="secondary">发现问题数</Text>
                               <div>{ev.finding_count}</div>
                             </Col>
+                            {(ev.premium_freight_count > 0 || ev.customer_disruption_count > 0) && (
+                              <>
+                                <Col span={8}>
+                                  <Text type="secondary">超额运费</Text>
+                                  <div>{ev.premium_freight_count}</div>
+                                </Col>
+                                <Col span={8}>
+                                  <Text type="secondary">客户干扰</Text>
+                                  <div>{ev.customer_disruption_count}</div>
+                                </Col>
+                              </>
+                            )}
                           </>
                         )}
                         {ev.notes && (
@@ -776,9 +787,30 @@ export default function SupplierDetailPage() {
                     <Slider min={0} max={100} />
                   </Form.Item>
 
-                  <div style={{ marginBottom: 16, color: "#888", fontSize: 13 }}>
-                    CAPA 数与发现问题数：提交后由系统自动统计
-                  </div>
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item label="CAPA数量" name="capa_count" initialValue={0}>
+                        <InputNumber min={0} style={{ width: "100%" }} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item label="发现问题数" name="finding_count" initialValue={0}>
+                        <InputNumber min={0} style={{ width: "100%" }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item label="超额运费次数" name="premium_freight_count" initialValue={0}>
+                        <InputNumber min={0} style={{ width: "100%" }} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item label="客户干扰次数" name="customer_disruption_count" initialValue={0}>
+                        <InputNumber min={0} style={{ width: "100%" }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
 
                   <Form.Item label="备注" name="notes">
                     <TextArea rows={2} />

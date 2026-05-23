@@ -40,7 +40,17 @@ class GraphNodeSchema(BaseModel):
     revised_severity: int = Field(default=0, ge=0, le=10)    # 改进后严重度 (1-10)
     revised_occurrence: int = Field(default=0, ge=0, le=10)  # 改进后频度 (1-10)
     revised_detection: int = Field(default=0, ge=0, le=10)   # 改进后探测度 (1-10)
+    ap: str | None = None                                    # 初始措施优先级 (H / M / L)
     revised_ap: str | None = None                            # 改进后的措施优先级 (H / M / L)
+
+    @field_validator("ap")
+    @classmethod
+    def validate_ap(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ("H", "M", "L", ""):
+            raise ValueError('ap must be one of "H", "M", "L", or empty')
+        return v
 
     @field_validator("revised_ap")
     @classmethod

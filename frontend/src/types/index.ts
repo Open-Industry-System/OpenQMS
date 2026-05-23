@@ -47,6 +47,7 @@ export interface GraphNode {
   revised_severity?: number;
   revised_occurrence?: number;
   revised_detection?: number;
+  ap?: string;
   revised_ap?: string;
   p_diagram?: {
     inputs: string[];
@@ -335,8 +336,12 @@ export interface SupplierEvaluation {
   service_score: number;
   capa_count: number;
   finding_count: number;
+  premium_freight_count: number;
+  customer_disruption_count: number;
   capa_penalty: number;
   finding_penalty: number;
+  premium_freight_penalty: number;
+  customer_disruption_penalty: number;
   total_score: number;
   grade: "A" | "B" | "C" | "D";
   notes: string | null;
