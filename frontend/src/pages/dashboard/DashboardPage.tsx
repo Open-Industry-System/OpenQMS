@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Row, Col, Card, Table, Tag, Typography } from "antd";
+import { useNavigate } from "react-router-dom";
 import { getDashboard } from "../../api/dashboard";
 import KPICard from "../../components/shared/KPICard";
 import type { DashboardData } from "../../types";
@@ -8,6 +9,7 @@ import { useProductLineStore } from "../../store/productLineStore";
 const { Title } = Typography;
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const productLine = useProductLineStore((s) => s.selected);
@@ -68,6 +70,30 @@ export default function DashboardPage() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <KPICard title="8D 报告总数" value={kpi?.total_capa ?? 0} color="#1677FF" />
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} sm={12} lg={6}>
+          <div onClick={() => navigate("/special-characteristics?approval_status=submitted")} style={{ cursor: "pointer" }}>
+            <KPICard
+              title="待安全审批"
+              value={kpi?.pending_safety_approval ?? 0}
+              color={kpi && kpi.pending_safety_approval > 0 ? "#FF4D4F" : "#52C41A"}
+            />
+          </div>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <div onClick={() => navigate("/special-characteristics?suggested_only=true")} style={{ cursor: "pointer" }}>
+            <KPICard
+              title="安全建议待确认"
+              value={kpi?.safety_suggestions ?? 0}
+              color={kpi && kpi.safety_suggestions > 0 ? "#FAAD14" : "#52C41A"}
+            />
+          </div>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <KPICard title="安全特性总数" value={kpi?.total_safety ?? 0} color="#1677FF" />
         </Col>
       </Row>
 
