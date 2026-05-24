@@ -37,6 +37,7 @@ export interface MatrixRow {
   sc_name: string;
   sc_type: string;
   customer_symbol: string | null;
+  product_line_code: string;
   has_dfmea: boolean;
   has_pfmea: boolean;
   has_cp: boolean;

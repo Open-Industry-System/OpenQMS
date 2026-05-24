@@ -69,6 +69,7 @@ class MatrixRow(BaseModel):
     sc_name: str
     sc_type: str
     customer_symbol: str | None = None
+    product_line_code: str
     has_dfmea: bool
     has_pfmea: bool
     has_cp: bool

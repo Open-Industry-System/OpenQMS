@@ -263,6 +263,7 @@ async def get_matrix(db: AsyncSession, product_line: str | None = None) -> Matri
         rows.append(MatrixRow(
             sc_id=root.sc_id, sc_code=root.sc_code, sc_name=root.sc_name,
             sc_type=root.sc_type, customer_symbol=root.customer_symbol,
+            product_line_code=root.product_line_code,
             has_dfmea=dfmea_sc is not None or root.source_type == "DFMEA",
             has_pfmea=pfmea_sc is not None or root.source_type == "PFMEA",
             has_cp=has_cp, msa_status=overall_msa, has_sop=has_sop,
@@ -278,6 +279,7 @@ async def get_matrix(db: AsyncSession, product_line: str | None = None) -> Matri
             rows.append(MatrixRow(
                 sc_id=sc.sc_id, sc_code=sc.sc_code, sc_name=sc.sc_name,
                 sc_type=sc.sc_type, customer_symbol=sc.customer_symbol,
+                product_line_code=sc.product_line_code,
                 has_dfmea=False, has_pfmea=sc.source_type == "PFMEA",
                 has_cp=sc.cp_item_id is not None, msa_status=sc.msa_status or "PENDING",
                 has_sop=bool(sc.sop_ref), dfmea_link=None,
