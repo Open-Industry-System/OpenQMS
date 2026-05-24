@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Table, Button, Tag, Typography, Space, Select, Popconfirm, App, Switch,
 } from "antd";
@@ -30,9 +30,10 @@ export default function SCListPage() {
   const [page, setPage] = useState(1);
   const [scTypeFilter, setScTypeFilter] = useState<string>("");
   const [sourceTypeFilter, setSourceTypeFilter] = useState<string>("");
-  const [safetyRelatedOnly, setSafetyRelatedOnly] = useState(false);
-  const [approvalStatusFilter, setApprovalStatusFilter] = useState<string>("");
-  const [suggestedOnly, setSuggestedOnly] = useState(false);
+  const [searchParams] = useSearchParams();
+  const [safetyRelatedOnly, setSafetyRelatedOnly] = useState(searchParams.get("safety_related_only") === "true");
+  const [approvalStatusFilter, setApprovalStatusFilter] = useState<string>(searchParams.get("approval_status") || "");
+  const [suggestedOnly, setSuggestedOnly] = useState(searchParams.get("suggested_only") === "true");
   const navigate = useNavigate();
 
   const user = useAuthStore((s) => s.user);
@@ -233,7 +234,6 @@ export default function SCListPage() {
             onChange={(v) => {
               setScTypeFilter(v || "");
               setPage(1);
-              fetchData(1);
             }}
           >
             <Select.Option value="">全部</Select.Option>
@@ -248,7 +248,6 @@ export default function SCListPage() {
             onChange={(v) => {
               setSourceTypeFilter(v || "");
               setPage(1);
-              fetchData(1);
             }}
           >
             <Select.Option value="">全部</Select.Option>
@@ -257,7 +256,7 @@ export default function SCListPage() {
           </Select>
           <Switch
             checked={safetyRelatedOnly}
-            onChange={(v) => { setSafetyRelatedOnly(v); setPage(1); fetchData(1); }}
+            onChange={(v) => { setSafetyRelatedOnly(v); setPage(1); }}
             checkedChildren="安全相关"
             unCheckedChildren="全部"
           />
@@ -266,7 +265,7 @@ export default function SCListPage() {
             allowClear
             style={{ width: 120 }}
             value={approvalStatusFilter || undefined}
-            onChange={(v) => { setApprovalStatusFilter(v || ""); setPage(1); fetchData(1); }}
+            onChange={(v) => { setApprovalStatusFilter(v || ""); setPage(1); }}
           >
             <Select.Option value="">全部</Select.Option>
             <Select.Option value="pending">待提交</Select.Option>
@@ -276,7 +275,7 @@ export default function SCListPage() {
           </Select>
           <Switch
             checked={suggestedOnly}
-            onChange={(v) => { setSuggestedOnly(v); setPage(1); fetchData(1); }}
+            onChange={(v) => { setSuggestedOnly(v); setPage(1); }}
             checkedChildren="仅建议"
             unCheckedChildren="全部"
           />
