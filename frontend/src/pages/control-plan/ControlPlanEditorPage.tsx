@@ -2,18 +2,21 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Table, Card, Row, Col,
-  App, Spin, Select, Alert,
+  App, Spin, Select, Alert, Tooltip,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, PlusOutlined, DeleteOutlined,
   ImportOutlined, CheckCircleOutlined, ExclamationCircleOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 import {
   getControlPlan, createControlPlan, updateControlPlan,
   checkStaleItems, approveControlPlan,
 } from "../../api/controlPlan";
 import type { ControlPlan, ControlPlanItem } from "../../types";
+import type { CPSyncStatusItem } from "../../types/specialCharacteristic";
 import { useAuthStore } from "../../store/authStore";
+import { getCPSyncStatus, syncToCP } from "../../api/specialCharacteristic";
 import ImportFromFMEAModal from "../../components/control-plan/ImportFromFMEAModal";
 
 const { Title, Text } = Typography;
@@ -76,6 +79,7 @@ export default function ControlPlanEditorPage() {
     visible: false,
     stepNos: [],
   });
+  const [syncStatus, setSyncStatus] = useState<CPSyncStatusItem[]>([]);
 
   const user = useAuthStore((s) => s.user);
   const isApproved = cp?.status === "approved";
@@ -114,6 +118,9 @@ export default function ControlPlanEditorPage() {
         setOrgFactory(doc.org_factory || "");
         setDrawingRev(doc.drawing_rev || "");
         setItems(doc.items || []);
+        if (id) {
+          getCPSyncStatus(id).then((res) => setSyncStatus(res.items)).catch(() => {});
+        }
       })
       .catch(() => {
         message.error("加载控制计划失败");
@@ -324,17 +331,28 @@ export default function ControlPlanEditorPage() {
       title: "特殊特性分类",
       dataIndex: "special_class",
       key: "special_class",
-      width: 110,
-      render: (_: string, __: ControlPlanItem, index: number) => (
-        <Select
-          value={items[index]?.special_class || ""}
-          onChange={(value) => updateItem(index, "special_class", value)}
-          options={specialClassOptions}
-          disabled={!canEdit}
-          size="small"
-          style={{ width: "100%" }}
-        />
-      ),
+      width: 130,
+      render: (_: string, record: ControlPlanItem, index: number) => {
+        const syncItem = syncStatus.find((s) => s.item_id === record.item_id);
+        const outOfSync = syncItem?.is_out_of_sync;
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <Select
+              value={items[index]?.special_class || ""}
+              onChange={(value) => updateItem(index, "special_class", value)}
+              options={specialClassOptions}
+              disabled={!canEdit}
+              size="small"
+              style={{ width: 80 }}
+            />
+            {outOfSync && (
+              <Tooltip title="节点特性已变更，建议同步">
+                <Tag color="warning">!</Tag>
+              </Tooltip>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: "产品/过程/规格/公差",
@@ -515,6 +533,23 @@ export default function ControlPlanEditorPage() {
         {!isNew && (
           <Button icon={<ExclamationCircleOutlined />} onClick={handleCheckStale}>
             检查 PFMEA 变更
+          </Button>
+        )}
+        {!isNew && canEdit && syncStatus.some((s) => s.is_out_of_sync) && (
+          <Button
+            icon={<SyncOutlined />}
+            onClick={async () => {
+              try {
+                if (!id) return;
+                await syncToCP(id);
+                message.success("同步成功");
+                getCPSyncStatus(id).then((res) => setSyncStatus(res.items)).catch(() => {});
+              } catch {
+                message.error("同步失败");
+              }
+            }}
+          >
+            同步特殊特性
           </Button>
         )}
         {!isNew && isAdminOrManager && currentStatus !== "approved" && (

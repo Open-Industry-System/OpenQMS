@@ -28,6 +28,7 @@ from app.api.msa import (
     attribute_router,
     overview_router,
 )
+from app.api.special_characteristic import router as sc_router
 
 
 @asynccontextmanager
@@ -74,6 +75,7 @@ app.include_router(linearity_router)
 app.include_router(stability_router)
 app.include_router(attribute_router)
 app.include_router(overview_router)
+app.include_router(sc_router)
 
 
 @app.get("/api/health")

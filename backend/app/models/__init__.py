@@ -15,6 +15,7 @@ from app.models.bias import BiasStudy, BiasMeasurement, BiasResult
 from app.models.linearity import LinearityStudy, LinearityMeasurement, LinearityResult
 from app.models.stability import StabilityStudy, StabilityMeasurement, StabilityResult
 from app.models.attribute import AttributeStudy, AttributeMeasurement, AttributeResult
+from app.models.special_characteristic import SpecialCharacteristic
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -28,4 +29,5 @@ __all__ = [
     "LinearityStudy", "LinearityMeasurement", "LinearityResult",
     "StabilityStudy", "StabilityMeasurement", "StabilityResult",
     "AttributeStudy", "AttributeMeasurement", "AttributeResult",
+    "SpecialCharacteristic",
 ]

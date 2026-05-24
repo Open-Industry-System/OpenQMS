@@ -376,3 +376,4 @@ export interface SupplierExpiryAlert {
 
 export * from "./spc";
 export * from "./msa";
+export * from "./specialCharacteristic";

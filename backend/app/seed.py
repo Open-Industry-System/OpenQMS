@@ -23,6 +23,8 @@ SAMPLE_GRAPH = {
         {"id": "wef_1", "type": "ProcessWorkElementFunction", "name": "设备提供适宜且稳定的贴装压力", "requirement": "贴装压力 3.0±0.5N", "severity": 0, "occurrence": 0, "detection": 0},
         {"id": "fe_1", "type": "FailureEffect", "name": "电控板功能丧失，导致整车无法启动报警", "severity": 8, "severity_plant": 4, "severity_customer": 8, "severity_user": 8, "occurrence": 0, "detection": 0},
         {"id": "fm_1", "type": "FailureMode", "name": "元器件贴装偏移", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "fm-cc-001", "type": "FailureMode", "name": "空载转速偏差超出规格", "classification": "CC", "severity": 9, "occurrence": 3, "detection": 4},
+        {"id": "fm-sc-001", "type": "FailureMode", "name": "压装扭矩不稳定", "classification": "SC", "severity": 6, "occurrence": 4, "detection": 3},
         {"id": "fc_1", "type": "FailureCause", "name": "贴装吸嘴磨损导致压力设定偏小", "severity": 0, "occurrence": 4, "detection": 0},
         {"id": "pc_1", "type": "PreventionControl", "name": "开机吸嘴压力自动零点校准与设备预防性维护", "severity": 0, "occurrence": 0, "detection": 0},
         {"id": "dc_1", "type": "DetectionControl", "name": "贴装后在线 3D-AOI 光学检测仪", "severity": 0, "occurrence": 0, "detection": 3},
@@ -186,6 +188,53 @@ async def seed():
             created_by=engineer.user_id,
         )
         db.add_all([capa1, capa2])
+
+        # --- Special Characteristics seed data ---
+        from app.models.special_characteristic import SpecialCharacteristic
+
+        admin_result = await db.execute(select(User).where(User.username == "admin"))
+        admin_id = admin_result.scalar_one().user_id
+
+        sc_data = [
+            {
+                "sc_code": "SC-2026-001",
+                "sc_name": "空载转速偏差",
+                "sc_type": "CC",
+                "customer_symbol": "🛡️",
+                "sc_category": "产品特性",
+                "spec_requirement": "空载转速 3500±50 RPM",
+                "source_fmea_id": fmea1.fmea_id,
+                "source_node_id": "fm-cc-001",
+                "source_type": "PFMEA",
+                "product_line_code": "DC-DC-100",
+                "msa_status": "PASS",
+                "sop_ref": "SOP-09",
+                "is_supplier_shared": True,
+                "supplier_code": "SUP-08",
+            },
+            {
+                "sc_code": "SC-2026-002",
+                "sc_name": "压装扭矩",
+                "sc_type": "SC",
+                "customer_symbol": "(S)",
+                "sc_category": "过程特性",
+                "spec_requirement": "压装扭矩 25±2 Nm",
+                "source_fmea_id": fmea1.fmea_id,
+                "source_node_id": "fm-sc-001",
+                "source_type": "PFMEA",
+                "product_line_code": "DC-DC-100",
+                "msa_status": "PENDING",
+            },
+        ]
+
+        for sc_dict in sc_data:
+            existing = await db.execute(
+                select(SpecialCharacteristic).where(SpecialCharacteristic.sc_code == sc_dict["sc_code"])
+            )
+            if not existing.scalar_one_or_none():
+                sc = SpecialCharacteristic(**sc_dict, created_by=admin_id)
+                db.add(sc)
+
         await db.commit()
 
     print("Seed data created successfully!")
