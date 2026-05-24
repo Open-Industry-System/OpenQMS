@@ -144,20 +144,41 @@ async def sync_from_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUI
     graph = fmea.graph_data if isinstance(fmea.graph_data, dict) else {}
     nodes = graph.get("nodes", [])
     source_type = "DFMEA" if fmea.fmea_type == "DFMEA" else "PFMEA"
-    classified_nodes = {n["id"]: n for n in nodes if n.get("classification") in ("CC", "SC")}
+    nodes_to_sync = {n["id"]: n for n in nodes if n.get("classification") in ("CC", "SC") or n.get("severity", 0) >= 9}
     existing_result = await db.execute(
         select(SpecialCharacteristic).where(SpecialCharacteristic.source_fmea_id == fmea_id)
     )
     existing = {sc.source_node_id: sc for sc in existing_result.scalars().all()}
+    # Severity drop detection: find existing safety SCs whose node severity dropped below 9
+    for node_id, sc in existing.items():
+        node = nodes_to_sync.get(node_id)
+        if sc.is_safety_related and node and node.get("severity", 0) < 9:
+            if sc.safety_approval_status == SafetyApprovalStatus.APPROVED.value:
+                await _create_audit(db, "SAFETY_SEVERITY_DROP", sc.sc_id, user_id, {
+                    "sc_code": sc.sc_code,
+                    "warning": "FMEA严重度已下降至8，请手动评估是否保留安全属性",
+                    "previous_severity": 9,
+                    "current_severity": node.get("severity", 0),
+                })
+            elif sc.is_safety_suggested and not sc.is_safety_related:
+                sc.is_safety_suggested = False
+            elif sc.safety_approval_status in (SafetyApprovalStatus.PENDING.value, SafetyApprovalStatus.SUBMITTED.value, SafetyApprovalStatus.REJECTED.value):
+                await _create_audit(db, "SAFETY_SEVERITY_DROP", sc.sc_id, user_id, {
+                    "sc_code": sc.sc_code,
+                    "warning": "FMEA严重度已下降至8，但该安全特性处于审批流程中，请人工评估",
+                })
     created_or_updated = []
-    for node_id, node in classified_nodes.items():
-        sc_type = node["classification"]
+    for node_id, node in nodes_to_sync.items():
+        sc_type = node.get("classification") or "CC"
         if node_id in existing:
             sc = existing[node_id]
             if sc.sc_type != sc_type:
                 sc.sc_type = sc_type
             if sc.sc_name != node.get("name", ""):
                 sc.sc_name = node.get("name", "")
+            # Auto-suggest safety for severity >= 9 CC nodes not yet safety-related
+            if node.get("severity", 0) >= 9 and sc_type == "CC" and not sc.is_safety_related:
+                sc.is_safety_suggested = True
             created_or_updated.append(_to_response(sc))
         else:
             sc_code = await generate_sc_code(db)
@@ -177,16 +198,24 @@ async def sync_from_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUI
                 source_fmea_id=fmea_id, source_node_id=node_id, source_type=source_type,
                 parent_sc_id=parent_sc_id, product_line_code=fmea.product_line_code,
                 created_by=user_id,
+                is_safety_suggested=node.get("severity", 0) >= 9 and sc_type == "CC",
             )
             db.add(sc)
             created_or_updated.append(_to_response(sc))
     for node_id, sc in existing.items():
-        if node_id not in classified_nodes:
-            await db.delete(sc)
+        if node_id not in nodes_to_sync:
+            if sc.is_safety_related:
+                # Intercept: don't auto-delete safety characteristics
+                await _create_audit(db, "SAFETY_DELETE_WARNING", sc.sc_id, user_id, {
+                    "sc_code": sc.sc_code,
+                    "warning": "FMEA中关联节点已变更，但该特性为安全特性，系统已拦截自动删除，请人工评估并处理",
+                })
+            else:
+                await db.delete(sc)
     await _create_audit(db, "SYNC", fmea_id, user_id, {
         "action": "sync_from_fmea",
-        "classified_count": len(classified_nodes),
-        "deleted_count": len([n for n in existing if n not in classified_nodes]),
+        "classified_count": len(nodes_to_sync),
+        "deleted_count": len([n for n in existing if n not in nodes_to_sync]),
     })
     await db.commit()
     return created_or_updated
