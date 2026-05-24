@@ -169,8 +169,6 @@ async def sync_from_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUI
                     "previous_severity": 9,
                     "current_severity": node.get("severity", 0),
                 })
-            elif sc.is_safety_suggested and not sc.is_safety_related:
-                sc.is_safety_suggested = False
             elif sc.safety_approval_status in (SafetyApprovalStatus.PENDING.value, SafetyApprovalStatus.SUBMITTED.value, SafetyApprovalStatus.REJECTED.value):
                 await _create_audit(db, "SAFETY_SEVERITY_DROP", sc.sc_id, user_id, {
                     "sc_code": sc.sc_code,
@@ -492,7 +490,8 @@ async def safety_submit(
     if not sc:
         raise ValueError("Special characteristic not found")
     if not sc.is_safety_related:
-        raise ValueError("Not a safety characteristic")
+        sc.is_safety_related = True
+        sc.safety_approval_status = SafetyApprovalStatus.PENDING.value
     if not _can_safety_transition(
         SafetyApprovalStatus(sc.safety_approval_status) if sc.safety_approval_status else None,
         SafetyApprovalStatus.SUBMITTED,
@@ -534,12 +533,12 @@ async def safety_approve(
     sc.safety_approved_by = user_id
     sc.safety_approved_at = datetime.utcnow()
     sc.safety_approval_comment = data.comment
-    await db.commit()
-    await db.refresh(sc)
     await _create_audit(db, "SAFETY_APPROVE", sc_id, user_id, {
         "sc_code": sc.sc_code,
         "comment": data.comment,
     })
+    await db.commit()
+    await db.refresh(sc)
     return _to_response(sc)
 
 
@@ -556,12 +555,12 @@ async def safety_reject(
     sc.safety_approved_by = user_id
     sc.safety_approved_at = datetime.utcnow()
     sc.safety_approval_comment = data.comment
-    await db.commit()
-    await db.refresh(sc)
     await _create_audit(db, "SAFETY_REJECT", sc_id, user_id, {
         "sc_code": sc.sc_code,
         "comment": data.comment,
     })
+    await db.commit()
+    await db.refresh(sc)
     return _to_response(sc)
 
 
@@ -577,9 +576,9 @@ async def safety_confirm(
     sc.is_safety_related = True
     sc.is_safety_suggested = False
     sc.safety_approval_status = SafetyApprovalStatus.PENDING.value
+    await _create_audit(db, "SAFETY_CONFIRM", sc_id, user_id, {"sc_code": sc.sc_code})
     await db.commit()
     await db.refresh(sc)
-    await _create_audit(db, "SAFETY_CONFIRM", sc_id, user_id, {"sc_code": sc.sc_code})
     return _to_response(sc)
 
 
@@ -593,9 +592,9 @@ async def safety_dismiss(
     if not sc.is_safety_suggested:
         raise ValueError("Not a safety suggestion")
     sc.is_safety_suggested = False
+    await _create_audit(db, "SAFETY_DISMISS", sc_id, user_id, {"sc_code": sc.sc_code})
     await db.commit()
     await db.refresh(sc)
-    await _create_audit(db, "SAFETY_DISMISS", sc_id, user_id, {"sc_code": sc.sc_code})
     return _to_response(sc)
 
 
@@ -618,9 +617,9 @@ async def safety_cancel(
     sc.safety_approval_comment = None
     sc.safety_regulation_ref = None
     sc.safety_verification_method = None
+    await _create_audit(db, "SAFETY_CANCEL", sc_id, user_id, {"sc_code": sc.sc_code})
     await db.commit()
     await db.refresh(sc)
-    await _create_audit(db, "SAFETY_CANCEL", sc_id, user_id, {"sc_code": sc.sc_code})
     return _to_response(sc)
 
 
