@@ -38,7 +38,7 @@ export default function CAPAListPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, [productLine]);
+  useEffect(() => { fetchData(1); }, [productLine]);
 
   const handleCreate = async (values: { title: string; document_no: string; severity: string; due_date?: dayjs.Dayjs }) => {
     try {

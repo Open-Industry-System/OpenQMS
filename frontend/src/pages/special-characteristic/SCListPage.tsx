@@ -50,7 +50,7 @@ export default function SCListPage() {
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData(1);
   }, [scTypeFilter, sourceTypeFilter, productLine]);
 
   const handleDelete = async (id: string) => {

@@ -61,7 +61,7 @@ export default function SPCListPage() {
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData(1);
   }, [productLine]);
 
   const handleCreate = async (values: {

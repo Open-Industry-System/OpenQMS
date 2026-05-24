@@ -162,10 +162,6 @@ export default function QualityGoalListPage() {
     listUsers().then(setUsers).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    getQualityGoalStats().then(setStats).catch(() => {});
-  }, []);
-
   const handleCreate = () => {
     setEditingGoal(null);
     form.resetFields();

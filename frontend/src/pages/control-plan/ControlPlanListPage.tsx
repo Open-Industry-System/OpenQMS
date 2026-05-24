@@ -49,7 +49,7 @@ export default function ControlPlanListPage() {
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData(1);
   }, [productLine]);
 
   const handleCreate = async (values: { title: string; document_no: string }) => {
