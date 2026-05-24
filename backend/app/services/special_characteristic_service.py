@@ -456,8 +456,6 @@ async def safety_submit(
     sc.safety_verification_method = data.safety_verification_method.strip()
     sc.safety_submitted_by = user_id
     sc.safety_submitted_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(sc)
     await _create_audit(db, "SAFETY_SUBMIT", sc_id, user_id, {
         "sc_code": sc.sc_code,
         "safety_regulation_ref": sc.safety_regulation_ref,
@@ -466,6 +464,8 @@ async def safety_submit(
         "read_by_users": [],
         "auto_roles": ["质量经理", "工艺工程师"] + (["供应链管理员"] if sc.is_supplier_shared else []),
     })
+    await db.commit()
+    await db.refresh(sc)
     return _to_response(sc)
 
 
