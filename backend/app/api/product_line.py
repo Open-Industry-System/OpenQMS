@@ -27,10 +27,10 @@ async def create_product_line(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_admin),
 ):
-    existing = await product_line_service.get_product_line(db, req.code)
-    if existing:
-        raise HTTPException(status_code=400, detail=f"产品线 '{req.code}' 已存在")
-    pl = await product_line_service.create_product_line(db, req.code, req.name)
+    try:
+        pl = await product_line_service.create_product_line(db, req.code, req.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return schemas.ProductLineResponse.model_validate(pl)
 
 

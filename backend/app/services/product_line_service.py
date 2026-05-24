@@ -17,6 +17,9 @@ async def get_product_line(db: AsyncSession, code: str) -> ProductLine | None:
 
 
 async def create_product_line(db: AsyncSession, code: str, name: str) -> ProductLine:
+    existing = await get_product_line(db, code)
+    if existing:
+        raise ValueError(f"产品线 '{code}' 已存在")
     pl = ProductLine(code=code, name=name)
     db.add(pl)
     await db.commit()
