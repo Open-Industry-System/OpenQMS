@@ -10,7 +10,32 @@ from app.models.audit import AuditLog
 from app.schemas.special_characteristic import (
     SCCreate, SCUpdate, SCResponse, SCListResponse,
     MatrixRow, MatrixResponse, SeverityWarning, CPSyncStatusItem, CPSyncStatusResponse,
+    SafetySubmitRequest, SafetyApprovalAction,
 )
+
+
+from enum import Enum
+
+
+class SafetyApprovalStatus(str, Enum):
+    PENDING = "pending"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+SAFETY_APPROVAL_TRANSITIONS: dict[SafetyApprovalStatus, list[SafetyApprovalStatus]] = {
+    SafetyApprovalStatus.PENDING: [SafetyApprovalStatus.SUBMITTED],
+    SafetyApprovalStatus.SUBMITTED: [SafetyApprovalStatus.APPROVED, SafetyApprovalStatus.REJECTED],
+    SafetyApprovalStatus.APPROVED: [SafetyApprovalStatus.PENDING],
+    SafetyApprovalStatus.REJECTED: [SafetyApprovalStatus.SUBMITTED],
+}
+
+
+def _can_safety_transition(current: SafetyApprovalStatus | None, target: SafetyApprovalStatus) -> bool:
+    if current is None:
+        return target == SafetyApprovalStatus.PENDING
+    return target in SAFETY_APPROVAL_TRANSITIONS.get(current, [])
 
 
 async def generate_sc_code(db: AsyncSession) -> str:
@@ -405,6 +430,171 @@ def _to_response(sc: SpecialCharacteristic) -> SCResponse:
         supplier_code=sc.supplier_code, created_by=sc.created_by,
         created_at=sc.created_at, updated_at=sc.updated_at,
     )
+
+
+async def safety_submit(
+    db: AsyncSession, sc_id: uuid.UUID, data: SafetySubmitRequest, user_id: uuid.UUID
+) -> SCResponse:
+    result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
+    sc = result.scalar_one_or_none()
+    if not sc:
+        raise ValueError("Special characteristic not found")
+    if not sc.is_safety_related:
+        raise ValueError("Not a safety characteristic")
+    if not _can_safety_transition(
+        SafetyApprovalStatus(sc.safety_approval_status) if sc.safety_approval_status else None,
+        SafetyApprovalStatus.SUBMITTED,
+    ):
+        raise ValueError(f"Cannot transition from {sc.safety_approval_status} to submitted")
+    if not data.safety_regulation_ref or not data.safety_regulation_ref.strip():
+        raise ValueError("提交审批时必须填写法规引用")
+    if not data.safety_verification_method or not data.safety_verification_method.strip():
+        raise ValueError("提交审批时必须填写安全验证方法")
+
+    sc.safety_approval_status = SafetyApprovalStatus.SUBMITTED.value
+    sc.safety_regulation_ref = data.safety_regulation_ref.strip()
+    sc.safety_verification_method = data.safety_verification_method.strip()
+    sc.safety_submitted_by = user_id
+    sc.safety_submitted_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(sc)
+    await _create_audit(db, "SAFETY_SUBMIT", sc_id, user_id, {
+        "sc_code": sc.sc_code,
+        "safety_regulation_ref": sc.safety_regulation_ref,
+        "notification_type": "safety_circular",
+        "required_roles": ["manager", "quality_engineer"],
+        "read_by_users": [],
+        "auto_roles": ["质量经理", "工艺工程师"] + (["供应链管理员"] if sc.is_supplier_shared else []),
+    })
+    return _to_response(sc)
+
+
+async def safety_approve(
+    db: AsyncSession, sc_id: uuid.UUID, data: SafetyApprovalAction, user_id: uuid.UUID
+) -> SCResponse:
+    result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
+    sc = result.scalar_one_or_none()
+    if not sc:
+        raise ValueError("Special characteristic not found")
+    if sc.safety_approval_status != SafetyApprovalStatus.SUBMITTED.value:
+        raise ValueError("Can only approve submitted safety characteristics")
+    sc.safety_approval_status = SafetyApprovalStatus.APPROVED.value
+    sc.safety_approved_by = user_id
+    sc.safety_approved_at = datetime.utcnow()
+    sc.safety_approval_comment = data.comment
+    await db.commit()
+    await db.refresh(sc)
+    await _create_audit(db, "SAFETY_APPROVE", sc_id, user_id, {
+        "sc_code": sc.sc_code,
+        "comment": data.comment,
+    })
+    return _to_response(sc)
+
+
+async def safety_reject(
+    db: AsyncSession, sc_id: uuid.UUID, data: SafetyApprovalAction, user_id: uuid.UUID
+) -> SCResponse:
+    result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
+    sc = result.scalar_one_or_none()
+    if not sc:
+        raise ValueError("Special characteristic not found")
+    if sc.safety_approval_status != SafetyApprovalStatus.SUBMITTED.value:
+        raise ValueError("Can only reject submitted safety characteristics")
+    sc.safety_approval_status = SafetyApprovalStatus.REJECTED.value
+    sc.safety_approved_by = user_id
+    sc.safety_approved_at = datetime.utcnow()
+    sc.safety_approval_comment = data.comment
+    await db.commit()
+    await db.refresh(sc)
+    await _create_audit(db, "SAFETY_REJECT", sc_id, user_id, {
+        "sc_code": sc.sc_code,
+        "comment": data.comment,
+    })
+    return _to_response(sc)
+
+
+async def safety_confirm(
+    db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID
+) -> SCResponse:
+    result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
+    sc = result.scalar_one_or_none()
+    if not sc:
+        raise ValueError("Special characteristic not found")
+    if not sc.is_safety_suggested:
+        raise ValueError("Not a safety suggestion")
+    sc.is_safety_related = True
+    sc.is_safety_suggested = False
+    sc.safety_approval_status = SafetyApprovalStatus.PENDING.value
+    await db.commit()
+    await db.refresh(sc)
+    await _create_audit(db, "SAFETY_CONFIRM", sc_id, user_id, {"sc_code": sc.sc_code})
+    return _to_response(sc)
+
+
+async def safety_dismiss(
+    db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID
+) -> SCResponse:
+    result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
+    sc = result.scalar_one_or_none()
+    if not sc:
+        raise ValueError("Special characteristic not found")
+    if not sc.is_safety_suggested:
+        raise ValueError("Not a safety suggestion")
+    sc.is_safety_suggested = False
+    await db.commit()
+    await db.refresh(sc)
+    await _create_audit(db, "SAFETY_DISMISS", sc_id, user_id, {"sc_code": sc.sc_code})
+    return _to_response(sc)
+
+
+async def safety_cancel(
+    db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID
+) -> SCResponse:
+    result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
+    sc = result.scalar_one_or_none()
+    if not sc:
+        raise ValueError("Special characteristic not found")
+    if not sc.is_safety_related:
+        raise ValueError("Not a safety characteristic")
+    sc.is_safety_related = False
+    sc.is_safety_suggested = False
+    sc.safety_approval_status = None
+    sc.safety_submitted_by = None
+    sc.safety_submitted_at = None
+    sc.safety_approved_by = None
+    sc.safety_approved_at = None
+    sc.safety_approval_comment = None
+    sc.safety_regulation_ref = None
+    sc.safety_verification_method = None
+    await db.commit()
+    await db.refresh(sc)
+    await _create_audit(db, "SAFETY_CANCEL", sc_id, user_id, {"sc_code": sc.sc_code})
+    return _to_response(sc)
+
+
+async def mark_audit_log_read(
+    db: AsyncSession, log_id: uuid.UUID, user_id: uuid.UUID, username: str
+) -> AuditLog:
+    result = await db.execute(select(AuditLog).where(AuditLog.log_id == log_id))
+    log = result.scalar_one_or_none()
+    if not log:
+        raise ValueError("Audit log not found")
+    changed = log.changed_fields or {}
+    read_by = changed.get("read_by_users", [])
+    if any(r["user_id"] == str(user_id) for r in read_by):
+        return log
+    read_by.append({
+        "user_id": str(user_id),
+        "username": username,
+        "read_at": datetime.utcnow().isoformat(),
+    })
+    changed["read_by_users"] = read_by
+    log.changed_fields = changed
+    # SQLAlchemy JSONB 原位修改陷阱：必须显式标记字段已变，否则 commit 不会触发 UPDATE
+    flag_modified(log, "changed_fields")
+    await db.commit()
+    await db.refresh(log)
+    return log
 
 
 async def _create_audit(db: AsyncSession, action: str, record_id: uuid.UUID, user_id: uuid.UUID, detail: dict):
