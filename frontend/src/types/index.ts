@@ -129,6 +129,9 @@ export interface DashboardData {
     overdue_capa: number;
     avg_rpn: number;
     high_rpn_count: number;
+    total_safety: number;
+    pending_safety_approval: number;
+    safety_suggestions: number;
   };
   trends: Record<string, unknown>;
   alerts: unknown[];
