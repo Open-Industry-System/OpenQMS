@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Table, Button, Tag, Typography, Space, Select, Popconfirm, App,
+  Table, Button, Tag, Typography, Space, Select, Popconfirm, App, Switch,
 } from "antd";
 import {
   PlusOutlined, FileTextOutlined, DeleteOutlined, TableOutlined,
+  SafetyCertificateOutlined, ExclamationCircleOutlined,
 } from "@ant-design/icons";
-import { listSCs, deleteSC } from "../../api/specialCharacteristic";
+import {
+  listSCs, deleteSC, safetyConfirm, safetyDismiss,
+} from "../../api/specialCharacteristic";
 import type { SpecialCharacteristic } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -27,6 +30,9 @@ export default function SCListPage() {
   const [page, setPage] = useState(1);
   const [scTypeFilter, setScTypeFilter] = useState<string>("");
   const [sourceTypeFilter, setSourceTypeFilter] = useState<string>("");
+  const [safetyRelatedOnly, setSafetyRelatedOnly] = useState(false);
+  const [approvalStatusFilter, setApprovalStatusFilter] = useState<string>("");
+  const [suggestedOnly, setSuggestedOnly] = useState(false);
   const navigate = useNavigate();
 
   const user = useAuthStore((s) => s.user);
@@ -41,6 +47,9 @@ export default function SCListPage() {
       product_line: productLine || undefined,
       sc_type: scTypeFilter || undefined,
       source_type: sourceTypeFilter || undefined,
+      safety_related_only: safetyRelatedOnly,
+      approval_status: approvalStatusFilter || undefined,
+      suggested_only: suggestedOnly,
     })
       .then((res) => {
         setData(res.items);
@@ -51,7 +60,7 @@ export default function SCListPage() {
 
   useEffect(() => {
     fetchData(1);
-  }, [scTypeFilter, sourceTypeFilter, productLine]);
+  }, [scTypeFilter, sourceTypeFilter, productLine, safetyRelatedOnly, approvalStatusFilter, suggestedOnly]);
 
   const handleDelete = async (id: string) => {
     try {
@@ -60,6 +69,26 @@ export default function SCListPage() {
       fetchData();
     } catch {
       message.error("删除失败");
+    }
+  };
+
+  const handleSafetyConfirm = async (id: string) => {
+    try {
+      await safetyConfirm(id);
+      message.success("已确认为安全特性");
+      fetchData();
+    } catch {
+      message.error("确认失败");
+    }
+  };
+
+  const handleSafetyDismiss = async (id: string) => {
+    try {
+      await safetyDismiss(id);
+      message.success("已忽略安全建议");
+      fetchData();
+    } catch {
+      message.error("忽略失败");
     }
   };
 
@@ -80,9 +109,17 @@ export default function SCListPage() {
       title: "类型",
       dataIndex: "sc_type",
       key: "sc_type",
-      width: 80,
-      render: (t: string) => (
-        <Tag color={t === "CC" ? "red" : "gold"}>{t}</Tag>
+      width: 100,
+      render: (t: string, record: SpecialCharacteristic) => (
+        <Space>
+          <Tag color={t === "CC" ? "red" : "gold"}>{t}</Tag>
+          {record.is_safety_related && (
+            <SafetyCertificateOutlined style={{ color: "#ff4d4f", fontSize: 16 }} />
+          )}
+          {record.is_safety_suggested && !record.is_safety_related && (
+            <ExclamationCircleOutlined style={{ color: "#faad14", fontSize: 16 }} />
+          )}
+        </Space>
       ),
     },
     {
@@ -138,7 +175,7 @@ export default function SCListPage() {
     {
       title: "操作",
       key: "actions",
-      width: 140,
+      width: 280,
       render: (_: unknown, record: SpecialCharacteristic) => (
         <Space>
           <Button
@@ -148,6 +185,16 @@ export default function SCListPage() {
           >
             查看
           </Button>
+          {record.is_safety_suggested && !record.is_safety_related && !isViewer && (
+            <>
+              <Button type="link" size="small" onClick={() => handleSafetyConfirm(record.sc_id)}>
+                确认安全
+              </Button>
+              <Button type="link" size="small" danger onClick={() => handleSafetyDismiss(record.sc_id)}>
+                忽略
+              </Button>
+            </>
+          )}
           {!isViewer && (
             <Popconfirm
               title="确认删除该特殊特性？"
@@ -208,6 +255,31 @@ export default function SCListPage() {
             <Select.Option value="DFMEA">DFMEA</Select.Option>
             <Select.Option value="PFMEA">PFMEA</Select.Option>
           </Select>
+          <Switch
+            checked={safetyRelatedOnly}
+            onChange={(v) => { setSafetyRelatedOnly(v); setPage(1); fetchData(1); }}
+            checkedChildren="安全相关"
+            unCheckedChildren="全部"
+          />
+          <Select
+            placeholder="审批状态"
+            allowClear
+            style={{ width: 120 }}
+            value={approvalStatusFilter || undefined}
+            onChange={(v) => { setApprovalStatusFilter(v || ""); setPage(1); fetchData(1); }}
+          >
+            <Select.Option value="">全部</Select.Option>
+            <Select.Option value="pending">待提交</Select.Option>
+            <Select.Option value="submitted">待审批</Select.Option>
+            <Select.Option value="approved">已批准</Select.Option>
+            <Select.Option value="rejected">已驳回</Select.Option>
+          </Select>
+          <Switch
+            checked={suggestedOnly}
+            onChange={(v) => { setSuggestedOnly(v); setPage(1); fetchData(1); }}
+            checkedChildren="仅建议"
+            unCheckedChildren="全部"
+          />
         </Space>
         {!isViewer && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/special-characteristics/new")}>
