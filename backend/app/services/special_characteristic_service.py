@@ -57,6 +57,9 @@ async def list_special_characteristics(
     db: AsyncSession, sc_type: str | None = None,
     product_line: str | None = None, source_type: str | None = None,
     page: int = 1, page_size: int = 20,
+    safety_related_only: bool = False,
+    approval_status: str | None = None,
+    suggested_only: bool = False,
 ) -> SCListResponse:
     query = select(SpecialCharacteristic).order_by(SpecialCharacteristic.created_at.desc())
     if sc_type:
@@ -65,6 +68,12 @@ async def list_special_characteristics(
         query = query.where(SpecialCharacteristic.product_line_code == product_line)
     if source_type:
         query = query.where(SpecialCharacteristic.source_type == source_type)
+    if safety_related_only:
+        query = query.where(SpecialCharacteristic.is_safety_related == True)
+    if approval_status:
+        query = query.where(SpecialCharacteristic.safety_approval_status == approval_status)
+    if suggested_only:
+        query = query.where(SpecialCharacteristic.is_safety_suggested == True)
     total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar() or 0
     result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
@@ -318,6 +327,7 @@ async def get_matrix(db: AsyncSession, product_line: str | None = None) -> Matri
             sc_id=root.sc_id, sc_code=root.sc_code, sc_name=root.sc_name,
             sc_type=root.sc_type, customer_symbol=root.customer_symbol,
             product_line_code=root.product_line_code,
+            is_safety_related=root.is_safety_related,
             has_dfmea=dfmea_sc is not None or root.source_type == "DFMEA",
             has_pfmea=pfmea_sc is not None or root.source_type == "PFMEA",
             has_cp=has_cp, msa_status=overall_msa, has_sop=has_sop,
@@ -334,6 +344,7 @@ async def get_matrix(db: AsyncSession, product_line: str | None = None) -> Matri
                 sc_id=sc.sc_id, sc_code=sc.sc_code, sc_name=sc.sc_name,
                 sc_type=sc.sc_type, customer_symbol=sc.customer_symbol,
                 product_line_code=sc.product_line_code,
+                is_safety_related=sc.is_safety_related,
                 has_dfmea=False, has_pfmea=sc.source_type == "PFMEA",
                 has_cp=sc.cp_item_id is not None, msa_status=sc.msa_status or "PENDING",
                 has_sop=bool(sc.sop_ref), dfmea_link=None,
@@ -457,7 +468,19 @@ def _to_response(sc: SpecialCharacteristic) -> SCResponse:
         product_line_code=sc.product_line_code,
         is_supplier_shared=sc.is_supplier_shared or False,
         supplier_code=sc.supplier_code, created_by=sc.created_by,
-        created_at=sc.created_at, updated_at=sc.updated_at,
+        created_at=sc.created_at,
+        # Safety fields
+        is_safety_related=sc.is_safety_related,
+        is_safety_suggested=sc.is_safety_suggested,
+        safety_approval_status=sc.safety_approval_status,
+        safety_submitted_by=sc.safety_submitted_by,
+        safety_submitted_at=sc.safety_submitted_at,
+        safety_approved_by=sc.safety_approved_by,
+        safety_approved_at=sc.safety_approved_at,
+        safety_approval_comment=sc.safety_approval_comment,
+        safety_regulation_ref=sc.safety_regulation_ref,
+        safety_verification_method=sc.safety_verification_method,
+        updated_at=sc.updated_at,
     )
 
 
