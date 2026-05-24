@@ -8,6 +8,7 @@ from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.fmea import FMEADocument
 from app.models.audit import AuditLog
 from app.schemas.control_plan import ControlPlanCreate, ControlPlanUpdate, ImportFromFMEARequest
+from app.services.product_line_service import validate_product_line
 
 
 async def create_audit_log(
@@ -43,12 +44,14 @@ async def create_control_plan(
     db: AsyncSession, data: ControlPlanCreate, user_id: uuid.UUID
 ) -> ControlPlan:
     """Create a new ControlPlan. Use provided document_no if given, else auto-generate."""
+    await validate_product_line(db, data.product_line_code)
     document_no = data.document_no if data.document_no else await generate_document_no(db)
 
     cp = ControlPlan(
         cp_id=uuid.uuid4(),
         document_no=document_no,
         title=data.title,
+        product_line_code=data.product_line_code,
         fmea_ref_id=data.fmea_ref_id,
         phase=data.phase,
         part_no=data.part_no,
@@ -87,11 +90,15 @@ async def get_control_plan(db: AsyncSession, cp_id: uuid.UUID) -> ControlPlan | 
 
 
 async def list_control_plans(
-    db: AsyncSession, page: int = 1, page_size: int = 20
+    db: AsyncSession, page: int = 1, page_size: int = 20, product_line: str | None = None,
 ) -> dict:
     """Return paginated list of control plans."""
     query = select(ControlPlan).order_by(ControlPlan.created_at.desc())
     count_query = select(func.count(ControlPlan.cp_id))
+
+    if product_line:
+        query = query.where(ControlPlan.product_line_code == product_line)
+        count_query = count_query.where(ControlPlan.product_line_code == product_line)
 
     query = query.offset((page - 1) * page_size).limit(page_size)
 
@@ -119,6 +126,9 @@ async def update_control_plan(
     if cp.status == "approved":
         raise ValueError("Cannot update an approved control plan.")
 
+    if data.product_line_code is not None:
+        await validate_product_line(db, data.product_line_code)
+
     changed_fields = {}
 
     for field in [
@@ -132,6 +142,7 @@ async def update_control_plan(
         "drawing_rev",
         "org_factory",
         "core_group",
+        "product_line_code",
     ]:
         value = getattr(data, field, None)
         if value is not None:

@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.models.capa import CAPAEightD
 from app.state_machines.eightd_state import EightDState, can_transition
 from app.models.audit import AuditLog
+from app.services.product_line_service import validate_product_line
 
 
 async def list_capas(
@@ -14,6 +15,7 @@ async def list_capas(
     page: int = 1,
     page_size: int = 20,
     status: str | None = None,
+    product_line: str | None = None,
 ) -> tuple[list[CAPAEightD], int]:
     query = select(CAPAEightD)
     count_query = select(func.count(CAPAEightD.report_id))
@@ -21,6 +23,10 @@ async def list_capas(
     if status:
         query = query.where(CAPAEightD.status == status)
         count_query = count_query.where(CAPAEightD.status == status)
+
+    if product_line:
+        query = query.where(CAPAEightD.product_line_code == product_line)
+        count_query = count_query.where(CAPAEightD.product_line_code == product_line)
 
     query = query.order_by(CAPAEightD.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -46,7 +52,9 @@ async def create_capa(
     severity: str,
     due_date,
     user_id: uuid.UUID,
+    product_line_code: str = "DC-DC-100",
 ) -> CAPAEightD:
+    await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
     existing_result = await db.execute(
         select(CAPAEightD).where(CAPAEightD.document_no == document_no)
@@ -61,6 +69,7 @@ async def create_capa(
         document_no=document_no,
         severity=severity,
         due_date=due_date,
+        product_line_code=product_line_code,
         created_by=user_id,
     )
     db.add(capa)
@@ -75,6 +84,7 @@ async def create_capa(
             "document_no": document_no,
             "severity": severity,
             "due_date": str(due_date) if due_date else None,
+            "product_line_code": product_line_code,
             "status": capa.status,
         },
         operated_by=user_id,
@@ -97,6 +107,9 @@ async def update_capa(
     update_data: dict,
     user_id: uuid.UUID,
 ) -> CAPAEightD:
+    if "product_line_code" in update_data and update_data["product_line_code"] is not None:
+        await validate_product_line(db, update_data["product_line_code"])
+
     changed_fields = {}
     for key, value in update_data.items():
         if value is not None and hasattr(capa, key):

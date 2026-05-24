@@ -6,23 +6,28 @@ from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
 
 
-async def get_dashboard(db: AsyncSession) -> dict:
+async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> dict:
     now = datetime.now(timezone.utc)
 
-    total_fmea = await db.scalar(select(func.count(FMEADocument.fmea_id)))
+    fmea_base = select(func.count(FMEADocument.fmea_id))
+    capa_base = select(func.count(CAPAEightD.report_id))
+
+    if product_line:
+        fmea_base = fmea_base.where(FMEADocument.product_line_code == product_line)
+        capa_base = capa_base.where(CAPAEightD.product_line_code == product_line)
+
+    total_fmea = await db.scalar(fmea_base)
     approved_fmea = await db.scalar(
-        select(func.count(FMEADocument.fmea_id)).where(FMEADocument.status == "approved")
+        fmea_base.where(FMEADocument.status == "approved")
     )
 
-    total_capa = await db.scalar(select(func.count(CAPAEightD.report_id)))
+    total_capa = await db.scalar(capa_base)
     open_capa = await db.scalar(
-        select(func.count(CAPAEightD.report_id)).where(
-            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
-        )
+        capa_base.where(CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]))
     )
 
     overdue_capa = await db.scalar(
-        select(func.count(CAPAEightD.report_id)).where(
+        capa_base.where(
             CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
             CAPAEightD.due_date < now.date(),
         )
@@ -31,7 +36,10 @@ async def get_dashboard(db: AsyncSession) -> dict:
     from app.utils.fmea_graph import build_rpn_rows
 
     # 获取所有FMEA文档的graph_data，在Python中遍历edges计算RPN
-    result = await db.execute(select(FMEADocument.fmea_id, FMEADocument.graph_data))
+    fmea_query = select(FMEADocument.fmea_id, FMEADocument.graph_data)
+    if product_line:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code == product_line)
+    result = await db.execute(fmea_query)
     all_docs = result.all()
 
     total_rpn = 0

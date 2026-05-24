@@ -20,10 +20,11 @@ async def list_fmeas(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     status: str | None = None,
+    product_line: str | None = None,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    items, total = await fmea_service.list_fmeas(db, page, page_size, status)
+    items, total = await fmea_service.list_fmeas(db, page, page_size, status, product_line)
     return FMEAListResponse(
         items=[FMEAResponse.model_validate(f) for f in items],
         total=total,
@@ -39,7 +40,7 @@ async def create_fmea(
     user: User = Depends(require_engineer_or_admin),
 ):
     try:
-        fmea = await fmea_service.create_fmea(db, req.title, req.document_no, req.fmea_type, user.user_id)
+        fmea = await fmea_service.create_fmea(db, req.title, req.document_no, req.fmea_type, user.user_id, req.product_line_code)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return FMEAResponse.model_validate(fmea)
@@ -68,7 +69,7 @@ async def update_fmea(
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
     graph_dict = req.graph_data.model_dump() if req.graph_data else None
-    fmea = await fmea_service.update_fmea(db, fmea, req.title, graph_dict, user.user_id)
+    fmea = await fmea_service.update_fmea(db, fmea, req.title, graph_dict, user.user_id, req.product_line_code)
     return FMEAResponse.model_validate(fmea)
 
 

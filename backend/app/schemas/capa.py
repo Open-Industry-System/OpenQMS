@@ -8,6 +8,7 @@ class CAPACreate(BaseModel):
     document_no: str
     severity: str = "一般"
     due_date: date | None = None
+    product_line_code: str = "DC-DC-100"
 
 
 class CAPAUpdate(BaseModel):
@@ -23,6 +24,7 @@ class CAPAUpdate(BaseModel):
     severity: str | None = None
     due_date: date | None = None
     fmea_ref_id: uuid.UUID | None = None
+    product_line_code: str | None = None
 
 
 class CAPAResponse(BaseModel):

@@ -23,10 +23,11 @@ router = APIRouter(prefix="/api/control-plans", tags=["control-plans"])
 async def list_control_plans(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
+    product_line: str | None = None,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    result = await control_plan_service.list_control_plans(db, page, page_size)
+    result = await control_plan_service.list_control_plans(db, page, page_size, product_line)
     return ControlPlanListResponse(
         items=[ControlPlanResponse.model_validate(cp) for cp in result["items"]],
         total=result["total"],

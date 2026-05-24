@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.models.fmea import FMEADocument
 from app.state_machines.fmea_state import FMEAState, can_transition
 from app.models.audit import AuditLog
+from app.services.product_line_service import validate_product_line
 
 
 async def list_fmeas(
@@ -14,6 +15,7 @@ async def list_fmeas(
     page: int = 1,
     page_size: int = 20,
     status: str | None = None,
+    product_line: str | None = None,
 ) -> tuple[list[FMEADocument], int]:
     query = select(FMEADocument)
     count_query = select(func.count(FMEADocument.fmea_id))
@@ -21,6 +23,10 @@ async def list_fmeas(
     if status:
         query = query.where(FMEADocument.status == status)
         count_query = count_query.where(FMEADocument.status == status)
+
+    if product_line:
+        query = query.where(FMEADocument.product_line_code == product_line)
+        count_query = count_query.where(FMEADocument.product_line_code == product_line)
 
     query = query.order_by(FMEADocument.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -40,8 +46,10 @@ async def get_fmea(db: AsyncSession, fmea_id: uuid.UUID) -> FMEADocument | None:
 
 
 async def create_fmea(
-    db: AsyncSession, title: str, document_no: str, fmea_type: str, user_id: uuid.UUID
+    db: AsyncSession, title: str, document_no: str, fmea_type: str, user_id: uuid.UUID,
+    product_line_code: str = "DC-DC-100",
 ) -> FMEADocument:
+    await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
     existing_result = await db.execute(
         select(FMEADocument).where(FMEADocument.document_no == document_no)
@@ -77,6 +85,7 @@ async def create_fmea(
         title=title,
         document_no=document_no,
         fmea_type=fmea_type,
+        product_line_code=product_line_code,
         created_by=user_id,
         updated_by=user_id,
         graph_data=graph_data,  # Inject template graph
@@ -92,6 +101,7 @@ async def create_fmea(
             "title": title,
             "document_no": document_no,
             "fmea_type": fmea_type,
+            "product_line_code": product_line_code,
             "status": fmea.status,
         },
         operated_by=user_id,
@@ -114,6 +124,7 @@ async def update_fmea(
     title: str | None,
     graph_data: dict | None,
     user_id: uuid.UUID,
+    product_line_code: str | None = None,
 ) -> FMEADocument:
     changed_fields = {}
     if title is not None:
@@ -122,6 +133,10 @@ async def update_fmea(
     if graph_data is not None:
         changed_fields["graph_data"] = graph_data
         fmea.graph_data = graph_data
+    if product_line_code is not None:
+        await validate_product_line(db, product_line_code)
+        changed_fields["product_line_code"] = product_line_code
+        fmea.product_line_code = product_line_code
     fmea.updated_by = user_id
 
     if changed_fields:

@@ -19,10 +19,11 @@ async def list_capas(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     status: str | None = None,
+    product_line: str | None = None,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    items, total = await capa_service.list_capas(db, page, page_size, status)
+    items, total = await capa_service.list_capas(db, page, page_size, status, product_line)
     return CAPAListResponse(
         items=[CAPAResponse.model_validate(c) for c in items],
         total=total,
@@ -39,7 +40,7 @@ async def create_capa(
 ):
     try:
         capa = await capa_service.create_capa(
-            db, req.title, req.document_no, req.severity, req.due_date, user.user_id
+            db, req.title, req.document_no, req.severity, req.due_date, user.user_id, req.product_line_code
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -77,11 +77,13 @@ class FMEACreate(BaseModel):
     title: str
     document_no: str
     fmea_type: str = "PFMEA"
+    product_line_code: str = "DC-DC-100"
 
 
 class FMEAUpdate(BaseModel):
     title: str | None = None
     graph_data: GraphDataSchema | None = None
+    product_line_code: str | None = None
 
 
 class FMEAResponse(BaseModel):

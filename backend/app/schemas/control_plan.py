@@ -46,6 +46,7 @@ class ControlPlanBase(BaseModel):
     drawing_rev: str | None = None
     org_factory: str | None = None
     core_group: str | None = None
+    product_line_code: str = "DC-DC-100"
 
 
 class ControlPlanCreate(ControlPlanBase):
@@ -63,6 +64,7 @@ class ControlPlanUpdate(BaseModel):
     drawing_rev: str | None = None
     org_factory: str | None = None
     core_group: str | None = None
+    product_line_code: str | None = None
     items: list[ControlPlanItemCreate] | None = None
 
 
