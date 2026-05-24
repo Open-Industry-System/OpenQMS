@@ -235,6 +235,18 @@ async def seed():
                 sc = SpecialCharacteristic(**sc_dict, created_by=admin_id)
                 db.add(sc)
 
+        # Product lines
+        from app.models.product_line import ProductLine
+
+        pl_data = [
+            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块"},
+            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线"},
+        ]
+        for pl_dict in pl_data:
+            existing = await db.execute(select(ProductLine).where(ProductLine.code == pl_dict["code"]))
+            if not existing.scalar_one_or_none():
+                db.add(ProductLine(**pl_dict))
+
         await db.commit()
 
     print("Seed data created successfully!")

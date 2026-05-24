@@ -9,3 +9,4 @@ from app.schemas import linearity
 from app.schemas import stability
 from app.schemas import attribute
 from app.schemas import msa
+from app.schemas import product_line
