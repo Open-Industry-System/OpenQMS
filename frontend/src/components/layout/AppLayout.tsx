@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import { Layout, Menu, Button, Avatar, Dropdown, theme, Space } from "antd";
+import { Layout, Menu, Button, Avatar, Dropdown, theme, Space, Select } from "antd";
 import {
   DashboardOutlined,
   FileTextOutlined,
@@ -17,6 +17,7 @@ import {
   MenuUnfoldOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
+import { useProductLineStore } from "../../store/productLineStore";
 
 const { Header, Sider, Content } = Layout;
 
@@ -48,6 +49,8 @@ export default function AppLayout() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const { token: themeToken } = theme.useToken();
+  const { productLines, selected, setSelected, load } = useProductLineStore();
+  useEffect(() => { load(); }, [load]);
 
   const selectedKey = "/" + location.pathname.split("/")[1];
 
@@ -97,7 +100,21 @@ export default function AppLayout() {
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={() => setCollapsed(!collapsed)}
           />
-          <Dropdown
+          <Space>
+            <Select
+              allowClear
+              placeholder="全部产品线"
+              style={{ width: 200 }}
+              value={selected || undefined}
+              onChange={(v) => setSelected(v || null)}
+            >
+              {productLines.map((pl) => (
+                <Select.Option key={pl.code} value={pl.code}>
+                  {pl.code} - {pl.name}
+                </Select.Option>
+              ))}
+            </Select>
+            <Dropdown
             menu={{
               items: [
                 { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => { logout(); navigate("/login"); } },
@@ -109,6 +126,7 @@ export default function AppLayout() {
               <span>{user?.display_name || user?.username}</span>
             </Space>
           </Dropdown>
+          </Space>
         </Header>
         <Content style={{ margin: 24 }}>
           <Outlet />

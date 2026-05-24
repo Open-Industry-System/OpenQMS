@@ -374,6 +374,14 @@ export interface SupplierExpiryAlert {
   days_remaining: number;
 }
 
+export interface ProductLine {
+  code: string;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export * from "./spc";
 export * from "./msa";
 export * from "./specialCharacteristic";
