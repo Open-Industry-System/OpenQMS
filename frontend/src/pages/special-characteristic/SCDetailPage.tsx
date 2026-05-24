@@ -2,10 +2,17 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Tag, Typography, Card, Form, Input, Select, Switch, App,
-  Spin, Row, Col, Descriptions, Space,
+  Spin, Row, Col, Descriptions, Space, Timeline, Collapse,
 } from "antd";
-import { ArrowLeftOutlined, SaveOutlined, LinkOutlined } from "@ant-design/icons";
-import { getSC, updateSC, createSC } from "../../api/specialCharacteristic";
+import {
+  ArrowLeftOutlined, SaveOutlined, LinkOutlined,
+  SafetyCertificateOutlined, ExclamationCircleOutlined,
+  CheckCircleOutlined, CloseCircleOutlined,
+} from "@ant-design/icons";
+import {
+  getSC, updateSC, createSC,
+  safetySubmit, safetyApprove, safetyReject, safetyCancel,
+} from "../../api/specialCharacteristic";
 import type { SpecialCharacteristic } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 
@@ -20,10 +27,14 @@ export default function SCDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
+  const [safetyForm] = Form.useForm();
+  const [safetyPanelOpen, setSafetyPanelOpen] = useState(false);
+  const [approvalLoading, setApprovalLoading] = useState(false);
   const isNew = id === "new";
 
   const user = useAuthStore((s) => s.user);
   const isViewer = user?.role === "viewer";
+  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
 
   useEffect(() => {
     if (!id || isNew) { setLoading(false); return; }
@@ -40,6 +51,11 @@ export default function SCDetailPage() {
           is_supplier_shared: data.is_supplier_shared,
           supplier_code: data.supplier_code,
         });
+        safetyForm.setFieldsValue({
+          safety_regulation_ref: data.safety_regulation_ref,
+          safety_verification_method: data.safety_verification_method,
+        });
+        setSafetyPanelOpen(data.is_safety_related || data.is_safety_suggested);
       })
       .catch(() => message.error("加载特殊特性失败"))
       .finally(() => setLoading(false));
@@ -62,6 +78,69 @@ export default function SCDetailPage() {
       message.error(isNew ? "创建失败" : "保存失败");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSafetyToggle = async (checked: boolean) => {
+    if (!sc || !id || isNew) return;
+    if (!checked) {
+      if (!isAdminOrManager) {
+        message.error("仅管理员或经理可取消安全标记");
+        return;
+      }
+      try {
+        const updated = await safetyCancel(id);
+        setSc(updated);
+        setSafetyPanelOpen(false);
+        message.success("已取消安全标记");
+      } catch {
+        message.error("取消失败");
+      }
+      return;
+    }
+    setSafetyPanelOpen(true);
+    setSc({ ...sc, is_safety_related: true, safety_approval_status: "pending" });
+  };
+
+  const handleSafetySubmit = async (values: { safety_regulation_ref: string; safety_verification_method: string }) => {
+    if (!id || isNew) return;
+    setApprovalLoading(true);
+    try {
+      const updated = await safetySubmit(id, values);
+      setSc(updated);
+      message.success("安全特性已提交审批");
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || "提交失败");
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
+
+  const handleSafetyApprove = async () => {
+    if (!id || isNew || !isAdminOrManager) return;
+    setApprovalLoading(true);
+    try {
+      const updated = await safetyApprove(id);
+      setSc(updated);
+      message.success("已批准");
+    } catch {
+      message.error("审批失败");
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
+
+  const handleSafetyReject = async () => {
+    if (!id || isNew || !isAdminOrManager) return;
+    setApprovalLoading(true);
+    try {
+      const updated = await safetyReject(id, "审批驳回");
+      setSc(updated);
+      message.success("已驳回");
+    } catch {
+      message.error("驳回失败");
+    } finally {
+      setApprovalLoading(false);
     }
   };
 
@@ -298,6 +377,121 @@ export default function SCDetailPage() {
               )}
             </Form>
           </Card>
+
+          {/* Safety Characteristic Panel */}
+          {!isNew && sc && (
+            <Collapse
+              activeKey={safetyPanelOpen ? ["safety"] : []}
+              onChange={(keys) => setSafetyPanelOpen(keys.includes("safety"))}
+              style={{ marginTop: 16 }}
+            >
+              <Collapse.Panel
+                header={
+                  <Space>
+                    <SafetyCertificateOutlined style={{ color: "#ff4d4f" }} />
+                    <span>安全特性</span>
+                    {sc.safety_approval_status && (
+                      <Tag color={
+                        sc.safety_approval_status === "approved" ? "green" :
+                        sc.safety_approval_status === "rejected" ? "red" :
+                        sc.safety_approval_status === "submitted" ? "blue" : "orange"
+                      }>
+                        {sc.safety_approval_status === "pending" && "待提交"}
+                        {sc.safety_approval_status === "submitted" && "待审批"}
+                        {sc.safety_approval_status === "approved" && "已批准"}
+                        {sc.safety_approval_status === "rejected" && "已驳回"}
+                      </Tag>
+                    )}
+                  </Space>
+                }
+                key="safety"
+              >
+                <Space direction="vertical" style={{ width: "100%" }}>
+                  <Form.Item label="安全相关">
+                    <Switch
+                      checked={sc.is_safety_related}
+                      onChange={handleSafetyToggle}
+                      disabled={isViewer || (sc.safety_approval_status === "submitted" && !isAdminOrManager)}
+                    />
+                  </Form.Item>
+
+                  {sc.is_safety_related && (
+                    <>
+                      <Form
+                        form={safetyForm}
+                        layout="vertical"
+                        onFinish={handleSafetySubmit}
+                        disabled={isViewer || sc.safety_approval_status === "submitted" || sc.safety_approval_status === "approved"}
+                      >
+                        <Form.Item
+                          name="safety_regulation_ref"
+                          label="安全法规引用"
+                          rules={[{ required: true, message: "请输入法规引用" }]}
+                        >
+                          <Input placeholder="例：UN ECE R100, GB/T 18384" />
+                        </Form.Item>
+                        <Form.Item
+                          name="safety_verification_method"
+                          label="安全验证方法"
+                          rules={[{ required: true, message: "请输入验证方法" }]}
+                        >
+                          <TextArea rows={3} placeholder="例：100% 高压绝缘测试" />
+                        </Form.Item>
+                        {sc.safety_approval_status === "pending" && !isViewer && (
+                          <Button type="primary" htmlType="submit" loading={approvalLoading}>
+                            提交审批
+                          </Button>
+                        )}
+                      </Form>
+
+                      {/* Approval Timeline */}
+                      {sc.safety_approval_status && (
+                        <Timeline
+                          items={[
+                            {
+                              dot: <ExclamationCircleOutlined style={{ color: "#faad14" }} />,
+                              children: "待提交：填写安全信息并提交审批",
+                              color: sc.safety_approval_status === "pending" ? "blue" : "gray",
+                            },
+                            {
+                              dot: <SafetyCertificateOutlined style={{ color: "#1677ff" }} />,
+                              children: `已提交：${sc.safety_submitted_at ? new Date(sc.safety_submitted_at).toLocaleString() : "-"}`,
+                              color: sc.safety_approval_status === "submitted" ? "blue" : "gray",
+                            },
+                            sc.safety_approval_status === "approved" ? {
+                              dot: <CheckCircleOutlined style={{ color: "#52c41a" }} />,
+                              children: `已批准：${sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-"}`,
+                              color: "green",
+                            } : sc.safety_approval_status === "rejected" ? {
+                              dot: <CloseCircleOutlined style={{ color: "#ff4d4f" }} />,
+                              children: `已驳回：${sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-"}${sc.safety_approval_comment ? `（${sc.safety_approval_comment}）` : ""}`,
+                              color: "red",
+                            } : {
+                              dot: <SafetyCertificateOutlined />,
+                              children: "审批结果",
+                              color: "gray",
+                            },
+                          ].filter(Boolean) as any}
+                        />
+                      )}
+
+                      {/* Approval Actions for manager/admin */}
+                      {sc.safety_approval_status === "submitted" && isAdminOrManager && (
+                        <Space>
+                          <Button type="primary" onClick={handleSafetyApprove} loading={approvalLoading}>
+                            批准
+                          </Button>
+                          <Button danger onClick={handleSafetyReject} loading={approvalLoading}>
+                            驳回
+                          </Button>
+                        </Space>
+                      )}
+                    </>
+                  )}
+                </Space>
+              </Collapse.Panel>
+            </Collapse>
+          )}
         </Col>
       </Row>
     </div>

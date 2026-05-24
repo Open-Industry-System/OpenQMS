@@ -21,6 +21,16 @@ export interface SpecialCharacteristic {
   supplier_code: string | null;
   created_by: string | null;
   created_at: string | null;
+  is_safety_related: boolean;
+  is_safety_suggested: boolean;
+  safety_approval_status: "pending" | "submitted" | "approved" | "rejected" | null;
+  safety_submitted_by: string | null;
+  safety_submitted_at: string | null;
+  safety_approved_by: string | null;
+  safety_approved_at: string | null;
+  safety_approval_comment: string | null;
+  safety_regulation_ref: string | null;
+  safety_verification_method: string | null;
   updated_at: string | null;
 }
 
@@ -38,6 +48,7 @@ export interface MatrixRow {
   sc_type: string;
   customer_symbol: string | null;
   product_line_code: string;
+  is_safety_related: boolean;
   has_dfmea: boolean;
   has_pfmea: boolean;
   has_cp: boolean;

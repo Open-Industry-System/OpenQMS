@@ -11,6 +11,10 @@ class SpecialCharacteristic(Base):
     __table_args__ = (
         CheckConstraint("sc_type IN ('CC', 'SC')", name="ck_sc_type"),
         CheckConstraint("source_type IN ('DFMEA', 'PFMEA')", name="ck_source_type"),
+        CheckConstraint(
+            "safety_approval_status IN ('pending', 'submitted', 'approved', 'rejected') OR safety_approval_status IS NULL",
+            name="ck_safety_approval_status",
+        ),
     )
 
     sc_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -31,6 +35,16 @@ class SpecialCharacteristic(Base):
     product_line_code: Mapped[str] = mapped_column(String(20), nullable=False)
     is_supplier_shared: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
     supplier_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_safety_related: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_safety_suggested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    safety_approval_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    safety_submitted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
+    safety_submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    safety_approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
+    safety_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    safety_approval_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    safety_regulation_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    safety_verification_method: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

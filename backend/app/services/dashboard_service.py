@@ -65,6 +65,22 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
 
     avg_rpn = round(total_rpn / rpn_count) if rpn_count > 0 else 0
 
+    from app.models.special_characteristic import SpecialCharacteristic
+
+    sc_base = select(func.count(SpecialCharacteristic.sc_id))
+    if product_line:
+        sc_base = sc_base.where(SpecialCharacteristic.product_line_code == product_line)
+
+    total_safety = await db.scalar(
+        sc_base.where(SpecialCharacteristic.is_safety_related == True)
+    )
+    pending_safety_approval = await db.scalar(
+        sc_base.where(SpecialCharacteristic.safety_approval_status == "submitted")
+    )
+    safety_suggestions = await db.scalar(
+        sc_base.where(SpecialCharacteristic.is_safety_suggested == True)
+    )
+
     return {
         "kpi": {
             "total_fmea": total_fmea or 0,
@@ -74,6 +90,9 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
             "overdue_capa": overdue_capa or 0,
             "avg_rpn": avg_rpn,
             "high_rpn_count": high_rpn_count,
+            "total_safety": total_safety or 0,
+            "pending_safety_approval": pending_safety_approval or 0,
+            "safety_suggestions": safety_suggestions or 0,
         },
         "trends": {
             "fmea_by_status": {},

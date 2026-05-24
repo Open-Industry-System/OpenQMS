@@ -75,9 +75,12 @@ export default function SCMatrixPage() {
         <Button
           type="link"
           size="small"
-          onClick={() =>
-            navigate(`/special-characteristics/${record.sc_id}`)
-          }
+          onClick={() => navigate(`/special-characteristics/${record.sc_id}`)}
+          style={{
+            backgroundColor: record.is_safety_related ? "#fff2f0" : undefined,
+            padding: "2px 8px",
+            borderRadius: 4,
+          }}
         >
           {code}
         </Button>
@@ -93,9 +96,14 @@ export default function SCMatrixPage() {
       title: "类型",
       dataIndex: "sc_type",
       key: "sc_type",
-      width: 70,
-      render: (t: string) => (
-        <Tag color={t === "CC" ? "red" : "gold"}>{t}</Tag>
+      width: 80,
+      render: (t: string, record: MatrixRow) => (
+        <Tag
+          color={t === "CC" ? "red" : "gold"}
+          style={{ backgroundColor: record.is_safety_related ? "#fff2f0" : undefined }}
+        >
+          {t}
+        </Tag>
       ),
     },
     {
