@@ -26,6 +26,9 @@ class SCUpdate(BaseModel):
     msa_status: str | None = None
     is_supplier_shared: bool | None = None
     supplier_code: str | None = None
+    # NOTE: is_safety_related, safety_regulation_ref, safety_verification_method
+    # are intentionally EXCLUDED from SCUpdate to enforce the safety approval workflow.
+    # Use the dedicated safety API endpoints instead.
 
 
 class SCResponse(BaseModel):
@@ -51,6 +54,16 @@ class SCResponse(BaseModel):
     supplier_code: str | None = None
     created_by: uuid.UUID | None = None
     created_at: datetime | None = None
+    is_safety_related: bool = False
+    is_safety_suggested: bool = False
+    safety_approval_status: str | None = None
+    safety_submitted_by: uuid.UUID | None = None
+    safety_submitted_at: datetime | None = None
+    safety_approved_by: uuid.UUID | None = None
+    safety_approved_at: datetime | None = None
+    safety_approval_comment: str | None = None
+    safety_regulation_ref: str | None = None
+    safety_verification_method: str | None = None
     updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
@@ -70,6 +83,7 @@ class MatrixRow(BaseModel):
     sc_type: str
     customer_symbol: str | None = None
     product_line_code: str
+    is_safety_related: bool = False
     has_dfmea: bool
     has_pfmea: bool
     has_cp: bool
@@ -105,3 +119,12 @@ class CPSyncStatusItem(BaseModel):
 class CPSyncStatusResponse(BaseModel):
     items: list[CPSyncStatusItem]
     total_out_of_sync: int
+
+
+class SafetySubmitRequest(BaseModel):
+    safety_regulation_ref: str
+    safety_verification_method: str
+
+
+class SafetyApprovalAction(BaseModel):
+    comment: str | None = None
