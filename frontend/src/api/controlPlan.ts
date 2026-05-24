@@ -4,6 +4,7 @@ import type { ControlPlan, ControlPlanListResponse } from "../types";
 export async function listControlPlans(params: {
   page?: number;
   page_size?: number;
+  product_line?: string;
 }): Promise<ControlPlanListResponse> {
   const resp = await client.get("/control-plans", { params });
   return resp.data;

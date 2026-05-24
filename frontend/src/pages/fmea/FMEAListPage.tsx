@@ -6,6 +6,7 @@ import { listFMEAs, createFMEA, updateFMEA } from "../../api/fmea";
 import type { FMEADocument, GraphNode, GraphEdge } from "../../types";
 import GenerationWizard from "../../components/dfmea/GenerationWizard";
 import { useAuthStore } from "../../store/authStore";
+import { useProductLineStore } from "../../store/productLineStore";
 
 const { Title } = Typography;
 
@@ -47,10 +48,11 @@ export default function FMEAListPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const canEdit = user?.role !== "viewer";
+  const productLine = useProductLineStore((s) => s.selected);
 
   const fetchData = (p: number = page) => {
     setLoading(true);
-    listFMEAs({ page: p, page_size: 20 })
+    listFMEAs({ page: p, page_size: 20, product_line: productLine || undefined })
       .then((res) => {
         setData(res.items);
         setTotal(res.total);
@@ -60,7 +62,7 @@ export default function FMEAListPage() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [productLine]);
 
   const handleCreate = async (values: { title: string; document_no: string; fmea_type: string }) => {
     if (values.fmea_type === "DFMEA") {

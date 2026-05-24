@@ -3,18 +3,20 @@ import { Row, Col, Card, Table, Tag, Typography } from "antd";
 import { getDashboard } from "../../api/dashboard";
 import KPICard from "../../components/shared/KPICard";
 import type { DashboardData } from "../../types";
+import { useProductLineStore } from "../../store/productLineStore";
 
 const { Title } = Typography;
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const productLine = useProductLineStore((s) => s.selected);
 
   useEffect(() => {
-    getDashboard()
+    getDashboard(productLine || undefined)
       .then(setData)
       .finally(() => setLoading(false));
-  }, []);
+  }, [productLine]);
 
   const kpi = data?.kpi;
 

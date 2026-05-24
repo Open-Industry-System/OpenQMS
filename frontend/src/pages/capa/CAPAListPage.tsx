@@ -4,6 +4,7 @@ import { Table, Button, Tag, Typography, Modal, Form, Input, Select, DatePicker,
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { listCAPAs, createCAPA } from "../../api/capa";
 import type { CAPAReport } from "../../types";
+import { useProductLineStore } from "../../store/productLineStore";
 import dayjs from "dayjs";
 
 const { Title } = Typography;
@@ -28,15 +29,16 @@ export default function CAPAListPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const productLine = useProductLineStore((s) => s.selected);
 
   const fetchData = (p: number = page) => {
     setLoading(true);
-    listCAPAs({ page: p, page_size: 20 })
+    listCAPAs({ page: p, page_size: 20, product_line: productLine || undefined })
       .then((res) => { setData(res.items); setTotal(res.total); })
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [productLine]);
 
   const handleCreate = async (values: { title: string; document_no: string; severity: string; due_date?: dayjs.Dayjs }) => {
     try {

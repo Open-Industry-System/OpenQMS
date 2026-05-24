@@ -9,6 +9,7 @@ import {
 import { listSCs, deleteSC } from "../../api/specialCharacteristic";
 import type { SpecialCharacteristic } from "../../types";
 import { useAuthStore } from "../../store/authStore";
+import { useProductLineStore } from "../../store/productLineStore";
 
 const { Title } = Typography;
 
@@ -30,12 +31,14 @@ export default function SCListPage() {
 
   const user = useAuthStore((s) => s.user);
   const isViewer = user?.role === "viewer";
+  const productLine = useProductLineStore((s) => s.selected);
 
   const fetchData = (p: number = page) => {
     setLoading(true);
     listSCs({
       page: p,
       page_size: 20,
+      product_line: productLine || undefined,
       sc_type: scTypeFilter || undefined,
       source_type: sourceTypeFilter || undefined,
     })
@@ -48,7 +51,7 @@ export default function SCListPage() {
 
   useEffect(() => {
     fetchData();
-  }, [scTypeFilter, sourceTypeFilter]);
+  }, [scTypeFilter, sourceTypeFilter, productLine]);
 
   const handleDelete = async (id: string) => {
     try {

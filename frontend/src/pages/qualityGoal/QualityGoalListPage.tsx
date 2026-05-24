@@ -28,6 +28,7 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
+import { useProductLineStore } from "../../store/productLineStore";
 import type { QualityGoal } from "../../types";
 import {
   listQualityGoals,
@@ -94,6 +95,7 @@ export default function QualityGoalListPage() {
   const user = useAuthStore((s) => s.user);
   const isEngineerPlus = user?.role === "admin" || user?.role === "manager" || user?.role === "quality_engineer";
   const isManagerPlus = user?.role === "admin" || user?.role === "manager";
+  const productLine = useProductLineStore((s) => s.selected);
 
   const [goals, setGoals] = useState<QualityGoal[]>([]);
   const [loading, setLoading] = useState(false);
@@ -131,6 +133,7 @@ export default function QualityGoalListPage() {
     setLoading(true);
     try {
       const params: Record<string, unknown> = { page, page_size: pageSize };
+      if (productLine) params.product_line = productLine;
       if (activeTab === "pending") params.status = "pending";
       else if (activeTab === "draft") params.status = "draft";
       const [resp, s] = await Promise.all([
@@ -149,7 +152,7 @@ export default function QualityGoalListPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, activeTab, user?.user_id]);
+  }, [page, pageSize, activeTab, user?.user_id, productLine]);
 
   useEffect(() => {
     fetchGoals();

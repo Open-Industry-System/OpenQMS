@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tag, Typography, Select, Space, App, Card, Row, Col, Statistic, Button } from "antd";
+import { Table, Tag, Typography, Space, App, Card, Row, Col, Statistic, Button } from "antd";
 import { ApartmentOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { getMatrix } from "../../api/specialCharacteristic";
 import type { MatrixRow } from "../../types";
+import { useProductLineStore } from "../../store/productLineStore";
 
 const { Title } = Typography;
 
@@ -18,7 +19,7 @@ export default function SCMatrixPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<MatrixRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [productLine, setProductLine] = useState<string>("");
+  const productLine = useProductLineStore((s) => s.selected);
 
   const fetchData = () => {
     setLoading(true);
@@ -186,16 +187,6 @@ export default function SCMatrixPage() {
             <ApartmentOutlined style={{ marginRight: 8 }} />
             特殊特性覆盖矩阵
           </Title>
-          <Select
-            placeholder="产品线筛选"
-            allowClear
-            style={{ width: 200 }}
-            value={productLine || undefined}
-            onChange={(v) => setProductLine(v || "")}
-          >
-            <Select.Option value="">全部产品线</Select.Option>
-            <Select.Option value="DC-DC-100">DC-DC-100</Select.Option>
-          </Select>
         </Space>
       </div>
 

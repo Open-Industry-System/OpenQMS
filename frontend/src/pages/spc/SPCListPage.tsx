@@ -15,6 +15,7 @@ import {
 } from "../../api/spc";
 import type { InspectionCharacteristic } from "../../types";
 import { useAuthStore } from "../../store/authStore";
+import { useProductLineStore } from "../../store/productLineStore";
 
 const { Title } = Typography;
 
@@ -42,12 +43,14 @@ export default function SPCListPage() {
 
   const user = useAuthStore((s) => s.user);
   const canEdit = user?.role !== "viewer";
+  const productLine = useProductLineStore((s) => s.selected);
 
   const fetchData = (p: number = page) => {
     setLoading(true);
     listInspectionCharacteristics({
       page: p,
       page_size: 20,
+      product_line: productLine || undefined,
       process_name: searchProcess || undefined,
     })
       .then((res) => {
@@ -59,7 +62,7 @@ export default function SPCListPage() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [productLine]);
 
   const handleCreate = async (values: {
     process_name: string;
