@@ -174,7 +174,7 @@ export default function QualityGoalListPage() {
     form.setFieldsValue({
       parent_id: goal.parent_id,
       level: goal.level,
-      product_line: goal.product_line,
+      product_line_code: goal.product_line_code,
       name: goal.name,
       target_value: goal.target_value,
       unit: goal.unit,
@@ -202,7 +202,7 @@ export default function QualityGoalListPage() {
         await createQualityGoal({
           parent_id: (values.parent_id as string) || null,
           level: values.level as number,
-          product_line: (values.product_line as string) || null,
+          product_line_code: (values.product_line_code as string) || null,
           name: values.name as string,
           target_value: values.target_value as string,
           unit: values.unit as string,
@@ -315,8 +315,8 @@ export default function QualityGoalListPage() {
             {LEVEL_MAP[record.level]?.icon} {LEVEL_MAP[record.level]?.label}
           </Tag>
           <div style={{ marginTop: 4, fontWeight: 500 }}>{record.name}</div>
-          {record.product_line && (
-            <div style={{ fontSize: 12, color: "#888" }}>{record.product_line}</div>
+          {record.product_line_code && (
+            <div style={{ fontSize: 12, color: "#888" }}>{record.product_line_code}</div>
           )}
         </div>
       ),
@@ -564,7 +564,7 @@ export default function QualityGoalListPage() {
               ))}
             </Select>
           </Form.Item>
-          <Form.Item name="product_line" label="产品线">
+          <Form.Item name="product_line_code" label="产品线">
             <Input placeholder="如 DC-DC-100" />
           </Form.Item>
           <Form.Item name="name" label="指标名称" rules={[{ required: true }]}>

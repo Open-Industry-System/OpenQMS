@@ -45,6 +45,7 @@ from app.schemas.version import (
     SyncPreviewItem,
     SyncPreviewResponse,
     SyncSummary,
+    SyncFromFMEARequest,
 )
 
 router = APIRouter(prefix="/api", tags=["versions"])

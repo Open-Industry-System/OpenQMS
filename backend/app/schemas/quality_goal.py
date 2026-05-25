@@ -6,7 +6,7 @@ from pydantic import BaseModel, field_validator
 class QualityGoalCreate(BaseModel):
     parent_id: uuid.UUID | None = None
     level: int
-    product_line: str | None = None
+    product_line_code: str | None = None
     name: str
     target_value: str
     unit: str
@@ -65,6 +65,7 @@ class QualityGoalResponse(BaseModel):
     approved_at: datetime | None
     reject_reason: str | None
     description: str | None
+    data_source_formula: str | None = None
     created_at: datetime
     updated_at: datetime
 

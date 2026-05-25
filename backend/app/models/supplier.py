@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlalchemy import String, Integer, ForeignKey, DateTime, Date, Text, Float, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -37,6 +37,9 @@ class Supplier(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+    ppap_submissions = relationship("SupplierPPAPSubmission", back_populates="supplier", cascade="all, delete-orphan")
+    scars = relationship("SupplierSCAR", back_populates="supplier", cascade="all, delete-orphan")
 
 
 class SupplierCertification(Base):
@@ -90,3 +93,86 @@ class SupplierEvaluation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class SupplierPPAPSubmission(Base):
+    __tablename__ = "supplier_ppap_submissions"
+
+    submission_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=False
+    )
+    part_no: Mapped[str] = mapped_column(String(100), nullable=False)
+    part_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    submission_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    submission_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    supplier = relationship("Supplier", back_populates="ppap_submissions")
+    elements = relationship("SupplierPPAPElement", back_populates="submission", cascade="all, delete-orphan")
+
+
+class SupplierPPAPElement(Base):
+    __tablename__ = "supplier_ppap_elements"
+
+    element_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    submission_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("supplier_ppap_submissions.submission_id", ondelete="CASCADE"), nullable=False
+    )
+    element_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    element_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    submission = relationship("SupplierPPAPSubmission", back_populates="elements")
+
+
+class SupplierSCAR(Base):
+    __tablename__ = "supplier_scars"
+
+    scar_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scar_no: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=False
+    )
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    supplier_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    issued_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    issued_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    closed_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    supplier = relationship("Supplier", back_populates="scars")

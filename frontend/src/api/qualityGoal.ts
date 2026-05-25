@@ -21,7 +21,7 @@ export async function getQualityGoal(id: string): Promise<QualityGoal> {
 export async function createQualityGoal(data: {
   parent_id?: string | null;
   level: number;
-  product_line?: string | null;
+  product_line_code?: string | null;
   name: string;
   target_value: string;
   unit: string;

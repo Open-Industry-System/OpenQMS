@@ -721,11 +721,15 @@ async def list_snapshots(db: AsyncSession, ic_id: uuid.UUID) -> list:
 
 
 async def activate_snapshot(
-    db: AsyncSession, user_id: uuid.UUID, ic_id: uuid.UUID, snapshot_id: uuid.UUID
+    db: AsyncSession, user_id: uuid.UUID, ic_id: uuid.UUID, snapshot_id: uuid.UUID,
+    change_reason: str = "",
 ) -> ControlLimitSnapshot:
     ic = await get_inspection_characteristic(db, ic_id)
     if not ic:
         raise ValueError("Inspection characteristic not found")
+    if not change_reason.strip():
+        raise ValueError("激活控制限必须提供变更原因 (change_reason)")
+
     snap_result = await db.execute(
         select(ControlLimitSnapshot).where(
             and_(
@@ -747,6 +751,6 @@ async def activate_snapshot(
     await db.refresh(snapshot)
     await _create_audit_log(
         db, user_id, "TRANSITION", "control_limit_snapshots", snapshot_id,
-        {"action": "activate", "version_no": snapshot.version_no}
+        {"action": "activate_control_limit", "version_no": snapshot.version_no, "change_reason": change_reason}
     )
     return snapshot

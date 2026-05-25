@@ -87,6 +87,13 @@ class ControlPlanItem(Base):
     reaction_plan: Mapped[str | None] = mapped_column(String(200), nullable=True)
     source_fmea_node_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     item_source: Mapped[str] = mapped_column(String(20), default="fmea")
+    sop_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    spc_chart_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("inspection_characteristics.ic_id", ondelete="SET NULL"), nullable=True
+    )
+    gauge_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("gauges.gauge_id", ondelete="SET NULL"), nullable=True
+    )
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
     control_plan = relationship("ControlPlan", back_populates="items")

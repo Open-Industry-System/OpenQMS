@@ -17,7 +17,7 @@ class QualityGoal(Base):
         UUID(as_uuid=True), ForeignKey("quality_goals.goal_id"), nullable=True
     )
     level: Mapped[int] = mapped_column(Integer, nullable=False)
-    product_line: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    product_line_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     target_value: Mapped[str] = mapped_column(String(50), nullable=False)
     actual_value: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -35,6 +35,7 @@ class QualityGoal(Base):
     )
     reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_source_formula: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

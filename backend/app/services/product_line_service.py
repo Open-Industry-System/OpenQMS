@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.product_line import ProductLine
 
@@ -38,6 +38,31 @@ async def update_product_line(db: AsyncSession, pl: ProductLine, name: str | Non
 
 
 async def delete_product_line(db: AsyncSession, pl: ProductLine) -> None:
+    # Check downstream references before soft-deleting
+    references = {}
+    tables_to_check = [
+        ('fmea_documents', 'product_line_code', "status != 'archived'"),
+        ('capa_eightd', 'product_line_code', "status != 'closed'"),
+        ('control_plans', 'product_line_code', "status != 'archived'"),
+        ('inspection_characteristics', 'product_line', 'is_active = true'),
+        ('special_characteristics', 'product_line_code', "status = 'active'"),
+        ('quality_goals', 'product_line_code', "status = 'active'"),
+        ('audit_programs', 'product_line_code', "status != 'completed'"),
+        ('gauges', 'product_line_code', "status = 'active'"),
+    ]
+    for table, col, active_filter in tables_to_check:
+        result = await db.execute(
+            text(f"SELECT COUNT(*) FROM {table} WHERE {col} = :code AND {active_filter}"),
+            {'code': pl.code}
+        )
+        count = result.scalar()
+        if count > 0:
+            references[table] = count
+
+    if references:
+        ref_list = ', '.join(f'{t}({c})' for t, c in references.items())
+        raise ValueError(f"产品线 {pl.code} 仍被以下模块引用，无法停用: {ref_list}")
+
     pl.is_active = False
     await db.commit()
 

@@ -62,6 +62,7 @@ async def create_audit_plan(
             team_members=req.team_members,
             checklist=req.checklist,
             user_id=user.user_id,
+            product_line_code=req.product_line_code,
         )
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:
@@ -103,6 +104,7 @@ async def update_audit_plan(
             checklist=req.checklist,
             status=req.status,
             user_id=user.user_id,
+            product_line_code=req.product_line_code,
         )
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:

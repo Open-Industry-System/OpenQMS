@@ -15,14 +15,14 @@ async def list_quality_goals(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     level: int | None = Query(None),
-    product_line: str | None = Query(None),
+    product_line_code: str | None = Query(None, alias="product_line"),
     status: str | None = Query(None),
     period: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     items, total = await quality_goal_service.list_quality_goals(
-        db, page, page_size, level, product_line, status, period
+        db, page, page_size, level, product_line_code, status, period
     )
     return schemas.quality_goal.QualityGoalListResponse(
         items=[schemas.quality_goal.QualityGoalResponse.model_validate(g) for g in items],
@@ -43,7 +43,7 @@ async def create_quality_goal(
             db,
             parent_id=req.parent_id,
             level=req.level,
-            product_line=req.product_line,
+            product_line_code=req.product_line_code,
             name=req.name,
             target_value=req.target_value,
             unit=req.unit,

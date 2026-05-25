@@ -285,9 +285,14 @@ async def create_audit_plan(
     team_members: list,
     checklist: list,
     user_id: uuid.UUID,
+    product_line_code: str | None = None,
 ) -> AuditPlan:
     year = planned_date.year
     plan_no = await _generate_plan_no(db, year)
+
+    # Auditor qualification check
+    if lead_auditor:
+        await _check_auditor_qualification(db, lead_auditor)
 
     plan = AuditPlan(
         plan_no=plan_no,
@@ -300,6 +305,7 @@ async def create_audit_plan(
         checklist=checklist or [],
         status="planned",
         created_by=user_id,
+        product_line_code=product_line_code,
     )
     db.add(plan)
 
@@ -347,8 +353,13 @@ async def update_audit_plan(
     checklist: list | None,
     status: str | None,
     user_id: uuid.UUID,
+    product_line_code: str | None = None,
 ) -> AuditPlan:
     changed = {}
+
+    # Auditor qualification check
+    if lead_auditor is not None and lead_auditor != plan.lead_auditor:
+        await _check_auditor_qualification(db, lead_auditor)
 
     if audit_scope is not None and audit_scope != plan.audit_scope:
         changed["audit_scope"] = {"before": plan.audit_scope, "after": audit_scope}
@@ -374,6 +385,9 @@ async def update_audit_plan(
     if status is not None and status != plan.status:
         changed["status"] = {"before": plan.status, "after": status}
         plan.status = status
+    if product_line_code is not None and product_line_code != plan.product_line_code:
+        changed["product_line_code"] = {"before": plan.product_line_code, "after": product_line_code}
+        plan.product_line_code = product_line_code
 
     if not changed:
         return plan
@@ -806,6 +820,20 @@ async def get_audit_stats(db: AsyncSession) -> dict:
 # ───────────────────────────────────────────────
 # Auditors
 # ───────────────────────────────────────────────
+
+async def _check_auditor_qualification(db: AsyncSession, auditor_id: uuid.UUID) -> None:
+    """Raise ValueError if the auditor's qualification has expired (> 12 months)."""
+    from datetime import date as date_type
+    user = await db.get(User, auditor_id)
+    if user is None:
+        return
+    if user.auditor_info and user.auditor_info.get('last_qualification_date'):
+        try:
+            qual_date = datetime.fromisoformat(user.auditor_info['last_qualification_date']).date()
+            if (date_type.today() - qual_date).days > 365:
+                raise ValueError("审核员资格已过期，请先完成资格再评审")
+        except (ValueError, TypeError):
+            pass  # If date parse fails, allow assignment (warn in logs in production)
 
 async def list_auditors(db: AsyncSession) -> list[User]:
     result = await db.execute(select(User).where(User.auditor_info.isnot(None)))

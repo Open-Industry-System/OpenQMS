@@ -161,6 +161,9 @@ export interface ControlPlanItem {
   control_method: string;
   reaction_plan: string;
   source_fmea_node_id: string | null;
+  sop_ref?: string;
+  spc_chart_id?: string;
+  gauge_id?: string;
   sort_order: number;
 }
 
@@ -201,7 +204,7 @@ export interface QualityGoal {
   doc_no: string;
   parent_id: string | null;
   level: number;
-  product_line: string | null;
+  product_line_code: string | null;
   name: string;
   target_value: string;
   actual_value: string | null;
@@ -213,6 +216,7 @@ export interface QualityGoal {
   approved_at: string | null;
   reject_reason: string | null;
   description: string | null;
+  data_source_formula?: string;
   created_at: string;
   updated_at: string;
 }
@@ -232,6 +236,7 @@ export interface AuditProgram {
   scope: string;
   criteria: string;
   status: "planned" | "active" | "completed";
+  product_line_code?: string;
   created_by: string;
   created_at: string;
 }
@@ -248,6 +253,7 @@ export interface AuditPlan {
   team_members: { user_id: string; username: string }[];
   checklist: AuditChecklistItem[];
   status: "planned" | "in_progress" | "completed" | "cancelled";
+  product_line_code?: string;
   created_by: string;
   created_at: string;
 }
@@ -551,4 +557,74 @@ export interface SyncPreviewResponse {
     update_count: number;
     delete_count: number;
   };
+}
+
+export interface PPAPSubmission {
+  submission_id: string;
+  supplier_id: string;
+  part_no: string;
+  part_name: string;
+  submission_level: number;
+  submission_date: string | null;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  approved_by: string | null;
+  approved_at: string | null;
+  notes: string | null;
+  elements: PPAPElement[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PPAPElement {
+  element_id: string;
+  submission_id: string;
+  element_no: number;
+  element_name: string;
+  status: 'pending' | 'submitted' | 'approved' | 'rejected';
+  notes: string | null;
+  sort_order: number;
+}
+
+export interface IqcInspection {
+  inspection_id: string;
+  inspection_no: string;
+  supplier_id: string;
+  part_no: string | null;
+  part_name: string | null;
+  lot_no: string | null;
+  lot_qty: number | null;
+  sample_qty: number | null;
+  inspection_result: 'pending' | 'accepted' | 'rejected' | 'concession';
+  defect_qty: number;
+  defect_description: string | null;
+  linked_capa_id: string | null;
+  inspection_date: string | null;
+  inspected_by: string | null;
+}
+
+export interface SupplierSCAR {
+  scar_id: string;
+  scar_no: string;
+  supplier_id: string;
+  source_type: 'iqc_reject' | 'audit_finding' | 'customer_complaint' | 'other';
+  source_id: string | null;
+  description: string;
+  requested_action: string | null;
+  supplier_response: string | null;
+  status: 'open' | 'supplier_responded' | 'closed';
+  issued_by: string | null;
+  issued_date: string | null;
+  due_date: string | null;
+  closed_date: string | null;
+}
+
+export interface AuditChecklistTemplate {
+  template_id: string;
+  name: string;
+  audit_type: 'system' | 'process' | 'product';
+  items: AuditChecklistItem[];
+  is_default: boolean;
+  created_by: string | null;
+  created_at: string;
 }

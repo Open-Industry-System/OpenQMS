@@ -227,11 +227,12 @@ async def get_snapshots(
 async def activate_snapshot(
     ic_id: UUID,
     snapshot_id: UUID,
+    change_reason: str = Query(..., min_length=1),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     try:
-        return await spc_service.activate_snapshot(db, current_user.user_id, ic_id, snapshot_id)
+        return await spc_service.activate_snapshot(db, current_user.user_id, ic_id, snapshot_id, change_reason)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

@@ -18,6 +18,9 @@ class ControlPlanItemBase(BaseModel):
     control_method: str | None = None
     reaction_plan: str | None = None
     source_fmea_node_id: str | None = None
+    sop_ref: str | None = None
+    spc_chart_id: uuid.UUID | None = None
+    gauge_id: uuid.UUID | None = None
     sort_order: int = 0
 
 

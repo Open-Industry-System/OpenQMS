@@ -197,3 +197,155 @@ class SupplierExpiryAlertResponse(BaseModel):
     cert_no: str
     expiry_date: date
     days_remaining: int
+
+
+# ─── PPAP ───
+
+class PPAPElementCreate(BaseModel):
+    element_no: int
+    element_name: str
+    status: str = "pending"
+    notes: str | None = None
+    sort_order: int = 0
+
+
+class PPAPElementResponse(BaseModel):
+    element_id: uuid.UUID
+    submission_id: uuid.UUID
+    element_no: int
+    element_name: str
+    status: str
+    notes: str | None
+    sort_order: int
+
+    model_config = {"from_attributes": True}
+
+
+class PPAPSubmissionCreate(BaseModel):
+    part_no: str
+    part_name: str
+    submission_level: int
+    submission_date: date | None = None
+    notes: str | None = None
+    elements: list[PPAPElementCreate] = []
+
+
+class PPAPSubmissionResponse(BaseModel):
+    submission_id: uuid.UUID
+    supplier_id: uuid.UUID
+    part_no: str
+    part_name: str
+    submission_level: int
+    submission_date: date | None
+    status: str
+    approved_by: uuid.UUID | None
+    approved_at: datetime | None
+    notes: str | None
+    elements: list[PPAPElementResponse] = []
+    created_by: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PPAPSubmissionListResponse(BaseModel):
+    items: list[PPAPSubmissionResponse]
+
+
+# ─── SCAR ───
+
+class SCARCreate(BaseModel):
+    source_type: str
+    source_id: uuid.UUID | None = None
+    description: str
+    requested_action: str | None = None
+    issued_date: date | None = None
+    due_date: date | None = None
+
+
+class SCARUpdate(BaseModel):
+    supplier_response: str | None = None
+    status: str | None = None
+
+
+class SCARResponse(BaseModel):
+    scar_id: uuid.UUID
+    scar_no: str
+    supplier_id: uuid.UUID
+    source_type: str
+    source_id: uuid.UUID | None
+    description: str
+    requested_action: str | None
+    supplier_response: str | None
+    status: str
+    issued_by: uuid.UUID | None
+    issued_date: date | None
+    due_date: date | None
+    closed_date: date | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SCARListResponse(BaseModel):
+    items: list[SCARResponse]
+
+
+# ─── IQC ───
+
+class IqcInspectionCreate(BaseModel):
+    part_no: str | None = None
+    part_name: str | None = None
+    lot_no: str | None = None
+    lot_qty: int | None = None
+    sample_qty: int | None = None
+    inspection_result: str = "pending"
+    defect_qty: int = 0
+    defect_description: str | None = None
+    linked_capa_id: uuid.UUID | None = None
+    inspection_date: date | None = None
+    inspected_by: uuid.UUID | None = None
+
+
+class IqcInspectionUpdate(BaseModel):
+    part_no: str | None = None
+    part_name: str | None = None
+    lot_no: str | None = None
+    lot_qty: int | None = None
+    sample_qty: int | None = None
+    inspection_result: str | None = None
+    defect_qty: int | None = None
+    defect_description: str | None = None
+    linked_capa_id: uuid.UUID | None = None
+    inspection_date: date | None = None
+    inspected_by: uuid.UUID | None = None
+
+
+class IqcInspectionResponse(BaseModel):
+    inspection_id: uuid.UUID
+    inspection_no: str
+    supplier_id: uuid.UUID
+    part_no: str | None
+    part_name: str | None
+    lot_no: str | None
+    lot_qty: int | None
+    sample_qty: int | None
+    inspection_result: str
+    defect_qty: int
+    defect_description: str | None
+    linked_capa_id: uuid.UUID | None
+    inspection_date: date | None
+    inspected_by: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class IqcInspectionListResponse(BaseModel):
+    items: list[IqcInspectionResponse]
+    total: int
+    page: int
+    page_size: int

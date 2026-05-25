@@ -35,7 +35,7 @@ async def list_quality_goals(
     page: int = 1,
     page_size: int = 20,
     level: int | None = None,
-    product_line: str | None = None,
+    product_line_code: str | None = None,
     status: str | None = None,
     period: str | None = None,
 ) -> tuple[list[QualityGoal], int]:
@@ -45,9 +45,9 @@ async def list_quality_goals(
     if level is not None:
         query = query.where(QualityGoal.level == level)
         count_query = count_query.where(QualityGoal.level == level)
-    if product_line:
-        query = query.where(QualityGoal.product_line == product_line)
-        count_query = count_query.where(QualityGoal.product_line == product_line)
+    if product_line_code:
+        query = query.where(QualityGoal.product_line_code == product_line_code)
+        count_query = count_query.where(QualityGoal.product_line_code == product_line_code)
     if status:
         query = query.where(QualityGoal.status == status)
         count_query = count_query.where(QualityGoal.status == status)
@@ -91,7 +91,7 @@ async def create_quality_goal(
         doc_no=doc_no,
         parent_id=parent_id,
         level=level,
-        product_line=product_line,
+        product_line_code=product_line_code,
         name=name,
         target_value=target_value,
         unit=unit,

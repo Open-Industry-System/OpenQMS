@@ -8,6 +8,7 @@ class AuditProgramCreate(BaseModel):
     audit_type: str
     scope: str
     criteria: str
+    product_line_code: str | None = None
 
     @field_validator("audit_type")
     @classmethod
@@ -23,6 +24,7 @@ class AuditProgramUpdate(BaseModel):
     scope: str | None = None
     criteria: str | None = None
     status: str | None = None
+    product_line_code: str | None = None
 
     @field_validator("audit_type")
     @classmethod
@@ -42,6 +44,7 @@ class AuditProgramResponse(BaseModel):
     scope: str
     criteria: str
     status: str
+    product_line_code: str | None = None
     created_by: uuid.UUID
     created_at: datetime
 
@@ -63,6 +66,7 @@ class AuditPlanCreate(BaseModel):
     lead_auditor: uuid.UUID | None = None
     team_members: list | None = None
     checklist: list | None = None
+    product_line_code: str | None = None
 
 
 class AuditPlanUpdate(BaseModel):
@@ -74,6 +78,7 @@ class AuditPlanUpdate(BaseModel):
     team_members: list | None = None
     checklist: list | None = None
     status: str | None = None
+    product_line_code: str | None = None
 
 
 class AuditPlanResponse(BaseModel):
@@ -88,6 +93,7 @@ class AuditPlanResponse(BaseModel):
     team_members: list
     checklist: list
     status: str
+    product_line_code: str | None = None
     created_by: uuid.UUID | None
     created_at: datetime
 
@@ -171,10 +177,22 @@ class AuditorInfoUpdate(BaseModel):
     last_qualification_date: str | None = None
 
 
-class AuditChecklistTemplate(BaseModel):
+class AuditChecklistTemplateCreate(BaseModel):
     audit_type: str
     name: str
+    items: list[dict] = []
+
+
+class AuditChecklistTemplateResponse(BaseModel):
+    template_id: uuid.UUID
+    name: str
+    audit_type: str
     items: list[dict]
+    is_default: bool
+    created_by: uuid.UUID | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class AuditStatsResponse(BaseModel):

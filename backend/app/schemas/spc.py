@@ -172,6 +172,7 @@ class SPCAlarmOut(BaseModel):
     severity: str
     status: str
     linked_capa_id: Optional[UUID]
+    linked_fmea_node_id: Optional[UUID] = None
     acknowledged_by_id: Optional[UUID]
     acknowledged_at: Optional[datetime]
 
