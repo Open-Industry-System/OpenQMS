@@ -17,6 +17,11 @@ class ControlPlan(Base):
     fmea_ref_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id"), nullable=True
     )
+    source_fmea_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("fmea_versions.version_id", ondelete="SET NULL"),
+        nullable=True,
+    )
     product_line_code: Mapped[str] = mapped_column(String(20), default="DC-DC-100")
     status: Mapped[str] = mapped_column(String(20), default="draft")
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -27,6 +32,7 @@ class ControlPlan(Base):
     drawing_rev: Mapped[str | None] = mapped_column(String(100), nullable=True)
     org_factory: Mapped[str | None] = mapped_column(String(200), nullable=True)
     core_group: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    sync_pending: Mapped[bool] = mapped_column(default=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
     )
@@ -80,6 +86,7 @@ class ControlPlanItem(Base):
     control_method: Mapped[str | None] = mapped_column(String(200), nullable=True)
     reaction_plan: Mapped[str | None] = mapped_column(String(200), nullable=True)
     source_fmea_node_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    item_source: Mapped[str] = mapped_column(String(20), default="fmea")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
     control_plan = relationship("ControlPlan", back_populates="items")
