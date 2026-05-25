@@ -2,12 +2,12 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Table, Card, Row, Col,
-  App, Spin, Select, Alert, Tooltip,
+  App, Spin, Select, Alert, Tooltip, Tabs, Modal,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, PlusOutlined, DeleteOutlined,
   ImportOutlined, CheckCircleOutlined, ExclamationCircleOutlined,
-  SyncOutlined,
+  SyncOutlined, HistoryOutlined,
 } from "@ant-design/icons";
 import {
   getControlPlan, createControlPlan, updateControlPlan,
@@ -18,6 +18,11 @@ import type { CPSyncStatusItem } from "../../types/specialCharacteristic";
 import { useAuthStore } from "../../store/authStore";
 import { getCPSyncStatus, syncToCP } from "../../api/specialCharacteristic";
 import ImportFromFMEAModal from "../../components/control-plan/ImportFromFMEAModal";
+import VersionHistoryTab from "../../components/version/VersionHistoryTab";
+import CreateVersionModal from "../../components/version/CreateVersionModal";
+import RollbackConfirmModal from "../../components/version/RollbackConfirmModal";
+import VersionCompareView from "../../components/version/VersionCompareView";
+import SyncPreviewDrawer from "../../components/version/SyncPreviewDrawer";
 
 const { Title, Text } = Typography;
 
@@ -80,6 +85,11 @@ export default function ControlPlanEditorPage() {
     stepNos: [],
   });
   const [syncStatus, setSyncStatus] = useState<CPSyncStatusItem[]>([]);
+  const [outerTab, setOuterTab] = useState("editor");
+  const [createVersionOpen, setCreateVersionOpen] = useState(false);
+  const [rollbackTarget, setRollbackTarget] = useState<{ major: number; minor: number } | null>(null);
+  const [compareState, setCompareState] = useState<{ major1: number; minor1: number; major2: number; minor2: number } | null>(null);
+  const [syncDrawerOpen, setSyncDrawerOpen] = useState(false);
 
   const user = useAuthStore((s) => s.user);
   const isApproved = cp?.status === "approved";
@@ -514,6 +524,24 @@ export default function ControlPlanEditorPage() {
         />
       )}
 
+      {/* Sync pending banner */}
+      {cp?.sync_pending && (
+        <Alert
+          message="关联的 FMEA 已更新（当前 CP 基于较旧版本），建议同步更新"
+          type="warning"
+          showIcon
+          action={
+            <Button size="small" icon={<SyncOutlined />} onClick={() => setSyncDrawerOpen(true)}>
+              立即同步
+            </Button>
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
+      <Tabs activeKey={outerTab} onChange={setOuterTab}>
+        <Tabs.TabPane tab="编辑器" key="editor">
+
       {/* Action buttons */}
       <Space style={{ marginBottom: 16 }}>
         <Button
@@ -687,6 +715,72 @@ export default function ControlPlanEditorPage() {
           onClose={() => setImportOpen(false)}
           onSuccess={handleImportSuccess}
         />
+      )}
+        </Tabs.TabPane>
+        <Tabs.TabPane tab={<span><HistoryOutlined /> 版本历史</span>} key="history">
+          <VersionHistoryTab
+            documentId={id!}
+            documentType="cp"
+            canCreate={user?.role !== "viewer"}
+            canRollback={isAdminOrManager}
+            isDraft={currentStatus === "draft"}
+            onViewSnapshot={() => {}}
+            onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
+            onRollback={(major, minor) => setRollbackTarget({ major, minor })}
+            onCreateVersion={() => setCreateVersionOpen(true)}
+          />
+        </Tabs.TabPane>
+      </Tabs>
+
+      {!isNew && id && (
+        <>
+          <CreateVersionModal
+            open={createVersionOpen}
+            documentId={id}
+            documentType="cp"
+            onClose={() => setCreateVersionOpen(false)}
+            onSuccess={() => setCreateVersionOpen(false)}
+          />
+          <RollbackConfirmModal
+            open={!!rollbackTarget}
+            targetVersion={rollbackTarget}
+            documentId={id}
+            documentType="cp"
+            onClose={() => setRollbackTarget(null)}
+            onSuccess={() => setRollbackTarget(null)}
+          />
+          {compareState && (
+            <Modal
+              open={!!compareState}
+              title="版本对比"
+              width={900}
+              footer={null}
+              onCancel={() => setCompareState(null)}
+            >
+              <VersionCompareView
+                documentId={id}
+                documentType="cp"
+                major1={compareState.major1}
+                minor1={compareState.minor1}
+                major2={compareState.major2}
+                minor2={compareState.minor2}
+              />
+            </Modal>
+          )}
+          <SyncPreviewDrawer
+            open={syncDrawerOpen}
+            cpId={id}
+            onClose={() => setSyncDrawerOpen(false)}
+            onSuccess={async () => {
+              setSyncDrawerOpen(false);
+              if (!id) return;
+              try {
+                const refreshed = await getControlPlan(id);
+                setCp(refreshed);
+              } catch { /* silent */ }
+            }}
+          />
+        </>
       )}
     </div>
   );
