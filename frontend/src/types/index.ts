@@ -441,3 +441,112 @@ export interface ReviewOutput {
   created_at: string;
   updated_at: string;
 }
+
+// --- Version Management ---
+export interface VersionBase {
+  major: number;
+  minor: number;
+  change_type: "submit" | "approve" | "manual" | "rollback" | "fmea_sync";
+  change_summary: string;
+  changed_by: string;
+  changed_at: string;
+}
+
+export interface FMEAVersion extends VersionBase {
+  fmea_id: string;
+  graph_data: GraphData;
+}
+
+export interface CPVersion extends VersionBase {
+  cp_id: string;
+  items: ControlPlanItem[];
+}
+
+export interface VersionListResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface NodeChange {
+  node_id: string;
+  node_name: string;
+  field: string;
+  old_value: string;
+  new_value: string;
+}
+
+export interface ModifiedNode {
+  node_id: string;
+  node_name: string;
+  changes: NodeChange[];
+  impact_chain: string[];
+}
+
+export interface FMEADiffResult {
+  added_nodes: GraphNode[];
+  deleted_nodes: GraphNode[];
+  modified_nodes: ModifiedNode[];
+}
+
+export interface CPItemChange {
+  item_id: string;
+  step_no: string;
+  field: string;
+  old_value: string;
+  new_value: string;
+}
+
+export interface CPItemDiff {
+  item_id: string;
+  step_no: string;
+  diff_type: "added" | "deleted" | "modified";
+  changes?: CPItemChange[];
+}
+
+export interface CPDiffResult {
+  added_items: ControlPlanItem[];
+  deleted_items: ControlPlanItem[];
+  modified_items: CPItemDiff[];
+}
+
+export interface DiffSummary {
+  added_count: number;
+  deleted_count: number;
+  modified_count: number;
+}
+
+export interface FMEACompareResponse {
+  diff: FMEADiffResult;
+  summary: DiffSummary;
+}
+
+export interface CPCompareResponse {
+  diff: CPDiffResult;
+  summary: DiffSummary;
+}
+
+export interface VerifyResponse {
+  is_valid: boolean;
+  warnings: string[];
+}
+
+export interface SyncPreviewItem {
+  item_id: string;
+  action: "add" | "update" | "delete";
+  step_no: string;
+  current_value: string | null;
+  fmea_new_value: string;
+  merged_value: string;
+}
+
+export interface SyncPreviewResponse {
+  fmea_version: string;
+  items: SyncPreviewItem[];
+  summary: {
+    add_count: number;
+    update_count: number;
+    delete_count: number;
+  };
+}
