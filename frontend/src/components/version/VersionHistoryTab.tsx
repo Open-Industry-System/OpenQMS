@@ -38,6 +38,7 @@ export default function VersionHistoryTab({
   documentType,
   canCreate,
   canRollback,
+  isDraft,
   onViewSnapshot,
   onCompare,
   onRollback,

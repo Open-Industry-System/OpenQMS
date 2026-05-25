@@ -20,7 +20,7 @@ interface SyncPreviewDrawerProps {
 
 const ACTION_CONFIG: Record<string, { label: string; color: string }> = {
   add: { label: "新增", color: "green" },
-  update: { label: "更新", color: "blue" },
+  sync: { label: "更新", color: "blue" },
   delete: { label: "删除", color: "red" },
 };
 
@@ -77,9 +77,7 @@ export default function SyncPreviewDrawer({
     setSyncing(true);
     try {
       const { applySyncFromFMEA } = await import("../../api/version");
-      await applySyncFromFMEA(cpId, {
-        selected_item_ids: selectedRowKeys as string[],
-      });
+      await applySyncFromFMEA(cpId, selectedRowKeys as string[]);
       message.success("同步成功");
       onSuccess();
       onClose();

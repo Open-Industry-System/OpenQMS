@@ -535,7 +535,7 @@ export interface VerifyResponse {
 
 export interface SyncPreviewItem {
   item_id: string;
-  action: "add" | "update" | "delete";
+  action: "add" | "sync" | "delete";
   step_no: string;
   current_value: string | null;
   fmea_new_value: string;
