@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import String, Date, Text, ForeignKey, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, deferred
 
 from app.database import Base
 
@@ -30,11 +30,11 @@ class ManagementReview(Base):
     chair_person_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
-    participants: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    participants: Mapped[dict | None] = mapped_column(JSONB, nullable=True, deferred=True)
     meeting_minutes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    data_package: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    manual_inputs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    attachments: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    data_package: Mapped[dict | None] = mapped_column(JSONB, nullable=True, deferred=True)
+    manual_inputs: Mapped[dict | None] = mapped_column(JSONB, nullable=True, deferred=True)
+    attachments: Mapped[dict | None] = mapped_column(JSONB, nullable=True, deferred=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )

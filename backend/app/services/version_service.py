@@ -373,6 +373,7 @@ async def rollback_fmea(
     target_minor: int,
     reason: str,
     user_id: uuid.UUID,
+    expected_lock_version: int | None = None,
 ) -> FMEAVersion:
     """Roll back an FMEA document's graph_data to a previous version.
 
@@ -381,6 +382,11 @@ async def rollback_fmea(
     """
     if fmea.status != "draft":
         raise ValueError("Rollback is only allowed when FMEA status is draft.")
+
+    if expected_lock_version is not None and fmea.lock_version != expected_lock_version:
+        raise ValueError(
+            "文档已被他人修改，请刷新后再试。"
+        )
 
     target = await get_fmea_version(db, fmea.fmea_id, target_major, target_minor)
     if target is None:
@@ -414,6 +420,7 @@ async def rollback_fmea(
     # Restore graph_data
     fmea.graph_data = target.snapshot
     fmea.updated_by = user_id
+    fmea.lock_version = (fmea.lock_version or 0) + 1
 
     # Create rollback version
     summary = f"回退原因：{reason}。从 v{target_major}.{target_minor} 回退"
@@ -447,6 +454,7 @@ async def rollback_control_plan(
     target_minor: int,
     reason: str,
     user_id: uuid.UUID,
+    expected_lock_version: int | None = None,
 ) -> ControlPlanVersion:
     """Roll back a Control Plan to a previous version.
 
@@ -455,6 +463,11 @@ async def rollback_control_plan(
     """
     if cp.status != "draft":
         raise ValueError("Rollback is only allowed when control plan status is draft.")
+
+    if expected_lock_version is not None and cp.lock_version != expected_lock_version:
+        raise ValueError(
+            "文档已被他人修改，请刷新后再试。"
+        )
 
     target = await get_cp_version(db, cp.cp_id, target_major, target_minor)
     if target is None:
@@ -471,8 +484,7 @@ async def rollback_control_plan(
         if field in header:
             setattr(cp, field, header[field])
     cp.updated_by = user_id
-
-    # Upsert items preserving original item_id UUIDs
+    cp.lock_version = (cp.lock_version or 0) + 1
     target_item_ids = set()
     for snap in items_snapshot:
         item_uid = uuid.UUID(snap["item_id"])

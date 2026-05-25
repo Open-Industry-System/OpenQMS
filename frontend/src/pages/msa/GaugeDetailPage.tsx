@@ -416,7 +416,7 @@ export default function GaugeDetailPage() {
         confirmLoading={calSaving}
         okText="保存"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={calForm} layout="vertical">
           <Form.Item

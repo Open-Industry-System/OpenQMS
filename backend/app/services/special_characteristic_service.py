@@ -6,6 +6,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.models.special_characteristic import SpecialCharacteristic
 from app.models.fmea import FMEADocument
 from app.models.control_plan import ControlPlanItem, ControlPlan
+from app.models.spc import InspectionCharacteristic
 from app.models.audit import AuditLog
 from app.schemas.special_characteristic import (
     SCCreate, SCUpdate, SCResponse, SCListResponse,
@@ -448,6 +449,90 @@ async def check_cp_sync_status(db: AsyncSession, cp_id: uuid.UUID) -> CPSyncStat
         total_out_of_sync=sum(1 for i in sync_items if i.is_out_of_sync),
     )
 
+
+
+async def get_traceability_chain(db: AsyncSession, sc_id: uuid.UUID) -> dict:
+    """Build the full traceability chain for a special characteristic:
+    SC -> FMEA source node -> Control Plan items -> SPC characteristics
+    """
+    sc = await db.get(SpecialCharacteristic, sc_id)
+    if not sc:
+        raise ValueError("特殊特性不存在")
+
+    chain = {
+        "sc_code": sc.sc_code,
+        "sc_name": sc.sc_name,
+        "sc_type": sc.sc_type,
+        "spec_requirement": sc.spec_requirement,
+        "product_line_code": sc.product_line_code,
+        "fmea_source": None,
+        "control_plan_items": [],
+        "spc_characteristics": [],
+    }
+
+    # 1. FMEA source
+    if sc.source_fmea_id:
+        fmea = await db.get(FMEADocument, sc.source_fmea_id)
+        if fmea and sc.source_node_id:
+            graph = fmea.graph_data or {}
+            node = next((n for n in graph.get("nodes", []) if n.get("id") == sc.source_node_id), None)
+            edges = graph.get("edges", [])
+            if node:
+                # Find connected failure modes
+                connected_fms = []
+                for e in edges:
+                    if e.get("source") == sc.source_node_id and e.get("type") == "HAS_FAILURE_MODE":
+                        fm = next((n for n in graph.get("nodes", []) if n.get("id") == e.get("target")), None)
+                        if fm:
+                            connected_fms.append({"id": fm["id"], "name": fm["name"], "type": fm.get("type", "")})
+
+                chain["fmea_source"] = {
+                    "fmea_id": str(fmea.fmea_id),
+                    "document_no": fmea.document_no,
+                    "title": fmea.title,
+                    "fmea_type": fmea.fmea_type,
+                    "node_id": sc.source_node_id,
+                    "node_name": node.get("name", ""),
+                    "node_type": node.get("type", ""),
+                    "connected_failure_modes": connected_fms,
+                }
+
+    # 2. Control Plan items
+    cp_items_result = await db.execute(
+        select(ControlPlanItem).where(
+            ControlPlanItem.special_class.in_([sc.sc_type, sc.sc_code, sc.sc_name])
+        )
+    )
+    for item in cp_items_result.scalars().all():
+        cp = await db.get(ControlPlan, item.cp_id)
+        chain["control_plan_items"].append({
+            "item_id": str(item.item_id),
+            "step_no": item.step_no,
+            "process_name": item.process_name,
+            "characteristic_no": item.characteristic_no,
+            "special_class": item.special_class,
+            "specification_tolerance": item.specification_tolerance,
+            "cp_document_no": cp.document_no if cp else "",
+            "cp_title": cp.title if cp else "",
+        })
+
+    # 3. SPC characteristics
+    spc_result = await db.execute(
+        select(InspectionCharacteristic).where(
+            InspectionCharacteristic.characteristic_name.ilike(f"%{sc.sc_name}%")
+        ).limit(10)
+    )
+    for ic in spc_result.scalars().all():
+        chain["spc_characteristics"].append({
+            "ic_id": str(ic.ic_id),
+            "characteristic_name": ic.characteristic_name,
+            "chart_type": ic.chart_type,
+            "spec_target": float(ic.spec_target) if ic.spec_target else None,
+            "spec_upper": float(ic.spec_upper) if ic.spec_upper else None,
+            "spec_lower": float(ic.spec_lower) if ic.spec_lower else None,
+        })
+
+    return chain
 
 def _to_response(sc: SpecialCharacteristic) -> SCResponse:
     fmea_title = fmea_doc_no = None

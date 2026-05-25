@@ -25,6 +25,7 @@ class ControlPlan(Base):
     product_line_code: Mapped[str] = mapped_column(String(20), default="DC-DC-100")
     status: Mapped[str] = mapped_column(String(20), default="draft")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    lock_version: Mapped[int] = mapped_column(Integer, default=0)
     phase: Mapped[str] = mapped_column(String(20), default="production")
     part_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
     part_name: Mapped[str | None] = mapped_column(String(200), nullable=True)

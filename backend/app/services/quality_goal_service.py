@@ -91,7 +91,7 @@ async def create_quality_goal(
         doc_no=doc_no,
         parent_id=parent_id,
         level=level,
-        product_line_code=product_line_code,
+        product_line_code=product_line,
         name=name,
         target_value=target_value,
         unit=unit,

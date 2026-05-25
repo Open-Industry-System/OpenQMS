@@ -362,7 +362,7 @@ export default function GaugeListPage() {
         confirmLoading={saving}
         okText="保存"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={modalForm} layout="vertical">
           <Form.Item label="量具编号" name="gauge_no" rules={[{ required: true, message: "请输入编号" }]}>

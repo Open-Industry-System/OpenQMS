@@ -314,7 +314,7 @@ export default function MsaStudyListPage() {
           createForm.resetFields();
         }}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={createForm} layout="vertical">
           <Form.Item label="研究类型" name="study_type" rules={[{ required: true }]}>

@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models.grr import GrrStudy, GrrMeasurement, GrrResult
 from app.models.audit import AuditLog
+from app.services.gauge_service import validate_gauge_for_use
 
 
 async def _generate_study_no(db: AsyncSession) -> str:
@@ -54,6 +55,8 @@ async def create_study(
     user_id: uuid.UUID,
     **kwargs,
 ) -> GrrStudy:
+    if gauge_id:
+        await validate_gauge_for_use(db, gauge_id)
     study_no = await _generate_study_no(db)
     study_id = uuid.uuid4()
     study = GrrStudy(

@@ -25,6 +25,7 @@ import StudyDetailPage from "./pages/msa/StudyDetailPage";
 import SCListPage from "./pages/special-characteristic/SCListPage";
 import SCMatrixPage from "./pages/special-characteristic/SCMatrixPage";
 import SCDetailPage from "./pages/special-characteristic/SCDetailPage";
+import TraceabilityPage from "./pages/special-characteristic/TraceabilityPage";
 import ManagementReviewListPage from "./pages/managementReview/ManagementReviewListPage";
 import ManagementReviewDetailPage from "./pages/managementReview/ManagementReviewDetailPage";
 
@@ -76,12 +77,14 @@ export default function App() {
         <Route path="/spc/:id" element={<SPCDetailPage />} />
         <Route path="/suppliers" element={<SupplierListPage />} />
         <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
+        <Route path="/msa" element={<Navigate to="/msa/gauges" replace />} />
         <Route path="/msa/gauges" element={<GaugeListPage />} />
         <Route path="/msa/gauges/:id" element={<GaugeDetailPage />} />
         <Route path="/msa/studies" element={<MsaStudyListPage />} />
         <Route path="/msa/studies/:type/:id" element={<StudyDetailPage />} />
         <Route path="/special-characteristics" element={<SCListPage />} />
         <Route path="/special-characteristics/matrix" element={<SCMatrixPage />} />
+        <Route path="/special-characteristics/traceability" element={<TraceabilityPage />} />
         <Route path="/special-characteristics/:id" element={<SCDetailPage />} />
         <Route path="/management-reviews" element={<ManagementReviewListPage />} />
         <Route path="/management-reviews/:id" element={<ManagementReviewDetailPage />} />

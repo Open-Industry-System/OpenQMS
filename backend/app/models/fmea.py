@@ -20,6 +20,7 @@ class FMEADocument(Base):
     product_line_code: Mapped[str] = mapped_column(String(20), default="DC-DC-100")
     status: Mapped[str] = mapped_column(String(20), default="draft")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    lock_version: Mapped[int] = mapped_column(Integer, default=0)
     graph_data: Mapped[dict] = mapped_column(JSONB, default=lambda: {"nodes": [], "edges": []})
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

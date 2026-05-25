@@ -233,3 +233,19 @@ async def create_calibration(
         raise ValueError(f"failed to create calibration: {e}")
     await db.refresh(cal)
     return cal
+
+
+
+async def validate_gauge_for_use(db: AsyncSession, gauge_id: uuid.UUID) -> Gauge:
+    """Validate that a gauge is active and within calibration date for use in inspections/SPC/CP.
+    
+    Raises ValueError if gauge is inactive, calibrating, or past calibration date.
+    """
+    gauge = await db.get(Gauge, gauge_id)
+    if gauge is None:
+        raise ValueError(f"量具 {gauge_id} 不存在")
+    if gauge.status != "active":
+        raise ValueError(f"量具 '{gauge.name}' ({gauge.gauge_no}) 当前状态为 '{gauge.status}'，不可用于检验。仅 'active' 状态量具可用。")
+    if gauge.next_calibration_date and gauge.next_calibration_date < date.today():
+        raise ValueError(f"量具 '{gauge.name}' ({gauge.gauge_no}) 校准已过期 (到期日: {gauge.next_calibration_date.isoformat()})，请先完成校准。")
+    return gauge

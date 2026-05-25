@@ -31,6 +31,7 @@ const menuItems = [
   { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
   { key: "/spc", icon: <FileTextOutlined />, label: "SPC控制图" },
   { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
+  { key: "/special-characteristics/traceability", icon: <SafetyCertificateOutlined />, label: "贯穿追踪" },
   { key: "/management-reviews", icon: <TeamOutlined />, label: "管理评审" },
   { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA" },
   {

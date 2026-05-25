@@ -224,9 +224,14 @@ async def delete_control_plan(
 async def approve_control_plan(
     db: AsyncSession, cp: ControlPlan, user_id: uuid.UUID
 ) -> ControlPlan:
-    """Approve a control plan."""
+    """Approve a control plan. Validates all referenced gauges are active and calibrated."""
     if cp.status == "approved":
         raise ValueError("Control plan is already approved.")
+
+    from app.services.gauge_service import validate_gauge_for_use
+    for item in cp.items:
+        if item.gauge_id:
+            await validate_gauge_for_use(db, item.gauge_id)
 
     cp.status = "approved"
     cp.approved_by = user_id

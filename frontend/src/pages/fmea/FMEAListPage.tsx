@@ -129,11 +129,16 @@ export default function FMEAListPage() {
       title: "操作",
       key: "actions",
       width: 100,
-      render: (_: unknown, record: FMEADocument) => (
-        <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
-          编辑
-        </Button>
-      ),
+      render: (_: unknown, record: FMEADocument) =>
+        canEdit ? (
+          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
+            编辑
+          </Button>
+        ) : (
+          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)} disabled>
+            查看
+          </Button>
+        ),
     },
   ];
 

@@ -44,6 +44,18 @@ async def get_matrix(
     return await sc_svc.get_matrix(db, product_line)
 
 
+@router.get("/traceability/{sc_id}")
+async def get_traceability(
+    sc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    try:
+        return await sc_svc.get_traceability_chain(db, sc_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/cp-sync-status/{cp_id}", response_model=CPSyncStatusResponse)
 async def cp_sync_status(
     cp_id: uuid.UUID,

@@ -16,3 +16,4 @@ docs/superpowers/
 .worktrees/
 node_modules
 .claude/
+.codegraph/
