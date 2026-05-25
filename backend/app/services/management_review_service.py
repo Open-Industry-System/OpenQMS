@@ -23,9 +23,11 @@ async def _audit(
     record_id: uuid.UUID,
     user_id: uuid.UUID,
     changed_fields: dict,
+    *,
+    table_name: str = "management_reviews",
 ) -> None:
     db.add(AuditLog(
-        table_name="management_reviews",
+        table_name=table_name,
         record_id=record_id,
         action=action,
         changed_fields=changed_fields,
@@ -441,8 +443,8 @@ async def create_output(
     review = await get_review(db, review_id)
     if review is None:
         raise ValueError("review not found")
-    if review.status not in ("in_review", "data_collected"):
-        raise ValueError("can only add outputs in data_collected or in_review status")
+    if review.status != "in_review":
+        raise ValueError("can only add outputs in in_review status")
 
     output = ReviewOutput(
         review_id=review_id,
@@ -456,7 +458,7 @@ async def create_output(
         "review_id": str(review_id),
         "category": category,
         "description": description[:100],
-    })
+    }, table_name="review_outputs")
     try:
         await db.commit()
     except IntegrityError as e:
@@ -480,6 +482,18 @@ async def update_output(
             if k not in allowed:
                 raise ValueError(f"field '{k}' is locked after review is closed")
 
+    # Validate status transitions: pending → in_progress → completed → verified
+    new_status = fields.get("status")
+    if new_status is not None and new_status != output.status:
+        valid_transitions = {
+            "pending": "in_progress",
+            "in_progress": "completed",
+            "completed": "verified",
+        }
+        expected = valid_transitions.get(output.status)
+        if expected is None or new_status != expected:
+            raise ValueError(f"invalid status transition: {output.status} → {new_status}")
+
     changed = {}
     for f, val in fields.items():
         if val is None:
@@ -492,7 +506,7 @@ async def update_output(
     if not changed:
         return output
 
-    await _audit(db, "UPDATE", output.output_id, user_id, changed)
+    await _audit(db, "UPDATE", output.output_id, user_id, changed, table_name="review_outputs")
     try:
         await db.commit()
     except IntegrityError as e:
@@ -505,10 +519,13 @@ async def update_output(
 async def delete_output(
     db: AsyncSession, output: ReviewOutput, user_id: uuid.UUID,
 ) -> None:
+    review = await get_review(db, output.review_id)
+    if review and review.status not in ("in_review", "data_collected"):
+        raise ValueError("can only delete outputs in data_collected or in_review status")
     await _audit(db, "DELETE", output.output_id, user_id, {
         "review_id": str(output.review_id),
         "category": output.category,
-    })
+    }, table_name="review_outputs")
     try:
         await db.delete(output)
         await db.commit()
@@ -537,7 +554,7 @@ async def verify_output(
     await _audit(db, "TRANSITION", output.output_id, user_id, {
         "status": {"before": "completed", "after": "verified"},
         "verified_by": str(user_id),
-    })
+    }, table_name="review_outputs")
     try:
         await db.commit()
     except IntegrityError as e:

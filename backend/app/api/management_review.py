@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
+from app.core.deps import get_current_user, require_admin, require_engineer_or_admin, require_manager_or_admin
 from app.models.user import User
 from app import schemas
 from app.services import management_review_service
@@ -86,7 +86,7 @@ async def update_review(
 async def delete_review(
     review_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_admin),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -258,7 +258,7 @@ async def delete_output(
     review_id: uuid.UUID,
     output_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_admin),
 ):
     outputs = await management_review_service.list_outputs(db, review_id)
     output = next((o for o in outputs if o.output_id == output_id), None)
