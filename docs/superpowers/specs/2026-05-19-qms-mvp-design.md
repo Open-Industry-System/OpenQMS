@@ -18,7 +18,7 @@
 
 | 模块 | 功能 | 优先级 |
 |------|------|--------|
-| 用户认证 | JWT 用户名密码认证，RBAC 角色（admin/quality_engineer/viewer） | P0 |
+| 用户认证 | JWT 用户名密码认证，RBAC 角色（admin/quality_engineer/quality_manager/viewer） | P0 |
 | PFMEA 编辑器 | 工序流编辑、FMEA 表格、RPN 计算、状态流转 | P0 |
 | 8D/CAPA | D1-D8 步骤流、阶段推进、FMEA 关联 | P0 |
 | 仪表盘 | KPI 卡片、趋势图、预警列表 | P0 |
@@ -53,7 +53,7 @@ CREATE TABLE users (
     display_name   VARCHAR(100),
     email          VARCHAR(100),
     password_hash  VARCHAR(255) NOT NULL,
-    role           VARCHAR(20) CHECK (role IN ('admin', 'quality_engineer', 'viewer')),
+    role           VARCHAR(20) CHECK (role IN ('admin', 'quality_engineer', 'quality_manager', 'viewer')),
     is_active      BOOLEAN DEFAULT TRUE,
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -140,7 +140,8 @@ CREATE INDEX idx_audit_time ON audit_logs(operated_at);
       "name": "元件偏移",
       "severity": 7,
       "occurrence": 4,
-      "detection": 3
+      "detection": 3,
+      "special_characteristic_class": null
     },
     {
       "id": "n4",
@@ -361,6 +362,17 @@ D1_TEAM → D2_DESCRIPTION → D3_INTERIM → D4_ROOT_CAUSE
 5. **数据持久化**: 所有数据可正确保存到 PostgreSQL，重启后不丢失
 
 ---
+
+### graph_data JSONB 性能说明
+
+当节点数量超过 200 时，全量 `graph_data` JSONB 的读写性能会显著下降。建议：
+- 前端采用增量更新策略，仅发送变更的节点/边
+- 后端实现 JSONB 部分更新（`jsonb_set`）而非全量覆盖
+- 超过 500 节点的 FMEA 考虑拆分为多个子文档
+
+### 特殊特性 (CC/SC) 字段
+
+所有 `FailureMode` 和 `Function` 节点均预留 `special_characteristic_class` 可选属性，值为 `"CC"`（关键特性）、`"SC"`（重要特性）或 `null`。该字段为后续 IATF 16949 §8.3.3.3 特性传递审计预留接口，MVP 阶段不强制填写。
 
 ## 10. 后续演进
 

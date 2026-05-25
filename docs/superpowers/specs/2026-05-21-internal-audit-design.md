@@ -30,6 +30,7 @@
 | scope | TEXT | NOT NULL | 审核范围 |
 | criteria | TEXT | NOT NULL | 审核准则 |
 | status | VARCHAR(20) | DEFAULT 'planned' | planned → active → completed |
+| product_line_code | VARCHAR(20) | FK → product_lines.code, nullable | 产品线编码 |
 | created_by | UUID | FK → users.user_id | |
 | created_at | DateTime | server_default=now() | |
 
@@ -190,7 +191,10 @@ open → in_progress → verified → closed
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | /api/audit-checklist-templates | 返回 3 套预设模板 | 所有角色 |
+| GET | /api/audit-checklist-templates | 返回模板列表，支持 audit_type 筛选 | 所有角色 |
+| POST | /api/audit-checklist-templates | 创建自定义模板 | engineer+ |
+| PUT | /api/audit-checklist-templates/{id} | 更新模板（非默认模板） | engineer+ |
+| DELETE | /api/audit-checklist-templates/{id} | 删除自定义模板 | engineer+ |
 
 ---
 
@@ -227,6 +231,9 @@ open → in_progress → verified → closed
 3. 回写 finding.capa_ref_id = 新 CAPA 的 report_id
 4. 记录 AuditLog
 
+> [!IMPORTANT]
+> 指派 lead_auditor 或 team_members 时，service 层必须校验该用户的 `auditor_info.last_qualification_date` 是否在最近 12 个月内。若资格已过期则抛出 `ValueError("审核员资格已过期，请先完成资格再评审")`。
+
 ### 4. 方案状态自动更新
 
 - 当第一个关联计划的 status 变为 in_progress 或 completed 时，方案自动变为 active
@@ -234,7 +241,19 @@ open → in_progress → verified → closed
 
 ### 5. 检查表模板
 
-后端只提供一个静态 JSON 返回接口，模板内容硬编码在 service 层：
+模板数据应持久化至数据库 `audit_checklist_templates` 表以支持用户自定义，静态 JSON 仅作为默认种子数据：
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| template_id | UUID | PK | 模板ID |
+| name | VARCHAR(100) | NOT NULL | 模板名称 |
+| audit_type | VARCHAR(20) | NOT NULL | system / process / product |
+| items | JSONB | NOT NULL | 检查项数组 |
+| is_default | BOOLEAN | DEFAULT false | 是否为系统默认模板 |
+| created_by | UUID | FK → users | |
+| created_at | DateTime | server_default=now() | |
+
+后端提供一个静态 JSON 返回接口，模板内容作为默认种子数据：
 
 - **system**（体系审核）：覆盖 ISO 9001:2015 主要条款，约 15-20 项
 - **process**（过程审核）：基于 VDA 6.3 简化，约 15-20 项

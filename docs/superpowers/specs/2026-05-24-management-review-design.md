@@ -111,14 +111,16 @@ draft ──→ data_collected ──→ in_review ──→ closed
 | 3 | 审核结果 | audit_programs/plans/findings | 自动 | 最近周期审核发现项统计, 闭环率 |
 | 4 | 不合格与纠正措施 | capa_eightd | 自动 | open/in_progress/completed 计数, 平均闭环天数 |
 | 5 | FMEA 风险分析 | fmea_documents | 自动 | AP=H 数量, 状态分布 |
-| 6 | SPC 过程能力 | inspection_characteristics/sample_batches/spc_alarms | 自动 | Cpk 分布, 异常事件计数 |
-| 7 | 外部供方绩效 | suppliers/supplier_evaluations | 自动 | 评级分布(A/B/C/D), 交付得分 |
+| 6 | MSA 测量系统能力 | gauges/grr_studies/grr_results | 自动 | GR&R 通过率, 量具校准逾期数, 不可接受量具数 |
+| 7 | SPC 过程能力 | inspection_characteristics/sample_batches/spc_alarms | 自动 | Cpk 分布, 异常事件计数（含最近 90 天趋势） |
+| 8 | 外部供方绩效 | suppliers/supplier_evaluations | 自动 | 评级分布(A/B/C/D), 交付得分 |
 | 8 | 内外部因素变化 | manual_inputs.external_factors | 手动文本 | 文本输入 + 可上传附件 |
 | 9 | 资源充分性 | manual_inputs.resource_adequacy | 手动文本 | 文本输入 + 可上传附件 |
 | 10 | 顾客满意与反馈 | manual_inputs.customer_satisfaction | 手动录入 | 文本摘要 + 上传附件 (Excel/PPT 报告) |
 | 11 | 监视测量结果(设备) | manual_inputs.equipment_monitoring | 手动录入 | 文本摘要 + 上传附件 |
 | 12 | 不良质量成本 | manual_inputs.copq | 手动录入 | 文本摘要 + 上传附件 |
 | 13 | 制造可行性评估 | manual_inputs.manufacturing_feasibility | 手动录入 | 文本摘要 + 上传附件 |
+| 14 | 异常事件趋势 | spc_alarms + capa_eightd | 自动 | 最近 90 天异常事件趋势（按月聚合），含 SPC 超限次数和 CAPA 新增数 |
 
 ### 4.2 产品线隔离
 
@@ -168,6 +170,23 @@ draft ──→ data_collected ──→ in_review ──→ closed
     "total_suppliers": 12,
     "rating_distribution": {"A": 5, "B": 4, "C": 2, "D": 1},
     "avg_delivery_score": 85.5
+  },
+  "msa_capability": {
+    "total_gauges": 25,
+    "calibration_overdue": 2,
+    "grr_pass_rate": 0.85,
+    "grr_unacceptable": 1
+  },
+  "abnormal_events": {
+    "last_90_days": {
+      "spc_out_of_control": 5,
+      "capa_new": 12,
+      "monthly_trend": [
+        {"month": "2026-03", "spc_events": 2, "capa_new": 4},
+        {"month": "2026-04", "spc_events": 1, "capa_new": 3},
+        {"month": "2026-05", "spc_events": 2, "capa_new": 5}
+      ]
+    }
   },
   "previous_review_actions": {
     "total_outputs": 15,

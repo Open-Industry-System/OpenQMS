@@ -417,6 +417,8 @@ FMEA 审批通过时：
 - **SHA-256 校验**：每次查看历史版本时校验快照哈希，不匹配则拒绝展示并告警
 - **UUID 幂等性**：CP 回退时保留原有 item_id，通过 Upsert 而非 delete+insert 实现
 - **强外键关联**：`source_fmea_version_id` 使用 UUID FK 直接关联 `fmea_versions.version_id`，FMEA 版本删除时 SET NULL
+- **回退前引用检查**：FMEA 回退前检查是否有 CP 或其他模块引用当前 FMEA 的 graph 节点 ID。若存在活跃引用（`source_fmea_node_id`），在 API 响应中返回受影响的 CP 清单，要求用户确认后方可执行回退
+- **快照存储上限**：每个文档保留最多 50 个版本快照。超出上限时，最早的 minor 版本（非 major 发布版本）自动归档为压缩存储（仅保留元数据 + 变更摘要，snapshot 字段清空），major 版本永久保留
 
 ### 性能考量
 
@@ -425,6 +427,7 @@ FMEA 审批通过时：
 - `?major_only=true` 参数过滤只返回主版本线，减少数据量
 - 预期版本数量：每个文档 10-50 个版本
 - 快照大小：单条 10KB-500KB
+- 当版本数超过 50 时，自动归档最早的 minor 版本（保留 major 发布版本），归档版本的 snapshot 字段清空仅保留元数据
 - 总存储可控，无需分区或归档策略
 
 ---
