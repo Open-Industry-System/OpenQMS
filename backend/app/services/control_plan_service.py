@@ -9,6 +9,7 @@ from app.models.fmea import FMEADocument
 from app.models.audit import AuditLog
 from app.schemas.control_plan import ControlPlanCreate, ControlPlanUpdate, ImportFromFMEARequest
 from app.services.product_line_service import validate_product_line
+from app.services.version_service import create_cp_version
 
 
 async def create_audit_log(
@@ -231,6 +232,9 @@ async def approve_control_plan(
     cp.approved_by = user_id
     cp.approved_at = datetime.now(timezone.utc)
     cp.updated_by = user_id
+
+    # Create version snapshot on approve
+    await create_cp_version(db, cp, "approve", "审批通过，版本发布", user_id)
 
     await create_audit_log(
         db,
@@ -540,3 +544,23 @@ async def check_stale_items(
             })
 
     return stale_items
+
+
+async def mark_cp_sync_pending_on_fmea_approve(
+    db: AsyncSession, fmea_id: uuid.UUID, fmea_version_id: uuid.UUID
+) -> list[ControlPlan]:
+    """Mark all linked CPs as sync pending when FMEA is approved.
+
+    NOTE: All FMEA-CP sync logic is consolidated in version_service.py's
+    build_sync_preview and apply_sync_preview. Do NOT create separate sync
+    functions here to avoid architectural redundancy.
+    """
+    result = await db.execute(
+        select(ControlPlan).where(ControlPlan.fmea_ref_id == fmea_id)
+    )
+    cps = list(result.scalars().all())
+    for cp in cps:
+        if cp.source_fmea_version_id != fmea_version_id:
+            cp.sync_pending = True
+    await db.commit()
+    return cps

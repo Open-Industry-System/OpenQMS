@@ -8,6 +8,7 @@ from app.models.fmea import FMEADocument
 from app.state_machines.fmea_state import FMEAState, can_transition
 from app.models.audit import AuditLog
 from app.services.product_line_service import validate_product_line
+from app.services.version_service import create_fmea_version
 
 
 async def list_fmeas(
@@ -175,6 +176,17 @@ async def transition_fmea(
         fmea.approved_by = user_id
         fmea.approved_at = datetime.now(timezone.utc)
 
+    # Create version snapshot on submit or approve
+    version = None
+    if target in (FMEAState.IN_REVIEW, FMEAState.APPROVED):
+        change_type = "approve" if target == FMEAState.APPROVED else "submit"
+        change_summary = (
+            f"状态变更：{old_status} → {target_status}"
+            if target == FMEAState.IN_REVIEW
+            else "审批通过，版本发布"
+        )
+        version = await create_fmea_version(db, fmea, change_type, change_summary, user_id)
+
     # Audit log
     audit_log = AuditLog(
         table_name="fmea_documents",
@@ -189,5 +201,11 @@ async def transition_fmea(
     db.add(audit_log)
 
     await db.commit()
+
+    # Trigger CP sync when FMEA is approved
+    if target == FMEAState.APPROVED and version:
+        from app.services.control_plan_service import mark_cp_sync_pending_on_fmea_approve
+        await mark_cp_sync_pending_on_fmea_approve(db, fmea.fmea_id, version.version_id)
+
     await db.refresh(fmea)
     return fmea
