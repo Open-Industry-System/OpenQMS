@@ -25,6 +25,7 @@ import StudyDetailPage from "./pages/msa/StudyDetailPage";
 import SCListPage from "./pages/special-characteristic/SCListPage";
 import SCMatrixPage from "./pages/special-characteristic/SCMatrixPage";
 import SCDetailPage from "./pages/special-characteristic/SCDetailPage";
+import ManagementReviewListPage from "./pages/managementReview/ManagementReviewListPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -81,6 +82,7 @@ export default function App() {
         <Route path="/special-characteristics" element={<SCListPage />} />
         <Route path="/special-characteristics/matrix" element={<SCMatrixPage />} />
         <Route path="/special-characteristics/:id" element={<SCDetailPage />} />
+        <Route path="/management-reviews" element={<ManagementReviewListPage />} />
       </Route>
     </Routes>
   );

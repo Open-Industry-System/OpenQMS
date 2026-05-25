@@ -388,3 +388,48 @@ export interface ProductLine {
 export * from "./spc";
 export * from "./msa";
 export * from "./specialCharacteristic";
+
+// --- Management Review ---
+export interface ManagementReview {
+  review_id: string;
+  doc_no: string;
+  title: string;
+  review_date: string;
+  actual_date: string | null;
+  status: "draft" | "data_collected" | "in_review" | "closed";
+  product_line_code: string | null;
+  location: string | null;
+  chair_person_id: string;
+  participants: { user_id: string; name: string; role: string; department: string }[] | null;
+  meeting_minutes: string | null;
+  data_package: Record<string, unknown> | null;
+  manual_inputs: Record<string, unknown> | null;
+  attachments: { file_name: string; file_url: string; uploaded_at: string; uploaded_by: string }[] | null;
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManagementReviewListResponse {
+  items: ManagementReview[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ReviewOutput {
+  output_id: string;
+  review_id: string;
+  category: "improvement_opportunity" | "system_change" | "resource_need";
+  description: string;
+  responsible_id: string | null;
+  due_date: string | null;
+  status: "pending" | "in_progress" | "completed" | "verified";
+  completion_notes: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  verification_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
