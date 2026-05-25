@@ -114,6 +114,7 @@ class SupplierPPAPSubmission(Base):
     )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    product_line_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
@@ -159,6 +160,7 @@ class SupplierSCAR(Base):
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)
     source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    product_line_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     requested_action: Mapped[str | None] = mapped_column(Text, nullable=True)
     supplier_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")

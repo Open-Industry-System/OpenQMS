@@ -53,7 +53,7 @@ class QualityGoalResponse(BaseModel):
     doc_no: str
     parent_id: uuid.UUID | None
     level: int
-    product_line: str | None
+    product_line_code: str | None
     name: str
     target_value: str
     actual_value: str | None

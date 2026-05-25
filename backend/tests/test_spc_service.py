@@ -175,7 +175,7 @@ async def test_spc_v1_1_lifecycle(db_session: AsyncSession):
 
         # 7. Test historical snapshot switching
         # Switch back to Version 1
-        v1_activated = await activate_snapshot(db_session, user_id, ic.ic_id, snapshots_v2_sorted[0].snapshot_id)
+        v1_activated = await activate_snapshot(db_session, user_id, ic.ic_id, snapshots_v2_sorted[0].snapshot_id, change_reason="Test rollback")
         assert v1_activated.version_no == 1
         assert v1_activated.is_active is True
 

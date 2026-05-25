@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Modal, Steps, Button, Input, Card, Tag, Space, Table, Typography, Empty, InputNumber, Result, Divider, Popconfirm, Tooltip } from 'antd';
+import { Modal, Steps, Button, Input, Card, Tag, Space, Table, Typography, Empty, InputNumber, Result, Divider, Popconfirm, Tooltip, Select } from 'antd';
 import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import type { GraphNode, GraphEdge } from '../../types';
 import { generateFailureModes, suggestFailureChain, analyzeRisk, suggestMeasures } from '../../utils/dfmeaRules';
@@ -34,17 +34,21 @@ const STEP_TITLES = [
 const STRUCTURE_EDGE_TYPES: Record<string, string> = {
   System: 'HAS_PROCESS_STEP',
   Subsystem: 'HAS_WORK_ELEMENT',
+  Component: 'HAS_PARAMETER',
 };
 
 const CHILD_TYPE: Record<string, string> = {
   System: 'Subsystem',
   Subsystem: 'Component',
+  Component: 'DesignParameter',
 };
 
 const TYPE_LABEL: Record<string, string> = {
   System: '系统',
   Subsystem: '子系统',
   Component: '零部件',
+  DesignParameter: '设计参数',
+  Interface: '接口',
 };
 
 function nextId(suffix: string): string {
@@ -187,20 +191,26 @@ export default function GenerationWizard({ open, onCancel, onComplete }: Generat
         return (
           <div>
             <Title level={5}>结构分析</Title>
-            <Paragraph>构建系统 → 子系统 → 零部件的层级结构。</Paragraph>
-            <Button size="small" icon={<PlusOutlined />} onClick={() => {
-              const node = createNode('System', '新系统');
-              updateData({ structureNodes: [...data.structureNodes, node] });
-            }}>添加系统</Button>
+            <Paragraph>构建系统 → 子系统 → 零部件 → 设计参数的层级结构，或添加接口节点连接不同分支。</Paragraph>
+            <Space style={{ marginBottom: 12 }}>
+              <Button size="small" icon={<PlusOutlined />} onClick={() => {
+                const node = createNode('System', '新系统');
+                updateData({ structureNodes: [...data.structureNodes, node] });
+              }}>添加系统</Button>
+              <Button size="small" icon={<PlusOutlined />} onClick={() => {
+                const node: GraphNode = { ...createNode('Interface', '新接口'), interface_type: 'physical' };
+                updateData({ structureNodes: [...data.structureNodes, node] });
+              }}>添加接口</Button>
+            </Space>
             <div style={{ marginTop: 12 }}>
               {data.structureNodes.map((node) => (
-                <Card key={node.id} size="small" style={{ marginBottom: 8, marginLeft: node.type === 'Subsystem' ? 20 : node.type === 'Component' ? 40 : 0 }}>
+                <Card key={node.id} size="small" style={{ marginBottom: 8, marginLeft: node.type === 'Subsystem' ? 20 : node.type === 'Component' ? 40 : node.type === 'DesignParameter' ? 60 : 0 }}>
                   <Space>
-                    <Tag color={node.type === 'System' ? 'red' : node.type === 'Subsystem' ? 'orange' : 'green'}>{TYPE_LABEL[node.type]}</Tag>
+                    <Tag color={node.type === 'System' ? 'red' : node.type === 'Subsystem' ? 'orange' : node.type === 'Component' ? 'green' : node.type === 'DesignParameter' ? 'blue' : 'purple'}>{TYPE_LABEL[node.type] || node.type}</Tag>
                     <Input size="small" value={node.name} onChange={(e) => {
                       updateData({ structureNodes: data.structureNodes.map((n) => n.id === node.id ? { ...n, name: e.target.value } : n) });
                     }} style={{ width: 200 }} />
-                    {node.type !== 'Component' && (
+                    {CHILD_TYPE[node.type] && (
                       <Button size="small" onClick={() => {
                         const childType = CHILD_TYPE[node.type];
                         const child = createNode(childType, `新${TYPE_LABEL[childType]}`);

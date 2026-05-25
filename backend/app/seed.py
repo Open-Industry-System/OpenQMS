@@ -18,14 +18,14 @@ SAMPLE_GRAPH = {
     "nodes": [
         {"id": "pi_1", "type": "ProcessItem", "name": "SMT焊接生产线", "severity": 0, "occurrence": 0, "detection": 0},
         {"id": "ps_1", "type": "ProcessStep", "name": "SMT元器件贴装", "process_number": "OP10", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "we_1", "type": "ProcessWorkElement", "name": "高速贴片机", "classification": "Machine", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "we_1", "type": "ProcessWorkElement", "name": "高速贴片机", "severity": 0, "occurrence": 0, "detection": 0},
         {"id": "pif_1", "type": "ProcessItemFunction", "name": "完成电路板SMT焊接与元器件组装", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "psf_1", "type": "ProcessStepFunction", "name": "准确贴装电子元器件", "specification": "元器件贴装偏移度 <= 0.05mm", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "wef_1", "type": "ProcessWorkElementFunction", "name": "设备提供适宜且稳定的贴装压力", "requirement": "贴装压力 3.0±0.5N", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "psf_1", "type": "ProcessStepFunction", "name": "准确贴装电子元器件", "specification": "元器件贴装偏移度 <= 0.05mm", "classification": "CC", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "wef_1", "type": "ProcessWorkElementFunction", "name": "设备提供适宜且稳定的贴装压力", "requirement": "贴装压力 3.0±0.5N", "classification": "SC", "severity": 0, "occurrence": 0, "detection": 0},
         {"id": "fe_1", "type": "FailureEffect", "name": "电控板功能丧失，导致整车无法启动报警", "severity": 8, "severity_plant": 4, "severity_customer": 8, "severity_user": 8, "occurrence": 0, "detection": 0},
         {"id": "fm_1", "type": "FailureMode", "name": "元器件贴装偏移", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "fm-cc-001", "type": "FailureMode", "name": "空载转速偏差超出规格", "classification": "CC", "severity": 9, "occurrence": 3, "detection": 4},
-        {"id": "fm-sc-001", "type": "FailureMode", "name": "压装扭矩不稳定", "classification": "SC", "severity": 6, "occurrence": 4, "detection": 3},
+        {"id": "fm-cc-001", "type": "FailureMode", "name": "空载转速偏差超出规格", "severity": 9, "occurrence": 3, "detection": 4},
+        {"id": "fm-sc-001", "type": "FailureMode", "name": "压装扭矩不稳定", "severity": 6, "occurrence": 4, "detection": 3},
         {"id": "fc_1", "type": "FailureCause", "name": "贴装吸嘴磨损导致压力设定偏小", "severity": 0, "occurrence": 4, "detection": 0},
         {"id": "pc_1", "type": "PreventionControl", "name": "开机吸嘴压力自动零点校准与设备预防性维护", "severity": 0, "occurrence": 0, "detection": 0},
         {"id": "dc_1", "type": "DetectionControl", "name": "贴装后在线 3D-AOI 光学检测仪", "severity": 0, "occurrence": 0, "detection": 3},
@@ -60,7 +60,9 @@ SAMPLE_GRAPH = {
         {"source": "fc_1", "target": "fm_1", "type": "CAUSE_OF"},
         {"source": "fc_1", "target": "pc_1", "type": "PREVENTED_BY"},
         {"source": "fc_1", "target": "dc_1", "type": "DETECTED_BY"},
-        {"source": "fc_1", "target": "ra_1", "type": "OPTIMIZED_BY"}
+        {"source": "fc_1", "target": "ra_1", "type": "OPTIMIZED_BY"},
+        {"source": "psf_1", "target": "fm-cc-001", "type": "HAS_FAILURE_MODE"},
+        {"source": "wef_1", "target": "fm-sc-001", "type": "HAS_FAILURE_MODE"}
     ]
 }
 
@@ -295,7 +297,7 @@ async def seed():
                 "sc_category": "产品特性",
                 "spec_requirement": "空载转速 3500±50 RPM",
                 "source_fmea_id": fmea1.fmea_id,
-                "source_node_id": "fm-cc-001",
+                "source_node_id": "psf_1",
                 "source_type": "PFMEA",
                 "product_line_code": "DC-DC-100",
                 "msa_status": "PASS",
@@ -311,7 +313,7 @@ async def seed():
                 "sc_category": "过程特性",
                 "spec_requirement": "压装扭矩 25±2 Nm",
                 "source_fmea_id": fmea1.fmea_id,
-                "source_node_id": "fm-sc-001",
+                "source_node_id": "wef_1",
                 "source_type": "PFMEA",
                 "product_line_code": "DC-DC-100",
                 "msa_status": "PENDING",

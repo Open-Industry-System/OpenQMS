@@ -528,7 +528,9 @@ async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> 
         dp = data_points[alarm["batch_index"]]
         # Check if this alarm already exists (same rule, same batch)
         batch_result = await db.execute(
-            select(SampleBatch).where(SampleBatch.batch_no == dp["batch_no"])
+            select(SampleBatch).where(
+                and_(SampleBatch.batch_no == dp["batch_no"], SampleBatch.ic_id == ic.ic_id)
+            )
         )
         batch = batch_result.scalar_one_or_none()
 
@@ -754,3 +756,34 @@ async def activate_snapshot(
         {"action": "activate_control_limit", "version_no": snapshot.version_no, "change_reason": change_reason}
     )
     return snapshot
+
+
+async def get_spc_measurements_for_msa(
+    db: AsyncSession,
+    ic_id: uuid.UUID,
+    limit: int | None = None,
+) -> list[dict]:
+    """Extract SPC sample measurements for MSA study auto-population.
+    
+    Returns a flat list of {value, batch_no, sampled_at, sequence_no} dicts
+    suitable for populating MSA study measurements (Bias, GRR, Stability, etc.).
+    """
+    batches_result = await db.execute(
+        select(SampleBatch)
+        .where(SampleBatch.ic_id == ic_id)
+        .options(selectinload(SampleBatch.values))
+        .order_by(SampleBatch.sampled_at.desc())
+        .limit(limit or 50)
+    )
+    batches = batches_result.scalars().all()
+    
+    measurements: list[dict] = []
+    for batch in batches:
+        for val in sorted(batch.values, key=lambda v: v.sequence_no or 0):
+            measurements.append({
+                "value": float(val.value),
+                "batch_no": batch.batch_no,
+                "sampled_at": batch.sampled_at.isoformat() if batch.sampled_at else None,
+                "sequence_no": val.sequence_no,
+            })
+    return measurements

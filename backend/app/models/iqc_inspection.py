@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, date
 from typing import Optional
 
-from sqlalchemy import String, Integer, Date, DateTime, Text, ForeignKey, func
+from sqlalchemy import String, Integer, Date, DateTime, Text, ForeignKey, Float, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,9 @@ class IqcInspection(Base):
     lot_no: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     lot_qty: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     sample_qty: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    aql_level: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    inspection_level: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    sampling_standard: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     inspection_result: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     defect_qty: Mapped[int] = mapped_column(Integer, default=0)
     defect_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

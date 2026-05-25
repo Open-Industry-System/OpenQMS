@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models.bias import BiasStudy, BiasMeasurement, BiasResult
 from app.models.audit import AuditLog
+from app.services.spc_service import get_spc_measurements_for_msa
 
 
 async def _generate_study_no(db: AsyncSession) -> str:
@@ -216,3 +217,66 @@ async def complete_study(
     await db.commit()
     await db.refresh(study)
     return study
+
+
+async def populate_measurements_from_spc(
+    db: AsyncSession,
+    study_id: uuid.UUID,
+    user_id: uuid.UUID,
+    limit: int | None = None,
+) -> list[BiasMeasurement]:
+    """Auto-populate bias study measurements from linked SPC characteristic data.
+
+    Uses the study's spc_characteristic_id to extract SampleValue data
+    and create BiasMeasurement records. Existing measurements are replaced.
+    """
+    study = await db.get(BiasStudy, study_id)
+    if not study:
+        raise ValueError("bias study not found")
+    if not study.spc_characteristic_id:
+        raise ValueError("study has no linked SPC characteristic")
+    if study.status == "completed":
+        raise ValueError("study is completed, cannot modify measurements")
+
+    # Extract SPC sample measurements
+    spc_data = await get_spc_measurements_for_msa(
+        db, study.spc_characteristic_id, limit=limit
+    )
+    if not spc_data:
+        raise ValueError("no SPC sample data found for the linked characteristic")
+
+    # Clear existing measurements
+    existing = (
+        await db.execute(
+            select(BiasMeasurement).where(BiasMeasurement.study_id == study_id)
+        )
+    ).scalars().all()
+    for m in existing:
+        await db.delete(m)
+
+    # Create new measurements from SPC data
+    new_items = []
+    for i, spc_measurement in enumerate(spc_data):
+        new_items.append(
+            BiasMeasurement(
+                study_id=study_id,
+                value=spc_measurement["value"],
+                sequence_no=i + 1,
+            )
+        )
+    for item in new_items:
+        db.add(item)
+
+    study.status = "ongoing"
+    db.add(AuditLog(
+        table_name="bias_studies",
+        record_id=study_id,
+        action="POPULATE_FROM_SPC",
+        changed_fields={
+            "spc_characteristic_id": str(study.spc_characteristic_id),
+            "measurement_count": len(new_items),
+        },
+        operated_by=user_id,
+    ))
+    await db.commit()
+    return new_items

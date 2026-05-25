@@ -14,6 +14,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
+from app.models.capa import CAPAEightD
 from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.control_plan_version import ControlPlanVersion
 from app.models.fmea import FMEADocument
@@ -384,6 +385,31 @@ async def rollback_fmea(
     target = await get_fmea_version(db, fmea.fmea_id, target_major, target_minor)
     if target is None:
         raise ValueError(f"Version v{target_major}.{target_minor} not found.")
+
+    # Guard: check for active downstream references before overwriting graph_data
+    cascade_refs: list[str] = []
+
+    capa_result = await db.execute(
+        select(CAPAEightD.report_id, CAPAEightD.document_no)
+        .where(CAPAEightD.fmea_ref_id == fmea.fmea_id)
+        .where(CAPAEightD.status != "D8_CLOSURE")
+    )
+    for row in capa_result.all():
+        cascade_refs.append(f"8D/CAPA {row.document_no}")
+
+    cp_result = await db.execute(
+        select(ControlPlan.cp_id, ControlPlan.document_no)
+        .where(ControlPlan.fmea_ref_id == fmea.fmea_id)
+        .where(ControlPlan.status != "archived")
+    )
+    for row in cp_result.all():
+        cascade_refs.append(f"控制计划 {row.document_no}")
+
+    if cascade_refs:
+        raise ValueError(
+            f"无法回退：以下 {len(cascade_refs)} 个关联文档仍在使用当前 FMEA 的节点数据，"
+            f"请先处理或归档这些文档：{'、'.join(cascade_refs)}"
+        )
 
     # Restore graph_data
     fmea.graph_data = target.snapshot

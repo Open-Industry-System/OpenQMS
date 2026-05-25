@@ -55,6 +55,13 @@ export interface GraphNode {
     controls: string[];
     noise_factors: string[];
   };
+  // DesignParameter fields (DFMEA-02)
+  value?: number;
+  tolerance_upper?: number;
+  tolerance_lower?: number;
+  unit?: string;
+  // Interface fields (DFMEA-03)
+  interface_type?: 'physical' | 'electrical' | 'software' | 'thermal' | 'communication';
 }
 
 export interface GraphEdge {

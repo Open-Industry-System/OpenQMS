@@ -44,10 +44,11 @@ async def delete_product_line(db: AsyncSession, pl: ProductLine) -> None:
         ('fmea_documents', 'product_line_code', "status != 'archived'"),
         ('capa_eightd', 'product_line_code', "status != 'closed'"),
         ('control_plans', 'product_line_code', "status != 'archived'"),
-        ('inspection_characteristics', 'product_line', 'is_active = true'),
+        ('inspection_characteristics', 'product_line', '1 = 1'),
         ('special_characteristics', 'product_line_code', "status = 'active'"),
         ('quality_goals', 'product_line_code', "status = 'active'"),
         ('audit_programs', 'product_line_code', "status != 'completed'"),
+        ('management_reviews', 'product_line_code', "status NOT IN ('closed', 'cancelled')"),
         ('gauges', 'product_line_code', "status = 'active'"),
     ]
     for table, col, active_filter in tables_to_check:
