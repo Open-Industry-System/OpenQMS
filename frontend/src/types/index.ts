@@ -537,12 +537,13 @@ export interface SyncPreviewItem {
   item_id: string;
   action: "add" | "sync" | "delete";
   step_no: string;
-  current_value: string | null;
-  fmea_new_value: string;
-  merged_value: string;
+  current_value: Record<string, string | null> | null;
+  fmea_new_value: Record<string, string | null>;
+  merged_value: Record<string, string | null>;
 }
 
 export interface SyncPreviewResponse {
+  fmea_version_id: string;
   fmea_version: string;
   items: SyncPreviewItem[];
   summary: {

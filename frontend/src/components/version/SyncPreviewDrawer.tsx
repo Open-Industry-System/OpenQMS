@@ -89,6 +89,19 @@ export default function SyncPreviewDrawer({
     }
   };
 
+  const formatDictValue = (val: Record<string, string | null> | null) => {
+    if (!val) return <span style={{ color: "#999" }}>无</span>;
+    const entries = Object.entries(val).filter(([, v]) => v);
+    if (!entries.length) return <span style={{ color: "#999" }}>无</span>;
+    return (
+      <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+        {entries.map(([k, v]) => (
+          <div key={k}>{k}: {v}</div>
+        ))}
+      </div>
+    );
+  };
+
   const columns = [
     {
       title: "操作",
@@ -110,17 +123,22 @@ export default function SyncPreviewDrawer({
       title: "当前值",
       dataIndex: "current_value",
       key: "current_value",
-      render: (val: string | null) => val || <span style={{ color: "#999" }}>无</span>,
+      width: 180,
+      render: formatDictValue,
     },
     {
       title: "FMEA新值",
       dataIndex: "fmea_new_value",
       key: "fmea_new_value",
+      width: 180,
+      render: formatDictValue,
     },
     {
       title: "合并值",
       dataIndex: "merged_value",
       key: "merged_value",
+      width: 180,
+      render: formatDictValue,
     },
   ];
 
