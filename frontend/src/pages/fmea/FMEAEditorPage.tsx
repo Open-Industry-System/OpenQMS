@@ -3,11 +3,12 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Select, Table, Card, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
-  Descriptions, Divider,
+  Descriptions, Divider, Modal,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, SendOutlined,
   CheckOutlined, UndoOutlined, PlusOutlined, DeleteOutlined,
+  HistoryOutlined,
 } from "@ant-design/icons";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../api/fmea";
 import { syncFromFMEA, getSeverityWarnings } from "../../api/specialCharacteristic";
@@ -18,6 +19,10 @@ import { buildRows, createRowNodes, type FMEARow } from "../../utils/fmeaTable";
 import StructureTree from "../../components/dfmea/StructureTree";
 import ParameterDiagram from "../../components/dfmea/ParameterDiagram";
 import InlineRecommendations from "../../components/dfmea/InlineRecommendations";
+import VersionHistoryTab from "../../components/version/VersionHistoryTab";
+import CreateVersionModal from "../../components/version/CreateVersionModal";
+import RollbackConfirmModal from "../../components/version/RollbackConfirmModal";
+import VersionCompareView from "../../components/version/VersionCompareView";
 
 const { Title, Text } = Typography;
 
@@ -77,6 +82,10 @@ export default function FMEAEditorPage() {
   const isViewer = user?.role === "viewer";
   const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
   const [activeTab, setActiveTab] = useState("failure");
+  const [outerTab, setOuterTab] = useState("editor");
+  const [createVersionOpen, setCreateVersionOpen] = useState(false);
+  const [rollbackTarget, setRollbackTarget] = useState<{ major: number; minor: number } | null>(null);
+  const [compareState, setCompareState] = useState<{ major1: number; minor1: number; major2: number; minor2: number } | null>(null);
   const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
   const [recommendationTrigger, setRecommendationTrigger] = useState<"function" | "failureMode" | "risk" | null>(null);
   const [recommendationCtx, setRecommendationCtx] = useState<{ functionDesc?: string; failureMode?: string; s?: number; o?: number; d?: number }>({});
@@ -751,7 +760,9 @@ export default function FMEAEditorPage() {
         </Descriptions>
       </Card>
 
-      <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }}>
+      <Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }}>
+        <Tabs.TabPane tab="编辑器" key="editor">
+          <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }}>
         <Tabs.TabPane tab="失效分析" key="failure">
           <Row gutter={16}>
             {/* Left: Structure/Function Tree */}
@@ -935,6 +946,55 @@ export default function FMEAEditorPage() {
       <Text type="secondary" style={{ fontSize: 11 }}>
         S=严重度 O=发生度 D=探测度 | RPN=风险优先数 | AP=措施优先级 (H=高 M=中 L=低) | 带 ' = 改进后评分
       </Text>
+        </Tabs.TabPane>
+        <Tabs.TabPane tab={<span><HistoryOutlined /> 版本历史</span>} key="history">
+          <VersionHistoryTab
+            documentId={id!}
+            documentType="fmea"
+            canCreate={!isViewer}
+            canRollback={isAdminOrManager}
+            isDraft={fmea.status === "draft"}
+            onViewSnapshot={() => {}}
+            onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
+            onRollback={(major, minor) => setRollbackTarget({ major, minor })}
+            onCreateVersion={() => setCreateVersionOpen(true)}
+          />
+        </Tabs.TabPane>
+      </Tabs>
+
+      <CreateVersionModal
+        open={createVersionOpen}
+        documentId={id!}
+        documentType="fmea"
+        onClose={() => setCreateVersionOpen(false)}
+        onSuccess={() => setCreateVersionOpen(false)}
+      />
+      <RollbackConfirmModal
+        open={!!rollbackTarget}
+        targetVersion={rollbackTarget}
+        documentId={id!}
+        documentType="fmea"
+        onClose={() => setRollbackTarget(null)}
+        onSuccess={() => setRollbackTarget(null)}
+      />
+      {compareState && (
+        <Modal
+          open={!!compareState}
+          title="版本对比"
+          width={900}
+          footer={null}
+          onCancel={() => setCompareState(null)}
+        >
+          <VersionCompareView
+            documentId={id!}
+            documentType="fmea"
+            major1={compareState.major1}
+            minor1={compareState.minor1}
+            major2={compareState.major2}
+            minor2={compareState.minor2}
+          />
+        </Modal>
+      )}
     </div>
   );
 }

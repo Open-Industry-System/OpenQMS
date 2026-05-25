@@ -180,6 +180,7 @@ export interface ControlPlan {
   org_factory: string;
   core_group: string;
   items: ControlPlanItem[];
+  sync_pending: boolean;
   created_by: string | null;
   updated_by: string | null;
   approved_by: string | null;
