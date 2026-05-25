@@ -847,7 +847,7 @@ async def _aggregate_data_package(
     alarm_base = select(func.count()).select_from(SPCAlarm)
     if product_line_code:
         alarm_base = alarm_base.join(
-            InspectionCharacteristic, SPCAlarm.characteristic_id == InspectionCharacteristic.ic_id
+            InspectionCharacteristic, SPCAlarm.ic_id == InspectionCharacteristic.ic_id
         ).where(InspectionCharacteristic.product_line == product_line_code)
     total_alarms = (await db.execute(alarm_base)).scalar() or 0
     pkg["spc_capability"] = {
@@ -1834,7 +1834,7 @@ export default function ManagementReviewDetailPage() {
     }
   };
 
-  const handleSaveManualInput = async (key: string, value: string) => {
+  const handleSaveManualInput = async (key: string, value: any) => {
     if (!id) return;
     const inputs = { ...manualInputs, [key]: value };
     const updated = await updateManagementReview(id, { manual_inputs: inputs });
@@ -1895,8 +1895,12 @@ export default function ManagementReviewDetailPage() {
             defaultValue={existing?.summary || ""}
             disabled={isClosed || isViewer}
             onBlur={(e) => {
-              const val = { ...(typeof manualInputs[src.key] === "object" ? manualInputs[src.key] as Record<string, unknown> : {}), summary: e.target.value };
-              handleSaveManualInput(src.key, JSON.stringify(val));
+              const current = manualInputs[src.key];
+              const parsed = typeof current === "string"
+                ? JSON.parse(current)
+                : (typeof current === "object" && current !== null ? current : {});
+              const val = { ...parsed, summary: e.target.value };
+              handleSaveManualInput(src.key, val);
             }}
             placeholder="请输入汇总文字..."
           />
@@ -2150,19 +2154,27 @@ async def _get_mgmt_review_stats(db: AsyncSession, product_line: str | None = No
     output_rows = (await db.execute(output_base)).all()
     output_dist = {row[0]: row[1] for row in output_rows}
     total_outputs = sum(output_dist.values())
-    verified = output_dist.get("verified", 0) + output_dist.get("completed", 0)
+    verified_count = output_dist.get("verified", 0)
     return {
         "total_reviews": total_reviews,
         "total_outputs": total_outputs,
-        "verified_outputs": verified,
+        "verified_outputs": verified_count,
         "pending_verification": output_dist.get("completed", 0),
-        "completion_rate": round(verified / total_outputs, 3) if total_outputs else 0,
+        "completion_rate": round(verified_count / total_outputs, 3) if total_outputs else 0,
     }
 ```
 
-Then in the `get_dashboard` function, before the final return, add:
+Then in the `get_dashboard` function, change the final `return { ... }` to assign to a `res` variable, append management review stats to `kpi`, and return `res`:
 ```python
-    stats["management_review"] = await _get_mgmt_review_stats(db, product_line)
+    res = {
+        "kpi": {
+            # ... all existing kpi fields ...
+        },
+        "trends": { ... },
+        "alerts": [],
+    }
+    res["kpi"]["management_review"] = await _get_mgmt_review_stats(db, product_line)
+    return res
 ```
 
 - [ ] **Step 2: Add KPI card to dashboard frontend**
