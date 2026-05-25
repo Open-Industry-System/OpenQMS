@@ -66,6 +66,7 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
     avg_rpn = round(total_rpn / rpn_count) if rpn_count > 0 else 0
 
     from app.models.special_characteristic import SpecialCharacteristic
+    from app.models.management_review import ManagementReview, ReviewOutput
 
     sc_base = select(func.count(SpecialCharacteristic.sc_id))
     if product_line:
@@ -81,6 +82,32 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
         sc_base.where(SpecialCharacteristic.is_safety_suggested == True)
     )
 
+    # Management review stats
+    mr_base = select(func.count(ManagementReview.review_id))
+    if product_line:
+        mr_base = mr_base.where(ManagementReview.product_line_code == product_line)
+
+    total_reviews = await db.scalar(mr_base) or 0
+    closed_reviews = await db.scalar(
+        mr_base.where(ManagementReview.status == "closed")
+    ) or 0
+
+    output_base = select(func.count(ReviewOutput.output_id)).join(
+        ManagementReview, ReviewOutput.review_id == ManagementReview.review_id
+    )
+    if product_line:
+        output_base = output_base.where(
+            ManagementReview.product_line_code == product_line
+        )
+
+    total_outputs = await db.scalar(output_base) or 0
+    verified_outputs = await db.scalar(
+        output_base.where(ReviewOutput.status == "verified")
+    ) or 0
+    pending_verification = await db.scalar(
+        output_base.where(ReviewOutput.status == "completed")
+    ) or 0
+
     return {
         "kpi": {
             "total_fmea": total_fmea or 0,
@@ -93,6 +120,14 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
             "total_safety": total_safety or 0,
             "pending_safety_approval": pending_safety_approval or 0,
             "safety_suggestions": safety_suggestions or 0,
+            "management_review": {
+                "total_reviews": total_reviews,
+                "closed_reviews": closed_reviews,
+                "total_outputs": total_outputs,
+                "verified_outputs": verified_outputs,
+                "pending_verification": pending_verification,
+                "completion_rate": round(verified_outputs / total_outputs, 3) if total_outputs > 0 else 0,
+            },
         },
         "trends": {
             "fmea_by_status": {},

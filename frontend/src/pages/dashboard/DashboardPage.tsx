@@ -98,6 +98,35 @@ export default function DashboardPage() {
       </Row>
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} sm={12} lg={6}>
+          <KPICard title="管理评审总数" value={kpi?.management_review?.total_reviews ?? 0} color="#1677FF" />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <div onClick={() => navigate("/management-reviews")} style={{ cursor: "pointer" }}>
+            <KPICard
+              title="评审措施完成率"
+              value={Math.round((kpi?.management_review?.completion_rate ?? 0) * 1000) / 10}
+              suffix="%"
+              color={
+                (kpi?.management_review?.completion_rate ?? 0) >= 0.8
+                  ? "#52C41A"
+                  : (kpi?.management_review?.completion_rate ?? 0) >= 0.5
+                    ? "#FAAD14"
+                    : "#FF4D4F"
+              }
+            />
+          </div>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <KPICard
+            title="待验证措施"
+            value={kpi?.management_review?.pending_verification ?? 0}
+            color={kpi && kpi.management_review && kpi.management_review.pending_verification > 0 ? "#FAAD14" : "#52C41A"}
+          />
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col span={24}>
           <Card title="数据概览" loading={loading}>
             <Table

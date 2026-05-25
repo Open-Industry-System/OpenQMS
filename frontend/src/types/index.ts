@@ -132,6 +132,14 @@ export interface DashboardData {
     total_safety: number;
     pending_safety_approval: number;
     safety_suggestions: number;
+    management_review: {
+      total_reviews: number;
+      closed_reviews: number;
+      total_outputs: number;
+      verified_outputs: number;
+      pending_verification: number;
+      completion_rate: number;
+    };
   };
   trends: Record<string, unknown>;
   alerts: unknown[];
