@@ -30,6 +30,7 @@ from app.api.msa import (
 )
 from app.api.special_characteristic import router as sc_router
 from app.api.product_line import router as product_line_router
+from app.api.management_review import router as management_review_router
 
 
 @asynccontextmanager
@@ -78,6 +79,7 @@ app.include_router(attribute_router)
 app.include_router(overview_router)
 app.include_router(sc_router)
 app.include_router(product_line_router)
+app.include_router(management_review_router)
 
 
 @app.get("/api/health")
