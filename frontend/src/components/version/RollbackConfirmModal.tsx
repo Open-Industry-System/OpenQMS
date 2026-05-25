@@ -3,7 +3,7 @@ import { Modal, Form, Input, Alert, message } from "antd";
 
 interface RollbackConfirmModalProps {
   open: boolean;
-  targetVersion: { major: number; minor: number } | null;
+  targetVersion: { major_no: number; minor_no: number } | null;
   documentId: string;
   documentType: "fmea" | "cp";
   onClose: () => void;
@@ -38,16 +38,16 @@ export default function RollbackConfirmModal({
         const { rollbackFMEAVersion } = await import("../../api/version");
         await rollbackFMEAVersion(
           documentId,
-          targetVersion.major,
-          targetVersion.minor,
+          targetVersion.major_no,
+          targetVersion.minor_no,
           { reason: values.reason }
         );
       } else {
         const { rollbackCPVersion } = await import("../../api/version");
         await rollbackCPVersion(
           documentId,
-          targetVersion.major,
-          targetVersion.minor,
+          targetVersion.major_no,
+          targetVersion.minor_no,
           { reason: values.reason }
         );
       }
@@ -77,7 +77,7 @@ export default function RollbackConfirmModal({
         description={
           <div>
             <p>
-              回退到版本 <strong>v{targetVersion?.major}.{targetVersion?.minor}</strong> 将创建一个新的次版本号，
+              回退到版本 <strong>v{targetVersion?.major_no}.{targetVersion?.minor_no}</strong> 将创建一个新的次版本号，
               内容与目标版本相同。
             </p>
             <p style={{ marginTop: 8, color: "#ff4d4f" }}>

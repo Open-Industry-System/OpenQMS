@@ -138,7 +138,7 @@ export default function VersionHistoryTab({
               color: cfg.color === "default" ? "gray" : cfg.color,
               children: (
                 <div
-                  key={`${v.major}.${v.minor}`}
+                  key={`${v.major_no}.${v.minor_no}`}
                   style={{ paddingBottom: 8 }}
                 >
                   <div
@@ -149,17 +149,17 @@ export default function VersionHistoryTab({
                     }}
                   >
                     <Space>
-                      <strong>v{v.major}.{v.minor}</strong>
+                      <strong>v{v.major_no}.{v.minor_no}</strong>
                       <Tag color={cfg.color}>{cfg.label}</Tag>
                       <span style={{ color: "#999", fontSize: 12 }}>
-                        {formatTime(v.changed_at)}
+                        {formatTime(v.created_at)}
                       </span>
                     </Space>
                     <Space size={4}>
                       <Button
                         size="small"
                         icon={<EyeOutlined />}
-                        onClick={() => onViewSnapshot(v.major, v.minor)}
+                        onClick={() => onViewSnapshot(v.major_no, v.minor_no)}
                       >
                         查看
                       </Button>
@@ -169,10 +169,10 @@ export default function VersionHistoryTab({
                           icon={<SwapOutlined />}
                           onClick={() =>
                             onCompare(
-                              v.major,
-                              v.minor,
-                              nextVersion.major,
-                              nextVersion.minor
+                              v.major_no,
+                              v.minor_no,
+                              nextVersion.major_no,
+                              nextVersion.minor_no
                             )
                           }
                         >
@@ -184,7 +184,7 @@ export default function VersionHistoryTab({
                           size="small"
                           danger
                           icon={<RollbackOutlined />}
-                          onClick={() => onRollback(v.major, v.minor)}
+                          onClick={() => onRollback(v.major_no, v.minor_no)}
                         >
                           回退
                         </Button>

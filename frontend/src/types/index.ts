@@ -445,12 +445,12 @@ export interface ReviewOutput {
 
 // --- Version Management ---
 export interface VersionBase {
-  major: number;
-  minor: number;
+  major_no: number;
+  minor_no: number;
   change_type: "submit" | "approve" | "manual" | "rollback" | "fmea_sync";
   change_summary: string;
-  changed_by: string;
-  changed_at: string;
+  created_by: string;
+  created_at: string;
 }
 
 export interface FMEAVersion extends VersionBase {

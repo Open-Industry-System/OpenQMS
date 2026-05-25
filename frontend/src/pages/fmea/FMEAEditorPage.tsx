@@ -84,7 +84,7 @@ export default function FMEAEditorPage() {
   const [activeTab, setActiveTab] = useState("failure");
   const [outerTab, setOuterTab] = useState("editor");
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
-  const [rollbackTarget, setRollbackTarget] = useState<{ major: number; minor: number } | null>(null);
+  const [rollbackTarget, setRollbackTarget] = useState<{ major_no: number; minor_no: number } | null>(null);
   const [compareState, setCompareState] = useState<{ major1: number; minor1: number; major2: number; minor2: number } | null>(null);
   const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
   const [recommendationTrigger, setRecommendationTrigger] = useState<"function" | "failureMode" | "risk" | null>(null);
@@ -956,7 +956,7 @@ export default function FMEAEditorPage() {
             isDraft={fmea.status === "draft"}
             onViewSnapshot={() => {}}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
-            onRollback={(major, minor) => setRollbackTarget({ major, minor })}
+            onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}
           />
         </Tabs.TabPane>
