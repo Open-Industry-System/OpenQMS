@@ -18,6 +18,8 @@ from app.models.attribute import AttributeStudy, AttributeMeasurement, Attribute
 from app.models.special_characteristic import SpecialCharacteristic
 from app.models.product_line import ProductLine
 from app.models.management_review import ManagementReview, ReviewOutput
+from app.models.fmea_version import FMEAVersion
+from app.models.control_plan_version import ControlPlanVersion
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -34,4 +36,5 @@ __all__ = [
     "SpecialCharacteristic",
     "ProductLine",
     "ManagementReview", "ReviewOutput",
+    "FMEAVersion", "ControlPlanVersion",
 ]
