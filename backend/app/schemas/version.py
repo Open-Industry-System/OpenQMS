@@ -79,8 +79,6 @@ class ManualVersionCreate(BaseModel):
 
 
 class RollbackRequest(BaseModel):
-    target_major: int
-    target_minor: int
     reason: str
 
 
@@ -136,25 +134,17 @@ class CPDiffResult(BaseModel):
 
 
 class DiffSummary(BaseModel):
-    total_added: int
-    total_deleted: int
-    total_modified: int
+    added_count: int
+    deleted_count: int
+    modified_count: int
 
 
 class FMEACompareResponse(BaseModel):
-    v1_major: int
-    v1_minor: int
-    v2_major: int
-    v2_minor: int
     diff: FMEADiffResult
     summary: DiffSummary
 
 
 class CPCompareResponse(BaseModel):
-    v1_major: int
-    v1_minor: int
-    v2_major: int
-    v2_minor: int
     diff: CPDiffResult
     summary: DiffSummary
 
@@ -164,9 +154,8 @@ class CPCompareResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class VerifyResponse(BaseModel):
-    version_id: uuid.UUID
-    valid: bool
-    sha256_hash: str
+    is_valid: bool
+    warnings: list[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -183,8 +172,13 @@ class SyncPreviewItem(BaseModel):
     merged_value: dict | None = None
 
 
+class SyncSummary(BaseModel):
+    add_count: int
+    update_count: int
+    delete_count: int
+
+
 class SyncPreviewResponse(BaseModel):
-    fmea_version_id: uuid.UUID
-    fmea_version_label: str
-    cp_id: uuid.UUID
+    fmea_version: str
     items: list[SyncPreviewItem]
+    summary: SyncSummary
