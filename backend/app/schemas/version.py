@@ -179,6 +179,11 @@ class SyncSummary(BaseModel):
 
 
 class SyncPreviewResponse(BaseModel):
+    fmea_version_id: uuid.UUID
     fmea_version: str
     items: list[SyncPreviewItem]
     summary: SyncSummary
+
+
+class SyncFromFMEARequest(BaseModel):
+    selected_item_ids: list[str]

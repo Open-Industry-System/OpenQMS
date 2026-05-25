@@ -56,8 +56,8 @@ export default function RollbackConfirmModal({
       onSuccess();
       onClose();
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "回退失败";
-      message.error(errorMessage);
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      message.error(axiosErr?.response?.data?.detail || "回退失败");
     } finally {
       setLoading(false);
     }

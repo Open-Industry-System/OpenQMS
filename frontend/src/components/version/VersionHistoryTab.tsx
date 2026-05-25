@@ -112,7 +112,7 @@ export default function VersionHistoryTab({
             size="small"
           />
         </Space>
-        {canCreate && (
+        {canCreate && isDraft && (
           <Button
             type="primary"
             icon={<PlusOutlined />}

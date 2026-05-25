@@ -168,13 +168,11 @@ export async function getSyncPreview(
 
 export async function applySyncFromFMEA(
   cpId: string,
-  data: {
-    selected_item_ids: string[];
-  }
-): Promise<{ synced_count: number }> {
+  selectedItemIds: string[]
+): Promise<CPVersion> {
   const resp = await client.post(
     `/control-plans/${cpId}/sync-from-fmea`,
-    data
+    { selected_item_ids: selectedItemIds }
   );
   return resp.data;
 }

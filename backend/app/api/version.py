@@ -309,22 +309,33 @@ async def verify_cp_version_integrity(
 @router.get("/control-plans/{cp_id}/sync-preview", response_model=SyncPreviewResponse)
 async def get_sync_preview(
     cp_id: uuid.UUID,
-    fmea_version_id: uuid.UUID = Query(..., description="FMEA version ID to sync from"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
-    fmea_version = await get_fmea_version_by_id(db, fmea_version_id)
+    if not cp.fmea_ref_id:
+        raise HTTPException(status_code=400, detail="该控制计划未关联FMEA")
+
+    # Auto-detect latest FMEA version
+    result = await db.execute(
+        select(FMEAVersion)
+        .where(FMEAVersion.fmea_id == cp.fmea_ref_id)
+        .order_by(FMEAVersion.major_no.desc(), FMEAVersion.minor_no.desc())
+        .limit(1)
+    )
+    fmea_version = result.scalar_one_or_none()
     if fmea_version is None:
-        raise HTTPException(status_code=404, detail="FMEA version not found")
+        raise HTTPException(status_code=404, detail="FMEA版本不存在")
+
     preview = await build_sync_preview(db, cp, fmea_version)
     items = [SyncPreviewItem(**p) for p in preview]
     add_count = sum(1 for i in items if i.action == "add")
-    update_count = sum(1 for i in items if i.action == "update")
+    update_count = sum(1 for i in items if i.action == "sync")
     delete_count = sum(1 for i in items if i.action == "delete")
     return SyncPreviewResponse(
+        fmea_version_id=fmea_version.version_id,
         fmea_version=f"v{fmea_version.major_no}.{fmea_version.minor_no}",
         items=items,
         summary=SyncSummary(add_count=add_count, update_count=update_count, delete_count=delete_count),
@@ -334,23 +345,34 @@ async def get_sync_preview(
 @router.post("/control-plans/{cp_id}/sync-from-fmea")
 async def sync_from_fmea(
     cp_id: uuid.UUID,
-    fmea_version_id: uuid.UUID = Query(..., description="FMEA version ID to sync from"),
-    accepted_item_ids: list[str] = [],
+    req: SyncFromFMEARequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_engineer_or_admin),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
-    fmea_version = await get_fmea_version_by_id(db, fmea_version_id)
+    if cp.status == "approved":
+        raise HTTPException(status_code=400, detail="已批准的控制计划不能同步")
+    if not cp.fmea_ref_id:
+        raise HTTPException(status_code=400, detail="该控制计划未关联FMEA")
+
+    # Auto-detect latest FMEA version
+    result = await db.execute(
+        select(FMEAVersion)
+        .where(FMEAVersion.fmea_id == cp.fmea_ref_id)
+        .order_by(FMEAVersion.major_no.desc(), FMEAVersion.minor_no.desc())
+        .limit(1)
+    )
+    fmea_version = result.scalar_one_or_none()
     if fmea_version is None:
-        raise HTTPException(status_code=404, detail="FMEA version not found")
-    if not accepted_item_ids:
-        raise HTTPException(status_code=400, detail="No items selected for sync")
+        raise HTTPException(status_code=404, detail="FMEA版本不存在")
+    if not req.selected_item_ids:
+        raise HTTPException(status_code=400, detail="请选择至少一项同步内容")
     try:
-        synced_count = await apply_sync_preview(
-            db, cp, fmea_version, accepted_item_ids, user.user_id,
+        version = await apply_sync_preview(
+            db, cp, fmea_version, req.selected_item_ids, user.user_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"synced_count": synced_count}
+    return ControlPlanVersionListItem.model_validate(version)

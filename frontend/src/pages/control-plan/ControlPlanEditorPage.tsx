@@ -724,7 +724,7 @@ export default function ControlPlanEditorPage() {
             canCreate={user?.role !== "viewer"}
             canRollback={isAdminOrManager}
             isDraft={currentStatus === "draft"}
-            onViewSnapshot={() => {}}
+            onViewSnapshot={(major, minor) => message.info(`查看版本 v${major}.${minor} 快照（功能开发中）`)}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
             onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}
