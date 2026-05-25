@@ -1071,9 +1071,10 @@ async def build_sync_preview(
     for node_id, node in fmea_nodes.items():
         current = current_map.get(node_id)
         if not current:
-            # New node from FMEA
+            # New node from FMEA — pre-generate UUID for React key + checkbox tracking
             preview_items.append({
-                "item_id": None,
+                "item_id": str(uuid.uuid4()),
+                "source_fmea_node_id": node_id,
                 "step_no": node.get("process_number", ""),
                 "current_value": {},
                 "fmea_new_value": {"process_name": node.get("name", ""), "step_no": node.get("process_number", "")},
@@ -1144,9 +1145,10 @@ async def apply_sync_preview(
 
     for preview_item in preview:
         action = preview_item["action"]
-        if action == "add":
+        if action == "add" and preview_item["item_id"] in accepted_items:
+            # Only add if user checked the item
             new_item = ControlPlanItem(
-                item_id=uuid.uuid4(),
+                item_id=uuid.UUID(preview_item["item_id"]),
                 cp_id=cp.cp_id,
                 step_no=preview_item["merged_value"].get("step_no"),
                 process_name=preview_item["merged_value"].get("process_name"),
@@ -1209,7 +1211,8 @@ from app.services.version_service import create_fmea_version
 In `transition_fmea`, after the audit log creation and before `await db.commit()`, add:
 
 ```python
-    # Create version snapshot on submit or approve
+    # Create version snapshot on submit or approve (assign to version variable for downstream use)
+    version = None
     if target in (FMEAState.IN_REVIEW, FMEAState.APPROVED):
         change_type = "approve" if target == FMEAState.APPROVED else "submit"
         change_summary = (
@@ -1217,7 +1220,7 @@ In `transition_fmea`, after the audit log creation and before `await db.commit()
             if target == FMEAState.IN_REVIEW
             else f"审批通过，版本发布"
         )
-        await create_fmea_version(db, fmea, change_type, change_summary, user_id)
+        version = await create_fmea_version(db, fmea, change_type, change_summary, user_id)
 ```
 
 - [ ] **Step 2: Commit**
@@ -1255,7 +1258,12 @@ Add a new function at the bottom of the file:
 async def mark_cp_sync_pending_on_fmea_approve(
     db: AsyncSession, fmea_id: uuid.UUID, fmea_version_id: uuid.UUID
 ) -> list[ControlPlan]:
-    """Mark all linked CPs as sync pending when FMEA is approved."""
+    """Mark all linked CPs as sync pending when FMEA is approved.
+    
+    NOTE: All FMEA-CP sync logic is consolidated in version_service.py's
+    build_sync_preview and apply_sync_preview. Do NOT create separate sync
+    functions in control_plan_service.py to avoid architectural redundancy.
+    """
     from app.models.control_plan import ControlPlan
 
     result = await db.execute(
@@ -1277,7 +1285,7 @@ async def mark_cp_sync_pending_on_fmea_approve(
 In `backend/app/services/fmea_service.py`, in `transition_fmea` where `target == FMEAState.APPROVED`, after creating the FMEA version, add:
 
 ```python
-    if target == FMEAState.APPROVED:
+    if target == FMEAState.APPROVED and version:
         # Trigger CP sync notifications
         from app.services.control_plan_service import mark_cp_sync_pending_on_fmea_approve
         await mark_cp_sync_pending_on_fmea_approve(db, fmea.fmea_id, version.version_id)
@@ -2986,3 +2994,22 @@ git commit -m "feat(version): complete FMEA/CP version management module (major.
 - Added `major_only` query param to list endpoints (spec requires filtering)
 - Added `impact_chain` to diff engine (spec requires RPN cascade visualization)
 - Added three-way sync preview with selective acceptance (spec requires `[✔ 接受同步]` / `[✖ 保持本地]`)
+
+### Critical Bug Fixes Applied (Post-Review 2026-05-25)
+
+**Fix 1 — NameError crash on FMEA approve:**
+`create_fmea_version()` return value now explicitly assigned to `version` variable.
+Task 9's `mark_cp_sync_pending_on_fmea_approve` call guarded by `if version:` check.
+Without this fix, FMEA approval would crash with `NameError: name 'version' is not defined`.
+
+**Fix 2 — source_fmea_node_id lost on sync "add" items:**
+`build_sync_preview` now includes `"source_fmea_node_id": node_id` in add-action preview items.
+Without this fix, synced CP rows would lack `source_fmea_node_id`, causing infinite duplicate row creation on subsequent syncs.
+
+**Fix 3 — Frontend checkbox bypass for "add" actions:**
+`build_sync_preview` now pre-generates `"item_id": str(uuid.uuid4())` for add items (was `None`).
+`apply_sync_preview` now checks `if action == "add" and preview_item["item_id"] in accepted_items` (was unconditional).
+Without this fix, unchecking an "add" item in the Drawer would still write it to the database.
+
+**Fix 4 — Sync logic consolidated to version_service.py:**
+Added NOTE in `mark_cp_sync_pending_on_fmea_approve` docstring: all FMEA-CP sync logic lives in `version_service.py`'s `build_sync_preview`/`apply_sync_preview`. No separate sync functions in `control_plan_service.py`.
