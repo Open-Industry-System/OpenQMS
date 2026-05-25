@@ -17,6 +17,7 @@ from app.models.stability import StabilityStudy, StabilityMeasurement, Stability
 from app.models.attribute import AttributeStudy, AttributeMeasurement, AttributeResult
 from app.models.special_characteristic import SpecialCharacteristic
 from app.models.product_line import ProductLine
+from app.models.management_review import ManagementReview, ReviewOutput
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -32,4 +33,5 @@ __all__ = [
     "AttributeStudy", "AttributeMeasurement", "AttributeResult",
     "SpecialCharacteristic",
     "ProductLine",
+    "ManagementReview", "ReviewOutput",
 ]
