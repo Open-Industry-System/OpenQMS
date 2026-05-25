@@ -3,13 +3,14 @@ Seed script: creates demo data for development.
 Run: docker compose exec backend python -m app.seed
 """
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from sqlalchemy import select
 
 from app.database import async_session
 from app.models.user import User
 from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
+from app.models.management_review import ManagementReview, ReviewOutput
 from app.core.security import hash_password
 
 
@@ -188,6 +189,96 @@ async def seed():
             created_by=engineer.user_id,
         )
         db.add_all([capa1, capa2])
+
+        # --- Management Review seed data ---
+        # Historical closed review (for previous_review_outputs stats)
+        review1 = ManagementReview(
+            doc_no="MR-2026-001",
+            title="2026年Q1全厂管理评审",
+            review_date=date(2026, 3, 15),
+            actual_date=date(2026, 3, 16),
+            status="closed",
+            product_line_code=None,  # 全厂级
+            location="质量会议室",
+            chair_person_id=manager.user_id,
+            participants=[
+                {"user_id": str(engineer.user_id), "name": "质量工程师", "role": "记录员", "department": "质量部"},
+                {"user_id": str(manager.user_id), "name": "质量经理", "role": "主持人", "department": "质量部"},
+            ],
+            meeting_minutes="评审确认质量目标达成率良好，FMEA风险控制有效。决定加强供应商绩效监控。",
+            data_package={
+                "generated_at": "2026-03-15T09:00:00Z",
+                "quality_goals": {"total": 10, "achieved": 7, "on_track": 2, "behind": 1},
+                "capa_stats": {"total": 25, "open": 8, "closed": 17},
+            },
+            created_by=engineer.user_id,
+            updated_by=manager.user_id,
+        )
+        db.add(review1)
+        await db.flush()
+
+        # Outputs for historical review (verified for completion rate stats)
+        output1_v = ReviewOutput(
+            review_id=review1.review_id,
+            category="improvement_opportunity",
+            description="建立供应商绩效看板，每周更新评级分布",
+            responsible_id=engineer.user_id,
+            due_date=date(2026, 4, 30),
+            status="verified",
+            completion_notes="已开发供应商绩效看板模块，并完成首周数据录入",
+            verified_by=manager.user_id,
+            verified_at=date(2026, 5, 10),
+            verification_notes="看板运行稳定，数据准确，达到预期效果",
+        )
+        output2_v = ReviewOutput(
+            review_id=review1.review_id,
+            category="system_change",
+            description="修订采购程序文件，增加供应商准入审批流程",
+            responsible_id=manager.user_id,
+            due_date=date(2026, 5, 15),
+            status="verified",
+            completion_notes="已完成程序文件修订，培训相关人员",
+            verified_by=manager.user_id,
+            verified_at=date(2026, 5, 20),
+            verification_notes="文件审批完成，培训记录完整",
+        )
+        output3_c = ReviewOutput(
+            review_id=review1.review_id,
+            category="resource_need",
+            description="增配一台SPC统计分析工作站",
+            responsible_id=engineer.user_id,
+            due_date=date(2026, 6, 1),
+            status="completed",
+            completion_notes="设备已采购到位，安装调试完成",
+        )
+        db.add_all([output1_v, output2_v, output3_c])
+
+        # Current in-review review
+        review2 = ManagementReview(
+            doc_no="MR-2026-002",
+            title="DC-DC-100产品线Q2管理评审",
+            review_date=date(2026, 5, 28),
+            status="in_review",
+            product_line_code="DC-DC-100",
+            location="生产线会议室",
+            chair_person_id=manager.user_id,
+            participants=[
+                {"user_id": str(engineer.user_id), "name": "质量工程师", "role": "数据准备", "department": "质量部"},
+            ],
+            created_by=engineer.user_id,
+        )
+        db.add(review2)
+        await db.flush()
+
+        output4_p = ReviewOutput(
+            review_id=review2.review_id,
+            category="improvement_opportunity",
+            description="优化SPC控制限设定，缩短Cpk达标周期",
+            responsible_id=engineer.user_id,
+            due_date=date(2026, 7, 15),
+            status="pending",
+        )
+        db.add(output4_p)
 
         # --- Special Characteristics seed data ---
         from app.models.special_characteristic import SpecialCharacteristic

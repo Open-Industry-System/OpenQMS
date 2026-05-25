@@ -7,6 +7,26 @@ from app.models.management_review import ManagementReview, ReviewOutput
 from app.models.audit import AuditLog
 
 
+def _parse_integrity_error(error: IntegrityError, operation: str) -> str:
+    """将数据库完整性错误转换为中文友好提示"""
+    msg = str(error.orig) if hasattr(error, "orig") else str(error)
+
+    if "doc_no" in msg and "unique" in msg.lower():
+        return "该年份下的评审编号已存在，请刷新后重试"
+    if "chair_person_id" in msg and "foreign key" in msg.lower():
+        return "主持人不存在或已被删除"
+    if "product_line_code" in msg and "foreign key" in msg.lower():
+        return "产品线不存在或已被删除"
+    if "responsible_id" in msg and "foreign key" in msg.lower():
+        return "责任人不存在或已被删除"
+    if "verified_by" in msg and "foreign key" in msg.lower():
+        return "验证人不存在或已被删除"
+    if "review_id" in msg and "foreign key" in msg.lower():
+        return "关联的评审记录不存在"
+
+    return f"{operation}失败，数据冲突或约束违规"
+
+
 async def _generate_doc_no(db: AsyncSession) -> str:
     year = datetime.now().year
     prefix = f"MR-{year}"
@@ -96,7 +116,7 @@ async def create_review(
         await db.commit()
     except IntegrityError as e:
         await db.rollback()
-        raise ValueError(f"failed to create review: {e}")
+        raise ValueError(_parse_integrity_error(e, "创建评审"))
     await db.refresh(review)
     return review
 
@@ -135,7 +155,7 @@ async def update_review(
         await db.commit()
     except IntegrityError as e:
         await db.rollback()
-        raise ValueError(f"failed to update review: {e}")
+        raise ValueError(_parse_integrity_error(e, "更新评审"))
     await db.refresh(review)
     return review
 
@@ -463,7 +483,7 @@ async def create_output(
         await db.commit()
     except IntegrityError as e:
         await db.rollback()
-        raise ValueError(f"failed to create output: {e}")
+        raise ValueError(_parse_integrity_error(e, "创建措施"))
     await db.refresh(output)
     return output
 
@@ -511,7 +531,7 @@ async def update_output(
         await db.commit()
     except IntegrityError as e:
         await db.rollback()
-        raise ValueError(f"failed to update output: {e}")
+        raise ValueError(_parse_integrity_error(e, "更新措施"))
     await db.refresh(output)
     return output
 
@@ -559,6 +579,6 @@ async def verify_output(
         await db.commit()
     except IntegrityError as e:
         await db.rollback()
-        raise ValueError(f"failed to verify output: {e}")
+        raise ValueError(_parse_integrity_error(e, "效果验证"))
     await db.refresh(output)
     return output
