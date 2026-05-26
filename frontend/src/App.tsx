@@ -34,6 +34,7 @@ import IqcMaterialListPage from "./pages/iqc/IqcMaterialListPage";
 import CustomerQualityPage from "./pages/customerQuality/CustomerQualityPage";
 import ComplaintDetailPage from "./pages/customerQuality/ComplaintDetailPage";
 import RMADetailPage from "./pages/customerQuality/RMADetailPage";
+import SupplierQualityPage from "./pages/supplier/SupplierQualityPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -83,6 +84,8 @@ export default function App() {
         <Route path="/spc/:id" element={<SPCDetailPage />} />
         <Route path="/suppliers" element={<SupplierListPage />} />
         <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
+        <Route path="/suppliers/quality" element={<SupplierQualityPage />} />
+        <Route path="/suppliers/quality/:supplierId" element={<SupplierQualityPage />} />
         <Route path="/msa" element={<Navigate to="/msa/gauges" replace />} />
         <Route path="/msa/gauges" element={<GaugeListPage />} />
         <Route path="/msa/gauges/:id" element={<GaugeDetailPage />} />
