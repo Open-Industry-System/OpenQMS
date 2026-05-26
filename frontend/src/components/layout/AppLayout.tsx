@@ -16,7 +16,6 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   TeamOutlined,
-  InspectionOutlined,
   CustomerServiceOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
@@ -33,7 +32,7 @@ const menuItems = [
   { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
   {
     key: "/iqc",
-    icon: <InspectionOutlined />,
+    icon: <ExperimentOutlined />,
     label: "来料检验",
     children: [
       { key: "/iqc/inspections", label: "检验单" },

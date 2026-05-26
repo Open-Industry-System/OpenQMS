@@ -729,7 +729,7 @@ export interface IqcInspection {
   code_letter: string | null;
   accept_number: number | null;
   reject_number: number | null;
-  inspection_result: string;
+  inspection_result: 'pending' | 'accepted' | 'rejected' | 'concession';
   defect_qty: number;
   defect_description: string | null;
   status: string;
