@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,7 +15,7 @@ from app.services.aql_engine import calculate_aql_plan
 # ─── Numbering ───
 
 async def _generate_inspection_no(db: AsyncSession) -> str:
-    today = datetime.utcnow().strftime("%y%m%d")
+    today = datetime.now(timezone.utc).strftime("%y%m%d")
     prefix = f"IQC-{today}"
     result = await db.execute(
         select(func.count()).where(IqcInspection.inspection_no.like(f"{prefix}-%"))
@@ -344,7 +344,7 @@ async def judge_inspection(
     if sample_qty is not None:
         inspection.sample_qty = sample_qty
     inspection.judged_by = user_id
-    inspection.judged_at = datetime.utcnow()
+    inspection.judged_at = datetime.now(timezone.utc)
 
     db.add(AuditLog(
         table_name="iqc_inspections",
@@ -500,7 +500,7 @@ async def trigger_scar(
         raise ValueError("检验单不存在")
 
     # Generate SCAR number
-    today = datetime.utcnow().strftime("%y%m%d")
+    today = datetime.now(timezone.utc).strftime("%y%m%d")
     prefix = f"SCAR-{today}"
     result = await db.execute(
         select(func.count()).where(SupplierSCAR.scar_no.like(f"{prefix}-%"))
