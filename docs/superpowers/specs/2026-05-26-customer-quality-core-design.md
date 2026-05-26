@@ -197,15 +197,25 @@ analysis -> cancelled
 
 估算 PPM 本期公式：
 
-`customer_ppm = (complaint impact_qty + independent_rma return_qty) / shipment_qty * 1,000,000`
+`customer_ppm = (complaint impact_qty + independent_rma return_qty) / effective_shipment_qty * 1,000,000`
 
-其中 `independent_rma` 只包含未关联客诉的 RMA，避免同一质量事件在客诉和退货中重复计数。`shipment_qty` 的取值顺序：
+其中 `independent_rma` 只包含未关联客诉的 RMA，避免同一质量事件在客诉和退货中重复计数。所有 PPM 计算都基于统计窗口；未传 `date_from/date_to` 时默认最近 90 天，首尾日期都计入窗口。
+
+`effective_shipment_qty` 的取值顺序：
 
 1. API 查询参数 `shipment_qty`，用于看板临时覆盖。
-2. `customers.annual_shipment_qty`，用于客户列表、客户摘要和默认看板。
+2. `customers.annual_shipment_qty` 按统计窗口天数折算，用于客户列表、客户摘要和默认看板。
 3. 两者都为空时，不计算 PPM，也不因 PPM 触发红黄灯。
 
-客户列表和 `/api/customers/{customer_id}/summary` 必须能在没有查询参数时返回稳定风险灯号；此时只使用开放致命客诉、超期客诉和 `annual_shipment_qty` 可计算的 PPM。
+折算公式：
+
+`period_days = (date_to - date_from).days + 1`
+
+`effective_shipment_qty = annual_shipment_qty * (period_days / 365.0)`
+
+显式传入的 `shipment_qty` 视为当前统计窗口内的实际发运量，不再折算。`period_days <= 0` 或折算后分母小于等于 0 时，不计算 PPM。
+
+客户列表和 `/api/customers/{customer_id}/summary` 必须能在没有查询参数时返回稳定风险灯号；此时默认最近 90 天，使用开放致命客诉、超期客诉和按 90 天折算后的 `annual_shipment_qty` 可计算 PPM。
 
 ---
 
@@ -272,8 +282,8 @@ analysis -> cancelled
 
 - `product_line`: 可选，遵循全局产品线筛选。
 - `customer_id`: 可选。
-- `date_from` / `date_to`: 可选，默认最近 90 天。
-- `shipment_qty`: 可选，本期用于估算 PPM。
+- `date_from` / `date_to`: 可选，默认最近 90 天，首尾日期都计入统计窗口。
+- `shipment_qty`: 可选，本期用于估算 PPM，表示当前统计窗口内的实际发运量。
 
 ---
 
@@ -399,6 +409,8 @@ analysis -> cancelled
 - 客户 PPM 估算在无发运数时返回空。
 - 客户风险灯号在无发运数时只基于致命开放客诉和超期客诉。
 - 客户风险灯号在有 `annual_shipment_qty` 或查询参数 `shipment_qty` 时纳入 PPM。
+- 使用 `annual_shipment_qty` 时按 `date_from/date_to` 统计窗口折算分母。
+- 查询参数 `shipment_qty` 作为窗口内实际发运量，不做年度折算。
 - 客诉状态转换合法/非法路径。
 - RMA 状态转换合法/非法路径。
 
