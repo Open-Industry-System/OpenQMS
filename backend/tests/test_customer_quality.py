@@ -60,4 +60,5 @@ def test_risk_light_priority():
     assert calculate_risk_light(open_fatal_count=0, overdue_count=0, open_count=0, ppm=250, ppm_target=100) == "red"
     assert calculate_risk_light(open_fatal_count=0, overdue_count=0, open_count=1, ppm=None, ppm_target=100) == "yellow"
     assert calculate_risk_light(open_fatal_count=0, overdue_count=0, open_count=0, ppm=120, ppm_target=100) == "yellow"
+    assert calculate_risk_light(open_fatal_count=0, overdue_count=0, open_count=0, ppm=200, ppm_target=100) == "yellow"
     assert calculate_risk_light(open_fatal_count=0, overdue_count=0, open_count=0, ppm=80, ppm_target=100) == "green"

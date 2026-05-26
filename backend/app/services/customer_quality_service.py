@@ -96,7 +96,7 @@ def calculate_risk_light(
     if open_fatal_count > 0 or overdue_count > 0:
         return "red"
     if ppm is not None and ppm_target is not None and ppm_target > 0:
-        if ppm >= ppm_target * 2:
+        if ppm > ppm_target * 2:
             return "red"
         if ppm > ppm_target:
             return "yellow"
