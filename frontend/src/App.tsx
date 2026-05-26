@@ -28,6 +28,9 @@ import SCDetailPage from "./pages/special-characteristic/SCDetailPage";
 import TraceabilityPage from "./pages/special-characteristic/TraceabilityPage";
 import ManagementReviewListPage from "./pages/managementReview/ManagementReviewListPage";
 import ManagementReviewDetailPage from "./pages/managementReview/ManagementReviewDetailPage";
+import CustomerQualityPage from "./pages/customerQuality/CustomerQualityPage";
+import ComplaintDetailPage from "./pages/customerQuality/ComplaintDetailPage";
+import RMADetailPage from "./pages/customerQuality/RMADetailPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -88,6 +91,9 @@ export default function App() {
         <Route path="/special-characteristics/:id" element={<SCDetailPage />} />
         <Route path="/management-reviews" element={<ManagementReviewListPage />} />
         <Route path="/management-reviews/:id" element={<ManagementReviewDetailPage />} />
+        <Route path="/customer-quality" element={<CustomerQualityPage />} />
+        <Route path="/customer-quality/complaints/:id" element={<ComplaintDetailPage />} />
+        <Route path="/customer-quality/rma/:id" element={<RMADetailPage />} />
       </Route>
     </Routes>
   );
