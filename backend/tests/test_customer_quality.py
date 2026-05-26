@@ -54,6 +54,47 @@ def test_ppm_prorates_annual_shipment_by_inclusive_window():
     assert result == 10000.0
 
 
+def test_normalize_window_defaults_to_last_90_days_inclusive():
+    from app.services import customer_quality_service
+
+    today = date(2026, 5, 26)
+
+    assert customer_quality_service._normalize_window(None, None, today=today) == (
+        date(2026, 2, 26),
+        today,
+    )
+    assert customer_quality_service._normalize_window(None, date(2026, 4, 30), today=today) == (
+        date(2026, 1, 31),
+        date(2026, 4, 30),
+    )
+    assert customer_quality_service._normalize_window(date(2026, 4, 1), None, today=today) == (
+        date(2026, 4, 1),
+        today,
+    )
+
+
+def test_direct_terminal_status_updates_are_rejected():
+    from app.services import customer_quality_service
+
+    with pytest.raises(ValueError, match="transition endpoint"):
+        customer_quality_service._validate_direct_status_update(
+            "responded",
+            "closed",
+            {status.value for status in ComplaintStatus},
+            {ComplaintStatus.CLOSED.value, ComplaintStatus.CANCELLED.value},
+            "complaint",
+        )
+
+    with pytest.raises(ValueError, match="transition endpoint"):
+        customer_quality_service._validate_direct_status_update(
+            "action_pending",
+            "closed",
+            {status.value for status in RMAStatus},
+            {RMAStatus.CLOSED.value, RMAStatus.CANCELLED.value},
+            "RMA",
+        )
+
+
 def test_risk_light_priority():
     assert calculate_risk_light(open_fatal_count=1, overdue_count=0, open_count=0, ppm=None, ppm_target=100) == "red"
     assert calculate_risk_light(open_fatal_count=0, overdue_count=1, open_count=0, ppm=None, ppm_target=100) == "red"

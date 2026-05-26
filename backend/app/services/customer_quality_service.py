@@ -7,8 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
+from app.models.capa import CAPAEightD
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
-from app.services import capa_service
 from app.services.product_line_service import validate_product_line
 
 
@@ -97,6 +97,19 @@ def calculate_customer_ppm(
         return None
 
     return round(((impact_qty + independent_rma_qty) / denominator) * 1_000_000, 2)
+
+
+def _normalize_window(
+    date_from: date | None,
+    date_to: date | None,
+    *,
+    today: date | None = None,
+) -> tuple[date, date]:
+    window_end = date_to or today or date.today()
+    window_start = date_from or (window_end - timedelta(days=89))
+    if window_start > window_end:
+        raise ValueError("date_from cannot be after date_to")
+    return window_start, window_end
 
 
 def calculate_risk_light(
@@ -202,6 +215,42 @@ def _valid_direct_rma_status_change(current: str, target: str) -> bool:
         old_status.value == current and new_status.value == target
         for (old_status, _action), new_status in RMA_TRANSITIONS.items()
     )
+
+
+def _validate_direct_status_update(
+    current: str,
+    target: str,
+    valid_statuses: set[str],
+    terminal_statuses: set[str],
+    entity_name: str,
+) -> None:
+    _validate_choice(target, valid_statuses, "status")
+    if target != current and target in terminal_statuses:
+        raise ValueError(f"{entity_name} terminal status changes must use transition endpoint")
+
+
+def _validate_rma_complaint_link(
+    rma_customer_id: uuid.UUID,
+    rma_product_line_code: str,
+    complaint: CustomerComplaint,
+) -> None:
+    if str(complaint.customer_id) != str(rma_customer_id):
+        raise ValueError("RMA and complaint must belong to the same customer")
+    if complaint.product_line_code != rma_product_line_code:
+        raise ValueError("RMA and complaint must belong to the same product line")
+
+
+async def _complaint_has_other_rmas(
+    db: AsyncSession,
+    complaint_id: uuid.UUID,
+    exclude_rma_id: uuid.UUID,
+) -> bool:
+    result = await db.execute(
+        select(func.count())
+        .select_from(RMARecord)
+        .where(RMARecord.complaint_id == complaint_id, RMARecord.rma_id != exclude_rma_id)
+    )
+    return (result.scalar() or 0) > 0
 
 
 async def list_customers(
@@ -327,18 +376,21 @@ async def customer_summary(
     shipment_qty: int | None = None,
 ) -> dict:
     customer = await _ensure_customer(db, customer_id)
+    window_start, window_end = _normalize_window(date_from, date_to)
 
-    complaint_conditions = [CustomerComplaint.customer_id == customer_id]
-    rma_conditions = [RMARecord.customer_id == customer_id]
+    complaint_conditions = [
+        CustomerComplaint.customer_id == customer_id,
+        CustomerComplaint.received_date >= window_start,
+        CustomerComplaint.received_date <= window_end,
+    ]
+    rma_conditions = [
+        RMARecord.customer_id == customer_id,
+        RMARecord.received_date >= window_start,
+        RMARecord.received_date <= window_end,
+    ]
     if product_line:
         complaint_conditions.append(CustomerComplaint.product_line_code == product_line)
         rma_conditions.append(RMARecord.product_line_code == product_line)
-    if date_from:
-        complaint_conditions.append(CustomerComplaint.received_date >= date_from)
-        rma_conditions.append(RMARecord.received_date >= date_from)
-    if date_to:
-        complaint_conditions.append(CustomerComplaint.received_date <= date_to)
-        rma_conditions.append(RMARecord.received_date <= date_to)
 
     complaints_result = await db.execute(select(CustomerComplaint).where(*complaint_conditions))
     rma_result = await db.execute(select(RMARecord).where(*rma_conditions))
@@ -366,8 +418,8 @@ async def customer_summary(
         independent_rma_qty=independent_rma_qty,
         shipment_qty=shipment_qty,
         annual_shipment_qty=customer.annual_shipment_qty,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=window_start,
+        date_to=window_end,
     )
 
     return {
@@ -545,7 +597,13 @@ async def update_complaint(
         if existing.scalar_one_or_none():
             raise ValueError(f"complaint number '{values['complaint_no']}' already exists")
     if "status" in values and values["status"] is not None:
-        _validate_choice(values["status"], {status.value for status in ComplaintStatus}, "status")
+        _validate_direct_status_update(
+            complaint.status,
+            values["status"],
+            {status.value for status in ComplaintStatus},
+            {ComplaintStatus.CLOSED.value, ComplaintStatus.CANCELLED.value},
+            "complaint",
+        )
         if not _valid_direct_complaint_status_change(complaint.status, values["status"]):
             raise ValueError(
                 f"invalid complaint status change: {complaint.status} -> {values['status']}"
@@ -672,16 +730,39 @@ async def create_capa_from_complaint(
     document_no: str,
     user_id: uuid.UUID,
 ):
+    await validate_product_line(db, complaint.product_line_code)
+    existing = await db.execute(select(CAPAEightD).where(CAPAEightD.document_no == document_no))
+    if existing.scalar_one_or_none():
+        raise ValueError(f"CAPA report number '{document_no}' already exists.")
+
     summary = " ".join(complaint.defect_desc.split())[:80]
     title = f"{complaint.complaint_no} {summary}".strip()
-    capa = await capa_service.create_capa(
-        db,
+    capa = CAPAEightD(
+        report_id=uuid.uuid4(),
         title=title,
         document_no=document_no,
+        status="D1_TEAM",
         severity=complaint.severity,
         due_date=complaint.due_date,
-        user_id=user_id,
         product_line_code=complaint.product_line_code,
+        created_by=user_id,
+    )
+    db.add(capa)
+    await _audit(
+        db,
+        "capa_eightd",
+        capa.report_id,
+        "CREATE",
+        user_id,
+        {
+            "title": title,
+            "document_no": document_no,
+            "severity": complaint.severity,
+            "due_date": _jsonable(complaint.due_date),
+            "product_line_code": complaint.product_line_code,
+            "status": capa.status,
+            "source_complaint_id": _jsonable(complaint.complaint_id),
+        },
     )
     old_capa_ref_id = complaint.capa_ref_id
     old_status = complaint.status
@@ -701,7 +782,12 @@ async def create_capa_from_complaint(
             "status": {"before": old_status, "after": complaint.status},
         },
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise ValueError(f"CAPA report number '{document_no}' already exists.")
+    await db.refresh(capa)
     await db.refresh(complaint)
     return capa
 
@@ -755,6 +841,11 @@ async def create_rma_record(db: AsyncSession, data, user_id: uuid.UUID) -> RMARe
     linked_complaint = None
     if values.get("complaint_id"):
         linked_complaint = await _ensure_complaint(db, values["complaint_id"])
+        _validate_rma_complaint_link(
+            values["customer_id"],
+            values["product_line_code"],
+            linked_complaint,
+        )
     values.setdefault("status", RMAStatus.OPEN.value)
     _validate_choice(
         values.get("status", RMAStatus.OPEN.value),
@@ -842,12 +933,23 @@ async def update_rma_record(
     linked_complaint = None
     if "complaint_id" in values and values["complaint_id"] is not None:
         linked_complaint = await _ensure_complaint(db, values["complaint_id"])
+        _validate_rma_complaint_link(
+            values.get("customer_id", rma.customer_id),
+            values.get("product_line_code", rma.product_line_code),
+            linked_complaint,
+        )
     if "rma_no" in values and values["rma_no"] != rma.rma_no:
         existing = await db.execute(select(RMARecord).where(RMARecord.rma_no == values["rma_no"]))
         if existing.scalar_one_or_none():
             raise ValueError(f"RMA number '{values['rma_no']}' already exists")
     if "status" in values and values["status"] is not None:
-        _validate_choice(values["status"], {status.value for status in RMAStatus}, "status")
+        _validate_direct_status_update(
+            rma.status,
+            values["status"],
+            {status.value for status in RMAStatus},
+            {RMAStatus.CLOSED.value, RMAStatus.CANCELLED.value},
+            "RMA",
+        )
         if not _valid_direct_rma_status_change(rma.status, values["status"]):
             raise ValueError(f"invalid RMA status change: {rma.status} -> {values['status']}")
     if "responsibility" in values:
@@ -880,6 +982,10 @@ async def update_rma_record(
         "received_date",
         "closed_at",
     }
+    old_complaint = None
+    if "complaint_id" in values and values["complaint_id"] != rma.complaint_id and rma.complaint_id:
+        old_complaint = await _ensure_complaint(db, rma.complaint_id)
+
     changed_fields = _apply_updates(rma, values, allowed)
     if linked_complaint is not None and not linked_complaint.has_rma:
         old_has_rma = linked_complaint.has_rma
@@ -888,6 +994,16 @@ async def update_rma_record(
             "before": old_has_rma,
             "after": True,
         }
+    if old_complaint is not None:
+        old_has_rma = old_complaint.has_rma
+        old_complaint.has_rma = await _complaint_has_other_rmas(
+            db, old_complaint.complaint_id, rma.rma_id
+        )
+        if old_has_rma != old_complaint.has_rma:
+            changed_fields["old_complaint_has_rma"] = {
+                "before": old_has_rma,
+                "after": old_complaint.has_rma,
+            }
     if not changed_fields:
         return rma
 
@@ -928,23 +1044,37 @@ async def link_rma_complaint(
     user_id: uuid.UUID,
 ) -> RMARecord:
     complaint = await _ensure_complaint(db, complaint_id)
+    _validate_rma_complaint_link(rma.customer_id, rma.product_line_code, complaint)
     old_complaint_id = rma.complaint_id
     old_has_rma = complaint.has_rma
+    old_complaint = None
+    if old_complaint_id and old_complaint_id != complaint_id:
+        old_complaint = await _ensure_complaint(db, old_complaint_id)
     rma.complaint_id = complaint_id
     complaint.has_rma = True
+    changed_fields = {
+        "complaint_id": {
+            "before": _jsonable(old_complaint_id),
+            "after": _jsonable(complaint_id),
+        },
+        "complaint_has_rma": {"before": old_has_rma, "after": True},
+    }
+    if old_complaint is not None:
+        old_complaint_has_rma = old_complaint.has_rma
+        old_complaint.has_rma = await _complaint_has_other_rmas(
+            db, old_complaint.complaint_id, rma.rma_id
+        )
+        changed_fields["old_complaint_has_rma"] = {
+            "before": old_complaint_has_rma,
+            "after": old_complaint.has_rma,
+        }
     await _audit(
         db,
         "rma_records",
         rma.rma_id,
         "LINK_COMPLAINT",
         user_id,
-        {
-            "complaint_id": {
-                "before": _jsonable(old_complaint_id),
-                "after": _jsonable(complaint_id),
-            },
-            "complaint_has_rma": {"before": old_has_rma, "after": True},
-        },
+        changed_fields,
     )
     await db.commit()
     await db.refresh(rma)
@@ -1001,6 +1131,7 @@ async def dashboard(
     date_to: date | None = None,
     shipment_qty: int | None = None,
 ) -> dict:
+    window_start, window_end = _normalize_window(date_from, date_to)
     complaint_conditions = []
     rma_conditions = []
     if product_line:
@@ -1009,12 +1140,10 @@ async def dashboard(
     if customer_id:
         complaint_conditions.append(CustomerComplaint.customer_id == customer_id)
         rma_conditions.append(RMARecord.customer_id == customer_id)
-    if date_from:
-        complaint_conditions.append(CustomerComplaint.received_date >= date_from)
-        rma_conditions.append(RMARecord.received_date >= date_from)
-    if date_to:
-        complaint_conditions.append(CustomerComplaint.received_date <= date_to)
-        rma_conditions.append(RMARecord.received_date <= date_to)
+    complaint_conditions.append(CustomerComplaint.received_date >= window_start)
+    complaint_conditions.append(CustomerComplaint.received_date <= window_end)
+    rma_conditions.append(RMARecord.received_date >= window_start)
+    rma_conditions.append(RMARecord.received_date <= window_end)
 
     complaints_result = await db.execute(select(CustomerComplaint).where(*complaint_conditions))
     rma_result = await db.execute(select(RMARecord).where(*rma_conditions))
@@ -1082,8 +1211,8 @@ async def dashboard(
             db,
             customer.customer_id,
             product_line=product_line,
-            date_from=date_from,
-            date_to=date_to,
+            date_from=window_start,
+            date_to=window_end,
             shipment_qty=shipment_qty if customer_id else None,
         )
         for customer in customers
