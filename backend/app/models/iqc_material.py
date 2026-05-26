@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
-from sqlalchemy import String, Float, DateTime, Text, func
+from sqlalchemy import String, Float, DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,7 +28,7 @@ class IqcMaterial(Base):
     product_line_code: Mapped[str] = mapped_column(String(20), nullable=False, default="DC-DC-100")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     created_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -38,5 +38,5 @@ class IqcMaterial(Base):
     )
 
     templates: Mapped[List["IqcInspectionTemplate"]] = relationship(
-        back_populates="material", lazy="selectin"
+        back_populates="material", lazy="selectin", cascade="all, delete-orphan"
     )
