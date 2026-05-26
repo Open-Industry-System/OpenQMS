@@ -33,6 +33,7 @@ from app.api.product_line import router as product_line_router
 from app.api.management_review import router as management_review_router
 from app.api.version import router as version_router
 from app.api.iqc import router as iqc_router
+from app.api.customer_quality import router as customer_quality_router
 
 
 @asynccontextmanager
@@ -84,6 +85,7 @@ app.include_router(product_line_router)
 app.include_router(management_review_router)
 app.include_router(version_router)
 app.include_router(iqc_router)
+app.include_router(customer_quality_router)
 
 
 @app.get("/api/health")

@@ -764,3 +764,146 @@ export interface IqcStats {
   acceptance_rate: number;
   rejection_rate: number;
 }
+
+// ─── Customer Quality Types ───
+
+export interface CustomerAttachment {
+  file_name: string;
+  file_url: string;
+  uploaded_at: string;
+  uploaded_by: string;
+  category: string;
+}
+
+export interface Customer {
+  customer_id: string;
+  customer_code: string;
+  name: string;
+  segment: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  csr_list: Record<string, unknown>[] | null;
+  ppm_target: number | null;
+  annual_shipment_qty: number | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerListResponse {
+  items: Customer[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface CustomerSummary {
+  customer_id: string;
+  customer_code: string;
+  name: string;
+  segment: string | null;
+  complaint_count: number;
+  open_complaint_count: number;
+  overdue_count: number;
+  open_fatal_count: number;
+  rma_count: number;
+  independent_rma_qty: number;
+  impact_qty: number;
+  ppm: number | null;
+  ppm_target: number | null;
+  risk_light: "red" | "yellow" | "green";
+}
+
+export interface CustomerComplaint {
+  complaint_id: string;
+  complaint_no: string;
+  product_line_code: string;
+  customer_id: string;
+  product_id: string | null;
+  batch_no: string | null;
+  serial_number: string | null;
+  category: "safety" | "function" | "appearance" | "delivery";
+  severity: "致命" | "严重" | "一般" | "轻微";
+  defect_desc: string;
+  impact_qty: number;
+  occurred_date: string | null;
+  received_date: string;
+  due_date: string | null;
+  status: "open" | "investigating" | "responded" | "closed" | "cancelled";
+  fmea_ref_id: string | null;
+  capa_ref_id: string | null;
+  has_rma: boolean;
+  preliminary_response: string | null;
+  root_cause: string | null;
+  corrective_action: string | null;
+  attachments: CustomerAttachment[] | null;
+  assignee_id: string | null;
+  supplier_responsibility: boolean;
+  scar_ref_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+}
+
+export interface ComplaintListResponse {
+  items: CustomerComplaint[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface RMARecord {
+  rma_id: string;
+  rma_no: string;
+  product_line_code: string;
+  customer_id: string;
+  complaint_id: string | null;
+  product_id: string | null;
+  batch_no: string | null;
+  serial_number: string | null;
+  return_qty: number;
+  defect_type: string;
+  responsibility: "supplier" | "internal" | "transport" | "customer_misuse" | "unknown" | null;
+  analysis_result: string | null;
+  corrective_action: string | null;
+  status: "open" | "analysis" | "action_pending" | "closed" | "cancelled";
+  fmea_ref_id: string | null;
+  capa_ref_id: string | null;
+  scar_ref_id: string | null;
+  attachments: CustomerAttachment[] | null;
+  assignee_id: string | null;
+  tracking_number: string | null;
+  received_date: string | null;
+  closed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RMARecordListResponse {
+  items: RMARecord[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface CustomerQualityDashboard {
+  kpi: {
+    complaint_count: number;
+    open_complaint_count: number;
+    overdue_count: number;
+    rma_count: number;
+    return_qty: number;
+    independent_rma_qty: number;
+    impact_qty: number;
+  };
+  customers: CustomerSummary[];
+  trend: { period: string; complaints: number; rma: number; rma_qty: number }[];
+  complaints_by_status: Record<string, number>;
+  complaints_by_severity: Record<string, number>;
+  rma_by_status: Record<string, number>;
+  rma_by_responsibility: Record<string, number>;
+}

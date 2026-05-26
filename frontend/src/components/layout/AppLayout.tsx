@@ -17,6 +17,7 @@ import {
   MenuUnfoldOutlined,
   TeamOutlined,
   InspectionOutlined,
+  CustomerServiceOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -39,6 +40,7 @@ const menuItems = [
       { key: "/iqc/materials", label: "物料管理" },
     ],
   },
+  { key: "/customer-quality", icon: <CustomerServiceOutlined />, label: "客户质量" },
   { key: "/spc", icon: <FileTextOutlined />, label: "SPC控制图" },
   { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
   { key: "/special-characteristics/traceability", icon: <SafetyCertificateOutlined />, label: "贯穿追踪" },

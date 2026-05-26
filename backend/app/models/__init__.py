@@ -22,6 +22,7 @@ from app.models.fmea_version import FMEAVersion
 from app.models.control_plan_version import ControlPlanVersion
 from app.models.iqc_inspection import IqcInspection
 from app.models.iqc_material import IqcMaterial
+from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -40,4 +41,5 @@ __all__ = [
     "ProductLine",
     "ManagementReview", "ReviewOutput",
     "FMEAVersion", "ControlPlanVersion", "IqcInspection", "IqcMaterial",
+    "Customer", "CustomerComplaint", "RMARecord",
 ]

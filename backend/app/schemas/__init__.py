@@ -12,3 +12,4 @@ from app.schemas import msa
 from app.schemas import product_line
 from app.schemas import management_review
 from app.schemas import iqc
+from app.schemas import customer_quality
