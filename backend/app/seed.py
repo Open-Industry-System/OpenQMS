@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
 from app.models.management_review import ManagementReview, ReviewOutput
+from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.core.security import hash_password
 
 
@@ -339,6 +340,176 @@ async def seed():
             existing = await db.execute(select(ProductLine).where(ProductLine.code == pl_dict["code"]))
             if not existing.scalar_one_or_none():
                 db.add(ProductLine(**pl_dict))
+
+        await db.flush()
+
+        # --- Customer Quality seed data ---
+        customer1 = Customer(
+            customer_code="CUS-001",
+            name="上海新能源主机厂",
+            segment="汽车",
+            contact_name="王工",
+            contact_email="wang.quality@example.com",
+            contact_phone="021-55550001",
+            csr_list=[
+                {"title": "24小时初步响应", "description": "重大质量问题需24小时内给出初步回复"},
+                {"title": "批次追溯", "description": "所有客诉需提供生产批次与围堵记录"},
+            ],
+            ppm_target=100.0,
+            annual_shipment_qty=36500,
+            notes="重点汽车客户，月度质量例会",
+            created_by=engineer.user_id,
+        )
+        customer2 = Customer(
+            customer_code="CUS-002",
+            name="苏州工业控制有限公司",
+            segment="工业",
+            contact_name="赵经理",
+            contact_email="zhao.qa@example.com",
+            contact_phone="0512-55550002",
+            csr_list=[{"title": "包装标识", "description": "外箱需标识产品批号和检验状态"}],
+            ppm_target=250.0,
+            annual_shipment_qty=18000,
+            notes="工业控制器客户",
+            created_by=engineer.user_id,
+        )
+        db.add_all([customer1, customer2])
+        await db.flush()
+
+        attachment_photo = [
+            {
+                "file_name": "defect-photo.jpg",
+                "file_url": "https://example.com/defect-photo.jpg",
+                "uploaded_at": "2026-05-26T10:00:00Z",
+                "uploaded_by": "seed",
+                "category": "photo",
+            }
+        ]
+        attachment_report = [
+            {
+                "file_name": "rma-analysis.pdf",
+                "file_url": "https://example.com/rma-analysis.pdf",
+                "uploaded_at": "2026-05-25T15:30:00Z",
+                "uploaded_by": "seed",
+                "category": "analysis_report",
+            }
+        ]
+
+        complaint1 = CustomerComplaint(
+            complaint_no="CC-2026-001",
+            product_line_code="DC-DC-100",
+            customer_id=customer1.customer_id,
+            product_id="DCDC-100W-A",
+            batch_no="B20260518-01",
+            serial_number="SN-DCDC-20260518-0007",
+            category="safety",
+            severity="致命",
+            defect_desc="客户现场反馈电源模块异常发热并触发整车报警",
+            impact_qty=12,
+            occurred_date=date(2026, 5, 24),
+            received_date=date(2026, 5, 26),
+            due_date=date(2026, 5, 27),
+            status="open",
+            fmea_ref_id=fmea1.fmea_id,
+            capa_ref_id=capa1.report_id,
+            has_rma=True,
+            preliminary_response=None,
+            root_cause=None,
+            corrective_action=None,
+            attachments=attachment_photo,
+            assignee_id=engineer.user_id,
+            supplier_responsibility=False,
+            created_by=engineer.user_id,
+        )
+        complaint2 = CustomerComplaint(
+            complaint_no="CC-2026-002",
+            product_line_code="DC-DC-100",
+            customer_id=customer1.customer_id,
+            product_id="DCDC-100W-A",
+            batch_no="B20260510-03",
+            category="function",
+            severity="严重",
+            defect_desc="客户抽检发现输出电压间歇性漂移",
+            impact_qty=35,
+            occurred_date=date(2026, 5, 18),
+            received_date=date(2026, 5, 20),
+            due_date=date(2026, 5, 23),
+            status="investigating",
+            fmea_ref_id=fmea1.fmea_id,
+            preliminary_response="已启动批次围堵并安排样件回收分析",
+            attachments=attachment_photo,
+            assignee_id=engineer.user_id,
+            supplier_responsibility=False,
+            created_by=engineer.user_id,
+        )
+        complaint3 = CustomerComplaint(
+            complaint_no="CC-2026-003",
+            product_line_code="PCB-SMT-200",
+            customer_id=customer2.customer_id,
+            product_id="PCB-CTRL-200",
+            batch_no="SMT20260428-02",
+            category="appearance",
+            severity="一般",
+            defect_desc="客户反馈外观轻微划伤，未影响功能",
+            impact_qty=8,
+            occurred_date=date(2026, 4, 29),
+            received_date=date(2026, 5, 2),
+            due_date=date(2026, 5, 12),
+            status="closed",
+            preliminary_response="已确认包装隔板磨损导致，完成改善",
+            root_cause="周转箱隔板磨损后保护不足",
+            corrective_action="更换隔板并增加出货外观复检",
+            attachments=attachment_report,
+            assignee_id=engineer.user_id,
+            supplier_responsibility=False,
+            closed_at=datetime(2026, 5, 10, tzinfo=timezone.utc),
+            created_by=engineer.user_id,
+        )
+        db.add_all([complaint1, complaint2, complaint3])
+        await db.flush()
+
+        rma1 = RMARecord(
+            rma_no="RMA-2026-001",
+            product_line_code="DC-DC-100",
+            customer_id=customer1.customer_id,
+            complaint_id=complaint1.complaint_id,
+            product_id="DCDC-100W-A",
+            batch_no="B20260518-01",
+            serial_number="SN-DCDC-20260518-0007",
+            return_qty=5,
+            defect_type="功能不良",
+            responsibility="internal",
+            analysis_result="待完成电气复测与热分析",
+            corrective_action="已隔离同批次库存并暂停发运",
+            status="analysis",
+            fmea_ref_id=fmea1.fmea_id,
+            capa_ref_id=capa1.report_id,
+            attachments=attachment_report,
+            assignee_id=engineer.user_id,
+            tracking_number="SF123456789CN",
+            received_date=date(2026, 5, 26),
+            created_by=engineer.user_id,
+        )
+        rma2 = RMARecord(
+            rma_no="RMA-2026-002",
+            product_line_code="PCB-SMT-200",
+            customer_id=customer2.customer_id,
+            product_id="PCB-CTRL-200",
+            batch_no="SMT20260505-01",
+            return_qty=3,
+            defect_type="外观缺陷",
+            responsibility="transport",
+            analysis_result="外箱挤压导致边角划伤",
+            corrective_action="通知物流更换缓冲包装",
+            status="closed",
+            attachments=attachment_report,
+            assignee_id=engineer.user_id,
+            tracking_number="DHL-20260520-0002",
+            received_date=date(2026, 5, 21),
+            closed_at=datetime(2026, 5, 25, tzinfo=timezone.utc),
+            created_by=engineer.user_id,
+        )
+        db.add_all([rma1, rma2])
 
         await db.commit()
 
