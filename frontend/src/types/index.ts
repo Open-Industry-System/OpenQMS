@@ -907,3 +907,82 @@ export interface CustomerQualityDashboard {
   rma_by_status: Record<string, number>;
   rma_by_responsibility: Record<string, number>;
 }
+
+// ─── Supplier Quality Dashboard ───
+
+export interface QualityKPI {
+  total_suppliers: number;
+  overall_ppm: number;
+  batch_acceptance_rate: number;
+  open_scar_count: number;
+}
+
+export interface PPMTrendPoint {
+  month: string;
+  ppm: number;
+}
+
+export interface GradeDistribution {
+  A: number;
+  B: number;
+  C: number;
+  D: number;
+}
+
+export interface SupplierRankingItem {
+  supplier_id: string;
+  supplier_no: string;
+  name: string;
+  grade: string;
+  ppm: number;
+  batch_acceptance_rate: number;
+  delivery_rate: number;
+  open_scar_count: number;
+}
+
+export interface QualityDashboardResponse {
+  kpi: QualityKPI;
+  ppm_trend: PPMTrendPoint[];
+  grade_distribution: GradeDistribution;
+  ranking: SupplierRankingItem[];
+}
+
+export interface SupplierQualityStats {
+  grade: string;
+  total_score: number;
+  quality_score: number;
+  delivery_score: number;
+  service_score: number;
+  ppm: number;
+  batch_acceptance_rate: number;
+  total_inspections: number;
+  accepted_count: number;
+  scar_count: number;
+  open_scar_count: number;
+}
+
+export interface SupplierQualityDetailResponse {
+  supplier: Supplier;
+  stats: SupplierQualityStats;
+  ppm_trend: PPMTrendPoint[];
+  acceptance_trend: { month: string; rate: number }[];
+}
+
+export interface SupplierCompareItem {
+  supplier_id: string;
+  name: string;
+  supplier_no: string;
+  grade: string;
+  ppm: number;
+  batch_acceptance_rate: number;
+  delivery_rate: number;
+  open_scar_count: number;
+  quality_score: number;
+  delivery_score: number;
+  service_score: number;
+}
+
+export interface SupplierCompareResponse {
+  suppliers: SupplierCompareItem[];
+  ppm_trends: Record<string, PPMTrendPoint[]>;
+}
