@@ -16,6 +16,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   TeamOutlined,
+  InspectionOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -29,6 +30,15 @@ const menuItems = [
   { key: "/quality-goals", icon: <AimOutlined />, label: "质量目标" },
   { key: "/internal-audits", icon: <SafetyOutlined />, label: "内部审核" },
   { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
+  {
+    key: "/iqc",
+    icon: <InspectionOutlined />,
+    label: "来料检验",
+    children: [
+      { key: "/iqc/inspections", label: "检验单" },
+      { key: "/iqc/materials", label: "物料管理" },
+    ],
+  },
   { key: "/spc", icon: <FileTextOutlined />, label: "SPC控制图" },
   { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
   { key: "/special-characteristics/traceability", icon: <SafetyCertificateOutlined />, label: "贯穿追踪" },
