@@ -28,6 +28,9 @@ import SCDetailPage from "./pages/special-characteristic/SCDetailPage";
 import TraceabilityPage from "./pages/special-characteristic/TraceabilityPage";
 import ManagementReviewListPage from "./pages/managementReview/ManagementReviewListPage";
 import ManagementReviewDetailPage from "./pages/managementReview/ManagementReviewDetailPage";
+import IqcInspectionListPage from "./pages/iqc/IqcInspectionListPage";
+import IqcInspectionDetailPage from "./pages/iqc/IqcInspectionDetailPage";
+import IqcMaterialListPage from "./pages/iqc/IqcMaterialListPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -88,6 +91,10 @@ export default function App() {
         <Route path="/special-characteristics/:id" element={<SCDetailPage />} />
         <Route path="/management-reviews" element={<ManagementReviewListPage />} />
         <Route path="/management-reviews/:id" element={<ManagementReviewDetailPage />} />
+        <Route path="/iqc" element={<Navigate to="/iqc/inspections" replace />} />
+        <Route path="/iqc/inspections" element={<IqcInspectionListPage />} />
+        <Route path="/iqc/inspections/:id" element={<IqcInspectionDetailPage />} />
+        <Route path="/iqc/materials" element={<IqcMaterialListPage />} />
       </Route>
     </Routes>
   );
