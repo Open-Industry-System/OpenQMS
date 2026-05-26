@@ -1,11 +1,16 @@
 import uuid
+from datetime import date as date_type
+from io import BytesIO
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.database import get_db
 from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
 from app.models.user import User
 from app import schemas
-from app.services import supplier_service
+from app.services import supplier_service, supplier_quality_service
 
 router = APIRouter(prefix="/api/suppliers", tags=["suppliers"])
 
@@ -25,6 +30,65 @@ async def get_expiry_alerts(
     _user=Depends(get_current_user),
 ):
     return await supplier_service.get_expiry_alerts(db, days)
+
+
+# ─── Quality Dashboard ───
+
+@router.get("/quality/dashboard", response_model=schemas.supplier.QualityDashboardResponse)
+async def get_quality_dashboard(
+    start_date: date_type | None = Query(None),
+    end_date: date_type | None = Query(None),
+    product_line_code: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    return await supplier_quality_service.get_quality_dashboard(
+        db, start_date, end_date, product_line_code
+    )
+
+
+@router.get("/quality/supplier/{supplier_id}", response_model=schemas.supplier.SupplierQualityDetailResponse)
+async def get_supplier_quality_detail(
+    supplier_id: uuid.UUID,
+    start_date: date_type | None = Query(None),
+    end_date: date_type | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    return await supplier_quality_service.get_supplier_quality_detail(
+        db, str(supplier_id), start_date, end_date
+    )
+
+
+@router.get("/quality/compare", response_model=schemas.supplier.SupplierCompareResponse)
+async def get_supplier_compare(
+    supplier_ids: str = Query(..., description="Comma-separated supplier IDs"),
+    start_date: date_type | None = Query(None),
+    end_date: date_type | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    ids = supplier_ids.split(",")
+    return await supplier_quality_service.get_supplier_compare(db, ids, start_date, end_date)
+
+
+@router.get("/quality/export")
+async def export_quality_dashboard(
+    start_date: date_type | None = Query(None),
+    end_date: date_type | None = Query(None),
+    product_line_code: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    excel_bytes = await supplier_quality_service.export_quality_dashboard_excel(
+        db, start_date, end_date, product_line_code
+    )
+    filename = f"supplier_quality_{date_type.today().strftime('%Y%m%d')}.xlsx"
+    return StreamingResponse(
+        BytesIO(excel_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("", response_model=schemas.supplier.SupplierListResponse)
