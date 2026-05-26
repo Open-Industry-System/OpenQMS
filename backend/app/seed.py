@@ -340,6 +340,46 @@ async def seed():
             if not existing.scalar_one_or_none():
                 db.add(ProductLine(**pl_dict))
 
+        # IQC demo materials
+        from app.models.iqc_material import IqcMaterial
+
+        iqc_materials = [
+            {
+                "part_no": "RES-0805-10K",
+                "part_name": "0805贴片电阻 10KΩ ±1%",
+                "part_spec": "±1% 1/8W",
+                "material_type": "component",
+                "default_aql": 0.65,
+                "default_inspection_level": "II",
+                "unit": "pcs",
+                "product_line_code": "DC-DC-100",
+            },
+            {
+                "part_no": "CAP-0805-10U",
+                "part_name": "0805贴片电容 10uF ±20%",
+                "part_spec": "±20% 16V",
+                "material_type": "component",
+                "default_aql": 1.0,
+                "default_inspection_level": "II",
+                "unit": "pcs",
+                "product_line_code": "DC-DC-100",
+            },
+            {
+                "part_no": "PCB-DC-001",
+                "part_name": "DC-DC电源模块PCB板",
+                "part_spec": "FR-4 1.6mm 双层板",
+                "material_type": "raw",
+                "default_aql": 0.4,
+                "default_inspection_level": "II",
+                "unit": "pcs",
+                "product_line_code": "DC-DC-100",
+            },
+        ]
+        for mat_dict in iqc_materials:
+            existing = await db.execute(select(IqcMaterial).where(IqcMaterial.part_no == mat_dict["part_no"]))
+            if not existing.scalar_one_or_none():
+                db.add(IqcMaterial(created_by=admin_id, **mat_dict))
+
         await db.commit()
 
     print("Seed data created successfully!")
