@@ -6,6 +6,9 @@ import type {
   SupplierEvaluation,
   SupplierStats,
   SupplierExpiryAlert,
+  QualityDashboardResponse,
+  SupplierQualityDetailResponse,
+  SupplierCompareResponse,
 } from "../types";
 
 export async function getSupplierStats(): Promise<SupplierStats> {
@@ -106,4 +109,52 @@ export async function createEvaluation(
 ): Promise<SupplierEvaluation> {
   const resp = await client.post(`/suppliers/${supplierId}/evaluations`, data);
   return resp.data;
+}
+
+// ─── Quality Dashboard ───
+
+export async function getQualityDashboard(params?: {
+  start_date?: string;
+  end_date?: string;
+  product_line_code?: string;
+}): Promise<QualityDashboardResponse> {
+  const resp = await client.get("/suppliers/quality/dashboard", { params });
+  return resp.data;
+}
+
+export async function getSupplierQualityDetail(
+  supplierId: string,
+  params?: { start_date?: string; end_date?: string }
+): Promise<SupplierQualityDetailResponse> {
+  const resp = await client.get(`/suppliers/quality/supplier/${supplierId}`, { params });
+  return resp.data;
+}
+
+export async function getSupplierCompare(
+  supplierIds: string[],
+  params?: { start_date?: string; end_date?: string }
+): Promise<SupplierCompareResponse> {
+  const resp = await client.get("/suppliers/quality/compare", {
+    params: { supplier_ids: supplierIds.join(","), ...params },
+  });
+  return resp.data;
+}
+
+export async function exportQualityDashboard(params?: {
+  start_date?: string;
+  end_date?: string;
+  product_line_code?: string;
+}): Promise<void> {
+  const resp = await client.get("/suppliers/quality/export", {
+    params,
+    responseType: "blob",
+  });
+  const url = window.URL.createObjectURL(new Blob([resp.data]));
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", `supplier_quality_${new Date().toISOString().split("T")[0]}.xlsx`);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
