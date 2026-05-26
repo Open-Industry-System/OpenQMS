@@ -635,3 +635,132 @@ export interface AuditChecklistTemplate {
   created_by: string | null;
   created_at: string;
 }
+
+// ─── IQC Types ───
+
+export interface IqcMaterial {
+  material_id: string;
+  part_no: string;
+  part_name: string;
+  part_spec: string | null;
+  material_type: string;
+  default_aql: number | null;
+  default_inspection_level: string | null;
+  unit: string | null;
+  product_line_code: string;
+  status: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IqcTemplateItem {
+  item_id: string;
+  template_id: string;
+  sort_order: number;
+  category: string;
+  item_name: string;
+  inspection_method: string | null;
+  inspect_type: string;
+  spec_upper: number | null;
+  spec_lower: number | null;
+  target_value: number | null;
+  unit: string | null;
+  sample_size: number | null;
+  aql_level: number | null;
+}
+
+export interface IqcInspectionTemplate {
+  template_id: string;
+  template_name: string;
+  material_id: string;
+  version: number;
+  is_active: boolean;
+  items: IqcTemplateItem[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IqcItemMeasurement {
+  measurement_id: string;
+  item_id: string;
+  sequence_no: number;
+  measured_value: number | null;
+  attribute_result: string | null;
+  remark: string | null;
+}
+
+export interface IqcInspectionItem {
+  item_id: string;
+  inspection_id: string;
+  template_item_id: string | null;
+  sort_order: number;
+  category: string;
+  item_name: string;
+  inspect_type: string;
+  spec_upper: number | null;
+  spec_lower: number | null;
+  target_value: number | null;
+  sample_size: number | null;
+  accept_no: number | null;
+  reject_no: number | null;
+  defect_qty: number;
+  result: string;
+  remark: string | null;
+  measurements: IqcItemMeasurement[];
+}
+
+export interface IqcInspection {
+  inspection_id: string;
+  inspection_no: string;
+  supplier_id: string;
+  inspection_mode: string;
+  material_id: string | null;
+  template_id: string | null;
+  part_no: string | null;
+  part_name: string | null;
+  lot_no: string | null;
+  lot_qty: number | null;
+  sample_qty: number | null;
+  aql_level: string | null;
+  inspection_level: string | null;
+  sampling_standard: string | null;
+  code_letter: string | null;
+  accept_number: number | null;
+  reject_number: number | null;
+  inspection_result: string;
+  defect_qty: number;
+  defect_description: string | null;
+  status: string;
+  re_inspection: boolean;
+  parent_inspection_id: string | null;
+  product_line_code: string | null;
+  linked_capa_id: string | null;
+  linked_scar_id: string | null;
+  judged_by: string | null;
+  judged_at: string | null;
+  inspection_date: string | null;
+  inspected_by: string | null;
+  items: IqcInspectionItem[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AqlPlan {
+  code_letter: string;
+  sample_size: number;
+  accept_number: number;
+  reject_number: number;
+  aql_level: number;
+  inspection_level: string;
+}
+
+export interface IqcStats {
+  total_inspections: number;
+  accepted_count: number;
+  rejected_count: number;
+  concession_count: number;
+  acceptance_rate: number;
+  rejection_rate: number;
+}
