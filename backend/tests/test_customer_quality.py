@@ -1,6 +1,7 @@
 import uuid
 from datetime import date, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -143,6 +144,42 @@ def test_rma_link_validation_uses_effective_update_tuple():
         customer_id,
         "DC-DC-100",
     )
+
+
+def test_complaint_link_identity_change_detection():
+    from app.services import customer_quality_service
+
+    customer_id = uuid.uuid4()
+    complaint = SimpleNamespace(
+        customer_id=customer_id,
+        product_line_code="DC-DC-100",
+    )
+
+    assert customer_quality_service._complaint_link_identity_changed(
+        complaint, {"customer_id": customer_id}
+    ) is False
+    assert customer_quality_service._complaint_link_identity_changed(
+        complaint, {"product_line_code": "DC-DC-100"}
+    ) is False
+    assert customer_quality_service._complaint_link_identity_changed(
+        complaint, {"customer_id": uuid.uuid4()}
+    ) is True
+    assert customer_quality_service._complaint_link_identity_changed(
+        complaint, {"product_line_code": "AC-DC-200"}
+    ) is True
+
+
+@pytest.mark.asyncio
+async def test_link_target_guards_reject_missing_records():
+    from app.services import customer_quality_service
+
+    db = SimpleNamespace(get=AsyncMock(return_value=None))
+
+    with pytest.raises(ValueError, match="CAPA not found"):
+        await customer_quality_service._ensure_capa(db, uuid.uuid4())
+
+    with pytest.raises(ValueError, match="FMEA not found"):
+        await customer_quality_service._ensure_fmea(db, uuid.uuid4())
 
 
 def test_risk_light_priority():

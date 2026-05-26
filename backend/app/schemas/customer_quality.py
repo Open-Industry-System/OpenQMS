@@ -337,3 +337,10 @@ class CustomerQualityDashboardResponse(BaseModel):
     complaints_by_severity: dict[str, int]
     rma_by_status: dict[str, int]
     rma_by_responsibility: dict[str, int]
+
+
+class CustomerQualityTrendPoint(BaseModel):
+    period: str
+    complaints: int
+    rma: int
+    rma_qty: int

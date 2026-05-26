@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
+from app.models.fmea import FMEADocument
 from app.services.product_line_service import validate_product_line
 
 
@@ -198,6 +199,20 @@ async def _ensure_complaint(db: AsyncSession, complaint_id: uuid.UUID) -> Custom
     return complaint
 
 
+async def _ensure_capa(db: AsyncSession, capa_ref_id: uuid.UUID) -> CAPAEightD:
+    capa = await db.get(CAPAEightD, capa_ref_id)
+    if capa is None:
+        raise ValueError("CAPA not found")
+    return capa
+
+
+async def _ensure_fmea(db: AsyncSession, fmea_ref_id: uuid.UUID) -> FMEADocument:
+    fmea = await db.get(FMEADocument, fmea_ref_id)
+    if fmea is None:
+        raise ValueError("FMEA not found")
+    return fmea
+
+
 def _validate_choice(value: str | None, valid_values: set[str], field_name: str) -> None:
     if value is not None and value not in valid_values:
         raise ValueError(f"invalid {field_name}")
@@ -258,6 +273,27 @@ def _effective_rma_link_tuple(rma: RMARecord, update_data: dict) -> tuple | None
     customer_id = update_data.get("customer_id") or rma.customer_id
     product_line_code = update_data.get("product_line_code") or rma.product_line_code
     return complaint_id, customer_id, product_line_code
+
+
+def _complaint_link_identity_changed(complaint: CustomerComplaint, update_data: dict) -> bool:
+    customer_changed = (
+        "customer_id" in update_data
+        and update_data["customer_id"] is not None
+        and update_data["customer_id"] != complaint.customer_id
+    )
+    product_line_changed = (
+        "product_line_code" in update_data
+        and update_data["product_line_code"] is not None
+        and update_data["product_line_code"] != complaint.product_line_code
+    )
+    return customer_changed or product_line_changed
+
+
+async def _complaint_has_rmas(db: AsyncSession, complaint_id: uuid.UUID) -> bool:
+    result = await db.execute(
+        select(func.count()).select_from(RMARecord).where(RMARecord.complaint_id == complaint_id)
+    )
+    return (result.scalar() or 0) > 0
 
 
 async def _complaint_has_other_rmas(
@@ -530,6 +566,10 @@ async def create_complaint(db: AsyncSession, data, user_id: uuid.UUID) -> Custom
     values = _as_dict(data)
     await validate_product_line(db, values["product_line_code"])
     await _ensure_customer(db, values["customer_id"])
+    if values.get("capa_ref_id") is not None:
+        await _ensure_capa(db, values["capa_ref_id"])
+    if values.get("fmea_ref_id") is not None:
+        await _ensure_fmea(db, values["fmea_ref_id"])
     values.setdefault("impact_qty", 0)
     values.setdefault("status", ComplaintStatus.OPEN.value)
     values.setdefault("has_rma", False)
@@ -609,6 +649,14 @@ async def update_complaint(
         await validate_product_line(db, values["product_line_code"])
     if "customer_id" in values and values["customer_id"] is not None:
         await _ensure_customer(db, values["customer_id"])
+    if _complaint_link_identity_changed(complaint, values) and await _complaint_has_rmas(
+        db, complaint.complaint_id
+    ):
+        raise ValueError("cannot change customer or product line while complaint has linked RMAs")
+    if "capa_ref_id" in values and values["capa_ref_id"] is not None:
+        await _ensure_capa(db, values["capa_ref_id"])
+    if "fmea_ref_id" in values and values["fmea_ref_id"] is not None:
+        await _ensure_fmea(db, values["fmea_ref_id"])
     if "complaint_no" in values and values["complaint_no"] != complaint.complaint_no:
         existing = await db.execute(
             select(CustomerComplaint).where(
@@ -709,6 +757,7 @@ async def link_complaint_capa(
     capa_ref_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> CustomerComplaint:
+    await _ensure_capa(db, capa_ref_id)
     old_value = complaint.capa_ref_id
     complaint.capa_ref_id = capa_ref_id
     await _audit(
@@ -730,6 +779,7 @@ async def link_complaint_fmea(
     fmea_ref_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> CustomerComplaint:
+    await _ensure_fmea(db, fmea_ref_id)
     old_value = complaint.fmea_ref_id
     complaint.fmea_ref_id = fmea_ref_id
     await _audit(
@@ -859,6 +909,10 @@ async def create_rma_record(db: AsyncSession, data, user_id: uuid.UUID) -> RMARe
     values = _as_dict(data)
     await validate_product_line(db, values["product_line_code"])
     await _ensure_customer(db, values["customer_id"])
+    if values.get("capa_ref_id") is not None:
+        await _ensure_capa(db, values["capa_ref_id"])
+    if values.get("fmea_ref_id") is not None:
+        await _ensure_fmea(db, values["fmea_ref_id"])
     linked_complaint = None
     if values.get("complaint_id"):
         linked_complaint = await _ensure_complaint(db, values["complaint_id"])
@@ -961,6 +1015,10 @@ async def update_rma_record(
         complaint_id, customer_id, product_line_code = effective_link
         linked_complaint = await _ensure_complaint(db, complaint_id)
         _validate_rma_complaint_link(customer_id, product_line_code, linked_complaint)
+    if "capa_ref_id" in values and values["capa_ref_id"] is not None:
+        await _ensure_capa(db, values["capa_ref_id"])
+    if "fmea_ref_id" in values and values["fmea_ref_id"] is not None:
+        await _ensure_fmea(db, values["fmea_ref_id"])
     if "rma_no" in values and values["rma_no"] != rma.rma_no:
         existing = await db.execute(select(RMARecord).where(RMARecord.rma_no == values["rma_no"]))
         if existing.scalar_one_or_none():
@@ -1110,6 +1168,7 @@ async def link_rma_capa(
     capa_ref_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> RMARecord:
+    await _ensure_capa(db, capa_ref_id)
     old_value = rma.capa_ref_id
     rma.capa_ref_id = capa_ref_id
     await _audit(
@@ -1131,6 +1190,7 @@ async def link_rma_fmea(
     fmea_ref_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> RMARecord:
+    await _ensure_fmea(db, fmea_ref_id)
     old_value = rma.fmea_ref_id
     rma.fmea_ref_id = fmea_ref_id
     await _audit(

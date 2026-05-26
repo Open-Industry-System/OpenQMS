@@ -273,9 +273,12 @@ async def link_complaint_capa(
     user: User = Depends(require_engineer_or_admin),
 ):
     complaint = await _get_complaint_or_404(db, complaint_id)
-    complaint = await customer_quality_service.link_complaint_capa(
-        db, complaint, capa_ref_id, user.user_id
-    )
+    try:
+        complaint = await customer_quality_service.link_complaint_capa(
+            db, complaint, capa_ref_id, user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return schemas.customer_quality.ComplaintResponse.model_validate(complaint)
 
 
@@ -311,9 +314,12 @@ async def link_complaint_fmea(
     user: User = Depends(require_engineer_or_admin),
 ):
     complaint = await _get_complaint_or_404(db, complaint_id)
-    complaint = await customer_quality_service.link_complaint_fmea(
-        db, complaint, fmea_ref_id, user.user_id
-    )
+    try:
+        complaint = await customer_quality_service.link_complaint_fmea(
+            db, complaint, fmea_ref_id, user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return schemas.customer_quality.ComplaintResponse.model_validate(complaint)
 
 
@@ -503,7 +509,10 @@ async def link_rma_capa(
     user: User = Depends(require_engineer_or_admin),
 ):
     rma = await _get_rma_or_404(db, rma_id)
-    rma = await customer_quality_service.link_rma_capa(db, rma, capa_ref_id, user.user_id)
+    try:
+        rma = await customer_quality_service.link_rma_capa(db, rma, capa_ref_id, user.user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return schemas.customer_quality.RMARecordResponse.model_validate(rma)
 
 
@@ -518,7 +527,10 @@ async def link_rma_fmea(
     user: User = Depends(require_engineer_or_admin),
 ):
     rma = await _get_rma_or_404(db, rma_id)
-    rma = await customer_quality_service.link_rma_fmea(db, rma, fmea_ref_id, user.user_id)
+    try:
+        rma = await customer_quality_service.link_rma_fmea(db, rma, fmea_ref_id, user.user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return schemas.customer_quality.RMARecordResponse.model_validate(rma)
 
 
@@ -543,7 +555,10 @@ async def get_customer_quality_dashboard(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/api/customer-quality/customers/{customer_id}/trend")
+@router.get(
+    "/api/customer-quality/customers/{customer_id}/trend",
+    response_model=list[schemas.customer_quality.CustomerQualityTrendPoint],
+)
 async def get_customer_trend(
     customer_id: uuid.UUID,
     product_line: str | None = Query(None),
@@ -553,6 +568,9 @@ async def get_customer_trend(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    customer = await customer_quality_service.get_customer(db, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="customer not found")
     try:
         data = await customer_quality_service.dashboard(
             db, product_line, customer_id, date_from, date_to, shipment_qty
