@@ -70,3 +70,19 @@ def test_customer_quality_models_have_table_names():
     assert Customer.__tablename__ == "customers"
     assert CustomerComplaint.__tablename__ == "customer_complaints"
     assert RMARecord.__tablename__ == "rma_records"
+
+
+def test_complaint_schema_rejects_invalid_category():
+    from app.schemas.customer_quality import ComplaintCreate
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ComplaintCreate(
+            complaint_no="CC-2026-001",
+            product_line_code="DC-DC-100",
+            customer_id="00000000-0000-0000-0000-000000000001",
+            category="bad",
+            severity="一般",
+            defect_desc="功能异常",
+            received_date=date.today(),
+        )
