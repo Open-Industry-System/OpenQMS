@@ -229,6 +229,17 @@ def _validate_direct_status_update(
         raise ValueError(f"{entity_name} terminal status changes must use transition endpoint")
 
 
+def _validate_initial_status(
+    status: str,
+    valid_statuses: set[str],
+    terminal_statuses: set[str],
+    entity_name: str,
+) -> None:
+    _validate_choice(status, valid_statuses, "status")
+    if status in terminal_statuses:
+        raise ValueError(f"{entity_name} initial status cannot be terminal")
+
+
 def _validate_rma_complaint_link(
     rma_customer_id: uuid.UUID,
     rma_product_line_code: str,
@@ -238,6 +249,15 @@ def _validate_rma_complaint_link(
         raise ValueError("RMA and complaint must belong to the same customer")
     if complaint.product_line_code != rma_product_line_code:
         raise ValueError("RMA and complaint must belong to the same product line")
+
+
+def _effective_rma_link_tuple(rma: RMARecord, update_data: dict) -> tuple | None:
+    complaint_id = update_data.get("complaint_id", rma.complaint_id)
+    if complaint_id is None:
+        return None
+    customer_id = update_data.get("customer_id") or rma.customer_id
+    product_line_code = update_data.get("product_line_code") or rma.product_line_code
+    return complaint_id, customer_id, product_line_code
 
 
 async def _complaint_has_other_rmas(
@@ -516,10 +536,11 @@ async def create_complaint(db: AsyncSession, data, user_id: uuid.UUID) -> Custom
     values.setdefault("supplier_responsibility", False)
     _validate_choice(values.get("category"), VALID_CATEGORIES, "category")
     _validate_choice(values.get("severity"), VALID_SEVERITIES, "severity")
-    _validate_choice(
+    _validate_initial_status(
         values.get("status", ComplaintStatus.OPEN.value),
         {status.value for status in ComplaintStatus},
-        "status",
+        {ComplaintStatus.CLOSED.value, ComplaintStatus.CANCELLED.value},
+        "complaint",
     )
 
     existing = await db.execute(
@@ -847,10 +868,11 @@ async def create_rma_record(db: AsyncSession, data, user_id: uuid.UUID) -> RMARe
             linked_complaint,
         )
     values.setdefault("status", RMAStatus.OPEN.value)
-    _validate_choice(
+    _validate_initial_status(
         values.get("status", RMAStatus.OPEN.value),
         {status.value for status in RMAStatus},
-        "status",
+        {RMAStatus.CLOSED.value, RMAStatus.CANCELLED.value},
+        "RMA",
     )
     _validate_choice(
         values.get("responsibility"),
@@ -931,13 +953,14 @@ async def update_rma_record(
     if "customer_id" in values and values["customer_id"] is not None:
         await _ensure_customer(db, values["customer_id"])
     linked_complaint = None
-    if "complaint_id" in values and values["complaint_id"] is not None:
-        linked_complaint = await _ensure_complaint(db, values["complaint_id"])
-        _validate_rma_complaint_link(
-            values.get("customer_id", rma.customer_id),
-            values.get("product_line_code", rma.product_line_code),
-            linked_complaint,
-        )
+    effective_link = _effective_rma_link_tuple(rma, values)
+    if (
+        effective_link is not None
+        and {"complaint_id", "customer_id", "product_line_code"} & values.keys()
+    ):
+        complaint_id, customer_id, product_line_code = effective_link
+        linked_complaint = await _ensure_complaint(db, complaint_id)
+        _validate_rma_complaint_link(customer_id, product_line_code, linked_complaint)
     if "rma_no" in values and values["rma_no"] != rma.rma_no:
         existing = await db.execute(select(RMARecord).where(RMARecord.rma_no == values["rma_no"]))
         if existing.scalar_one_or_none():

@@ -1,4 +1,6 @@
+import uuid
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -93,6 +95,54 @@ def test_direct_terminal_status_updates_are_rejected():
             {RMAStatus.CLOSED.value, RMAStatus.CANCELLED.value},
             "RMA",
         )
+
+
+def test_initial_terminal_statuses_are_rejected():
+    from app.services import customer_quality_service
+
+    customer_quality_service._validate_initial_status(
+        "open",
+        {status.value for status in ComplaintStatus},
+        {ComplaintStatus.CLOSED.value, ComplaintStatus.CANCELLED.value},
+        "complaint",
+    )
+
+    with pytest.raises(ValueError, match="initial status cannot be terminal"):
+        customer_quality_service._validate_initial_status(
+            "closed",
+            {status.value for status in ComplaintStatus},
+            {ComplaintStatus.CLOSED.value, ComplaintStatus.CANCELLED.value},
+            "complaint",
+        )
+
+    with pytest.raises(ValueError, match="initial status cannot be terminal"):
+        customer_quality_service._validate_initial_status(
+            "cancelled",
+            {status.value for status in RMAStatus},
+            {RMAStatus.CLOSED.value, RMAStatus.CANCELLED.value},
+            "RMA",
+        )
+
+
+def test_rma_link_validation_uses_effective_update_tuple():
+    from app.services import customer_quality_service
+
+    complaint_id = uuid.uuid4()
+    customer_id = uuid.uuid4()
+    rma = SimpleNamespace(
+        complaint_id=complaint_id,
+        customer_id=customer_id,
+        product_line_code="DC-DC-100",
+    )
+
+    assert customer_quality_service._effective_rma_link_tuple(
+        rma, {"product_line_code": "AC-DC-200"}
+    ) == (complaint_id, customer_id, "AC-DC-200")
+    assert customer_quality_service._effective_rma_link_tuple(rma, {"customer_id": None}) == (
+        complaint_id,
+        customer_id,
+        "DC-DC-100",
+    )
 
 
 def test_risk_light_priority():
