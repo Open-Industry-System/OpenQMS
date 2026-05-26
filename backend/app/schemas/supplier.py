@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, date
+from typing import List
 from pydantic import BaseModel, field_validator
 
 
@@ -349,3 +350,86 @@ class IqcInspectionListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# ─── Quality Dashboard ───
+
+class QualityKPI(BaseModel):
+    total_suppliers: int
+    overall_ppm: float
+    batch_acceptance_rate: float
+    open_scar_count: int
+
+
+class PPMTrendPoint(BaseModel):
+    month: str
+    ppm: float
+
+
+class GradeDistribution(BaseModel):
+    A: int
+    B: int
+    C: int
+    D: int
+
+
+class SupplierRankingItem(BaseModel):
+    supplier_id: uuid.UUID
+    supplier_no: str
+    name: str
+    grade: str
+    ppm: float
+    batch_acceptance_rate: float
+    delivery_rate: float
+    open_scar_count: int
+
+    model_config = {"from_attributes": True}
+
+
+class QualityDashboardResponse(BaseModel):
+    kpi: QualityKPI
+    ppm_trend: List[PPMTrendPoint]
+    grade_distribution: GradeDistribution
+    ranking: List[SupplierRankingItem]
+
+
+class SupplierQualityStats(BaseModel):
+    grade: str
+    total_score: float
+    quality_score: float
+    delivery_score: float
+    service_score: float
+    ppm: float
+    batch_acceptance_rate: float
+    total_inspections: int
+    accepted_count: int
+    scar_count: int
+    open_scar_count: int
+
+
+class SupplierQualityDetailResponse(BaseModel):
+    supplier: SupplierResponse
+    stats: SupplierQualityStats
+    ppm_trend: List[PPMTrendPoint]
+    acceptance_trend: List[dict]
+
+
+class SupplierCompareItem(BaseModel):
+    supplier_id: uuid.UUID
+    name: str
+    supplier_no: str
+    grade: str
+    ppm: float
+    batch_acceptance_rate: float
+    delivery_rate: float
+    open_scar_count: int
+    quality_score: float
+    delivery_score: float
+    service_score: float
+
+    model_config = {"from_attributes": True}
+
+
+class SupplierCompareResponse(BaseModel):
+    suppliers: List[SupplierCompareItem]
+    ppm_trends: dict

@@ -17,3 +17,4 @@ docs/superpowers/
 node_modules
 .claude/
 .codegraph/
+/.superpowers/
