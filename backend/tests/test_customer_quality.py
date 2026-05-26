@@ -62,3 +62,11 @@ def test_risk_light_priority():
     assert calculate_risk_light(open_fatal_count=0, overdue_count=0, open_count=0, ppm=120, ppm_target=100) == "yellow"
     assert calculate_risk_light(open_fatal_count=0, overdue_count=0, open_count=0, ppm=200, ppm_target=100) == "yellow"
     assert calculate_risk_light(open_fatal_count=0, overdue_count=0, open_count=0, ppm=80, ppm_target=100) == "green"
+
+
+def test_customer_quality_models_have_table_names():
+    from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
+
+    assert Customer.__tablename__ == "customers"
+    assert CustomerComplaint.__tablename__ == "customer_complaints"
+    assert RMARecord.__tablename__ == "rma_records"
