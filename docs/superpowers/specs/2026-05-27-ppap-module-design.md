@@ -376,20 +376,20 @@ export interface PPAPSubmission {
   submission_id: string;
   ppap_no: string;              // 新增
   supplier_id: string;
-  supplier_name?: string;       // 新增
-  supplier_no?: string;         // 新增
+  supplier_name: string | null; // 新增
+  supplier_no: string | null;   // 新增
   part_no: string;
   part_name: string;
   submission_level: number;
-  submission_date?: string;       // 新增（现有 ORM 字段，原 schema 也暴露）
-  customer_name?: string;         // 新增
-  product_line_code?: string;   // 新增
+  submission_date: string | null;  // 新增（现有 ORM 字段，原 schema 也暴露）
+  customer_name: string | null;    // 新增
+  product_line_code: string | null;// 新增
   status: 'draft' | 'under_review' | 'approved' | 'rejected';
   revision: number;             // 新增
-  rejection_reason?: string;    // 新增
-  approved_by?: string;
-  approved_at?: string;
-  notes?: string;
+  rejection_reason: string | null; // 新增
+  approved_by: string | null;
+  approved_at: string | null;
+  notes: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -403,10 +403,10 @@ export interface PPAPElement {
   element_name: string;
   required: boolean;            // 新增
   status: 'pending' | 'in_review' | 'approved' | 'not_applicable';
-  reviewed_by?: string;         // 新增
-  reviewed_at?: string;         // 新增
-  file_url?: string;            // 新增
-  notes?: string;
+  reviewed_by: string | null;   // 新增
+  reviewed_at: string | null;   // 新增
+  file_url: string | null;      // 新增
+  notes: string | null;
   sort_order: number;
 }
 
@@ -502,7 +502,7 @@ export async function deletePPAP(id: string): Promise<void>
 
 `backend/app/schemas/supplier.py` 中已有旧 PPAP 定义（`PPAPElementCreate`、`PPAPElementResponse`、`PPAPSubmissionCreate`、`PPAPSubmissionResponse`、`PPAPSubmissionListResponse`）。当前供应商 API 无 PPAP 端点，这些 schema 暂未被独立路由使用。
 
-**处理策略**: 旧 schema 标记废弃（`# DEPRECATED: 迁移至 schemas/ppap.py`），新 PPAP 模块使用 `schemas/ppap.py`。旧 schema 当前未被独立 PPAP 路由使用（供应商 API 无 PPAP 端点），保留以兼容已有模型引用，不删除。
+**处理策略**: 旧 schema 标记废弃（`# DEPRECATED: 迁移至 schemas/ppap.py`），新 PPAP 模块使用 `schemas/ppap.py`。旧 schema 保留以兼容已有模型引用，不删除。
 
 ### 现有前端 Type
 
