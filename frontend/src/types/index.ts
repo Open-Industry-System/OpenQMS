@@ -568,19 +568,26 @@ export interface SyncPreviewResponse {
 
 export interface PPAPSubmission {
   submission_id: string;
+  ppap_no: string;
   supplier_id: string;
+  supplier_name: string | null;
+  supplier_no: string | null;
   part_no: string;
   part_name: string;
   submission_level: number;
   submission_date: string | null;
-  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  customer_name: string | null;
+  product_line_code: string | null;
+  status: 'draft' | 'under_review' | 'approved' | 'rejected';
+  revision: number;
+  rejection_reason: string | null;
   approved_by: string | null;
   approved_at: string | null;
   notes: string | null;
-  elements: PPAPElement[];
   created_by: string;
   created_at: string;
   updated_at: string;
+  elements: PPAPElement[];
 }
 
 export interface PPAPElement {
@@ -588,9 +595,42 @@ export interface PPAPElement {
   submission_id: string;
   element_no: number;
   element_name: string;
-  status: 'pending' | 'submitted' | 'approved' | 'rejected';
+  required: boolean;
+  status: 'pending' | 'in_review' | 'approved' | 'not_applicable';
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  file_url: string | null;
   notes: string | null;
   sort_order: number;
+}
+
+export interface PPAPListResponse {
+  items: PPAPSubmission[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PPAPCreate {
+  supplier_id: string;
+  part_no: string;
+  part_name: string;
+  submission_level: number;
+  submission_date?: string;
+  customer_name?: string;
+  product_line_code?: string;
+  notes?: string;
+}
+
+export interface PPAPElementUpdate {
+  status?: 'pending' | 'in_review' | 'approved' | 'not_applicable';
+  notes?: string;
+  file_url?: string;
+}
+
+export interface PPAPTransitionRequest {
+  action: 'submit' | 'approve' | 'reject' | 'resubmit';
+  rejection_reason?: string;
 }
 
 export interface IqcInspection {
