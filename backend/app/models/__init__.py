@@ -22,6 +22,8 @@ from app.models.fmea_version import FMEAVersion
 from app.models.control_plan_version import ControlPlanVersion
 from app.models.iqc_inspection import IqcInspection
 from app.models.iqc_material import IqcMaterial
+from app.models.iqc_inspection_template import IqcInspectionTemplate, IqcTemplateItem
+from app.models.iqc_inspection_item import IqcInspectionItem, IqcItemMeasurement
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.models.apqp import APQPProject
 
@@ -42,6 +44,7 @@ __all__ = [
     "ProductLine",
     "ManagementReview", "ReviewOutput",
     "FMEAVersion", "ControlPlanVersion", "IqcInspection", "IqcMaterial",
+    "IqcInspectionTemplate", "IqcTemplateItem", "IqcInspectionItem", "IqcItemMeasurement",
     "Customer", "CustomerComplaint", "RMARecord",
     "APQPProject",
 ]
