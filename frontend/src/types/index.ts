@@ -1026,3 +1026,103 @@ export interface SCARTransitionRequest {
 export interface SCARLinkCAPARequest {
   capa_ref_id: string;
 }
+
+// ─── APQP 项目质量策划 ───
+
+export interface APQPProject {
+  project_id: string;
+  project_code: string;
+  project_name: string;
+  product_name: string;
+  product_line_code: string;
+  customer_name: string | null;
+  description: string | null;
+  target_sop_date: string | null;
+  team_members: { name: string; role: string; department: string }[] | null;
+  current_phase: number;
+  phase_name: string;
+  phase_status: string | null;
+  project_status: string;
+  phase_1_completed_at: string | null;
+  phase_2_completed_at: string | null;
+  phase_3_completed_at: string | null;
+  phase_4_completed_at: string | null;
+  phase_5_completed_at: string | null;
+  gate_approved_by: string | null;
+  gate_approved_by_name: string | null;
+  gate_approved_at: string | null;
+  gate_comments: string | null;
+  gate_history: APQPGateHistoryEntry[] | null;
+  dfmea_id: string | null;
+  dfmea_document_no: string | null;
+  pfmea_id: string | null;
+  pfmea_document_no: string | null;
+  control_plan_id: string | null;
+  control_plan_document_no: string | null;
+  ppap_submission_id: string | null;
+  ppap_submission_part_no: string | null;
+  ppap_submission_part_name: string | null;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface APQPGateHistoryEntry {
+  phase: number;
+  action: string;
+  user_id: string;
+  user_name: string;
+  comments: string | null;
+  timestamp: string;
+}
+
+export interface APQPListResponse {
+  items: APQPProject[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface APQPProjectCreate {
+  project_name: string;
+  product_name: string;
+  product_line_code: string;
+  customer_name?: string;
+  description?: string;
+  target_sop_date?: string;
+  team_members?: { name: string; role: string; department: string }[];
+  dfmea_id?: string;
+  pfmea_id?: string;
+  control_plan_id?: string;
+  ppap_submission_id?: string;
+}
+
+export interface APQPProjectUpdate {
+  project_name?: string;
+  product_name?: string;
+  product_line_code?: string;
+  customer_name?: string | null;
+  description?: string | null;
+  target_sop_date?: string | null;
+  team_members?: { name: string; role: string; department: string }[] | null;
+  dfmea_id?: string | null;
+  pfmea_id?: string | null;
+  control_plan_id?: string | null;
+  ppap_submission_id?: string | null;
+}
+
+export interface APQPGateTransition {
+  action: "submit_gate" | "approve_gate" | "reject_gate" | "cancel";
+  comments?: string;
+}
+
+export interface APQPProjectStats {
+  total_projects: number;
+  active_count: number;
+  pending_approval_count: number;
+  completed_count: number;
+  cancelled_count: number;
+  overdue_count: number;
+  phase_distribution: Record<number, number>;
+}
