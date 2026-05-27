@@ -359,6 +359,7 @@ from app.models.audit import AuditLog
 from app.models.fmea import FMEADocument
 from app.models.control_plan import ControlPlan
 from app.models.supplier import SupplierPPAPSubmission
+from app.models.product_line import ProductLine
 
 
 PHASE_NAMES = {
@@ -534,12 +535,13 @@ async def update_project(
 ) -> APQPProject:
     # Validate linked IDs if being updated (non-None key with value means set to that ID)
     fk_fields = {
-        "dfmea_id": (FMEADocument, "DFMEA"),
-        "pfmea_id": (FMEADocument, "PFMEA"),
-        "control_plan_id": (ControlPlan, "控制计划"),
-        "ppap_submission_id": (SupplierPPAPSubmission, "PPAP"),
+        "product_line_code": (ProductLine, "code", "产品线"),
+        "dfmea_id": (FMEADocument, "fmea_id", "DFMEA"),
+        "pfmea_id": (FMEADocument, "fmea_id", "PFMEA"),
+        "control_plan_id": (ControlPlan, "cp_id", "控制计划"),
+        "ppap_submission_id": (SupplierPPAPSubmission, "submission_id", "PPAP"),
     }
-    for key, (model, label) in fk_fields.items():
+    for key, (model, pk, label) in fk_fields.items():
         val = kwargs.get(key)
         if val is not None and not await db.get(model, val):
             raise ValueError(f"{label} 记录不存在")
@@ -548,7 +550,6 @@ async def update_project(
     field_map = {
         "project_name": "project_name",
         "product_name": "product_name",
-        "product_line_code": "product_line_code",
         "product_line_code": "product_line_code",
         "customer_name": "customer_name",
         "description": "description",
@@ -1428,7 +1429,7 @@ export default function APQPDetailPage() {
     // Convert empty strings to null for nullable FK fields
     const payload: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(editForm)) {
-      if (["dfmea_id", "pfmea_id", "control_plan_id", "ppap_submission_id", "customer_name"].includes(k)) {
+      if (["dfmea_id", "pfmea_id", "control_plan_id", "ppap_submission_id", "customer_name", "description"].includes(k)) {
         payload[k] = v ? v : null;
       } else {
         payload[k] = v;
@@ -1845,8 +1846,9 @@ async def db():
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         # Seed required FK target
-        pl = ProductLine(code="DC-DC-100", name="DC-DC Convert 100W")
-        conn.execute(pl.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W"))
+        await conn.execute(
+            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W")
+        )
         await conn.commit()
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with session_factory() as session:
