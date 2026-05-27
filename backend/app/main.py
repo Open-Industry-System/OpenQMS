@@ -36,6 +36,7 @@ from app.api.iqc import router as iqc_router
 from app.api.customer_quality import router as customer_quality_router
 from app.api.scar import router as scar_router
 from app.api.apqp import router as apqp_router
+from app.api.ppap import router as ppap_router
 
 
 @asynccontextmanager
@@ -90,6 +91,7 @@ app.include_router(iqc_router)
 app.include_router(customer_quality_router)
 app.include_router(scar_router)
 app.include_router(apqp_router)
+app.include_router(ppap_router)
 
 
 @app.get("/api/health")
