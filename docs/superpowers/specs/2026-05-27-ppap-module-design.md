@@ -15,7 +15,7 @@ PPAP (Production Part Approval Process) 模块实现 AIAG 第四版 18 元素生
 
 | 模块 | 关系 |
 |------|------|
-| 供应商管理 | PPAP 属于某供应商（FK → `suppliers.supplier_id`），提交记录展示在供应商详情页 |
+| 供应商管理 | PPAP 属于某供应商（FK → `suppliers.supplier_id`）；供应商详情页展示 PPAP 列表（后续迭代） |
 | APQP | APQP Phase 4 关联 PPAP 提交（FK → `supplier_ppap_submissions.submission_id`），已有，保持不变 |
 | 产品线 | PPAP 提交可选关联产品线 |
 | 仪表盘 | 后续迭代增加 PPAP 统计卡片（本期不涉及） |
@@ -118,8 +118,8 @@ async def _next_ppap_no(db: AsyncSession) -> str:
     today = datetime.now(timezone.utc).strftime("%y%m%d")
     prefix = f"PPAP-{today}"
     result = await db.execute(
-        select(SupplierPPAPSubmission.submission_id)
-        .where(SupplierPPAPSubmission.ppap_no.like(f"{prefix}%"))
+        select(SupplierPPAPSubmission.ppap_no)
+        .where(SupplierPPAPSubmission.ppap_no.like(f"{prefix}-%"))
         .order_by(SupplierPPAPSubmission.ppap_no.desc())
         .limit(1)
     )
@@ -145,6 +145,7 @@ class PPAPCreate(BaseModel):
     part_no: str
     part_name: str
     submission_level: int = Field(ge=1, le=5, default=3)
+    submission_date: date | None = None
     customer_name: str | None = None
     product_line_code: str | None = None
     notes: str | None = None
@@ -171,6 +172,7 @@ class PPAPResponse(BaseModel):
     part_no: str
     part_name: str
     submission_level: int
+    submission_date: date | None
     customer_name: str | None
     product_line_code: str | None
     status: str
@@ -224,7 +226,7 @@ class PPAPTransitionRequest(BaseModel):
 | `create_ppap(db, **fields, user_id)` | 创建 PPAP，自动生成 ppap_no，根据 submission_level 自动生成 18 元素（required 按级别填充），写审计日志 |
 | `update_ppap(db, ppap, **fields, user_id)` | 更新基础信息（仅 draft 状态），写审计日志 |
 | `update_element(db, element, **fields, user_id)` | 更新单个元素状态/文件/备注，写审计日志 |
-| `transition_ppap(db, ppap, action, user_id, **kwargs)` | 状态流转，含必填字段校验，写审计日志；**不做角色校验** |
+| `transition_ppap(db, ppap, action, user_id, **kwargs)` | 状态流转，含必填字段校验 + approve 门禁校验，写审计日志；**不做角色校验** |
 | `delete_ppap(db, ppap, user_id)` | 删除（仅 draft 状态），写审计日志 |
 
 ### 18 元素自动填充
@@ -272,6 +274,19 @@ PPAP_TRANSITIONS = {
     "resubmit":  ("rejected",      "under_review"),  # revision +1
 }
 ```
+
+### 状态流转副作用
+
+| 动作 | 自动设值 |
+|------|---------|
+| submit | `submission_date = date.today()`（如创建时未指定） |
+| approve | `approved_by = user.user_id`, `approved_at = datetime.now(timezone.utc)` |
+| reject | `rejection_reason` 由请求体填入 |
+| resubmit | `revision += 1`；**保留** `rejection_reason`（作为历史参考，不自动清空） |
+
+### approve 门禁
+
+`transition_ppap` 在执行 `approve` 前校验：所有 `required=True` 的元素状态必须为 `approved`。非必填元素允许 `not_applicable`。校验失败则 raise `ValueError("存在未批准的必填元素")`，API 层转 400。
 
 ### 查询策略
 
@@ -365,7 +380,8 @@ export interface PPAPSubmission {
   part_no: string;
   part_name: string;
   submission_level: number;
-  customer_name?: string;       // 新增
+  submission_date?: string;       // 新增（现有 ORM 字段，原 schema 也暴露）
+  customer_name?: string;         // 新增
   product_line_code?: string;   // 新增
   status: 'draft' | 'under_review' | 'approved' | 'rejected';
   revision: number;             // 新增
@@ -453,31 +469,78 @@ export async function deletePPAP(id: string): Promise<void>
 
 ## 8. Alembic Migration
 
-新增 migration 文件，添加:
+新增 migration 文件，操作顺序（`ppap_no` 必须分步，因为表已有数据）:
 
-1. `supplier_ppap_submissions` 表增加 `ppap_no` (VARCHAR(30), NOT NULL, unique) — 为现有记录回填编号
-2. `supplier_ppap_submissions` 表增加 `revision` (Integer, NOT NULL, default=1)
-3. `supplier_ppap_submissions` 表增加 `customer_name` (VARCHAR(200), nullable)
-4. `supplier_ppap_submissions` 表增加 `rejection_reason` (Text, nullable)
-5. `supplier_ppap_elements` 表增加 `required` (Boolean, NOT NULL, default=True)
-6. `supplier_ppap_elements` 表增加 `reviewed_by` (UUID, nullable, FK → users.user_id)
-7. `supplier_ppap_elements` 表增加 `reviewed_at` (DateTime with timezone, nullable)
-8. `supplier_ppap_elements` 表增加 `file_url` (VARCHAR(500), nullable)
+### `supplier_ppap_submissions` 表
+
+1. `add_column ppap_no VARCHAR(30) NULLABLE` — 先加可空列
+2. 为现有记录回填编号：按 `created_at, submission_id` 排序，逐行生成 `PPAP-260527-001` 格式编号写入
+3. `alter_column ppap_no SET NOT NULL`
+4. `create_unique_constraint uq_ppap_no ON supplier_ppap_submissions(ppap_no)`
+5. `add_column revision INTEGER NOT NULL DEFAULT 1`
+6. `add_column customer_name VARCHAR(200) NULLABLE`
+7. `add_column rejection_reason TEXT NULLABLE`
+
+### `supplier_ppap_elements` 表
+
+8. `add_column required BOOLEAN NOT NULL DEFAULT True`
+9. `add_column reviewed_by UUID NULLABLE FK → users.user_id`
+10. `add_column reviewed_at TIMESTAMP WITH TIME ZONE NULLABLE`
+11. `add_column file_url VARCHAR(500) NULLABLE`
+
+> **注意**: 步骤 1-4 必须按顺序执行，不能合并为 `add_column ppap_no VARCHAR(30) NOT NULL UNIQUE`，否则在有数据环境会直接失败。
 
 ---
 
-## 9. 不在范围内
+## 9. 旧 PPAP Schema/Type 处理
+
+### 现有后端 Schema
+
+`backend/app/schemas/supplier.py` 中已有旧 PPAP 定义（`PPAPElementCreate`、`PPAPElementResponse`、`PPAPSubmissionCreate`、`PPAPSubmissionResponse`、`PPAPSubmissionListResponse`）。这些被供应商模块的 PPAP API 路由使用。
+
+**处理策略**: 旧 schema 标记废弃（`# DEPRECATED: 迁移至 schemas/ppap.py`），新 PPAP 模块使用 `schemas/ppap.py`。供应商模块的 PPAP 路由（如有）后续迭代迁移至新 schema。旧 schema 不删除，避免供应商模块 break。
+
+### 现有前端 Type
+
+`frontend/src/types/index.ts` 已有 `PPAPSubmission`（L569）和 `PPAPElement`（L586）。
+
+**处理策略**: 直接原地扩展这些接口（新增字段 + 修改状态枚举），不新建独立接口。旧字段保持不变，新字段标 `// 新增` 注释。
+
+### 状态枚举映射
+
+现有前端使用以下枚举，与新设计存在差异：
+
+| 字段 | 旧枚举 | 新枚举 | 映射策略 |
+|------|--------|--------|---------|
+| `PPAPSubmission.status` | `draft, submitted, approved, rejected` | `draft, under_review, approved, rejected` | 去掉 `submitted`，新增 `under_review`。如有旧数据 `status='submitted'`，在迁移脚本中统一更新为 `under_review` |
+| `PPAPElement.status` | `pending, submitted, approved, rejected` | `pending, in_review, approved, not_applicable` | 去掉 `submitted` 和 `rejected`，新增 `in_review` 和 `not_applicable`。旧数据 `submitted` → `in_review`，`rejected` → `not_applicable`（在迁移脚本中处理） |
+
+迁移脚本中需追加数据修复:
+
+```python
+# 修复 submission 状态
+op.execute("UPDATE supplier_ppap_submissions SET status = 'under_review' WHERE status = 'submitted'")
+# 修复 element 状态
+op.execute("UPDATE supplier_ppap_elements SET status = 'in_review' WHERE status = 'submitted'")
+op.execute("UPDATE supplier_ppap_elements SET status = 'not_applicable' WHERE status = 'rejected'")
+```
+
+---
+
+## 10. 不在范围内
 
 - 文件上传/存储（v1 仅存文件路径字符串，不做实际上传）
 - 客户-供应商双向 PPAP 流程（后续迭代）
+- PPAP 版本历史快照（V1 采用原地更新 revision + 1，`rejection_reason` 保留历史参考；后续迭代可增加独立的提交记录快照表以完整保留每版文件和审核记录）
 - PPAP 批量操作
 - PPAP 导出 Excel / PDF
 - PPAP 过期提醒通知
 - 仪表盘 PPAP 统计卡片（后续迭代）
+- 供应商详情页 PPAP 列表/跳转（后续迭代）
 
 ---
 
-## 10. 文件清单
+## 11. 文件清单
 
 ### 新增文件
 
