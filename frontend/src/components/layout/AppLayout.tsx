@@ -20,6 +20,7 @@ import {
   BarChartOutlined,
   AlertOutlined,
   ProjectOutlined,
+  FileProtectOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -31,6 +32,7 @@ const menuItems = [
   { key: "/fmea", icon: <FileTextOutlined />, label: "FMEA管理" },
   { key: "/control-plans", icon: <FileTextOutlined />, label: "控制计划" },
   { key: "/apqp", icon: <ProjectOutlined />, label: "APQP 质量策划" },
+  { key: "/ppap", icon: <FileProtectOutlined />, label: "PPAP" },
   { key: "/quality-goals", icon: <AimOutlined />, label: "质量目标" },
   { key: "/internal-audits", icon: <SafetyOutlined />, label: "内部审核" },
   { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
