@@ -200,7 +200,10 @@ class SupplierExpiryAlertResponse(BaseModel):
     days_remaining: int
 
 
-# ─── PPAP ───
+# ─── PPAP (DEPRECATED) ───
+# 这些旧 PPAP schema 已被 schemas/ppap.py 取代，保留以兼容已有模型引用。
+# 新 PPAP 模块请使用 schemas/ppap.py。
+# DEPRECATED: 迁移至 schemas/ppap.py
 
 class PPAPElementCreate(BaseModel):
     element_no: int
