@@ -206,6 +206,14 @@ async def update_ppap(
     if ppap.status != "draft":
         raise ValueError("仅草稿状态可以编辑")
 
+    # Guard: non-nullable fields must not be explicitly None
+    if part_no is not _UNSET and part_no is None:
+        raise ValueError("零件号不能为空")
+    if part_name is not _UNSET and part_name is None:
+        raise ValueError("零件名称不能为空")
+    if submission_level is not _UNSET and submission_level is None:
+        raise ValueError("提交等级不能为空")
+
     changed: dict[str, object] = {}
 
     if part_no is not _UNSET:
@@ -255,6 +263,10 @@ async def update_element(
     parent = await db.get(SupplierPPAPSubmission, element.submission_id)
     if parent and parent.status not in ("draft", "under_review"):
         raise ValueError(f"当前提交状态 {parent.status} 不允许编辑元素")
+
+    # Guard: status must not be None if explicitly passed
+    if status is not _UNSET and status is None:
+        raise ValueError("元素状态不能为空")
 
     changed: dict[str, object] = {}
 
