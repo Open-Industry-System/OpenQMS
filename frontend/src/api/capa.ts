@@ -21,6 +21,7 @@ export async function createCAPA(data: {
   document_no: string;
   severity: string;
   due_date?: string;
+  product_line_code?: string;
 }): Promise<CAPAReport> {
   const resp = await client.post("/capa", data);
   return resp.data;
