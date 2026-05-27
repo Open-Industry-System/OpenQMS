@@ -195,6 +195,14 @@ class TestUpdateElement:
         assert el.reviewed_by is None
         assert el.reviewed_at is None
 
+    async def test_update_element_rejects_null_status(self, db: AsyncSession):
+        user = await _make_user(db, "ppap_el3", "quality_engineer")
+        supplier = await _make_supplier(db, user)
+        ppap = await _make_ppap(db, user, supplier.supplier_id)
+        el = ppap.elements[0]
+        with pytest.raises(ValueError, match="元素状态不能为空"):
+            await ppap_service.update_element(db, el, user_id=user.user_id, status=None)
+
 
 class TestUpdatePPAP:
     async def test_update_level_recalculates_required(self, db: AsyncSession):
@@ -215,6 +223,20 @@ class TestUpdatePPAP:
         ppap = await ppap_service.transition_ppap(db, ppap, "submit", user.user_id)
         with pytest.raises(ValueError, match="草稿"):
             await ppap_service.update_ppap(db, ppap, user_id=user.user_id, part_no="NEW")
+
+    async def test_update_rejects_null_part_no(self, db: AsyncSession):
+        user = await _make_user(db, "ppap_null_pn", "quality_engineer")
+        supplier = await _make_supplier(db, user)
+        ppap = await _make_ppap(db, user, supplier.supplier_id)
+        with pytest.raises(ValueError, match="零件号不能为空"):
+            await ppap_service.update_ppap(db, ppap, user_id=user.user_id, part_no=None)
+
+    async def test_update_rejects_null_submission_level(self, db: AsyncSession):
+        user = await _make_user(db, "ppap_null_sl", "quality_engineer")
+        supplier = await _make_supplier(db, user)
+        ppap = await _make_ppap(db, user, supplier.supplier_id)
+        with pytest.raises(ValueError, match="提交等级不能为空"):
+            await ppap_service.update_ppap(db, ppap, user_id=user.user_id, submission_level=None)
 
 
 class TestDeletePPAP:
