@@ -177,4 +177,10 @@ class SupplierSCAR(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    capa_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="SET NULL"), nullable=True
+    )
+    resolution_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     supplier = relationship("Supplier", back_populates="scars")
+    capa = relationship("CAPAEightD", foreign_keys=[capa_ref_id])
