@@ -14,4 +14,7 @@ export default defineConfig({
       },
     },
   },
+  optimizeDeps: {
+    include: ["@ant-design/charts"],
+  },
 });

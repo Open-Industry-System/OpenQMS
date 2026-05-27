@@ -49,7 +49,7 @@ async def list_scars(
 ):
     statuses = status.split(",") if status else None
     items, total = await scar_service.list_scars(
-        db, page, page_size, statuses, str(supplier_id) if supplier_id else None, source_type
+        db, page, page_size, statuses, supplier_id, source_type
     )
     return scar_schemas.SCARListResponse(
         items=[_to_response(s) for s in items],

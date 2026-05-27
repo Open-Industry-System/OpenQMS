@@ -49,7 +49,7 @@ async def list_scars(
     page: int = 1,
     page_size: int = 20,
     statuses: list[str] | None = None,
-    supplier_id: str | None = None,
+    supplier_id: uuid.UUID | None = None,
     source_type: str | None = None,
 ) -> tuple[list[SupplierSCAR], int]:
     query = select(SupplierSCAR).options(selectinload(SupplierSCAR.supplier))
@@ -118,8 +118,9 @@ async def create_scar(
         try:
             await db.flush()
             break
-        except IntegrityError:
-            # 仅在 scar_no unique 冲突时重试；其他约束冲突（如 FK 无效）向上抛出
+        except IntegrityError as e:
+            if "supplier_scars_scar_no" not in str(e.orig):
+                raise
             await db.rollback()
             if attempt == 2:
                 raise ValueError("SCAR 编号生成冲突，请重试")

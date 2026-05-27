@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Tabs } from "antd";
-import { BarChartOutlined, UserOutlined, CompareOutlined } from "@ant-design/icons";
+import { BarChartOutlined, UserOutlined, SwapOutlined } from "@ant-design/icons";
 import DashboardView from "./components/DashboardView";
 import SupplierDetailView from "./components/SupplierDetailView";
 import CompareView from "./components/CompareView";
@@ -38,7 +38,7 @@ export default function SupplierQualityPage() {
             key: "compare",
             label: (
               <span>
-                <CompareOutlined />
+                <SwapOutlined />
                 对比分析
               </span>
             ),
