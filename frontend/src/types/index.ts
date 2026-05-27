@@ -614,16 +614,23 @@ export interface SupplierSCAR {
   scar_id: string;
   scar_no: string;
   supplier_id: string;
-  source_type: 'iqc_reject' | 'audit_finding' | 'customer_complaint' | 'other';
-  source_id: string | null;
+  supplier_name?: string;
+  supplier_no?: string;
+  source_type: 'iqc' | 'complaint' | 'rma' | 'manual';
+  source_id?: string;
   description: string;
-  requested_action: string | null;
-  supplier_response: string | null;
-  status: 'open' | 'supplier_responded' | 'closed';
-  issued_by: string | null;
-  issued_date: string | null;
-  due_date: string | null;
-  closed_date: string | null;
+  product_line_code?: string;
+  requested_action?: string;
+  supplier_response?: string;
+  status: 'open' | 'in_progress' | 'responded' | 'verified' | 'closed';
+  capa_ref_id?: string;
+  resolution_summary?: string;
+  issued_by?: string;
+  issued_date?: string;
+  due_date?: string;
+  closed_date?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AuditChecklistTemplate {
@@ -985,4 +992,37 @@ export interface SupplierCompareItem {
 export interface SupplierCompareResponse {
   suppliers: SupplierCompareItem[];
   ppm_trends: Record<string, PPMTrendPoint[]>;
+}
+
+export interface SCARListResponse {
+  items: SupplierSCAR[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface SCARCreate {
+  supplier_id: string;
+  source_type: 'iqc' | 'complaint' | 'rma' | 'manual';
+  source_id?: string;
+  description: string;
+  product_line_code?: string;
+  requested_action?: string;
+  due_date?: string;
+}
+
+export interface SCARUpdate {
+  description?: string;
+  requested_action?: string;
+  due_date?: string;
+}
+
+export interface SCARTransitionRequest {
+  action: 'start' | 'respond' | 'verify' | 'reject' | 'close' | 'reopen';
+  supplier_response?: string;
+  resolution_summary?: string;
+}
+
+export interface SCARLinkCAPARequest {
+  capa_ref_id: string;
 }
