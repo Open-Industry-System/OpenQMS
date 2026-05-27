@@ -25,7 +25,7 @@ APQP (Advanced Product Quality Planning) 模块实现 AIAG 五阶段项目质量
 
 | 模块 | 关系 |
 |------|------|
-| FMEA | APQP 项目可关联 FMEA 文档（FK），Phase 2/3 的关键交付物 |
+| FMEA | APQP 关联 DFMEA（Phase 2）和 PFMEA（Phase 3）各一个 FK |
 | 控制计划 | APQP 项目可关联控制计划（FK），Phase 3 的关键交付物 |
 | PPAP | APQP 项目可关联 PPAP 提交（FK），Phase 4 的关键交付物 |
 | 产品线 | APQP 项目属于某个产品线（FK → product_lines） |
@@ -55,7 +55,7 @@ class APQPProject(Base):
 
     # 阶段管理
     current_phase: Mapped[int] = mapped_column(Integer, default=1, nullable=False)  # 1-5
-    phase_status: Mapped[str] = mapped_column(String(20), default="in_progress", nullable=True)
+    phase_status: Mapped[str | None] = mapped_column(String(20), default="in_progress", nullable=True)
     project_status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
 
     # 阶段完成时间戳
@@ -73,7 +73,8 @@ class APQPProject(Base):
     gate_history: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # 关联模块
-    fmea_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="SET NULL"), nullable=True)
+    dfmea_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="SET NULL"), nullable=True)
+    pfmea_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="SET NULL"), nullable=True)
     control_plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("control_plans.cp_id", ondelete="SET NULL"), nullable=True)
     ppap_submission_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("supplier_ppap_submissions.submission_id", ondelete="SET NULL"), nullable=True)
 
@@ -85,7 +86,8 @@ class APQPProject(Base):
     # Relationships
     creator = relationship("User", foreign_keys=[created_by])
     gate_approver = relationship("User", foreign_keys=[gate_approved_by])
-    fmea = relationship("FMEADocument", foreign_keys=[fmea_id])
+    dfmea = relationship("FMEADocument", foreign_keys=[dfmea_id])
+    pfmea = relationship("FMEADocument", foreign_keys=[pfmea_id])
     control_plan = relationship("ControlPlan", foreign_keys=[control_plan_id])
     ppap_submission = relationship("SupplierPPAPSubmission", foreign_keys=[ppap_submission_id])
     product_line = relationship("ProductLine", foreign_keys=[product_line_code])
@@ -93,8 +95,9 @@ class APQPProject(Base):
 
 ### 关联字段说明
 
-- `fmea_id` — 关联 FMEA 文档，FK → `fmea_documents.fmea_id`，`SET NULL` on delete
-- `control_plan_id` — 关联控制计划，FK → `control_plans.cp_id`，`SET NULL` on delete
+- `dfmea_id` — 关联 DFMEA 文档（Phase 2），FK → `fmea_documents.fmea_id`，`SET NULL` on delete
+- `pfmea_id` — 关联 PFMEA 文档（Phase 3），FK → `fmea_documents.fmea_id`，`SET NULL` on delete
+- `control_plan_id` — 关联控制计划（Phase 3），FK → `control_plans.cp_id`，`SET NULL` on delete
 - `ppap_submission_id` — 关联 PPAP 提交，FK → `supplier_ppap_submissions.submission_id`，`SET NULL` on delete
 - 所有关联字段均为 nullable，不强制要求
 
@@ -135,7 +138,7 @@ Phase 5 in_progress ──[submit_gate]──→ Phase 5 pending_approval
 | 当前阶段状态 | 动作 | 结果 | 路由权限 | 必填字段 |
 |------------|------|------|---------|---------|
 | in_progress | submit_gate | phase_status → pending_approval | `require_engineer_or_admin` | — |
-| pending_approval | approve_gate | phase_status → in_progress, current_phase +1 (Phase 5 → project_status = completed) | `require_manager_or_admin` | Phase 2: fmea_id 非空; Phase 3: control_plan_id 非空; Phase 4: ppap_submission_id 非空 |
+| pending_approval | approve_gate | phase_status → in_progress, current_phase +1 (Phase 5 → project_status = completed) | `require_manager_or_admin` | Phase 2: dfmea_id 非空; Phase 3: pfmea_id + control_plan_id 非空; Phase 4: ppap_submission_id 非空 |
 | pending_approval | reject_gate | phase_status → in_progress | `require_manager_or_admin` | — |
 | active | cancel | project_status → cancelled | admin only | — |
 
@@ -179,7 +182,8 @@ class APQPProjectCreate(BaseModel):
     description: str | None = None
     target_sop_date: date | None = None
     team_members: list[dict] | None = None
-    fmea_id: UUID | None = None
+    dfmea_id: UUID | None = None
+    pfmea_id: UUID | None = None
     control_plan_id: UUID | None = None
     ppap_submission_id: UUID | None = None
 
@@ -191,7 +195,8 @@ class APQPProjectUpdate(BaseModel):
     description: str | None = None
     target_sop_date: date | None = None
     team_members: list[dict] | None = None
-    fmea_id: UUID | None = None
+    dfmea_id: UUID | None = None
+    pfmea_id: UUID | None = None
     control_plan_id: UUID | None = None
     ppap_submission_id: UUID | None = None
 
@@ -223,8 +228,10 @@ class APQPProjectResponse(BaseModel):
     gate_comments: str | None
     gate_history: list | None              # [{phase, action, user_id, user_name, comments, timestamp}]
 
-    fmea_id: UUID | None
-    fmea_document_code: str | None      # joined
+    dfmea_id: UUID | None
+    dfmea_document_code: str | None      # joined
+    pfmea_id: UUID | None
+    pfmea_document_code: str | None      # joined
     control_plan_id: UUID | None
     control_plan_code: str | None       # joined
     ppap_submission_id: UUID | None
@@ -296,14 +303,19 @@ async def _generate_project_code(db: AsyncSession) -> str:
 
 ```python
 # 交付物检查规则（Phase 2/3/4 approve_gate 前）
+# v1 仅校验关联记录存在，不校验交付物自身的审批状态
+# Phase 3 同时检查 PFMEA + 控制计划
 DELIVERABLE_CHECKS = {
-    2: {"field": "fmea_id", "label": "FMEA"},
-    3: {"field": "control_plan_id", "label": "控制计划"},
-    4: {"field": "ppap_submission_id", "label": "PPAP"},
+    2: [{"field": "dfmea_id", "label": "DFMEA"}],
+    3: [{"field": "pfmea_id", "label": "PFMEA"}, {"field": "control_plan_id", "label": "控制计划"}],
+    4: [{"field": "ppap_submission_id", "label": "PPAP"}],
 }
 
 async def transition_project(db, project_id, action, comments, user_id, user_name):
     project = await get_project(db, project_id)
+
+    if project.project_status != "active":
+        raise ValueError("项目不在进行中，无法操作")
 
     if action == "submit_gate":
         if project.phase_status != "in_progress":
@@ -314,10 +326,11 @@ async def transition_project(db, project_id, action, comments, user_id, user_nam
     elif action == "approve_gate":
         if project.phase_status != "pending_approval":
             raise ValueError("当前阶段未提交审批")
-        # 交付物检查（Phase 2/3/4）
-        check = DELIVERABLE_CHECKS.get(project.current_phase)
-        if check and not getattr(project, check["field"]):
-            raise ValueError(f"Phase {project.current_phase} 需关联 {check['label']} 后方可审批通过")
+        # 交付物检查（Phase 2/3/4，v1 仅校验关联存在）
+        checks = DELIVERABLE_CHECKS.get(project.current_phase, [])
+        for check in checks:
+            if not getattr(project, check["field"]):
+                raise ValueError(f"Phase {project.current_phase} 需关联 {check['label']} 后方可审批通过")
         now = datetime.now(timezone.utc)
         project.gate_approved_by = user_id
         project.gate_approved_at = now
@@ -443,9 +456,10 @@ def _append_gate_history(project, action, user_id, user_name, comments):
    - 最近门控意见显示
 
 4. **关联交付物卡片**
-   - FMEA：关联的文档编号（可点击跳转 `/fmea/:id`），或"未关联"
-   - 控制计划：同上（跳转 `/control-plans/:id`）
-   - PPAP：同上
+   - DFMEA：关联的文档编号（可点击跳转 `/fmea/:id`），或"未关联"（Phase 2 门控必填）
+   - PFMEA：同上（Phase 3 门控必填）
+   - 控制计划：同上（跳转 `/control-plans/:id`，Phase 3 门控必填）
+   - PPAP：同上（Phase 4 门控必填）
    - 编辑模式下可修改关联
 
 5. **项目时间线卡片**
