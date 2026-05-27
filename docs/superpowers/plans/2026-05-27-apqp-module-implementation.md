@@ -289,13 +289,14 @@ class APQPProjectResponse(BaseModel):
     gate_history: list | None = None
 
     dfmea_id: uuid.UUID | None = None
-    dfmea_document_code: str | None = None
+    dfmea_document_no: str | None = None
     pfmea_id: uuid.UUID | None = None
-    pfmea_document_code: str | None = None
+    pfmea_document_no: str | None = None
     control_plan_id: uuid.UUID | None = None
-    control_plan_code: str | None = None
+    control_plan_document_no: str | None = None
     ppap_submission_id: uuid.UUID | None = None
-    ppap_submission_code: str | None = None
+    ppap_submission_part_no: str | None = None
+    ppap_submission_part_name: str | None = None
 
     created_by: uuid.UUID
     created_by_name: str
@@ -468,6 +469,20 @@ async def create_project(
     control_plan_id: uuid.UUID | None = None,
     ppap_submission_id: uuid.UUID | None = None,
 ) -> APQPProject:
+    # Validate linked IDs if provided
+    if dfmea_id:
+        if not await db.get(FMEADocument, dfmea_id):
+            raise ValueError("DFMEA 记录不存在")
+    if pfmea_id:
+        if not await db.get(FMEADocument, pfmea_id):
+            raise ValueError("PFMEA 记录不存在")
+    if control_plan_id:
+        if not await db.get(ControlPlan, control_plan_id):
+            raise ValueError("控制计划记录不存在")
+    if ppap_submission_id:
+        if not await db.get(SupplierPPAPSubmission, ppap_submission_id):
+            raise ValueError("PPAP 提交记录不存在")
+
     for attempt in range(3):
         project_code = await _next_project_code(db)
         project = APQPProject(
@@ -516,49 +531,34 @@ async def update_project(
     project_name: str | None = None,
     product_name: str | None = None,
     product_line_code: str | None = None,
-    customer_name: str | None = None,
-    description: str | None = None,
-    target_sop_date: date | None = None,
-    team_members: list | None = None,
-    dfmea_id: uuid.UUID | None = None,
-    pfmea_id: uuid.UUID | None = None,
-    control_plan_id: uuid.UUID | None = None,
-    ppap_submission_id: uuid.UUID | None = None,
+    # kwargs only contains keys set by the client (exclude_unset=True)
+    # "key": None means clear the field; missing key means don't touch
+    **kwargs,
 ) -> APQPProject:
     changed = {}
-    if project_name is not None:
-        project.project_name = project_name
-        changed["project_name"] = project_name
-    if product_name is not None:
-        project.product_name = product_name
-        changed["product_name"] = product_name
-    if product_line_code is not None:
-        project.product_line_code = product_line_code
-        changed["product_line_code"] = product_line_code
-    if customer_name is not None:
-        project.customer_name = customer_name
-        changed["customer_name"] = customer_name
-    if description is not None:
-        project.description = description
-        changed["description"] = description
-    if target_sop_date is not None:
-        project.target_sop_date = target_sop_date
-        changed["target_sop_date"] = str(target_sop_date)
-    if team_members is not None:
-        project.team_members = team_members
-        changed["team_members"] = str(team_members)
-    if dfmea_id is not None:
-        project.dfmea_id = dfmea_id
-        changed["dfmea_id"] = str(dfmea_id)
-    if pfmea_id is not None:
-        project.pfmea_id = pfmea_id
-        changed["pfmea_id"] = str(pfmea_id)
-    if control_plan_id is not None:
-        project.control_plan_id = control_plan_id
-        changed["control_plan_id"] = str(control_plan_id)
-    if ppap_submission_id is not None:
-        project.ppap_submission_id = ppap_submission_id
-        changed["ppap_submission_id"] = str(ppap_submission_id)
+    field_map = {
+        "project_name": "project_name",
+        "product_name": "product_name",
+        "product_line_code": "product_line_code",
+        "customer_name": "customer_name",
+        "description": "description",
+        "target_sop_date": "target_sop_date",
+        "team_members": "team_members",
+        "dfmea_id": "dfmea_id",
+        "pfmea_id": "pfmea_id",
+        "control_plan_id": "control_plan_id",
+        "ppap_submission_id": "ppap_submission_id",
+    }
+    for key, attr in field_map.items():
+        if key in kwargs:
+            val = kwargs[key]
+            setattr(project, attr, val)
+            if attr in ("target_sop_date", "dfmea_id", "pfmea_id", "control_plan_id", "ppap_submission_id"):
+                changed[key] = str(val) if val is not None else None
+            elif attr == "team_members":
+                changed[key] = str(val) if val is not None else None
+            else:
+                changed[key] = val
 
     if changed:
         db.add(AuditLog(
@@ -745,13 +745,14 @@ def _to_response(p) -> apqp_schemas.APQPProjectResponse:
         gate_comments=p.gate_comments,
         gate_history=p.gate_history,
         dfmea_id=p.dfmea_id,
-        dfmea_document_code=p.dfmea.document_code if p.dfmea else None,
+        dfmea_document_no=p.dfmea.document_no if p.dfmea else None,
         pfmea_id=p.pfmea_id,
-        pfmea_document_code=p.pfmea.document_code if p.pfmea else None,
+        pfmea_document_no=p.pfmea.document_no if p.pfmea else None,
         control_plan_id=p.control_plan_id,
-        control_plan_code=p.control_plan.cp_code if p.control_plan else None,
+        control_plan_document_no=p.control_plan.document_no if p.control_plan else None,
         ppap_submission_id=p.ppap_submission_id,
-        ppap_submission_code=p.ppap_submission.submission_code if p.ppap_submission else None,
+        ppap_submission_part_no=p.ppap_submission.part_no if p.ppap_submission else None,
+        ppap_submission_part_name=p.ppap_submission.part_name if p.ppap_submission else None,
         created_by=p.created_by,
         created_by_name=p.creator.display_name if p.creator else "",
         created_at=p.created_at,
@@ -837,21 +838,9 @@ async def update_project(
     if project.project_status != "active":
         raise HTTPException(400, "只能编辑进行中的项目")
     try:
-        project = await apqp_service.update_project(
-            db, project,
-            user_id=user.user_id,
-            project_name=req.project_name,
-            product_name=req.product_name,
-            product_line_code=req.product_line_code,
-            customer_name=req.customer_name,
-            description=req.description,
-            target_sop_date=req.target_sop_date,
-            team_members=req.team_members,
-            dfmea_id=req.dfmea_id,
-            pfmea_id=req.pfmea_id,
-            control_plan_id=req.control_plan_id,
-            ppap_submission_id=req.ppap_submission_id,
-        )
+        # Use exclude_unset=True so None means "clear this field" vs missing key means "don't touch"
+        update_data = req.model_dump(exclude_unset=True)
+        project = await apqp_service.update_project(db, project, user_id=user.user_id, **update_data)
         return _to_response(project)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -951,13 +940,14 @@ export interface APQPProject {
   gate_comments: string | null;
   gate_history: APQPGateHistoryEntry[] | null;
   dfmea_id: string | null;
-  dfmea_document_code: string | null;
+  dfmea_document_no: string | null;
   pfmea_id: string | null;
-  pfmea_document_code: string | null;
+  pfmea_document_no: string | null;
   control_plan_id: string | null;
-  control_plan_code: string | null;
+  control_plan_document_no: string | null;
   ppap_submission_id: string | null;
-  ppap_submission_code: string | null;
+  ppap_submission_part_no: string | null;
+  ppap_submission_part_name: string | null;
   created_by: string;
   created_by_name: string;
   created_at: string;
@@ -1204,7 +1194,7 @@ export default function APQPListPage() {
   };
 
   const columns = [
-    { title: "项目编号", dataIndex: "project_code", key: "project_code", render: (v: string) => <a onClick={() => navigate(`/apqp/${v}`)}>{v}</a> },
+    { title: "项目编号", dataIndex: "project_code", key: "project_code", render: (_v: string, record: APQPProject) => <a onClick={() => navigate(`/apqp/${record.project_id}`)}>{record.project_code}</a> },
     { title: "项目名称", dataIndex: "project_name", key: "project_name" },
     { title: "产品", dataIndex: "product_name", key: "product_name" },
     { title: "客户", dataIndex: "customer_name", key: "customer_name", render: (v: string | null) => v || "-" },
@@ -1587,7 +1577,7 @@ export default function APQPDetailPage() {
           <Descriptions.Item label="DFMEA（Phase 2）">
             {project.dfmea_id ? (
               <Space>
-                <span>{project.dfmea_document_code || project.dfmea_id}</span>
+                <span>{project.dfmea_document_no || project.dfmea_id}</span>
                 <Button size="small" type="link" onClick={() => navigate(`/fmea/${project.dfmea_id}`)}>查看</Button>
               </Space>
             ) : <span style={{ color: "#999" }}>未关联</span>}
@@ -1595,7 +1585,7 @@ export default function APQPDetailPage() {
           <Descriptions.Item label="PFMEA（Phase 3）">
             {project.pfmea_id ? (
               <Space>
-                <span>{project.pfmea_document_code || project.pfmea_id}</span>
+                <span>{project.pfmea_document_no || project.pfmea_id}</span>
                 <Button size="small" type="link" onClick={() => navigate(`/fmea/${project.pfmea_id}`)}>查看</Button>
               </Space>
             ) : <span style={{ color: "#999" }}>未关联</span>}
@@ -1603,7 +1593,7 @@ export default function APQPDetailPage() {
           <Descriptions.Item label="控制计划（Phase 3）">
             {project.control_plan_id ? (
               <Space>
-                <span>{project.control_plan_code || project.control_plan_id}</span>
+                <span>{project.control_plan_document_no || project.control_plan_id}</span>
                 <Button size="small" type="link" onClick={() => navigate(`/control-plans/${project.control_plan_id}`)}>查看</Button>
               </Space>
             ) : <span style={{ color: "#999" }}>未关联</span>}
@@ -1611,7 +1601,7 @@ export default function APQPDetailPage() {
           <Descriptions.Item label="PPAP（Phase 4）">
             {project.ppap_submission_id ? (
               <Space>
-                <span>{project.ppap_submission_code || project.ppap_submission_id}</span>
+                <span>{project.ppap_submission_part_no} — {project.ppap_submission_part_name}</span>
               </Space>
             ) : <span style={{ color: "#999" }}>未关联</span>}
           </Descriptions.Item>
@@ -1799,18 +1789,240 @@ curl -s http://localhost:8000/api/apqp-projects -H "Authorization: Bearer $TOKEN
 
 Expected: all endpoints return valid JSON without errors.
 
-- [ ] **Step 3: Kill the backend**
+- [ ] **Step 3: Stop server with PID**
 
 ```bash
-kill %1 2>/dev/null || true
+kill $(lsof -ti:8000) 2>/dev/null || true
+```
+
+---
+
+### Task 11: Backend Tests (State Machine + Service)
+
+**Files:**
+- Create: `backend/tests/test_apqp_service.py`
+
+- [ ] **Step 1: Create test file**
+
+```python
+# backend/tests/test_apqp_service.py
+import pytest
+import pytest_asyncio
+import uuid
+from datetime import date, datetime, timezone
+
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+
+from app.models.apqp import APQPProject
+from app.models.user import User
+from app.models.audit import AuditLog
+from app.models.fmea import FMEADocument
+from app.models.control_plan import ControlPlan
+from app.models.supplier import Supplier, SupplierPPAPSubmission
+from app.database import Base
+from app.services import apqp_service
+
+
+TEST_DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test"
+
+
+@pytest_asyncio.fixture
+async def db():
+    engine = create_async_engine(TEST_DB_URL)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        yield session
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def user(db: AsyncSession):
+    user = User(
+        user_id=uuid.uuid4(), username="test_engineer", display_name="测试工程师",
+        role="quality_engineer", password_hash="hash",
+    )
+    db.add(user)
+    await db.commit()
+    return user
+
+
+@pytest_asyncio.fixture
+async def manager(db: AsyncSession):
+    user = User(
+        user_id=uuid.uuid4(), username="test_manager", display_name="测试经理",
+        role="manager", password_hash="hash",
+    )
+    db.add(user)
+    await db.commit()
+    return user
+
+
+@pytest_asyncio.fixture
+async def project(db: AsyncSession, user: User):
+    proj = APQPProject(
+        project_id=uuid.uuid4(), project_code="APQP-2026-999",
+        project_name="Test", product_name="TestProduct", product_line_code="DC-DC-100",
+        created_by=user.user_id,
+    )
+    db.add(proj)
+    await db.commit()
+    return await apqp_service.get_project(db, proj.project_id)
+
+
+class TestCreateProject:
+    async def test_create_basic(self, db: AsyncSession, user: User):
+        proj = await apqp_service.create_project(
+            db, project_name="APQP Test", product_name="Product X",
+            product_line_code="DC-DC-100", user_id=user.user_id,
+        )
+        assert proj.project_code.startswith("APQP-2026-")
+        assert proj.current_phase == 1
+        assert proj.phase_status == "in_progress"
+        assert proj.project_status == "active"
+
+    async def test_create_with_invalid_dfmea(self, db: AsyncSession, user: User):
+        fake_id = uuid.uuid4()
+        with pytest.raises(ValueError, match="DFMEA"):
+            await apqp_service.create_project(
+                db, project_name="X", product_name="Y", product_line_code="DC-DC-100",
+                user_id=user.user_id, dfmea_id=fake_id,
+            )
+
+
+class TestGateTransitions:
+    async def test_submit_gate(self, db: AsyncSession, project: APQPProject, user: User):
+        proj = await apqp_service.transition_project(
+            db, project, "submit_gate", user.user_id, user.display_name,
+        )
+        assert proj.phase_status == "pending_approval"
+        assert proj.gate_history is not None
+        assert proj.gate_history[-1]["action"] == "submit"
+
+    async def test_approve_gate_advances_phase(self, db: AsyncSession, project: APQPProject, manager: User):
+        proj = await apqp_service.transition_project(
+            db, project, "submit_gate", manager.user_id, manager.display_name,
+        )
+        proj = await apqp_service.transition_project(
+            db, proj, "approve_gate", manager.user_id, manager.display_name,
+        )
+        assert proj.current_phase == 2
+        assert proj.phase_status == "in_progress"
+        assert proj.phase_1_completed_at is not None
+
+    async def test_approve_gate_requires_submit_first(self, db: AsyncSession, project: APQPProject, manager: User):
+        with pytest.raises(ValueError, match="未提交审批"):
+            await apqp_service.transition_project(
+                db, project, "approve_gate", manager.user_id, manager.display_name,
+            )
+
+    async def test_reject_gate_returns_to_in_progress(self, db: AsyncSession, project: APQPProject, manager: User):
+        proj = await apqp_service.transition_project(
+            db, project, "submit_gate", manager.user_id, manager.display_name,
+        )
+        proj = await apqp_service.transition_project(
+            db, proj, "reject_gate", manager.user_id, manager.display_name,
+        )
+        assert proj.phase_status == "in_progress"
+        assert proj.gate_history[-1]["action"] == "reject"
+
+    async def test_phase_5_approve_completes_project(self, db: AsyncSession, project: APQPProject, manager: User):
+        proj = project
+        proj.current_phase = 5
+        proj.phase_status = "in_progress"
+        await db.commit()
+        proj = await apqp_service.transition_project(
+            db, proj, "submit_gate", manager.user_id, manager.display_name,
+        )
+        proj = await apqp_service.transition_project(
+            db, proj, "approve_gate", manager.user_id, manager.display_name,
+        )
+        assert proj.project_status == "completed"
+        assert proj.phase_status == "completed"
+        assert proj.phase_5_completed_at is not None
+
+
+class TestDeliverableChecks:
+    async def test_phase_2_missing_dfmea(self, db: AsyncSession, project: APQPProject, manager: User):
+        proj = await apqp_service.transition_project(
+            db, project, "submit_gate", manager.user_id, manager.display_name,
+        )
+        with pytest.raises(ValueError, match="DFMEA"):
+            await apqp_service.transition_project(
+                db, proj, "approve_gate", manager.user_id, manager.display_name,
+            )
+
+    async def test_phase_2_with_dfmea_passes(self, db: AsyncSession, project: APQPProject, manager: User, user: User):
+        fmea = FMEADocument(fmea_id=uuid.uuid4(), document_no="FMEA-TEST-001", title="Test DFMEA",
+                            fmea_type="DFMEA", graph_data={"nodes": [], "edges": []})
+        db.add(fmea)
+        await db.commit()
+        project.dfmea_id = fmea.fmea_id
+        await db.commit()
+        proj = await apqp_service.get_project(db, project.project_id)
+        proj = await apqp_service.transition_project(
+            db, proj, "submit_gate", manager.user_id, manager.display_name,
+        )
+        proj = await apqp_service.transition_project(
+            db, proj, "approve_gate", manager.user_id, manager.display_name,
+        )
+        assert proj.current_phase == 2
+
+
+class TestGuardClauses:
+    async def test_completed_project_cannot_transition(self, db: AsyncSession, project: APQPProject, manager: User):
+        project.project_status = "completed"
+        project.phase_status = "completed"
+        await db.commit()
+        proj = await apqp_service.get_project(db, project.project_id)
+        with pytest.raises(ValueError, match="不在进行中"):
+            await apqp_service.transition_project(
+                db, proj, "submit_gate", manager.user_id, manager.display_name,
+            )
+
+    async def test_cancelled_project_cannot_transition(self, db: AsyncSession, project: APQPProject, manager: User):
+        project.project_status = "cancelled"
+        await db.commit()
+        proj = await apqp_service.get_project(db, project.project_id)
+        with pytest.raises(ValueError, match="不在进行中"):
+            await apqp_service.transition_project(
+                db, proj, "submit_gate", manager.user_id, manager.display_name,
+            )
+
+
+class TestStats:
+    async def test_stats_counts(self, db: AsyncSession, user: User):
+        s = await apqp_service.get_stats(db)
+        assert "total_projects" in s
+        assert "phase_distribution" in s
+```
+
+- [ ] **Step 2: Run tests**
+
+```bash
+cd backend && python -m pytest tests/test_apqp_service.py -v 2>&1
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/tests/test_apqp_service.py
+git commit -m "test(apqp): add service layer tests for gate transitions and guards"
 ```
 
 ---
 
 ## Self-Review Summary
 
-1. **Spec coverage**: All spec sections covered — model (Task 1), migration (Task 2), schemas (Task 3), service (Task 4), API routes (Task 5), types + API client (Task 6), list page (Task 7), detail page (Task 8), router + sidebar (Task 9), verification (Task 10).
+1. **Spec coverage**: All spec sections covered — model (Task 1), migration (Task 2), schemas (Task 3), service (Task 4), API routes (Task 5), types + API client (Task 6), list page (Task 7), detail page (Task 8), router + sidebar (Task 9), verification (Task 10), tests (Task 11).
 
-2. **Placeholder scan**: No TBD/TODO. All code is complete and concrete.
+2. **Field names corrected**: `document_no` (FMEA/CP), `part_no`/`part_name` (PPAP). `cp_code` → `document_no`. `submission_code` → `part_no`+`part_name`. Schema, _to_response(), TS types, and detail page all aligned.
 
-3. **Type consistency**: `dfmea_id`/`pfmea_id` used consistently across model, schemas, service, API, types, and frontend pages. `project_id` (not `id`) used as PK throughout.
+3. **Update nullable fix**: `update_project` uses `**kwargs` with `exclude_unset=True` — "None" clears field, missing key skips.
+
+4. **FK validation**: `create_project` validates linked IDs exist before insert, returns 400s.
+
+5. **Navigation fix**: List page link uses `record.project_id` not `record.project_code`.
