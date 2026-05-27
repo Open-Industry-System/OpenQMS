@@ -130,7 +130,7 @@ class SupplierPPAPSubmission(Base):
     )
 
     supplier = relationship("Supplier", back_populates="ppap_submissions")
-    elements = relationship("SupplierPPAPElement", back_populates="submission", cascade="all, delete-orphan")
+    elements = relationship("SupplierPPAPElement", back_populates="submission", cascade="all, delete-orphan", order_by="SupplierPPAPElement.sort_order")
 
 
 class SupplierPPAPElement(Base):

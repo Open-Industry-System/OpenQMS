@@ -72,8 +72,8 @@ export default function PPAPDetailPage() {
     if (!editingElement || !id) return;
     await updatePPAPElement(id, editingElement.element_id, {
       status: editStatus as "pending" | "in_review" | "approved" | "not_applicable",
-      notes: editNotes || undefined,
-      file_url: editFileUrl || undefined,
+      notes: editNotes === "" ? null : editNotes,
+      file_url: editFileUrl === "" ? null : editFileUrl,
     });
     message.success("元素已更新");
     setEditElementOpen(false);

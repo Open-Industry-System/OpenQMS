@@ -624,8 +624,8 @@ export interface PPAPCreate {
 
 export interface PPAPElementUpdate {
   status?: 'pending' | 'in_review' | 'approved' | 'not_applicable';
-  notes?: string;
-  file_url?: string;
+  notes?: string | null;
+  file_url?: string | null;
 }
 
 export interface PPAPTransitionRequest {

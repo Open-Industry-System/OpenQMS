@@ -10,6 +10,9 @@ from app.models.supplier import Supplier, SupplierPPAPSubmission, SupplierPPAPEl
 from app.models.audit import AuditLog
 
 
+_UNSET = object()  # sentinel: distinguish omitted args from explicit None
+
+
 PPAP_TRANSITIONS = {
     "submit":   ("draft",         "under_review"),
     "approve":  ("under_review",  "approved"),
@@ -193,36 +196,36 @@ async def update_ppap(
     ppap: SupplierPPAPSubmission,
     *,
     user_id: uuid.UUID,
-    part_no: str | None = None,
-    part_name: str | None = None,
-    submission_level: int | None = None,
-    customer_name: str | None = None,
-    product_line_code: str | None = None,
-    notes: str | None = None,
+    part_no: str | None = _UNSET,
+    part_name: str | None = _UNSET,
+    submission_level: int | None = _UNSET,
+    customer_name: str | None = _UNSET,
+    product_line_code: str | None = _UNSET,
+    notes: str | None = _UNSET,
 ) -> SupplierPPAPSubmission:
     if ppap.status != "draft":
         raise ValueError("仅草稿状态可以编辑")
 
     changed: dict[str, object] = {}
 
-    if part_no is not None:
+    if part_no is not _UNSET:
         ppap.part_no = part_no
         changed["part_no"] = part_no
-    if part_name is not None:
+    if part_name is not _UNSET:
         ppap.part_name = part_name
         changed["part_name"] = part_name
-    if submission_level is not None:
+    if submission_level is not _UNSET:
         ppap.submission_level = submission_level
         changed["submission_level"] = submission_level
         # Recalculate element required flags
         await _recalculate_elements(db, ppap.submission_id, submission_level)
-    if customer_name is not None:
+    if customer_name is not _UNSET:
         ppap.customer_name = customer_name
         changed["customer_name"] = customer_name
-    if product_line_code is not None:
+    if product_line_code is not _UNSET:
         ppap.product_line_code = product_line_code
         changed["product_line_code"] = product_line_code
-    if notes is not None:
+    if notes is not _UNSET:
         ppap.notes = notes
         changed["notes"] = notes
 
@@ -244,13 +247,18 @@ async def update_element(
     element: SupplierPPAPElement,
     *,
     user_id: uuid.UUID,
-    status: str | None = None,
-    notes: str | None = None,
-    file_url: str | None = None,
+    status: str | None = _UNSET,
+    notes: str | None = _UNSET,
+    file_url: str | None = _UNSET,
 ) -> SupplierPPAPElement:
+    # Parent status guard: only allow element edits when submission is draft or under_review
+    parent = await db.get(SupplierPPAPSubmission, element.submission_id)
+    if parent and parent.status not in ("draft", "under_review"):
+        raise ValueError(f"当前提交状态 {parent.status} 不允许编辑元素")
+
     changed: dict[str, object] = {}
 
-    if status is not None:
+    if status is not _UNSET:
         old_status = element.status
         element.status = status
         changed["status"] = f"{old_status} -> {status}"
@@ -262,10 +270,10 @@ async def update_element(
             element.reviewed_at = datetime.now(timezone.utc)
             changed["reviewed_by"] = str(user_id)
 
-    if notes is not None:
+    if notes is not _UNSET:
         element.notes = notes
         changed["notes"] = notes
-    if file_url is not None:
+    if file_url is not _UNSET:
         element.file_url = file_url
         changed["file_url"] = file_url
 
