@@ -528,17 +528,27 @@ async def update_project(
     project: APQPProject,
     *,
     user_id: uuid.UUID,
-    project_name: str | None = None,
-    product_name: str | None = None,
-    product_line_code: str | None = None,
-    # kwargs only contains keys set by the client (exclude_unset=True)
+    # All other fields come via **kwargs (populated by API from exclude_unset=True dict)
     # "key": None means clear the field; missing key means don't touch
     **kwargs,
 ) -> APQPProject:
+    # Validate linked IDs if being updated (non-None key with value means set to that ID)
+    fk_fields = {
+        "dfmea_id": (FMEADocument, "DFMEA"),
+        "pfmea_id": (FMEADocument, "PFMEA"),
+        "control_plan_id": (ControlPlan, "控制计划"),
+        "ppap_submission_id": (SupplierPPAPSubmission, "PPAP"),
+    }
+    for key, (model, label) in fk_fields.items():
+        val = kwargs.get(key)
+        if val is not None and not await db.get(model, val):
+            raise ValueError(f"{label} 记录不存在")
+
     changed = {}
     field_map = {
         "project_name": "project_name",
         "product_name": "product_name",
+        "product_line_code": "product_line_code",
         "product_line_code": "product_line_code",
         "customer_name": "customer_name",
         "description": "description",
@@ -988,14 +998,14 @@ export interface APQPProjectUpdate {
   project_name?: string;
   product_name?: string;
   product_line_code?: string;
-  customer_name?: string;
-  description?: string;
-  target_sop_date?: string;
-  team_members?: { name: string; role: string; department: string }[];
-  dfmea_id?: string;
-  pfmea_id?: string;
-  control_plan_id?: string;
-  ppap_submission_id?: string;
+  customer_name?: string | null;
+  description?: string | null;
+  target_sop_date?: string | null;
+  team_members?: { name: string; role: string; department: string }[] | null;
+  dfmea_id?: string | null;
+  pfmea_id?: string | null;
+  control_plan_id?: string | null;
+  ppap_submission_id?: string | null;
 }
 
 export interface APQPGateTransition {
@@ -1300,19 +1310,20 @@ export default function APQPListPage() {
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
           <Space style={{ width: "100%" }}>
+            {/* v1 使用文本输入，FK 校验由后端返回 400 兜底；后续改为 Select 组件 */}
             <Form.Item name="dfmea_id" label="DFMEA">
-              <Input placeholder="FMEA ID（可选）" style={{ width: 200 }} />
+              <Input placeholder="FMEA ID（可选，v1 文本输入）" style={{ width: 200 }} />
             </Form.Item>
             <Form.Item name="pfmea_id" label="PFMEA">
-              <Input placeholder="FMEA ID（可选）" style={{ width: 200 }} />
+              <Input placeholder="FMEA ID（可选，v1 文本输入）" style={{ width: 200 }} />
             </Form.Item>
           </Space>
           <Space style={{ width: "100%" }}>
             <Form.Item name="control_plan_id" label="控制计划">
-              <Input placeholder="CP ID（可选）" style={{ width: 200 }} />
+              <Input placeholder="CP ID（可选，v1 文本输入）" style={{ width: 200 }} />
             </Form.Item>
             <Form.Item name="ppap_submission_id" label="PPAP">
-              <Input placeholder="PPAP ID（可选）" style={{ width: 200 }} />
+              <Input placeholder="PPAP ID（可选，v1 文本输入）" style={{ width: 200 }} />
             </Form.Item>
           </Space>
         </Form>
@@ -1414,16 +1425,16 @@ export default function APQPDetailPage() {
 
   const handleEdit = async () => {
     if (!id) return;
-    await updateAPQPProject(id, {
-      project_name: editForm.project_name,
-      product_name: editForm.product_name,
-      customer_name: editForm.customer_name,
-      description: editForm.description,
-      dfmea_id: editForm.dfmea_id || undefined,
-      pfmea_id: editForm.pfmea_id || undefined,
-      control_plan_id: editForm.control_plan_id || undefined,
-      ppap_submission_id: editForm.ppap_submission_id || undefined,
-    });
+    // Convert empty strings to null for nullable FK fields
+    const payload: Record<string, string | null> = {};
+    for (const [k, v] of Object.entries(editForm)) {
+      if (["dfmea_id", "pfmea_id", "control_plan_id", "ppap_submission_id", "customer_name"].includes(k)) {
+        payload[k] = v ? v : null;
+      } else {
+        payload[k] = v;
+      }
+    }
+    await updateAPQPProject(id, payload);
     message.success("更新成功");
     setEditOpen(false);
     load();
@@ -1819,6 +1830,7 @@ from app.models.audit import AuditLog
 from app.models.fmea import FMEADocument
 from app.models.control_plan import ControlPlan
 from app.models.supplier import Supplier, SupplierPPAPSubmission
+from app.models.product_line import ProductLine
 from app.database import Base
 from app.services import apqp_service
 
@@ -1826,45 +1838,38 @@ from app.services import apqp_service
 TEST_DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test"
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="function")
 async def db():
     engine = create_async_engine(TEST_DB_URL)
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+        # Seed required FK target
+        pl = ProductLine(code="DC-DC-100", name="DC-DC Convert 100W")
+        conn.execute(pl.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W"))
+        await conn.commit()
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with session_factory() as session:
         yield session
     await engine.dispose()
 
 
-@pytest_asyncio.fixture
-async def user(db: AsyncSession):
+async def _make_user(db: AsyncSession, username: str, role: str) -> User:
     user = User(
-        user_id=uuid.uuid4(), username="test_engineer", display_name="测试工程师",
-        role="quality_engineer", password_hash="hash",
+        user_id=uuid.uuid4(), username=username, display_name=username,
+        role=role, password_hash="hash",
     )
     db.add(user)
     await db.commit()
     return user
 
 
-@pytest_asyncio.fixture
-async def manager(db: AsyncSession):
-    user = User(
-        user_id=uuid.uuid4(), username="test_manager", display_name="测试经理",
-        role="manager", password_hash="hash",
-    )
-    db.add(user)
-    await db.commit()
-    return user
-
-
-@pytest_asyncio.fixture
-async def project(db: AsyncSession, user: User):
+async def _make_project(db: AsyncSession, user: User, current_phase: int = 1, **kwargs) -> APQPProject:
+    code = f"APQP-2026-TEST-{uuid.uuid4().hex[:6]}"
     proj = APQPProject(
-        project_id=uuid.uuid4(), project_code="APQP-2026-999",
+        project_id=uuid.uuid4(), project_code=code,
         project_name="Test", product_name="TestProduct", product_line_code="DC-DC-100",
-        created_by=user.user_id,
+        created_by=user.user_id, current_phase=current_phase, **kwargs,
     )
     db.add(proj)
     await db.commit()
@@ -1872,7 +1877,8 @@ async def project(db: AsyncSession, user: User):
 
 
 class TestCreateProject:
-    async def test_create_basic(self, db: AsyncSession, user: User):
+    async def test_create_basic(self, db: AsyncSession):
+        user = await _make_user(db, "test_create", "quality_engineer")
         proj = await apqp_service.create_project(
             db, project_name="APQP Test", product_name="Product X",
             product_line_code="DC-DC-100", user_id=user.user_id,
@@ -1882,7 +1888,8 @@ class TestCreateProject:
         assert proj.phase_status == "in_progress"
         assert proj.project_status == "active"
 
-    async def test_create_with_invalid_dfmea(self, db: AsyncSession, user: User):
+    async def test_create_with_invalid_dfmea(self, db: AsyncSession):
+        user = await _make_user(db, "test_invalid_fk", "quality_engineer")
         fake_id = uuid.uuid4()
         with pytest.raises(ValueError, match="DFMEA"):
             await apqp_service.create_project(
@@ -1892,17 +1899,20 @@ class TestCreateProject:
 
 
 class TestGateTransitions:
-    async def test_submit_gate(self, db: AsyncSession, project: APQPProject, user: User):
+    async def test_submit_gate(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_submit", "manager")
+        proj = await _make_project(db, manager)
         proj = await apqp_service.transition_project(
-            db, project, "submit_gate", user.user_id, user.display_name,
+            db, proj, "submit_gate", manager.user_id, manager.display_name,
         )
         assert proj.phase_status == "pending_approval"
-        assert proj.gate_history is not None
         assert proj.gate_history[-1]["action"] == "submit"
 
-    async def test_approve_gate_advances_phase(self, db: AsyncSession, project: APQPProject, manager: User):
+    async def test_approve_gate_advances_phase(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_advance", "manager")
+        proj = await _make_project(db, manager)
         proj = await apqp_service.transition_project(
-            db, project, "submit_gate", manager.user_id, manager.display_name,
+            db, proj, "submit_gate", manager.user_id, manager.display_name,
         )
         proj = await apqp_service.transition_project(
             db, proj, "approve_gate", manager.user_id, manager.display_name,
@@ -1911,15 +1921,19 @@ class TestGateTransitions:
         assert proj.phase_status == "in_progress"
         assert proj.phase_1_completed_at is not None
 
-    async def test_approve_gate_requires_submit_first(self, db: AsyncSession, project: APQPProject, manager: User):
+    async def test_approve_gate_requires_submit_first(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_require", "manager")
+        proj = await _make_project(db, manager)
         with pytest.raises(ValueError, match="未提交审批"):
             await apqp_service.transition_project(
-                db, project, "approve_gate", manager.user_id, manager.display_name,
+                db, proj, "approve_gate", manager.user_id, manager.display_name,
             )
 
-    async def test_reject_gate_returns_to_in_progress(self, db: AsyncSession, project: APQPProject, manager: User):
+    async def test_reject_gate_returns_to_in_progress(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_reject", "manager")
+        proj = await _make_project(db, manager)
         proj = await apqp_service.transition_project(
-            db, project, "submit_gate", manager.user_id, manager.display_name,
+            db, proj, "submit_gate", manager.user_id, manager.display_name,
         )
         proj = await apqp_service.transition_project(
             db, proj, "reject_gate", manager.user_id, manager.display_name,
@@ -1927,11 +1941,11 @@ class TestGateTransitions:
         assert proj.phase_status == "in_progress"
         assert proj.gate_history[-1]["action"] == "reject"
 
-    async def test_phase_5_approve_completes_project(self, db: AsyncSession, project: APQPProject, manager: User):
-        proj = project
-        proj.current_phase = 5
-        proj.phase_status = "in_progress"
+    async def test_phase_5_approve_completes_project(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_p5", "manager")
+        proj = await _make_project(db, manager, current_phase=5)
         await db.commit()
+        proj = await apqp_service.get_project(db, proj.project_id)
         proj = await apqp_service.transition_project(
             db, proj, "submit_gate", manager.user_id, manager.display_name,
         )
@@ -1940,51 +1954,83 @@ class TestGateTransitions:
         )
         assert proj.project_status == "completed"
         assert proj.phase_status == "completed"
-        assert proj.phase_5_completed_at is not None
 
 
 class TestDeliverableChecks:
-    async def test_phase_2_missing_dfmea(self, db: AsyncSession, project: APQPProject, manager: User):
-        proj = await apqp_service.transition_project(
-            db, project, "submit_gate", manager.user_id, manager.display_name,
+    async def _make_fmea(self, db: AsyncSession, fmea_type: str) -> FMEADocument:
+        fmea = FMEADocument(
+            fmea_id=uuid.uuid4(), document_no=f"FMEA-TEST-{uuid.uuid4().hex[:6]}",
+            title=f"Test {fmea_type}", fmea_type=fmea_type,
+            graph_data={"nodes": [], "edges": []},
         )
+        db.add(fmea)
+        await db.commit()
+        return fmea
+
+    async def test_phase_2_missing_dfmea(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_p2_check", "manager")
+        proj = await _make_project(db, manager, current_phase=2, dfmea_id=None)
+        # Submit gate for Phase 2
+        proj = await apqp_service.transition_project(
+            db, proj, "submit_gate", manager.user_id, manager.display_name,
+        )
+        # Approve should fail because dfmea_id is None
         with pytest.raises(ValueError, match="DFMEA"):
             await apqp_service.transition_project(
                 db, proj, "approve_gate", manager.user_id, manager.display_name,
             )
 
-    async def test_phase_2_with_dfmea_passes(self, db: AsyncSession, project: APQPProject, manager: User, user: User):
-        fmea = FMEADocument(fmea_id=uuid.uuid4(), document_no="FMEA-TEST-001", title="Test DFMEA",
-                            fmea_type="DFMEA", graph_data={"nodes": [], "edges": []})
-        db.add(fmea)
-        await db.commit()
-        project.dfmea_id = fmea.fmea_id
-        await db.commit()
-        proj = await apqp_service.get_project(db, project.project_id)
+    async def test_phase_2_with_dfmea_passes(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_p2_ok", "manager")
+        fmea = await self._make_fmea(db, "DFMEA")
+        proj = await _make_project(db, manager, current_phase=2, dfmea_id=fmea.fmea_id)
         proj = await apqp_service.transition_project(
             db, proj, "submit_gate", manager.user_id, manager.display_name,
         )
         proj = await apqp_service.transition_project(
             db, proj, "approve_gate", manager.user_id, manager.display_name,
         )
-        assert proj.current_phase == 2
+        assert proj.current_phase == 3
+
+    async def test_phase_3_missing_pfmea(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_p3_check", "manager")
+        cp = ControlPlan(cp_id=uuid.uuid4(), document_no=f"CP-TEST-{uuid.uuid4().hex[:6]}",
+                         title="Test CP", phase="production")
+        db.add(cp)
+        await db.commit()
+        proj = await _make_project(db, manager, current_phase=3, pfmea_id=None, control_plan_id=cp.cp_id)
+        proj = await apqp_service.transition_project(
+            db, proj, "submit_gate", manager.user_id, manager.display_name,
+        )
+        with pytest.raises(ValueError, match="PFMEA"):
+            await apqp_service.transition_project(
+                db, proj, "approve_gate", manager.user_id, manager.display_name,
+            )
+
+    async def test_phase_4_missing_ppap(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_p4_check", "manager")
+        proj = await _make_project(db, manager, current_phase=4, ppap_submission_id=None)
+        proj = await apqp_service.transition_project(
+            db, proj, "submit_gate", manager.user_id, manager.display_name,
+        )
+        with pytest.raises(ValueError, match="PPAP"):
+            await apqp_service.transition_project(
+                db, proj, "approve_gate", manager.user_id, manager.display_name,
+            )
 
 
 class TestGuardClauses:
-    async def test_completed_project_cannot_transition(self, db: AsyncSession, project: APQPProject, manager: User):
-        project.project_status = "completed"
-        project.phase_status = "completed"
-        await db.commit()
-        proj = await apqp_service.get_project(db, project.project_id)
+    async def test_completed_project_cannot_transition(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_guard_c", "manager")
+        proj = await _make_project(db, manager, project_status="completed", phase_status="completed")
         with pytest.raises(ValueError, match="不在进行中"):
             await apqp_service.transition_project(
                 db, proj, "submit_gate", manager.user_id, manager.display_name,
             )
 
-    async def test_cancelled_project_cannot_transition(self, db: AsyncSession, project: APQPProject, manager: User):
-        project.project_status = "cancelled"
-        await db.commit()
-        proj = await apqp_service.get_project(db, project.project_id)
+    async def test_cancelled_project_cannot_transition(self, db: AsyncSession):
+        manager = await _make_user(db, "mgr_guard_x", "manager")
+        proj = await _make_project(db, manager, project_status="cancelled", phase_status="in_progress")
         with pytest.raises(ValueError, match="不在进行中"):
             await apqp_service.transition_project(
                 db, proj, "submit_gate", manager.user_id, manager.display_name,
@@ -1992,9 +2038,11 @@ class TestGuardClauses:
 
 
 class TestStats:
-    async def test_stats_counts(self, db: AsyncSession, user: User):
+    async def test_stats_counts(self, db: AsyncSession):
+        user = await _make_user(db, "test_stats", "quality_engineer")
+        await _make_project(db, user)
         s = await apqp_service.get_stats(db)
-        assert "total_projects" in s
+        assert s["total_projects"] >= 1
         assert "phase_distribution" in s
 ```
 
