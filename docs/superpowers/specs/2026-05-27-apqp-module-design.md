@@ -47,7 +47,7 @@ class APQPProject(Base):
     project_code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)  # APQP-2026-001
     project_name: Mapped[str] = mapped_column(String(200), nullable=False)
     product_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    product_line_code: Mapped[str] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=False)
+    product_line_code: Mapped[str] = mapped_column(String(20), ForeignKey("product_lines.code"), nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_sop_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -260,7 +260,7 @@ class APQPProjectStatsResponse(BaseModel):
     pending_approval_count: int
     completed_count: int
     cancelled_count: int
-    overdue_count: int               # target_sop_date 已过但 project_status = active
+    overdue_count: int               # target_sop_date < today AND project_status = active
     phase_distribution: dict[int, int]  # {1: n, 2: n, 3: n, 4: n, 5: n}
 ```
 
@@ -427,7 +427,7 @@ def _append_gate_history(project, action, user_id, user_name, comments):
 
 **创建 Modal：**
 - 表单字段：项目名称、产品名称、产品线（Select）、客户名称、描述、目标SOP日期、团队成员（动态列表）
-- 关联字段：FMEA（Select）、控制计划（Select）、PPAP（Select）
+- 关联字段：DFMEA（Select）、PFMEA（Select）、控制计划（Select）、PPAP（Select）
 
 ### 详情页 (`frontend/src/pages/apqp/APQPDetailPage.tsx`)
 
@@ -451,7 +451,7 @@ def _append_gate_history(project, action, user_id, user_name, comments):
    - 当前阶段名称 + 状态
    - 门控操作按钮：
      - 质量工程师：[提交审批]（phase_status == in_progress 时显示）
-     - 管理员：[审批通过] / [驳回]（phase_status == pending_approval 时显示）
+     - 经理/管理员：[审批通过] / [驳回]（phase_status == pending_approval 时显示）
    - 门控意见输入框（审批/驳回时可填写）
    - 最近门控意见显示
 
@@ -492,7 +492,7 @@ export async function getAPQPProjectStats(): Promise<APQPProjectStats>
 
 - 进行中 APQP 项目数
 - 待审批门控数
-- 逾期项目数（target_sop_date < now AND project_status = 'active'）
+- 逾期项目数（target_sop_date < today AND project_status = 'active'）
 
 ---
 
