@@ -471,6 +471,9 @@ async def create_project(
     ppap_submission_id: uuid.UUID | None = None,
 ) -> APQPProject:
     # Validate linked IDs if provided
+    if product_line_code:
+        if not await db.get(ProductLine, product_line_code):
+            raise ValueError("产品线记录不存在")
     if dfmea_id:
         if not await db.get(FMEADocument, dfmea_id):
             raise ValueError("DFMEA 记录不存在")
@@ -535,13 +538,13 @@ async def update_project(
 ) -> APQPProject:
     # Validate linked IDs if being updated (non-None key with value means set to that ID)
     fk_fields = {
-        "product_line_code": (ProductLine, "code", "产品线"),
-        "dfmea_id": (FMEADocument, "fmea_id", "DFMEA"),
-        "pfmea_id": (FMEADocument, "fmea_id", "PFMEA"),
-        "control_plan_id": (ControlPlan, "cp_id", "控制计划"),
-        "ppap_submission_id": (SupplierPPAPSubmission, "submission_id", "PPAP"),
+        "product_line_code": (ProductLine, "产品线"),
+        "dfmea_id": (FMEADocument, "DFMEA"),
+        "pfmea_id": (FMEADocument, "PFMEA"),
+        "control_plan_id": (ControlPlan, "控制计划"),
+        "ppap_submission_id": (SupplierPPAPSubmission, "PPAP"),
     }
-    for key, (model, pk, label) in fk_fields.items():
+    for key, (model, label) in fk_fields.items():
         val = kwargs.get(key)
         if val is not None and not await db.get(model, val):
             raise ValueError(f"{label} 记录不存在")
@@ -1426,16 +1429,13 @@ export default function APQPDetailPage() {
 
   const handleEdit = async () => {
     if (!id) return;
-    // Convert empty strings to null for nullable FK fields
+    // Convert empty strings to null for nullable fields
+    const nullableFields = ["dfmea_id", "pfmea_id", "control_plan_id", "ppap_submission_id", "customer_name", "description"];
     const payload: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(editForm)) {
-      if (["dfmea_id", "pfmea_id", "control_plan_id", "ppap_submission_id", "customer_name", "description"].includes(k)) {
-        payload[k] = v ? v : null;
-      } else {
-        payload[k] = v;
-      }
+      payload[k] = nullableFields.includes(k) ? (v || null) : v;
     }
-    await updateAPQPProject(id, payload);
+    await updateAPQPProject(id, payload as APQPProjectUpdate);
     message.success("更新成功");
     setEditOpen(false);
     load();
