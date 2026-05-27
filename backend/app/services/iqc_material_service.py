@@ -66,21 +66,22 @@ async def create_material(
         created_by=user_id,
     )
     db.add(material)
-    try:
-        await db.flush()
-    except IntegrityError:
-        await db.rollback()
-        raise ValueError(f"物料号 '{part_no}' 已存在")
 
     if user_id:
         db.add(AuditLog(
-            user_id=user_id,
-            action="create",
-            entity_type="iqc_material",
-            entity_id=str(material.material_id),
-            new_value={"part_no": part_no, "part_name": part_name},
+            table_name="iqc_materials",
+            record_id=material.material_id,
+            action="CREATE",
+            changed_fields={"part_no": part_no, "part_name": part_name},
+            operated_by=user_id,
         ))
-    await db.commit()
+
+    try:
+        await db.flush()
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise ValueError(f"物料号 '{part_no}' 已存在")
     return material
 
 
@@ -93,27 +94,40 @@ async def update_material(
     material = await get_material(db, material_id)
     if not material:
         raise ValueError("物料不存在")
-    old = {"part_no": material.part_no, "part_name": material.part_name}
 
-    for key, value in kwargs.items():
-        if value is not None and hasattr(material, key):
-            setattr(material, key, value)
+    changed = {}
+    for key, new_val in kwargs.items():
+        if new_val is not None and hasattr(material, key):
+            old_val = getattr(material, key)
+            if new_val != old_val:
+                changed[key] = {"before": old_val, "after": new_val}
+                setattr(material, key, new_val)
+
+    if not changed:
+        return material
 
     db.add(AuditLog(
-        user_id=user_id,
-        action="update",
-        entity_type="iqc_material",
-        entity_id=str(material_id),
-        old_value=old,
-        new_value={"part_no": material.part_no, "part_name": material.part_name},
+        table_name="iqc_materials",
+        record_id=material_id,
+        action="UPDATE",
+        changed_fields=changed,
+        operated_by=user_id,
     ))
     await db.commit()
     return material
 
 
-async def delete_material(db: AsyncSession, material_id: uuid.UUID) -> None:
+async def delete_material(db: AsyncSession, material_id: uuid.UUID, user_id: uuid.UUID) -> None:
     material = await get_material(db, material_id)
     if not material:
         raise ValueError("物料不存在")
+
+    db.add(AuditLog(
+        table_name="iqc_materials",
+        record_id=material.material_id,
+        action="DELETE",
+        changed_fields={"part_no": material.part_no, "part_name": material.part_name},
+        operated_by=user_id,
+    ))
     await db.delete(material)
     await db.commit()

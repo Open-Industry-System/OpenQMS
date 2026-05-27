@@ -50,7 +50,7 @@ export default function CompareView() {
       const s = compareData?.suppliers.find((x) => x.supplier_id === id);
       return {
         title: s?.name || id,
-        render: (_: unknown, record: Record<string, unknown>) => record[id],
+        render: (_: unknown, record: Record<string, React.ReactNode>) => record[id],
       };
     }),
   ];
