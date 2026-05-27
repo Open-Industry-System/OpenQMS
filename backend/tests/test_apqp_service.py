@@ -17,12 +17,20 @@ from app.services import apqp_service
 
 import app.models  # noqa: F401 — ensure all FK-referenced tables are registered in Base.metadata
 import os
+from urllib.parse import urlparse
 
 
-TEST_DB_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test",
-)
+def _get_test_db_url():
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL not set; this test requires a dedicated test database")
+    db_name = urlparse(url).path.lstrip("/")
+    if "_test" not in db_name:
+        pytest.skip(f"Database '{db_name}' does not contain '_test'; refusing to run destructive tests")
+    return url
+
+
+TEST_DB_URL = _get_test_db_url()
 
 
 @pytest_asyncio.fixture(scope="function")

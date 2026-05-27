@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,11 +10,14 @@ from app.database import Base
 
 class APQPProject(Base):
     __tablename__ = "apqp_projects"
+    __table_args__ = (
+        UniqueConstraint("project_code", name="uq_apqp_projects_project_code"),
+    )
 
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    project_code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    project_code: Mapped[str] = mapped_column(String(30), nullable=False)
     project_name: Mapped[str] = mapped_column(String(200), nullable=False)
     product_name: Mapped[str] = mapped_column(String(200), nullable=False)
     product_line_code: Mapped[str] = mapped_column(
