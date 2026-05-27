@@ -50,12 +50,12 @@ class APQPProject(Base):
     product_line_code: Mapped[str] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    target_sop_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    target_sop_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     team_members: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # [{name, role, department}]
 
     # 阶段管理
     current_phase: Mapped[int] = mapped_column(Integer, default=1, nullable=False)  # 1-5
-    phase_status: Mapped[str] = mapped_column(String(20), default="in_progress", nullable=False)
+    phase_status: Mapped[str] = mapped_column(String(20), default="in_progress", nullable=True)
     project_status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
 
     # 阶段完成时间戳
@@ -65,18 +65,20 @@ class APQPProject(Base):
     phase_4_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     phase_5_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # 门控信息
-    gate_approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    # 门控信息（当前阶段最新审批，completed 后保留最后一次）
+    gate_approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
     gate_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     gate_comments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 门控历史：所有阶段的审批记录 [{phase, action, user_id, user_name, comments, timestamp}]
+    gate_history: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # 关联模块
-    fmea_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.id", ondelete="SET NULL"), nullable=True)
-    control_plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("control_plans.plan_id", ondelete="SET NULL"), nullable=True)
+    fmea_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="SET NULL"), nullable=True)
+    control_plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("control_plans.cp_id", ondelete="SET NULL"), nullable=True)
     ppap_submission_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("supplier_ppap_submissions.submission_id", ondelete="SET NULL"), nullable=True)
 
     # 审计
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -91,8 +93,8 @@ class APQPProject(Base):
 
 ### 关联字段说明
 
-- `fmea_id` — 关联 FMEA 文档，FK → `fmea_documents.id`，`SET NULL` on delete
-- `control_plan_id` — 关联控制计划，FK → `control_plans.plan_id`，`SET NULL` on delete
+- `fmea_id` — 关联 FMEA 文档，FK → `fmea_documents.fmea_id`，`SET NULL` on delete
+- `control_plan_id` — 关联控制计划，FK → `control_plans.cp_id`，`SET NULL` on delete
 - `ppap_submission_id` — 关联 PPAP 提交，FK → `supplier_ppap_submissions.submission_id`，`SET NULL` on delete
 - 所有关联字段均为 nullable，不强制要求
 
@@ -133,7 +135,7 @@ Phase 5 in_progress ──[submit_gate]──→ Phase 5 pending_approval
 | 当前阶段状态 | 动作 | 结果 | 路由权限 | 必填字段 |
 |------------|------|------|---------|---------|
 | in_progress | submit_gate | phase_status → pending_approval | `require_engineer_or_admin` | — |
-| pending_approval | approve_gate | phase_status → in_progress, current_phase +1 (Phase 5 → project_status = completed) | `require_manager_or_admin` | — |
+| pending_approval | approve_gate | phase_status → in_progress, current_phase +1 (Phase 5 → project_status = completed) | `require_manager_or_admin` | Phase 2: fmea_id 非空; Phase 3: control_plan_id 非空; Phase 4: ppap_submission_id 非空 |
 | pending_approval | reject_gate | phase_status → in_progress | `require_manager_or_admin` | — |
 | active | cancel | project_status → cancelled | admin only | — |
 
@@ -150,7 +152,7 @@ if project.current_phase < 5:
 elif project.current_phase == 5:
     project.phase_5_completed_at = now
     project.project_status = "completed"
-    project.phase_status = None  # completed 项目无需 phase_status
+    project.phase_status = "completed"
 ```
 
 ### 项目编号规则
@@ -201,7 +203,7 @@ class APQPProjectResponse(BaseModel):
     product_line_code: str
     customer_name: str | None
     description: str | None
-    target_sop_date: datetime | None
+    target_sop_date: date | None
     team_members: list | None
 
     current_phase: int
@@ -219,6 +221,7 @@ class APQPProjectResponse(BaseModel):
     gate_approved_by_name: str | None   # joined from User
     gate_approved_at: datetime | None
     gate_comments: str | None
+    gate_history: list | None              # [{phase, action, user_id, user_name, comments, timestamp}]
 
     fmea_id: UUID | None
     fmea_document_code: str | None      # joined
@@ -266,7 +269,7 @@ class APQPProjectStatsResponse(BaseModel):
 | `get_project(db, project_id)` | 单条查询，`selectinload` 关联 |
 | `create_project(db, data, user_id)` | 创建项目，自动生成编号，写 AuditLog |
 | `update_project(db, project_id, data)` | 更新项目，写 AuditLog |
-| `transition_project(db, project_id, action, comments, user_id)` | 门控状态转换，写 AuditLog |
+| `transition_project(db, project_id, action, comments, user_id, user_name)` | 门控状态转换，写 AuditLog，追加 gate_history |
 
 ### 编号生成逻辑
 
@@ -292,42 +295,69 @@ async def _generate_project_code(db: AsyncSession) -> str:
 ### 门控转换逻辑
 
 ```python
-async def transition_project(db, project_id, action, comments, user_id):
+# 交付物检查规则（Phase 2/3/4 approve_gate 前）
+DELIVERABLE_CHECKS = {
+    2: {"field": "fmea_id", "label": "FMEA"},
+    3: {"field": "control_plan_id", "label": "控制计划"},
+    4: {"field": "ppap_submission_id", "label": "PPAP"},
+}
+
+async def transition_project(db, project_id, action, comments, user_id, user_name):
     project = await get_project(db, project_id)
 
     if action == "submit_gate":
         if project.phase_status != "in_progress":
             raise ValueError("当前阶段不在进行中")
         project.phase_status = "pending_approval"
+        _append_gate_history(project, "submit", user_id, user_name, comments)
 
     elif action == "approve_gate":
         if project.phase_status != "pending_approval":
             raise ValueError("当前阶段未提交审批")
+        # 交付物检查（Phase 2/3/4）
+        check = DELIVERABLE_CHECKS.get(project.current_phase)
+        if check and not getattr(project, check["field"]):
+            raise ValueError(f"Phase {project.current_phase} 需关联 {check['label']} 后方可审批通过")
         now = datetime.now(timezone.utc)
         project.gate_approved_by = user_id
         project.gate_approved_at = now
         project.gate_comments = comments
         setattr(project, f"phase_{project.current_phase}_completed_at", now)
+        _append_gate_history(project, "approve", user_id, user_name, comments)
 
         if project.current_phase < 5:
             project.current_phase += 1
             project.phase_status = "in_progress"
         else:
             project.project_status = "completed"
-            project.phase_status = None
+            project.phase_status = "completed"
 
     elif action == "reject_gate":
         if project.phase_status != "pending_approval":
             raise ValueError("当前阶段未提交审批")
         project.phase_status = "in_progress"
         project.gate_comments = comments
+        _append_gate_history(project, "reject", user_id, user_name, comments)
 
     elif action == "cancel":
         project.project_status = "cancelled"
 
-    # AuditLog
     db.add(AuditLog(...))
     await db.commit()
+
+def _append_gate_history(project, action, user_id, user_name, comments):
+    entry = {
+        "phase": project.current_phase,
+        "action": action,
+        "user_id": str(user_id),
+        "user_name": user_name,
+        "comments": comments,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if project.gate_history is None:
+        project.gate_history = [entry]
+    else:
+        project.gate_history = project.gate_history + [entry]
 ```
 
 ---
@@ -343,7 +373,7 @@ async def transition_project(db, project_id, action, comments, user_id):
 | GET | `/api/apqp-projects/{project_id}` | `get_current_user` | 详情 |
 | POST | `/api/apqp-projects` | `require_engineer_or_admin` | 创建 |
 | PUT | `/api/apqp-projects/{project_id}` | `require_engineer_or_admin` | 编辑（仅 active 状态可编辑） |
-| POST | `/api/apqp-projects/{project_id}/transition` | varies | 门控操作（service 层校验角色） |
+| POST | `/api/apqp-projects/{project_id}/transition` | `require_engineer_or_admin`（路由层），`user.role` 校验（路由层，approve/reject 需 manager+） | 门控操作 |
 
 ### 路由层 `_to_response()` 辅助函数
 
@@ -414,7 +444,7 @@ async def transition_project(db, project_id, action, comments, user_id):
 
 4. **关联交付物卡片**
    - FMEA：关联的文档编号（可点击跳转 `/fmea/:id`），或"未关联"
-   - 控制计划：同上（跳转 `/control-plan/:id`）
+   - 控制计划：同上（跳转 `/control-plans/:id`）
    - PPAP：同上
    - 编辑模式下可修改关联
 
@@ -434,7 +464,7 @@ export async function getAPQPProjectStats(): Promise<APQPProjectStats>
 
 ### TypeScript Types (`frontend/src/types/index.ts`)
 
-新增接口：`APQPProject`, `APQPProjectCreate`, `APQPProjectUpdate`, `APQPListResponse`, `APQPGateTransition`, `APQPProjectStats`
+新增接口：`APQPProject`, `APQPProjectCreate`, `APQPProjectUpdate`, `APQPListResponse`, `APQPGateTransition`, `APQPProjectStats`, `APQPGateHistoryEntry`
 
 ### 侧边栏菜单
 
@@ -454,10 +484,10 @@ export async function getAPQPProjectStats(): Promise<APQPProjectStats>
 
 ## 9. Alembic 迁移
 
-`backend/alembic/versions/019_apqp_projects.py`
+`backend/alembic/versions/023_add_apqp_projects.py`
 
 - 创建 `apqp_projects` 表
-- FK 到 `users.id`（created_by, gate_approved_by）、`product_lines.code`、`fmea_documents.id`、`control_plans.plan_id`、`supplier_ppap_submissions.submission_id`
+- FK 到 `users.user_id`（created_by, gate_approved_by）、`product_lines.code`、`fmea_documents.fmea_id`、`control_plans.cp_id`、`supplier_ppap_submissions.submission_id`
 - 索引：`project_code`（UNIQUE）、`project_status`、`current_phase`
 
 ---
@@ -483,7 +513,7 @@ export async function getAPQPProjectStats(): Promise<APQPProjectStats>
 | `backend/app/schemas/apqp.py` | Pydantic schemas |
 | `backend/app/services/apqp_service.py` | 业务逻辑 + 审计日志 |
 | `backend/app/api/apqp.py` | API 路由 |
-| `backend/alembic/versions/019_apqp_projects.py` | 数据库迁移 |
+| `backend/alembic/versions/023_add_apqp_projects.py` | 数据库迁移 |
 | `frontend/src/pages/apqp/APQPListPage.tsx` | 列表页 |
 | `frontend/src/pages/apqp/APQPDetailPage.tsx` | 详情页 |
 | `frontend/src/api/apqp.ts` | API 客户端 |
