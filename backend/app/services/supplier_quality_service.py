@@ -50,7 +50,7 @@ async def get_quality_dashboard(
 
     # Open SCAR count
     open_scar_count = await db.scalar(
-        select(func.count()).select_from(SupplierSCAR).where(SupplierSCAR.status == "open")
+        select(func.count()).select_from(SupplierSCAR).where(SupplierSCAR.status != "closed")
     ) or 0
 
     # Total suppliers
@@ -154,7 +154,7 @@ async def get_quality_dashboard(
 
         supp_scar_count = await db.scalar(
             select(func.count()).select_from(SupplierSCAR)
-            .where(SupplierSCAR.supplier_id == row.supplier_id, SupplierSCAR.status == "open")
+            .where(SupplierSCAR.supplier_id == row.supplier_id, SupplierSCAR.status != "closed")
         ) or 0
 
         delivery_rate = 0.0
@@ -264,7 +264,7 @@ async def get_supplier_quality_detail(
 
     open_scar_count = await db.scalar(
         select(func.count()).select_from(SupplierSCAR)
-        .where(SupplierSCAR.supplier_id == supplier_id, SupplierSCAR.status == "open")
+        .where(SupplierSCAR.supplier_id == supplier_id, SupplierSCAR.status != "closed")
     ) or 0
 
     trend_result = await db.execute(
