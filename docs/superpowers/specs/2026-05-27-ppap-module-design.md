@@ -163,6 +163,19 @@ class PPAPElementUpdate(BaseModel):
     notes: str | None = None
     file_url: str | None = None
 
+class PPAPElementResponse(BaseModel):
+    element_id: uuid.UUID
+    submission_id: uuid.UUID
+    element_no: int
+    element_name: str
+    required: bool
+    status: str
+    reviewed_by: uuid.UUID | None
+    reviewed_at: datetime | None
+    file_url: str | None
+    notes: str | None
+    sort_order: int
+
 class PPAPResponse(BaseModel):
     submission_id: uuid.UUID
     ppap_no: str
@@ -185,19 +198,6 @@ class PPAPResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     elements: list[PPAPElementResponse]
-
-class PPAPElementResponse(BaseModel):
-    element_id: uuid.UUID
-    submission_id: uuid.UUID
-    element_no: int
-    element_name: str
-    required: bool
-    status: str
-    reviewed_by: uuid.UUID | None
-    reviewed_at: datetime | None
-    file_url: str | None
-    notes: str | None
-    sort_order: int
 
 class PPAPListResponse(BaseModel):
     items: list[PPAPResponse]
@@ -226,7 +226,7 @@ class PPAPTransitionRequest(BaseModel):
 | `get_ppap(db, submission_id)` | 获取单条，JOIN supplier + elements |
 | `create_ppap(db, **fields, user_id)` | 创建 PPAP，自动生成 ppap_no，根据 submission_level 自动生成 18 元素（required 按级别填充），写审计日志 |
 | `update_ppap(db, ppap, **fields, user_id)` | 更新基础信息（仅 draft 状态），写审计日志；**若 `submission_level` 变更**，同步重新计算 18 元素的 `required` 标记（调用 `LEVEL_REQUIRED` 查表） |
-| `update_element(db, element, **fields, user_id)` | 更新单个元素状态/文件/备注，写审计日志 |
+| `update_element(db, element, **fields, user_id)` | 更新单个元素状态/文件/备注，写审计日志；**若 `status` 发生变化**，自动设 `reviewed_by=user_id`、`reviewed_at=datetime.now(timezone.utc)`；若状态重置为 `pending`，则清空 `reviewed_by` 和 `reviewed_at` |
 | `transition_ppap(db, ppap, action, user_id, **kwargs)` | 状态流转，含必填字段校验 + approve 门禁校验，写审计日志；**不做角色校验** |
 | `delete_ppap(db, ppap, user_id)` | 删除（仅 draft 状态），写审计日志 |
 
@@ -500,7 +500,7 @@ export async function deletePPAP(id: string): Promise<void>
 
 ### 现有后端 Schema
 
-`backend/app/schemas/supplier.py` 中已有旧 PPAP 定义（`PPAPElementCreate`、`PPAPElementResponse`、`PPAPSubmissionCreate`、`PPAPSubmissionResponse`、`PPAPSubmissionListResponse`）。这些被供应商模块的 PPAP API 路由使用。
+`backend/app/schemas/supplier.py` 中已有旧 PPAP 定义（`PPAPElementCreate`、`PPAPElementResponse`、`PPAPSubmissionCreate`、`PPAPSubmissionResponse`、`PPAPSubmissionListResponse`）。当前供应商 API 无 PPAP 端点，这些 schema 暂未被独立路由使用。
 
 **处理策略**: 旧 schema 标记废弃（`# DEPRECATED: 迁移至 schemas/ppap.py`），新 PPAP 模块使用 `schemas/ppap.py`。旧 schema 当前未被独立 PPAP 路由使用（供应商 API 无 PPAP 端点），保留以兼容已有模型引用，不删除。
 
