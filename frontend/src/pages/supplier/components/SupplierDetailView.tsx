@@ -144,7 +144,7 @@ export default function SupplierDetailView() {
                     <div style={{ fontSize: 20, fontWeight: 600 }}>{data.stats.scar_count}</div>
                   </Col>
                   <Col span={6}>
-                    <div style={{ fontSize: 12, color: "#888" }}>开放SCAR</div>
+                    <div style={{ fontSize: 12, color: "#888" }}>未关闭SCAR</div>
                     <div style={{ fontSize: 20, fontWeight: 600, color: data.stats.open_scar_count > 0 ? "#ff4d4f" : undefined }}>
                       {data.stats.open_scar_count}
                     </div>

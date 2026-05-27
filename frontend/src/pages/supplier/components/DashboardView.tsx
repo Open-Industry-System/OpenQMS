@@ -109,7 +109,7 @@ export default function DashboardView() {
       render: (rate: number) => `${(rate * 100).toFixed(1)}%`,
     },
     {
-      title: "开放SCAR",
+      title: "未关闭SCAR",
       dataIndex: "open_scar_count",
       key: "open_scar_count",
       render: (count: number) => <Tag color={count > 0 ? "error" : "success"}>{count}</Tag>,
@@ -160,7 +160,7 @@ export default function DashboardView() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div style={{ fontSize: 14, color: "#888" }}>开放SCAR</div>
+            <div style={{ fontSize: 14, color: "#888" }}>未关闭SCAR</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: "#faad14" }}>
               {data.kpi.open_scar_count}
             </div>
