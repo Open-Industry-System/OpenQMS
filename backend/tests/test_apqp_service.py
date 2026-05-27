@@ -16,9 +16,13 @@ from app.database import Base
 from app.services import apqp_service
 
 import app.models  # noqa: F401 — ensure all FK-referenced tables are registered in Base.metadata
+import os
 
 
-TEST_DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test"
+TEST_DB_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test",
+)
 
 
 @pytest_asyncio.fixture(scope="function")

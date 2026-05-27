@@ -18,7 +18,7 @@ def upgrade() -> None:
     op.create_table(
         "apqp_projects",
         sa.Column("project_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("project_code", sa.String(30), unique=True, nullable=False),
+        sa.Column("project_code", sa.String(30), nullable=False),
         sa.Column("project_name", sa.String(200), nullable=False),
         sa.Column("product_name", sa.String(200), nullable=False),
         sa.Column("product_line_code", sa.String(20), nullable=False),
@@ -50,6 +50,7 @@ def upgrade() -> None:
     # Indexes
     op.create_index("ix_apqp_projects_project_status", "apqp_projects", ["project_status"])
     op.create_index("ix_apqp_projects_current_phase", "apqp_projects", ["current_phase"])
+    op.create_unique_constraint("uq_apqp_projects_project_code", "apqp_projects", ["project_code"])
 
     # Foreign keys
     op.create_foreign_key("fk_apqp_projects_product_line", "apqp_projects", "product_lines", ["product_line_code"], ["code"])

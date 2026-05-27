@@ -167,7 +167,6 @@ export default function APQPDetailPage() {
                   编辑
                 </Button>
               )}
-              {actionButtons()}
             </Space>
           </Col>
         </Row>

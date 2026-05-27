@@ -161,7 +161,7 @@ async def create_project(
             await db.flush()
             break
         except IntegrityError as e:
-            if "apqp_projects_project_code" not in str(e.orig):
+            if "uq_apqp_projects_project_code" not in str(e.orig) and "project_code" not in str(e.orig):
                 raise
             await db.rollback()
             if attempt == 2:
