@@ -188,6 +188,7 @@ class PPAPResponse(BaseModel):
 
 class PPAPElementResponse(BaseModel):
     element_id: uuid.UUID
+    submission_id: uuid.UUID
     element_no: int
     element_name: str
     required: bool
@@ -224,7 +225,7 @@ class PPAPTransitionRequest(BaseModel):
 | `list_ppaps(db, page, page_size, statuses, supplier_id)` | 分页列表，JOIN supplier 加载 name/no，加载 elements；`statuses` 为 `list[str]`，支持多状态过滤 |
 | `get_ppap(db, submission_id)` | 获取单条，JOIN supplier + elements |
 | `create_ppap(db, **fields, user_id)` | 创建 PPAP，自动生成 ppap_no，根据 submission_level 自动生成 18 元素（required 按级别填充），写审计日志 |
-| `update_ppap(db, ppap, **fields, user_id)` | 更新基础信息（仅 draft 状态），写审计日志 |
+| `update_ppap(db, ppap, **fields, user_id)` | 更新基础信息（仅 draft 状态），写审计日志；**若 `submission_level` 变更**，同步重新计算 18 元素的 `required` 标记（调用 `LEVEL_REQUIRED` 查表） |
 | `update_element(db, element, **fields, user_id)` | 更新单个元素状态/文件/备注，写审计日志 |
 | `transition_ppap(db, ppap, action, user_id, **kwargs)` | 状态流转，含必填字段校验 + approve 门禁校验，写审计日志；**不做角色校验** |
 | `delete_ppap(db, ppap, user_id)` | 删除（仅 draft 状态），写审计日志 |
@@ -421,6 +422,7 @@ export interface PPAPCreate {
   part_no: string;
   part_name: string;
   submission_level: number;
+  submission_date?: string;       // 新增
   customer_name?: string;
   product_line_code?: string;
   notes?: string;
@@ -477,18 +479,20 @@ export async function deletePPAP(id: string): Promise<void>
 2. 为现有记录回填编号：按 `created_at, submission_id` 排序，逐行生成 `PPAP-260527-001` 格式编号写入
 3. `alter_column ppap_no SET NOT NULL`
 4. `create_unique_constraint uq_ppap_no ON supplier_ppap_submissions(ppap_no)`
-5. `add_column revision INTEGER NOT NULL DEFAULT 1`
+5. `add_column revision INTEGER NOT NULL server_default='1'` — `server_default` 确保已有行自动回填
 6. `add_column customer_name VARCHAR(200) NULLABLE`
 7. `add_column rejection_reason TEXT NULLABLE`
 
 ### `supplier_ppap_elements` 表
 
-8. `add_column required BOOLEAN NOT NULL DEFAULT True`
+8. `add_column required BOOLEAN NOT NULL server_default='true'` — `server_default` 确保已有行自动回填
 9. `add_column reviewed_by UUID NULLABLE FK → users.user_id`
 10. `add_column reviewed_at TIMESTAMP WITH TIME ZONE NULLABLE`
 11. `add_column file_url VARCHAR(500) NULLABLE`
 
-> **注意**: 步骤 1-4 必须按顺序执行，不能合并为 `add_column ppap_no VARCHAR(30) NOT NULL UNIQUE`，否则在有数据环境会直接失败。
+> **注意**:
+> - 步骤 1-4 必须按顺序执行，不能合并为 `add_column ppap_no VARCHAR(30) NOT NULL UNIQUE`，否则在有数据环境会直接失败。
+> - 步骤 5、8 使用 Alembic 的 `server_default`（生成 SQL `DEFAULT` 子句），而非 Python model 层的 `default=`。只有 `server_default` 才能为迁移时已存在的行自动填充值。
 
 ---
 
@@ -498,7 +502,7 @@ export async function deletePPAP(id: string): Promise<void>
 
 `backend/app/schemas/supplier.py` 中已有旧 PPAP 定义（`PPAPElementCreate`、`PPAPElementResponse`、`PPAPSubmissionCreate`、`PPAPSubmissionResponse`、`PPAPSubmissionListResponse`）。这些被供应商模块的 PPAP API 路由使用。
 
-**处理策略**: 旧 schema 标记废弃（`# DEPRECATED: 迁移至 schemas/ppap.py`），新 PPAP 模块使用 `schemas/ppap.py`。供应商模块的 PPAP 路由（如有）后续迭代迁移至新 schema。旧 schema 不删除，避免供应商模块 break。
+**处理策略**: 旧 schema 标记废弃（`# DEPRECATED: 迁移至 schemas/ppap.py`），新 PPAP 模块使用 `schemas/ppap.py`。旧 schema 当前未被独立 PPAP 路由使用（供应商 API 无 PPAP 端点），保留以兼容已有模型引用，不删除。
 
 ### 现有前端 Type
 
