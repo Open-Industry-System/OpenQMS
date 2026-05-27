@@ -18,6 +18,7 @@ import {
   TeamOutlined,
   CustomerServiceOutlined,
   BarChartOutlined,
+  AlertOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -46,6 +47,7 @@ const menuItems = [
   { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
   { key: "/special-characteristics/traceability", icon: <SafetyCertificateOutlined />, label: "贯穿追踪" },
   { key: "/management-reviews", icon: <TeamOutlined />, label: "管理评审" },
+  { key: "/scars", icon: <AlertOutlined />, label: "SCAR管理" },
   { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA" },
   {
     key: "/msa",

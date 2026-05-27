@@ -155,9 +155,13 @@ export default function IqcInspectionDetailPage() {
   const handleTriggerScar = async () => {
     if (!id) return;
     try {
-      await triggerScar(id);
+      const result = await triggerScar(id);
       message.success("SCAR已触发");
-      fetchInspection();
+      if (result.linked_scar_id) {
+        navigate(`/scars/${result.linked_scar_id}`);
+      } else {
+        fetchInspection();
+      }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
       message.error(err.response?.data?.detail || "操作失败");

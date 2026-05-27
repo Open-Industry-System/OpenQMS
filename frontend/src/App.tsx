@@ -35,6 +35,8 @@ import CustomerQualityPage from "./pages/customerQuality/CustomerQualityPage";
 import ComplaintDetailPage from "./pages/customerQuality/ComplaintDetailPage";
 import RMADetailPage from "./pages/customerQuality/RMADetailPage";
 import SupplierQualityPage from "./pages/supplier/SupplierQualityPage";
+import SCARListPage from "./pages/scar/SCARListPage";
+import SCARDetailPage from "./pages/scar/SCARDetailPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -101,6 +103,8 @@ export default function App() {
         <Route path="/iqc/inspections" element={<IqcInspectionListPage />} />
         <Route path="/iqc/inspections/:id" element={<IqcInspectionDetailPage />} />
         <Route path="/iqc/materials" element={<IqcMaterialListPage />} />
+        <Route path="/scars" element={<SCARListPage />} />
+        <Route path="/scars/:id" element={<SCARDetailPage />} />
         <Route path="/customer-quality" element={<CustomerQualityPage />} />
         <Route path="/customer-quality/complaints/:id" element={<ComplaintDetailPage />} />
         <Route path="/customer-quality/rma/:id" element={<RMADetailPage />} />
