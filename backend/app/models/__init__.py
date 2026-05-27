@@ -23,6 +23,7 @@ from app.models.control_plan_version import ControlPlanVersion
 from app.models.iqc_inspection import IqcInspection
 from app.models.iqc_material import IqcMaterial
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
+from app.models.apqp import APQPProject
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -42,4 +43,5 @@ __all__ = [
     "ManagementReview", "ReviewOutput",
     "FMEAVersion", "ControlPlanVersion", "IqcInspection", "IqcMaterial",
     "Customer", "CustomerComplaint", "RMARecord",
+    "APQPProject",
 ]
