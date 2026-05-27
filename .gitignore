@@ -10,7 +10,6 @@ pgdata/
 .DS_Store
 .agents/
 .superpowers/
-docs/superpowers/
 *.tsbuildinfo
 .playwright-mcp/
 .worktrees/
