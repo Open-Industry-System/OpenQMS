@@ -115,6 +115,10 @@ class SupplierPPAPSubmission(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    ppap_no: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
@@ -143,6 +147,12 @@ class SupplierPPAPElement(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    required: Mapped[bool] = mapped_column(default=True, server_default="true", nullable=False)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    file_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     submission = relationship("SupplierPPAPSubmission", back_populates="elements")
 
