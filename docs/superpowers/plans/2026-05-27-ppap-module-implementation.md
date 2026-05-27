@@ -105,7 +105,7 @@ def upgrade() -> None:
     # Step 2: backfill ppap_no for existing rows (group by date, sequence within each date)
     conn = op.get_bind()
     rows = conn.execute(
-        text("SELECT submission_id, created_at FROM supplier_ppap_submissions ORDER BY created_at, submission_id")
+        text("SELECT submission_id, COALESCE(created_at, now()) AS ca FROM supplier_ppap_submissions ORDER BY ca, submission_id")
     ).fetchall()
     date_seq: dict[str, int] = {}
     for sub_id, created_at in rows:
@@ -746,6 +746,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.deps import get_current_user, require_engineer_or_admin
 from app.models.user import User
+from app.models.supplier import SupplierPPAPElement
 from app.schemas import ppap as ppap_schemas
 from app.services import ppap_service
 
@@ -861,12 +862,7 @@ async def update_ppap(
         ppap = await ppap_service.update_ppap(
             db, ppap,
             user_id=user.user_id,
-            part_no=req.part_no,
-            part_name=req.part_name,
-            submission_level=req.submission_level,
-            customer_name=req.customer_name,
-            product_line_code=req.product_line_code,
-            notes=req.notes,
+            **req.model_dump(exclude_unset=True),
         )
         return _to_response(ppap)
     except ValueError as e:
@@ -883,9 +879,9 @@ async def update_ppap_element(
 ):
     from sqlalchemy import select as sa_select
     result = await db.execute(
-        sa_select(ppap_service.SupplierPPAPElement).where(
-            ppap_service.SupplierPPAPElement.element_id == element_id,
-            ppap_service.SupplierPPAPElement.submission_id == ppap_id,
+        sa_select(SupplierPPAPElement).where(
+            SupplierPPAPElement.element_id == element_id,
+            SupplierPPAPElement.submission_id == ppap_id,
         )
     )
     element = result.scalar_one_or_none()
@@ -895,9 +891,7 @@ async def update_ppap_element(
         element = await ppap_service.update_element(
             db, element,
             user_id=user.user_id,
-            status=req.status,
-            notes=req.notes,
-            file_url=req.file_url,
+            **req.model_dump(exclude_unset=True),
         )
         return ppap_schemas.PPAPElementResponse(
             element_id=element.element_id,
