@@ -102,14 +102,16 @@ def upgrade() -> None:
         sa.Column("ppap_no", sa.String(30), nullable=True),
     )
 
-    # Step 2: backfill ppap_no for existing rows
+    # Step 2: backfill ppap_no for existing rows (group by date, sequence within each date)
     conn = op.get_bind()
     rows = conn.execute(
         text("SELECT submission_id, created_at FROM supplier_ppap_submissions ORDER BY created_at, submission_id")
     ).fetchall()
-    for i, (sub_id, created_at) in enumerate(rows, start=1):
-        suffix = f"{i:03d}"
-        ppap_no = f"PPAP-{created_at.strftime('%y%m%d')}-{suffix}"
+    date_seq: dict[str, int] = {}
+    for sub_id, created_at in rows:
+        day_str = created_at.strftime("%y%m%d")
+        date_seq[day_str] = date_seq.get(day_str, 0) + 1
+        ppap_no = f"PPAP-{day_str}-{date_seq[day_str]:03d}"
         conn.execute(
             text("UPDATE supplier_ppap_submissions SET ppap_no = :no WHERE submission_id = :sid"),
             {"no": ppap_no, "sid": sub_id},
@@ -662,7 +664,7 @@ async def transition_ppap(
             )
         )
         elements = result.scalars().all()
-        not_approved = [el for el in elements if el.status != "approved" and el.status != "not_applicable"]
+        not_approved = [el for el in elements if el.status != "approved"]
         if not_approved:
             raise ValueError("存在未批准的必填元素")
 
@@ -1161,6 +1163,19 @@ class TestTransition:
         with pytest.raises(ValueError, match="未批准的必填元素"):
             await ppap_service.transition_ppap(db, ppap, "approve", user.user_id)
 
+    async def test_approve_rejects_required_not_applicable(self, db: AsyncSession):
+        user = await _make_user(db, "ppap_na", "manager")
+        supplier = await _make_supplier(db, user)
+        ppap = await _make_ppap(db, user, supplier.supplier_id)
+        await ppap_service.transition_ppap(db, ppap, "submit", user.user_id)
+        ppap = await ppap_service.get_ppap(db, ppap.submission_id)
+        # Set all required elements to not_applicable instead of approved
+        for el in ppap.elements:
+            if el.required:
+                await ppap_service.update_element(db, el, user_id=user.user_id, status="not_applicable")
+        with pytest.raises(ValueError, match="未批准的必填元素"):
+            await ppap_service.transition_ppap(db, ppap, "approve", user.user_id)
+
     async def test_approve_succeeds_when_elements_approved(self, db: AsyncSession):
         user = await _make_user(db, "ppap_ok", "manager")
         supplier = await _make_supplier(db, user)
@@ -1502,7 +1517,7 @@ export const STATUS_LABELS: Record<string, string> = {
   rejected: "已驳回",
 };
 
-const LEVEL_LABELS: Record<number, string> = {
+export const LEVEL_LABELS: Record<number, string> = {
   1: "Level 1",
   2: "Level 2",
   3: "Level 3",
@@ -1527,9 +1542,15 @@ export default function PPAPListPage() {
     try {
       const result = await listPPAPs({ page, page_size: 20, status: STATUS_MAP[activeTab], supplier_id: supplierId });
       setData(result);
-      // Also load KPIs from "all" query
-      const all = await listPPAPs({ page: 1, page_size: 1, status: undefined });
-      setKpis((prev) => ({ ...prev, total: all.total }));
+      // Load KPI counts in parallel
+      const [all, draftR, underReviewR, approvedR, rejectedR] = await Promise.all([
+        listPPAPs({ page: 1, page_size: 1 }),
+        listPPAPs({ page: 1, page_size: 1, status: "draft" }),
+        listPPAPs({ page: 1, page_size: 1, status: "under_review" }),
+        listPPAPs({ page: 1, page_size: 1, status: "approved" }),
+        listPPAPs({ page: 1, page_size: 1, status: "rejected" }),
+      ]);
+      setKpis({ total: all.total, pending: draftR.total + underReviewR.total, approved: approvedR.total, rejected: rejectedR.total });
     } finally {
       setLoading(false);
     }
