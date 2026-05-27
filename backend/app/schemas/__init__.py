@@ -14,3 +14,5 @@ from app.schemas import management_review
 from app.schemas import iqc
 from app.schemas import customer_quality
 from app.schemas import scar
+from app.schemas import apqp
+from app.schemas import ppap
