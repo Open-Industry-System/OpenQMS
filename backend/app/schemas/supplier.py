@@ -254,6 +254,7 @@ class PPAPSubmissionListResponse(BaseModel):
     items: list[PPAPSubmissionResponse]
 
 
+# DEPRECATED: 以下 SCAR schemas 已被 app.schemas.scar 替代，保留仅供 trigger-scar 兼容，后续清理
 # ─── SCAR ───
 
 class SCARCreate(BaseModel):
