@@ -23,10 +23,10 @@ from urllib.parse import urlparse
 def _get_test_db_url():
     url = os.environ.get("TEST_DATABASE_URL")
     if not url:
-        pytest.skip("TEST_DATABASE_URL not set; this test requires a dedicated test database")
+        pytest.skip("TEST_DATABASE_URL not set; this test requires a dedicated test database", allow_module_level=True)
     db_name = urlparse(url).path.lstrip("/")
     if "_test" not in db_name:
-        pytest.skip(f"Database '{db_name}' does not contain '_test'; refusing to run destructive tests")
+        pytest.skip(f"Database '{db_name}' does not contain '_test'; refusing to run destructive tests", allow_module_level=True)
     return url
 
 
