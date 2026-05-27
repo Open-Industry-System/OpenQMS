@@ -1431,11 +1431,11 @@ export default function APQPDetailPage() {
     if (!id) return;
     // Convert empty strings to null for nullable fields
     const nullableFields = ["dfmea_id", "pfmea_id", "control_plan_id", "ppap_submission_id", "customer_name", "description"];
-    const payload: Record<string, string | null> = {};
+    const payload: APQPProjectUpdate = {};
     for (const [k, v] of Object.entries(editForm)) {
-      payload[k] = nullableFields.includes(k) ? (v || null) : v;
+      (payload as Record<string, string | null>)[k] = nullableFields.includes(k) ? (v || null) : v;
     }
-    await updateAPQPProject(id, payload as APQPProjectUpdate);
+    await updateAPQPProject(id, payload);
     message.success("更新成功");
     setEditOpen(false);
     load();
@@ -1834,6 +1834,8 @@ from app.models.supplier import Supplier, SupplierPPAPSubmission
 from app.models.product_line import ProductLine
 from app.database import Base
 from app.services import apqp_service
+
+import app.models  # noqa: F401 — ensure all FK-referenced tables are registered in Base.metadata
 
 
 TEST_DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test"
