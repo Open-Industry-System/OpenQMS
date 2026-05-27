@@ -224,6 +224,13 @@ class TestUpdatePPAP:
         with pytest.raises(ValueError, match="草稿"):
             await ppap_service.update_ppap(db, ppap, user_id=user.user_id, part_no="NEW")
 
+    async def test_update_rejects_null_part_name(self, db: AsyncSession):
+        user = await _make_user(db, "ppap_null_name", "quality_engineer")
+        supplier = await _make_supplier(db, user)
+        ppap = await _make_ppap(db, user, supplier.supplier_id)
+        with pytest.raises(ValueError, match="零件名称不能为空"):
+            await ppap_service.update_ppap(db, ppap, user_id=user.user_id, part_name=None)
+
     async def test_update_rejects_null_part_no(self, db: AsyncSession):
         user = await _make_user(db, "ppap_null_pn", "quality_engineer")
         supplier = await _make_supplier(db, user)
