@@ -537,6 +537,8 @@ async def create_customer_audit(
     product_line_code: str | None,
     user_id: uuid.UUID,
 ) -> AuditPlan:
+    if not customer_name or not customer_name.strip():
+        raise ValueError("customer_name is required")
     if customer_type not in VALID_CUSTOMER_TYPES:
         raise ValueError(f"invalid customer_type: {customer_type}")
     if audit_mode and audit_mode not in VALID_AUDIT_MODES:
@@ -586,6 +588,7 @@ async def list_customer_audits(
     audit_mode: str | None = None,
     customer_name: str | None = None,
     status: str | None = None,
+    product_line_code: str | None = None,
 ) -> tuple[list[AuditPlan], int]:
     query = select(AuditPlan).where(AuditPlan.audit_category == "customer")
     count_query = select(func.count()).select_from(AuditPlan).where(AuditPlan.audit_category == "customer")
@@ -602,6 +605,9 @@ async def list_customer_audits(
     if status:
         query = query.where(AuditPlan.status == status)
         count_query = count_query.where(AuditPlan.status == status)
+    if product_line_code:
+        query = query.where(AuditPlan.product_line_code == product_line_code)
+        count_query = count_query.where(AuditPlan.product_line_code == product_line_code)
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -821,31 +827,38 @@ async def customer_confirm_finding(
     return finding
 
 
-async def get_customer_audit_stats(db: AsyncSession) -> dict:
-    base = select(AuditPlan).where(AuditPlan.audit_category == "customer")
+async def get_customer_audit_stats(
+    db: AsyncSession,
+    product_line_code: str | None = None,
+) -> dict:
+    plan_conditions = [AuditPlan.audit_category == "customer"]
+    finding_join_conditions = [AuditPlan.audit_category == "customer"]
+    if product_line_code:
+        plan_conditions.append(AuditPlan.product_line_code == product_line_code)
+        finding_join_conditions.append(AuditPlan.product_line_code == product_line_code)
 
     total_result = await db.execute(
-        select(func.count()).select_from(AuditPlan).where(AuditPlan.audit_category == "customer")
+        select(func.count()).select_from(AuditPlan).where(*plan_conditions)
     )
     total = total_result.scalar() or 0
 
     planned_result = await db.execute(
         select(func.count()).select_from(AuditPlan).where(
-            and_(AuditPlan.audit_category == "customer", AuditPlan.status == "planned")
+            *plan_conditions, AuditPlan.status == "planned"
         )
     )
     planned = planned_result.scalar() or 0
 
     in_progress_result = await db.execute(
         select(func.count()).select_from(AuditPlan).where(
-            and_(AuditPlan.audit_category == "customer", AuditPlan.status == "in_progress")
+            *plan_conditions, AuditPlan.status == "in_progress"
         )
     )
     in_progress = in_progress_result.scalar() or 0
 
     completed_result = await db.execute(
         select(func.count()).select_from(AuditPlan).where(
-            and_(AuditPlan.audit_category == "customer", AuditPlan.status == "completed")
+            *plan_conditions, AuditPlan.status == "completed"
         )
     )
     completed = completed_result.scalar() or 0
@@ -856,10 +869,8 @@ async def get_customer_audit_stats(db: AsyncSession) -> dict:
         .select_from(AuditFinding)
         .join(AuditPlan, AuditFinding.audit_id == AuditPlan.audit_id)
         .where(
-            and_(
-                AuditPlan.audit_category == "customer",
-                AuditFinding.status.in_(["open", "in_progress"]),
-            )
+            *finding_join_conditions,
+            AuditFinding.status.in_(["open", "in_progress"]),
         )
     )
     open_findings = open_findings_result.scalar() or 0
@@ -869,11 +880,9 @@ async def get_customer_audit_stats(db: AsyncSession) -> dict:
         .select_from(AuditFinding)
         .join(AuditPlan, AuditFinding.audit_id == AuditPlan.audit_id)
         .where(
-            and_(
-                AuditPlan.audit_category == "customer",
-                AuditFinding.finding_type == "major_nc",
-                AuditFinding.status.in_(["open", "in_progress"]),
-            )
+            *finding_join_conditions,
+            AuditFinding.finding_type == "major_nc",
+            AuditFinding.status.in_(["open", "in_progress"]),
         )
     )
     major_nc = major_nc_result.scalar() or 0
@@ -883,10 +892,8 @@ async def get_customer_audit_stats(db: AsyncSession) -> dict:
         .select_from(AuditFinding)
         .join(AuditPlan, AuditFinding.audit_id == AuditPlan.audit_id)
         .where(
-            and_(
-                AuditPlan.audit_category == "customer",
-                AuditFinding.customer_confirmed == True,
-            )
+            *finding_join_conditions,
+            AuditFinding.customer_confirmed == True,
         )
     )
     confirmed = confirmed_result.scalar() or 0
@@ -896,11 +903,9 @@ async def get_customer_audit_stats(db: AsyncSession) -> dict:
         .select_from(AuditFinding)
         .join(AuditPlan, AuditFinding.audit_id == AuditPlan.audit_id)
         .where(
-            and_(
-                AuditPlan.audit_category == "customer",
-                AuditFinding.customer_confirmed == False,
-                AuditFinding.status.in_(["open", "in_progress"]),
-            )
+            *finding_join_conditions,
+            AuditFinding.customer_confirmed == False,
+            AuditFinding.status.in_(["open", "in_progress"]),
         )
     )
     pending = pending_result.scalar() or 0
@@ -959,8 +964,8 @@ async def create_audit_plan(
                 audit_scope=req.audit_scope,
                 audit_criteria=req.audit_criteria,
                 planned_date=req.planned_date,
-                customer_name=req.customer_name or "",
-                customer_type=req.customer_type or "",
+                customer_name=req.customer_name,
+                customer_type=req.customer_type,
                 audit_mode=req.audit_mode,
                 lead_auditor=req.lead_auditor,
                 team_members=req.team_members,
@@ -1038,11 +1043,12 @@ Add these routes. The `/customer-stats` route MUST be registered BEFORE the `/{a
 ```python
 @router.get("/customer-stats", response_model=schemas.audit.CustomerAuditStatsResponse)
 async def get_customer_audit_stats(
+    product_line_code: str | None = None,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     from app.services import customer_audit_service
-    stats = await customer_audit_service.get_customer_audit_stats(db)
+    stats = await customer_audit_service.get_customer_audit_stats(db, product_line_code=product_line_code)
     return schemas.audit.CustomerAuditStatsResponse(**stats)
 ```
 
@@ -1317,8 +1323,8 @@ Append these functions at the end of `frontend/src/api/audit.ts` (after line 110
 ```typescript
 // ── Customer Audit API ──
 
-export async function getCustomerAuditStats(): Promise<CustomerAuditStats> {
-  const resp = await client.get("/audit-plans/customer-stats");
+export async function getCustomerAuditStats(params?: { product_line_code?: string }): Promise<CustomerAuditStats> {
+  const resp = await client.get("/audit-plans/customer-stats", { params });
   return resp.data;
 }
 
@@ -1463,7 +1469,7 @@ export default function CustomerAuditListPage() {
     try {
       const [auditsResp, statsResp] = await Promise.all([
         listCustomerAudits({ page, page_size: 20, product_line_code: currentProductLine }),
-        getCustomerAuditStats(),
+        getCustomerAuditStats({ product_line_code: currentProductLine || undefined }),
       ]);
       setAudits(auditsResp.items);
       setTotal(auditsResp.total);
