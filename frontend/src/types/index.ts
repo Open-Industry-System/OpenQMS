@@ -239,7 +239,7 @@ export interface AuditProgram {
   program_id: string;
   program_no: string;
   program_year: number;
-  audit_type: "system" | "process" | "product";
+  audit_type: "system" | "process" | "product" | "customer";
   scope: string;
   criteria: string;
   status: "planned" | "active" | "completed";
@@ -261,6 +261,11 @@ export interface AuditPlan {
   checklist: AuditChecklistItem[];
   status: "planned" | "in_progress" | "completed" | "cancelled";
   product_line_code?: string;
+  audit_category: string;
+  customer_name?: string;
+  customer_type?: string;
+  audit_mode?: string;
+  customer_confirmation_doc?: CustomerAuditAttachment[];
   created_by: string;
   created_at: string;
 }
@@ -275,9 +280,12 @@ export interface AuditFinding {
   correction: string | null;
   corrective_action: string | null;
   capa_ref_id: string | null;
-  status: "open" | "in_progress" | "verified" | "closed";
+  status: "open" | "in_progress" | "closed";
   due_date: string | null;
   closed_at: string | null;
+  customer_confirmed: boolean;
+  customer_confirmation_date: string | null;
+  customer_confirmation_attachments: CustomerAuditAttachment[];
   created_by: string | null;
   created_at: string;
 }
@@ -1165,4 +1173,36 @@ export interface APQPProjectStats {
   cancelled_count: number;
   overdue_count: number;
   phase_distribution: Record<number, number>;
+}
+
+export interface CustomerAuditAttachment {
+  file_name: string;
+  file_url: string;
+  file_size?: number;
+  file_type?: string;
+  uploaded_at?: string;
+  uploaded_by?: string;
+}
+
+export interface CustomerAuditStats {
+  total_customer_audits: number;
+  planned: number;
+  in_progress: number;
+  completed: number;
+  open_findings: number;
+  major_nc_count: number;
+  customer_confirmed_count: number;
+  pending_confirmation_count: number;
+}
+
+export interface FindingTransitionRequest {
+  action: "start_progress" | "close";
+  customer_confirmed?: boolean;
+  customer_confirmation_date?: string;
+  customer_confirmation_attachments?: CustomerAuditAttachment[];
+}
+
+export interface CustomerConfirmationRequest {
+  confirmation_date: string;
+  attachments?: CustomerAuditAttachment[];
 }

@@ -202,6 +202,7 @@ export default function InternalAuditListPage() {
         lead_auditor: values.lead_auditor as string,
         team_members: [],
         checklist: template?.items || [],
+        audit_category: "internal",
       });
       message.success("计划创建成功");
       setPlanModalOpen(false);

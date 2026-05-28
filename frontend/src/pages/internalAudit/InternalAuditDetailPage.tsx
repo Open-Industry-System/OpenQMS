@@ -287,6 +287,9 @@ export default function InternalAuditDetailPage() {
         correction: null,
         corrective_action: null,
         due_date: values.due_date ? (values.due_date as dayjs.Dayjs).format("YYYY-MM-DD") : null,
+        customer_confirmed: false,
+        customer_confirmation_date: null,
+        customer_confirmation_attachments: [],
       });
       message.success("发现项已创建");
       setFindingModalOpen(false);
