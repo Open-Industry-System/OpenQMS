@@ -210,17 +210,9 @@ git commit -m "feat(models): add customer audit fields to AuditPlan and AuditFin
 
 - [ ] **Step 1: Add customer audit schemas to audit.py**
 
-Append the following at the end of `backend/app/schemas/audit.py` (after `AuditStatsResponse`, line 204):
+**首先，更新 imports**：在 `backend/app/schemas/audit.py` 顶部，将 `from pydantic import BaseModel, field_validator` 改为 `from pydantic import BaseModel, field_validator, model_validator`。
 
-```python
-# ── Customer Audit Schemas ──
-
-
-class AuditPlanCreate(BaseModel):  # existing class already exists, this extends it
-    pass
-```
-
-**首先，扩展 AuditProgram 校验**：现有 `AuditProgramCreate` (line 13) 的 `audit_type` validator 只接受 `"system"`、`"process"`、`"product"`。需增加 `"customer"`。同时 `_generate_program_no` 的 type_map 需增加 `"customer": "CUS"`。
+**然后，扩展 AuditProgram 校验**：现有 `AuditProgramCreate` (line 13) 的 `audit_type` validator 只接受 `"system"`、`"process"`、`"product"`。需增加 `"customer"`。同时 `_generate_program_no` 的 type_map 需增加 `"customer": "CUS"`。
 
 替换 `AuditProgramCreate` validator (line 13-18):
 ```python
@@ -248,7 +240,8 @@ class AuditPlanCreate(BaseModel):  # existing class already exists, this extends
 
 ```python
 class AuditPlanCreate(BaseModel):
-    program_id: uuid.UUID
+    audit_category: str = "internal"
+    program_id: uuid.UUID | None = None  # optional for customer audits (auto-created)
     audit_scope: str
     audit_criteria: str
     planned_date: date
@@ -257,10 +250,15 @@ class AuditPlanCreate(BaseModel):
     checklist: list | None = None
     product_line_code: str | None = None
     # Customer audit fields
-    audit_category: str = "internal"
     customer_name: str | None = None
     customer_type: str | None = None
     audit_mode: str | None = None
+
+    @model_validator(mode="after")
+    def check_program_id_for_internal(self):
+        if self.audit_category != "customer" and self.program_id is None:
+            raise ValueError("program_id is required for internal audits")
+        return self
 
     @field_validator("audit_category")
     @classmethod
@@ -292,6 +290,8 @@ Replace existing `AuditPlanUpdate` (line 72) with:
 
 ```python
 class AuditPlanUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+
     audit_scope: str | None = None
     audit_criteria: str | None = None
     planned_date: date | None = None
@@ -304,7 +304,8 @@ class AuditPlanUpdate(BaseModel):
     customer_type: str | None = None
     audit_mode: str | None = None
 
-# Note: status field removed from AuditPlanUpdate. Status changes must go through
+# Note: status field removed from AuditPlanUpdate. extra="forbid" ensures
+# requests containing "status" return 422. Status changes must go through
 # dedicated transition endpoints: /start, /complete, /cancel
 ```
 
@@ -358,6 +359,21 @@ class AuditFindingResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+```
+
+**Also update `AuditFindingUpdate`** (line 128) to remove `status` and reject extra fields:
+
+```python
+class AuditFindingUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    clause_ref: str | None = None
+    finding_type: str | None = None
+    description: str | None = None
+    root_cause: str | None = None
+    correction: str | None = None
+    corrective_action: str | None = None
+    due_date: date | None = None
 ```
 
 Add these new schemas at the end of the file:
@@ -435,14 +451,17 @@ from app.models.audit_finding import AuditFinding
 from app.models.audit_plan import AuditPlan
 from app.models.audit_program import AuditProgram
 from app.models.capa import CAPAEightD
+from sqlalchemy.exc import IntegrityError
 
 VALID_CUSTOMER_TYPES = {"OEM", "Tier 1", "Tier 2", "其他"}
 VALID_AUDIT_MODES = {"on_site", "remote"}
 
 
-async def _get_or_create_customer_program(db: AsyncSession, year: int) -> AuditProgram:
+async def _get_or_create_customer_program(
+    db: AsyncSession, year: int, user_id: uuid.UUID
+) -> AuditProgram:
     """Return the default customer audit program for a year, creating if needed.
-    Uses database-level uniqueness to prevent concurrent creation of duplicate programs."""
+    Uses deterministic program_no so concurrent requests collide on uniqueness."""
     result = await db.execute(
         select(AuditProgram).where(
             AuditProgram.audit_type == "customer",
@@ -453,19 +472,15 @@ async def _get_or_create_customer_program(db: AsyncSession, year: int) -> AuditP
     if program:
         return program
 
-    prefix = f"AP-{year}-CUS"
-    count_result = await db.execute(
-        select(func.count()).where(AuditProgram.program_no.like(f"{prefix}-%"))
-    )
-    count = count_result.scalar() or 0
-
+    # Deterministic program_no ensures concurrent requests collide on the same value
     program = AuditProgram(
-        program_no=f"{prefix}-{count + 1:03d}",
+        program_no=f"AP-{year}-CUS-001",
         program_year=year,
         audit_type="customer",
         scope="客户审核方案",
         criteria="客户审核标准",
         status="active",
+        created_by=user_id,
     )
     db.add(program)
     try:
@@ -483,9 +498,6 @@ async def _get_or_create_customer_program(db: AsyncSession, year: int) -> AuditP
     return program
 
 
-编号按 `CA-YYYY-%` 单独计数，与 `PL-YYYY-%` 互不影响。
-
-```python
 async def _generate_customer_audit_no(db: AsyncSession, year: int) -> str:
     prefix = f"CA-{year}"
     result = await db.execute(
@@ -530,7 +542,7 @@ async def create_customer_audit(
     if audit_mode and audit_mode not in VALID_AUDIT_MODES:
         raise ValueError(f"invalid audit_mode: {audit_mode}")
 
-    program = await _get_or_create_customer_program(db, planned_date.year)
+    program = await _get_or_create_customer_program(db, planned_date.year, user_id)
     plan_no = await _generate_customer_audit_no(db, planned_date.year)
 
     plan = AuditPlan(
@@ -717,6 +729,15 @@ async def transition_finding(
 ) -> AuditFinding:
     old_status = finding.status
 
+    # Apply customer confirmation fields BEFORE validation so a single request
+    # can confirm and close in one call.
+    if customer_confirmed is not None:
+        finding.customer_confirmed = customer_confirmed
+    if customer_confirmation_date is not None:
+        finding.customer_confirmation_date = customer_confirmation_date
+    if customer_confirmation_attachments is not None:
+        finding.customer_confirmation_attachments = customer_confirmation_attachments
+
     if action == "start_progress":
         if finding.status != "open":
             raise ValueError("only open findings can start progress")
@@ -752,14 +773,6 @@ async def transition_finding(
 
     else:
         raise ValueError(f"invalid action: {action}")
-
-    # Handle customer confirmation fields
-    if customer_confirmed is not None:
-        finding.customer_confirmed = customer_confirmed
-    if customer_confirmation_date is not None:
-        finding.customer_confirmation_date = customer_confirmation_date
-    if customer_confirmation_attachments is not None:
-        finding.customer_confirmation_attachments = customer_confirmation_attachments
 
     audit_log = AuditLog(
         table_name="audit_findings",
@@ -973,7 +986,52 @@ async def create_audit_plan(
         raise HTTPException(status_code=400, detail=str(e))
 ```
 
-- [ ] **Step 2: Add customer-stats and customer-confirm routes to audit_plan.py**
+- [ ] **Step 2: Modify `list_audit_plans` to support customer audit filters**
+
+In `backend/app/api/audit_plan.py`, update `list_audit_plans` (line 26-45) to add query params and pass them to the service. Also update `audit_service.list_audit_plans` (line 237) to accept `audit_category`, `customer_type`, `audit_mode`, `customer_name` filters.
+
+- [ ] **Step 3: Modify `update_audit_plan` to remove `status` pass-through**
+
+In `backend/app/api/audit_plan.py`, update `update_audit_plan` (line 84-111) to remove `status=req.status` since `AuditPlanUpdate` no longer contains that field.
+
+- [ ] **Step 4: Modify `complete_audit_plan` to branch for customer audits**
+
+In `backend/app/api/audit_plan.py`, update `complete_audit_plan` (line 146-159):
+
+```python
+@router.post("/{audit_id}/complete", response_model=schemas.audit.AuditPlanResponse)
+async def complete_audit_plan(
+    audit_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    plan = await audit_service.get_audit_plan(db, audit_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="audit plan not found")
+    try:
+        if plan.audit_category == "customer":
+            from app.services import customer_audit_service
+            plan = await customer_audit_service.complete_customer_audit(db, plan, user.user_id)
+        else:
+            plan = await audit_service.complete_audit_plan(db, plan, user.user_id)
+        return schemas.audit.AuditPlanResponse.model_validate(plan)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+```
+
+- [ ] **Step 5: Add program/category consistency check to audit_service.create_audit_plan**
+
+In `backend/app/services/audit_service.py`, in `create_audit_plan` (line 278), after retrieving the year and before creating the plan, add a check that internal audits cannot be linked to customer programs:
+
+```python
+    program = await db.get(AuditProgram, program_id)
+    if program and program.audit_type == "customer":
+        raise ValueError("internal audit cannot be linked to a customer program")
+```
+
+This enforces the design spec rule: `audit_category='internal'` → `program.audit_type` cannot be `'customer'`.
+
+- [ ] **Step 6: Add customer-stats and customer-confirm routes to audit_plan.py**
 
 Add these routes. The `/customer-stats` route MUST be registered BEFORE the `/{audit_id}` route to avoid 422 conflicts. Insert after the `list_audit_plans` function (after line 45) and before `create_audit_plan`:
 
@@ -1022,7 +1080,37 @@ async def confirm_customer_audit(
     return schemas.audit.AuditPlanResponse.model_validate(plan)
 ```
 
-- [ ] **Step 3: Add transition and customer-confirm routes to audit_finding.py**
+- [ ] **Step 7: Modify existing finding routes in audit_finding.py**
+
+Update `update_audit_finding` (line 70-96) to remove `status=req.status` since `AuditFindingUpdate` no longer contains that field.
+
+Update `close_audit_finding` (line 99-112) to delegate to `transition_finding` for customer audits, ensuring customer confirmation checks run:
+
+```python
+@router.post("/{finding_id}/close", response_model=schemas.audit.AuditFindingResponse)
+async def close_audit_finding(
+    finding_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    finding = await audit_service.get_audit_finding(db, finding_id)
+    if finding is None:
+        raise HTTPException(status_code=404, detail="audit finding not found")
+    try:
+        plan = await audit_service.get_audit_plan(db, finding.audit_id)
+        if plan and plan.audit_category == "customer":
+            from app.services import customer_audit_service
+            finding = await customer_audit_service.transition_finding(
+                db, finding, action="close", user_id=user.user_id
+            )
+        else:
+            finding = await audit_service.close_audit_finding(db, finding, user.user_id)
+        return schemas.audit.AuditFindingResponse.model_validate(finding)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+```
+
+- [ ] **Step 8: Add transition and customer-confirm routes to audit_finding.py**
 
 In `backend/app/api/audit_finding.py`, add these new routes. Insert BEFORE the existing `/{finding_id}` GET route (line 58) to avoid routing conflicts, or append after `create_capa_from_finding`:
 
@@ -1077,15 +1165,15 @@ async def confirm_customer_finding(
         raise HTTPException(status_code=400, detail=str(e))
 ```
 
-- [ ] **Step 4: Verify backend starts**
+- [ ] **Step 9: Verify backend starts**
 
 Run: `cd backend && python -c "from app.main import app; print('App OK')"`
 Expected: `App OK`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add backend/app/api/audit_plan.py backend/app/api/audit_finding.py
+git add backend/app/api/audit_plan.py backend/app/api/audit_finding.py backend/app/services/audit_service.py
 git commit -m "feat(api): add customer audit routes, transition API, and customer confirmation"
 ```
 
@@ -1156,7 +1244,7 @@ export interface AuditFinding {
   correction: string | null;
   corrective_action: string | null;
   capa_ref_id: string | null;
-  status: "open" | "in_progress" | "verified" | "closed";
+  status: "open" | "in_progress" | "closed";
   due_date: string | null;
   closed_at: string | null;
   customer_confirmed: boolean;
@@ -1250,7 +1338,6 @@ export async function createCustomerAudit(data: {
   team_members?: { user_id: string; username: string }[];
   checklist?: AuditChecklistItem[];
   product_line_code?: string;
-  program_id: string;
 }): Promise<AuditPlan> {
   const resp = await client.post("/audit-plans", { audit_category: "customer", ...data });
   return resp.data;
@@ -1397,12 +1484,10 @@ export default function CustomerAuditListPage() {
   const handleCreate = async () => {
     try {
       const values = await form.validateFields();
-      const defaultProgram = (await listAuditPrograms({ status: "active" })).items[0];
       await createCustomerAudit({
         ...values,
         planned_date: values.planned_date.format("YYYY-MM-DD"),
         product_line_code: currentProductLine,
-        program_id: defaultProgram?.program_id || "",
       });
       message.success("创建成功");
       setCreateOpen(false);
@@ -1593,10 +1678,10 @@ const statusColor: Record<string, string> = {
   planned: "blue", in_progress: "processing", completed: "success", cancelled: "default",
 };
 const findingStatusLabel: Record<string, string> = {
-  open: "已开立", in_progress: "整改中", closed: "已关闭", verified: "已验证",
+  open: "已开立", in_progress: "整改中", closed: "已关闭",
 };
 const findingStatusColor: Record<string, string> = {
-  open: "error", in_progress: "processing", closed: "success", verified: "success",
+  open: "error", in_progress: "processing", closed: "success",
 };
 const findingTypeLabel: Record<string, string> = {
   major_nc: "严重不符合", minor_nc: "一般不符合", ofi: "改进机会", observation: "观察项",
@@ -2005,7 +2090,7 @@ Run:
 ```bash
 cd backend && alembic upgrade head
 ```
-Expected: Migration 021 applied successfully
+Expected: Migration 025 applied successfully
 
 - [ ] **Step 2: Verify backend starts cleanly**
 
@@ -2037,4 +2122,333 @@ Run `docker compose up` or start backend/frontend separately. Login and verify:
 
 ```bash
 git add -A && git commit -m "fix(customer-audit): integration fixes after manual testing"
+```
+
+---
+
+### Task 12: Backend Tests
+
+**Files:**
+- Create: `backend/tests/test_customer_audit.py`
+
+Follow the existing `test_ppap_service.py` pattern: pytest with `TEST_DATABASE_URL` fixture.
+
+- [ ] **Step 1: Create test file**
+
+```python
+import pytest
+import pytest_asyncio
+import uuid
+from datetime import date, datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+
+from app.models.user import User
+from app.models.audit_plan import AuditPlan
+from app.models.audit_finding import AuditFinding
+from app.models.audit_program import AuditProgram
+from app.models.product_line import ProductLine
+from app.database import Base
+from app.services import customer_audit_service, audit_service
+
+import app.models  # noqa: F401
+import os
+from urllib.parse import urlparse
+
+
+@pytest_asyncio.fixture(scope="function")
+async def db():
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL not set; this test requires a dedicated test database")
+    db_name = urlparse(url).path.lstrip("/")
+    if "_test" not in db_name:
+        pytest.skip(f"Database '{db_name}' does not contain '_test'; refusing to run destructive tests")
+
+    engine = create_async_engine(url)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W")
+        )
+        await conn.commit()
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        yield session
+    await engine.dispose()
+
+
+async def _make_user(db: AsyncSession, username: str, role: str = "quality_engineer") -> User:
+    user = User(
+        user_id=uuid.uuid4(),
+        username=username,
+        display_name=username,
+        role=role,
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.commit()
+    return user
+
+
+class TestCreateCustomerAudit:
+    async def test_create_basic(self, db: AsyncSession):
+        user = await _make_user(db, "ca_create")
+        plan = await customer_audit_service.create_customer_audit(
+            db,
+            audit_scope="Test scope",
+            audit_criteria="Test criteria",
+            planned_date=date(2026, 6, 1),
+            customer_name="Tesla",
+            customer_type="OEM",
+            audit_mode="on_site",
+            lead_auditor=None,
+            team_members=[],
+            checklist=[],
+            product_line_code=None,
+            user_id=user.user_id,
+        )
+        assert plan.audit_category == "customer"
+        assert plan.customer_name == "Tesla"
+        assert plan.customer_type == "OEM"
+        assert plan.audit_mode == "on_site"
+        assert plan.plan_no.startswith("CA-2026-")
+
+    async def test_program_created_once_per_year(self, db: AsyncSession):
+        user = await _make_user(db, "ca_prog")
+        plan1 = await customer_audit_service.create_customer_audit(
+            db,
+            audit_scope="Scope 1",
+            audit_criteria="Criteria 1",
+            planned_date=date(2026, 6, 1),
+            customer_name="BYD",
+            customer_type="OEM",
+            audit_mode=None,
+            lead_auditor=None,
+            team_members=[],
+            checklist=[],
+            product_line_code=None,
+            user_id=user.user_id,
+        )
+        plan2 = await customer_audit_service.create_customer_audit(
+            db,
+            audit_scope="Scope 2",
+            audit_criteria="Criteria 2",
+            planned_date=date(2026, 7, 1),
+            customer_name="NIO",
+            customer_type="OEM",
+            audit_mode=None,
+            lead_auditor=None,
+            team_members=[],
+            checklist=[],
+            product_line_code=None,
+            user_id=user.user_id,
+        )
+        assert plan1.program_id == plan2.program_id
+
+
+class TestCompleteCustomerAudit:
+    async def test_blocks_unclosed_findings(self, db: AsyncSession):
+        user = await _make_user(db, "ca_complete1")
+        plan = await customer_audit_service.create_customer_audit(
+            db,
+            audit_scope="Scope",
+            audit_criteria="Criteria",
+            planned_date=date(2026, 6, 1),
+            customer_name="XPeng",
+            customer_type="OEM",
+            audit_mode=None,
+            lead_auditor=None,
+            team_members=[],
+            checklist=[],
+            product_line_code=None,
+            user_id=user.user_id,
+        )
+        plan = await audit_service.start_audit_plan(db, plan, user.user_id)
+
+        await audit_service.create_audit_finding(
+            db,
+            audit_id=plan.audit_id,
+            clause_ref="8.5.1",
+            finding_type="major_nc",
+            description="Test finding",
+            root_cause=None,
+            correction=None,
+            corrective_action=None,
+            due_date=None,
+            user_id=user.user_id,
+        )
+
+        with pytest.raises(ValueError, match="not closed"):
+            await customer_audit_service.complete_customer_audit(db, plan, user.user_id)
+
+    async def test_blocks_unconfirmed_findings(self, db: AsyncSession):
+        user = await _make_user(db, "ca_complete2")
+        plan = await customer_audit_service.create_customer_audit(
+            db,
+            audit_scope="Scope",
+            audit_criteria="Criteria",
+            planned_date=date(2026, 6, 1),
+            customer_name="LiAuto",
+            customer_type="OEM",
+            audit_mode=None,
+            lead_auditor=None,
+            team_members=[],
+            checklist=[],
+            product_line_code=None,
+            user_id=user.user_id,
+        )
+        plan = await audit_service.start_audit_plan(db, plan, user.user_id)
+
+        finding = await audit_service.create_audit_finding(
+            db,
+            audit_id=plan.audit_id,
+            clause_ref="8.5.1",
+            finding_type="major_nc",
+            description="Test finding",
+            root_cause="Root cause",
+            correction="Correction",
+            corrective_action="Corrective action",
+            due_date=None,
+            user_id=user.user_id,
+        )
+        finding.status = "closed"
+        finding.closed_at = datetime.now(timezone.utc)
+        await db.commit()
+
+        with pytest.raises(ValueError, match="not customer-confirmed"):
+            await customer_audit_service.complete_customer_audit(db, plan, user.user_id)
+
+
+class TestTransitionFinding:
+    async def test_close_checks_customer_confirmed(self, db: AsyncSession):
+        user = await _make_user(db, "ca_trans")
+        plan = await customer_audit_service.create_customer_audit(
+            db,
+            audit_scope="Scope",
+            audit_criteria="Criteria",
+            planned_date=date(2026, 6, 1),
+            customer_name="Geely",
+            customer_type="OEM",
+            audit_mode=None,
+            lead_auditor=None,
+            team_members=[],
+            checklist=[],
+            product_line_code=None,
+            user_id=user.user_id,
+        )
+        finding = await audit_service.create_audit_finding(
+            db,
+            audit_id=plan.audit_id,
+            clause_ref="8.5.1",
+            finding_type="major_nc",
+            description="Test finding",
+            root_cause="Root cause",
+            correction="Correction",
+            corrective_action="Corrective action",
+            due_date=None,
+            user_id=user.user_id,
+        )
+
+        with pytest.raises(ValueError, match="customer confirmation is required"):
+            await customer_audit_service.transition_finding(
+                db, finding, action="close", user_id=user.user_id
+            )
+
+    async def test_close_with_confirmation_succeeds(self, db: AsyncSession):
+        user = await _make_user(db, "ca_trans2")
+        plan = await customer_audit_service.create_customer_audit(
+            db,
+            audit_scope="Scope",
+            audit_criteria="Criteria",
+            planned_date=date(2026, 6, 1),
+            customer_name="Geely2",
+            customer_type="OEM",
+            audit_mode=None,
+            lead_auditor=None,
+            team_members=[],
+            checklist=[],
+            product_line_code=None,
+            user_id=user.user_id,
+        )
+        finding = await audit_service.create_audit_finding(
+            db,
+            audit_id=plan.audit_id,
+            clause_ref="8.5.1",
+            finding_type="major_nc",
+            description="Test finding",
+            root_cause="Root cause",
+            correction="Correction",
+            corrective_action="Corrective action",
+            due_date=None,
+            user_id=user.user_id,
+        )
+
+        finding = await customer_audit_service.transition_finding(
+            db,
+            finding,
+            action="close",
+            user_id=user.user_id,
+            customer_confirmed=True,
+            customer_confirmation_date=date(2026, 6, 15),
+            customer_confirmation_attachments=[],
+        )
+        assert finding.status == "closed"
+        assert finding.customer_confirmed is True
+
+
+class TestCustomerConfirmFinding:
+    async def test_confirm_sets_fields(self, db: AsyncSession):
+        user = await _make_user(db, "ca_confirm")
+        plan = await customer_audit_service.create_customer_audit(
+            db,
+            audit_scope="Scope",
+            audit_criteria="Criteria",
+            planned_date=date(2026, 6, 1),
+            customer_name="Chery",
+            customer_type="OEM",
+            audit_mode=None,
+            lead_auditor=None,
+            team_members=[],
+            checklist=[],
+            product_line_code=None,
+            user_id=user.user_id,
+        )
+        finding = await audit_service.create_audit_finding(
+            db,
+            audit_id=plan.audit_id,
+            clause_ref="8.5.1",
+            finding_type="major_nc",
+            description="Test finding",
+            root_cause=None,
+            correction=None,
+            corrective_action=None,
+            due_date=None,
+            user_id=user.user_id,
+        )
+
+        finding = await customer_audit_service.customer_confirm_finding(
+            db,
+            finding,
+            confirmation_date=date(2026, 6, 10),
+            attachments=[{"file_name": "confirm.pdf", "file_url": "/uploads/confirm.pdf"}],
+            user_id=user.user_id,
+        )
+        assert finding.customer_confirmed is True
+        assert finding.customer_confirmation_date == date(2026, 6, 10)
+        assert len(finding.customer_confirmation_attachments) == 1
+```
+
+- [ ] **Step 2: Run tests**
+
+Run: `cd backend && TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test pytest tests/test_customer_audit.py -v`
+Expected: All 6 tests pass
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/tests/test_customer_audit.py
+git commit -m "test(customer-audit): add backend tests for customer audit service"
 ```
