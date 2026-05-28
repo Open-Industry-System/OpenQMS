@@ -12,25 +12,27 @@
 
 ---
 
-### Task 1: Database Migration 021
+### Task 1: Database Migration 025
 
 **Files:**
-- Create: `backend/alembic/versions/021_add_customer_audit_fields.py`
+- Create: `backend/alembic/versions/025_add_customer_audit_fields.py`
+
+**当前 Alembic head**: `024_add_ppap_fields`
 
 - [ ] **Step 1: Create the migration file**
 
 ```python
 """add customer audit fields
 
-Revision ID: 021
-Revises: 020
+Revision ID: 025
+Revises: 024_add_ppap_fields
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision = "021"
-down_revision = "020"
+revision = "025"
+down_revision = "024_add_ppap_fields"
 
 
 def upgrade() -> None:
@@ -213,7 +215,31 @@ class AuditPlanCreate(BaseModel):  # existing class already exists, this extends
     pass
 ```
 
-Actually, we need to **modify** the existing `AuditPlanCreate` (line 61) to add optional customer fields. Replace it with:
+**首先，扩展 AuditProgram 校验**：现有 `AuditProgramCreate` (line 13) 的 `audit_type` validator 只接受 `"system"`、`"process"`、`"product"`。需增加 `"customer"`。同时 `_generate_program_no` 的 type_map 需增加 `"customer": "CUS"`。
+
+替换 `AuditProgramCreate` validator (line 13-18):
+```python
+    @field_validator("audit_type")
+    @classmethod
+    def validate_audit_type(cls, v: str) -> str:
+        if v not in ("system", "process", "product", "customer"):
+            raise ValueError('audit_type must be one of "system", "process", "product", "customer"')
+        return v
+```
+
+同样替换 `AuditProgramUpdate` validator (line 29-36):
+```python
+    @field_validator("audit_type")
+    @classmethod
+    def validate_audit_type(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ("system", "process", "product", "customer"):
+            raise ValueError('audit_type must be one of "system", "process", "product", "customer"')
+        return v
+```
+
+**然后，修改 AuditPlanCreate** (line 61) 添加客户审核字段。替换为:
 
 ```python
 class AuditPlanCreate(BaseModel):
@@ -339,8 +365,8 @@ class FindingTransitionRequest(BaseModel):
     @field_validator("action")
     @classmethod
     def validate_action(cls, v: str) -> str:
-        if v not in ("start_progress", "close", "reopen"):
-            raise ValueError('action must be one of "start_progress", "close", "reopen"')
+        if v not in ("start_progress", "close"):
+            raise ValueError('action must be one of "start_progress", "close"')
         return v
 
 
@@ -438,6 +464,9 @@ async def _ensure_customer_program(db: AsyncSession, year: int) -> AuditProgram:
     return program
 
 
+编号按 `CA-YYYY-%` 单独计数，与 `PL-YYYY-%` 互不影响。
+
+```python
 async def _generate_customer_audit_no(db: AsyncSession, year: int) -> str:
     prefix = f"CA-{year}"
     result = await db.execute(
@@ -599,6 +628,49 @@ async def update_customer_audit(
     return plan
 
 
+async def complete_customer_audit(db: AsyncSession, plan: AuditPlan, user_id: uuid.UUID) -> AuditPlan:
+    if plan.status != "in_progress":
+        raise ValueError("only in-progress audits can be completed")
+
+    # For customer audits, check all findings are closed and confirmed
+    if plan.audit_category == "customer":
+        result = await db.execute(
+            select(AuditFinding.finding_id, AuditFinding.status, AuditFinding.customer_confirmed)
+            .where(AuditFinding.audit_id == plan.audit_id, AuditFinding.status != "closed")
+        )
+        unclosed = result.all()
+        if unclosed:
+            raise ValueError(f"cannot complete: {len(unclosed)} finding(s) not closed")
+
+        # Check all findings are customer-confirmed
+        result = await db.execute(
+            select(AuditFinding.finding_id)
+            .where(
+                AuditFinding.audit_id == plan.audit_id,
+                AuditFinding.status == "closed",
+                AuditFinding.customer_confirmed == False,
+            )
+        )
+        unconfirmed = result.all()
+        if unconfirmed:
+            raise ValueError(f"cannot complete: {len(unconfirmed)} finding(s) not customer-confirmed")
+
+    plan.status = "completed"
+    plan.actual_date = datetime.now(timezone.utc).date()
+
+    audit_log = AuditLog(
+        table_name="audit_plans",
+        record_id=plan.audit_id,
+        action="TRANSITION",
+        changed_fields={"status": {"before": "in_progress", "after": "completed"}},
+        operated_by=user_id,
+    )
+    db.add(audit_log)
+    await db.commit()
+    await db.refresh(plan)
+    return plan
+
+
 async def transition_finding(
     db: AsyncSession,
     finding: AuditFinding,
@@ -643,12 +715,6 @@ async def transition_finding(
 
         finding.status = "closed"
         finding.closed_at = datetime.now(timezone.utc)
-
-    elif action == "reopen":
-        if finding.status != "closed":
-            raise ValueError("only closed findings can be reopened")
-        finding.status = "open"
-        finding.closed_at = None
 
     else:
         raise ValueError(f"invalid action: {action}")
@@ -1070,7 +1136,7 @@ export interface CustomerAuditStats {
 }
 
 export interface FindingTransitionRequest {
-  action: "start_progress" | "close" | "reopen";
+  action: "start_progress" | "close";
   customer_confirmed?: boolean;
   customer_confirmation_date?: string;
   customer_confirmation_attachments?: CustomerAuditAttachment[];
@@ -1635,9 +1701,6 @@ export default function CustomerAuditDetailPage() {
             <Popconfirm title="确认关闭？需满足所有关闭条件" onConfirm={() => handleTransition(record.finding_id, "close")}>
               <Button size="small" type="primary">关闭</Button>
             </Popconfirm>
-          )}
-          {record.status === "closed" && isManager && (
-            <Button size="small" onClick={() => handleTransition(record.finding_id, "reopen")}>重新打开</Button>
           )}
           {!record.customer_confirmed && !isViewer && (
             <Button size="small" icon={<CheckOutlined />}
