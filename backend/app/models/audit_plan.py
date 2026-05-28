@@ -35,3 +35,8 @@ class AuditPlan(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     product_line_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    audit_category: Mapped[str] = mapped_column(String(20), default="internal", nullable=False)
+    customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    customer_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    audit_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    customer_confirmation_doc: Mapped[list] = mapped_column(JSONB, default=list)
