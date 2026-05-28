@@ -1,5 +1,5 @@
 import client from "./client";
-import type { AuditProgram, AuditPlan, AuditFinding, AuditProgramListResponse, AuditPlanListResponse, AuditFindingListResponse, AuditStats, AuditChecklistItem, User } from "../types";
+import type { AuditProgram, AuditPlan, AuditFinding, AuditProgramListResponse, AuditPlanListResponse, AuditFindingListResponse, AuditStats, AuditChecklistItem, User, CustomerAuditStats, CustomerConfirmationRequest, FindingTransitionRequest } from "../types";
 
 export async function listAuditPrograms(params?: Record<string, unknown>): Promise<AuditProgramListResponse> {
   const resp = await client.get("/audit-programs/list", { params });
@@ -106,5 +106,62 @@ export async function listAuditors(): Promise<User[]> {
 
 export async function updateAuditorInfo(userId: string, data: { is_auditor: boolean; qualifications: string[]; last_qualification_date?: string }): Promise<User> {
   const resp = await client.put(`/auditors/${userId}/auditor-info`, data);
+  return resp.data;
+}
+
+// -- Customer Audit API --
+
+export async function getCustomerAuditStats(params?: { product_line_code?: string }): Promise<CustomerAuditStats> {
+  const resp = await client.get("/audit-plans/customer-stats", { params });
+  return resp.data;
+}
+
+export async function listCustomerAudits(params?: Record<string, unknown>): Promise<AuditPlanListResponse> {
+  const resp = await client.get("/audit-plans", { params: { audit_category: "customer", ...params } });
+  return resp.data;
+}
+
+export async function createCustomerAudit(data: {
+  audit_scope: string;
+  audit_criteria: string;
+  planned_date: string;
+  customer_name: string;
+  customer_type: string;
+  audit_mode?: string;
+  lead_auditor?: string;
+  team_members?: { user_id: string; username: string }[];
+  checklist?: AuditChecklistItem[];
+  product_line_code?: string;
+}): Promise<AuditPlan> {
+  const resp = await client.post("/audit-plans", { audit_category: "customer", ...data });
+  return resp.data;
+}
+
+export async function updateCustomerAudit(id: string, data: Partial<AuditPlan>): Promise<AuditPlan> {
+  const resp = await client.put(`/audit-plans/${id}`, data);
+  return resp.data;
+}
+
+export async function confirmCustomerAudit(
+  id: string,
+  data: CustomerConfirmationRequest
+): Promise<AuditPlan> {
+  const resp = await client.put(`/audit-plans/${id}/customer-confirm`, data);
+  return resp.data;
+}
+
+export async function transitionFinding(
+  id: string,
+  data: FindingTransitionRequest
+): Promise<AuditFinding> {
+  const resp = await client.post(`/audit-findings/${id}/transition`, data);
+  return resp.data;
+}
+
+export async function confirmCustomerFinding(
+  id: string,
+  data: CustomerConfirmationRequest
+): Promise<AuditFinding> {
+  const resp = await client.post(`/audit-findings/${id}/customer-confirm`, data);
   return resp.data;
 }
