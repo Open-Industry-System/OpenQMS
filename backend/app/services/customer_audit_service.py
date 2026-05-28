@@ -173,6 +173,7 @@ async def update_customer_audit(
     audit_scope: str | None = None,
     audit_criteria: str | None = None,
     planned_date: date | None = None,
+    actual_date: date | None = None,
     lead_auditor: uuid.UUID | None = None,
     team_members: list | None = None,
     checklist: list | None = None,
@@ -192,19 +193,29 @@ async def update_customer_audit(
             raise ValueError(f"invalid audit_mode: {audit_mode}")
         changed["audit_mode"] = {"before": plan.audit_mode, "after": audit_mode}
         plan.audit_mode = audit_mode
-    if audit_scope is not None:
+    if audit_scope is not None and audit_scope != plan.audit_scope:
+        changed["audit_scope"] = {"before": plan.audit_scope, "after": audit_scope}
         plan.audit_scope = audit_scope
-    if audit_criteria is not None:
+    if audit_criteria is not None and audit_criteria != plan.audit_criteria:
+        changed["audit_criteria"] = {"before": plan.audit_criteria, "after": audit_criteria}
         plan.audit_criteria = audit_criteria
-    if planned_date is not None:
+    if planned_date is not None and planned_date != plan.planned_date:
+        changed["planned_date"] = {"before": plan.planned_date.isoformat() if plan.planned_date else None, "after": planned_date.isoformat()}
         plan.planned_date = planned_date
-    if lead_auditor is not None:
+    if actual_date is not None and actual_date != plan.actual_date:
+        changed["actual_date"] = {"before": plan.actual_date.isoformat() if plan.actual_date else None, "after": actual_date.isoformat()}
+        plan.actual_date = actual_date
+    if lead_auditor is not None and lead_auditor != plan.lead_auditor:
+        changed["lead_auditor"] = {"before": str(plan.lead_auditor), "after": str(lead_auditor)}
         plan.lead_auditor = lead_auditor
-    if team_members is not None:
+    if team_members is not None and team_members != plan.team_members:
+        changed["team_members"] = {"before": plan.team_members, "after": team_members}
         plan.team_members = team_members
-    if checklist is not None:
+    if checklist is not None and checklist != plan.checklist:
+        changed["checklist"] = {"before": plan.checklist, "after": checklist}
         plan.checklist = checklist
-    if product_line_code is not None:
+    if product_line_code is not None and product_line_code != plan.product_line_code:
+        changed["product_line_code"] = {"before": plan.product_line_code, "after": product_line_code}
         plan.product_line_code = product_line_code
 
     if changed:

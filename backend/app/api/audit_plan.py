@@ -136,6 +136,7 @@ async def update_audit_plan(
                 audit_scope=req.audit_scope,
                 audit_criteria=req.audit_criteria,
                 planned_date=req.planned_date,
+                actual_date=req.actual_date,
                 lead_auditor=req.lead_auditor,
                 team_members=req.team_members,
                 checklist=req.checklist,
