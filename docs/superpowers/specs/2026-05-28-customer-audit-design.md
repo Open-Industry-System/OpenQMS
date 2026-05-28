@@ -57,11 +57,16 @@
 
 现有 `audit_plans.program_id` 为 NOT NULL。客户审核通过以下方式处理：
 
-- 新增一个默认的 `AuditProgram` 记录，`audit_type='customer'`，编号规则 `AP-YYYY-CUS-NNN`
+- 后端提供 `get_or_create_customer_audit_program(year)` 服务函数，按年份自动获取或创建 `audit_type='customer'` 的默认方案，避免前端并发重复创建
 - 客户审核必须挂接到 `audit_type='customer'` 的审核方案下
-- `AuditPlanCreate` schema 中 `program_id` 保持必填，但前端创建客户审核时自动选择或创建客户审核方案
+- `AuditPlanCreate` schema 中 `program_id` 保持必填；创建客户审核时后端自动绑定到对应年份的 customer program
 
-**需同步扩展 AuditProgram 校验**：`AuditProgramCreate` 和 `AuditProgramUpdate` 中的 `audit_type` validator 增加 `"customer"` 选项，编号 map 增加 `{"customer": "CUS"}`。
+**需同步扩展 AuditProgram 校验**：
+- `AuditProgramCreate` / `AuditProgramUpdate` 中的 `audit_type` validator 增加 `"customer"` 选项
+- 编号 map 增加 `{"customer": "CUS"}`
+- **服务层一致性校验**：创建/更新 `AuditPlan` 时，校验 `audit_category` 与所挂 `AuditProgram.audit_type` 一致：
+  - `audit_category='customer'` → `program.audit_type` 必须是 `'customer'`
+  - `audit_category='internal'` → `program.audit_type` 不能是 `'customer'`
 
 ### 2.4 `capa_ref_id` 处理
 
@@ -280,7 +285,15 @@ router.get("/{audit_id}")          # 动态，后注册
 
 ## 5. 前端设计
 
-### 5.1 页面结构
+### 5.0 前端类型同步扩展
+
+`AuditProgram` TypeScript 接口需同步扩展 `audit_type`：
+- 当前：`"system" | "process" | "product"`
+- 扩展为：`"system" | "process" | "product" | "customer"`
+
+对应筛选项和展示文案同步更新：
+- 下拉选项增加 `"customer"` → `"客户审核"`
+- 列表/详情页展示 `"customer"` 时渲染为 `"客户审核"`
 
 ```
 客户审核管理
@@ -319,6 +332,8 @@ router.get("/{audit_id}")          # 动态，后注册
 ### Migration 025: Add Customer Audit Fields
 
 **当前 Alembic head**: `024_add_ppap_fields`
+
+**实施前确认**：运行 `alembic heads` 检查是否存在并行 head。如有，需先 merge 再基于合并后的 head 创建新 migration。
 
 ```python
 """add customer audit fields

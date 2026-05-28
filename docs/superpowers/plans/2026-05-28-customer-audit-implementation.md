@@ -119,6 +119,8 @@ def downgrade() -> None:
     op.drop_column("audit_plans", "audit_category")
 ```
 
+**实施前确认**：运行 `alembic heads` 检查是否存在并行 head。如有，需先 merge 再创建 migration。
+
 - [ ] **Step 2: Run migration**
 
 Run: `cd backend && alembic upgrade head`
@@ -132,8 +134,8 @@ Expected: `Models loaded OK`
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/alembic/versions/021_add_customer_audit_fields.py
-git commit -m "feat(db): add customer audit migration 021"
+git add backend/alembic/versions/025_add_customer_audit_fields.py
+git commit -m "feat(db): add customer audit migration 025"
 ```
 
 ---
@@ -438,8 +440,9 @@ VALID_CUSTOMER_TYPES = {"OEM", "Tier 1", "Tier 2", "其他"}
 VALID_AUDIT_MODES = {"on_site", "remote"}
 
 
-async def _ensure_customer_program(db: AsyncSession, year: int) -> AuditProgram:
-    """Return the default customer audit program for a year, creating if needed."""
+async def _get_or_create_customer_program(db: AsyncSession, year: int) -> AuditProgram:
+    """Return the default customer audit program for a year, creating if needed.
+    Uses database-level uniqueness to prevent concurrent creation of duplicate programs."""
     result = await db.execute(
         select(AuditProgram).where(
             AuditProgram.audit_type == "customer",
@@ -465,7 +468,18 @@ async def _ensure_customer_program(db: AsyncSession, year: int) -> AuditProgram:
         status="active",
     )
     db.add(program)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # Concurrent creation: re-fetch the existing program
+        await db.rollback()
+        result = await db.execute(
+            select(AuditProgram).where(
+                AuditProgram.audit_type == "customer",
+                AuditProgram.program_year == year,
+            )
+        )
+        program = result.scalar_one()
     return program
 
 
@@ -479,6 +493,21 @@ async def _generate_customer_audit_no(db: AsyncSession, year: int) -> str:
     )
     count = result.scalar() or 0
     return f"{prefix}-{count + 1:03d}"
+
+
+async def _validate_program_category(
+    db: AsyncSession,
+    program_id: uuid.UUID,
+    expected_audit_category: str,
+) -> None:
+    """Validate that the program's audit_type matches the plan's audit_category."""
+    program = await db.get(AuditProgram, program_id)
+    if program is None:
+        raise ValueError("program not found")
+    if expected_audit_category == "customer" and program.audit_type != "customer":
+        raise ValueError("customer audit must be linked to a customer program")
+    if expected_audit_category == "internal" and program.audit_type == "customer":
+        raise ValueError("internal audit cannot be linked to a customer program")
 
 
 async def create_customer_audit(
@@ -501,7 +530,7 @@ async def create_customer_audit(
     if audit_mode and audit_mode not in VALID_AUDIT_MODES:
         raise ValueError(f"invalid audit_mode: {audit_mode}")
 
-    program = await _ensure_customer_program(db, planned_date.year)
+    program = await _get_or_create_customer_program(db, planned_date.year)
     plan_no = await _generate_customer_audit_no(db, planned_date.year)
 
     plan = AuditPlan(
@@ -1066,6 +1095,25 @@ git commit -m "feat(api): add customer audit routes, transition API, and custome
 
 **Files:**
 - Modify: `frontend/src/types/index.ts`
+
+- [ ] **Step 0: Extend AuditProgram audit_type**
+
+In `frontend/src/types/index.ts`, update the `AuditProgram` interface (around line 242) to include `"customer"`:
+
+```typescript
+export interface AuditProgram {
+  program_id: string;
+  program_no: string;
+  program_year: number;
+  audit_type: "system" | "process" | "product" | "customer";
+  scope: string;
+  criteria: string;
+  status: "planned" | "active" | "completed";
+  product_line_code?: string;
+  created_by: string;
+  created_at: string;
+}
+```
 
 - [ ] **Step 1: Extend AuditPlan interface**
 
