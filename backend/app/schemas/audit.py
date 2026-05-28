@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class AuditProgramCreate(BaseModel):
@@ -13,8 +13,8 @@ class AuditProgramCreate(BaseModel):
     @field_validator("audit_type")
     @classmethod
     def validate_audit_type(cls, v: str) -> str:
-        if v not in ("system", "process", "product"):
-            raise ValueError('audit_type must be one of "system", "process", "product"')
+        if v not in ("system", "process", "product", "customer"):
+            raise ValueError('audit_type must be one of "system", "process", "product", "customer"')
         return v
 
 
@@ -31,8 +31,8 @@ class AuditProgramUpdate(BaseModel):
     def validate_audit_type(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        if v not in ("system", "process", "product"):
-            raise ValueError('audit_type must be one of "system", "process", "product"')
+        if v not in ("system", "process", "product", "customer"):
+            raise ValueError('audit_type must be one of "system", "process", "product", "customer"')
         return v
 
 
@@ -59,7 +59,8 @@ class AuditProgramListResponse(BaseModel):
 
 
 class AuditPlanCreate(BaseModel):
-    program_id: uuid.UUID
+    audit_category: str = "internal"
+    program_id: uuid.UUID | None = None
     audit_scope: str
     audit_criteria: str
     planned_date: date
@@ -67,9 +68,45 @@ class AuditPlanCreate(BaseModel):
     team_members: list | None = None
     checklist: list | None = None
     product_line_code: str | None = None
+    customer_name: str | None = None
+    customer_type: str | None = None
+    audit_mode: str | None = None
+
+    @model_validator(mode="after")
+    def check_program_id_for_internal(self):
+        if self.audit_category != "customer" and self.program_id is None:
+            raise ValueError("program_id is required for internal audits")
+        return self
+
+    @field_validator("audit_category")
+    @classmethod
+    def validate_audit_category(cls, v: str) -> str:
+        if v not in ("internal", "customer", "supplier"):
+            raise ValueError('audit_category must be one of "internal", "customer", "supplier"')
+        return v
+
+    @field_validator("audit_mode")
+    @classmethod
+    def validate_audit_mode(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ("on_site", "remote"):
+            raise ValueError('audit_mode must be one of "on_site", "remote"')
+        return v
+
+    @field_validator("customer_type")
+    @classmethod
+    def validate_customer_type(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ("OEM", "Tier 1", "Tier 2", "其他"):
+            raise ValueError('customer_type must be one of "OEM", "Tier 1", "Tier 2", "其他"')
+        return v
 
 
 class AuditPlanUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+
     audit_scope: str | None = None
     audit_criteria: str | None = None
     planned_date: date | None = None
@@ -77,8 +114,10 @@ class AuditPlanUpdate(BaseModel):
     lead_auditor: uuid.UUID | None = None
     team_members: list | None = None
     checklist: list | None = None
-    status: str | None = None
     product_line_code: str | None = None
+    customer_name: str | None = None
+    customer_type: str | None = None
+    audit_mode: str | None = None
 
 
 class AuditPlanResponse(BaseModel):
@@ -94,6 +133,11 @@ class AuditPlanResponse(BaseModel):
     checklist: list
     status: str
     product_line_code: str | None = None
+    audit_category: str = "internal"
+    customer_name: str | None = None
+    customer_type: str | None = None
+    audit_mode: str | None = None
+    customer_confirmation_doc: list = []
     created_by: uuid.UUID | None
     created_at: datetime
 
@@ -126,13 +170,14 @@ class AuditFindingCreate(BaseModel):
 
 
 class AuditFindingUpdate(BaseModel):
+    model_config = {"extra": "forbid"}
+
     clause_ref: str | None = None
     finding_type: str | None = None
     description: str | None = None
     root_cause: str | None = None
     correction: str | None = None
     corrective_action: str | None = None
-    status: str | None = None
     due_date: date | None = None
 
     @field_validator("finding_type")
@@ -158,6 +203,9 @@ class AuditFindingResponse(BaseModel):
     status: str
     due_date: date | None
     closed_at: datetime | None
+    customer_confirmed: bool = False
+    customer_confirmation_date: date | None = None
+    customer_confirmation_attachments: list = []
     created_by: uuid.UUID | None
     created_at: datetime
 
@@ -202,3 +250,42 @@ class AuditStatsResponse(BaseModel):
     completed_count: int
     open_findings: int
     major_nc_count: int
+
+
+class FindingTransitionRequest(BaseModel):
+    action: str
+    customer_confirmed: bool | None = None
+    customer_confirmation_date: date | None = None
+    customer_confirmation_attachments: list | None = None
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v: str) -> str:
+        if v not in ("start_progress", "close"):
+            raise ValueError('action must be one of "start_progress", "close"')
+        return v
+
+
+class CustomerAuditAttachment(BaseModel):
+    file_name: str
+    file_url: str
+    file_size: int | None = None
+    file_type: str | None = None
+    uploaded_at: str | None = None
+    uploaded_by: str | None = None
+
+
+class CustomerAuditStatsResponse(BaseModel):
+    total_customer_audits: int
+    planned: int
+    in_progress: int
+    completed: int
+    open_findings: int
+    major_nc_count: int
+    customer_confirmed_count: int
+    pending_confirmation_count: int
+
+
+class CustomerConfirmationRequest(BaseModel):
+    confirmation_date: date
+    attachments: list[CustomerAuditAttachment] = []
