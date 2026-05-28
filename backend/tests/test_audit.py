@@ -557,7 +557,12 @@ async def test_customer_confirm_finding():
         finding_id=uuid.uuid4(),
         status="in_progress",
         customer_confirmed=False,
+        audit_id=uuid.uuid4(),
     )
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = "customer"
+    db.execute.return_value = mock_result
 
     updated = await customer_audit_service.customer_confirm_finding(
         db, finding, confirmation_date=date(2026, 6, 15), attachments=[], user_id=user_id
@@ -565,6 +570,26 @@ async def test_customer_confirm_finding():
     assert updated.customer_confirmed is True
     assert updated.customer_confirmation_date == date(2026, 6, 15)
     assert db.commit.called
+
+
+@pytest.mark.asyncio
+async def test_customer_confirm_finding_rejects_non_customer_audit():
+    db = create_mock_db()
+    finding = AuditFinding(
+        finding_id=uuid.uuid4(),
+        status="in_progress",
+        customer_confirmed=False,
+        audit_id=uuid.uuid4(),
+    )
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = "internal"
+    db.execute.return_value = mock_result
+
+    with pytest.raises(ValueError, match="does not belong to a customer audit"):
+        await customer_audit_service.customer_confirm_finding(
+            db, finding, confirmation_date=date(2026, 6, 15), attachments=[], user_id=uuid.uuid4()
+        )
 
 
 @pytest.mark.asyncio

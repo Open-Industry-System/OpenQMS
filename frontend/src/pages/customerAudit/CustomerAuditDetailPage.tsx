@@ -7,6 +7,7 @@ import {
 import {
   ArrowLeftOutlined, PlayCircleOutlined, CheckCircleOutlined, StopOutlined,
   PlusOutlined, DeleteOutlined, LinkOutlined, CheckOutlined, UploadOutlined,
+  MinusCircleOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
@@ -55,9 +56,12 @@ export default function CustomerAuditDetailPage() {
   const [editingFinding, setEditingFinding] = useState<AuditFinding | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [confirmFindingId, setConfirmFindingId] = useState<string | null>(null);
+  const [confirmAttachments, setConfirmAttachments] = useState<{ file_name: string; file_url: string }[]>([]);
+  const [planConfirmModalOpen, setPlanConfirmModalOpen] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [findingForm] = Form.useForm();
   const [confirmForm] = Form.useForm();
+  const [planConfirmForm] = Form.useForm();
 
   const fetchPlan = useCallback(async () => {
     if (!id) return;
@@ -126,16 +130,20 @@ export default function CustomerAuditDetailPage() {
     try {
       const values = await confirmForm.validateFields();
       const date = values.confirmation_date.format("YYYY-MM-DD");
+      const attachments = confirmAttachments
+        .filter((a) => a.file_name.trim() && a.file_url.trim())
+        .map((a) => ({ file_name: a.file_name.trim(), file_url: a.file_url.trim() }));
       if (confirmFindingId) {
         await confirmCustomerFinding(confirmFindingId, {
           confirmation_date: date,
-          attachments: [],
+          attachments,
         });
       }
       message.success("确认成功");
       setConfirmModalOpen(false);
       confirmForm.resetFields();
       setConfirmFindingId(null);
+      setConfirmAttachments([]);
       fetchPlan();
     } catch (e: unknown) {
       if (e && typeof e === "object" && "errorFields" in e) return;
@@ -144,12 +152,20 @@ export default function CustomerAuditDetailPage() {
   };
 
   const handlePlanConfirm = async () => {
-    if (!id) return;
     try {
-      await confirmCustomerAudit(id, { confirmation_date: dayjs().format("YYYY-MM-DD"), attachments: [] });
+      const values = await planConfirmForm.validateFields();
+      if (!id) return;
+      const date = values.confirmation_date.format("YYYY-MM-DD");
+      const attachments = (values.attachments || [])
+        .filter((a: { file_name?: string; file_url?: string }) => a.file_name?.trim() && a.file_url?.trim())
+        .map((a: { file_name: string; file_url: string }) => ({ file_name: a.file_name.trim(), file_url: a.file_url.trim() }));
+      await confirmCustomerAudit(id, { confirmation_date: date, attachments });
       message.success("审核确认成功");
+      setPlanConfirmModalOpen(false);
+      planConfirmForm.resetFields();
       fetchPlan();
     } catch (e: unknown) {
+      if (e && typeof e === "object" && "errorFields" in e) return;
       message.error((e as Error).message || "确认失败");
     }
   };
@@ -196,7 +212,7 @@ export default function CustomerAuditDetailPage() {
           )}
           {!record.customer_confirmed && !isViewer && (
             <Button size="small" icon={<CheckOutlined />}
-              onClick={() => { setConfirmFindingId(record.finding_id); setConfirmModalOpen(true); }}>
+              onClick={() => { setConfirmFindingId(record.finding_id); setConfirmAttachments([]); setConfirmModalOpen(true); }}>
               客户确认
             </Button>
           )}
@@ -300,7 +316,7 @@ export default function CustomerAuditDetailPage() {
                   <Col span={8}>
                     <div style={{ marginTop: 32 }}>
                       {!isViewer && (
-                        <Button type="primary" icon={<UploadOutlined />} onClick={handlePlanConfirm}>
+                        <Button type="primary" icon={<UploadOutlined />} onClick={() => setPlanConfirmModalOpen(true)}>
                           上传审核级确认函
                         </Button>
                       )}
@@ -366,12 +382,84 @@ export default function CustomerAuditDetailPage() {
         title="客户确认整改完成"
         open={confirmModalOpen}
         onOk={handleCustomerConfirm}
-        onCancel={() => { setConfirmModalOpen(false); confirmForm.resetFields(); setConfirmFindingId(null); }}
+        onCancel={() => { setConfirmModalOpen(false); confirmForm.resetFields(); setConfirmFindingId(null); setConfirmAttachments([]); }}
       >
         <Form form={confirmForm} layout="vertical">
           <Form.Item name="confirmation_date" label="确认日期" rules={[{ required: true }]}>
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
+          <div style={{ marginBottom: 8 }}>
+            <Text strong>确认附件</Text>
+            {confirmAttachments.map((a, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <Input
+                  placeholder="文件名称"
+                  value={a.file_name}
+                  onChange={(e) => {
+                    const next = [...confirmAttachments];
+                    next[i].file_name = e.target.value;
+                    setConfirmAttachments(next);
+                  }}
+                />
+                <Input
+                  placeholder="文件链接"
+                  value={a.file_url}
+                  onChange={(e) => {
+                    const next = [...confirmAttachments];
+                    next[i].file_url = e.target.value;
+                    setConfirmAttachments(next);
+                  }}
+                />
+                <Button
+                  icon={<MinusCircleOutlined />}
+                  danger
+                  onClick={() => setConfirmAttachments(confirmAttachments.filter((_, idx) => idx !== i))}
+                />
+              </div>
+            ))}
+            <Button
+              type="dashed"
+              icon={<PlusOutlined />}
+              style={{ marginTop: 8, width: "100%" }}
+              onClick={() => setConfirmAttachments([...confirmAttachments, { file_name: "", file_url: "" }])}
+            >
+              添加附件
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+
+      {/* Plan Confirm Modal */}
+      <Modal
+        title="上传审核级确认函"
+        open={planConfirmModalOpen}
+        onOk={handlePlanConfirm}
+        onCancel={() => { setPlanConfirmModalOpen(false); planConfirmForm.resetFields(); }}
+      >
+        <Form form={planConfirmForm} layout="vertical">
+          <Form.Item name="confirmation_date" label="确认日期" rules={[{ required: true }]} initialValue={dayjs()}>
+            <DatePicker style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.List name="attachments">
+            {(fields, { add, remove }) => (
+              <>
+                {fields.map(({ key, name, ...restField }) => (
+                  <div key={key} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <Form.Item {...restField} name={[name, "file_name"]} rules={[{ required: true }]} style={{ flex: 1, marginBottom: 0 }}>
+                      <Input placeholder="文件名称" />
+                    </Form.Item>
+                    <Form.Item {...restField} name={[name, "file_url"]} rules={[{ required: true }]} style={{ flex: 1, marginBottom: 0 }}>
+                      <Input placeholder="文件链接" />
+                    </Form.Item>
+                    <Button icon={<MinusCircleOutlined />} danger onClick={() => remove(name)} />
+                  </div>
+                ))}
+                <Button type="dashed" icon={<PlusOutlined />} style={{ width: "100%" }} onClick={() => add()}>
+                  添加附件
+                </Button>
+              </>
+            )}
+          </Form.List>
         </Form>
       </Modal>
     </div>

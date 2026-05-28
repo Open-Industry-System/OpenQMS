@@ -274,17 +274,18 @@ async def transition_finding(
 ) -> AuditFinding:
     old_status = finding.status
 
-    if customer_confirmed is not None:
-        finding.customer_confirmed = customer_confirmed
-    if customer_confirmation_date is not None:
-        finding.customer_confirmation_date = customer_confirmation_date
-    if customer_confirmation_attachments is not None:
-        finding.customer_confirmation_attachments = customer_confirmation_attachments
+    # Stage new values locally; do not write to ORM until all validation passes
+    new_customer_confirmed = customer_confirmed if customer_confirmed is not None else finding.customer_confirmed
+    new_customer_confirmation_date = customer_confirmation_date if customer_confirmation_date is not None else finding.customer_confirmation_date
+    new_customer_confirmation_attachments = (
+        customer_confirmation_attachments if customer_confirmation_attachments is not None else finding.customer_confirmation_attachments
+    )
+    new_status = finding.status
 
     if action == "start_progress":
         if finding.status != "open":
             raise ValueError("only open findings can start progress")
-        finding.status = "in_progress"
+        new_status = "in_progress"
 
     elif action == "close":
         if finding.status not in ("open", "in_progress"):
@@ -306,14 +307,21 @@ async def transition_finding(
             select(AuditPlan.audit_category).where(AuditPlan.audit_id == finding.audit_id)
         )
         audit_category = plan_result.scalar_one_or_none()
-        if audit_category == "customer" and not finding.customer_confirmed:
+        if audit_category == "customer" and not new_customer_confirmed:
             raise ValueError("customer confirmation is required before closing customer audit finding")
 
-        finding.status = "closed"
-        finding.closed_at = datetime.now(timezone.utc)
+        new_status = "closed"
 
     else:
         raise ValueError(f"invalid action: {action}")
+
+    # All validations passed — apply staged values
+    finding.customer_confirmed = new_customer_confirmed
+    finding.customer_confirmation_date = new_customer_confirmation_date
+    finding.customer_confirmation_attachments = new_customer_confirmation_attachments
+    finding.status = new_status
+    if new_status == "closed":
+        finding.closed_at = datetime.now(timezone.utc)
 
     audit_log = AuditLog(
         table_name="audit_findings",
@@ -341,6 +349,13 @@ async def customer_confirm_finding(
     user_id: uuid.UUID,
 ) -> AuditFinding:
     """Mark a finding as customer-confirmed without changing its workflow status."""
+    plan_result = await db.execute(
+        select(AuditPlan.audit_category).where(AuditPlan.audit_id == finding.audit_id)
+    )
+    audit_category = plan_result.scalar_one_or_none()
+    if audit_category != "customer":
+        raise ValueError("finding does not belong to a customer audit")
+
     finding.customer_confirmed = True
     finding.customer_confirmation_date = confirmation_date
     finding.customer_confirmation_attachments = attachments

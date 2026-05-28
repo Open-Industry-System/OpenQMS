@@ -125,19 +125,36 @@ async def update_audit_plan(
     if plan is None:
         raise HTTPException(status_code=404, detail="audit plan not found")
     try:
-        plan = await audit_service.update_audit_plan(
-            db,
-            plan=plan,
-            audit_scope=req.audit_scope,
-            audit_criteria=req.audit_criteria,
-            planned_date=req.planned_date,
-            actual_date=req.actual_date,
-            lead_auditor=req.lead_auditor,
-            team_members=req.team_members,
-            checklist=req.checklist,
-            user_id=user.user_id,
-            product_line_code=req.product_line_code,
-        )
+        if plan.audit_category == "customer":
+            plan = await customer_audit_service.update_customer_audit(
+                db,
+                plan,
+                user_id=user.user_id,
+                customer_name=req.customer_name,
+                customer_type=req.customer_type,
+                audit_mode=req.audit_mode,
+                audit_scope=req.audit_scope,
+                audit_criteria=req.audit_criteria,
+                planned_date=req.planned_date,
+                lead_auditor=req.lead_auditor,
+                team_members=req.team_members,
+                checklist=req.checklist,
+                product_line_code=req.product_line_code,
+            )
+        else:
+            plan = await audit_service.update_audit_plan(
+                db,
+                plan=plan,
+                audit_scope=req.audit_scope,
+                audit_criteria=req.audit_criteria,
+                planned_date=req.planned_date,
+                actual_date=req.actual_date,
+                lead_auditor=req.lead_auditor,
+                team_members=req.team_members,
+                checklist=req.checklist,
+                user_id=user.user_id,
+                product_line_code=req.product_line_code,
+            )
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
