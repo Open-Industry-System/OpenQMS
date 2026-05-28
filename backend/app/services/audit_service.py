@@ -17,7 +17,7 @@ from app.models.audit import AuditLog
 # ───────────────────────────────────────────────
 
 async def _generate_program_no(db: AsyncSession, audit_type: str, year: int) -> str:
-    type_map = {"system": "SYS", "process": "PRO", "product": "PRD"}
+    type_map = {"system": "SYS", "process": "PRO", "product": "PRD", "customer": "CUS"}
     type_code = type_map.get(audit_type, "SYS")
     prefix = f"AP-{year}-{type_code}"
     result = await db.execute(
