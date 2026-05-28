@@ -993,7 +993,7 @@ async def create_audit_plan(
 
 - [ ] **Step 2: Modify `list_audit_plans` to support customer audit filters**
 
-In `backend/app/api/audit_plan.py`, update `list_audit_plans` (line 26-45) to add query params and pass them to the service. Also update `audit_service.list_audit_plans` (line 237) to accept `audit_category`, `customer_type`, `audit_mode`, `customer_name` filters.
+In `backend/app/api/audit_plan.py`, update `list_audit_plans` (line 26-45) to add query params and pass them to the service. Also update `audit_service.list_audit_plans` (line 237) to accept `audit_category`, `customer_type`, `audit_mode`, `customer_name`, `product_line_code` filters.
 
 - [ ] **Step 3: Modify `update_audit_plan` to remove `status` pass-through**
 
@@ -1484,7 +1484,7 @@ export default function CustomerAuditListPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   useEffect(() => {
-    listUsers().then((r) => setUsers(r.items || r)).catch(() => {});
+    listUsers().then(setUsers).catch(() => {});
   }, []);
 
   const handleCreate = async () => {
@@ -1731,7 +1731,7 @@ export default function CustomerAuditDetailPage() {
   }, [id]);
 
   useEffect(() => { fetchPlan(); }, [fetchPlan]);
-  useEffect(() => { listUsers().then((r) => setUsers(r.items || r)).catch(() => {}); }, []);
+  useEffect(() => { listUsers().then(setUsers).catch(() => {}); }, []);
 
   const handlePlanAction = async (action: string) => {
     if (!id) return;
