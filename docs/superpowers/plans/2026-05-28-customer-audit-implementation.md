@@ -69,6 +69,8 @@ def upgrade() -> None:
 
     op.create_index("idx_audit_plans_category", "audit_plans", ["audit_category"])
     op.create_index("idx_audit_plans_customer_type", "audit_plans", ["customer_type"])
+    # customer_name search index (plain B-tree for now; upgrade to pg_trgm when data grows)
+    op.create_index("idx_audit_plans_customer_name", "audit_plans", ["customer_name"])
 
     # audit_findings new columns
     op.add_column("audit_findings", sa.Column(
@@ -107,6 +109,7 @@ def downgrade() -> None:
     op.drop_constraint("chk_audit_mode", "audit_plans", type_="check")
     op.drop_constraint("chk_audit_category", "audit_plans", type_="check")
 
+    op.drop_index("idx_audit_plans_customer_name", table_name="audit_plans")
     op.drop_index("idx_audit_plans_customer_type", table_name="audit_plans")
     op.drop_index("idx_audit_plans_category", table_name="audit_plans")
     op.drop_column("audit_plans", "customer_confirmation_doc")
@@ -119,7 +122,7 @@ def downgrade() -> None:
 - [ ] **Step 2: Run migration**
 
 Run: `cd backend && alembic upgrade head`
-Expected: `Running upgrade 020 -> 021, add customer audit fields`
+Expected: `Running upgrade 024_add_ppap_fields -> 025, add customer audit fields`
 
 - [ ] **Step 3: Verify columns exist**
 
@@ -294,11 +297,13 @@ class AuditPlanUpdate(BaseModel):
     lead_auditor: uuid.UUID | None = None
     team_members: list | None = None
     checklist: list | None = None
-    status: str | None = None
     product_line_code: str | None = None
     customer_name: str | None = None
     customer_type: str | None = None
     audit_mode: str | None = None
+
+# Note: status field removed from AuditPlanUpdate. Status changes must go through
+# dedicated transition endpoints: /start, /complete, /cancel
 ```
 
 Replace existing `AuditPlanResponse` (line 84) with:
@@ -890,6 +895,8 @@ git commit -m "feat(service): add customer audit service with transition and con
 - Modify: `backend/app/api/audit_plan.py` (add customer-specific filters and customer-confirm endpoint)
 - Modify: `backend/app/api/audit_finding.py` (add transition endpoint, customer-confirm endpoint)
 - Modify: `backend/app/main.py` (no new router needed — routes go on existing routers)
+
+**Status write protection**: `AuditPlanUpdate` schema (Task 3) already removed the `status` field. The existing `PUT /api/audit-plans/{id}` route will automatically reject any request containing `status`, enforcing that state changes must go through `/start`, `/complete`, `/cancel` transition endpoints.
 
 - [ ] **Step 1: Add customer fields to audit plan creation in audit_plan.py**
 

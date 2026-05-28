@@ -191,6 +191,11 @@ router.get("/{audit_id}")          # 动态，后注册
 
 验证：`audit_category='customer'` 时，`customer_name` 和 `customer_type` 必填。
 
+**禁止直接修改审核计划 status**：`PUT /api/audit-plans/{id}` 不再接受 `status` 字段（`AuditPlanUpdate` 中移除 `status` 参数）。状态变更只能通过专用 transition 端点：
+- `POST /api/audit-plans/{id}/start` → `planned` → `in_progress`
+- `POST /api/audit-plans/{id}/complete` → `in_progress` → `completed`（客户审核需额外校验）
+- `POST /api/audit-plans/{id}/cancel` → `planned` → `cancelled`
+
 ### 3.3 发现项状态 Transition API（新增）
 
 #### POST /api/audit-findings/{finding_id}/transition
