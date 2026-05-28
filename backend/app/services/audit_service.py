@@ -375,8 +375,8 @@ async def update_audit_plan(
     lead_auditor: uuid.UUID | None,
     team_members: list | None,
     checklist: list | None,
-    status: str | None,
     user_id: uuid.UUID,
+    status: str | None = None,
     product_line_code: str | None = None,
 ) -> AuditPlan:
     changed = {}
@@ -666,9 +666,9 @@ async def update_audit_finding(
     root_cause: str | None,
     correction: str | None,
     corrective_action: str | None,
-    status: str | None,
     due_date: date | None,
     user_id: uuid.UUID,
+    status: str | None = None,
 ) -> AuditFinding:
     changed = {}
 
