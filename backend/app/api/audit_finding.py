@@ -5,7 +5,7 @@ from app.database import get_db
 from app.core.deps import get_current_user, require_engineer_or_admin
 from app.models.user import User
 from app import schemas
-from app.services import audit_service
+from app.services import audit_service, customer_audit_service
 
 router = APIRouter(prefix="/api/audit-findings", tags=["audit-findings"])
 
@@ -87,8 +87,55 @@ async def update_audit_finding(
             root_cause=req.root_cause,
             correction=req.correction,
             corrective_action=req.corrective_action,
-            status=req.status,
             due_date=req.due_date,
+            user_id=user.user_id,
+        )
+        return schemas.audit.AuditFindingResponse.model_validate(finding)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{finding_id}/transition", response_model=schemas.audit.AuditFindingResponse)
+async def transition_audit_finding(
+    finding_id: uuid.UUID,
+    req: schemas.audit.FindingTransitionRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    finding = await audit_service.get_audit_finding(db, finding_id)
+    if finding is None:
+        raise HTTPException(status_code=404, detail="audit finding not found")
+    try:
+        finding = await customer_audit_service.transition_finding(
+            db,
+            finding,
+            action=req.action,
+            user_id=user.user_id,
+            customer_confirmed=req.customer_confirmed,
+            customer_confirmation_date=req.customer_confirmation_date,
+            customer_confirmation_attachments=req.customer_confirmation_attachments,
+        )
+        return schemas.audit.AuditFindingResponse.model_validate(finding)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{finding_id}/customer-confirm", response_model=schemas.audit.AuditFindingResponse)
+async def confirm_customer_finding(
+    finding_id: uuid.UUID,
+    req: schemas.audit.CustomerConfirmationRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    finding = await audit_service.get_audit_finding(db, finding_id)
+    if finding is None:
+        raise HTTPException(status_code=404, detail="audit finding not found")
+    try:
+        finding = await customer_audit_service.customer_confirm_finding(
+            db,
+            finding,
+            confirmation_date=req.confirmation_date,
+            attachments=[a.model_dump() for a in req.attachments] if req.attachments else [],
             user_id=user.user_id,
         )
         return schemas.audit.AuditFindingResponse.model_validate(finding)
@@ -106,7 +153,13 @@ async def close_audit_finding(
     if finding is None:
         raise HTTPException(status_code=404, detail="audit finding not found")
     try:
-        finding = await audit_service.close_audit_finding(db, finding, user.user_id)
+        plan = await audit_service.get_audit_plan(db, finding.audit_id)
+        if plan and plan.audit_category == "customer":
+            finding = await customer_audit_service.transition_finding(
+                db, finding, action="close", user_id=user.user_id
+            )
+        else:
+            finding = await audit_service.close_audit_finding(db, finding, user.user_id)
         return schemas.audit.AuditFindingResponse.model_validate(finding)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

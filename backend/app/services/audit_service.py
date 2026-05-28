@@ -242,6 +242,11 @@ async def list_audit_plans(
     status: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    audit_category: str | None = None,
+    customer_type: str | None = None,
+    audit_mode: str | None = None,
+    customer_name: str | None = None,
+    product_line_code: str | None = None,
 ) -> tuple[list[AuditPlan], int]:
     query = select(AuditPlan)
     count_query = select(func.count()).select_from(AuditPlan)
@@ -258,6 +263,21 @@ async def list_audit_plans(
     if date_to is not None:
         query = query.where(AuditPlan.planned_date <= date_to)
         count_query = count_query.where(AuditPlan.planned_date <= date_to)
+    if audit_category:
+        query = query.where(AuditPlan.audit_category == audit_category)
+        count_query = count_query.where(AuditPlan.audit_category == audit_category)
+    if customer_type:
+        query = query.where(AuditPlan.customer_type == customer_type)
+        count_query = count_query.where(AuditPlan.customer_type == customer_type)
+    if audit_mode:
+        query = query.where(AuditPlan.audit_mode == audit_mode)
+        count_query = count_query.where(AuditPlan.audit_mode == audit_mode)
+    if customer_name:
+        query = query.where(AuditPlan.customer_name.ilike(f"%{customer_name}%"))
+        count_query = count_query.where(AuditPlan.customer_name.ilike(f"%{customer_name}%"))
+    if product_line_code:
+        query = query.where(AuditPlan.product_line_code == product_line_code)
+        count_query = count_query.where(AuditPlan.product_line_code == product_line_code)
 
     query = query.order_by(AuditPlan.planned_date.asc())
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -287,6 +307,10 @@ async def create_audit_plan(
     user_id: uuid.UUID,
     product_line_code: str | None = None,
 ) -> AuditPlan:
+    program = await db.get(AuditProgram, program_id)
+    if program and program.audit_type == "customer":
+        raise ValueError("internal audit cannot be linked to a customer program")
+
     year = planned_date.year
     plan_no = await _generate_plan_no(db, year)
 

@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.deps import get_current_user, require_engineer_or_admin
 from app.models.user import User
+from app.models.audit import AuditLog
 from app import schemas
-from app.services import audit_service
+from app.services import audit_service, customer_audit_service
 
 router = APIRouter(prefix="/api/audit-plans", tags=["audit-plans"])
 
@@ -23,6 +24,16 @@ async def get_checklist_templates(
     return CHECKLIST_TEMPLATES
 
 
+@router.get("/customer-stats", response_model=schemas.audit.CustomerAuditStatsResponse)
+async def get_customer_audit_stats(
+    product_line_code: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    stats = await customer_audit_service.get_customer_audit_stats(db, product_line_code=product_line_code)
+    return schemas.audit.CustomerAuditStatsResponse(**stats)
+
+
 @router.get("", response_model=schemas.audit.AuditPlanListResponse)
 async def list_audit_plans(
     page: int = Query(1, ge=1),
@@ -31,11 +42,17 @@ async def list_audit_plans(
     status: str | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    audit_category: str | None = Query(None),
+    customer_type: str | None = Query(None),
+    audit_mode: str | None = Query(None),
+    customer_name: str | None = Query(None),
+    product_line_code: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     items, total = await audit_service.list_audit_plans(
-        db, page, page_size, program_id, status, date_from, date_to
+        db, page, page_size, program_id, status, date_from, date_to,
+        audit_category, customer_type, audit_mode, customer_name, product_line_code,
     )
     return schemas.audit.AuditPlanListResponse(
         items=[schemas.audit.AuditPlanResponse.model_validate(p) for p in items],
@@ -52,18 +69,34 @@ async def create_audit_plan(
     user: User = Depends(require_engineer_or_admin),
 ):
     try:
-        plan = await audit_service.create_audit_plan(
-            db,
-            program_id=req.program_id,
-            audit_scope=req.audit_scope,
-            audit_criteria=req.audit_criteria,
-            planned_date=req.planned_date,
-            lead_auditor=req.lead_auditor,
-            team_members=req.team_members,
-            checklist=req.checklist,
-            user_id=user.user_id,
-            product_line_code=req.product_line_code,
-        )
+        if req.audit_category == "customer":
+            plan = await customer_audit_service.create_customer_audit(
+                db,
+                audit_scope=req.audit_scope,
+                audit_criteria=req.audit_criteria,
+                planned_date=req.planned_date,
+                customer_name=req.customer_name,
+                customer_type=req.customer_type,
+                audit_mode=req.audit_mode,
+                lead_auditor=req.lead_auditor,
+                team_members=req.team_members,
+                checklist=req.checklist,
+                product_line_code=req.product_line_code,
+                user_id=user.user_id,
+            )
+        else:
+            plan = await audit_service.create_audit_plan(
+                db,
+                program_id=req.program_id,
+                audit_scope=req.audit_scope,
+                audit_criteria=req.audit_criteria,
+                planned_date=req.planned_date,
+                lead_auditor=req.lead_auditor,
+                team_members=req.team_members,
+                checklist=req.checklist,
+                user_id=user.user_id,
+                product_line_code=req.product_line_code,
+            )
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -102,7 +135,6 @@ async def update_audit_plan(
             lead_auditor=req.lead_auditor,
             team_members=req.team_members,
             checklist=req.checklist,
-            status=req.status,
             user_id=user.user_id,
             product_line_code=req.product_line_code,
         )
@@ -153,7 +185,10 @@ async def complete_audit_plan(
     if plan is None:
         raise HTTPException(status_code=404, detail="audit plan not found")
     try:
-        plan = await audit_service.complete_audit_plan(db, plan, user.user_id)
+        if plan.audit_category == "customer":
+            plan = await customer_audit_service.complete_customer_audit(db, plan, user.user_id)
+        else:
+            plan = await audit_service.complete_audit_plan(db, plan, user.user_id)
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -173,6 +208,36 @@ async def cancel_audit_plan(
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/{audit_id}/customer-confirm", response_model=schemas.audit.AuditPlanResponse)
+async def confirm_customer_audit(
+    audit_id: uuid.UUID,
+    req: schemas.audit.CustomerConfirmationRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    plan = await audit_service.get_audit_plan(db, audit_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="audit plan not found")
+    if plan.audit_category != "customer":
+        raise HTTPException(status_code=400, detail="not a customer audit")
+
+    plan.customer_confirmation_doc = [
+        a.model_dump() for a in req.attachments
+    ] if req.attachments else []
+
+    audit_log = AuditLog(
+        table_name="audit_plans",
+        record_id=audit_id,
+        action="CUSTOMER_CONFIRM",
+        changed_fields={"customer_confirmation_date": req.confirmation_date.isoformat()},
+        operated_by=user.user_id,
+    )
+    db.add(audit_log)
+    await db.commit()
+    await db.refresh(plan)
+    return schemas.audit.AuditPlanResponse.model_validate(plan)
 
 
 @router.get("/{audit_id}/findings", response_model=schemas.audit.AuditFindingListResponse)
