@@ -36,12 +36,12 @@ async def import_suppliers(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_engineer_or_admin),
 ):
-    from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError
+    from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
     from dataclasses import asdict
     from fastapi.responses import JSONResponse
 
     raw = await file.read()
-    if len(raw) > 10 * 1024 * 1024:
+    if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="文件超过 10MB 限制")
 
     header_mapping = {
