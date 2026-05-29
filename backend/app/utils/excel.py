@@ -40,7 +40,7 @@ def append_row(ws: Worksheet, values: list[Any]) -> None:
 def auto_width(ws: Worksheet, min_width: int = 10, max_width: int = 40) -> None:
     for col in ws.columns:
         max_len = max(len(str(cell.value or "")) for cell in col)
-        ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, max_width)
+        ws.column_dimensions[col[0].column_letter].width = max(min(max_len + 2, max_width), min_width)
 
 
 def workbook_to_bytes(wb: Workbook) -> bytes:
