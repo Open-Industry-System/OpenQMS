@@ -7,6 +7,7 @@ import {
 import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
 import { listFMEAs } from "../../api/fmea";
+import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 import type { CAPAReport, FMEADocument } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 
@@ -125,6 +126,10 @@ export default function CAPADetailPage() {
           {capa.fmea_ref_id && (
             <Tag icon={<LinkOutlined />} color="green">已关联 FMEA</Tag>
           )}
+          <RelatedFMEALink
+            fmeaRefId={capa.fmea_ref_id ?? null}
+            fmeaNodeId={capa.fmea_node_id ?? null}
+          />
           {!isViewer && (
             <Button icon={<LinkOutlined />} onClick={() => setLinkModal(true)}>
               {capa.fmea_ref_id ? "更换FMEA关联" : "关联FMEA"}

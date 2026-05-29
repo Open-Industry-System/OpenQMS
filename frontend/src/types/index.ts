@@ -114,6 +114,7 @@ export interface CAPAReport {
   d7_prevention: string | null;
   d8_closure: string | null;
   fmea_ref_id: string | null;
+  fmea_node_id: string | null;
   due_date: string | null;
   created_by: string | null;
   created_at: string;
