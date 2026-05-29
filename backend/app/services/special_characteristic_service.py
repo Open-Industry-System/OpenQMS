@@ -739,3 +739,39 @@ async def _create_audit(db: AsyncSession, action: str, record_id: uuid.UUID, use
         action=action, changed_fields=detail, operated_by=user_id,
     )
     db.add(log)
+
+
+async def get_sc_references(
+    db: AsyncSession, sc_id: str
+) -> list[dict]:
+    from app.models.special_characteristic_link import SpecialCharacteristicLink
+    q = select(SpecialCharacteristicLink).where(
+        SpecialCharacteristicLink.sc_id == sc_id
+    )
+    result = await db.execute(q)
+    return [
+        {
+            "source_type": link.source_type,
+            "source_id": str(link.source_id),
+            "source_item_id": link.source_item_id,
+        }
+        for link in result.scalars().all()
+    ]
+
+
+async def add_sc_reference(
+    db: AsyncSession,
+    sc_id: str,
+    source_type: str,
+    source_id: str,
+    source_item_id: str,
+) -> None:
+    from app.models.special_characteristic_link import SpecialCharacteristicLink
+    link = SpecialCharacteristicLink(
+        sc_id=sc_id,
+        source_type=source_type,
+        source_id=source_id,
+        source_item_id=source_item_id,
+    )
+    db.add(link)
+    await db.commit()

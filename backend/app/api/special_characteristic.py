@@ -65,6 +65,15 @@ async def cp_sync_status(
     return await sc_svc.check_cp_sync_status(db, cp_id)
 
 
+@router.get("/{sc_id}/references")
+async def get_sc_references(
+    sc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    return await sc_svc.get_sc_references(db, sc_id)
+
+
 @router.get("/{sc_id}", response_model=SCResponse)
 async def get_sc(
     sc_id: uuid.UUID,
