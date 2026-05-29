@@ -209,3 +209,21 @@ async def link_fmea(
     await db.commit()
     await db.refresh(capa)
     return capa
+
+
+async def get_capas_by_fmea_node(
+    db: AsyncSession, fmea_id: str, fmea_node_id: str | None = None
+) -> list[dict]:
+    q = select(CAPAEightD).where(CAPAEightD.fmea_ref_id == fmea_id)
+    if fmea_node_id:
+        q = q.where(CAPAEightD.fmea_node_id == fmea_node_id)
+    result = await db.execute(q)
+    return [
+        {
+            "report_id": str(c.report_id),
+            "document_no": c.document_no,
+            "title": c.title,
+            "status": c.status,
+        }
+        for c in result.scalars().all()
+    ]

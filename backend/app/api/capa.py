@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -45,6 +46,16 @@ async def create_capa(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CAPAResponse.model_validate(capa)
+
+
+@router.get("/by-fmea-node/{fmea_id}")
+async def get_capas_by_fmea_node(
+    fmea_id: str,
+    fmea_node_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    return await capa_service.get_capas_by_fmea_node(db, fmea_id, fmea_node_id)
 
 
 @router.get("/{report_id}", response_model=CAPAResponse)
@@ -112,3 +123,35 @@ async def link_fmea(
         raise HTTPException(status_code=404, detail="8D report not found")
     capa = await capa_service.link_fmea(db, capa, fmea_id, user.user_id)
     return CAPAResponse.model_validate(capa)
+
+
+@router.get("/{report_id}/related-fmea")
+async def get_related_fmea(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    from app.models.capa import CAPAEightD
+    from app.models.fmea import FMEADocument
+
+    capa = (
+        await db.execute(
+            select(CAPAEightD).where(CAPAEightD.report_id == report_id)
+        )
+    ).scalar_one_or_none()
+    if not capa:
+        raise HTTPException(status_code=404, detail="CAPA not found")
+    if not capa.fmea_ref_id:
+        return {"fmea_id": None, "document_no": None, "fmea_node_id": None}
+
+    fmea = (
+        await db.execute(
+            select(FMEADocument).where(FMEADocument.fmea_id == capa.fmea_ref_id)
+        )
+    ).scalar_one_or_none()
+
+    return {
+        "fmea_id": str(capa.fmea_ref_id),
+        "document_no": fmea.document_no if fmea else None,
+        "fmea_node_id": capa.fmea_node_id,
+    }
