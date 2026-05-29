@@ -28,40 +28,111 @@ import { useProductLineStore } from "../../store/productLineStore";
 
 const { Header, Sider, Content } = Layout;
 
+// 所有菜单 key 列表（用于最长前缀匹配）
+const MENU_KEYS = [
+  "/dashboard",
+  "/fmea", "/control-plans", "/apqp", "/ppap",
+  "/special-characteristics", "/special-characteristics/matrix", "/special-characteristics/traceability",
+  "/spc", "/msa/gauges", "/msa/studies", "/quality-goals",
+  "/internal-audits", "/management-reviews",
+  "/customer-quality", "/customer-audits", "/capa",
+  "/suppliers", "/suppliers/quality",
+  "/iqc/inspections", "/iqc/materials", "/scars",
+];
+
+// 菜单 key → 需要展开的所有 SubMenu key 列表
+const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
+  "/fmea": ["grp:planning"],
+  "/control-plans": ["grp:planning"],
+  "/apqp": ["grp:planning"],
+  "/ppap": ["grp:planning"],
+  "/special-characteristics": ["grp:planning"],
+  "/special-characteristics/matrix": ["grp:planning"],
+  "/special-characteristics/traceability": ["grp:planning"],
+  "/spc": ["grp:shopfloor"],
+  "/msa/gauges": ["grp:shopfloor", "grp:msa"],
+  "/msa/studies": ["grp:shopfloor", "grp:msa"],
+  "/quality-goals": ["grp:shopfloor"],
+  "/internal-audits": ["grp:shopfloor"],
+  "/management-reviews": ["grp:shopfloor"],
+  "/customer-quality": ["grp:customer"],
+  "/customer-audits": ["grp:customer"],
+  "/capa": ["grp:customer"],
+  "/suppliers": ["grp:supplier"],
+  "/suppliers/quality": ["grp:supplier"],
+  "/iqc/inspections": ["grp:supplier", "grp:iqc"],
+  "/iqc/materials": ["grp:supplier", "grp:iqc"],
+  "/scars": ["grp:supplier"],
+};
+
+function getSelectedMenuKey(pathname: string): string {
+  const matched = MENU_KEYS
+    .filter((key) => pathname === key || pathname.startsWith(key + "/"))
+    .sort((a, b) => b.length - a.length);
+  return matched[0] || "/dashboard";
+}
+
 const menuItems = [
   { key: "/dashboard", icon: <DashboardOutlined />, label: "仪表盘" },
-  { key: "/fmea", icon: <FileTextOutlined />, label: "FMEA管理" },
-  { key: "/control-plans", icon: <FileTextOutlined />, label: "控制计划" },
-  { key: "/apqp", icon: <ProjectOutlined />, label: "APQP 质量策划" },
-  { key: "/ppap", icon: <FileProtectOutlined />, label: "PPAP" },
-  { key: "/quality-goals", icon: <AimOutlined />, label: "质量目标" },
-  { key: "/internal-audits", icon: <SafetyOutlined />, label: "内部审核" },
-  { key: "/customer-audits", icon: <AuditOutlined />, label: "客户审核" },
-  { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
-  { key: "/suppliers/quality", icon: <BarChartOutlined />, label: "供货质量看板" },
   {
-    key: "/iqc",
+    key: "grp:planning",
     icon: <ExperimentOutlined />,
-    label: "来料检验",
+    label: "前期质量策划",
     children: [
-      { key: "/iqc/inspections", label: "检验单" },
-      { key: "/iqc/materials", label: "物料管理" },
+      { key: "/fmea", icon: <FileTextOutlined />, label: "FMEA 管理" },
+      { key: "/control-plans", icon: <FileTextOutlined />, label: "控制计划" },
+      { key: "/apqp", icon: <ProjectOutlined />, label: "APQP 质量策划" },
+      { key: "/ppap", icon: <FileProtectOutlined />, label: "PPAP" },
+      { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
     ],
   },
-  { key: "/customer-quality", icon: <CustomerServiceOutlined />, label: "客户质量" },
-  { key: "/spc", icon: <FileTextOutlined />, label: "SPC控制图" },
-  { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
-  { key: "/special-characteristics/traceability", icon: <SafetyCertificateOutlined />, label: "贯穿追踪" },
-  { key: "/management-reviews", icon: <TeamOutlined />, label: "管理评审" },
-  { key: "/scars", icon: <AlertOutlined />, label: "SCAR管理" },
-  { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA" },
   {
-    key: "/msa",
+    key: "grp:shopfloor",
     icon: <ToolOutlined />,
-    label: "MSA分析",
+    label: "现场质量管理",
     children: [
-      { key: "/msa/gauges", icon: <ToolOutlined />, label: "量具管理" },
-      { key: "/msa/studies", icon: <ExperimentOutlined />, label: "研究管理" },
+      { key: "/spc", icon: <BarChartOutlined />, label: "SPC 控制图" },
+      {
+        key: "grp:msa",
+        icon: <ToolOutlined />,
+        label: "MSA 分析",
+        children: [
+          { key: "/msa/gauges", label: "量具管理" },
+          { key: "/msa/studies", label: "研究管理" },
+        ],
+      },
+      { key: "/quality-goals", icon: <AimOutlined />, label: "质量目标" },
+      { key: "/internal-audits", icon: <SafetyOutlined />, label: "内部审核" },
+      { key: "/management-reviews", icon: <TeamOutlined />, label: "管理评审" },
+    ],
+  },
+  {
+    key: "grp:customer",
+    icon: <CustomerServiceOutlined />,
+    label: "客户质量",
+    children: [
+      { key: "/customer-quality", icon: <CustomerServiceOutlined />, label: "客诉/RMA" },
+      { key: "/customer-audits", icon: <AuditOutlined />, label: "客户审核" },
+      { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA" },
+    ],
+  },
+  {
+    key: "grp:supplier",
+    icon: <ShopOutlined />,
+    label: "供应商质量",
+    children: [
+      { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
+      { key: "/suppliers/quality", icon: <BarChartOutlined />, label: "供货质量看板" },
+      { key: "/scars", icon: <AlertOutlined />, label: "SCAR 管理" },
+      {
+        key: "grp:iqc",
+        icon: <ExperimentOutlined />,
+        label: "来料检验",
+        children: [
+          { key: "/iqc/inspections", label: "检验单" },
+          { key: "/iqc/materials", label: "物料管理" },
+        ],
+      },
     ],
   },
 ];
@@ -76,7 +147,17 @@ export default function AppLayout() {
   const { productLines, selected, setSelected, load } = useProductLineStore();
   useEffect(() => { load(); }, [load]);
 
-  const selectedKey = "/" + location.pathname.split("/")[1];
+  const selectedKey = getSelectedMenuKey(location.pathname);
+  const requiredOpenKeys = MENU_KEY_TO_OPEN_KEYS[selectedKey] || [];
+  const [openKeys, setOpenKeys] = useState<string[]>(requiredOpenKeys);
+
+  useEffect(() => {
+    setOpenKeys((prev) => {
+      const merged = new Set(prev);
+      requiredOpenKeys.forEach((k) => merged.add(k));
+      return Array.from(merged);
+    });
+  }, [selectedKey]);
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
@@ -103,8 +184,13 @@ export default function AppLayout() {
         <Menu
           mode="inline"
           selectedKeys={[selectedKey]}
+          openKeys={openKeys}
+          onOpenChange={setOpenKeys}
           items={menuItems}
-          onClick={({ key }) => navigate(key)}
+          onClick={({ key }) => {
+            if (key.startsWith("grp:")) return;
+            navigate(key);
+          }}
           style={{ borderRight: 0 }}
         />
       </Sider>
