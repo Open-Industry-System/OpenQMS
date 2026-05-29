@@ -161,7 +161,7 @@ const openKeys = MENU_KEY_TO_GROUP[selectedKey]
 
 - **高 RPN FMEA**：RPN≥100 的 FMEA 节点，显示文档编号、节点名称、RPN 值
 - **超期 CAPA**：超过 `due_date` 且未关闭的 CAPA，显示编号、超期天数
-- **PPM 超标供应商**：PPM>阈值的供应商，显示供应商名称、PPM 值
+- **PPM 超标供应商**：PPM>阈值的供应商，显示供应商名称、PPM 值。阈值来源：取 `customers` 表的 `ppm_target` 字段（客户 PPM 目标），默认阈值 500。无客户关联时使用全局默认值（后端常量）
 
 ### 底部区域
 
@@ -265,10 +265,15 @@ interface DashboardData {
    - `id` UUID (PK)
    - `sc_id` UUID (FK → `special_characteristics.sc_id`)
    - `source_type` VARCHAR ('fmea' | 'control_plan')
-   - `source_id` UUID（FMEA 时为 `fmea_documents.fmea_id`，控制计划时为 `control_plans.plan_id`）
+   - `source_id` UUID（FMEA 时为 `fmea_documents.fmea_id`，控制计划时为 `control_plans.cp_id`）
    - `source_item_id` VARCHAR (graph node ID（FMEA）或 `control_plan_items.item_id`（控制计划），定位到具体行)
    - 复合唯一约束：(`sc_id`, `source_type`, `source_id`, `source_item_id`)
    - 同一特殊特性可在同一 FMEA 文档的多个节点中出现，也可在同一控制计划的多个项目中出现
+
+   **迁移策略：** 现有 `special_characteristics` 表已有 `source_fmea_id`、`source_node_id`、`cp_item_id` 字段，记录特殊特性的"来源出处"（从哪个 FMEA 节点/控制计划项创建）。新增的 `special_characteristic_links` 表记录"被引用位置"（哪些 FMEA 节点/控制计划项引用了该特殊特性）。两者语义不同：
+   - `special_characteristics.source_*` = 创建来源（一个特殊特性只有一个创建来源）
+   - `special_characteristic_links` = 引用位置（一个特殊特性可被多处引用）
+   - 现有字段保留不变，不迁移。link 表是新增的引用关系层
 
 ### 通用关联组件
 
