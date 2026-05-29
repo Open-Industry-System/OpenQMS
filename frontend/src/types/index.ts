@@ -152,6 +152,40 @@ export interface DashboardData {
   alerts: unknown[];
 }
 
+export interface DashboardSummary {
+  pending_actions: number;
+  overdue_tasks: number;
+  high_risk_items: number;
+  month_trend: number;
+}
+
+export interface DashboardAlerts {
+  high_rpn_fmeas: Array<{
+    fmea_id: string;
+    document_no: string;
+    node_name: string;
+    rpn: number;
+  }>;
+  overdue_capas: Array<{
+    report_id: string;
+    document_no: string;
+    overdue_days: number;
+  }>;
+  high_ppm_suppliers: Array<{
+    supplier_id: string;
+    supplier_name: string;
+    ppm: number;
+  }>;
+}
+
+export interface DashboardRecentAction {
+  record_id: string;
+  table_name: string;
+  entity_no: string;
+  action: string;
+  operated_at: string;
+}
+
 export interface ControlPlanItem {
   item_id: string;
   step_no: string;
