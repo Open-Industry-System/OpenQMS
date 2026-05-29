@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, Tag, Button, Space, Descriptions, Input, Modal, message, Spin, Row, Col, Steps, Timeline } from "antd";
 import { EditOutlined } from "@ant-design/icons";
-import { getAPQPProject, updateAPQPProject, transitionAPQPProject } from "../../api/apqp";
-import type { APQPProject, APQPProjectUpdate } from "../../types";
-import { useAuthStore } from "../../store/authStore";
+import { getAPQPProject, updateAPQPProject, transitionAPQPProject } from "../../../api/apqp";
+import type { APQPProject, APQPProjectUpdate } from "../../../types";
+import { useAuthStore } from "../../../store/authStore";
 
 const PHASE_NAMES: Record<number, string> = {
   1: "策划与定义",

@@ -9,10 +9,10 @@ import {
 } from "@ant-design/icons";
 import {
   listSCs, deleteSC, safetyConfirm, safetyDismiss,
-} from "../../api/specialCharacteristic";
-import type { SpecialCharacteristic } from "../../types";
-import { useAuthStore } from "../../store/authStore";
-import { useProductLineStore } from "../../store/productLineStore";
+} from "../../../api/specialCharacteristic";
+import type { SpecialCharacteristic } from "../../../types";
+import { useAuthStore } from "../../../store/authStore";
+import { useProductLineStore } from "../../../store/productLineStore";
 
 const { Title } = Typography;
 

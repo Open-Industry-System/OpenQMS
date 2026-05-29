@@ -10,20 +10,20 @@ import {
   CheckOutlined, UndoOutlined, PlusOutlined, DeleteOutlined,
   HistoryOutlined,
 } from "@ant-design/icons";
-import { getFMEA, updateFMEA, transitionFMEA } from "../../api/fmea";
-import { syncFromFMEA, getSeverityWarnings } from "../../api/specialCharacteristic";
-import type { FMEADocument, GraphNode, GraphEdge } from "../../types";
-import { useAuthStore } from "../../store/authStore";
-import { calculateAP } from "../../utils/fmea";
-import { buildRows, createRowNodes, type FMEARow } from "../../utils/fmeaTable";
-import StructureTree from "../../components/dfmea/StructureTree";
-import ParameterDiagram from "../../components/dfmea/ParameterDiagram";
-import InlineRecommendations from "../../components/dfmea/InlineRecommendations";
-import VersionHistoryTab from "../../components/version/VersionHistoryTab";
-import CreateVersionModal from "../../components/version/CreateVersionModal";
-import RollbackConfirmModal from "../../components/version/RollbackConfirmModal";
-import VersionCompareView from "../../components/version/VersionCompareView";
-import RelatedCAPAList from "../../components/cross-links/RelatedCAPAList";
+import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
+import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
+import type { FMEADocument, GraphNode, GraphEdge } from "../../../types";
+import { useAuthStore } from "../../../store/authStore";
+import { calculateAP } from "../../../utils/fmea";
+import { buildRows, createRowNodes, type FMEARow } from "../../../utils/fmeaTable";
+import StructureTree from "../../../components/dfmea/StructureTree";
+import ParameterDiagram from "../../../components/dfmea/ParameterDiagram";
+import InlineRecommendations from "../../../components/dfmea/InlineRecommendations";
+import VersionHistoryTab from "../../../components/version/VersionHistoryTab";
+import CreateVersionModal from "../../../components/version/CreateVersionModal";
+import RollbackConfirmModal from "../../../components/version/RollbackConfirmModal";
+import VersionCompareView from "../../../components/version/VersionCompareView";
+import RelatedCAPAList from "../../../components/cross-links/RelatedCAPAList";
 
 const { Title, Text } = Typography;
 

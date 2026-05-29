@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Table, Tag, Tabs, Button, Space, Modal, Form, Input, DatePicker, message, Card, Row, Col } from "antd";
 import { PlusOutlined, ProjectOutlined, ClockCircleOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
-import { listAPQPProjects, createAPQPProject, getAPQPProjectStats } from "../../api/apqp";
-import type { APQPProject, APQPListResponse, APQPProjectStats } from "../../types";
+import { listAPQPProjects, createAPQPProject, getAPQPProjectStats } from "../../../api/apqp";
+import type { APQPProject, APQPListResponse, APQPProjectStats } from "../../../types";
 
 const PROJECT_STATUS_TABS = [
   { key: "all", label: "全部" },

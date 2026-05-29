@@ -12,17 +12,17 @@ import {
 import {
   getControlPlan, createControlPlan, updateControlPlan,
   checkStaleItems, approveControlPlan,
-} from "../../api/controlPlan";
-import type { ControlPlan, ControlPlanItem } from "../../types";
-import type { CPSyncStatusItem } from "../../types/specialCharacteristic";
-import { useAuthStore } from "../../store/authStore";
-import { getCPSyncStatus, syncToCP } from "../../api/specialCharacteristic";
-import ImportFromFMEAModal from "../../components/control-plan/ImportFromFMEAModal";
-import VersionHistoryTab from "../../components/version/VersionHistoryTab";
-import CreateVersionModal from "../../components/version/CreateVersionModal";
-import RollbackConfirmModal from "../../components/version/RollbackConfirmModal";
-import VersionCompareView from "../../components/version/VersionCompareView";
-import SyncPreviewDrawer from "../../components/version/SyncPreviewDrawer";
+} from "../../../api/controlPlan";
+import type { ControlPlan, ControlPlanItem } from "../../../types";
+import type { CPSyncStatusItem } from "../../../types/specialCharacteristic";
+import { useAuthStore } from "../../../store/authStore";
+import { getCPSyncStatus, syncToCP } from "../../../api/specialCharacteristic";
+import ImportFromFMEAModal from "../../../components/control-plan/ImportFromFMEAModal";
+import VersionHistoryTab from "../../../components/version/VersionHistoryTab";
+import CreateVersionModal from "../../../components/version/CreateVersionModal";
+import RollbackConfirmModal from "../../../components/version/RollbackConfirmModal";
+import VersionCompareView from "../../../components/version/VersionCompareView";
+import SyncPreviewDrawer from "../../../components/version/SyncPreviewDrawer";
 
 const { Title, Text } = Typography;
 

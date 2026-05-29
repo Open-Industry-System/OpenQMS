@@ -12,9 +12,9 @@ import {
 import {
   getSC, updateSC, createSC,
   safetySubmit, safetyApprove, safetyReject, safetyCancel,
-} from "../../api/specialCharacteristic";
-import type { SpecialCharacteristic } from "../../types";
-import { useAuthStore } from "../../store/authStore";
+} from "../../../api/specialCharacteristic";
+import type { SpecialCharacteristic } from "../../../types";
+import { useAuthStore } from "../../../store/authStore";
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;

@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Table, Tag, Typography, Space, App, Card, Row, Col, Statistic, Button } from "antd";
 import { ApartmentOutlined, CheckCircleOutlined } from "@ant-design/icons";
-import { getMatrix } from "../../api/specialCharacteristic";
-import type { MatrixRow } from "../../types";
-import { useProductLineStore } from "../../store/productLineStore";
+import { getMatrix } from "../../../api/specialCharacteristic";
+import type { MatrixRow } from "../../../types";
+import { useProductLineStore } from "../../../store/productLineStore";
 
 const { Title } = Typography;
 

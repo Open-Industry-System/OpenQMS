@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, Tag, Button, Space, Descriptions, Modal, Input, Select, message, Spin, Row, Col, Table } from "antd";
-import { getPPAP, updatePPAPElement, transitionPPAP, deletePPAP } from "../../api/ppap";
+import { getPPAP, updatePPAPElement, transitionPPAP, deletePPAP } from "../../../api/ppap";
 import { STATUS_COLORS, STATUS_LABELS, LEVEL_LABELS } from "./PPAPListPage";
-import type { PPAPSubmission, PPAPElement } from "../../types";
+import type { PPAPSubmission, PPAPElement } from "../../../types";
 
 const ELEMENT_STATUS_COLORS: Record<string, string> = {
   pending: "default",

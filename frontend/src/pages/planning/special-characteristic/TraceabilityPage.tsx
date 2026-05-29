@@ -7,8 +7,8 @@ import {
   ExperimentOutlined,
   BarChartOutlined,
 } from '@ant-design/icons';
-import client from '../../api/client';
-import type { SpecialCharacteristic } from '../../types/specialCharacteristic';
+import client from '../../../api/client';
+import type { SpecialCharacteristic } from '../../../types/specialCharacteristic';
 
 const { Title, Text } = Typography;
 

@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Tag, Typography, Modal, Form, Input, Select, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
-import { listFMEAs, createFMEA, updateFMEA } from "../../api/fmea";
-import type { FMEADocument, GraphNode, GraphEdge } from "../../types";
-import GenerationWizard from "../../components/dfmea/GenerationWizard";
-import { useAuthStore } from "../../store/authStore";
-import { useProductLineStore } from "../../store/productLineStore";
+import { listFMEAs, createFMEA, updateFMEA } from "../../../api/fmea";
+import type { FMEADocument, GraphNode, GraphEdge } from "../../../types";
+import GenerationWizard from "../../../components/dfmea/GenerationWizard";
+import { useAuthStore } from "../../../store/authStore";
+import { useProductLineStore } from "../../../store/productLineStore";
 
 const { Title } = Typography;
 

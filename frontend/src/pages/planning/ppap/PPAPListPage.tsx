@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Table, Tag, Tabs, Button, Select, Space, Modal, Form, Input, InputNumber, message, Card, Row, Col } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { listPPAPs, createPPAP } from "../../api/ppap";
-import { listSuppliers } from "../../api/supplier";
-import type { PPAPSubmission, PPAPListResponse, Supplier } from "../../types";
+import { listPPAPs, createPPAP } from "../../../api/ppap";
+import { listSuppliers } from "../../../api/supplier";
+import type { PPAPSubmission, PPAPListResponse, Supplier } from "../../../types";
 
 const STATUS_TABS = [
   { key: "all", label: "全部" },
