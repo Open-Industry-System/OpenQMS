@@ -182,6 +182,15 @@ async def create_supplier(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/{supplier_id}/related")
+async def get_supplier_related(
+    supplier_id: uuid.UUID,
+    db=Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    return await supplier_service.get_supplier_related(db, supplier_id)
+
+
 @router.get("/{supplier_id}", response_model=schemas.supplier.SupplierResponse)
 async def get_supplier(supplier_id: uuid.UUID, db=Depends(get_db), _user=Depends(get_current_user)):
     supplier = await supplier_service.get_supplier(db, supplier_id)

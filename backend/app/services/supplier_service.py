@@ -727,3 +727,42 @@ async def get_expiry_alerts(db: AsyncSession, days: int = 90) -> list[dict]:
         })
 
     return alerts
+
+
+async def get_supplier_related(
+    db: AsyncSession, supplier_id: str
+) -> dict:
+    from app.models.customer_quality import CustomerComplaint
+    from app.models.iqc_inspection import IqcInspection
+    from app.models.supplier import SupplierSCAR
+
+    complaints_q = select(CustomerComplaint).where(
+        CustomerComplaint.supplier_id == supplier_id
+    )
+    complaints = (await db.execute(complaints_q)).scalars().all()
+
+    iqc_q = select(IqcInspection).where(
+        IqcInspection.supplier_id == supplier_id,
+        IqcInspection.inspection_result == "reject",
+    )
+    iqc_rejects = (await db.execute(iqc_q)).scalars().all()
+
+    scar_q = select(SupplierSCAR).where(
+        SupplierSCAR.supplier_id == supplier_id
+    )
+    scars = (await db.execute(scar_q)).scalars().all()
+
+    return {
+        "complaints": [
+            {"id": str(c.complaint_id), "no": c.complaint_no, "status": c.status}
+            for c in complaints
+        ],
+        "iqc_rejects": [
+            {"id": str(i.inspection_id), "no": i.inspection_no, "result": i.inspection_result}
+            for i in iqc_rejects
+        ],
+        "scars": [
+            {"id": str(s.scar_id), "no": s.scar_no, "status": s.status}
+            for s in scars
+        ],
+    }
