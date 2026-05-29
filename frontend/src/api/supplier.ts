@@ -1,4 +1,5 @@
 import client from "./client";
+import { downloadExcel, uploadExcel, type ImportResult } from "../utils/excel";
 import type {
   Supplier,
   SupplierListResponse,
@@ -157,4 +158,16 @@ export async function exportQualityDashboard(params?: {
   link.click();
   link.remove();
   window.URL.revokeObjectURL(url);
+}
+
+export async function exportSuppliers(params?: Record<string, string | undefined>): Promise<void> {
+  await downloadExcel("/suppliers/export", params || {}, `suppliers_${new Date().toISOString().split("T")[0]}.xlsx`);
+}
+
+export async function downloadSupplierImportTemplate(): Promise<void> {
+  await downloadExcel("/suppliers/import-template", {}, "supplier_import_template.xlsx");
+}
+
+export async function importSuppliers(file: File): Promise<ImportResult> {
+  return uploadExcel("/suppliers/import", file);
 }

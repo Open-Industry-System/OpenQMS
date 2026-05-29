@@ -23,6 +23,8 @@ import {
   StopOutlined,
   CloseCircleOutlined,
   RollbackOutlined,
+  DownloadOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
@@ -36,7 +38,11 @@ import {
   confirmApproved,
   suspendSupplier,
   reinstateSupplier,
+  exportSuppliers,
+  importSuppliers,
+  downloadSupplierImportTemplate,
 } from "../../api/supplier";
+import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
 
 const { Option } = Select;
 
@@ -70,6 +76,8 @@ export default function SupplierListPage() {
 
   const [filterName, setFilterName] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string | undefined>();
+
+  const [importOpen, setImportOpen] = useState(false);
 
   const [expiryDrawerOpen, setExpiryDrawerOpen] = useState(false);
   const [expiryAlerts, setExpiryAlerts] = useState<SupplierExpiryAlert[]>([]);
@@ -366,6 +374,15 @@ export default function SupplierListPage() {
                 新增供应商
               </Button>
             )}
+            <Button icon={<DownloadOutlined />} onClick={() => exportSuppliers({
+              search: filterName || undefined,
+              status: filterStatus,
+            })}>
+              导出
+            </Button>
+            <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+              导入
+            </Button>
             <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
               刷新
             </Button>
@@ -463,6 +480,15 @@ export default function SupplierListPage() {
           ]}
         />
       </Drawer>
+
+      <ImportExcelDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => fetchSuppliers()}
+        importFn={(file) => importSuppliers(file)}
+        templateDownloadFn={downloadSupplierImportTemplate}
+        hint="每行包含: 名称*, 简称*, 联系人, 电话, 邮箱, 地址, 供货范围"
+      />
     </div>
   );
 }
