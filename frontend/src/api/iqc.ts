@@ -1,4 +1,5 @@
 import client from "./client";
+import { downloadExcel, uploadExcel, type ImportResult } from "../utils/excel";
 import type {
   IqcMaterial,
   IqcInspectionTemplate,
@@ -187,4 +188,14 @@ export async function calculateAql(data: {
 export async function getIqcStats(params?: Record<string, unknown>): Promise<IqcStats> {
   const resp = await client.get("/iqc/stats", { params });
   return resp.data;
+}
+
+// ─── Import / Export ───
+
+export async function downloadMaterialImportTemplate(): Promise<void> {
+  await downloadExcel("/iqc/materials/import-template", {}, "iqc_material_import_template.xlsx");
+}
+
+export async function importMaterials(file: File, productLineCode?: string): Promise<ImportResult> {
+  return uploadExcel("/iqc/materials/import", file, productLineCode ? { product_line_code: productLineCode } : {});
 }

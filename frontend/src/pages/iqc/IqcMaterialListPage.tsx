@@ -18,10 +18,12 @@ import {
   ReloadOutlined,
   EditOutlined,
   DeleteOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import type { IqcMaterial } from "../../types";
-import { listMaterials, createMaterial, updateMaterial, deleteMaterial } from "../../api/iqc";
+import { listMaterials, createMaterial, updateMaterial, deleteMaterial, importMaterials, downloadMaterialImportTemplate } from "../../api/iqc";
+import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
 
 const { Option } = Select;
 
@@ -37,6 +39,7 @@ export default function IqcMaterialListPage() {
   const [pageSize, setPageSize] = useState(20);
   const [search, setSearch] = useState("");
 
+  const [importOpen, setImportOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<IqcMaterial | null>(null);
   const [form] = Form.useForm();
@@ -202,6 +205,11 @@ export default function IqcMaterialListPage() {
                 新增物料
               </Button>
             )}
+            {!isViewer && (
+              <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+                导入物料
+              </Button>
+            )}
             <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
               刷新
             </Button>
@@ -293,6 +301,15 @@ export default function IqcMaterialListPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <ImportExcelDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => fetchMaterials()}
+        importFn={(file) => importMaterials(file)}
+        templateDownloadFn={downloadMaterialImportTemplate}
+        hint="每行: 物料号*, 名称*, 规格, 类型, 默认AQL, 检验水平, 单位, 产品线"
+      />
     </div>
   );
 }
