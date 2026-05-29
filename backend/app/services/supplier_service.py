@@ -138,6 +138,90 @@ async def export_suppliers_excel(
     return workbook_to_bytes(wb)
 
 
+async def bulk_import_suppliers(
+    db: AsyncSession,
+    rows: list[dict],
+    user_id: uuid.UUID,
+) -> "ImportResult":
+    from app.utils.excel import ImportError as ExcelImportError, ImportResult, MAX_IMPORT_ROWS
+
+    if len(rows) > MAX_IMPORT_ROWS:
+        return ImportResult(0, [ExcelImportError(0, "", f"导入行数超过上限 {MAX_IMPORT_ROWS}")])
+
+    # 预检查 DB 已存在
+    existing_names: set[str] = set()
+    existing_short: set[str] = set()
+    for row in rows:
+        name = row.get("name")
+        short = row.get("short_name")
+        if name:
+            r = await db.execute(select(Supplier.supplier_id).where(Supplier.name == name))
+            if r.scalar_one_or_none():
+                existing_names.add(name)
+        if short:
+            r = await db.execute(select(Supplier.supplier_id).where(Supplier.short_name == short))
+            if r.scalar_one_or_none():
+                existing_short.add(short)
+
+    # 逐行校验
+    errors = []
+    seen_names: set[str] = set()
+    seen_short: set[str] = set()
+    validated = []
+    for row in rows:
+        row_no = row.pop("_row")
+        errs = []
+        if not row.get("name"):
+            errs.append(ExcelImportError(row_no, "name", "名称为必填项"))
+        if not row.get("short_name"):
+            errs.append(ExcelImportError(row_no, "short_name", "简称为必填项"))
+        name = row.get("name")
+        short = row.get("short_name")
+        if name and name in seen_names:
+            errs.append(ExcelImportError(row_no, "name", f"批次内重复: {name}"))
+        if short and short in seen_short:
+            errs.append(ExcelImportError(row_no, "short_name", f"批次内重复: {short}"))
+        if name and name in existing_names:
+            errs.append(ExcelImportError(row_no, "name", f"数据库已存在: {name}"))
+        if short and short in existing_short:
+            errs.append(ExcelImportError(row_no, "short_name", f"数据库已存在: {short}"))
+        if errs:
+            errors.extend(errs)
+        else:
+            seen_names.add(name)
+            seen_short.add(short)
+            validated.append((row_no, row))
+
+    if errors:
+        return ImportResult(0, errors)
+
+    # 批量创建
+    created = []
+    try:
+        from datetime import datetime as dt
+        for row_no, row in validated:
+            supplier_no = await _generate_supplier_no(db, dt.now().year)
+            supplier = Supplier(
+                supplier_no=supplier_no, name=row["name"], short_name=row["short_name"],
+                contact_name=row.get("contact_name"), contact_phone=row.get("contact_phone"),
+                contact_email=row.get("contact_email"), address=row.get("address"),
+                product_scope=row.get("product_scope"), status="pending_review", created_by=user_id,
+            )
+            db.add(supplier)
+            await db.flush()
+            db.add(AuditLog(
+                table_name="suppliers", record_id=supplier.supplier_id,
+                action="CREATE", changed_fields={"supplier_no": supplier_no, "name": row["name"]},
+                operated_by=user_id,
+            ))
+            created.append(supplier)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return ImportResult(0, [ExcelImportError(0, "", "数据库写入冲突，请重试")])
+    return ImportResult(len(created), [])
+
+
 async def get_supplier(db: AsyncSession, supplier_id: uuid.UUID) -> Supplier | None:
     return await db.get(Supplier, supplier_id)
 

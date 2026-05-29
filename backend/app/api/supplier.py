@@ -2,7 +2,7 @@ import uuid
 from datetime import date as date_type
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,48 @@ async def export_suppliers(
 ):
     excel_bytes = await supplier_service.export_suppliers_excel(db, status, grade, search)
     return excel_response(excel_bytes, f"suppliers_{date_type.today().strftime('%Y%m%d')}.xlsx")
+
+
+# Import MUST be before "/{supplier_id}"
+@router.post("/import")
+async def import_suppliers(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError
+    from dataclasses import asdict
+    from fastapi.responses import JSONResponse
+
+    raw = await file.read()
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="文件超过 10MB 限制")
+
+    header_mapping = {
+        "名称*": "name", "简称*": "short_name",
+        "联系人": "contact_name", "电话": "contact_phone",
+        "邮箱": "contact_email", "地址": "address",
+        "供货范围": "product_scope",
+    }
+    try:
+        rows = parse_upload(raw, header_mapping, required_headers=["名称*", "简称*"])
+    except ExcelParseError as e:
+        return JSONResponse(status_code=422, content={"imported_count": 0, "errors": [{"row": 0, "field": "", "message": str(e)}]})
+
+    result = await supplier_service.bulk_import_suppliers(db, rows, user.user_id)
+    if result.errors:
+        return JSONResponse(status_code=422, content={"imported_count": 0, "errors": [asdict(e) for e in result.errors]})
+    return {"imported_count": result.imported_count, "errors": []}
+
+
+# Import template MUST be before "/{supplier_id}"
+@router.get("/import-template")
+async def download_supplier_import_template():
+    headers = ["名称*", "简称*", "联系人", "电话", "邮箱", "地址", "供货范围"]
+    example = ["示例供应商", "示例", "张三", "13800138000", "test@example.com", "上海市", "电子元器件"]
+    from app.utils.excel import create_template
+    template_bytes = create_template(headers, "供应商导入模板", example)
+    return excel_response(template_bytes, "supplier_import_template.xlsx")
 
 
 # Stats MUST be before "/{supplier_id}" to avoid routing conflict
