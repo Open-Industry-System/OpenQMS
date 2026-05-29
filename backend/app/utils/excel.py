@@ -96,43 +96,45 @@ def parse_upload(
     except (zipfile.BadZipFile, OSError, InvalidFileException) as e:
         raise ExcelParseError(f"文件格式无效，仅支持 .xlsx 格式: {e}")
 
-    ws = wb.worksheets[sheet_index]
-    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+    try:
+        ws = wb.worksheets[sheet_index]
+        header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
 
-    col_map: dict[int, str] = {}
-    matched_headers: set[str] = set()
-    for col_idx, header in enumerate(header_row):
-        if header:
-            header_clean = str(header).strip().lower()
-            for cn_header, internal_key in header_mapping.items():
-                if cn_header.strip().lower() == header_clean:
-                    col_map[col_idx] = internal_key
-                    matched_headers.add(cn_header.strip().lower())
-                    break
+        col_map: dict[int, str] = {}
+        matched_headers: set[str] = set()
+        for col_idx, header in enumerate(header_row):
+            if header:
+                header_clean = str(header).strip().lower()
+                for cn_header, internal_key in header_mapping.items():
+                    if cn_header.strip().lower() == header_clean:
+                        col_map[col_idx] = internal_key
+                        matched_headers.add(cn_header.strip().lower())
+                        break
 
-    if required_headers:
-        for req in required_headers:
-            if req.strip().lower() not in matched_headers:
-                raise ExcelParseError(f"缺少必需表头：{req}")
+        if required_headers:
+            for req in required_headers:
+                if req.strip().lower() not in matched_headers:
+                    raise ExcelParseError(f"缺少必需表头：{req}")
 
-    rows = []
-    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        record = {}
-        all_none = True
-        for col_idx, internal_key in col_map.items():
-            value = row[col_idx] if col_idx < len(row) else None
-            if value is not None:
-                # trim 字符串值，避免 "   " 通过必填校验
-                if isinstance(value, str):
-                    value = value.strip()
-                if value is not None and value != "":
-                    record[internal_key] = value
-                    all_none = False
-        if not all_none:
-            rows.append({"_row": row_idx, **record})
+        rows = []
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            record = {}
+            all_none = True
+            for col_idx, internal_key in col_map.items():
+                value = row[col_idx] if col_idx < len(row) else None
+                if value is not None:
+                    # trim 字符串值，避免 "   " 通过必填校验
+                    if isinstance(value, str):
+                        value = value.strip()
+                    if value is not None and value != "":
+                        record[internal_key] = value
+                        all_none = False
+            if not all_none:
+                rows.append({"_row": row_idx, **record})
 
-    wb.close()
-    return rows
+        return rows
+    finally:
+        wb.close()
 
 
 def coerce_datetime(value: Any) -> datetime | None:

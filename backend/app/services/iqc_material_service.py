@@ -108,7 +108,7 @@ async def bulk_import_materials(
     seen = set()
     validated = []
     for row in rows:
-        row_no = row.pop("_row")
+        row_no = row["_row"]
         errs = []
         if not row.get("part_no"):
             errs.append(ExcelImportError(row_no, "part_no", "物料号为必填项"))

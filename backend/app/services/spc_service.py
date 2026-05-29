@@ -602,7 +602,7 @@ async def bulk_import_samples(
     attribute_charts = {"p", "np", "c", "u"}
 
     for row in rows:
-        row_no = row.pop("_row")
+        row_no = row["_row"]
         errs = []
 
         if not row.get("batch_no"):
@@ -684,7 +684,7 @@ async def bulk_import_samples(
                 data["defect_count"] = row["defect_count"]
                 data["values"] = []
             else:
-                data["values"] = row.pop("_values")
+                data["values"] = row["_values"]
             batch = await _create_sample_batch_inner(db, user_id, ic.ic_id, data)
             created.append(batch)
 

@@ -172,7 +172,7 @@ async def bulk_import_suppliers(
     seen_short: set[str] = set()
     validated = []
     for row in rows:
-        row_no = row.pop("_row")
+        row_no = row["_row"]
         errs = []
         if not row.get("name"):
             errs.append(ExcelImportError(row_no, "name", "名称为必填项"))
