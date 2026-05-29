@@ -92,6 +92,9 @@ async def bulk_import_materials(
     if len(rows) > MAX_IMPORT_ROWS:
         return ImportResult(0, [ExcelImportError(0, "", f"导入行数超过上限 {MAX_IMPORT_ROWS}")])
 
+    if not rows:
+        return ImportResult(0, [ExcelImportError(0, "", "没有可导入的数据行")])
+
     # 预检查 DB 已存在的 part_no
     existing: set[str] = set()
     for row in rows:

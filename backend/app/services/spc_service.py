@@ -587,6 +587,9 @@ async def bulk_import_samples(
     if len(rows) > MAX_IMPORT_ROWS:
         return ImportResult(0, [ExcelImportError(0, "", f"导入行数超过上限 {MAX_IMPORT_ROWS}")])
 
+    if not rows:
+        return ImportResult(0, [ExcelImportError(0, "", "没有可导入的数据行")])
+
     # 预检查 DB 已存在的 batch_no
     result = await db.execute(
         select(SampleBatch.batch_no).where(SampleBatch.ic_id == ic.ic_id)

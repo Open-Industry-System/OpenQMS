@@ -122,8 +122,12 @@ def parse_upload(
         for col_idx, internal_key in col_map.items():
             value = row[col_idx] if col_idx < len(row) else None
             if value is not None:
-                record[internal_key] = value
-                all_none = False
+                # trim 字符串值，避免 "   " 通过必填校验
+                if isinstance(value, str):
+                    value = value.strip()
+                if value is not None and value != "":
+                    record[internal_key] = value
+                    all_none = False
         if not all_none:
             rows.append({"_row": row_idx, **record})
 

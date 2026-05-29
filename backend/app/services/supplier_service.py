@@ -148,6 +148,9 @@ async def bulk_import_suppliers(
     if len(rows) > MAX_IMPORT_ROWS:
         return ImportResult(0, [ExcelImportError(0, "", f"导入行数超过上限 {MAX_IMPORT_ROWS}")])
 
+    if not rows:
+        return ImportResult(0, [ExcelImportError(0, "", "没有可导入的数据行")])
+
     # 预检查 DB 已存在
     existing_names: set[str] = set()
     existing_short: set[str] = set()
