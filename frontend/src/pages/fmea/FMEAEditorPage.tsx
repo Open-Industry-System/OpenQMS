@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Select, Table, Card, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
@@ -23,6 +23,7 @@ import VersionHistoryTab from "../../components/version/VersionHistoryTab";
 import CreateVersionModal from "../../components/version/CreateVersionModal";
 import RollbackConfirmModal from "../../components/version/RollbackConfirmModal";
 import VersionCompareView from "../../components/version/VersionCompareView";
+import RelatedCAPAList from "../../components/cross-links/RelatedCAPAList";
 
 const { Title, Text } = Typography;
 
@@ -77,6 +78,10 @@ export default function FMEAEditorPage() {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [selectedFunctionId, setSelectedFunctionId] = useState<string | null>(null);
+
+  const [searchParams] = useSearchParams();
+  const highlightNodeId = searchParams.get("node");
+  const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(null);
 
   const user = useAuthStore((s) => s.user);
   const isViewer = user?.role === "viewer";
@@ -187,6 +192,21 @@ export default function FMEAEditorPage() {
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   const rows = useMemo(() => buildRows(nodes, edges), [nodes, edges]);
+
+  useEffect(() => {
+    if (highlightNodeId && rows.length > 0) {
+      const targetRow = rows.find(
+        (r) => r.failureModeNodeId === highlightNodeId
+      );
+      if (targetRow) {
+        setHighlightedRowKey(targetRow.key);
+        setTimeout(() => {
+          const el = document.querySelector(`[data-row-key="${targetRow.key}"]`);
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 300);
+      }
+    }
+  }, [highlightNodeId, rows]);
 
   const rowsByFunction = useMemo(() => {
     const groups: Record<string, FMEARow[]> = {};
@@ -843,6 +863,7 @@ export default function FMEAEditorPage() {
                 const classes = [];
                 if (selectedFunctionId && row.functionNodeId === selectedFunctionId) classes.push("fmea-row-highlight");
                 if (severityWarnings.includes(row.failureModeNodeId)) classes.push("severity-warning-row");
+                if (row.key === highlightedRowKey) classes.push("highlighted-row");
                 return classes.join(" ");
               }}
             />
@@ -940,12 +961,30 @@ export default function FMEAEditorPage() {
         .severity-warning-row td:first-child {
           border-left: 3px solid #faad14 !important;
         }
+        .highlighted-row td {
+          background-color: #fffbe6 !important;
+        }
+        .highlighted-row td:first-child {
+          border-left: 3px solid #faad14 !important;
+        }
       `}</style>
 
       <Divider />
       <Text type="secondary" style={{ fontSize: 11 }}>
         S=严重度 O=发生度 D=探测度 | RPN=风险优先数 | AP=措施优先级 (H=高 M=中 L=低) | 带 ' = 改进后评分
       </Text>
+        </Tabs.TabPane>
+        <Tabs.TabPane tab="关联 CAPA" key="related-capa">
+          {selectedFunctionId ? (
+            <RelatedCAPAList
+              fmeaId={fmea!.fmea_id}
+              fmeaNodeId={selectedFunctionId}
+            />
+          ) : (
+            <Typography.Text type="secondary">
+              请先在编辑器中选择一个失效模式行
+            </Typography.Text>
+          )}
         </Tabs.TabPane>
         <Tabs.TabPane tab={<span><HistoryOutlined /> 版本历史</span>} key="history">
           <VersionHistoryTab
