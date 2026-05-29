@@ -1,26 +1,45 @@
 import { useEffect, useState } from "react";
-import { Row, Col, Card, Table, Tag, Typography } from "antd";
+import { Row, Col, Card, List, Button, Tag, Typography, Space, Statistic } from "antd";
+import {
+  AlertOutlined,
+  ClockCircleOutlined,
+  WarningOutlined,
+  RiseOutlined,
+  PlusOutlined,
+} from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import { getDashboard } from "../../api/dashboard";
-import KPICard from "../../components/shared/KPICard";
-import type { DashboardData } from "../../types";
+import {
+  getDashboardSummary,
+  getDashboardAlerts,
+  getDashboardRecentActions,
+} from "../../api/dashboard";
+import type { DashboardSummary, DashboardAlerts, DashboardRecentAction } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
 
 const { Title } = Typography;
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
   const productLine = useProductLineStore((s) => s.selected);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [alerts, setAlerts] = useState<DashboardAlerts | null>(null);
+  const [recentActions, setRecentActions] = useState<DashboardRecentAction[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getDashboard(productLine || undefined)
-      .then(setData)
+    setLoading(true);
+    Promise.all([
+      getDashboardSummary(productLine || undefined),
+      getDashboardAlerts(productLine || undefined),
+      getDashboardRecentActions(),
+    ])
+      .then(([s, a, r]) => {
+        setSummary(s);
+        setAlerts(a);
+        setRecentActions(r);
+      })
       .finally(() => setLoading(false));
   }, [productLine]);
-
-  const kpi = data?.kpi;
 
   return (
     <div>
@@ -28,175 +47,173 @@ export default function DashboardPage() {
         质量仪表盘
       </Title>
 
+      {/* 顶部指标卡 */}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} lg={6}>
-          <KPICard title="FMEA 文档总数" value={kpi?.total_fmea ?? 0} color="#1677FF" />
+          <Card hoverable onClick={() => navigate("/capa?pending_action=true")}>
+            <Statistic
+              title="待办事项"
+              value={summary?.pending_actions ?? 0}
+              prefix={<ClockCircleOutlined />}
+              valueStyle={{ color: (summary?.pending_actions ?? 0) > 0 ? "#FAAD14" : "#52C41A" }}
+            />
+          </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <KPICard title="已批准 FMEA" value={kpi?.approved_fmea ?? 0} color="#52C41A" />
+          <Card hoverable onClick={() => navigate("/capa?overdue=true")}>
+            <Statistic
+              title="超期任务"
+              value={summary?.overdue_tasks ?? 0}
+              prefix={<AlertOutlined />}
+              valueStyle={{ color: (summary?.overdue_tasks ?? 0) > 0 ? "#FF4D4F" : "#52C41A" }}
+            />
+          </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <KPICard title="开放 8D 报告" value={kpi?.open_capa ?? 0} color="#FAAD14" />
+          <Card hoverable onClick={() => navigate("/fmea?risk=high")}>
+            <Statistic
+              title="高风险项"
+              value={summary?.high_risk_items ?? 0}
+              prefix={<WarningOutlined />}
+              valueStyle={{ color: (summary?.high_risk_items ?? 0) > 0 ? "#FF4D4F" : "#52C41A" }}
+            />
+          </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <KPICard
-            title="超期 8D"
-            value={kpi?.overdue_capa ?? 0}
-            color={kpi && kpi.overdue_capa > 0 ? "#FF4D4F" : "#52C41A"}
-          />
+          <Card>
+            <Statistic
+              title="本月趋势"
+              value={summary?.month_trend ?? 0}
+              prefix={<RiseOutlined />}
+              valueStyle={{
+                color: (summary?.month_trend ?? 0) >= 0 ? "#52C41A" : "#FF4D4F",
+              }}
+            />
+          </Card>
         </Col>
       </Row>
 
+      {/* 风险预警区 */}
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} sm={12} lg={6}>
-          <KPICard
-            title="平均 RPN"
-            value={kpi?.avg_rpn ?? 0}
-            color={
-              kpi && kpi.avg_rpn >= 100
-                ? "#FF4D4F"
-                : kpi && kpi.avg_rpn >= 50
-                  ? "#FAAD14"
-                  : "#52C41A"
-            }
-          />
+        <Col xs={24} lg={8}>
+          <Card title="高 RPN FMEA" size="small" loading={loading}>
+            <List
+              dataSource={alerts?.high_rpn_fmeas ?? []}
+              locale={{ emptyText: "无高风险项" }}
+              renderItem={(item) => (
+                <List.Item
+                  style={{ cursor: "pointer" }}
+                  onClick={() => navigate(`/fmea/${item.fmea_id}`)}
+                >
+                  <List.Item.Meta
+                    title={item.document_no}
+                    description={item.node_name}
+                  />
+                  <Tag color="error">RPN={item.rpn}</Tag>
+                </List.Item>
+              )}
+            />
+          </Card>
         </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <KPICard
-            title="高风险项 (RPN≥100)"
-            value={kpi?.high_rpn_count ?? 0}
-            color={kpi && kpi.high_rpn_count > 0 ? "#FF4D4F" : "#52C41A"}
-          />
+        <Col xs={24} lg={8}>
+          <Card title="超期 CAPA" size="small" loading={loading}>
+            <List
+              dataSource={alerts?.overdue_capas ?? []}
+              locale={{ emptyText: "无超期任务" }}
+              renderItem={(item) => (
+                <List.Item
+                  style={{ cursor: "pointer" }}
+                  onClick={() => navigate(`/capa/${item.report_id}`)}
+                >
+                  <List.Item.Meta
+                    title={item.document_no}
+                    description={`超期 ${item.overdue_days} 天`}
+                  />
+                  <Tag color="error">{item.overdue_days}天</Tag>
+                </List.Item>
+              )}
+            />
+          </Card>
         </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <KPICard title="8D 报告总数" value={kpi?.total_capa ?? 0} color="#1677FF" />
+        <Col xs={24} lg={8}>
+          <Card title="PPM 超标供应商" size="small" loading={loading}>
+            <List
+              dataSource={alerts?.high_ppm_suppliers ?? []}
+              locale={{ emptyText: "无超标供应商" }}
+              renderItem={(item) => (
+                <List.Item
+                  style={{ cursor: "pointer" }}
+                  onClick={() => navigate(`/suppliers/${item.supplier_id}`)}
+                >
+                  <List.Item.Meta
+                    title={item.supplier_name}
+                    description={`PPM: ${item.ppm}`}
+                  />
+                  <Tag color="warning">PPM={item.ppm}</Tag>
+                </List.Item>
+              )}
+            />
+          </Card>
         </Col>
       </Row>
 
+      {/* 底部：最近操作 + 快速入口 */}
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} sm={12} lg={6}>
-          <div onClick={() => navigate("/special-characteristics?approval_status=submitted")} style={{ cursor: "pointer" }}>
-            <KPICard
-              title="待安全审批"
-              value={kpi?.pending_safety_approval ?? 0}
-              color={kpi && kpi.pending_safety_approval > 0 ? "#FF4D4F" : "#52C41A"}
+        <Col xs={24} lg={16}>
+          <Card title="最近操作" size="small" loading={loading}>
+            <List
+              dataSource={recentActions}
+              locale={{ emptyText: "暂无操作记录" }}
+              renderItem={(item) => {
+                const typeMap: Record<string, { label: string; path: string }> = {
+                  fmea_documents: { label: "FMEA", path: "/fmea" },
+                  capa_eightd: { label: "CAPA", path: "/capa" },
+                };
+                const info = typeMap[item.table_name] || {
+                  label: item.table_name,
+                  path: "/",
+                };
+                return (
+                  <List.Item
+                    style={{ cursor: "pointer" }}
+                    onClick={() => navigate(`${info.path}/${item.record_id}`)}
+                  >
+                    <List.Item.Meta
+                      title={`${info.label} - ${item.entity_no}`}
+                      description={`${item.action} · ${new Date(item.operated_at).toLocaleString("zh-CN")}`}
+                    />
+                  </List.Item>
+                );
+              }}
             />
-          </div>
+          </Card>
         </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <div onClick={() => navigate("/special-characteristics?suggested_only=true")} style={{ cursor: "pointer" }}>
-            <KPICard
-              title="安全建议待确认"
-              value={kpi?.safety_suggestions ?? 0}
-              color={kpi && kpi.safety_suggestions > 0 ? "#FAAD14" : "#52C41A"}
-            />
-          </div>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <KPICard title="安全特性总数" value={kpi?.total_safety ?? 0} color="#1677FF" />
-        </Col>
-      </Row>
-
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} sm={12} lg={6}>
-          <KPICard title="管理评审总数" value={kpi?.management_review?.total_reviews ?? 0} color="#1677FF" />
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <div onClick={() => navigate("/management-reviews")} style={{ cursor: "pointer" }}>
-            <KPICard
-              title="评审措施完成率"
-              value={Math.round((kpi?.management_review?.completion_rate ?? 0) * 1000) / 10}
-              suffix="%"
-              color={
-                (kpi?.management_review?.completion_rate ?? 0) >= 0.8
-                  ? "#52C41A"
-                  : (kpi?.management_review?.completion_rate ?? 0) >= 0.5
-                    ? "#FAAD14"
-                    : "#FF4D4F"
-              }
-            />
-          </div>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <KPICard
-            title="待验证措施"
-            value={kpi?.management_review?.pending_verification ?? 0}
-            color={kpi && kpi.management_review && kpi.management_review.pending_verification > 0 ? "#FAAD14" : "#52C41A"}
-          />
-        </Col>
-      </Row>
-
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col span={24}>
-          <Card title="数据概览" loading={loading}>
-            <Table
-              dataSource={[
-                {
-                  key: "fmea",
-                  metric: "FMEA 文档",
-                  total: kpi?.total_fmea ?? 0,
-                  approved: kpi?.approved_fmea ?? 0,
-                },
-                {
-                  key: "capa",
-                  metric: "8D 报告",
-                  total: kpi?.total_capa ?? 0,
-                  open: kpi?.open_capa ?? 0,
-                  overdue: kpi?.overdue_capa ?? 0,
-                },
-                {
-                  key: "rpn",
-                  metric: "风险指标",
-                  avg_rpn: kpi?.avg_rpn ?? 0,
-                  high_risk: kpi?.high_rpn_count ?? 0,
-                },
-              ]}
-              columns={[
-                { title: "指标", dataIndex: "metric", key: "metric" },
-                { title: "总数", dataIndex: "total", key: "total", render: (v: number) => v ?? "-" },
-                { title: "已批准", dataIndex: "approved", key: "approved", render: (v: number) => v ?? "-" },
-                {
-                  title: "进行中",
-                  dataIndex: "open",
-                  key: "open",
-                  render: (v: number) =>
-                    v !== undefined ? <Tag color="processing">{v}</Tag> : "-",
-                },
-                {
-                  title: "超期",
-                  dataIndex: "overdue",
-                  key: "overdue",
-                  render: (v: number) =>
-                    v !== undefined && v > 0 ? (
-                      <Tag color="error">{v}</Tag>
-                    ) : v === 0 ? (
-                      <Tag color="success">0</Tag>
-                    ) : (
-                      "-"
-                    ),
-                },
-                {
-                  title: "平均 RPN",
-                  dataIndex: "avg_rpn",
-                  key: "avg_rpn",
-                  render: (v: number) => (v !== undefined ? v : "-"),
-                },
-                {
-                  title: "高风险",
-                  dataIndex: "high_risk",
-                  key: "high_risk",
-                  render: (v: number) =>
-                    v !== undefined && v > 0 ? (
-                      <Tag color="error">{v}</Tag>
-                    ) : v === 0 ? (
-                      <Tag color="success">0</Tag>
-                    ) : (
-                      "-"
-                    ),
-                },
-              ]}
-              pagination={false}
-            />
+        <Col xs={24} lg={8}>
+          <Card title="快速入口" size="small">
+            <Space direction="vertical" style={{ width: "100%" }}>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                block
+                onClick={() => navigate("/fmea")}
+              >
+                新建 FMEA
+              </Button>
+              <Button
+                icon={<PlusOutlined />}
+                block
+                onClick={() => navigate("/capa")}
+              >
+                新建 CAPA
+              </Button>
+              <Button
+                icon={<PlusOutlined />}
+                block
+                onClick={() => navigate("/customer-quality")}
+              >
+                新建客诉
+              </Button>
+            </Space>
           </Card>
         </Col>
       </Row>
