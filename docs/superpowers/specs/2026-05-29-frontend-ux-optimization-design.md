@@ -38,15 +38,30 @@
 当前 `AppLayout.tsx:79` 用 `"/" + location.pathname.split("/")[1]` 算选中项。分组后需要维护一个路由→分组映射表：
 
 ```typescript
-// 路由前缀 → 所属分组 key
-const ROUTE_GROUP_MAP: Record<string, string> = {
+// 所有菜单 key 列表（用于最长前缀匹配）
+const MENU_KEYS = [
+  "/dashboard",
+  "/fmea", "/control-plans", "/apqp", "/ppap",
+  "/special-characteristics", "/special-characteristics/matrix", "/special-characteristics/traceability",
+  "/spc", "/msa/gauges", "/msa/studies", "/quality-goals",
+  "/internal-audits", "/management-reviews",
+  "/customer-quality", "/customer-audits", "/capa",
+  "/suppliers", "/suppliers/quality",
+  "/iqc/inspections", "/iqc/materials", "/scars",
+];
+
+// 菜单 key → 所属分组 key
+const MENU_KEY_TO_GROUP: Record<string, string> = {
   "/fmea": "grp:planning",
   "/control-plans": "grp:planning",
   "/apqp": "grp:planning",
   "/ppap": "grp:planning",
   "/special-characteristics": "grp:planning",
+  "/special-characteristics/matrix": "grp:planning",
+  "/special-characteristics/traceability": "grp:planning",
   "/spc": "grp:shopfloor",
-  "/msa": "grp:shopfloor",
+  "/msa/gauges": "grp:shopfloor",
+  "/msa/studies": "grp:shopfloor",
   "/quality-goals": "grp:shopfloor",
   "/internal-audits": "grp:shopfloor",
   "/management-reviews": "grp:shopfloor",
@@ -54,13 +69,30 @@ const ROUTE_GROUP_MAP: Record<string, string> = {
   "/customer-audits": "grp:customer",
   "/capa": "grp:customer",
   "/suppliers": "grp:supplier",
-  "/iqc": "grp:supplier",
+  "/suppliers/quality": "grp:supplier",
+  "/iqc/inspections": "grp:supplier",
+  "/iqc/materials": "grp:supplier",
   "/scars": "grp:supplier",
 };
+
+function getSelectedMenuKey(pathname: string): string {
+  // 最长前缀匹配：遍历所有菜单 key，找与 pathname 前缀匹配的最长项
+  // 例如 /suppliers/quality 匹配 /suppliers/quality（长度 20），而不是 /suppliers（长度 10）
+  const matched = MENU_KEYS
+    .filter((key) => pathname === key || pathname.startsWith(key + "/"))
+    .sort((a, b) => b.length - a.length);
+  return matched[0] || "/dashboard";
+}
+
+// 使用方式：
+const selectedKey = getSelectedMenuKey(location.pathname);
+const openKeys = MENU_KEY_TO_GROUP[selectedKey]
+  ? [MENU_KEY_TO_GROUP[selectedKey]]
+  : [];
 ```
 
-- `selectedKeys`：保持现有逻辑 `"/" + pathname.split("/")[1]`
-- `openKeys`：通过 `ROUTE_GROUP_MAP[selectedKey]` 自动展开当前分组
+- `selectedKeys`：最长前缀匹配，确保 `/suppliers/quality` 选中 `/suppliers/quality` 而非 `/suppliers`
+- `openKeys`：通过匹配到的菜单 key 查 `MENU_KEY_TO_GROUP` 自动展开分组
 - 折叠态（`collapsed=true`）：SubMenu 自动变成 popup 子菜单，hover 展开
 
 ### 交互细节
@@ -111,7 +143,17 @@ const ROUTE_GROUP_MAP: Record<string, string> = {
 | 待办事项 | 跳转到各模块待办列表（待审批 FMEA + 待推进 CAPA + 未关闭客诉） |
 | 超期任务 | 跳转到 CAPA 列表，筛选"超期" |
 | 高风险项 | 跳转到 FMEA 列表，筛选"RPN≥100" |
-| 本月趋势 | 显示本月 vs 上月数据变化量 |
+| 本月趋势 | 显示本月 vs 上月数据变化量（纯展示，不跳转） |
+
+各列表页需支持以下 query 参数以实现仪表盘跳转筛选：
+
+| 列表页 | 支持的 query 参数 | 说明 |
+|--------|------------------|------|
+| `/fmea` | `?risk=high` | 筛选 RPN≥100 的 FMEA 文档 |
+| `/capa` | `?overdue=true` | 筛选超期未关闭的 CAPA |
+| `/customer-quality` | `?status=open` | 筛选未关闭客诉 |
+| `/fmea` | `?pending_approval=true` | 筛选待审批 FMEA |
+| `/capa` | `?pending_action=true` | 筛选待推进 CAPA |
 
 ### 风险预警区
 
@@ -123,7 +165,7 @@ const ROUTE_GROUP_MAP: Record<string, string> = {
 
 ### 底部区域
 
-- **最近操作**：当前用户最近写操作的 5 个文档（从现有 `audit_logs` 表查询 `user_id` 匹配的记录，按 `created_at` 降序）。注意：audit_logs 记录的是写操作（创建/编辑/审批），不是页面访问。UI 文案用"最近操作"准确，不需要新增 access log
+- **最近操作**：当前用户最近写操作的 5 个文档（从现有 `audit_logs` 表查询 `operated_by` 匹配的记录，按 `operated_at` 降序）。注意：audit_logs 记录的是写操作（创建/编辑/审批），不是页面访问。UI 文案用"最近操作"准确，不需要新增 access log
 - **快速入口**：新建 FMEA / 新建 CAPA / 新建客诉 的快捷按钮
 
 ### 后端 API 扩展
@@ -161,11 +203,11 @@ interface DashboardData {
     }>;
   };
   recent_actions: Array<{       // 从 audit_logs 查询
-    entity_id: string;          // 操作对象 ID
-    entity_type: string;        // 'fmea' | 'capa' | 'control_plan' | ...
-    entity_no: string;          // 文档编号
-    action: string;             // 'create' | 'update' | 'approve' | ...
-    created_at: string;         // ISO datetime
+    record_id: string;          // 对应 audit_logs.record_id
+    table_name: string;         // 对应 audit_logs.table_name（'fmea_documents' | 'capa_eightd' | ...）
+    entity_no: string;          // 文档编号（从关联表查）
+    action: string;             // 对应 audit_logs.action（'create' | 'update' | 'approve' | ...）
+    operated_at: string;        // 对应 audit_logs.operated_at（ISO datetime）
   }>;
 }
 ```
@@ -220,11 +262,13 @@ interface DashboardData {
 #### 新增关联表
 
 3. **`special_characteristic_links` 关联表**
-   - `sc_id` UUID (FK → `special_characteristics.id`)
+   - `id` UUID (PK)
+   - `sc_id` UUID (FK → `special_characteristics.sc_id`)
    - `source_type` VARCHAR ('fmea' | 'control_plan')
-   - `source_id` UUID (文档 ID)
-   - `node_id` VARCHAR (graph node ID，仅 FMEA 需要)
-   - 复合唯一约束：(`sc_id`, `source_type`, `source_id`)
+   - `source_id` UUID（FMEA 时为 `fmea_documents.fmea_id`，控制计划时为 `control_plans.plan_id`）
+   - `source_item_id` VARCHAR (graph node ID（FMEA）或 `control_plan_items.item_id`（控制计划），定位到具体行)
+   - 复合唯一约束：(`sc_id`, `source_type`, `source_id`, `source_item_id`)
+   - 同一特殊特性可在同一 FMEA 文档的多个节点中出现，也可在同一控制计划的多个项目中出现
 
 ### 通用关联组件
 
@@ -327,6 +371,8 @@ frontend/src/
 
 所有 `←` 标记表示从现有位置迁移。页面文件全部已存在，无遗漏。
 
+**补充：** `pages/supplier/components/` 下的 `CompareView.tsx`、`DashboardView.tsx`、`SupplierDetailView.tsx` 在目录迁移时一并移入 `components/supplier/`。
+
 ### 路由保持不变
 
 所有 URL 路径不变（`/fmea`、`/capa`、`/suppliers` 等），只改文件物理位置和 import 路径。现有书签和链接不受影响。
@@ -369,7 +415,7 @@ FMEA 数据以 JSONB graph 存储（`graph_data` 列），失效模式是 graph 
   1. 跳转到 `/fmea/:fmea_id`
   2. URL 携带 `?node=<fmea_node_id>` 参数
   3. FMEA 编辑器解析参数，自动展开 graph→table 对应行，高亮该失效模式
-- **graph→table 转换：** 复用现有 `fmeaTable.ts` 的 `graphToRows()` 逻辑，找到 node 所在行索引，调用 `scrollToRow()`
+- **graph→table 转换：** 复用现有 `fmeaTable.ts` 的 `buildRows()` 逻辑，遍历返回的行找到 `failureModeNodeId` 匹配的行索引。FMEA 编辑器新增高亮状态（`highlightedRowId`），通过 Ant Table 的 `rowClassName` 给目标行加高亮样式，配合 `scrollIntoView()` 实现自动滚动。需要在 Table 的 row DOM 上加 `ref` 或 `id` 属性以支持 `scrollIntoView()`
 - **多 CAPA 关联：** 一个失效模式节点可被多个 CAPA 引用（一对多），不需要关联表，`fmea_node_id` 在 CAPA 侧存储即可
 
 这个跳转逻辑是 P4 中最复杂的部分，需要 FMEA 编辑器支持 URL 参数定位。
