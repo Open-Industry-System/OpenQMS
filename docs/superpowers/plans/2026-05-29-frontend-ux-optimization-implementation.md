@@ -21,7 +21,7 @@
 
 - [ ] **Step 1: 替换 menuItems 为分组结构**
 
-将 `AppLayout.tsx:31-67` 的 `menuItems` 替换为 SubMenu 分组结构。添加 `ROUTE_GROUP_MAP` 和 `getSelectedMenuKey` 函数：
+将 `AppLayout.tsx:31-67` 的 `menuItems` 替换为 SubMenu 分组结构。添加 `MENU_KEY_TO_OPEN_KEYS` 和 `getSelectedMenuKey` 函数：
 
 ```tsx
 // 所有菜单 key 列表（用于最长前缀匹配）
@@ -884,7 +884,7 @@ git commit -m "feat(dashboard): redesign to three-tier layout with alerts and re
 ### Task 5: Alembic 迁移 — 新增 fmea_node_id 和 supplier_id 字段
 
 **Files:**
-- Create: `backend/alembic/versions/008_add_cross_module_links.py`
+- Create: `backend/alembic/versions/026_add_cross_module_links.py`
 
 - [ ] **Step 1: 创建迁移文件 `026_add_cross_module_links.py`**
 
@@ -952,13 +952,13 @@ def downgrade() -> None:
 
 - [ ] **Step 2: 验证迁移语法**
 
-Run: `cd backend && python -c "import alembic.config; print('OK')"`
-Expected: `OK`
+Run: `cd backend && python -m py_compile alembic/versions/026_add_cross_module_links.py`
+Expected: 无输出（编译成功）
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/alembic/versions/008_add_cross_module_links.py
+git add backend/alembic/versions/026_add_cross_module_links.py
 git commit -m "feat(db): add cross-module link fields (fmea_node_id, supplier_id, sc_links)"
 ```
 
@@ -1158,23 +1158,40 @@ git commit -m "feat(capa): add CAPA-FMEA node-level linking API"
 在 `backend/app/services/customer_quality_service.py` 中，找到 `create_complaint` 函数（约 L592）和 `update_complaint` 函数（约 L685）的 `allowed` 集合，添加 `"supplier_id"`：
 
 ```python
-# create_complaint 的 allowed (L592)
+# create_complaint 的 allowed (L592) 和 update_complaint 的 allowed (L685) 都添加 supplier_id：
 allowed = {
     "complaint_no",
     "product_line_code",
     "customer_id",
-    # ... 其他字段 ...
+    "product_id",
+    "batch_no",
+    "serial_number",
+    "category",
+    "severity",
+    "defect_desc",
+    "impact_qty",
+    "occurred_date",
+    "received_date",
+    "due_date",
+    "status",
+    "fmea_ref_id",
+    "capa_ref_id",
+    "has_rma",
+    "preliminary_response",
+    "root_cause",
+    "corrective_action",
+    "attachments",
+    "assignee_id",
     "supplier_responsibility",
     "scar_ref_id",
     "supplier_id",  # 新增
 }
-
-# update_complaint 的 allowed (L685) 同样添加
 ```
 
-同时在 create_complaint 中添加 supplier 存在性校验：
+同时在 create_complaint 和 update_complaint 中添加 supplier 存在性校验：
 
 ```python
+# 在 create_complaint 和 update_complaint 中，处理 allowed 字段之前添加：
 if "supplier_id" in values and values["supplier_id"]:
     from app.models.supplier import Supplier
     supp = await db.get(Supplier, values["supplier_id"])
@@ -1824,14 +1841,16 @@ useEffect(() => {
 
 - [ ] **Step 2: 在失效分析 Table 的 rowClassName 中添加高亮样式**
 
-找到"失效分析"tab 内的 `<Table>` 组件（在 `outerTab === "editor"` 区域内），添加 `rowClassName` prop：
+找到"失效分析"tab 内的 `<Table>` 组件（在 L766 `outerTab === "editor"` 区域内，约 L770-898 的失效分析 Table），在现有 props 末尾（`pagination={false}` 之后）追加 `rowClassName` prop：
 ```tsx
-<Table
-  // ... 现有 props 保持不变 ...
-  rowClassName={(record) =>
-    record.key === highlightedRowKey ? "highlighted-row" : ""
-  }
-/>
+          <Table
+            // 以下为现有 props，全部保留，不修改：
+            // dataSource, columns, bordered, size, pagination, scroll 等
+            // 仅在此基础上追加 rowClassName：
+            rowClassName={(record) =>
+              record.key === highlightedRowKey ? "highlighted-row" : ""
+            }
+          />
 ```
 
 在文件末尾或全局 CSS 中添加样式：
@@ -1878,7 +1897,7 @@ git commit -m "feat(fmea): add URL node定位, row高亮, and 关联CAPA tab"
 
 - [ ] **Step 1: 后端 FMEA API 添加 high_rpn 筛选参数**
 
-在 `backend/app/api/fmea.py` 的 `list_fmeas` 端点添加 `high_rpn` 参数：
+在 `backend/app/api/fmea.py` 的 `list_fmeas` 端点添加 `high_rpn` 参数。保持现有 `response_model` 和返回方式不变：
 
 ```python
 @router.get("")
@@ -1894,14 +1913,67 @@ async def list_fmeas(
     items, total = await fmea_service.list_fmeas(
         db, page, page_size, status, product_line, high_rpn=high_rpn
     )
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    # 保持现有返回方式不变，使用 model_validate
+    return FMEAListResponse(
+        items=[FMEAResponse.model_validate(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 ```
 
-在 `backend/app/services/fmea_service.py` 的 `list_fmeas` 函数中，当 `high_rpn=True` 时，只返回包含 RPN≥100 节点的 FMEA 文档。实现方式：查出所有文档后，在 Python 中用 `build_rpn_rows` 过滤，只保留有高 RPN 节点的文档。
+在 `backend/app/services/fmea_service.py` 的 `list_fmeas` 函数中添加 `high_rpn: bool = False` 参数。实现逻辑：
+
+```python
+async def list_fmeas(
+    db, page, page_size, status=None, product_line=None, high_rpn=False
+):
+    # 1. 先按 status/product_line 构建基础查询
+    query = select(FMEADocument)
+    count_query = select(func.count(FMEADocument.fmea_id))
+    if status:
+        query = query.where(FMEADocument.status == status)
+        count_query = count_query.where(FMEADocument.status == status)
+    if product_line:
+        query = query.where(FMEADocument.product_line_code == product_line)
+        count_query = count_query.where(FMEADocument.product_line_code == product_line)
+
+    if high_rpn:
+        # 2. high_rpn 模式：先取所有候选文档，在 Python 中过滤
+        all_docs = (await db.execute(query)).scalars().all()
+        from app.utils.fmea_graph import build_rpn_rows
+        filtered = []
+        for doc in all_docs:
+            nodes = doc.graph_data.get("nodes", []) if doc.graph_data else []
+            edges = doc.graph_data.get("edges", []) if doc.graph_data else []
+            rows = build_rpn_rows(nodes, edges)
+            has_high = any(
+                r.get("severity", 0) * r.get("occurrence", 0) * r.get("detection", 0) >= 100
+                for r in rows
+                if r.get("severity", 0) > 0
+            )
+            if has_high:
+                filtered.append(doc)
+        # 3. 在 Python 中分页
+        total = len(filtered)
+        items = filtered[(page - 1) * page_size : page * page_size]
+        return items, total
+    else:
+        # 非 high_rpn 模式：数据库分页（现有逻辑）
+        total = await db.scalar(count_query)
+        items = (
+            await db.execute(
+                query.order_by(FMEADocument.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).scalars().all()
+        return items, total
+```
 
 - [ ] **Step 2: 后端 CAPA API 添加 overdue/pending_action 筛选参数**
 
-在 `backend/app/api/capa.py` 的 `list_capas` 端点添加参数：
+在 `backend/app/api/capa.py` 的 `list_capas` 端点添加参数。保持现有 `response_model` 和返回方式不变：
 
 ```python
 @router.get("")
@@ -1919,12 +1991,64 @@ async def list_capas(
         db, page, page_size, status, product_line,
         overdue=overdue, pending_action=pending_action,
     )
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    # 保持现有返回方式不变
+    return CAPAListResponse(
+        items=[CAPAResponse.model_validate(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 ```
 
-在 `backend/app/services/capa_service.py` 的 `list_capas` 函数中：
-- `overdue=True`：添加 `CAPAEightD.due_date < now.date()` 且状态不在 `D8_CLOSURE`/`ARCHIVED`
-- `pending_action=True`：添加 `CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])`
+在 `backend/app/services/capa_service.py` 的 `list_capas` 函数中添加 `overdue: bool = False, pending_action: bool = False` 参数：
+
+```python
+async def list_capas(
+    db, page, page_size, status=None, product_line=None,
+    overdue=False, pending_action=False,
+):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    query = select(CAPAEightD)
+    count_query = select(func.count(CAPAEightD.report_id))
+
+    # 现有筛选
+    if status:
+        query = query.where(CAPAEightD.status == status)
+        count_query = count_query.where(CAPAEightD.status == status)
+    if product_line:
+        query = query.where(CAPAEightD.product_line_code == product_line)
+        count_query = count_query.where(CAPAEightD.product_line_code == product_line)
+
+    # 新增筛选
+    if overdue:
+        query = query.where(
+            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+            CAPAEightD.due_date < now.date(),
+        )
+        count_query = count_query.where(
+            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+            CAPAEightD.due_date < now.date(),
+        )
+    if pending_action:
+        query = query.where(
+            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
+        )
+        count_query = count_query.where(
+            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
+        )
+
+    total = await db.scalar(count_query)
+    items = (
+        await db.execute(
+            query.order_by(CAPAEightD.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+    return items, total
+```
 
 - [ ] **Step 3: 确认后端客诉 API 已支持 status 筛选**
 
