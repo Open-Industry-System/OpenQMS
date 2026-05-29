@@ -1159,7 +1159,7 @@ git commit -m "feat(capa): add CAPA-FMEA node-level linking API"
 
 - [ ] **Step 1: 在客诉 schema 中添加 supplier_id 字段**
 
-在 `backend/app/schemas/customer_quality.py` 的客诉 Create 和 Update schema 中添加 `supplier_id: str | None = None`。在 Response schema 中同样添加。
+在 `backend/app/schemas/customer_quality.py` 的客诉 Create 和 Update schema 中添加 `supplier_id: uuid.UUID | None = None`（与现有其它 ID 字段类型一致）。在 Response schema 中同样添加。
 
 - [ ] **Step 2: 在客诉 service 的 create_complaint 和 update_complaint 的 allowed 白名单中添加 supplier_id**
 
@@ -1917,16 +1917,18 @@ git commit -m "feat(fmea): add URL node定位, row高亮, and 关联CAPA tab"
 - Modify: `backend/app/services/capa_service.py` — 添加 `overdue`、`pending_action` 筛选逻辑
 - Modify: `backend/app/api/capa.py` — 添加 `overdue`、`pending_action` query 参数
 - Modify: `backend/app/services/customer_quality_service.py` — 确认 `status` 筛选已存在
+- Modify: `frontend/src/api/fmea.ts` — `listFMEAs` params 添加 `high_rpn`
+- Modify: `frontend/src/api/capa.ts` — `listCAPAs` params 添加 `overdue` / `pending_action`
 - Modify: `frontend/src/pages/fmea/FMEAListPage.tsx`
 - Modify: `frontend/src/pages/capa/CAPAListPage.tsx`
 - Modify: `frontend/src/pages/customerQuality/CustomerQualityPage.tsx`
 
 - [ ] **Step 1: 后端 FMEA API 添加 high_rpn 筛选参数**
 
-在 `backend/app/api/fmea.py` 的 `list_fmeas` 端点添加 `high_rpn` 参数。保持现有 `response_model` 和返回方式不变：
+在 `backend/app/api/fmea.py` 的 `list_fmeas` 端点添加 `high_rpn` 参数。保持现有 `response_model` 不变：
 
 ```python
-@router.get("")
+@router.get("", response_model=FMEAListResponse)
 async def list_fmeas(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -1939,7 +1941,6 @@ async def list_fmeas(
     items, total = await fmea_service.list_fmeas(
         db, page, page_size, status, product_line, high_rpn=high_rpn
     )
-    # 保持现有返回方式不变，使用 model_validate
     return FMEAListResponse(
         items=[FMEAResponse.model_validate(i) for i in items],
         total=total,
@@ -1965,7 +1966,8 @@ async def list_fmeas(
         count_query = count_query.where(FMEADocument.product_line_code == product_line)
 
     if high_rpn:
-        # 2. high_rpn 模式：先取所有候选文档，在 Python 中过滤
+        # 2. high_rpn 模式：先按 status/product_line 取候选，排序后在 Python 中过滤
+        query = query.order_by(FMEADocument.created_at.desc())
         all_docs = (await db.execute(query)).scalars().all()
         from app.utils.fmea_graph import build_rpn_rows
         filtered = []
@@ -1999,10 +2001,10 @@ async def list_fmeas(
 
 - [ ] **Step 2: 后端 CAPA API 添加 overdue/pending_action 筛选参数**
 
-在 `backend/app/api/capa.py` 的 `list_capas` 端点添加参数。保持现有 `response_model` 和返回方式不变：
+在 `backend/app/api/capa.py` 的 `list_capas` 端点添加参数。保持现有 `response_model` 不变：
 
 ```python
-@router.get("")
+@router.get("", response_model=CAPAListResponse)
 async def list_capas(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -2017,7 +2019,6 @@ async def list_capas(
         db, page, page_size, status, product_line,
         overdue=overdue, pending_action=pending_action,
     )
-    # 保持现有返回方式不变
     return CAPAListResponse(
         items=[CAPAResponse.model_validate(i) for i in items],
         total=total,
@@ -2083,7 +2084,42 @@ async def list_capas(
 Run: `grep -n "status" backend/app/api/customer_quality.py | head -5`
 Expected: 确认 `status` 参数存在
 
-- [ ] **Step 4: 前端 FMEA 列表页读取 query 参数并传给 API**
+- [ ] **Step 4: 扩展前端 FMEA API client params 类型**
+
+在 `frontend/src/api/fmea.ts` 的 `listFMEAs` params 中添加 `high_rpn`：
+
+```typescript
+export async function listFMEAs(params: {
+  page?: number;
+  page_size?: number;
+  status?: string;
+  product_line?: string;
+  high_rpn?: boolean;  // 新增
+}): Promise<FMEAListResponse> {
+  const resp = await client.get("/fmea", { params });
+  return resp.data;
+}
+```
+
+- [ ] **Step 5: 扩展前端 CAPA API client params 类型**
+
+在 `frontend/src/api/capa.ts` 的 `listCAPAs` params 中添加 `overdue` 和 `pending_action`：
+
+```typescript
+export async function listCAPAs(params: {
+  page?: number;
+  page_size?: number;
+  status?: string;
+  product_line?: string;
+  overdue?: boolean;        // 新增
+  pending_action?: boolean;  // 新增
+}): Promise<CAPAListResponse> {
+  const resp = await client.get("/capa", { params });
+  return resp.data;
+}
+```
+
+- [ ] **Step 6: 前端 FMEA 列表页读取 query 参数并传给 API**
 
 在 `frontend/src/pages/fmea/FMEAListPage.tsx` 中：
 
@@ -2109,7 +2145,7 @@ const resp = await listFMEAs({
 
 4. 在 `useEffect` 依赖数组中追加 `searchParams`，确保 URL 参数变化时重新加载
 
-- [ ] **Step 5: 前端 CAPA 列表页读取 query 参数并传给 API**
+- [ ] **Step 7: 前端 CAPA 列表页读取 query 参数并传给 API**
 
 在 `frontend/src/pages/capa/CAPAListPage.tsx` 中：
 
@@ -2134,7 +2170,7 @@ const resp = await listCAPAs({
 
 4. 在 `useEffect` 依赖数组中追加 `searchParams`
 
-- [ ] **Step 6: 前端客诉列表页读取 query 参数并传给 API**
+- [ ] **Step 8: 前端客诉列表页读取 query 参数并传给 API**
 
 在 `frontend/src/pages/customerQuality/CustomerQualityPage.tsx` 中：
 
@@ -2155,16 +2191,16 @@ const resp = await listComplaints({
 
 4. 在 `useEffect` 依赖数组中追加 `searchParams`
 
-- [ ] **Step 7: 验证编译**
+- [ ] **Step 9: 验证编译**
 
 Run: `cd backend && python -c "from app.api.fmea import router; from app.api.capa import router; print('OK')"`
 Run: `cd frontend && npm run build`
 Expected: 编译成功
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add backend/app/api/fmea.py backend/app/services/fmea_service.py backend/app/api/capa.py backend/app/services/capa_service.py frontend/src/pages/fmea/FMEAListPage.tsx frontend/src/pages/capa/CAPAListPage.tsx frontend/src/pages/customerQuality/CustomerQualityPage.tsx
+git add backend/app/api/fmea.py backend/app/services/fmea_service.py backend/app/api/capa.py backend/app/services/capa_service.py frontend/src/api/fmea.ts frontend/src/api/capa.ts frontend/src/pages/fmea/FMEAListPage.tsx frontend/src/pages/capa/CAPAListPage.tsx frontend/src/pages/customerQuality/CustomerQualityPage.tsx
 git commit -m "feat(lists): add backend filtering (high_rpn, overdue, pending_action) and frontend query param support"
 ```
 
