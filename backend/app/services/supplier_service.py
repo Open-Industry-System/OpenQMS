@@ -118,6 +118,26 @@ async def list_suppliers(
     return list(items), total
 
 
+async def export_suppliers_excel(
+    db: AsyncSession,
+    status: str | None = None,
+    grade: str | None = None,
+    search: str | None = None,
+) -> bytes:
+    from app.utils.excel import create_workbook, append_row, workbook_to_bytes, MAX_EXPORT_ROWS
+    items, _ = await list_suppliers(db, page=1, page_size=MAX_EXPORT_ROWS, status=status, grade=grade, search=search)
+    headers = ["供应商编号", "名称", "简称", "联系人", "电话", "邮箱", "地址", "供货范围", "状态", "创建时间"]
+    wb, ws = create_workbook("供应商", headers)
+    for s in items:
+        append_row(ws, [
+            s.supplier_no, s.name, s.short_name,
+            s.contact_name or "", s.contact_phone or "", s.contact_email or "",
+            s.address or "", s.product_scope or "",
+            s.status, s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "",
+        ])
+    return workbook_to_bytes(wb)
+
+
 async def get_supplier(db: AsyncSession, supplier_id: uuid.UUID) -> Supplier | None:
     return await db.get(Supplier, supplier_id)
 

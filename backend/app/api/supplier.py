@@ -11,8 +11,22 @@ from app.core.deps import get_current_user, require_engineer_or_admin, require_m
 from app.models.user import User
 from app import schemas
 from app.services import supplier_service, supplier_quality_service
+from app.utils.excel import excel_response
 
 router = APIRouter(prefix="/api/suppliers", tags=["suppliers"])
+
+
+# Export MUST be before "/{supplier_id}"
+@router.get("/export")
+async def export_suppliers(
+    status: str | None = Query(None),
+    grade: str | None = Query(None),
+    search: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    excel_bytes = await supplier_service.export_suppliers_excel(db, status, grade, search)
+    return excel_response(excel_bytes, f"suppliers_{date_type.today().strftime('%Y%m%d')}.xlsx")
 
 
 # Stats MUST be before "/{supplier_id}" to avoid routing conflict
