@@ -36,29 +36,29 @@ const MENU_KEYS = [
   "/iqc/inspections", "/iqc/materials", "/scars",
 ];
 
-// 菜单 key → 所属分组 key（精确匹配每个叶子菜单项）
-const MENU_KEY_TO_GROUP: Record<string, string> = {
-  "/fmea": "grp:planning",
-  "/control-plans": "grp:planning",
-  "/apqp": "grp:planning",
-  "/ppap": "grp:planning",
-  "/special-characteristics": "grp:planning",
-  "/special-characteristics/matrix": "grp:planning",
-  "/special-characteristics/traceability": "grp:planning",
-  "/spc": "grp:shopfloor",
-  "/msa/gauges": "grp:shopfloor",
-  "/msa/studies": "grp:shopfloor",
-  "/quality-goals": "grp:shopfloor",
-  "/internal-audits": "grp:shopfloor",
-  "/management-reviews": "grp:shopfloor",
-  "/customer-quality": "grp:customer",
-  "/customer-audits": "grp:customer",
-  "/capa": "grp:customer",
-  "/suppliers": "grp:supplier",
-  "/suppliers/quality": "grp:supplier",
-  "/iqc/inspections": "grp:supplier",
-  "/iqc/materials": "grp:supplier",
-  "/scars": "grp:supplier",
+// 菜单 key → 需要展开的所有 SubMenu key 列表（含父级分组 + 二级子菜单）
+const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
+  "/fmea": ["grp:planning"],
+  "/control-plans": ["grp:planning"],
+  "/apqp": ["grp:planning"],
+  "/ppap": ["grp:planning"],
+  "/special-characteristics": ["grp:planning"],
+  "/special-characteristics/matrix": ["grp:planning"],
+  "/special-characteristics/traceability": ["grp:planning"],
+  "/spc": ["grp:shopfloor"],
+  "/msa/gauges": ["grp:shopfloor", "grp:msa"],
+  "/msa/studies": ["grp:shopfloor", "grp:msa"],
+  "/quality-goals": ["grp:shopfloor"],
+  "/internal-audits": ["grp:shopfloor"],
+  "/management-reviews": ["grp:shopfloor"],
+  "/customer-quality": ["grp:customer"],
+  "/customer-audits": ["grp:customer"],
+  "/capa": ["grp:customer"],
+  "/suppliers": ["grp:supplier"],
+  "/suppliers/quality": ["grp:supplier"],
+  "/iqc/inspections": ["grp:supplier", "grp:iqc"],
+  "/iqc/materials": ["grp:supplier", "grp:iqc"],
+  "/scars": ["grp:supplier"],
 };
 
 function getSelectedMenuKey(pathname: string): string {
@@ -144,19 +144,19 @@ const menuItems = [
 
 // 改为：
 const selectedKey = getSelectedMenuKey(location.pathname);
-const currentGroup = MENU_KEY_TO_GROUP[selectedKey];
+const requiredOpenKeys = MENU_KEY_TO_OPEN_KEYS[selectedKey] || [];
 
-// openKeys：路由变化时自动展开当前分组，同时保留用户手动操作
-const [openKeys, setOpenKeys] = useState<string[]>(
-  currentGroup ? [currentGroup] : []
-);
+// openKeys：路由变化时自动展开所需分组，同时保留用户手动操作
+const [openKeys, setOpenKeys] = useState<string[]>(requiredOpenKeys);
 
-// 路由变化时，确保当前分组在 openKeys 中
+// 路由变化时，确保所需分组都在 openKeys 中
 useEffect(() => {
-  if (currentGroup && !openKeys.includes(currentGroup)) {
-    setOpenKeys((prev) => [...prev, currentGroup]);
-  }
-}, [currentGroup]);
+  setOpenKeys((prev) => {
+    const merged = new Set(prev);
+    requiredOpenKeys.forEach((k) => merged.add(k));
+    return Array.from(merged);
+  });
+}, [selectedKey]);
 ```
 
 在 `<Menu>` 组件上使用受控 `openKeys` + `onOpenChange`：
@@ -886,21 +886,21 @@ git commit -m "feat(dashboard): redesign to three-tier layout with alerts and re
 **Files:**
 - Create: `backend/alembic/versions/008_add_cross_module_links.py`
 
-- [ ] **Step 1: 创建迁移文件**
+- [ ] **Step 1: 创建迁移文件 `026_add_cross_module_links.py`**
 
 ```python
 """add cross-module link fields
 
-Revision ID: 026_add_cross_module_links
-Revises: 025_add_customer_audit_fields
+Revision ID: 026
+Revises: 025
 Create Date: 2026-05-29
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "026_add_cross_module_links"
-down_revision = "025_add_customer_audit_fields"
+revision = "026"
+down_revision = "025"
 branch_labels = None
 depends_on = None
 
@@ -1151,9 +1151,42 @@ git commit -m "feat(capa): add CAPA-FMEA node-level linking API"
 
 - [ ] **Step 1: 在客诉 schema 中添加 supplier_id 字段**
 
-在 `backend/app/schemas/customer_quality.py` 的客诉相关 schema 中添加 `supplier_id: str | None = None`。
+在 `backend/app/schemas/customer_quality.py` 的客诉 Create 和 Update schema 中添加 `supplier_id: str | None = None`。在 Response schema 中同样添加。
 
-- [ ] **Step 2: 在客诉 service 中添加按供应商查询方法**
+- [ ] **Step 2: 在客诉 service 的 create_complaint 和 update_complaint 的 allowed 白名单中添加 supplier_id**
+
+在 `backend/app/services/customer_quality_service.py` 中，找到 `create_complaint` 函数（约 L592）和 `update_complaint` 函数（约 L685）的 `allowed` 集合，添加 `"supplier_id"`：
+
+```python
+# create_complaint 的 allowed (L592)
+allowed = {
+    "complaint_no",
+    "product_line_code",
+    "customer_id",
+    # ... 其他字段 ...
+    "supplier_responsibility",
+    "scar_ref_id",
+    "supplier_id",  # 新增
+}
+
+# update_complaint 的 allowed (L685) 同样添加
+```
+
+同时在 create_complaint 中添加 supplier 存在性校验：
+
+```python
+if "supplier_id" in values and values["supplier_id"]:
+    from app.models.supplier import Supplier
+    supp = await db.get(Supplier, values["supplier_id"])
+    if not supp:
+        raise ValueError("Supplier not found")
+```
+
+- [ ] **Step 3: 在前端 CustomerComplaint 类型中添加 supplier_id**
+
+在 `frontend/src/types/index.ts` 的 `CustomerComplaint` 接口中添加 `supplier_id: string | null`。
+
+- [ ] **Step 4: 在客诉 service 中添加按供应商查询方法**
 
 ```python
 async def get_complaints_by_supplier(
@@ -1300,7 +1333,7 @@ async def get_supplier_related(
             for c in complaints
         ],
         "iqc_rejects": [
-            {"id": str(i.inspection_id), "no": i.inspection_no, "result": i.result}
+            {"id": str(i.inspection_id), "no": i.inspection_no, "result": i.inspection_result}
             for i in iqc_rejects
         ],
         "scars": [
@@ -1657,13 +1690,18 @@ git commit -m "feat(customer-quality): integrate SupplierBadge and RelatedFMEALi
 
 - [ ] **Step 1: 在供应商详情页添加客诉/IQC/SCAR tabs**
 
-```tsx
-import { Tabs, List, Tag } from "antd";
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import client from "../../api/client";
+`SupplierDetailPage.tsx` 是一个 1048 行的复杂页面。`tabItems` 数组在 L475-850 定义，包含 "基本信息"、"资质证书"、"评价记录"、"审核计划" 四个 tab。`<Tabs>` 在 L957 渲染。
 
-// 在供应商详情页添加 tabs：
+**插入位置：** 在 `tabItems` 数组末尾（L849，`];` 之前）追加三个新 tab。
+
+在文件顶部 import 区添加：
+```tsx
+import { List, Tag } from "antd";  // 如果尚未导入
+import client from "../../api/client";
+```
+
+在 `SupplierDetailPage` 函数体内，现有 state 声明（约 L134）之后添加：
+```tsx
 const [relatedData, setRelatedData] = useState<{
   complaints: Array<{id: string; no: string; status: string}>;
   iqc_rejects: Array<{id: string; no: string; result: string}>;
@@ -1671,64 +1709,70 @@ const [relatedData, setRelatedData] = useState<{
 }>({ complaints: [], iqc_rejects: [], scars: [] });
 
 useEffect(() => {
-  if (!supplierId) return;
-  client.get(`/suppliers/${supplierId}/related`).then((r) => setRelatedData(r.data));
-}, [supplierId]);
+  if (!id || isNew) return;
+  client.get(`/suppliers/${id}/related`).then((r) => setRelatedData(r.data));
+}, [id]);
+```
 
-<Tabs items={[
-  // ... 现有 tabs ...
-  {
-    key: "complaints",
-    label: `客诉 (${relatedData.complaints.length})`,
-    children: (
-      <List
-        dataSource={relatedData.complaints}
-        renderItem={(item) => (
-          <List.Item
-            style={{ cursor: "pointer" }}
-            onClick={() => navigate(`/customer-quality/complaints/${item.id}`)}
-          >
-            {item.no} <Tag>{item.status}</Tag>
-          </List.Item>
-        )}
-      />
-    ),
-  },
-  {
-    key: "iqc",
-    label: `IQC 不合格 (${relatedData.iqc_rejects.length})`,
-    children: (
-      <List
-        dataSource={relatedData.iqc_rejects}
-        renderItem={(item) => (
-          <List.Item
-            style={{ cursor: "pointer" }}
-            onClick={() => navigate(`/iqc/inspections/${item.id}`)}
-          >
-            {item.no} <Tag color="error">{item.result}</Tag>
-          </List.Item>
-        )}
-      />
-    ),
-  },
-  {
-    key: "scars",
-    label: `SCAR (${relatedData.scars.length})`,
-    children: (
-      <List
-        dataSource={relatedData.scars}
-        renderItem={(item) => (
-          <List.Item
-            style={{ cursor: "pointer" }}
-            onClick={() => navigate(`/scars/${item.id}`)}
-          >
-            {item.no} <Tag>{item.status}</Tag>
-          </List.Item>
-        )}
-      />
-    ),
-  },
-]} />
+在 `tabItems` 数组的最后一个元素（L849 `];` 之前）追加：
+```tsx
+    {
+      key: "complaints",
+      label: `客诉 (${relatedData.complaints.length})`,
+      children: (
+        <List
+          dataSource={relatedData.complaints}
+          locale={{ emptyText: "无关联客诉" }}
+          renderItem={(item) => (
+            <List.Item
+              style={{ cursor: "pointer" }}
+              onClick={() => navigate(`/customer-quality/complaints/${item.id}`)}
+            >
+              <List.Item.Meta title={item.no} />
+              <Tag>{item.status}</Tag>
+            </List.Item>
+          )}
+        />
+      ),
+    },
+    {
+      key: "iqc",
+      label: `IQC 不合格 (${relatedData.iqc_rejects.length})`,
+      children: (
+        <List
+          dataSource={relatedData.iqc_rejects}
+          locale={{ emptyText: "无 IQC 不合格记录" }}
+          renderItem={(item) => (
+            <List.Item
+              style={{ cursor: "pointer" }}
+              onClick={() => navigate(`/iqc/inspections/${item.id}`)}
+            >
+              <List.Item.Meta title={item.no} />
+              <Tag color="error">{item.result}</Tag>
+            </List.Item>
+          )}
+        />
+      ),
+    },
+    {
+      key: "scars",
+      label: `SCAR (${relatedData.scars.length})`,
+      children: (
+        <List
+          dataSource={relatedData.scars}
+          locale={{ emptyText: "无 SCAR 记录" }}
+          renderItem={(item) => (
+            <List.Item
+              style={{ cursor: "pointer" }}
+              onClick={() => navigate(`/scars/${item.id}`)}
+            >
+              <List.Item.Meta title={item.no} />
+              <Tag>{item.status}</Tag>
+            </List.Item>
+          )}
+        />
+      ),
+    },
 ```
 
 - [ ] **Step 2: Commit**
@@ -1745,15 +1789,23 @@ git commit -m "feat(supplier): add complaint/IQC/SCAR tabs to supplier detail pa
 
 - [ ] **Step 1: 添加 URL 参数 node 解析和高亮逻辑**
 
+`FMEAEditorPage.tsx` 是 1001 行的复杂页面。组件入口在 L70，outer tabs 在 L763-927（"编辑器"、"结构分析"），版本历史在 L950-962。
+
+在文件顶部 import 区添加：
 ```tsx
 import { useSearchParams } from "react-router-dom";
+import RelatedCAPAList from "../../components/cross-links/RelatedCAPAList";
+```
 
-// 在 FMEAEditorPage 组件内：
+在 `FMEAEditorPage` 函数体内，现有 state 声明（L78-93）之后添加：
+```tsx
 const [searchParams] = useSearchParams();
 const highlightNodeId = searchParams.get("node");
 const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(null);
+```
 
-// 在 rows 计算后，找到高亮行：
+在 `useEffect` 中加载 FMEA 数据之后（约 L118 之后），添加高亮定位逻辑：
+```tsx
 useEffect(() => {
   if (highlightNodeId && rows.length > 0) {
     const targetRow = rows.find(
@@ -1761,7 +1813,6 @@ useEffect(() => {
     );
     if (targetRow) {
       setHighlightedRowKey(targetRow.key);
-      // 滚动到目标行
       setTimeout(() => {
         const el = document.querySelector(`[data-row-key="${targetRow.key}"]`);
         el?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1771,40 +1822,39 @@ useEffect(() => {
 }, [highlightNodeId, rows]);
 ```
 
-- [ ] **Step 2: 在 Table 的 rowClassName 中添加高亮样式**
+- [ ] **Step 2: 在失效分析 Table 的 rowClassName 中添加高亮样式**
 
+找到"失效分析"tab 内的 `<Table>` 组件（在 `outerTab === "editor"` 区域内），添加 `rowClassName` prop：
 ```tsx
 <Table
-  // ... 现有 props ...
+  // ... 现有 props 保持不变 ...
   rowClassName={(record) =>
     record.key === highlightedRowKey ? "highlighted-row" : ""
   }
 />
-
-// 在页面的 <style> 或 CSS 中添加：
-// .highlighted-row { background-color: #fffbe6 !important; }
 ```
 
-- [ ] **Step 3: 添加"关联 CAPA"tab**
+在文件末尾或全局 CSS 中添加样式：
+```css
+.highlighted-row { background-color: #fffbe6 !important; }
+```
 
-在 FMEA 编辑器的 tab 区域添加：
+- [ ] **Step 3: 添加"关联 CAPA"outer tab**
 
+在 outer `<Tabs>` 组件中（L763-927），"结构分析" `TabPane` 结束（L926）之后，版本历史 `TabPane`（L950）之前，添加新的 TabPane：
 ```tsx
-import RelatedCAPAList from "../../components/cross-links/RelatedCAPAList";
-
-// 在 tabs 中添加：
-{
-  key: "related-capa",
-  label: "关联 CAPA",
-  children: selectedFunctionId ? (
-    <RelatedCAPAList
-      fmeaId={fmea!.fmea_id}
-      fmeaNodeId={selectedFunctionId}
-    />
-  ) : (
-    <Typography.Text type="secondary">请先选择一个失效模式行</Typography.Text>
-  ),
-}
+        <Tabs.TabPane tab="关联 CAPA" key="related-capa">
+          {selectedFunctionId ? (
+            <RelatedCAPAList
+              fmeaId={fmea!.fmea_id}
+              fmeaNodeId={selectedFunctionId}
+            />
+          ) : (
+            <Typography.Text type="secondary">
+              请先在编辑器中选择一个失效模式行
+            </Typography.Text>
+          )}
+        </Tabs.TabPane>
 ```
 
 - [ ] **Step 4: Commit**
@@ -1814,53 +1864,140 @@ git add frontend/src/pages/fmea/FMEAEditorPage.tsx
 git commit -m "feat(fmea): add URL node定位, row高亮, and 关联CAPA tab"
 ```
 
-### Task 16: 在列表页支持 query 参数筛选
+### Task 16: 列表页筛选 — 后端 API + 前端 query 参数
 
 **Files:**
+- Modify: `backend/app/services/fmea_service.py` — 添加 `high_rpn` 筛选逻辑
+- Modify: `backend/app/api/fmea.py` — 添加 `high_rpn` query 参数
+- Modify: `backend/app/services/capa_service.py` — 添加 `overdue`、`pending_action` 筛选逻辑
+- Modify: `backend/app/api/capa.py` — 添加 `overdue`、`pending_action` query 参数
+- Modify: `backend/app/services/customer_quality_service.py` — 确认 `status` 筛选已存在
 - Modify: `frontend/src/pages/fmea/FMEAListPage.tsx`
 - Modify: `frontend/src/pages/capa/CAPAListPage.tsx`
 - Modify: `frontend/src/pages/customerQuality/CustomerQualityPage.tsx`
 
-- [ ] **Step 1: FMEA 列表页支持 ?risk=high 参数**
+- [ ] **Step 1: 后端 FMEA API 添加 high_rpn 筛选参数**
+
+在 `backend/app/api/fmea.py` 的 `list_fmeas` 端点添加 `high_rpn` 参数：
+
+```python
+@router.get("")
+async def list_fmeas(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: str | None = None,
+    product_line: str | None = None,
+    high_rpn: bool = Query(False),  # 新增
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    items, total = await fmea_service.list_fmeas(
+        db, page, page_size, status, product_line, high_rpn=high_rpn
+    )
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+```
+
+在 `backend/app/services/fmea_service.py` 的 `list_fmeas` 函数中，当 `high_rpn=True` 时，只返回包含 RPN≥100 节点的 FMEA 文档。实现方式：查出所有文档后，在 Python 中用 `build_rpn_rows` 过滤，只保留有高 RPN 节点的文档。
+
+- [ ] **Step 2: 后端 CAPA API 添加 overdue/pending_action 筛选参数**
+
+在 `backend/app/api/capa.py` 的 `list_capas` 端点添加参数：
+
+```python
+@router.get("")
+async def list_capas(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: str | None = None,
+    product_line: str | None = None,
+    overdue: bool = Query(False),        # 新增
+    pending_action: bool = Query(False),  # 新增
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    items, total = await capa_service.list_capas(
+        db, page, page_size, status, product_line,
+        overdue=overdue, pending_action=pending_action,
+    )
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+```
+
+在 `backend/app/services/capa_service.py` 的 `list_capas` 函数中：
+- `overdue=True`：添加 `CAPAEightD.due_date < now.date()` 且状态不在 `D8_CLOSURE`/`ARCHIVED`
+- `pending_action=True`：添加 `CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])`
+
+- [ ] **Step 3: 确认后端客诉 API 已支持 status 筛选**
+
+`backend/app/api/customer_quality.py` 的客诉列表端点已有 `status` 参数，无需改动。验证：
+
+Run: `grep -n "status" backend/app/api/customer_quality.py | head -5`
+Expected: 确认 `status` 参数存在
+
+- [ ] **Step 4: 前端 FMEA 列表页读取 query 参数并传给 API**
+
+在 `frontend/src/pages/fmea/FMEAListPage.tsx` 中：
 
 ```tsx
 import { useSearchParams } from "react-router-dom";
 
 const [searchParams] = useSearchParams();
-const riskFilter = searchParams.get("risk");
 
-// 在加载列表数据时，如果 risk=high，添加筛选条件
+// 在加载列表数据的 useEffect 或函数中：
 useEffect(() => {
-  const params: Record<string, string> = {};
-  if (riskFilter === "high") params.high_rpn = "true";
-  // 传给 API 调用
-}, [riskFilter]);
+  const params: Record<string, string | boolean> = {};
+  if (searchParams.get("risk") === "high") params.high_rpn = true;
+  if (searchParams.get("pending_approval") === "true") params.status = "in_review";
+  // 传给 listFMEA API 调用
+  listFMEAs({ page, page_size, ...params }).then(/* ... */);
+}, [searchParams, page]);
 ```
 
-- [ ] **Step 2: CAPA 列表页支持 ?overdue=true 和 ?pending_action=true 参数**
+- [ ] **Step 5: 前端 CAPA 列表页读取 query 参数并传给 API**
+
+在 `frontend/src/pages/capa/CAPAListPage.tsx` 中：
 
 ```tsx
-const [searchParams] = useSearchParams();
-const overdueFilter = searchParams.get("overdue");
-const pendingFilter = searchParams.get("pending_action");
+import { useSearchParams } from "react-router-dom";
 
-// 在加载列表数据时应用筛选
+const [searchParams] = useSearchParams();
+
+useEffect(() => {
+  const params: Record<string, string | boolean> = {};
+  if (searchParams.get("overdue") === "true") params.overdue = true;
+  if (searchParams.get("pending_action") === "true") params.pending_action = true;
+  listCAPAs({ page, page_size, ...params }).then(/* ... */);
+}, [searchParams, page]);
 ```
 
-- [ ] **Step 3: 客诉列表页支持 ?status=open 参数**
+- [ ] **Step 6: 前端客诉列表页读取 query 参数并传给 API**
+
+在 `frontend/src/pages/customerQuality/CustomerQualityPage.tsx` 中：
 
 ```tsx
-const [searchParams] = useSearchParams();
-const statusFilter = searchParams.get("status");
+import { useSearchParams } from "react-router-dom";
 
-// 在加载列表数据时应用筛选
+const [searchParams] = useSearchParams();
+
+useEffect(() => {
+  const status = searchParams.get("status");
+  if (status) {
+    // 传给客诉列表 API 调用
+    listComplaints({ page, page_size, status }).then(/* ... */);
+  }
+}, [searchParams, page]);
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 7: 验证编译**
+
+Run: `cd backend && python -c "from app.api.fmea import router; from app.api.capa import router; print('OK')"`
+Run: `cd frontend && npm run build`
+Expected: 编译成功
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add frontend/src/pages/fmea/FMEAListPage.tsx frontend/src/pages/capa/CAPAListPage.tsx frontend/src/pages/customerQuality/CustomerQualityPage.tsx
-git commit -m "feat(lists): add query param filtering for dashboard drill-down"
+git add backend/app/api/fmea.py backend/app/services/fmea_service.py backend/app/api/capa.py backend/app/services/capa_service.py frontend/src/pages/fmea/FMEAListPage.tsx frontend/src/pages/capa/CAPAListPage.tsx frontend/src/pages/customerQuality/CustomerQualityPage.tsx
+git commit -m "feat(lists): add backend filtering (high_rpn, overdue, pending_action) and frontend query param support"
 ```
 
 ---
