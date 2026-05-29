@@ -1087,7 +1087,23 @@ async def get_capas_by_fmea_node(
 
 - [ ] **Step 3: 在 CAPA API router 中添加端点**
 
+**重要：路由顺序。** 现有 `@router.get("/{report_id}")` 在 L50。FastAPI 按声明顺序匹配，`/by-fmea-node/{fmea_id}` 必须在 `/{report_id}` **之前**声明，否则会被 `/{report_id}` 捕获导致 UUID 校验失败。
+
+在 `backend/app/api/capa.py` 中，**在 L50 的 `@router.get("/{report_id}")` 之前**插入两个新端点：
+
 ```python
+# === 以下两个端点必须在 /{report_id} 之前 ===
+
+@router.get("/by-fmea-node/{fmea_id}")
+async def get_capas_by_fmea_node(
+    fmea_id: str,
+    fmea_node_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    return await capa_service.get_capas_by_fmea_node(db, fmea_id, fmea_node_id)
+
+
 @router.get("/{report_id}/related-fmea")
 async def get_related_fmea(
     report_id: str,
@@ -1119,15 +1135,7 @@ async def get_related_fmea(
         "fmea_node_id": capa.fmea_node_id,
     }
 
-
-@router.get("/by-fmea-node/{fmea_id}")
-async def get_capas_by_fmea_node(
-    fmea_id: str,
-    fmea_node_id: str | None = None,
-    db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    return await capa_service.get_capas_by_fmea_node(db, fmea_id, fmea_node_id)
+# === 现有的 @router.get("/{report_id}") 在下面 L50 ===
 ```
 
 - [ ] **Step 4: 验证编译**
@@ -1228,8 +1236,14 @@ async def get_complaints_by_supplier(
 
 - [ ] **Step 3: 在客诉 API router 中添加端点**
 
+**重要：路由顺序和路径。** 现有客诉路由使用完整路径如 `/api/customer-complaints/{complaint_id}`（L145）。新端点必须：
+1. 使用完整路径 `/api/customer-complaints/by-supplier/{supplier_id}`
+2. 在 `/api/customer-complaints/{complaint_id}`（L145）**之前**声明
+
+在 `backend/app/api/customer_quality.py` 中，**在 L145 的 `@router.get("/api/customer-complaints/{complaint_id}")` 之前**插入：
+
 ```python
-@router.get("/by-supplier/{supplier_id}")
+@router.get("/api/customer-complaints/by-supplier/{supplier_id}")
 async def get_complaints_by_supplier(
     supplier_id: str,
     db: AsyncSession = Depends(get_db),
@@ -1839,21 +1853,33 @@ useEffect(() => {
 }, [highlightNodeId, rows]);
 ```
 
-- [ ] **Step 2: 在失效分析 Table 的 rowClassName 中添加高亮样式**
+- [ ] **Step 2: 修改现有 rowClassName 函数，追加高亮条件**
 
-找到"失效分析"tab 内的 `<Table>` 组件（在 L766 `outerTab === "editor"` 区域内，约 L770-898 的失效分析 Table），在现有 props 末尾（`pagination={false}` 之后）追加 `rowClassName` prop：
+FMEAEditorPage L842 已有 `rowClassName` 函数：
+
 ```tsx
-          <Table
-            // 以下为现有 props，全部保留，不修改：
-            // dataSource, columns, bordered, size, pagination, scroll 等
-            // 仅在此基础上追加 rowClassName：
-            rowClassName={(record) =>
-              record.key === highlightedRowKey ? "highlighted-row" : ""
-            }
-          />
+// 现有代码（L842-847）：
+rowClassName={(row: FMEARow) => {
+  const classes = [];
+  if (selectedFunctionId && row.functionNodeId === selectedFunctionId) classes.push("fmea-row-highlight");
+  if (severityWarnings.includes(row.failureModeNodeId)) classes.push("severity-warning-row");
+  return classes.join(" ");
+}}
 ```
 
-在文件末尾或全局 CSS 中添加样式：
+修改为（追加 `highlightedRowKey` 条件）：
+
+```tsx
+rowClassName={(row: FMEARow) => {
+  const classes = [];
+  if (selectedFunctionId && row.functionNodeId === selectedFunctionId) classes.push("fmea-row-highlight");
+  if (severityWarnings.includes(row.failureModeNodeId)) classes.push("severity-warning-row");
+  if (row.key === highlightedRowKey) classes.push("highlighted-row");  // 新增
+  return classes.join(" ");
+}}
+```
+
+在全局 CSS 或页面 `<style>` 中添加高亮样式：
 ```css
 .highlighted-row { background-color: #fffbe6 !important; }
 ```
@@ -2061,55 +2087,73 @@ Expected: 确认 `status` 参数存在
 
 在 `frontend/src/pages/fmea/FMEAListPage.tsx` 中：
 
+1. 添加 `import { useSearchParams } from "react-router-dom";`
+2. 在组件内添加 `const [searchParams] = useSearchParams();`
+3. 找到现有的加载列表数据的函数（通常是 `fetchList` 或 `loadData`，内部调用 `listFMEAs`），在构建参数对象时追加筛选字段：
+
 ```tsx
-import { useSearchParams } from "react-router-dom";
+// 在现有加载函数中，构建 API 参数的位置追加：
+const highRpn = searchParams.get("risk") === "high";
+const pendingApproval = searchParams.get("pending_approval") === "true";
 
-const [searchParams] = useSearchParams();
-
-// 在加载列表数据的 useEffect 或函数中：
-useEffect(() => {
-  const params: Record<string, string | boolean> = {};
-  if (searchParams.get("risk") === "high") params.high_rpn = true;
-  if (searchParams.get("pending_approval") === "true") params.status = "in_review";
-  // 传给 listFMEA API 调用
-  listFMEAs({ page, page_size, ...params }).then(/* ... */);
-}, [searchParams, page]);
+// 传给现有 listFMEAs 调用的参数对象中追加：
+const resp = await listFMEAs({
+  page,
+  page_size: pageSize,
+  status: pendingApproval ? "in_review" : statusFilter,  // statusFilter 为现有筛选状态
+  product_line: productLine || undefined,
+  high_rpn: highRpn || undefined,
+});
+// resp 赋值给现有 state（setItems/setTotal 等），保持不变
 ```
+
+4. 在 `useEffect` 依赖数组中追加 `searchParams`，确保 URL 参数变化时重新加载
 
 - [ ] **Step 5: 前端 CAPA 列表页读取 query 参数并传给 API**
 
 在 `frontend/src/pages/capa/CAPAListPage.tsx` 中：
 
+1. 添加 `import { useSearchParams } from "react-router-dom";`
+2. 在组件内添加 `const [searchParams] = useSearchParams();`
+3. 找到现有的加载列表数据函数，在构建参数对象时追加：
+
 ```tsx
-import { useSearchParams } from "react-router-dom";
+const overdue = searchParams.get("overdue") === "true";
+const pendingAction = searchParams.get("pending_action") === "true";
 
-const [searchParams] = useSearchParams();
-
-useEffect(() => {
-  const params: Record<string, string | boolean> = {};
-  if (searchParams.get("overdue") === "true") params.overdue = true;
-  if (searchParams.get("pending_action") === "true") params.pending_action = true;
-  listCAPAs({ page, page_size, ...params }).then(/* ... */);
-}, [searchParams, page]);
+const resp = await listCAPAs({
+  page,
+  page_size: pageSize,
+  status: statusFilter,
+  product_line: productLine || undefined,
+  overdue: overdue || undefined,
+  pending_action: pendingAction || undefined,
+});
+// resp 赋值给现有 state，保持不变
 ```
+
+4. 在 `useEffect` 依赖数组中追加 `searchParams`
 
 - [ ] **Step 6: 前端客诉列表页读取 query 参数并传给 API**
 
 在 `frontend/src/pages/customerQuality/CustomerQualityPage.tsx` 中：
 
+1. 添加 `import { useSearchParams } from "react-router-dom";`
+2. 在组件内添加 `const [searchParams] = useSearchParams();`
+3. 找到现有的加载列表数据函数，在构建参数对象时追加：
+
 ```tsx
-import { useSearchParams } from "react-router-dom";
+const statusParam = searchParams.get("status");
 
-const [searchParams] = useSearchParams();
-
-useEffect(() => {
-  const status = searchParams.get("status");
-  if (status) {
-    // 传给客诉列表 API 调用
-    listComplaints({ page, page_size, status }).then(/* ... */);
-  }
-}, [searchParams, page]);
+const resp = await listComplaints({
+  page,
+  page_size: pageSize,
+  status: statusParam || statusFilter,  // statusFilter 为现有筛选状态
+});
+// resp 赋值给现有 state，保持不变
 ```
+
+4. 在 `useEffect` 依赖数组中追加 `searchParams`
 
 - [ ] **Step 7: 验证编译**
 
