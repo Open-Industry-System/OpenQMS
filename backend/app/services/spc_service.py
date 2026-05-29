@@ -22,10 +22,11 @@ from app.services.spc_calculation_engine import (
 )
 
 
-async def _create_audit_log(
+async def _add_audit_log_no_commit(
     db: AsyncSession, user_id: uuid.UUID, action: str, table_name: str,
     record_id: uuid.UUID, changed_fields: Optional[dict] = None
 ) -> None:
+    """db.add(AuditLog) + db.flush()，不 commit。"""
     db.add(AuditLog(
         table_name=table_name,
         record_id=record_id,
@@ -33,6 +34,14 @@ async def _create_audit_log(
         changed_fields=changed_fields or {},
         operated_by=user_id,
     ))
+    await db.flush()
+
+
+async def _create_audit_log(
+    db: AsyncSession, user_id: uuid.UUID, action: str, table_name: str,
+    record_id: uuid.UUID, changed_fields: Optional[dict] = None
+) -> None:
+    await _add_audit_log_no_commit(db, user_id, action, table_name, record_id, changed_fields)
     await db.commit()
 
 
@@ -355,19 +364,18 @@ async def lock_unlock_control_limits(
     return ic
 
 
-async def add_sample_batch(
-    db: AsyncSession, user_id: uuid.UUID, ic_id: uuid.UUID,
-    data: dict
+async def _create_sample_batch_inner(
+    db: AsyncSession, user_id: uuid.UUID, ic_id: uuid.UUID, data: dict
 ) -> SampleBatch:
+    """创建 SampleBatch + SampleValues + AuditLog，flush 但不 commit。"""
     ic = await get_inspection_characteristic(db, ic_id)
     if not ic:
         raise ValueError("Inspection characteristic not found")
 
     inspected_count = None
     defect_count = None
-
-    # Differentiate between attribute and variable charts
     attribute_charts = {"p", "np", "c", "u"}
+
     if ic.chart_type in attribute_charts:
         inspected_count = data.get("inspected_count")
         defect_count = data.get("defect_count")
@@ -375,7 +383,7 @@ async def add_sample_batch(
             raise ValueError(f"计数值图（{ic.chart_type}）必须提供 inspected_count 和 defect_count")
         if defect_count > inspected_count:
             raise ValueError("defect_count 不能超过 inspected_count")
-        values = []  # attribute charts don't use measurement values
+        values = []
     else:
         values = data.get("values")
         if not values:
@@ -384,6 +392,7 @@ async def add_sample_batch(
             raise ValueError(f"Expected {ic.subgroup_size} values for xbar_r, got {len(values)}")
         if ic.chart_type == "imr" and len(values) != 1:
             raise ValueError(f"Expected 1 value for imr, got {len(values)}")
+
     sampled_at = data["sampled_at"]
     if isinstance(sampled_at, str):
         sampled_at = datetime.fromisoformat(sampled_at.replace("Z", "+00:00"))
@@ -402,16 +411,23 @@ async def add_sample_batch(
     for i, val in enumerate(values):
         db.add(SampleValue(batch_id=batch.batch_id, sequence_no=i + 1, value=val))
 
-    await db.commit()
-    await db.refresh(batch)
-
-    # Always re-evaluate alarms — Phase II monitoring requires locked limits + alarm detection
-    await _reevaluate_alarms(db, ic)
-
-    await _create_audit_log(
+    await _add_audit_log_no_commit(
         db, user_id, "CREATE", "sample_batches", batch.batch_id,
         {"ic_id": str(ic_id), "batch_no": data["batch_no"], "count": len(values)}
     )
+    return batch
+
+
+async def add_sample_batch(
+    db: AsyncSession, user_id: uuid.UUID, ic_id: uuid.UUID,
+    data: dict
+) -> SampleBatch:
+    batch = await _create_sample_batch_inner(db, user_id, ic_id, data)
+    await db.commit()
+    await db.refresh(batch)
+    ic = await get_inspection_characteristic(db, ic_id)
+    if ic:
+        await _reevaluate_alarms(db, ic)
     return batch
 
 
@@ -503,6 +519,60 @@ async def _compute_chart_data(db: AsyncSession, ic: InspectionCharacteristic) ->
         "limits": limits,
         "total_batches": total,
     }
+
+
+async def _reevaluate_alarms_no_commit(db: AsyncSession, ic: InspectionCharacteristic) -> None:
+    """计算告警 + 生成 SPCAlarm 记录 + db.flush()，不 commit。
+    批量导入只创建 SPCAlarm，不自动创建 CAPA。"""
+    chart_data = await _compute_chart_data(db, ic)
+    data_points = chart_data["data_points"]
+    limits = chart_data["limits"]
+
+    if not data_points or (limits.get("ucl") is None and limits.get("ucl_list") is None):
+        return
+
+    # Evaluate rules
+    subgroup_stats = [dp["x_value"] for dp in data_points if dp["x_value"] is not None]
+    # Attribute charts: only Rule 1 (beyond control limits) applies
+    if ic.chart_type in {"p", "np", "c", "u"}:
+        effective_rules = {k: (v if k == "rule_1" else False) for k, v in ic.rules_config.items()}
+    else:
+        effective_rules = ic.rules_config
+    alarms = evaluate_western_electric(subgroup_stats, limits, effective_rules)
+
+    # Create alarm records for new violations
+    for alarm in alarms:
+        dp = data_points[alarm["batch_index"]]
+        # Check if this alarm already exists (same rule, same batch)
+        batch_result = await db.execute(
+            select(SampleBatch).where(
+                and_(SampleBatch.batch_no == dp["batch_no"], SampleBatch.ic_id == ic.ic_id)
+            )
+        )
+        batch = batch_result.scalar_one_or_none()
+
+        existing = await db.execute(
+            select(SPCAlarm).where(
+                and_(
+                    SPCAlarm.ic_id == ic.ic_id,
+                    SPCAlarm.rule_no == alarm["rule_no"],
+                    SPCAlarm.batch_id == (batch.batch_id if batch else None),
+                )
+            )
+        )
+        if existing.scalar_one_or_none():
+            continue
+
+        spc_alarm = SPCAlarm(
+            ic_id=ic.ic_id,
+            batch_id=batch.batch_id if batch else None,
+            rule_no=alarm["rule_no"],
+            severity=alarm["severity"],
+            status="open",
+        )
+        db.add(spc_alarm)
+
+    await db.flush()
 
 
 async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> None:
