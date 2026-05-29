@@ -15,6 +15,8 @@ import {
 } from "../../api/customerQuality";
 import type { CustomerComplaint } from "../../types";
 import { useAuthStore } from "../../store/authStore";
+import SupplierBadge from "../../components/cross-links/SupplierBadge";
+import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 
 const { Title } = Typography;
 
@@ -113,6 +115,8 @@ export default function ComplaintDetailPage() {
           <Title level={4} style={{ margin: 0 }}>{data?.complaint_no || "客诉详情"}</Title>
           {data && <Tag color={severityColor[data.severity]}>{data.severity}</Tag>}
           {data && <Tag>{statusLabel[data.status] || data.status}</Tag>}
+          {data?.supplier_id && <SupplierBadge supplierId={data.supplier_id} />}
+          {data?.fmea_ref_id && <RelatedFMEALink fmeaRefId={data.fmea_ref_id} />}
         </Space>
         {canEdit && data && (
           <Space>
