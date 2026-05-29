@@ -78,6 +78,9 @@ class CustomerComplaint(Base):
     )
     supplier_responsibility: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     scar_ref_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("suppliers.supplier_id"), nullable=True
+    )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
     )

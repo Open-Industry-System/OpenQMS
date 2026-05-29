@@ -30,6 +30,7 @@ class CAPAEightD(Base):
     fmea_ref_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id")
     )
+    fmea_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
