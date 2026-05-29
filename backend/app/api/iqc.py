@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin, require_admin
@@ -53,6 +53,46 @@ async def create_material(
         return schemas.iqc.IqcMaterialResponse.model_validate(material)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.post("/materials/import")
+async def import_materials(
+    file: UploadFile = File(...),
+    product_line_code: str = Query("DC-DC-100"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
+    from dataclasses import asdict
+    from fastapi.responses import JSONResponse
+
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文件超过 10MB 限制")
+
+    header_mapping = {
+        "物料号*": "part_no", "名称*": "part_name", "规格": "part_spec",
+        "类型": "material_type", "默认AQL": "default_aql", "检验水平": "default_inspection_level",
+        "单位": "unit", "产品线": "product_line_code",
+    }
+    try:
+        rows = parse_upload(raw, header_mapping, required_headers=["物料号*", "名称*"])
+    except ExcelParseError as e:
+        return JSONResponse(status_code=422, content={"imported_count": 0, "errors": [{"row": 0, "field": "", "message": str(e)}]})
+
+    result = await iqc_material_service.bulk_import_materials(db, rows, product_line_code, user.user_id)
+    if result.errors:
+        return JSONResponse(status_code=422, content={"imported_count": 0, "errors": [asdict(e) for e in result.errors]})
+    return {"imported_count": result.imported_count, "errors": []}
+
+
+@router.get("/materials/import-template")
+async def download_material_import_template():
+    from app.utils.excel import create_template, excel_response
+    headers = ["物料号*", "名称*", "规格", "类型", "默认AQL", "检验水平", "单位", "产品线"]
+    example = ["PN-001", "示例物料", "10x20mm", "raw", "0.65", "II", "pcs", "DC-DC-100"]
+    template_bytes = create_template(headers, "物料导入模板", example)
+    return excel_response(template_bytes, "iqc_material_import_template.xlsx")
 
 
 @router.get("/materials/{material_id}", response_model=schemas.iqc.IqcMaterialResponse)
