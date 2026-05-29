@@ -17,6 +17,7 @@ async def list_fmeas(
     page_size: int = 20,
     status: str | None = None,
     product_line: str | None = None,
+    high_rpn: bool = False,
 ) -> tuple[list[FMEADocument], int]:
     query = select(FMEADocument)
     count_query = select(func.count(FMEADocument.fmea_id))
@@ -28,6 +29,26 @@ async def list_fmeas(
     if product_line:
         query = query.where(FMEADocument.product_line_code == product_line)
         count_query = count_query.where(FMEADocument.product_line_code == product_line)
+
+    if high_rpn:
+        from app.utils.fmea_graph import build_rpn_rows
+        query = query.order_by(FMEADocument.created_at.desc())
+        all_docs = (await db.execute(query)).scalars().all()
+        filtered = []
+        for doc in all_docs:
+            nodes = doc.graph_data.get("nodes", []) if doc.graph_data else []
+            edges = doc.graph_data.get("edges", []) if doc.graph_data else []
+            rows = build_rpn_rows(nodes, edges)
+            has_high = any(
+                r.get("severity", 0) * r.get("occurrence", 0) * r.get("detection", 0) >= 100
+                for r in rows
+                if r.get("severity", 0) > 0
+            )
+            if has_high:
+                filtered.append(doc)
+        total = len(filtered)
+        items = filtered[(page - 1) * page_size : page * page_size]
+        return items, total
 
     query = query.order_by(FMEADocument.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)

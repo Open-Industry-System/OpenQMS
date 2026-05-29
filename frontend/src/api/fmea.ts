@@ -6,6 +6,7 @@ export async function listFMEAs(params: {
   page_size?: number;
   status?: string;
   product_line?: string;
+  high_rpn?: boolean;
 }): Promise<FMEAListResponse> {
   const resp = await client.get("/fmea", { params });
   return resp.data;

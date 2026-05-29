@@ -16,7 +16,12 @@ async def list_capas(
     page_size: int = 20,
     status: str | None = None,
     product_line: str | None = None,
+    overdue: bool = False,
+    pending_action: bool = False,
 ) -> tuple[list[CAPAEightD], int]:
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
     query = select(CAPAEightD)
     count_query = select(func.count(CAPAEightD.report_id))
 
@@ -27,6 +32,24 @@ async def list_capas(
     if product_line:
         query = query.where(CAPAEightD.product_line_code == product_line)
         count_query = count_query.where(CAPAEightD.product_line_code == product_line)
+
+    if overdue:
+        query = query.where(
+            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+            CAPAEightD.due_date < now.date(),
+        )
+        count_query = count_query.where(
+            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+            CAPAEightD.due_date < now.date(),
+        )
+
+    if pending_action:
+        query = query.where(
+            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
+        )
+        count_query = count_query.where(
+            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
+        )
 
     query = query.order_by(CAPAEightD.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)

@@ -6,6 +6,8 @@ export async function listCAPAs(params: {
   page_size?: number;
   status?: string;
   product_line?: string;
+  overdue?: boolean;
+  pending_action?: boolean;
 }): Promise<CAPAListResponse> {
   const resp = await client.get("/capa", { params });
   return resp.data;

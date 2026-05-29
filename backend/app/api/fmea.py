@@ -21,10 +21,11 @@ async def list_fmeas(
     page_size: int = Query(20, ge=1, le=1000),
     status: str | None = None,
     product_line: str | None = None,
+    high_rpn: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    items, total = await fmea_service.list_fmeas(db, page, page_size, status, product_line)
+    items, total = await fmea_service.list_fmeas(db, page, page_size, status, product_line, high_rpn=high_rpn)
     return FMEAListResponse(
         items=[FMEAResponse.model_validate(f) for f in items],
         total=total,

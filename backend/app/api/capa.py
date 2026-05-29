@@ -21,10 +21,15 @@ async def list_capas(
     page_size: int = Query(20, ge=1, le=1000),
     status: str | None = None,
     product_line: str | None = None,
+    overdue: bool = Query(False),
+    pending_action: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    items, total = await capa_service.list_capas(db, page, page_size, status, product_line)
+    items, total = await capa_service.list_capas(
+        db, page, page_size, status, product_line,
+        overdue=overdue, pending_action=pending_action,
+    )
     return CAPAListResponse(
         items=[CAPAResponse.model_validate(c) for c in items],
         total=total,
