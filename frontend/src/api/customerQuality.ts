@@ -16,8 +16,8 @@ export type CustomerUpdatePayload = Partial<CustomerCreatePayload>;
 
 export type ComplaintCreatePayload = Omit<
   CustomerComplaint,
-  "complaint_id" | "created_by" | "created_at" | "updated_at" | "closed_at"
->;
+  "complaint_id" | "created_by" | "created_at" | "updated_at" | "closed_at" | "supplier_id"
+> & { supplier_id?: string | null };
 export type ComplaintUpdatePayload = Partial<ComplaintCreatePayload>;
 
 export type RMARecordCreatePayload = Omit<

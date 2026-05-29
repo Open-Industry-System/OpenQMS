@@ -931,6 +931,7 @@ export interface CustomerComplaint {
   assignee_id: string | null;
   supplier_responsibility: boolean;
   scar_ref_id: string | null;
+  supplier_id: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

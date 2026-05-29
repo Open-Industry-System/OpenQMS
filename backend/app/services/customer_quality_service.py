@@ -614,6 +614,7 @@ async def create_complaint(db: AsyncSession, data, user_id: uuid.UUID) -> Custom
         "assignee_id",
         "supplier_responsibility",
         "scar_ref_id",
+        "supplier_id",
     }
     complaint = CustomerComplaint(
         complaint_id=uuid.uuid4(),
@@ -707,6 +708,7 @@ async def update_complaint(
         "assignee_id",
         "supplier_responsibility",
         "scar_ref_id",
+        "supplier_id",
     }
     changed_fields = _apply_updates(complaint, values, allowed)
     if not changed_fields:
@@ -1318,3 +1320,22 @@ async def dashboard(
         "rma_by_status": rma_by_status,
         "rma_by_responsibility": rma_by_responsibility,
     }
+
+
+async def get_complaints_by_supplier(
+    db: AsyncSession, supplier_id: str
+) -> list[dict]:
+    q = select(CustomerComplaint).where(
+        CustomerComplaint.supplier_id == supplier_id
+    )
+    result = await db.execute(q)
+    return [
+        {
+            "complaint_id": str(c.complaint_id),
+            "complaint_no": c.complaint_no,
+            "severity": c.severity,
+            "status": c.status,
+            "defect_desc": c.defect_desc,
+        }
+        for c in result.scalars().all()
+    ]

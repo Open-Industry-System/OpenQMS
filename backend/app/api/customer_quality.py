@@ -142,6 +142,15 @@ async def create_complaint(
     return schemas.customer_quality.ComplaintResponse.model_validate(complaint)
 
 
+@router.get("/api/customer-complaints/by-supplier/{supplier_id}")
+async def get_complaints_by_supplier(
+    supplier_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    return await customer_quality_service.get_complaints_by_supplier(db, supplier_id)
+
+
 @router.get(
     "/api/customer-complaints/{complaint_id}",
     response_model=schemas.customer_quality.ComplaintResponse,
