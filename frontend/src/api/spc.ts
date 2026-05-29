@@ -100,3 +100,13 @@ export async function createCAPAFromAlarm(alarmId: string): Promise<{ capa_id: s
   const resp = await client.post(`/spc/alarms/${alarmId}/create-capa`);
   return resp.data;
 }
+
+import { downloadExcel, uploadExcel, type ImportResult } from "../utils/excel";
+
+export async function downloadSampleImportTemplate(icId: string): Promise<void> {
+  await downloadExcel(`/spc/inspection-characteristics/${icId}/samples/import-template`, {}, `spc_samples_template.xlsx`);
+}
+
+export async function importSamples(icId: string, file: File): Promise<ImportResult> {
+  return uploadExcel(`/spc/inspection-characteristics/${icId}/samples/import`, file);
+}

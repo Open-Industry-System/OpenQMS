@@ -11,6 +11,8 @@ import {
   ExclamationCircleOutlined, UploadOutlined,
 } from "@ant-design/icons";
 import VersionPanel from "./VersionPanel";
+import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
+import { importSamples, downloadSampleImportTemplate } from "../../api/spc";
 import dayjs from "dayjs";
 import * as echarts from "echarts";
 import {
@@ -95,6 +97,7 @@ export default function SPCDetailPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("chart");
+  const [importOpen, setImportOpen] = useState(false);
 
   // Data entry form
   const [batchNo, setBatchNo] = useState("");
@@ -798,23 +801,19 @@ export default function SPCDetailPage() {
                     label: "批量导入",
                     children: (
                       <Card>
-                        <Upload.Dragger
-                          name="file"
-                          multiple={false}
-                          beforeUpload={() => false}
-                          disabled
-                        >
-                          <p className="ant-upload-drag-icon">
-                            <UploadOutlined />
-                          </p>
-                          <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
-                          <p className="ant-upload-hint">
-                            支持 Excel (.xlsx) 或 CSV 格式，每行包含: 批次号, 采样时间, 样本值1, 样本值2, ...
-                          </p>
-                        </Upload.Dragger>
-                        <Text type="secondary" style={{ display: "block", marginTop: 16 }}>
-                          批量导入功能开发中，请使用单批录入。
-                        </Text>
+                        <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+                          上传 Excel 批量导入
+                        </Button>
+                        <ImportExcelDialog
+                          open={importOpen}
+                          onClose={() => setImportOpen(false)}
+                          onImported={() => fetchAll()}
+                          importFn={(file) => importSamples(id!, file)}
+                          templateDownloadFn={() => downloadSampleImportTemplate(id!)}
+                          hint={ic?.chart_type === "xbar_r" || ic?.chart_type === "imr"
+                            ? `每行: 批次号*, 采样时间*, 样本值1${ic?.chart_type === "xbar_r" ? ", 样本值2, ..." : ""}`
+                            : "每行: 批次号*, 采样时间*, 检验数, 缺陷数"}
+                        />
                       </Card>
                     ),
                   },
