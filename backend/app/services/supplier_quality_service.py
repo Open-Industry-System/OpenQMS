@@ -359,28 +359,15 @@ async def export_quality_dashboard_excel(
     end_date: Optional[date] = None,
     product_line_code: Optional[str] = None,
 ) -> bytes:
-    from io import BytesIO
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment, PatternFill
+    from app.utils.excel import create_workbook, append_row, workbook_to_bytes
 
     dashboard_data = await get_quality_dashboard(db, start_date, end_date, product_line_code)
 
-    wb = Workbook()
-    ws1 = wb.active
-    ws1.title = "供应商质量排名"
-
     headers = ["排名", "供应商编号", "供应商名称", "评级", "PPM", "批次合格率", "交付准时率", "开放SCAR"]
-    ws1.append(headers)
-
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="1677FF", end_color="1677FF", fill_type="solid")
-    for cell in ws1[1]:
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center")
+    wb, ws = create_workbook("供应商质量排名", headers)
 
     for idx, item in enumerate(dashboard_data["ranking"], 1):
-        ws1.append([
+        append_row(ws, [
             idx,
             item["supplier_no"],
             item["name"],
@@ -396,7 +383,4 @@ async def export_quality_dashboard_excel(
     for point in dashboard_data["ppm_trend"]:
         ws2.append([point["month"], round(point["ppm"], 2)])
 
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output.getvalue()
+    return workbook_to_bytes(wb)
