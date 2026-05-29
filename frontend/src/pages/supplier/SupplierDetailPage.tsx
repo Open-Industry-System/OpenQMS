@@ -11,6 +11,7 @@ import {
   App,
   Tabs,
   Table,
+  List,
   Modal,
   Popconfirm,
   Row,
@@ -30,6 +31,7 @@ import {
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
 import type { Supplier, SupplierCertification, SupplierEvaluation, AuditPlan } from "../../types";
+import client from "../../api/client";
 import {
   getSupplier,
   createSupplier,
@@ -135,6 +137,12 @@ export default function SupplierDetailPage() {
   const [suspendReason, setSuspendReason] = useState("");
   const [transitioning, setTransitioning] = useState(false);
 
+  const [relatedData, setRelatedData] = useState<{
+    complaints: Array<{ id: string; no: string; status: string }>;
+    iqc_rejects: Array<{ id: string; no: string; result: string }>;
+    scars: Array<{ id: string; no: string; status: string }>;
+  }>({ complaints: [], iqc_rejects: [], scars: [] });
+
   const loadSupplier = useCallback(async () => {
     if (!id || id === "new") return;
     setLoading(true);
@@ -183,9 +191,19 @@ export default function SupplierDetailPage() {
     }
   }, []);
 
+  const loadRelated = useCallback(async () => {
+    if (!id || id === "new") return;
+    try {
+      const resp = await client.get(`/suppliers/${id}/related`);
+      setRelatedData(resp.data);
+    } catch {
+      // non-critical
+    }
+  }, [id]);
+
   useEffect(() => {
-    Promise.all([loadSupplier(), loadCerts(), loadEvals(), loadAuditPlans()]);
-  }, [loadSupplier, loadCerts, loadEvals, loadAuditPlans]);
+    Promise.all([loadSupplier(), loadCerts(), loadEvals(), loadAuditPlans(), loadRelated()]);
+  }, [loadSupplier, loadCerts, loadEvals, loadAuditPlans, loadRelated]);
 
   // Populate info form when supplier loads or editing starts
   useEffect(() => {
@@ -845,6 +863,63 @@ export default function SupplierDetailPage() {
             </Col>
           )}
         </Row>
+      ),
+    },
+    {
+      key: "complaints",
+      label: `客诉 (${relatedData.complaints.length})`,
+      children: (
+        <List
+          dataSource={relatedData.complaints}
+          locale={{ emptyText: "无关联客诉" }}
+          renderItem={(item) => (
+            <List.Item
+              style={{ cursor: "pointer" }}
+              onClick={() => navigate(`/customer-quality/complaints/${item.id}`)}
+            >
+              <List.Item.Meta title={item.no} />
+              <Tag>{item.status}</Tag>
+            </List.Item>
+          )}
+        />
+      ),
+    },
+    {
+      key: "iqc",
+      label: `IQC 不合格 (${relatedData.iqc_rejects.length})`,
+      children: (
+        <List
+          dataSource={relatedData.iqc_rejects}
+          locale={{ emptyText: "无 IQC 不合格记录" }}
+          renderItem={(item) => (
+            <List.Item
+              style={{ cursor: "pointer" }}
+              onClick={() => navigate(`/iqc/inspections/${item.id}`)}
+            >
+              <List.Item.Meta title={item.no} />
+              <Tag color="error">{item.result}</Tag>
+            </List.Item>
+          )}
+        />
+      ),
+    },
+    {
+      key: "scars",
+      label: `SCAR (${relatedData.scars.length})`,
+      children: (
+        <List
+          dataSource={relatedData.scars}
+          locale={{ emptyText: "无 SCAR 记录" }}
+          renderItem={(item) => (
+            <List.Item
+              style={{ cursor: "pointer" }}
+              onClick={() => navigate(`/scars/${item.id}`)}
+            >
+              <List.Item.Meta title={item.no} />
+              <Tag>{item.status}</Tag>
+            </List.Item>
+          )}
+        />
       ),
     },
   ];
