@@ -575,6 +575,125 @@ async def _reevaluate_alarms_no_commit(db: AsyncSession, ic: InspectionCharacter
     await db.flush()
 
 
+async def bulk_import_samples(
+    db: AsyncSession,
+    ic: InspectionCharacteristic,
+    rows: list[dict],
+    user_id: uuid.UUID,
+) -> "ImportResult":
+    from app.utils.excel import ImportError as ExcelImportError, ImportResult, MAX_IMPORT_ROWS
+    from app.utils.excel import coerce_datetime, coerce_int_strict
+
+    if len(rows) > MAX_IMPORT_ROWS:
+        return ImportResult(0, [ExcelImportError(0, "", f"导入行数超过上限 {MAX_IMPORT_ROWS}")])
+
+    # 预检查 DB 已存在的 batch_no
+    result = await db.execute(
+        select(SampleBatch.batch_no).where(SampleBatch.ic_id == ic.ic_id)
+    )
+    existing_batch_nos = {bn for (bn,) in result.all()}
+
+    errors = []
+    seen = set()
+    validated = []
+    attribute_charts = {"p", "np", "c", "u"}
+
+    for row in rows:
+        row_no = row.pop("_row")
+        errs = []
+
+        if not row.get("batch_no"):
+            errs.append(ExcelImportError(row_no, "batch_no", "批次号为必填项"))
+        if not row.get("sampled_at"):
+            errs.append(ExcelImportError(row_no, "sampled_at", "采样时间为必填项"))
+
+        sampled_at = coerce_datetime(row.get("sampled_at"))
+        if sampled_at is None and row.get("sampled_at"):
+            errs.append(ExcelImportError(row_no, "sampled_at", "日期格式无效"))
+        elif sampled_at:
+            row["sampled_at"] = sampled_at
+
+        batch_no = row.get("batch_no")
+        if batch_no:
+            if batch_no in seen:
+                errs.append(ExcelImportError(row_no, "batch_no", f"批次内重复: {batch_no}"))
+            if batch_no in existing_batch_nos:
+                errs.append(ExcelImportError(row_no, "batch_no", f"数据库已存在: {batch_no}"))
+            seen.add(batch_no)
+
+        if ic.chart_type in attribute_charts:
+            ic_val = row.get("inspected_count")
+            if ic_val is None:
+                errs.append(ExcelImportError(row_no, "inspected_count", "计数值图需要检验数"))
+            else:
+                try:
+                    ic_int = coerce_int_strict(ic_val)
+                    if ic_int < 0:
+                        errs.append(ExcelImportError(row_no, "inspected_count", "检验数必须为非负整数"))
+                    else:
+                        row["inspected_count"] = ic_int
+                except (ValueError, TypeError):
+                    errs.append(ExcelImportError(row_no, "inspected_count", "检验数必须为整数（不能为小数）"))
+
+            dc_val = row.get("defect_count")
+            if dc_val is None:
+                errs.append(ExcelImportError(row_no, "defect_count", "计数值图需要缺陷数"))
+            else:
+                try:
+                    dc_int = coerce_int_strict(dc_val)
+                    if dc_int < 0:
+                        errs.append(ExcelImportError(row_no, "defect_count", "缺陷数必须为非负整数"))
+                    elif "inspected_count" in row and dc_int > row["inspected_count"]:
+                        errs.append(ExcelImportError(row_no, "defect_count", "缺陷数不能超过检验数"))
+                    else:
+                        row["defect_count"] = dc_int
+                except (ValueError, TypeError):
+                    errs.append(ExcelImportError(row_no, "defect_count", "缺陷数必须为整数（不能为小数）"))
+        else:
+            values = []
+            for i in range(1, ic.subgroup_size + 1):
+                key = f"value_{i}"
+                val = row.get(key)
+                if val is None:
+                    errs.append(ExcelImportError(row_no, key, f"样本值{i}为必填项"))
+                else:
+                    try:
+                        values.append(float(val))
+                    except (ValueError, TypeError):
+                        errs.append(ExcelImportError(row_no, key, f"样本值{i}必须为数字"))
+            if not errs:
+                row["_values"] = values
+
+        if errs:
+            errors.extend(errs)
+        else:
+            validated.append(row)
+
+    if errors:
+        return ImportResult(0, errors)
+
+    created = []
+    try:
+        for row in validated:
+            data = {"batch_no": row["batch_no"], "sampled_at": row["sampled_at"]}
+            if ic.chart_type in attribute_charts:
+                data["inspected_count"] = row["inspected_count"]
+                data["defect_count"] = row["defect_count"]
+                data["values"] = []
+            else:
+                data["values"] = row.pop("_values")
+            batch = await _create_sample_batch_inner(db, user_id, ic.ic_id, data)
+            created.append(batch)
+
+        await _reevaluate_alarms_no_commit(db, ic)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        return ImportResult(0, [ExcelImportError(0, "", "数据库写入失败，请重试")])
+
+    return ImportResult(len(created), [])
+
+
 async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> None:
     """Re-evaluate all Western Electric rules after new data is added."""
     chart_data = await _compute_chart_data(db, ic)

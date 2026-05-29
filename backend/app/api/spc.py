@@ -1,7 +1,7 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -132,6 +132,67 @@ async def add_samples(
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/inspection-characteristics/{ic_id}/samples/import")
+async def import_samples(
+    ic_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
+    from dataclasses import asdict
+    from fastapi.responses import JSONResponse
+
+    ic = await spc_service.get_inspection_characteristic(db, ic_id)
+    if not ic:
+        raise HTTPException(status_code=404, detail="inspection characteristic not found")
+
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文件超过 10MB 限制")
+
+    if ic.chart_type in ("p", "np", "c", "u"):
+        header_mapping = {"批次号*": "batch_no", "采样时间*": "sampled_at", "检验数": "inspected_count", "缺陷数": "defect_count"}
+    else:
+        header_mapping = {"批次号*": "batch_no", "采样时间*": "sampled_at"}
+        for i in range(1, ic.subgroup_size + 1):
+            header_mapping[f"样本值{i}"] = f"value_{i}"
+
+    try:
+        rows = parse_upload(raw, header_mapping, required_headers=["批次号*", "采样时间*"])
+    except ExcelParseError as e:
+        return JSONResponse(status_code=422, content={"imported_count": 0, "errors": [{"row": 0, "field": "", "message": str(e)}]})
+
+    result = await spc_service.bulk_import_samples(db, ic, rows, user.user_id)
+    if result.errors:
+        return JSONResponse(status_code=422, content={"imported_count": 0, "errors": [asdict(e) for e in result.errors]})
+    return {"imported_count": result.imported_count, "errors": []}
+
+
+@router.get("/inspection-characteristics/{ic_id}/samples/import-template")
+async def download_sample_import_template(
+    ic_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    from app.utils.excel import create_template, excel_response
+
+    ic = await spc_service.get_inspection_characteristic(db, ic_id)
+    if not ic:
+        raise HTTPException(status_code=404, detail="inspection characteristic not found")
+
+    if ic.chart_type in ("p", "np", "c", "u"):
+        headers = ["批次号*", "采样时间*", "检验数", "缺陷数"]
+        example = ["B001", "2026-05-28 10:00", "100", "3"]
+    else:
+        headers = ["批次号*", "采样时间*"] + [f"样本值{i}" for i in range(1, ic.subgroup_size + 1)]
+        example = ["B001", "2026-05-28 10:00"] + ["10.5"] * ic.subgroup_size
+
+    template_bytes = create_template(headers, "样本导入模板", example)
+    filename = f"spc_samples_{ic.chart_type}_template.xlsx"
+    return excel_response(template_bytes, filename)
 
 
 @router.get("/inspection-characteristics/{ic_id}/chart-data")
