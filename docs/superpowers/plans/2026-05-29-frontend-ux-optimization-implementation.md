@@ -24,26 +24,6 @@
 将 `AppLayout.tsx:31-67` 的 `menuItems` 替换为 SubMenu 分组结构。添加 `ROUTE_GROUP_MAP` 和 `getSelectedMenuKey` 函数：
 
 ```tsx
-// 路由前缀 → 所属分组 key
-const ROUTE_GROUP_MAP: Record<string, string> = {
-  "/fmea": "grp:planning",
-  "/control-plans": "grp:planning",
-  "/apqp": "grp:planning",
-  "/ppap": "grp:planning",
-  "/special-characteristics": "grp:planning",
-  "/spc": "grp:shopfloor",
-  "/msa": "grp:shopfloor",
-  "/quality-goals": "grp:shopfloor",
-  "/internal-audits": "grp:shopfloor",
-  "/management-reviews": "grp:shopfloor",
-  "/customer-quality": "grp:customer",
-  "/customer-audits": "grp:customer",
-  "/capa": "grp:customer",
-  "/suppliers": "grp:supplier",
-  "/iqc": "grp:supplier",
-  "/scars": "grp:supplier",
-};
-
 // 所有菜单 key 列表（用于最长前缀匹配）
 const MENU_KEYS = [
   "/dashboard",
@@ -55,6 +35,31 @@ const MENU_KEYS = [
   "/suppliers", "/suppliers/quality",
   "/iqc/inspections", "/iqc/materials", "/scars",
 ];
+
+// 菜单 key → 所属分组 key（精确匹配每个叶子菜单项）
+const MENU_KEY_TO_GROUP: Record<string, string> = {
+  "/fmea": "grp:planning",
+  "/control-plans": "grp:planning",
+  "/apqp": "grp:planning",
+  "/ppap": "grp:planning",
+  "/special-characteristics": "grp:planning",
+  "/special-characteristics/matrix": "grp:planning",
+  "/special-characteristics/traceability": "grp:planning",
+  "/spc": "grp:shopfloor",
+  "/msa/gauges": "grp:shopfloor",
+  "/msa/studies": "grp:shopfloor",
+  "/quality-goals": "grp:shopfloor",
+  "/internal-audits": "grp:shopfloor",
+  "/management-reviews": "grp:shopfloor",
+  "/customer-quality": "grp:customer",
+  "/customer-audits": "grp:customer",
+  "/capa": "grp:customer",
+  "/suppliers": "grp:supplier",
+  "/suppliers/quality": "grp:supplier",
+  "/iqc/inspections": "grp:supplier",
+  "/iqc/materials": "grp:supplier",
+  "/scars": "grp:supplier",
+};
 
 function getSelectedMenuKey(pathname: string): string {
   const matched = MENU_KEYS
@@ -131,7 +136,7 @@ const menuItems = [
 
 - [ ] **Step 2: 更新 AppLayout 函数体中的 selectedKeys 和 openKeys 逻辑**
 
-替换 `AppLayout.tsx:79` 的 `selectedKey` 计算，添加 `openKeys` 受控：
+替换 `AppLayout.tsx:79` 的 `selectedKey` 计算，添加状态化的 `openKeys`：
 
 ```tsx
 // 替换原来的：
@@ -139,21 +144,31 @@ const menuItems = [
 
 // 改为：
 const selectedKey = getSelectedMenuKey(location.pathname);
-const openKeys = ROUTE_GROUP_MAP[selectedKey]
-  ? [ROUTE_GROUP_MAP[selectedKey]]
-  : [];
+const currentGroup = MENU_KEY_TO_GROUP[selectedKey];
+
+// openKeys：路由变化时自动展开当前分组，同时保留用户手动操作
+const [openKeys, setOpenKeys] = useState<string[]>(
+  currentGroup ? [currentGroup] : []
+);
+
+// 路由变化时，确保当前分组在 openKeys 中
+useEffect(() => {
+  if (currentGroup && !openKeys.includes(currentGroup)) {
+    setOpenKeys((prev) => [...prev, currentGroup]);
+  }
+}, [currentGroup]);
 ```
 
-在 `<Menu>` 组件上添加 `openKeys` 和 `onOpenChange`：
+在 `<Menu>` 组件上使用受控 `openKeys` + `onOpenChange`：
 
 ```tsx
 <Menu
   mode="inline"
   selectedKeys={[selectedKey]}
-  defaultOpenKeys={openKeys}
+  openKeys={openKeys}
+  onOpenChange={setOpenKeys}
   items={menuItems}
   onClick={({ key }) => {
-    // 点击分组标题不跳转
     if (key.startsWith("grp:")) return;
     navigate(key);
   }}
@@ -161,7 +176,7 @@ const openKeys = ROUTE_GROUP_MAP[selectedKey]
 />
 ```
 
-注意：用 `defaultOpenKeys` 而非 `openKeys`，这样用户可以手动展开/收起其他分组。如果用受控 `openKeys`，用户无法手动操作。
+这样路由变化时自动展开当前分组，用户也可以手动展开/收起其他分组。
 
 - [ ] **Step 3: 验证编译通过**
 
@@ -358,7 +373,7 @@ async def get_alerts(db: AsyncSession, product_line: str | None = None) -> dict:
     # PPM 从 IQC 检验数据计算（defects / lot_qty * 1M）
     # 阈值：customers.ppm_target，默认 500
     from app.models.customer_quality import Customer
-    from app.models.iqc import IqcInspection
+    from app.models.iqc_inspection import IqcInspection
     from app.models.supplier import Supplier
 
     ppm_target_q = select(func.min(Customer.ppm_target))
@@ -447,9 +462,9 @@ async def get_recent_actions(
     return actions
 ```
 
-- [ ] **Step 4: 在 dashboard API router 中注册新端点**
+- [ ] **Step 4: 在 dashboard API router 中注册新端点，替换现有 alerts 端点**
 
-在 `backend/app/api/dashboard.py` 末尾添加：
+现有 `backend/app/api/dashboard.py` 已有 `@router.get("/alerts")`（L41-48），它从 `get_dashboard` 返回的 `data["alerts"]` 取数据（当前为空列表）。**替换**该端点实现，同时新增 `/summary` 和 `/recent-actions`：
 
 ```python
 @router.get("/summary")
@@ -461,6 +476,7 @@ async def get_summary(
     return await dashboard_service.get_summary(db, product_line)
 
 
+# 替换现有的 /alerts 端点实现
 @router.get("/alerts")
 async def get_alerts(
     product_line: str | None = None,
@@ -875,16 +891,16 @@ git commit -m "feat(dashboard): redesign to three-tier layout with alerts and re
 ```python
 """add cross-module link fields
 
-Revision ID: 008
-Revises: 007
+Revision ID: 026_add_cross_module_links
+Revises: 025_add_customer_audit_fields
 Create Date: 2026-05-29
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "008"
-down_revision = "007"
+revision = "026_add_cross_module_links"
+down_revision = "025_add_customer_audit_fields"
 branch_labels = None
 depends_on = None
 
@@ -936,7 +952,7 @@ def downgrade() -> None:
 
 - [ ] **Step 2: 验证迁移语法**
 
-Run: `cd backend && python -c "from alembic.versions._008_add_cross_module_links import upgrade; print('OK')"`
+Run: `cd backend && python -c "import alembic.config; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 3: Commit**
@@ -1078,8 +1094,31 @@ async def get_related_fmea(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    # 返回 CAPA 关联的 FMEA 信息
-    ...
+    from app.models.capa import CAPAEightD
+    from app.models.fmea import FMEADocument
+
+    capa = (
+        await db.execute(
+            select(CAPAEightD).where(CAPAEightD.report_id == report_id)
+        )
+    ).scalar_one_or_none()
+    if not capa:
+        raise HTTPException(status_code=404, detail="CAPA not found")
+    if not capa.fmea_ref_id:
+        return {"fmea_id": None, "document_no": None, "fmea_node_id": None}
+
+    fmea = (
+        await db.execute(
+            select(FMEADocument).where(FMEADocument.fmea_id == capa.fmea_ref_id)
+        )
+    ).scalar_one_or_none()
+
+    return {
+        "fmea_id": str(capa.fmea_ref_id),
+        "document_no": fmea.document_no if fmea else None,
+        "fmea_node_id": capa.fmea_node_id,
+    }
+
 
 @router.get("/by-fmea-node/{fmea_id}")
 async def get_capas_by_fmea_node(
@@ -1233,8 +1272,8 @@ async def get_supplier_related(
     db: AsyncSession, supplier_id: str
 ) -> dict:
     from app.models.customer_quality import CustomerComplaint
-    from app.models.iqc import IqcInspection
-    from app.models.scar import SupplierSCAR
+    from app.models.iqc_inspection import IqcInspection
+    from app.models.supplier import SupplierSCAR
 
     # 客诉
     complaints_q = select(CustomerComplaint).where(
@@ -1245,7 +1284,7 @@ async def get_supplier_related(
     # IQC 不合格
     iqc_q = select(IqcInspection).where(
         IqcInspection.supplier_id == supplier_id,
-        IqcInspection.result == "reject",
+        IqcInspection.inspection_result == "reject",
     )
     iqc_rejects = (await db.execute(iqc_q)).scalars().all()
 
@@ -1721,10 +1760,10 @@ useEffect(() => {
       (r) => r.failureModeNodeId === highlightNodeId
     );
     if (targetRow) {
-      setHighlightedRowKey(targetRow.id);
+      setHighlightedRowKey(targetRow.key);
       // 滚动到目标行
       setTimeout(() => {
-        const el = document.querySelector(`[data-row-key="${targetRow.id}"]`);
+        const el = document.querySelector(`[data-row-key="${targetRow.key}"]`);
         el?.scrollIntoView({ behavior: "smooth", block: "center" });
       }, 300);
     }
@@ -1738,7 +1777,7 @@ useEffect(() => {
 <Table
   // ... 现有 props ...
   rowClassName={(record) =>
-    record.id === highlightedRowKey ? "highlighted-row" : ""
+    record.key === highlightedRowKey ? "highlighted-row" : ""
   }
 />
 
@@ -1908,13 +1947,80 @@ Expected: 编译成功
 
 - [ ] **Step 5: 更新所有模块内部的相对 import 路径**
 
-每个模块内的文件可能有相对 import（如 `../../api/fmea`、`../../types` 等）。迁移后路径深度变了，需要逐一修正。
+每个模块内的文件有相对 import（如 `../../api/fmea`、`../../types`）。迁移后路径深度变了，需要逐一修正。
 
-逐模块检查并修正：
-- `frontend/src/pages/planning/fmea/` 内的 import
-- `frontend/src/pages/planning/control-plan/` 内的 import
-- `frontend/src/pages/shopfloor/spc/` 内的 import
-- ... 以此类推
+**planning/fmea/** — 文件从 `pages/fmea/` 移到 `pages/planning/fmea/`（多一层），所有 `../../` 改为 `../../../`：
+- `FMEAListPage.tsx`: `../../api/fmea` → `../../../api/fmea`, `../../types` → `../../../types`
+- `FMEAEditorPage.tsx`: `../../api/fmea` → `../../../api/fmea`, `../../types` → `../../../types`, `../../utils/fmeaTable` → `../../../utils/fmeaTable`, `../../utils/fmea` → `../../../utils/fmea`, `../../store/authStore` → `../../../store/authStore`, `../../components/dfmea/` → `../../../components/dfmea/`
+
+**planning/control-plan/** — 同理多一层：
+- `ControlPlanListPage.tsx`: `../../api/controlPlan` → `../../../api/controlPlan`, `../../types` → `../../../types`
+- `ControlPlanEditorPage.tsx`: `../../api/controlPlan` → `../../../api/controlPlan`, `../../types` → `../../../types`, `../../store/authStore` → `../../../store/authStore`, `../../components/control-plan/` → `../../../components/control-plan/`
+
+**planning/apqp/** — 多一层：
+- `APQPListPage.tsx`: `../../api/apqp` → `../../../api/apqp`, `../../types` → `../../../types`
+- `APQPDetailPage.tsx`: `../../api/apqp` → `../../../api/apqp`, `../../types` → `../../../types`
+
+**planning/ppap/** — 多一层：
+- `PPAPListPage.tsx`: `../../api/ppap` → `../../../api/ppap`, `../../types` → `../../../types`
+- `PPAPDetailPage.tsx`: `../../api/ppap` → `../../../api/ppap`, `../../types` → `../../../types`
+
+**planning/special-characteristic/** — 多一层：
+- `SCListPage.tsx`: `../../api/specialCharacteristic` → `../../../api/specialCharacteristic`, `../../types` → `../../../types`
+- `SCDetailPage.tsx`: `../../api/specialCharacteristic` → `../../../api/specialCharacteristic`, `../../types` → `../../../types`
+- `SCMatrixPage.tsx`: `../../api/specialCharacteristic` → `../../../api/specialCharacteristic`, `../../types` → `../../../types`
+- `TraceabilityPage.tsx`: `../../api/specialCharacteristic` → `../../../api/specialCharacteristic`, `../../types` → `../../../types`
+
+**shopfloor/spc/** — 多一层：
+- `SPCListPage.tsx`: `../../api/spc` → `../../../api/spc`, `../../types` → `../../../types`
+- `SPCDetailPage.tsx`: `../../api/spc` → `../../../api/spc`, `../../types` → `../../../types`, `../../types/spc` → `../../../types/spc`
+- `VersionPanel.tsx`: `../../api/spc` → `../../../api/spc`, `../../types` → `../../../types`
+
+**shopfloor/msa/** — 多一层：
+- `GaugeListPage.tsx`: `../../api/msa` → `../../../api/msa`, `../../types` → `../../../types`
+- `GaugeDetailPage.tsx`: `../../api/msa` → `../../../api/msa`, `../../types` → `../../../types`
+- `MsaStudyListPage.tsx`: `../../api/msa` → `../../../api/msa`, `../../types` → `../../../types`
+- `StudyDetailPage.tsx`: `../../api/msa` → `../../../api/msa`, `../../types` → `../../../types`
+
+**shopfloor/quality-goal/** — 多一层：
+- `QualityGoalListPage.tsx`: `../../api/qualityGoal` → `../../../api/qualityGoal`, `../../types` → `../../../types`
+
+**shopfloor/internal-audit/** — 多一层：
+- `InternalAuditListPage.tsx`: `../../api/audit` → `../../../api/audit`, `../../types` → `../../../types`
+- `InternalAuditDetailPage.tsx`: `../../api/audit` → `../../../api/audit`, `../../types` → `../../../types`
+
+**shopfloor/management-review/** — 多一层：
+- `ManagementReviewListPage.tsx`: `../../api/managementReview` → `../../../api/managementReview`, `../../types` → `../../../types`
+- `ManagementReviewDetailPage.tsx`: `../../api/managementReview` → `../../../api/managementReview`, `../../types` → `../../../types`
+
+**customer/quality/** — 多一层（从 `pages/customerQuality/` 到 `pages/customer/quality/`）：
+- `CustomerQualityPage.tsx`: `../../api/customerQuality` → `../../../api/customerQuality`, `../../types` → `../../../types`
+- `ComplaintDetailPage.tsx`: `../../api/customerQuality` → `../../../api/customerQuality`, `../../types` → `../../../types`
+- `RMADetailPage.tsx`: `../../api/customerQuality` → `../../../api/customerQuality`, `../../types` → `../../../types`
+
+**customer/audit/** — 多一层（从 `pages/customerAudit/` 到 `pages/customer/audit/`）：
+- `CustomerAuditListPage.tsx`: `../../api/audit` → `../../../api/audit`, `../../types` → `../../../types`
+- `CustomerAuditDetailPage.tsx`: `../../api/audit` → `../../../api/audit`, `../../types` → `../../../types`
+
+**customer/capa/** — 多一层（从 `pages/capa/` 到 `pages/customer/capa/`）：
+- `CAPAListPage.tsx`: `../../api/capa` → `../../../api/capa`, `../../types` → `../../../types`
+- `CAPADetailPage.tsx`: `../../api/capa` → `../../../api/capa`, `../../types` → `../../../types`
+
+**supplier/management/** — 多一层（从 `pages/supplier/` 到 `pages/supplier/management/`）：
+- `SupplierListPage.tsx`: `../../api/supplier` → `../../../api/supplier`, `../../types` → `../../../types`
+- `SupplierDetailPage.tsx`: `../../api/supplier` → `../../../api/supplier`, `../../types` → `../../../types`
+
+**supplier/dashboard/** — 多一层：
+- `SupplierQualityPage.tsx`: `../../api/supplier` → `../../../api/supplier`, `../../types` → `../../../types`
+
+**supplier/scar/** — 多一层（从 `pages/scar/` 到 `pages/supplier/scar/`）：
+- `SCARListPage.tsx`: `../../api/scar` → `../../../api/scar`, `../../types` → `../../../types`
+- `SCARDetailPage.tsx`: `../../api/scar` → `../../../api/scar`, `../../types` → `../../../types`
+
+**supplier/iqc/** — 多一层（从 `pages/iqc/` 到 `pages/supplier/iqc/`）：
+- `IqcInspectionListPage.tsx`: `../../api/iqc` → `../../../api/iqc`, `../../types` → `../../../types`
+- `IqcInspectionDetailPage.tsx`: `../../api/iqc` → `../../../api/iqc`, `../../types` → `../../../types`
+- `IqcMaterialListPage.tsx`: `../../api/iqc` → `../../../api/iqc`, `../../types` → `../../../types`
 
 Run: `cd frontend && npm run build`
 Expected: 编译成功
