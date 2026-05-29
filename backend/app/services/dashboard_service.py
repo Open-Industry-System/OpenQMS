@@ -138,3 +138,224 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
         },
         "alerts": [],
     }
+
+
+async def get_summary(db: AsyncSession, product_line: str | None = None) -> dict:
+    now = datetime.now(timezone.utc)
+
+    fmea_pending = select(func.count(FMEADocument.fmea_id)).where(
+        FMEADocument.status.in_(["draft", "in_review"])
+    )
+    if product_line:
+        fmea_pending = fmea_pending.where(FMEADocument.product_line_code == product_line)
+    fmea_pending_count = await db.scalar(fmea_pending) or 0
+
+    capa_pending = select(func.count(CAPAEightD.report_id)).where(
+        CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
+    )
+    if product_line:
+        capa_pending = capa_pending.where(CAPAEightD.product_line_code == product_line)
+    capa_pending_count = await db.scalar(capa_pending) or 0
+
+    from app.models.customer_quality import CustomerComplaint
+
+    complaint_pending = select(func.count(CustomerComplaint.complaint_id)).where(
+        CustomerComplaint.status == "open"
+    )
+    if product_line:
+        complaint_pending = complaint_pending.where(
+            CustomerComplaint.product_line_code == product_line
+        )
+    complaint_pending_count = await db.scalar(complaint_pending) or 0
+
+    pending_actions = fmea_pending_count + capa_pending_count + complaint_pending_count
+
+    overdue_capa_q = select(func.count(CAPAEightD.report_id)).where(
+        CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+        CAPAEightD.due_date < now.date(),
+    )
+    if product_line:
+        overdue_capa_q = overdue_capa_q.where(CAPAEightD.product_line_code == product_line)
+    overdue_tasks = await db.scalar(overdue_capa_q) or 0
+
+    from app.utils.fmea_graph import build_rpn_rows
+
+    fmea_query = select(FMEADocument.fmea_id, FMEADocument.graph_data)
+    if product_line:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code == product_line)
+    result = await db.execute(fmea_query)
+    all_docs = result.all()
+
+    high_risk_items = 0
+    for _doc_id, graph_data in all_docs:
+        if not graph_data:
+            continue
+        nodes = graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
+        edges = graph_data.get("edges", []) if isinstance(graph_data, dict) else []
+        rows = build_rpn_rows(nodes, edges)
+        for row in rows:
+            s = row.get("severity", 0)
+            o = row.get("occurrence", 0)
+            d = row.get("detection", 0)
+            if s > 0 and o > 0 and d > 0:
+                rpn = s * o * d
+                if rpn >= 100:
+                    high_risk_items += 1
+
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    prev_month_start = (month_start - timedelta(days=1)).replace(day=1)
+
+    this_month = select(func.count(FMEADocument.fmea_id)).where(
+        FMEADocument.created_at >= month_start
+    )
+    last_month = select(func.count(FMEADocument.fmea_id)).where(
+        FMEADocument.created_at >= prev_month_start,
+        FMEADocument.created_at < month_start,
+    )
+    if product_line:
+        this_month = this_month.where(FMEADocument.product_line_code == product_line)
+        last_month = last_month.where(FMEADocument.product_line_code == product_line)
+
+    this_count = await db.scalar(this_month) or 0
+    last_count = await db.scalar(last_month) or 0
+
+    return {
+        "pending_actions": pending_actions,
+        "overdue_tasks": overdue_tasks,
+        "high_risk_items": high_risk_items,
+        "month_trend": this_count - last_count,
+    }
+
+
+async def get_alerts(db: AsyncSession, product_line: str | None = None) -> dict:
+    from app.utils.fmea_graph import build_rpn_rows
+    from app.models.supplier import Supplier
+
+    now = datetime.now(timezone.utc)
+
+    fmea_query = select(FMEADocument.fmea_id, FMEADocument.document_no, FMEADocument.graph_data)
+    if product_line:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code == product_line)
+    result = await db.execute(fmea_query)
+    all_docs = result.all()
+
+    high_rpn_items = []
+    for doc_id, doc_no, graph_data in all_docs:
+        if not graph_data:
+            continue
+        nodes = graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
+        edges = graph_data.get("edges", []) if isinstance(graph_data, dict) else []
+        rows = build_rpn_rows(nodes, edges)
+        for row in rows:
+            s = row.get("severity", 0)
+            o = row.get("occurrence", 0)
+            d = row.get("detection", 0)
+            if s > 0 and o > 0 and d > 0:
+                rpn = s * o * d
+                if rpn >= 100:
+                    high_rpn_items.append({
+                        "fmea_id": str(doc_id),
+                        "document_no": doc_no,
+                        "node_name": row.get("failure_mode", ""),
+                        "rpn": rpn,
+                    })
+
+    high_rpn_items.sort(key=lambda x: x["rpn"], reverse=True)
+    high_rpn_items = high_rpn_items[:5]
+
+    capa_query = (
+        select(CAPAEightD.report_id, CAPAEightD.document_no, CAPAEightD.due_date)
+        .where(
+            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+            CAPAEightD.due_date < now.date(),
+        )
+        .order_by(CAPAEightD.due_date)
+        .limit(5)
+    )
+    if product_line:
+        capa_query = capa_query.where(CAPAEightD.product_line_code == product_line)
+    capa_result = await db.execute(capa_query)
+    overdue_capas = [
+        {
+            "report_id": str(row.report_id),
+            "document_no": row.document_no,
+            "overdue_days": (now.date() - row.due_date).days,
+        }
+        for row in capa_result.all()
+    ]
+
+    from app.models.customer_quality import Customer
+    from app.models.iqc_inspection import IqcInspection
+
+    ppm_target_q = select(func.min(Customer.ppm_target))
+    ppm_threshold = await db.scalar(ppm_target_q) or 500.0
+    if ppm_threshold is None or ppm_threshold <= 0:
+        ppm_threshold = 500.0
+
+    ppm_query = (
+        select(
+            IqcInspection.supplier_id,
+            func.sum(IqcInspection.defect_qty).label("total_defects"),
+            func.sum(IqcInspection.lot_qty).label("total_lots"),
+        )
+        .where(IqcInspection.supplier_id.isnot(None))
+        .group_by(IqcInspection.supplier_id)
+    )
+    if product_line:
+        ppm_query = ppm_query.where(IqcInspection.product_line_code == product_line)
+    ppm_result = await db.execute(ppm_query)
+
+    high_ppm_suppliers = []
+    for row in ppm_result.all():
+        if row.total_lots and row.total_lots > 0:
+            ppm = (row.total_defects / row.total_lots) * 1_000_000
+            if ppm > ppm_threshold:
+                supp = await db.get(Supplier, row.supplier_id)
+                if supp:
+                    high_ppm_suppliers.append({
+                        "supplier_id": str(row.supplier_id),
+                        "supplier_name": supp.name,
+                        "ppm": round(ppm, 1),
+                    })
+
+    high_ppm_suppliers.sort(key=lambda x: x["ppm"], reverse=True)
+    high_ppm_suppliers = high_ppm_suppliers[:5]
+
+    return {
+        "high_rpn_fmeas": high_rpn_items,
+        "overdue_capas": overdue_capas,
+        "high_ppm_suppliers": high_ppm_suppliers,
+    }
+
+
+async def get_recent_actions(db: AsyncSession, user_id: str, limit: int = 5) -> list[dict]:
+    from app.models.audit import AuditLog
+
+    query = (
+        select(AuditLog)
+        .where(AuditLog.operated_by == user_id)
+        .order_by(AuditLog.operated_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    logs = result.scalars().all()
+
+    actions = []
+    for log in logs:
+        entity_no = ""
+        if log.table_name == "fmea_documents":
+            q = select(FMEADocument.document_no).where(FMEADocument.fmea_id == log.record_id)
+            entity_no = await db.scalar(q) or ""
+        elif log.table_name == "capa_eightd":
+            q = select(CAPAEightD.document_no).where(CAPAEightD.report_id == log.record_id)
+            entity_no = await db.scalar(q) or ""
+
+        actions.append({
+            "record_id": str(log.record_id),
+            "table_name": log.table_name,
+            "entity_no": entity_no,
+            "action": log.action,
+            "operated_at": log.operated_at.isoformat(),
+        })
+
+    return actions

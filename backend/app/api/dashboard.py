@@ -44,5 +44,21 @@ async def get_alerts(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    data = await dashboard_service.get_dashboard(db, product_line)
-    return data["alerts"]
+    return await dashboard_service.get_alerts(db, product_line)
+
+
+@router.get("/summary")
+async def get_summary(
+    product_line: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    return await dashboard_service.get_summary(db, product_line)
+
+
+@router.get("/recent-actions")
+async def get_recent_actions(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return await dashboard_service.get_recent_actions(db, user.user_id)
