@@ -42,7 +42,7 @@ async def get_material(db: AsyncSession, material_id: uuid.UUID) -> IqcMaterial 
     return result.scalar_one_or_none()
 
 
-async def create_material(
+async def _create_material_inner(
     db: AsyncSession,
     part_no: str,
     part_name: str,
@@ -54,6 +54,7 @@ async def create_material(
     product_line_code: str = "DC-DC-100",
     user_id: uuid.UUID | None = None,
 ) -> IqcMaterial:
+    """创建 IqcMaterial + AuditLog，flush 但不 commit。"""
     material = IqcMaterial(
         part_no=part_no,
         part_name=part_name,
@@ -66,6 +67,7 @@ async def create_material(
         created_by=user_id,
     )
     db.add(material)
+    await db.flush()  # 先 flush 获取 material_id
 
     if user_id:
         db.add(AuditLog(
@@ -76,8 +78,26 @@ async def create_material(
             operated_by=user_id,
         ))
 
+    return material
+
+
+async def create_material(
+    db: AsyncSession,
+    part_no: str,
+    part_name: str,
+    part_spec: str | None = None,
+    material_type: str = "raw",
+    default_aql: float | None = None,
+    default_inspection_level: str | None = None,
+    unit: str | None = None,
+    product_line_code: str = "DC-DC-100",
+    user_id: uuid.UUID | None = None,
+) -> IqcMaterial:
+    material = await _create_material_inner(
+        db, part_no, part_name, part_spec, material_type,
+        default_aql, default_inspection_level, unit, product_line_code, user_id,
+    )
     try:
-        await db.flush()
         await db.commit()
     except IntegrityError:
         await db.rollback()
