@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Tag, Typography, Modal, Form, Input, Select, DatePicker, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { listCAPAs, createCAPA } from "../../api/capa";
@@ -30,15 +30,24 @@ export default function CAPAListPage() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const productLine = useProductLineStore((s) => s.selected);
+  const [searchParams] = useSearchParams();
 
   const fetchData = (p: number = page) => {
     setLoading(true);
-    listCAPAs({ page: p, page_size: 20, product_line: productLine || undefined })
+    const overdue = searchParams.get("overdue") === "true";
+    const pendingAction = searchParams.get("pending_action") === "true";
+    listCAPAs({
+      page: p,
+      page_size: 20,
+      product_line: productLine || undefined,
+      overdue: overdue || undefined,
+      pending_action: pendingAction || undefined,
+    })
       .then((res) => { setData(res.items); setTotal(res.total); })
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1); }, [productLine]);
+  useEffect(() => { fetchData(1); }, [productLine, searchParams]);
 
   const handleCreate = async (values: { title: string; document_no: string; severity: string; due_date?: dayjs.Dayjs }) => {
     try {

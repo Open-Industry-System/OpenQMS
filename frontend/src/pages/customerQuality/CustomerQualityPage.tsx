@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   App,
   Button,
@@ -70,6 +70,7 @@ export default function CustomerQualityPage() {
   const [customerForm] = Form.useForm();
   const [complaintForm] = Form.useForm();
   const [rmaForm] = Form.useForm();
+  const [searchParams] = useSearchParams();
 
   const canEdit = user?.role !== "viewer";
   const assigneeId = mineOnly ? user?.user_id : undefined;
@@ -82,6 +83,8 @@ export default function CustomerQualityPage() {
       setCustomers(customerRes.items);
       setSelectedCustomerId(effectiveCustomerId);
 
+      const statusParam = searchParams.get("status");
+
       const [complaintRes, rmaRes, dashboardRes] = await Promise.all([
         listComplaints({
           page: 1,
@@ -89,6 +92,7 @@ export default function CustomerQualityPage() {
           product_line: productLine || undefined,
           customer_id: effectiveCustomerId || undefined,
           assignee_id: assigneeId,
+          status: statusParam || undefined,
         }),
         listRMARecords({
           page: 1,

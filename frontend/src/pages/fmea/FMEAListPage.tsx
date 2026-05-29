@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Tag, Typography, Modal, Form, Input, Select, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { listFMEAs, createFMEA, updateFMEA } from "../../api/fmea";
@@ -49,10 +49,19 @@ export default function FMEAListPage() {
   const user = useAuthStore((s) => s.user);
   const canEdit = user?.role !== "viewer";
   const productLine = useProductLineStore((s) => s.selected);
+  const [searchParams] = useSearchParams();
 
   const fetchData = (p: number = page) => {
     setLoading(true);
-    listFMEAs({ page: p, page_size: 20, product_line: productLine || undefined })
+    const highRpn = searchParams.get("risk") === "high";
+    const pendingApproval = searchParams.get("pending_approval") === "true";
+    listFMEAs({
+      page: p,
+      page_size: 20,
+      product_line: productLine || undefined,
+      high_rpn: highRpn || undefined,
+      status: pendingApproval ? "in_review" : undefined,
+    })
       .then((res) => {
         setData(res.items);
         setTotal(res.total);
@@ -62,7 +71,7 @@ export default function FMEAListPage() {
 
   useEffect(() => {
     fetchData(1);
-  }, [productLine]);
+  }, [productLine, searchParams]);
 
   const handleCreate = async (values: { title: string; document_no: string; fmea_type: string }) => {
     if (values.fmea_type === "DFMEA") {
