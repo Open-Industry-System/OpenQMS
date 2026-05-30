@@ -10,6 +10,7 @@ from app.models.audit import AuditLog
 from app.models.graph_sync_outbox import GraphSyncOutbox
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import create_fmea_version
+from app.services.version_service import _create_fmea_version_no_commit
 
 
 async def list_fmeas(
@@ -223,7 +224,7 @@ async def transition_fmea(
             if target == FMEAState.IN_REVIEW
             else "审批通过，版本发布"
         )
-        version = await create_fmea_version(db, fmea, change_type, change_summary, user_id)
+        version = await _create_fmea_version_no_commit(db, fmea, change_type, change_summary, user_id)
 
     # Audit log
     audit_log = AuditLog(
