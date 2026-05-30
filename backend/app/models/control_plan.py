@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import String, Integer, ForeignKey, DateTime, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -51,6 +51,12 @@ class ControlPlan(Base):
     )
     approved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+    product_line = relationship("ProductLine")
+
+    customer_requirements: Mapped[list | None] = mapped_column(
+        JSONB, default=list, nullable=True
     )
 
     items = relationship(

@@ -4,6 +4,7 @@ from datetime import date, datetime
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Index, CheckConstraint
 
 from app.database import Base
 
@@ -36,6 +37,9 @@ class Customer(Base):
 
     complaints = relationship("CustomerComplaint", back_populates="customer")
     rma_records = relationship("RMARecord", back_populates="customer")
+
+    satisfaction_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    satisfaction_survey_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class CustomerComplaint(Base):
@@ -149,3 +153,47 @@ class RMARecord(Base):
     customer = relationship("Customer", back_populates="rma_records")
     complaint = relationship("CustomerComplaint", back_populates="rma_records")
     product_line = relationship("ProductLine")
+
+
+class ShipmentRecord(Base):
+    __tablename__ = "shipment_records"
+
+    shipment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("customers.customer_id"), nullable=False
+    )
+    product_line_code: Mapped[str | None] = mapped_column(
+        String, ForeignKey("product_lines.code"), nullable=True
+    )
+    shipment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    batch_no: Mapped[str | None] = mapped_column(String, nullable=True)
+    destination: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
+
+    __table_args__ = (
+        Index("ix_shipment_records_customer_date", "customer_id", "shipment_date"),
+        Index("ix_shipment_records_batch_no", "batch_no"),
+        Index("ix_shipment_records_date_line", "shipment_date", "product_line_code"),
+        CheckConstraint("quantity > 0", name="ck_shipment_quantity_positive"),
+    )
+
+
+class WarrantyRecord(Base):
+    __tablename__ = "warranty_records"
+
+    warranty_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("customers.customer_id"), nullable=False
+    )
+    product_line_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    claim_date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    failure_mode: Mapped[str | None] = mapped_column(String, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
