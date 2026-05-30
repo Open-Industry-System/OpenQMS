@@ -66,7 +66,7 @@ neo4j>=5.0,<6.0
 
 - [ ] **Step 3: 安装依赖**
 
-Run: `cd backend && pip install neo4j>=5.0,<6.0`
+Run: `cd backend && pip install 'neo4j>=5.0,<6.0'`
 
 - [ ] **Step 4: Commit**
 
@@ -118,6 +118,7 @@ class GraphSyncOutbox(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -169,6 +170,7 @@ def upgrade() -> None:
         sa.Column('max_attempts', sa.Integer(), nullable=False, server_default='5'),
         sa.Column('next_attempt_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column('last_error', sa.Text(), nullable=True),
+        sa.Column('locked_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column('processed_at', sa.DateTime(timezone=True), nullable=True),
     )
@@ -377,8 +379,8 @@ SAMPLE_GRAPH = {
 }
 
 
-def test_build_cypher_sync_returns_delete_and_create():
-    """build_cypher_sync 应返回：1 条 DELETE + 1 条 CREATE (nodes) + 1 条 CREATE (edges)。"""
+def test_build_cypher_sync_returns_delete_doc_nodes_edges():
+    """build_cypher_sync 应返回：1 DELETE + 1 FMEDoc + N nodes + M edges。"""
     statements = build_cypher_sync(
         fmea_id="00000000-0000-0000-0000-000000000001",
         document_no="PFMEA-2026-001",
@@ -389,14 +391,17 @@ def test_build_cypher_sync_returns_delete_and_create():
         version=1,
         graph_data=SAMPLE_GRAPH,
     )
-    assert len(statements) == 3
+    # 1 DELETE + 1 FMEDoc + 6 nodes + 5 edges = 13
+    assert len(statements) == 13
     # 第一条是 DELETE
     assert "DETACH DELETE" in statements[0][0]
-    # 第二条是 CREATE nodes
-    assert "CREATE" in statements[1][0]
-    assert "GraphNode" in statements[1][0]
-    # 第三条是 CREATE edges
-    assert "CREATE" in statements[2][0]
+    # 第二条是 FMEDocument
+    assert "FMEDocument" in statements[1][0]
+    # 后续是节点和边创建
+    node_stmts = [s for s in statements if "GraphNode" in s[0]]
+    edge_stmts = [s for s in statements if "MATCH (s:GraphNode" in s[0]]
+    assert len(node_stmts) == 6
+    assert len(edge_stmts) == 5
 
 
 def test_build_cypher_sync_maps_node_types_to_labels():
@@ -411,10 +416,12 @@ def test_build_cypher_sync_maps_node_types_to_labels():
         version=1,
         graph_data=SAMPLE_GRAPH,
     )
-    nodes_cypher = statements[1][0]
-    assert ":GraphNode:FailureMode" in nodes_cypher
-    assert ":GraphNode:System" in nodes_cypher
-    assert ":GraphNode:Control" in nodes_cypher
+    node_stmts = [s[0] for s in statements if "GraphNode" in s[0] and "MATCH" not in s[0]]
+    cypher_text = " ".join(node_stmts)
+    assert ":GraphNode:FailureMode" in cypher_text
+    assert ":GraphNode:System" in cypher_text
+    # PreventionControl/DetectionControl → Control
+    assert ":GraphNode:Control" in cypher_text
 
 
 def test_build_cypher_sync_empty_graph():
@@ -431,11 +438,36 @@ def test_build_cypher_sync_empty_graph():
     )
     assert len(statements) == 1  # 只有 DELETE
     assert "DETACH DELETE" in statements[0][0]
+
+
+def test_build_cypher_sync_skips_unknown_types():
+    """未知节点类型和边类型被安全跳过，不进入 Cypher。"""
+    graph = {
+        "nodes": [
+            {"id": "x1", "type": "EvilNode", "name": "bad", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "x2", "type": "FailureMode", "name": "ok", "severity": 0, "occurrence": 0, "detection": 0},
+        ],
+        "edges": [
+            {"source": "x2", "target": "x2", "type": "EVIL_RELATIONSHIP"},
+            {"source": "x2", "target": "x2", "type": "CAUSE_OF"},
+        ],
+    }
+    statements = build_cypher_sync(
+        fmea_id="00000000-0000-0000-0000-000000000001",
+        document_no="T-001", title="t", fmea_type="PFMEA",
+        product_line_code="DC-DC-100", status="draft", version=1,
+        graph_data=graph,
+    )
+    cypher_text = " ".join(s[0] for s in statements)
+    assert "EvilNode" not in cypher_text
+    assert "EVIL_RELATIONSHIP" not in cypher_text
+    assert "FailureMode" in cypher_text
+    assert "CAUSE_OF" in cypher_text
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd backend && python -m pytest tests/test_graph_projection.py -v`
+Run: `cd backend && SECRET_KEY=openqms-local-dev-2026-jwt-signing-key python -m pytest tests/test_graph_projection.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.services.graph_projection_service'`
 
 - [ ] **Step 3: 实现 GraphProjectionService**
@@ -449,27 +481,34 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'app.services.graph_pro
 (Cypher, params) 元组，worker 逐条执行实现幂等投影。
 """
 import uuid
+import logging
 from typing import Any
 
-# 节点类型 → Neo4j 标签映射
-# PreventionControl / DetectionControl 统一映射为 Control 标签 + control_type 属性
+logger = logging.getLogger(__name__)
+
+# ── 白名单：防止用户输入直接进入 Cypher ──
+
+ALLOWED_NODE_TYPES: set[str] = {
+    "ProcessItem", "System", "ProcessStep", "Subsystem",
+    "ProcessWorkElement", "Component",
+    "ProcessItemFunction", "ProcessStepFunction", "ProcessWorkElementFunction",
+    "Function",
+    "FailureMode", "FailureEffect", "FailureCause",
+    "PreventionControl", "DetectionControl",
+    "RecommendedAction",
+}
+
 NODE_TYPE_LABEL_MAP: dict[str, str] = {
-    "ProcessItem": "ProcessItem",
-    "System": "System",
-    "ProcessStep": "ProcessStep",
-    "Subsystem": "Subsystem",
-    "ProcessWorkElement": "ProcessWorkElement",
-    "Component": "Component",
-    "ProcessItemFunction": "Function",
-    "ProcessStepFunction": "Function",
-    "ProcessWorkElementFunction": "Function",
-    "Function": "Function",
-    "FailureMode": "FailureMode",
-    "FailureEffect": "FailureEffect",
-    "FailureCause": "FailureCause",
     "PreventionControl": "Control",
     "DetectionControl": "Control",
-    "RecommendedAction": "RecommendedAction",
+    # 其他类型保持原名
+}
+
+ALLOWED_EDGE_TYPES: set[str] = {
+    "HAS_PROCESS_STEP", "HAS_WORK_ELEMENT", "HAS_FUNCTION",
+    "FUNCTION_MAPPED_TO", "HAS_FAILURE_MODE",
+    "EFFECT_OF", "CAUSE_OF",
+    "PREVENTED_BY", "DETECTED_BY", "OPTIMIZED_BY",
 }
 
 
@@ -480,7 +519,6 @@ def _node_properties(node: dict) -> dict[str, Any]:
         "name": node.get("name", ""),
         "type": node["type"],
     }
-    # 可选字段
     for key in ("process_number", "classification", "requirement", "specification",
                 "severity", "occurrence", "detection", "ap",
                 "revised_severity", "revised_occurrence", "revised_detection", "revised_ap",
@@ -490,7 +528,6 @@ def _node_properties(node: dict) -> dict[str, Any]:
         if val is not None and val != 0 and val != "":
             props[key] = val
 
-    # Control 子类型标识
     if node["type"] in ("PreventionControl", "DetectionControl"):
         props["control_type"] = "prevention" if node["type"] == "PreventionControl" else "detection"
 
@@ -509,6 +546,9 @@ def build_cypher_sync(
 ) -> list[tuple[str, dict]]:
     """为单个 FMEA 文档生成完整的 Neo4j 投影 Cypher 语句序列。
 
+    策略：逐条生成简单、参数化的 Cypher（不用动态字符串拼接标签/关系类型）。
+    每个 (cypher, params) 对应一条独立语句，在同一个 Neo4j transaction 中顺序执行。
+
     Returns: [(cypher, params), ...] — 按顺序执行即为幂等同步。
     """
     statements: list[tuple[str, dict]] = []
@@ -525,94 +565,58 @@ def build_cypher_sync(
     if not nodes:
         return statements
 
-    # Step 2: CREATE FMEDocument + all GraphNodes
-    # 使用 UNWIND 批量创建
-    node_rows = []
+    # Step 2: CREATE FMEDocument node
+    statements.append((
+        "CREATE (d:FMEDocument {fmea_id: $fmea_id, document_no: $document_no, "
+        "title: $title, fmea_type: $fmea_type, product_line_code: $product_line_code, "
+        "status: $status, version: $version})",
+        {
+            "fmea_id": fmea_id,
+            "document_no": document_no,
+            "title": title,
+            "fmea_type": fmea_type,
+            "product_line_code": product_line_code,
+            "status": status,
+            "version": version,
+        },
+    ))
+
+    # Step 3: CREATE each GraphNode (逐条，标签在白名单内直接拼接)
     for node in nodes:
-        label = NODE_TYPE_LABEL_MAP.get(node["type"], node["type"])
+        raw_type = node.get("type", "")
+        if raw_type not in ALLOWED_NODE_TYPES:
+            logger.warning(f"Skipping unknown node type: {raw_type}")
+            continue
+
+        label = NODE_TYPE_LABEL_MAP.get(raw_type, raw_type)
         props = _node_properties(node)
         props["fmea_id"] = fmea_id
         props["product_line_code"] = product_line_code
-        node_rows.append({"label": label, "props": props})
 
-    # FMEDocument 节点
-    doc_props = {
-        "fmea_id": fmea_id,
-        "document_no": document_no,
-        "title": title,
-        "fmea_type": fmea_type,
-        "product_line_code": product_line_code,
-        "status": status,
-        "version": version,
-    }
+        statements.append((
+            f"CREATE (n:GraphNode:{label}) SET n += $props",
+            {"props": props},
+        ))
 
-    doc_cypher = (
-        "CREATE (d:FMEDocument {fmea_id: $fmea_id, document_no: $document_no, "
-        "title: $title, fmea_type: $fmea_type, product_line_code: $product_line_code, "
-        "status: $status, version: $version})"
-    )
+    # Step 4: CREATE edges — MATCH by (fmea_id, node_id) for exact binding
+    node_ids = {n["id"] for n in nodes if n.get("type") in ALLOWED_NODE_TYPES}
+    for edge in edges:
+        edge_type = edge.get("type", "")
+        source = edge.get("source", "")
+        target = edge.get("target", "")
 
-    nodes_cypher = (
-        "UNWIND $rows AS row "
-        "CREATE (n:GraphNode) "
-        "SET n += row.props "
-        "WITH n, row "
-        "CALL apoc.create.addLabels(n, [row.label]) YIELD node "
-        "RETURN count(*)"
-    )
-    # 不用 APOC — 用动态标签
-    # Neo4j 5 支持 label expression 但 CREATE 不支持动态标签
-    # 改为逐个节点用字符串拼接（节点数少，性能可接受）
-    nodes_parts = []
-    nodes_params: dict[str, Any] = {"doc": doc_props}
-    for i, row in enumerate(node_rows):
-        label = row["label"]
-        param_key = f"n{i}"
-        nodes_params[param_key] = row["props"]
-        nodes_parts.append(
-            f"CREATE (n{i}:GraphNode:{label}) "
-            f"SET n{i} += ${param_key}"
-        )
+        if edge_type not in ALLOWED_EDGE_TYPES:
+            logger.warning(f"Skipping unknown edge type: {edge_type}")
+            continue
+        if source not in node_ids or target not in node_ids:
+            continue
 
-    # 连接所有节点到 FMEDocument
-    link_parts = []
-    for i in range(len(node_rows)):
-        link_parts.append(f"CREATE (doc)-[:HAS_NODE]->(n{i})")
-
-    full_create_nodes = (
-        doc_cypher + " WITH doc "
-        + " ".join(nodes_parts)
-        + " WITH doc, " + ", ".join(f"n{i}" for i in range(len(node_rows))) + " "
-        + " ".join(link_parts)
-    )
-
-    statements.append((full_create_nodes, nodes_params))
-
-    # Step 3: CREATE edges
-    if edges:
-        node_id_to_var = {node["id"]: f"n{i}" for i, node in enumerate(nodes)}
-        edge_parts = []
-        edge_params: dict[str, Any] = {}
-        for i, edge in enumerate(edges):
-            source_var = node_id_to_var.get(edge["source"])
-            target_var = node_id_to_var.get(edge["target"])
-            if source_var is None or target_var is None:
-                continue
-            edge_type = edge["type"]
-            edge_parts.append(f"CREATE ({source_var})-[:{edge_type}]->({target_var})")
-
-        if edge_parts:
-            edge_cypher = (
-                "MATCH (doc:FMEDocument {fmea_id: $fmea_id}) "
-                "WITH doc "
-                + "MATCH " + ", ".join(
-                    f"(n{i}) WHERE n{i}.fmea_id = $fmea_id"
-                    for i in range(len(node_rows))
-                )
-                + " WITH " + ", ".join(f"n{i}" for i in range(len(node_rows)))
-                + " " + " ".join(edge_parts)
-            )
-            statements.append((edge_cypher, {"fmea_id": fmea_id}))
+        statements.append((
+            f"MATCH (s:GraphNode {{fmea_id: $fmea_id, node_id: $source}}), "
+            f"(t:GraphNode {{fmea_id: $fmea_id, node_id: $target}}) "
+            f"CREATE (s)-[:{edge_type}]->(t)",
+            {"fmea_id": fmea_id, "source": source, "target": target},
+        ))
 
     return statements
 
@@ -689,8 +693,8 @@ class GraphProjectionService:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd backend && python -m pytest tests/test_graph_projection.py -v`
-Expected: 3 passed
+Run: `cd backend && SECRET_KEY=openqms-local-dev-2026-jwt-signing-key python -m pytest tests/test_graph_projection.py -v`
+Expected: 4 passed
 
 - [ ] **Step 5: Commit**
 
@@ -776,7 +780,7 @@ class TestBackoff:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd backend && python -m pytest tests/test_graph_sync_worker.py -v`
+Run: `cd backend && SECRET_KEY=openqms-local-dev-2026-jwt-signing-key python -m pytest tests/test_graph_sync_worker.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.services.graph_sync_worker'`
 
 - [ ] **Step 3: 实现 GraphSyncWorker**
@@ -844,13 +848,33 @@ def deduplicate_tasks(tasks: list[dict]) -> dict[str, list[dict]]:
 
 
 async def _poll_and_lock(db: AsyncSession) -> list[GraphSyncOutbox]:
-    """使用 PG FOR UPDATE SKIP LOCKED 原子领取一批 pending 任务。"""
+    """使用 PG FOR UPDATE SKIP LOCKED 原子领取一批 pending 任务。
+
+    同时回收超过 10 分钟仍在 processing 的任务（Worker 崩溃残留）。
+    """
+    now = datetime.now(timezone.utc)
+    stale_cutoff = now - timedelta(minutes=10)
+
+    # 先回收 stale processing 任务
+    await db.execute(
+        update(GraphSyncOutbox)
+        .where(
+            and_(
+                GraphSyncOutbox.status == "processing",
+                GraphSyncOutbox.locked_at < stale_cutoff,
+            )
+        )
+        .values(status="pending", locked_at=None)
+    )
+    await db.flush()
+
+    # 领取 pending 任务
     result = await db.execute(
         select(GraphSyncOutbox)
         .where(
             and_(
                 GraphSyncOutbox.status == "pending",
-                GraphSyncOutbox.next_attempt_at <= datetime.now(timezone.utc),
+                GraphSyncOutbox.next_attempt_at <= now,
             )
         )
         .order_by(GraphSyncOutbox.next_attempt_at)
@@ -864,7 +888,7 @@ async def _poll_and_lock(db: AsyncSession) -> list[GraphSyncOutbox]:
         await db.execute(
             update(GraphSyncOutbox)
             .where(GraphSyncOutbox.id.in_(task_ids))
-            .values(status="processing")
+            .values(status="processing", locked_at=now)
         )
         await db.commit()
 
@@ -874,7 +898,7 @@ async def _poll_and_lock(db: AsyncSession) -> list[GraphSyncOutbox]:
 async def _cleanup_stale_processing() -> int:
     """将 status='processing' 且超过 10 分钟的任务重置为 pending。
 
-    解决 Worker 崩溃后任务永远卡在 processing 的问题。
+    Worker 启动时调用，清理上次崩溃残留。
     """
     stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
     async with async_session() as db:
@@ -883,10 +907,10 @@ async def _cleanup_stale_processing() -> int:
             .where(
                 and_(
                     GraphSyncOutbox.status == "processing",
-                    GraphSyncOutbox.next_attempt_at < stale_cutoff,
+                    GraphSyncOutbox.locked_at < stale_cutoff,
                 )
             )
-            .values(status="pending")
+            .values(status="pending", locked_at=None)
             .returning(GraphSyncOutbox.id)
         )
         reset_ids = list(result.scalars().all())
@@ -1002,7 +1026,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd backend && python -m pytest tests/test_graph_sync_worker.py -v`
+Run: `cd backend && SECRET_KEY=openqms-local-dev-2026-jwt-signing-key python -m pytest tests/test_graph_sync_worker.py -v`
 Expected: 6 passed
 
 - [ ] **Step 5: Commit**
@@ -1164,7 +1188,6 @@ class JSONBRepository(FMEAGraphRepository):
         node_map = {n["id"]: n for n in nodes}
 
         visited_nodes = set()
-        visited_edges = set()
         result_nodes = []
         result_edges = []
         queue = [start_node_id]
@@ -1177,15 +1200,23 @@ class JSONBRepository(FMEAGraphRepository):
             if current in node_map:
                 result_nodes.append(node_map[current])
 
-            for edge in edges:
-                if direction == "downstream" and edge.get("source") == current and edge["id"] not in visited_edges:
-                    visited_edges.add(edge["id"])
-                    result_edges.append(edge)
-                    queue.append(edge["target"])
-                elif direction == "upstream" and edge.get("target") == current and edge["id"] not in visited_edges:
-                    visited_edges.add(edge["id"])
-                    result_edges.append(edge)
-                    queue.append(edge["source"])
+            for idx, edge in enumerate(edges):
+                src = edge.get("source", "")
+                tgt = edge.get("target", "")
+                edge_type = edge.get("type", "")
+                # 用 (source, target, type, index) 做唯一标识，因为 edge 没有 id 字段
+                edge_key = (src, tgt, edge_type, idx)
+
+                if direction == "downstream" and src == current and edge_key not in {e["_key"] for e in result_edges}:
+                    result_edges.append({"source": src, "target": tgt, "type": edge_type, "_key": edge_key})
+                    queue.append(tgt)
+                elif direction == "upstream" and tgt == current and edge_key not in {e["_key"] for e in result_edges}:
+                    result_edges.append({"source": src, "target": tgt, "type": edge_type, "_key": edge_key})
+                    queue.append(src)
+
+        # 去掉内部 _key
+        for e in result_edges:
+            e.pop("_key", None)
 
         return {"nodes": result_nodes, "edges": result_edges}
 ```
@@ -1593,7 +1624,7 @@ git commit -m "feat: add Neo4j and graph-worker services to Docker Compose"
 
 - [ ] **Step 1: Run all tests**
 
-Run: `cd backend && python -m pytest tests/test_graph_projection.py tests/test_graph_sync_worker.py -v`
+Run: `cd backend && SECRET_KEY=openqms-local-dev-2026-jwt-signing-key python -m pytest tests/test_graph_projection.py tests/test_graph_sync_worker.py -v`
 Expected: All passed
 
 - [ ] **Step 2: Run Alembic migration**
@@ -1603,10 +1634,10 @@ Expected: No errors
 
 - [ ] **Step 3: Verify outbox model importable**
 
-Run: `cd backend && python -c "from app.models.graph_sync_outbox import GraphSyncOutbox; print('OK')"`
+Run: `cd backend && SECRET_KEY=openqms-local-dev-2026-jwt-signing-key python -c "from app.models.graph_sync_outbox import GraphSyncOutbox; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 4: Verify API starts**
 
-Run: `cd backend && python -c "from app.main import app; print([r.path for r in app.routes if '/graph' in getattr(r, 'path', '')])"`
+Run: `cd backend && SECRET_KEY=openqms-local-dev-2026-jwt-signing-key python -c "from app.main import app; print([r.path for r in app.routes if '/graph' in getattr(r, 'path', '')])"`
 Expected: 包含 `/api/graph/fmea/{fmea_id}/impact/{node_id}` 等 5 条路由
