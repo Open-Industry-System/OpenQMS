@@ -38,7 +38,7 @@ Graph Sync Worker (asyncio 轮询)
   - PG 行级锁领取任务: SELECT ... FOR UPDATE SKIP LOCKED
   - 按 aggregate_id 去重，跳过同 ID 旧事件
   - 解析 JSONB → MERGE Neo4j
-  - 标记 completed / failed
+  - 标记 completed / dead
        │
        ▼
 Neo4j Community (只读投影)
@@ -144,9 +144,9 @@ CREATE INDEX graph_node_product_line IF NOT EXISTS FOR (n:GraphNode) ON (n.produ
 
 | event_type | Neo4j 操作 |
 |---|---|
-| `fmea.created` | MERGE FMEDocument 节点 + CREATE 该 FMEA 所有节点/边 |
+| `fmea.created` | 同 updated — 统一调用 `sync_fmea_to_neo4j()`，先删后建，幂等 |
 | `fmea.updated` | 先 DELETE 该 fmea_id 全部节点/边，再 CREATE（幂等） |
-| `fmea.approved` | 同 updated + FMEDocument.status = 'approved' |
+| `fmea.approved` | 同 updated — 统一调用 `sync_fmea_to_neo4j()`，幂等 |
 
 **全量重建（CLI 操作，不走 outbox）：**
 1. 清空 Neo4j 全部数据：`MATCH (n) DETACH DELETE n`
@@ -387,7 +387,7 @@ neo4j>=5.0,<6.0       # Neo4j Python driver (async)
 
 1. **Docker + 配置** — Neo4j 容器、config.py、neo4j driver 连接、约束初始化
 2. **Outbox 模型 + 迁移** — SQLAlchemy 模型、Alembic 迁移
-3. **FMEA Service 集成** — update/transition 中写 outbox（5 行代码）
+3. **FMEA Service 集成** — create/update/transition 中写 outbox（每处 5 行代码）
 4. **GraphProjectionService** — JSONB → Neo4j 映射逻辑
 5. **GraphSyncWorker** — PG 行级锁轮询、事件去重、同步、退避重试
 6. **FMEAGraphRepository** — 抽象接口 + JSONB 实现 + Neo4j 实现
