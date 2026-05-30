@@ -113,7 +113,7 @@ async def create_fmea_version(
         operated_by=user_id,
     ))
 
-    await db.commit()
+    await db.flush()
     await db.refresh(version)
     return version
 

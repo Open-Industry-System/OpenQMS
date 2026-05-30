@@ -7,6 +7,8 @@ import uuid
 import logging
 from typing import Any
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 # ── 白名单：防止用户输入直接进入 Cypher ──
@@ -32,6 +34,7 @@ ALLOWED_EDGE_TYPES: set[str] = {
     "FUNCTION_MAPPED_TO", "HAS_FAILURE_MODE",
     "EFFECT_OF", "CAUSE_OF",
     "PREVENTED_BY", "DETECTED_BY", "OPTIMIZED_BY",
+    "HAS_NODE",
 }
 
 
@@ -121,6 +124,14 @@ def build_cypher_sync(
             {"props": props},
         ))
 
+        # Step 3b: CREATE (:FMEDocument)-[:HAS_NODE]->(:GraphNode)
+        statements.append((
+            "MATCH (d:FMEDocument {fmea_id: $fmea_id}), "
+            f"(n:GraphNode {{fmea_id: $fmea_id, node_id: $node_id}}) "
+            "CREATE (d)-[:HAS_NODE]->(n)",
+            {"fmea_id": fmea_id, "node_id": node["id"]},
+        ))
+
     # Step 4: CREATE edges — MATCH by (fmea_id, node_id) for exact binding
     node_ids = {n["id"] for n in nodes if n.get("type") in ALLOWED_NODE_TYPES}
     for edge in edges:
@@ -180,7 +191,7 @@ class GraphProjectionService:
                 result = await tx.run(cypher, params)
                 await result.consume()  # 确保每条语句执行完成并检查错误
 
-        async with self._driver.session(database="neo4j") as session:
+        async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
             await session.execute_write(_tx)
 
     async def full_rebuild(self) -> dict:
@@ -193,7 +204,7 @@ class GraphProjectionService:
         failed = 0
 
         # 清空 Neo4j
-        async with self._driver.session(database="neo4j") as session:
+        async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
             await session.run("MATCH (n) DETACH DELETE n")
 
         # 重新创建约束

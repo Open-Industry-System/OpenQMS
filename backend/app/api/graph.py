@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.config import settings
 from app.core.deps import get_current_user, require_admin
 from app.models.user import User
 from app.graph.repository import FMEAGraphRepository
@@ -12,8 +13,13 @@ from app.graph.jsonb_repository import JSONBRepository
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
 
-def _repo(db: AsyncSession = Depends(get_db)) -> FMEAGraphRepository:
-    """当前默认使用 JSONB 实现。Neo4j 可用时可切换。"""
+async def _repo(db: AsyncSession = Depends(get_db)) -> FMEAGraphRepository:
+    """根据 GRAPH_REPOSITORY 配置选择实现。"""
+    if settings.GRAPH_REPOSITORY == "neo4j":
+        from app.graph.neo4j_driver import get_neo4j_driver
+        from app.graph.neo4j_repository import Neo4jRepository
+        driver = await get_neo4j_driver()
+        return Neo4jRepository(driver)
     return JSONBRepository(db)
 
 

@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "openqms2026"
     NEO4J_DATABASE: str = "neo4j"
+    GRAPH_REPOSITORY: str = "jsonb"  # "jsonb" or "neo4j"
 
     model_config = {"env_file": ".env"}
 

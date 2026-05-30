@@ -34,16 +34,18 @@ def test_build_cypher_sync_returns_delete_doc_nodes_edges():
         version=1,
         graph_data=SAMPLE_GRAPH,
     )
-    # 1 DELETE + 1 FMEDoc + 6 nodes + 5 edges = 13
-    assert len(statements) == 13
+    # 1 DELETE + 1 FMEDoc + (6 node creates + 6 HAS_NODE) + 5 edges = 19
+    assert len(statements) == 19
     # 第一条是 DELETE
     assert "DETACH DELETE" in statements[0][0]
     # 第二条是 FMEDocument
     assert "FMEDocument" in statements[1][0]
     # 后续是节点和边创建
     node_stmts = [s for s in statements if "CREATE (n:GraphNode" in s[0]]
-    edge_stmts = [s for s in statements if "MATCH (s:GraphNode" in s[0]]
+    has_node_stmts = [s for s in statements if "HAS_NODE" in s[0]]
+    edge_stmts = [s for s in statements if "MATCH (s:GraphNode" in s[0] and "HAS_NODE" not in s[0]]
     assert len(node_stmts) == 6
+    assert len(has_node_stmts) == 6
     assert len(edge_stmts) == 5
 
 
