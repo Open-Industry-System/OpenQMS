@@ -91,9 +91,9 @@ CREATE INDEX idx_outbox_pending ON graph_sync_outbox (next_attempt_at)
 
 将 FMEA JSONB 的 `GraphNode` 和 `GraphEdge` 映射为 Neo4j 节点和关系：
 
-**节点标签：**
+**节点标签：** 每个节点使用双标签模式 — 统一的 `GraphNode` 基标签 + 具体类型标签，例如 `(:GraphNode:FailureMode)`。约束和索引挂在 `GraphNode` 基标签上，确保跨类型查询和唯一性约束生效。
 
-| Neo4j Label | 来源 GraphNode.type | 关键属性 |
+| 具体标签 | 来源 GraphNode.type | 关键属性 |
 |---|---|---|
 | `FMEDocument` | (虚拟节点) | fmea_id, document_no, title, fmea_type, product_line_code, status, version |
 | `ProcessItem` / `System` | ProcessItem / System | fmea_id, name |
@@ -130,7 +130,7 @@ CREATE INDEX idx_outbox_pending ON graph_sync_outbox (next_attempt_at)
 **Neo4j 约束与索引（首次启动时创建）：**
 
 ```cypher
--- 唯一性约束（保证幂等全删全建时数据一致）
+-- 唯一性约束（挂在 GraphNode 基标签上，覆盖所有具体标签）
 CREATE CONSTRAINT fmea_doc_id IF NOT EXISTS FOR (d:FMEDocument) REQUIRE d.fmea_id IS UNIQUE;
 CREATE CONSTRAINT graph_node_id IF NOT EXISTS FOR (n:GraphNode) REQUIRE (n.fmea_id, n.node_id) IS UNIQUE;
 
@@ -144,6 +144,7 @@ CREATE INDEX graph_node_product_line IF NOT EXISTS FOR (n:GraphNode) ON (n.produ
 
 | event_type | Neo4j 操作 |
 |---|---|
+| `fmea.created` | MERGE FMEDocument 节点 + CREATE 该 FMEA 所有节点/边 |
 | `fmea.updated` | 先 DELETE 该 fmea_id 全部节点/边，再 CREATE（幂等） |
 | `fmea.approved` | 同 updated + FMEDocument.status = 'approved' |
 
@@ -196,15 +197,15 @@ class FMEAGraphRepository(ABC):
     @abstractmethod
     async def find_similar_nodes(
         self, node_type: str, name_keyword: str,
-        product_line_code: str | None = None, limit: int = 20
+        product_line_code: str, limit: int = 20
     ) -> list[dict]:
-        """跨 FMEA 搜索相似节点（知识库基础）"""
+        """跨 FMEA 搜索相似节点（知识库基础）。product_line_code 必填，防止越权。"""
 
     @abstractmethod
     async def get_cross_fmea_stats(
-        self, product_line_code: str | None = None
+        self, product_line_code: str
     ) -> dict:
-        """跨 FMEA 聚合统计：节点类型分布、高频失效模式等"""
+        """跨 FMEA 聚合统计：节点类型分布、高频失效模式等。product_line_code 必填。"""
 ```
 
 ### 4.3 GraphProjectionService
@@ -283,14 +284,14 @@ POST /api/graph/rebuild                            # 触发全量重建 (admin o
 
 ### 4.6 FMEA Service 集成点（最小改动）
 
-在 `fmea_service.py` 的 `update_fmea()` 和 `transition_fmea()` 中：
+在 `fmea_service.py` 的 `create_fmea()`、`update_fmea()` 和 `transition_fmea()` 中：
 
 ```python
 # 在现有事务内，commit 前
 outbox = GraphSyncOutbox(
     aggregate_type="fmea",
     aggregate_id=fmea.fmea_id,
-    event_type="fmea.updated",  # 或 "fmea.approved"
+    event_type="fmea.created",  # 或 "fmea.updated" / "fmea.approved"
     payload={"version": fmea.version, "product_line_code": fmea.product_line_code}
 )
 session.add(outbox)
@@ -333,9 +334,9 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Worker 需要 SECRET_KEY 避免 config 导入崩溃
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
-      DATABASE_URL: postgresql+asyncpg://openqms:openqms@db:5432/openqms
+      # 与 backend 服务保持一致，使用实际 compose 中的 SECRET_KEY 和 DATABASE_URL
+      SECRET_KEY: openqms-local-dev-2026-jwt-signing-key
+      DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@db:5432/qms
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: openqms2026
