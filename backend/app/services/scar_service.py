@@ -139,6 +139,51 @@ async def create_scar(
     return await get_scar(db, scar.scar_id)
 
 
+async def _create_scar_without_commit(
+    db: AsyncSession,
+    *,
+    supplier_id: uuid.UUID,
+    source_type: str,
+    source_id: uuid.UUID,
+    description: str,
+    requested_action: str | None = None,
+    due_date: date | None = None,
+    issued_by: uuid.UUID,
+    product_line_code: str | None = None,
+) -> SupplierSCAR:
+    """Create SCAR without committing — caller must commit."""
+    supplier = await db.get(Supplier, supplier_id)
+    if not supplier:
+        raise ValueError("供应商不存在")
+
+    for attempt in range(3):
+        scar_no = await _next_scar_no(db)
+        scar = SupplierSCAR(
+            scar_no=scar_no,
+            supplier_id=supplier_id,
+            source_type=source_type,
+            source_id=source_id,
+            description=description,
+            product_line_code=product_line_code,
+            requested_action=requested_action,
+            due_date=due_date,
+            issued_by=issued_by,
+            issued_date=date.today(),
+        )
+        db.add(scar)
+        try:
+            await db.flush()
+            break
+        except IntegrityError as e:
+            if "supplier_scars_scar_no" not in str(e.orig):
+                raise
+            await db.rollback()
+            if attempt == 2:
+                raise ValueError("SCAR 编号生成冲突，请重试")
+            continue
+    return scar
+
+
 async def update_scar(
     db: AsyncSession,
     scar: SupplierSCAR,
