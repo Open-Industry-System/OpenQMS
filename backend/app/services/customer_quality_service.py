@@ -1293,18 +1293,25 @@ async def _get_warranty_total(
 
 async def _get_customer_audit_summary(
     db: AsyncSession,
+    customer_id: uuid.UUID | None,
     date_from: date,
     date_to: date,
 ) -> dict:
     from app.models.audit_plan import AuditPlan
     from app.models.audit_finding import AuditFinding
 
-    result = await db.execute(
+    query = (
         select(AuditPlan)
         .where(AuditPlan.audit_category == "customer")
         .where(AuditPlan.planned_date >= date_from)
         .where(AuditPlan.planned_date <= date_to)
     )
+    if customer_id:
+        target = await db.get(Customer, customer_id)
+        if target:
+            query = query.where(AuditPlan.customer_name == target.name)
+
+    result = await db.execute(query)
     plans = result.scalars().all()
     completed = [p for p in plans if p.status == "completed"]
 
@@ -1418,6 +1425,16 @@ async def dashboard(
         for customer in customers
     ]
 
+    # Calculate avg satisfaction properly via aggregation
+    if customer_id:
+        target = await db.get(Customer, customer_id)
+        avg_satisfaction = target.satisfaction_score if target and target.satisfaction_score is not None else None
+    else:
+        sat_result = await db.execute(
+            select(func.avg(Customer.satisfaction_score)).where(Customer.satisfaction_score.isnot(None))
+        )
+        avg_satisfaction = sat_result.scalar()
+
     return {
         "kpi": {
             "complaint_count": len(complaints),
@@ -1437,8 +1454,8 @@ async def dashboard(
         # Enhanced fields
         "spc_cpks": await _get_spc_cpks_for_customer(db, customer_id, product_line),
         "warranty_total": await _get_warranty_total(db, customer_id, window_start, window_end),
-        "avg_satisfaction": customer.satisfaction_score if customer else None,
-        "audit_summary": await _get_customer_audit_summary(db, window_start, window_end),
+        "avg_satisfaction": avg_satisfaction,
+        "audit_summary": await _get_customer_audit_summary(db, customer_id, window_start, window_end),
     }
 
 

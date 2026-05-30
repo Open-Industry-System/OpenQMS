@@ -373,3 +373,46 @@ class CustomerQualityTrendPoint(BaseModel):
     complaints: int
     rma: int
     rma_qty: int
+
+
+# ─── Shipment Record Schemas ───
+
+class ShipmentRecordCreate(BaseModel):
+    shipment_date: date
+    quantity: int = Field(gt=0)
+    product_line_code: str | None = None
+    batch_no: str | None = None
+    destination: str | None = None
+    notes: str | None = None
+
+
+class ShipmentRecordUpdate(BaseModel):
+    shipment_date: date | None = None
+    quantity: int | None = Field(default=None, gt=0)
+    product_line_code: str | None = None
+    batch_no: str | None = None
+    destination: str | None = None
+    notes: str | None = None
+
+
+class ShipmentRecordResponse(BaseModel):
+    shipment_id: uuid.UUID
+    customer_id: uuid.UUID
+    product_line_code: str | None
+    shipment_date: date
+    quantity: int
+    batch_no: str | None
+    destination: str | None
+    notes: str | None
+    created_by: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ShipmentRecordListResponse(BaseModel):
+    items: list[ShipmentRecordResponse]
+    total: int
+    page: int
+    page_size: int

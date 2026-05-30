@@ -218,7 +218,6 @@ def test_complaint_schema_rejects_invalid_category():
 
 # === Customer Quality Enhancements Tests ===
 
-@pytest.mark.skip(reason="Enable after Task B/C/D/E schemas are implemented")
 def test_scar_related_create_optional_supplier_id():
     from app.schemas.customer_quality import SCARRelatedCreate
     req = SCARRelatedCreate(description="test")
@@ -226,7 +225,6 @@ def test_scar_related_create_optional_supplier_id():
     assert req.description == "test"
 
 
-@pytest.mark.skip(reason="Enable after Task B/C/D/E schemas are implemented")
 def test_scar_related_create_rejects_invalid_quantity():
     from app.schemas.customer_quality import ShipmentRecordCreate
     from pydantic import ValidationError
@@ -254,7 +252,6 @@ def test_ppm_returns_none_when_no_denominator():
     assert result is None
 
 
-@pytest.mark.skip(reason="Enable after Task B/C/D/E schemas are implemented")
 def test_customer_requirements_item_structure():
     from app.schemas.control_plan import CustomerRequirementItem
     item = CustomerRequirementItem(
@@ -267,7 +264,6 @@ def test_customer_requirements_item_structure():
     assert item.title == "包装要求"
 
 
-@pytest.mark.skip(reason="Enable after Task B/C/D/E schemas are implemented")
 def test_dashboard_schema_accepts_new_fields():
     from app.schemas.customer_quality import CustomerQualityDashboardResponse
     data = {

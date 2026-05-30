@@ -232,6 +232,7 @@ export interface ControlPlan {
   created_at: string;
   updated_at: string;
   approved_at: string | null;
+  customer_requirements?: { title: string; description: string; source_customer_id: string | null; synced_at: string | null; source: string }[];
 }
 
 export interface ControlPlanListResponse {
@@ -997,6 +998,11 @@ export interface CustomerQualityDashboard {
   complaints_by_severity: Record<string, number>;
   rma_by_status: Record<string, number>;
   rma_by_responsibility: Record<string, number>;
+  // Enhanced fields
+  spc_cpks: { product_line_code: string; cpk: number | null; ppk: number | null; last_updated: string | null }[];
+  warranty_total: number;
+  avg_satisfaction: number | null;
+  audit_summary: { completed_count: number; finding_count: number; last_audit_date: string | null } | null;
 }
 
 // ─── Supplier Quality Dashboard ───

@@ -71,6 +71,20 @@ class ControlPlanUpdate(BaseModel):
     items: list[ControlPlanItemCreate] | None = None
 
 
+# ─── CSR Sync ───
+
+class CSRSyncRequest(BaseModel):
+    customer_ids: list[uuid.UUID]
+
+
+class CustomerRequirementItem(BaseModel):
+    title: str
+    description: str = ""
+    source_customer_id: uuid.UUID | None = None
+    synced_at: datetime | None = None
+    source: str = "manual"  # "csr" | "manual"
+
+
 class ControlPlanResponse(ControlPlanBase):
     cp_id: uuid.UUID
     product_line_code: str
@@ -98,17 +112,3 @@ class ControlPlanListResponse(BaseModel):
 class ImportFromFMEARequest(BaseModel):
     fmea_id: uuid.UUID
     step_nos: list[str] | None = None
-
-
-# ─── CSR Sync ───
-
-class CSRSyncRequest(BaseModel):
-    customer_ids: list[uuid.UUID]
-
-
-class CustomerRequirementItem(BaseModel):
-    title: str
-    description: str = ""
-    source_customer_id: uuid.UUID | None = None
-    synced_at: datetime | None = None
-    source: str = "manual"  # "csr" | "manual"

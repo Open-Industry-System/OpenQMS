@@ -11,9 +11,10 @@ import {
 } from "@ant-design/icons";
 import {
   getControlPlan, createControlPlan, updateControlPlan,
-  checkStaleItems, approveControlPlan,
+  checkStaleItems, approveControlPlan, syncCSRToControlPlan,
 } from "../../../api/controlPlan";
 import type { ControlPlan, ControlPlanItem } from "../../../types";
+import { listCustomers } from "../../../api/customerQuality";
 import type { CPSyncStatusItem } from "../../../types/specialCharacteristic";
 import { useAuthStore } from "../../../store/authStore";
 import { getCPSyncStatus, syncToCP } from "../../../api/specialCharacteristic";
@@ -90,6 +91,10 @@ export default function ControlPlanEditorPage() {
   const [rollbackTarget, setRollbackTarget] = useState<{ major_no: number; minor_no: number } | null>(null);
   const [compareState, setCompareState] = useState<{ major1: number; minor1: number; major2: number; minor2: number } | null>(null);
   const [syncDrawerOpen, setSyncDrawerOpen] = useState(false);
+  const [csrSyncOpen, setCsrSyncOpen] = useState(false);
+  const [csrCustomerIds, setCsrCustomerIds] = useState<string[]>([]);
+  const [csrSyncing, setCsrSyncing] = useState(false);
+  const [csrCustomers, setCsrCustomers] = useState<{ customer_id: string; name: string; csr_list: unknown[] | null }[]>([]);
 
   const user = useAuthStore((s) => s.user);
   const isApproved = cp?.status === "approved";
@@ -244,6 +249,30 @@ export default function ControlPlanEditorPage() {
       message.success("导入成功");
     } catch {
       message.error("刷新数据失败");
+    }
+  };
+
+  const handleOpenCsrSync = async () => {
+    setCsrSyncOpen(true);
+    try {
+      const res = await listCustomers({ page: 1, page_size: 200 });
+      setCsrCustomers(res.items.filter((c: { csr_list: unknown[] | null }) => c.csr_list && c.csr_list.length > 0));
+    } catch { /* silent */ }
+  };
+
+  const handleCsrSync = async () => {
+    if (!id || csrCustomerIds.length === 0) return;
+    setCsrSyncing(true);
+    try {
+      const refreshed = await syncCSRToControlPlan(id, csrCustomerIds);
+      setCp(refreshed);
+      setCsrSyncOpen(false);
+      setCsrCustomerIds([]);
+      message.success("CSR 同步成功");
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || "CSR 同步失败");
+    } finally {
+      setCsrSyncing(false);
     }
   };
 
@@ -585,6 +614,11 @@ export default function ControlPlanEditorPage() {
             批准
           </Button>
         )}
+        {!isNew && canEdit && (
+          <Button icon={<SyncOutlined />} onClick={handleOpenCsrSync}>
+            同步 CSR
+          </Button>
+        )}
       </Space>
 
       {/* Header info card */}
@@ -780,6 +814,33 @@ export default function ControlPlanEditorPage() {
               } catch { /* silent */ }
             }}
           />
+
+          <Modal
+            title="同步客户特殊要求 (CSR)"
+            open={csrSyncOpen}
+            onOk={handleCsrSync}
+            onCancel={() => { setCsrSyncOpen(false); setCsrCustomerIds([]); }}
+            confirmLoading={csrSyncing}
+            okButtonProps={{ disabled: csrCustomerIds.length === 0 }}
+          >
+            <Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+              选择客户，将其 CSR 列表同步到控制计划的客户要求字段。已有的手动条目会被保留。
+            </Text>
+            <Select
+              mode="multiple"
+              placeholder="选择客户"
+              style={{ width: "100%" }}
+              value={csrCustomerIds}
+              onChange={setCsrCustomerIds}
+              options={csrCustomers.map((c) => ({ value: c.customer_id, label: c.name }))}
+              filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
+            />
+            {cp?.customer_requirements && cp.customer_requirements.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <Text type="secondary">当前已有 {cp.customer_requirements.length} 条客户要求</Text>
+              </div>
+            )}
+          </Modal>
         </>
       )}
     </div>

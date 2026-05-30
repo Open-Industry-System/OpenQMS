@@ -441,6 +441,39 @@ export default function CustomerQualityPage() {
         <Card><Statistic title="RMA 数" value={dashboard?.kpi.rma_count || 0} /></Card>
         <Card><Statistic title="影响数量" value={dashboard?.kpi.impact_qty || 0} /></Card>
       </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12, marginBottom: 16 }}>
+        <Card size="small">
+          <Statistic
+            title="SPC CPK"
+            value={dashboard?.spc_cpks?.length ? dashboard.spc_cpks.map((c) => c.cpk ?? "-").join(" / ") : "-"}
+            valueStyle={{ fontSize: 16 }}
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {dashboard?.spc_cpks?.map((c) => c.product_line_code).join(", ") || "无数据"}
+          </Text>
+        </Card>
+        <Card size="small">
+          <Statistic title="保修费用" value={dashboard?.warranty_total ?? 0} precision={2} prefix="¥" />
+        </Card>
+        <Card size="small">
+          <Statistic
+            title="客户满意度"
+            value={dashboard?.avg_satisfaction ?? "-"}
+            suffix="/ 10"
+            valueStyle={{ color: dashboard?.avg_satisfaction && dashboard.avg_satisfaction >= 8 ? "#3f8600" : dashboard?.avg_satisfaction && dashboard.avg_satisfaction < 6 ? "#cf1322" : undefined }}
+          />
+        </Card>
+        <Card size="small">
+          <Statistic
+            title="客户审核"
+            value={dashboard?.audit_summary ? `${dashboard.audit_summary.completed_count} 次` : "-"}
+            valueStyle={{ fontSize: 16 }}
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {dashboard?.audit_summary ? `发现项 ${dashboard.audit_summary.finding_count}` : "无数据"}
+          </Text>
+        </Card>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 16 }}>
         <Card bodyStyle={{ padding: 0 }}>
