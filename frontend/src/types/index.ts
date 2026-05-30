@@ -1242,3 +1242,17 @@ export interface CustomerConfirmationRequest {
   confirmation_date: string;
   attachments?: CustomerAuditAttachment[];
 }
+
+// ─── Shipment Records ───
+
+export interface ShipmentRecord {
+  shipment_id: string;
+  customer_id: string;
+  shipment_date: string;
+  quantity: number;
+  batch_no: string | null;
+  destination: string | null;
+  notes: string | null;
+  product_line_code: string | null;
+  created_at: string;
+}
