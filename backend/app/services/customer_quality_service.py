@@ -1209,6 +1209,120 @@ async def link_rma_fmea(
     return rma
 
 
+# ─── Dashboard Enhancement Helpers ───
+
+async def _get_spc_cpks_for_customer(
+    db: AsyncSession,
+    customer_id: uuid.UUID | None,
+    product_line: str | None,
+) -> list[dict]:
+    """Return list of {product_line_code, cpk, ppk, last_updated} for the given customer/product line."""
+    from app.models.spc import InspectionCharacteristic
+    from app.services import spc_service as spc_svc
+
+    product_lines = set()
+    if product_line:
+        product_lines.add(product_line)
+    elif customer_id:
+        # Find product lines from this customer's complaints/RMAs
+        complaint_result = await db.execute(
+            select(CustomerComplaint.product_line_code)
+            .where(CustomerComplaint.customer_id == customer_id)
+            .distinct()
+        )
+        for pl in complaint_result.scalars().all():
+            if pl:
+                product_lines.add(pl)
+        rma_result = await db.execute(
+            select(RMARecord.product_line_code)
+            .where(RMARecord.customer_id == customer_id)
+            .distinct()
+        )
+        for pl in rma_result.scalars().all():
+            if pl:
+                product_lines.add(pl)
+
+    if not product_lines:
+        return []
+
+    result = await db.execute(
+        select(InspectionCharacteristic)
+        .where(InspectionCharacteristic.product_line.in_(product_lines))
+    )
+    characteristics = result.scalars().all()
+
+    cpks = []
+    seen = set()
+    for ic in characteristics:
+        if ic.product_line in seen:
+            continue
+        seen.add(ic.product_line)
+        try:
+            stats = await spc_svc.calculate_capability(db, ic.ic_id)
+            cpks.append({
+                "product_line_code": ic.product_line,
+                "cpk": stats.get("cpk"),
+                "ppk": stats.get("ppk"),
+                "last_updated": str(ic.updated_at) if ic.updated_at else None,
+            })
+        except ValueError:
+            cpks.append({
+                "product_line_code": ic.product_line,
+                "cpk": None,
+                "ppk": None,
+                "last_updated": str(ic.updated_at) if ic.updated_at else None,
+            })
+    return cpks
+
+
+async def _get_warranty_total(
+    db: AsyncSession,
+    customer_id: uuid.UUID | None,
+    date_from: date,
+    date_to: date,
+) -> float:
+    query = select(func.coalesce(func.sum(WarrantyRecord.amount), 0.0)).where(
+        WarrantyRecord.claim_date >= date_from,
+        WarrantyRecord.claim_date <= date_to,
+    )
+    if customer_id:
+        query = query.where(WarrantyRecord.customer_id == customer_id)
+    result = await db.execute(query)
+    return result.scalar_one()
+
+
+async def _get_customer_audit_summary(
+    db: AsyncSession,
+    date_from: date,
+    date_to: date,
+) -> dict:
+    from app.models.audit_plan import AuditPlan
+    from app.models.audit_finding import AuditFinding
+
+    result = await db.execute(
+        select(AuditPlan)
+        .where(AuditPlan.audit_category == "customer")
+        .where(AuditPlan.planned_date >= date_from)
+        .where(AuditPlan.planned_date <= date_to)
+    )
+    plans = result.scalars().all()
+    completed = [p for p in plans if p.status == "completed"]
+
+    finding_count = 0
+    if completed:
+        plan_ids = [p.audit_id for p in completed]
+        finding_result = await db.execute(
+            select(func.count()).select_from(AuditFinding).where(AuditFinding.audit_id.in_(plan_ids))
+        )
+        finding_count = finding_result.scalar_one()
+
+    return {
+        "completed_count": len(completed),
+        "finding_count": finding_count,
+        "last_audit_date": str(max(p.planned_date for p in completed)) if completed else None,
+    }
+
+
 async def dashboard(
     db: AsyncSession,
     product_line: str | None = None,
@@ -1320,6 +1434,11 @@ async def dashboard(
         "complaints_by_severity": complaints_by_severity,
         "rma_by_status": rma_by_status,
         "rma_by_responsibility": rma_by_responsibility,
+        # Enhanced fields
+        "spc_cpks": await _get_spc_cpks_for_customer(db, customer_id, product_line),
+        "warranty_total": await _get_warranty_total(db, customer_id, window_start, window_end),
+        "avg_satisfaction": customer.satisfaction_score if customer else None,
+        "audit_summary": await _get_customer_audit_summary(db, window_start, window_end),
     }
 
 

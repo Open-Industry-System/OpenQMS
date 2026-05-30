@@ -340,6 +340,19 @@ class RMARecordListResponse(BaseModel):
     page_size: int
 
 
+class SPCCPKInfo(BaseModel):
+    product_line_code: str
+    cpk: float | None = None
+    ppk: float | None = None
+    last_updated: datetime | None = None
+
+
+class AuditSummary(BaseModel):
+    completed_count: int = 0
+    finding_count: int = 0
+    last_audit_date: date | None = None
+
+
 class CustomerQualityDashboardResponse(BaseModel):
     kpi: dict
     customers: list[CustomerSummaryResponse]
@@ -348,6 +361,11 @@ class CustomerQualityDashboardResponse(BaseModel):
     complaints_by_severity: dict[str, int]
     rma_by_status: dict[str, int]
     rma_by_responsibility: dict[str, int]
+    # Enhanced fields
+    spc_cpks: list[SPCCPKInfo] = []
+    warranty_total: float = 0.0
+    avg_satisfaction: float | None = None
+    audit_summary: AuditSummary | None = None
 
 
 class CustomerQualityTrendPoint(BaseModel):
