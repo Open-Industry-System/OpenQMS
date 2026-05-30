@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 VALID_CATEGORIES = {"safety", "function", "appearance", "delivery"}
@@ -105,6 +105,7 @@ class ComplaintCreate(BaseModel):
     assignee_id: uuid.UUID | None = None
     supplier_responsibility: bool = False
     scar_ref_id: uuid.UUID | None = None
+    supplier_id: uuid.UUID | None = None
 
     @field_validator("category")
     @classmethod
@@ -153,6 +154,7 @@ class ComplaintUpdate(BaseModel):
     assignee_id: uuid.UUID | None = None
     supplier_responsibility: bool | None = None
     scar_ref_id: uuid.UUID | None = None
+    supplier_id: uuid.UUID | None = None
 
     @field_validator("category")
     @classmethod
@@ -202,6 +204,8 @@ class ComplaintResponse(BaseModel):
     assignee_id: uuid.UUID | None
     supplier_responsibility: bool
     scar_ref_id: uuid.UUID | None
+    supplier_id: uuid.UUID | None = None
+    scar_no: str | None = None
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
@@ -215,6 +219,13 @@ class ComplaintListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class SCARRelatedCreate(BaseModel):
+    supplier_id: uuid.UUID | None = None
+    description: str | None = None
+    requested_action: str | None = None
+    due_date: date | None = None
 
 
 class RMARecordCreate(BaseModel):
