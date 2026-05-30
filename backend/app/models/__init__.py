@@ -26,6 +26,7 @@ from app.models.iqc_inspection_template import IqcInspectionTemplate, IqcTemplat
 from app.models.iqc_inspection_item import IqcInspectionItem, IqcItemMeasurement
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.models.apqp import APQPProject
+from app.models.graph_sync_outbox import GraphSyncOutbox
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -47,4 +48,5 @@ __all__ = [
     "IqcInspectionTemplate", "IqcTemplateItem", "IqcInspectionItem", "IqcItemMeasurement",
     "Customer", "CustomerComplaint", "RMARecord",
     "APQPProject",
+    "GraphSyncOutbox",
 ]
