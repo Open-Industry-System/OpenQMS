@@ -587,3 +587,40 @@ async def get_customer_trend(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return data["trend"]
+
+
+# ─── SCAR creation from complaint / RMA ───
+
+from app.schemas.customer_quality import SCARRelatedCreate
+
+
+@router.post("/api/customer-complaints/{complaint_id}/create-scar")
+async def create_scar_from_complaint_endpoint(
+    complaint_id: uuid.UUID,
+    req: SCARRelatedCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    try:
+        scar = await customer_quality_service.create_scar_from_complaint(
+            db, complaint_id, req.model_dump(), user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"scar_id": scar.scar_id, "scar_no": scar.scar_no}
+
+
+@router.post("/api/rma-records/{rma_id}/create-scar")
+async def create_scar_from_rma_endpoint(
+    rma_id: uuid.UUID,
+    req: SCARRelatedCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    try:
+        scar = await customer_quality_service.create_scar_from_rma(
+            db, rma_id, req.model_dump(), user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"scar_id": scar.scar_id, "scar_no": scar.scar_no}
