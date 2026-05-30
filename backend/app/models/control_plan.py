@@ -53,8 +53,6 @@ class ControlPlan(Base):
         DateTime(timezone=True), nullable=True
     )
 
-    product_line = relationship("ProductLine")
-
     customer_requirements: Mapped[list | None] = mapped_column(
         JSONB, default=list, nullable=True
     )

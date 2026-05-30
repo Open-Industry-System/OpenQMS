@@ -141,7 +141,7 @@ async def approve_control_plan(
 from app.schemas.control_plan import CSRSyncRequest
 
 
-@router.post("/api/control-plans/{plan_id}/sync-csr")
+@router.post("/{plan_id}/sync-csr")
 async def sync_csr_endpoint(
     plan_id: uuid.UUID,
     req: CSRSyncRequest,

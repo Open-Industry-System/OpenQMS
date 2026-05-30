@@ -170,9 +170,9 @@ async def _create_scar_without_commit(
             issued_by=issued_by,
             issued_date=date.today(),
         )
-        db.add(scar)
         try:
             async with db.begin_nested():
+                db.add(scar)
                 await db.flush()
             break
         except IntegrityError as e:
