@@ -24,12 +24,20 @@ import {
   createComplaint,
   createCustomer,
   createRMARecord,
+  createSCARFromComplaint,
+  createSCARFromRMA,
   getCustomerQualityDashboard,
   listComplaints,
   listCustomers,
   listRMARecords,
+  listShipments,
+  createShipment,
+  updateShipment,
+  deleteShipment,
 } from "../../api/customerQuality";
-import type { Customer, CustomerComplaint, CustomerQualityDashboard, RMARecord } from "../../types";
+import { listSuppliers } from "../../api/supplier";
+import type { Customer, CustomerComplaint, CustomerQualityDashboard, RMARecord, ShipmentRecord } from "../../types";
+import type { Supplier } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
 
@@ -71,6 +79,21 @@ export default function CustomerQualityPage() {
   const [complaintForm] = Form.useForm();
   const [rmaForm] = Form.useForm();
   const [searchParams] = useSearchParams();
+
+  // SCAR creation state
+  const [scarModalOpen, setScarModalOpen] = useState(false);
+  const [scarTarget, setScarTarget] = useState<{ type: "complaint" | "rma"; record: CustomerComplaint | RMARecord } | null>(null);
+  const [scarForm] = Form.useForm();
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
+  // Shipment records state
+  const [shipments, setShipments] = useState<ShipmentRecord[]>([]);
+  const [shipmentTotal, setShipmentTotal] = useState(0);
+  const [shipmentPage, setShipmentPage] = useState(1);
+  const [shipmentLoading, setShipmentLoading] = useState(false);
+  const [shipmentModalOpen, setShipmentModalOpen] = useState(false);
+  const [shipmentForm] = Form.useForm();
+  const [editingShipment, setEditingShipment] = useState<ShipmentRecord | null>(null);
 
   const canEdit = user?.role !== "viewer";
   const assigneeId = mineOnly ? user?.user_id : undefined;
@@ -119,6 +142,102 @@ export default function CustomerQualityPage() {
   useEffect(() => {
     loadData();
   }, [productLine, mineOnly, selectedCustomerId]);
+
+  // Load suppliers for SCAR modal
+  useEffect(() => {
+    listSuppliers({ page_size: 200 }).then((r) => setSuppliers(r.items)).catch(() => {});
+  }, []);
+
+  // Fetch shipment records when customer selected
+  const fetchShipments = async () => {
+    if (!selectedCustomerId) return;
+    setShipmentLoading(true);
+    try {
+      const resp = await listShipments(selectedCustomerId, { page: shipmentPage, page_size: 10 });
+      setShipments(resp.items);
+      setShipmentTotal(resp.total);
+    } catch {
+      message.error("加载发运记录失败");
+    } finally {
+      setShipmentLoading(false);
+    }
+  };
+  useEffect(() => { if (selectedCustomerId) fetchShipments(); }, [selectedCustomerId, shipmentPage]);
+
+  // SCAR handlers
+  const handleCreateSCAR = (type: "complaint" | "rma", record: CustomerComplaint | RMARecord) => {
+    setScarTarget({ type, record });
+    if (type === "complaint") {
+      const c = record as CustomerComplaint;
+      scarForm.setFieldsValue({ supplier_id: (c as CustomerComplaint & { supplier_id?: string }).supplier_id, description: c.defect_desc });
+    } else {
+      const r = record as RMARecord;
+      scarForm.setFieldsValue({ description: `${r.defect_type || "RMA"}${r.analysis_result ? " — " + r.analysis_result : ""}` });
+    }
+    setScarModalOpen(true);
+  };
+
+  const handleConfirmSCAR = async () => {
+    const values = await scarForm.validateFields();
+    if (!scarTarget) return;
+    try {
+      const data = { ...values, due_date: values.due_date?.format("YYYY-MM-DD") };
+      if (scarTarget.type === "complaint") {
+        await createSCARFromComplaint(scarTarget.record.complaint_id, data);
+      } else {
+        await createSCARFromRMA(scarTarget.record.rma_id, data);
+      }
+      message.success("SCAR 创建成功");
+      setScarModalOpen(false);
+      scarForm.resetFields();
+      setScarTarget(null);
+      loadData();
+    } catch {
+      message.error("SCAR 创建失败");
+    }
+  };
+
+  // Shipment handlers
+  const handleSubmitShipment = async () => {
+    const values = await shipmentForm.validateFields();
+    const payload = {
+      shipment_date: values.shipment_date.format("YYYY-MM-DD"),
+      quantity: values.quantity,
+      batch_no: values.batch_no,
+      destination: values.destination,
+      notes: values.notes,
+      product_line_code: productLine || undefined,
+    };
+    try {
+      if (editingShipment) {
+        await updateShipment(selectedCustomerId!, editingShipment.shipment_id, payload);
+        message.success("更新成功");
+      } else {
+        await createShipment(selectedCustomerId!, payload);
+        message.success("创建成功");
+      }
+      setShipmentModalOpen(false);
+      shipmentForm.resetFields();
+      setEditingShipment(null);
+      fetchShipments();
+    } catch {
+      message.error(editingShipment ? "更新失败" : "创建失败");
+    }
+  };
+
+  const handleDeleteShipment = async (record: ShipmentRecord) => {
+    Modal.confirm({
+      title: "确认删除",
+      content: `删除 ${record.shipment_date} 的发运记录？`,
+      onOk: async () => {
+        try {
+          await deleteShipment(selectedCustomerId!, record.shipment_id);
+          message.success("删除成功");
+          fetchShipments();
+        } catch { message.error("删除失败"); }
+      },
+    });
+  };
 
   const selectedCustomer = useMemo(
     () => customers.find((item) => item.customer_id === selectedCustomerId) || null,
@@ -259,11 +378,17 @@ export default function CustomerQualityPage() {
     { title: "描述", dataIndex: "defect_desc", ellipsis: true },
     {
       title: "操作",
-      width: 80,
+      width: 140,
       render: (_: unknown, record: CustomerComplaint) => (
-        <Button type="link" onClick={() => navigate(`/customer-quality/complaints/${record.complaint_id}`)}>
-          处理
-        </Button>
+        <Space>
+          <Button type="link" onClick={() => navigate(`/customer-quality/complaints/${record.complaint_id}`)}>处理</Button>
+          {record.supplier_responsibility && !record.scar_ref_id && (
+            <Button size="small" onClick={() => handleCreateSCAR("complaint", record)}>创建SCAR</Button>
+          )}
+          {record.scar_ref_id && (
+            <Button size="small" type="link" onClick={() => navigate(`/scars/${record.scar_ref_id}`)}>查看SCAR</Button>
+          )}
+        </Space>
       ),
     },
   ];
@@ -282,11 +407,17 @@ export default function CustomerQualityPage() {
     { title: "不良类型", dataIndex: "defect_type", ellipsis: true },
     {
       title: "操作",
-      width: 80,
+      width: 140,
       render: (_: unknown, record: RMARecord) => (
-        <Button type="link" onClick={() => navigate(`/customer-quality/rma/${record.rma_id}`)}>
-          分析
-        </Button>
+        <Space>
+          <Button type="link" onClick={() => navigate(`/customer-quality/rma/${record.rma_id}`)}>分析</Button>
+          {record.responsibility === "supplier" && !record.scar_ref_id && (
+            <Button size="small" onClick={() => handleCreateSCAR("rma", record)}>创建SCAR</Button>
+          )}
+          {record.scar_ref_id && (
+            <Button size="small" type="link" onClick={() => navigate(`/scars/${record.scar_ref_id}`)}>查看SCAR</Button>
+          )}
+        </Space>
       ),
     },
   ];
@@ -374,6 +505,37 @@ export default function CustomerQualityPage() {
                   </pre>
                 ) : <Text type="secondary">请选择客户</Text>,
               },
+              {
+                key: "shipments",
+                label: "发运记录",
+                children: (
+                  <>
+                    <div style={{ textAlign: "right", marginBottom: 12 }}>
+                      {canEdit && selectedCustomerId && (
+                        <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingShipment(null); shipmentForm.resetFields(); setShipmentModalOpen(true); }}>新增发运</Button>
+                      )}
+                    </div>
+                    <Table
+                      dataSource={shipments}
+                      rowKey="shipment_id"
+                      loading={shipmentLoading}
+                      pagination={{ current: shipmentPage, total: shipmentTotal, pageSize: 10, onChange: setShipmentPage }}
+                      columns={[
+                        { title: "日期", dataIndex: "shipment_date", render: (d: string) => dayjs(d).format("YYYY-MM-DD") },
+                        { title: "数量", dataIndex: "quantity" },
+                        { title: "批次号", dataIndex: "batch_no", render: (v: string | null) => v || "-" },
+                        { title: "目的地", dataIndex: "destination", render: (v: string | null) => v || "-" },
+                        { title: "操作", key: "action", render: (_: unknown, record: ShipmentRecord) => (
+                          <Space>
+                            {canEdit && <Button size="small" onClick={() => { setEditingShipment(record); shipmentForm.setFieldsValue({ shipment_date: dayjs(record.shipment_date), quantity: record.quantity, batch_no: record.batch_no, destination: record.destination, notes: record.notes }); setShipmentModalOpen(true); }}>编辑</Button>}
+                            {canEdit && <Button size="small" danger onClick={() => handleDeleteShipment(record)}>删除</Button>}
+                          </Space>
+                        )},
+                      ]}
+                    />
+                  </>
+                ),
+              },
             ]}
           />
         </Card>
@@ -422,6 +584,59 @@ export default function CustomerQualityPage() {
           <Form.Item name="responsibility" label="责任判定"><Select options={[{ value: "supplier", label: "供应商" }, { value: "internal", label: "自制" }, { value: "transport", label: "运输" }, { value: "customer_misuse", label: "客户误用" }, { value: "unknown", label: "未知" }]} /></Form.Item>
           <Form.Item name="tracking_number" label="物流单号"><Input /></Form.Item>
           <Form.Item name="received_date" label="接收日期"><DatePicker style={{ width: "100%" }} /></Form.Item>
+        </Form>
+      </Modal>
+
+      {/* SCAR Creation Modal */}
+      <Modal
+        title="创建 SCAR"
+        open={scarModalOpen}
+        onOk={handleConfirmSCAR}
+        onCancel={() => { setScarModalOpen(false); scarForm.resetFields(); setScarTarget(null); }}
+      >
+        <Form form={scarForm} layout="vertical">
+          <Form.Item name="supplier_id" label="责任供应商" rules={[{ required: true, message: "请选择供应商" }]}>
+            <Select placeholder="选择供应商">
+              {suppliers.map((s) => (
+                <Select.Option key={s.supplier_id} value={s.supplier_id}>{s.name} ({s.supplier_no})</Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item name="description" label="问题描述">
+            <Input.TextArea />
+          </Form.Item>
+          <Form.Item name="requested_action" label="要求措施">
+            <Input />
+          </Form.Item>
+          <Form.Item name="due_date" label="截止日期">
+            <DatePicker style={{ width: "100%" }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Shipment Modal */}
+      <Modal
+        title={editingShipment ? "编辑发运记录" : "新增发运记录"}
+        open={shipmentModalOpen}
+        onOk={handleSubmitShipment}
+        onCancel={() => { setShipmentModalOpen(false); shipmentForm.resetFields(); setEditingShipment(null); }}
+      >
+        <Form form={shipmentForm} layout="vertical">
+          <Form.Item name="shipment_date" label="发运日期" rules={[{ required: true }]}>
+            <DatePicker style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="quantity" label="数量" rules={[{ required: true, type: "number", min: 1 }]}>
+            <InputNumber style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="batch_no" label="批次号">
+            <Input />
+          </Form.Item>
+          <Form.Item name="destination" label="目的地">
+            <Input />
+          </Form.Item>
+          <Form.Item name="notes" label="备注">
+            <Input.TextArea />
+          </Form.Item>
         </Form>
       </Modal>
     </div>
