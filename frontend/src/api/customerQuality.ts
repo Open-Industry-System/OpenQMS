@@ -223,3 +223,52 @@ export async function getCustomerTrend(
   const resp = await client.get(`/customer-quality/customers/${customer_id}/trend`, { params });
   return resp.data;
 }
+
+// ─── SCAR creation from complaint / RMA ───
+
+export async function createSCARFromComplaint(
+  complaintId: string,
+  data: {
+    supplier_id?: string;
+    description?: string;
+    requested_action?: string;
+    due_date?: string;
+  }
+): Promise<{ scar_id: string; scar_no: string }> {
+  const resp = await client.post(`/customer-complaints/${complaintId}/create-scar`, data);
+  return resp.data;
+}
+
+export async function createSCARFromRMA(
+  rmaId: string,
+  data: {
+    supplier_id?: string;
+    description?: string;
+    requested_action?: string;
+    due_date?: string;
+  }
+): Promise<{ scar_id: string; scar_no: string }> {
+  const resp = await client.post(`/rma-records/${rmaId}/create-scar`, data);
+  return resp.data;
+}
+
+// ─── Shipment records ───
+
+export async function listShipments(customerId: string, params?: { page?: number; page_size?: number }) {
+  const resp = await client.get(`/customers/${customerId}/shipments`, { params });
+  return resp.data;
+}
+
+export async function createShipment(customerId: string, data: Record<string, unknown>) {
+  const resp = await client.post(`/customers/${customerId}/shipments`, data);
+  return resp.data;
+}
+
+export async function updateShipment(customerId: string, shipmentId: string, data: Record<string, unknown>) {
+  const resp = await client.put(`/customers/${customerId}/shipments/${shipmentId}`, data);
+  return resp.data;
+}
+
+export async function deleteShipment(customerId: string, shipmentId: string) {
+  await client.delete(`/customers/${customerId}/shipments/${shipmentId}`);
+}
