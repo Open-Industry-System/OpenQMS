@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ALGORITHM: str = "HS256"
 
+    # Neo4j
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "openqms2026"
+    NEO4J_DATABASE: str = "neo4j"
+
     model_config = {"env_file": ".env"}
 
     @field_validator("SECRET_KEY")
