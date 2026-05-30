@@ -440,7 +440,7 @@ async def rollback_fmea(
 
     # Create rollback version
     summary = f"回退原因：{reason}。从 v{target_major}.{target_minor} 回退"
-    version = await create_fmea_version(
+    version = await _create_fmea_version_no_commit(
         db, fmea, change_type="rollback", change_summary=summary, user_id=user_id,
     )
 

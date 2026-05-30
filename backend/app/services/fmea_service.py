@@ -9,7 +9,6 @@ from app.state_machines.fmea_state import FMEAState, can_transition
 from app.models.audit import AuditLog
 from app.models.graph_sync_outbox import GraphSyncOutbox
 from app.services.product_line_service import validate_product_line
-from app.services.version_service import create_fmea_version
 from app.services.version_service import _create_fmea_version_no_commit
 
 
