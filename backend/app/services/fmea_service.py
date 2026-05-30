@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.models.fmea import FMEADocument
 from app.state_machines.fmea_state import FMEAState, can_transition
 from app.models.audit import AuditLog
+from app.models.graph_sync_outbox import GraphSyncOutbox
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import create_fmea_version
 
@@ -130,6 +131,14 @@ async def create_fmea(
     )
     db.add(audit_log)
 
+    # Outbox: enqueue Neo4j projection sync
+    db.add(GraphSyncOutbox(
+        aggregate_type="fmea",
+        aggregate_id=fmea_id,
+        event_type="fmea.created",
+        payload={"version": 1, "product_line_code": product_line_code, "fmea_type": fmea_type},
+    ))
+
     try:
         await db.commit()
     except IntegrityError:
@@ -170,6 +179,14 @@ async def update_fmea(
             operated_by=user_id,
         )
         db.add(audit_log)
+
+        # Outbox: enqueue Neo4j projection sync
+        db.add(GraphSyncOutbox(
+            aggregate_type="fmea",
+            aggregate_id=fmea.fmea_id,
+            event_type="fmea.updated",
+            payload={"version": fmea.version, "product_line_code": fmea.product_line_code},
+        ))
 
     await db.commit()
     await db.refresh(fmea)
@@ -220,6 +237,14 @@ async def transition_fmea(
         operated_by=user_id,
     )
     db.add(audit_log)
+
+    # Outbox: enqueue Neo4j projection sync
+    db.add(GraphSyncOutbox(
+        aggregate_type="fmea",
+        aggregate_id=fmea.fmea_id,
+        event_type="fmea.approved" if target == FMEAState.APPROVED else "fmea.updated",
+        payload={"version": fmea.version, "product_line_code": fmea.product_line_code, "status": target_status},
+    ))
 
     await db.commit()
 
