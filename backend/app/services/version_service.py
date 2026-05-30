@@ -59,17 +59,16 @@ async def get_latest_fmea_version(db: AsyncSession, fmea_id: uuid.UUID) -> FMEAV
     return result.scalar_one_or_none()
 
 
-async def create_fmea_version(
+async def _create_fmea_version_no_commit(
     db: AsyncSession,
     fmea: FMEADocument,
     change_type: str,
     change_summary: str | None,
     user_id: uuid.UUID,
 ) -> FMEAVersion:
-    """Snapshot the current FMEA graph_data as a new version.
+    """Build and stage a new FMEA version (flush, no commit).
 
-    * ``change_type == "approve"`` bumps major_no, resets minor_no to 0.
-    * All other types bump minor_no.
+    Callers must commit the session themselves.
     """
     latest = await get_latest_fmea_version(db, fmea.fmea_id)
     if latest is None:
@@ -113,8 +112,25 @@ async def create_fmea_version(
         operated_by=user_id,
     ))
 
-    await db.commit()
+    await db.flush()
     await db.refresh(version)
+    return version
+
+
+async def create_fmea_version(
+    db: AsyncSession,
+    fmea: FMEADocument,
+    change_type: str,
+    change_summary: str | None,
+    user_id: uuid.UUID,
+) -> FMEAVersion:
+    """Snapshot the current FMEA graph_data as a new version.
+
+    * ``change_type == "approve"`` bumps major_no, resets minor_no to 0.
+    * All other types bump minor_no.
+    """
+    version = await _create_fmea_version_no_commit(db, fmea, change_type, change_summary, user_id)
+    await db.commit()
     return version
 
 
@@ -424,7 +440,7 @@ async def rollback_fmea(
 
     # Create rollback version
     summary = f"回退原因：{reason}。从 v{target_major}.{target_minor} 回退"
-    version = await create_fmea_version(
+    version = await _create_fmea_version_no_commit(
         db, fmea, change_type="rollback", change_summary=summary, user_id=user_id,
     )
 
