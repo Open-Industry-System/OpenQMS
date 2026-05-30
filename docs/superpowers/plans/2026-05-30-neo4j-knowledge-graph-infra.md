@@ -871,6 +871,29 @@ async def _poll_and_lock(db: AsyncSession) -> list[GraphSyncOutbox]:
     return tasks
 
 
+async def _cleanup_stale_processing() -> int:
+    """将 status='processing' 且超过 10 分钟的任务重置为 pending。
+
+    解决 Worker 崩溃后任务永远卡在 processing 的问题。
+    """
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    async with async_session() as db:
+        result = await db.execute(
+            update(GraphSyncOutbox)
+            .where(
+                and_(
+                    GraphSyncOutbox.status == "processing",
+                    GraphSyncOutbox.next_attempt_at < stale_cutoff,
+                )
+            )
+            .values(status="pending")
+            .returning(GraphSyncOutbox.id)
+        )
+        reset_ids = list(result.scalars().all())
+        await db.commit()
+    return len(reset_ids)
+
+
 async def _mark_completed(db: AsyncSession, task_id: uuid.UUID) -> None:
     await db.execute(
         update(GraphSyncOutbox)
@@ -920,6 +943,11 @@ async def run_worker() -> None:
     projection = GraphProjectionService(driver, async_session)
 
     logger.info("Neo4j connected, constraints ensured. Polling outbox...")
+
+    # 启动时清理上次崩溃残留的 processing 任务
+    stale_count = await _cleanup_stale_processing()
+    if stale_count:
+        logger.info(f"Cleaned up {stale_count} stale processing tasks")
 
     while True:
         try:
@@ -1311,7 +1339,7 @@ git commit -m "feat: add FMEAGraphRepository interface with JSONB and Neo4j impl
 ```python
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -1375,17 +1403,21 @@ async def cross_fmea_stats(
 
 @router.post("/rebuild")
 async def trigger_rebuild(
+    background_tasks: BackgroundTasks,
     _user: User = Depends(require_admin),
 ):
-    """触发全量重建 (admin only)。异步执行，立即返回。"""
-    from app.services.graph_projection_service import GraphProjectionService
-    from app.graph.neo4j_driver import get_neo4j_driver
-    from app.database import async_session
+    """触发全量重建 (admin only)。异步执行，秒回防超时。"""
+    async def _do_rebuild():
+        from app.services.graph_projection_service import GraphProjectionService
+        from app.graph.neo4j_driver import get_neo4j_driver
+        from app.database import async_session
 
-    driver = await get_neo4j_driver()
-    projection = GraphProjectionService(driver, async_session)
-    result = await projection.full_rebuild()
-    return result
+        driver = await get_neo4j_driver()
+        projection = GraphProjectionService(driver, async_session)
+        await projection.full_rebuild()
+
+    background_tasks.add_task(_do_rebuild)
+    return {"message": "Graph rebuild started in background"}
 ```
 
 - [ ] **Step 2: 注册 router 到 main.py**
