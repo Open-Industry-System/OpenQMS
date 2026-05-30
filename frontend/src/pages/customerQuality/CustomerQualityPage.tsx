@@ -82,7 +82,11 @@ export default function CustomerQualityPage() {
 
   // SCAR creation state
   const [scarModalOpen, setScarModalOpen] = useState(false);
-  const [scarTarget, setScarTarget] = useState<{ type: "complaint" | "rma"; record: CustomerComplaint | RMARecord } | null>(null);
+  const [scarTarget, setScarTarget] = useState<
+    | { type: "complaint"; record: CustomerComplaint }
+    | { type: "rma"; record: RMARecord }
+    | null
+  >(null);
   const [scarForm] = Form.useForm();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
@@ -166,12 +170,13 @@ export default function CustomerQualityPage() {
 
   // SCAR handlers
   const handleCreateSCAR = (type: "complaint" | "rma", record: CustomerComplaint | RMARecord) => {
-    setScarTarget({ type, record });
     if (type === "complaint") {
       const c = record as CustomerComplaint;
+      setScarTarget({ type, record: c });
       scarForm.setFieldsValue({ supplier_id: (c as CustomerComplaint & { supplier_id?: string }).supplier_id, description: c.defect_desc });
     } else {
       const r = record as RMARecord;
+      setScarTarget({ type, record: r });
       scarForm.setFieldsValue({ description: `${r.defect_type || "RMA"}${r.analysis_result ? " — " + r.analysis_result : ""}` });
     }
     setScarModalOpen(true);
