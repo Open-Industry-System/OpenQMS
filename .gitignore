@@ -17,3 +17,4 @@ node_modules
 .claude/
 .codegraph/
 /.superpowers/
+AGENTS.md
