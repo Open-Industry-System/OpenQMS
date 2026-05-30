@@ -134,3 +134,24 @@ async def approve_control_plan(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return ControlPlanResponse.model_validate(cp)
+
+
+# ─── CSR Sync ───
+
+from app.schemas.control_plan import CSRSyncRequest
+
+
+@router.post("/api/control-plans/{plan_id}/sync-csr")
+async def sync_csr_endpoint(
+    plan_id: uuid.UUID,
+    req: CSRSyncRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_engineer_or_admin),
+):
+    try:
+        plan = await control_plan_service.sync_csr_to_control_plan(
+            db, plan_id, req.customer_ids, user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ControlPlanResponse.model_validate(plan)

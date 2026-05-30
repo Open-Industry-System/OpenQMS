@@ -569,3 +569,61 @@ async def mark_cp_sync_pending_on_fmea_approve(
             cp.sync_pending = True
     await db.commit()
     return cps
+
+
+# ─── CSR Sync ───
+
+async def sync_csr_to_control_plan(
+    db: AsyncSession,
+    plan_id: uuid.UUID,
+    customer_ids: list[uuid.UUID],
+    user_id: uuid.UUID,
+):
+    from app.models.audit import AuditLog
+    from app.models.customer_quality import Customer
+    from app.models.control_plan import ControlPlan
+
+    # 1. Query control plan
+    result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == plan_id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise ValueError("控制计划不存在")
+
+    # 2. Query customer CSR
+    result = await db.execute(select(Customer).where(Customer.customer_id.in_(customer_ids)))
+    customers = result.scalars().all()
+
+    # 3. Build CSR map keyed by (source_customer_id, title)
+    new_csr_map: dict[tuple, dict] = {}
+    for customer in customers:
+        if customer.csr_list:
+            for item in customer.csr_list:
+                key = (str(customer.customer_id), item.get("title", ""))
+                new_csr_map[key] = {
+                    "title": item.get("title", ""),
+                    "description": item.get("description", ""),
+                    "source_customer_id": str(customer.customer_id),
+                    "synced_at": datetime.now(timezone.utc).isoformat(),
+                    "source": "csr",
+                }
+
+    # 4. Preserve existing manual items
+    existing = plan.customer_requirements or []
+    manual_items = [item for item in existing if item.get("source") == "manual"]
+
+    # 5. Merge: csr items replace, manual items preserved
+    merged = list(new_csr_map.values()) + manual_items
+    plan.customer_requirements = merged
+
+    # AuditLog
+    audit = AuditLog(
+        table_name="control_plans",
+        record_id=plan_id,
+        action="SYNC_CSR",
+        changed_fields={"customer_ids": [str(cid) for cid in customer_ids], "csr_count": len(new_csr_map)},
+        operated_by=user_id,
+    )
+    db.add(audit)
+
+    await db.commit()
+    return plan

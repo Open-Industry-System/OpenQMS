@@ -87,3 +87,10 @@ export async function approveControlPlan(id: string): Promise<ControlPlan> {
   const resp = await client.post(`/control-plans/${id}/approve`);
   return resp.data;
 }
+
+// ─── CSR Sync ───
+
+export async function syncCSRToControlPlan(planId: string, customerIds: string[]): Promise<ControlPlan> {
+  const resp = await client.post(`/control-plans/${planId}/sync-csr`, { customer_ids: customerIds });
+  return resp.data;
+}
