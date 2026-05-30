@@ -74,7 +74,7 @@ export default function DashboardView() {
     angleField: "value",
     colorField: "type",
     color: ["#52c41a", "#1677ff", "#faad14", "#ff4d4f"],
-    label: { type: "inner" as const, offset: "-30%" },
+    label: { offset: "-30%" },
   };
 
   const rankingColumns = [
@@ -171,12 +171,24 @@ export default function DashboardView() {
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} lg={12}>
           <Card title="PPM 趋势">
-            <Line {...ppmTrendConfig} />
+            {data.ppm_trend.length > 0 ? (
+              <Line {...ppmTrendConfig} />
+            ) : (
+              <div style={{ textAlign: "center", padding: "60px 0", color: "#888" }}>
+                暂无数据
+              </div>
+            )}
           </Card>
         </Col>
         <Col xs={24} lg={12}>
           <Card title="评级分布">
-            <Pie {...gradeDistConfig} />
+            {Object.values(data.grade_distribution).some((v) => v > 0) ? (
+              <Pie {...gradeDistConfig} />
+            ) : (
+              <div style={{ textAlign: "center", padding: "60px 0", color: "#888" }}>
+                暂无数据
+              </div>
+            )}
           </Card>
         </Col>
       </Row>

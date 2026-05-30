@@ -1,155 +1,238 @@
-# DFMEA 双视图编辑器设计规格说明书
+# DFMEA 编辑器 + 生成规则引擎 设计文档
 
-**日期**: 2026-05-20  
-**状态**: 提案 (Proposal)  
-**作者**: Antigravity AI  
-
----
-
-## 1. 业务背景与设计目标
-
-### 1.1 背景
-设计失效模式及影响分析 (DFMEA) 是质量管理系统 (QMS) 的核心组成部分，用于在设计阶段识别和降低产品失效风险。与聚焦工序流的 PFMEA 不同，DFMEA 聚焦于产品的**物理/功能结构（系统树）**与**设计参数/要求**。
-
-### 1.2 设计冲突与解决方案
-* **痛点**: 
-  1. 现代 QMS 倾向于将产品结构建模为层级树（系统 → 子系统 → 零部件），能极好地展现失效传递路径（方案 A）。
-  2. 传统品质工程师和外部客户审计通常更习惯传统 Excel 的平铺大表格（方案 C），且需要支持直接按行录入与对比。
-* **解决方案**: 
-  **双视图融合模式** —— 默认呈现**“结构树 + 选中节点参数矩阵”**的高效主视图，同时提供**“传统平铺大表格”**一键切换模式。双视图共享同一个底层底层图数据库模型 (Graph Data Model)，实现任意一方修改，双向实时同步。
+**日期**: 2026-05-20
+**版本**: v1.0
+**状态**: 已确认，待实现
 
 ---
 
-## 2. 系统架构与数据模型
+## 1. 目标
 
-### 2.1 底层图数据结构 (Graph Data Model)
-为了保持与现有 PFMEA 数据模型的高度一致且无需修改 PostgreSQL schema，DFMEA 的文档数据将继续以 JSONB 格式存储在 `fmea_documents.graph_data` 中，其数据结构为典型的点边图模式 `{"nodes": [], "edges": []}`。
+完成 OpenQMS Phase 1 M3-M4 核心扩展中的两个 P0 模块：
 
-为了完美适配 **AIAG-VDA FMEA 第五版 (2019) 的七步法**，DFMEA 图数据模型采用以“关注要素 (Focus Element)”为核心的相对级联关系，构建出符合标准的“结构-功能-失效-控制”的完整拓扑网络。
-
-#### 节点定义 (Nodes)
-* **System (系统) / Subsystem (子系统) / Component (零部件) (结构要素)**:
-  `{ "id": "sys_1", "type": "System", "name": "转向系统" }`
-  `{ "id": "sub_1", "type": "Subsystem", "name": "转向柱组合" }`
-  `{ "id": "comp_1", "type": "Component", "name": "滚动轴承" }`
-  > [!NOTE]
-  > 在分析中，结构要素节点会根据分析层级被自动映射为**“上一较高级别 (Higher Level)”**、**“关注要素 (Focus Element)”**和**“下一较低级别 (Lower Level)”**。
-* **Function (功能及要求)**:
-  `{ "id": "fun_1", "type": "Function", "name": "传输旋转运动并承受径向载荷", "requirement": "扭矩传递率 >= 98%, 径向载荷阻抗 >= 15kN" }`
-  > [!NOTE]
-  > Function 节点同时承载功能描述和其对应的技术要求，对应 FMEA 中的“功能与要求”。
-* **Characteristic (设计/特性)**:
-  `{ “id”: “char_1”, “type”: “Characteristic”, “name”: “工作游隙”, “specification”: “5~15μm” }`
-  > [!NOTE]
-  > 代表较低级别的设计或材料特性，如尺寸、公差、硬度等，对应”下一较低级别功能及要求或特性”。
-* **DesignParameter (设计参数)**:
-  `{ “id”: “dp_1”, “type”: “DesignParameter”, “name”: “工作游隙”, “nominal_value”: 10.0, “unit”: “μm”, “tolerance_upper”: 15, “tolerance_lower”: 5, “specification”: “5~15μm” }`
-* **Interface (接口)**:
-  `{ “id”: “if_1”, “type”: “Interface”, “name”: “电气接口-连接器”, “interface_type”: “electrical” }`
-  > [!NOTE]
-  > interface_type 可选值: “mechanical”(机械), “electrical”(电气), “hydraulic”(液压), “software”(软件), “thermal”(热).
-* **DVPTask (设计验证任务)**:
-  `{ “id”: “dvp_1”, “type”: “DVPTask”, “name”: “轴承台架耐久测试”, “test_method”: “GB/T XXX”, “result”: “pass/fail/pending”, “detection_contribution”: 2 }`
-  > [!NOTE]
-  > DVP 验证任务节点关联至 DetectionControl 或 FailureMode，验证结果反馈更新探测度(D)评分。
-* **FailureEffect (FE - 潜在失效影响)**:
-  `{ "id": "fe_1", "type": "FailureEffect", "name": "方向盘异常振动与手感不良", "severity": 6 }`
-  > [!IMPORTANT]
-  > 严重度 (Severity, S) 直接决定了失效影响的后果级别，因此 `severity` 属性保存在 `FailureEffect` 节点上，评分为 1-10。
-* **FailureMode (FM - 潜在失效模式)**:
-  `{ "id": "fm_1", "type": "FailureMode", "name": "轴承内部游隙过大异响" }`
-  > [!NOTE]
-  > 对应关注要素的功能失效。
-* **FailureCause (FC - 潜在失效起因)**:
-  `{ "id": "fc_1", "type": "FailureCause", "name": "内部滚珠尺寸公差偏大", "occurrence": 3 }`
-  > [!IMPORTANT]
-  > 频度 (Occurrence, O) 决定了失效起因发生的预测等级，在采取现行预防措施后进行评估，因此 `occurrence` 属性保存在 `FailureCause` 节点上，评分为 1-10。
-* **PreventionControl (PC - 现行设计控制-预防措施)**:
-  `{ "id": "pc_1", "type": "PreventionControl", "name": "设计公差仿真分析" }`
-* **DetectionControl (DC - 现行设计控制-探测措施)**:
-  `{ "id": "dc_1", "type": "DetectionControl", "name": "噪音/振动台架测试", "detection": 4 }`
-  > [!IMPORTANT]
-  > 探测度 (Detection, D) 决定了设计发布前探测到失效起因或模式的能力，因此 `detection` 属性保存在 `DetectionControl` 节点上，评分为 1-10。
-* **RecommendedAction (优化/建议措施)**:
-  `{ "id": "opt_1", "type": "RecommendedAction", "name": "优化滚珠公差带设计，增加CAE公差配合分析", "responsible": "张工", "due_date": "2026-06-30", "status": "open", "action_taken": "", "completion_date": "", "revised_severity": 0, "revised_occurrence": 0, "revised_detection": 0, "revised_ap": "" }`
-
-#### 边定义 (Edges)
-* `HAS_SUBSYSTEM`: System ➔ Subsystem (系统包含子系统)
-* `HAS_COMPONENT`: Subsystem ➔ Component (子系统包含零部件)
-* `HAS_FUNCTION`: System/Subsystem/Component ➔ Function (结构要素包含其功能与要求)
-* `HAS_CHARACTERISTIC`: Component ➔ Characteristic (零部件包含设计特性)
-* `HAS_DESIGN_PARAMETER`: Component ➔ DesignParameter (零部件包含设计参数)
-* `HAS_INTERFACE`: Component ➔ Interface (零部件包含接口)
-* `HAS_FAILURE_MODE`: Function ➔ FailureMode (功能存在潜在失效模式)
-* `EFFECT_OF`: FailureMode ➔ FailureEffect (失效模式产生上一级功能层面的失效影响)
-* `CAUSE_OF`: FailureCause ➔ FailureMode (下一较低层级的失效起因导致关注要素的失效模式)
-* `PREVENTED_BY`: FailureCause ➔ PreventionControl (失效起因由现行预防措施规避)
-* `DETECTED_BY`: FailureCause/FailureMode ➔ DetectionControl (失效起因/失效模式由现行探测措施探测)
-* `OPTIMIZED_BY`: FailureCause ➔ RecommendedAction (失效起因对应优化建议措施)
-* `VALIDATED_BY`: FailureMode/DetectionControl ➔ DVPTask (设计验证任务关联)
+1. **DFMEA 编辑器** — 系统→子系统→零部件展开 + 设计参数矩阵
+2. **DFMEA 生成规则引擎** — 基于 AIAG-VDA 七步法的引导式规则
 
 ---
 
-## 3. API 接口设计
+## 2. 架构方案
 
-无需设计新的 API，通过直接复用并兼容现有的 `/api/fmea` 端点：
+**方案 C：前端模块化 + 后端最小改动**
 
-* **创建 FMEA**: `POST /api/fmea`  
-  支持传入 `fmea_type="DFMEA"`。
-  
-* **更新 FMEA**: `PUT /api/fmea/{fmea_id}`  
-  传入 `{ "title": "...", "graph_data": { "nodes": [...], "edges": [...] } }`。
-  
-* **获取 FMEA 详情**: `GET /api/fmea/{fmea_id}`  
-  返回完整文档信息以及 `graph_data`。
-
-> [!NOTE]
-> 在后端 `fmea_service.py` 的 `create_fmea` 服务中，当 `fmea_type` 为 `DFMEA` 时，我们将为其初始化一个基础模版结构（一个空的 System 节点），方便前端直接渲染。
+- 前端拆分独立组件，保持后端 API 不变
+- 结构树/参数图通过更新 `graph_data` JSONB 实现
+- 规则引擎为纯前端静态逻辑
+- 预留后端历史数据推荐接口（Phase 3 实现）
 
 ---
 
-## 4. 前端界面设计与双视图实现
+## 3. 后端变更
 
-DFMEA 编辑器组件 `DFMEAEditorPage.tsx` 将设计为一个大容器结构，其中包含视图状态 `viewMode: 'tree' | 'spreadsheet'`：
+### 3.1 GraphNode 类型扩展
 
-### 4.1 主视图 A (结构树 + 设计矩阵)
-* **左侧面板（系统树）**: 
-  - 依据 `HAS_SUBSYSTEM` 和 `HAS_COMPONENT` 边递归渲染 `System -> Subsystem -> Component` 节点层级拓扑关系。
-  - 提供快速增加/删除节点、重命名节点的右键菜单或悬浮工具条。
-  - 当选中某个节点时，它被定义为当前的**“关注要素 (Focus Element)”**，其父级自动识别为**“上一较高级别 (Higher Level)”**，其子级/特性自动识别为**“下一较低级别 (Lower Level)”**。
-* **右侧面板（设计矩阵）**: 
-  - 根据选中的关注要素节点过滤展示其直接挂载的 `Function`（关注要素功能与要求）及其相关的 `FailureMode`，以及级联形成的完整 FMEA 数据链（FE ➔ FM ➔ FC ➔ PC/DC ➔ AP）。
-  - 提供便捷的可视化编辑卡片，用于直接编辑功能要求、失效模式、失效后果（严重度 S）、失效起因（频度 O）、当前预防控制（PC）与当前探测控制（DC，探测度 D）。
+在 `backend/app/schemas/fmea.py` 中扩展 `NodeType` 枚举，新增 DFMEA 专用语义类型：
 
-### 4.2 传统平铺视图 C (Excel 矩阵)
-* **大平铺表格**:
-  - 全屏宽度渲染，支持横向滚动，完美对接 VDA-AIAG 5th Edition 官方模板。
-  - 列定义（共 25 列，体现标准的 7 步法全流程）：
-    1. **结构分析 (Step 2)**: `上一较高级别` | `关注要素` | `下一较低级别或特性类型`
-    2. **功能分析 (Step 3)**: `上一较高级别功能及要求` | `关注要素功能及要求` | `下一较低级别功能及要求或特性`
-    3. **失效分析 (Step 4)**: `潜在失效影响 (FE)` | `潜在失效模式 (FM)` | `潜在失效起因 (FC)`
-    4. **风险分析 (Step 5)**: `严重度 (S)` | `现行预防控制 (PC)` | `频度 (O)` | `现行探测控制 (DC)` | `探测度 (D)` | `RPN` | `措施优先级 (AP)`
-    5. **优化 (Step 6)**: `建议措施` | `责任人` | `计划完成日期` | `采取的措施及生效日期` | `修改后的 S` | `修改后的 O` | `修改后的 D` | `修改后的 RPN` | `修改后的 AP`
-  - **rowSpan 动态合并**: 使用 `rowSpan` 合并相同父层级的单元格（例如同一个系统合并展示其下的所有子系统和零部件，以及相同功能下的多个失效模式）。
-  - **实时联动计算**:
-    - $RPN = S \times O \times D$。
-    - **措施优先级 (AP)**: 依据 AIAG-VDA 第五版附录 C1.5 表格，根据 S、O、D 的评分组合自动实时计算出 AP 等级（**高 H**、**中 M**、**低 L**），并以醒目的高对比度标签（如红色高亮 H，黄色 M，绿色 L）渲染，无需手动填写。
-  - 所有单元格在点击时激活为编辑态（Input/Select/NumberInput），失焦时自动同步并触发防抖保存。
+```python
+# 新增（语义区分，字段与现有 Function 节点相同）
+SystemFunction = "SystemFunction"
+SubsystemFunction = "SubsystemFunction"
+ComponentFunction = "ComponentFunction"
+```
 
-### 4.3 视图间状态同步逻辑
-由于两个视图绑定的是同一个 React 状态 `nodes` 和 `edges`，因此：
-- 只要修改了 `nodes` 列表或 `edges` 列表，两个视图都会触发重绘。
-- 在“平铺表格视图”下新增一行，会自动在 Graph 模型中生成相应的子系统或零部件节点，并通过 `edges` 将它们与父级关联。
-- 提供输入防抖（Debounce）保存机制，在用户停止输入 500ms 后自动同步至后端。
+**注意**：字段保持与现有 `ProcessStepFunction` / `ProcessWorkElementFunction` 一致，仅类型名称语义化。
+
+### 3.2 预留 API 接口
+
+在 `backend/app/api/fmea.py` 中添加占位路由：
+
+```python
+@router.post("/{fmea_id}/recommend")
+async def recommend_fmea(...):
+    """预留：Phase 3 接入历史数据推荐"""
+    raise HTTPException(status_code=501, detail="历史数据推荐功能将在 Phase 3 实现")
+```
+
+### 3.3 无其他变更
+
+- 复用现有 `PUT /api/fmea/{id}` 更新 graph_data
+- 复用现有 `FMEADocument` 模型和状态机
 
 ---
 
-## 5. 验证与测试计划
+## 4. 前端组件架构
 
-### 5.1 自动化测试
-* 单元测试: 测试图谱解析器（如 `flattenGraphToTable` 和 `tableToFlattenedNodes`）的边界情况。
-* 接口测试: 确保 `fmea_type="DFMEA"` 能够正确写入审计日志，并且防抖保存能够正确调用 `PUT` 请求。
+### 4.1 组件拆分
 
-### 5.2 手动测试
-* 部署到本地测试环境，在结构树视图和传统平铺大表格之间快速切换。
-* 验证数据流双向保存：在结构树中新增的零部件，能够在平铺视图中显示；在平铺视图中新增一行，能在左侧结构树中自动生成节点。
+```
+FMEAEditorPage.tsx (主容器，管理全局状态)
+├── EditorTabs (页签切换)
+│   ├── FailureAnalysisTab (现有功能提取)
+│   │   ├── StructureFunctionPanel (左侧节点列表)
+│   │   ├── FailureAnalysisTable (右侧 19 列表格)
+│   │   └── InlineRecommendations (底部推荐卡片)
+│   └── StructureAnalysisTab (新增)
+│       ├── StructureTree (嵌套树形结构)
+│       └── NodeDetailPanel (节点属性 + 参数图)
+└── DFMEAGenerationWizard (模态框，7 步向导)
+    ├── Step1Scope.tsx (5T 范围定义)
+    ├── Step2Structure.tsx (结构树构建)
+    ├── Step3Function.tsx (功能树 + 参数图)
+    ├── Step4Failure.tsx (失效链 FE-FM-FC)
+    ├── Step5Risk.tsx (风险分析 S/O/D + AP)
+    ├── Step6Optimization.tsx (优化措施)
+    └── Step7Documentation.tsx (结果预览)
+```
+
+### 4.2 新增文件清单
+
+| 文件 | 说明 |
+|------|------|
+| `frontend/src/components/dfmea/StructureTree.tsx` | 嵌套树形结构（Ant Design Tree） |
+| `frontend/src/components/dfmea/ParameterDiagram.tsx` | 参数图编辑面板（输入-输出-噪声-控制） |
+| `frontend/src/components/dfmea/GenerationWizard.tsx` | 7 步向导容器 |
+| `frontend/src/components/dfmea/InlineRecommendations.tsx` | 底部推荐卡片 |
+| `frontend/src/utils/dfmeaRules.ts` | AIAG-VDA 规则引擎 |
+| `frontend/src/utils/dfmeaWizard.ts` | 向导步骤验证 |
+
+---
+
+## 5. 规则引擎设计
+
+### 5.1 规则类型
+
+| 规则 | 输入 | 输出 | 触发条件 |
+|------|------|------|---------|
+| **功能否定** | 功能描述文本 | 失效模式列表 | 用户输入/修改功能描述 |
+| **失效链关联** | 失效模式 | 失效影响 + 失效原因 | 用户确认失效模式 |
+| **AP 查表** | S, O, D | H/M/L + 优化方向 | 用户输入 S/O/D 后 |
+| **措施建议** | 失效模式 + AP | 预防/探测措施 | AP = H 时强制提示 |
+
+### 5.2 规则数据
+
+纯前端静态配置：
+
+- **中文动词否定词典**：采集→无法采集/采集延迟/采集精度不足
+- **AP 查表矩阵**：S×O×D → H/M/L（复用现有 `frontend/src/utils/fmea.ts`）
+- **常见失效模式库**：按行业分类的模板库（汽车电子、BMS 等）
+
+### 5.3 7 步向导流程
+
+| 步骤 | 内容 | 规则引擎作用 |
+|------|------|-------------|
+| 1. 范围定义 (5T) | 团队/时间/工具/任务/趋势 | 纯表单，无规则 |
+| 2. 结构分析 | System→Subsystem→Component | 层级提示下级分解建议 |
+| 3. 功能分析 | 功能描述 + 参数图 | 结构名称自动提示功能模板 |
+| 4. 失效分析 | FE-FM-FC 失效链 | **功能否定自动生成失效模式** |
+| 5. 风险分析 | S/O/D + AP | **AP 自动查表**，三级 severity 引导 |
+| 6. 优化 | 预防/探测措施 | **AP=H 强制提示优化** |
+| 7. 结果文件化 | 预览骨架 | 汇总验证 |
+
+---
+
+## 6. 权限集成
+
+基于 `docs/permissions.md`，复用现有 `isViewer` / `isAdminOrManager` 模式：
+
+| 功能 | viewer | engineer | manager/admin |
+|------|:------:|:--------:|:-------------:|
+| 查看编辑器 | ✅ | ✅ | ✅ |
+| 编辑失效分析 | ❌ | ✅ | ✅ |
+| 编辑结构树 | ❌ | ✅ | ✅ |
+| 编辑参数图 | ❌ | ✅ | ✅ |
+| 触发规则推荐 | ❌ | ✅ | ✅ |
+| 使用生成向导 | ❌ | ✅ | ✅ |
+| 审批 FMEA | ❌ | ❌ | ✅ |
+
+---
+
+## 7. 交互流程
+
+### 7.1 创建新 DFMEA
+
+```
+用户点击"新建 DFMEA" → 弹出 7 步向导
+  Step 1: 填写 5T → 下一步
+  Step 2: 构建结构树 → 下一步
+  Step 3: 填写功能 + 参数图 → 下一步
+  Step 4: 确认/修改推荐的失效模式 → 下一步
+  Step 5: 输入 S/O/D，AP 自动计算 → 下一步
+  Step 6: 填写优化措施（AP=H 强制） → 下一步
+  Step 7: 预览 → 确认创建 → 进入编辑器
+```
+
+### 7.2 编辑现有 DFMEA
+
+```
+进入编辑器 → 默认"失效分析"页签
+  ├─ 点击"结构分析" → 编辑结构树 + 节点参数图
+  ├─ 失效分析中输入功能 → 底部弹出推荐卡片
+  └─ 保存 → PUT /api/fmea/{id}
+```
+
+---
+
+## 8. 数据结构
+
+### 8.1 结构树在 graph_data 中的表示
+
+```json
+{
+  "nodes": [
+    { "id": "sys-1", "type": "System", "name": "BMS", "description": "电池管理系统" },
+    { "id": "sub-1", "type": "Subsystem", "name": "BMU", "description": "电池管理单元" },
+    { "id": "comp-1", "type": "Component", "name": "LTC6811", "description": "电压采集芯片" },
+    { "id": "func-1", "type": "ComponentFunction", "name": "实时采集单体电压", "specification": "±5mV@25°C" }
+  ],
+  "edges": [
+    { "source": "sys-1", "target": "sub-1", "type": "HAS_PROCESS_STEP" },
+    { "source": "sub-1", "target": "comp-1", "type": "HAS_WORK_ELEMENT" },
+    { "source": "comp-1", "target": "func-1", "type": "HAS_FUNCTION" }
+  ]
+}
+```
+
+### 8.2 参数图在节点中的表示
+
+```json
+{
+  "id": "comp-1",
+  "type": "Component",
+  "name": "LTC6811",
+  "p_diagram": {
+    "inputs": ["电池单体电压", "温度信号"],
+    "outputs": ["数字电压值", "温度值"],
+    "controls": ["ADC采样率", "滤波算法"],
+    "noise_factors": ["电磁干扰", "温度漂移"]
+  }
+}
+```
+
+---
+
+## 9. 验收标准
+
+- [ ] 结构分析页签可增删改 System/Subsystem/Component 层级
+- [ ] 点击 Component 节点可编辑参数图（输入/输出/噪声/控制）
+- [ ] 创建 DFMEA 时弹出 7 步向导，完成可生成骨架
+- [ ] 功能否定规则可自动生成失效模式建议
+- [ ] AP 查表自动计算 H/M/L 并给出优化方向
+- [ ] viewer 角色所有输入禁用，engineer+ 可编辑
+- [ ] 完成后更新 `docs/ROADMAP.md` 状态
+
+---
+
+## 10. 依赖与风险
+
+| 风险 | 缓解措施 |
+|------|---------|
+| FMEAEditorPage.tsx 已有 770 行，拆分引入回归 | 先提取组件，保持原有逻辑不变，逐步替换 |
+| 中文动词否定规则覆盖率低 | 初期提供常见动词模板，后续迭代扩展 |
+| 参数图 UI 复杂度高 | 先用简单表单实现（4 个文本列表），后续升级可视化 |
+
+---
+
+## 11. 后续扩展（Phase 3）
+
+- 实现 `POST /api/fmea/{id}/recommend` 后端推荐接口
+- 接入历史 FMEA 数据相似度检索
+- 参数图可视化（方块图/边界图渲染）

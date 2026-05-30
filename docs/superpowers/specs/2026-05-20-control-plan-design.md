@@ -15,7 +15,7 @@
 | `cp_id` | UUID PK | 控制计划ID |
 | `document_no` | str(50), unique | 编号，如 `CP-2026-001` |
 | `title` | str(200) | 标题 |
-| `fmea_ref_id` | UUID FK → fmea_documents, nullable | 关联 PFMEA 或 DFMEA |
+| `fmea_ref_id` | UUID FK → fmea_documents, nullable | **仅关联 PFMEA**，不关联 DFMEA |
 | `product_line_code` | str(20) | 产品线，默认 `DC-DC-100` |
 | `status` | str(20) | `draft` / `review` / `approved` |
 | `version` | int | 版本号，默认 1 |
@@ -43,10 +43,7 @@
 | `process_characteristic` | str(200) | 过程特性 |
 | `special_class` | str(20) | 特殊特性分类：`CC` / `SC` / `无` |
 | `specification_tolerance` | str(200) | 产品/过程/规格/公差 |
-| `evaluation_method` | str(200) | 评价/测量技术（文本描述，如关联量具则自动填充） |
-| `gauge_id` | UUID FK → gauges.gauge_id, nullable | 关联的量具（校准有效性校验） |
-| `sop_ref` | str(200) | SOP指导书编号引用 |
-| `spc_chart_id` | UUID FK → inspection_characteristics.ic_id, nullable | 关联的SPC控制图 |
+| `evaluation_method` | str(200) | 评价/测量技术 |
 | `sample_size` | str(50) | 样本大小 |
 | `sample_frequency` | str(50) | 样本频次 |
 | `control_method` | str(200) | 控制方法 |
@@ -75,7 +72,7 @@ backend/app/
 - 初始状态为 `draft`
 
 **`import_from_fmea(cp_id, fmea_id, step_filter?)`**
-1. 校验目标 FMEA 存在且 `fmea_type == "PFMEA"`，否则抛 `ValueError`（控制计划可关联 DFMEA 但仅 PFMEA 支持自动导入）
+1. 校验目标 FMEA 存在且 `fmea_type == "PFMEA"`，否则抛 `ValueError`
 2. 遍历 PFMEA `graph_data.nodes`，筛选 `type == "ProcessStep"` 的节点
 3. 对每个 ProcessStep：
    - `node.process_number` → `step_no`

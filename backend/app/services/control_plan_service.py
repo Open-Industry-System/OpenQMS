@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.fmea import FMEADocument
@@ -85,8 +86,12 @@ async def create_control_plan(
 
 
 async def get_control_plan(db: AsyncSession, cp_id: uuid.UUID) -> ControlPlan | None:
-    """Get a ControlPlan by UUID."""
-    result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == cp_id))
+    """Get a ControlPlan by UUID with items eagerly loaded."""
+    result = await db.execute(
+        select(ControlPlan)
+        .options(selectinload(ControlPlan.items))
+        .where(ControlPlan.cp_id == cp_id)
+    )
     return result.scalar_one_or_none()
 
 
@@ -94,7 +99,11 @@ async def list_control_plans(
     db: AsyncSession, page: int = 1, page_size: int = 20, product_line: str | None = None,
 ) -> dict:
     """Return paginated list of control plans."""
-    query = select(ControlPlan).order_by(ControlPlan.created_at.desc())
+    query = (
+        select(ControlPlan)
+        .options(selectinload(ControlPlan.items))
+        .order_by(ControlPlan.created_at.desc())
+    )
     count_query = select(func.count(ControlPlan.cp_id))
 
     if product_line:
