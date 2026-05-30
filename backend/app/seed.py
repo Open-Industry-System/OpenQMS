@@ -11,7 +11,7 @@ from app.models.user import User
 from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
 from app.models.management_review import ManagementReview, ReviewOutput
-from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
+from app.models.customer_quality import Customer, CustomerComplaint, RMARecord, ShipmentRecord, WarrantyRecord
 from app.core.security import hash_password
 
 
@@ -550,6 +550,34 @@ async def seed():
             created_by=engineer.user_id,
         )
         db.add_all([rma1, rma2])
+
+        # ─── Shipment records seed ───
+        from datetime import date as date_type, timedelta
+        for customer in [customer1, customer2]:
+            for i in range(6):
+                db.add(ShipmentRecord(
+                    shipment_id=uuid.uuid4(),
+                    customer_id=customer.customer_id,
+                    product_line_code="DC-DC-100",
+                    shipment_date=date_type.today() - timedelta(days=i * 15),
+                    quantity=(i + 1) * 500,
+                    batch_no=f"BATCH-SHIP-2026-{i+1:03d}",
+                    destination="上海",
+                    notes=f"发运记录 {i+1}",
+                ))
+
+        # ─── Warranty records seed ───
+        for customer in [customer1, customer2]:
+            for i in range(3):
+                db.add(WarrantyRecord(
+                    warranty_id=uuid.uuid4(),
+                    customer_id=customer.customer_id,
+                    product_line_code="DC-DC-100",
+                    claim_date=date_type.today() - timedelta(days=i * 60),
+                    amount=(i + 1) * 3500.0,
+                    failure_mode="短路" if i == 0 else ("开路" if i == 1 else "参数漂移"),
+                    description=f"保修索赔 {i+1} - {customer.name}",
+                ))
 
         await db.commit()
 
