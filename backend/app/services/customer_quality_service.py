@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
-from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
+from app.models.customer_quality import Customer, CustomerComplaint, RMARecord, ShipmentRecord, WarrantyRecord
 from app.models.fmea import FMEADocument
 from app.services import scar_service
 from app.services.product_line_service import validate_product_line
@@ -1341,6 +1341,60 @@ async def get_complaints_by_supplier(
         for c in result.scalars().all()
     ]
 
+
+# ─── Shipment Records CRUD ───
+
+async def list_shipments(db: AsyncSession, customer_id: uuid.UUID, page: int = 1, page_size: int = 20):
+    query = select(ShipmentRecord).where(ShipmentRecord.customer_id == customer_id).order_by(ShipmentRecord.shipment_date.desc())
+    count_query = select(func.count()).select_from(ShipmentRecord).where(ShipmentRecord.customer_id == customer_id)
+    result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
+    count_result = await db.execute(count_query)
+    return result.scalars().all(), count_result.scalar_one()
+
+async def create_shipment(db: AsyncSession, customer_id: uuid.UUID, data: dict, user_id: uuid.UUID):
+    shipment = ShipmentRecord(shipment_id=uuid.uuid4(), customer_id=customer_id, **data, created_by=user_id)
+    db.add(shipment)
+    audit = AuditLog(table_name="shipment_records", record_id=shipment.shipment_id, action="CREATE", changed_fields=data, operated_by=user_id)
+    db.add(audit)
+    await db.commit()
+    return shipment
+
+async def update_shipment(db: AsyncSession, customer_id: uuid.UUID, shipment_id: uuid.UUID, data: dict, user_id: uuid.UUID):
+    result = await db.execute(select(ShipmentRecord).where(ShipmentRecord.shipment_id == shipment_id, ShipmentRecord.customer_id == customer_id))
+    shipment = result.scalar_one_or_none()
+    if not shipment:
+        raise ValueError("发运记录不存在")
+    for key, value in data.items():
+        setattr(shipment, key, value)
+    audit = AuditLog(table_name="shipment_records", record_id=shipment_id, action="UPDATE", changed_fields=data, operated_by=user_id)
+    db.add(audit)
+    await db.commit()
+    return shipment
+
+async def delete_shipment(db: AsyncSession, customer_id: uuid.UUID, shipment_id: uuid.UUID, user_id: uuid.UUID):
+    result = await db.execute(select(ShipmentRecord).where(ShipmentRecord.shipment_id == shipment_id, ShipmentRecord.customer_id == customer_id))
+    shipment = result.scalar_one_or_none()
+    if not shipment:
+        raise ValueError("发运记录不存在")
+    await db.delete(shipment)
+    audit = AuditLog(table_name="shipment_records", record_id=shipment_id, action="DELETE", operated_by=user_id)
+    db.add(audit)
+    await db.commit()
+
+# ─── PPM 发运量查询 ───
+
+async def _get_shipment_qty_for_window(db: AsyncSession, customer_id: uuid.UUID | None, product_line_code: str | None, date_from: date, date_to: date) -> int | None:
+    query = select(func.coalesce(func.sum(ShipmentRecord.quantity), 0)).where(
+        ShipmentRecord.shipment_date >= date_from,
+        ShipmentRecord.shipment_date <= date_to,
+    )
+    if customer_id:
+        query = query.where(ShipmentRecord.customer_id == customer_id)
+    if product_line_code:
+        query = query.where(ShipmentRecord.product_line_code == product_line_code)
+    result = await db.execute(query)
+    total = result.scalar_one()
+    return total if total > 0 else None
 
 # ─── SCAR creation from complaint / RMA ───
 
