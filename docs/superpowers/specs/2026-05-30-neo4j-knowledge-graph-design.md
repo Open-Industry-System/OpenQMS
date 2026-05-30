@@ -15,12 +15,12 @@
 1. Neo4j Community Docker 容器部署
 2. `graph_sync_outbox` 表 + Alembic 迁移
 3. `GraphProjectionService` — JSONB → Neo4j 节点/边映射
-4. `GraphSyncWorker` — 异步轮询 outbox 投影到 Neo4j
+4. `GraphSyncWorker` — 异步轮询 outbox 投影到 Neo4j（PG 行级锁 + 事件去重）
 5. `FMEAGraphRepository` 抽象接口 + JSONB 实现 + Neo4j 实现
-6. 全量重建 CLI 命令
+6. 全量重建 CLI 命令（含 retry-failed 兜底）
 7. 基础图查询 API（影响链、原因链、跨 FMEA 统计）
 
-**不包含：** 图谱可视化、LLM RAG、智能推荐、多人协同。
+**不包含：** 图谱可视化、LLM RAG、智能推荐、多人协同、FMEA 删除功能（当前 API 无 delete path，后续版本补充）。
 
 ---
 
@@ -35,7 +35,8 @@ PostgreSQL (主存储)
        ▼
 Graph Sync Worker (asyncio 轮询)
   - 轮询 pending outbox (5s 间隔)
-  - 加锁领取任务 (Redis 分布式锁)
+  - PG 行级锁领取任务: SELECT ... FOR UPDATE SKIP LOCKED
+  - 按 aggregate_id 去重，跳过同 ID 旧事件
   - 解析 JSONB → MERGE Neo4j
   - 标记 completed / failed
        │
@@ -64,23 +65,27 @@ CREATE TABLE graph_sync_outbox (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     aggregate_type  VARCHAR(50) NOT NULL DEFAULT 'fmea',
     aggregate_id    UUID NOT NULL,                    -- fmea_id
-    event_type      VARCHAR(50) NOT NULL,             -- fmea.updated / fmea.approved / fmea.deleted
+    event_type      VARCHAR(50) NOT NULL,             -- fmea.updated / fmea.approved
     payload         JSONB DEFAULT '{}',               -- 轻量 metadata: {version, product_line_code, fmea_type}
-    status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending/processing/completed/dead
     attempt_count   INTEGER NOT NULL DEFAULT 0,
     max_attempts    INTEGER NOT NULL DEFAULT 5,
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_error      TEXT,
-    locked_by       VARCHAR(100),                     -- worker instance id (hostname:pid)
-    locked_at       TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     processed_at    TIMESTAMPTZ
 );
 
--- 只查 pending 和可重试的 failed 任务
+-- 只查 pending 任务（failed 重试也重置为 pending，通过 next_attempt_at 控制退避）
 CREATE INDEX idx_outbox_pending ON graph_sync_outbox (next_attempt_at)
-    WHERE status IN ('pending', 'failed') AND attempt_count < max_attempts;
+    WHERE status = 'pending';
 ```
+
+**加锁机制：** Worker 使用 PG 行级锁 `SELECT ... FOR UPDATE SKIP LOCKED` 原子领取任务，无需 Redis。多 worker 实例可安全并发消费。
+
+**事件去重：** Worker 取出一批任务后，按 `aggregate_id` 分组，每个 fmea_id 只处理最新一条事件。被跳过的旧事件直接标记 `completed`（payload 记录 `dedup_skipped: true`）。
+
+**死信处理：** 超过 `max_attempts` 的任务标记为 `dead`。全量重建 CLI 提供 `--retry-failed` 参数重置 dead 任务为 pending。
 
 ### 3.2 Neo4j 节点模型
 
@@ -119,6 +124,20 @@ CREATE INDEX idx_outbox_pending ON graph_sync_outbox (next_attempt_at)
 -[:PREVENTED_BY]->
 -[:DETECTED_BY]->
 -[:OPTIMIZED_BY]->
+-[:HAS_FUNCTION]->
+```
+
+**Neo4j 约束与索引（首次启动时创建）：**
+
+```cypher
+-- 唯一性约束（保证幂等全删全建时数据一致）
+CREATE CONSTRAINT fmea_doc_id IF NOT EXISTS FOR (d:FMEDocument) REQUIRE d.fmea_id IS UNIQUE;
+CREATE CONSTRAINT graph_node_id IF NOT EXISTS FOR (n:GraphNode) REQUIRE (n.fmea_id, n.node_id) IS UNIQUE;
+
+-- 性能索引
+CREATE INDEX graph_node_fmea IF NOT EXISTS FOR (n:GraphNode) ON (n.fmea_id);
+CREATE INDEX graph_node_type IF NOT EXISTS FOR (n:GraphNode) ON (n.type);
+CREATE INDEX graph_node_product_line IF NOT EXISTS FOR (n:GraphNode) ON (n.product_line_code);
 ```
 
 ### 3.3 同步策略
@@ -127,10 +146,16 @@ CREATE INDEX idx_outbox_pending ON graph_sync_outbox (next_attempt_at)
 |---|---|
 | `fmea.updated` | 先 DELETE 该 fmea_id 全部节点/边，再 CREATE（幂等） |
 | `fmea.approved` | 同 updated + FMEDocument.status = 'approved' |
-| `fmea.deleted` | MATCH (n {fmea_id: $id}) DETACH DELETE n |
-| `full_rebuild` | CLI 命令：遍历 PG 所有 FMEA 文档，逐个 MERGE |
+
+**全量重建（CLI 操作，不走 outbox）：**
+1. 清空 Neo4j 全部数据：`MATCH (n) DETACH DELETE n`
+2. 重新创建约束和索引
+3. 遍历 PG 所有 FMEA 文档，逐个调用 `sync_fmea_to_neo4j`
+4. `--retry-failed` 模式：将 outbox 中 `dead` 状态的任务重置为 `pending` 并由 worker 处理
 
 **幂等性：** 每次同步先全删再全建，不做增量 diff。FMEA 单文档节点数通常 50-200 个，全删全建性能可接受。
+
+**租户隔离：** 所有跨 FMEA 查询（`find_similar_nodes`、`get_cross_fmea_stats`）强制要求 `product_line_code` 参数，Neo4j 查询通过 `product_line_code` 属性过滤，防止数据越权。
 
 ---
 
@@ -205,20 +230,42 @@ class GraphProjectionService:
 ```python
 class GraphSyncWorker:
     POLL_INTERVAL = 5        # 秒
-    LOCK_TIMEOUT = 300       # 5 分钟
+    BATCH_SIZE = 10          # 每次拉取任务数
     MAX_RETRY_DELAY = 3600   # 最大重试延迟 1 小时
 
     async def run(self) -> None:
-        """主循环：轮询 → 加锁 → 同步 → 标记"""
+        """主循环：轮询 → 加锁 → 去重 → 同步 → 标记"""
 
-    async def _poll_pending(self, limit: int = 10) -> list: ...
-    async def _lock_task(self, task) -> bool: ...
+    async def _poll_and_lock(self) -> list:
+        """
+        原子领取任务（PG 行级锁）：
+        BEGIN;
+        SELECT * FROM graph_sync_outbox
+          WHERE status = 'pending' AND next_attempt_at <= NOW()
+          ORDER BY next_attempt_at
+          LIMIT 10
+          FOR UPDATE SKIP LOCKED;
+        UPDATE ... SET status = 'processing' WHERE id IN (...);
+        COMMIT;
+        """
+
+    async def _deduplicate(self, tasks: list) -> list:
+        """
+        按 aggregate_id 分组，每个 fmea_id 只保留最新一条事件。
+        被跳过的旧事件标记 completed（payload: {dedup_skipped: true}）。
+        """
+
     async def _process_task(self, task) -> None: ...
     async def _mark_completed(self, task) -> None: ...
-    async def _mark_failed(self, task, error: str) -> None: ...
+    async def _mark_failed(self, task, error: str) -> None:
+        """
+        attempt_count += 1
+        if attempt_count >= max_attempts: status = 'dead'
+        else: status = 'pending', next_attempt_at = NOW() + backoff(attempt_count)
+        """
 
     # 重试退避：exponential backoff
-    # attempt 1 → 10s, attempt 2 → 30s, attempt 3 → 90s, attempt 4 → 270s, attempt 5 → max
+    # attempt 1 → 10s, attempt 2 → 30s, attempt 3 → 90s, attempt 4 → 270s, attempt 5 → dead
 ```
 
 ### 4.5 Graph Query API
@@ -243,7 +290,7 @@ POST /api/graph/rebuild                            # 触发全量重建 (admin o
 outbox = GraphSyncOutbox(
     aggregate_type="fmea",
     aggregate_id=fmea.fmea_id,
-    event_type="fmea.updated",  # 或 "fmea.approved" / "fmea.deleted"
+    event_type="fmea.updated",  # 或 "fmea.approved"
     payload={"version": fmea.version, "product_line_code": fmea.product_line_code}
 )
 session.add(outbox)
@@ -266,7 +313,6 @@ services:
       - "7687:7687"   # Bolt protocol
     environment:
       NEO4J_AUTH: neo4j/openqms2026
-      NEO4J_PLUGINS: '["apoc"]'
       NEO4J_server_memory_pagecache_size: 128M
       NEO4J_server_memory_heap_initial__size: 256M
       NEO4J_server_memory_heap_max__size: 512M
@@ -287,7 +333,9 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      # Worker 需要 SECRET_KEY 避免 config 导入崩溃
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      DATABASE_URL: postgresql+asyncpg://openqms:openqms@db:5432/openqms
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: openqms2026
@@ -295,6 +343,8 @@ services:
 volumes:
   neo4j_data:
 ```
+
+**注意：** 确保 `db` 服务在 docker-compose.yml 中配置了 `healthcheck`（如 `pg_isready`），否则 `graph-worker` 的 `depends_on: condition: service_healthy` 会报错。
 
 ### 5.2 配置
 
@@ -334,15 +384,15 @@ neo4j>=5.0,<6.0       # Neo4j Python driver (async)
 
 按以下顺序实现：
 
-1. **Docker + 配置** — Neo4j 容器、config.py、neo4j driver 连接
+1. **Docker + 配置** — Neo4j 容器、config.py、neo4j driver 连接、约束初始化
 2. **Outbox 模型 + 迁移** — SQLAlchemy 模型、Alembic 迁移
 3. **FMEA Service 集成** — update/transition 中写 outbox（5 行代码）
 4. **GraphProjectionService** — JSONB → Neo4j 映射逻辑
-5. **GraphSyncWorker** — 轮询、加锁、同步、重试
+5. **GraphSyncWorker** — PG 行级锁轮询、事件去重、同步、退避重试
 6. **FMEAGraphRepository** — 抽象接口 + JSONB 实现 + Neo4j 实现
-7. **Graph Query API** — 路由 + 权限
-8. **全量重建 CLI** — `python -m app.cli.graph_rebuild`
-9. **测试** — 投影映射正确性、worker 重试逻辑、全量重建
+7. **Graph Query API** — 路由 + 权限 + product_line_code 强制隔离
+8. **全量重建 CLI** — `python -m app.cli.graph_rebuild` + `--retry-failed` 兜底
+9. **测试** — 投影映射正确性、worker 去重/重试逻辑、全量重建
 
 ---
 
@@ -352,8 +402,11 @@ neo4j>=5.0,<6.0       # Neo4j Python driver (async)
 - [ ] 创建/编辑 FMEA 后，outbox 自动写入
 - [ ] worker 在 10 秒内将 FMEA 图数据同步到 Neo4j
 - [ ] Neo4j Browser 可查询到正确的节点和关系
+- [ ] Neo4j 唯一性约束生效，全量重建不产生重复节点
 - [ ] 图查询 API 返回正确的影响链和原因链
-- [ ] 全量重建命令可从 PG 完整重建 Neo4j
+- [ ] 跨 FMEA 查询强制 product_line_code 过滤
+- [ ] 全量重建命令先清空 Neo4j 再从 PG 重建所有数据
+- [ ] `--retry-failed` 可重置 dead 状态任务
+- [ ] 同一 FMEA 5 秒内多次保存，worker 去重只同步一次
+- [ ] worker 失败自动退避重试，超过 5 次标记为 dead
 - [ ] Neo4j 完全清空后，全量重建可恢复所有数据
-- [ ] worker 失败自动重试，超过 5 次标记为 failed
-- [ ] FMEA 删除时，Neo4j 对应数据同步清除
