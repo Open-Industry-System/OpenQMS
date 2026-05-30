@@ -172,12 +172,12 @@ async def _create_scar_without_commit(
         )
         db.add(scar)
         try:
-            await db.flush()
+            async with db.begin_nested():
+                await db.flush()
             break
         except IntegrityError as e:
             if "supplier_scars_scar_no" not in str(e.orig):
                 raise
-            await db.rollback()
             if attempt == 2:
                 raise ValueError("SCAR 编号生成冲突，请重试")
             continue

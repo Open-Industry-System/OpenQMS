@@ -470,10 +470,17 @@ async def customer_summary(
     independent_rma_qty = sum(
         rma.return_qty or 0 for rma in rma_records if rma.complaint_id is None
     )
+    # PPM denominator fallback: explicit param → shipment_records SUM → annual_shipment_qty
+    effective_shipment_qty = shipment_qty
+    if effective_shipment_qty is None:
+        effective_shipment_qty = await _get_shipment_qty_for_window(
+            db, customer_id, product_line, window_start, window_end
+        )
+
     ppm = calculate_customer_ppm(
         impact_qty=impact_qty,
         independent_rma_qty=independent_rma_qty,
-        shipment_qty=shipment_qty,
+        shipment_qty=effective_shipment_qty,
         annual_shipment_qty=customer.annual_shipment_qty,
         date_from=window_start,
         date_to=window_end,
@@ -1278,6 +1285,7 @@ async def _get_spc_cpks_for_customer(
 async def _get_warranty_total(
     db: AsyncSession,
     customer_id: uuid.UUID | None,
+    product_line: str | None,
     date_from: date,
     date_to: date,
 ) -> float:
@@ -1287,6 +1295,8 @@ async def _get_warranty_total(
     )
     if customer_id:
         query = query.where(WarrantyRecord.customer_id == customer_id)
+    if product_line:
+        query = query.where(WarrantyRecord.product_line_code == product_line)
     result = await db.execute(query)
     return result.scalar_one()
 
@@ -1294,6 +1304,7 @@ async def _get_warranty_total(
 async def _get_customer_audit_summary(
     db: AsyncSession,
     customer_id: uuid.UUID | None,
+    product_line: str | None,
     date_from: date,
     date_to: date,
 ) -> dict:
@@ -1310,6 +1321,8 @@ async def _get_customer_audit_summary(
         target = await db.get(Customer, customer_id)
         if target:
             query = query.where(AuditPlan.customer_name == target.name)
+    if product_line:
+        query = query.where(AuditPlan.product_line_code == product_line)
 
     result = await db.execute(query)
     plans = result.scalars().all()
@@ -1453,9 +1466,9 @@ async def dashboard(
         "rma_by_responsibility": rma_by_responsibility,
         # Enhanced fields
         "spc_cpks": await _get_spc_cpks_for_customer(db, customer_id, product_line),
-        "warranty_total": await _get_warranty_total(db, customer_id, window_start, window_end),
+        "warranty_total": await _get_warranty_total(db, customer_id, product_line, window_start, window_end),
         "avg_satisfaction": avg_satisfaction,
-        "audit_summary": await _get_customer_audit_summary(db, customer_id, window_start, window_end),
+        "audit_summary": await _get_customer_audit_summary(db, customer_id, product_line, window_start, window_end),
     }
 
 
