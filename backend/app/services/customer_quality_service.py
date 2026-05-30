@@ -10,6 +10,7 @@ from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.models.fmea import FMEADocument
+from app.services import scar_service
 from app.services.product_line_service import validate_product_line
 
 
@@ -1339,3 +1340,118 @@ async def get_complaints_by_supplier(
         }
         for c in result.scalars().all()
     ]
+
+
+# ─── SCAR creation from complaint / RMA ───
+
+async def create_scar_from_complaint(
+    db: AsyncSession,
+    complaint_id: uuid.UUID,
+    req_data: dict,
+    user_id: uuid.UUID,
+):
+    # 1. Query complaint
+    result = await db.execute(
+        select(CustomerComplaint).where(CustomerComplaint.complaint_id == complaint_id)
+    )
+    complaint = result.scalar_one_or_none()
+    if not complaint:
+        raise ValueError("客诉不存在")
+
+    # 2. Verify supplier responsibility
+    if not complaint.supplier_responsibility:
+        raise ValueError("该客诉未判定为供应商责任，无法创建 SCAR")
+
+    # 3. Verify not already linked
+    if complaint.scar_ref_id:
+        raise ValueError("该客诉已关联 SCAR，无法重复创建")
+
+    # 4. Determine supplier_id
+    supplier_id = req_data.get("supplier_id") or complaint.supplier_id
+    if not supplier_id:
+        raise ValueError("缺少责任供应商信息")
+
+    # 5. Determine description
+    description = req_data.get("description") or complaint.defect_desc or "客诉关联 SCAR"
+
+    # 6. Create SCAR + backfill in same transaction
+    scar = await scar_service._create_scar_without_commit(
+        db,
+        supplier_id=supplier_id,
+        source_type="complaint",
+        source_id=complaint_id,
+        description=description,
+        requested_action=req_data.get("requested_action"),
+        due_date=req_data.get("due_date"),
+        issued_by=user_id,
+        product_line_code=complaint.product_line_code,
+    )
+
+    complaint.scar_ref_id = scar.scar_id
+
+    audit = AuditLog(
+        table_name="customer_complaints",
+        record_id=complaint_id,
+        action="CREATE_SCAR",
+        changed_fields={"scar_id": str(scar.scar_id), "scar_no": scar.scar_no},
+        operated_by=user_id,
+    )
+    db.add(audit)
+    await db.commit()
+    return scar
+
+
+async def create_scar_from_rma(
+    db: AsyncSession,
+    rma_id: uuid.UUID,
+    req_data: dict,
+    user_id: uuid.UUID,
+):
+    result = await db.execute(
+        select(RMARecord).where(RMARecord.rma_id == rma_id)
+    )
+    rma = result.scalar_one_or_none()
+    if not rma:
+        raise ValueError("RMA 不存在")
+
+    if rma.responsibility != "supplier":
+        raise ValueError('该 RMA 责任判定不是"供应商"，无法创建 SCAR')
+
+    if rma.scar_ref_id:
+        raise ValueError("该 RMA 已关联 SCAR，无法重复创建")
+
+    supplier_id = req_data.get("supplier_id")
+    if not supplier_id:
+        raise ValueError("缺少责任供应商信息（RMA 未记录供应商，请手动指定）")
+
+    description = req_data.get("description")
+    if not description:
+        parts = [rma.defect_type or "RMA"]
+        if rma.analysis_result:
+            parts.append(rma.analysis_result)
+        description = " — ".join(parts)
+
+    scar = await scar_service._create_scar_without_commit(
+        db,
+        supplier_id=supplier_id,
+        source_type="rma",
+        source_id=rma_id,
+        description=description,
+        requested_action=req_data.get("requested_action"),
+        due_date=req_data.get("due_date"),
+        issued_by=user_id,
+        product_line_code=rma.product_line_code,
+    )
+
+    rma.scar_ref_id = scar.scar_id
+
+    audit = AuditLog(
+        table_name="rma_records",
+        record_id=rma_id,
+        action="CREATE_SCAR",
+        changed_fields={"scar_id": str(scar.scar_id), "scar_no": scar.scar_no},
+        operated_by=user_id,
+    )
+    db.add(audit)
+    await db.commit()
+    return scar
