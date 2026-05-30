@@ -398,7 +398,7 @@ def test_build_cypher_sync_returns_delete_doc_nodes_edges():
     # 第二条是 FMEDocument
     assert "FMEDocument" in statements[1][0]
     # 后续是节点和边创建
-    node_stmts = [s for s in statements if "GraphNode" in s[0]]
+    node_stmts = [s for s in statements if "CREATE (n:GraphNode" in s[0]]
     edge_stmts = [s for s in statements if "MATCH (s:GraphNode" in s[0]]
     assert len(node_stmts) == 6
     assert len(edge_stmts) == 5
@@ -549,7 +549,7 @@ def build_cypher_sync(
     策略：逐条生成简单、参数化的 Cypher（不用动态字符串拼接标签/关系类型）。
     每个 (cypher, params) 对应一条独立语句，在同一个 Neo4j transaction 中顺序执行。
 
-    Returns: [(cypher, params), ...] — 按顺序执行即为幂等同步。
+    Returns: [(cypher, params), ...] — 按顺序在同一个 Neo4j write transaction 中执行即为幂等同步。
     """
     statements: list[tuple[str, dict]] = []
 
@@ -652,9 +652,13 @@ class GraphProjectionService:
             graph_data=fmea.graph_data or {"nodes": [], "edges": []},
         )
 
-        async with self._driver.session(database="neo4j") as session:
+        async def _tx(tx):
             for cypher, params in statements:
-                await session.run(cypher, params)
+                result = await tx.run(cypher, params)
+                await result.consume()  # 确保每条语句执行完成并检查错误
+
+        async with self._driver.session(database="neo4j") as session:
+            await session.execute_write(_tx)
 
     async def full_rebuild(self) -> dict:
         """全量重建：清空 Neo4j + 遍历所有 FMEA 逐个同步。"""
