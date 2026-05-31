@@ -65,13 +65,27 @@ class Neo4jRepository(FMEAGraphRepository):
             type_records = await type_result.data()
             type_dist = {r["type"]: r["cnt"] for r in type_records}
 
-            # 获取所有 FailureMode 的 S/O/D 用于计算 AP 分布和高风险节点
+            # 获取所有 FailureMode 的 S/O/D：通过遍历关联节点（而非直接读 FailureMode 属性）
+            # S 来自 FailureEffect（fm -EFFECT_OF-> effect）
+            # O 来自 FailureCause（cause -CAUSE_OF-> fm）
+            # D 来自 DetectionControl（cause/fm -DETECTED_BY-> det）
             fm_result = await session.run(
-                "MATCH (n:GraphNode:FailureMode) WHERE n.product_line_code = $pl "
-                "MATCH (d:FMEDocument) WHERE d.fmea_id = n.fmea_id "
-                "RETURN n.node_id AS node_id, n.name AS name, "
-                "n.severity AS severity, n.occurrence AS occurrence, n.detection AS detection, "
-                "n.fmea_id AS fmea_id, d.document_no AS document_no",
+                """
+                MATCH (fm:GraphNode {type: 'FailureMode'}) WHERE fm.product_line_code = $pl
+                MATCH (d:FMEDocument) WHERE d.fmea_id = fm.fmea_id
+                OPTIONAL MATCH (fm)-[:EFFECT_OF]->(effect:GraphNode)
+                WITH fm, d, coalesce(max(effect.severity), 0) as max_s
+                OPTIONAL MATCH (cause:GraphNode)-[:CAUSE_OF]->(fm)
+                WITH fm, d, max_s, coalesce(max(cause.occurrence), 0) as max_o
+                OPTIONAL MATCH (cause2:GraphNode)-[:CAUSE_OF]->(fm)
+                OPTIONAL MATCH (cause2)-[:DETECTED_BY]->(det:GraphNode)
+                OPTIONAL MATCH (fm)-[:DETECTED_BY]->(det2:GraphNode)
+                WITH fm, d, max_s, max_o,
+                     coalesce(max(coalesce(det.detection, det2.detection, 0)), 0) as max_d
+                RETURN fm.node_id AS node_id, fm.name AS name,
+                       max_s AS severity, max_o AS occurrence, max_d AS detection,
+                       fm.fmea_id AS fmea_id, d.document_no AS document_no
+                """,
                 pl=product_line_code,
             )
             fm_records = await fm_result.data()
@@ -111,14 +125,8 @@ class Neo4jRepository(FMEAGraphRepository):
                             "document_no": r.get("document_no"),
                         })
 
-            # 平均 RPN
-            avg_result = await session.run(
-                "MATCH (n:GraphNode:FailureMode) WHERE n.product_line_code = $pl "
-                "AND n.severity > 0 AND n.occurrence > 0 AND n.detection > 0 "
-                "RETURN avg(n.severity * n.occurrence * n.detection) AS avg_rpn, count(*) AS cnt",
-                pl=product_line_code,
-            )
-            avg_records = await avg_result.data()
+            # 平均 RPN：用 Python 累加结果计算（与 JSONB 实现一致）
+            avg_rpn = round(total_rpn / rpn_count, 1) if rpn_count > 0 else 0
 
             # FMEA 文档数
             doc_result = await session.run(
@@ -133,7 +141,7 @@ class Neo4jRepository(FMEAGraphRepository):
                 "node_type_distribution": type_dist,
                 "ap_distribution": ap_counts,
                 "high_ap_nodes": sorted(high_ap_nodes, key=lambda x: x["rpn"], reverse=True)[:20],
-                "avg_rpn": round(avg_records[0]["avg_rpn"], 1) if avg_records and avg_records[0]["avg_rpn"] else 0,
+                "avg_rpn": avg_rpn,
                 "top_failure_modes": sorted(top_modes, key=lambda x: x["rpn"], reverse=True)[:10],
             }
 
