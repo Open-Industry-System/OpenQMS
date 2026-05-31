@@ -49,24 +49,26 @@ export function normalizeGraphData(
   rawEdges: Array<Record<string, unknown>>
 ): { nodes: RenderGraphNode[]; edges: RenderGraphEdge[] } {
   return {
-    nodes: rawNodes.map((n) => {
-      const id = (n.id as string) ?? (n.node_id as string) ?? "";
-      const label = (n.type as string) ?? (n.label as string) ?? "";
-      const props = (n.properties as Record<string, unknown>) ?? n;
-      return {
-        id,
-        label,
-        properties: {
-          name: (props.name as string) ?? (n.name as string) ?? "",
-          severity: (props.severity as number) ?? (n.severity as number),
-          occurrence: (props.occurrence as number) ?? (n.occurrence as number),
-          detection: (props.detection as number) ?? (n.detection as number),
-          ap: (props.ap as string) ?? (n.ap as string),
-          ...props,
-        },
-        style: undefined,
-      };
-    }),
+    nodes: rawNodes
+      .map((n) => {
+        const id = (n.id as string) ?? (n.node_id as string) ?? "";
+        const label = (n.type as string) ?? (n.label as string) ?? "";
+        const props = (n.properties as Record<string, unknown>) ?? n;
+        return {
+          id,
+          label,
+          properties: {
+            ...props, // spread first so explicit fields take precedence
+            name: (props.name as string) ?? (n.name as string) ?? "",
+            severity: (props.severity as number) ?? (n.severity as number),
+            occurrence: (props.occurrence as number) ?? (n.occurrence as number),
+            detection: (props.detection as number) ?? (n.detection as number),
+            ap: (props.ap as string) ?? (n.ap as string),
+          },
+          style: undefined,
+        };
+      })
+      .filter((n) => n.id !== ""), // drop nodes without valid id
     edges: rawEdges.map((e) => ({
       source: (e.source as string) ?? "",
       target: (e.target as string) ?? "",
