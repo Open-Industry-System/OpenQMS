@@ -46,7 +46,7 @@ PostgreSQL (FMEA graph_data JSONB)
 
 ### 3.1 AP 计算复用
 
-**不复用新增文件。** 已有 `backend/app/state_machines/fmea_state.py:34` 的 `compute_ap(s, o, d)` 与前端 `calculateAP` 逻辑完全一致（已通过 `backend/tests/test_fmea_state.py` 验证）。
+**不新增 AP 计算文件。** 已有 `backend/app/state_machines/fmea_state.py:34` 的 `compute_ap(s, o, d)` 与前端 `calculateAP` 逻辑完全一致（已通过 `backend/tests/test_fmea_state.py` 验证）。
 
 Repository 中通过 `from app.state_machines.fmea_state import compute_ap` 复用。
 
@@ -136,7 +136,7 @@ class CrossFmeaStatsOut(BaseModel):
 ### 3.4 产品线过滤策略
 
 **强制要求 `product_line_code`：**
-- 后端 API：`product_line_code` 为 Query 必填参数（`Query(..., min_length=1)`），空字符串或纯空白直接 422。实现时先 `strip()` 再校验。
+- 后端 API：`product_line_code` 为 Query 必填参数（`Query(..., min_length=1)`）。**实现方式：** 端点内先执行 `product_line_code = product_line_code.strip()`，再判断 `if not product_line_code: raise HTTPException(status_code=422, detail="product_line_code cannot be empty")`。`min_length=1` 拦截空字符串，但无法拦截纯空白（如 `"   "`），必须配合显式 `strip()` 校验。
 - 前端页面：读取 `useProductLineStore` 当前选择值。若用户清空为"全部产品线"（`null` 或空字符串），页面显示提示"请选择产品线以查看知识库"，**禁用查询按钮和自动加载**
 
 **理由：** 全局知识库涉及跨 FMEA 聚合，"全部产品线"会暴露所有产品数据，与当前 RBAC 设计冲突。后续如需支持全局汇总，需单独设计权限控制。
@@ -265,7 +265,7 @@ export interface SimilarNode {
 
 ### 6.2 G6 画布降级
 
-全局知识库页面**不直接渲染 G6 画布**，仅展示统计卡片和表格列表。点击"查看图谱"跳转至 FMEA 编辑器内的图谱 Tab（由知识图谱可视化模块负责 G6 渲染和降级）。
+全局知识库页面**不直接渲染 G6 画布**，仅展示统计卡片和表格列表。点击"查看图谱"跳转至 FMEA 编辑器，图谱 Tab/画布能力由知识图谱可视化模块负责实现和降级。
 
 ---
 
