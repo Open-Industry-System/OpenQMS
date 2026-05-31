@@ -53,22 +53,6 @@ async def lifespan(app: FastAPI):
                 role="admin",
             ))
             await db.commit()
-
-    # Neo4j 全量重投影：确保关系带 edge_index（v0.6+ 新增属性）
-    try:
-        from app.graph.neo4j_driver import get_neo4j_driver, ensure_constraints
-        from app.services.graph_projection_service import GraphProjectionService
-        import logging
-        logger = logging.getLogger(__name__)
-        driver = await get_neo4j_driver()
-        await ensure_constraints()
-        projection = GraphProjectionService(driver, async_session)
-        result = await projection.full_rebuild()
-        logger.info(f"Neo4j graph projection synced: {result}")
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Neo4j projection skipped (Neo4j unavailable): {e}")
-
     yield
 
 
