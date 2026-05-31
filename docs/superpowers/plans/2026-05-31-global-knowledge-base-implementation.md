@@ -132,12 +132,35 @@ git commit -m "feat: JSONBRepository stats with AP distribution, high-risk nodes
 
 ---
 
-## Task 2: Neo4jRepository stats 字段补齐
+## Task 2: Neo4jRepository stats + similar 字段补齐
 
 **Files:**
 - Modify: `backend/app/graph/neo4j_repository.py`
 
-- [ ] **Step 1: 重写 `get_cross_fmea_stats` 补齐字段**
+- [ ] **Step 1: 修改 `find_similar_nodes` 通过 FMEDocument JOIN 返回 `document_no`**
+
+替换 `backend/app/graph/neo4j_repository.py` 中 `find_similar_nodes` 方法（第 38-53 行）：
+
+```python
+    async def find_similar_nodes(
+        self, node_type: str, name_keyword: str, product_line_code: str, limit: int = 20
+    ) -> list[dict]:
+        async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+            result = await session.run(
+                "MATCH (d:FMEDocument)-[:HAS_NODE]->(n:GraphNode) "
+                "WHERE n.type = $node_type AND n.product_line_code = $product_line_code "
+                "AND toLower(n.name) CONTAINS toLower($keyword) "
+                "RETURN n.node_id AS node_id, n.name AS name, n.type AS type, "
+                "n.fmea_id AS fmea_id, d.document_no AS document_no "
+                "LIMIT $limit",
+                node_type=node_type, product_line_code=product_line_code,
+                keyword=name_keyword, limit=limit,
+            )
+            records = await result.data()
+            return records
+```
+
+- [ ] **Step 2: 重写 `get_cross_fmea_stats` 补齐字段**
 
 替换 `backend/app/graph/neo4j_repository.py` 中 `get_cross_fmea_stats` 方法（第 55-92 行）：
 
@@ -229,7 +252,7 @@ git commit -m "feat: JSONBRepository stats with AP distribution, high-risk nodes
 
 ```bash
 git add backend/app/graph/neo4j_repository.py
-git commit -m "feat: Neo4jRepository stats with AP distribution, document_no via FMEDocument join"
+git commit -m "feat: Neo4jRepository stats + similar with document_no via FMEDocument join"
 ```
 
 ---
@@ -432,7 +455,7 @@ git commit -m "feat: frontend graph API client"
 - [ ] **Step 1: 创建页面文件**
 
 ```tsx
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   Card,
   Row,
@@ -472,7 +495,8 @@ const NODE_TYPE_OPTIONS = [
   "FailureEffect",
   "FailureCause",
   "Function",
-  "Control",
+  "PreventionControl",
+  "DetectionControl",
   "ProcessItem",
   "ProcessStep",
   "ProcessWorkElement",
@@ -489,7 +513,7 @@ const AP_COLOR_MAP: Record<string, string> = {
 
 const KnowledgeGraphPage: React.FC = () => {
   const navigate = useNavigate();
-  const { currentProductLine } = useProductLineStore();
+  const currentProductLine = useProductLineStore((s) => s.selected);
 
   const [stats, setStats] = useState<CrossFmeaStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -498,6 +522,7 @@ const KnowledgeGraphPage: React.FC = () => {
   const [searchType, setSearchType] = useState("FailureMode");
   const [searchResults, setSearchResults] = useState<SimilarNode[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchStats = useCallback(async () => {
     if (!currentProductLine) return;
@@ -514,7 +539,7 @@ const KnowledgeGraphPage: React.FC = () => {
     fetchStats();
   }, [fetchStats]);
 
-  const handleSearch = async () => {
+  const doSearch = useCallback(async () => {
     if (!searchKeyword.trim() || !currentProductLine) return;
     setSearchLoading(true);
     try {
@@ -528,6 +553,13 @@ const KnowledgeGraphPage: React.FC = () => {
     } finally {
       setSearchLoading(false);
     }
+  }, [searchKeyword, searchType, currentProductLine]);
+
+  const handleSearch = () => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      doSearch();
+    }, 300);
   };
 
   const handleViewGraph = (fmeaId: string, nodeId?: string) => {
@@ -620,7 +652,13 @@ const KnowledgeGraphPage: React.FC = () => {
           <Input
             placeholder="输入节点名称关键词"
             value={searchKeyword}
-            onChange={(e) => setSearchKeyword(e.target.value)}
+            onChange={(e) => {
+              setSearchKeyword(e.target.value);
+              if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+              searchDebounceRef.current = setTimeout(() => {
+                doSearch();
+              }, 300);
+            }}
             onPressEnter={handleSearch}
           />
           <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
@@ -635,7 +673,7 @@ const KnowledgeGraphPage: React.FC = () => {
           {searchResults.length > 0 && (
             <Table
               dataSource={searchResults}
-              rowKey="node_id"
+              rowKey={(record) => `${record.fmea_id}-${record.node_id}`}
               loading={searchLoading}
               size="small"
               pagination={{ pageSize: 10 }}
@@ -770,21 +808,48 @@ import KnowledgeGraphPage from "./pages/graph/KnowledgeGraphPage";
 <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
 ```
 
-- [ ] **Step 2: AppLayout.tsx 添加导航菜单项**
+- [ ] **Step 2: AppLayout.tsx 添加导航菜单项 + 导航状态表**
 
-在 `frontend/src/components/layout/AppLayout.tsx` 的 `menuItems` 中，找到 "前期质量策划" 分组（`grp:planning`），在其 children 末尾添加：
+在 `frontend/src/components/layout/AppLayout.tsx` 中做三处修改：
+
+1. **import 中添加 `NodeIndexOutlined`：**
+
+```tsx
+import {
+  // ... existing imports
+  NodeIndexOutlined,  // 新增
+} from "@ant-design/icons";
+```
+
+2. **MENU_KEYS 数组末尾添加：**
+
+```tsx
+const MENU_KEYS = [
+  // ... existing keys
+  "/knowledge-graph",  // 新增
+];
+```
+
+3. **MENU_KEY_TO_OPEN_KEYS 添加：**
+
+```tsx
+const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
+  // ... existing mappings
+  "/knowledge-graph": ["grp:planning"],  // 新增
+};
+```
+
+4. **menuItems 中 "前期质量策划" 分组（`grp:planning`）children 末尾添加：**
 
 ```tsx
 { key: "/knowledge-graph", icon: <NodeIndexOutlined />, label: "知识图谱" },
 ```
 
-确保 `NodeIndexOutlined` 已在文件顶部的 import 中（检查现有 imports，若缺失则添加）。
-
 - [ ] **Step 3: Commit**
 
 ```bash
 git add frontend/src/App.tsx frontend/src/components/layout/AppLayout.tsx
-git commit -m "feat: register /knowledge-graph route and sidebar menu entry"
+git commit -m "feat: register /knowledge-graph route, sidebar menu, and navigation state"
 ```
 
 ---
@@ -793,6 +858,7 @@ git commit -m "feat: register /knowledge-graph route and sidebar menu entry"
 
 **Files:**
 - Create: `backend/tests/test_graph_repository.py`
+- Create: `backend/tests/test_graph_api.py`
 
 - [ ] **Step 1: 创建 Repository 测试**
 
@@ -888,16 +954,72 @@ async def test_jsonb_repository_stats_empty_sod_handling():
     assert result["high_ap_nodes"] == []
 ```
 
-- [ ] **Step 2: 运行测试**
+- [ ] **Step 2: 创建 API 层测试**
+
+创建 `backend/tests/test_graph_api.py`：
+
+```python
+import pytest
+from httpx import AsyncClient
+from fastapi import status
+
+
+@pytest.mark.asyncio
+async def test_graph_stats_product_line_required(client: AsyncClient):
+    """验证 product_line_code 缺失或纯空白返回 422。"""
+    # 缺失参数
+    resp = await client.get("/api/graph/stats")
+    assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    # 纯空白
+    resp = await client.get("/api/graph/stats?product_line_code=%20%20%20")
+    assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.asyncio
+async def test_graph_stats_response_has_whitelist_fields_only(client: AsyncClient):
+    """验证 stats 响应仅含白名单字段，无敏感字段外泄。"""
+    resp = await client.get("/api/graph/stats?product_line_code=DC-DC-100")
+    if resp.status_code == status.HTTP_200_OK:
+        data = resp.json()
+        # 必须含白名单字段
+        assert "total_fmeas" in data
+        assert "ap_distribution" in data
+        assert "high_ap_nodes" in data
+        # 必须不含敏感字段
+        assert "created_by" not in data
+        assert "updated_by" not in data
+        assert "approved_by" not in data
+        # ap_distribution 含全键
+        assert "H" in data["ap_distribution"] and "M" in data["ap_distribution"] and "L" in data["ap_distribution"]
+
+
+@pytest.mark.asyncio
+async def test_graph_similar_response_has_document_no(client: AsyncClient):
+    """验证 similar 响应含 document_no。"""
+    resp = await client.get(
+        "/api/graph/similar?node_type=FailureMode&name_keyword=焊&product_line_code=DC-DC-100"
+    )
+    if resp.status_code == status.HTTP_200_OK:
+        data = resp.json()
+        if isinstance(data, list) and len(data) > 0:
+            assert "document_no" in data[0]
+            assert "node_id" in data[0]
+            assert "name" in data[0]
+            # 敏感字段必须不存在
+            assert "created_by" not in data[0]
+```
+
+- [ ] **Step 3: 运行测试**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
-python -m pytest tests/test_graph_repository.py -v
+python -m pytest tests/test_graph_repository.py tests/test_graph_api.py -v
 ```
 
 Expected: 全部通过。
 
-- [ ] **Step 3: 前端构建检查**
+- [ ] **Step 4: 前端构建检查**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/frontend
@@ -918,8 +1040,8 @@ Expected: 输出 `H`。
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/tests/test_graph_repository.py
-git commit -m "test: graph repository stats fields, sorting, empty SOD, AP consistency"
+git add backend/tests/test_graph_repository.py backend/tests/test_graph_api.py
+git commit -m "test: graph repository stats + API whitelist and validation tests"
 ```
 
 ---
@@ -930,20 +1052,26 @@ git commit -m "test: graph repository stats fields, sorting, empty SOD, AP consi
 
 | 设计文档需求 | 对应 Task |
 |-------------|----------|
-| AP 计算复用 `compute_ap` | Task 1, Task 2（import from fmea_state） |
+| AP 计算复用 `compute_ap` | Task 1, 2（import from fmea_state） |
 | JSONBRepository stats 字段补齐 | Task 1 |
-| Neo4jRepository stats 字段补齐 | Task 2 |
+| Neo4jRepository stats + similar 字段补齐 | Task 2 |
 | 数据脱敏（Pydantic 白名单） | Task 3 |
-| similar 返回 document_no | Task 1, Task 2, Task 3（验证） |
-| 产品线空值拦截 | Task 3（API 422）+ Task 5（前端提示） |
+| similar 返回 document_no | Task 1, 2, 3（验证） |
+| 产品线空值拦截（含纯空白） | Task 3（API 422）+ Task 5（前端提示） |
 | 跳转参数 `?node=` | Task 5 |
 | Neo4j document_no JOIN | Task 2 |
-| top_failure_modes 含 document_no | Task 1, Task 2 |
-| stats 语义（排序/limit/空值） | Task 1, Task 2 |
+| top_failure_modes 含 document_no | Task 1, 2 |
+| stats 语义（排序/limit/空值） | Task 1, 2 |
+| 搜索防抖 300ms | Task 5 |
+| productLineStore `selected` 字段 | Task 5 |
+| MENU_KEYS / MENU_KEY_TO_OPEN_KEYS | Task 6 |
+| 搜索节点类型实际值 | Task 5 |
+| 表格 rowKey 跨 FMEA 防冲突 | Task 5 |
 | AppLayout 导航菜单 | Task 6 |
 | 前端 API 客户端 | Task 4 |
 | 前端全局知识库页面 | Task 5 |
 | 路由注册 | Task 6 |
+| 后端 Repository + API 测试 | Task 7 |
 | 构建验证 | Task 7 |
 
 **无遗漏。**
