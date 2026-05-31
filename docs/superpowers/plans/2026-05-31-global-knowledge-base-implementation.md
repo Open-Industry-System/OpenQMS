@@ -789,11 +789,115 @@ git commit -m "feat: register /knowledge-graph route and sidebar menu entry"
 
 ---
 
-## Task 7: 构建验证
+## Task 7: 后端测试 + 构建验证
 
-**Files:** 无新增/修改，仅验证
+**Files:**
+- Create: `backend/tests/test_graph_repository.py`
 
-- [ ] **Step 1: 前端构建检查**
+- [ ] **Step 1: 创建 Repository 测试**
+
+创建 `backend/tests/test_graph_repository.py`：
+
+```python
+import pytest
+from unittest.mock import AsyncMock
+from app.graph.jsonb_repository import JSONBRepository
+from app.state_machines.fmea_state import compute_ap
+
+
+def test_compute_ap_consistency_with_frontend_matrix():
+    """验证 compute_ap 与前端 AIAG-VDA 矩阵一致。"""
+    assert compute_ap(10, 10, 10) == "H"
+    assert compute_ap(1, 1, 1) == "L"
+    assert compute_ap(9, 3, 7) == "H"
+    assert compute_ap(9, 3, 5) == "M"
+    assert compute_ap(9, 3, 4) == "L"
+    assert compute_ap(7, 6, 2) == "H"
+    assert compute_ap(7, 6, 1) == "M"
+    assert compute_ap(4, 8, 5) == "H"
+    assert compute_ap(4, 8, 4) == "M"
+    assert compute_ap(3, 8, 5) == "M"
+    assert compute_ap(3, 8, 4) == "L"
+
+
+@pytest.mark.asyncio
+async def test_jsonb_repository_stats_field_structure():
+    """验证 JSONBRepository stats 返回字段结构完整且 ap_distribution 含全键。"""
+    mock_db = AsyncMock()
+    mock_fmea = AsyncMock()
+    mock_fmea.fmea_id = "test-fmea-id"
+    mock_fmea.document_no = "PFMEA-2026-001"
+    mock_fmea.graph_data = {
+        "nodes": [
+            {"id": "n1", "type": "FailureMode", "name": "焊接不良", "severity": 9, "occurrence": 8, "detection": 5},
+            {"id": "n2", "type": "FailureMode", "name": "虚焊", "severity": 7, "occurrence": 4, "detection": 3},
+            {"id": "n3", "type": "Function", "name": "导电功能"},
+        ],
+        "edges": []
+    }
+    mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_fmea]
+
+    repo = JSONBRepository(mock_db)
+    result = await repo.get_cross_fmea_stats("DC-DC-100")
+
+    assert "total_fmeas" in result
+    assert "total_nodes" in result
+    assert "node_type_distribution" in result
+    assert "ap_distribution" in result
+    assert "high_ap_nodes" in result
+    assert "avg_rpn" in result
+    assert "top_failure_modes" in result
+
+    # ap_distribution 必须含全键
+    ap = result["ap_distribution"]
+    assert "H" in ap and "M" in ap and "L" in ap
+    assert ap["H"] + ap["M"] + ap["L"] == 2  # 两个 FailureMode 都有效
+
+    # high_ap_nodes 按 RPN 降序
+    if result["high_ap_nodes"]:
+        rpns = [n["rpn"] for n in result["high_ap_nodes"]]
+        assert rpns == sorted(rpns, reverse=True)
+
+    # top_failure_modes 含 document_no
+    if result["top_failure_modes"]:
+        assert "document_no" in result["top_failure_modes"][0]
+
+
+@pytest.mark.asyncio
+async def test_jsonb_repository_stats_empty_sod_handling():
+    """验证空 S/O/D 时跳过 AP 计算、RPN=0。"""
+    mock_db = AsyncMock()
+    mock_fmea = AsyncMock()
+    mock_fmea.fmea_id = "test-fmea-id"
+    mock_fmea.document_no = "PFMEA-2026-001"
+    mock_fmea.graph_data = {
+        "nodes": [
+            {"id": "n1", "type": "FailureMode", "name": "无数据", "severity": 0, "occurrence": 0, "detection": 0},
+        ],
+        "edges": []
+    }
+    mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_fmea]
+
+    repo = JSONBRepository(mock_db)
+    result = await repo.get_cross_fmea_stats("DC-DC-100")
+
+    assert result["ap_distribution"]["H"] == 0
+    assert result["ap_distribution"]["M"] == 0
+    assert result["ap_distribution"]["L"] == 0
+    assert result["avg_rpn"] == 0
+    assert result["high_ap_nodes"] == []
+```
+
+- [ ] **Step 2: 运行测试**
+
+```bash
+cd /Users/sam/Documents/Code/OpenQMS/backend
+python -m pytest tests/test_graph_repository.py -v
+```
+
+Expected: 全部通过。
+
+- [ ] **Step 3: 前端构建检查**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/frontend
@@ -802,7 +906,7 @@ npm run build
 
 Expected: `tsc --noEmit` 通过，vite build 成功，无 TypeScript 错误。
 
-- [ ] **Step 2: 后端启动检查**
+- [ ] **Step 4: 后端启动检查**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
@@ -811,18 +915,12 @@ python -c "from app.state_machines.fmea_state import compute_ap; print(compute_a
 
 Expected: 输出 `H`。
 
-- [ ] **Step 3: 运行现有测试**
+- [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/sam/Documents/Code/OpenQMS/backend
-python -m pytest tests/test_fmea_state.py -v 2>/dev/null || python tests/test_fmea_state.py
+git add backend/tests/test_graph_repository.py
+git commit -m "test: graph repository stats fields, sorting, empty SOD, AP consistency"
 ```
-
-Expected: 现有 AP 计算测试通过。
-
-- [ ] **Step 4: Commit（如修复了任何问题）**
-
-如有修复，单独提交。
 
 ---
 

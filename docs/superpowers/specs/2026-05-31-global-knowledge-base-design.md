@@ -3,7 +3,7 @@
 **日期**: 2026-05-31
 **模块**: 全局知识库 (Global Knowledge Base)
 **阶段**: Phase 3 — AI + 知识图谱增强
-**状态**: Approved (rev.2)
+**状态**: Approved (rev.3)
 
 ---
 
