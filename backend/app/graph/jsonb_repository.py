@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fmea import FMEADocument
 from app.graph.repository import FMEAGraphRepository
+from app.state_machines.fmea_state import compute_ap
 
 
 class JSONBRepository(FMEAGraphRepository):
@@ -58,8 +59,12 @@ class JSONBRepository(FMEAGraphRepository):
         fmeas = result.scalars().all()
 
         type_counts: dict[str, int] = {}
-        high_risk_modes: list[dict] = []
         total_nodes = 0
+        ap_counts = {"H": 0, "M": 0, "L": 0}
+        high_ap_nodes: list[dict] = []
+        total_rpn = 0
+        rpn_count = 0
+        top_modes: list[dict] = []
 
         for fmea in fmeas:
             if not fmea.graph_data:
@@ -68,23 +73,39 @@ class JSONBRepository(FMEAGraphRepository):
                 total_nodes += 1
                 t = node.get("type", "Unknown")
                 type_counts[t] = type_counts.get(t, 0) + 1
-                if node.get("type") == "FailureMode":
-                    s = node.get("severity", 0)
-                    o = node.get("occurrence", 0)
-                    d = node.get("detection", 0)
-                    if s * o * d >= 100:
-                        high_risk_modes.append({
-                            "name": node.get("name", ""),
-                            "rpn": s * o * d,
-                            "fmea_id": str(fmea.fmea_id),
-                            "document_no": fmea.document_no,
-                        })
+
+                if t == "FailureMode":
+                    s = node.get("severity", 0) or 0
+                    o = node.get("occurrence", 0) or 0
+                    d = node.get("detection", 0) or 0
+                    rpn = s * o * d
+                    ap = compute_ap(s, o, d) if s > 0 and o > 0 and d > 0 else ""
+
+                    if rpn > 0:
+                        total_rpn += rpn
+                        rpn_count += 1
+                        top_modes.append({"name": node.get("name", ""), "rpn": rpn, "fmea_id": str(fmea.fmea_id)})
+
+                    if ap:
+                        ap_counts[ap] = ap_counts.get(ap, 0) + 1
+                        if ap == "H":
+                            high_ap_nodes.append({
+                                "node_id": node.get("id", ""),
+                                "name": node.get("name", ""),
+                                "ap": ap,
+                                "rpn": rpn,
+                                "fmea_id": str(fmea.fmea_id),
+                                "document_no": fmea.document_no,
+                            })
 
         return {
             "total_fmeas": len(fmeas),
             "total_nodes": total_nodes,
             "node_type_distribution": type_counts,
-            "high_risk_failure_modes": sorted(high_risk_modes, key=lambda x: x["rpn"], reverse=True)[:10],
+            "ap_distribution": ap_counts,
+            "high_ap_nodes": sorted(high_ap_nodes, key=lambda x: x["rpn"], reverse=True)[:20],
+            "avg_rpn": round(total_rpn / rpn_count, 1) if rpn_count > 0 else 0,
+            "top_failure_modes": sorted(top_modes, key=lambda x: x["rpn"], reverse=True)[:10],
         }
 
     async def _get_fmea(self, fmea_id: uuid.UUID) -> FMEADocument | None:
