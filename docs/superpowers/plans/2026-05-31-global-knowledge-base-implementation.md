@@ -4,7 +4,7 @@
 
 **Goal:** 实现跨产品线 FMEA 聚合查询 + 数据脱敏，补齐 stats/similar API 字段，构建前端全局知识库页面。
 
-**Architecture:** 后端通过 `FMEAGraphRepository` 抽象层提供统一的 stats/similar 查询，JSONB 和 Neo4j 双实现同步补齐字段；API 层统一脱敏；前端通过独立页面展示统计卡片、风险列表和跨 FMEA 搜索。
+**Architecture:** 后端通过 `FMEAGraphRepository` 抽象层提供统一的 stats/similar 查询，JSONB 和 Neo4j 双实现同步补齐字段；API 层通过 Pydantic 白名单 ResponseModel 统一脱敏；前端通过独立页面展示统计卡片、风险列表和跨 FMEA 搜索。
 
 **Tech Stack:** Python 3.11 + FastAPI | React 18 + TypeScript + Ant Design 5
 
@@ -16,7 +16,6 @@
 
 | 文件 | 职责 |
 |------|------|
-| `backend/app/utils/ap_calculator.py` | AIAG-VDA AP 计算工具函数 |
 | `frontend/src/api/graph.ts` | 图查询 API 客户端（axios） |
 | `frontend/src/pages/graph/KnowledgeGraphPage.tsx` | 全局知识库页面（统计+列表+搜索） |
 
@@ -24,161 +23,22 @@
 
 | 文件 | 职责 |
 |------|------|
-| `backend/app/graph/jsonb_repository.py` | 补齐 `get_cross_fmea_stats` / `find_similar_nodes` 字段 |
-| `backend/app/graph/neo4j_repository.py` | 补齐 `get_cross_fmea_stats` 字段 |
-| `backend/app/api/graph.py` | 添加脱敏中间层、返回字段对齐 |
+| `backend/app/graph/jsonb_repository.py` | 补齐 `get_cross_fmea_stats` / `find_similar_nodes` 字段；复用 `compute_ap` |
+| `backend/app/graph/neo4j_repository.py` | 补齐 `get_cross_fmea_stats` 字段；FMEDocument JOIN 获取 `document_no` |
+| `backend/app/api/graph.py` | 添加 Pydantic 白名单 ResponseModel；产品线空值拦截 |
 | `frontend/src/App.tsx` | 注册 `/knowledge-graph` 路由 |
+| `frontend/src/components/layout/AppLayout.tsx` | 导航菜单添加"知识图谱"入口 |
 
 ---
 
-## Task 1: 后端 AP 计算工具
-
-**Files:**
-- Create: `backend/app/utils/ap_calculator.py`
-- Test: `backend/app/test_schema.py`（复用现有测试文件，追加 AP 测试）
-
-- [ ] **Step 1: 实现 AP 计算函数**
-
-创建 `backend/app/utils/ap_calculator.py`：
-
-```python
-"""AIAG-VDA FMEA Action Priority (AP) 计算工具.
-
-Ref: AIAG-VDA FMEA Handbook (2019) Appendix C1.5
-与前端 frontend/src/utils/fmea.ts calculateAP 逻辑严格一致.
-"""
-
-
-def calculate_ap(s: int, o: int, d: int) -> str:
-    """Calculate Action Priority based on Severity, Occurrence, Detection.
-
-    Returns:
-        'H' (High), 'M' (Medium), 'L' (Low), or '' (if out of 1-10 range).
-    """
-    if s < 1 or s > 10 or o < 1 or o > 10 or d < 1 or d > 10:
-        return ""
-
-    # Severity 9-10
-    if s >= 9:
-        if o >= 4:
-            return "H"
-        if o in (3, 2):
-            return "H" if d >= 7 else "M" if d >= 5 else "L"
-        return "L"  # o == 1
-
-    # Severity 7-8
-    if s >= 7:
-        if o >= 8:
-            return "H"
-        if o in (6, 7):
-            return "H" if d >= 2 else "M"
-        if o in (4, 5):
-            return "H" if d >= 7 else "M"
-        if o in (2, 3):
-            return "M" if d >= 5 else "L"
-        return "L"  # o == 1
-
-    # Severity 4-6
-    if s >= 4:
-        if o >= 8:
-            return "H" if d >= 5 else "M"
-        if o in (6, 7):
-            return "M" if d >= 2 else "L"
-        if o in (4, 5):
-            return "M" if d >= 7 else "L"
-        return "L"  # o <= 3
-
-    # Severity 1-3
-    if o >= 8:
-        return "M" if d >= 5 else "L"
-    return "L"
-```
-
-- [ ] **Step 2: 追加测试到现有测试文件**
-
-在 `backend/app/test_schema.py` 末尾追加：
-
-```python
-from app.utils.ap_calculator import calculate_ap
-
-
-def test_calculate_ap_boundary():
-    assert calculate_ap(10, 10, 10) == "H"
-    assert calculate_ap(1, 1, 1) == "L"
-    assert calculate_ap(0, 5, 5) == ""
-    assert calculate_ap(5, 0, 5) == ""
-    assert calculate_ap(5, 5, 0) == ""
-
-
-def test_calculate_ap_high_severity():
-    # s=9, o=4 -> H regardless of D
-    assert calculate_ap(9, 4, 1) == "H"
-    # s=9, o=3, d=7 -> H
-    assert calculate_ap(9, 3, 7) == "H"
-    # s=9, o=3, d=5 -> M
-    assert calculate_ap(9, 3, 5) == "M"
-    # s=9, o=3, d=4 -> L
-    assert calculate_ap(9, 3, 4) == "L"
-    # s=9, o=1 -> L
-    assert calculate_ap(9, 1, 10) == "L"
-
-
-def test_calculate_ap_medium_severity():
-    # s=7, o=8 -> H
-    assert calculate_ap(7, 8, 1) == "H"
-    # s=7, o=6, d=2 -> H
-    assert calculate_ap(7, 6, 2) == "H"
-    # s=7, o=6, d=1 -> M
-    assert calculate_ap(7, 6, 1) == "M"
-    # s=7, o=2, d=5 -> M
-    assert calculate_ap(7, 2, 5) == "M"
-    # s=7, o=2, d=4 -> L
-    assert calculate_ap(7, 2, 4) == "L"
-
-
-def test_calculate_ap_low_severity():
-    # s=4, o=8, d=5 -> H
-    assert calculate_ap(4, 8, 5) == "H"
-    # s=4, o=8, d=4 -> M
-    assert calculate_ap(4, 8, 4) == "M"
-    # s=4, o=6, d=2 -> M
-    assert calculate_ap(4, 6, 2) == "M"
-    # s=4, o=6, d=1 -> L
-    assert calculate_ap(4, 6, 1) == "L"
-    # s=3, o=8, d=5 -> M
-    assert calculate_ap(3, 8, 5) == "M"
-    # s=3, o=8, d=4 -> L
-    assert calculate_ap(3, 8, 4) == "L"
-    # s=1, o=1, d=1 -> L
-    assert calculate_ap(1, 1, 1) == "L"
-```
-
-- [ ] **Step 3: 运行测试**
-
-```bash
-cd /Users/sam/Documents/Code/OpenQMS/backend
-python app/test_schema.py
-```
-
-Expected: All tests pass including the new AP tests.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add backend/app/utils/ap_calculator.py backend/app/test_schema.py
-git commit -m "feat: AP calculator utility with AIAG-VDA lookup table"
-```
-
----
-
-## Task 2: JSONBRepository 字段补齐
+## Task 1: JSONBRepository stats 字段补齐
 
 **Files:**
 - Modify: `backend/app/graph/jsonb_repository.py`
 
-- [ ] **Step 1: 修改 `find_similar_nodes` 返回 `document_no`**
+- [ ] **Step 1: 确认 `find_similar_nodes` 已返回 `document_no`**
 
-当前代码第 43-50 行：
+检查当前代码第 43-50 行，确认 `document_no` 已在返回字典中：
 
 ```python
 matches.append({
@@ -186,11 +46,11 @@ matches.append({
     "name": node["name"],
     "type": node["type"],
     "fmea_id": str(fmea.fmea_id),
-    "document_no": fmea.document_no,  # 确认已有此行
+    "document_no": fmea.document_no,
 })
 ```
 
-验证 `document_no` 已在返回字典中。若缺失则添加。
+若缺失则添加，若已存在则跳过此步。
 
 - [ ] **Step 2: 重写 `get_cross_fmea_stats` 补齐字段**
 
@@ -198,7 +58,7 @@ matches.append({
 
 ```python
     async def get_cross_fmea_stats(self, product_line_code: str) -> dict:
-        from app.utils.ap_calculator import calculate_ap
+        from app.state_machines.fmea_state import compute_ap
 
         query = select(FMEADocument).where(FMEADocument.product_line_code == product_line_code)
         result = await self._db.execute(query)
@@ -225,15 +85,16 @@ matches.append({
                     o = node.get("occurrence", 0) or 0
                     d = node.get("detection", 0) or 0
                     rpn = s * o * d
-                    ap = calculate_ap(s, o, d)
+                    ap = compute_ap(s, o, d) if s > 0 and o > 0 and d > 0 else ""
 
-                    if rpn > 0:
+                    if s > 0 and o > 0 and d > 0:
                         total_rpn += rpn
                         rpn_count += 1
                         top_failure_modes.append({
                             "name": node.get("name", ""),
                             "rpn": rpn,
                             "fmea_id": str(fmea.fmea_id),
+                            "document_no": fmea.document_no,
                         })
 
                     if ap:
@@ -249,13 +110,14 @@ matches.append({
                             })
 
         top_failure_modes.sort(key=lambda x: x["rpn"], reverse=True)
+        high_ap_nodes.sort(key=lambda x: x["rpn"], reverse=True)
 
         return {
             "total_fmeas": len(fmeas),
             "total_nodes": total_nodes,
             "node_type_distribution": type_counts,
             "ap_distribution": ap_counts,
-            "high_ap_nodes": high_ap_nodes[:20],
+            "high_ap_nodes": high_ap_nodes[:50],
             "avg_rpn": round(total_rpn / rpn_count, 1) if rpn_count > 0 else 0,
             "top_failure_modes": top_failure_modes[:10],
         }
@@ -265,12 +127,12 @@ matches.append({
 
 ```bash
 git add backend/app/graph/jsonb_repository.py
-git commit -m "feat: JSONBRepository stats with AP distribution and high-risk nodes"
+git commit -m "feat: JSONBRepository stats with AP distribution, high-risk nodes, and top failure modes"
 ```
 
 ---
 
-## Task 3: Neo4jRepository stats 字段补齐
+## Task 2: Neo4jRepository stats 字段补齐
 
 **Files:**
 - Modify: `backend/app/graph/neo4j_repository.py`
@@ -281,7 +143,7 @@ git commit -m "feat: JSONBRepository stats with AP distribution and high-risk no
 
 ```python
     async def get_cross_fmea_stats(self, product_line_code: str) -> dict:
-        from app.utils.ap_calculator import calculate_ap
+        from app.state_machines.fmea_state import compute_ap
 
         async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
             # 节点类型分布
@@ -294,12 +156,13 @@ git commit -m "feat: JSONBRepository stats with AP distribution and high-risk no
             type_records = await type_result.data()
             type_dist = {r["type"]: r["cnt"] for r in type_records}
 
-            # FailureMode 节点全量（用于 AP 计算和统计）
+            # FailureMode 节点全量（通过 FMEDocument JOIN 获取 document_no）
             fm_result = await session.run(
-                "MATCH (n:GraphNode:FailureMode) WHERE n.product_line_code = $pl "
+                "MATCH (d:FMEDocument)-[:HAS_NODE]->(n:GraphNode:FailureMode) "
+                "WHERE n.product_line_code = $pl "
                 "RETURN n.node_id AS node_id, n.name AS name, "
                 "n.severity AS severity, n.occurrence AS occurrence, n.detection AS detection, "
-                "n.fmea_id AS fmea_id, n.document_no AS document_no",
+                "n.fmea_id AS fmea_id, d.document_no AS document_no",
                 pl=product_line_code,
             )
             fm_records = await fm_result.data()
@@ -315,15 +178,16 @@ git commit -m "feat: JSONBRepository stats with AP distribution and high-risk no
                 o = rec.get("occurrence", 0) or 0
                 d = rec.get("detection", 0) or 0
                 rpn = s * o * d
-                ap = calculate_ap(s, o, d)
+                ap = compute_ap(s, o, d) if s > 0 and o > 0 and d > 0 else ""
 
-                if rpn > 0:
+                if s > 0 and o > 0 and d > 0:
                     total_rpn += rpn
                     rpn_count += 1
                     top_failure_modes.append({
                         "name": rec.get("name", ""),
                         "rpn": rpn,
                         "fmea_id": rec.get("fmea_id", ""),
+                        "document_no": rec.get("document_no", ""),
                     })
 
                 if ap:
@@ -339,6 +203,7 @@ git commit -m "feat: JSONBRepository stats with AP distribution and high-risk no
                         })
 
             top_failure_modes.sort(key=lambda x: x["rpn"], reverse=True)
+            high_ap_nodes.sort(key=lambda x: x["rpn"], reverse=True)
 
             # FMEA 文档数
             doc_result = await session.run(
@@ -354,7 +219,7 @@ git commit -m "feat: JSONBRepository stats with AP distribution and high-risk no
                 "total_nodes": total_nodes,
                 "node_type_distribution": type_dist,
                 "ap_distribution": ap_counts,
-                "high_ap_nodes": high_ap_nodes[:20],
+                "high_ap_nodes": high_ap_nodes[:50],
                 "avg_rpn": round(total_rpn / rpn_count, 1) if rpn_count > 0 else 0,
                 "top_failure_modes": top_failure_modes[:10],
             }
@@ -364,69 +229,64 @@ git commit -m "feat: JSONBRepository stats with AP distribution and high-risk no
 
 ```bash
 git add backend/app/graph/neo4j_repository.py
-git commit -m "feat: Neo4jRepository stats with AP distribution and high-risk nodes"
+git commit -m "feat: Neo4jRepository stats with AP distribution, document_no via FMEDocument join"
 ```
 
 ---
 
-## Task 4: API 脱敏层 + similar 字段补齐
+## Task 3: API 白名单脱敏 + Pydantic DTO
 
 **Files:**
 - Modify: `backend/app/api/graph.py`
 
-- [ ] **Step 1: 添加脱敏辅助函数**
+- [ ] **Step 1: 添加 Pydantic ResponseModel**
 
-在 `backend/app/api/graph.py` 的 `_repo` 函数之后、路由之前添加：
+在 `backend/app/api/graph.py` 的 import 区域添加：
 
 ```python
-
-# 全局查询脱敏：过滤敏感字段
-_SENSITIVE_KEYS = {"created_by", "updated_by", "approved_by", "creator", "updater", "approver"}
+from pydantic import BaseModel
 
 
-def _sanitize_node(node: dict) -> dict:
-    """对节点数据脱敏，移除人员相关敏感信息。"""
-    if not isinstance(node, dict):
-        return node
-    return {k: v for k, v in node.items() if k not in _SENSITIVE_KEYS}
+class SimilarNodeOut(BaseModel):
+    node_id: str
+    name: str
+    type: str
+    fmea_id: str
+    document_no: str
 
 
-def _sanitize_similar_result(items: list[dict]) -> list[dict]:
-    """similar 查询结果脱敏：仅保留必要字段。"""
-    return [
-        {
-            "node_id": item.get("node_id"),
-            "name": item.get("name"),
-            "type": item.get("type"),
-            "fmea_id": item.get("fmea_id"),
-            "document_no": item.get("document_no"),
-        }
-        for item in items
-    ]
+class HighAPNodeOut(BaseModel):
+    node_id: str
+    name: str
+    ap: str
+    rpn: int
+    fmea_id: str
+    document_no: str
 
 
-def _sanitize_stats_result(data: dict) -> dict:
-    """stats 查询结果脱敏：仅保留统计字段。"""
-    # high_ap_nodes 中可能包含原始节点属性，需逐节点脱敏
-    high_ap_nodes = data.get("high_ap_nodes", [])
-    sanitized_nodes = [_sanitize_node(n) for n in high_ap_nodes]
-    return {
-        "total_fmeas": data.get("total_fmeas"),
-        "total_nodes": data.get("total_nodes"),
-        "node_type_distribution": data.get("node_type_distribution"),
-        "ap_distribution": data.get("ap_distribution"),
-        "high_ap_nodes": sanitized_nodes,
-        "avg_rpn": data.get("avg_rpn"),
-        "top_failure_modes": data.get("top_failure_modes", []),
-    }
+class TopFailureModeOut(BaseModel):
+    name: str
+    rpn: int
+    fmea_id: str
+    document_no: str
+
+
+class CrossFmeaStatsOut(BaseModel):
+    total_fmeas: int
+    total_nodes: int
+    node_type_distribution: dict[str, int]
+    ap_distribution: dict[str, int]
+    high_ap_nodes: list[HighAPNodeOut]
+    avg_rpn: float
+    top_failure_modes: list[TopFailureModeOut]
 ```
 
-- [ ] **Step 2: 修改 similar_nodes 端点应用脱敏**
+- [ ] **Step 2: 修改 `similar_nodes` 端点使用 ResponseModel**
 
 将 `similar_nodes` 路由修改为：
 
 ```python
-@router.get("/similar")
+@router.get("/similar", response_model=list[SimilarNodeOut])
 async def similar_nodes(
     node_type: str = Query(..., description="节点类型，如 FailureMode"),
     name_keyword: str = Query(..., min_length=1, description="名称关键词"),
@@ -435,37 +295,35 @@ async def similar_nodes(
     repo: FMEAGraphRepository = Depends(_repo),
     _user: User = Depends(get_current_user),
 ):
-    """跨 FMEA 搜索相似节点。product_line_code 必填。返回已脱敏数据。"""
-    raw = await repo.find_similar_nodes(node_type, name_keyword, product_line_code, limit)
-    return _sanitize_similar_result(raw)
+    """跨 FMEA 搜索相似节点。product_line_code 必填。返回白名单字段。"""
+    return await repo.find_similar_nodes(node_type, name_keyword, product_line_code, limit)
 ```
 
-- [ ] **Step 3: 修改 cross_fmea_stats 端点应用脱敏**
+- [ ] **Step 3: 修改 `cross_fmea_stats` 端点使用 ResponseModel**
 
 将 `cross_fmea_stats` 路由修改为：
 
 ```python
-@router.get("/stats")
+@router.get("/stats", response_model=CrossFmeaStatsOut)
 async def cross_fmea_stats(
     product_line_code: str = Query(..., description="产品线代码（必填，租户隔离）"),
     repo: FMEAGraphRepository = Depends(_repo),
     _user: User = Depends(get_current_user),
 ):
-    """跨 FMEA 聚合统计。product_line_code 必填。返回已脱敏数据。"""
-    raw = await repo.get_cross_fmea_stats(product_line_code)
-    return _sanitize_stats_result(raw)
+    """跨 FMEA 聚合统计。product_line_code 必填。返回白名单字段。"""
+    return await repo.get_cross_fmea_stats(product_line_code)
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add backend/app/api/graph.py
-git commit -m "feat: graph API sanitization for global queries"
+git commit -m "feat: graph API Pydantic whitelist response models for sanitization"
 ```
 
 ---
 
-## Task 5: 前端 API 客户端
+## Task 4: 前端 API 客户端
 
 **Files:**
 - Create: `frontend/src/api/graph.ts`
@@ -502,7 +360,12 @@ export interface CrossFmeaStats {
     document_no: string;
   }>;
   avg_rpn: number;
-  top_failure_modes: Array<{ name: string; rpn: number; fmea_id: string }>;
+  top_failure_modes: Array<{
+    name: string;
+    rpn: number;
+    fmea_id: string;
+    document_no: string;
+  }>;
 }
 
 export async function getImpactChain(
@@ -555,7 +418,7 @@ git commit -m "feat: frontend graph API client"
 
 ---
 
-## Task 6: 前端全局知识库页面
+## Task 5: 前端全局知识库页面
 
 **Files:**
 - Create: `frontend/src/pages/graph/KnowledgeGraphPage.tsx`
@@ -578,6 +441,7 @@ import {
   Empty,
   Tag,
   Button,
+  Alert,
 } from "antd";
 import {
   FileTextOutlined,
@@ -586,7 +450,12 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import { getCrossFmeaStats, searchSimilarNodes, type CrossFmeaStats, type SimilarNode } from "../../api/graph";
+import {
+  getCrossFmeaStats,
+  searchSimilarNodes,
+  type CrossFmeaStats,
+  type SimilarNode,
+} from "../../api/graph";
 import { useProductLineStore } from "../../store/productLineStore";
 
 const { Title } = Typography;
@@ -624,30 +493,29 @@ const KnowledgeGraphPage: React.FC = () => {
   const [searchResults, setSearchResults] = useState<SimilarNode[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
 
-  const productLineCode = currentProductLine || "DC-DC-100";
-
   const fetchStats = useCallback(async () => {
+    if (!currentProductLine) return;
     setStatsLoading(true);
     try {
-      const data = await getCrossFmeaStats(productLineCode);
+      const data = await getCrossFmeaStats(currentProductLine);
       setStats(data);
     } finally {
       setStatsLoading(false);
     }
-  }, [productLineCode]);
+  }, [currentProductLine]);
 
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
 
   const handleSearch = async () => {
-    if (!searchKeyword.trim()) return;
+    if (!searchKeyword.trim() || !currentProductLine) return;
     setSearchLoading(true);
     try {
       const results = await searchSimilarNodes({
         node_type: searchType,
         name_keyword: searchKeyword.trim(),
-        product_line_code: productLineCode,
+        product_line_code: currentProductLine,
         limit: 20,
       });
       setSearchResults(results);
@@ -658,7 +526,7 @@ const KnowledgeGraphPage: React.FC = () => {
 
   const handleViewGraph = (fmeaId: string, nodeId?: string) => {
     if (nodeId) {
-      navigate(`/fmea/${fmeaId}?tab=graph&highlightNode=${nodeId}`);
+      navigate(`/fmea/${fmeaId}?tab=graph&node=${nodeId}`);
     } else {
       navigate(`/fmea/${fmeaId}?tab=graph`);
     }
@@ -666,10 +534,24 @@ const KnowledgeGraphPage: React.FC = () => {
 
   const apDist = stats?.ap_distribution || { H: 0, M: 0, L: 0 };
 
+  if (!currentProductLine) {
+    return (
+      <div style={{ padding: 24 }}>
+        <Title level={3}>全局知识库</Title>
+        <Alert
+          message="请选择产品线"
+          description="请在顶部导航栏选择产品线以查看知识库数据。"
+          type="info"
+          showIcon
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: 24 }}>
       <Title level={3}>全局知识库</Title>
-      <p style={{ color: "#888" }}>产品线: {productLineCode}</p>
+      <p style={{ color: "#888" }}>产品线: {currentProductLine}</p>
 
       <Spin spinning={statsLoading}>
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
@@ -827,7 +709,20 @@ const KnowledgeGraphPage: React.FC = () => {
               dataIndex: "rpn",
               key: "rpn",
             },
-            { title: "FMEA ID", dataIndex: "fmea_id", key: "fmea_id" },
+            { title: "来源文档", dataIndex: "document_no", key: "document_no" },
+            {
+              title: "操作",
+              key: "action",
+              render: (_, record) => (
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => handleViewGraph(record.fmea_id)}
+                >
+                  查看图谱
+                </Button>
+              ),
+            },
           ]}
         />
       </Card>
@@ -847,12 +742,13 @@ git commit -m "feat: global knowledge base page with stats, search, and risk lis
 
 ---
 
-## Task 7: 前端路由注册
+## Task 6: 前端路由注册 + 导航菜单
 
 **Files:**
 - Modify: `frontend/src/App.tsx`
+- Modify: `frontend/src/components/layout/AppLayout.tsx`
 
-- [ ] **Step 1: 导入并注册路由**
+- [ ] **Step 1: App.tsx 导入并注册路由**
 
 在 `frontend/src/App.tsx` 中：
 
@@ -868,16 +764,26 @@ import KnowledgeGraphPage from "./pages/graph/KnowledgeGraphPage";
 <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: AppLayout.tsx 添加导航菜单项**
+
+在 `frontend/src/components/layout/AppLayout.tsx` 的 `menuItems` 中，找到 "前期质量策划" 分组（`grp:planning`），在其 children 末尾添加：
+
+```tsx
+{ key: "/knowledge-graph", icon: <NodeIndexOutlined />, label: "知识图谱" },
+```
+
+确保 `NodeIndexOutlined` 已在文件顶部的 import 中（检查现有 imports，若缺失则添加）。
+
+- [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/src/App.tsx
-git commit -m "feat: register /knowledge-graph route"
+git add frontend/src/App.tsx frontend/src/components/layout/AppLayout.tsx
+git commit -m "feat: register /knowledge-graph route and sidebar menu entry"
 ```
 
 ---
 
-## Task 8: 构建验证
+## Task 7: 构建验证
 
 **Files:** 无新增/修改，仅验证
 
@@ -894,12 +800,21 @@ Expected: `tsc --noEmit` 通过，vite build 成功，无 TypeScript 错误。
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
-python -c "from app.utils.ap_calculator import calculate_ap; print(calculate_ap(10,10,10))"
+python -c "from app.state_machines.fmea_state import compute_ap; print(compute_ap(10,10,10))"
 ```
 
 Expected: 输出 `H`。
 
-- [ ] **Step 3: Commit（如修复了任何问题）**
+- [ ] **Step 3: 运行现有测试**
+
+```bash
+cd /Users/sam/Documents/Code/OpenQMS/backend
+python -m pytest tests/test_fmea_state.py -v 2>/dev/null || python tests/test_fmea_state.py
+```
+
+Expected: 现有 AP 计算测试通过。
+
+- [ ] **Step 4: Commit（如修复了任何问题）**
 
 如有修复，单独提交。
 
@@ -911,15 +826,21 @@ Expected: 输出 `H`。
 
 | 设计文档需求 | 对应 Task |
 |-------------|----------|
-| AP 计算工具 | Task 1 |
-| JSONBRepository stats 字段补齐 | Task 2 |
-| Neo4jRepository stats 字段补齐 | Task 3 |
-| 数据脱敏 | Task 4 |
-| similar 返回 document_no | Task 2, Task 3（验证）, Task 4（脱敏保留） |
-| 前端 API 客户端 | Task 5 |
-| 前端全局知识库页面 | Task 6 |
-| 路由注册 | Task 7 |
-| 构建验证 | Task 8 |
+| AP 计算复用 `compute_ap` | Task 1, Task 2（import from fmea_state） |
+| JSONBRepository stats 字段补齐 | Task 1 |
+| Neo4jRepository stats 字段补齐 | Task 2 |
+| 数据脱敏（Pydantic 白名单） | Task 3 |
+| similar 返回 document_no | Task 1, Task 2, Task 3（验证） |
+| 产品线空值拦截 | Task 3（API 422）+ Task 5（前端提示） |
+| 跳转参数 `?node=` | Task 5 |
+| Neo4j document_no JOIN | Task 2 |
+| top_failure_modes 含 document_no | Task 1, Task 2 |
+| stats 语义（排序/limit/空值） | Task 1, Task 2 |
+| AppLayout 导航菜单 | Task 6 |
+| 前端 API 客户端 | Task 4 |
+| 前端全局知识库页面 | Task 5 |
+| 路由注册 | Task 6 |
+| 构建验证 | Task 7 |
 
 **无遗漏。**
 
@@ -932,10 +853,11 @@ Expected: 输出 `H`。
 
 ### 3. Type consistency
 
-- `CrossFmeaStats` 接口与后端返回字段一致
-- `SimilarNode` 接口与 `_sanitize_similar_result` 返回字段一致
-- `high_ap_nodes` 字段名前后端一致（`node_id`, `name`, `ap`, `rpn`, `fmea_id`, `document_no`）
-- `calculate_ap` 函数名在 ap_calculator.py、jsonb_repository.py、neo4j_repository.py 中一致
+- `CrossFmeaStats` / `SimilarNode` 接口与后端 ResponseModel 字段一致
+- `high_ap_nodes` 字段名前后端一致
+- `top_failure_modes` 含 `document_no` 前后端一致
+- 跳转参数 `node=` 与 FMEAEditorPage `searchParams.get("node")` 一致
+- `compute_ap` 函数名在 Task 1 和 Task 2 中一致
 
 ---
 
