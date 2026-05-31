@@ -40,11 +40,11 @@ class Neo4jRepository(FMEAGraphRepository):
     ) -> list[dict]:
         async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
             result = await session.run(
-                "MATCH (n:GraphNode) "
+                "MATCH (d:FMEDocument)-[:HAS_NODE]->(n:GraphNode) "
                 "WHERE n.type = $node_type AND n.product_line_code = $product_line_code "
                 "AND toLower(n.name) CONTAINS toLower($keyword) "
                 "RETURN n.node_id AS node_id, n.name AS name, n.type AS type, "
-                "n.fmea_id AS fmea_id "
+                "n.fmea_id AS fmea_id, d.document_no AS document_no "
                 "LIMIT $limit",
                 node_type=node_type, product_line_code=product_line_code,
                 keyword=name_keyword, limit=limit,
@@ -53,6 +53,8 @@ class Neo4jRepository(FMEAGraphRepository):
             return records
 
     async def get_cross_fmea_stats(self, product_line_code: str) -> dict:
+        from app.state_machines.fmea_state import compute_ap
+
         async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
             # 节点类型分布
             type_result = await session.run(
@@ -64,16 +66,54 @@ class Neo4jRepository(FMEAGraphRepository):
             type_records = await type_result.data()
             type_dist = {r["type"]: r["cnt"] for r in type_records}
 
-            # 高风险失效模式
-            risk_result = await session.run(
-                "MATCH (n:GraphNode:FailureMode) WHERE n.product_line_code = $pl "
-                "AND n.severity * n.occurrence * n.detection >= 100 "
-                "RETURN n.name AS name, n.severity * n.occurrence * n.detection AS rpn, "
-                "n.fmea_id AS fmea_id "
-                "ORDER BY rpn DESC LIMIT 10",
+            # FailureMode 节点全量（通过 FMEDocument JOIN 获取 document_no）
+            fm_result = await session.run(
+                "MATCH (d:FMEDocument)-[:HAS_NODE]->(n:GraphNode:FailureMode) "
+                "WHERE n.product_line_code = $pl "
+                "RETURN n.node_id AS node_id, n.name AS name, "
+                "n.severity AS severity, n.occurrence AS occurrence, n.detection AS detection, "
+                "n.fmea_id AS fmea_id, d.document_no AS document_no",
                 pl=product_line_code,
             )
-            risk_records = await risk_result.data()
+            fm_records = await fm_result.data()
+
+            ap_counts = {"H": 0, "M": 0, "L": 0}
+            high_ap_nodes: list[dict] = []
+            top_failure_modes: list[dict] = []
+            total_rpn = 0
+            rpn_count = 0
+
+            for rec in fm_records:
+                s = rec.get("severity", 0) or 0
+                o = rec.get("occurrence", 0) or 0
+                d = rec.get("detection", 0) or 0
+                rpn = s * o * d
+                ap = compute_ap(s, o, d) if s > 0 and o > 0 and d > 0 else ""
+
+                if s > 0 and o > 0 and d > 0:
+                    total_rpn += rpn
+                    rpn_count += 1
+                    top_failure_modes.append({
+                        "name": rec.get("name", ""),
+                        "rpn": rpn,
+                        "fmea_id": rec.get("fmea_id", ""),
+                        "document_no": rec.get("document_no", ""),
+                    })
+
+                if ap:
+                    ap_counts[ap] = ap_counts.get(ap, 0) + 1
+                    if ap == "H":
+                        high_ap_nodes.append({
+                            "node_id": rec.get("node_id", ""),
+                            "name": rec.get("name", ""),
+                            "ap": ap,
+                            "rpn": rpn,
+                            "fmea_id": rec.get("fmea_id", ""),
+                            "document_no": rec.get("document_no", ""),
+                        })
+
+            top_failure_modes.sort(key=lambda x: x["rpn"], reverse=True)
+            high_ap_nodes.sort(key=lambda x: x["rpn"], reverse=True)
 
             # FMEA 文档数
             doc_result = await session.run(
@@ -88,7 +128,10 @@ class Neo4jRepository(FMEAGraphRepository):
                 "total_fmeas": doc_records[0]["cnt"] if doc_records else 0,
                 "total_nodes": total_nodes,
                 "node_type_distribution": type_dist,
-                "high_risk_failure_modes": risk_records,
+                "ap_distribution": ap_counts,
+                "high_ap_nodes": high_ap_nodes[:50],
+                "avg_rpn": round(total_rpn / rpn_count, 1) if rpn_count > 0 else 0,
+                "top_failure_modes": top_failure_modes[:10],
             }
 
     async def _path_result_to_dict(self, result) -> dict:
