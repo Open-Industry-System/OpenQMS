@@ -6,8 +6,6 @@ import { useProductLineStore } from "../../store/productLineStore";
 import { searchSimilarNodes, getCrossFmeaStats } from "../../api/graph";
 import type { SimilarNode, CrossFmeaStats } from "../../api/graph";
 
-const { TabPane } = Tabs;
-
 export default function KnowledgeGraphPage() {
   const navigate = useNavigate();
   const { selected: productLineCode } = useProductLineStore();
@@ -111,65 +109,67 @@ export default function KnowledgeGraphPage() {
     );
   }
 
-  return (
-    <div>
-      <h2>知识图谱</h2>
-      <Tabs activeKey={activeTab} onChange={setActiveTab}>
-        <TabPane tab={<span><BarChartOutlined /> 总览 / 风险地图</span>} key="overview">
-          {statsLoading ? (
-            <Spin size="large" style={{ display: "block", margin: "60px auto" }} />
-          ) : stats ? (
-            <Space direction="vertical" size="large" style={{ width: "100%" }}>
-              <Row gutter={16}>
-                <Col span={6}>
-                  <Card><Statistic title="FMEA 总数" value={stats.total_fmeas} /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card><Statistic title="节点总数" value={stats.total_nodes} /></Card>
-                </Col>
-                <Col span={6}>
-                  <Card>
-                    <Statistic
-                      title="高优先级失效模式 (AP=H)"
-                      value={stats.high_ap_nodes?.length || 0}
-                      prefix={<FireOutlined style={{ color: "#ff4d4f" }} />}
-                    />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card><Statistic title="平均 RPN" value={stats.avg_rpn || 0} precision={1} /></Card>
-                </Col>
-              </Row>
-              <Card title="AP 分布">
-                <Space size="large">
-                  <Tag color="red">高 (H): {stats.ap_distribution?.H || 0}</Tag>
-                  <Tag color="orange">中 (M): {stats.ap_distribution?.M || 0}</Tag>
-                  <Tag color="green">低 (L): {stats.ap_distribution?.L || 0}</Tag>
-                </Space>
-              </Card>
-              <Card title="高优先级失效模式 Top 10" extra={<Tag color="red">AP = H (高优先级)</Tag>}>
-                <Table
-                  dataSource={stats.high_ap_nodes || []}
-                  columns={riskColumns}
-                  rowKey={(r) => `${r.fmea_id}-${r.node_id}`}
-                  pagination={false}
-                  size="small"
+  const tabItems = [
+    {
+      key: "overview",
+      label: <span><BarChartOutlined /> 总览 / 风险地图</span>,
+      children: statsLoading ? (
+        <Spin size="large" style={{ display: "block", margin: "60px auto" }} />
+      ) : stats ? (
+        <Space direction="vertical" size="large" style={{ width: "100%" }}>
+          <Row gutter={16}>
+            <Col span={6}>
+              <Card><Statistic title="FMEA 总数" value={stats.total_fmeas} /></Card>
+            </Col>
+            <Col span={6}>
+              <Card><Statistic title="节点总数" value={stats.total_nodes} /></Card>
+            </Col>
+            <Col span={6}>
+              <Card>
+                <Statistic
+                  title="高优先级失效模式 (AP=H)"
+                  value={stats.high_ap_nodes?.length || 0}
+                  prefix={<FireOutlined style={{ color: "#ff4d4f" }} />}
                 />
               </Card>
-              <Card title="节点类型分布">
-                <Space wrap>
-                  {Object.entries(stats.node_type_distribution || {}).map(([type, count]) => (
-                    <Tag key={type}>{type}: {count}</Tag>
-                  ))}
-                </Space>
-              </Card>
+            </Col>
+            <Col span={6}>
+              <Card><Statistic title="平均 RPN" value={stats.avg_rpn || 0} precision={1} /></Card>
+            </Col>
+          </Row>
+          <Card title="AP 分布">
+            <Space size="large">
+              <Tag color="red">高 (H): {stats.ap_distribution?.H || 0}</Tag>
+              <Tag color="orange">中 (M): {stats.ap_distribution?.M || 0}</Tag>
+              <Tag color="green">低 (L): {stats.ap_distribution?.L || 0}</Tag>
             </Space>
-          ) : (
-            <Empty description="暂无统计数据" />
-          )}
-        </TabPane>
-
-        <TabPane tab={<span><SearchOutlined /> 历史关键词搜索</span>} key="search">
+          </Card>
+          <Card title="高优先级失效模式 Top 10" extra={<Tag color="red">AP = H (高优先级)</Tag>}>
+            <Table
+              dataSource={stats.high_ap_nodes || []}
+              columns={riskColumns}
+              rowKey={(r) => `${r.fmea_id}-${r.node_id}`}
+              pagination={false}
+              size="small"
+            />
+          </Card>
+          <Card title="节点类型分布">
+            <Space wrap>
+              {Object.entries(stats.node_type_distribution || {}).map(([type, count]) => (
+                <Tag key={type}>{type}: {count}</Tag>
+              ))}
+            </Space>
+          </Card>
+        </Space>
+      ) : (
+        <Empty description="暂无统计数据" />
+      ),
+    },
+    {
+      key: "search",
+      label: <span><SearchOutlined /> 历史关键词搜索</span>,
+      children: (
+        <>
           <Space style={{ marginBottom: 16 }}>
             <Select value={searchType} onChange={setSearchType} style={{ width: 140 }}>
               <Select.Option value="FailureMode">失效模式</Select.Option>
@@ -194,8 +194,15 @@ export default function KnowledgeGraphPage() {
               size="small"
             />
           )}
-        </TabPane>
-      </Tabs>
+        </>
+      ),
+    },
+  ];
+
+  return (
+    <div>
+      <h2>知识图谱</h2>
+      <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
     </div>
   );
 }

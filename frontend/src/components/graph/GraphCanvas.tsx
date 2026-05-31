@@ -66,8 +66,8 @@ function toG6Data(nodes: GraphNode[], edges: GraphEdge[]) {
     },
   }));
 
-  const g6Edges = edges.map((e, i) => ({
-    id: `e${i}`,
+  const g6Edges = edges.map((e) => ({
+    id: `${e.source}-${e.target}-${e.label || "edge"}`,
     source: e.source,
     target: e.target,
     data: { label: e.label },

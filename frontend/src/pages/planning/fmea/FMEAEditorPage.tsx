@@ -1139,6 +1139,8 @@ export default function FMEAEditorPage() {
             node={selectedGraphNode}
             visible={drawerVisible}
             onClose={() => setDrawerVisible(false)}
+            allNodes={graphDataRef.current?.nodes}
+            allEdges={graphDataRef.current?.edges}
           />
         </Tabs.TabPane>
         <Tabs.TabPane tab="关联 CAPA" key="related-capa">
