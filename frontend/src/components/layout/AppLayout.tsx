@@ -22,6 +22,7 @@ import {
   ProjectOutlined,
   FileProtectOutlined,
   AuditOutlined,
+  ShareAltOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -38,6 +39,7 @@ const MENU_KEYS = [
   "/customer-quality", "/customer-audits", "/capa",
   "/suppliers", "/suppliers/quality",
   "/iqc/inspections", "/iqc/materials", "/scars",
+  "/knowledge-graph",
 ];
 
 // 菜单 key → 需要展开的所有 SubMenu key 列表
@@ -63,6 +65,7 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/iqc/inspections": ["grp:supplier", "grp:iqc"],
   "/iqc/materials": ["grp:supplier", "grp:iqc"],
   "/scars": ["grp:supplier"],
+  "/knowledge-graph": ["grp:planning"],
 };
 
 function getSelectedMenuKey(pathname: string): string {
@@ -84,6 +87,7 @@ const menuItems = [
       { key: "/apqp", icon: <ProjectOutlined />, label: "APQP 质量策划" },
       { key: "/ppap", icon: <FileProtectOutlined />, label: "PPAP" },
       { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
+      { key: "/knowledge-graph", icon: <ShareAltOutlined />, label: "知识图谱" },
     ],
   },
   {
