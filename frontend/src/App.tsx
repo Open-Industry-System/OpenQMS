@@ -43,6 +43,7 @@ import APQPListPage from "./pages/planning/apqp/APQPListPage";
 import APQPDetailPage from "./pages/planning/apqp/APQPDetailPage";
 import PPAPListPage from "./pages/planning/ppap/PPAPListPage";
 import PPAPDetailPage from "./pages/planning/ppap/PPAPDetailPage";
+import KnowledgeGraphPage from "./pages/graph/KnowledgeGraphPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -120,6 +121,7 @@ export default function App() {
         <Route path="/customer-quality" element={<CustomerQualityPage />} />
         <Route path="/customer-quality/complaints/:id" element={<ComplaintDetailPage />} />
         <Route path="/customer-quality/rma/:id" element={<RMADetailPage />} />
+        <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
       </Route>
     </Routes>
   );
