@@ -65,7 +65,8 @@ class Neo4jRepository(FMEAGraphRepository):
             type_records = await type_result.data()
             type_dist = {r["type"]: r["cnt"] for r in type_records}
 
-            # 获取所有 FailureMode 的 S/O/D：通过遍历关联节点（而非直接读 FailureMode 属性）
+            # 获取所有 FailureMode 的 S/O/D：按 FMEARow 语义逐行计算真实 RPN
+            # 每行 = effect.severity × cause.occurrence × detection.detection
             # S 来自 FailureEffect（fm -EFFECT_OF-> effect）
             # O 来自 FailureCause（cause -CAUSE_OF-> fm）
             # D 来自 DetectionControl（cause/fm -DETECTED_BY-> det）
@@ -74,16 +75,28 @@ class Neo4jRepository(FMEAGraphRepository):
                 MATCH (fm:GraphNode {type: 'FailureMode'}) WHERE fm.product_line_code = $pl
                 MATCH (d:FMEDocument) WHERE d.fmea_id = fm.fmea_id
                 OPTIONAL MATCH (fm)-[:EFFECT_OF]->(effect:GraphNode)
-                WITH fm, d, coalesce(max(effect.severity), 0) as max_s
+                WITH fm, d, coalesce(max(effect.severity), 0) as s
                 OPTIONAL MATCH (cause:GraphNode)-[:CAUSE_OF]->(fm)
-                WITH fm, d, max_s, coalesce(max(cause.occurrence), 0) as max_o
-                OPTIONAL MATCH (cause2:GraphNode)-[:CAUSE_OF]->(fm)
-                OPTIONAL MATCH (cause2)-[:DETECTED_BY]->(det:GraphNode)
-                OPTIONAL MATCH (fm)-[:DETECTED_BY]->(det2:GraphNode)
-                WITH fm, d, max_s, max_o,
-                     coalesce(max(coalesce(det.detection, det2.detection, 0)), 0) as max_d
+                WITH fm, d, s, collect(cause) as causes
+                UNWIND CASE WHEN size(causes) = 0 THEN [null] ELSE causes END as cause
+                WITH fm, d, s,
+                     coalesce(cause.occurrence, 0) as o
+                OPTIONAL MATCH (cause)-[:DETECTED_BY]->(det_c:GraphNode)
+                WITH fm, d, s, o,
+                     coalesce(max(det_c.detection), 0) as max_d_cause
+                OPTIONAL MATCH (fm)-[:DETECTED_BY]->(det_f:GraphNode)
+                WITH fm, d, s, o, max_d_cause,
+                     coalesce(max(det_f.detection), 0) as max_d_fm
+                WITH fm, d, s, o,
+                     CASE WHEN max_d_cause > max_d_fm THEN max_d_cause ELSE max_d_fm END as d_val,
+                     s * o * CASE WHEN max_d_cause > max_d_fm THEN max_d_cause ELSE max_d_fm END as rpn
+                ORDER BY rpn DESC
+                WITH fm, d, s,
+                     head(collect(o)) as o_best,
+                     head(collect(d_val)) as d_best,
+                     head(collect(rpn)) as max_rpn
                 RETURN fm.node_id AS node_id, fm.name AS name,
-                       max_s AS severity, max_o AS occurrence, max_d AS detection,
+                       s AS severity, o_best AS occurrence, d_best AS detection, max_rpn AS rpn,
                        fm.fmea_id AS fmea_id, d.document_no AS document_no
                 """,
                 pl=product_line_code,

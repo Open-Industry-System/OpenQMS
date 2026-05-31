@@ -56,17 +56,15 @@ class JSONBRepository(FMEAGraphRepository):
         return matches
 
     def _collect_failure_mode_rpn(self, graph_data: dict) -> list[dict]:
-        """按链路遍历收集每个 FailureMode 的 S/O/D。
+        """按 FMEARow 语义逐行计算每个 FailureMode 的 RPN/AP。
 
-        S 来自 FailureEffect（FailureMode -EFFECT_OF-> FailureEffect）
-        O 来自 FailureCause（FailureCause -CAUSE_OF-> FailureMode）
-        D 来自 DetectionControl（FailureCause/FailureMode -DETECTED_BY-> DetectionControl）
+        每行 = effect.severity × cause.occurrence × detection.detection
+        取该 FailureMode 下所有真实行的最大 RPN 作为代表值。
         """
         nodes = graph_data.get("nodes", [])
         edges = graph_data.get("edges", [])
         node_map = {n["id"]: n for n in nodes}
 
-        # 构建边索引加速查找
         out_edges: dict[tuple[str, str], list[str]] = {}
         in_edges: dict[tuple[str, str], list[str]] = {}
         for e in edges:
@@ -78,6 +76,11 @@ class JSONBRepository(FMEAGraphRepository):
             if tgt and etype:
                 in_edges.setdefault((tgt, etype), []).append(src)
 
+        def _max_detection(source_id: str) -> int:
+            det_ids = out_edges.get((source_id, "DETECTED_BY"), [])
+            values = [node_map[did].get("detection", 0) or 0 for did in det_ids if did in node_map]
+            return max(values) if values else 0
+
         results: list[dict] = []
         for node in nodes:
             if node.get("type") != "FailureMode":
@@ -86,46 +89,40 @@ class JSONBRepository(FMEAGraphRepository):
             fm_id = node["id"]
             fm_name = node.get("name", "")
 
-            # Effect: FailureMode -EFFECT_OF-> FailureEffect
+            # Effect: frontend takes the first one
             effect_ids = out_edges.get((fm_id, "EFFECT_OF"), [])
-            severities = [
-                node_map[eid].get("severity", 0) or 0
-                for eid in effect_ids
-                if eid in node_map
-            ]
-            s = max(severities) if severities else 0
+            first_effect = node_map.get(effect_ids[0]) if effect_ids else None
+            s = first_effect.get("severity", 0) or 0 if first_effect else 0
 
-            # Cause: FailureCause -CAUSE_OF-> FailureMode
+            # Causes
             cause_ids = in_edges.get((fm_id, "CAUSE_OF"), [])
-            occurrences = [
-                node_map[cid].get("occurrence", 0) or 0
-                for cid in cause_ids
-                if cid in node_map
-            ]
-            o = max(occurrences) if occurrences else 0
 
-            # Detection: from causes or directly from FailureMode
-            detection_ids: set[str] = set()
-            for cid in cause_ids:
-                detection_ids.update(out_edges.get((cid, "DETECTED_BY"), []))
-            detection_ids.update(out_edges.get((fm_id, "DETECTED_BY"), []))
-            detections = [
-                node_map[did].get("detection", 0) or 0
-                for did in detection_ids
-                if did in node_map
-            ]
-            d_val = max(detections) if detections else 0
+            # Compute per-row RPN (effect × cause × detection), take max
+            rows: list[tuple[int, int, int]] = []  # (o, d, rpn)
 
-            rpn = s * o * d_val
-            ap = compute_ap(s, o, d_val) if s > 0 and o > 0 and d_val > 0 else ""
+            if not cause_ids:
+                d = _max_detection(fm_id)
+                rows.append((0, d, 0))
+            else:
+                for cause_id in cause_ids:
+                    cause = node_map.get(cause_id)
+                    o = cause.get("occurrence", 0) or 0 if cause else 0
+                    d = max(_max_detection(cause_id), _max_detection(fm_id))
+                    rows.append((o, d, s * o * d))
+
+            # Find row with max RPN
+            best = max(rows, key=lambda x: x[2]) if rows else (0, 0, 0)
+            o_best, d_best, max_rpn = best
+
+            ap = compute_ap(s, o_best, d_best) if s > 0 and o_best > 0 and d_best > 0 else ""
 
             results.append({
                 "node_id": fm_id,
                 "name": fm_name,
                 "s": s,
-                "o": o,
-                "d": d_val,
-                "rpn": rpn,
+                "o": o_best,
+                "d": d_best,
+                "rpn": max_rpn,
                 "ap": ap,
             })
 
