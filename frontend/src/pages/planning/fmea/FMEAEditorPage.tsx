@@ -276,6 +276,15 @@ export default function FMEAEditorPage() {
     }
   }, [searchParams]);
 
+  // 如果图谱数据已缓存，直接应用待高亮节点
+  useEffect(() => {
+    if (pendingHighlightNode && graphDataRef.current) {
+      setHighlightNodes([pendingHighlightNode]);
+      setDimOthers(true);
+      setPendingHighlightNode(null);
+    }
+  }, [pendingHighlightNode]);
+
   useEffect(() => {
     if (highlightNodeId && rows.length > 0) {
       const targetRow = rows.find(

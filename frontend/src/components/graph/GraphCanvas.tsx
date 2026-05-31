@@ -106,6 +106,12 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
 
+  // Keep handlers in refs so initGraph only depends on structural inputs (nodes/edges/layout)
+  const handlersRef = useRef({ onNodeClick, onNodeDoubleClick, onNodeContextMenu });
+  useEffect(() => {
+    handlersRef.current = { onNodeClick, onNodeDoubleClick, onNodeContextMenu };
+  });
+
   const initGraph = useCallback(() => {
     if (!containerRef.current) return;
 
@@ -158,36 +164,38 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
 
     graphRef.current = graph;
 
-    if (onNodeClick) {
-      graph.on("node:click", (evt) => {
-        // @ts-expect-error G6 v5 event type: target exists on element events
-        const nodeId = evt.target?.id as string;
-        const node = nodes.find((n) => n.id === nodeId);
-        if (node) onNodeClick(node);
-      });
-    }
+    graph.on("node:click", (evt) => {
+      const h = handlersRef.current.onNodeClick;
+      if (!h) return;
+      // @ts-expect-error G6 v5 event target access
+      const nodeId = (evt.target as unknown as { id?: string })?.id;
+      const node = nodes.find((n) => n.id === nodeId);
+      if (node) h(node);
+    });
 
-    if (onNodeDoubleClick) {
-      graph.on("node:dblclick", (evt) => {
-        // @ts-expect-error G6 v5 event type: target exists on element events
-        const nodeId = evt.target?.id as string;
-        const node = nodes.find((n) => n.id === nodeId);
-        if (node) onNodeDoubleClick(node);
-      });
-    }
+    graph.on("node:dblclick", (evt) => {
+      const h = handlersRef.current.onNodeDoubleClick;
+      if (!h) return;
+      // @ts-expect-error G6 v5 event target access
+      const nodeId = (evt.target as unknown as { id?: string })?.id;
+      const node = nodes.find((n) => n.id === nodeId);
+      if (node) h(node);
+    });
 
-    if (onNodeContextMenu) {
-      graph.on("node:contextmenu", (evt) => {
-        // @ts-expect-error G6 v5 event type: originalEvent exists on pointer events
-        evt.originalEvent?.preventDefault();
-        // @ts-expect-error G6 v5 event type: target exists on element events
-        const nodeId = evt.target?.id as string;
-        const node = nodes.find((n) => n.id === nodeId);
-        // @ts-expect-error G6 v5 event type: originalEvent exists on pointer events
-        if (node) onNodeContextMenu(node, evt.originalEvent as MouseEvent);
-      });
-    }
-  }, [nodes, edges, layout, mode, onNodeClick, onNodeDoubleClick, onNodeContextMenu]);
+    graph.on("node:contextmenu", (evt) => {
+      const h = handlersRef.current.onNodeContextMenu;
+      if (!h) return;
+      const originalEvent = (evt as unknown as { originalEvent?: MouseEvent }).originalEvent;
+      originalEvent?.preventDefault();
+      // @ts-expect-error G6 v5 event target access
+      const nodeId = (evt.target as unknown as { id?: string })?.id;
+      const node = nodes.find((n) => n.id === nodeId);
+      if (node && originalEvent) h(node, originalEvent);
+    });
+
+    // G6 v5 requires explicit render() call
+    graph.render().catch(() => {});
+  }, [nodes, edges, layout]);
 
   // Apply highlight/dim
   useEffect(() => {

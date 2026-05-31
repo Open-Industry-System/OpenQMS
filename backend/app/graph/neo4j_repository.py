@@ -44,8 +44,9 @@ class Neo4jRepository(FMEAGraphRepository):
                 "MATCH (n:GraphNode) "
                 "WHERE n.type = $node_type AND n.product_line_code = $product_line_code "
                 "AND toLower(n.name) CONTAINS toLower($keyword) "
+                "MATCH (d:FMEDocument) WHERE d.fmea_id = n.fmea_id "
                 "RETURN n.node_id AS node_id, n.name AS name, n.type AS type, "
-                "n.fmea_id AS fmea_id, n.document_no AS document_no "
+                "n.fmea_id AS fmea_id, d.document_no AS document_no "
                 "LIMIT $limit",
                 node_type=node_type, product_line_code=product_line_code,
                 keyword=name_keyword, limit=limit,
@@ -67,9 +68,10 @@ class Neo4jRepository(FMEAGraphRepository):
             # 获取所有 FailureMode 的 S/O/D 用于计算 AP 分布和高风险节点
             fm_result = await session.run(
                 "MATCH (n:GraphNode:FailureMode) WHERE n.product_line_code = $pl "
+                "MATCH (d:FMEDocument) WHERE d.fmea_id = n.fmea_id "
                 "RETURN n.node_id AS node_id, n.name AS name, "
                 "n.severity AS severity, n.occurrence AS occurrence, n.detection AS detection, "
-                "n.fmea_id AS fmea_id, n.document_no AS document_no",
+                "n.fmea_id AS fmea_id, d.document_no AS document_no",
                 pl=product_line_code,
             )
             fm_records = await fm_result.data()
