@@ -12,7 +12,7 @@ interface GraphCanvasProps {
   dimOthers?: boolean;
   onNodeClick?: (node: GraphNode) => void;
   onNodeDoubleClick?: (node: GraphNode) => void;
-  onNodeContextMenu?: (node: GraphNode, event: MouseEvent) => void;
+  onNodeContextMenu?: (node: GraphNode, event: { clientX: number; clientY: number }) => void;
 }
 
 const NODE_TYPE_COLORS: Record<string, string> = {
@@ -195,13 +195,19 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
       const g6Evt = evt as unknown as {
         target?: { id?: string };
         item?: { id?: string };
-        originalEvent?: MouseEvent;
+        clientX?: number;
+        clientY?: number;
+        preventDefault?: () => void;
       };
-      const originalEvent = g6Evt.originalEvent;
-      originalEvent?.preventDefault();
+      g6Evt.preventDefault?.();
       const nodeId = g6Evt.target?.id ?? g6Evt.item?.id;
       const node = nodes.find((n) => n.id === nodeId);
-      if (node && originalEvent) h(node, originalEvent);
+      if (node) {
+        h(node, {
+          clientX: g6Evt.clientX ?? 0,
+          clientY: g6Evt.clientY ?? 0,
+        });
+      }
     });
 
     graph.render().catch((err: unknown) => {

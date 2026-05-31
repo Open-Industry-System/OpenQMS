@@ -1094,7 +1094,6 @@ export default function FMEAEditorPage() {
                       setDrawerVisible(true);
                     }}
                     onNodeContextMenu={(node, evt) => {
-                      evt.preventDefault();
                       setContextMenuNode(node);
                       setContextMenuPos({ x: evt.clientX, y: evt.clientY });
                       setContextMenuOpen(true);
