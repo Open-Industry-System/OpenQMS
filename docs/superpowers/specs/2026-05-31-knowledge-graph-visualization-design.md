@@ -69,12 +69,27 @@ npm install @antv/g6
 
 ### 4.1 数据契约（前后端接口）
 
-为了抹平 Neo4j 数据模型与 G6 渲染模型，前端统一使用以下接口：
+**源数据格式**：现有 `GET /api/fmea/{id}/graph` 返回的是扁平结构 `GraphNode`（字段：id/type/name/severity/occurrence/detection/ap...），与 Neo4j 返回的 label/properties 嵌套结构不同。
+
+**渲染数据格式**：GraphCanvas 内部统一使用以下结构，通过 `normalizeGraphData(raw)` 转换层抹平差异：
 
 ```typescript
-interface GraphNode {
+// 源数据（来自 /api/fmea/{id}/graph 或 Neo4j path 查询）
+interface RawGraphNode {
   id: string;
-  label: string;           // Neo4j Node Label，如 "FailureMode"
+  type: string;            // 如 "FailureMode"
+  name: string;
+  severity?: number;
+  occurrence?: number;
+  detection?: number;
+  ap?: string;
+  // ... 其他字段
+}
+
+// 渲染数据（GraphCanvas 统一消费）
+interface RenderGraphNode {
+  id: string;
+  label: string;           // 对应 RawGraphNode.type，用于映射颜色和形状
   properties: {
     name: string;
     severity?: number;
@@ -94,12 +109,52 @@ interface GraphNode {
   style?: any;             // G6 动态样式重写（用于高亮/置灰）
 }
 
-interface GraphEdge {
+interface RenderGraphEdge {
   source: string;
   target: string;
   label: string;           // 关系类型，如 "CAUSE_OF"
   properties?: {
     [key: string]: any;
+  };
+}
+
+// 转换层（在 api/graph.ts 或 GraphCanvas 入口处统一调用）
+// 兼容两种源格式：
+// - JSONB: { id, type, name, severity, ... }  （扁平结构）
+// - Neo4j: { node_id, label, properties: { name, severity, ... } }  （嵌套结构）
+// 建议后端统一归一化为扁平结构，前端 adapter 作为兜底兼容
+function normalizeGraphData(
+  rawNodes: Array<Record<string, unknown>>,
+  rawEdges: Array<Record<string, unknown>>
+): {
+  nodes: RenderGraphNode[];
+  edges: RenderGraphEdge[];
+} {
+  return {
+    nodes: rawNodes.map((n) => {
+      const id = (n.id as string) ?? (n.node_id as string) ?? "";
+      const label = (n.type as string) ?? (n.label as string) ?? "";
+      const props = (n.properties as Record<string, unknown>) ?? n;
+      return {
+        id,
+        label,
+        properties: {
+          name: (props.name as string) ?? (n.name as string) ?? "",
+          severity: (props.severity as number) ?? (n.severity as number),
+          occurrence: (props.occurrence as number) ?? (n.occurrence as number),
+          detection: (props.detection as number) ?? (n.detection as number),
+          ap: (props.ap as string) ?? (n.ap as string),
+          ...props,
+        },
+        style: undefined,
+      };
+    }),
+    edges: rawEdges.map((e) => ({
+      source: (e.source as string) ?? "",
+      target: (e.target as string) ?? "",
+      label: (e.type as string) ?? (e.label as string) ?? "",
+      properties: undefined,
+    })),
   };
 }
 ```
@@ -108,15 +163,15 @@ interface GraphEdge {
 
 ```typescript
 interface GraphCanvasProps {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
+  nodes: RenderGraphNode[];
+  edges: RenderGraphEdge[];
   mode: 'single-fmea' | 'global';
   layout: 'dagre' | 'force' | 'compact-box';
   highlightNodes?: string[];      // 高亮节点 ID 列表
   dimOthers?: boolean;            // 非高亮节点是否置灰
-  onNodeClick?: (node: GraphNode) => void;
-  onNodeDoubleClick?: (node: GraphNode) => void;
-  onNodeContextMenu?: (node: GraphNode, event: MouseEvent) => void;
+  onNodeClick?: (node: RenderGraphNode) => void;
+  onNodeDoubleClick?: (node: RenderGraphNode) => void;
+  onNodeContextMenu?: (node: RenderGraphNode, event: MouseEvent) => void;
 }
 ```
 
@@ -189,7 +244,7 @@ interface GraphCanvasProps {
 
 ---
 
-## 6. 四种场景实现
+## 6. 五种场景实现
 
 ### 6.1 场景一：失效链全貌
 
@@ -200,11 +255,11 @@ interface GraphCanvasProps {
 2. **Tab 切换状态缓存**：在 FMEAEditorPage 中用 `useRef` 或父级 state 缓存图谱数据，切换 Tab 时不重新 Fetch，做到无感秒切；仅在 FMEA 数据变更时刷新缓存
 3. 首次切换到 graph 时，调用 `getFmeaGraph(id)` 获取 JSONB 图数据并缓存
 4. GraphCanvas 以 `layout='dagre'`（层次布局，方向 LR）初始化，自动展开全部节点
-5. 双击节点：调用 `graph.collapse/expand` 切换邻居显隐，**布局重计算启用动画过渡**
+5. 双击节点：通过 G6 **collapse-expand behavior** 配置切换邻居显隐，**布局重计算启用动画过渡**
 
 ### 6.2 场景二：追溯影响范围
 
-**入口**: 两者（编辑器右键菜单 / 全局页面工具栏）  
+**入口**: FMEA 编辑器右键菜单  
 **API**: `GET /api/graph/fmea/{id}/impact/{nodeId}`  
 **实现**:
 1. 用户右键节点选择"追溯影响"或点击工具栏"影响分析"按钮
@@ -237,7 +292,7 @@ interface CrossFmeaStats {
   node_type_distribution: Record<string, number>;
   // AP 优先的风险统计（需后端补充）
   ap_distribution: { H: number; M: number; L: number };
-  high_ap_nodes: Array<{ name: string; ap: string; fmea_id: string; document_no: string }>;
+  high_ap_nodes: Array<{ node_id: string; name: string; ap: string; rpn: number; fmea_id: string; document_no: string }>;
   avg_rpn: number;
   top_failure_modes: Array<{ name: string; rpn: number; fmea_id: string }>;
 }
@@ -252,12 +307,43 @@ interface CrossFmeaStats {
 
 **注意**：全局页首版以"统计卡片 + 数据列表 + 搜索"为主，不承诺跨 FMEA 的全局画布渲染（后端 `stats` 不返回全局 nodes/edges）。后续如需全局画布，需新增 `GET /api/graph/overview` 接口聚合所有 FMEA 的图数据。
 
-### 6.5 场景五：追溯原因链
+---
 
-**入口**: FMEA 编辑器右键菜单 / 全局页面工具栏  
+## 6.5 后端契约变更（本模块实施时需同步修改）
+
+当前后端 `FMEAGraphRepository` 的 `get_cross_fmea_stats` 返回字段不足，需 JSONBRepository 和 Neo4jRepository 统一返回以下 DTO：
+
+```typescript
+interface CrossFmeaStatsDTO {
+  total_fmeas: number;
+  total_nodes: number;
+  node_type_distribution: Record<string, number>;
+  ap_distribution: { H: number; M: number; L: number };      // 新增
+  high_ap_nodes: Array<{                                      // 新增
+    node_id: string;                                         // 新增，用于跳转高亮
+    name: string;
+    ap: string;
+    rpn: number;                                             // 新增
+    fmea_id: string;
+    document_no?: string;
+  }>;
+  avg_rpn: number;                                           // 新增
+  top_failure_modes: Array<{ name: string; rpn: number; fmea_id: string }>;
+}
+```
+
+**实现要点**：
+- `JSONBRepository.get_cross_fmea_stats`：遍历所有 FMEA 的 graph_data.nodes，统计 AP 分布时调用 `app.state_machines.fmea_state.compute_ap(s, o, d)`
+- `Neo4jRepository.get_cross_fmea_stats`：Cypher 查询中增加 `n.ap` 字段统计，或现场计算 AP
+- `JSONBRepository.find_similar_nodes`：返回字段补 `document_no`，与 Neo4j 实现对齐
+- 两个实现的返回字段必须一致，前端不区分底层存储
+
+### 6.6 场景五：追溯原因链
+
+**入口**: FMEA 编辑器右键菜单  
 **API**: `GET /api/graph/fmea/{id}/cause/{nodeId}`  
 **实现**:
-1. 用户右键节点选择"追溯原因"或点击工具栏"原因分析"按钮
+1. 用户右键节点选择"追溯原因"
 2. 调用 `getCauseChain(fmeaId, nodeId)` 获取上游节点列表（沿 CAUSE_OF 边反向追溯 1-3 层）
 3. GraphCanvas 接收 `highlightNodes=[...nodeIds]`，`dimOthers=true`
 4. 高亮路径从选中节点向上游原因节点延伸，黄色渐变（与影响链的红色区分）
@@ -287,22 +373,18 @@ FMEAEditorPage
 
 ```
 KnowledgeGraphPage
-  ├── 视图模式 state: 'overview' | 'risk-map' | 'similar-search' | 'impact-analysis' | 'cause-analysis'
+  ├── 视图模式 state: 'overview' | 'similar-search'
   │
-  ├── overview / risk-map: getCrossFmeaStats(productLineCode)
-  │     └── 统计卡片 + RiskMapPanel + 高风险节点列表（点击跳转单 FMEA 图谱）
+  ├── overview: getCrossFmeaStats(productLineCode)
+  │     └── 统计卡片 + RiskMapPanel + 高风险节点列表
+  │         └── 点击列表项 → 跳转 /fmea/:id?tab=graph&highlightNode=:nodeId
   │
-  ├── similar-search: searchSimilarNodes(params)
-  │     └── 搜索结果列表（无画布，点击跳转单 FMEA）
-  │
-  ├── impact-analysis: getImpactChain(fmeaId, nodeId)
-  │     └── GraphCanvas(highlightNodes, dimOthers=true) 或嵌入单 FMEA 编辑器
-  │
-  └── cause-analysis: getCauseChain(fmeaId, nodeId)
-        └── GraphCanvas(highlightNodes, dimOthers=true) 或嵌入单 FMEA 编辑器
+  └── similar-search: searchSimilarNodes(params)
+        └── 搜索结果列表（无画布）
+            └── 点击列表项 → 跳转 /fmea/:id?tab=graph&highlightNode=:nodeId
 ```
 
-**全局页首版定位**：以统计聚合、列表浏览、跨 FMEA 搜索为核心，不承诺全局画布渲染。单 FMEA 的详细图谱通过链接跳转至 `/fmea/:id?tab=graph` 展示。
+**全局页首版定位**：以统计聚合、列表浏览、跨 FMEA 搜索为核心，不承诺全局画布渲染。影响分析 / 原因分析仅在单 FMEA 编辑器中通过右键菜单触发。单 FMEA 的详细图谱通过链接跳转至 `/fmea/:id?tab=graph` 展示，可选携带 `highlightNode` 参数自动高亮目标节点。
 
 ---
 
@@ -331,7 +413,7 @@ KnowledgeGraphPage
 | API 返回空图 | 显示"该 FMEA 暂无图谱数据"空状态 |
 | 节点数 > 500 | 提示"节点过多，建议切换至层次布局"，自动启用性能模式（隐藏标签） |
 | 图查询超时 | Spin 加载 + 30s 后提示"数据量较大，请稍后重试" |
-| Neo4j 未配置 | 全局页面显示"知识图谱功能需要 Neo4j 支持"提示，隐藏相关入口 |
+| 图查询 API 不可用 | 全局页面显示"知识图谱功能暂不可用"提示，隐藏相关入口（后端有 JSONB fallback，此场景极少触发） |
 
 ---
 
@@ -352,7 +434,7 @@ KnowledgeGraphPage
 - [ ] 双击节点可展开/折叠邻居，布局重计算有过渡动画，无闪烁跳跃
 - [ ] 右键"追溯影响"正确高亮下游路径（红色渐变），其他节点置灰
 - [ ] 右键"追溯原因"正确高亮上游路径（黄色渐变），其他节点置灰
-- [ ] 全局知识图谱页支持五种视图模式切换（总览/风险地图/关键词搜索/影响分析/原因分析）
+- [ ] 全局知识图谱页支持总览（统计+风险列表）和关键词搜索两种视图
 - [ ] 历史关键词搜索支持按节点类型和关键词过滤，结果列表可点击跳转至单 FMEA 图谱
 - [ ] 风险地图统计卡片展示 AP 分布、平均 RPN、高风险节点列表，数据与后端一致
 - [ ] 支持按产品线过滤（租户隔离）
