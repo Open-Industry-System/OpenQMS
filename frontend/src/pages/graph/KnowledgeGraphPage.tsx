@@ -85,6 +85,32 @@ const KnowledgeGraphPage: React.FC = () => {
     fetchStats();
   }, [fetchStats]);
 
+  // 抽取共用搜索函数，统一错误处理 + AbortController 防竞态
+  const runSearch = useCallback(
+    async (keyword: string, type: string, productLine: string, signal?: AbortSignal) => {
+      setSearchLoading(true);
+      try {
+        const results = await searchSimilarNodes({
+          node_type: type,
+          name_keyword: keyword,
+          product_line_code: productLine,
+          limit: 20,
+        });
+        if (signal?.aborted) return;
+        setSearchResults(results);
+      } catch {
+        if (signal?.aborted) return;
+        message.error("搜索失败，请稍后重试");
+        setSearchResults([]);
+      } finally {
+        if (!signal?.aborted) {
+          setSearchLoading(false);
+        }
+      }
+    },
+    []
+  );
+
   // 搜索防抖：监听 keyword/type/productLine 变化，300ms 后自动触发
   useEffect(() => {
     const trimmed = searchKeyword.trim();
@@ -93,25 +119,15 @@ const KnowledgeGraphPage: React.FC = () => {
       setSearchLoading(false);
       return;
     }
-    setSearchLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const results = await searchSimilarNodes({
-          node_type: searchType,
-          name_keyword: trimmed,
-          product_line_code: currentProductLine,
-          limit: 20,
-        });
-        setSearchResults(results);
-      } catch {
-        message.error("搜索失败，请稍后重试");
-        setSearchResults([]);
-      } finally {
-        setSearchLoading(false);
-      }
+    const abortCtrl = new AbortController();
+    const timer = setTimeout(() => {
+      runSearch(trimmed, searchType, currentProductLine, abortCtrl.signal);
     }, 300);
-    return () => clearTimeout(timer);
-  }, [searchKeyword, searchType, currentProductLine]);
+    return () => {
+      clearTimeout(timer);
+      abortCtrl.abort();
+    };
+  }, [searchKeyword, searchType, currentProductLine, runSearch]);
 
   const handleViewGraph = (fmeaId: string, nodeId?: string) => {
     if (nodeId) {
@@ -212,13 +228,7 @@ const KnowledgeGraphPage: React.FC = () => {
             onClick={() => {
               const trimmed = searchKeyword.trim();
               if (trimmed && currentProductLine) {
-                setSearchLoading(true);
-                searchSimilarNodes({
-                  node_type: searchType,
-                  name_keyword: trimmed,
-                  product_line_code: currentProductLine,
-                  limit: 20,
-                }).then(setSearchResults).finally(() => setSearchLoading(false));
+                runSearch(trimmed, searchType, currentProductLine);
               }
             }}
           >
@@ -227,7 +237,7 @@ const KnowledgeGraphPage: React.FC = () => {
         </Space.Compact>
 
         <div style={{ marginTop: 16 }}>
-          {searchResults.length === 0 && !searchLoading && searchKeyword && (
+          {searchResults.length === 0 && !searchLoading && searchKeyword.trim() && (
             <Empty description="未找到匹配节点" />
           )}
           {searchResults.length > 0 && (
