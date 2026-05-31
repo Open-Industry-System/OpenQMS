@@ -241,7 +241,7 @@ git commit -m "feat: Neo4jRepository stats with AP distribution, document_no via
 
 - [ ] **Step 1: 添加 Pydantic ResponseModel**
 
-在 `backend/app/api/graph.py` 的 import 区域添加：
+确认 `backend/app/api/graph.py` 已导入 `HTTPException`，然后添加 `BaseModel`：
 
 ```python
 from pydantic import BaseModel
@@ -290,12 +290,15 @@ class CrossFmeaStatsOut(BaseModel):
 async def similar_nodes(
     node_type: str = Query(..., description="节点类型，如 FailureMode"),
     name_keyword: str = Query(..., min_length=1, description="名称关键词"),
-    product_line_code: str = Query(..., description="产品线代码（必填，租户隔离）"),
+    product_line_code: str = Query(..., min_length=1, description="产品线代码（必填，租户隔离）"),
     limit: int = Query(20, ge=1, le=100),
     repo: FMEAGraphRepository = Depends(_repo),
     _user: User = Depends(get_current_user),
 ):
-    """跨 FMEA 搜索相似节点。product_line_code 必填。返回白名单字段。"""
+    """跨 FMEA 搜索相似节点。product_line_code 必填且不能为空字符串。返回白名单字段。"""
+    product_line_code = product_line_code.strip()
+    if not product_line_code:
+        raise HTTPException(status_code=422, detail="product_line_code cannot be empty")
     return await repo.find_similar_nodes(node_type, name_keyword, product_line_code, limit)
 ```
 
@@ -306,11 +309,14 @@ async def similar_nodes(
 ```python
 @router.get("/stats", response_model=CrossFmeaStatsOut)
 async def cross_fmea_stats(
-    product_line_code: str = Query(..., description="产品线代码（必填，租户隔离）"),
+    product_line_code: str = Query(..., min_length=1, description="产品线代码（必填，租户隔离）"),
     repo: FMEAGraphRepository = Depends(_repo),
     _user: User = Depends(get_current_user),
 ):
-    """跨 FMEA 聚合统计。product_line_code 必填。返回白名单字段。"""
+    """跨 FMEA 聚合统计。product_line_code 必填且不能为空字符串。返回白名单字段。"""
+    product_line_code = product_line_code.strip()
+    if not product_line_code:
+        raise HTTPException(status_code=422, detail="product_line_code cannot be empty")
     return await repo.get_cross_fmea_stats(product_line_code)
 ```
 
@@ -526,9 +532,9 @@ const KnowledgeGraphPage: React.FC = () => {
 
   const handleViewGraph = (fmeaId: string, nodeId?: string) => {
     if (nodeId) {
-      navigate(`/fmea/${fmeaId}?tab=graph&node=${nodeId}`);
+      navigate(`/fmea/${fmeaId}?node=${nodeId}`);
     } else {
-      navigate(`/fmea/${fmeaId}?tab=graph`);
+      navigate(`/fmea/${fmeaId}`);
     }
   };
 

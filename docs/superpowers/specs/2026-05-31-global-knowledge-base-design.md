@@ -127,6 +127,8 @@ class CrossFmeaStatsOut(BaseModel):
     top_failure_modes: list[TopFailureModeOut]
 ```
 
+**ap_distribution 缺键保护：** 无论实际分布如何，`ap_distribution` 必须始终返回 `{H: 0, M: 0, L: 0}` 全键（Repository 中显式初始化）。前端直接解构 `{H, M, L}` 而不会遇到 `undefined`。
+
 端点返回类型注解为 `CrossFmeaStatsOut` / `list[SimilarNodeOut]`，FastAPI 自动过滤多余字段。
 
 **明确：** `fmea_id`（UUID）和 `node_id`（字符串）是前端跳转必需的标识符，**不属于敏感字段**，允许返回。`document_no` 是业务编号，也允许返回。
@@ -134,8 +136,8 @@ class CrossFmeaStatsOut(BaseModel):
 ### 3.4 产品线过滤策略
 
 **强制要求 `product_line_code`：**
-- 后端 API：`product_line_code` 为 Query 必填参数（`Query(...)`），空值直接 422
-- 前端页面：读取 `useProductLineStore` 当前选择值。若用户清空为"全部产品线"（`null`），页面显示提示"请选择产品线以查看知识库"，**禁用查询按钮和自动加载**
+- 后端 API：`product_line_code` 为 Query 必填参数（`Query(..., min_length=1)`），空字符串或纯空白直接 422。实现时先 `strip()` 再校验。
+- 前端页面：读取 `useProductLineStore` 当前选择值。若用户清空为"全部产品线"（`null` 或空字符串），页面显示提示"请选择产品线以查看知识库"，**禁用查询按钮和自动加载**
 
 **理由：** 全局知识库涉及跨 FMEA 聚合，"全部产品线"会暴露所有产品数据，与当前 RBAC 设计冲突。后续如需支持全局汇总，需单独设计权限控制。
 
@@ -215,7 +217,7 @@ export interface SimilarNode {
 1. **页面加载**：读取 `useProductLineStore` → 若 `currentProductLine` 为空，显示提示并要求选择 → 否则调用 `getCrossFmeaStats(productLineCode)`
 2. **产品线切换**：重新拉取 stats 数据；若清空则清空页面数据并显示提示
 3. **搜索节点**：输入关键词 + 选择节点类型 → 防抖 300ms → 调用 `searchSimilarNodes` → 结果列表展示
-4. **查看图谱**：点击"查看图谱" → 跳转 `/fmea/:id?tab=graph&node=:nodeId`（与现有 FMEAEditorPage `searchParams.get("node")` 对齐）
+4. **查看图谱**：点击"查看图谱" → 跳转 `/fmea/:id?node=:nodeId`。FMEAEditorPage 已支持通过 `searchParams.get("node")` 高亮对应节点。图谱 Tab 切换由知识图谱可视化模块负责实现，全局知识库模块不依赖也不修改 FMEAEditorPage 的 Tab 逻辑。
 
 ### 4.4 排序优先级说明（AIAG-VDA 合规）
 
@@ -275,9 +277,9 @@ export interface SimilarNode {
 - [ ] `GET /api/graph/similar` 返回结果包含 `document_no`
 - [ ] 后端 `compute_ap`（`fmea_state.py`）与前端 `calculateAP` 结果一致
 - [ ] 全局查询返回的数据**仅包含白名单字段**（无 created_by/updated_by/approved_by/responsible 等）
-- [ ] `product_line_code` 为空时 API 返回 422；前端页面提示选择产品线
+- [ ] `product_line_code` 为空字符串或纯空白时 API 返回 422；前端页面提示选择产品线
 - [ ] 前端全局知识库页面可正常展示统计卡片、风险列表、搜索结果
-- [ ] 点击"查看图谱"正确跳转 `/fmea/:id?tab=graph&node=:nodeId` 并高亮节点
+- [ ] 点击"查看图谱"正确跳转 `/fmea/:id?node=:nodeId`，FMEA 编辑器能识别 node 参数高亮对应节点
 - [ ] 支持按产品线过滤
 - [ ] 中文 UI
 
@@ -295,4 +297,4 @@ export interface SimilarNode {
 ### 构建验收
 
 - [ ] `npm run build` 通过，无 TypeScript 错误
-- [ ] 后端 `python app/test_schema.py` 通过（含 AP 计算测试）
+- [ ] 后端 `pytest tests/test_fmea_state.py -v` 通过（验证 AP 计算），`python app/test_schema.py` 通过（基础 schema 测试）
