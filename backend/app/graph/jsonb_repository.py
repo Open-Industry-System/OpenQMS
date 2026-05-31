@@ -3,6 +3,7 @@
 不需要 Neo4j，适合开发/测试环境或 Neo4j 不可用时的 fallback。
 """
 import uuid
+from collections import deque
 from typing import Any
 
 from sqlalchemy import select
@@ -41,10 +42,11 @@ class JSONBRepository(FMEAGraphRepository):
             if not fmea.graph_data:
                 continue
             for node in fmea.graph_data.get("nodes", []):
-                if node.get("type") == node_type and name_keyword.lower() in node.get("name", "").lower():
+                node_name = node.get("name") or ""
+                if node.get("type") == node_type and name_keyword.lower() in node_name.lower():
                     matches.append({
                         "node_id": node["id"],
-                        "name": node["name"],
+                        "name": node_name,
                         "type": node["type"],
                         "fmea_id": str(fmea.fmea_id),
                         "document_no": fmea.document_no,
@@ -123,10 +125,11 @@ class JSONBRepository(FMEAGraphRepository):
         visited_nodes = set()
         result_nodes = []
         result_edges = []
-        queue = [start_node_id]
+        seen_edge_keys = set()
+        queue = deque([start_node_id])
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             if current in visited_nodes:
                 continue
             visited_nodes.add(current)
@@ -140,10 +143,12 @@ class JSONBRepository(FMEAGraphRepository):
                 # 用 (source, target, type, index) 做唯一标识，因为 edge 没有 id 字段
                 edge_key = (src, tgt, edge_type, idx)
 
-                if direction == "downstream" and src == current and edge_key not in {e["_key"] for e in result_edges}:
+                if direction == "downstream" and src == current and edge_key not in seen_edge_keys:
+                    seen_edge_keys.add(edge_key)
                     result_edges.append({"source": src, "target": tgt, "type": edge_type, "_key": edge_key})
                     queue.append(tgt)
-                elif direction == "upstream" and tgt == current and edge_key not in {e["_key"] for e in result_edges}:
+                elif direction == "upstream" and tgt == current and edge_key not in seen_edge_keys:
+                    seen_edge_keys.add(edge_key)
                     result_edges.append({"source": src, "target": tgt, "type": edge_type, "_key": edge_key})
                     queue.append(src)
 

@@ -58,7 +58,6 @@ function toG6Data(nodes: GraphNode[], edges: GraphEdge[]) {
       fill: NODE_TYPE_COLORS[n.label] || "#e8e8e8",
       stroke: NODE_TYPE_COLORS[n.label] || "#8c8c8c",
       lineWidth: 1,
-      // G6 v5 Size type: number | [number, number] | [number, number, number]
       size: (n.label === "FailureMode"
         ? [80, 50]
         : n.label?.includes("Control")
@@ -115,6 +114,12 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
   const initGraph = useCallback(() => {
     if (!containerRef.current) return;
 
+    // If graph already exists, just update data instead of recreating
+    if (graphRef.current) {
+      graphRef.current.setData(toG6Data(nodes, edges));
+      return;
+    }
+
     const graph = new Graph({
       container: containerRef.current,
       width: containerRef.current.clientWidth,
@@ -149,10 +154,6 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
         "drag-canvas",
         "zoom-canvas",
         "drag-element",
-        {
-          type: "collapse-expand",
-          trigger: "dblclick",
-        },
       ],
       plugins: [
         {
@@ -167,8 +168,8 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.on("node:click", (evt) => {
       const h = handlersRef.current.onNodeClick;
       if (!h) return;
-      // @ts-expect-error G6 v5 event target access
-      const nodeId = (evt.target as unknown as { id?: string })?.id;
+      // @ts-expect-error G6 v5 item access
+      const nodeId = (evt.item as unknown as { id?: string })?.id;
       const node = nodes.find((n) => n.id === nodeId);
       if (node) h(node);
     });
@@ -176,8 +177,8 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.on("node:dblclick", (evt) => {
       const h = handlersRef.current.onNodeDoubleClick;
       if (!h) return;
-      // @ts-expect-error G6 v5 event target access
-      const nodeId = (evt.target as unknown as { id?: string })?.id;
+      // @ts-expect-error G6 v5 item access
+      const nodeId = (evt.item as unknown as { id?: string })?.id;
       const node = nodes.find((n) => n.id === nodeId);
       if (node) h(node);
     });
@@ -187,18 +188,19 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
       if (!h) return;
       const originalEvent = (evt as unknown as { originalEvent?: MouseEvent }).originalEvent;
       originalEvent?.preventDefault();
-      // @ts-expect-error G6 v5 event target access
-      const nodeId = (evt.target as unknown as { id?: string })?.id;
+      // @ts-expect-error G6 v5 item access
+      const nodeId = (evt.item as unknown as { id?: string })?.id;
       const node = nodes.find((n) => n.id === nodeId);
       if (node && originalEvent) h(node, originalEvent);
     });
 
-    // G6 v5 requires explicit render() call
-    graph.render().catch(() => {});
+    graph.render().catch((err: unknown) => {
+      console.error("G6 render failed:", err);
+    });
   }, [nodes, edges, layout]);
 
   // Apply highlight/dim
-  useEffect(() => {
+  const applyHighlight = useCallback(() => {
     const graph = graphRef.current;
     if (!graph) return;
 
@@ -216,7 +218,6 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
         ]);
       });
       graph.getEdgeData().forEach((edge) => {
-        // EdgeData.id is optional in G6 v5 types, but we always set it in toG6Data
         const edgeId = edge.id!;
         const isHighlighted =
           highlightNodes.includes(edge.source) && highlightNodes.includes(edge.target);
@@ -270,6 +271,11 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     };
   }, [initGraph]);
 
+  // Apply highlight after graph initialization
+  useEffect(() => {
+    applyHighlight();
+  }, [applyHighlight]);
+
   // Resize handler
   useEffect(() => {
     const handleResize = () => {
@@ -295,12 +301,19 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
       }
     },
     download: () => {
-      const canvas = containerRef.current?.querySelector("canvas");
-      if (canvas) {
-        const link = document.createElement("a");
-        link.download = "graph.png";
-        link.href = (canvas as HTMLCanvasElement).toDataURL();
-        link.click();
+      const g = graphRef.current;
+      if (g) {
+        // Use G6's toDataURL instead of querySelector to avoid capturing minimap
+        g.toDataURL()
+          .then((url: string) => {
+            const link = document.createElement("a");
+            link.download = "graph.png";
+            link.href = url;
+            link.click();
+          })
+          .catch((err: unknown) => {
+            console.error("Graph download failed:", err);
+          });
       }
     },
   }));

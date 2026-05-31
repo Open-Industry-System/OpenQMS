@@ -437,7 +437,7 @@ export default function FMEAEditorPage() {
             min={1}
             max={10}
             size="small"
-            value={node?.severity || undefined}
+            value={node?.severity ?? undefined}
             disabled={isViewer}
             style={{ width: 55, textAlign: "center" }}
             onFocus={() => {
@@ -506,7 +506,7 @@ export default function FMEAEditorPage() {
             min={1}
             max={10}
             size="small"
-            value={node?.occurrence || undefined}
+            value={node?.occurrence ?? undefined}
             disabled={isViewer}
             style={{ width: 55, textAlign: "center" }}
             onFocus={() => {
@@ -571,7 +571,7 @@ export default function FMEAEditorPage() {
             min={1}
             max={10}
             size="small"
-            value={node?.detection || undefined}
+            value={node?.detection ?? undefined}
             disabled={isViewer}
             style={{ width: 55, textAlign: "center" }}
             onFocus={() => {
@@ -743,7 +743,7 @@ export default function FMEAEditorPage() {
             min={1}
             max={10}
             size="small"
-            value={node?.revised_severity || undefined}
+            value={node?.revised_severity ?? undefined}
             disabled={isViewer}
             style={{ width: 48, textAlign: "center" }}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_severity", Number(e.target.value) || 0)}
@@ -764,7 +764,7 @@ export default function FMEAEditorPage() {
             min={1}
             max={10}
             size="small"
-            value={node?.revised_occurrence || undefined}
+            value={node?.revised_occurrence ?? undefined}
             disabled={isViewer}
             style={{ width: 48, textAlign: "center" }}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_occurrence", Number(e.target.value) || 0)}
@@ -785,7 +785,7 @@ export default function FMEAEditorPage() {
             min={1}
             max={10}
             size="small"
-            value={node?.revised_detection || undefined}
+            value={node?.revised_detection ?? undefined}
             disabled={isViewer}
             style={{ width: 48, textAlign: "center" }}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_detection", Number(e.target.value) || 0)}

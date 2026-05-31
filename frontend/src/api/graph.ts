@@ -69,12 +69,14 @@ export function normalizeGraphData(
         };
       })
       .filter((n) => n.id !== ""), // drop nodes without valid id
-    edges: rawEdges.map((e) => ({
-      source: (e.source as string) ?? "",
-      target: (e.target as string) ?? "",
-      label: (e.type as string) ?? (e.label as string) ?? "",
-      properties: undefined,
-    })),
+    edges: rawEdges
+      .map((e) => ({
+        source: (e.source as string) ?? "",
+        target: (e.target as string) ?? "",
+        label: (e.type as string) ?? (e.label as string) ?? "",
+        properties: undefined,
+      }))
+      .filter((e) => e.source !== "" && e.target !== ""),
   };
 }
 
