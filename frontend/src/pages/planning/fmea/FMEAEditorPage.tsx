@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Select, Table, Card, Tabs,
@@ -24,6 +24,12 @@ import CreateVersionModal from "../../../components/version/CreateVersionModal";
 import RollbackConfirmModal from "../../../components/version/RollbackConfirmModal";
 import VersionCompareView from "../../../components/version/VersionCompareView";
 import RelatedCAPAList from "../../../components/cross-links/RelatedCAPAList";
+import { Dropdown } from "antd";
+import type { MenuProps } from "antd";
+import { GraphCanvas, GraphToolbar, NodeDetailDrawer, GraphLegend } from "../../../components/graph";
+import type { GraphLayout, GraphCanvasRef } from "../../../components/graph";
+import type { GraphNode as APIGraphNode } from "../../../api/graph";
+import { getImpactChain, getCauseChain, normalizeGraphData } from "../../../api/graph";
 
 const { Title, Text } = Typography;
 
@@ -96,6 +102,20 @@ export default function FMEAEditorPage() {
   const [recommendationCtx, setRecommendationCtx] = useState<{ functionDesc?: string; failureMode?: string; s?: number; o?: number; d?: number }>({});
   const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
   const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
+  const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
+  const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
+  const [highlightNodes, setHighlightNodes] = useState<string[]>([]);
+  const [dimOthers, setDimOthers] = useState(false);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const canvasRef = useRef<GraphCanvasRef>(null);
+
+  // 右键菜单状态
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
+  const [contextMenuNode, setContextMenuNode] = useState<APIGraphNode | null>(null);
+  const [pendingHighlightNode, setPendingHighlightNode] = useState<string | null>(null);
 
   const activateRecommendation = (
     rowKey: string,
@@ -133,6 +153,50 @@ export default function FMEAEditorPage() {
       .catch(() => {});
   }, [id]);
 
+  const loadGraphData = useCallback(async () => {
+    if (!id || graphDataRef.current) return;
+    setGraphLoading(true);
+    try {
+      const doc = await getFMEA(id);
+      const rawNodes = doc.graph_data?.nodes || [];
+      const rawEdges = doc.graph_data?.edges || [];
+      graphDataRef.current = normalizeGraphData(rawNodes as unknown as Array<Record<string, unknown>>, rawEdges as unknown as Array<Record<string, unknown>>);
+      if (pendingHighlightNode) {
+        setHighlightNodes([pendingHighlightNode]);
+        setDimOthers(true);
+        setPendingHighlightNode(null);
+      }
+    } catch {
+      message.error("图谱数据加载失败");
+    } finally {
+      setGraphLoading(false);
+    }
+  }, [id, message, pendingHighlightNode]);
+
+  const handleTraceImpact = async (nodeId: string) => {
+    if (!id) return;
+    try {
+      const chain = await getImpactChain(id, nodeId);
+      const { nodes } = normalizeGraphData(chain.nodes, chain.edges);
+      setHighlightNodes(nodes.map((n) => n.id));
+      setDimOthers(true);
+    } catch {
+      message.error("影响链查询失败");
+    }
+  };
+
+  const handleTraceCause = async (nodeId: string) => {
+    if (!id) return;
+    try {
+      const chain = await getCauseChain(id, nodeId);
+      const { nodes } = normalizeGraphData(chain.nodes, chain.edges);
+      setHighlightNodes(nodes.map((n) => n.id));
+      setDimOthers(true);
+    } catch {
+      message.error("原因链查询失败");
+    }
+  };
+
   const save = useCallback(async () => {
     if (!id || !fmea) return;
     setSaving(true);
@@ -142,6 +206,7 @@ export default function FMEAEditorPage() {
         graph_data: { nodes, edges },
       });
       setFmea(updated);
+      graphDataRef.current = null; // 保存后清空缓存，下次切回 graph 时重新加载
       message.success("保存成功");
       try {
         if (id) await syncFromFMEA(id);
@@ -192,6 +257,24 @@ export default function FMEAEditorPage() {
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   const rows = useMemo(() => buildRows(nodes, edges), [nodes, edges]);
+
+  useEffect(() => {
+    if (outerTab === "graph") {
+      loadGraphData();
+    }
+  }, [outerTab, loadGraphData]);
+
+  // 响应 URL ?tab=graph&highlightNode=... 参数
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    const highlightParam = searchParams.get("highlightNode");
+    if (tabParam === "graph") {
+      setOuterTab("graph");
+      if (highlightParam) {
+        setPendingHighlightNode(highlightParam);
+      }
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (highlightNodeId && rows.length > 0) {
@@ -973,6 +1056,82 @@ export default function FMEAEditorPage() {
       <Text type="secondary" style={{ fontSize: 11 }}>
         S=严重度 O=发生度 D=探测度 | RPN=风险优先数 | AP=措施优先级 (H=高 M=中 L=低) | 带 ' = 改进后评分
       </Text>
+        </Tabs.TabPane>
+        <Tabs.TabPane tab="🕸️ 图谱" key="graph">
+          <div style={{ display: "flex", gap: 16, height: "calc(100vh - 240px)" }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+              <GraphToolbar
+                layout={graphLayout}
+                onLayoutChange={setGraphLayout}
+                onZoomIn={() => canvasRef.current?.zoomIn()}
+                onZoomOut={() => canvasRef.current?.zoomOut()}
+                onFitView={() => canvasRef.current?.fitView()}
+                onDownload={() => canvasRef.current?.download()}
+              />
+              {graphLoading ? (
+                <Spin size="large" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }} />
+              ) : graphDataRef.current ? (
+                <>
+                  <GraphCanvas
+                    ref={canvasRef}
+                    nodes={graphDataRef.current.nodes}
+                    edges={graphDataRef.current.edges}
+                    mode="single-fmea"
+                    layout={graphLayout}
+                    highlightNodes={highlightNodes}
+                    dimOthers={dimOthers}
+                    onNodeClick={(node) => {
+                      setSelectedGraphNode(node);
+                      setDrawerVisible(true);
+                    }}
+                    onNodeContextMenu={(node, evt) => {
+                      evt.preventDefault();
+                      setContextMenuNode(node);
+                      setContextMenuPos({ x: evt.clientX, y: evt.clientY });
+                      setContextMenuOpen(true);
+                    }}
+                  />
+                  <Dropdown
+                    open={contextMenuOpen}
+                    onOpenChange={setContextMenuOpen}
+                    menu={{
+                      items: [
+                        { key: "impact", label: "追溯影响" },
+                        { key: "cause", label: "追溯原因" },
+                      ],
+                      onClick: ({ key }) => {
+                        setContextMenuOpen(false);
+                        if (key === "impact" && contextMenuNode) handleTraceImpact(contextMenuNode.id);
+                        if (key === "cause" && contextMenuNode) handleTraceCause(contextMenuNode.id);
+                      },
+                    }}
+                  >
+                    <span style={{
+                      position: "fixed",
+                      left: contextMenuPos.x,
+                      top: contextMenuPos.y,
+                      zIndex: 1050,
+                    }} />
+                  </Dropdown>
+                </>
+              ) : (
+                <Empty description="暂无图谱数据" style={{ flex: 1 }} />
+              )}
+            </div>
+            <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 16 }}>
+              <GraphLegend />
+              {highlightNodes.length > 0 && (
+                <Button onClick={() => { setHighlightNodes([]); setDimOthers(false); }}>
+                  清除高亮
+                </Button>
+              )}
+            </div>
+          </div>
+          <NodeDetailDrawer
+            node={selectedGraphNode}
+            visible={drawerVisible}
+            onClose={() => setDrawerVisible(false)}
+          />
         </Tabs.TabPane>
         <Tabs.TabPane tab="关联 CAPA" key="related-capa">
           {selectedFunctionId ? (
