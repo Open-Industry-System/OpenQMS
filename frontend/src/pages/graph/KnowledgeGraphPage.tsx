@@ -302,7 +302,7 @@ const KnowledgeGraphPage: React.FC = () => {
       <Card title="TOP10 失效模式">
         <Table
           dataSource={stats?.top_failure_modes || []}
-          rowKey={(record, index) => `${record.fmea_id}-${index}`}
+          rowKey={(record) => `${record.fmea_id}-${record.name}`}
           loading={statsLoading}
           size="small"
           pagination={false}

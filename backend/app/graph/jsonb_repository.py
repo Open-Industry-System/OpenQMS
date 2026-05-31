@@ -49,7 +49,7 @@ class JSONBRepository(FMEAGraphRepository):
                         "document_no": fmea.document_no,
                     })
                     if len(matches) >= limit:
-                        return matches
+                        return matches[:limit]
         return matches
 
     async def get_cross_fmea_stats(self, product_line_code: str) -> dict:

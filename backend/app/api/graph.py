@@ -91,8 +91,11 @@ async def similar_nodes(
 ):
     """跨 FMEA 搜索相似节点。product_line_code 必填且不能为空字符串。返回白名单字段。"""
     product_line_code = product_line_code.strip()
+    name_keyword = name_keyword.strip()
     if not product_line_code:
         raise HTTPException(status_code=422, detail="product_line_code cannot be empty")
+    if not name_keyword:
+        raise HTTPException(status_code=422, detail="name_keyword cannot be empty")
     return await repo.find_similar_nodes(node_type, name_keyword, product_line_code, limit)
 
 
