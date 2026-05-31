@@ -1,6 +1,91 @@
 import client from "./client";
 
-export interface ImpactChainResponse {
+// ========== 原始数据类型（后端返回的多种格式）==========
+export interface RawGraphNode {
+  id?: string;
+  node_id?: string;
+  type?: string;
+  label?: string;
+  name?: string;
+  severity?: number;
+  occurrence?: number;
+  detection?: number;
+  ap?: string;
+  [key: string]: unknown;
+}
+
+export interface RawGraphEdge {
+  source: string;
+  target: string;
+  type?: string;
+  label?: string;
+}
+
+// ========== 渲染数据类型（GraphCanvas 统一消费）==========
+export interface RenderGraphNode {
+  id: string;
+  label: string;
+  properties: {
+    name: string;
+    severity?: number;
+    occurrence?: number;
+    detection?: number;
+    ap?: string;
+    [key: string]: unknown;
+  };
+  style?: unknown;
+}
+
+export interface RenderGraphEdge {
+  source: string;
+  target: string;
+  label: string;
+  properties?: Record<string, unknown>;
+}
+
+// ========== 转换层（抹平 JSONB 扁平结构 vs Neo4j 嵌套结构）==========
+export function normalizeGraphData(
+  rawNodes: Array<Record<string, unknown>>,
+  rawEdges: Array<Record<string, unknown>>
+): { nodes: RenderGraphNode[]; edges: RenderGraphEdge[] } {
+  return {
+    nodes: rawNodes
+      .map((n) => {
+        const id = (n.id as string) ?? (n.node_id as string) ?? "";
+        const label = (n.type as string) ?? (n.label as string) ?? "";
+        const props = (n.properties as Record<string, unknown>) ?? n;
+        return {
+          id,
+          label,
+          properties: {
+            ...props, // spread first so explicit fields take precedence
+            name: (props.name as string) ?? (n.name as string) ?? "",
+            severity: (props.severity as number) ?? (n.severity as number),
+            occurrence: (props.occurrence as number) ?? (n.occurrence as number),
+            detection: (props.detection as number) ?? (n.detection as number),
+            ap: (props.ap as string) ?? (n.ap as string),
+          },
+          style: undefined,
+        };
+      })
+      .filter((n) => n.id !== ""), // drop nodes without valid id
+    edges: rawEdges
+      .map((e) => ({
+        source: (e.source as string) ?? "",
+        target: (e.target as string) ?? "",
+        label: (e.type as string) ?? (e.label as string) ?? "",
+        properties: undefined,
+      }))
+      .filter((e) => e.source !== "" && e.target !== ""),
+  };
+}
+
+// ========== 兼容别名（后续组件统一使用 GraphNode / GraphEdge）==========
+export type GraphNode = RenderGraphNode;
+export type GraphEdge = RenderGraphEdge;
+
+// ========== API 返回类型（原始数据，需 normalize 后使用）==========
+export interface GraphChainResponse {
   nodes: Array<Record<string, unknown>>;
   edges: Array<Record<string, unknown>>;
 }
@@ -10,7 +95,7 @@ export interface SimilarNode {
   name: string;
   type: string;
   fmea_id: string;
-  document_no: string;
+  document_no?: string;
 }
 
 export interface CrossFmeaStats {
@@ -24,31 +109,26 @@ export interface CrossFmeaStats {
     ap: string;
     rpn: number;
     fmea_id: string;
-    document_no: string;
+    document_no?: string;
   }>;
   avg_rpn: number;
-  top_failure_modes: Array<{
-    name: string;
-    rpn: number;
-    fmea_id: string;
-    document_no: string;
-  }>;
+  top_failure_modes: Array<{ name: string; rpn: number; fmea_id: string }>;
 }
 
 export async function getImpactChain(
   fmeaId: string,
   nodeId: string
-): Promise<ImpactChainResponse> {
-  const res = await client.get(`/graph/fmea/${fmeaId}/impact/${nodeId}`);
-  return res.data;
+): Promise<GraphChainResponse> {
+  const resp = await client.get(`/graph/fmea/${fmeaId}/impact/${nodeId}`);
+  return resp.data;
 }
 
 export async function getCauseChain(
   fmeaId: string,
   nodeId: string
-): Promise<ImpactChainResponse> {
-  const res = await client.get(`/graph/fmea/${fmeaId}/cause/${nodeId}`);
-  return res.data;
+): Promise<GraphChainResponse> {
+  const resp = await client.get(`/graph/fmea/${fmeaId}/cause/${nodeId}`);
+  return resp.data;
 }
 
 export async function searchSimilarNodes(params: {
@@ -57,20 +137,15 @@ export async function searchSimilarNodes(params: {
   product_line_code: string;
   limit?: number;
 }): Promise<SimilarNode[]> {
-  const res = await client.get("/graph/similar", { params });
-  return res.data;
+  const resp = await client.get("/graph/similar", { params });
+  return resp.data;
 }
 
 export async function getCrossFmeaStats(
   productLineCode: string
 ): Promise<CrossFmeaStats> {
-  const res = await client.get("/graph/stats", {
+  const resp = await client.get("/graph/stats", {
     params: { product_line_code: productLineCode },
   });
-  return res.data;
-}
-
-export async function triggerRebuild(): Promise<{ message: string }> {
-  const res = await client.post("/graph/rebuild");
-  return res.data;
+  return resp.data;
 }

@@ -22,7 +22,7 @@ import {
   ProjectOutlined,
   FileProtectOutlined,
   AuditOutlined,
-  NodeIndexOutlined,
+  ShareAltOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -87,7 +87,7 @@ const menuItems = [
       { key: "/apqp", icon: <ProjectOutlined />, label: "APQP 质量策划" },
       { key: "/ppap", icon: <FileProtectOutlined />, label: "PPAP" },
       { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
-      { key: "/knowledge-graph", icon: <NodeIndexOutlined />, label: "知识图谱" },
+      { key: "/knowledge-graph", icon: <ShareAltOutlined />, label: "知识图谱" },
     ],
   },
   {

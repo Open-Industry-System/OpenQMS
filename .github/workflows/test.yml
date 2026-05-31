@@ -1,0 +1,104 @@
+name: Test OpenQMS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: qms
+          POSTGRES_PASSWORD: qms_dev_2026
+          POSTGRES_DB: qms_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run manual tests
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+        run: |
+          cd backend
+          PYTHONPATH=. python app/test_schema.py
+          PYTHONPATH=. python app/test_spc_engine.py
+
+      - name: Run pytest suite
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+          TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms_test
+        run: |
+          cd backend
+          PYTHONPATH=. pytest tests/ -v --ignore=tests/test_graph_sync_worker.py --ignore=tests/test_graph_projection.py
+
+      - name: Run engine import checks
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+        run: |
+          cd backend
+          PYTHONPATH=. python -c "
+          engines = [
+              'app.services.spc_calculation_engine',
+              'app.services.aql_engine',
+              'app.services.grr_engine',
+              'app.services.bias_engine',
+              'app.services.linearity_engine',
+              'app.services.stability_engine',
+              'app.services.attribute_engine',
+              'app.services.diff_engine',
+          ]
+          for m in engines:
+              __import__(m)
+              print(f'{m}: OK')
+          print('All engine modules imported successfully')
+          "
+
+  frontend-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: TypeScript check
+        run: |
+          cd frontend
+          npx tsc --noEmit
+
+      - name: Build check
+        run: |
+          cd frontend
+          npm run build
