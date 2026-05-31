@@ -160,7 +160,7 @@ git commit -m "feat: JSONBRepository stats with AP distribution, high-risk nodes
             return records
 ```
 
-- [ ] **Step 2: 重写 `get_cross_fmea_stats` 补齐字段**
+- [ ] **Step 3: 重写 `get_cross_fmea_stats` 补齐字段**
 
 替换 `backend/app/graph/neo4j_repository.py` 中 `get_cross_fmea_stats` 方法（第 55-92 行）：
 
@@ -248,7 +248,7 @@ git commit -m "feat: JSONBRepository stats with AP distribution, high-risk nodes
             }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add backend/app/graph/neo4j_repository.py
@@ -529,6 +529,9 @@ const KnowledgeGraphPage: React.FC = () => {
     try {
       const data = await getCrossFmeaStats(currentProductLine);
       setStats(data);
+    } catch {
+      message.error("加载统计失败，请稍后重试");
+      setStats(null);
     } finally {
       setStatsLoading(false);
     }
@@ -543,6 +546,7 @@ const KnowledgeGraphPage: React.FC = () => {
     const trimmed = searchKeyword.trim();
     if (!trimmed || !currentProductLine) {
       setSearchResults([]);
+      setSearchLoading(false);
       return;
     }
     setSearchLoading(true);
@@ -555,6 +559,9 @@ const KnowledgeGraphPage: React.FC = () => {
           limit: 20,
         });
         setSearchResults(results);
+      } catch {
+        message.error("搜索失败，请稍后重试");
+        setSearchResults([]);
       } finally {
         setSearchLoading(false);
       }
@@ -995,7 +1002,9 @@ from app.api.graph import _repo
 
 
 class StubGraphRepo:
-    """确定性 stub，不依赖真实 PostgreSQL。"""
+    """确定性 stub，不依赖真实 PostgreSQL。
+    故意在返回中加入敏感字段，用于验证 ResponseModel 白名单过滤。
+    """
 
     async def get_cross_fmea_stats(self, product_line_code: str):
         return {
@@ -1011,12 +1020,16 @@ class StubGraphRepo:
                     "rpn": 360,
                     "fmea_id": "fmea-1",
                     "document_no": "PFMEA-2026-001",
+                    "created_by": " leaked-user-id ",
+                    "updated_by": " leaked-user-id ",
+                    "responsible": " leaked-name ",
                 }
             ],
             "avg_rpn": 180.0,
             "top_failure_modes": [
                 {"name": "焊接不良", "rpn": 360, "fmea_id": "fmea-1", "document_no": "PFMEA-2026-001"}
             ],
+            "secret_field": "should-be-filtered",
         }
 
     async def find_similar_nodes(self, node_type, name_keyword, product_line_code, limit=20):
@@ -1027,6 +1040,8 @@ class StubGraphRepo:
                 "type": "FailureMode",
                 "fmea_id": "fmea-1",
                 "document_no": "PFMEA-2026-001",
+                "created_by": " leaked-user-id ",
+                "responsible": " leaked-name ",
             }
         ]
 
@@ -1043,6 +1058,9 @@ async def _override_get_current_user():
         user_id="00000000-0000-0000-0000-000000000001",
         username="tester",
         display_name="测试员",
+        email="tester@openqms.local",
+        password_hash="hashed",
+        is_active=True,
         role="admin",
     )
 
@@ -1087,7 +1105,12 @@ async def test_graph_stats_response_has_whitelist_fields_only(client: AsyncClien
     assert "created_by" not in data
     assert "updated_by" not in data
     assert "approved_by" not in data
+    assert "secret_field" not in data
     assert "H" in data["ap_distribution"] and "M" in data["ap_distribution"] and "L" in data["ap_distribution"]
+    # high_ap_nodes 中敏感字段被 ResponseModel 过滤
+    first_node = data["high_ap_nodes"][0]
+    assert "responsible" not in first_node
+    assert "created_by" not in first_node
 
 
 @pytest.mark.asyncio
@@ -1100,10 +1123,13 @@ async def test_graph_similar_response_has_document_no(client: AsyncClient):
     data = resp.json()
     assert isinstance(data, list)
     assert len(data) > 0
-    assert "document_no" in data[0]
-    assert "node_id" in data[0]
-    assert "name" in data[0]
-    assert "created_by" not in data[0]
+    first = data[0]
+    assert "document_no" in first
+    assert "node_id" in first
+    assert "name" in first
+    # ResponseModel 白名单过滤
+    assert "created_by" not in first
+    assert "responsible" not in first
 ```
 
 - [ ] **Step 3: 运行测试**
