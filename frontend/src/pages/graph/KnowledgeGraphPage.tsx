@@ -151,7 +151,7 @@ export default function KnowledgeGraphPage() {
                 <Table
                   dataSource={stats.high_ap_nodes || []}
                   columns={riskColumns}
-                  rowKey={(r) => `${r.fmea_id}-${r.name}`}
+                  rowKey={(r) => `${r.fmea_id}-${r.node_id}`}
                   pagination={false}
                   size="small"
                 />
