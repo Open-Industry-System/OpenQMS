@@ -58,6 +58,10 @@ class JSONBRepository(FMEAGraphRepository):
     def _collect_failure_mode_rpn(self, graph_data: dict) -> list[dict]:
         """按 FMEARow 语义逐行计算每个 FailureMode 的 RPN/AP。
 
+        口径与前端 FMEA 编辑器表格一致：
+        - S 取第一个 FailureEffect 的 severity（edges 顺序中的第一个）
+        - O 取每个 FailureCause 的 occurrence
+        - D 优先取该 Cause 的第一个 DetectionControl，否则取 FailureMode 的第一个
         每行 = effect.severity × cause.occurrence × detection.detection
         取该 FailureMode 下所有真实行的最大 RPN 作为代表值。
         """
@@ -76,10 +80,12 @@ class JSONBRepository(FMEAGraphRepository):
             if tgt and etype:
                 in_edges.setdefault((tgt, etype), []).append(src)
 
-        def _max_detection(source_id: str) -> int:
+        def _first_detection(source_id: str) -> int:
+            """取 source 的第一个 DetectionControl 的 detection 值（与前端 detectionControlIds[0] 一致）。"""
             det_ids = out_edges.get((source_id, "DETECTED_BY"), [])
-            values = [node_map[did].get("detection", 0) or 0 for did in det_ids if did in node_map]
-            return max(values) if values else 0
+            first_id = det_ids[0] if det_ids else None
+            node = node_map.get(first_id) if first_id else None
+            return node.get("detection", 0) or 0 if node else 0
 
         results: list[dict] = []
         for node in nodes:
@@ -89,7 +95,7 @@ class JSONBRepository(FMEAGraphRepository):
             fm_id = node["id"]
             fm_name = node.get("name", "")
 
-            # Effect: frontend takes the first one
+            # S: 取第一个 FailureEffect 的 severity（与前端 effectEdges[0] 一致）
             effect_ids = out_edges.get((fm_id, "EFFECT_OF"), [])
             first_effect = node_map.get(effect_ids[0]) if effect_ids else None
             s = first_effect.get("severity", 0) or 0 if first_effect else 0
@@ -97,20 +103,27 @@ class JSONBRepository(FMEAGraphRepository):
             # Causes
             cause_ids = in_edges.get((fm_id, "CAUSE_OF"), [])
 
-            # Compute per-row RPN (effect × cause × detection), take max
+            # 按 (effect, cause, detection) 逐行计算 RPN，取最大真实行
             rows: list[tuple[int, int, int]] = []  # (o, d, rpn)
 
             if not cause_ids:
-                d = _max_detection(fm_id)
+                # 无 cause：O=0，D 取 fm 的第一个 detection
+                d = _first_detection(fm_id)
                 rows.append((0, d, 0))
             else:
                 for cause_id in cause_ids:
                     cause = node_map.get(cause_id)
                     o = cause.get("occurrence", 0) or 0 if cause else 0
-                    d = max(_max_detection(cause_id), _max_detection(fm_id))
+                    # D：优先取 cause 的第一个 detection，否则取 fm 的第一个
+                    # 与前端 findDetectionControls(causeId=xx) → [0] 一致
+                    cause_dets = out_edges.get((cause_id, "DETECTED_BY"), [])
+                    if cause_dets:
+                        d = _first_detection(cause_id)
+                    else:
+                        d = _first_detection(fm_id)
                     rows.append((o, d, s * o * d))
 
-            # Find row with max RPN
+            # 取最大 RPN 的真实行
             best = max(rows, key=lambda x: x[2]) if rows else (0, 0, 0)
             o_best, d_best, max_rpn = best
 
