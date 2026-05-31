@@ -75,18 +75,26 @@ class Neo4jRepository(FMEAGraphRepository):
                 """
                 MATCH (fm:GraphNode {type: 'FailureMode'}) WHERE fm.product_line_code = $pl
                 MATCH (d:FMEDocument) WHERE d.fmea_id = fm.fmea_id
-                OPTIONAL MATCH (fm)-[:EFFECT_OF]->(effect:GraphNode)
+                OPTIONAL MATCH (fm)-[re:EFFECT_OF]->(effect:GraphNode)
+                WITH fm, d, effect, re
+                   ORDER BY re.edge_index ASC
                 WITH fm, d, coalesce(head(collect(effect.severity)), 0) as s
-                OPTIONAL MATCH (cause:GraphNode)-[:CAUSE_OF]->(fm)
+                OPTIONAL MATCH (cause:GraphNode)-[rc:CAUSE_OF]->(fm)
+                WITH fm, d, s, cause, rc
+                   ORDER BY rc.edge_index ASC
                 WITH fm, d, s, collect(cause) as causes
                 UNWIND CASE WHEN size(causes) = 0 THEN [null] ELSE causes END as cause
                 WITH fm, d, s,
                      coalesce(cause.occurrence, 0) as o
-                OPTIONAL MATCH (cause)-[:DETECTED_BY]->(det_c:GraphNode)
+                OPTIONAL MATCH (cause)-[rdc:DETECTED_BY]->(det_c:GraphNode)
+                WITH fm, d, s, o, det_c, rdc
+                   ORDER BY rdc.edge_index ASC
                 WITH fm, d, s, o,
                      coalesce(head(collect(det_c.detection)), 0) as first_d_cause,
                      count(det_c) > 0 as has_cause_det
-                OPTIONAL MATCH (fm)-[:DETECTED_BY]->(det_f:GraphNode)
+                OPTIONAL MATCH (fm)-[rdf:DETECTED_BY]->(det_f:GraphNode)
+                WITH fm, d, s, o, first_d_cause, has_cause_det, det_f, rdf
+                   ORDER BY rdf.edge_index ASC
                 WITH fm, d, s, o, first_d_cause, has_cause_det,
                      coalesce(head(collect(det_f.detection)), 0) as first_d_fm
                 WITH fm, d, s, o,

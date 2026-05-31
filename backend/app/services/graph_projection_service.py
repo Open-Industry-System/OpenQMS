@@ -133,8 +133,9 @@ def build_cypher_sync(
         ))
 
     # Step 4: CREATE edges — MATCH by (fmea_id, node_id) for exact binding
+    # edge_index 保持原始顺序，Neo4j 查询 ORDER BY rel.edge_index 可稳定取第一条
     node_ids = {n["id"] for n in nodes if n.get("type") in ALLOWED_NODE_TYPES}
-    for edge in edges:
+    for edge_idx, edge in enumerate(edges):
         edge_type = edge.get("type", "")
         source = edge.get("source", "")
         target = edge.get("target", "")
@@ -148,8 +149,8 @@ def build_cypher_sync(
         statements.append((
             f"MATCH (s:GraphNode {{fmea_id: $fmea_id, node_id: $source}}), "
             f"(t:GraphNode {{fmea_id: $fmea_id, node_id: $target}}) "
-            f"CREATE (s)-[:{edge_type}]->(t)",
-            {"fmea_id": fmea_id, "source": source, "target": target},
+            f"CREATE (s)-[:{edge_type} {{edge_index: $edge_index}}]->(t)",
+            {"fmea_id": fmea_id, "source": source, "target": target, "edge_index": edge_idx},
         ))
 
     return statements
