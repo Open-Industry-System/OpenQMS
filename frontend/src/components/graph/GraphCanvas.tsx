@@ -168,8 +168,11 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.on("node:click", (evt) => {
       const h = handlersRef.current.onNodeClick;
       if (!h) return;
-      // @ts-expect-error G6 v5 item access
-      const nodeId = (evt.item as unknown as { id?: string })?.id;
+      const g6Evt = evt as unknown as {
+        target?: { id?: string };
+        item?: { id?: string };
+      };
+      const nodeId = g6Evt.target?.id ?? g6Evt.item?.id;
       const node = nodes.find((n) => n.id === nodeId);
       if (node) h(node);
     });
@@ -177,8 +180,11 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.on("node:dblclick", (evt) => {
       const h = handlersRef.current.onNodeDoubleClick;
       if (!h) return;
-      // @ts-expect-error G6 v5 item access
-      const nodeId = (evt.item as unknown as { id?: string })?.id;
+      const g6Evt = evt as unknown as {
+        target?: { id?: string };
+        item?: { id?: string };
+      };
+      const nodeId = g6Evt.target?.id ?? g6Evt.item?.id;
       const node = nodes.find((n) => n.id === nodeId);
       if (node) h(node);
     });
@@ -186,10 +192,14 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.on("node:contextmenu", (evt) => {
       const h = handlersRef.current.onNodeContextMenu;
       if (!h) return;
-      const originalEvent = (evt as unknown as { originalEvent?: MouseEvent }).originalEvent;
+      const g6Evt = evt as unknown as {
+        target?: { id?: string };
+        item?: { id?: string };
+        originalEvent?: MouseEvent;
+      };
+      const originalEvent = g6Evt.originalEvent;
       originalEvent?.preventDefault();
-      // @ts-expect-error G6 v5 item access
-      const nodeId = (evt.item as unknown as { id?: string })?.id;
+      const nodeId = g6Evt.target?.id ?? g6Evt.item?.id;
       const node = nodes.find((n) => n.id === nodeId);
       if (node && originalEvent) h(node, originalEvent);
     });
@@ -261,6 +271,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
         ]);
       });
     }
+    graph.draw();
   }, [highlightNodes, dimOthers]);
 
   useEffect(() => {
