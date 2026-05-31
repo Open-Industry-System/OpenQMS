@@ -1072,7 +1072,6 @@ import { getImpactChain, getCauseChain, normalizeGraphData } from "../../../api/
 在组件内部（约第 90 行附近，其他 state 定义之后）添加：
 
 ```typescript
-const [graphTabActive, setGraphTabActive] = useState(false);
 const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
 const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
 const [drawerVisible, setDrawerVisible] = useState(false);
@@ -1080,7 +1079,7 @@ const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
 const [highlightNodes, setHighlightNodes] = useState<string[]>([]);
 const [dimOthers, setDimOthers] = useState(false);
 const [graphLoading, setGraphLoading] = useState(false);
-const canvasRef = useRef<import("../../../components/graph").GraphCanvasRef>(null);
+const canvasRef = useRef<GraphCanvasRef>(null);
 
 // 右键菜单状态
 const [contextMenuOpen, setContextMenuOpen] = useState(false);
