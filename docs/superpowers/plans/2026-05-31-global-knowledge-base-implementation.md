@@ -455,7 +455,7 @@ git commit -m "feat: frontend graph API client"
 - [ ] **Step 1: 创建页面文件**
 
 ```tsx
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Card,
   Row,
@@ -980,15 +980,63 @@ async def test_jsonb_repository_stats_empty_sod_handling():
 创建 `backend/tests/test_graph_api.py`：
 
 ```python
+import os
+
+# 必须先设置 SECRET_KEY，否则 app.main 导入时会拒绝默认 secret
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-graph-api-tests")
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 from fastapi import status
 
 from app.main import app
 from app.core.deps import get_current_user
+from app.api.graph import _repo
 
 
-# 绕过 JWT 鉴权
+class StubGraphRepo:
+    """确定性 stub，不依赖真实 PostgreSQL。"""
+
+    async def get_cross_fmea_stats(self, product_line_code: str):
+        return {
+            "total_fmeas": 2,
+            "total_nodes": 10,
+            "node_type_distribution": {"FailureMode": 3, "Function": 2},
+            "ap_distribution": {"H": 1, "M": 1, "L": 0},
+            "high_ap_nodes": [
+                {
+                    "node_id": "n1",
+                    "name": "焊接不良",
+                    "ap": "H",
+                    "rpn": 360,
+                    "fmea_id": "fmea-1",
+                    "document_no": "PFMEA-2026-001",
+                }
+            ],
+            "avg_rpn": 180.0,
+            "top_failure_modes": [
+                {"name": "焊接不良", "rpn": 360, "fmea_id": "fmea-1", "document_no": "PFMEA-2026-001"}
+            ],
+        }
+
+    async def find_similar_nodes(self, node_type, name_keyword, product_line_code, limit=20):
+        return [
+            {
+                "node_id": "n1",
+                "name": "焊接不良",
+                "type": "FailureMode",
+                "fmea_id": "fmea-1",
+                "document_no": "PFMEA-2026-001",
+            }
+        ]
+
+    async def get_impact_chain(self, fmea_id, node_id):
+        return {"nodes": [], "edges": []}
+
+    async def get_cause_chain(self, fmea_id, node_id):
+        return {"nodes": [], "edges": []}
+
+
 async def _override_get_current_user():
     from app.models.user import User
     return User(
@@ -999,15 +1047,21 @@ async def _override_get_current_user():
     )
 
 
-app.dependency_overrides[get_current_user] = _override_get_current_user
+async def _override_repo():
+    return StubGraphRepo()
 
 
 @pytest.fixture
 async def client():
-    """基于 ASGI transport 的测试客户端。"""
+    """基于 ASGI transport 的测试客户端，注入 stub repo 和 mock user。"""
+    app.dependency_overrides[get_current_user] = _override_get_current_user
+    app.dependency_overrides[_repo] = _override_repo
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
@@ -1027,15 +1081,12 @@ async def test_graph_stats_response_has_whitelist_fields_only(client: AsyncClien
     assert resp.status_code == status.HTTP_200_OK
     data = resp.json()
 
-    # 必须含白名单字段
     assert "total_fmeas" in data
     assert "ap_distribution" in data
     assert "high_ap_nodes" in data
-    # 必须不含敏感字段
     assert "created_by" not in data
     assert "updated_by" not in data
     assert "approved_by" not in data
-    # ap_distribution 含全键
     assert "H" in data["ap_distribution"] and "M" in data["ap_distribution"] and "L" in data["ap_distribution"]
 
 
@@ -1048,13 +1099,11 @@ async def test_graph_similar_response_has_document_no(client: AsyncClient):
     assert resp.status_code == status.HTTP_200_OK
     data = resp.json()
     assert isinstance(data, list)
-    # 空结果也是合法情况，但每个元素必须含 document_no
-    for item in data:
-        assert "document_no" in item
-        assert "node_id" in item
-        assert "name" in item
-        # 敏感字段必须不存在
-        assert "created_by" not in item
+    assert len(data) > 0
+    assert "document_no" in data[0]
+    assert "node_id" in data[0]
+    assert "name" in data[0]
+    assert "created_by" not in data[0]
 ```
 
 - [ ] **Step 3: 运行测试**
