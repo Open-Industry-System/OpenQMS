@@ -24,7 +24,7 @@
 | 文件 | 职责 |
 |------|------|
 | `backend/app/graph/jsonb_repository.py` | 补齐 `get_cross_fmea_stats` / `find_similar_nodes` 字段；复用 `compute_ap` |
-| `backend/app/graph/neo4j_repository.py` | 补齐 `get_cross_fmea_stats` 字段；FMEDocument JOIN 获取 `document_no` |
+| `backend/app/graph/neo4j_repository.py` | 补齐 `get_cross_fmea_stats` / `find_similar_nodes` 字段；FMEDocument JOIN 获取 `document_no` |
 | `backend/app/api/graph.py` | 添加 Pydantic 白名单 ResponseModel；产品线空值拦截 |
 | `frontend/src/App.tsx` | 注册 `/knowledge-graph` 路由 |
 | `frontend/src/components/layout/AppLayout.tsx` | 导航菜单添加"知识图谱"入口 |
@@ -522,7 +522,6 @@ const KnowledgeGraphPage: React.FC = () => {
   const [searchType, setSearchType] = useState("FailureMode");
   const [searchResults, setSearchResults] = useState<SimilarNode[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchStats = useCallback(async () => {
     if (!currentProductLine) return;
@@ -539,28 +538,29 @@ const KnowledgeGraphPage: React.FC = () => {
     fetchStats();
   }, [fetchStats]);
 
-  const doSearch = useCallback(async () => {
-    if (!searchKeyword.trim() || !currentProductLine) return;
-    setSearchLoading(true);
-    try {
-      const results = await searchSimilarNodes({
-        node_type: searchType,
-        name_keyword: searchKeyword.trim(),
-        product_line_code: currentProductLine,
-        limit: 20,
-      });
-      setSearchResults(results);
-    } finally {
-      setSearchLoading(false);
+  // 搜索防抖：监听 keyword/type/productLine 变化，300ms 后自动触发
+  useEffect(() => {
+    const trimmed = searchKeyword.trim();
+    if (!trimmed || !currentProductLine) {
+      setSearchResults([]);
+      return;
     }
-  }, [searchKeyword, searchType, currentProductLine]);
-
-  const handleSearch = () => {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => {
-      doSearch();
+    setSearchLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchSimilarNodes({
+          node_type: searchType,
+          name_keyword: trimmed,
+          product_line_code: currentProductLine,
+          limit: 20,
+        });
+        setSearchResults(results);
+      } finally {
+        setSearchLoading(false);
+      }
     }, 300);
-  };
+    return () => clearTimeout(timer);
+  }, [searchKeyword, searchType, currentProductLine]);
 
   const handleViewGraph = (fmeaId: string, nodeId?: string) => {
     if (nodeId) {
@@ -650,18 +650,27 @@ const KnowledgeGraphPage: React.FC = () => {
             ))}
           </Select>
           <Input
-            placeholder="输入节点名称关键词"
+            placeholder="输入节点名称关键词（自动搜索）"
             value={searchKeyword}
-            onChange={(e) => {
-              setSearchKeyword(e.target.value);
-              if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-              searchDebounceRef.current = setTimeout(() => {
-                doSearch();
-              }, 300);
-            }}
-            onPressEnter={handleSearch}
+            onChange={(e) => setSearchKeyword(e.target.value)}
+            allowClear
           />
-          <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
+          <Button
+            type="primary"
+            icon={<SearchOutlined />}
+            onClick={() => {
+              const trimmed = searchKeyword.trim();
+              if (trimmed && currentProductLine) {
+                setSearchLoading(true);
+                searchSimilarNodes({
+                  node_type: searchType,
+                  name_keyword: trimmed,
+                  product_line_code: currentProductLine,
+                  limit: 20,
+                }).then(setSearchResults).finally(() => setSearchLoading(false));
+              }
+            }}
+          >
             搜索
           </Button>
         </Space.Compact>
@@ -703,7 +712,7 @@ const KnowledgeGraphPage: React.FC = () => {
       <Card title="高风险节点 (AP = H)" style={{ marginBottom: 24 }}>
         <Table
           dataSource={stats?.high_ap_nodes || []}
-          rowKey="node_id"
+          rowKey={(record) => `${record.fmea_id}-${record.node_id}`}
           loading={statsLoading}
           size="small"
           pagination={{ pageSize: 10 }}
@@ -865,8 +874,9 @@ git commit -m "feat: register /knowledge-graph route, sidebar menu, and navigati
 创建 `backend/tests/test_graph_repository.py`：
 
 ```python
+import types
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from app.graph.jsonb_repository import JSONBRepository
 from app.state_machines.fmea_state import compute_ap
 
@@ -886,72 +896,83 @@ def test_compute_ap_consistency_with_frontend_matrix():
     assert compute_ap(3, 8, 4) == "L"
 
 
+def _make_mock_fmea(**kwargs):
+    """用 SimpleNamespace 构建稳定的 mock FMEA 对象，避免 AsyncMock 属性漂移。"""
+    return types.SimpleNamespace(**kwargs)
+
+
 @pytest.mark.asyncio
 async def test_jsonb_repository_stats_field_structure():
     """验证 JSONBRepository stats 返回字段结构完整且 ap_distribution 含全键。"""
+    mock_fmea = _make_mock_fmea(
+        fmea_id="test-fmea-id",
+        document_no="PFMEA-2026-001",
+        graph_data={
+            "nodes": [
+                {"id": "n1", "type": "FailureMode", "name": "焊接不良", "severity": 9, "occurrence": 8, "detection": 5},
+                {"id": "n2", "type": "FailureMode", "name": "虚焊", "severity": 7, "occurrence": 4, "detection": 3},
+                {"id": "n3", "type": "Function", "name": "导电功能"},
+            ],
+            "edges": []
+        },
+    )
+
+    # SQLAlchemy result.scalars().all() 是同步链，用 MagicMock
+    result_mock = MagicMock()
+    result_mock.scalars.return_value.all.return_value = [mock_fmea]
+
     mock_db = AsyncMock()
-    mock_fmea = AsyncMock()
-    mock_fmea.fmea_id = "test-fmea-id"
-    mock_fmea.document_no = "PFMEA-2026-001"
-    mock_fmea.graph_data = {
-        "nodes": [
-            {"id": "n1", "type": "FailureMode", "name": "焊接不良", "severity": 9, "occurrence": 8, "detection": 5},
-            {"id": "n2", "type": "FailureMode", "name": "虚焊", "severity": 7, "occurrence": 4, "detection": 3},
-            {"id": "n3", "type": "Function", "name": "导电功能"},
-        ],
-        "edges": []
-    }
-    mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_fmea]
+    mock_db.execute.return_value = result_mock
 
     repo = JSONBRepository(mock_db)
-    result = await repo.get_cross_fmea_stats("DC-DC-100")
+    data = await repo.get_cross_fmea_stats("DC-DC-100")
 
-    assert "total_fmeas" in result
-    assert "total_nodes" in result
-    assert "node_type_distribution" in result
-    assert "ap_distribution" in result
-    assert "high_ap_nodes" in result
-    assert "avg_rpn" in result
-    assert "top_failure_modes" in result
+    assert "total_fmeas" in data
+    assert "total_nodes" in data
+    assert "node_type_distribution" in data
+    assert "ap_distribution" in data
+    assert "high_ap_nodes" in data
+    assert "avg_rpn" in data
+    assert "top_failure_modes" in data
 
     # ap_distribution 必须含全键
-    ap = result["ap_distribution"]
-    assert "H" in ap and "M" in ap and "L" in ap
-    assert ap["H"] + ap["M"] + ap["L"] == 2  # 两个 FailureMode 都有效
+    ap = data["ap_distribution"]
+    assert ap == {"H": 1, "M": 1, "L": 0}  # n1=H, n2=M
 
     # high_ap_nodes 按 RPN 降序
-    if result["high_ap_nodes"]:
-        rpns = [n["rpn"] for n in result["high_ap_nodes"]]
-        assert rpns == sorted(rpns, reverse=True)
+    rpns = [n["rpn"] for n in data["high_ap_nodes"]]
+    assert rpns == sorted(rpns, reverse=True)
 
     # top_failure_modes 含 document_no
-    if result["top_failure_modes"]:
-        assert "document_no" in result["top_failure_modes"][0]
+    assert data["top_failure_modes"][0]["document_no"] == "PFMEA-2026-001"
 
 
 @pytest.mark.asyncio
 async def test_jsonb_repository_stats_empty_sod_handling():
     """验证空 S/O/D 时跳过 AP 计算、RPN=0。"""
+    mock_fmea = _make_mock_fmea(
+        fmea_id="test-fmea-id",
+        document_no="PFMEA-2026-001",
+        graph_data={
+            "nodes": [
+                {"id": "n1", "type": "FailureMode", "name": "无数据", "severity": 0, "occurrence": 0, "detection": 0},
+            ],
+            "edges": []
+        },
+    )
+
+    result_mock = MagicMock()
+    result_mock.scalars.return_value.all.return_value = [mock_fmea]
+
     mock_db = AsyncMock()
-    mock_fmea = AsyncMock()
-    mock_fmea.fmea_id = "test-fmea-id"
-    mock_fmea.document_no = "PFMEA-2026-001"
-    mock_fmea.graph_data = {
-        "nodes": [
-            {"id": "n1", "type": "FailureMode", "name": "无数据", "severity": 0, "occurrence": 0, "detection": 0},
-        ],
-        "edges": []
-    }
-    mock_db.execute.return_value.scalars.return_value.all.return_value = [mock_fmea]
+    mock_db.execute.return_value = result_mock
 
     repo = JSONBRepository(mock_db)
-    result = await repo.get_cross_fmea_stats("DC-DC-100")
+    data = await repo.get_cross_fmea_stats("DC-DC-100")
 
-    assert result["ap_distribution"]["H"] == 0
-    assert result["ap_distribution"]["M"] == 0
-    assert result["ap_distribution"]["L"] == 0
-    assert result["avg_rpn"] == 0
-    assert result["high_ap_nodes"] == []
+    assert data["ap_distribution"] == {"H": 0, "M": 0, "L": 0}
+    assert data["avg_rpn"] == 0
+    assert data["high_ap_nodes"] == []
 ```
 
 - [ ] **Step 2: 创建 API 层测试**
@@ -960,18 +981,41 @@ async def test_jsonb_repository_stats_empty_sod_handling():
 
 ```python
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from fastapi import status
+
+from app.main import app
+from app.core.deps import get_current_user
+
+
+# 绕过 JWT 鉴权
+async def _override_get_current_user():
+    from app.models.user import User
+    return User(
+        user_id="00000000-0000-0000-0000-000000000001",
+        username="tester",
+        display_name="测试员",
+        role="admin",
+    )
+
+
+app.dependency_overrides[get_current_user] = _override_get_current_user
+
+
+@pytest.fixture
+async def client():
+    """基于 ASGI transport 的测试客户端。"""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
 
 
 @pytest.mark.asyncio
 async def test_graph_stats_product_line_required(client: AsyncClient):
     """验证 product_line_code 缺失或纯空白返回 422。"""
-    # 缺失参数
     resp = await client.get("/api/graph/stats")
     assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
-    # 纯空白
     resp = await client.get("/api/graph/stats?product_line_code=%20%20%20")
     assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
@@ -980,18 +1024,19 @@ async def test_graph_stats_product_line_required(client: AsyncClient):
 async def test_graph_stats_response_has_whitelist_fields_only(client: AsyncClient):
     """验证 stats 响应仅含白名单字段，无敏感字段外泄。"""
     resp = await client.get("/api/graph/stats?product_line_code=DC-DC-100")
-    if resp.status_code == status.HTTP_200_OK:
-        data = resp.json()
-        # 必须含白名单字段
-        assert "total_fmeas" in data
-        assert "ap_distribution" in data
-        assert "high_ap_nodes" in data
-        # 必须不含敏感字段
-        assert "created_by" not in data
-        assert "updated_by" not in data
-        assert "approved_by" not in data
-        # ap_distribution 含全键
-        assert "H" in data["ap_distribution"] and "M" in data["ap_distribution"] and "L" in data["ap_distribution"]
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+
+    # 必须含白名单字段
+    assert "total_fmeas" in data
+    assert "ap_distribution" in data
+    assert "high_ap_nodes" in data
+    # 必须不含敏感字段
+    assert "created_by" not in data
+    assert "updated_by" not in data
+    assert "approved_by" not in data
+    # ap_distribution 含全键
+    assert "H" in data["ap_distribution"] and "M" in data["ap_distribution"] and "L" in data["ap_distribution"]
 
 
 @pytest.mark.asyncio
@@ -1000,14 +1045,16 @@ async def test_graph_similar_response_has_document_no(client: AsyncClient):
     resp = await client.get(
         "/api/graph/similar?node_type=FailureMode&name_keyword=焊&product_line_code=DC-DC-100"
     )
-    if resp.status_code == status.HTTP_200_OK:
-        data = resp.json()
-        if isinstance(data, list) and len(data) > 0:
-            assert "document_no" in data[0]
-            assert "node_id" in data[0]
-            assert "name" in data[0]
-            # 敏感字段必须不存在
-            assert "created_by" not in data[0]
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+    assert isinstance(data, list)
+    # 空结果也是合法情况，但每个元素必须含 document_no
+    for item in data:
+        assert "document_no" in item
+        assert "node_id" in item
+        assert "name" in item
+        # 敏感字段必须不存在
+        assert "created_by" not in item
 ```
 
 - [ ] **Step 3: 运行测试**
@@ -1028,7 +1075,7 @@ npm run build
 
 Expected: `tsc --noEmit` 通过，vite build 成功，无 TypeScript 错误。
 
-- [ ] **Step 4: 后端启动检查**
+- [ ] **Step 5: 后端启动检查**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
@@ -1037,7 +1084,7 @@ python -c "from app.state_machines.fmea_state import compute_ap; print(compute_a
 
 Expected: 输出 `H`。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/tests/test_graph_repository.py backend/tests/test_graph_api.py
