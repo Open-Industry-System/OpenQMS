@@ -256,6 +256,234 @@ async def link_fmea(
     return capa
 
 
+def get_d7_recommendations(
+    capa_data: dict,
+    fmea_docs: list[dict],
+    allowed_product_lines: list[str] | None = None,
+) -> list[dict]:
+    """Compute D7 FMEA recommendations for a CAPA.
+
+    Args:
+        capa_data: dict with fmea_ref_id, fmea_node_id, d4_root_cause, d5_correction, product_line_code
+        fmea_docs: list of dicts with fmea_id, document_no, graph_data (already filtered by product line)
+        allowed_product_lines: user's accessible product line codes
+
+    Returns:
+        List of recommendation dicts matching D7Recommendation schema.
+    """
+    from app.utils.text import extract_keywords
+
+    recommendations: list[dict] = []
+
+    # Split into linked FMEA and other FMEAs
+    linked_fmea_id = capa_data.get("fmea_ref_id")
+    linked_fmea = None
+    other_fmeas = []
+
+    for doc in fmea_docs:
+        if doc["fmea_id"] == linked_fmea_id:
+            linked_fmea = doc
+        else:
+            other_fmeas.append(doc)
+
+    # --- Linked matching ---
+    if linked_fmea and linked_fmea.get("graph_data"):
+        graph = linked_fmea["graph_data"]
+        node_map = {n["id"]: n for n in graph.get("nodes", [])}
+        edges = graph.get("edges", [])
+
+        # Build reverse index: target -> list of (source, edge_type)
+        reverse_edges: dict[str, list[tuple[str, str]]] = {}
+        for e in edges:
+            reverse_edges.setdefault(e["target"], []).append((e["source"], e["type"]))
+
+        # Build forward index: source -> list of (target, edge_type)
+        forward_edges: dict[str, list[tuple[str, str]]] = {}
+        for e in edges:
+            forward_edges.setdefault(e["source"], []).append((e["target"], e["type"]))
+
+        target_node_id = capa_data.get("fmea_node_id")
+        target_node = node_map.get(target_node_id) if target_node_id else None
+
+        failure_mode_ids: list[str] = []
+
+        if target_node:
+            if target_node["type"] == "FailureCause":
+                # Find parent FailureMode via CAUSE_OF forward (FailureCause -> FailureMode)
+                for tgt, etype in forward_edges.get(target_node_id, []):
+                    if etype == "CAUSE_OF" and node_map.get(tgt, {}).get("type") == "FailureMode":
+                        failure_mode_ids.append(tgt)
+            elif target_node["type"] == "FailureMode":
+                failure_mode_ids.append(target_node_id)
+            else:
+                # Function or other type: find FailureModes via HAS_FAILURE_MODE
+                for tgt, etype in forward_edges.get(target_node_id, []):
+                    if etype == "HAS_FAILURE_MODE" and node_map.get(tgt, {}).get("type") == "FailureMode":
+                        failure_mode_ids.append(tgt)
+        else:
+            # No specific node: find FailureModes matching D4 keywords
+            keywords = extract_keywords(capa_data.get("d4_root_cause", ""))
+            for n in graph.get("nodes", []):
+                if n.get("type") == "FailureMode":
+                    name = n.get("name", "")
+                    if any(kw in name or name in kw for kw in keywords):
+                        failure_mode_ids.append(n["id"])
+
+        # For each FailureMode, find FailureCauses and PreventionControls
+        for fm_id in failure_mode_ids:
+            fm_node = node_map.get(fm_id)
+            if not fm_node:
+                continue
+
+            # Find FailureCauses via CAUSE_OF reverse (FailureCause --CAUSE_OF--> FailureMode)
+            cause_ids = []
+            for src, etype in reverse_edges.get(fm_id, []):
+                if etype == "CAUSE_OF" and node_map.get(src, {}).get("type") == "FailureCause":
+                    cause_ids.append(src)
+
+            if not cause_ids:
+                # No FailureCause -- skip (linked matching filters these out)
+                continue
+
+            for cause_id in cause_ids:
+                cause_node = node_map.get(cause_id)
+                # Find PreventionControl via PREVENTED_BY forward
+                control_id = None
+                control_name = None
+                for tgt, etype in forward_edges.get(cause_id, []):
+                    if etype == "PREVENTED_BY" and node_map.get(tgt, {}).get("type") == "PreventionControl":
+                        control_id = tgt
+                        control_name = node_map[tgt].get("name")
+                        break
+
+                recommendations.append({
+                    "fmea_id": linked_fmea["fmea_id"],
+                    "fmea_document_no": linked_fmea["document_no"],
+                    "failure_mode_node_id": fm_id,
+                    "failure_mode_name": fm_node.get("name", ""),
+                    "failure_cause_node_id": cause_id,
+                    "failure_cause_name": cause_node.get("name", "") if cause_node else None,
+                    "prevention_control_node_id": control_id,
+                    "prevention_control_name": control_name,
+                    "match_source": "linked",
+                    "match_reason": "关联FMEA失效模式",
+                    "related_d4_keywords": extract_keywords(capa_data.get("d4_root_cause", "")),
+                    "suggested_prevention": capa_data.get("d5_correction"),
+                })
+
+    # --- Keyword matching (other FMEAs) ---
+    keywords = extract_keywords(capa_data.get("d4_root_cause", ""))
+    if keywords and other_fmeas:
+        seen_keys: set[str] = set()
+        # Exclude already-added linked recommendations
+        for r in recommendations:
+            seen_keys.add(f"{r['fmea_id']}_{r['failure_mode_node_id']}")
+
+        keyword_results: list[tuple[int, dict]] = []  # (match_count, rec)
+
+        for doc in other_fmeas:
+            # product_line filtering already done at query level
+            graph = doc.get("graph_data")
+            if not graph:
+                continue
+
+            node_map = {n["id"]: n for n in graph.get("nodes", [])}
+            edges = graph.get("edges", [])
+
+            reverse_edges_kw: dict[str, list[tuple[str, str]]] = {}
+            for e in edges:
+                reverse_edges_kw.setdefault(e["target"], []).append((e["source"], e["type"]))
+
+            forward_edges_kw: dict[str, list[tuple[str, str]]] = {}
+            for e in edges:
+                forward_edges_kw.setdefault(e["source"], []).append((e["target"], e["type"]))
+
+            # Pre-index FailureCause names+descriptions per FailureMode for broader keyword matching
+            fm_cause_texts: dict[str, list[str]] = {}  # fm_id -> [cause_name, cause_desc, ...]
+            for e in edges:
+                if e["type"] == "CAUSE_OF":
+                    cause_node = node_map.get(e["source"])
+                    if cause_node and cause_node.get("type") == "FailureCause":
+                        texts = [cause_node.get("name", "")]
+                        if cause_node.get("description"):
+                            texts.append(cause_node["description"])
+                        fm_cause_texts.setdefault(e["target"], []).extend(texts)
+
+            for n in graph.get("nodes", []):
+                if n.get("type") != "FailureMode":
+                    continue
+
+                # Match against FailureMode name/description AND its FailureCause name/description
+                all_text = [n.get("name", "")]
+                if n.get("description"):
+                    all_text.append(n["description"])
+                all_text.extend(fm_cause_texts.get(n["id"], []))
+                matched_kws = [kw for kw in keywords if any(kw in t or t in kw for t in all_text)]
+                if not matched_kws:
+                    continue
+
+                dedup_key = f"{doc['fmea_id']}_{n['id']}"
+                if dedup_key in seen_keys:
+                    continue
+                seen_keys.add(dedup_key)
+
+                # Find FailureCauses
+                cause_ids = []
+                for src, etype in reverse_edges_kw.get(n["id"], []):
+                    if etype == "CAUSE_OF" and node_map.get(src, {}).get("type") == "FailureCause":
+                        cause_ids.append(src)
+
+                if not cause_ids:
+                    # No FailureCause -- include with null cause/control, disable auto-fill
+                    keyword_results.append((len(matched_kws), {
+                        "fmea_id": doc["fmea_id"],
+                        "fmea_document_no": doc["document_no"],
+                        "failure_mode_node_id": n["id"],
+                        "failure_mode_name": n.get("name", ""),
+                        "failure_cause_node_id": None,
+                        "failure_cause_name": None,
+                        "prevention_control_node_id": None,
+                        "prevention_control_name": None,
+                        "match_source": "keyword",
+                        "match_reason": f"关键词匹配: {', '.join(matched_kws)}",
+                        "related_d4_keywords": matched_kws,
+                        "suggested_prevention": capa_data.get("d5_correction"),
+                    }))
+                    continue
+
+                for cause_id in cause_ids:
+                    cause_node = node_map.get(cause_id)
+                    control_id = None
+                    control_name = None
+                    for tgt, etype in forward_edges_kw.get(cause_id, []):
+                        if etype == "PREVENTED_BY" and node_map.get(tgt, {}).get("type") == "PreventionControl":
+                            control_id = tgt
+                            control_name = node_map[tgt].get("name")
+                            break
+
+                    keyword_results.append((len(matched_kws), {
+                        "fmea_id": doc["fmea_id"],
+                        "fmea_document_no": doc["document_no"],
+                        "failure_mode_node_id": n["id"],
+                        "failure_mode_name": n.get("name", ""),
+                        "failure_cause_node_id": cause_id,
+                        "failure_cause_name": cause_node.get("name", "") if cause_node else None,
+                        "prevention_control_node_id": control_id,
+                        "prevention_control_name": control_name,
+                        "match_source": "keyword",
+                        "match_reason": f"关键词匹配: {', '.join(matched_kws)}",
+                        "related_d4_keywords": matched_kws,
+                        "suggested_prevention": capa_data.get("d5_correction"),
+                    }))
+
+        # Sort by match count descending, take top 5
+        keyword_results.sort(key=lambda x: x[0], reverse=True)
+        for _, rec in keyword_results[:5]:
+            recommendations.append(rec)
+
+    return recommendations
+
+
 async def get_capas_by_fmea_node(
     db: AsyncSession, fmea_id: str, fmea_node_id: str | None = None
 ) -> list[dict]:
