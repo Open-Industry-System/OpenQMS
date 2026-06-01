@@ -169,7 +169,6 @@ export default function AppLayout() {
         trigger={null}
         collapsible
         collapsed={collapsed}
-        style={{ background: themeToken.colorBgContainer }}
       >
         <div
           style={{
@@ -202,11 +201,9 @@ export default function AppLayout() {
         <Header
           style={{
             padding: "0 24px",
-            background: themeToken.colorBgContainer,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            borderBottom: `1px solid ${themeToken.colorBorderSecondary}`,
           }}
         >
           <Button
