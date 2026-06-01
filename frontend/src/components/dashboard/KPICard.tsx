@@ -1,4 +1,5 @@
 import { Card, Statistic, Skeleton, Typography, theme } from "antd";
+import type { GlobalToken } from "antd/es/theme/interface";
 import type { ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
 
@@ -17,24 +18,15 @@ interface KPICardProps {
   disabled?: boolean;
 }
 
-// Use token-based colors instead of hardcoded values
-const getStatusBorderColor = (status: KPIStatus, token: Record<string, string>): string => {
-  const map: Record<KPIStatus, string> = {
-    success: token.colorSuccess || "#10b981",
-    warning: token.colorWarning || "#f59e0b",
-    danger: token.colorError || "#ef4444",
-  };
-  return map[status];
+const statusColorKey: Record<KPIStatus, keyof GlobalToken> = {
+  success: "colorSuccess",
+  warning: "colorWarning",
+  danger: "colorError",
 };
 
-const getStatusColor = (status: KPIStatus, token: Record<string, string>): string => {
-  const map: Record<KPIStatus, string> = {
-    success: token.colorSuccess || "#10b981",
-    warning: token.colorWarning || "#f59e0b",
-    danger: token.colorError || "#ef4444",
-  };
-  return map[status];
-};
+function getStatusColor(status: KPIStatus, token: GlobalToken): string {
+  return token[statusColorKey[status]] as string;
+}
 
 export default function KPICard({
   title,
@@ -76,7 +68,7 @@ export default function KPICard({
 
   const borderColor = loading || error
     ? token.colorBorderSecondary
-    : getStatusBorderColor(status, token as unknown as Record<string, string>);
+    : getStatusColor(status, token);
 
   const focusOutlineColor = token.colorPrimary;
 
@@ -202,7 +194,7 @@ export default function KPICard({
               marginLeft: 12,
               color: loading || error
                 ? token.colorTextDisabled
-                : getStatusColor(status, token as unknown as Record<string, string>) ?? token.colorTextSecondary,
+                : getStatusColor(status, token) ?? token.colorTextSecondary,
               fontSize: 24,
               lineHeight: 1,
               flexShrink: 0,
