@@ -66,6 +66,15 @@ async def lifespan(app: FastAPI):
                 # Rollback failed transaction and skip admin creation
                 await db.rollback()
                 print("WARNING: role_definitions table not found. Run 'alembic upgrade head' and seed before using the permission system.")
+
+    # Initialize LLM provider (non-fatal)
+    from app.services.llm_provider import create_llm_provider
+    import logging as _logging
+    try:
+        app.state.llm_provider = create_llm_provider()
+    except Exception as e:
+        _logging.getLogger(__name__).warning("LLM provider init failed: %s", e)
+        app.state.llm_provider = None
     yield
 
 
