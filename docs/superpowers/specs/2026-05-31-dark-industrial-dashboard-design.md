@@ -1,7 +1,7 @@
 # OpenQMS 深色主题仪表盘设计
 
 **创建日期**: 2026-05-31
-**修订**: v4 — 统一命名、修复对比度、逐组件状态矩阵、首屏 JS 总量预算
+**修订**: v5 — 非目标声明、小屏折叠规则、Lighthouse/Playwright 验证计划
 **状态**: 待实现
 
 ---
@@ -28,6 +28,13 @@
 ### 1.3 深色主题不是装饰
 
 深色主题的理由是**减少长时间使用的眼睛疲劳**和**让状态色（红/黄/绿）在低亮度环境中更突出**。不是为了"科技感"。移除所有纯装饰元素：网格纹理、发光边框、数字滚动动画、卡片入场动画。
+
+### 1.4 非目标（本轮不实现）
+
+| 非目标 | 原因 | 后续路径 |
+|--------|------|---------|
+| 浅色主题 / 主题切换 | 降低范围，避免每个 token、图表、状态色变成双路径验证 | 所有颜色已通过 `theme.useToken()` 获取，后续只需增加一组 token + 切换入口 |
+| 仪表盘自定义布局 | 用户自定义拖拽卡片超出本轮范围 | 信息架构已按优先级固定，后续可加配置 |
 
 ---
 
@@ -403,6 +410,22 @@ token: {
 - 桌面：展开 220px，可折叠至 80px
 - 平板/手机：默认折叠，点击展开为 overlay
 
+### 11.3 小屏区块优先级与折叠规则
+
+为避免 P2/P3 区块在小屏上挤压 P0/P1，按以下规则处理：
+
+| 区块 | 优先级 | 平板（768-1023px） | 手机（<768px） |
+|------|--------|-------------------|---------------|
+| KPI 指标卡 | P0 | 正常显示（2 列） | 正常显示（1 列） |
+| 待处置事项 | P1 | 正常显示 | 正常显示 |
+| 最近操作 | P2 | 正常显示 | **默认折叠**，点击展开 |
+| 快速入口 | P3 | 正常显示 | **默认折叠**，点击展开 |
+
+**折叠交互：**
+- 折叠时显示区块标题 + 展开箭头（`DownOutlined`）
+- 展开时显示完整内容 + 收起箭头（`UpOutlined`）
+- viewer 角色在手机端不显示快速入口折叠项（直接隐藏）
+
 ---
 
 ## 12. 实现计划
@@ -452,3 +475,65 @@ token: {
 | 性能 | 首屏 TTI ≤ 2s，首屏 JS 总量 ≤ 300KB gzipped，dark theme 增量 ≤ 5KB，API ≤ 3 |
 | 功能完整 | 现有功能无回归 |
 | 动画 | 默认关闭（reduced-motion），开启时使用 AntD Motion Token |
+
+---
+
+## 14. 实现后验证计划
+
+实现完成后，使用以下工具验证验收标准：
+
+### 14.1 Lighthouse 验证
+
+| 指标 | 目标 | 验证方法 |
+|------|------|---------|
+| Performance | ≥ 90 | `lighthouse http://localhost:5173/dashboard --view` |
+| 首屏 JS 总量 | ≤ 300KB gzipped | Lighthouse "Reduce unused JavaScript" + Network 面板 |
+| TTI | ≤ 2s | Lighthouse Treo 或 WebPageTest |
+| 对比度 | 全部通过 | Lighthouse "Color contrast is satisfactory" |
+
+### 14.2 Playwright 自动化验证
+
+```typescript
+// 键盘路径验证
+test('KPI cards are keyboard navigable', async ({ page }) => {
+  await page.goto('/dashboard');
+  await page.keyboard.press('Tab');
+  // 第一个 KPI 卡片获得焦点
+  await expect(page.locator('.kpi-card').first()).toBeFocused();
+  await page.keyboard.press('Enter');
+  // 导航到对应页面
+  expect(page.url()).toContain('/capa');
+});
+
+// reduced-motion 验证
+test('respects prefers-reduced-motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/dashboard');
+  // 验证所有 transition 为 0s
+  const transitions = await page.evaluate(() =>
+    getComputedStyle(document.body).transitionDuration
+  );
+  expect(transitions).toBe('0s');
+});
+
+// API 请求数验证
+test('dashboard loads with ≤ 3 API calls', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', req => {
+    if (req.url().includes('/api/')) requests.push(req.url());
+  });
+  await page.goto('/dashboard');
+  await page.waitForLoadState('networkidle');
+  expect(requests.length).toBeLessThanOrEqual(3);
+});
+```
+
+### 14.3 手动验证清单
+
+| 检查项 | 方法 |
+|--------|------|
+| 键盘 Tab 顺序 | 逐个 Tab 遍历所有可交互元素 |
+| 屏幕阅读器 | VoiceOver（Mac）读出 KPI 和列表内容 |
+| 对比度 | Chrome DevTools → Accessibility 面板 |
+| 响应式 | Chrome DevTools 切换 768px / 1024px / 1280px |
+| 状态色不依赖颜色 | 灰度模式下仍可区分正常/警告/危险 |
