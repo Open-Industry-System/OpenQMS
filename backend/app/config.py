@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     NEO4J_DATABASE: str = "neo4j"
     GRAPH_REPOSITORY: str = "jsonb"  # "jsonb" or "neo4j"
 
+    # LLM 推荐（可选，未设置则纯规则引擎模式）
+    LLM_PROVIDER: str = ""       # claude | openai | local | 留空=纯规则
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = ""          # 各 provider 有内部默认值
+    LLM_BASE_URL: str = ""       # 仅 local 模式
+    LLM_TIMEOUT: int = 5         # 超时秒数
+
     model_config = {"env_file": ".env"}
 
     @field_validator("SECRET_KEY")
