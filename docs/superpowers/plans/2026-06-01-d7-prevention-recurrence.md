@@ -698,21 +698,26 @@ def get_d7_recommendations(
             for e in edges:
                 forward_edges_kw.setdefault(e["source"], []).append((e["target"], e["type"]))
 
-            # Pre-index FailureCause names per FailureMode for broader keyword matching
-            fm_cause_names: dict[str, list[str]] = {}  # fm_id -> [cause_name, ...]
+            # Pre-index FailureCause names+descriptions per FailureMode for broader keyword matching
+            fm_cause_texts: dict[str, list[str]] = {}  # fm_id -> [cause_name, cause_desc, ...]
             for e in edges:
                 if e["type"] == "CAUSE_OF":
                     cause_node = node_map.get(e["source"])
                     if cause_node and cause_node.get("type") == "FailureCause":
-                        fm_cause_names.setdefault(e["target"], []).append(cause_node.get("name", ""))
+                        texts = [cause_node.get("name", "")]
+                        if cause_node.get("description"):
+                            texts.append(cause_node["description"])
+                        fm_cause_texts.setdefault(e["target"], []).extend(texts)
 
             for n in graph.get("nodes", []):
                 if n.get("type") != "FailureMode":
                     continue
 
-                name = n.get("name", "")
-                # Match against FailureMode name AND its FailureCause names
-                all_text = [name] + fm_cause_names.get(n["id"], [])
+                # Match against FailureMode name/description AND its FailureCause name/description
+                all_text = [n.get("name", "")]
+                if n.get("description"):
+                    all_text.append(n["description"])
+                all_text.extend(fm_cause_texts.get(n["id"], []))
                 matched_kws = [kw for kw in keywords if any(kw in t for t in all_text)]
                 if not matched_kws:
                     continue
@@ -785,7 +790,7 @@ def get_d7_recommendations(
 cd /Users/sam/Documents/Code/OpenQMS/backend && python -m pytest tests/test_d7_recommendations.py -v
 ```
 
-Expected: All 6 tests PASS
+Expected: All 8 tests PASS
 
 - [ ] **Step 5: Commit**
 
