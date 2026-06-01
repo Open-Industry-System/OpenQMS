@@ -5,7 +5,8 @@
 > **范围:** 后端推荐服务 + 前端智能建议下拉组件  
 > **审查修订:** 2026-06-01 R1 — 修正缓存、权限、限流、前端接入、LLM Provider 边界  
 > **审查修订:** 2026-06-01 R2 — 修正迁移编号冲突、PG partial index、权限依赖语义、模型类名、updateNode 签名、API client 路径  
-> **审查修订:** 2026-06-01 R3 — 修正缓存过期记录唯一约束冲突、down_revision 指向当前 head、依赖安装策略明确化
+> **审查修订:** 2026-06-01 R3 — 修正缓存过期记录唯一约束冲突、down_revision 指向当前 head、依赖安装策略明确化  
+> **审查修订:** 2026-06-01 R4 — 缓存写入改为真正 upsert（ON CONFLICT DO UPDATE），响应示例补全 llm_available
 
 ---
 
@@ -124,7 +125,8 @@ POST /api/fmea/{fmea_id}/recommend
     }
   ],
   "source": "hybrid",
-  "cached": false
+  "cached": false,
+  "llm_available": true
 }
 ```
 
@@ -425,33 +427,39 @@ async def _get_cached(
 
 **缓存写入：**
 
-使用 `INSERT ... ON CONFLICT DO UPDATE` 处理过期记录冲突：过期记录的 UNIQUE 约束仍然存在，直接 INSERT 会报错。方案是先删除同 key 的过期记录，再插入新记录。
+使用 PostgreSQL `INSERT ... ON CONFLICT DO UPDATE`（upsert）处理并发和过期记录冲突。两个并发请求同时未命中缓存时，第二个会更新第一个的写入而非报错。
 
 ```python
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 async def _cache_result(
     self, fmea_id: UUID, trigger_type: str, context_hash: str,
     fmea: "FMEADocument", response: RecommendResponse
 ) -> None:
-    # 先删除同 key 的过期记录（避免唯一约束冲突）
-    await self.db.execute(
-        delete(RecommendationCache)
-        .where(RecommendationCache.fmea_id == fmea_id)
-        .where(RecommendationCache.trigger_type == trigger_type)
-        .where(RecommendationCache.context_hash == context_hash)
-        .where(RecommendationCache.expires_at <= func.now())
+    stmt = (
+        pg_insert(RecommendationCache)
+        .values(
+            fmea_id=fmea_id,
+            trigger_type=trigger_type,
+            context_hash=context_hash,
+            product_line_code=fmea.product_line_code,
+            fmea_type=fmea.fmea_type,
+            suggestions=[s.model_dump() for s in response.suggestions],
+            source=response.source,
+        )
+        .on_conflict_do_update(
+            index_elements=["fmea_id", "trigger_type", "context_hash"],
+            set_={
+                "suggestions": [s.model_dump() for s in response.suggestions],
+                "source": response.source,
+                "product_line_code": fmea.product_line_code,
+                "fmea_type": fmea.fmea_type,
+                "created_at": func.now(),
+                "expires_at": func.now() + text("INTERVAL '24 hours'"),
+            },
+        )
     )
-    # 插入新记录
-    entry = RecommendationCache(
-        fmea_id=fmea_id,
-        trigger_type=trigger_type,
-        context_hash=context_hash,
-        product_line_code=fmea.product_line_code,
-        fmea_type=fmea.fmea_type,
-        suggestions=[s.model_dump() for s in response.suggestions],
-        source=response.source,
-    )
-    self.db.add(entry)
-    await self.db.flush()
+    await self.db.execute(stmt)
 ```
 
 **缓存失效逻辑：**
