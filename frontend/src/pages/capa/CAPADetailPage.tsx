@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Steps, Card, Form, Input,
-  Select, App, Spin, Empty, Row, Col, Table, Divider,
+  Select, App, Spin, Empty, Row, Col, Table, Divider, Modal,
 } from "antd";
 import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
 import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
+import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
 import type { CAPAReport, FMEADocument } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
@@ -48,6 +49,12 @@ export default function CAPADetailPage() {
   // D1 Team Adding UI State
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberRole, setNewMemberRole] = useState("质量工程师");
+
+  // D7 soft gate state
+  const [allD7Confirmed, setAllD7Confirmed] = useState(true);
+  const [d7UnconfirmedItems, setD7UnconfirmedItems] = useState<D7UnconfirmedItem[]>([]);
+  const [d7SkipDialogOpen, setD7SkipDialogOpen] = useState(false);
+  const [d7SkipReasons, setD7SkipReasons] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!id) return;
@@ -90,10 +97,42 @@ export default function CAPADetailPage() {
 
   const handleAdvance = async () => {
     if (!id) return;
+
+    // D7 soft gate: check for unconfirmed recommendations
+    if (capa?.status === "D7_PREVENTION" && !allD7Confirmed) {
+      setD7SkipDialogOpen(true);
+      return;
+    }
+
     try {
       const updated = await advanceCAPA(id);
       setCapa(updated);
       message.success("已推进到下一步");
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || "推进失败");
+    }
+  };
+
+  const handleD7SkipConfirm = async () => {
+    if (!id) return;
+    setD7SkipDialogOpen(false);
+
+    const globalReason = (d7SkipReasons["__global__"] || "").trim();
+    const skipReasonsList = d7UnconfirmedItems.map((item) => ({
+      fmea_id: item.fmea_id,
+      node_id: item.failure_mode_node_id,
+      reason: globalReason || "未填写理由",
+    }));
+
+    try {
+      const updated = await advanceCAPA(id, {
+        d7_skip_reasons: skipReasonsList.length > 0 ? skipReasonsList : undefined,
+      });
+      setCapa(updated);
+      message.success("已推进到下一步");
+      setD7SkipReasons({});
+      setD7UnconfirmedItems([]);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
       message.error(err?.response?.data?.detail || "推进失败");
@@ -114,40 +153,41 @@ export default function CAPADetailPage() {
   if (!capa) return <Empty description="8D 报告未找到" />;
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/capa")}>返回</Button>
-          <Title level={4} style={{ margin: 0 }}>{capa.title}</Title>
-          <Tag color="blue">{capa.document_no}</Tag>
-          <Tag color="red">{capa.severity}</Tag>
-        </Space>
-        <Space>
-          {capa.fmea_ref_id && (
-            <Tag icon={<LinkOutlined />} color="green">已关联 FMEA</Tag>
-          )}
-          <RelatedFMEALink
-            fmeaRefId={capa.fmea_ref_id ?? null}
-            fmeaNodeId={capa.fmea_node_id ?? null}
-          />
-          {canEdit('capa') && (
-            <Button icon={<LinkOutlined />} onClick={() => setLinkModal(true)}>
-              {capa.fmea_ref_id ? "更换FMEA关联" : "关联FMEA"}
-            </Button>
-          )}
-          {capa.status !== "ARCHIVED" && capa.status !== "D8_CLOSURE" && (!["D7_PREVENTION", "D8_CLOSURE"].includes(capa.status) || canApprove('capa')) && canEdit('capa') && (
-            <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance}>
-              推进下一步
-            </Button>
-          )}
-        </Space>
-      </div>
+    <>
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+          <Space>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/capa")}>返回</Button>
+            <Title level={4} style={{ margin: 0 }}>{capa.title}</Title>
+            <Tag color="blue">{capa.document_no}</Tag>
+            <Tag color="red">{capa.severity}</Tag>
+          </Space>
+          <Space>
+            {capa.fmea_ref_id && (
+              <Tag icon={<LinkOutlined />} color="green">已关联 FMEA</Tag>
+            )}
+            <RelatedFMEALink
+              fmeaRefId={capa.fmea_ref_id ?? null}
+              fmeaNodeId={capa.fmea_node_id ?? null}
+            />
+            {canEdit('capa') && (
+              <Button icon={<LinkOutlined />} onClick={() => setLinkModal(true)}>
+                {capa.fmea_ref_id ? "更换FMEA关联" : "关联FMEA"}
+              </Button>
+            )}
+            {capa.status !== "ARCHIVED" && capa.status !== "D8_CLOSURE" && (!["D7_PREVENTION", "D8_CLOSURE"].includes(capa.status) || canApprove('capa')) && canEdit('capa') && (
+              <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance}>
+                推进下一步
+              </Button>
+            )}
+          </Space>
+        </div>
 
-      <Steps current={currentStep} items={stepItems} style={{ marginBottom: 24 }} />
+        <Steps current={currentStep} items={stepItems} style={{ marginBottom: 24 }} />
 
-      <Row gutter={16}>
-        <Col span={16}>
-          <Card title="当前步骤详情">
+        <Row gutter={16}>
+          <Col span={16}>
+            <Card title="当前步骤详情">
             {capa.status === "D1_TEAM" && (
               <div>
                 <Table
@@ -301,17 +341,28 @@ export default function CAPADetailPage() {
             )}
 
             {capa.status === "D7_PREVENTION" && (
-              <Form layout="vertical">
-                <Form.Item label="预防复发措施">
-                  <TextArea
-                    rows={4}
-                    disabled={!canEdit('capa')}
-                    value={localData.d7_prevention || ""}
-                    onChange={(e) => setLocalData({ ...localData, d7_prevention: e.target.value })}
-                    onBlur={() => handleUpdate("d7_prevention", localData.d7_prevention)}
-                  />
-                </Form.Item>
-              </Form>
+              <>
+                <Form layout="vertical">
+                  <Form.Item label="预防复发措施">
+                    <TextArea
+                      rows={4}
+                      disabled={!canEdit('capa')}
+                      value={localData.d7_prevention || ""}
+                      onChange={(e) => setLocalData({ ...localData, d7_prevention: e.target.value })}
+                      onBlur={() => handleUpdate("d7_prevention", localData.d7_prevention)}
+                    />
+                  </Form.Item>
+                </Form>
+                <Divider />
+                <D7RecPanel
+                  capaId={id!}
+                  d5Correction={localData.d5_correction}
+                  onConfirmationChange={(allConfirmed, unconfirmed) => {
+                    setAllD7Confirmed(allConfirmed);
+                    setD7UnconfirmedItems(unconfirmed);
+                  }}
+                />
+              </>
             )}
 
             {capa.status === "D8_CLOSURE" && (
@@ -361,6 +412,36 @@ export default function CAPADetailPage() {
           )}
         </Col>
       </Row>
-    </div>
+      </div>
+
+      <Modal
+        title="⚠️ 以下 FMEA 节点尚未确认"
+        open={d7SkipDialogOpen}
+        onOk={handleD7SkipConfirm}
+        onCancel={() => setD7SkipDialogOpen(false)}
+        okText="确认跳过并推进"
+        cancelText="取消"
+        width={600}
+      >
+        <p>以下推荐的 FMEA 节点尚未标记为"已更新"或"无需更新"：</p>
+        <ul>
+          {d7UnconfirmedItems.map((item) => (
+            <li key={item.failure_mode_node_id}>
+              {item.failure_mode_name}
+              {item.failure_cause_node_id && ` (原因: ${item.failure_cause_node_id})`}
+            </li>
+          ))}
+        </ul>
+        <p>如需跳过，请填写理由（可选）：</p>
+        <Input.TextArea
+          rows={3}
+          placeholder="跳过理由（可选）"
+          value={d7SkipReasons["__global__"] || ""}
+          onChange={(e) =>
+            setD7SkipReasons({ ...d7SkipReasons, __global__: e.target.value })
+          }
+        />
+      </Modal>
+    </>
   );
 }
