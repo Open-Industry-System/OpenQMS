@@ -76,6 +76,10 @@ async def lifespan(app: FastAPI):
         _logging.getLogger(__name__).warning("LLM provider init failed: %s", e)
         app.state.llm_provider = None
     yield
+    # Cleanup: close LLM provider httpx client if applicable
+    provider = getattr(app.state, "llm_provider", None)
+    if provider and hasattr(provider, "aclose"):
+        await provider.aclose()
 
 
 app = FastAPI(title="OpenQMS API", version="0.1.0", lifespan=lifespan)

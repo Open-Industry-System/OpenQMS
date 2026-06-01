@@ -168,7 +168,9 @@ async def recommend(
     # Use singleton LLM provider from app.state (initialized in lifespan)
     llm = getattr(fastapi_request.app.state, "llm_provider", None)
     service = RecommendationService(db=db, llm_provider=llm)
-    return await service.recommend(fmea_id, request)
+    result = await service.recommend(fmea_id, request)
+    await db.commit()  # persist cache writes
+    return result
 
 
 @router.get("/{fmea_id}/graph")

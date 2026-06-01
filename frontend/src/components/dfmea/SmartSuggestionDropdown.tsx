@@ -48,7 +48,7 @@ export default function SmartSuggestionDropdown({
       try {
         const res: RecommendResponse = await getRecommendations(
           fmeaId,
-          { trigger_type: triggerType, context: { ...context, [contextKey(triggerType)]: inputValue } },
+          { trigger_type: triggerType, context: { ...context, input_text: inputValue } },
           abortRef.current.signal
         );
         setSuggestions(res.suggestions.slice(0, 5));
@@ -182,15 +182,4 @@ export default function SmartSuggestionDropdown({
       </div>
     </Dropdown>
   );
-}
-
-function contextKey(triggerType: string): string {
-  const map: Record<string, string> = {
-    failure_mode: "function_description",
-    failure_effect: "failure_mode",
-    failure_cause: "failure_mode",
-    measure: "failure_mode",
-    optimization: "failure_mode",
-  };
-  return map[triggerType] || "function_description";
 }

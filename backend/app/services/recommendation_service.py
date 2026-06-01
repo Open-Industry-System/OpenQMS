@@ -116,7 +116,7 @@ class RuleEngine:
         return handler(context)
 
     def _generate_failure_modes(self, context: dict) -> RuleResult:
-        func_desc = context.get("function_description", "")
+        func_desc = context.get("function_description", "") or context.get("input_text", "")
         if not func_desc:
             return RuleResult(suggestions=[], quality="generic")
 

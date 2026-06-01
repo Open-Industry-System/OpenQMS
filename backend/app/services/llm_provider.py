@@ -57,6 +57,9 @@ class LocalProvider:
         self.model = model
         self.client = httpx.AsyncClient(base_url=base_url, timeout=30)
 
+    async def aclose(self):
+        await self.client.aclose()
+
     async def complete(self, prompt: str, response_schema: dict) -> dict:
         response = await self.client.post(
             "/api/generate",
