@@ -153,7 +153,7 @@ git commit -m "feat(d7): add extract_keywords utility for D7 FMEA matching"
 
 - [ ] **Step 1: Add fmea_node_id to CAPAUpdate and CAPAResponse**
 
-Add `fmea_node_id: uuid.UUID | None = None` to `CAPAUpdate` (after `fmea_ref_id` line).
+Add `fmea_node_id: str | None = None` to `CAPAUpdate` (after `fmea_ref_id` line). Note: FMEA node IDs are strings (not UUIDs), e.g. `n${Date.now()}_fm`.
 
 Add `fmea_node_id: str | None = None` to `CAPAResponse` (after `fmea_ref_id` line).
 
@@ -359,7 +359,7 @@ def sample_graph():
         ],
         "edges": [
             {"source": func_id, "target": fm_id, "type": "HAS_FAILURE_MODE"},
-            {"source": fm_id, "target": cause_id, "type": "CAUSE_OF"},
+            {"source": cause_id, "target": fm_id, "type": "CAUSE_OF"},
             {"source": cause_id, "target": control_id, "type": "PREVENTED_BY"},
         ],
     }
@@ -623,10 +623,7 @@ def get_d7_recommendations(
         keyword_results: list[tuple[int, dict]] = []  # (match_count, rec)
 
         for doc in other_fmeas:
-            if doc["fmea_id"] not in allowed_product_lines:
-                # product_line filtering already done at query level, but double-check
-                pass
-
+            # product_line filtering already done at query level
             graph = doc.get("graph_data")
             if not graph:
                 continue
@@ -760,13 +757,18 @@ async def get_d7_fmea_recommendations(
         raise HTTPException(status_code=404, detail="8D report not found")
     await enforce_product_line_access(user, capa.product_line_code, db)
 
-    # Get user's accessible product lines
-    allowed_pls = await get_user_product_line_codes(user, db)
-    if not allowed_pls:
-        return {"recommendations": []}
+    # Get user's accessible product lines (bypass for admins)
+    if user.role_definition.bypass_row_level_security:
+        allowed_pls = None  # no restriction
+    else:
+        allowed_pls = await get_user_product_line_codes(user, db)
+        if not allowed_pls:
+            return {"recommendations": []}
 
-    # Fetch FMEA documents for accessible product lines
-    fmea_query = select(FMEADocument).where(FMEADocument.product_line_code.in_(allowed_pls))
+    # Fetch FMEA documents (filtered by product line for non-admins)
+    fmea_query = select(FMEADocument)
+    if allowed_pls is not None:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
         {
@@ -937,15 +939,23 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import client from "../../api/client";
-import { getD7Recommendations, updateCAPA } from "../../api/capa";
+import { getD7Recommendations } from "../../api/capa";
+import { updateFMEA } from "../../api/fmea";
 import type { D7Recommendation } from "../../types";
 
 const { Text } = Typography;
 
+export interface D7UnconfirmedItem {
+  fmea_id: string;
+  failure_mode_node_id: string;
+  failure_mode_name: string;
+  failure_cause_node_id: string | null;
+}
+
 interface D7RecPanelProps {
   capaId: string;
   d5Correction: string | null;
-  onConfirmationChange: (allConfirmed: boolean) => void;
+  onConfirmationChange: (allConfirmed: boolean, unconfirmedItems: D7UnconfirmedItem[]) => void;
 }
 
 export default function D7RecPanel({
@@ -970,13 +980,18 @@ export default function D7RecPanel({
 
   useEffect(() => {
     if (recommendations.length === 0) {
-      onConfirmationChange(true);
+      onConfirmationChange(true, []);
       return;
     }
-    const allConfirmed = recommendations.every((r) =>
-      confirmedNodes.has(r.failure_mode_node_id + (r.failure_cause_node_id || ""))
-    );
-    onConfirmationChange(allConfirmed);
+    const unconfirmed: D7UnconfirmedItem[] = recommendations
+      .filter((r) => !confirmedNodes.has(r.failure_mode_node_id + (r.failure_cause_node_id || "")))
+      .map((r) => ({
+        fmea_id: String(r.fmea_id),
+        failure_mode_node_id: r.failure_mode_node_id,
+        failure_mode_name: r.failure_mode_name,
+        failure_cause_node_id: r.failure_cause_node_id,
+      }));
+    onConfirmationChange(unconfirmed.length === 0, unconfirmed);
   }, [confirmedNodes, recommendations]);
 
   const linked = useMemo(
@@ -1040,7 +1055,7 @@ export default function D7RecPanel({
         });
       }
 
-      await updateCAPA(rec.fmea_id, { graph_data: graph });
+      await updateFMEA(rec.fmea_id, { graph_data: graph });
       message.success("已自动填充预防措施");
 
       // Mark as updated
@@ -1227,16 +1242,16 @@ git commit -m "feat(d7): add D7RecPanel component with recommendation list and a
 Add import at top:
 
 ```typescript
-import D7RecPanel from "../../components/capa/D7RecPanel";
+import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
 ```
 
 Add state variable inside `CAPADetailPage`:
 
 ```typescript
 const [allD7Confirmed, setAllD7Confirmed] = useState(true);
+const [d7UnconfirmedItems, setD7UnconfirmedItems] = useState<D7UnconfirmedItem[]>([]);
 const [d7SkipDialogOpen, setD7SkipDialogOpen] = useState(false);
 const [d7SkipReasons, setD7SkipReasons] = useState<Record<string, string>>({});
-const [pendingD7Advance, setPendingD7Advance] = useState(false);
 ```
 
 - [ ] **Step 2: Embed D7RecPanel in D7 step**
@@ -1261,7 +1276,10 @@ Replace the existing D7 section (the `{capa.status === "D7_PREVENTION" && (` blo
     <D7RecPanel
       capaId={id!}
       d5Correction={localData.d5_correction}
-      onConfirmationChange={setAllD7Confirmed}
+      onConfirmationChange={(allConfirmed, unconfirmed) => {
+        setAllD7Confirmed(allConfirmed);
+        setD7UnconfirmedItems(unconfirmed);
+      }}
     />
   </>
 )}
@@ -1295,13 +1313,12 @@ const handleD7SkipConfirm = async () => {
   if (!id) return;
   setD7SkipDialogOpen(false);
 
-  const skipReasonsList = Object.entries(d7SkipReasons)
-    .filter(([_, reason]) => reason.trim())
-    .map(([nodeId, reason]) => ({
-      fmea_id: "", // will be enriched by backend context
-      node_id: nodeId,
-      reason: reason.trim(),
-    }));
+  const globalReason = (d7SkipReasons["__global__"] || "").trim();
+  const skipReasonsList = d7UnconfirmedItems.map((item) => ({
+    fmea_id: item.fmea_id,
+    node_id: item.failure_mode_node_id,
+    reason: globalReason || "未填写理由",
+  }));
 
   try {
     const updated = await advanceCAPA(id, {
@@ -1310,6 +1327,7 @@ const handleD7SkipConfirm = async () => {
     setCapa(updated);
     message.success("已推进到下一步");
     setD7SkipReasons({});
+    setD7UnconfirmedItems([]);
   } catch (e: unknown) {
     const err = e as { response?: { data?: { detail?: string } } };
     message.error(err?.response?.data?.detail || "推进失败");
@@ -1319,32 +1337,48 @@ const handleD7SkipConfirm = async () => {
 
 - [ ] **Step 4: Add skip confirmation Modal**
 
-Add the Modal JSX after the existing closing `</div>` of the component (before the final `}`):
+Wrap the existing `return (<div>...</div>);` in a fragment and add the Modal inside:
 
 ```tsx
-<Modal
-  title="⚠️ 以下 FMEA 节点尚未确认"
-  open={d7SkipDialogOpen}
-  onOk={handleD7SkipConfirm}
-  onCancel={() => setD7SkipDialogOpen(false)}
-  okText="确认跳过并推进"
-  cancelText="取消"
-  width={600}
->
-  <p>以下推荐的 FMEA 节点尚未标记为"已更新"或"无需更新"：</p>
-  <ul>
-    {/* Unconfirmed items would be listed here via a ref or prop from D7RecPanel */}
-  </ul>
-  <p>如需跳过，请填写理由（可选）：</p>
-  <Input.TextArea
-    rows={3}
-    placeholder="跳过理由（可选）"
-    value={d7SkipReasons["__global__"] || ""}
-    onChange={(e) =>
-      setD7SkipReasons({ ...d7SkipReasons, __global__: e.target.value })
-    }
-  />
-</Modal>
+// Change the return statement from:
+//   return (<div>...</div>);
+// To:
+return (
+  <>
+    <div>
+      {/* ... all existing JSX ... */}
+    </div>
+
+    <Modal
+      title="⚠️ 以下 FMEA 节点尚未确认"
+      open={d7SkipDialogOpen}
+      onOk={handleD7SkipConfirm}
+      onCancel={() => setD7SkipDialogOpen(false)}
+      okText="确认跳过并推进"
+      cancelText="取消"
+      width={600}
+    >
+      <p>以下推荐的 FMEA 节点尚未标记为"已更新"或"无需更新"：</p>
+      <ul>
+        {d7UnconfirmedItems.map((item) => (
+          <li key={item.failure_mode_node_id}>
+            {item.failure_mode_name}
+            {item.failure_cause_node_id && ` (原因: ${item.failure_cause_node_id})`}
+          </li>
+        ))}
+      </ul>
+      <p>如需跳过，请填写理由（可选）：</p>
+      <Input.TextArea
+        rows={3}
+        placeholder="跳过理由（可选）"
+        value={d7SkipReasons["__global__"] || ""}
+        onChange={(e) =>
+          setD7SkipReasons({ ...d7SkipReasons, __global__: e.target.value })
+        }
+      />
+    </Modal>
+  </>
+);
 ```
 
 Add `Modal` to the antd imports at the top of the file.
