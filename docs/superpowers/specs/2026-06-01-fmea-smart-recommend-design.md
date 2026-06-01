@@ -3,7 +3,8 @@
 > **状态:** 已审阅  
 > **日期:** 2026-06-01  
 > **范围:** 后端推荐服务 + 前端智能建议下拉组件  
-> **审查修订:** 2026-06-01 — 修正缓存、权限、限流、前端接入、LLM Provider 边界
+> **审查修订:** 2026-06-01 R1 — 修正缓存、权限、限流、前端接入、LLM Provider 边界  
+> **审查修订:** 2026-06-01 R2 — 修正迁移编号冲突、PG partial index、权限依赖语义、模型类名、updateNode 签名、API client 路径
 
 ---
 
@@ -32,7 +33,7 @@
 ```
 用户输入 → 前端防抖(500ms) + 最小上下文过滤
   → POST /api/fmea/{id}/recommend
-    → 权限检查: require_engineer_or_admin (FMEA EDIT 级别)
+    → 权限检查: require_permission(Module.FMEA, PermissionLevel.EDIT)
     → 限流检查: 每用户+每FMEA 滑动窗口
     → RecommendationService
       → 1. 缓存查询 (按 fmea_id + trigger_type + context_hash)
@@ -57,7 +58,7 @@
 | `backend/app/services/recommendation_service.py` | 推荐服务核心：规则引擎 + LLM 编排 + 缓存 |
 | `backend/app/services/llm_provider.py` | LLM 多提供商抽象 + 工厂 |
 | `backend/app/schemas/recommendation.py` | 请求/响应 Pydantic 模型 |
-| `backend/alembic/versions/018_add_recommendation_cache.py` | 缓存表迁移 |
+| `backend/alembic/versions/20260601_add_recommendation_cache.py` | 缓存表迁移（down_revision: `20260530_customer_quality_enhancements`） |
 
 ### 3.2 修改文件
 
@@ -83,7 +84,7 @@ httpx>=0.27.0           # HTTP 客户端 (LocalProvider + 通用)
 POST /api/fmea/{fmea_id}/recommend
 ```
 
-**权限:** 使用现有的 `require_engineer_or_admin` 依赖（`core/deps.py`），对应 FMEA EDIT 权限。Viewer 调用返回 403。
+**权限:** 使用 `require_permission(Module.FMEA, PermissionLevel.EDIT)`（`core/permissions.py:62`）。注意：现有的 `require_engineer_or_admin` 检查的是 `PermissionLevel.CREATE`，不是 EDIT，因此这里使用精确的权限依赖。Viewer 调用返回 403。
 
 **请求:**
 ```json
@@ -294,7 +295,7 @@ PROMPT_TEMPLATES = {
 ### 3.9 上下文组装
 
 ```python
-async def _assemble_context(self, fmea: FmeaDocument, request: RecommendRequest) -> dict:
+async def _assemble_context(self, fmea: FMEADocument, request: RecommendRequest) -> dict:
     # 1. 历史相似 FMEA
     historical = await get_similar_fmeas(
         self.db,
@@ -329,18 +330,18 @@ async def get_similar_fmeas(
     fmea_type: str,
     product_line_code: str,
     limit: int = 5
-) -> list["FmeaDocument"]:
+) -> list["FMEADocument"]:
     """查找同产品线、已批准的 FMEA，按更新时间排序。
     后续可扩展为基于功能描述的向量相似度搜索。"""
-    from app.models.fmea import FmeaDocument as FmeaDocModel
+    from app.models.fmea import FMEADocument
 
     stmt = (
-        select(FmeaDocModel)
-        .where(FmeaDocModel.fmea_type == fmea_type)
-        .where(FmeaDocModel.product_line_code == product_line_code)
-        .where(FmeaDocModel.status == "approved")
-        .where(FmeaDocModel.fmea_id != current_fmea_id)
-        .order_by(FmeaDocModel.updated_at.desc())
+        select(FMEADocument)
+        .where(FMEADocument.fmea_type == fmea_type)
+        .where(FMEADocument.product_line_code == product_line_code)
+        .where(FMEADocument.status == "approved")
+        .where(FMEADocument.fmea_id != current_fmea_id)
+        .order_by(FMEADocument.updated_at.desc())
         .limit(limit)
     )
     result = await session.execute(stmt)
@@ -392,8 +393,7 @@ CREATE TABLE recommendation_cache (
 );
 
 CREATE INDEX ix_recommendation_cache_lookup
-    ON recommendation_cache (fmea_id, trigger_type, context_hash)
-    WHERE expires_at > now();
+    ON recommendation_cache (fmea_id, trigger_type, context_hash, expires_at);
 CREATE INDEX ix_recommendation_cache_expires
     ON recommendation_cache (expires_at);
 ```
@@ -426,7 +426,7 @@ async def _get_cached(
 ```python
 async def _cache_result(
     self, fmea_id: UUID, trigger_type: str, context_hash: str,
-    fmea: "FmeaDocument", response: RecommendResponse
+    fmea: "FMEADocument", response: RecommendResponse
 ) -> None:
     entry = RecommendationCache(
         fmea_id=fmea_id,
@@ -543,8 +543,8 @@ FMEA 编辑器位于 `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx`。现
       }}
       fmeaId={fmeaId}
       onSelect={(s) => {
-        // 使用现有的 updateNode 函数签名
-        updateNode(row.failureModeNodeId, { name: s.name });
+        // 使用现有的 updateNode(nodeId, field, value) 三参数签名
+        updateNode(row.failureModeNodeId, "name", s.name);
       }}
       disabled={isViewer}
     />
@@ -554,13 +554,12 @@ FMEA 编辑器位于 `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx`。现
 
 **`updateNode` 函数（现有签名，位于 FMEAEditorPage.tsx:233）：**
 ```typescript
-const updateNode = useCallback((nodeId: string, updates: Partial<GraphNode>) => {
-  setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, ...updates } : n));
-  setDirty(true);
+const updateNode = useCallback((nodeId: string, field: string, value: unknown) => {
+  setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, [field]: value } : n)));
 }, []);
 ```
 
-`SmartSuggestionDropdown` 内部包裹一个 `Input` + 下拉 popover，用户选择建议后调用 `onSelect`，由父组件通过 `updateNode` 更新 graph 数据。
+`SmartSuggestionDropdown` 内部包裹一个 `Input` + 下拉 popover，用户选择建议后调用 `onSelect`，由父组件通过 `updateNode(nodeId, field, value)` 更新 graph 数据。
 
 ### 4.4 与现有组件的关系
 
@@ -573,7 +572,7 @@ const updateNode = useCallback((nodeId: string, updates: Partial<GraphNode>) => 
 
 ```typescript
 // frontend/src/api/recommendation.ts
-import api from './index';
+import client from "./client";
 
 export interface Suggestion {
   name: string;
@@ -599,7 +598,7 @@ export async function getRecommendations(
   request: RecommendRequest,
   signal?: AbortSignal
 ): Promise<RecommendResponse> {
-  const { data } = await api.post(`/fmea/${fmeaId}/recommend`, request, { signal });
+  const { data } = await client.post(`/fmea/${fmeaId}/recommend`, request, { signal });
   return data;
 }
 ```
@@ -612,7 +611,7 @@ export async function getRecommendations(
 
 | 操作 | 所需权限 | 对应依赖 |
 |------|---------|---------|
-| 调用推荐接口 | FMEA EDIT | `require_engineer_or_admin` |
+| 调用推荐接口 | FMEA EDIT | `require_permission(Module.FMEA, PermissionLevel.EDIT)` |
 | 查看推荐结果 | 无独立"查看"接口，结果随 POST 返回 | — |
 
 **明确说明：** 当前设计只有一个 `POST /recommend` 端点，不存在独立的"查看"路径。Viewer 调用此端点返回 403，这意味着 Viewer 无法使用智能推荐功能。如果后续需要 Viewer 查看推荐，需新增 `GET /recommend/cached` 端点（只读缓存，不触发 LLM）。
