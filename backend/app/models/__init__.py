@@ -28,6 +28,7 @@ from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.models.apqp import APQPProject
 from app.models.graph_sync_outbox import GraphSyncOutbox
 from app.models.role import RoleDefinition, RolePermission, UserProductLine
+from app.models.recommendation_cache import RecommendationCache
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -51,4 +52,5 @@ __all__ = [
     "APQPProject",
     "GraphSyncOutbox",
     "RoleDefinition", "RolePermission", "UserProductLine",
+    "RecommendationCache",
 ]
