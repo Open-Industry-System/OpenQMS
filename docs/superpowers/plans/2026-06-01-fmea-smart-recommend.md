@@ -966,7 +966,7 @@ async def recommend(
         return RecommendResponse(suggestions=[], source="rule", cached=False, llm_available=False)
 
     # Use singleton LLM provider from app.state (initialized in lifespan)
-    llm = fastapi_request.app.state.llm_provider
+    llm = getattr(fastapi_request.app.state, "llm_provider", None)
     service = RecommendationService(db=db, llm_provider=llm)
     return await service.recommend(fmea_id, request)
 ```
@@ -1305,7 +1305,7 @@ git commit -m "feat(rec): add SmartSuggestionDropdown component with debounce an
 **Files:**
 - Modify: `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx`
 
-**关键前提：** `FMEARow` 只包含 node IDs（如 `failureModeNodeId`），不包含显示值。所有显示值通过 `nodeMap.get(row.xxxNodeId)?.name` 获取。现有权限使用 `canEdit('fmea')` 而非 `isViewer`。推荐列应替换 `Input.TextArea`，但保留现有 `onFocus` 触发的 `activateRecommendation` 调用（可选，后续可移除）。
+**关键前提：** `FMEARow` 只包含 node IDs（如 `failureModeNodeId`），不包含显示值。所有显示值通过 `nodeMap.get(row.xxxNodeId)?.name` 获取。现有权限使用 `canEdit('fmea')` 而非 `isViewer`。推荐列替换 `Input.TextArea` 为 `SmartSuggestionDropdown`，同时退役旧的 InlineRecommendations 系统（见 Step 1）。
 
 - [ ] **Step 1: 添加 import 和 fmeaId 变量**
 
@@ -1326,11 +1326,12 @@ const fmeaId = id || "";
 同时退役旧的 InlineRecommendations 系统：
 
 1. **移除 import：** 删除 `import InlineRecommendations from "../../../components/dfmea/InlineRecommendations";`
-2. **移除 activateRecommendation 相关状态：** 删除 `activateRecommendation` 函数和相关的 `recommendation` state（如果存在）
-3. **移除渲染：** 搜索 `InlineRecommendations` 的 JSX 使用（通常在表格下方的 `<InlineRecommendations ... />`），删除或注释掉
-4. **保留 `dfmeaRules.ts` import 不动：** 如果没有其他地方使用它，可以一并移除；如果有（如 GenerationWizard），保留并标记 `@deprecated`
+2. **移除渲染：** 搜索 `InlineRecommendations` 的 JSX 使用（通常在表格下方的 `<InlineRecommendations ... />`），删除或注释掉
+3. **移除 activateRecommendation 调用：** 搜索所有 `onFocus={() => activateRecommendation(...)}` 调用（存在于 S/O/D 列的 Input 组件上），逐个删除这些 onFocus 回调。注意：不要删除整个 Input 组件，只删除 `onFocus` prop。
+4. **移除 activateRecommendation 函数和相关 state：** 确认所有调用点已清除后，删除 `activateRecommendation` 函数定义和相关的 `recommendation` state 变量
+5. **保留 `dfmeaRules.ts` import 不动：** 如果没有其他地方使用它，可以一并移除；如果有（如 GenerationWizard），保留并标记 `@deprecated`
 
-这确保只有一套推荐系统运行，不会出现新旧冲突。
+**执行顺序很重要：** 先删调用点（Step 3），再删定义（Step 4），否则编译会报错。
 
 - [ ] **Step 2: 在失败模式列集成 SmartSuggestionDropdown**
 
