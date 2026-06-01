@@ -422,11 +422,6 @@ def get_d7_recommendations(
                 if not matched_kws:
                     continue
 
-                dedup_key = f"{doc['fmea_id']}_{n['id']}"
-                if dedup_key in seen_keys:
-                    continue
-                seen_keys.add(dedup_key)
-
                 # Find FailureCauses
                 cause_ids = []
                 for src, etype in reverse_edges_kw.get(n["id"], []):
@@ -435,6 +430,10 @@ def get_d7_recommendations(
 
                 if not cause_ids:
                     # No FailureCause -- include with null cause/control, disable auto-fill
+                    dedup_key = f"{doc['fmea_id']}_{n['id']}_none"
+                    if dedup_key in seen_keys:
+                        continue
+                    seen_keys.add(dedup_key)
                     keyword_results.append((len(matched_kws), {
                         "fmea_id": doc["fmea_id"],
                         "fmea_document_no": doc["document_no"],
@@ -452,6 +451,11 @@ def get_d7_recommendations(
                     continue
 
                 for cause_id in cause_ids:
+                    dedup_key = f"{doc['fmea_id']}_{n['id']}_{cause_id}"
+                    if dedup_key in seen_keys:
+                        continue
+                    seen_keys.add(dedup_key)
+
                     cause_node = node_map.get(cause_id)
                     control_id = None
                     control_name = None

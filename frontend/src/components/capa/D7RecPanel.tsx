@@ -6,9 +6,8 @@ import {
   LinkOutlined, CheckOutlined, CloseOutlined, ThunderboltOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import client from "../../api/client";
 import { getD7Recommendations } from "../../api/capa";
-import { updateFMEA } from "../../api/fmea";
+import { getFMEA, updateFMEA } from "../../api/fmea";
 import type { D7Recommendation } from "../../types";
 
 const { Text } = Typography;
@@ -87,8 +86,7 @@ export default function D7RecPanel({
     setFillingNode(rec.failure_cause_node_id);
     try {
       // Fetch current FMEA to get graph_data
-      const fmeaResp = await client.get(`/fmea/${rec.fmea_id}`);
-      const fmea = fmeaResp.data;
+      const fmea = await getFMEA(rec.fmea_id);
       const graph = fmea.graph_data;
 
       // Find and update or create PreventionControl

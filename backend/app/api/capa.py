@@ -226,8 +226,8 @@ async def get_d7_fmea_recommendations(
         if not allowed_pls:
             return {"recommendations": []}
 
-    # Fetch FMEA documents (filtered by product line for non-admins)
-    fmea_query = select(FMEADocument)
+    # Fetch FMEA documents — always same product line as CAPA, plus RLS filter
+    fmea_query = select(FMEADocument).where(FMEADocument.product_line_code == capa.product_line_code)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
     fmea_result = await db.execute(fmea_query)
