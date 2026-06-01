@@ -25,8 +25,8 @@ const { Title } = Typography;
 
 function formatTrend(trend: number | undefined): string {
   if (trend === undefined || trend === null) return "—";
-  if (trend > 0) return `↑ ${trend}%`;
-  if (trend < 0) return `↓ ${Math.abs(trend)}%`;
+  if (trend > 0) return `↑ +${trend}`;
+  if (trend < 0) return `↓ ${trend}`;
   return "—";
 }
 
@@ -50,20 +50,22 @@ export default function DashboardPage() {
     setAlertsError(false);
     setActionsError(false);
 
-    getDashboardSummary(productLine || undefined)
-      .then((s) => setSummary(s))
-      .catch(() => setSummaryError(true))
-      .finally(() => setLoading(false));
+    Promise.allSettled([
+      getDashboardSummary(productLine || undefined),
+      getDashboardAlerts(productLine || undefined),
+      getDashboardRecentActions(),
+    ]).then(([summaryResult, alertsResult, actionsResult]) => {
+      if (summaryResult.status === "fulfilled") setSummary(summaryResult.value);
+      else setSummaryError(true);
 
-    getDashboardAlerts(productLine || undefined)
-      .then((a) => setAlerts(a))
-      .catch(() => setAlertsError(true))
-      .finally(() => setLoading(false));
+      if (alertsResult.status === "fulfilled") setAlerts(alertsResult.value);
+      else setAlertsError(true);
 
-    getDashboardRecentActions()
-      .then((r) => setRecentActions(r))
-      .catch(() => setActionsError(true))
-      .finally(() => setLoading(false));
+      if (actionsResult.status === "fulfilled") setRecentActions(actionsResult.value);
+      else setActionsError(true);
+
+      setLoading(false);
+    });
   }, [productLine]);
 
   useEffect(() => {

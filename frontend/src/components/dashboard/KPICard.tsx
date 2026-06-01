@@ -17,16 +17,23 @@ interface KPICardProps {
   disabled?: boolean;
 }
 
-const statusBorderColor: Record<KPIStatus, string> = {
-  success: "#52c41a",
-  warning: "#faad14",
-  danger: "#f5222d",
+// Use token-based colors instead of hardcoded values
+const getStatusBorderColor = (status: KPIStatus, token: Record<string, string>): string => {
+  const map: Record<KPIStatus, string> = {
+    success: token.colorSuccess || "#10b981",
+    warning: token.colorWarning || "#f59e0b",
+    danger: token.colorError || "#ef4444",
+  };
+  return map[status];
 };
 
-const statusTokenMap: Record<KPIStatus, string> = {
-  success: "colorSuccess",
-  warning: "colorWarning",
-  danger: "colorError",
+const getStatusColor = (status: KPIStatus, token: Record<string, string>): string => {
+  const map: Record<KPIStatus, string> = {
+    success: token.colorSuccess || "#10b981",
+    warning: token.colorWarning || "#f59e0b",
+    danger: token.colorError || "#ef4444",
+  };
+  return map[status];
 };
 
 export default function KPICard({
@@ -59,7 +66,7 @@ export default function KPICard({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === "Enter" && (clickable || retryable)) {
+      if ((e.key === "Enter" || e.key === " ") && (clickable || retryable)) {
         e.preventDefault();
         handleClick();
       }
@@ -69,7 +76,7 @@ export default function KPICard({
 
   const borderColor = loading || error
     ? token.colorBorderSecondary
-    : statusBorderColor[status];
+    : getStatusBorderColor(status, token as unknown as Record<string, string>);
 
   const focusOutlineColor = token.colorPrimary;
 
@@ -168,8 +175,9 @@ export default function KPICard({
                         if (retryable && onRetry) onRetry();
                       }}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") {
+                        if (e.key === "Enter" || e.key === " ") {
                           e.stopPropagation();
+                          e.preventDefault();
                           if (retryable && onRetry) onRetry();
                         }
                       }}
@@ -194,7 +202,7 @@ export default function KPICard({
               marginLeft: 12,
               color: loading || error
                 ? token.colorTextDisabled
-                : token[statusTokenMap[status] as keyof typeof token] as string ?? token.colorTextSecondary,
+                : getStatusColor(status, token as unknown as Record<string, string>) ?? token.colorTextSecondary,
               fontSize: 24,
               lineHeight: 1,
               flexShrink: 0,
