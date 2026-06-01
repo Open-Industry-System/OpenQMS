@@ -24,6 +24,7 @@ class CAPAUpdate(BaseModel):
     severity: str | None = None
     due_date: date | None = None
     fmea_ref_id: uuid.UUID | None = None
+    fmea_node_id: str | None = None
     product_line_code: str | None = None
 
 
@@ -43,6 +44,7 @@ class CAPAResponse(BaseModel):
     d7_prevention: str | None = None
     d8_closure: str | None = None
     fmea_ref_id: uuid.UUID | None = None
+    fmea_node_id: str | None = None
     due_date: date | None = None
     created_by: uuid.UUID | None = None
     created_at: datetime
@@ -56,3 +58,26 @@ class CAPAListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class D7Recommendation(BaseModel):
+    fmea_id: uuid.UUID
+    fmea_document_no: str
+    failure_mode_node_id: str
+    failure_mode_name: str
+    failure_cause_node_id: str | None = None
+    failure_cause_name: str | None = None
+    prevention_control_node_id: str | None = None
+    prevention_control_name: str | None = None
+    match_source: str  # "linked" | "keyword"
+    match_reason: str
+    related_d4_keywords: list[str] = []
+    suggested_prevention: str | None = None
+
+
+class D7RecommendationResponse(BaseModel):
+    recommendations: list[D7Recommendation]
+
+
+class AdvanceRequest(BaseModel):
+    d7_skip_reasons: list[dict] | None = None
