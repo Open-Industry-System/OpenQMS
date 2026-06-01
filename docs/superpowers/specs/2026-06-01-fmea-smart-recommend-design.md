@@ -1,8 +1,9 @@
 # FMEA 智能推荐升级 — 设计文档
 
-> **状态:** 草稿  
+> **状态:** 已审阅  
 > **日期:** 2026-06-01  
-> **范围:** 后端推荐服务 + 前端智能建议下拉组件
+> **范围:** 后端推荐服务 + 前端智能建议下拉组件  
+> **审查修订:** 2026-06-01 — 修正缓存、权限、限流、前端接入、LLM Provider 边界
 
 ---
 
@@ -13,10 +14,15 @@
 ### 核心需求
 
 - **触发方式:** 输入自动触发（防抖 500ms）
-- **推荐范围:** 失败模式、效应+原因、预防/检测措施、优化行动（全部 4 类）
+- **推荐范围:** 4 类推荐，5 种触发类型（效应+原因各一个触发）：
+  1. 失败模式 (`failure_mode`)
+  2. 失败效应 (`failure_effect`)
+  3. 失败原因 (`failure_cause`)
+  4. 预防/检测措施 (`measure`)
+  5. 优化行动 (`optimization`)
 - **智能来源:** 规则引擎优先 → LLM 补充（当规则结果为通用/模糊时）
-- **LLM 提供商:** 可配置（Claude / OpenAI / 本地模型）
-- **缓存:** 按输入哈希缓存，24 小时 TTL
+- **LLM 提供商:** 可配置（Claude / OpenAI / 本地模型），默认仅规则引擎（LLM 为可选增强）
+- **缓存:** 按结构化字段缓存，24 小时 TTL，支持按 fmea_id 主动失效
 - **回退:** LLM 失败时回退到规则引擎 + 显示错误提示
 
 ---
@@ -24,14 +30,21 @@
 ## 2. 架构概览
 
 ```
-用户输入 → 前端防抖(500ms) → POST /api/fmea/{id}/recommend
-  → RecommendationService (后端)
-    → 1. 规则引擎评估 (快速，无 API 成本)
-    → 2. 如果结果为 generic → 调用 LLM
-    → 3. 缓存结果 (按输入哈希)
-    → 返回结构化建议
+用户输入 → 前端防抖(500ms) + 最小上下文过滤
+  → POST /api/fmea/{id}/recommend
+    → 权限检查: require_engineer_or_admin (FMEA EDIT 级别)
+    → 限流检查: 每用户+每FMEA 滑动窗口
+    → RecommendationService
+      → 1. 缓存查询 (按 fmea_id + trigger_type + context_hash)
+      → 2. 命中 → 返回 cached=true
+      → 3. 未命中 → 规则引擎评估
+      → 4. 如果结果为 generic 且 LLM 已配置 → 调用 LLM
+      → 5. LLM 输出 Pydantic 校验
+      → 6. 写入缓存 + 返回
   → 前端显示内联下拉菜单
 ```
+
+**LLM 未配置时的行为：** 系统默认以"纯规则引擎"模式运行。`LLM_PROVIDER` 环境变量未设置时，规则引擎结果直接返回（即使为 generic），不报错。这保证了零外部依赖的基本可用性。
 
 ---
 
@@ -42,6 +55,7 @@
 | 文件 | 职责 |
 |------|------|
 | `backend/app/services/recommendation_service.py` | 推荐服务核心：规则引擎 + LLM 编排 + 缓存 |
+| `backend/app/services/llm_provider.py` | LLM 多提供商抽象 + 工厂 |
 | `backend/app/schemas/recommendation.py` | 请求/响应 Pydantic 模型 |
 | `backend/alembic/versions/018_add_recommendation_cache.py` | 缓存表迁移 |
 
@@ -50,27 +64,51 @@
 | 文件 | 变更 |
 |------|------|
 | `backend/app/api/fmea.py` | 实现 `/recommend` 端点（替换 501 stub） |
+| `backend/requirements.txt` | 新增 `anthropic`、`openai`、`httpx` 依赖 |
 
-### 3.3 API 端点
+### 3.3 新增依赖
+
+```
+# requirements.txt 新增
+anthropic>=0.40.0       # Claude API (可选)
+openai>=1.50.0          # OpenAI API (可选)
+httpx>=0.27.0           # HTTP 客户端 (LocalProvider + 通用)
+```
+
+三个包均为可选：`LLM_PROVIDER` 未设置时不需要安装。启动时做惰性导入，缺少包不报错。
+
+### 3.4 API 端点
 
 ```
 POST /api/fmea/{fmea_id}/recommend
 ```
 
+**权限:** 使用现有的 `require_engineer_or_admin` 依赖（`core/deps.py`），对应 FMEA EDIT 权限。Viewer 调用返回 403。
+
 **请求:**
 ```json
 {
-  "trigger_type": "failure_mode | failure_effect | failure_cause | measure | optimization",
+  "trigger_type": "failure_mode",
   "context": {
     "function_description": "密封腔体",
+    "process_step": "OP30",
     "failure_mode": "密封失效",
     "severity": 8,
     "occurrence": 5,
-    "detection": 6,
-    "process_step": "OP30"
+    "detection": 6
   }
 }
 ```
+
+`context` 中的字段根据 `trigger_type` 不同而变化：
+
+| trigger_type | 必填 context 字段 | 可选 context 字段 |
+|---|---|---|
+| `failure_mode` | `function_description` | `process_step` |
+| `failure_effect` | `failure_mode` | `function_description` |
+| `failure_cause` | `failure_mode` | `function_description`, `severity` |
+| `measure` | `failure_mode`, `ap` | `severity`, `occurrence`, `detection` |
+| `optimization` | `failure_mode`, `severity`, `occurrence`, `detection` | `ap` |
 
 **响应:**
 ```json
@@ -88,45 +126,64 @@ POST /api/fmea/{fmea_id}/recommend
 }
 ```
 
-### 3.4 RecommendationService 核心逻辑
+### 3.5 RecommendationService 核心逻辑
 
 ```python
 class RecommendationService:
-    def __init__(self, db: AsyncSession, llm_provider: LLMProvider):
+    def __init__(self, db: AsyncSession, llm_provider: LLMProvider | None):
         self.db = db
-        self.llm = llm_provider
+        self.llm = llm_provider  # 可能为 None（纯规则模式）
         self.rules = RuleEngine()
 
     async def recommend(self, fmea_id: UUID, request: RecommendRequest) -> RecommendResponse:
+        # 0. 获取 FMEA 文档（后续缓存查询和上下文组装都需要）
+        fmea = await self._get_fmea_or_404(fmea_id)
+
         # 1. 检查缓存
-        cache_key = self._compute_hash(request)
-        cached = await self._get_cached(cache_key)
+        context_hash = self._compute_context_hash(request.context)
+        cached = await self._get_cached(fmea_id, request.trigger_type, context_hash)
         if cached:
             return cached
 
         # 2. 规则引擎评估
         rule_result = self.rules.evaluate(request.trigger_type, request.context)
 
-        # 3. 如果规则结果为 generic，调用 LLM
-        if rule_result.quality == "generic":
-            context = await self._assemble_context(fmea_id, request)
-            llm_result = await self.llm.complete(
-                prompt=self._build_prompt(request.trigger_type, context),
-                response_schema=SUGGESTION_SCHEMA
-            )
-            suggestions = self._merge_results(rule_result.suggestions, llm_result.suggestions)
-            source = "hybrid"
+        # 3. 如果规则结果为 generic 且 LLM 已配置，调用 LLM
+        if rule_result.quality == "generic" and self.llm is not None:
+            try:
+                llm_context = await self._assemble_context(fmea, request)
+                llm_result = await asyncio.wait_for(
+                    self.llm.complete(
+                        prompt=self._build_prompt(request.trigger_type, llm_context),
+                        response_schema=SUGGESTION_RESPONSE_SCHEMA
+                    ),
+                    timeout=settings.LLM_TIMEOUT
+                )
+                # Pydantic 校验 LLM 输出
+                validated = SuggestionList.model_validate(llm_result)
+                suggestions = self._merge_results(rule_result.suggestions, validated.suggestions)
+                source = "hybrid"
+            except (asyncio.TimeoutError, Exception) as e:
+                # LLM 失败：回退到规则引擎
+                suggestions = rule_result.suggestions
+                source = "rule_fallback"
+                logger.warning("LLM failed, falling back to rules: %s", e)
         else:
             suggestions = rule_result.suggestions
             source = "rule"
 
         # 4. 缓存结果
-        response = RecommendResponse(suggestions=suggestions, source=source, cached=False)
-        await self._cache_result(cache_key, response)
+        response = RecommendResponse(
+            suggestions=suggestions,
+            source=source,
+            cached=False,
+            llm_available=self.llm is not None
+        )
+        await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response)
         return response
 ```
 
-### 3.5 规则引擎（从前端迁移）
+### 3.6 规则引擎（从前端迁移）
 
 将 `frontend/src/utils/dfmeaRules.ts` 的逻辑迁移到后端 `recommendation_service.py` 内部：
 
@@ -141,36 +198,71 @@ class RecommendationService:
 - 返回的建议中包含通用占位符（如 "功能降级"、"零部件老化"）→ `generic`
 - 所有建议都是具体的、上下文相关的 → `specific`
 
-### 3.6 LLM Provider 抽象
+### 3.7 LLM Provider 抽象
 
 ```python
+# backend/app/services/llm_provider.py
 from typing import Protocol
+from pydantic import BaseModel
 
 class LLMProvider(Protocol):
     async def complete(self, prompt: str, response_schema: dict) -> dict: ...
 
 class ClaudeProvider:
-    """使用 Anthropic SDK"""
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6"): ...
+    """使用 Anthropic SDK。api_key 从环境变量读取。"""
+    def __init__(self, api_key: str, model: str): ...
 
 class OpenAIProvider:
-    """使用 OpenAI SDK"""
-    def __init__(self, api_key: str, model: str = "gpt-4o"): ...
+    """使用 OpenAI SDK。api_key 从环境变量读取。"""
+    def __init__(self, api_key: str, model: str): ...
 
 class LocalProvider:
-    """使用 httpx 调用本地 Ollama/vLLM"""
+    """使用 httpx 调用本地 Ollama/vLLM。"""
     def __init__(self, base_url: str, model: str): ...
+
+def create_llm_provider() -> LLMProvider | None:
+    """工厂函数：根据环境变量创建 provider，未配置时返回 None。"""
+    provider_name = settings.LLM_PROVIDER
+    if not provider_name:
+        return None  # 纯规则引擎模式
+
+    api_key = settings.LLM_API_KEY
+    if not api_key and provider_name != "local":
+        raise ValueError(f"LLM_PROVIDER={provider_name} requires LLM_API_KEY")
+
+    model = settings.LLM_MODEL
+    if provider_name == "claude":
+        return ClaudeProvider(api_key=api_key, model=model)
+    elif provider_name == "openai":
+        return OpenAIProvider(api_key=api_key, model=model)
+    elif provider_name == "local":
+        base_url = settings.LLM_BASE_URL
+        if not base_url:
+            raise ValueError("LLM_PROVIDER=local requires LLM_BASE_URL")
+        return LocalProvider(base_url=base_url, model=model)
+    else:
+        raise ValueError(f"Unknown LLM_PROVIDER: {provider_name}")
 ```
 
-通过环境变量切换：
-```env
-LLM_PROVIDER=claude          # claude | openai | local
-LLM_API_KEY=sk-...
-LLM_MODEL=claude-sonnet-4-6  # 可选，有默认值
-LLM_BASE_URL=                # 仅 local 模式需要
+**启动时配置验证：** 在 FastAPI `lifespan` 中调用 `create_llm_provider()`。如果配置无效（如缺少 API key），记录警告日志并以 `provider=None` 启动（纯规则模式），不阻止服务启动。
+
+**LLM 输出校验：** LLM 返回的 JSON 必须通过 Pydantic 校验：
+
+```python
+class SuggestionItem(BaseModel):
+    name: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    explanation: str = ""
+
+class SuggestionList(BaseModel):
+    suggestions: list[SuggestionItem]
 ```
 
-### 3.7 Prompt 模板
+校验失败时视为 LLM 失败，回退到规则引擎。
+
+**超长输出保护：** LLM 响应体限制 10KB，超出视为异常并回退。
+
+### 3.8 Prompt 模板
 
 ```python
 PROMPT_TEMPLATES = {
@@ -199,25 +291,23 @@ PROMPT_TEMPLATES = {
 }
 ```
 
-### 3.8 上下文组装
+### 3.9 上下文组装
 
 ```python
-async def _assemble_context(self, fmea_id: UUID, request: RecommendRequest) -> dict:
-    # 1. 当前文档数据
-    fmea = await get_fmea(self.db, fmea_id)
-
-    # 2. 历史相似 FMEA
+async def _assemble_context(self, fmea: FmeaDocument, request: RecommendRequest) -> dict:
+    # 1. 历史相似 FMEA
     historical = await get_similar_fmeas(
         self.db,
+        current_fmea_id=fmea.fmea_id,
         fmea_type=fmea.fmea_type,
         product_line_code=fmea.product_line_code,
         limit=5
     )
 
-    # 3. AIAG-VDA 标准知识（硬编码关键规则）
+    # 2. AIAG-VDA 标准知识（硬编码关键规则）
     aiag_rules = get_aiag_vda_rules()
 
-    # 4. 行业知识库
+    # 3. 行业知识库
     industry_kb = get_industry_knowledge(fmea.product_line_code)
 
     return {
@@ -234,29 +324,33 @@ async def _assemble_context(self, fmea_id: UUID, request: RecommendRequest) -> d
 ```python
 async def get_similar_fmeas(
     session: AsyncSession,
+    *,
+    current_fmea_id: UUID,
     fmea_type: str,
     product_line_code: str,
     limit: int = 5
-) -> list[FmeaDocument]:
+) -> list["FmeaDocument"]:
     """查找同产品线、已批准的 FMEA，按更新时间排序。
     后续可扩展为基于功能描述的向量相似度搜索。"""
+    from app.models.fmea import FmeaDocument as FmeaDocModel
+
     stmt = (
-        select(FmeaDocument)
-        .where(FmeaDocument.fmea_type == fmea_type)
-        .where(FmeaDocument.product_line_code == product_line_code)
-        .where(FmeaDocument.status == "approved")
-        .where(FmeaDocument.fmea_id != current_fmea_id)  # 排除自身
-        .order_by(FmeaDocument.updated_at.desc())
+        select(FmeaDocModel)
+        .where(FmeaDocModel.fmea_type == fmea_type)
+        .where(FmeaDocModel.product_line_code == product_line_code)
+        .where(FmeaDocModel.status == "approved")
+        .where(FmeaDocModel.fmea_id != current_fmea_id)
+        .order_by(FmeaDocModel.updated_at.desc())
         .limit(limit)
     )
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return list(result.scalars().all())
 ```
 
 **`extract_patterns` 逻辑：**
 从历史 FMEA 的 graph_data 中提取失败模式模式：
 ```python
-def extract_patterns(fmeas: list[FmeaDocument]) -> list[dict]:
+def extract_patterns(fmeas: list) -> list[dict]:
     """从历史 FMEA 中提取失败模式、效应、原因的模式。"""
     patterns = []
     for fmea in fmeas:
@@ -264,7 +358,6 @@ def extract_patterns(fmeas: list[FmeaDocument]) -> list[dict]:
         edges = fmea.graph_data.get("edges", [])
         for node in nodes:
             if node["type"] == "FailureMode":
-                # 找到关联的效应和原因
                 effects = [n for n in nodes if n["type"] == "FailureEffect"
                           and any(e["source"] == node["id"] and e["target"] == n["id"]
                                  for e in edges if e["type"] == "EFFECT_OF")]
@@ -280,36 +373,107 @@ def extract_patterns(fmeas: list[FmeaDocument]) -> list[dict]:
     return patterns
 ```
 
-### 3.9 缓存表
+### 3.10 缓存表
 
 ```sql
 CREATE TABLE recommendation_cache (
-    cache_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    input_hash     VARCHAR(64) UNIQUE NOT NULL,
-    trigger_type   VARCHAR(20) NOT NULL,
-    suggestions    JSONB NOT NULL,
-    source         VARCHAR(10) NOT NULL,  -- rule | llm | hybrid
-    fmea_type      VARCHAR(20) NOT NULL,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at     TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '24 hours'
+    cache_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    fmea_id            UUID NOT NULL REFERENCES fmea_documents(fmea_id) ON DELETE CASCADE,
+    trigger_type       VARCHAR(20) NOT NULL,
+    context_hash       VARCHAR(64) NOT NULL,
+    product_line_code  VARCHAR(20) NOT NULL,
+    fmea_type          VARCHAR(20) NOT NULL,
+    suggestions        JSONB NOT NULL,
+    source             VARCHAR(15) NOT NULL,  -- rule | hybrid | rule_fallback
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at         TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '24 hours',
+
+    UNIQUE (fmea_id, trigger_type, context_hash)
 );
 
-CREATE INDEX ix_recommendation_cache_hash ON recommendation_cache (input_hash);
-CREATE INDEX ix_recommendation_cache_expires ON recommendation_cache (expires_at);
+CREATE INDEX ix_recommendation_cache_lookup
+    ON recommendation_cache (fmea_id, trigger_type, context_hash)
+    WHERE expires_at > now();
+CREATE INDEX ix_recommendation_cache_expires
+    ON recommendation_cache (expires_at);
+```
+
+**缓存查询：**
+```python
+async def _get_cached(
+    self, fmea_id: UUID, trigger_type: str, context_hash: str
+) -> RecommendResponse | None:
+    stmt = (
+        select(RecommendationCache)
+        .where(RecommendationCache.fmea_id == fmea_id)
+        .where(RecommendationCache.trigger_type == trigger_type)
+        .where(RecommendationCache.context_hash == context_hash)
+        .where(RecommendationCache.expires_at > func.now())
+    )
+    result = await self.db.execute(stmt)
+    row = result.scalar_one_or_none()
+    if row:
+        return RecommendResponse(
+            suggestions=row.suggestions,
+            source=row.source,
+            cached=True,
+            llm_available=self.llm is not None
+        )
+    return None
+```
+
+**缓存写入：**
+```python
+async def _cache_result(
+    self, fmea_id: UUID, trigger_type: str, context_hash: str,
+    fmea: "FmeaDocument", response: RecommendResponse
+) -> None:
+    entry = RecommendationCache(
+        fmea_id=fmea_id,
+        trigger_type=trigger_type,
+        context_hash=context_hash,
+        product_line_code=fmea.product_line_code,
+        fmea_type=fmea.fmea_type,
+        suggestions=[s.model_dump() for s in response.suggestions],
+        source=response.source,
+    )
+    self.db.add(entry)
+    await self.db.flush()
 ```
 
 **缓存失效逻辑：**
-- **自然过期：** `expires_at` 到期后自动失效（查询时过滤 `WHERE expires_at > now()`）
-- **主动失效：** 当 FMEA 文档更新时，删除该文档相关的所有缓存条目
+- **自然过期：** 查询时过滤 `WHERE expires_at > now()`，过期条目不返回
+- **主动失效：** FMEA 文档更新时，按 `fmea_id` 删除所有缓存
   ```python
   async def invalidate_cache_for_fmea(self, fmea_id: UUID):
-      """FMEA 更新时，删除该文档相关的缓存。"""
       await self.db.execute(
           delete(RecommendationCache)
-          .where(RecommendationCache.input_hash.contains(str(fmea_id)))
+          .where(RecommendationCache.fmea_id == fmea_id)
       )
   ```
-- **定期清理：** 后台定时任务删除过期条目（可选，PostgreSQL 查询时自然过滤即可）
+  调用点：`fmea_service.update_fmea()` 中 `graph_data` 变更后调用
+- **级联删除：** 外键 `ON DELETE CASCADE`，FMEA 文档删除时缓存自动清除
+
+### 3.11 限流
+
+**策略：** 滑动窗口限流，基于内存计数器（生产环境可升级为 Redis）。
+
+```python
+# 每用户每秒最多 5 次推荐请求
+# 每 FMEA 文档每秒最多 20 次推荐请求（防止单文档刷屏）
+RATE_LIMITS = {
+    "per_user": {"max_requests": 5, "window_seconds": 1},
+    "per_fmea": {"max_requests": 20, "window_seconds": 1},
+}
+```
+
+限流超限返回 429 Too Many Requests。
+
+**前端配合：**
+- 防抖 500ms（减少无效请求）
+- 仅对有效字段触发（输入 >= 2 字符）
+- 仅发送最小必要 context（不同 trigger_type 只发对应必填字段）
+- 输入变化时取消前一个未完成的请求（AbortController）
 
 ---
 
@@ -319,19 +483,22 @@ CREATE INDEX ix_recommendation_cache_expires ON recommendation_cache (expires_at
 
 | 文件 | 职责 |
 |------|------|
-| `frontend/src/components/fmea/SmartSuggestionDropdown.tsx` | 智能建议下拉组件 |
+| `frontend/src/components/dfmea/SmartSuggestionDropdown.tsx` | 智能建议下拉组件 |
 | `frontend/src/api/recommendation.ts` | 前端 API 调用函数 |
+
+注意：放在 `components/dfmea/` 而非 `components/fmea/`，与现有组件目录一致。
 
 ### 4.2 SmartSuggestionDropdown 组件
 
 **功能：**
-- 挂载在 FMEA 编辑器的可推荐单元格上（失败模式、效应、原因、措施列）
+- 挂载在 FMEA 编辑器的可推荐单元格上
 - 用户输入停止 500ms 后自动触发 API 调用
 - 加载状态：单元格右侧显示小型 spinner
 - 下拉菜单：最多 5 个建议，每个带有置信度标签（高/中/低）
 - 键盘支持：↑↓ 选择，Enter 应用，Esc 关闭
 - 来源标记：规则引擎（齿轮图标）/ LLM（星星图标）
 - 回退提示：使用规则引擎回退时显示黄色提示条
+- 无 LLM 提示：`llm_available=false` 时显示"仅规则引擎"灰色标签
 
 **Props：**
 ```typescript
@@ -344,32 +511,95 @@ interface SmartSuggestionDropdownProps {
 }
 ```
 
-**使用示例：**
+### 4.3 逐列接入方案
+
+FMEA 编辑器位于 `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx`。现有表格使用 Ant Design `Table` 组件，每列通过 `render` 函数自定义渲染。
+
+**接入方式：** 在可推荐列的 `render` 函数中，将 `SmartSuggestionDropdown` 包裹在 `Input` 外层。
+
+**具体列映射：**
+
+| 列 | trigger_type | context 来源 | 目标节点 | 目标属性 |
+|---|---|---|---|---|
+| 失败模式 | `failure_mode` | `functionName`, `processNumber` | `FailureMode` | `name` |
+| 失败效应 | `failure_effect` | `failureModeName`, `functionName` | `FailureEffect` | `name` |
+| 失败原因 | `failure_cause` | `failureModeName`, `functionName` | `FailureCause` | `name` |
+| 预防措施 | `measure` | `failureModeName`, `ap` | `PreventionControl` | `name` |
+| 检测措施 | `measure` | `failureModeName`, `ap` | `DetectionControl` | `name` |
+| 优化行动 | `optimization` | `failureModeName`, S/O/D | `RecommendedAction` | `name` |
+
+**集成示例（失败模式列）：**
 ```tsx
-<SmartSuggestionDropdown
-  triggerType="failure_mode"
-  context={{ function_description: row.functionName, process_step: row.processNumber }}
-  fmeaId={fmeaId}
-  onSelect={(s) => updateNode(row.failureModeNodeId, { name: s.name })}
-  disabled={isViewer}
-/>
+// 在 FMEAEditorPage.tsx 的 columns 定义中
+{
+  title: '失效模式',
+  dataIndex: 'failureMode',
+  render: (_, row) => (
+    <SmartSuggestionDropdown
+      triggerType="failure_mode"
+      context={{
+        function_description: row.functionName,
+        process_step: row.processNumber,
+      }}
+      fmeaId={fmeaId}
+      onSelect={(s) => {
+        // 使用现有的 updateNode 函数签名
+        updateNode(row.failureModeNodeId, { name: s.name });
+      }}
+      disabled={isViewer}
+    />
+  ),
+}
 ```
 
-### 4.3 与现有组件的关系
+**`updateNode` 函数（现有签名，位于 FMEAEditorPage.tsx:233）：**
+```typescript
+const updateNode = useCallback((nodeId: string, updates: Partial<GraphNode>) => {
+  setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, ...updates } : n));
+  setDirty(true);
+}, []);
+```
 
-- `SmartSuggestionDropdown` 替代现有的 `InlineRecommendations` 组件
+`SmartSuggestionDropdown` 内部包裹一个 `Input` + 下拉 popover，用户选择建议后调用 `onSelect`，由父组件通过 `updateNode` 更新 graph 数据。
+
+### 4.4 与现有组件的关系
+
+- `SmartSuggestionDropdown` 替代 `InlineRecommendations`（位于 `frontend/src/components/dfmea/InlineRecommendations.tsx`）
+- `InlineRecommendations` 标记为 `@deprecated`，但保留直到新组件稳定
 - `dfmeaRules.ts` 标记为 `@deprecated`，后端规则引擎成熟后移除
 - `GenerationWizard` 中的推荐调用暂不修改（后续迭代）
 
-### 4.4 API 调用
+### 4.5 API 调用
 
 ```typescript
 // frontend/src/api/recommendation.ts
+import api from './index';
+
+export interface Suggestion {
+  name: string;
+  confidence: number;
+  source: 'rule' | 'llm';
+  explanation: string;
+}
+
+export interface RecommendRequest {
+  trigger_type: string;
+  context: Record<string, unknown>;
+}
+
+export interface RecommendResponse {
+  suggestions: Suggestion[];
+  source: 'rule' | 'hybrid' | 'rule_fallback';
+  cached: boolean;
+  llm_available: boolean;
+}
+
 export async function getRecommendations(
   fmeaId: string,
-  request: RecommendRequest
+  request: RecommendRequest,
+  signal?: AbortSignal
 ): Promise<RecommendResponse> {
-  const { data } = await api.post(`/fmea/${fmeaId}/recommend`, request);
+  const { data } = await api.post(`/fmea/${fmeaId}/recommend`, request, { signal });
   return data;
 }
 ```
@@ -378,35 +608,52 @@ export async function getRecommendations(
 
 ## 5. 权限
 
-- 所有已认证用户（包括 viewer）可以**查看**推荐
-- 只有 `quality_engineer` 及以上角色可以**触发**推荐（viewer 触发时返回 403）
-- 推荐结果不写入审计日志（仅为辅助建议，非数据变更）
+使用现有的权限模型（`core/permissions.py` 中 `Module.FMEA` + `PermissionLevel`）：
+
+| 操作 | 所需权限 | 对应依赖 |
+|------|---------|---------|
+| 调用推荐接口 | FMEA EDIT | `require_engineer_or_admin` |
+| 查看推荐结果 | 无独立"查看"接口，结果随 POST 返回 | — |
+
+**明确说明：** 当前设计只有一个 `POST /recommend` 端点，不存在独立的"查看"路径。Viewer 调用此端点返回 403，这意味着 Viewer 无法使用智能推荐功能。如果后续需要 Viewer 查看推荐，需新增 `GET /recommend/cached` 端点（只读缓存，不触发 LLM）。
+
+推荐结果不写入审计日志（仅为辅助建议，非数据变更）。
 
 ---
 
 ## 6. 错误处理
 
-| 场景 | 行为 |
-|------|------|
-| LLM 超时 (>5s) | 回退到规则引擎结果 + 黄色提示 |
-| LLM API 错误 | 回退到规则引擎结果 + 黄色提示 |
-| 缓存命中 | 直接返回缓存结果，`cached: true` |
-| 规则引擎无结果 | 调用 LLM（跳过规则质量检查） |
-| 输入太短 (<2字符) | 不触发推荐，返回空列表 |
-| 频率限制 | 前端防抖(500ms) + 后端缓存天然限流；如需更严格限制，可在 Nginx/API Gateway 层配置 |
+| 场景 | HTTP 状态 | 响应 | 前端行为 |
+|------|----------|------|---------|
+| LLM 超时 (>LLM_TIMEOUT 秒) | 200 | `source: "rule_fallback"` | 黄色提示条"AI 建议暂不可用，已使用规则引擎" |
+| LLM API 错误 | 200 | `source: "rule_fallback"` | 同上 |
+| LLM 输出校验失败 | 200 | `source: "rule_fallback"` | 同上 |
+| 缓存命中 | 200 | `cached: true` | 无特殊提示 |
+| 规则引擎无结果 + 无 LLM | 200 | `suggestions: []` | 显示"暂无建议" |
+| 输入太短 (<2 字符) | — | 不发请求 | 无下拉 |
+| 权限不足 (viewer) | 403 | 错误信息 | 不触发（前端 disabled） |
+| 限流超限 | 429 | 错误信息 | 短暂禁用触发，3 秒后重试 |
+| FMEA 不存在 | 404 | 错误信息 | 无下拉 |
 
 ---
 
 ## 7. 环境变量
 
 ```env
-# LLM 配置
-LLM_PROVIDER=claude          # claude | openai | local
-LLM_API_KEY=sk-...           # API key
-LLM_MODEL=claude-sonnet-4-6  # 模型名称（可选）
-LLM_BASE_URL=                # 本地模型 URL（仅 local 模式）
-LLM_TIMEOUT=5                # 超时秒数（默认 5）
+# LLM 配置（可选，未设置则以纯规则引擎模式运行）
+LLM_PROVIDER=          # claude | openai | local | 留空=纯规则
+LLM_API_KEY=           # API key（claude/openai 必填）
+LLM_MODEL=             # 模型名称（各 provider 有内部默认值）
+LLM_BASE_URL=          # 本地模型 URL（仅 local 模式）
+LLM_TIMEOUT=5          # 超时秒数（默认 5）
 ```
+
+**默认值（代码内部）：**
+- `claude` → `claude-sonnet-4-6-20250514`
+- `openai` → `gpt-4o`
+- `local` → 无默认值，必须指定 `LLM_MODEL`
+
+启动时验证：如果 `LLM_PROVIDER` 有值但配置不完整（如 `claude` 无 `LLM_API_KEY`），记录 `WARNING` 日志并以 `provider=None` 启动。
 
 ---
 
@@ -419,3 +666,4 @@ LLM_TIMEOUT=5                # 超时秒数（默认 5）
 3. **用户反馈循环：** 记录用户是否采纳建议，用于优化推荐质量
 4. **Redis 缓存：** 当前使用 PostgreSQL 缓存，后续可切换到 Redis
 5. **流式响应：** LLM 结果逐步返回，减少用户等待感
+6. **Viewer 只读推荐：** 新增 `GET /recommend/cached` 端点
