@@ -19,7 +19,7 @@ import { calculateAP } from "../../../utils/fmea";
 import { buildRows, createRowNodes, type FMEARow } from "../../../utils/fmeaTable";
 import StructureTree from "../../../components/dfmea/StructureTree";
 import ParameterDiagram from "../../../components/dfmea/ParameterDiagram";
-import InlineRecommendations from "../../../components/dfmea/InlineRecommendations";
+import SmartSuggestionDropdown from "../../../components/dfmea/SmartSuggestionDropdown";
 import VersionHistoryTab from "../../../components/version/VersionHistoryTab";
 import CreateVersionModal from "../../../components/version/CreateVersionModal";
 import RollbackConfirmModal from "../../../components/version/RollbackConfirmModal";
@@ -78,6 +78,7 @@ function getFunctionNodes(nodes: GraphNode[], fmeaType: string): GraphNode[] {
 export default function FMEAEditorPage() {
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
+  const fmeaId = id || "";
   const navigate = useNavigate();
   const [fmea, setFmea] = useState<FMEADocument | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,9 +99,6 @@ export default function FMEAEditorPage() {
   const [rollbackTarget, setRollbackTarget] = useState<{ major_no: number; minor_no: number } | null>(null);
   const [compareState, setCompareState] = useState<{ major1: number; minor1: number; major2: number; minor2: number } | null>(null);
   const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
-  const [recommendationTrigger, setRecommendationTrigger] = useState<"function" | "failureMode" | "risk" | null>(null);
-  const [recommendationCtx, setRecommendationCtx] = useState<{ functionDesc?: string; failureMode?: string; s?: number; o?: number; d?: number }>({});
-  const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
   const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
@@ -116,16 +114,6 @@ export default function FMEAEditorPage() {
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [contextMenuNode, setContextMenuNode] = useState<APIGraphNode | null>(null);
   const [pendingHighlightNode, setPendingHighlightNode] = useState<string | null>(null);
-
-  const activateRecommendation = (
-    rowKey: string,
-    trigger: "function" | "failureMode" | "risk",
-    ctx: { functionDesc?: string; failureMode?: string; s?: number; o?: number; d?: number }
-  ) => {
-    setFocusedRowKey(rowKey);
-    setRecommendationTrigger(trigger);
-    setRecommendationCtx(ctx);
-  };
 
   useEffect(() => {
     if (!id) return;
@@ -375,7 +363,6 @@ export default function FMEAEditorPage() {
         const funcNode = nodeMap.get(row.functionNodeId);
         return (
           <div
-            onFocus={() => activateRecommendation(row.key, "function", { functionDesc: funcNode?.name || "" })}
             tabIndex={0}
             style={{ outline: "none" }}
           >
@@ -397,12 +384,16 @@ export default function FMEAEditorPage() {
       render: (_: unknown, row: FMEARow) => {
         const node = nodeMap.get(row.failureModeNodeId);
         return (
-          <Input.TextArea
+          <SmartSuggestionDropdown
+            triggerType="failure_mode"
+            context={{
+              function_description: nodeMap.get(row.functionNodeId)?.name || "",
+            }}
+            fmeaId={fmeaId}
             value={node?.name || ""}
-            rows={2}
+            onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
+            onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
             disabled={!canEdit('fmea')}
-            onFocus={() => activateRecommendation(row.key, "failureMode", { failureMode: node?.name || "" })}
-            onChange={(e) => updateNode(row.failureModeNodeId, "name", e.target.value)}
           />
         );
       },
@@ -415,11 +406,17 @@ export default function FMEAEditorPage() {
         if (!row.failureEffectNodeId) return "-";
         const node = nodeMap.get(row.failureEffectNodeId);
         return (
-          <Input.TextArea
+          <SmartSuggestionDropdown
+            triggerType="failure_effect"
+            context={{
+              failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              function_description: nodeMap.get(row.functionNodeId)?.name || "",
+            }}
+            fmeaId={fmeaId}
             value={node?.name || ""}
-            rows={2}
+            onChange={(val) => updateNode(row.failureEffectNodeId!, "name", val)}
+            onSelect={(s) => updateNode(row.failureEffectNodeId!, "name", s.name)}
             disabled={!canEdit('fmea')}
-            onChange={(e) => updateNode(row.failureEffectNodeId!, "name", e.target.value)}
           />
         );
       },
@@ -440,16 +437,6 @@ export default function FMEAEditorPage() {
             value={node?.severity ?? undefined}
             disabled={!canEdit('fmea')}
             style={{ width: 55, textAlign: "center" }}
-            onFocus={() => {
-              const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
-              const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
-              activateRecommendation(row.key, "risk", {
-                failureMode: nodeMap.get(row.failureModeNodeId)?.name,
-                s: node?.severity || 0,
-                o: causeNode?.occurrence || 0,
-                d: detNode?.detection || 0,
-              });
-            }}
             onChange={(e) => updateNode(row.failureEffectNodeId!, "severity", Number(e.target.value) || 0)}
           />
         );
@@ -477,18 +464,26 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: "失效起因",
+      title: "失效原因",
       key: "failureCause",
       width: 140,
       render: (_: unknown, row: FMEARow) => {
         if (!row.failureCauseNodeId) return "-";
         const node = nodeMap.get(row.failureCauseNodeId);
+        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         return (
-          <Input.TextArea
+          <SmartSuggestionDropdown
+            triggerType="failure_cause"
+            context={{
+              failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              function_description: nodeMap.get(row.functionNodeId)?.name || "",
+              severity: effectNode?.severity || 0,
+            }}
+            fmeaId={fmeaId}
             value={node?.name || ""}
-            rows={2}
+            onChange={(val) => updateNode(row.failureCauseNodeId!, "name", val)}
+            onSelect={(s) => updateNode(row.failureCauseNodeId!, "name", s.name)}
             disabled={!canEdit('fmea')}
-            onChange={(e) => updateNode(row.failureCauseNodeId!, "name", e.target.value)}
           />
         );
       },
@@ -509,51 +504,62 @@ export default function FMEAEditorPage() {
             value={node?.occurrence ?? undefined}
             disabled={!canEdit('fmea')}
             style={{ width: 55, textAlign: "center" }}
-            onFocus={() => {
-              const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
-              const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
-              activateRecommendation(row.key, "risk", {
-                failureMode: nodeMap.get(row.failureModeNodeId)?.name,
-                s: effectNode?.severity || 0,
-                o: node?.occurrence || 0,
-                d: detNode?.detection || 0,
-              });
-            }}
             onChange={(e) => updateNode(row.failureCauseNodeId!, "occurrence", Number(e.target.value) || 0)}
           />
         );
       },
     },
     {
-      title: "预防控制",
+      title: "预防措施",
       key: "preventionControl",
-      width: 130,
+      width: 140,
       render: (_: unknown, row: FMEARow) => {
-        if (row.preventionControlIds.length === 0) return "-";
-        const node = nodeMap.get(row.preventionControlIds[0]);
+        const nodeId = row.preventionControlIds[0];
+        if (!nodeId) return "-";
+        const node = nodeMap.get(nodeId);
+        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+        const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
+        const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
+        const ap = calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, detNode?.detection || 0);
         return (
-          <Input.TextArea
+          <SmartSuggestionDropdown
+            triggerType="measure"
+            context={{
+              failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              ap: ap,
+            }}
+            fmeaId={fmeaId}
             value={node?.name || ""}
-            rows={2}
+            onChange={(val) => updateNode(nodeId, "name", val)}
+            onSelect={(s) => updateNode(nodeId, "name", s.name)}
             disabled={!canEdit('fmea')}
-            onChange={(e) => updateNode(row.preventionControlIds[0], "name", e.target.value)}
           />
         );
       },
     },
     {
-      title: "探测控制",
+      title: "检测措施",
       key: "detectionControl",
-      width: 130,
+      width: 140,
       render: (_: unknown, row: FMEARow) => {
-        if (row.detectionControlIds.length === 0) return "-";
-        const node = nodeMap.get(row.detectionControlIds[0]);
+        const nodeId = row.detectionControlIds[0];
+        if (!nodeId) return "-";
+        const node = nodeMap.get(nodeId);
+        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+        const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
+        const ap = calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, node?.detection || 0);
         return (
-          <Input.TextArea
+          <SmartSuggestionDropdown
+            triggerType="measure"
+            context={{
+              failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              ap: ap,
+            }}
+            fmeaId={fmeaId}
             value={node?.name || ""}
-            rows={2}
+            onChange={(val) => updateNode(nodeId, "name", val)}
+            onSelect={(s) => updateNode(nodeId, "name", s.name)}
             disabled={!canEdit('fmea')}
-            onChange={(e) => updateNode(row.detectionControlIds[0], "name", e.target.value)}
           />
         );
       },
@@ -574,16 +580,6 @@ export default function FMEAEditorPage() {
             value={node?.detection ?? undefined}
             disabled={!canEdit('fmea')}
             style={{ width: 55, textAlign: "center" }}
-            onFocus={() => {
-              const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
-              const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
-              activateRecommendation(row.key, "risk", {
-                failureMode: nodeMap.get(row.failureModeNodeId)?.name,
-                s: effectNode?.severity || 0,
-                o: causeNode?.occurrence || 0,
-                d: node?.detection || 0,
-              });
-            }}
             onChange={(e) => updateNode(row.detectionControlIds[0], "detection", Number(e.target.value) || 0)}
           />
         );
@@ -674,13 +670,26 @@ export default function FMEAEditorPage() {
             </Button>
           );
         }
-        const node = nodeMap.get(row.recommendedActionIds[0]);
+        const nodeId = row.recommendedActionIds[0];
+        const node = nodeMap.get(nodeId);
+        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+        const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
+        const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
         return (
-          <Input.TextArea
+          <SmartSuggestionDropdown
+            triggerType="optimization"
+            context={{
+              failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              severity: effectNode?.severity || 0,
+              occurrence: causeNode?.occurrence || 0,
+              detection: detNode?.detection || 0,
+              ap: calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, detNode?.detection || 0),
+            }}
+            fmeaId={fmeaId}
             value={node?.name || ""}
-            rows={2}
+            onChange={(val) => updateNode(nodeId, "name", val)}
+            onSelect={(s) => updateNode(nodeId, "name", s.name)}
             disabled={!canEdit('fmea')}
-            onChange={(e) => updateNode(row.recommendedActionIds[0], "name", e.target.value)}
           />
         );
       },
@@ -965,48 +974,6 @@ export default function FMEAEditorPage() {
               </div>
             )}
           </Card>
-          <InlineRecommendations
-            trigger={recommendationTrigger}
-            {...recommendationCtx}
-            onApplySuggestion={(suggestion, field) => {
-              if (!focusedRowKey) {
-                message.warning("请先点击需要填充的单元格");
-                return;
-              }
-              const row = rows.find((r) => r.key === focusedRowKey);
-              if (!row) return;
-
-              let nodeId: string | undefined;
-              let nodeField: keyof GraphNode = "name";
-
-              switch (field) {
-                case "failureMode":
-                  nodeId = row.failureModeNodeId;
-                  break;
-                case "effect":
-                  nodeId = row.failureEffectNodeId ?? undefined;
-                  break;
-                case "cause":
-                  nodeId = row.failureCauseNodeId ?? undefined;
-                  break;
-                case "prevention":
-                  nodeId = row.preventionControlIds[0] ?? undefined;
-                  break;
-                case "detection":
-                  nodeId = row.detectionControlIds[0] ?? undefined;
-                  break;
-                default:
-                  message.warning(`未知字段: ${field}`);
-                  return;
-              }
-
-              if (nodeId) {
-                updateNode(nodeId, nodeField, suggestion);
-                message.success(`已采用建议: ${suggestion}`);
-              }
-              setRecommendationTrigger(null);
-            }}
-          />
         </Col>
       </Row>
         </Tabs.TabPane>
