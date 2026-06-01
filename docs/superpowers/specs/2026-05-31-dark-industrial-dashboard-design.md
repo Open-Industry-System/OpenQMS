@@ -1,7 +1,7 @@
 # OpenQMS 深色主题仪表盘设计
 
 **创建日期**: 2026-05-31
-**修订**: v3 — 修正行动词、空状态、时间格式、本月新增定义
+**修订**: v4 — 统一命名、修复对比度、逐组件状态矩阵、首屏 JS 总量预算
 **状态**: 待实现
 
 ---
@@ -19,7 +19,7 @@
 | 维度 | 约束 |
 |------|------|
 | 首屏 TTI | ≤ 2s（含数据请求） |
-| 首屏 JS bundle 增量 | ≤ 15KB gzipped（不含 ECharts 本身） |
+| 首屏 JS 总量 | ≤ 300KB gzipped（当前约 280KB，dark theme 增量 ≤ 5KB） |
 | 网络请求 | 首屏 ≤ 3 个 API 调用（已合并为 summary + alerts + recent） |
 | 外部资源 | 默认不引入 Google Fonts 等外链字体 |
 | 动画 | 默认关闭，`prefers-reduced-motion: no-preference` 时启用 |
@@ -107,7 +107,7 @@
 │                             │
 │  12                         │  ← 32px, 600字重, colorText
 │                             │
-│  较昨日 +3                   │  ← 12px, colorTextTertiary
+│  较昨日 +3                   │  ← 12px, colorTextTertiary (#8696a8, AA ✓)
 └─────────────────────────────┘
   ↑ 顶部 3px 边框：状态色（红/黄/绿）
 ```
@@ -117,16 +117,18 @@
 - 背景 `token.colorBgContainer`
 - 可点击卡片：`cursor: pointer`，hover 时背景微亮（`colorBgElevated`）
 
-### 4.3 状态矩阵
+### 4.3 状态矩阵（KPI 卡片）
 
-| 状态 | 数字 | 边框色 | 辅助文字 |
-|------|------|--------|---------|
-| 正常（0） | 0 | 绿色 `colorSuccess` | — |
-| 警告（>0） | 实际值 | 黄色 `colorWarning` | "较昨日 +N" |
-| 危险（超期/高风险） | 实际值 | 红色 `colorError` | "较昨日 +N" |
-| 加载中 | — | 灰色 `colorBorder` | Skeleton |
-| 错误 | — | 灰色 `colorBorder` | "加载失败，点击重试" |
-| 无权限 | — | — | —（viewer 看到完整卡片但不可点击） |
+| 状态 | 视觉表现 | 交互 |
+|------|---------|------|
+| empty（首次使用，无数据） | 数字"—"，灰色边框，辅助文字"暂无记录" | 不可点击 |
+| loading | Ant Design Skeleton（标题+数字+辅助文字） | 不可点击 |
+| error | 数字"—"，灰色边框，辅助文字"加载失败" | 辅助文字为可点击的"重试"链接 |
+| success-正常（0） | 数字"0"，绿色边框 | 可点击（viewer 不可点击） |
+| success-警告（>0） | 实际值，黄色边框，"较昨日 +N" | 可点击 |
+| success-危险 | 实际值，红色边框，"较昨日 +N" | 可点击 |
+| focus | 2px `colorPrimary` 外轮廓（`outline-offset: 2px`） | Enter 触发导航 |
+| disabled（viewer） | 完整展示，`cursor: default`，无 hover 效果 | 不可点击，无键盘焦点 |
 
 ### 4.4 空状态
 
@@ -163,14 +165,17 @@
 | PPM | >500 | rgba(239,68,68,0.12) | colorError |
 | PPM | 200-500 | rgba(245,158,11,0.12) | colorWarning |
 
-### 5.4 状态矩阵
+### 5.4 状态矩阵（待处置事项列表）
 
-| 状态 | 显示 |
-|------|------|
-| 有数据 | 正常列表 |
-| 空数据 | 描述性空状态："暂无待处置事项，当前无超期或高风险项" |
-| 加载中 | Skeleton 列表（3 行） |
-| 错误 | "加载失败" + 重试按钮 |
+| 状态 | 视觉表现 | 交互 |
+|------|---------|------|
+| empty | 居中文案："暂无待处置事项，当前无超期或高风险项" | — |
+| loading | Skeleton 列表（3 行占位） | — |
+| error | 居中文案"加载失败" + 重试 Button（`type=default`） | 点击重试 |
+| success（有数据） | 列表项展示，每项可独立操作 | 每项可点击导航 |
+| success（空数据） | 同 empty | — |
+| focus | 列表项获得 2px `colorPrimary` 外轮廓 | Enter 触发导航 |
+| disabled（viewer） | 列表项展示，操作链接隐藏 | 不可点击 |
 
 ---
 
@@ -189,9 +194,17 @@
 | 目标 | 文档编号 + 文档类型 |
 | 链接 | 点击跳转到详情页 |
 
-### 6.3 空状态
+### 6.3 状态矩阵（最近操作）
 
-"暂无操作记录"，不显示引导（首次使用用户可从快速入口开始）。
+| 状态 | 视觉表现 | 交互 |
+|------|---------|------|
+| empty | 居中文案："暂无操作记录" | — |
+| loading | Skeleton 列表（5 行占位） | — |
+| error | 居中文案"加载失败" + 重试 Button | 点击重试 |
+| success（有数据） | 时间线列表，每项可点击 | 跳转到详情页 |
+| success（空数据） | 同 empty | — |
+| focus | 列表项获得 `colorPrimary` 外轮廓 | Enter 跳转 |
+| disabled | 不适用（viewer 可查看操作记录） | — |
 
 ---
 
@@ -202,6 +215,17 @@
 - viewer 角色隐藏整个区块
 - 按钮文案明确动作："新建 FMEA"、"新建 CAPA"、"新建客诉"
 - 按钮样式：`type="default"`，不是 `type="primary"`（避免视觉权重过高）
+
+### 7.2 状态矩阵（快速入口）
+
+| 状态 | 视觉表现 | 交互 |
+|------|---------|------|
+| default | 3 个 Button（`type=default`），`block` 宽度 | 点击跳转创建页 |
+| loading | 不适用（静态按钮，无数据依赖） | — |
+| error | 不适用 | — |
+| success | 同 default | — |
+| focus | 按钮获得 `colorPrimary` 外轮廓 | Enter 触发 |
+| disabled（viewer） | 整个区块隐藏（`display: none`） | — |
 
 ### 7.2 空状态
 
@@ -229,7 +253,7 @@ const darkTheme = {
     // 文字层级
     colorText: '#f0f9ff',
     colorTextSecondary: '#94a3b8',
-    colorTextTertiary: '#64748b',
+    colorTextTertiary: '#8696a8',  // 调亮以满足 12px AA（4.5:1）
 
     // 边框
     colorBorder: 'rgba(148, 163, 184, 0.2)',
@@ -288,7 +312,7 @@ KPI 数字和文档编号使用等宽字体：`'SF Mono', 'Cascadia Code', 'Cons
 |------|------|------|--------|------|
 | 主标题/卡片 | #f0f9ff | #111827 | 15.2:1 | AAA ✓ |
 | 次要文字/卡片 | #94a3b8 | #111827 | 6.8:1 | AA ✓ |
-| 辅助文字/卡片 | #64748b | #111827 | 4.1:1 | AA 大字 ✓ |
+| 辅助文字/卡片 | #8696a8 | #111827 | 5.2:1 | AA ✓（12px 可用） |
 | 成功标签 | #10b981 | rgba(16,185,129,0.12) on #111827 | 5.1:1 | AA ✓ |
 | 危险标签 | #ef4444 | rgba(239,68,68,0.12) on #111827 | 4.7:1 | AA ✓ |
 
@@ -399,7 +423,7 @@ token: {
 ### 12.3 阶段三：仪表盘页面
 
 1. KPI 卡片：数据定义、状态矩阵、空状态、错误状态
-2. 风险列表："需要你处理"重命名、状态矩阵、空状态
+2. 风险列表："待处置事项"、状态矩阵、空状态
 3. 最近操作：时间格式、空状态
 4. 快速入口：viewer 隐藏逻辑
 5. 权限适配
@@ -425,6 +449,6 @@ token: {
 | 可读性 | 所有文字 ≥ WCAG AA（4.5:1） |
 | 状态覆盖 | 每个关键组件覆盖 empty/loading/error/success/focus/disabled |
 | 无障碍 | 键盘可达，屏幕阅读器可用，prefers-reduced-motion 响应 |
-| 性能 | 首屏 TTI ≤ 2s，JS 增量 ≤ 15KB gzipped，API ≤ 3 |
+| 性能 | 首屏 TTI ≤ 2s，首屏 JS 总量 ≤ 300KB gzipped，dark theme 增量 ≤ 5KB，API ≤ 3 |
 | 功能完整 | 现有功能无回归 |
 | 动画 | 默认关闭（reduced-motion），开启时使用 AntD Motion Token |
