@@ -449,6 +449,65 @@ def test_keyword_match_finds_similar_fmea(sample_graph):
     assert "焊接虚焊" in results[0]["failure_mode_name"] or len(results[0]["related_d4_keywords"]) > 0
 
 
+def test_linked_match_from_failure_cause_node(sample_graph):
+    """When fmea_node_id is a FailureCause, find its parent FailureMode via CAUSE_OF forward."""
+    cause_id = sample_graph["nodes"][2]["id"]
+    capa_data = {
+        "fmea_ref_id": uuid.uuid4(),
+        "fmea_node_id": cause_id,  # pointing to FailureCause
+        "d4_root_cause": "焊接参数偏移",
+        "d5_correction": "增加焊接参数在线监控",
+        "product_line_code": "DC-DC-100",
+    }
+    fmea_docs = [
+        {
+            "fmea_id": capa_data["fmea_ref_id"],
+            "document_no": "PFMEA-2026-001",
+            "graph_data": sample_graph,
+        }
+    ]
+
+    results = get_d7_recommendations(capa_data, fmea_docs, allowed_product_lines=["DC-DC-100"])
+
+    assert len(results) == 1
+    assert results[0]["failure_mode_name"] == "焊接虚焊"
+    assert results[0]["failure_cause_name"] == "焊接参数偏移"
+    assert results[0]["match_source"] == "linked"
+
+
+def test_keyword_match_via_failure_cause_name():
+    """Keywords matching FailureCause name (not FailureMode name) should still recommend."""
+    fm_id = str(uuid.uuid4())
+    cause_id = str(uuid.uuid4())
+    func_id = str(uuid.uuid4())
+    graph = {
+        "nodes": [
+            {"id": func_id, "type": "ProcessStepFunction", "name": "焊接功能", "severity": 8, "occurrence": 5, "detection": 6},
+            {"id": fm_id, "type": "FailureMode", "name": "虚焊", "severity": 8, "occurrence": 5, "detection": 6},
+            {"id": cause_id, "type": "FailureCause", "name": "焊接参数偏移导致接触不良", "severity": 8, "occurrence": 5, "detection": 6},
+        ],
+        "edges": [
+            {"source": func_id, "target": fm_id, "type": "HAS_FAILURE_MODE"},
+            {"source": cause_id, "target": fm_id, "type": "CAUSE_OF"},
+        ],
+    }
+    fmea_id = uuid.uuid4()
+    capa_data = {
+        "fmea_ref_id": uuid.uuid4(),  # different FMEA (not linked)
+        "fmea_node_id": None,
+        "d4_root_cause": "焊接参数偏移",
+        "d5_correction": None,
+        "product_line_code": "DC-DC-100",
+    }
+    fmea_docs = [{"fmea_id": fmea_id, "document_no": "PFMEA-2026-005", "graph_data": graph}]
+
+    results = get_d7_recommendations(capa_data, fmea_docs, allowed_product_lines=["DC-DC-100"])
+
+    # "焊接参数偏移" matches FailureCause name, so FailureMode "虚焊" should be recommended
+    assert len(results) >= 1
+    assert any(r["failure_mode_name"] == "虚焊" for r in results)
+
+
 def test_empty_graph_returns_empty():
     capa_data = {
         "fmea_ref_id": uuid.uuid4(),
@@ -502,7 +561,7 @@ from app.utils.text import extract_keywords
 def get_d7_recommendations(
     capa_data: dict,
     fmea_docs: list[dict],
-    allowed_product_lines: list[str],
+    allowed_product_lines: list[str] | None = None,
 ) -> list[dict]:
     """Compute D7 FMEA recommendations for a CAPA.
 
@@ -550,10 +609,10 @@ def get_d7_recommendations(
 
         if target_node:
             if target_node["type"] == "FailureCause":
-                # Find parent FailureMode via CAUSE_OF reverse
-                for src, etype in reverse_edges.get(target_node_id, []):
-                    if etype == "CAUSE_OF" and node_map.get(src, {}).get("type") == "FailureMode":
-                        failure_mode_ids.append(src)
+                # Find parent FailureMode via CAUSE_OF forward (FailureCause -> FailureMode)
+                for tgt, etype in forward_edges.get(target_node_id, []):
+                    if etype == "CAUSE_OF" and node_map.get(tgt, {}).get("type") == "FailureMode":
+                        failure_mode_ids.append(tgt)
             elif target_node["type"] == "FailureMode":
                 failure_mode_ids.append(target_node_id)
             else:
@@ -639,12 +698,22 @@ def get_d7_recommendations(
             for e in edges:
                 forward_edges_kw.setdefault(e["source"], []).append((e["target"], e["type"]))
 
+            # Pre-index FailureCause names per FailureMode for broader keyword matching
+            fm_cause_names: dict[str, list[str]] = {}  # fm_id -> [cause_name, ...]
+            for e in edges:
+                if e["type"] == "CAUSE_OF":
+                    cause_node = node_map.get(e["source"])
+                    if cause_node and cause_node.get("type") == "FailureCause":
+                        fm_cause_names.setdefault(e["target"], []).append(cause_node.get("name", ""))
+
             for n in graph.get("nodes", []):
                 if n.get("type") != "FailureMode":
                     continue
 
                 name = n.get("name", "")
-                matched_kws = [kw for kw in keywords if kw in name]
+                # Match against FailureMode name AND its FailureCause names
+                all_text = [name] + fm_cause_names.get(n["id"], [])
+                matched_kws = [kw for kw in keywords if any(kw in t for t in all_text)]
                 if not matched_kws:
                     continue
 
