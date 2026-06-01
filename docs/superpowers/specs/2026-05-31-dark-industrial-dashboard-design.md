@@ -1,495 +1,230 @@
-# 深色工业仪表盘主题设计
+# OpenQMS 深色主题仪表盘设计
 
 **创建日期**: 2026-05-31
+**修订**: v2 — 基于审核反馈全面重写
 **状态**: 待实现
-**设计者**: Claude Code
 
 ---
 
-## 1. 设计概览
+## 1. 设计原则
 
-### 1.1 视觉方向
+### 1.1 主任务定义
 
-**"精密工业控制室"** — 深色背景、高对比度数据展示、精密的网格系统，灵感来源于现代工厂的数字孪生（Digital Twin）监控系统和航空电子仪表盘。
+**质量负责人在 30 秒内识别最需要处理的质量风险，并进入处置动作。**
 
-### 1.2 设计目标
+仪表盘不是信息展示页面，是**决策入口**。每个元素必须服务于：看到问题 → 理解优先级 → 进入处置。任何不服务于这个链路的元素都是噪声。
 
-- **数据优先**: 高对比度文字和图表，确保远距离可读性
-- **状态清晰**: 红（危险）、黄（警告）、绿（正常）的工业标准色编码
-- **专业感**: 微妙的科技感纹理、等宽数字字体、精确的间距系统
-- **低视觉疲劳**: 深色背景减少长时间使用的眼睛疲劳
+### 1.2 设计约束
 
-### 1.3 技术方案
+| 维度 | 约束 |
+|------|------|
+| 首屏 TTI | ≤ 2s（含数据请求） |
+| 首屏 JS bundle 增量 | ≤ 15KB gzipped（不含 ECharts 本身） |
+| 网络请求 | 首屏 ≤ 3 个 API 调用（已合并为 summary + alerts + recent） |
+| 外部资源 | 默认不引入 Google Fonts 等外链字体 |
+| 动画 | 默认关闭，`prefers-reduced-motion: no-preference` 时启用 |
+| 对比度 | 所有文字 ≥ WCAG AA（4.5:1），关键数据 ≥ 7:1 |
 
-- 基于Ant Design 5.x 的 ConfigProvider + `theme.darkAlgorithm`
-- 自定义设计令牌微调工业质感
-- CSS变量覆盖关键样式
-- 适度动画：页面加载渐入、卡片hover效果、数字滚动计数
+### 1.3 深色主题不是装饰
 
----
-
-## 2. 色彩系统
-
-> **注意：** 本节中 `--xxx` 标记为设计概念名称，实际实现时全部映射到 Ant Design Token，不在代码中引入原生 CSS 变量。映射关系见附录 11.1。
-
-### 2.1 背景层级
-
-| 设计概念 | Ant Design Token | 值 | 用途 |
-|---------|-----------------|-----|------|
-| --bg-primary | `token.colorBgLayout` | #0a0e1a | 页面主背景 - 接近黑色的深蓝灰 |
-| --bg-surface | `token.colorBgContainer` | #111827 | 卡片/面板背景 |
-| --bg-elevated | `token.colorBgElevated` | #1f2937 | 悬浮/选中状态 |
-| --bg-hover | 组件级 Token `colorItemBgHover` | #374151 | hover状态 |
-
-### 2.2 文字颜色
-
-| 设计概念 | Ant Design Token | 值 | 用途 |
-|---------|-----------------|-----|------|
-| --text-primary | `token.colorText` | #f0f9ff | 主标题 - 高亮白 |
-| --text-secondary | `token.colorTextSecondary` | #94a3b8 | 次要文字 - 蓝灰 |
-| --text-muted | `token.colorTextTertiary` | #64748b | 辅助文字 - 暗灰 |
-| --text-disabled | `token.colorTextDisabled` | #475569 | 禁用状态 |
-
-### 2.3 强调色
-
-| 用途 | Ant Design Token | 值 |
-|------|-----------------|-----|
-| 主交互色 | `token.colorPrimary` | #3b82f6 |
-| 数据高亮 | `token.colorInfo` | #06b6d4 |
-| 成功/正常 | `token.colorSuccess` | #10b981 |
-| 警告 | `token.colorWarning` | #f59e0b |
-| 危险/异常 | `token.colorError` | #ef4444 |
-
-### 2.4 边框与分隔
-
-| 设计概念 | Ant Design Token | 值 |
-|---------|-----------------|-----|
-| --border-subtle | `token.colorBorderSecondary` | rgba(148, 163, 184, 0.1) |
-| --border-default | `token.colorBorder` | rgba(148, 163, 184, 0.2) |
-| --border-glow | 自定义扩展 Token（见附录） | rgba(59, 130, 246, 0.3) |
+深色主题的理由是**减少长时间使用的眼睛疲劳**和**让状态色（红/黄/绿）在低亮度环境中更突出**。不是为了"科技感"。移除所有纯装饰元素：网格纹理、发光边框、数字滚动动画、卡片入场动画。
 
 ---
 
-## 3. 布局设计
+## 2. 用户角色与权限矩阵
 
-### 3.1 整体结构（保持现有布局）
+### 2.1 角色定义
 
-| 区域 | 尺寸 | 说明 |
-|------|------|------|
-| 侧边栏 | 220px（折叠后80px） | 深色背景导航 |
-| 顶栏 | 64px | 产品线选择器、用户信息 |
-| 内容区 | 自适应 | 24px 内边距 |
+| 角色 | 代号 | 仪表盘可见内容 |
+|------|------|--------------|
+| 管理员 | admin | 全部 |
+| 质量工程师 | quality_engineer | 全部 |
+| 经理 | manager | 全部 |
+| 查看者 | viewer | 只读，隐藏"快速入口" |
 
-### 3.2 侧边栏改进
+### 2.2 权限影响
 
-- **背景色**: `--bg-surface` (#111827)
-- **Logo区域**: 居中显示 "OpenQMS"，使用 --accent-primary 色
-- **菜单项**:
-  - 默认状态：透明背景，--text-secondary 图标和文字
-  - 悬停状态：--bg-hover 背景，文字变亮
-  - 选中状态：左侧3px --accent-primary 竖线 + 渐变背景
-- **子菜单展开**: 带有微弱的展开/收起动画
-
-### 3.3 顶栏改进
-
-- **背景**: `--bg-surface` + 底部1px `--border-subtle`
-- **折叠按钮**: 图标按钮，hover时背景变亮
-- **产品线选择器**:
-  - 深色下拉框样式
-  - 边框: 1px --border-default
-  - 下拉菜单: --bg-elevated 背景
-- **用户区域**:
-  - 头像：40px圆形，带1px --accent-primary 边框
-  - 下拉菜单：深色背景，带阴影
-
-### 3.4 内容区改进
-
-- **背景**: `--bg-primary` + 微妙的网格纹理
-- **卡片容器**: --bg-surface 背景，无默认边框
-- **页面标题**: 24px, 600字重，--text-primary
+- viewer 看到的 KPI 卡片不可点击导航（仅展示数字）
+- viewer 隐藏"快速入口"区块
+- 空状态文案区分"无数据"（尚未创建）和"无权限"（无权查看）
 
 ---
 
-## 4. 仪表盘页面设计
+## 3. 仪表盘信息架构
 
-### 4.1 KPI 卡片区域
+### 3.1 页面结构
 
-**布局**: 4列等宽，16px间距 (Row gutter)
+```
+┌─────────────────────────────────────────────────────┐
+│  质量仪表盘                                    [产品线] │
+├────────────┬────────────┬────────────┬──────────────┤
+│  待办事项   │  超期任务   │  高风险项   │  本月新增    │
+│  红/黄/绿   │  红/0=绿   │  红/0=绿   │  趋势箭头    │
+├────────────┴────────────┴────────────┴──────────────┤
+│  需要你处理 ─────────────────────────────────────── │
+│  ┌─────────────┐ ┌─────────────┐ ┌───────────────┐ │
+│  │ 高 RPN FMEA  │ │ 超期 CAPA   │ │ PPM 超标供应商 │ │
+│  │              │ │              │ │               │ │
+│  │ PFMEA-001    │ │ 8D-003      │ │ 供应商A        │ │
+│  │ RPN=240      │ │ 超期5天      │ │ PPM=850       │ │
+│  │ [立即处理→]  │ │ [查看→]     │ │ [查看→]       │ │
+│  └─────────────┘ └─────────────┘ └───────────────┘ │
+├─────────────────────────────┬───────────────────────┤
+│  最近操作                   │  快速入口              │
+│  ● 14:30 创建 PFMEA-001    │  [新建 FMEA]          │
+│  ● 11:20 更新 8D-003       │  [新建 CAPA]          │
+│  └─── 时间线 ───            │  [新建客诉]           │
+└─────────────────────────────┴───────────────────────┘
+```
 
-**卡片样式**:
+### 3.2 信息优先级
+
+| 优先级 | 区块 | 决策支持 |
+|--------|------|---------|
+| P0 | KPI 指标卡 | 一眼看出整体健康度 |
+| P1 | "需要你处理"风险列表 | 明确下一步动作 |
+| P2 | 最近操作 | 上下文连续性 |
+| P3 | 快速入口 | 减少导航步骤（viewer 隐藏） |
+
+---
+
+## 4. KPI 指标卡设计
+
+### 4.1 数据定义
+
+| 卡片 | 数据来源 | 计算逻辑 | 阈值 | 点击目标 |
+|------|---------|---------|------|---------|
+| 待办事项 | `summary.pending_actions` | CAPA 未完成 + FMEA 待审批 | >0 黄色, 0 绿色 | `/capa?pending_action=true` |
+| 超期任务 | `summary.overdue_tasks` | CAPA 截止日期 < 今天 | >0 红色, 0 绿色 | `/capa?overdue=true` |
+| 高风险项 | `summary.high_risk_items` | FMEA RPN ≥ 200 或 AP=H | >0 红色, 0 绿色 | `/fmea?risk=high` |
+| 本月新增 | `summary.month_trend` | 本月新增记录数 vs 上月 | 正=绿↑, 负=红↓ | 不可点击 |
+
+### 4.2 组件规格
+
 ```
 ┌─────────────────────────────┐
-│ ▓▓▓ (顶部3px状态色边框)      │
+│  待办事项                    │  ← 14px, colorTextSecondary
 │                             │
-│  📊 待办事项                 │
+│  12                         │  ← 32px, 600字重, colorText
 │                             │
-│  ┌─────────────────────┐   │
-│  │       12            │   │  ← 48px, JetBrains Mono
-│  │    ─────────        │   │
-│  └─────────────────────┘   │
-│                             │
-│  较昨日 +3                   │
+│  较昨日 +3                   │  ← 12px, colorTextTertiary
 └─────────────────────────────┘
+  ↑ 顶部 3px 边框：状态色（红/黄/绿）
 ```
 
-**状态色边框映射**:
-| 指标 | 边框颜色 |
-|------|----------|
-| 待办事项 | --accent-warning |
-| 超期任务 | --accent-danger |
-| 高风险项 | --accent-danger |
-| 本月趋势 | 正数: --accent-success / 负数: --accent-danger |
+- 数字不使用滚动动画，直接渲染
+- 卡片圆角 `token.borderRadiusLG`（8px）
+- 背景 `token.colorBgContainer`
+- 可点击卡片：`cursor: pointer`，hover 时背景微亮（`colorBgElevated`）
 
-**卡片交互**:
-- 悬停：translateY(-4px) + 阴影增强
-- 点击：导航到对应详情页
-- 数字动画：从0滚动到目标值，1.5s ease-out
+### 4.3 状态矩阵
 
-### 4.2 风险预警区域
+| 状态 | 数字 | 边框色 | 辅助文字 |
+|------|------|--------|---------|
+| 正常（0） | 0 | 绿色 `colorSuccess` | — |
+| 警告（>0） | 实际值 | 黄色 `colorWarning` | "较昨日 +N" |
+| 危险（超期/高风险） | 实际值 | 红色 `colorError` | "较昨日 +N" |
+| 加载中 | — | 灰色 `colorBorder` | Skeleton |
+| 错误 | — | 灰色 `colorBorder` | "加载失败，点击重试" |
+| 无权限 | — | — | —（viewer 看到完整卡片但不可点击） |
 
-**布局**: 3列等宽，16px间距
+### 4.4 空状态
 
-**卡片样式**:
-- 标题：16px, 500字重，带右侧数量徽章
-- 列表项：
-  - 默认：透明背景
-  - 悬停：--bg-elevated 背景
-  - 圆角：4px
-  - 内边距：12px 8px
-
-**列表项内容**:
-```
-┌─────────────────────────────────────┐
-│ PFMEA-2026-001          [RPN=240]  │  ← 编号：等宽字体
-│ 结构功能失效                       │  ← 描述：--text-secondary
-└─────────────────────────────────────┘
-```
-
-**标签样式**:
-- 高RPN: --accent-danger 背景
-- 超期天数: --accent-warning 背景
-- PPM超标: --accent-warning 背景
-
-### 4.3 最近操作区域
-
-**时间线样式**:
-```
-│
-●──── 2026-05-31 14:30
-│     FMEA - PFMEA-2026-001
-│     创建文档
-│
-●──── 2026-05-31 11:20
-│     ...
-```
-
-**元素**:
-- 时间线竖线：2px, --border-default
-- 圆点：8px, 根据操作类型着色
-- 操作描述：--text-secondary
-
-### 4.4 快速入口区域
-
-**按钮样式**:
-- 主按钮：--accent-primary 背景，白色文字
-- 次要按钮：--bg-elevated 背景，--text-primary 文字
-- 悬停：亮度提升10%
-- 圆角：6px
-- 内边距：12px 24px
+- 数据为 0 且无错误：显示 "0"，绿色边框，辅助文字显示 "暂无"
+- API 失败：显示 "—"，灰色边框，显示重试链接
+- 从未初始化（首次使用）：显示 "—"，引导用户创建第一条记录
 
 ---
 
-## 5. 通用组件样式
+## 5. 风险列表设计
 
-### 5.1 按钮
+### 5.1 区块标题
 
-| 类型 | 样式 |
-|------|------|
-| Primary | --accent-primary 背景，白色文字 |
-| Default | --bg-elevated 背景，--border-default 边框 |
-| Text | 透明背景，hover时--bg-hover |
-| Danger | --accent-danger 背景，白色文字 |
+**"需要你处理"** — 不是"高 RPN FMEA"、"超期 CAPA"等技术术语。标题表达的是用户行动，不是数据分类。
 
-### 5.2 卡片
+### 5.2 列表项设计
 
-```css
-.card {
-  background: var(--bg-surface);
-  border-radius: 8px;
-  border: none;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: transform 0.2s, box-shadow 0.2s;
-}
+每个列表项是一个**可行动的卡片**，包含：
 
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-}
-```
-
-### 5.3 表格
-
-- 表头：--bg-elevated 背景，--text-secondary 文字
-- 表格行：默认透明，hover时--bg-hover
-- 边框：底部 1px --border-subtle
-- 斑马纹：奇数行 --bg-surface / 偶数行 微亮
-
-### 5.4 表单
-
-- 输入框：--bg-elevated 背景，--border-default 边框
-- 聚焦时：--accent-primary 边框 + 微弱发光
-- 标签：--text-secondary
-- 错误状态：--accent-danger 边框
-
-### 5.5 标签/徽章
-
-| 类型 | 背景 | 文字 |
+| 元素 | 内容 | 样式 |
 |------|------|------|
-| 成功 | rgba(16, 185, 129, 0.15) | --accent-success |
-| 警告 | rgba(245, 158, 11, 0.15) | --accent-warning |
-| 危险 | rgba(239, 68, 68, 0.15) | --accent-danger |
-| 信息 | rgba(59, 130, 246, 0.15) | --accent-primary |
+| 主标题 | 文档编号（等宽字体） | 14px, colorText |
+| 副标题 | 风险描述或超期信息 | 12px, colorTextSecondary |
+| 右侧标签 | 风险指标（RPN/天数/PPM） | pill 形状，状态色背景 |
+| 操作 | "立即处理 →" 或 "查看 →" | 12px, colorPrimary |
+
+### 5.3 风险标签颜色
+
+| 指标 | 值 | 背景 | 文字 |
+|------|-----|------|------|
+| RPN | ≥200 | rgba(239,68,68,0.12) | colorError |
+| RPN | 100-199 | rgba(245,158,11,0.12) | colorWarning |
+| 超期天数 | >0 | rgba(239,68,68,0.12) | colorError |
+| PPM | >500 | rgba(239,68,68,0.12) | colorError |
+| PPM | 200-500 | rgba(245,158,11,0.12) | colorWarning |
+
+### 5.4 状态矩阵
+
+| 状态 | 显示 |
+|------|------|
+| 有数据 | 正常列表 |
+| 空数据 | 描述性空状态："暂无需要处理的项目 ✓" |
+| 加载中 | Skeleton 列表（3 行） |
+| 错误 | "加载失败" + 重试按钮 |
 
 ---
 
-## 6. 字体系统
+## 6. 最近操作设计
 
-### 6.1 字体族
+### 6.1 数据来源
 
-```css
-:root {
-  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
-}
-```
+`getDashboardRecentActions()` 返回最近 10 条操作记录。
 
-### 6.2 字体规格
+### 6.2 列表项
 
-| 用途 | 字体 | 大小 | 字重 | 行高 |
-|------|------|------|------|------|
-| 页面标题 | --font-sans | 24px | 600 | 1.2 |
-| 区块标题 | --font-sans | 18px | 600 | 1.3 |
-| 卡片标题 | --font-sans | 16px | 500 | 1.4 |
-| 正文 | --font-sans | 14px | 400 | 1.5 |
-| 辅助文字 | --font-sans | 12px | 400 | 1.4 |
-| KPI数字 | --font-mono | 48px | 700 | 1 |
-| 数据/编号 | --font-mono | 14px | 400 | 1.4 |
+| 元素 | 内容 |
+|------|------|
+| 时间 | "14:30"（今天）或 "05-30 14:30"（非今天） |
+| 操作类型 | 创建/更新/审批/驳回 |
+| 目标 | 文档编号 + 文档类型 |
+| 链接 | 点击跳转到详情页 |
 
-### 6.3 JetBrains Mono 引入
+### 6.3 空状态
 
-```html
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-```
+"暂无操作记录"，不显示引导（首次使用用户可从快速入口开始）。
 
 ---
 
-## 7. 动画系统
+## 7. 快速入口设计
 
-### 7.1 页面加载动画
+### 7.1 规则
 
-**KPI卡片依次渐入**:
-```css
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+- viewer 角色隐藏整个区块
+- 按钮文案明确动作："新建 FMEA"、"新建 CAPA"、"新建客诉"
+- 按钮样式：`type="default"`，不是 `type="primary"`（避免视觉权重过高）
 
-.kpi-card:nth-child(1) { animation-delay: 0ms; }
-.kpi-card:nth-child(2) { animation-delay: 100ms; }
-.kpi-card:nth-child(3) { animation-delay: 200ms; }
-.kpi-card:nth-child(4) { animation-delay: 300ms; }
-```
+### 7.2 空状态
 
-**数字滚动动画**:
-- 使用 `react-countup` 或自定义 React hook
-- 从0滚动到目标值
-- 持续时间：1.5s
-- 缓动函数：ease-out
-
-### 7.2 交互动画
-
-**卡片悬停**:
-```css
-.card {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-```
-
-**按钮点击**:
-```css
-.button:active {
-  transform: scale(0.98);
-}
-```
-
-**列表项悬停**:
-```css
-.list-item {
-  transition: background-color 0.15s ease;
-}
-
-.list-item:hover {
-  background-color: var(--bg-elevated);
-}
-```
-
-### 7.3 过渡时间规范（使用 Ant Design Motion Token）
-
-> **注意：** 不手写 CSS transition 时长，优先复用 AntD 内置 Motion Token，确保全系统动画节奏一致。
-
-| 类型 | Ant Design Token | 值 | 用途 |
-|------|-----------------|-----|------|
-| 微交互（hover） | `token.motionDurationMid` | 0.2s | 卡片悬浮、列表项高亮 |
-| 状态变化 | `token.motionDurationSlow` | 0.3s | 面板展开、下拉菜单 |
-| 页面元素入场 | `token.motionDurationSlow` + stagger | 0.3s + delay | KPI卡片依次渐入 |
-| 数字动画 | 自定义（requestAnimationFrame） | 1000-1500ms | useCountUp hook |
+不适用（按钮始终显示，除非权限限制）。
 
 ---
 
-## 8. 响应式设计
+## 8. 主题系统
 
-### 8.1 断点
+### 8.1 设计决策
 
-| 设备 | 断点 | 布局调整 |
-|------|------|----------|
-| 桌面端 | ≥1280px | 完整布局，侧边栏展开 |
-| 小桌面 | 1024-1279px | 侧边栏折叠，内容区自适应 |
-| 平板端 | 768-1023px | 2列KPI，侧边栏折叠 |
-| 移动端 | <768px | 单列布局，底部导航 |
+使用 Ant Design 5 `darkAlgorithm` + 全局 Token 覆盖。**单一事实来源**：所有颜色通过 `theme.useToken()` 获取，不引入原生 CSS 变量。
 
-### 8.2 KPI卡片响应式
-
-```css
-/* 默认4列 */
-.kpi-grid {
-  grid-template-columns: repeat(4, 1fr);
-}
-
-/* 平板端2列 */
-@media (max-width: 1023px) {
-  .kpi-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-/* 移动端单列 */
-@media (max-width: 767px) {
-  .kpi-grid {
-    grid-template-columns: 1fr;
-  }
-}
-```
-
----
-
-## 9. 实现计划
-
-### 9.1 阶段一：主题基础（预计 2-3 小时）
-
-1. 在 `App.tsx` 中配置 `ConfigProvider` 暗色主题（使用附录 11.2 完整配置）
-2. 注册 ECharts 自定义 `industrialDark` 主题（见附录 11.4）
-3. 引入 JetBrains Mono 字体
-4. 在现有组件中用 `theme.useToken()` 替换硬编码颜色值
-
-### 9.2 阶段二：布局与导航（预计 2-3 小时）
-
-1. 改造 AppLayout 侧边栏样式
-2. 改造顶栏样式
-3. 添加背景网格纹理
-4. 测试折叠/展开动画
-
-### 9.3 阶段三：仪表盘页面（预计 3-4 小时）
-
-1. 改造 KPI 卡片组件（使用 `token` 控制颜色和动画时长）
-2. 实现 `useCountUp` hook（requestAnimationFrame，见附录 11.5）
-3. 改造风险预警列表
-4. 改造时间线样式
-5. 实现页面加载 stagger 动画（使用 `token.motionDurationSlow`）
-
-### 9.4 阶段四：通用组件（预计 2-3 小时）
-
-1. 统一卡片样式
-2. 统一按钮样式
-3. 统一表单样式
-4. 统一表格样式
-5. 统一标签/徽章样式
-
-### 9.5 阶段五：业务页面适配（预计 3-4 小时）
-
-1. FMEA 列表/编辑页面
-2. CAPA 列表/详情页面
-3. SPC 控制图页面
-4. 供应商管理页面
-5. 其他页面通用样式检查
-
----
-
-## 10. 验收标准
-
-1. **视觉一致性**: 所有页面使用统一的深色主题
-2. **可读性**: 文字对比度符合 WCAG AA 标准（≥4.5:1）
-3. **动画流畅**: 无明显卡顿，动画不干扰操作
-4. **响应式**: 在桌面、平板、移动端均正常显示
-5. **功能完整**: 现有功能无回归问题
-6. **性能**: 主题切换无闪烁，首屏加载时间无明显增加
-
----
-
-## 11. 附录：Ant Design 主题配置
-
-### 11.1 Token 体系说明
-
-本设计**不使用原生 CSS 变量**（如 `--bg-surface`），而是将所有颜色定义映射到 Ant Design 5 的 Token 体系中，确保**单一事实来源（Single Source of Truth）**。实现时通过 `theme.useToken()` hook 获取颜色值，避免维护两套变量系统导致主题切换时状态不一致。
-
-**设计概念 → Ant Design Token 映射表：**
-
-| 设计概念 | Ant Design 全局 Token | 值 |
-|---------|----------------------|-----|
-| --bg-primary | `colorBgLayout` | #0a0e1a |
-| --bg-surface | `colorBgContainer` | #111827 |
-| --bg-elevated | `colorBgElevated` | #1f2937 |
-| --text-primary | `colorText` | #f0f9ff |
-| --text-secondary | `colorTextSecondary` | #94a3b8 |
-| --text-muted | `colorTextTertiary` | #64748b |
-| --border-subtle | `colorBorderSecondary` | rgba(148,163,184,0.1) |
-| --border-default | `colorBorder` | rgba(148,163,184,0.2) |
-| --accent-primary | `colorPrimary` | #3b82f6 |
-| --accent-success | `colorSuccess` | #10b981 |
-| --accent-warning | `colorWarning` | #f59e0b |
-| --accent-danger | `colorError` | #ef4444 |
-
-### 11.2 ConfigProvider 完整配置
+### 8.2 Ant Design Token 配置
 
 ```typescript
-import { ConfigProvider, theme } from 'antd';
-
 const darkTheme = {
   algorithm: theme.darkAlgorithm,
   token: {
-    // 全局基础色
-    colorPrimary: '#3b82f6',
-    colorSuccess: '#10b981',
-    colorWarning: '#f59e0b',
-    colorError: '#ef4444',
-    colorInfo: '#06b6d4',
-
-    // 背景层级（映射设计概念）
-    colorBgLayout: '#0a0e1a',       // 页面主背景
-    colorBgContainer: '#111827',    // 卡片/面板背景
-    colorBgElevated: '#1f2937',     // 悬浮/选中状态
+    // 背景层级
+    colorBgLayout: '#0a0e1a',
+    colorBgContainer: '#111827',
+    colorBgElevated: '#1f2937',
 
     // 文字层级
     colorText: '#f0f9ff',
@@ -500,18 +235,25 @@ const darkTheme = {
     colorBorder: 'rgba(148, 163, 184, 0.2)',
     colorBorderSecondary: 'rgba(148, 163, 184, 0.1)',
 
-    // 圆角与字体
+    // 强调色（状态色）
+    colorPrimary: '#3b82f6',
+    colorSuccess: '#10b981',
+    colorWarning: '#f59e0b',
+    colorError: '#ef4444',
+    colorInfo: '#06b6d4',
+
+    // 基础参数
     borderRadius: 8,
-    fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
     fontSize: 14,
 
-    // 动画（复用 AntD Motion Token，不手写 CSS transition）
-    motionDurationMid: '0.2s',      // 微交互 hover
-    motionDurationSlow: '0.3s',     // 状态变化
+    // 动画时长（复用 AntD 内置，不手写）
+    motionDurationMid: '0.2s',
+    motionDurationSlow: '0.3s',
   },
   components: {
     Layout: {
-      headerBg: '#111827',           // 正确的 v5 Token 名
+      headerBg: '#111827',
       bodyBg: '#0a0e1a',
       siderBg: '#111827',
     },
@@ -531,73 +273,158 @@ const darkTheme = {
 };
 ```
 
-### 11.3 组件中获取 Token 的方式
+### 8.3 字体策略
 
-```tsx
-import { theme } from 'antd';
+| 优先级 | 方案 | 条件 |
+|--------|------|------|
+| 默认 | `system-ui` + 系统等宽字体 | 无外部依赖 |
+| 增强 | JetBrains Mono（CDN） | 用户在设置中手动开启 |
 
-function MyComponent() {
-  const { token } = theme.useToken();
-  // 使用 token.colorBgContainer 而非 CSS 变量
-  // 使用 token.motionDurationMid 而非手写 '0.2s'
-  return <div style={{ background: token.colorBgContainer }} />;
-}
-```
+KPI 数字和文档编号使用等宽字体：`'SF Mono', 'Cascadia Code', 'Consolas', monospace`（系统内置，零网络请求）。
 
-### 11.4 图表暗黑模式适配
+### 8.4 对比度验证
 
-项目使用了 ECharts 和 @ant-design/charts，需要确保图表主题与深色 UI 融合。
+| 组合 | 前景 | 背景 | 对比度 | WCAG |
+|------|------|------|--------|------|
+| 主标题/卡片 | #f0f9ff | #111827 | 15.2:1 | AAA ✓ |
+| 次要文字/卡片 | #94a3b8 | #111827 | 6.8:1 | AA ✓ |
+| 辅助文字/卡片 | #64748b | #111827 | 4.1:1 | AA 大字 ✓ |
+| 成功标签 | #10b981 | rgba(16,185,129,0.12) on #111827 | 5.1:1 | AA ✓ |
+| 危险标签 | #ef4444 | rgba(239,68,68,0.12) on #111827 | 4.7:1 | AA ✓ |
 
-**ECharts 暗黑主题：**
+---
+
+## 9. 图表主题适配
+
+### 9.1 ECharts 注册主题
 
 ```typescript
-import * as echarts from 'echarts';
-
-// 注册自定义工业深色主题
-echarts.registerTheme('industrialDark', {
-  backgroundColor: 'transparent',              // 继承卡片背景
-  textStyle: { color: '#94a3b8' },             // 对应 colorTextSecondary
-  axisLine: { lineStyle: { color: 'rgba(148,163,184,0.2)' } },
-  splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } },
-  // ... 其他配置
+echarts.registerTheme('openqms-dark', {
+  backgroundColor: 'transparent',
+  textStyle: { color: '#94a3b8', fontSize: 12 },
+  title: { textStyle: { color: '#f0f9ff' } },
+  legend: { textStyle: { color: '#94a3b8' } },
+  tooltip: {
+    backgroundColor: '#1f2937',
+    borderColor: 'rgba(148,163,184,0.2)',
+    textStyle: { color: '#f0f9ff' },
+  },
+  xAxis: {
+    axisLine: { lineStyle: { color: 'rgba(148,163,184,0.2)' } },
+    splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } },
+    axisLabel: { color: '#94a3b8' },
+  },
+  yAxis: {
+    axisLine: { lineStyle: { color: 'rgba(148,163,184,0.2)' } },
+    splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } },
+    axisLabel: { color: '#94a3b8' },
+  },
+  series: {
+    // 调色板与状态色一致
+    color: ['#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'],
+  },
 });
-
-// 初始化时使用
-const chart = echarts.init(dom, 'industrialDark');
 ```
 
-**Tooltip 背景融合：**
+### 9.2 @ant-design/charts
+
+通过 ConfigProvider Token 自动继承暗色主题。如需额外配置，使用其 `theme` 属性。
+
+---
+
+## 10. 无障碍与动画
+
+### 10.1 prefers-reduced-motion
 
 ```typescript
-tooltip: {
-  backgroundColor: '#1f2937',       // 对应 colorBgElevated
-  borderColor: 'rgba(148,163,184,0.2)',
-  textStyle: { color: '#f0f9ff' },
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// 在 ConfigProvider 中
+token: {
+  motionDurationMid: prefersReducedMotion ? '0s' : '0.2s',
+  motionDurationSlow: prefersReducedMotion ? '0s' : '0.3s',
 }
 ```
 
-**@ant-design/charts：** 使用其内置的 `theme` 属性传入暗黑配置，或通过 ConfigProvider 的 Token 自动继承。
+所有 CSS transition 和动画必须响应此媒体查询。
 
-### 11.5 数字滚动动画方案
+### 10.2 键盘导航
 
-**方案选择：** 为了减少外部依赖，使用自定义 `useCountUp` hook（基于 `requestAnimationFrame`），不引入 `react-countup`。
+- KPI 卡片：可聚焦（tabIndex=0），Enter 触发导航
+- 风险列表项：可聚焦，Enter 触发导航
+- 快速入口：标准 Button 键盘行为
+- 侧边栏菜单：Ant Design Menu 内置键盘支持
 
-```typescript
-function useCountUp(end: number, duration: number = 1500) {
-  const [value, setValue] = useState(0);
-  useEffect(() => {
-    if (end === 0) { setValue(0); return; }
-    const startTime = performance.now();
-    const animate = (now: number) => {
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      // ease-out 缓动
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setValue(Math.round(eased * end));
-      if (progress < 1) requestAnimationFrame(animate);
-    };
-    requestAnimationFrame(animate);
-  }, [end, duration]);
-  return value;
-}
-```
+### 10.3 屏幕阅读器
+
+- KPI 卡片添加 `aria-label`："待办事项：12 项"
+- 风险列表添加 `role="list"`，列表项添加 `role="listitem"`
+- 状态色辅以文字标签（不依赖颜色传达信息）
+
+---
+
+## 11. 响应式设计
+
+### 11.1 断点
+
+| 设备 | 断点 | 调整 |
+|------|------|------|
+| 桌面 | ≥1280px | 4 列 KPI，3 列风险，2 列底部 |
+| 小桌面 | 1024-1279px | 侧边栏折叠，其余同桌面 |
+| 平板 | 768-1023px | 2 列 KPI，1 列风险，1 列底部 |
+| 手机 | <768px | 全部单列 |
+
+### 11.2 侧边栏
+
+- 桌面：展开 220px，可折叠至 80px
+- 平板/手机：默认折叠，点击展开为 overlay
+
+---
+
+## 12. 实现计划
+
+### 12.1 阶段一：主题基础
+
+1. `App.tsx` 中配置 ConfigProvider（使用 8.2 完整配置）
+2. 注册 ECharts `openqms-dark` 主题（9.1）
+3. 在组件中用 `theme.useToken()` 替换硬编码颜色
+4. 添加 `prefers-reduced-motion` 响应逻辑
+
+### 12.2 阶段二：布局与导航
+
+1. AppLayout 侧边栏样式适配 Token
+2. 顶栏样式适配
+3. 折叠/展开交互
+
+### 12.3 阶段三：仪表盘页面
+
+1. KPI 卡片：数据定义、状态矩阵、空状态、错误状态
+2. 风险列表："需要你处理"重命名、状态矩阵、空状态
+3. 最近操作：时间格式、空状态
+4. 快速入口：viewer 隐藏逻辑
+5. 权限适配
+
+### 12.4 阶段四：通用组件
+
+1. 卡片、按钮、表单、表格、标签统一适配 Token
+2. 状态覆盖：empty/loading/error/success/focus/disabled
+
+### 12.5 阶段五：业务页面适配
+
+1. FMEA、CAPA、SPC、供应商等页面通用样式检查
+2. ECharts 图表主题验证
+3. 响应式验证
+
+---
+
+## 13. 验收标准
+
+| 维度 | 标准 |
+|------|------|
+| 主任务 | 质量负责人 30 秒内识别最高优先级风险 |
+| 可读性 | 所有文字 ≥ WCAG AA（4.5:1） |
+| 状态覆盖 | 每个关键组件覆盖 empty/loading/error/success/focus/disabled |
+| 无障碍 | 键盘可达，屏幕阅读器可用，prefers-reduced-motion 响应 |
+| 性能 | 首屏 TTI ≤ 2s，JS 增量 ≤ 15KB gzipped，API ≤ 3 |
+| 功能完整 | 现有功能无回归 |
+| 动画 | 默认关闭（reduced-motion），开启时使用 AntD Motion Token |
