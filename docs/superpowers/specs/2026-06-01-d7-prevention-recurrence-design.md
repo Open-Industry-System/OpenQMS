@@ -110,8 +110,16 @@ GET /api/capa/{report_id}/d7-fmea-recommendations
 新增 `backend/app/utils/text.py`：
 
 ```python
+import re
+
 def extract_keywords(text: str, min_length: int = 2) -> list[str]:
-    """从文本中提取关键词（中文 ≥min_length 字，英文按空格分词）"""
+    """从文本中提取关键词。
+
+    策略（纯标准库，不引入 jieba 依赖）：
+    - 按中文标点、英文标点、空格、换行拆分
+    - 过滤掉纯数字和长度 < min_length 的词
+    - 去重保序
+    """
 ```
 
 ## 4. 前端设计
