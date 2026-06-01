@@ -1,0 +1,209 @@
+import { Card, Statistic, Skeleton, Typography, theme } from "antd";
+import type { ReactNode } from "react";
+import { useCallback, useRef, useState } from "react";
+
+export type KPIStatus = "success" | "warning" | "danger";
+
+interface KPICardProps {
+  title: string;
+  value: number | null;
+  status: KPIStatus;
+  subtitle?: string;
+  icon: ReactNode;
+  onClick?: () => void;
+  loading?: boolean;
+  error?: boolean;
+  onRetry?: () => void;
+  disabled?: boolean;
+}
+
+const statusBorderColor: Record<KPIStatus, string> = {
+  success: "#52c41a",
+  warning: "#faad14",
+  danger: "#f5222d",
+};
+
+const statusTokenMap: Record<KPIStatus, string> = {
+  success: "colorSuccess",
+  warning: "colorWarning",
+  danger: "colorError",
+};
+
+export default function KPICard({
+  title,
+  value,
+  status,
+  subtitle,
+  icon,
+  onClick,
+  loading = false,
+  error = false,
+  onRetry,
+  disabled = false,
+}: KPICardProps) {
+  const { token } = theme.useToken();
+  const [focused, setFocused] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  const clickable = !loading && !disabled && !error && !!onClick;
+  const retryable = error && !!onRetry;
+
+  const handleClick = useCallback(() => {
+    if (clickable && onClick) {
+      onClick();
+    }
+    if (retryable && onRetry) {
+      onRetry();
+    }
+  }, [clickable, onClick, retryable, onRetry]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "Enter" && (clickable || retryable)) {
+        e.preventDefault();
+        handleClick();
+      }
+    },
+    [clickable, retryable, handleClick]
+  );
+
+  const borderColor = loading || error
+    ? token.colorBorderSecondary
+    : statusBorderColor[status];
+
+  const focusOutlineColor = token.colorPrimary;
+
+  const ariaLabel = loading
+    ? `${title}，加载中`
+    : error
+      ? `${title}，加载失败，点击重试`
+      : `${title}，当前值 ${value ?? 0}，${status === "success" ? "正常" : status === "warning" ? "警告" : "危险"}${subtitle ? `，${subtitle}` : ""}`;
+
+  return (
+    <div
+      ref={cardRef}
+      role="button"
+      aria-label={ariaLabel}
+      tabIndex={clickable || retryable ? 0 : -1}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{
+        cursor: clickable || retryable ? "pointer" : "default",
+        outline: focused ? `2px solid ${focusOutlineColor}` : "none",
+        outlineOffset: focused ? "2px" : "0px",
+        borderRadius: token.borderRadiusLG,
+      }}
+    >
+      <Card
+        bodyStyle={{ padding: "16px" }}
+        style={{
+          borderTop: `3px solid ${borderColor}`,
+          borderRadius: token.borderRadiusLG,
+          transition: "box-shadow 0.2s ease",
+          boxShadow: focused
+            ? `0 0 0 2px ${focusOutlineColor}`
+            : "none",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {loading ? (
+              <>
+                <Skeleton.Input active size="small" style={{ width: 80, marginBottom: 8 }} />
+                <Skeleton.Input active size="large" style={{ width: 60, marginBottom: 4 }} />
+                <Skeleton.Input active size="small" style={{ width: 100 }} />
+              </>
+            ) : (
+              <>
+                <Typography.Text
+                  style={{
+                    fontSize: 14,
+                    color: token.colorTextSecondary,
+                    display: "block",
+                    marginBottom: 4,
+                  }}
+                >
+                  {title}
+                </Typography.Text>
+
+                <Statistic
+                  value={error ? "—" : value ?? 0}
+                  valueStyle={{
+                    fontSize: 32,
+                    fontWeight: 600,
+                    color: error
+                      ? token.colorTextDisabled
+                      : token.colorText,
+                    fontFamily:
+                      "'SF Mono', 'Cascadia Code', 'Consolas', monospace",
+                    lineHeight: 1.2,
+                  }}
+                  formatter={(val) => (
+                    <span>{val}</span>
+                  )}
+                />
+
+                <Typography.Text
+                  style={{
+                    fontSize: 12,
+                    color: token.colorTextTertiary,
+                    display: "block",
+                    marginTop: 4,
+                  }}
+                >
+                  {error ? (
+                    <span
+                      role="button"
+                      tabIndex={retryable ? 0 : -1}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (retryable && onRetry) onRetry();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.stopPropagation();
+                          if (retryable && onRetry) onRetry();
+                        }
+                      }}
+                      style={{
+                        color: token.colorPrimary,
+                        cursor: retryable ? "pointer" : "default",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      加载失败，点击重试
+                    </span>
+                  ) : (
+                    subtitle ?? "暂无"
+                  )}
+                </Typography.Text>
+              </>
+            )}
+          </div>
+
+          <div
+            style={{
+              marginLeft: 12,
+              color: loading || error
+                ? token.colorTextDisabled
+                : token[statusTokenMap[status] as keyof typeof token] as string ?? token.colorTextSecondary,
+              fontSize: 24,
+              lineHeight: 1,
+              flexShrink: 0,
+            }}
+          >
+            {icon}
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
