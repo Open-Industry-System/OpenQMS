@@ -25,6 +25,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { Gauge, GaugeCalibration } from "../../types";
 import {
   getGauge,
@@ -49,11 +50,7 @@ export default function GaugeDetailPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
-  const isViewer = user?.role === "viewer";
-  const isEngineerOrAbove =
-    user?.role === "quality_engineer" ||
-    user?.role === "manager" ||
-    user?.role === "admin";
+  const { canEdit } = usePermission();
 
   const [gauge, setGauge] = useState<Gauge | null>(null);
   const [loading, setLoading] = useState(true);
@@ -214,7 +211,7 @@ export default function GaugeDetailPage() {
       children: (
         <Card
           extra={
-            !isViewer && (
+            canEdit('msa') && (
               <Space>
                 {editing ? (
                   <>
@@ -373,7 +370,7 @@ export default function GaugeDetailPage() {
       children: (
         <Card
           extra={
-            isEngineerOrAbove && (
+            canEdit('msa') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCalModalOpen(true)}>
                 添加记录
               </Button>

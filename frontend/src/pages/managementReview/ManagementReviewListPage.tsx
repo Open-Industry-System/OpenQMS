@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Space, Select, Tag, Card } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 import { listManagementReviews } from "../../api/managementReview";
 import type { ManagementReview } from "../../types";
@@ -18,7 +19,7 @@ export default function ManagementReviewListPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
+  const { canEdit } = usePermission();
   const { selected: selectedPL } = useProductLineStore();
 
   const [data, setData] = useState<ManagementReview[]>([]);
@@ -77,7 +78,7 @@ export default function ManagementReviewListPage() {
   return (
     <Card title="管理评审">
       <Space style={{ marginBottom: 16 }}>
-        {!isViewer && (
+        {canEdit('management_review') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/management-reviews/new")}>新建评审</Button>
         )}
         <Select

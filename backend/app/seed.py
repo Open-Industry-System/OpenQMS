@@ -12,6 +12,7 @@ from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
 from app.models.management_review import ManagementReview, ReviewOutput
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord, ShipmentRecord, WarrantyRecord
+from app.models.role import RoleDefinition, UserProductLine
 from app.core.security import hash_password
 
 
@@ -130,21 +131,30 @@ async def seed():
             print("Already seeded, skipping.")
             return
 
+        # Load roles
+        role_result = await db.execute(select(RoleDefinition))
+        roles = {r.role_key: r.id for r in role_result.scalars().all()}
+
         # Users
         engineer = User(
             username="engineer", display_name="质量工程师",
-            password_hash=hash_password("Engineer@2026"), role="quality_engineer",
+            password_hash=hash_password("Engineer@2026"), role_id=roles["field_qe"],
         )
         manager = User(
             username="manager", display_name="质量经理",
-            password_hash=hash_password("Manager@2026"), role="manager",
+            password_hash=hash_password("Manager@2026"), role_id=roles["manager"],
         )
         viewer = User(
             username="viewer", display_name="只读用户",
-            password_hash=hash_password("Viewer@2026"), role="viewer",
+            password_hash=hash_password("Viewer@2026"), role_id=roles["viewer"],
         )
         db.add_all([engineer, manager, viewer])
         await db.flush()
+
+        # Product line assignments
+        db.add(UserProductLine(user_id=engineer.user_id, product_line_code="DC-DC-100"))
+        db.add(UserProductLine(user_id=manager.user_id, product_line_code="DC-DC-100"))
+        db.add(UserProductLine(user_id=viewer.user_id, product_line_code="DC-DC-100"))
 
         # FMEA documents
         fmea1 = FMEADocument(

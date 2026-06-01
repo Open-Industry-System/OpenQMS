@@ -10,6 +10,7 @@ import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 import type { CAPAReport, FMEADocument } from "../../types";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 
 
 const { Title, Text } = Typography;
@@ -39,8 +40,7 @@ export default function CAPADetailPage() {
 
   // User Role Controls
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
-  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
 
   // Local Form Buffers (for input debouncing/onBlur saves)
   const [localData, setLocalData] = useState<Record<string, any>>({});
@@ -73,7 +73,7 @@ export default function CAPADetailPage() {
   const currentStep = capa ? (stepIndex[capa.status] ?? 0) : 0;
 
   const handleUpdate = async (field: string, value: unknown) => {
-    if (!id || isViewer) return;
+    if (!id || !canEdit('capa')) return;
     
     // Check if value actually changed to prevent redundant network hits
     if (capa && JSON.stringify(capa[field as keyof CAPAReport]) === JSON.stringify(value)) {
@@ -130,12 +130,12 @@ export default function CAPADetailPage() {
             fmeaRefId={capa.fmea_ref_id ?? null}
             fmeaNodeId={capa.fmea_node_id ?? null}
           />
-          {!isViewer && (
+          {canEdit('capa') && (
             <Button icon={<LinkOutlined />} onClick={() => setLinkModal(true)}>
               {capa.fmea_ref_id ? "更换FMEA关联" : "关联FMEA"}
             </Button>
           )}
-          {capa.status !== "ARCHIVED" && capa.status !== "D8_CLOSURE" && (!["D7_PREVENTION", "D8_CLOSURE"].includes(capa.status) || isAdminOrManager) && !isViewer && (
+          {capa.status !== "ARCHIVED" && capa.status !== "D8_CLOSURE" && (!["D7_PREVENTION", "D8_CLOSURE"].includes(capa.status) || canApprove('capa')) && canEdit('capa') && (
             <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance}>
               推进下一步
             </Button>
@@ -166,7 +166,7 @@ export default function CAPADetailPage() {
                         <Button
                           type="text"
                           danger
-                          disabled={isViewer}
+                          disabled={!canEdit('capa')}
                           icon={<DeleteOutlined />}
                           onClick={() => {
                             const filtered = (localData.d1_team || []).filter(
@@ -179,7 +179,7 @@ export default function CAPADetailPage() {
                     },
                   ]}
                 />
-                {!isViewer && (
+                {canEdit('capa') && (
                   <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
                     <Input
                       placeholder="成员姓名"
@@ -234,7 +234,7 @@ export default function CAPADetailPage() {
                 <Form.Item label="5W2H 问题描述">
                   <TextArea
                     rows={6}
-                    disabled={isViewer}
+                    disabled={!canEdit('capa')}
                     value={localData.d2_description || ""}
                     onChange={(e) => setLocalData({ ...localData, d2_description: e.target.value })}
                     onBlur={() => handleUpdate("d2_description", localData.d2_description)}
@@ -249,7 +249,7 @@ export default function CAPADetailPage() {
                 <Form.Item label="临时遏制措施">
                   <TextArea
                     rows={4}
-                    disabled={isViewer}
+                    disabled={!canEdit('capa')}
                     value={localData.d3_interim || ""}
                     onChange={(e) => setLocalData({ ...localData, d3_interim: e.target.value })}
                     onBlur={() => handleUpdate("d3_interim", localData.d3_interim)}
@@ -263,7 +263,7 @@ export default function CAPADetailPage() {
                 <Form.Item label="根因分析 (5Why / 鱼骨图)">
                   <TextArea
                     rows={6}
-                    disabled={isViewer}
+                    disabled={!canEdit('capa')}
                     value={localData.d4_root_cause || ""}
                     onChange={(e) => setLocalData({ ...localData, d4_root_cause: e.target.value })}
                     onBlur={() => handleUpdate("d4_root_cause", localData.d4_root_cause)}
@@ -277,7 +277,7 @@ export default function CAPADetailPage() {
                 <Form.Item label="永久纠正措施">
                   <TextArea
                     rows={4}
-                    disabled={isViewer}
+                    disabled={!canEdit('capa')}
                     value={localData.d5_correction || ""}
                     onChange={(e) => setLocalData({ ...localData, d5_correction: e.target.value })}
                     onBlur={() => handleUpdate("d5_correction", localData.d5_correction)}
@@ -291,7 +291,7 @@ export default function CAPADetailPage() {
                 <Form.Item label="效果验证">
                   <TextArea
                     rows={4}
-                    disabled={isViewer}
+                    disabled={!canEdit('capa')}
                     value={localData.d6_verification || ""}
                     onChange={(e) => setLocalData({ ...localData, d6_verification: e.target.value })}
                     onBlur={() => handleUpdate("d6_verification", localData.d6_verification)}
@@ -305,7 +305,7 @@ export default function CAPADetailPage() {
                 <Form.Item label="预防复发措施">
                   <TextArea
                     rows={4}
-                    disabled={isViewer}
+                    disabled={!canEdit('capa')}
                     value={localData.d7_prevention || ""}
                     onChange={(e) => setLocalData({ ...localData, d7_prevention: e.target.value })}
                     onBlur={() => handleUpdate("d7_prevention", localData.d7_prevention)}
@@ -319,7 +319,7 @@ export default function CAPADetailPage() {
                 <Form.Item label="关闭确认">
                   <TextArea
                     rows={4}
-                    disabled={isViewer}
+                    disabled={!canEdit('capa')}
                     value={localData.d8_closure || ""}
                     onChange={(e) => setLocalData({ ...localData, d8_closure: e.target.value })}
                     onBlur={() => handleUpdate("d8_closure", localData.d8_closure)}
@@ -341,7 +341,7 @@ export default function CAPADetailPage() {
             <p><Text strong>创建时间:</Text> {new Date(capa.created_at).toLocaleString("zh-CN")}</p>
           </Card>
 
-          {linkModal && !isViewer && (
+          {linkModal && canEdit('capa') && (
             <Card title="选择关联的 FMEA" size="small" style={{ marginTop: 16 }}>
               <Select
                 showSearch

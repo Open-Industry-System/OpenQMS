@@ -15,6 +15,7 @@ import {
 } from "../../api/customerQuality";
 import type { CustomerComplaint } from "../../types";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import SupplierBadge from "../../components/cross-links/SupplierBadge";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 
@@ -39,8 +40,7 @@ export default function ComplaintDetailPage() {
   const [data, setData] = useState<CustomerComplaint | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const canEdit = user?.role !== "viewer";
-  const canClose = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
 
   const load = async () => {
     if (!id) return;
@@ -118,19 +118,19 @@ export default function ComplaintDetailPage() {
           {data?.supplier_id && <SupplierBadge supplierId={data.supplier_id} />}
           {data?.fmea_ref_id && <RelatedFMEALink fmeaRefId={data.fmea_ref_id} />}
         </Space>
-        {canEdit && data && (
+        {canEdit('customer_quality') && data && (
           <Space>
             <Button onClick={() => runAction(() => startComplaintInvestigation(data.complaint_id), "已进入调查")}>调查</Button>
             <Button onClick={() => runAction(() => markComplaintResponded(data.complaint_id), "已标记回复")}>已回复</Button>
             <Button onClick={() => runAction(() => cancelComplaint(data.complaint_id), "已取消")}>取消</Button>
-            {canClose && <Button type="primary" onClick={() => runAction(() => closeComplaint(data.complaint_id), "已关闭")}>关闭</Button>}
+            {canApprove('customer_quality') && <Button type="primary" onClick={() => runAction(() => closeComplaint(data.complaint_id), "已关闭")}>关闭</Button>}
           </Space>
         )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
         <Card loading={loading}>
-          <Form form={form} layout="vertical" onFinish={save} disabled={!canEdit}>
+          <Form form={form} layout="vertical" onFinish={save} disabled={!canEdit('customer_quality')}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
               <Form.Item name="category" label="分类"><Select options={[{ value: "safety", label: "安全" }, { value: "function", label: "功能" }, { value: "appearance", label: "外观" }, { value: "delivery", label: "交付" }]} /></Form.Item>
               <Form.Item name="severity" label="严重等级"><Select options={["致命", "严重", "一般", "轻微"].map((value) => ({ value, label: value }))} /></Form.Item>
@@ -147,16 +147,16 @@ export default function ComplaintDetailPage() {
             <Form.Item name="root_cause" label="根因"><Input.TextArea rows={3} /></Form.Item>
             <Form.Item name="corrective_action" label="纠正措施"><Input.TextArea rows={3} /></Form.Item>
             <Form.Item name="supplier_responsibility" label="供应商责任" valuePropName="checked"><Switch /></Form.Item>
-            {canEdit && <Button type="primary" htmlType="submit">保存</Button>}
+            {canEdit('customer_quality') && <Button type="primary" htmlType="submit">保存</Button>}
           </Form>
         </Card>
 
         <Card title="关联与证据">
-          <Form form={linkForm} layout="vertical" onFinish={handleLinks} disabled={!canEdit}>
+          <Form form={linkForm} layout="vertical" onFinish={handleLinks} disabled={!canEdit('customer_quality')}>
             <Form.Item name="capa_ref_id" label="关联 CAPA ID"><Input /></Form.Item>
             <Form.Item name="fmea_ref_id" label="关联 FMEA ID"><Input /></Form.Item>
             <Form.Item name="capa_document_no" label="新建 8D 编号"><Input placeholder="如 8D-2026-010" /></Form.Item>
-            {canEdit && <Button type="primary" htmlType="submit">更新关联</Button>}
+            {canEdit('customer_quality') && <Button type="primary" htmlType="submit">更新关联</Button>}
           </Form>
           <pre style={{ marginTop: 16, whiteSpace: "pre-wrap" }}>
             {JSON.stringify(data?.attachments || [], null, 2)}

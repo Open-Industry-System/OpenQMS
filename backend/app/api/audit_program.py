@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app import schemas
 from app.services import audit_service
@@ -44,7 +44,7 @@ async def list_audit_programs(
 async def create_audit_program(
     req: schemas.audit.AuditProgramCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     try:
         program = await audit_service.create_audit_program(
@@ -77,7 +77,7 @@ async def update_audit_program(
     program_id: uuid.UUID,
     req: schemas.audit.AuditProgramUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     program = await audit_service.get_audit_program(db, program_id)
     if program is None:
@@ -102,7 +102,7 @@ async def update_audit_program(
 async def delete_audit_program(
     program_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     program = await audit_service.get_audit_program(db, program_id)
     if program is None:

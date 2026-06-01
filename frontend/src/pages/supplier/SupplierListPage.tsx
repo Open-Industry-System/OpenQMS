@@ -28,6 +28,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { Supplier, SupplierStats, SupplierExpiryAlert } from "../../types";
 import {
   listSuppliers,
@@ -58,8 +59,7 @@ export default function SupplierListPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
-  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(false);
@@ -274,14 +274,14 @@ export default function SupplierListPage() {
           >
             查看
           </Button>
-          {isAdminOrManager && record.status === "pending_review" && (
+          {canApprove('supplier') && record.status === "pending_review" && (
             <Popconfirm title="确认批准该供应商？" onConfirm={() => handleApprove(record.supplier_id)}>
               <Button size="small" type="primary" icon={<CheckCircleOutlined />}>
                 批准
               </Button>
             </Popconfirm>
           )}
-          {isAdminOrManager && record.status === "pending_review" && (
+          {canApprove('supplier') && record.status === "pending_review" && (
             <Button
               size="small"
               danger
@@ -291,14 +291,14 @@ export default function SupplierListPage() {
               拒绝
             </Button>
           )}
-          {isAdminOrManager && record.status === "audit_required" && (
+          {canApprove('supplier') && record.status === "audit_required" && (
             <Popconfirm title="确认审核通过并批准？" onConfirm={() => handleConfirmApproved(record.supplier_id)}>
               <Button size="small" type="primary" icon={<CheckCircleOutlined />}>
                 确认批准
               </Button>
             </Popconfirm>
           )}
-          {isAdminOrManager && record.status === "approved" && (
+          {canApprove('supplier') && record.status === "approved" && (
             <Button
               size="small"
               danger
@@ -308,7 +308,7 @@ export default function SupplierListPage() {
               暂停
             </Button>
           )}
-          {isAdminOrManager && record.status === "suspended" && (
+          {canApprove('supplier') && record.status === "suspended" && (
             <Popconfirm title="确认恢复该供应商？" onConfirm={() => handleReinstate(record.supplier_id)}>
               <Button size="small" icon={<RollbackOutlined />}>
                 恢复
@@ -365,7 +365,7 @@ export default function SupplierListPage() {
         title="供应商管理"
         extra={
           <Space>
-            {!isViewer && (
+            {canEdit('supplier') && (
               <Button
                 type="primary"
                 icon={<PlusOutlined />}

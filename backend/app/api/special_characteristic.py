@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app.schemas.special_characteristic import (
     SCCreate, SCUpdate, SCResponse, SCListResponse,
@@ -90,7 +90,7 @@ async def get_sc(
 async def create_sc(
     data: SCCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)),
 ):
     return await sc_svc.create_special_characteristic(db, data, user.user_id)
 
@@ -100,7 +100,7 @@ async def update_sc(
     sc_id: uuid.UUID,
     data: SCUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)),
 ):
     result = await sc_svc.update_special_characteristic(db, sc_id, data, user.user_id)
     if not result:
@@ -112,7 +112,7 @@ async def update_sc(
 async def delete_sc(
     sc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)),
 ):
     ok = await sc_svc.delete_special_characteristic(db, sc_id, user.user_id)
     if not ok:
@@ -124,7 +124,7 @@ async def delete_sc(
 async def sync_from_fmea(
     fmea_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)),
 ):
     try:
         result = await sc_svc.sync_from_fmea(db, fmea_id, user.user_id)
@@ -137,7 +137,7 @@ async def sync_from_fmea(
 async def sync_to_cp(
     cp_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)),
 ):
     try:
         result = await sc_svc.sync_to_cp(db, cp_id, user.user_id)
@@ -151,7 +151,7 @@ async def msa_callback(
     sc_id: uuid.UUID,
     grr_percent: float = Query(..., ge=0, le=100),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)),
 ):
     result = await sc_svc.update_msa_status(db, sc_id, grr_percent)
     if not result:
@@ -164,7 +164,7 @@ async def safety_submit(
     sc_id: uuid.UUID,
     data: SafetySubmitRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)),
 ):
     try:
         return await sc_svc.safety_submit(db, sc_id, data, user.user_id)
@@ -177,7 +177,7 @@ async def safety_approve(
     sc_id: uuid.UUID,
     data: SafetyApprovalAction,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.APPROVE)),
 ):
     try:
         return await sc_svc.safety_approve(db, sc_id, data, user.user_id)
@@ -190,7 +190,7 @@ async def safety_reject(
     sc_id: uuid.UUID,
     data: SafetyApprovalAction,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.APPROVE)),
 ):
     try:
         return await sc_svc.safety_reject(db, sc_id, data, user.user_id)
@@ -202,7 +202,7 @@ async def safety_reject(
 async def safety_confirm(
     sc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)),
 ):
     try:
         return await sc_svc.safety_confirm(db, sc_id, user.user_id)
@@ -214,7 +214,7 @@ async def safety_confirm(
 async def safety_dismiss(
     sc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)),
 ):
     try:
         return await sc_svc.safety_dismiss(db, sc_id, user.user_id)
@@ -226,7 +226,7 @@ async def safety_dismiss(
 async def safety_cancel(
     sc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.APPROVE)),
 ):
     try:
         return await sc_svc.safety_cancel(db, sc_id, user.user_id)

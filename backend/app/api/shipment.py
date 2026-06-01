@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app.schemas.customer_quality import (
     ShipmentRecordCreate,
@@ -38,7 +38,7 @@ async def create_shipment(
     customer_id: uuid.UUID,
     req: ShipmentRecordCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     try:
         shipment = await customer_quality_service.create_shipment(db, customer_id, req.model_dump(), user.user_id)
@@ -53,7 +53,7 @@ async def update_shipment(
     shipment_id: uuid.UUID,
     req: ShipmentRecordUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     try:
         shipment = await customer_quality_service.update_shipment(db, customer_id, shipment_id, req.model_dump(exclude_unset=True), user.user_id)
@@ -67,7 +67,7 @@ async def delete_shipment(
     customer_id: uuid.UUID,
     shipment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     try:
         await customer_quality_service.delete_shipment(db, customer_id, shipment_id, user.user_id)

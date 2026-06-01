@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Spin } from "antd";
 import { useAuthStore } from "./store/authStore";
+import { usePermission } from "./hooks/usePermission";
+import type { ModuleKey } from "./hooks/usePermission";
 import AppLayout from "./components/layout/AppLayout";
 import LoginPage from "./pages/login/LoginPage";
 import DashboardPage from "./pages/dashboard/DashboardPage";
@@ -45,11 +47,12 @@ import PPAPListPage from "./pages/planning/ppap/PPAPListPage";
 import PPAPDetailPage from "./pages/planning/ppap/PPAPDetailPage";
 import KnowledgeGraphPage from "./pages/graph/KnowledgeGraphPage";
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
   const loading = useAuthStore((s) => s.loading);
   const fetchUser = useAuthStore((s) => s.fetchUser);
   const user = useAuthStore((s) => s.user);
+  const { canView } = usePermission();
 
   useEffect(() => {
     if (token && !user) fetchUser();
@@ -64,6 +67,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!token) return <Navigate to="/login" replace />;
+
+  if (requiredModule && !canView(requiredModule)) return <Navigate to="/dashboard" replace />;
+
   return <>{children}</>;
 }
 
@@ -80,47 +86,47 @@ export default function App() {
       >
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/fmea" element={<FMEAListPage />} />
-        <Route path="/fmea/:id" element={<FMEAEditorPage />} />
-        <Route path="/capa" element={<CAPAListPage />} />
-        <Route path="/capa/:id" element={<CAPADetailPage />} />
-        <Route path="/control-plans" element={<ControlPlanListPage />} />
-        <Route path="/control-plans/:id" element={<ControlPlanEditorPage />} />
-        <Route path="/quality-goals" element={<QualityGoalListPage />} />
-        <Route path="/internal-audits" element={<InternalAuditListPage />} />
-        <Route path="/internal-audits/:id" element={<InternalAuditDetailPage />} />
-        <Route path="/customer-audits" element={<CustomerAuditListPage />} />
-        <Route path="/customer-audits/:id" element={<CustomerAuditDetailPage />} />
-        <Route path="/spc" element={<SPCListPage />} />
-        <Route path="/spc/:id" element={<SPCDetailPage />} />
-        <Route path="/suppliers" element={<SupplierListPage />} />
-        <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
-        <Route path="/suppliers/quality" element={<SupplierQualityPage />} />
-        <Route path="/suppliers/quality/:supplierId" element={<SupplierQualityPage />} />
-        <Route path="/msa" element={<Navigate to="/msa/gauges" replace />} />
-        <Route path="/msa/gauges" element={<GaugeListPage />} />
-        <Route path="/msa/gauges/:id" element={<GaugeDetailPage />} />
-        <Route path="/msa/studies" element={<MsaStudyListPage />} />
-        <Route path="/msa/studies/:type/:id" element={<StudyDetailPage />} />
-        <Route path="/special-characteristics" element={<SCListPage />} />
-        <Route path="/special-characteristics/matrix" element={<SCMatrixPage />} />
-        <Route path="/special-characteristics/traceability" element={<TraceabilityPage />} />
-        <Route path="/special-characteristics/:id" element={<SCDetailPage />} />
-        <Route path="/management-reviews" element={<ManagementReviewListPage />} />
-        <Route path="/management-reviews/:id" element={<ManagementReviewDetailPage />} />
-        <Route path="/iqc" element={<Navigate to="/iqc/inspections" replace />} />
-        <Route path="/iqc/inspections" element={<IqcInspectionListPage />} />
-        <Route path="/iqc/inspections/:id" element={<IqcInspectionDetailPage />} />
-        <Route path="/iqc/materials" element={<IqcMaterialListPage />} />
-        <Route path="/scars" element={<SCARListPage />} />
-        <Route path="/scars/:id" element={<SCARDetailPage />} />
-        <Route path="/apqp" element={<APQPListPage />} />
-        <Route path="/apqp/:id" element={<APQPDetailPage />} />
-        <Route path="/ppap" element={<PPAPListPage />} />
-        <Route path="/ppap/:id" element={<PPAPDetailPage />} />
-        <Route path="/customer-quality" element={<CustomerQualityPage />} />
-        <Route path="/customer-quality/complaints/:id" element={<ComplaintDetailPage />} />
-        <Route path="/customer-quality/rma/:id" element={<RMADetailPage />} />
+        <Route path="/fmea" element={<ProtectedRoute requiredModule="fmea"><FMEAListPage /></ProtectedRoute>} />
+        <Route path="/fmea/:id" element={<ProtectedRoute requiredModule="fmea"><FMEAEditorPage /></ProtectedRoute>} />
+        <Route path="/capa" element={<ProtectedRoute requiredModule="capa"><CAPAListPage /></ProtectedRoute>} />
+        <Route path="/capa/:id" element={<ProtectedRoute requiredModule="capa"><CAPADetailPage /></ProtectedRoute>} />
+        <Route path="/control-plans" element={<ProtectedRoute requiredModule="planning"><ControlPlanListPage /></ProtectedRoute>} />
+        <Route path="/control-plans/:id" element={<ProtectedRoute requiredModule="planning"><ControlPlanEditorPage /></ProtectedRoute>} />
+        <Route path="/quality-goals" element={<ProtectedRoute requiredModule="quality_goal"><QualityGoalListPage /></ProtectedRoute>} />
+        <Route path="/internal-audits" element={<ProtectedRoute requiredModule="audit"><InternalAuditListPage /></ProtectedRoute>} />
+        <Route path="/internal-audits/:id" element={<ProtectedRoute requiredModule="audit"><InternalAuditDetailPage /></ProtectedRoute>} />
+        <Route path="/customer-audits" element={<ProtectedRoute requiredModule="customer_audit"><CustomerAuditListPage /></ProtectedRoute>} />
+        <Route path="/customer-audits/:id" element={<ProtectedRoute requiredModule="customer_audit"><CustomerAuditDetailPage /></ProtectedRoute>} />
+        <Route path="/spc" element={<ProtectedRoute requiredModule="spc"><SPCListPage /></ProtectedRoute>} />
+        <Route path="/spc/:id" element={<ProtectedRoute requiredModule="spc"><SPCDetailPage /></ProtectedRoute>} />
+        <Route path="/suppliers" element={<ProtectedRoute requiredModule="supplier"><SupplierListPage /></ProtectedRoute>} />
+        <Route path="/suppliers/:id" element={<ProtectedRoute requiredModule="supplier"><SupplierDetailPage /></ProtectedRoute>} />
+        <Route path="/suppliers/quality" element={<ProtectedRoute requiredModule="supplier"><SupplierQualityPage /></ProtectedRoute>} />
+        <Route path="/suppliers/quality/:supplierId" element={<ProtectedRoute requiredModule="supplier"><SupplierQualityPage /></ProtectedRoute>} />
+        <Route path="/msa" element={<ProtectedRoute requiredModule="msa"><Navigate to="/msa/gauges" replace /></ProtectedRoute>} />
+        <Route path="/msa/gauges" element={<ProtectedRoute requiredModule="msa"><GaugeListPage /></ProtectedRoute>} />
+        <Route path="/msa/gauges/:id" element={<ProtectedRoute requiredModule="msa"><GaugeDetailPage /></ProtectedRoute>} />
+        <Route path="/msa/studies" element={<ProtectedRoute requiredModule="msa"><MsaStudyListPage /></ProtectedRoute>} />
+        <Route path="/msa/studies/:type/:id" element={<ProtectedRoute requiredModule="msa"><StudyDetailPage /></ProtectedRoute>} />
+        <Route path="/special-characteristics" element={<ProtectedRoute requiredModule="special_characteristic"><SCListPage /></ProtectedRoute>} />
+        <Route path="/special-characteristics/matrix" element={<ProtectedRoute requiredModule="special_characteristic"><SCMatrixPage /></ProtectedRoute>} />
+        <Route path="/special-characteristics/traceability" element={<ProtectedRoute requiredModule="special_characteristic"><TraceabilityPage /></ProtectedRoute>} />
+        <Route path="/special-characteristics/:id" element={<ProtectedRoute requiredModule="special_characteristic"><SCDetailPage /></ProtectedRoute>} />
+        <Route path="/management-reviews" element={<ProtectedRoute requiredModule="management_review"><ManagementReviewListPage /></ProtectedRoute>} />
+        <Route path="/management-reviews/:id" element={<ProtectedRoute requiredModule="management_review"><ManagementReviewDetailPage /></ProtectedRoute>} />
+        <Route path="/iqc" element={<ProtectedRoute requiredModule="iqc"><Navigate to="/iqc/inspections" replace /></ProtectedRoute>} />
+        <Route path="/iqc/inspections" element={<ProtectedRoute requiredModule="iqc"><IqcInspectionListPage /></ProtectedRoute>} />
+        <Route path="/iqc/inspections/:id" element={<ProtectedRoute requiredModule="iqc"><IqcInspectionDetailPage /></ProtectedRoute>} />
+        <Route path="/iqc/materials" element={<ProtectedRoute requiredModule="iqc"><IqcMaterialListPage /></ProtectedRoute>} />
+        <Route path="/scars" element={<ProtectedRoute requiredModule="scar"><SCARListPage /></ProtectedRoute>} />
+        <Route path="/scars/:id" element={<ProtectedRoute requiredModule="scar"><SCARDetailPage /></ProtectedRoute>} />
+        <Route path="/apqp" element={<ProtectedRoute requiredModule="planning"><APQPListPage /></ProtectedRoute>} />
+        <Route path="/apqp/:id" element={<ProtectedRoute requiredModule="planning"><APQPDetailPage /></ProtectedRoute>} />
+        <Route path="/ppap" element={<ProtectedRoute requiredModule="ppap"><PPAPListPage /></ProtectedRoute>} />
+        <Route path="/ppap/:id" element={<ProtectedRoute requiredModule="ppap"><PPAPDetailPage /></ProtectedRoute>} />
+        <Route path="/customer-quality" element={<ProtectedRoute requiredModule="customer_quality"><CustomerQualityPage /></ProtectedRoute>} />
+        <Route path="/customer-quality/complaints/:id" element={<ProtectedRoute requiredModule="customer_quality"><ComplaintDetailPage /></ProtectedRoute>} />
+        <Route path="/customer-quality/rma/:id" element={<ProtectedRoute requiredModule="customer_quality"><RMADetailPage /></ProtectedRoute>} />
         <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
       </Route>
     </Routes>

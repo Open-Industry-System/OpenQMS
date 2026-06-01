@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app.services import fmea_service, control_plan_service
 from app.services.version_service import (
@@ -95,7 +95,7 @@ async def manual_create_fmea_version(
     fmea_id: uuid.UUID,
     req: ManualVersionCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
@@ -113,7 +113,7 @@ async def rollback_fmea_version(
     target_minor: int,
     req: RollbackRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.APPROVE)),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
@@ -219,7 +219,7 @@ async def manual_create_cp_version(
     cp_id: uuid.UUID,
     req: ManualVersionCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
@@ -237,7 +237,7 @@ async def rollback_cp_version(
     target_minor: int,
     req: RollbackRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.APPROVE)),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
@@ -348,7 +348,7 @@ async def sync_from_fmea(
     cp_id: uuid.UUID,
     req: SyncFromFMEARequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:

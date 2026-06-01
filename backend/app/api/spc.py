@@ -5,7 +5,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Upl
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app.models.spc import SampleValue
 from app import schemas
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/spc", tags=["SPC"])
 async def create_ic(
     data: schemas.spc.InspectionCharacteristicCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.CREATE)),
 ):
     try:
         ic = await spc_service.create_inspection_characteristic(db, user.user_id, data.model_dump())
@@ -68,7 +68,7 @@ async def update_ic(
     ic_id: UUID,
     data: schemas.spc.InspectionCharacteristicUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.CREATE)),
 ):
     try:
         ic = await spc_service.update_inspection_characteristic(
@@ -83,7 +83,7 @@ async def update_ic(
 async def delete_ic(
     ic_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.CREATE)),
 ):
     try:
         await spc_service.delete_inspection_characteristic(db, user.user_id, ic_id)
@@ -97,7 +97,7 @@ async def lock_limits(
     ic_id: UUID,
     locked: bool = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.CREATE)),
 ):
     try:
         ic = await spc_service.lock_unlock_control_limits(db, user.user_id, ic_id, locked)
@@ -113,7 +113,7 @@ async def add_samples(
     ic_id: UUID,
     data: schemas.spc.SampleBatchCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.CREATE)),
 ):
     try:
         batch = await spc_service.add_sample_batch(db, user.user_id, ic_id, data.model_dump())
@@ -139,7 +139,7 @@ async def import_samples(
     ic_id: UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.CREATE)),
 ):
     from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
     from dataclasses import asdict
@@ -242,7 +242,7 @@ async def list_ic_alarms(
 async def acknowledge_alarm(
     alarm_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.CREATE)),
 ):
     try:
         alarm = await spc_service.acknowledge_alarm(db, user.user_id, alarm_id)
@@ -255,7 +255,7 @@ async def acknowledge_alarm(
 async def create_capa_from_alarm(
     alarm_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.CREATE)),
 ):
     try:
         capa = await spc_service.create_capa_from_alarm(db, user.user_id, alarm_id)

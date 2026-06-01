@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
+from app.core.permissions import require_permission, Module, PermissionLevel, get_user_permission, get_current_user
+from app.core.product_line_filter import get_user_product_line_codes, enforce_product_line_access
 from typing import Any
 from app.models.user import User
 
@@ -24,11 +25,17 @@ async def list_capas(
     overdue: bool = Query(False),
     pending_action: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
+    allowed_pls = None
+    if not user.role_definition.bypass_row_level_security:
+        allowed_pls = await get_user_product_line_codes(user, db)
+        if not allowed_pls:
+            return CAPAListResponse(items=[], total=0, page=page, page_size=page_size)
     items, total = await capa_service.list_capas(
         db, page, page_size, status, product_line,
         overdue=overdue, pending_action=pending_action,
+        allowed_product_line_codes=allowed_pls,
     )
     return CAPAListResponse(
         items=[CAPAResponse.model_validate(c) for c in items],
@@ -42,9 +49,10 @@ async def list_capas(
 async def create_capa(
     req: CAPACreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.CREATE)),
 ):
     try:
+        await enforce_product_line_access(user, req.product_line_code, db)
         capa = await capa_service.create_capa(
             db, req.title, req.document_no, req.severity, req.due_date, user.user_id, req.product_line_code
         )
@@ -58,20 +66,26 @@ async def get_capas_by_fmea_node(
     fmea_id: str,
     fmea_node_id: str | None = None,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
-    return await capa_service.get_capas_by_fmea_node(db, fmea_id, fmea_node_id)
+    capas = await capa_service.get_capas_by_fmea_node(db, fmea_id, fmea_node_id)
+    # Filter by product line access
+    if not user.role_definition.bypass_row_level_security:
+        user_codes = await get_user_product_line_codes(user, db)
+        capas = [c for c in capas if c.get("product_line_code") in user_codes]
+    return capas
 
 
 @router.get("/{report_id}", response_model=CAPAResponse)
 async def get_capa(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
+    await enforce_product_line_access(user, capa.product_line_code, db)
     return CAPAResponse.model_validate(capa)
 
 
@@ -80,25 +94,33 @@ async def update_capa(
     report_id: uuid.UUID,
     req: CAPAUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
 ):
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    capa = await capa_service.update_capa(db, capa, req.model_dump(exclude_unset=True), user.user_id)
+    await enforce_product_line_access(user, capa.product_line_code, db)
+    update_data = req.model_dump(exclude_unset=True)
+    new_pl = update_data.get("product_line_code")
+    if new_pl is not None and new_pl != capa.product_line_code:
+        await enforce_product_line_access(user, new_pl, db)
+    capa = await capa_service.update_capa(db, capa, update_data, user.user_id)
     return CAPAResponse.model_validate(capa)
 
 
 async def require_close_permission(
     report_id: uuid.UUID,
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
 ) -> tuple[User, Any]:
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
+    await enforce_product_line_access(user, capa.product_line_code, db)
     if capa.status in ["D7_PREVENTION", "D8_CLOSURE"]:
-        user = await require_manager_or_admin(user)
+        level = await get_user_permission(user, Module.CAPA, db)
+        if level < PermissionLevel.APPROVE:
+            raise HTTPException(status_code=403, detail="审批权限不足")
     return user, capa
 
 
@@ -121,11 +143,22 @@ async def link_fmea(
     report_id: uuid.UUID,
     fmea_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
 ):
+    from app.models.fmea import FMEADocument
+
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
+    await enforce_product_line_access(user, capa.product_line_code, db)
+
+    # Validate target FMEA exists and user can access its product line
+    target_fmea = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id))
+    target_fmea = target_fmea.scalar_one_or_none()
+    if target_fmea is None:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
+    await enforce_product_line_access(user, target_fmea.product_line_code, db)
+
     capa = await capa_service.link_fmea(db, capa, fmea_id, user.user_id)
     return CAPAResponse.model_validate(capa)
 
@@ -134,7 +167,7 @@ async def link_fmea(
 async def get_related_fmea(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
     from app.models.capa import CAPAEightD
     from app.models.fmea import FMEADocument
@@ -146,6 +179,7 @@ async def get_related_fmea(
     ).scalar_one_or_none()
     if not capa:
         raise HTTPException(status_code=404, detail="CAPA not found")
+    await enforce_product_line_access(user, capa.product_line_code, db)
     if not capa.fmea_ref_id:
         return {"fmea_id": None, "document_no": None, "fmea_node_id": None}
 

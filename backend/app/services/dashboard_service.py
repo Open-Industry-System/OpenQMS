@@ -6,15 +6,23 @@ from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
 
 
-async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> dict:
+async def get_dashboard(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None) -> dict:
     now = datetime.now(timezone.utc)
+
+    # Resolve effective product line codes
+    if product_line_codes is not None:
+        codes = product_line_codes
+    elif product_line is not None:
+        codes = [product_line]
+    else:
+        codes = None
 
     fmea_base = select(func.count(FMEADocument.fmea_id))
     capa_base = select(func.count(CAPAEightD.report_id))
 
-    if product_line:
-        fmea_base = fmea_base.where(FMEADocument.product_line_code == product_line)
-        capa_base = capa_base.where(CAPAEightD.product_line_code == product_line)
+    if codes:
+        fmea_base = fmea_base.where(FMEADocument.product_line_code.in_(codes))
+        capa_base = capa_base.where(CAPAEightD.product_line_code.in_(codes))
 
     total_fmea = await db.scalar(fmea_base)
     approved_fmea = await db.scalar(
@@ -37,8 +45,8 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
 
     # 获取所有FMEA文档的graph_data，在Python中遍历edges计算RPN
     fmea_query = select(FMEADocument.fmea_id, FMEADocument.graph_data)
-    if product_line:
-        fmea_query = fmea_query.where(FMEADocument.product_line_code == product_line)
+    if codes:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(codes))
     result = await db.execute(fmea_query)
     all_docs = result.all()
 
@@ -69,8 +77,8 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
     from app.models.management_review import ManagementReview, ReviewOutput
 
     sc_base = select(func.count(SpecialCharacteristic.sc_id))
-    if product_line:
-        sc_base = sc_base.where(SpecialCharacteristic.product_line_code == product_line)
+    if codes:
+        sc_base = sc_base.where(SpecialCharacteristic.product_line_code.in_(codes))
 
     total_safety = await db.scalar(
         sc_base.where(SpecialCharacteristic.is_safety_related == True)
@@ -84,8 +92,8 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
 
     # Management review stats
     mr_base = select(func.count(ManagementReview.review_id))
-    if product_line:
-        mr_base = mr_base.where(ManagementReview.product_line_code == product_line)
+    if codes:
+        mr_base = mr_base.where(ManagementReview.product_line_code.in_(codes))
 
     total_reviews = await db.scalar(mr_base) or 0
     closed_reviews = await db.scalar(
@@ -95,9 +103,9 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
     output_base = select(func.count(ReviewOutput.output_id)).join(
         ManagementReview, ReviewOutput.review_id == ManagementReview.review_id
     )
-    if product_line:
+    if codes:
         output_base = output_base.where(
-            ManagementReview.product_line_code == product_line
+            ManagementReview.product_line_code.in_(codes)
         )
 
     total_outputs = await db.scalar(output_base) or 0
@@ -140,21 +148,29 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None) -> di
     }
 
 
-async def get_summary(db: AsyncSession, product_line: str | None = None) -> dict:
+async def get_summary(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None) -> dict:
     now = datetime.now(timezone.utc)
+
+    # Resolve effective product line codes
+    if product_line_codes is not None:
+        codes = product_line_codes
+    elif product_line is not None:
+        codes = [product_line]
+    else:
+        codes = None
 
     fmea_pending = select(func.count(FMEADocument.fmea_id)).where(
         FMEADocument.status.in_(["draft", "in_review"])
     )
-    if product_line:
-        fmea_pending = fmea_pending.where(FMEADocument.product_line_code == product_line)
+    if codes:
+        fmea_pending = fmea_pending.where(FMEADocument.product_line_code.in_(codes))
     fmea_pending_count = await db.scalar(fmea_pending) or 0
 
     capa_pending = select(func.count(CAPAEightD.report_id)).where(
         CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
     )
-    if product_line:
-        capa_pending = capa_pending.where(CAPAEightD.product_line_code == product_line)
+    if codes:
+        capa_pending = capa_pending.where(CAPAEightD.product_line_code.in_(codes))
     capa_pending_count = await db.scalar(capa_pending) or 0
 
     from app.models.customer_quality import CustomerComplaint
@@ -162,9 +178,9 @@ async def get_summary(db: AsyncSession, product_line: str | None = None) -> dict
     complaint_pending = select(func.count(CustomerComplaint.complaint_id)).where(
         CustomerComplaint.status == "open"
     )
-    if product_line:
+    if codes:
         complaint_pending = complaint_pending.where(
-            CustomerComplaint.product_line_code == product_line
+            CustomerComplaint.product_line_code.in_(codes)
         )
     complaint_pending_count = await db.scalar(complaint_pending) or 0
 
@@ -174,15 +190,15 @@ async def get_summary(db: AsyncSession, product_line: str | None = None) -> dict
         CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
         CAPAEightD.due_date < now.date(),
     )
-    if product_line:
-        overdue_capa_q = overdue_capa_q.where(CAPAEightD.product_line_code == product_line)
+    if codes:
+        overdue_capa_q = overdue_capa_q.where(CAPAEightD.product_line_code.in_(codes))
     overdue_tasks = await db.scalar(overdue_capa_q) or 0
 
     from app.utils.fmea_graph import build_rpn_rows
 
     fmea_query = select(FMEADocument.fmea_id, FMEADocument.graph_data)
-    if product_line:
-        fmea_query = fmea_query.where(FMEADocument.product_line_code == product_line)
+    if codes:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(codes))
     result = await db.execute(fmea_query)
     all_docs = result.all()
 
@@ -212,9 +228,9 @@ async def get_summary(db: AsyncSession, product_line: str | None = None) -> dict
         FMEADocument.created_at >= prev_month_start,
         FMEADocument.created_at < month_start,
     )
-    if product_line:
-        this_month = this_month.where(FMEADocument.product_line_code == product_line)
-        last_month = last_month.where(FMEADocument.product_line_code == product_line)
+    if codes:
+        this_month = this_month.where(FMEADocument.product_line_code.in_(codes))
+        last_month = last_month.where(FMEADocument.product_line_code.in_(codes))
 
     this_count = await db.scalar(this_month) or 0
     last_count = await db.scalar(last_month) or 0
@@ -227,15 +243,23 @@ async def get_summary(db: AsyncSession, product_line: str | None = None) -> dict
     }
 
 
-async def get_alerts(db: AsyncSession, product_line: str | None = None) -> dict:
+async def get_alerts(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None) -> dict:
     from app.utils.fmea_graph import build_rpn_rows
     from app.models.supplier import Supplier
 
     now = datetime.now(timezone.utc)
 
+    # Resolve effective product line codes
+    if product_line_codes is not None:
+        codes = product_line_codes
+    elif product_line is not None:
+        codes = [product_line]
+    else:
+        codes = None
+
     fmea_query = select(FMEADocument.fmea_id, FMEADocument.document_no, FMEADocument.graph_data)
-    if product_line:
-        fmea_query = fmea_query.where(FMEADocument.product_line_code == product_line)
+    if codes:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(codes))
     result = await db.execute(fmea_query)
     all_docs = result.all()
 
@@ -272,8 +296,8 @@ async def get_alerts(db: AsyncSession, product_line: str | None = None) -> dict:
         .order_by(CAPAEightD.due_date)
         .limit(5)
     )
-    if product_line:
-        capa_query = capa_query.where(CAPAEightD.product_line_code == product_line)
+    if codes:
+        capa_query = capa_query.where(CAPAEightD.product_line_code.in_(codes))
     capa_result = await db.execute(capa_query)
     overdue_capas = [
         {
@@ -301,8 +325,8 @@ async def get_alerts(db: AsyncSession, product_line: str | None = None) -> dict:
         .where(IqcInspection.supplier_id.isnot(None))
         .group_by(IqcInspection.supplier_id)
     )
-    if product_line:
-        ppm_query = ppm_query.where(IqcInspection.product_line_code == product_line)
+    if codes:
+        ppm_query = ppm_query.where(IqcInspection.product_line_code.in_(codes))
     ppm_result = await db.execute(ppm_query)
 
     high_ppm_suppliers = []

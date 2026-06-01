@@ -11,6 +11,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { AuditPlan, AuditFinding, User } from "../../types";
 import {
   getAuditPlan, startAuditPlan, completeAuditPlan, cancelAuditPlan,
@@ -46,8 +47,7 @@ export default function CustomerAuditDetailPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const isViewer = user?.role === "viewer";
-  const isManager = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
 
   const [plan, setPlan] = useState<AuditPlan | null>(null);
   const [findings, setFindings] = useState<AuditFinding[]>([]);
@@ -201,22 +201,22 @@ export default function CustomerAuditDetailPage() {
       title: "操作", key: "finding_actions", width: 280,
       render: (_: unknown, record: AuditFinding) => (
         <Space size="small">
-          {!isViewer && <Button size="small" onClick={() => openEditFinding(record)}>编辑</Button>}
-          {record.status === "open" && !isViewer && (
+          {canEdit('customer_audit') && <Button size="small" onClick={() => openEditFinding(record)}>编辑</Button>}
+          {record.status === "open" && canEdit('customer_audit') && (
             <Button size="small" type="default" onClick={() => handleTransition(record.finding_id, "start_progress")}>开始整改</Button>
           )}
-          {record.status === "in_progress" && !isViewer && (
+          {record.status === "in_progress" && canEdit('customer_audit') && (
             <Popconfirm title="确认关闭？需满足所有关闭条件" onConfirm={() => handleTransition(record.finding_id, "close")}>
               <Button size="small" type="primary">关闭</Button>
             </Popconfirm>
           )}
-          {!record.customer_confirmed && !isViewer && (
+          {!record.customer_confirmed && canEdit('customer_audit') && (
             <Button size="small" icon={<CheckOutlined />}
               onClick={() => { setConfirmFindingId(record.finding_id); setConfirmAttachments([]); setConfirmModalOpen(true); }}>
               客户确认
             </Button>
           )}
-          {!record.capa_ref_id && !isViewer && record.finding_type === "major_nc" && (
+          {!record.capa_ref_id && canEdit('customer_audit') && record.finding_type === "major_nc" && (
             <Popconfirm title="是否创建 CAPA？" onConfirm={async () => {
               try { await createCAPAFromFinding(record.finding_id); message.success("CAPA 已创建"); fetchPlan(); }
               catch (e: unknown) { message.error((e as Error).message || "创建失败"); }
@@ -241,10 +241,10 @@ export default function CustomerAuditDetailPage() {
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
           <h3 style={{ margin: 0 }}>{plan.plan_no} - {plan.customer_name}</h3>
           <Space>
-            {plan.status === "planned" && !isViewer && (
+            {plan.status === "planned" && canEdit('customer_audit') && (
               <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => handlePlanAction("start")}>开始审核</Button>
             )}
-            {plan.status === "in_progress" && isManager && (
+            {plan.status === "in_progress" && canApprove('customer_audit') && (
               <>
                 <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => handlePlanAction("complete")}>完成审核</Button>
                 <Button danger icon={<StopOutlined />} onClick={() => handlePlanAction("cancel")}>取消</Button>
@@ -274,7 +274,7 @@ export default function CustomerAuditDetailPage() {
             children: (
               <>
                 <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-                  {!isViewer && (
+                  {canEdit('customer_audit') && (
                     <Button type="primary" icon={<PlusOutlined />}
                       onClick={() => { setEditingFinding(null); findingForm.resetFields(); setFindingModalOpen(true); }}>
                       新增发现项
@@ -315,7 +315,7 @@ export default function CustomerAuditDetailPage() {
                   </Col>
                   <Col span={8}>
                     <div style={{ marginTop: 32 }}>
-                      {!isViewer && (
+                      {canEdit('customer_audit') && (
                         <Button type="primary" icon={<UploadOutlined />} onClick={() => setPlanConfirmModalOpen(true)}>
                           上传审核级确认函
                         </Button>

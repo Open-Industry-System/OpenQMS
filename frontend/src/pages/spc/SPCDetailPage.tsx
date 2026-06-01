@@ -34,6 +34,7 @@ import type {
   SampleBatch,
 } from "../../types";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 
 const { Title, Text } = Typography;
 
@@ -113,7 +114,7 @@ export default function SPCDetailPage() {
   const subChartInstance = useRef<echarts.ECharts | null>(null);
 
   const user = useAuthStore((s) => s.user);
-  const canEdit = user?.role !== "viewer";
+  const { canEdit } = usePermission();
 
   const fetchAll = async () => {
     if (!id) return;
@@ -475,7 +476,7 @@ export default function SPCDetailPage() {
       width: 180,
       render: (_: unknown, record: SPCAlarm) => (
         <Space>
-          {record.status === "open" && canEdit && (
+          {record.status === "open" && canEdit('spc') && (
             <Button
               size="small"
               icon={<CheckCircleOutlined />}
@@ -484,7 +485,7 @@ export default function SPCDetailPage() {
               确认
             </Button>
           )}
-          {!record.linked_capa_id && canEdit && (
+          {!record.linked_capa_id && canEdit('spc') && (
             <Button
               size="small"
               type="primary"
@@ -591,7 +592,7 @@ export default function SPCDetailPage() {
                       type={ic.control_limits_locked ? "default" : "primary"}
                       icon={ic.control_limits_locked ? <UnlockOutlined /> : <LockOutlined />}
                       onClick={handleLockToggle}
-                      disabled={!canEdit}
+                      disabled={!canEdit('spc')}
                       block
                     >
                       {ic.control_limits_locked ? "解锁控制限" : "锁定控制限"}
@@ -619,7 +620,7 @@ export default function SPCDetailPage() {
                           size="small"
                           checked={!!ic.rules_config[key]}
                           onChange={(checked) => handleRuleToggle(key, checked)}
-                          disabled={!canEdit}
+                          disabled={!canEdit('spc')}
                         />
                       </div>
                     ))}
@@ -789,7 +790,7 @@ export default function SPCDetailPage() {
                               添加样本
                             </Button>
                           )}
-                          <Button type="primary" onClick={handleAddSample} disabled={!canEdit}>
+                          <Button type="primary" onClick={handleAddSample} disabled={!canEdit('spc')}>
                             提交批次
                           </Button>
                         </div>

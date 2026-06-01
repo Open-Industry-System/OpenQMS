@@ -14,6 +14,7 @@ import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
 import type { FMEADocument, GraphNode, GraphEdge } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
+import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
 import { buildRows, createRowNodes, type FMEARow } from "../../../utils/fmeaTable";
 import StructureTree from "../../../components/dfmea/StructureTree";
@@ -90,8 +91,7 @@ export default function FMEAEditorPage() {
   const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(null);
 
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
-  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
   const [activeTab, setActiveTab] = useState("failure");
   const [outerTab, setOuterTab] = useState("editor");
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
@@ -400,7 +400,7 @@ export default function FMEAEditorPage() {
           <Input.TextArea
             value={node?.name || ""}
             rows={2}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             onFocus={() => activateRecommendation(row.key, "failureMode", { failureMode: node?.name || "" })}
             onChange={(e) => updateNode(row.failureModeNodeId, "name", e.target.value)}
           />
@@ -418,7 +418,7 @@ export default function FMEAEditorPage() {
           <Input.TextArea
             value={node?.name || ""}
             rows={2}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.failureEffectNodeId!, "name", e.target.value)}
           />
         );
@@ -438,7 +438,7 @@ export default function FMEAEditorPage() {
             max={10}
             size="small"
             value={node?.severity ?? undefined}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             style={{ width: 55, textAlign: "center" }}
             onFocus={() => {
               const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
@@ -469,7 +469,7 @@ export default function FMEAEditorPage() {
             size="small"
             value={classValue || undefined}
             onChange={(value) => updateNode(row.failureModeNodeId, "classification", value || "")}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             style={{ width: 60, ...bgStyle }}
             options={[{ value: "", label: "-" }, { value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
           />
@@ -487,7 +487,7 @@ export default function FMEAEditorPage() {
           <Input.TextArea
             value={node?.name || ""}
             rows={2}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.failureCauseNodeId!, "name", e.target.value)}
           />
         );
@@ -507,7 +507,7 @@ export default function FMEAEditorPage() {
             max={10}
             size="small"
             value={node?.occurrence ?? undefined}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             style={{ width: 55, textAlign: "center" }}
             onFocus={() => {
               const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
@@ -535,7 +535,7 @@ export default function FMEAEditorPage() {
           <Input.TextArea
             value={node?.name || ""}
             rows={2}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.preventionControlIds[0], "name", e.target.value)}
           />
         );
@@ -552,7 +552,7 @@ export default function FMEAEditorPage() {
           <Input.TextArea
             value={node?.name || ""}
             rows={2}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.detectionControlIds[0], "name", e.target.value)}
           />
         );
@@ -572,7 +572,7 @@ export default function FMEAEditorPage() {
             max={10}
             size="small"
             value={node?.detection ?? undefined}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             style={{ width: 55, textAlign: "center" }}
             onFocus={() => {
               const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
@@ -652,7 +652,7 @@ export default function FMEAEditorPage() {
             <Button
               size="small"
               type="dashed"
-              disabled={isViewer}
+              disabled={!canEdit('fmea')}
               onClick={() => {
                 const ts = Date.now();
                 const raId = `n${ts}_ra`;
@@ -679,7 +679,7 @@ export default function FMEAEditorPage() {
           <Input.TextArea
             value={node?.name || ""}
             rows={2}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "name", e.target.value)}
           />
         );
@@ -698,7 +698,7 @@ export default function FMEAEditorPage() {
               size="small"
               placeholder="责任人"
               value={node?.responsible || ""}
-              disabled={isViewer}
+              disabled={!canEdit('fmea')}
               style={{ marginBottom: 4 }}
               onChange={(e) => updateNode(row.recommendedActionIds[0], "responsible", e.target.value)}
             />
@@ -706,7 +706,7 @@ export default function FMEAEditorPage() {
               size="small"
               placeholder="YYYY-MM-DD"
               value={node?.due_date || ""}
-              disabled={isViewer}
+              disabled={!canEdit('fmea')}
               onChange={(e) => updateNode(row.recommendedActionIds[0], "due_date", e.target.value)}
             />
           </div>
@@ -724,7 +724,7 @@ export default function FMEAEditorPage() {
           <Input.TextArea
             value={node?.action_taken || ""}
             rows={2}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "action_taken", e.target.value)}
           />
         );
@@ -744,7 +744,7 @@ export default function FMEAEditorPage() {
             max={10}
             size="small"
             value={node?.revised_severity ?? undefined}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             style={{ width: 48, textAlign: "center" }}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_severity", Number(e.target.value) || 0)}
           />
@@ -765,7 +765,7 @@ export default function FMEAEditorPage() {
             max={10}
             size="small"
             value={node?.revised_occurrence ?? undefined}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             style={{ width: 48, textAlign: "center" }}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_occurrence", Number(e.target.value) || 0)}
           />
@@ -786,7 +786,7 @@ export default function FMEAEditorPage() {
             max={10}
             size="small"
             value={node?.revised_detection ?? undefined}
-            disabled={isViewer}
+            disabled={!canEdit('fmea')}
             style={{ width: 48, textAlign: "center" }}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_detection", Number(e.target.value) || 0)}
           />
@@ -821,7 +821,7 @@ export default function FMEAEditorPage() {
       fixed: "right" as const,
       render: (_: unknown, row: FMEARow) => (
         <Popconfirm title="确认删除此行？" onConfirm={() => deleteRow(row)}>
-          <Button type="text" danger size="small" disabled={isViewer} icon={<DeleteOutlined />} />
+          <Button type="text" danger size="small" disabled={!canEdit('fmea')} icon={<DeleteOutlined />} />
         </Popconfirm>
       ),
     },
@@ -841,8 +841,8 @@ export default function FMEAEditorPage() {
         <Space>
           {nextTransitions[fmea.status]
             ?.filter((t) => {
-              if (isViewer) return false;
-              if (t.target === "approved" && !isAdminOrManager) return false;
+              if (!canEdit('fmea')) return false;
+              if (t.target === "approved" && !canApprove('fmea')) return false;
               return true;
             })
             ?.map((t) => (
@@ -850,7 +850,7 @@ export default function FMEAEditorPage() {
                 <Button icon={t.icon}>{t.label}</Button>
               </Popconfirm>
             ))}
-          {!isViewer && (
+          {canEdit('fmea') && (
             <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>保存</Button>
           )}
         </Space>
@@ -863,11 +863,11 @@ export default function FMEAEditorPage() {
             {structureNodes.find((n) => n.type === (isDFMEA ? "System" : "ProcessItem"))?.name || "-"}
           </Descriptions.Item>
           <Descriptions.Item label={isDFMEA ? "设计责任" : "过程责任"}>
-            <Input size="small" placeholder="责任部门" style={{ width: 150 }} disabled={isViewer} />
+            <Input size="small" placeholder="责任部门" style={{ width: 150 }} disabled={!canEdit('fmea')} />
           </Descriptions.Item>
           <Descriptions.Item label="FMEA 编号">{fmea.document_no}</Descriptions.Item>
           <Descriptions.Item label="关键日期">
-            <Input size="small" placeholder="YYYY-MM-DD" style={{ width: 100 }} disabled={isViewer} />
+            <Input size="small" placeholder="YYYY-MM-DD" style={{ width: 100 }} disabled={!canEdit('fmea')} />
           </Descriptions.Item>
         </Descriptions>
       </Card>
@@ -883,7 +883,7 @@ export default function FMEAEditorPage() {
             title={isDFMEA ? "结构 / 功能" : "工序 / 功能"}
             size="small"
             extra={
-              !isViewer && (
+              canEdit('fmea') && (
                 <Button size="small" icon={<PlusOutlined />} onClick={addRow} disabled={!selectedFunctionId}>
                   添加行
                 </Button>
@@ -1019,7 +1019,7 @@ export default function FMEAEditorPage() {
                   edges={edges}
                   onUpdateNodes={setNodes}
                   onUpdateEdges={setEdges}
-                  isViewer={isViewer}
+                  isViewer={!canEdit('fmea')}
                   onSelectNode={(node) => setSelectedStructureNode(node)}
                 />
               </Card>
@@ -1031,7 +1031,7 @@ export default function FMEAEditorPage() {
                   onUpdateNode={(nodeId, updates) => {
                     setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, ...updates } : n)));
                   }}
-                  isViewer={isViewer}
+                  isViewer={!canEdit('fmea')}
                 />
               </Card>
             </Col>
@@ -1159,8 +1159,8 @@ export default function FMEAEditorPage() {
           <VersionHistoryTab
             documentId={id!}
             documentType="fmea"
-            canCreate={!isViewer}
-            canRollback={isAdminOrManager}
+            canCreate={canEdit('fmea')}
+            canRollback={canApprove('fmea')}
             isDraft={fmea.status === "draft"}
             onViewSnapshot={(major, minor) => message.info(`查看版本 v${major}.${minor} 快照（功能开发中）`)}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}

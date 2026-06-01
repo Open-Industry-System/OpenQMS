@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app import schemas
 from app.services import audit_service, customer_audit_service
@@ -35,7 +35,7 @@ async def list_audit_findings(
 async def create_audit_finding(
     req: schemas.audit.AuditFindingCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     try:
         finding = await audit_service.create_audit_finding(
@@ -72,7 +72,7 @@ async def update_audit_finding(
     finding_id: uuid.UUID,
     req: schemas.audit.AuditFindingUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
@@ -100,7 +100,7 @@ async def transition_audit_finding(
     finding_id: uuid.UUID,
     req: schemas.audit.FindingTransitionRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
@@ -125,7 +125,7 @@ async def confirm_customer_finding(
     finding_id: uuid.UUID,
     req: schemas.audit.CustomerConfirmationRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
@@ -147,7 +147,7 @@ async def confirm_customer_finding(
 async def close_audit_finding(
     finding_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
@@ -169,7 +169,7 @@ async def close_audit_finding(
 async def create_capa_from_finding(
     finding_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:

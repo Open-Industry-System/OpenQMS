@@ -6,6 +6,7 @@ import {
 import { PlusOutlined, ReloadOutlined, EyeOutlined, PlayCircleOutlined, CheckCircleOutlined, StopOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { AuditPlan, CustomerAuditStats } from "../../types";
 import {
@@ -35,8 +36,7 @@ export default function CustomerAuditListPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const { selected: currentProductLine } = useProductLineStore();
-  const isViewer = user?.role === "viewer";
-  const isManager = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
 
   const [audits, setAudits] = useState<AuditPlan[]>([]);
   const [total, setTotal] = useState(0);
@@ -117,10 +117,10 @@ export default function CustomerAuditListPage() {
       render: (_: unknown, record: AuditPlan) => (
         <Space>
           <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/customer-audits/${record.audit_id}`)}>查看</Button>
-          {record.status === "planned" && !isViewer && (
+          {record.status === "planned" && canEdit('customer_audit') && (
             <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleAction("start", record.audit_id)}>开始</Button>
           )}
-          {record.status === "in_progress" && isManager && (
+          {record.status === "in_progress" && canApprove('customer_audit') && (
             <>
               <Button size="small" type="primary" icon={<CheckCircleOutlined />} onClick={() => handleAction("complete", record.audit_id)}>完成</Button>
               <Button size="small" danger icon={<StopOutlined />} onClick={() => handleAction("cancel", record.audit_id)}>取消</Button>
@@ -149,7 +149,7 @@ export default function CustomerAuditListPage() {
           <h3 style={{ margin: 0 }}>客户审核管理</h3>
           <Space>
             <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
-            {!isViewer && (
+            {canEdit('customer_audit') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建客户审核</Button>
             )}
           </Space>

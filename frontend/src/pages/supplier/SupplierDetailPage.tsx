@@ -30,6 +30,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { Supplier, SupplierCertification, SupplierEvaluation, AuditPlan } from "../../types";
 import client from "../../api/client";
 import {
@@ -101,13 +102,7 @@ export default function SupplierDetailPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
-  const isViewer = user?.role === "viewer";
-  const isEngineerOrAbove =
-    user?.role === "quality_engineer" ||
-    user?.role === "manager" ||
-    user?.role === "admin";
-  const isManagerOrAdmin =
-    user?.role === "manager" || user?.role === "admin";
+  const { canEdit, canApprove } = usePermission();
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const isNew = id === "new";
@@ -461,7 +456,7 @@ export default function SupplierDetailPage() {
         );
       },
     },
-    ...(isEngineerOrAbove
+    ...(canEdit('supplier')
       ? [
           {
             title: "操作",
@@ -497,7 +492,7 @@ export default function SupplierDetailPage() {
       children: (
         <Card
           extra={
-            !isViewer && (
+            canEdit('supplier') && (
               <Space>
                 {editing ? (
                   <>
@@ -641,7 +636,7 @@ export default function SupplierDetailPage() {
       children: (
         <Card
           extra={
-            isEngineerOrAbove && (
+            canEdit('supplier') && (
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
@@ -758,7 +753,7 @@ export default function SupplierDetailPage() {
           </Col>
 
           {/* Right: inline create form */}
-          {isEngineerOrAbove && (
+          {canEdit('supplier') && (
             <Col span={12}>
               <Card title="新建评价" size="small">
                 <Form
@@ -936,7 +931,7 @@ export default function SupplierDetailPage() {
         </Button>
         <h2 style={{ margin: 0, fontSize: 20 }}>{isNew ? "新建供应商" : supplier!.name}</h2>
         {!isNew && <Tag color={statusInfo.color}>{statusInfo.label}</Tag>}
-        {!isNew && supplier && isManagerOrAdmin && (
+        {!isNew && supplier && canApprove('supplier') && (
           <Space style={{ marginLeft: "auto" }}>
             {supplier.status === "pending_review" && (
               <>

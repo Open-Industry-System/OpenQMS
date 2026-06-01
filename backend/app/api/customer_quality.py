@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
-from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.database import get_db
 from app.models.user import User
 from app.services import customer_quality_service
@@ -35,7 +35,7 @@ async def list_customers(
 async def create_customer(
     req: schemas.customer_quality.CustomerCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     try:
         customer = await customer_quality_service.create_customer(db, req, user.user_id)
@@ -61,7 +61,7 @@ async def update_customer(
     customer_id: uuid.UUID,
     req: schemas.customer_quality.CustomerUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     customer = await customer_quality_service.get_customer(db, customer_id)
     if customer is None:
@@ -133,7 +133,7 @@ async def list_complaints(
 async def create_complaint(
     req: schemas.customer_quality.ComplaintCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     try:
         complaint = await customer_quality_service.create_complaint(db, req, user.user_id)
@@ -174,7 +174,7 @@ async def update_complaint(
     complaint_id: uuid.UUID,
     req: schemas.customer_quality.ComplaintUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     complaint = await customer_quality_service.get_complaint(db, complaint_id)
     if complaint is None:
@@ -202,7 +202,7 @@ async def _get_complaint_or_404(db: AsyncSession, complaint_id: uuid.UUID):
 async def start_complaint_investigation(
     complaint_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     complaint = await _get_complaint_or_404(db, complaint_id)
     try:
@@ -221,7 +221,7 @@ async def start_complaint_investigation(
 async def mark_complaint_responded(
     complaint_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     complaint = await _get_complaint_or_404(db, complaint_id)
     try:
@@ -240,7 +240,7 @@ async def mark_complaint_responded(
 async def cancel_complaint(
     complaint_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     complaint = await _get_complaint_or_404(db, complaint_id)
     try:
@@ -259,7 +259,7 @@ async def cancel_complaint(
 async def close_complaint(
     complaint_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.APPROVE)),
 ):
     complaint = await _get_complaint_or_404(db, complaint_id)
     try:
@@ -279,7 +279,7 @@ async def link_complaint_capa(
     complaint_id: uuid.UUID,
     capa_ref_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     complaint = await _get_complaint_or_404(db, complaint_id)
     try:
@@ -299,7 +299,7 @@ async def create_capa_from_complaint(
     complaint_id: uuid.UUID,
     document_no: str = Query(...),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     complaint = await _get_complaint_or_404(db, complaint_id)
     try:
@@ -320,7 +320,7 @@ async def link_complaint_fmea(
     complaint_id: uuid.UUID,
     fmea_ref_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     complaint = await _get_complaint_or_404(db, complaint_id)
     try:
@@ -364,7 +364,7 @@ async def list_rma_records(
 async def create_rma_record(
     req: schemas.customer_quality.RMARecordCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     try:
         rma = await customer_quality_service.create_rma_record(db, req, user.user_id)
@@ -396,7 +396,7 @@ async def update_rma_record(
     rma_id: uuid.UUID,
     req: schemas.customer_quality.RMARecordUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     rma = await customer_quality_service.get_rma_record(db, rma_id)
     if rma is None:
@@ -424,7 +424,7 @@ async def _get_rma_or_404(db: AsyncSession, rma_id: uuid.UUID):
 async def start_rma_analysis(
     rma_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     rma = await _get_rma_or_404(db, rma_id)
     try:
@@ -441,7 +441,7 @@ async def start_rma_analysis(
 async def mark_rma_action_pending(
     rma_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     rma = await _get_rma_or_404(db, rma_id)
     try:
@@ -460,7 +460,7 @@ async def mark_rma_action_pending(
 async def cancel_rma_record(
     rma_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     rma = await _get_rma_or_404(db, rma_id)
     try:
@@ -477,7 +477,7 @@ async def cancel_rma_record(
 async def close_rma_record(
     rma_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.APPROVE)),
 ):
     rma = await _get_rma_or_404(db, rma_id)
     try:
@@ -495,7 +495,7 @@ async def link_rma_complaint(
     rma_id: uuid.UUID,
     complaint_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     rma = await _get_rma_or_404(db, rma_id)
     try:
@@ -515,7 +515,7 @@ async def link_rma_capa(
     rma_id: uuid.UUID,
     capa_ref_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     rma = await _get_rma_or_404(db, rma_id)
     try:
@@ -533,7 +533,7 @@ async def link_rma_fmea(
     rma_id: uuid.UUID,
     fmea_ref_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     rma = await _get_rma_or_404(db, rma_id)
     try:
@@ -599,7 +599,7 @@ async def create_scar_from_complaint_endpoint(
     complaint_id: uuid.UUID,
     req: SCARRelatedCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     try:
         scar = await customer_quality_service.create_scar_from_complaint(
@@ -615,7 +615,7 @@ async def create_scar_from_rma_endpoint(
     rma_id: uuid.UUID,
     req: SCARRelatedCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.CUSTOMER_QUALITY, PermissionLevel.CREATE)),
 ):
     try:
         scar = await customer_quality_service.create_scar_from_rma(

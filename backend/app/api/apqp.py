@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, get_user_permission, PermissionLevel, Module
 from app.models.user import User
 from app.schemas import apqp as apqp_schemas
 from app.services import apqp_service
@@ -103,7 +103,7 @@ async def get_project(
 async def create_project(
     req: apqp_schemas.APQPProjectCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
 ):
     try:
         project = await apqp_service.create_project(
@@ -131,7 +131,7 @@ async def update_project(
     project_id: uuid.UUID,
     req: apqp_schemas.APQPProjectUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
 ):
     project = await apqp_service.get_project(db, project_id)
     if not project:
@@ -153,15 +153,16 @@ async def transition_project(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # Route-level role check (FMEA-style pattern)
+    # Route-level permission check
+    perm_level = await get_user_permission(user, Module.PLANNING, db)
     if req.action in ("approve_gate", "reject_gate"):
-        if user.role not in ("admin", "manager"):
+        if perm_level < PermissionLevel.APPROVE:
             raise HTTPException(403, "需要经理或管理员权限")
     elif req.action in ("submit_gate",):
-        if user.role not in ("admin", "manager", "quality_engineer"):
+        if perm_level < PermissionLevel.CREATE:
             raise HTTPException(403, "需要工程师或更高权限")
     elif req.action == "cancel":
-        if user.role != "admin":
+        if perm_level < PermissionLevel.ADMIN:
             raise HTTPException(403, "仅管理员可取消项目")
 
     project = await apqp_service.get_project(db, project_id)

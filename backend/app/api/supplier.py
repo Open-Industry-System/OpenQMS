@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app import schemas
 from app.services import supplier_service, supplier_quality_service
@@ -34,7 +34,7 @@ async def export_suppliers(
 async def import_suppliers(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SUPPLIER, PermissionLevel.CREATE)),
 ):
     from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
     from dataclasses import asdict
@@ -168,7 +168,7 @@ async def list_suppliers(
 async def create_supplier(
     req: schemas.supplier.SupplierCreate,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.CREATE)),
 ):
     try:
         supplier = await supplier_service.create_supplier(
@@ -204,7 +204,7 @@ async def update_supplier(
     supplier_id: uuid.UUID,
     req: schemas.supplier.SupplierUpdate,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.CREATE)),
 ):
     supplier = await supplier_service.get_supplier(db, supplier_id)
     if supplier is None:
@@ -223,7 +223,7 @@ async def update_supplier(
 
 
 @router.delete("/{supplier_id}")
-async def delete_supplier(supplier_id: uuid.UUID, db=Depends(get_db), user=Depends(require_engineer_or_admin)):
+async def delete_supplier(supplier_id: uuid.UUID, db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.CREATE))):
     supplier = await supplier_service.get_supplier(db, supplier_id)
     if supplier is None:
         raise HTTPException(status_code=404, detail="supplier not found")
@@ -237,7 +237,7 @@ async def delete_supplier(supplier_id: uuid.UUID, db=Depends(get_db), user=Depen
 # ─── State transitions (all require manager/admin) ───
 
 @router.post("/{supplier_id}/approve", response_model=schemas.supplier.SupplierResponse)
-async def approve_supplier(supplier_id: uuid.UUID, db=Depends(get_db), user=Depends(require_manager_or_admin)):
+async def approve_supplier(supplier_id: uuid.UUID, db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.APPROVE))):
     supplier = await supplier_service.get_supplier(db, supplier_id)
     if supplier is None:
         raise HTTPException(status_code=404, detail="supplier not found")
@@ -250,7 +250,7 @@ async def approve_supplier(supplier_id: uuid.UUID, db=Depends(get_db), user=Depe
 
 
 @router.post("/{supplier_id}/reject", response_model=schemas.supplier.SupplierResponse)
-async def reject_supplier(supplier_id: uuid.UUID, reason: str = Query(...), db=Depends(get_db), user=Depends(require_manager_or_admin)):
+async def reject_supplier(supplier_id: uuid.UUID, reason: str = Query(...), db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.APPROVE))):
     supplier = await supplier_service.get_supplier(db, supplier_id)
     if supplier is None:
         raise HTTPException(status_code=404, detail="supplier not found")
@@ -263,7 +263,7 @@ async def reject_supplier(supplier_id: uuid.UUID, reason: str = Query(...), db=D
 
 
 @router.post("/{supplier_id}/confirm-approved", response_model=schemas.supplier.SupplierResponse)
-async def confirm_approved(supplier_id: uuid.UUID, db=Depends(get_db), user=Depends(require_manager_or_admin)):
+async def confirm_approved(supplier_id: uuid.UUID, db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.APPROVE))):
     supplier = await supplier_service.get_supplier(db, supplier_id)
     if supplier is None:
         raise HTTPException(status_code=404, detail="supplier not found")
@@ -276,7 +276,7 @@ async def confirm_approved(supplier_id: uuid.UUID, db=Depends(get_db), user=Depe
 
 
 @router.post("/{supplier_id}/suspend", response_model=schemas.supplier.SupplierResponse)
-async def suspend_supplier(supplier_id: uuid.UUID, reason: str = Query(...), db=Depends(get_db), user=Depends(require_manager_or_admin)):
+async def suspend_supplier(supplier_id: uuid.UUID, reason: str = Query(...), db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.APPROVE))):
     supplier = await supplier_service.get_supplier(db, supplier_id)
     if supplier is None:
         raise HTTPException(status_code=404, detail="supplier not found")
@@ -289,7 +289,7 @@ async def suspend_supplier(supplier_id: uuid.UUID, reason: str = Query(...), db=
 
 
 @router.post("/{supplier_id}/reinstate", response_model=schemas.supplier.SupplierResponse)
-async def reinstate_supplier(supplier_id: uuid.UUID, db=Depends(get_db), user=Depends(require_manager_or_admin)):
+async def reinstate_supplier(supplier_id: uuid.UUID, db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.APPROVE))):
     supplier = await supplier_service.get_supplier(db, supplier_id)
     if supplier is None:
         raise HTTPException(status_code=404, detail="supplier not found")
@@ -312,7 +312,7 @@ async def list_certifications(supplier_id: uuid.UUID, db=Depends(get_db), _user=
 
 
 @router.post("/{supplier_id}/certifications", response_model=schemas.supplier.SupplierCertificationResponse)
-async def create_certification(supplier_id: uuid.UUID, req: schemas.supplier.SupplierCertificationCreate, db=Depends(get_db), user=Depends(require_engineer_or_admin)):
+async def create_certification(supplier_id: uuid.UUID, req: schemas.supplier.SupplierCertificationCreate, db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.CREATE))):
     try:
         cert = await supplier_service.create_certification(
             db, supplier_id=supplier_id, cert_type=req.cert_type, cert_no=req.cert_no,
@@ -324,7 +324,7 @@ async def create_certification(supplier_id: uuid.UUID, req: schemas.supplier.Sup
 
 
 @router.put("/{supplier_id}/certifications/{cert_id}", response_model=schemas.supplier.SupplierCertificationResponse)
-async def update_certification(supplier_id: uuid.UUID, cert_id: uuid.UUID, req: schemas.supplier.SupplierCertificationUpdate, db=Depends(get_db), user=Depends(require_engineer_or_admin)):
+async def update_certification(supplier_id: uuid.UUID, cert_id: uuid.UUID, req: schemas.supplier.SupplierCertificationUpdate, db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.CREATE))):
     cert = await supplier_service.get_certification(db, cert_id)
     if cert is None or cert.supplier_id != supplier_id:
         raise HTTPException(status_code=404, detail="certification not found")
@@ -339,7 +339,7 @@ async def update_certification(supplier_id: uuid.UUID, cert_id: uuid.UUID, req: 
 
 
 @router.delete("/{supplier_id}/certifications/{cert_id}")
-async def delete_certification(supplier_id: uuid.UUID, cert_id: uuid.UUID, db=Depends(get_db), user=Depends(require_engineer_or_admin)):
+async def delete_certification(supplier_id: uuid.UUID, cert_id: uuid.UUID, db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.CREATE))):
     cert = await supplier_service.get_certification(db, cert_id)
     if cert is None or cert.supplier_id != supplier_id:
         raise HTTPException(status_code=404, detail="certification not found")
@@ -361,7 +361,7 @@ async def list_evaluations(supplier_id: uuid.UUID, db=Depends(get_db), _user=Dep
 
 
 @router.post("/{supplier_id}/evaluations", response_model=schemas.supplier.SupplierEvaluationResponse)
-async def create_evaluation(supplier_id: uuid.UUID, req: schemas.supplier.SupplierEvaluationCreate, db=Depends(get_db), user=Depends(require_engineer_or_admin)):
+async def create_evaluation(supplier_id: uuid.UUID, req: schemas.supplier.SupplierEvaluationCreate, db=Depends(get_db), user=Depends(require_permission(Module.SUPPLIER, PermissionLevel.CREATE))):
     try:
         evaluation = await supplier_service.create_evaluation(
             db, supplier_id=supplier_id, eval_period=req.eval_period, eval_type=req.eval_type,

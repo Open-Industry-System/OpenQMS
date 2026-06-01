@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app import schemas
 from app.services import quality_goal_service
@@ -36,7 +36,7 @@ async def list_quality_goals(
 async def create_quality_goal(
     req: schemas.quality_goal.QualityGoalCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.QUALITY_GOAL, PermissionLevel.CREATE)),
 ):
     try:
         goal = await quality_goal_service.create_quality_goal(
@@ -83,7 +83,7 @@ async def update_quality_goal(
     goal_id: uuid.UUID,
     req: schemas.quality_goal.QualityGoalUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.QUALITY_GOAL, PermissionLevel.CREATE)),
 ):
     goal = await quality_goal_service.get_quality_goal(db, goal_id)
     if goal is None:
@@ -110,7 +110,7 @@ async def update_quality_goal(
 async def delete_quality_goal(
     goal_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.QUALITY_GOAL, PermissionLevel.CREATE)),
 ):
     goal = await quality_goal_service.get_quality_goal(db, goal_id)
     if goal is None:
@@ -126,7 +126,7 @@ async def delete_quality_goal(
 async def submit_for_approval(
     goal_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.QUALITY_GOAL, PermissionLevel.CREATE)),
 ):
     goal = await quality_goal_service.get_quality_goal(db, goal_id)
     if goal is None:
@@ -142,7 +142,7 @@ async def submit_for_approval(
 async def withdraw_submission(
     goal_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.QUALITY_GOAL, PermissionLevel.CREATE)),
 ):
     goal = await quality_goal_service.get_quality_goal(db, goal_id)
     if goal is None:
@@ -158,7 +158,7 @@ async def withdraw_submission(
 async def approve_goal(
     goal_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.QUALITY_GOAL, PermissionLevel.APPROVE)),
 ):
     goal = await quality_goal_service.get_quality_goal(db, goal_id)
     if goal is None:
@@ -175,7 +175,7 @@ async def reject_goal(
     goal_id: uuid.UUID,
     req: schemas.quality_goal.QualityGoalRejectRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.QUALITY_GOAL, PermissionLevel.APPROVE)),
 ):
     goal = await quality_goal_service.get_quality_goal(db, goal_id)
     if goal is None:
@@ -191,7 +191,7 @@ async def reject_goal(
 async def archive_goal(
     goal_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.QUALITY_GOAL, PermissionLevel.APPROVE)),
 ):
     goal = await quality_goal_service.get_quality_goal(db, goal_id)
     if goal is None:
@@ -208,7 +208,7 @@ async def update_actual_value(
     goal_id: uuid.UUID,
     req: schemas.quality_goal.QualityGoalUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.QUALITY_GOAL, PermissionLevel.CREATE)),
 ):
     goal = await quality_goal_service.get_quality_goal(db, goal_id)
     if goal is None:

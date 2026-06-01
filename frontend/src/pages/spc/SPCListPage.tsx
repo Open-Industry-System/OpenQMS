@@ -15,6 +15,7 @@ import {
 } from "../../api/spc";
 import type { InspectionCharacteristic } from "../../types";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 
 const { Title } = Typography;
@@ -42,7 +43,7 @@ export default function SPCListPage() {
   const navigate = useNavigate();
 
   const user = useAuthStore((s) => s.user);
-  const canEdit = user?.role !== "viewer";
+  const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
 
   const fetchData = (p: number = page) => {
@@ -165,7 +166,7 @@ export default function SPCListPage() {
           >
             查看
           </Button>
-          {canEdit && (
+          {canEdit('spc') && (
             <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.ic_id)}>
               <Button type="link" danger icon={<DeleteOutlined />}>
                 删除
@@ -234,7 +235,7 @@ export default function SPCListPage() {
             style={{ width: 240 }}
           />
         </Space>
-        {canEdit && (
+        {canEdit('spc') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
             新建检验特性
           </Button>

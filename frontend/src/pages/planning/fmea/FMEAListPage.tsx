@@ -6,6 +6,7 @@ import { listFMEAs, createFMEA, updateFMEA } from "../../../api/fmea";
 import type { FMEADocument, GraphNode, GraphEdge } from "../../../types";
 import GenerationWizard from "../../../components/dfmea/GenerationWizard";
 import { useAuthStore } from "../../../store/authStore";
+import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
 
 const { Title } = Typography;
@@ -47,7 +48,7 @@ export default function FMEAListPage() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const canEdit = user?.role !== "viewer";
+  const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
   const [searchParams] = useSearchParams();
 
@@ -139,7 +140,7 @@ export default function FMEAListPage() {
       key: "actions",
       width: 100,
       render: (_: unknown, record: FMEADocument) =>
-        canEdit ? (
+        canEdit('fmea') ? (
           <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
             编辑
           </Button>
@@ -155,7 +156,7 @@ export default function FMEAListPage() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
         <Title level={4} style={{ margin: 0 }}>FMEA 管理</Title>
-        {canEdit && (
+        {canEdit('fmea') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
             新建 FMEA
           </Button>

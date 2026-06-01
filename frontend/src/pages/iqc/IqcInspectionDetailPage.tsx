@@ -25,6 +25,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { IqcInspection, IqcInspectionItem } from "../../types";
 import {
   getInspection,
@@ -74,8 +75,7 @@ export default function IqcInspectionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
-  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
 
   const [inspection, setInspection] = useState<IqcInspection | null>(null);
   const [loading, setLoading] = useState(false);
@@ -225,23 +225,23 @@ export default function IqcInspectionDetailPage() {
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/iqc/inspections")}>
           返回列表
         </Button>
-        {inspection.status === "pending" && !isViewer && (
+        {inspection.status === "pending" && canEdit('iqc') && (
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>
             开始检验
           </Button>
         )}
-        {inspection.status === "judged" && !isViewer && (
+        {inspection.status === "judged" && canEdit('iqc') && (
           <Button type="primary" onClick={handleClose}>
             关闭检验单
           </Button>
         )}
-        {inspection.status === "judged" && inspection.inspection_result === "rejected" && !isViewer && (
+        {inspection.status === "judged" && inspection.inspection_result === "rejected" && canEdit('iqc') && (
           <>
             <Button danger onClick={handleTriggerScar}>
               触发SCAR
             </Button>
             <Button onClick={handleReinspect}>申请复检</Button>
-            {isAdminOrManager && (
+            {canApprove('iqc') && (
               <Button onClick={handleConcession}>让步接收</Button>
             )}
           </>
@@ -288,7 +288,7 @@ export default function IqcInspectionDetailPage() {
 
       <Divider />
 
-      {inspection.status === "inspecting" && !isViewer && (
+      {inspection.status === "inspecting" && canEdit('iqc') && (
         <Card title="录入检验结果">
           <Form form={itemForm} onFinish={handleUpdateItems} layout="vertical">
             <Form.Item
@@ -311,7 +311,7 @@ export default function IqcInspectionDetailPage() {
         </Card>
       )}
 
-      {inspection.status === "inspecting" && !isViewer && (
+      {inspection.status === "inspecting" && canEdit('iqc') && (
         <Card title="判定" style={{ marginTop: 16 }}>
           <Form form={judgeForm} onFinish={handleJudge} layout="vertical">
             <Row gutter={16}>

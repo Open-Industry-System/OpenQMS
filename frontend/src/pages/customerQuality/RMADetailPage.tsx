@@ -15,6 +15,7 @@ import {
 } from "../../api/customerQuality";
 import type { RMARecord } from "../../types";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 
 const { Title } = Typography;
 const statusLabel: Record<string, string> = {
@@ -34,8 +35,7 @@ export default function RMADetailPage() {
   const [linkForm] = Form.useForm();
   const [data, setData] = useState<RMARecord | null>(null);
   const [loading, setLoading] = useState(false);
-  const canEdit = user?.role !== "viewer";
-  const canClose = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
 
   const load = async () => {
     if (!id) return;
@@ -107,19 +107,19 @@ export default function RMADetailPage() {
           <Title level={4} style={{ margin: 0 }}>{data?.rma_no || "RMA详情"}</Title>
           {data && <Tag>{statusLabel[data.status] || data.status}</Tag>}
         </Space>
-        {canEdit && data && (
+        {canEdit('customer_quality') && data && (
           <Space>
             <Button onClick={() => runAction(() => startRMAAnalysis(data.rma_id), "已进入分析")}>分析</Button>
             <Button onClick={() => runAction(() => markRMAActionPending(data.rma_id), "已标记等待措施")}>等待措施</Button>
             <Button onClick={() => runAction(() => cancelRMA(data.rma_id), "已取消")}>取消</Button>
-            {canClose && <Button type="primary" onClick={() => runAction(() => closeRMA(data.rma_id), "已关闭")}>关闭</Button>}
+            {canApprove('customer_quality') && <Button type="primary" onClick={() => runAction(() => closeRMA(data.rma_id), "已关闭")}>关闭</Button>}
           </Space>
         )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
         <Card loading={loading}>
-          <Form form={form} layout="vertical" onFinish={save} disabled={!canEdit}>
+          <Form form={form} layout="vertical" onFinish={save} disabled={!canEdit('customer_quality')}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
               <Form.Item name="product_id" label="产品号"><Input /></Form.Item>
               <Form.Item name="batch_no" label="批次号"><Input /></Form.Item>
@@ -132,15 +132,15 @@ export default function RMADetailPage() {
             </div>
             <Form.Item name="analysis_result" label="分析结果"><Input.TextArea rows={4} /></Form.Item>
             <Form.Item name="corrective_action" label="纠正措施"><Input.TextArea rows={4} /></Form.Item>
-            {canEdit && <Button type="primary" htmlType="submit">保存</Button>}
+            {canEdit('customer_quality') && <Button type="primary" htmlType="submit">保存</Button>}
           </Form>
         </Card>
         <Card title="关联与证据">
-          <Form form={linkForm} layout="vertical" onFinish={handleLinks} disabled={!canEdit}>
+          <Form form={linkForm} layout="vertical" onFinish={handleLinks} disabled={!canEdit('customer_quality')}>
             <Form.Item name="complaint_id" label="关联客诉 ID"><Input /></Form.Item>
             <Form.Item name="capa_ref_id" label="关联 CAPA ID"><Input /></Form.Item>
             <Form.Item name="fmea_ref_id" label="关联 FMEA ID"><Input /></Form.Item>
-            {canEdit && <Button type="primary" htmlType="submit">更新关联</Button>}
+            {canEdit('customer_quality') && <Button type="primary" htmlType="submit">更新关联</Button>}
           </Form>
           <pre style={{ marginTop: 16, whiteSpace: "pre-wrap" }}>
             {JSON.stringify(data?.attachments || [], null, 2)}

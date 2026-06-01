@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin, require_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app import schemas
 from app.services import iqc_material_service, iqc_template_service, iqc_inspection_service
@@ -35,7 +35,7 @@ async def list_materials(
 async def create_material(
     req: schemas.iqc.IqcMaterialCreate,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         material = await iqc_material_service.create_material(
@@ -60,7 +60,7 @@ async def import_materials(
     file: UploadFile = File(...),
     product_line_code: str = Query("DC-DC-100"),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
     from dataclasses import asdict
@@ -112,7 +112,7 @@ async def update_material(
     material_id: uuid.UUID,
     req: schemas.iqc.IqcMaterialUpdate,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         material = await iqc_material_service.update_material(
@@ -128,7 +128,7 @@ async def update_material(
 async def delete_material(
     material_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.ADMIN)),
 ):
     try:
         await iqc_material_service.delete_material(db, material_id, user.user_id)
@@ -158,7 +158,7 @@ async def list_templates(
 async def create_template(
     req: schemas.iqc.IqcTemplateCreate,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         template = await iqc_template_service.create_template(
@@ -190,7 +190,7 @@ async def update_template(
     template_id: uuid.UUID,
     req: schemas.iqc.IqcTemplateCreate,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         template = await iqc_template_service.update_template(
@@ -207,7 +207,7 @@ async def update_template(
 async def delete_template(
     template_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.ADMIN)),
 ):
     try:
         await iqc_template_service.delete_template(db, template_id, user.user_id)
@@ -251,7 +251,7 @@ async def list_inspections(
 async def create_inspection(
     req: schemas.iqc.IqcInspectionCreate,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         inspection = await iqc_inspection_service.create_inspection(
@@ -320,7 +320,7 @@ async def update_inspection(
     inspection_id: uuid.UUID,
     req: schemas.iqc.IqcInspectionUpdate,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         inspection = await iqc_inspection_service.update_inspection(
@@ -336,7 +336,7 @@ async def update_inspection(
 async def delete_inspection(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.ADMIN)),
 ):
     try:
         await iqc_inspection_service.delete_inspection(db, inspection_id, user.user_id)
@@ -349,7 +349,7 @@ async def delete_inspection(
 async def start_inspection(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         inspection = await iqc_inspection_service.start_inspection(db, inspection_id, user.user_id)
@@ -363,7 +363,7 @@ async def update_items(
     inspection_id: uuid.UUID,
     req: schemas.iqc.IqcBatchItemUpdate,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         inspection = await iqc_inspection_service.update_items(
@@ -381,7 +381,7 @@ async def judge_inspection(
     inspection_id: uuid.UUID,
     req: schemas.iqc.IqcInspectionJudge,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         inspection = await iqc_inspection_service.judge_inspection(
@@ -397,7 +397,7 @@ async def judge_inspection(
 async def request_reinspect(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         inspection = await iqc_inspection_service.request_reinspect(db, inspection_id, user.user_id)
@@ -411,7 +411,7 @@ async def approve_concession(
     inspection_id: uuid.UUID,
     req: schemas.iqc.IqcInspectionConcession,
     db=Depends(get_db),
-    user=Depends(require_manager_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.APPROVE)),
 ):
     try:
         inspection = await iqc_inspection_service.approve_concession(
@@ -426,7 +426,7 @@ async def approve_concession(
 async def close_inspection(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_manager_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.APPROVE)),
 ):
     try:
         inspection = await iqc_inspection_service.close_inspection(db, inspection_id, user.user_id)
@@ -439,7 +439,7 @@ async def close_inspection(
 async def trigger_scar(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
 ):
     try:
         inspection = await iqc_inspection_service.trigger_scar(db, inspection_id, user.user_id)

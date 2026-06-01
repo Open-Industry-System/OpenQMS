@@ -23,6 +23,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { MsaStudyOverview } from "../../types";
 import { listMsaStudies, deleteGrrStudy, deleteBiasStudy, deleteLinearityStudy, deleteStabilityStudy, deleteAttributeStudy } from "../../api/msa";
 import dayjs from "dayjs";
@@ -46,11 +47,7 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 export default function MsaStudyListPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
-  const isEngineerOrAbove =
-    user?.role === "quality_engineer" ||
-    user?.role === "manager" ||
-    user?.role === "admin";
+  const { canEdit } = usePermission();
 
   const [studies, setStudies] = useState<MsaStudyOverview[]>([]);
   const [loading, setLoading] = useState(false);
@@ -176,7 +173,7 @@ export default function MsaStudyListPage() {
           >
             查看
           </Button>
-          {isEngineerOrAbove && (
+          {canEdit('msa') && (
             <Button
               size="small"
               danger
@@ -233,7 +230,7 @@ export default function MsaStudyListPage() {
         title="MSA 研究管理"
         extra={
           <Space>
-            {!isViewer && (
+            {canEdit('msa') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
                 新建研究
               </Button>

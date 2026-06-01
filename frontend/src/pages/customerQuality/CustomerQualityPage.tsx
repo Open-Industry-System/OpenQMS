@@ -39,6 +39,7 @@ import { listSuppliers } from "../../api/supplier";
 import type { Customer, CustomerComplaint, CustomerQualityDashboard, RMARecord, ShipmentRecord } from "../../types";
 import type { Supplier } from "../../types";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 
 const { Title, Text } = Typography;
@@ -99,7 +100,7 @@ export default function CustomerQualityPage() {
   const [shipmentForm] = Form.useForm();
   const [editingShipment, setEditingShipment] = useState<ShipmentRecord | null>(null);
 
-  const canEdit = user?.role !== "viewer";
+  const { canEdit } = usePermission();
   const assigneeId = mineOnly ? user?.user_id : undefined;
 
   const loadData = async () => {
@@ -435,7 +436,7 @@ export default function CustomerQualityPage() {
           <Text>我的待办</Text>
           <Switch checked={mineOnly} onChange={setMineOnly} />
           <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
-          {canEdit && <Button icon={<PlusOutlined />} onClick={() => setCustomerModalOpen(true)}>新建客户</Button>}
+          {canEdit('customer_quality') && <Button icon={<PlusOutlined />} onClick={() => setCustomerModalOpen(true)}>新建客户</Button>}
         </Space>
       </div>
 
@@ -516,7 +517,7 @@ export default function CustomerQualityPage() {
                 children: (
                   <>
                     <div style={{ textAlign: "right", marginBottom: 12 }}>
-                      {canEdit && <Button type="primary" icon={<PlusOutlined />} onClick={() => setComplaintModalOpen(true)}>新建客诉</Button>}
+                      {canEdit('customer_quality') && <Button type="primary" icon={<PlusOutlined />} onClick={() => setComplaintModalOpen(true)}>新建客诉</Button>}
                     </div>
                     <Table columns={complaintColumns} dataSource={complaints} rowKey="complaint_id" loading={loading} />
                   </>
@@ -528,7 +529,7 @@ export default function CustomerQualityPage() {
                 children: (
                   <>
                     <div style={{ textAlign: "right", marginBottom: 12 }}>
-                      {canEdit && <Button type="primary" icon={<PlusOutlined />} onClick={() => setRmaModalOpen(true)}>新建 RMA</Button>}
+                      {canEdit('customer_quality') && <Button type="primary" icon={<PlusOutlined />} onClick={() => setRmaModalOpen(true)}>新建 RMA</Button>}
                     </div>
                     <Table columns={rmaColumns} dataSource={rmas} rowKey="rma_id" loading={loading} />
                   </>
@@ -549,7 +550,7 @@ export default function CustomerQualityPage() {
                 children: (
                   <>
                     <div style={{ textAlign: "right", marginBottom: 12 }}>
-                      {canEdit && selectedCustomerId && (
+                      {canEdit('customer_quality') && selectedCustomerId && (
                         <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingShipment(null); shipmentForm.resetFields(); setShipmentModalOpen(true); }}>新增发运</Button>
                       )}
                     </div>
@@ -565,8 +566,8 @@ export default function CustomerQualityPage() {
                         { title: "目的地", dataIndex: "destination", render: (v: string | null) => v || "-" },
                         { title: "操作", key: "action", render: (_: unknown, record: ShipmentRecord) => (
                           <Space>
-                            {canEdit && <Button size="small" onClick={() => { setEditingShipment(record); shipmentForm.setFieldsValue({ shipment_date: dayjs(record.shipment_date), quantity: record.quantity, batch_no: record.batch_no, destination: record.destination, notes: record.notes }); setShipmentModalOpen(true); }}>编辑</Button>}
-                            {canEdit && <Button size="small" danger onClick={() => handleDeleteShipment(record)}>删除</Button>}
+                            {canEdit('customer_quality') && <Button size="small" onClick={() => { setEditingShipment(record); shipmentForm.setFieldsValue({ shipment_date: dayjs(record.shipment_date), quantity: record.quantity, batch_no: record.batch_no, destination: record.destination, notes: record.notes }); setShipmentModalOpen(true); }}>编辑</Button>}
+                            {canEdit('customer_quality') && <Button size="small" danger onClick={() => handleDeleteShipment(record)}>删除</Button>}
                           </Space>
                         )},
                       ]}

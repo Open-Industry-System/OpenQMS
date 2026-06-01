@@ -5,6 +5,7 @@ import { PlusOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icon
 import { listControlPlans, createControlPlan, deleteControlPlan } from "../../../api/controlPlan";
 import type { ControlPlan } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
+import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
 
 const { Title } = Typography;
@@ -35,7 +36,7 @@ export default function ControlPlanListPage() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const canEdit = user?.role !== "viewer";
+  const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
 
   const fetchData = (p: number = page) => {
@@ -108,7 +109,7 @@ export default function ControlPlanListPage() {
           <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/control-plans/${record.cp_id}`)}>
             编辑
           </Button>
-          {canEdit && (
+          {canEdit('planning') && (
             <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.cp_id)}>
               <Button type="link" danger icon={<DeleteOutlined />}>
                 删除
@@ -124,7 +125,7 @@ export default function ControlPlanListPage() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
         <Title level={4} style={{ margin: 0 }}>控制计划</Title>
-        {canEdit && (
+        {canEdit('planning') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
             新建控制计划
           </Button>
