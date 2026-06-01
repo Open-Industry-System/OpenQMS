@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -116,14 +116,59 @@ async def transition_fmea(
     return FMEAResponse.model_validate(fmea)
 
 
-@router.post("/{fmea_id}/recommend", response_model=dict)
-async def recommend_fmea(
+import time
+from collections import defaultdict
+from app.schemas.recommendation import RecommendRequest, RecommendResponse
+from app.services.recommendation_service import RecommendationService
+
+# Simple in-memory rate limiter
+_rate_store: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMITS = {"per_user": (5, 1.0), "per_fmea": (20, 1.0)}
+
+
+def _check_rate_limit(key: str, limit: tuple[int, float]) -> bool:
+    """Returns True if allowed, False if rate limited."""
+    now = time.time()
+    window = limit[1]
+    max_req = limit[0]
+    entries = _rate_store[key]
+    _rate_store[key] = [t for t in entries if now - t < window]
+    if len(_rate_store[key]) >= max_req:
+        return False
+    _rate_store[key].append(now)
+    return True
+
+
+@router.post("/{fmea_id}/recommend", response_model=RecommendResponse)
+async def recommend(
     fmea_id: uuid.UUID,
+    request: RecommendRequest,
+    fastapi_request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.VIEW)),
+    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.EDIT)),
 ):
-    """预留：Phase 3 接入历史数据推荐"""
-    raise HTTPException(status_code=501, detail="历史数据推荐功能将在 Phase 3 实现")
+    # Rate limiting
+    user_key = f"rec_user:{user.user_id}"
+    fmea_key = f"rec_fmea:{fmea_id}"
+    if not _check_rate_limit(user_key, _RATE_LIMITS["per_user"]):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后重试")
+    if not _check_rate_limit(fmea_key, _RATE_LIMITS["per_fmea"]):
+        raise HTTPException(status_code=429, detail="该文档请求过于频繁，请稍后重试")
+
+    # Load FMEA for product-line access check
+    fmea = await fmea_service.get_fmea(db, fmea_id)
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    await enforce_product_line_access(user, fmea.product_line_code, db)
+
+    # Validate minimum context
+    if len(request.context.get("function_description", request.context.get("failure_mode", ""))) < 2:
+        return RecommendResponse(suggestions=[], source="rule", cached=False, llm_available=False)
+
+    # Use singleton LLM provider from app.state (initialized in lifespan)
+    llm = getattr(fastapi_request.app.state, "llm_provider", None)
+    service = RecommendationService(db=db, llm_provider=llm)
+    return await service.recommend(fmea_id, request)
 
 
 @router.get("/{fmea_id}/graph")
