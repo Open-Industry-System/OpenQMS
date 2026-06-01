@@ -267,14 +267,14 @@ class RecommendationService:
 
         # 1. Check cache
         context_hash = self._compute_context_hash(request.context)
-        cached = await self._get_cached(fmea_id, request.trigger_type, context_hash)
-        if cached:
+        cache_result = await self._get_cached(fmea_id, request.trigger_type, context_hash)
+        if cache_result:
+            cached_response, cached_with_llm = cache_result
             # Skip cache only if LLM is now available but cache was written without LLM
-            # (avoids re-evaluating high-quality rule results that don't need LLM)
-            if self.llm is not None and not cached.llm_available:
+            if self.llm is not None and not cached_with_llm:
                 pass  # fall through to re-evaluate with LLM
             else:
-                return cached
+                return cached_response
 
         # 2. Rule engine
         rule_result = self.rules.evaluate(request.trigger_type, request.context)
@@ -326,7 +326,8 @@ class RecommendationService:
         raw = json.dumps(context, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(raw.encode()).hexdigest()
 
-    async def _get_cached(self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str) -> RecommendResponse | None:
+    async def _get_cached(self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str) -> tuple[RecommendResponse, bool] | None:
+        """Returns (response, cached_with_llm) or None if no cache hit."""
         stmt = (
             select(RecommendationCache)
             .where(RecommendationCache.fmea_id == fmea_id)
@@ -337,13 +338,13 @@ class RecommendationService:
         result = await self.db.execute(stmt)
         row = result.scalar_one_or_none()
         if row:
-            # llm_available in response reflects CURRENT state, not cache write time
-            return RecommendResponse(
+            response = RecommendResponse(
                 suggestions=row.suggestions,
                 source=row.source,
                 cached=True,
-                llm_available=self.llm is not None,
+                llm_available=self.llm is not None,  # current state for frontend
             )
+            return (response, row.llm_available)  # row.llm_available = cache write time state
         return None
 
     async def _cache_result(
