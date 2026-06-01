@@ -19,7 +19,7 @@
 | 维度 | 约束 |
 |------|------|
 | 首屏 TTI | ≤ 2s（含数据请求） |
-| 首屏 JS 总量 | ≤ 300KB gzipped（当前约 280KB，dark theme 增量 ≤ 5KB） |
+| 首屏 JS 总量 | ≤ 300KB gzipped（目标，当前 1615KB 为现有债务：ECharts ~500KB、Ant Design ~300KB、业务模块 ~800KB；本分支 dark theme 增量 ≤ 5KB） |
 | 网络请求 | 首屏 ≤ 3 个 API 调用（已合并为 summary + alerts + recent） |
 | 外部资源 | 默认不引入 Google Fonts 等外链字体 |
 | 动画 | 默认关闭，`prefers-reduced-motion: no-preference` 时启用 |
@@ -472,7 +472,7 @@ token: {
 | 可读性 | 所有文字 ≥ WCAG AA（4.5:1） |
 | 状态覆盖 | 每个关键组件覆盖 empty/loading/error/success/focus/disabled |
 | 无障碍 | 键盘可达，屏幕阅读器可用，prefers-reduced-motion 响应 |
-| 性能 | 首屏 TTI ≤ 2s，首屏 JS 总量 ≤ 300KB gzipped，dark theme 增量 ≤ 5KB，API ≤ 3 |
+| 性能 | 首屏 TTI ≤ 2s，首屏 JS 总量 ≤ 300KB gzipped（目标，当前 1615KB 为现有债务），dark theme 增量 ≤ 5KB，API ≤ 3 |
 | 功能完整 | 现有功能无回归 |
 | 动画 | 默认关闭（reduced-motion），开启时使用 AntD Motion Token |
 
@@ -487,7 +487,7 @@ token: {
 | 指标 | 目标 | 验证方法 |
 |------|------|---------|
 | Performance | ≥ 90 | `lighthouse http://localhost:5173/dashboard --view` |
-| 首屏 JS 总量 | ≤ 300KB gzipped | Lighthouse "Reduce unused JavaScript" + Network 面板 |
+| 首屏 JS 总量 | ≤ 300KB gzipped（目标，当前 1615KB 为现有债务） | Lighthouse "Reduce unused JavaScript" + Network 面板 |
 | TTI | ≤ 2s | Lighthouse Treo 或 WebPageTest |
 | 对比度 | 全部通过 | Lighthouse "Color contrast is satisfactory" |
 
