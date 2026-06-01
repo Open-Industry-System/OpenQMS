@@ -19,6 +19,7 @@
 | 文件 | 职责 |
 |------|------|
 | `backend/app/schemas/recommendation.py` | 请求/响应 Pydantic 模型 |
+| `backend/app/models/recommendation_cache.py` | 缓存 ORM 模型（共享 `app.database.Base`） |
 | `backend/app/services/llm_provider.py` | LLM 多提供商抽象 + 工厂 |
 | `backend/app/services/recommendation_service.py` | 推荐服务核心（规则 + LLM + 缓存） |
 | `backend/alembic/versions/20260601_add_recommendation_cache.py` | 缓存表迁移 |
@@ -158,6 +159,59 @@ Expected: `OK`
 ```bash
 git add backend/alembic/versions/20260601_add_recommendation_cache.py
 git commit -m "feat(rec): add recommendation_cache table migration"
+```
+
+---
+
+## Task 2b: RecommendationCache ORM 模型
+
+**Files:**
+- Create: `backend/app/models/recommendation_cache.py`
+
+- [ ] **Step 1: 创建 ORM 模型文件**
+
+使用项目共享的 `app.database.Base`，与其他模型（`FMEADocument`、`User`）保持一致：
+
+```python
+# backend/app/models/recommendation_cache.py
+import uuid
+from datetime import datetime
+
+from sqlalchemy import String, DateTime, ForeignKey, func, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database import Base
+
+
+class RecommendationCache(Base):
+    __tablename__ = "recommendation_cache"
+    __table_args__ = (
+        UniqueConstraint("fmea_id", "trigger_type", "context_hash", name="uq_recommendation_cache_lookup"),
+    )
+
+    cache_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    fmea_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="CASCADE"), nullable=False)
+    trigger_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    context_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    product_line_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    fmea_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    suggestions: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    source: Mapped[str] = mapped_column(String(15), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+```
+
+- [ ] **Step 2: 验证模型可导入**
+
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.models.recommendation_cache import RecommendationCache; print('OK')"`
+Expected: `OK`
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/app/models/recommendation_cache.py
+git commit -m "feat(rec): add RecommendationCache ORM model"
 ```
 
 ---
@@ -605,44 +659,21 @@ git commit -m "feat(rec): add rule engine migrated from frontend dfmeaRules.ts"
 
 ```python
 # ---------------------------------------------------------------------------
-# Cache Model & Recommendation Service
+# Recommendation Service
 # ---------------------------------------------------------------------------
 import asyncio
-from datetime import datetime, timezone
+import uuid as _uuid
 from sqlalchemy import select, delete, func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.fmea import FMEADocument
+from app.models.recommendation_cache import RecommendationCache
 from app.schemas.recommendation import (
     RecommendRequest, RecommendResponse, SuggestionItem, SuggestionList,
 )
 from app.services.llm_provider import LLMProvider
-
-
-# Inline cache model (avoids importing from models to keep service self-contained)
-from sqlalchemy.orm import DeclarativeBase
-
-class _CacheBase(DeclarativeBase):
-    pass
-
-from sqlalchemy import Column, String, DateTime
-from sqlalchemy.dialects.postgresql import UUID as SA_UUID, JSONB as SA_JSONB
-
-import uuid as _uuid
-
-class RecommendationCache(_CacheBase):
-    __tablename__ = "recommendation_cache"
-    cache_id = Column(SA_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
-    fmea_id = Column(SA_UUID(as_uuid=True), nullable=False)
-    trigger_type = Column(String(20), nullable=False)
-    context_hash = Column(String(64), nullable=False)
-    product_line_code = Column(String(20), nullable=False)
-    fmea_type = Column(String(20), nullable=False)
-    suggestions = Column(SA_JSONB, nullable=False)
-    source = Column(String(15), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=False)
 
 
 PROMPT_TEMPLATES = {
@@ -848,12 +879,6 @@ class RecommendationService:
         return merged
 ```
 
-注意：需要在文件顶部补充 `import settings`：
-
-```python
-from app.config import settings
-```
-
 - [ ] **Step 2: 验证完整服务可导入**
 
 Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.services.recommendation_service import RecommendationService, RuleEngine; print('OK')"`
@@ -875,7 +900,12 @@ git commit -m "feat(rec): add RecommendationService with cache, LLM orchestratio
 
 - [ ] **Step 1: 在 fmea.py 中实现 /recommend 端点**
 
-找到现有的 501 stub（约在文件末尾）：
+首先在文件顶部的 fastapi import 中添加 `Request`：
+```python
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+```
+
+然后找到现有的 501 stub（约在文件末尾）：
 
 ```python
 @router.post("/{fmea_id}/recommend")
@@ -890,7 +920,6 @@ import time
 from collections import defaultdict
 from app.schemas.recommendation import RecommendRequest, RecommendResponse
 from app.services.recommendation_service import RecommendationService
-from app.services.llm_provider import create_llm_provider
 
 # Simple in-memory rate limiter
 _rate_store: dict[str, list[float]] = defaultdict(list)
@@ -916,6 +945,8 @@ async def recommend(
     request: RecommendRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.EDIT)),
+    # FastAPI Request object to access app.state.llm_provider
+    fastapi_request: Request,
 ):
     # Rate limiting
     user_key = f"rec_user:{user.user_id}"
@@ -925,12 +956,18 @@ async def recommend(
     if not _check_rate_limit(fmea_key, _RATE_LIMITS["per_fmea"]):
         raise HTTPException(status_code=429, detail="该文档请求过于频繁，请稍后重试")
 
+    # Load FMEA for product-line access check
+    fmea = await fmea_service.get_fmea(db, fmea_id)
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    await enforce_product_line_access(user, fmea.product_line_code, db)
+
     # Validate minimum context
     if len(request.context.get("function_description", request.context.get("failure_mode", ""))) < 2:
         return RecommendResponse(suggestions=[], source="rule", cached=False, llm_available=False)
 
-    # Create service with LLM provider (lazy singleton could be added later)
-    llm = create_llm_provider()
+    # Use singleton LLM provider from app.state (initialized in lifespan)
+    llm = fastapi_request.app.state.llm_provider
     service = RecommendationService(db=db, llm_provider=llm)
     return await service.recommend(fmea_id, request)
 ```
@@ -954,22 +991,22 @@ git commit -m "feat(rec): implement /recommend endpoint with rate limiting and p
 **Files:**
 - Modify: `backend/app/main.py`
 
+**说明：** Task 7 的 `/recommend` 端点通过 `request.app.state.llm_provider` 获取 LLM provider 单例。本 Task 负责在 lifespan 中初始化该单例。
+
 - [ ] **Step 1: 在 lifespan 中初始化 LLM provider 并存入 app.state**
 
-在 `backend/app/main.py` 的 `lifespan` 函数中，在数据库初始化之后添加 LLM provider 初始化：
+在 `backend/app/main.py` 的 `lifespan` 函数中，在数据库初始化之后（`async with async_session() as db:` 块之后、`yield` 之前）添加：
 
 ```python
     # Initialize LLM provider (non-fatal)
     from app.services.llm_provider import create_llm_provider
+    import logging as _logging
     try:
         app.state.llm_provider = create_llm_provider()
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("LLM provider init failed: %s", e)
+        _logging.getLogger(__name__).warning("LLM provider init failed: %s", e)
         app.state.llm_provider = None
 ```
-
-这段代码放在 `async with async_session() as db:` 块之后、`yield` 之前。
 
 - [ ] **Step 2: 验证 main.py 语法**
 
@@ -980,7 +1017,7 @@ Expected: `OK`
 
 ```bash
 git add backend/app/main.py
-git commit -m "feat(rec): initialize LLM provider in app lifespan"
+git commit -m "feat(rec): initialize LLM provider singleton in app lifespan"
 ```
 
 ---
@@ -1269,6 +1306,8 @@ git commit -m "feat(rec): add SmartSuggestionDropdown component with debounce an
 **Files:**
 - Modify: `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx`
 
+**关键前提：** `FMEARow` 只包含 node IDs（如 `failureModeNodeId`），不包含显示值。所有显示值通过 `nodeMap.get(row.xxxNodeId)?.name` 获取。现有权限使用 `canEdit('fmea')` 而非 `isViewer`。推荐列应替换 `Input.TextArea`，但保留现有 `onFocus` 触发的 `activateRecommendation` 调用（可选，后续可移除）。
+
 - [ ] **Step 1: 添加 import**
 
 在 `FMEAEditorPage.tsx` 的 import 区域添加：
@@ -1279,96 +1318,127 @@ import SmartSuggestionDropdown from "../../../components/dfmea/SmartSuggestionDr
 
 - [ ] **Step 2: 在失败模式列集成 SmartSuggestionDropdown**
 
-找到失败模式列的 `render` 函数（搜索 `失效模式` 或 `failureMode` 的 column 定义），将其改为使用 `SmartSuggestionDropdown`：
+找到失败模式列（key: `failureMode`），将 `Input.TextArea` 替换为 `SmartSuggestionDropdown`：
 
 ```tsx
 {
-  title: '失效模式',
-  dataIndex: 'failureMode',
-  render: (_, row) => (
-    <SmartSuggestionDropdown
-      triggerType="failure_mode"
-      context={{
-        function_description: row.functionName,
-        process_step: row.processNumber,
-      }}
-      fmeaId={fmeaId}
-      value={row.failureMode}
-      onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
-      onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
-      disabled={isViewer}
-    />
-  ),
+  title: "失效模式",
+  key: "failureMode",
+  width: 130,
+  render: (_: unknown, row: FMEARow) => {
+    const node = nodeMap.get(row.failureModeNodeId);
+    return (
+      <SmartSuggestionDropdown
+        triggerType="failure_mode"
+        context={{
+          function_description: nodeMap.get(row.functionNodeId)?.name || "",
+        }}
+        fmeaId={fmeaId}
+        value={node?.name || ""}
+        onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
+        onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
+        disabled={!canEdit('fmea')}
+      />
+    );
+  },
 },
 ```
 
 - [ ] **Step 3: 在失败效应列集成**
 
+找到失效影响列（key: `failureEffect`）：
+
 ```tsx
 {
-  title: '失效影响',
-  dataIndex: 'failureEffect',
-  render: (_, row) => (
-    <SmartSuggestionDropdown
-      triggerType="failure_effect"
-      context={{
-        failure_mode: row.failureMode,
-        function_description: row.functionName,
-      }}
-      fmeaId={fmeaId}
-      value={row.failureEffect}
-      onChange={(val) => updateNode(row.failureEffectNodeId, "name", val)}
-      onSelect={(s) => updateNode(row.failureEffectNodeId, "name", s.name)}
-      disabled={isViewer}
-    />
-  ),
+  title: "失效影响",
+  key: "failureEffect",
+  width: 140,
+  render: (_: unknown, row: FMEARow) => {
+    if (!row.failureEffectNodeId) return "-";
+    const node = nodeMap.get(row.failureEffectNodeId);
+    return (
+      <SmartSuggestionDropdown
+        triggerType="failure_effect"
+        context={{
+          failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+          function_description: nodeMap.get(row.functionNodeId)?.name || "",
+        }}
+        fmeaId={fmeaId}
+        value={node?.name || ""}
+        onChange={(val) => updateNode(row.failureEffectNodeId!, "name", val)}
+        onSelect={(s) => updateNode(row.failureEffectNodeId!, "name", s.name)}
+        disabled={!canEdit('fmea')}
+      />
+    );
+  },
 },
 ```
 
 - [ ] **Step 4: 在失败原因列集成**
 
+找到失效原因列（搜索 `失效原因` 或 `failureCause`）：
+
 ```tsx
 {
-  title: '失效原因',
-  dataIndex: 'failureCause',
-  render: (_, row) => (
-    <SmartSuggestionDropdown
-      triggerType="failure_cause"
-      context={{
-        failure_mode: row.failureMode,
-        function_description: row.functionName,
-        severity: row.severity,
-      }}
-      fmeaId={fmeaId}
-      value={row.failureCause}
-      onChange={(val) => updateNode(row.failureCauseNodeId, "name", val)}
-      onSelect={(s) => updateNode(row.failureCauseNodeId, "name", s.name)}
-      disabled={isViewer}
-    />
-  ),
+  title: "失效原因",
+  key: "failureCause",
+  width: 140,
+  render: (_: unknown, row: FMEARow) => {
+    if (!row.failureCauseNodeId) return "-";
+    const node = nodeMap.get(row.failureCauseNodeId);
+    const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+    return (
+      <SmartSuggestionDropdown
+        triggerType="failure_cause"
+        context={{
+          failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+          function_description: nodeMap.get(row.functionNodeId)?.name || "",
+          severity: effectNode?.severity || 0,
+        }}
+        fmeaId={fmeaId}
+        value={node?.name || ""}
+        onChange={(val) => updateNode(row.failureCauseNodeId!, "name", val)}
+        onSelect={(s) => updateNode(row.failureCauseNodeId!, "name", s.name)}
+        disabled={!canEdit('fmea')}
+      />
+    );
+  },
 },
 ```
 
 - [ ] **Step 5: 在预防措施列集成**
 
+找到预防措施列（搜索 `预防措施` 或 `preventionControl`）。注意：现有列使用 `Input.TextArea`，此处替换：
+
 ```tsx
 {
-  title: '预防措施',
-  dataIndex: 'preventionControl',
-  render: (_, row) => (
-    <SmartSuggestionDropdown
-      triggerType="measure"
-      context={{
-        failure_mode: row.failureMode,
-        ap: row.ap,
-      }}
-      fmeaId={fmeaId}
-      value={row.preventionControl}
-      onChange={(val) => updateNode(row.preventionControlIds?.[0], "name", val)}
-      onSelect={(s) => updateNode(row.preventionControlIds?.[0], "name", s.name)}
-      disabled={isViewer}
-    />
-  ),
+  title: "预防措施",
+  key: "preventionControl",
+  width: 140,
+  render: (_: unknown, row: FMEARow) => {
+    const nodeId = row.preventionControlIds[0];
+    if (!nodeId) return "-";
+    const node = nodeMap.get(nodeId);
+    // 计算当前 AP 用于推荐上下文
+    const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+    const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
+    const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
+    const ap = calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, detNode?.detection || 0);
+    return (
+      <SmartSuggestionDropdown
+        triggerType="measure"
+        context={{
+          failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+          ap: ap,
+        }}
+        fmeaId={fmeaId}
+        value={node?.name || ""}
+        onChange={(val) => updateNode(nodeId, "name", val)}
+        onSelect={(s) => updateNode(nodeId, "name", s.name)}
+        disabled={!canEdit('fmea')}
+      />
+    );
+  },
 },
 ```
 
@@ -1376,48 +1446,96 @@ import SmartSuggestionDropdown from "../../../components/dfmea/SmartSuggestionDr
 
 ```tsx
 {
-  title: '检测措施',
-  dataIndex: 'detectionControl',
-  render: (_, row) => (
-    <SmartSuggestionDropdown
-      triggerType="measure"
-      context={{
-        failure_mode: row.failureMode,
-        ap: row.ap,
-      }}
-      fmeaId={fmeaId}
-      value={row.detectionControl}
-      onChange={(val) => updateNode(row.detectionControlIds?.[0], "name", val)}
-      onSelect={(s) => updateNode(row.detectionControlIds?.[0], "name", s.name)}
-      disabled={isViewer}
-    />
-  ),
+  title: "检测措施",
+  key: "detectionControl",
+  width: 140,
+  render: (_: unknown, row: FMEARow) => {
+    const nodeId = row.detectionControlIds[0];
+    if (!nodeId) return "-";
+    const node = nodeMap.get(nodeId);
+    const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+    const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
+    const ap = calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, node?.detection || 0);
+    return (
+      <SmartSuggestionDropdown
+        triggerType="measure"
+        context={{
+          failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+          ap: ap,
+        }}
+        fmeaId={fmeaId}
+        value={node?.name || ""}
+        onChange={(val) => updateNode(nodeId, "name", val)}
+        onSelect={(s) => updateNode(nodeId, "name", s.name)}
+        disabled={!canEdit('fmea')}
+      />
+    );
+  },
 },
 ```
 
-- [ ] **Step 7: 在优化行动列集成**
+- [ ] **Step 7: 在建议措施列集成（保留 add 按钮路径）**
+
+找到建议措施列（key: `recommendedAction`）。**关键：当 `recommendedActionIds.length === 0` 时，保留现有的 `+ 添加` 按钮**，只有存在 action node 时才显示 SmartSuggestionDropdown：
 
 ```tsx
 {
-  title: '优化行动',
-  dataIndex: 'recommendedAction',
-  render: (_, row) => (
-    <SmartSuggestionDropdown
-      triggerType="optimization"
-      context={{
-        failure_mode: row.failureMode,
-        severity: row.severity,
-        occurrence: row.occurrence,
-        detection: row.detection,
-        ap: row.ap,
-      }}
-      fmeaId={fmeaId}
-      value={row.recommendedAction}
-      onChange={(val) => updateNode(row.recommendedActionIds?.[0], "name", val)}
-      onSelect={(s) => updateNode(row.recommendedActionIds?.[0], "name", s.name)}
-      disabled={isViewer}
-    />
-  ),
+  title: "建议措施",
+  key: "recommendedAction",
+  width: 140,
+  render: (_: unknown, row: FMEARow) => {
+    if (row.recommendedActionIds.length === 0) {
+      // 保留现有的 "+ 添加" 按钮逻辑（创建 RecommendedAction 节点）
+      return (
+        <Button
+          size="small"
+          type="dashed"
+          disabled={!canEdit('fmea')}
+          onClick={() => {
+            const ts = Date.now();
+            const raId = `n${ts}_ra`;
+            const newNode: GraphNode = {
+              id: raId,
+              type: "RecommendedAction",
+              name: "新建议措施",
+              severity: 0,
+              occurrence: 0,
+              detection: 0,
+            };
+            const sourceId = row.failureCauseNodeId || row.failureModeNodeId;
+            const newEdge: GraphEdge = { source: sourceId, target: raId, type: "OPTIMIZED_BY" };
+            setNodes((prev) => [...prev, newNode]);
+            setEdges((prev) => [...prev, newEdge]);
+          }}
+        >
+          + 添加
+        </Button>
+      );
+    }
+    // 已有 action node → 显示 SmartSuggestionDropdown
+    const nodeId = row.recommendedActionIds[0];
+    const node = nodeMap.get(nodeId);
+    const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+    const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
+    const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
+    return (
+      <SmartSuggestionDropdown
+        triggerType="optimization"
+        context={{
+          failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+          severity: effectNode?.severity || 0,
+          occurrence: causeNode?.occurrence || 0,
+          detection: detNode?.detection || 0,
+          ap: calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, detNode?.detection || 0),
+        }}
+        fmeaId={fmeaId}
+        value={node?.name || ""}
+        onChange={(val) => updateNode(nodeId, "name", val)}
+        onSelect={(s) => updateNode(nodeId, "name", s.name)}
+        disabled={!canEdit('fmea')}
+      />
+    );
+  },
 },
 ```
 
