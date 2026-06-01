@@ -29,6 +29,7 @@ export default function SmartSuggestionDropdown({
   const [open, setOpen] = useState(false);
   const [llmAvailable, setLlmAvailable] = useState(true);
   const [fallback, setFallback] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const abortRef = useRef<AbortController>();
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -45,6 +46,7 @@ export default function SmartSuggestionDropdown({
       abortRef.current = new AbortController();
 
       setLoading(true);
+      setError(null);
       try {
         const res: RecommendResponse = await getRecommendations(
           fmeaId,
@@ -56,8 +58,18 @@ export default function SmartSuggestionDropdown({
         setFallback(res.source === "rule_fallback");
         setOpen(res.suggestions.length > 0);
         setSelectedIndex(-1);
-      } catch {
-        // Silently ignore aborted requests
+      } catch (e: unknown) {
+        if (e instanceof Error && e.name === "AbortError") return; // ignore aborts
+        const err = e as { response?: { status?: number }; message?: string };
+        if (err?.response?.status === 429) {
+          setError("请求过于频繁，请稍后重试");
+        } else if (err?.response?.status === 403) {
+          setError("无权限使用推荐功能");
+        } else {
+          setError("推荐服务暂不可用");
+        }
+        setSuggestions([]);
+        setOpen(true);  // show error in dropdown
       } finally {
         setLoading(false);
       }
@@ -68,6 +80,7 @@ export default function SmartSuggestionDropdown({
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     onChange?.(val);
+    setError(null);
 
     clearTimeout(debounceRef.current);
     if (val.length >= 2) {
@@ -119,6 +132,14 @@ export default function SmartSuggestionDropdown({
 
   const dropdownContent = (
     <div style={{ width: 320, background: "#fff", borderRadius: 4, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
+      {error && (
+        <Alert
+          type="error"
+          message={error}
+          banner
+          style={{ fontSize: 12 }}
+        />
+      )}
       {fallback && (
         <Alert
           type="warning"

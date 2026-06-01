@@ -269,7 +269,12 @@ class RecommendationService:
         context_hash = self._compute_context_hash(request.context)
         cached = await self._get_cached(fmea_id, request.trigger_type, context_hash)
         if cached:
-            return cached
+            # Skip rule-only cache if LLM is now available and cached result was rule-only
+            # (LLM may have been enabled after the cache was written)
+            if cached.source == "rule" and self.llm is not None:
+                pass  # fall through to re-evaluate with LLM
+            else:
+                return cached
 
         # 2. Rule engine
         rule_result = self.rules.evaluate(request.trigger_type, request.context)
@@ -301,7 +306,9 @@ class RecommendationService:
             cached=False,
             llm_available=self.llm is not None,
         )
-        await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response)
+        # Don't cache rule_fallback — it's a transient LLM failure, retry next time
+        if source != "rule_fallback":
+            await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response)
         return response
 
     # -- Helpers --
