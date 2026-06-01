@@ -168,6 +168,7 @@ async def advance_capa(
     db: AsyncSession,
     capa: CAPAEightD,
     user_id: uuid.UUID,
+    d7_skip_reasons: list[dict] | None = None,
 ) -> CAPAEightD:
     current = EightDState(capa.status)
     transitions = [
@@ -194,7 +195,7 @@ async def advance_capa(
     old_status = capa.status
     capa.status = next_state.value
 
-    # Audit log
+    # Audit log for transition
     audit_log = AuditLog(
         table_name="capa_eightd",
         record_id=capa.report_id,
@@ -207,6 +208,17 @@ async def advance_capa(
     )
     db.add(audit_log)
 
+    # D7 skip reasons audit
+    if d7_skip_reasons and old_status == "D7_PREVENTION":
+        skip_log = AuditLog(
+            table_name="capa_eightd",
+            record_id=capa.report_id,
+            action="D7_SKIP_CONFIRMATION",
+            changed_fields={"skipped_nodes": d7_skip_reasons},
+            operated_by=user_id,
+        )
+        db.add(skip_log)
+
     await db.commit()
     await db.refresh(capa)
     return capa
@@ -217,9 +229,12 @@ async def link_fmea(
     capa: CAPAEightD,
     fmea_ref_id: uuid.UUID,
     user_id: uuid.UUID,
+    fmea_node_id: str | None = None,
 ) -> CAPAEightD:
     old_fmea_ref_id = capa.fmea_ref_id
+    old_fmea_node_id = capa.fmea_node_id
     capa.fmea_ref_id = fmea_ref_id
+    capa.fmea_node_id = fmea_node_id
 
     # Audit log
     audit_log = AuditLog(
@@ -229,6 +244,8 @@ async def link_fmea(
         changed_fields={
             "old_fmea_ref_id": str(old_fmea_ref_id) if old_fmea_ref_id else None,
             "new_fmea_ref_id": str(fmea_ref_id),
+            "old_fmea_node_id": old_fmea_node_id,
+            "new_fmea_node_id": fmea_node_id,
         },
         operated_by=user_id,
     )
