@@ -10,7 +10,7 @@ from app.core.product_line_filter import get_user_product_line_codes, enforce_pr
 from typing import Any
 from app.models.user import User
 
-from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse
+from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse, AdvanceRequest
 from app.services import capa_service
 
 router = APIRouter(prefix="/api/capa", tags=["capa"])
@@ -127,12 +127,14 @@ async def require_close_permission(
 @router.post("/{report_id}/advance", response_model=CAPAResponse)
 async def advance_capa(
     report_id: uuid.UUID,
+    body: AdvanceRequest | None = None,
     db: AsyncSession = Depends(get_db),
     result: tuple[User, Any] = Depends(require_close_permission),
 ):
     user, capa = result
+    skip_reasons = body.d7_skip_reasons if body else None
     try:
-        capa = await capa_service.advance_capa(db, capa, user.user_id)
+        capa = await capa_service.advance_capa(db, capa, user.user_id, skip_reasons)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CAPAResponse.model_validate(capa)
@@ -142,6 +144,7 @@ async def advance_capa(
 async def link_fmea(
     report_id: uuid.UUID,
     fmea_id: uuid.UUID,
+    fmea_node_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
 ):
@@ -159,7 +162,7 @@ async def link_fmea(
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
     await enforce_product_line_access(user, target_fmea.product_line_code, db)
 
-    capa = await capa_service.link_fmea(db, capa, fmea_id, user.user_id)
+    capa = await capa_service.link_fmea(db, capa, fmea_id, user.user_id, fmea_node_id)
     return CAPAResponse.model_validate(capa)
 
 
@@ -194,3 +197,56 @@ async def get_related_fmea(
         "document_no": fmea.document_no if fmea else None,
         "fmea_node_id": capa.fmea_node_id,
     }
+
+
+@router.get("/{report_id}/d7-fmea-recommendations")
+async def get_d7_fmea_recommendations(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+):
+    from app.models.fmea import FMEADocument
+    from app.services.capa_service import get_d7_recommendations
+
+    # Require both CAPA VIEW and FMEA VIEW
+    fmea_level = await get_user_permission(user, Module.FMEA, db)
+    if fmea_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    await enforce_product_line_access(user, capa.product_line_code, db)
+
+    # Get user's accessible product lines (bypass for admins)
+    if user.role_definition.bypass_row_level_security:
+        allowed_pls = None  # no restriction
+    else:
+        allowed_pls = await get_user_product_line_codes(user, db)
+        if not allowed_pls:
+            return {"recommendations": []}
+
+    # Fetch FMEA documents (filtered by product line for non-admins)
+    fmea_query = select(FMEADocument)
+    if allowed_pls is not None:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
+    fmea_result = await db.execute(fmea_query)
+    fmea_docs = [
+        {
+            "fmea_id": f.fmea_id,
+            "document_no": f.document_no,
+            "graph_data": f.graph_data,
+        }
+        for f in fmea_result.scalars().all()
+    ]
+
+    capa_data = {
+        "fmea_ref_id": capa.fmea_ref_id,
+        "fmea_node_id": capa.fmea_node_id,
+        "d4_root_cause": capa.d4_root_cause or "",
+        "d5_correction": capa.d5_correction,
+        "product_line_code": capa.product_line_code,
+    }
+
+    recs = get_d7_recommendations(capa_data, fmea_docs, allowed_pls)
+    return {"recommendations": recs}
