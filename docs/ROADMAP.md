@@ -92,6 +92,13 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 4. ~~0 公里 PPM 发运记录~~ ✅ shipment_records 表 + PPM fallback 链
 5. ~~高级客户质量看板~~ ✅ SPC CPK、保修、满意度、审核摘要
 
+**深色工业仪表盘 (2026-06-01 已完成)**:
+1. ~~ConfigProvider 暗色主题~~ ✅ darkAlgorithm + 自定义 Token（单一来源）
+2. ~~仪表盘重写~~ ✅ KPI 卡片（状态矩阵）+ 待处置事项（行动词）+ 最近操作（相对时间）+ 快速入口（viewer 隐藏）
+3. ~~响应式设计~~ ✅ 小屏 P2/P3 自动折叠 + ARIA 地标 + 键盘导航（Enter + Space）
+4. ~~可访问性~~ ✅ prefers-reduced-motion 响应 + 对比度 WCAG AA + screen reader 支持
+5. ~~AppLayout 清理~~ ✅ 移除硬编码颜色，依赖 ConfigProvider Token
+
 **验收标准**: GA v1.0 发布 — 供应商/客户模块上线
 
 ---
@@ -179,10 +186,14 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 - [x] 知识图谱可视化前端 (G6 v5: GraphCanvas + 嵌入 FMEA tab + /knowledge-graph 全局页 + 5 场景交互)
 - [x] 全局知识库基础 (跨 FMEA 统计 + 相似节点搜索 + Pydantic 响应白名单脱敏)
 
+**已完成 (2026-06-01)**:
+- [x] 深色工业仪表盘 (ConfigProvider 暗色主题 + 仪表盘重写 + 响应式折叠 + 可访问性)
+- [x] AppLayout 清理 (移除硬编码颜色，依赖 ConfigProvider Token)
+
 **立即**:
-- 用户验收测试知识图谱可视化功能
+- 用户验收测试深色仪表盘功能
 - 修复发现的 bug
-- 决定是否合并/发布知识图谱分支
+- 决定是否合并/发布仪表盘分支
 
 **Phase 3 剩余 (待排期)**:
 - [ ] FMEA 智能推荐升级 — 接入知识图谱相似度匹配 + 来源文档标注（规则引擎版已完成）
