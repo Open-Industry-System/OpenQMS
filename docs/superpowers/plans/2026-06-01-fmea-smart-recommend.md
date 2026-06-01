@@ -196,7 +196,7 @@ class RecommendationCache(Base):
     context_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     product_line_code: Mapped[str] = mapped_column(String(20), nullable=False)
     fmea_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    suggestions: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    suggestions: Mapped[list[dict]] = mapped_column(JSONB, nullable=False)
     source: Mapped[str] = mapped_column(String(15), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -943,10 +943,9 @@ def _check_rate_limit(key: str, limit: tuple[int, float]) -> bool:
 async def recommend(
     fmea_id: uuid.UUID,
     request: RecommendRequest,
+    fastapi_request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.EDIT)),
-    # FastAPI Request object to access app.state.llm_provider
-    fastapi_request: Request,
 ):
     # Rate limiting
     user_key = f"rec_user:{user.user_id}"
@@ -1308,13 +1307,30 @@ git commit -m "feat(rec): add SmartSuggestionDropdown component with debounce an
 
 **关键前提：** `FMEARow` 只包含 node IDs（如 `failureModeNodeId`），不包含显示值。所有显示值通过 `nodeMap.get(row.xxxNodeId)?.name` 获取。现有权限使用 `canEdit('fmea')` 而非 `isViewer`。推荐列应替换 `Input.TextArea`，但保留现有 `onFocus` 触发的 `activateRecommendation` 调用（可选，后续可移除）。
 
-- [ ] **Step 1: 添加 import**
+- [ ] **Step 1: 添加 import 和 fmeaId 变量**
 
 在 `FMEAEditorPage.tsx` 的 import 区域添加：
 
 ```typescript
 import SmartSuggestionDropdown from "../../../components/dfmea/SmartSuggestionDropdown";
 ```
+
+在组件内部（`const { id } = useParams<{ id: string }>();` 之后）添加 fmeaId 别名：
+
+```typescript
+const fmeaId = id || "";
+```
+
+现有代码使用 `const { id } = useParams()` 获取路由参数，后续代码中统一使用 `fmeaId` 引用。
+
+同时退役旧的 InlineRecommendations 系统：
+
+1. **移除 import：** 删除 `import InlineRecommendations from "../../../components/dfmea/InlineRecommendations";`
+2. **移除 activateRecommendation 相关状态：** 删除 `activateRecommendation` 函数和相关的 `recommendation` state（如果存在）
+3. **移除渲染：** 搜索 `InlineRecommendations` 的 JSX 使用（通常在表格下方的 `<InlineRecommendations ... />`），删除或注释掉
+4. **保留 `dfmeaRules.ts` import 不动：** 如果没有其他地方使用它，可以一并移除；如果有（如 GenerationWizard），保留并标记 `@deprecated`
+
+这确保只有一套推荐系统运行，不会出现新旧冲突。
 
 - [ ] **Step 2: 在失败模式列集成 SmartSuggestionDropdown**
 
