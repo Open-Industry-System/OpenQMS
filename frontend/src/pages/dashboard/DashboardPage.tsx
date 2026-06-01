@@ -34,7 +34,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const productLine = useProductLineStore((s) => s.selected);
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
+  const isViewer = user?.role_key === "viewer";
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [alerts, setAlerts] = useState<DashboardAlerts | null>(null);

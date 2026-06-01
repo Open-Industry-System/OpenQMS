@@ -27,6 +27,7 @@ from app.models.iqc_inspection_item import IqcInspectionItem, IqcItemMeasurement
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.models.apqp import APQPProject
 from app.models.graph_sync_outbox import GraphSyncOutbox
+from app.models.role import RoleDefinition, RolePermission, UserProductLine
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -49,4 +50,5 @@ __all__ = [
     "Customer", "CustomerComplaint", "RMARecord",
     "APQPProject",
     "GraphSyncOutbox",
+    "RoleDefinition", "RolePermission", "UserProductLine",
 ]

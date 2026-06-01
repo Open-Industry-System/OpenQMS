@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { IqcInspection, IqcStats } from "../../types";
 import { listInspections, getIqcStats } from "../../api/iqc";
 
@@ -42,7 +43,7 @@ export default function IqcInspectionListPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
+  const { canEdit } = usePermission();
 
   const [inspections, setInspections] = useState<IqcInspection[]>([]);
   const [loading, setLoading] = useState(false);
@@ -221,7 +222,7 @@ export default function IqcInspectionListPage() {
         title="来料检验"
         extra={
           <Space>
-            {!isViewer && (
+            {canEdit('iqc') && (
               <Button
                 type="primary"
                 icon={<PlusOutlined />}

@@ -9,7 +9,11 @@ export interface User {
   username: string;
   display_name: string | null;
   email: string | null;
-  role: string;
+  role_key: string;
+  legacy_role?: string | null;
+  permissions: Record<string, number>;
+  product_lines: { product_line_code: string; name?: string }[];
+  bypass_row_level_security: boolean;
   is_active: boolean;
   auditor_info?: AuditorInfo;
 }

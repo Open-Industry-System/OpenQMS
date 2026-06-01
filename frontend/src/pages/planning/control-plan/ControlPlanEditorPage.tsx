@@ -17,6 +17,7 @@ import type { ControlPlan, ControlPlanItem } from "../../../types";
 import { listCustomers } from "../../../api/customerQuality";
 import type { CPSyncStatusItem } from "../../../types/specialCharacteristic";
 import { useAuthStore } from "../../../store/authStore";
+import { usePermission } from "../../../hooks/usePermission";
 import { getCPSyncStatus, syncToCP } from "../../../api/specialCharacteristic";
 import ImportFromFMEAModal from "../../../components/control-plan/ImportFromFMEAModal";
 import VersionHistoryTab from "../../../components/version/VersionHistoryTab";
@@ -97,9 +98,9 @@ export default function ControlPlanEditorPage() {
   const [csrCustomers, setCsrCustomers] = useState<{ customer_id: string; name: string; csr_list: unknown[] | null }[]>([]);
 
   const user = useAuthStore((s) => s.user);
+  const { canEdit: canEditPerm, canApprove } = usePermission();
   const isApproved = cp?.status === "approved";
-  const canEdit = user?.role !== "viewer" && !isApproved;
-  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+  const canEdit = canEditPerm('planning') && !isApproved;
 
   // Form state
   const [title, setTitle] = useState("");
@@ -609,7 +610,7 @@ export default function ControlPlanEditorPage() {
             同步特殊特性
           </Button>
         )}
-        {!isNew && isAdminOrManager && currentStatus !== "approved" && (
+        {!isNew && canApprove('planning') && currentStatus !== "approved" && (
           <Button icon={<CheckCircleOutlined />} onClick={handleApprove}>
             批准
           </Button>
@@ -755,8 +756,8 @@ export default function ControlPlanEditorPage() {
           <VersionHistoryTab
             documentId={id!}
             documentType="cp"
-            canCreate={user?.role !== "viewer"}
-            canRollback={isAdminOrManager}
+            canCreate={canEditPerm('planning')}
+            canRollback={canApprove('planning')}
             isDraft={currentStatus === "draft"}
             onViewSnapshot={(major, minor) => message.info(`查看版本 v${major}.${minor} 快照（功能开发中）`)}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}

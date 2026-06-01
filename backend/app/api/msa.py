@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.spc import InspectionCharacteristic
 from app.models.gauge import Gauge
 from app import schemas
@@ -53,7 +53,7 @@ async def list_grr(
 async def create_grr(
     req: schemas.grr.GrrStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         study = await grr_service.create_study(
@@ -95,7 +95,7 @@ async def update_grr(
     study_id: uuid.UUID,
     req: schemas.grr.GrrStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await grr_service.get_study(db, study_id)
     if not study:
@@ -128,7 +128,7 @@ async def update_grr(
 async def delete_grr(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await grr_service.get_study(db, study_id)
     if not study:
@@ -145,7 +145,7 @@ async def upsert_grr_measurements(
     study_id: uuid.UUID,
     req: schemas.grr.GrrMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         await grr_service.upsert_measurements(
@@ -180,7 +180,7 @@ async def get_grr_measurements(
 async def compute_grr(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await grr_service.get_study(db, study_id)
     if not study:
@@ -213,7 +213,7 @@ async def complete_grr(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await grr_service.get_study(db, study_id)
     if not study:
@@ -249,7 +249,7 @@ async def list_bias(
 async def create_bias(
     req: schemas.bias.BiasStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         study = await bias_service.create_study(
@@ -286,7 +286,7 @@ async def update_bias(
     study_id: uuid.UUID,
     req: schemas.bias.BiasStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await bias_service.get_study(db, study_id)
     if not study:
@@ -314,7 +314,7 @@ async def update_bias(
 async def delete_bias(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await bias_service.get_study(db, study_id)
     if not study:
@@ -331,7 +331,7 @@ async def upsert_bias_measurements(
     study_id: uuid.UUID,
     req: schemas.bias.BiasMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         await bias_service.upsert_measurements(
@@ -364,7 +364,7 @@ async def get_bias_measurements(
 async def compute_bias(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await bias_service.get_study(db, study_id)
     if not study:
@@ -397,7 +397,7 @@ async def complete_bias(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await bias_service.get_study(db, study_id)
     if not study:
@@ -433,7 +433,7 @@ async def list_linearity(
 async def create_linearity(
     req: schemas.linearity.LinearityStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         study = await linearity_service.create_study(
@@ -471,7 +471,7 @@ async def update_linearity(
     study_id: uuid.UUID,
     req: schemas.linearity.LinearityStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await linearity_service.get_study(db, study_id)
     if not study:
@@ -500,7 +500,7 @@ async def update_linearity(
 async def delete_linearity(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await linearity_service.get_study(db, study_id)
     if not study:
@@ -517,7 +517,7 @@ async def upsert_linearity_measurements(
     study_id: uuid.UUID,
     req: schemas.linearity.LinearityMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         await linearity_service.upsert_measurements(
@@ -551,7 +551,7 @@ async def get_linearity_measurements(
 async def compute_linearity(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await linearity_service.get_study(db, study_id)
     if not study:
@@ -584,7 +584,7 @@ async def complete_linearity(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await linearity_service.get_study(db, study_id)
     if not study:
@@ -620,7 +620,7 @@ async def list_stability(
 async def create_stability(
     req: schemas.stability.StabilityStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         study = await stability_service.create_study(
@@ -657,7 +657,7 @@ async def update_stability(
     study_id: uuid.UUID,
     req: schemas.stability.StabilityStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await stability_service.get_study(db, study_id)
     if not study:
@@ -685,7 +685,7 @@ async def update_stability(
 async def delete_stability(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await stability_service.get_study(db, study_id)
     if not study:
@@ -702,7 +702,7 @@ async def upsert_stability_measurements(
     study_id: uuid.UUID,
     req: schemas.stability.StabilityMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         await stability_service.upsert_measurements(
@@ -737,7 +737,7 @@ async def get_stability_measurements(
 async def compute_stability(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await stability_service.get_study(db, study_id)
     if not study:
@@ -770,7 +770,7 @@ async def complete_stability(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await stability_service.get_study(db, study_id)
     if not study:
@@ -806,7 +806,7 @@ async def list_attribute(
 async def create_attribute(
     req: schemas.attribute.AttributeStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         study = await attribute_service.create_study(
@@ -843,7 +843,7 @@ async def update_attribute(
     study_id: uuid.UUID,
     req: schemas.attribute.AttributeStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await attribute_service.get_study(db, study_id)
     if not study:
@@ -871,7 +871,7 @@ async def update_attribute(
 async def delete_attribute(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await attribute_service.get_study(db, study_id)
     if not study:
@@ -888,7 +888,7 @@ async def upsert_attribute_measurements(
     study_id: uuid.UUID,
     req: schemas.attribute.AttributeMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         await attribute_service.upsert_measurements(
@@ -924,7 +924,7 @@ async def get_attribute_measurements(
 async def compute_attribute(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await attribute_service.get_study(db, study_id)
     if not study:
@@ -957,7 +957,7 @@ async def complete_attribute(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     study = await attribute_service.get_study(db, study_id)
     if not study:

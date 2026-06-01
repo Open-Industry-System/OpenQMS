@@ -15,6 +15,7 @@ import {
 } from "../../../api/specialCharacteristic";
 import type { SpecialCharacteristic } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
+import { usePermission } from "../../../hooks/usePermission";
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -33,8 +34,7 @@ export default function SCDetailPage() {
   const isNew = id === "new";
 
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
-  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
 
   useEffect(() => {
     if (!id || isNew) { setLoading(false); return; }
@@ -84,7 +84,7 @@ export default function SCDetailPage() {
   const handleSafetyToggle = async (checked: boolean) => {
     if (!sc || !id || isNew) return;
     if (!checked) {
-      if (!isAdminOrManager) {
+      if (!canApprove('special_characteristic')) {
         message.error("仅管理员或经理可取消安全标记");
         return;
       }
@@ -117,7 +117,7 @@ export default function SCDetailPage() {
   };
 
   const handleSafetyApprove = async () => {
-    if (!id || isNew || !isAdminOrManager) return;
+    if (!id || isNew || !canApprove('special_characteristic')) return;
     setApprovalLoading(true);
     try {
       const updated = await safetyApprove(id);
@@ -131,7 +131,7 @@ export default function SCDetailPage() {
   };
 
   const handleSafetyReject = async () => {
-    if (!id || isNew || !isAdminOrManager) return;
+    if (!id || isNew || !canApprove('special_characteristic')) return;
     setApprovalLoading(true);
     try {
       const updated = await safetyReject(id, "审批驳回");
@@ -295,7 +295,7 @@ export default function SCDetailPage() {
               form={form}
               layout="vertical"
               onFinish={handleSave}
-              disabled={isViewer}
+              disabled={!canEdit('special_characteristic')}
             >
               {isNew && (
                 <Form.Item
@@ -363,7 +363,7 @@ export default function SCDetailPage() {
                 </Col>
               </Row>
 
-              {!isViewer && (
+              {!!canEdit('special_characteristic') && (
                 <Form.Item>
                   <Button
                     type="primary"
@@ -411,7 +411,7 @@ export default function SCDetailPage() {
                     <Switch
                       checked={sc.is_safety_related}
                       onChange={handleSafetyToggle}
-                      disabled={isViewer || (sc.safety_approval_status === "submitted" && !isAdminOrManager)}
+                      disabled={!canEdit('special_characteristic') || (sc.safety_approval_status === "submitted" && !canApprove('special_characteristic'))}
                     />
                   </Form.Item>
 
@@ -421,7 +421,7 @@ export default function SCDetailPage() {
                         form={safetyForm}
                         layout="vertical"
                         onFinish={handleSafetySubmit}
-                        disabled={isViewer || sc.safety_approval_status === "submitted" || sc.safety_approval_status === "approved"}
+                        disabled={!canEdit('special_characteristic') || sc.safety_approval_status === "submitted" || sc.safety_approval_status === "approved"}
                       >
                         <Form.Item
                           name="safety_regulation_ref"
@@ -437,7 +437,7 @@ export default function SCDetailPage() {
                         >
                           <TextArea rows={3} placeholder="例：100% 高压绝缘测试" />
                         </Form.Item>
-                        {sc.safety_approval_status === "pending" && !isViewer && (
+                        {sc.safety_approval_status === "pending" && !!canEdit('special_characteristic') && (
                           <Button type="primary" htmlType="submit" loading={approvalLoading}>
                             提交审批
                           </Button>
@@ -476,7 +476,7 @@ export default function SCDetailPage() {
                       )}
 
                       {/* Approval Actions for manager/admin */}
-                      {sc.safety_approval_status === "submitted" && isAdminOrManager && (
+                      {sc.safety_approval_status === "submitted" && canApprove('special_characteristic') && (
                         <Space>
                           <Button type="primary" onClick={handleSafetyApprove} loading={approvalLoading}>
                             批准

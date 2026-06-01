@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin, require_manager_or_admin
+from app.core.permissions import get_current_user, require_permission, get_user_permission, PermissionLevel, Module
 from app.models.user import User
 from app.schemas import scar as scar_schemas
 from app.services import scar_service
@@ -73,7 +73,7 @@ async def get_scar(
 async def create_scar(
     req: scar_schemas.SCARCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SCAR, PermissionLevel.CREATE)),
 ):
     try:
         scar = await scar_service.create_scar(
@@ -97,7 +97,7 @@ async def update_scar(
     scar_id: uuid.UUID,
     req: scar_schemas.SCARUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SCAR, PermissionLevel.CREATE)),
 ):
     scar = await scar_service.get_scar(db, scar_id)
     if not scar:
@@ -122,12 +122,13 @@ async def transition_scar(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # Route-level role check
+    # Route-level permission check
+    perm_level = await get_user_permission(user, Module.SCAR, db)
     if req.action in ("verify", "reject", "close", "reopen"):
-        if user.role not in ("admin", "manager"):
+        if perm_level < PermissionLevel.APPROVE:
             raise HTTPException(403, "需要 manager 或 admin 权限")
     elif req.action in ("start", "respond"):
-        if user.role not in ("admin", "manager", "quality_engineer"):
+        if perm_level < PermissionLevel.CREATE:
             raise HTTPException(403, "需要 engineer 或更高权限")
 
     scar = await scar_service.get_scar(db, scar_id)
@@ -149,7 +150,7 @@ async def link_capa(
     scar_id: uuid.UUID,
     req: scar_schemas.SCARLinkCAPARequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.SCAR, PermissionLevel.CREATE)),
 ):
     scar = await scar_service.get_scar(db, scar_id)
     if not scar:

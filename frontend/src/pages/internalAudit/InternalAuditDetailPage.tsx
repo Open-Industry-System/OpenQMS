@@ -31,6 +31,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { AuditPlan, AuditFinding, AuditChecklistItem, User } from "../../types";
 import {
   getAuditPlan,
@@ -82,7 +83,7 @@ export default function InternalAuditDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const isEngineerPlus = user?.role === "admin" || user?.role === "manager" || user?.role === "quality_engineer";
+  const { canEdit } = usePermission();
 
   const [plan, setPlan] = useState<AuditPlan | null>(null);
   const [loading, setLoading] = useState(false);
@@ -354,17 +355,17 @@ export default function InternalAuditDetailPage() {
           {plan.audit_id.slice(0, 8).toUpperCase()}
         </Title>
         <Tag color={STATUS_MAP[plan.status]?.color}>{STATUS_MAP[plan.status]?.label}</Tag>
-        {plan.status === "planned" && isEngineerPlus && (
+        {plan.status === "planned" && canEdit('audit') && (
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>
             开始
           </Button>
         )}
-        {plan.status === "in_progress" && isEngineerPlus && (
+        {plan.status === "in_progress" && canEdit('audit') && (
           <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleComplete}>
             完成
           </Button>
         )}
-        {plan.status === "planned" && isEngineerPlus && (
+        {plan.status === "planned" && canEdit('audit') && (
           <Popconfirm title="确认取消？" onConfirm={handleCancel}>
             <Button danger icon={<StopOutlined />}>取消</Button>
           </Popconfirm>
@@ -374,7 +375,7 @@ export default function InternalAuditDetailPage() {
       <Card
         title="基本信息"
         extra={
-          isEngineerPlus && (
+          canEdit('audit') && (
             <Button
               icon={<EditOutlined />}
               onClick={() => {
@@ -491,7 +492,7 @@ export default function InternalAuditDetailPage() {
             children: (
               <Card
                 extra={
-                  isEngineerPlus && (
+                  canEdit('audit') && (
                     <Button type="primary" icon={<PlusOutlined />} onClick={handleAddChecklistItem}>
                       添加检查项
                     </Button>
@@ -518,7 +519,7 @@ export default function InternalAuditDetailPage() {
                           placeholder="选择结果"
                           style={{ width: "100%" }}
                           allowClear
-                          disabled={!isEngineerPlus}
+                          disabled={!canEdit('audit')}
                           onChange={(v) => handleChecklistChange(index, "result", v || "")}
                         >
                           {RESULT_OPTIONS.map((o) => (
@@ -536,7 +537,7 @@ export default function InternalAuditDetailPage() {
                         <Input
                           value={value}
                           placeholder="输入证据"
-                          disabled={!isEngineerPlus}
+                          disabled={!canEdit('audit')}
                           onChange={(e) => handleChecklistChange(index, "evidence", e.target.value)}
                         />
                       ),
@@ -548,7 +549,7 @@ export default function InternalAuditDetailPage() {
                         <Input
                           value={value}
                           placeholder="输入备注"
-                          disabled={!isEngineerPlus}
+                          disabled={!canEdit('audit')}
                           onChange={(e) => handleChecklistChange(index, "note", e.target.value)}
                         />
                       ),
@@ -557,7 +558,7 @@ export default function InternalAuditDetailPage() {
                       title: "操作",
                       width: 80,
                       render: (_: unknown, _record: AuditChecklistItem, index: number) =>
-                        isEngineerPlus ? (
+                        canEdit('audit') ? (
                           <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteChecklistItem(index)} />
                         ) : null,
                     },
@@ -573,7 +574,7 @@ export default function InternalAuditDetailPage() {
             children: (
               <Card
                 extra={
-                  isEngineerPlus && (
+                  canEdit('audit') && (
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => setFindingModalOpen(true)}>
                       添加发现项
                     </Button>
@@ -631,12 +632,12 @@ export default function InternalAuditDetailPage() {
                       width: 200,
                       render: (_: unknown, record: AuditFinding) => (
                         <Space size="small">
-                          {record.status !== "closed" && isEngineerPlus && (
+                          {record.status !== "closed" && canEdit('audit') && (
                             <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleCloseFinding(record.finding_id)}>
                               关闭
                             </Button>
                           )}
-                          {!record.capa_ref_id && isEngineerPlus && (
+                          {!record.capa_ref_id && canEdit('audit') && (
                             <Button size="small" onClick={() => handleCreateCAPA(record.finding_id)}>
                               创建CAPA
                             </Button>

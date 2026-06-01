@@ -30,6 +30,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type {
   GrrStudy,
   BiasStudy,
@@ -109,11 +110,7 @@ export default function StudyDetailPage() {
   const { user } = useAuthStore();
 
   const isNew = id === "new";
-  const isViewer = user?.role === "viewer";
-  const isEngineerOrAbove =
-    user?.role === "quality_engineer" ||
-    user?.role === "manager" ||
-    user?.role === "admin";
+  const { canEdit } = usePermission();
 
   const [study, setStudy] = useState<Study | null>(null);
   const [loading, setLoading] = useState(!isNew);
@@ -1005,7 +1002,7 @@ export default function StudyDetailPage() {
       children: (
         <Card
           extra={
-            !isViewer && (
+            canEdit('msa') && (
               <Space>
                 {editing ? (
                   <>
@@ -1117,7 +1114,7 @@ export default function StudyDetailPage() {
       children: (
         <Card
           extra={
-            isEngineerOrAbove && study.status !== "completed" && (
+            canEdit('msa') && study.status !== "completed" && (
               <Space>
                 <Button loading={measSaving} onClick={handleSaveMeasurements} icon={<SaveOutlined />}>
                   保存数据
@@ -1136,7 +1133,7 @@ export default function StudyDetailPage() {
       children: (
         <Card
           extra={
-            isEngineerOrAbove && study.status !== "completed" && (
+            canEdit('msa') && study.status !== "completed" && (
               <Space>
                 <Button loading={resultLoading} onClick={handleCompute} icon={<CalculatorOutlined />} type="primary">
                   计算结果

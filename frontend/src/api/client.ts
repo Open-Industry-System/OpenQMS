@@ -15,10 +15,20 @@ client.interceptors.request.use((config) => {
 
 client.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("access_token");
       window.location.href = "/login";
+      return Promise.reject(error);
+    }
+    if (error.response?.status === 403) {
+      try {
+        const { useAuthStore } = await import("../store/authStore");
+        const resp = await client.get("/auth/me");
+        useAuthStore.getState().setUser(resp.data);
+      } catch {
+        // refresh failed — ignore, user stays with stale state
+      }
     }
     return Promise.reject(error);
   }

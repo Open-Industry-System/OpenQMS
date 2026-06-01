@@ -18,6 +18,7 @@ async def list_capas(
     product_line: str | None = None,
     overdue: bool = False,
     pending_action: bool = False,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> tuple[list[CAPAEightD], int]:
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
@@ -32,6 +33,10 @@ async def list_capas(
     if product_line:
         query = query.where(CAPAEightD.product_line_code == product_line)
         count_query = count_query.where(CAPAEightD.product_line_code == product_line)
+
+    if allowed_product_line_codes is not None:
+        query = query.where(CAPAEightD.product_line_code.in_(allowed_product_line_codes))
+        count_query = count_query.where(CAPAEightD.product_line_code.in_(allowed_product_line_codes))
 
     if overdue:
         query = query.where(
@@ -247,6 +252,7 @@ async def get_capas_by_fmea_node(
             "document_no": c.document_no,
             "title": c.title,
             "status": c.status,
+            "product_line_code": c.product_line_code,
         }
         for c in result.scalars().all()
     ]

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, get_user_permission, PermissionLevel, Module
 from app.models.user import User
 from app.models.supplier import SupplierPPAPElement
 from app.schemas import ppap as ppap_schemas
@@ -88,7 +88,7 @@ async def get_ppap(
 async def create_ppap(
     req: ppap_schemas.PPAPCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PPAP, PermissionLevel.CREATE)),
 ):
     try:
         ppap = await ppap_service.create_ppap(
@@ -113,7 +113,7 @@ async def update_ppap(
     ppap_id: uuid.UUID,
     req: ppap_schemas.PPAPUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PPAP, PermissionLevel.CREATE)),
 ):
     ppap = await ppap_service.get_ppap(db, ppap_id)
     if not ppap:
@@ -135,7 +135,7 @@ async def update_ppap_element(
     element_id: uuid.UUID,
     req: ppap_schemas.PPAPElementUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PPAP, PermissionLevel.CREATE)),
 ):
     from sqlalchemy import select as sa_select
     result = await db.execute(
@@ -177,12 +177,13 @@ async def transition_ppap(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # Route-level role check
+    # Route-level permission check
+    perm_level = await get_user_permission(user, Module.PPAP, db)
     if req.action in ("approve", "reject"):
-        if user.role not in ("admin", "manager"):
+        if perm_level < PermissionLevel.APPROVE:
             raise HTTPException(403, "需要 manager 或 admin 权限")
     elif req.action in ("submit", "resubmit"):
-        if user.role not in ("admin", "manager", "quality_engineer"):
+        if perm_level < PermissionLevel.CREATE:
             raise HTTPException(403, "需要 engineer 或更高权限")
 
     ppap = await ppap_service.get_ppap(db, ppap_id)
@@ -202,7 +203,7 @@ async def transition_ppap(
 async def delete_ppap(
     ppap_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PPAP, PermissionLevel.CREATE)),
 ):
     ppap = await ppap_service.get_ppap(db, ppap_id)
     if not ppap:

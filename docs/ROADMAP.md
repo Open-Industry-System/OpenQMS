@@ -102,9 +102,9 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 |------|--------|------|------|
 | Neo4j 知识图谱基础设施 | P1 | ✅ 完成 | Neo4j Docker 服务 + Repository 抽象（Neo4j/JSONB 双实现）+ API 路由 |
 | 知识图谱可视化 (G6 v5) | P1 | ✅ 完成 | FMEA 嵌入"图谱" tab（力导向/层次布局 + 节点点击/双击/右键菜单 + 影响/原因追溯高亮）+ 独立全局页面 `/knowledge-graph`（风险地图 + 跨 FMEA 统计 + 历史关键词搜索 + 节点跳转联动） |
-| 全局知识库 | P1 | 🔄 部分完成 | 跨 FMEA 节点统计（AP 分布 / 高 AP 节点 / 平均 RPN）+ 相似节点关键词搜索；待脱敏 + 跨产品线聚合 |
+| 全局知识库 | P1 | ✅ 完成 | 跨 FMEA 节点统计（AP 分布 / 高 AP 节点 / 平均 RPN / Top 失效模式）+ 相似节点关键词搜索 + Pydantic 响应白名单脱敏 + `/knowledge-graph` 全局页面 |
 | LLM RAG 语义搜索 | P2 | 🔲 待开发 | 自然语言搜索历史 FMEA/8D |
-| FMEA 编辑时智能推荐 | P2 | ✅ 完成 | 底部 InlineRecommendations 组件（相似度 + 来源标注），已接入 FMEA 编辑器 |
+| FMEA 编辑时智能推荐 | P2 | 🔄 部分完成 | 底部 InlineRecommendations 组件（规则引擎版：失效模式/影响/原因链建议 + AP 分析 + 措施推荐，已接入 FMEA 编辑器）；待接入知识图谱相似度匹配 + 来源文档标注 |
 | 8D 根因+措施推荐 | P2 | 🔲 待开发 | D4 推荐失效原因 / D5 推荐控制措施 |
 | 变更影响分析（图遍历）| P2 | 🔲 待开发 | 设计参数变更 → 自动追溯影响范围 |
 | SPC-FMEA 异常关联推荐 | P2 | 🔲 待开发 | 控制图异常 → 识别关联 FMEA → 推荐 8D 方案 |
@@ -177,7 +177,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 **已完成 (2026-05-31)**:
 - [x] Neo4j 知识图谱基础设施 (Docker Compose + 双 Repository 实现 + API 路由)
 - [x] 知识图谱可视化前端 (G6 v5: GraphCanvas + 嵌入 FMEA tab + /knowledge-graph 全局页 + 5 场景交互)
-- [x] 全局知识库基础 (跨 FMEA 统计 + 相似节点搜索)
+- [x] 全局知识库基础 (跨 FMEA 统计 + 相似节点搜索 + Pydantic 响应白名单脱敏)
 
 **立即**:
 - 用户验收测试知识图谱可视化功能
@@ -185,6 +185,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 - 决定是否合并/发布知识图谱分支
 
 **Phase 3 剩余 (待排期)**:
+- [ ] FMEA 智能推荐升级 — 接入知识图谱相似度匹配 + 来源文档标注（规则引擎版已完成）
 - [ ] LLM RAG 语义搜索 (自然语言搜索历史 FMEA/8D)
 - [ ] 8D 根因+措施推荐 (D4/D5 智能推荐)
 - [ ] 变更影响分析 (设计参数变更 → 自动追溯影响范围)

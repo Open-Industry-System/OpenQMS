@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.database import async_session
 from app.models.user import User
+from app.models.role import RoleDefinition
 from app.core.security import hash_password
 from app.api.auth import router as auth_router
 from app.api.fmea import router as fmea_router
@@ -39,6 +40,7 @@ from app.api.apqp import router as apqp_router
 from app.api.ppap import router as ppap_router
 from app.api.shipment import router as shipment_router
 from app.api.graph import router as graph_router
+from app.api.admin import permissions as admin_permissions_api
 
 
 @asynccontextmanager
@@ -46,13 +48,24 @@ async def lifespan(app: FastAPI):
     async with async_session() as db:
         result = await db.execute(select(User).where(User.username == "admin"))
         if not result.scalar_one_or_none():
-            db.add(User(
-                username="admin",
-                password_hash=hash_password("Admin@2026"),
-                display_name="系统管理员",
-                role="admin",
-            ))
-            await db.commit()
+            try:
+                admin_role_result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
+                admin_role = admin_role_result.scalar_one_or_none()
+                if admin_role:
+                    db.add(User(
+                        username="admin",
+                        password_hash=hash_password("Admin@2026"),
+                        display_name="系统管理员",
+                        role_id=admin_role.id,
+                    ))
+                    await db.commit()
+                else:
+                    print("WARNING: admin role not found in role_definitions. Run migrations and seed.")
+            except Exception:
+                # role_definitions table may not exist yet (migration not run)
+                # Rollback failed transaction and skip admin creation
+                await db.rollback()
+                print("WARNING: role_definitions table not found. Run 'alembic upgrade head' and seed before using the permission system.")
     yield
 
 
@@ -96,6 +109,7 @@ app.include_router(apqp_router)
 app.include_router(ppap_router)
 app.include_router(shipment_router)
 app.include_router(graph_router)
+app.include_router(admin_permissions_api.router)
 
 
 @app.get("/api/health")

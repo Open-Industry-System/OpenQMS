@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app import schemas
 from app.services import gauge_service
 
@@ -52,7 +52,7 @@ async def list_gauges(
 async def create_gauge(
     req: schemas.gauge.GaugeCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         gauge = await gauge_service.create_gauge(
@@ -91,7 +91,7 @@ async def update_gauge(
     gauge_id: uuid.UUID,
     req: schemas.gauge.GaugeUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     gauge = await gauge_service.get_gauge(db, gauge_id)
     if gauge is None:
@@ -122,7 +122,7 @@ async def update_gauge(
 async def delete_gauge(
     gauge_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     gauge = await gauge_service.get_gauge(db, gauge_id)
     if gauge is None:
@@ -160,7 +160,7 @@ async def create_calibration(
     gauge_id: uuid.UUID,
     req: schemas.gauge.GaugeCalibrationCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_engineer_or_admin),
+    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
 ):
     try:
         cal = await gauge_service.create_calibration(

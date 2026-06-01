@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, get_user_permission, PermissionLevel, Module
 from app.models.user import User
 
 from app.schemas.control_plan import (
@@ -40,7 +40,7 @@ async def list_control_plans(
 async def create_control_plan(
     req: ControlPlanCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
 ):
     try:
         cp = await control_plan_service.create_control_plan(db, req, user.user_id)
@@ -66,7 +66,7 @@ async def update_control_plan(
     cp_id: uuid.UUID,
     req: ControlPlanUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
@@ -82,7 +82,7 @@ async def update_control_plan(
 async def delete_control_plan(
     cp_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
@@ -96,7 +96,7 @@ async def import_from_fmea(
     cp_id: uuid.UUID,
     req: ImportFromFMEARequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
 ):
     try:
         items = await control_plan_service.import_from_fmea(db, cp_id, req, user.user_id)
@@ -122,13 +122,11 @@ async def stale_check(
 async def approve_control_plan(
     cp_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.APPROVE)),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
-    if user.role not in ["admin", "manager"]:
-        raise HTTPException(status_code=403, detail="仅管理员或经理可批准")
     try:
         cp = await control_plan_service.approve_control_plan(db, cp, user.user_id)
     except ValueError as e:
@@ -146,7 +144,7 @@ async def sync_csr_endpoint(
     plan_id: uuid.UUID,
     req: CSRSyncRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
 ):
     try:
         plan = await control_plan_service.sync_csr_to_control_plan(

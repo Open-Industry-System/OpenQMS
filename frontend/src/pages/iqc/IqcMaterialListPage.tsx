@@ -21,6 +21,7 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { IqcMaterial } from "../../types";
 import { listMaterials, createMaterial, updateMaterial, deleteMaterial, importMaterials, downloadMaterialImportTemplate } from "../../api/iqc";
 import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
@@ -30,7 +31,7 @@ const { Option } = Select;
 export default function IqcMaterialListPage() {
   const { message } = App.useApp();
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
+  const { canEdit, isAdmin } = usePermission();
 
   const [materials, setMaterials] = useState<IqcMaterial[]>([]);
   const [loading, setLoading] = useState(false);
@@ -170,7 +171,7 @@ export default function IqcMaterialListPage() {
       width: 150,
       render: (_: unknown, record: IqcMaterial) => (
         <Space size="small">
-          {!isViewer && (
+          {canEdit('iqc') && (
             <Button
               size="small"
               icon={<EditOutlined />}
@@ -179,7 +180,7 @@ export default function IqcMaterialListPage() {
               编辑
             </Button>
           )}
-          {user?.role === "admin" && (
+          {isAdmin && (
             <Popconfirm
               title="确认删除该物料？"
               onConfirm={() => handleDelete(record.material_id)}
@@ -200,12 +201,12 @@ export default function IqcMaterialListPage() {
         title="物料管理"
         extra={
           <Space>
-            {!isViewer && (
+            {canEdit('iqc') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
                 新增物料
               </Button>
             )}
-            {!isViewer && (
+            {canEdit('iqc') && (
               <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
                 导入物料
               </Button>

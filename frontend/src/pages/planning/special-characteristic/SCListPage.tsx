@@ -12,6 +12,7 @@ import {
 } from "../../../api/specialCharacteristic";
 import type { SpecialCharacteristic } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
+import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
 
 const { Title } = Typography;
@@ -37,7 +38,7 @@ export default function SCListPage() {
   const navigate = useNavigate();
 
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
+  const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
 
   const fetchData = (p: number = page) => {
@@ -186,7 +187,7 @@ export default function SCListPage() {
           >
             查看
           </Button>
-          {record.is_safety_suggested && !record.is_safety_related && !isViewer && (
+          {record.is_safety_suggested && !record.is_safety_related && canEdit('special_characteristic') && (
             <>
               <Button type="link" size="small" onClick={() => handleSafetyConfirm(record.sc_id)}>
                 确认安全
@@ -196,7 +197,7 @@ export default function SCListPage() {
               </Button>
             </>
           )}
-          {!isViewer && (
+          {canEdit('special_characteristic') && (
             <Popconfirm
               title="确认删除该特殊特性？"
               onConfirm={() => handleDelete(record.sc_id)}
@@ -280,7 +281,7 @@ export default function SCListPage() {
             unCheckedChildren="全部"
           />
         </Space>
-        {!isViewer && (
+        {canEdit('special_characteristic') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/special-characteristics/new")}>
             新建特殊特性
           </Button>

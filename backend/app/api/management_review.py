@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.deps import get_current_user, require_admin, require_engineer_or_admin, require_manager_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app import schemas
 from app.services import management_review_service
@@ -32,7 +32,7 @@ async def list_reviews(
 async def create_review(
     req: schemas.management_review.ManagementReviewCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
 ):
     try:
         review = await management_review_service.create_review(
@@ -67,7 +67,7 @@ async def update_review(
     review_id: uuid.UUID,
     req: schemas.management_review.ManagementReviewUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -86,7 +86,7 @@ async def update_review(
 async def delete_review(
     review_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.ADMIN)),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -102,7 +102,7 @@ async def delete_review(
 async def collect_data(
     review_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -118,7 +118,7 @@ async def collect_data(
 async def refresh_data(
     review_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -134,7 +134,7 @@ async def refresh_data(
 async def back_to_draft(
     review_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -150,7 +150,7 @@ async def back_to_draft(
 async def start_review(
     review_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -166,7 +166,7 @@ async def start_review(
 async def close_review(
     review_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.APPROVE)),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -182,7 +182,7 @@ async def close_review(
 async def reopen_review(
     review_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.APPROVE)),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -209,7 +209,7 @@ async def create_output(
     review_id: uuid.UUID,
     req: schemas.management_review.ReviewOutputCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
 ):
     try:
         output = await management_review_service.create_output(
@@ -231,7 +231,7 @@ async def update_output(
     output_id: uuid.UUID,
     req: schemas.management_review.ReviewOutputUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
 ):
     review = await management_review_service.get_review(db, review_id)
     if review is None:
@@ -258,7 +258,7 @@ async def delete_output(
     review_id: uuid.UUID,
     output_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.ADMIN)),
 ):
     outputs = await management_review_service.list_outputs(db, review_id)
     output = next((o for o in outputs if o.output_id == output_id), None)
@@ -277,7 +277,7 @@ async def verify_output(
     output_id: uuid.UUID,
     req: schemas.management_review.ReviewOutputVerify,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_manager_or_admin),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.APPROVE)),
 ):
     outputs = await management_review_service.list_outputs(db, review_id)
     output = next((o for o in outputs if o.output_id == output_id), None)

@@ -19,6 +19,7 @@ async def list_fmeas(
     status: str | None = None,
     product_line: str | None = None,
     high_rpn: bool = False,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> tuple[list[FMEADocument], int]:
     query = select(FMEADocument)
     count_query = select(func.count(FMEADocument.fmea_id))
@@ -30,6 +31,10 @@ async def list_fmeas(
     if product_line:
         query = query.where(FMEADocument.product_line_code == product_line)
         count_query = count_query.where(FMEADocument.product_line_code == product_line)
+
+    if allowed_product_line_codes is not None:
+        query = query.where(FMEADocument.product_line_code.in_(allowed_product_line_codes))
+        count_query = count_query.where(FMEADocument.product_line_code.in_(allowed_product_line_codes))
 
     if high_rpn:
         from app.utils.fmea_graph import build_rpn_rows

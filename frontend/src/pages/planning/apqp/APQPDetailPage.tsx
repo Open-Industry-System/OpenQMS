@@ -6,6 +6,7 @@ import { EditOutlined } from "@ant-design/icons";
 import { getAPQPProject, updateAPQPProject, transitionAPQPProject } from "../../../api/apqp";
 import type { APQPProject, APQPProjectUpdate } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
+import { usePermission } from "../../../hooks/usePermission";
 
 const PHASE_NAMES: Record<number, string> = {
   1: "策划与定义",
@@ -31,15 +32,12 @@ export default function APQPDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const { canEdit, canApprove, isAdmin } = usePermission();
   const [project, setProject] = useState<APQPProject | null>(null);
   const [loading, setLoading] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [gateComment, setGateComment] = useState("");
-
-  const isAdmin = user?.role === "admin";
-  const isManager = user?.role === "admin" || user?.role === "manager";
-  const isEngineer = user?.role === "admin" || user?.role === "manager" || user?.role === "quality_engineer";
 
   const load = async () => {
     if (!id) return;
@@ -103,7 +101,7 @@ export default function APQPDetailPage() {
   const actionButtons = (): ReactNode[] => {
     if (project.project_status !== "active") return [];
     const btns: ReactNode[] = [];
-    if (project.phase_status === "in_progress" && isEngineer) {
+    if (project.phase_status === "in_progress" && canEdit('planning')) {
       btns.push(
         <Button key="submit" type="primary" onClick={() => handleTransition("submit_gate")}>
           提交审批
@@ -111,7 +109,7 @@ export default function APQPDetailPage() {
       );
     }
     if (project.phase_status === "pending_approval") {
-      if (isManager) {
+      if (canApprove('planning')) {
         btns.push(
           <Button key="approve" type="primary" onClick={() => handleTransition("approve_gate", gateComment)}>
             审批通过
@@ -150,7 +148,7 @@ export default function APQPDetailPage() {
           </Col>
           <Col>
             <Space>
-              {isEngineer && project.project_status === "active" && (
+              {canEdit('planning') && project.project_status === "active" && (
                 <Button icon={<EditOutlined />} onClick={() => {
                   setEditForm({
                     project_name: project.project_name,

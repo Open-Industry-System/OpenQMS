@@ -31,6 +31,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { AuditPlan, AuditProgram, AuditStats, AuditChecklistItem, User } from "../../types";
 import {
   listAuditPlans,
@@ -68,8 +69,7 @@ export default function InternalAuditListPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
-  const isEngineerPlus = user?.role === "admin" || user?.role === "manager" || user?.role === "quality_engineer";
+  const { canEdit, isAdmin } = usePermission();
 
   const [plans, setPlans] = useState<AuditPlan[]>([]);
   const [loading, setLoading] = useState(false);
@@ -326,17 +326,17 @@ export default function InternalAuditListPage() {
           <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/internal-audits/${record.audit_id}`)}>
             查看详情
           </Button>
-          {record.status === "planned" && isEngineerPlus && (
+          {record.status === "planned" && canEdit('audit') && (
             <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleStart(record.audit_id)}>
               开始
             </Button>
           )}
-          {record.status === "in_progress" && isEngineerPlus && (
+          {record.status === "in_progress" && canEdit('audit') && (
             <Button size="small" type="primary" icon={<CheckCircleOutlined />} onClick={() => handleComplete(record.audit_id)}>
               完成
             </Button>
           )}
-          {record.status === "planned" && isEngineerPlus && (
+          {record.status === "planned" && canEdit('audit') && (
             <Popconfirm title="确认取消？" onConfirm={() => handleCancel(record.audit_id)}>
               <Button size="small" danger icon={<StopOutlined />}>
                 取消
@@ -377,12 +377,12 @@ export default function InternalAuditListPage() {
         title="内部审核管理"
         extra={
           <Space>
-            {isEngineerPlus && (
+            {canEdit('audit') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setProgramModalOpen(true)}>
                 新建方案
               </Button>
             )}
-            {isEngineerPlus && (
+            {canEdit('audit') && (
               <Button icon={<PlusOutlined />} onClick={() => setPlanModalOpen(true)}>
                 新建计划
               </Button>

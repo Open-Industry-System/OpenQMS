@@ -9,9 +9,31 @@ from app.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token
 from app.core.deps import get_current_user, require_admin
 from app.models.user import User
+from app.models.product_line import ProductLine
+from app.models.role import RoleDefinition
 from app.schemas.auth import LoginRequest, RegisterRequest, UserResponse, TokenResponse, RefreshTokenRequest, RefreshTokenResponse
+from app.services.permission_service import get_role_permissions
+from app.core.product_line_filter import get_user_product_line_codes
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+async def build_user_response(user: User, db: AsyncSession) -> UserResponse:
+    permissions = await get_role_permissions(db, user.role_id)
+    if user.role_definition.bypass_row_level_security:
+        result = await db.execute(select(ProductLine.code, ProductLine.name).where(ProductLine.is_active == True))
+        product_lines = [{"product_line_code": code, "name": name} for code, name in result.all()]
+    else:
+        codes = await get_user_product_line_codes(user, db)
+        product_lines = [{"product_line_code": code} for code in codes]
+    return UserResponse(
+        user_id=user.user_id, username=user.username,
+        display_name=user.display_name, email=user.email,
+        role_key=user.role_definition.role_key, legacy_role=user.legacy_role,
+        permissions=permissions, product_lines=product_lines,
+        bypass_row_level_security=user.role_definition.bypass_row_level_security,
+        is_active=user.is_active, auditor_info=user.auditor_info,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -25,7 +47,8 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     user.refresh_token = refresh_token
     user.refresh_token_expires = refresh_expires
     await db.commit()
-    return TokenResponse(access_token=token, refresh_token=refresh_token, user=UserResponse.model_validate(user))
+    user_resp = await build_user_response(user, db)
+    return TokenResponse(access_token=token, refresh_token=refresh_token, user=user_resp)
 
 
 @router.post("/register", response_model=UserResponse)
@@ -37,29 +60,33 @@ async def register(
     existing = await db.execute(select(User).where(User.username == req.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username exists")
+    role_def = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == req.role_key))
+    role_def = role_def.scalar_one_or_none()
+    if role_def is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role_key")
     user = User(
         username=req.username,
         password_hash=hash_password(req.password),
         display_name=req.display_name or req.username,
         email=req.email,
-        role=req.role,
+        role_id=role_def.id,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    return UserResponse.model_validate(user)
+    return await build_user_response(user, db)
 
 
 @router.get("/users", response_model=list[UserResponse])
-async def list_users(db: AsyncSession = Depends(get_db), _user: User = Depends(get_current_user)):
+async def list_users(db: AsyncSession = Depends(get_db), _user: User = Depends(require_admin)):
     result = await db.execute(select(User))
     users = result.scalars().all()
-    return [UserResponse.model_validate(u) for u in users]
+    return [await build_user_response(u, db) for u in users]
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(user: User = Depends(get_current_user)):
-    return UserResponse.model_validate(user)
+async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await build_user_response(user, db)
 
 
 @router.post("/refresh", response_model=RefreshTokenResponse)

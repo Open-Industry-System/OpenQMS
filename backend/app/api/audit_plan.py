@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.deps import get_current_user, require_engineer_or_admin
+from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app.models.audit import AuditLog
 from app import schemas
@@ -66,7 +66,7 @@ async def list_audit_plans(
 async def create_audit_plan(
     req: schemas.audit.AuditPlanCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     try:
         if req.audit_category == "customer":
@@ -119,7 +119,7 @@ async def update_audit_plan(
     audit_id: uuid.UUID,
     req: schemas.audit.AuditPlanUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
@@ -165,7 +165,7 @@ async def update_audit_plan(
 async def delete_audit_plan(
     audit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
@@ -181,7 +181,7 @@ async def delete_audit_plan(
 async def start_audit_plan(
     audit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
@@ -197,7 +197,7 @@ async def start_audit_plan(
 async def complete_audit_plan(
     audit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
@@ -216,7 +216,7 @@ async def complete_audit_plan(
 async def cancel_audit_plan(
     audit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
@@ -233,7 +233,7 @@ async def confirm_customer_audit(
     audit_id: uuid.UUID,
     req: schemas.audit.CustomerConfirmationRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_engineer_or_admin),
+    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
 ):
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:

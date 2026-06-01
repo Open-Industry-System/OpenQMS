@@ -10,6 +10,7 @@ import {
   listOutputs, createOutput, updateOutput, deleteOutput, verifyOutput,
 } from "../../api/managementReview";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import type { ManagementReview, ReviewOutput } from "../../types";
 
 const { TextArea } = Input;
@@ -60,8 +61,7 @@ export default function ManagementReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role === "viewer";
-  const isAdminOrManager = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
 
   const [review, setReview] = useState<ManagementReview | null>(null);
   const [outputs, setOutputs] = useState<ReviewOutput[]>([]);
@@ -144,7 +144,7 @@ export default function ManagementReviewDetailPage() {
         <TextArea
           rows={3}
           defaultValue={String(manualInputs[src.key] || "")}
-          disabled={isClosed || isViewer}
+          disabled={isClosed || !canEdit('management_review')}
           onBlur={(e) => handleSaveManualInput(src.key, e.target.value)}
           placeholder="请输入..."
         />
@@ -166,7 +166,7 @@ export default function ManagementReviewDetailPage() {
           <TextArea
             rows={3}
             defaultValue={summary}
-            disabled={isClosed || isViewer}
+            disabled={isClosed || !canEdit('management_review')}
             onBlur={(e) => {
               const val = { ...parsed, summary: e.target.value };
               handleSaveManualInput(src.key, val);
@@ -212,7 +212,7 @@ export default function ManagementReviewDetailPage() {
               fetchData();
             }}>完成</Button>
           )}
-          {record.status === "completed" && isAdminOrManager && (
+          {record.status === "completed" && canApprove('management_review') && (
             <Button size="small" type="primary" onClick={() => {
               setActiveOutput(record);
               setVerifyModalOpen(true);
@@ -243,20 +243,20 @@ export default function ManagementReviewDetailPage() {
         }
         extra={
           <Space>
-            {s === "draft" && !isViewer && (
+            {s === "draft" && !!canEdit('management_review') && (
               <Button type="primary" onClick={() => handleTransition(() => collectData(id!))}>汇总数据</Button>
             )}
-            {s === "data_collected" && !isViewer && (
+            {s === "data_collected" && !!canEdit('management_review') && (
               <>
                 <Button onClick={() => handleTransition(() => refreshData(id!))}>刷新数据</Button>
                 <Button onClick={() => handleTransition(() => backToDraft(id!))}>返回草稿</Button>
                 <Button type="primary" onClick={() => handleTransition(() => startReview(id!))}>开始评审</Button>
               </>
             )}
-            {s === "in_review" && isAdminOrManager && (
+            {s === "in_review" && canApprove('management_review') && (
               <Button type="primary" onClick={() => handleTransition(() => closeReview(id!))}>关闭评审</Button>
             )}
-            {s === "closed" && isAdminOrManager && (
+            {s === "closed" && canApprove('management_review') && (
               <Popconfirm title="确认重新打开?" onConfirm={() => handleTransition(() => reopenReview(id!))}>
                 <Button>重新打开</Button>
               </Popconfirm>
@@ -287,7 +287,7 @@ export default function ManagementReviewDetailPage() {
           <TextArea
             rows={6}
             defaultValue={review.meeting_minutes || ""}
-            disabled={isClosed || isViewer}
+            disabled={isClosed || !canEdit('management_review')}
             onBlur={async (e) => {
               if (!id) return;
               const updated = await updateManagementReview(id, { meeting_minutes: e.target.value });
@@ -302,7 +302,7 @@ export default function ManagementReviewDetailPage() {
       {(s === "in_review" || s === "closed") && (
         <Card
           title="评审输出措施"
-          extra={!isClosed && !isViewer ? (
+          extra={!isClosed && !!canEdit('management_review') ? (
             <Button type="primary" onClick={() => setOutputModalOpen(true)}>添加措施</Button>
           ) : undefined}
         >

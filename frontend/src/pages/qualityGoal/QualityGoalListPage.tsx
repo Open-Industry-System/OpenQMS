@@ -28,6 +28,7 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
+import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { QualityGoal } from "../../types";
 import {
@@ -93,8 +94,7 @@ function getProgressPercent(target: string, actual: string | null): number {
 export default function QualityGoalListPage() {
   const { message } = App.useApp();
   const user = useAuthStore((s) => s.user);
-  const isEngineerPlus = user?.role === "admin" || user?.role === "manager" || user?.role === "quality_engineer";
-  const isManagerPlus = user?.role === "admin" || user?.role === "manager";
+  const { canEdit, canApprove } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
 
   const [goals, setGoals] = useState<QualityGoal[]>([]);
@@ -397,7 +397,7 @@ export default function QualityGoalListPage() {
         const isOwner = record.owner_id === user?.user_id;
         return (
           <Space size="small" wrap>
-            {record.status === "draft" && isEngineerPlus && (
+            {record.status === "draft" && canEdit('quality_goal') && (
               <>
                 <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
                   编辑
@@ -414,12 +414,12 @@ export default function QualityGoalListPage() {
             )}
             {record.status === "pending" && (
               <>
-                {isEngineerPlus && isOwner && (
+                {canEdit('quality_goal') && isOwner && (
                   <Button size="small" icon={<RollbackOutlined />} onClick={() => handleWithdraw(record.goal_id)}>
                     撤回
                   </Button>
                 )}
-                {isManagerPlus && (
+                {canApprove('quality_goal') && (
                   <>
                     <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => handleApprove(record.goal_id)}>
                       通过
@@ -441,7 +441,7 @@ export default function QualityGoalListPage() {
             )}
             {record.status === "active" && (
               <>
-                {isEngineerPlus && (
+                {canEdit('quality_goal') && (
                   <Tooltip title="更新实际值">
                     <Button
                       size="small"
@@ -455,7 +455,7 @@ export default function QualityGoalListPage() {
                     </Button>
                   </Tooltip>
                 )}
-                {isManagerPlus && (
+                {canApprove('quality_goal') && (
                   <Popconfirm title="确认停用？" onConfirm={() => handleArchive(record.goal_id)}>
                     <Button size="small" icon={<InboxOutlined />}>
                       停用
@@ -502,7 +502,7 @@ export default function QualityGoalListPage() {
       <Card
         title="质量目标列表"
         extra={
-          isEngineerPlus && (
+          canEdit('quality_goal') && (
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
               新建目标
             </Button>
@@ -514,9 +514,9 @@ export default function QualityGoalListPage() {
           onChange={setActiveTab}
           items={[
             { label: "全部", key: "all" },
-            ...(isManagerPlus ? [{ label: "待我审批", key: "pending" }] : []),
+            ...(canApprove('quality_goal') ? [{ label: "待我审批", key: "pending" }] : []),
             { label: "我的目标", key: "my" },
-            ...(isEngineerPlus ? [{ label: "草稿", key: "draft" }] : []),
+            ...(canEdit('quality_goal') ? [{ label: "草稿", key: "draft" }] : []),
           ]}
         />
         <Table

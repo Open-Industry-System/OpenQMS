@@ -1,6 +1,6 @@
 import re
 import uuid
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, Field
 
 
 class LoginRequest(BaseModel):
@@ -13,7 +13,7 @@ class RegisterRequest(BaseModel):
     password: str
     display_name: str | None = None
     email: EmailStr | None = None
-    role: str = "viewer"
+    role_key: str = "viewer"
 
     @field_validator("password")
     @classmethod
@@ -36,7 +36,12 @@ class UserResponse(BaseModel):
     username: str
     display_name: str | None
     email: str | None
-    role: str
+    role_key: str = ""
+    legacy_role: str | None = None
+    permissions: dict[str, int] = Field(default_factory=dict)
+    product_lines: list[dict] = Field(default_factory=list)
+    bypass_row_level_security: bool = False
+    auditor_info: dict | None = None
     is_active: bool
 
     model_config = {"from_attributes": True}
