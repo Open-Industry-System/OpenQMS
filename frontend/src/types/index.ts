@@ -1266,3 +1266,24 @@ export interface ShipmentRecord {
   product_line_code: string | null;
   created_at: string;
 }
+
+// ─── D7 Prevention Recurrence ───
+
+export interface D7Recommendation {
+  fmea_id: string;
+  fmea_document_no: string;
+  failure_mode_node_id: string;
+  failure_mode_name: string;
+  failure_cause_node_id: string | null;
+  failure_cause_name: string | null;
+  prevention_control_node_id: string | null;
+  prevention_control_name: string | null;
+  match_source: "linked" | "keyword";
+  match_reason: string;
+  related_d4_keywords: string[];
+  suggested_prevention: string | null;
+}
+
+export interface D7RecommendationResponse {
+  recommendations: D7Recommendation[];
+}
