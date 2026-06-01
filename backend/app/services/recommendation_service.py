@@ -269,9 +269,9 @@ class RecommendationService:
         context_hash = self._compute_context_hash(request.context)
         cached = await self._get_cached(fmea_id, request.trigger_type, context_hash)
         if cached:
-            # Skip rule-only cache if LLM is now available and cached result was rule-only
-            # (LLM may have been enabled after the cache was written)
-            if cached.source == "rule" and self.llm is not None:
+            # Skip cache only if LLM is now available but cache was written without LLM
+            # (avoids re-evaluating high-quality rule results that don't need LLM)
+            if self.llm is not None and not cached.llm_available:
                 pass  # fall through to re-evaluate with LLM
             else:
                 return cached
@@ -337,11 +337,13 @@ class RecommendationService:
         result = await self.db.execute(stmt)
         row = result.scalar_one_or_none()
         if row:
+            # Use the cached llm_available flag to determine if cache was written with LLM context
+            # The current self.llm state is used for the response, but the cached flag is stored separately
             return RecommendResponse(
                 suggestions=row.suggestions,
                 source=row.source,
                 cached=True,
-                llm_available=self.llm is not None,
+                llm_available=getattr(row, "llm_available", False),
             )
         return None
 
@@ -359,12 +361,14 @@ class RecommendationService:
                 fmea_type=fmea.fmea_type,
                 suggestions=[s.model_dump() for s in response.suggestions],
                 source=response.source,
+                llm_available=self.llm is not None,
             )
             .on_conflict_do_update(
                 index_elements=["fmea_id", "trigger_type", "context_hash"],
                 set_={
                     "suggestions": [s.model_dump() for s in response.suggestions],
                     "source": response.source,
+                    "llm_available": self.llm is not None,
                     "product_line_code": fmea.product_line_code,
                     "fmea_type": fmea.fmea_type,
                     "created_at": func.now(),

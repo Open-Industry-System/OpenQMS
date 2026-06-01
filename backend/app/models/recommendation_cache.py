@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, ForeignKey, func, UniqueConstraint
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, func, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,5 +22,6 @@ class RecommendationCache(Base):
     fmea_type: Mapped[str] = mapped_column(String(20), nullable=False)
     suggestions: Mapped[list[dict]] = mapped_column(JSONB, nullable=False)
     source: Mapped[str] = mapped_column(String(15), nullable=False)
+    llm_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

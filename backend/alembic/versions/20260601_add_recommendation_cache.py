@@ -25,6 +25,7 @@ def upgrade() -> None:
         sa.Column("fmea_type", sa.String(20), nullable=False),
         sa.Column("suggestions", JSONB, nullable=False),
         sa.Column("source", sa.String(15), nullable=False),
+        sa.Column("llm_available", sa.Boolean, nullable=False, server_default=sa.text("false")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), server_default=sa.text("now() + INTERVAL '24 hours'"), nullable=False),
         sa.UniqueConstraint("fmea_id", "trigger_type", "context_hash", name="uq_recommendation_cache_lookup"),
