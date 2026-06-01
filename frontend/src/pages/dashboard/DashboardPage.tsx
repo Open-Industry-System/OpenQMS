@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Row, Col, Card, List, Button, Tag, Typography, Space, Statistic } from "antd";
+import { useEffect, useState, useCallback } from "react";
+import { Row, Col, Card, Button, Typography } from "antd";
 import {
   AlertOutlined,
   ClockCircleOutlined,
@@ -15,31 +15,67 @@ import {
 } from "../../api/dashboard";
 import type { DashboardSummary, DashboardAlerts, DashboardRecentAction } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
+import { useAuthStore } from "../../store/authStore";
+import KPICard from "../../components/dashboard/KPICard";
+import RiskList from "../../components/dashboard/RiskList";
+import RecentActions from "../../components/dashboard/RecentActions";
+import CollapsibleSection from "../../components/dashboard/CollapsibleSection";
 
 const { Title } = Typography;
+
+function formatTrend(trend: number | undefined): string {
+  if (trend === undefined || trend === null) return "—";
+  if (trend > 0) return `↑ ${trend}%`;
+  if (trend < 0) return `↓ ${Math.abs(trend)}%`;
+  return "—";
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const productLine = useProductLineStore((s) => s.selected);
+  const user = useAuthStore((s) => s.user);
+  const isViewer = user?.role === "viewer";
+
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [alerts, setAlerts] = useState<DashboardAlerts | null>(null);
   const [recentActions, setRecentActions] = useState<DashboardRecentAction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState(false);
+  const [alertsError, setAlertsError] = useState(false);
+  const [actionsError, setActionsError] = useState(false);
 
-  useEffect(() => {
+  const fetchData = useCallback(() => {
     setLoading(true);
-    Promise.all([
-      getDashboardSummary(productLine || undefined),
-      getDashboardAlerts(productLine || undefined),
-      getDashboardRecentActions(),
-    ])
-      .then(([s, a, r]) => {
-        setSummary(s);
-        setAlerts(a);
-        setRecentActions(r);
-      })
+    setSummaryError(false);
+    setAlertsError(false);
+    setActionsError(false);
+
+    getDashboardSummary(productLine || undefined)
+      .then((s) => setSummary(s))
+      .catch(() => setSummaryError(true))
+      .finally(() => setLoading(false));
+
+    getDashboardAlerts(productLine || undefined)
+      .then((a) => setAlerts(a))
+      .catch(() => setAlertsError(true))
+      .finally(() => setLoading(false));
+
+    getDashboardRecentActions()
+      .then((r) => setRecentActions(r))
+      .catch(() => setActionsError(true))
       .finally(() => setLoading(false));
   }, [productLine]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const pendingStatus = (summary?.pending_actions ?? 0) > 0 ? "warning" : "success";
+  const overdueStatus = (summary?.overdue_tasks ?? 0) > 0 ? "danger" : "success";
+  const highRiskStatus = (summary?.high_risk_items ?? 0) > 0 ? "danger" : "success";
+
+  const trend = summary?.month_trend ?? 0;
+  const trendStatus = trend > 0 ? "success" : trend < 0 ? "danger" : "success";
 
   return (
     <div>
@@ -47,176 +83,133 @@ export default function DashboardPage() {
         质量仪表盘
       </Title>
 
-      {/* 顶部指标卡 */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} lg={6}>
-          <Card hoverable onClick={() => navigate("/capa?pending_action=true")}>
-            <Statistic
+      {/* P0: KPI section */}
+      <section aria-label="质量指标概览">
+        <Row gutter={[16, 16]}>
+          <Col xs={24} sm={12} lg={6}>
+            <KPICard
               title="待办事项"
               value={summary?.pending_actions ?? 0}
-              prefix={<ClockCircleOutlined />}
-              valueStyle={{ color: (summary?.pending_actions ?? 0) > 0 ? "#FAAD14" : "#52C41A" }}
+              status={pendingStatus}
+              icon={<ClockCircleOutlined />}
+              onClick={() => navigate("/capa?pending_action=true")}
+              loading={loading}
+              error={summaryError}
+              onRetry={fetchData}
+              disabled={isViewer}
             />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card hoverable onClick={() => navigate("/capa?overdue=true")}>
-            <Statistic
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <KPICard
               title="超期任务"
               value={summary?.overdue_tasks ?? 0}
-              prefix={<AlertOutlined />}
-              valueStyle={{ color: (summary?.overdue_tasks ?? 0) > 0 ? "#FF4D4F" : "#52C41A" }}
+              status={overdueStatus}
+              icon={<AlertOutlined />}
+              onClick={() => navigate("/capa?overdue=true")}
+              loading={loading}
+              error={summaryError}
+              onRetry={fetchData}
+              disabled={isViewer}
             />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card hoverable onClick={() => navigate("/fmea?risk=high")}>
-            <Statistic
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <KPICard
               title="高风险项"
               value={summary?.high_risk_items ?? 0}
-              prefix={<WarningOutlined />}
-              valueStyle={{ color: (summary?.high_risk_items ?? 0) > 0 ? "#FF4D4F" : "#52C41A" }}
+              status={highRiskStatus}
+              icon={<WarningOutlined />}
+              onClick={() => navigate("/fmea?risk=high")}
+              loading={loading}
+              error={summaryError}
+              onRetry={fetchData}
+              disabled={isViewer}
             />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card>
-            <Statistic
-              title="本月趋势"
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <KPICard
+              title="本月新增"
               value={summary?.month_trend ?? 0}
-              prefix={<RiseOutlined />}
-              valueStyle={{
-                color: (summary?.month_trend ?? 0) >= 0 ? "#52C41A" : "#FF4D4F",
-              }}
+              status={trendStatus}
+              subtitle={formatTrend(summary?.month_trend)}
+              icon={<RiseOutlined />}
+              loading={loading}
+              error={summaryError}
+              onRetry={fetchData}
+              disabled={isViewer}
             />
-          </Card>
-        </Col>
-      </Row>
+          </Col>
+        </Row>
+      </section>
 
-      {/* 风险预警区 */}
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} lg={8}>
-          <Card title="高 RPN FMEA" size="small" loading={loading}>
-            <List
-              dataSource={alerts?.high_rpn_fmeas ?? []}
-              locale={{ emptyText: "无高风险项" }}
-              renderItem={(item) => (
-                <List.Item
-                  style={{ cursor: "pointer" }}
-                  onClick={() => navigate(`/fmea/${item.fmea_id}`)}
-                >
-                  <List.Item.Meta
-                    title={item.document_no}
-                    description={item.node_name}
-                  />
-                  <Tag color="error">RPN={item.rpn}</Tag>
-                </List.Item>
-              )}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={8}>
-          <Card title="超期 CAPA" size="small" loading={loading}>
-            <List
-              dataSource={alerts?.overdue_capas ?? []}
-              locale={{ emptyText: "无超期任务" }}
-              renderItem={(item) => (
-                <List.Item
-                  style={{ cursor: "pointer" }}
-                  onClick={() => navigate(`/capa/${item.report_id}`)}
-                >
-                  <List.Item.Meta
-                    title={item.document_no}
-                    description={`超期 ${item.overdue_days} 天`}
-                  />
-                  <Tag color="error">{item.overdue_days}天</Tag>
-                </List.Item>
-              )}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={8}>
-          <Card title="PPM 超标供应商" size="small" loading={loading}>
-            <List
-              dataSource={alerts?.high_ppm_suppliers ?? []}
-              locale={{ emptyText: "无超标供应商" }}
-              renderItem={(item) => (
-                <List.Item
-                  style={{ cursor: "pointer" }}
-                  onClick={() => navigate(`/suppliers/${item.supplier_id}`)}
-                >
-                  <List.Item.Meta
-                    title={item.supplier_name}
-                    description={`PPM: ${item.ppm}`}
-                  />
-                  <Tag color="warning">PPM={item.ppm}</Tag>
-                </List.Item>
-              )}
-            />
-          </Card>
-        </Col>
-      </Row>
+      {/* P1: 待处置事项 section */}
+      <section aria-label="待处置事项" style={{ marginTop: 24 }}>
+        <Title level={5}>待处置事项</Title>
+        <Row gutter={[16, 16]} style={{ marginTop: 8 }}>
+          <Col xs={24} lg={8}>
+            <Card title="高 RPN FMEA" size="small">
+              <RiskList
+                data={alerts}
+                category="fmea"
+                loading={loading}
+                error={alertsError}
+                onRetry={fetchData}
+                disabled={isViewer}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Card title="超期 CAPA" size="small">
+              <RiskList
+                data={alerts}
+                category="capa"
+                loading={loading}
+                error={alertsError}
+                onRetry={fetchData}
+                disabled={isViewer}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Card title="PPM 超标供应商" size="small">
+              <RiskList
+                data={alerts}
+                category="supplier"
+                loading={loading}
+                error={alertsError}
+                onRetry={fetchData}
+                disabled={isViewer}
+              />
+            </Card>
+          </Col>
+        </Row>
+      </section>
 
-      {/* 底部：最近操作 + 快速入口 */}
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} lg={16}>
-          <Card title="最近操作" size="small" loading={loading}>
-            <List
-              dataSource={recentActions}
-              locale={{ emptyText: "暂无操作记录" }}
-              renderItem={(item) => {
-                const typeMap: Record<string, { label: string; path: string }> = {
-                  fmea_documents: { label: "FMEA", path: "/fmea" },
-                  capa_eightd: { label: "CAPA", path: "/capa" },
-                };
-                const info = typeMap[item.table_name] || {
-                  label: item.table_name,
-                  path: "/",
-                };
-                return (
-                  <List.Item
-                    style={{ cursor: "pointer" }}
-                    onClick={() => navigate(`${info.path}/${item.record_id}`)}
-                  >
-                    <List.Item.Meta
-                      title={`${info.label} - ${item.entity_no}`}
-                      description={`${item.action} · ${new Date(item.operated_at).toLocaleString("zh-CN")}`}
-                    />
-                  </List.Item>
-                );
-              }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={8}>
-          <Card title="快速入口" size="small">
-            <Space direction="vertical" style={{ width: "100%" }}>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                block
-                onClick={() => navigate("/fmea")}
-              >
-                新建 FMEA
-              </Button>
-              <Button
-                icon={<PlusOutlined />}
-                block
-                onClick={() => navigate("/capa")}
-              >
-                新建 CAPA
-              </Button>
-              <Button
-                icon={<PlusOutlined />}
-                block
-                onClick={() => navigate("/customer-quality")}
-              >
-                新建客诉
-              </Button>
-            </Space>
-          </Card>
-        </Col>
-      </Row>
+      {/* P2: 最近操作 section */}
+      <CollapsibleSection title="最近操作" collapseAt={767} style={{ marginTop: 24 }}>
+        <Card size="small">
+          <RecentActions
+            data={recentActions}
+            loading={loading}
+            error={actionsError}
+            onRetry={fetchData}
+          />
+        </Card>
+      </CollapsibleSection>
+
+      {/* P3: 快速入口 section */}
+      <CollapsibleSection title="快速入口" collapseAt={767} hidden={isViewer} style={{ marginTop: 16 }}>
+        <Card size="small">
+          <Button type="default" icon={<PlusOutlined />} block onClick={() => navigate("/fmea")}>
+            新建 FMEA
+          </Button>
+          <Button type="default" icon={<PlusOutlined />} block onClick={() => navigate("/capa")} style={{ marginTop: 8 }}>
+            新建 CAPA
+          </Button>
+          <Button type="default" icon={<PlusOutlined />} block onClick={() => navigate("/customer-quality")} style={{ marginTop: 8 }}>
+            新建客诉
+          </Button>
+        </Card>
+      </CollapsibleSection>
     </div>
   );
 }
