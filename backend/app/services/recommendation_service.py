@@ -337,13 +337,12 @@ class RecommendationService:
         result = await self.db.execute(stmt)
         row = result.scalar_one_or_none()
         if row:
-            # Use the cached llm_available flag to determine if cache was written with LLM context
-            # The current self.llm state is used for the response, but the cached flag is stored separately
+            # llm_available in response reflects CURRENT state, not cache write time
             return RecommendResponse(
                 suggestions=row.suggestions,
                 source=row.source,
                 cached=True,
-                llm_available=getattr(row, "llm_available", False),
+                llm_available=self.llm is not None,
             )
         return None
 
