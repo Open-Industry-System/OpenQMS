@@ -30,47 +30,43 @@
 
 ## 2. 色彩系统
 
+> **注意：** 本节中 `--xxx` 标记为设计概念名称，实际实现时全部映射到 Ant Design Token，不在代码中引入原生 CSS 变量。映射关系见附录 11.1。
+
 ### 2.1 背景层级
 
-```css
-:root {
-  --bg-primary: #0a0e1a;      /* 页面主背景 - 接近黑色的深蓝灰 */
-  --bg-surface: #111827;       /* 卡片/面板背景 */
-  --bg-elevated: #1f2937;      /* 悬浮/选中状态 */
-  --bg-hover: #374151;         /* hover状态 */
-}
-```
+| 设计概念 | Ant Design Token | 值 | 用途 |
+|---------|-----------------|-----|------|
+| --bg-primary | `token.colorBgLayout` | #0a0e1a | 页面主背景 - 接近黑色的深蓝灰 |
+| --bg-surface | `token.colorBgContainer` | #111827 | 卡片/面板背景 |
+| --bg-elevated | `token.colorBgElevated` | #1f2937 | 悬浮/选中状态 |
+| --bg-hover | 组件级 Token `colorItemBgHover` | #374151 | hover状态 |
 
 ### 2.2 文字颜色
 
-```css
-:root {
-  --text-primary: #f0f9ff;     /* 主标题 - 高亮白 */
-  --text-secondary: #94a3b8;   /* 次要文字 - 蓝灰 */
-  --text-muted: #64748b;       /* 辅助文字 - 暗灰 */
-  --text-disabled: #475569;    /* 禁用状态 */
-}
-```
+| 设计概念 | Ant Design Token | 值 | 用途 |
+|---------|-----------------|-----|------|
+| --text-primary | `token.colorText` | #f0f9ff | 主标题 - 高亮白 |
+| --text-secondary | `token.colorTextSecondary` | #94a3b8 | 次要文字 - 蓝灰 |
+| --text-muted | `token.colorTextTertiary` | #64748b | 辅助文字 - 暗灰 |
+| --text-disabled | `token.colorTextDisabled` | #475569 | 禁用状态 |
 
 ### 2.3 强调色
 
-| 用途 | 颜色 | CSS变量 |
-|------|------|---------|
-| 主交互色 | #3b82f6 | --accent-primary |
-| 数据高亮 | #06b6d4 | --accent-cyan |
-| 成功/正常 | #10b981 | --accent-success |
-| 警告 | #f59e0b | --accent-warning |
-| 危险/异常 | #ef4444 | --accent-danger |
+| 用途 | Ant Design Token | 值 |
+|------|-----------------|-----|
+| 主交互色 | `token.colorPrimary` | #3b82f6 |
+| 数据高亮 | `token.colorInfo` | #06b6d4 |
+| 成功/正常 | `token.colorSuccess` | #10b981 |
+| 警告 | `token.colorWarning` | #f59e0b |
+| 危险/异常 | `token.colorError` | #ef4444 |
 
 ### 2.4 边框与分隔
 
-```css
-:root {
-  --border-subtle: rgba(148, 163, 184, 0.1);      /* 微弱边框 */
-  --border-default: rgba(148, 163, 184, 0.2);     /* 默认边框 */
-  --border-glow: rgba(59, 130, 246, 0.3);         /* 发光边框 */
-}
-```
+| 设计概念 | Ant Design Token | 值 |
+|---------|-----------------|-----|
+| --border-subtle | `token.colorBorderSecondary` | rgba(148, 163, 184, 0.1) |
+| --border-default | `token.colorBorder` | rgba(148, 163, 184, 0.2) |
+| --border-glow | 自定义扩展 Token（见附录） | rgba(59, 130, 246, 0.3) |
 
 ---
 
@@ -350,14 +346,16 @@
 }
 ```
 
-### 7.3 过渡时间规范
+### 7.3 过渡时间规范（使用 Ant Design Motion Token）
 
-| 类型 | 持续时间 |
-|------|----------|
-| 微交互（hover） | 150-200ms |
-| 状态变化 | 200-300ms |
-| 页面元素入场 | 300-500ms |
-| 数字动画 | 1000-1500ms |
+> **注意：** 不手写 CSS transition 时长，优先复用 AntD 内置 Motion Token，确保全系统动画节奏一致。
+
+| 类型 | Ant Design Token | 值 | 用途 |
+|------|-----------------|-----|------|
+| 微交互（hover） | `token.motionDurationMid` | 0.2s | 卡片悬浮、列表项高亮 |
+| 状态变化 | `token.motionDurationSlow` | 0.3s | 面板展开、下拉菜单 |
+| 页面元素入场 | `token.motionDurationSlow` + stagger | 0.3s + delay | KPI卡片依次渐入 |
+| 数字动画 | 自定义（requestAnimationFrame） | 1000-1500ms | useCountUp hook |
 
 ---
 
@@ -401,10 +399,10 @@
 
 ### 9.1 阶段一：主题基础（预计 2-3 小时）
 
-1. 创建全局CSS变量文件 `frontend/src/styles/dark-theme.css`
-2. 配置 Ant Design ConfigProvider 暗色主题
+1. 在 `App.tsx` 中配置 `ConfigProvider` 暗色主题（使用附录 11.2 完整配置）
+2. 注册 ECharts 自定义 `industrialDark` 主题（见附录 11.4）
 3. 引入 JetBrains Mono 字体
-4. 覆盖关键 Ant Design 组件令牌
+4. 在现有组件中用 `theme.useToken()` 替换硬编码颜色值
 
 ### 9.2 阶段二：布局与导航（预计 2-3 小时）
 
@@ -415,11 +413,11 @@
 
 ### 9.3 阶段三：仪表盘页面（预计 3-4 小时）
 
-1. 改造 KPI 卡片组件
-2. 实现数字滚动动画
+1. 改造 KPI 卡片组件（使用 `token` 控制颜色和动画时长）
+2. 实现 `useCountUp` hook（requestAnimationFrame，见附录 11.5）
 3. 改造风险预警列表
 4. 改造时间线样式
-5. 实现页面加载动画
+5. 实现页面加载 stagger 动画（使用 `token.motionDurationSlow`）
 
 ### 9.4 阶段四：通用组件（预计 2-3 小时）
 
@@ -452,29 +450,73 @@
 
 ## 11. 附录：Ant Design 主题配置
 
+### 11.1 Token 体系说明
+
+本设计**不使用原生 CSS 变量**（如 `--bg-surface`），而是将所有颜色定义映射到 Ant Design 5 的 Token 体系中，确保**单一事实来源（Single Source of Truth）**。实现时通过 `theme.useToken()` hook 获取颜色值，避免维护两套变量系统导致主题切换时状态不一致。
+
+**设计概念 → Ant Design Token 映射表：**
+
+| 设计概念 | Ant Design 全局 Token | 值 |
+|---------|----------------------|-----|
+| --bg-primary | `colorBgLayout` | #0a0e1a |
+| --bg-surface | `colorBgContainer` | #111827 |
+| --bg-elevated | `colorBgElevated` | #1f2937 |
+| --text-primary | `colorText` | #f0f9ff |
+| --text-secondary | `colorTextSecondary` | #94a3b8 |
+| --text-muted | `colorTextTertiary` | #64748b |
+| --border-subtle | `colorBorderSecondary` | rgba(148,163,184,0.1) |
+| --border-default | `colorBorder` | rgba(148,163,184,0.2) |
+| --accent-primary | `colorPrimary` | #3b82f6 |
+| --accent-success | `colorSuccess` | #10b981 |
+| --accent-warning | `colorWarning` | #f59e0b |
+| --accent-danger | `colorError` | #ef4444 |
+
+### 11.2 ConfigProvider 完整配置
+
 ```typescript
 import { ConfigProvider, theme } from 'antd';
 
 const darkTheme = {
   algorithm: theme.darkAlgorithm,
   token: {
+    // 全局基础色
     colorPrimary: '#3b82f6',
     colorSuccess: '#10b981',
     colorWarning: '#f59e0b',
     colorError: '#ef4444',
     colorInfo: '#06b6d4',
+
+    // 背景层级（映射设计概念）
+    colorBgLayout: '#0a0e1a',       // 页面主背景
+    colorBgContainer: '#111827',    // 卡片/面板背景
+    colorBgElevated: '#1f2937',     // 悬浮/选中状态
+
+    // 文字层级
+    colorText: '#f0f9ff',
+    colorTextSecondary: '#94a3b8',
+    colorTextTertiary: '#64748b',
+
+    // 边框
+    colorBorder: 'rgba(148, 163, 184, 0.2)',
+    colorBorderSecondary: 'rgba(148, 163, 184, 0.1)',
+
+    // 圆角与字体
     borderRadius: 8,
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     fontSize: 14,
+
+    // 动画（复用 AntD Motion Token，不手写 CSS transition）
+    motionDurationMid: '0.2s',      // 微交互 hover
+    motionDurationSlow: '0.3s',     // 状态变化
   },
   components: {
+    Layout: {
+      headerBg: '#111827',           // 正确的 v5 Token 名
+      bodyBg: '#0a0e1a',
+      siderBg: '#111827',
+    },
     Card: {
       colorBgContainer: '#111827',
-    },
-    Layout: {
-      colorBgHeader: '#111827',
-      colorBgBody: '#0a0e1a',
-      colorBgSider: '#111827',
     },
     Menu: {
       colorBgContainer: 'transparent',
@@ -487,4 +529,75 @@ const darkTheme = {
     },
   },
 };
+```
+
+### 11.3 组件中获取 Token 的方式
+
+```tsx
+import { theme } from 'antd';
+
+function MyComponent() {
+  const { token } = theme.useToken();
+  // 使用 token.colorBgContainer 而非 CSS 变量
+  // 使用 token.motionDurationMid 而非手写 '0.2s'
+  return <div style={{ background: token.colorBgContainer }} />;
+}
+```
+
+### 11.4 图表暗黑模式适配
+
+项目使用了 ECharts 和 @ant-design/charts，需要确保图表主题与深色 UI 融合。
+
+**ECharts 暗黑主题：**
+
+```typescript
+import * as echarts from 'echarts';
+
+// 注册自定义工业深色主题
+echarts.registerTheme('industrialDark', {
+  backgroundColor: 'transparent',              // 继承卡片背景
+  textStyle: { color: '#94a3b8' },             // 对应 colorTextSecondary
+  axisLine: { lineStyle: { color: 'rgba(148,163,184,0.2)' } },
+  splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } },
+  // ... 其他配置
+});
+
+// 初始化时使用
+const chart = echarts.init(dom, 'industrialDark');
+```
+
+**Tooltip 背景融合：**
+
+```typescript
+tooltip: {
+  backgroundColor: '#1f2937',       // 对应 colorBgElevated
+  borderColor: 'rgba(148,163,184,0.2)',
+  textStyle: { color: '#f0f9ff' },
+}
+```
+
+**@ant-design/charts：** 使用其内置的 `theme` 属性传入暗黑配置，或通过 ConfigProvider 的 Token 自动继承。
+
+### 11.5 数字滚动动画方案
+
+**方案选择：** 为了减少外部依赖，使用自定义 `useCountUp` hook（基于 `requestAnimationFrame`），不引入 `react-countup`。
+
+```typescript
+function useCountUp(end: number, duration: number = 1500) {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (end === 0) { setValue(0); return; }
+    const startTime = performance.now();
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      // ease-out 缓动
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.round(eased * end));
+      if (progress < 1) requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+  }, [end, duration]);
+  return value;
+}
 ```
