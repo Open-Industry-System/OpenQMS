@@ -862,7 +862,7 @@ class ChangeImpactService:
         return result.scalar_one_or_none()
 ```
 
-**注意：** 审计日志模型和字段需要根据实际 `app.models.audit_log` 调整。如果 `AuditLog` 构造函数不同，请适配。
+**注意：** 审计日志已按 `app.models.audit.AuditLog` 适配（字段：table_name/record_id/action/changed_fields/operated_by）。
 
 - [ ] **Step 2: 验证无导入错误**
 
@@ -946,16 +946,19 @@ async def list_change_impacts(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """获取变更影响分析历史列表。按产品线过滤（不传则查用户有权访问的所有产品线）。"""
+    """获取变更影响分析历史列表。按产品线过滤（不传则查用户有权访问的所有产品线）。admin 绕过 RLS 时不过滤。"""
     from app.core.product_line_filter import get_user_product_line_codes
 
-    user_codes = await get_user_product_line_codes(user, db)
-    if product_line_code:
-        if product_line_code not in user_codes:
-            raise HTTPException(status_code=403, detail="无权访问该产品线")
-        filter_codes = [product_line_code]
+    if user.role_definition.bypass_row_level_security:
+        filter_codes = [product_line_code] if product_line_code else None
     else:
-        filter_codes = user_codes
+        user_codes = await get_user_product_line_codes(user, db)
+        if product_line_code:
+            if product_line_code not in user_codes:
+                raise HTTPException(status_code=403, detail="无权访问该产品线")
+            filter_codes = [product_line_code]
+        else:
+            filter_codes = user_codes
 
     service = ChangeImpactService(db, None)
     # 简化分页：先全查再切片（数据量小，后续可优化为数据库分页）
@@ -1669,7 +1672,7 @@ const handleAnalyzeImpact = async () => {
 </Modal>
 ```
 
-**注意：** 需要导入 `Modal`, `Radio`, `Input`, `Space`, `Text`, `Button` 等 Ant Design 组件。`isViewer` 需要根据实际权限状态判断。
+**注意：** 需要导入 `Modal`, `Radio`, `Input`, `Space`, `Text`, `Button` 等 Ant Design 组件。权限判断使用 `canEdit("fmea")`。
 
 - [ ] **Step 5: 验证编译通过**
 
