@@ -163,7 +163,19 @@ async def update_fmea(
     graph_data: dict | None,
     user_id: uuid.UUID,
     product_line_code: str | None = None,
+    lock_version: int | None = None,
+    confirmed_latest_lock_version: int | None = None,
 ) -> FMEADocument:
+    # 乐观锁校验（互斥分支）
+    if confirmed_latest_lock_version is not None:
+        # 强制保存：只校验确认的版本号，跳过常规 lock_version
+        if fmea.lock_version != confirmed_latest_lock_version:
+            raise ValueError("lock_version_changed_again")
+    elif lock_version is not None:
+        # 常规保存：检查 lock_version 是否匹配
+        if fmea.lock_version != lock_version:
+            raise ValueError("lock_version_mismatch")
+
     changed_fields = {}
     if title is not None:
         changed_fields["title"] = title
@@ -176,6 +188,7 @@ async def update_fmea(
         changed_fields["product_line_code"] = product_line_code
         fmea.product_line_code = product_line_code
     fmea.updated_by = user_id
+    fmea.lock_version += 1  # 递增乐观锁版本
 
     if changed_fields:
         audit_log = AuditLog(
@@ -194,6 +207,17 @@ async def update_fmea(
             event_type="fmea.updated",
             payload={"version": fmea.version, "product_line_code": fmea.product_line_code},
         ))
+
+        # 强制覆盖时记录审计日志
+        if confirmed_latest_lock_version is not None:
+            force_audit = AuditLog(
+                table_name="fmea_documents",
+                record_id=fmea.fmea_id,
+                action="FORCE_SAVE_OVERRIDE",
+                changed_fields={"reason": "User confirmed overwrite after conflict detection"},
+                operated_by=user_id,
+            )
+            db.add(force_audit)
 
         # Invalidate recommendation cache when graph_data or product_line changes
         if graph_data is not None or product_line_code is not None:

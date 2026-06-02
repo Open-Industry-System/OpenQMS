@@ -81,7 +81,39 @@ async def update_fmea(
     if req.product_line_code is not None and req.product_line_code != fmea.product_line_code:
         await enforce_product_line_access(user, req.product_line_code, db)
     graph_dict = req.graph_data.model_dump() if req.graph_data else None
-    fmea = await fmea_service.update_fmea(db, fmea, req.title, graph_dict, user.user_id, req.product_line_code)
+    try:
+        fmea = await fmea_service.update_fmea(
+            db, fmea, req.title, graph_dict, user.user_id, req.product_line_code,
+            lock_version=req.lock_version,
+            confirmed_latest_lock_version=req.confirmed_latest_lock_version,
+        )
+    except ValueError as e:
+        error_msg = str(e)
+        if error_msg == "lock_version_mismatch":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Document has been modified by another user.",
+                    "conflict": {
+                        "saved_by": None,
+                        "saved_at": None,
+                        "latest_lock_version": fmea.lock_version,
+                    },
+                },
+            )
+        if error_msg == "lock_version_changed_again":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Document was modified again while you were reviewing. Please refresh.",
+                    "conflict": {
+                        "saved_by": None,
+                        "saved_at": None,
+                        "latest_lock_version": fmea.lock_version,
+                    },
+                },
+            )
+        raise HTTPException(status_code=400, detail=error_msg)
     return FMEAResponse.model_validate(fmea)
 
 
