@@ -110,7 +110,8 @@ class RecommendationContext:
 
 @dataclass
 class RecommendationCandidate:
-    source: str           # "fmea_graph" | "semantic_search" | "historical_capa" | "rule_engine" | "llm"
+    source: str           # 内部 Source 标识: "fmea_graph" | "semantic_search" | "historical_capa" | "rule_engine" | "llm"
+                          # 注意: 响应输出时 "rule_engine" 映射为旧值 "rule"，保持前端兼容
     content: str          # 根因文本 / 措施文本
     category: str | None  # D5 用: "预防措施" | "探测措施" | "纠正措施"
     confidence: float     # 0.0 ~ 1.0
@@ -223,6 +224,7 @@ class LLMFusionLayer:
             return candidates
 
         # 阶段 1：为候选生成推荐理由
+        # 总 LLM 预算由 pipeline 统一控制: LLM_TOTAL_TIMEOUT = min(settings.LLM_TIMEOUT * 2, 4.0)
         if candidates:
             try:
                 prompt = self._build_fusion_prompt(candidates, context)
@@ -234,7 +236,7 @@ class LLMFusionLayer:
         else:
             enriched = []
 
-        # 阶段 2：候选不足时独立生成
+        # 阶段 2：候选不足时独立生成（仅在阶段 1 成功后且候选仍 < 3 时触发）
         if len(enriched) < 3:
             generated = await self._generate_fallback(context)
             enriched.extend(generated)
