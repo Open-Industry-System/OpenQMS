@@ -470,6 +470,7 @@ def build_cypher_sync(
     for node in nodes:
         raw_type = node.get("type", "")
         if raw_type not in ALLOWED_NODE_TYPES:
+            logger.warning(f"Skipping unknown node type: {raw_type}")
             continue
         label = NODE_TYPE_LABEL_MAP.get(raw_type, raw_type)
         props = _node_properties(node)
@@ -495,6 +496,7 @@ def build_cypher_sync(
         source = edge.get("source", "")
         target = edge.get("target", "")
         if edge_type not in ALLOWED_EDGE_TYPES:
+            logger.warning(f"Skipping unknown edge type: {edge_type}")
             continue
         if source not in node_ids or target not in node_ids:
             continue
@@ -1120,25 +1122,29 @@ class Module(StrEnum):
     KNOWLEDGE_GRAPH = "knowledge_graph"  # 新增
 ```
 
-- [ ] **Step 2: 获取当前 alembic head 并创建迁移文件**
+- [ ] **Step 2: 检查 alembic heads，多 head 时自动 merge**
+
+Run: `cd backend && alembic heads`
+
+如果输出多于一行：
 
 ```bash
 cd backend
-# 检查 head 数量
-HEAD_COUNT=$(alembic heads | wc -l | tr -d ' ')
-if [ "$HEAD_COUNT" -ne 1 ]; then
-    echo "Error: $HEAD_COUNT alembic heads found. Expected exactly 1."
-    echo "Run: alembic merge -m 'merge branches' <head1> <head2>"
-    exit 1
-fi
-HEAD=$(alembic heads | head -1 | awk '{print $1}')
-echo "Current head: $HEAD"
+# 收集所有 head revision
+HEADS=$(alembic heads | awk '{print $1}')
+# 自动创建 merge revision
+alembic merge -m "merge branches before knowledge_graph permissions" $HEADS
+# 验证已合并为单 head
+alembic heads
 ```
 
-然后创建迁移文件：
+Expected: 现在 alembic heads 只输出一行
 
-```bash
-cat > alembic/versions/029_knowledge_graph_permissions.py << PYEOF
+- [ ] **Step 3: 创建迁移文件（先写模板，再填入 down_revision）**
+
+用 Write 工具创建 `backend/alembic/versions/029_knowledge_graph_permissions.py`：
+
+```python
 """add knowledge_graph permissions
 
 Revision ID: 029
@@ -1148,7 +1154,7 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = '029_knowledge_graph_permissions'
-down_revision: Union[str, None] = '$HEAD'
+down_revision: Union[str, None] = None  # 将在下一步替换
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -1168,10 +1174,28 @@ def downgrade() -> None:
     op.execute(
         "DELETE FROM role_permissions WHERE module = 'knowledge_graph'"
     )
-PYEOF
 ```
 
-- [ ] **Step 3: 验证迁移文件语法**
+- [ ] **Step 4: 填入正确的 down_revision**
+
+Run: `cd backend && alembic heads | head -1 | awk '{print $1}'`
+Expected: 输出一个 revision ID（例如 `20260602_collab_sessions`）
+
+用 Edit 工具替换迁移文件中的占位值：
+
+```python
+down_revision: Union[str, None] = None  # TODO: replace
+```
+
+替换为：
+
+```python
+down_revision: Union[str, None] = 'REVISION_FROM_ALEMBIC_HEADS'
+```
+
+（替换为 Step 4 获取的实际 revision ID）
+
+- [ ] **Step 5: 验证迁移文件**
 
 Run: `cd backend && python -m py_compile alembic/versions/029_knowledge_graph_permissions.py`
 Expected: No output (success)
@@ -1179,7 +1203,7 @@ Expected: No output (success)
 Run: `cd backend && alembic check`
 Expected: No error, revision chain is valid
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/app/core/permissions.py backend/alembic/versions/029_knowledge_graph_permissions.py
@@ -1203,7 +1227,6 @@ from app.graph.deps import get_graph_repository
 from app.graph.repository import FMEAGraphRepository
 from app.core.permissions import get_user_permission
 
-# ... inside recommend() ...
 @router.post("/{fmea_id}/recommend", response_model=RecommendResponse)
 async def recommend(
     fmea_id: uuid.UUID,
