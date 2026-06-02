@@ -1170,7 +1170,7 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = '029_knowledge_graph_permissions'
-down_revision: Union[str, None] = 'CURRENT_HEAD_PLACEHOLDER'
+# down_revision: Union[str, None] = None  # 由 Step 4 填入实际值
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -1192,10 +1192,10 @@ def downgrade() -> None:
     )
 ```
 
-然后立即用 Edit 工具替换 `CURRENT_HEAD_PLACEHOLDER` 为 Step 2 保存的实际值：
+然后立即用 Edit 工具取消注释并填入实际值：
 
 ```python
-down_revision: Union[str, None] = 'CURRENT_HEAD_PLACEHOLDER'
+# down_revision: Union[str, None] = None  # 由 Step 4 填入实际值
 ```
 
 替换为：
@@ -1204,7 +1204,7 @@ down_revision: Union[str, None] = 'CURRENT_HEAD_PLACEHOLDER'
 down_revision: Union[str, None] = '20260602_collab_sessions'
 ```
 
-（使用 Step 2 中 `$CURRENT_HEAD` 的实际值）
+（使用 Step 3 merge 后重新获取的 `$CURRENT_HEAD` 值；若未发生 merge，则使用 Step 2 保存的值）
 
 - [ ] **Step 5: 验证迁移文件**
 
@@ -1343,12 +1343,6 @@ async def similar_nodes_advanced(
         total=len(result_matches),
         effective_scope=effective_scope,
     )
-```
-
-注意：`get_db` 已经在文件顶部被导入（通过 `app.graph.deps.get_graph_repository` 的依赖链间接使用），但这里需要显式使用。检查 `backend/app/api/graph.py` 顶部没有 `get_db` 导入，需要添加：
-
-```python
-from app.database import get_db
 ```
 
 - [ ] **Step 3: 更新 `fmea_service.py` 中的 cache invalidation 调用**
