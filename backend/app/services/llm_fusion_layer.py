@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import logging
 from typing import Any
 
@@ -94,26 +95,30 @@ D4 根因: {d4}
         result: Any,
     ) -> list[RecommendationCandidate]:
         if not isinstance(result, list):
-            return candidates
+            return list(candidates)
 
         reason_map = {}
         for item in result:
             if isinstance(item, dict) and "candidate_id" in item:
                 reason_map[item["candidate_id"]] = item.get("match_reason", "")
 
+        merged = []
         for i, c in enumerate(candidates):
             if i in reason_map and reason_map[i]:
-                c.match_reason = reason_map[i]
-
-        return candidates
+                merged.append(dataclasses.replace(c, match_reason=reason_map[i]))
+            else:
+                merged.append(c)
+        return merged
 
     async def _generate_fallback(
         self,
         context: RecommendationContext | None,
     ) -> list[RecommendationCandidate]:
-        d2 = context.capa_data.get("d2_description", "") if context else ""
-        d4 = context.capa_data.get("d4_root_cause", "") if context else ""
-        stage = context.stage if context else "d4"
+        if not context:
+            return []
+        d2 = context.capa_data.get("d2_description", "")
+        d4 = context.capa_data.get("d4_root_cause", "")
+        stage = context.stage
 
         prompt = f"""
 你是一名质量工程师。请基于以下信息生成 8D {stage.upper()} 阶段的建议：

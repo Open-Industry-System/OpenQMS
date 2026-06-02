@@ -45,7 +45,13 @@ class TestLLMFusionLayer:
         ])
 
         layer = LLMFusionLayer(mock_llm)
+        from app.services.recommendation_types import RecommendationContext
+        context = RecommendationContext(
+            capa_data={"d2_description": "问题描述", "d4_root_cause": "根因"},
+            user_product_lines=None,
+            stage="d4",
+        )
         candidates = []
-        result = await layer.enrich(candidates, None)
+        result = await layer.enrich(candidates, context)
         assert len(result) == 1
         assert result[0].content == "generated"
