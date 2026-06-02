@@ -9,6 +9,19 @@ import sqlalchemy as sa
 from sqlalchemy import text
 import logging
 
+
+def _parse_vector_dimensions(raw: str | None, default: int = 1536) -> int:
+    """Parse and validate vector dimensions. Inlined to keep migration self-contained."""
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        dim = int(raw)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid vector dimensions: '{raw}'. Must be an integer.")
+    if not (1 <= dim <= 2000):
+        raise ValueError(f"Invalid vector dimensions: {dim}. Must be 1-2000.")
+    return dim
+
 logger = logging.getLogger("alembic.migration")
 
 revision = "20260602_vec_search"
@@ -41,9 +54,8 @@ def upgrade():
     # --- document_embeddings table ---
     # Vector dimension is configurable at deployment time (default 1536 for OpenAI)
     # To change: run `alembic upgrade head -x dimensions=768`
-    from app.utils.vector import parse_vector_dimensions
     x_args = op.get_context().get_x_argument(as_dictionary=True)
-    dimensions = parse_vector_dimensions(x_args.get("dimensions"))
+    dimensions = _parse_vector_dimensions(x_args.get("dimensions"))
     op.execute(f"""
         CREATE TABLE document_embeddings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
