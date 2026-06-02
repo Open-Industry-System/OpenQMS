@@ -118,6 +118,8 @@ export interface SPCAlarm {
   linked_capa_id?: string;
   acknowledged_by_id?: string;
   acknowledged_at?: string;
+  confirmed_fmea_id?: string;
+  confirmed_fmea_node_id?: string;
 }
 
 export interface SPCAlarmListResponse {
@@ -125,4 +127,38 @@ export interface SPCAlarmListResponse {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface FMEAMatch {
+  node_id: string;
+  name: string;
+  node_type: string;
+  fmea_id: string;
+  document_no: string;
+  match_source: "control_plan" | "process_name" | "characteristic_name";
+  match_score: number;
+  rpn: number;
+  ap: string;
+  severity: number;
+  occurrence: number;
+  detection: number;
+  path: string;
+  cause_preview: string[];
+  control_count: number;
+}
+
+export interface FMEAMatchResponse {
+  alarm_id: string;
+  ic_code: string;
+  process_name: string;
+  characteristic_name: string;
+  recommendations: FMEAMatch[];
+  has_confirmed: boolean;
+  confirmed_fmea_id: string | null;
+  confirmed_fmea_node_id: string | null;
+}
+
+export interface ConfirmFMEARequest {
+  fmea_id: string;
+  node_id: string;
 }

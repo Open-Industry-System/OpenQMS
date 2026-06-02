@@ -9,6 +9,7 @@ import type {
   SPCAlarm,
   SPCAlarmListResponse,
   ControlLimitSnapshot,
+  FMEAMatchResponse,
 } from "../types/spc";
 
 export async function listInspectionCharacteristics(params: {
@@ -98,6 +99,28 @@ export async function acknowledgeAlarm(alarmId: string): Promise<SPCAlarm> {
 
 export async function createCAPAFromAlarm(alarmId: string): Promise<{ capa_id: string; document_number: string }> {
   const resp = await client.post(`/spc/alarms/${alarmId}/create-capa`);
+  return resp.data;
+}
+
+export async function getFMEAMatchRecommendations(
+  alarmId: string,
+  force: boolean = false
+): Promise<FMEAMatchResponse> {
+  const resp = await client.get(`/spc/alarms/${alarmId}/fmea-recommendations`, {
+    params: { force }
+  });
+  return resp.data;
+}
+
+export async function confirmFMEAAssociation(
+  alarmId: string,
+  fmeaId: string,
+  nodeId: string
+): Promise<{ success: boolean }> {
+  const resp = await client.post(`/spc/alarms/${alarmId}/confirm-fmea`, {
+    fmea_id: fmeaId,
+    node_id: nodeId
+  });
   return resp.data;
 }
 
