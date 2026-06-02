@@ -188,12 +188,6 @@ def _match_cross_fmea_d4(
         node_map = {n["id"]: n for n in graph.get("nodes", [])}
         edges = graph.get("edges", [])
 
-        # Build reverse CAUSE_OF index: FailureMode -> [FailureCause]
-        reverse_cause: dict[str, list[str]] = {}
-        for e in edges:
-            if e["type"] == "CAUSE_OF":
-                reverse_cause.setdefault(e["target"], []).append(e["source"])
-
         for node in graph.get("nodes", []):
             if node["type"] != "FailureCause":
                 continue
@@ -427,6 +421,40 @@ def _match_existing_controls(
                                     "fmea_document_no": doc.get("document_no"),
                                 })
 
+        # Path 4: FailureMode matched directly by keywords (no cause matched)
+        # Find FM nodes matching keywords that weren't already covered by cause matching
+        covered_fm_ids = {c["failure_mode_node_id"] for c in controls if c["failure_mode_node_id"]}
+        for node in graph.get("nodes", []):
+            if node["type"] != "FailureMode":
+                continue
+            name = node.get("name", "")
+            desc = node.get("description", "")
+            if not any(kw in name or kw in desc for kw in keywords):
+                continue
+            if node["id"] in covered_fm_ids:
+                continue
+            # This FM matched by keywords but had no matching cause — find its detection controls
+            for tgt, etype in forward_edges.get(node["id"], []):
+                if etype == "DETECTED_BY":
+                    ctrl = node_map.get(tgt)
+                    if ctrl and ctrl.get("type") == "DetectionControl":
+                        key = (tgt, "detection")
+                        if key not in seen:
+                            seen.add(key)
+                            controls.append({
+                                "failure_mode_node_id": node["id"],
+                                "failure_mode_name": name,
+                                "failure_cause_node_id": None,
+                                "failure_cause_name": None,
+                                "control_node_id": tgt,
+                                "control_name": ctrl.get("name"),
+                                "control_type": "detection",
+                                "match_source": match_source,
+                                "match_reason": "FMEA 探测措施（失效模式级）",
+                                "fmea_id": str(doc["fmea_id"]),
+                                "fmea_document_no": doc.get("document_no"),
+                            })
+
     return controls
 
 
@@ -439,15 +467,40 @@ def _generate_general_suggestions(
 
     engine = RuleEngine()
 
-    # Try to get AP level from linked FMEA
+    # Try to get AP level from linked FMEA, using fmea_node_id to resolve correctly
     ap_level = None
     linked_fmea_id = capa_data.get("fmea_ref_id")
+    target_node_id = capa_data.get("fmea_node_id")
     for doc in fmea_docs:
         if doc["fmea_id"] == linked_fmea_id and doc.get("graph_data"):
-            for node in doc["graph_data"].get("nodes", []):
-                if node.get("type") == "FailureMode" and node.get("ap"):
-                    ap_level = node["ap"]
-                    break
+            graph = doc["graph_data"]
+            node_map = {n["id"]: n for n in graph.get("nodes", [])}
+            edges = graph.get("edges", [])
+
+            # Resolve target_node_id to a FailureMode
+            target_fm_id = None
+            if target_node_id:
+                target_node = node_map.get(target_node_id)
+                if target_node:
+                    if target_node["type"] == "FailureMode":
+                        target_fm_id = target_node_id
+                    elif target_node["type"] == "FailureCause":
+                        # Find parent FailureMode via CAUSE_OF
+                        for e in edges:
+                            if e["source"] == target_node_id and e["type"] == "CAUSE_OF":
+                                parent = node_map.get(e["target"])
+                                if parent and parent.get("type") == "FailureMode":
+                                    target_fm_id = e["target"]
+                                    break
+
+            # Get AP from resolved FM, or first FM with ap as fallback
+            if target_fm_id and node_map.get(target_fm_id, {}).get("ap"):
+                ap_level = node_map[target_fm_id]["ap"]
+            else:
+                for node in graph.get("nodes", []):
+                    if node.get("type") == "FailureMode" and node.get("ap"):
+                        ap_level = node["ap"]
+                        break
             break
 
     failure_mode_text = capa_data.get("d2_description", "")

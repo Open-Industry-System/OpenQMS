@@ -210,3 +210,40 @@ def test_d5_cause_level_detection_control(sample_graph):
                  if c["control_type"] == "detection" and "原因级" in c.get("match_reason", "")]
     assert len(cause_det) >= 1
     assert cause_det[0]["control_name"] == "AOI光学检测"
+
+
+def test_d5_fm_level_detection_without_cause():
+    """D2/D4 hits FailureMode name but no FailureCause — still returns FM-level detection control."""
+    import uuid as _uuid
+    fm_id = str(_uuid.uuid4())
+    det_ctrl_id = str(_uuid.uuid4())
+    func_id = str(_uuid.uuid4())
+
+    graph = {
+        "nodes": [
+            {"id": func_id, "type": "ProcessStepFunction", "name": "密封功能"},
+            {"id": fm_id, "type": "FailureMode", "name": "密封失效"},
+            {"id": det_ctrl_id, "type": "DetectionControl", "name": "气密性检测"},
+        ],
+        "edges": [
+            {"source": func_id, "target": fm_id, "type": "HAS_FAILURE_MODE"},
+            {"source": fm_id, "target": det_ctrl_id, "type": "DETECTED_BY"},
+        ],
+    }
+    fmea_id = _uuid.uuid4()
+    capa_data = {
+        "d4_root_cause": "密封失效",
+        "d2_description": "密封失效",
+        "fmea_ref_id": fmea_id,
+        "fmea_node_id": fm_id,
+        "product_line_code": "DC-DC-100",
+    }
+    fmea_docs = [_make_fmea_doc(fmea_id, graph)]
+
+    result = get_d5_recommendations(capa_data, fmea_docs)
+
+    assert len(result["existing_controls"]) >= 1
+    det = [c for c in result["existing_controls"] if c["control_type"] == "detection"]
+    assert len(det) >= 1
+    assert det[0]["control_name"] == "气密性检测"
+    assert det[0]["failure_cause_node_id"] is None

@@ -10,7 +10,7 @@ from app.core.product_line_filter import get_user_product_line_codes, enforce_pr
 from typing import Any
 from app.models.user import User
 
-from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse, AdvanceRequest
+from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse, AdvanceRequest, D4RecommendationResponse, D5RecommendationResponse
 from app.services import capa_service
 
 router = APIRouter(prefix="/api/capa", tags=["capa"])
@@ -252,7 +252,7 @@ async def get_d7_fmea_recommendations(
     return {"recommendations": recs}
 
 
-@router.get("/{report_id}/d4-fmea-recommendations")
+@router.get("/{report_id}/d4-fmea-recommendations", response_model=D4RecommendationResponse)
 async def get_d4_fmea_recommendations(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -298,7 +298,7 @@ async def get_d4_fmea_recommendations(
     return {"items": items}
 
 
-@router.get("/{report_id}/d5-fmea-recommendations")
+@router.get("/{report_id}/d5-fmea-recommendations", response_model=D5RecommendationResponse)
 async def get_d5_fmea_recommendations(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
