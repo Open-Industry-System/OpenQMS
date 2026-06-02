@@ -72,6 +72,7 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
                     SELECT node->>'id' as node_id,
                            node->>'type' as node_type,
                            node->>'name' as name,
+                           COALESCE(node->>'description', '') as description,
                            COALESCE(node->>'requirement', '') as requirement,
                            COALESCE(node->>'specification', '') as specification,
                            fmea.product_line_code,
@@ -85,6 +86,8 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
             for row in result.fetchall():
                 row = row._mapping
                 text_parts = [row["name"]]
+                if row.get("description"):
+                    text_parts.append(row["description"])
                 if row["requirement"]:
                     text_parts.append(row["requirement"])
                 if row["specification"]:
