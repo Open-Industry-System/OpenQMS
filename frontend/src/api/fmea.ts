@@ -28,7 +28,12 @@ export async function createFMEA(data: {
 
 export async function updateFMEA(
   id: string,
-  data: { title?: string; graph_data?: GraphData }
+  data: {
+    title?: string;
+    graph_data?: GraphData;
+    lock_version?: number;
+    confirmed_latest_lock_version?: number;
+  }
 ): Promise<FMEADocument> {
   const resp = await client.put(`/fmea/${id}`, data);
   return resp.data;
