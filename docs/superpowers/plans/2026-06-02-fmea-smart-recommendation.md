@@ -219,7 +219,7 @@ from app.utils.similarity import compute_similarity
         return {row.code: row.name for row in result.all()}
 ```
 
-- [ ] **Step 3: 添加 `find_similar_nodes_advanced` 实现**
+- [ ] **Step 5: 添加 `find_similar_nodes_advanced` 实现**
 
 在 `_load_product_line_names` 之后添加：
 
@@ -236,7 +236,7 @@ from app.utils.similarity import compute_similarity
         from sqlalchemy import select as sa_select
 
         query = sa_select(FMEADocument).where(
-            FMEADocument.status == "approved",
+            FMEADocument.status == "approved",  # approved = 已审批并发布；后续可扩展为 in_(["approved", "published"])
             FMEADocument.graph_data.isnot(None),
         )
         if scope == "current_product_line" and product_line_code:
@@ -332,7 +332,7 @@ from app.utils.similarity import compute_similarity
         async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
             cypher = """
             MATCH (d:FMEDocument)-[:HAS_NODE]->(n:GraphNode {type: $node_type})
-            WHERE d.status = 'approved'
+            WHERE d.status = 'approved'  /* approved = 已审批并发布；后续可扩展为 IN ['approved', 'published'] */
             """
             params: dict[str, Any] = {"node_type": node_type}
             if scope == "current_product_line" and product_line_code:
@@ -1181,16 +1181,16 @@ def downgrade() -> None:
 Run: `cd backend && alembic heads | head -1 | awk '{print $1}'`
 Expected: 输出一个 revision ID（例如 `20260602_collab_sessions`）
 
-用 Edit 工具替换迁移文件中的占位值：
+用 Edit 工具替换迁移文件中的 `None`：
 
 ```python
-down_revision: Union[str, None] = None  # TODO: replace
+down_revision: Union[str, None] = None
 ```
 
-替换为：
+替换为 alembic heads 输出的实际 revision ID，例如：
 
 ```python
-down_revision: Union[str, None] = 'REVISION_FROM_ALEMBIC_HEADS'
+down_revision: Union[str, None] = '20260602_collab_sessions'
 ```
 
 （替换为 Step 4 获取的实际 revision ID）
@@ -1273,6 +1273,7 @@ async def recommend(
 在 `backend/app/api/graph.py` 底部、`@router.post("/rebuild")` 之前添加：
 
 ```python
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.recommendation import SimilarNodesRequest, SimilarNodesResponse, SimilarNodeMatch
 from app.core.permissions import get_user_permission, Module, PermissionLevel
 
@@ -1934,9 +1935,9 @@ git commit -m "chore: build verification fixes" || echo "no fixes needed"
 
 ## Placeholder 扫描
 
-- [x] 无 "TBD" / "TODO"
+- [x] 无 "TBD" / "TODO" / "... existing code ..." 占位
 - [x] 无 "Add appropriate error handling" 等模糊描述
-- [x] 每个步骤含完整代码
+- [x] 每个步骤含完整代码（迁移文件的 down_revision 通过 Edit 工具填入实际值，非占位）
 - [x] 无 "Similar to Task N" 引用
 
 ## 类型一致性检查
