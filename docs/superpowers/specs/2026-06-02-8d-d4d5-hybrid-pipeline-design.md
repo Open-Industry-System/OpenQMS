@@ -28,7 +28,7 @@
 
 ### 1.3 目标
 
-构建**全混合推荐管道**，在保持现有 API 契约不变的前提下：
+构建**全混合推荐管道**，在保持现有 API 契约**向后兼容**的前提下：
 
 1. **历史 CAPA 匹配**：用语义搜索匹配已关闭 CAPA 的 D2/D4，推荐其 D4/D5 经验
 2. **RAG 语义搜索**：用向量语义搜索替代所有关键词子串匹配
@@ -71,9 +71,13 @@ class HybridRecommendationPipeline:
         self.llm_layer = LLMFusionLayer(llm_provider)
 
     async def recommend(self, context: RecommendationContext) -> RecommendationResult:
-        # 1. 并行召回（单 Source 失败不阻断）
+        # 1. 召回阶段：
+        #    - DB 依赖的 Source（SemanticSearchSource, HistoricalCAPASource）串行执行，
+        #      避免共享 AsyncSession 的并发使用问题
+        #    - 纯计算 Source（FMEAGraphSource, RuleEngineSource）可与 DB Source 并行
+        #    - D5 的 FMEAControlExpander 在 SemanticSearchSource 之后执行（两阶段依赖）
         # 2. FusionEngine 去重排序
-        # 3. LLMFusionLayer 增强
+        # 3. LLMFusionLayer 增强（只改写 match_reason，保留原 candidate id 和 metadata）
         ...
 ```
 
@@ -135,14 +139,14 @@ class RecommendationCandidate:
 | Source | 职责 | 查询文本 | 返回内容 | Confidence 范围 |
 |--------|------|----------|----------|----------------|
 | `SemanticSearchSource` | FMEA FailureCause 语义搜索 | `d4_root_cause` | FailureCause 节点 | 0.3~0.8 |
-| `FMEAControlSource` | 控制措施图遍历 | 上述匹配的 Cause ID | PreventionControl / DetectionControl | 0.5~0.7 |
+| `FMEAControlExpander` | 基于召回的 Cause 做图遍历扩展 | Stage 1 的 Cause IDs | PreventionControl / DetectionControl | 0.5~0.7 |
 | `HistoricalCAPAMeasureSource` | 历史 CAPA D4→D4 匹配 | `d4_root_cause` | 历史 CAPA 的 `d5_correction` | 0.5~0.85 |
 | `RuleEngineMeasureSource` | 规则引擎通用建议 | `d2_description` + AP | 通用措施建议 | 0.3~0.5 |
 
-**FMEAControlSource 与 SemanticSearchSource 协作**：
-- SemanticSearchSource 负责语义召回匹配的 FailureCause
-- FMEAControlSource 对这些 FailureCause 执行 3 路径图遍历找 Control
-- 两者互补：语义搜索可能召回无直接图结构的节点，图遍历保证结构性正确
+**D5 两阶段召回**：
+- **Stage 1**: `SemanticSearchSource` 语义召回匹配的 FailureCause 节点
+- **Stage 2**: `FMEAControlExpander` 接收 Stage 1 的 Cause ID 列表，执行 3 路径图遍历找 PreventionControl / DetectionControl
+- 两阶段在同个 pipeline 调用内顺序执行，不是独立并行 Source
 
 **HistoricalCAPAMeasureSource 过滤**：
 - `entity_type = "capa"`, `entity_field = "d4_root_cause"`
@@ -166,15 +170,14 @@ class FusionEngine:
     }
 
     def merge(self, candidates, context):
-        # 1. 元数据加权
+        # 1. 元数据加权与来源优先级归一化
         for c in candidates:
-            base = c.confidence
-            if c.metadata.get("product_line_code") == context.capa_data.get("product_line_code"):
-                base += 0.05
-            if c.metadata.get("severity") == context.capa_data.get("severity"):
-                base += 0.03
             priority = self.SOURCE_PRIORITY.get(c.source, 0.5)
-            c.confidence = min(base * priority + 0.1, 0.95)
+            product_bonus = 0.05 if c.metadata.get("product_line_code") == context.capa_data.get("product_line_code") else 0.0
+            severity_bonus = 0.03 if c.metadata.get("severity") == context.capa_data.get("severity") else 0.0
+            # 公式: 原始 confidence * 来源优先级 + 元数据 bonus
+            # bonus 线性累加，避免被优先级乘法削弱
+            c.confidence = min(c.confidence * priority + product_bonus + severity_bonus, 0.95)
 
         # 2. 去重（归一化文本匹配）
         seen = set()
@@ -237,11 +240,17 @@ class LLMFusionLayer:
 ### 5.2 LLM Prompt 设计
 
 **System Prompt**：
-> 你是一名资深质量工程师，擅长 AIAG-VDA 8D 问题解决方法。请根据提供的候选根因/措施列表，识别重复项并合并，按相关性和组织经验价值重新排序，为每条推荐写一句中文推荐理由。输出 JSON 数组。
+> 你是一名资深质量工程师，擅长 AIAG-VDA 8D 问题解决方法。请根据提供的候选根因/措施列表，识别重复项并合并，按相关性和组织经验价值重新排序，为每条推荐写一句中文推荐理由。
+> 
+> 规则：
+> 1. 你只能改写 `match_reason` 字段，**不允许**生成新的 `content`、`failure_cause_node_id`、`control_node_id` 等主键字段
+> 2. 输出必须保留每条候选的原始 `candidate_id`，以便后端合并回原始 metadata
+> 3. 不增减候选数量，只优化理由和微调排序
+> 4. 输出 JSON 数组
 
-**Input**：当前 CAPA 的 D2/D4 描述 + 候选列表（含来源、confidence、原始文本）
+**Input**：当前 CAPA 的 D2/D4 描述 + 候选列表（含 candidate_id、source、content、confidence、metadata）
 
-**Output**：JSON 数组，每条包含 `content`, `confidence`, `match_reason`
+**Output**：JSON 数组，每条包含 `candidate_id`, `match_reason`
 
 ### 5.3 回退生成
 
@@ -269,18 +278,48 @@ CAPA 已经是**字段级 embedding**：
 
 FMEA 也是**节点级 embedding**：`entity_type = "fmea_node"`，每个节点独立 chunk。
 
+### 6.1.1 FMEA Embedding 范围扩展
+
+现有 FMEA 节点 embedding 只拼接 `name + requirement + specification`，**不包含 `description`**。而当前关键词子串匹配会搜索 `description` 字段。
+
+**本次实现内**：扩展 `embedding_sync_worker.py` 的 `fetch_chunks` 中 FMEA 节点的 chunk 内容，加入 `description`：
+
+```python
+# 现有
+text_parts = [row["name"]]
+if row["requirement"]:
+    text_parts.append(row["requirement"])
+if row["specification"]:
+    text_parts.append(row["specification"])
+
+# 扩展后
+text_parts = [row["name"]]
+if row.get("description"):
+    text_parts.append(row["description"])
+if row["requirement"]:
+    text_parts.append(row["requirement"])
+if row["specification"]:
+    text_parts.append(row["specification"])
+```
+
+> 注意：所有 FMEA 节点的 `entity_field` 保持为 `"name"`（节点级 chunk，不按字段拆分）。语义搜索召回的是节点整体向量，返回后通过 `metadata.node_type` 区分节点类型。
+
 ### 6.2 CAPA Embedding 更新触发
 
 **问题**：`d4_root_cause` 和 `d5_correction` 是后续步骤填写的，create 时为空。
 
-**解决方案**：在 `capa_service.update_capa()` 中，当更新字段包含 embedding 字段时，重新触发同步：
+**解决方案**：在 `capa_service.update_capa()` 中，当更新的字段**实际内容发生变化**时，重新触发同步：
 
 ```python
 EMBEDDING_FIELDS = {"d2_description", "d4_root_cause", "d5_correction", "d7_prevention"}
 
 async def update_capa(db, capa, update_data, user_id):
     # ... 现有更新逻辑 ...
-    if EMBEDDING_FIELDS & set(update_data.keys()):
+    changed = {
+        k for k, v in update_data.items()
+        if k in EMBEDDING_FIELDS and getattr(capa, k) != v
+    }
+    if changed:
         from app.services.embedding_outbox import enqueue_embedding
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
 ```
@@ -289,17 +328,19 @@ async def update_capa(db, capa, update_data, user_id):
 
 ```sql
 SELECT de.id, de.entity_id, de.chunk_text, de.entity_field,
-       1 - (embedding <=> :query_vector) AS similarity,
-       capa.document_no, capa.severity, capa.closed_at
+       1 - (de.embedding <=> :query_vector) AS similarity,
+       capa.document_no, capa.severity, capa.updated_at AS closed_at
 FROM document_embeddings de
 JOIN capa_eightd capa ON de.entity_id = capa.report_id
 WHERE de.entity_type = 'capa'
   AND de.entity_field = :target_field   -- 'd2_description' 或 'd4_root_cause'
   AND capa.status = 'D8_CLOSURE'
-  AND (:product_line_code IS NULL OR de.product_line_code = :product_line_code)
-ORDER BY embedding <=> :query_vector
+  AND (:product_line_codes IS NULL OR de.product_line_code = ANY(:product_line_codes))
+ORDER BY de.embedding <=> :query_vector
 LIMIT :limit
 ```
+
+> **注意**：CAPA 模型没有 `closed_at` 字段，使用 `updated_at` 近似（进入 D8_CLOSURE 时 updated_at 即最后更新时间）。`product_line_codes` 为数组类型，使用 `= ANY()` 支持多产品线权限过滤。
 
 ---
 
@@ -307,7 +348,7 @@ LIMIT :limit
 
 ### 7.1 API 变更
 
-**零新端点，零契约变更**：
+**零新端点，向后兼容的 Schema 扩展**：
 
 ```
 GET /api/capa/{report_id}/d4-fmea-recommendations  → D4RecommendationResponse
@@ -316,12 +357,17 @@ GET /api/capa/{report_id}/d5-fmea-recommendations  → D5RecommendationResponse
 
 内部实现从直接调用 `get_d4_recommendations()` / `get_d5_recommendations()` 改为调用 `HybridRecommendationPipeline.recommend()`。
 
+**Schema 扩展（向后兼容，新增可选字段）**：
+- `D4Recommendation` 新增：`source_capa_id`, `source_capa_document_no`, `source_product_line_code`（历史 CAPA 来源标识）
+- `D5GeneralSuggestion` 新增：`match_source`, `source_capa_id`, `source_capa_document_no`（历史 CAPA 措施来源标识）
+- 现有字段全部保留，前端不读取新字段时不影响功能
+
 ### 7.2 前端变更
 
 **最小变更**：
 
 - `match_reason` 字段内容会更丰富（LLM 生成的推荐理由），前端可直接展示
-- 历史 CAPA 候选可展示 `document_no` 链接（从 metadata 读取）
+- 历史 CAPA 候选可展示 `document_no` 链接（从新增的 `source_capa_document_no` 读取）
 - 无新增组件需求，现有推荐面板直接复用
 
 ---
@@ -333,7 +379,7 @@ GET /api/capa/{report_id}/d5-fmea-recommendations  → D5RecommendationResponse
 | SemanticSearchSource 失败（pgvector 不可用） | 记录 warning，继续执行其他 Source |
 | HistoricalCAPASource 失败 | 记录 warning，降级为无历史 CAPA 推荐 |
 | LLMFusionLayer 失败 | 记录 warning，返回未 LLM 增强的候选 |
-| 所有 Source 都失败 | 返回 RuleEngine 兜底结果 |
+| 所有非规则 Source 都失败 | 单独调用 RuleEngine fallback |
 | 无 embedding provider | 语义搜索 Source 返回空，依赖 FMEAGraphSource + RuleEngine |
 | 单 Source 超时 | 超时 Source 返回空，不影响其他 Source |
 
@@ -355,7 +401,7 @@ GET /api/capa/{report_id}/d5-fmea-recommendations  → D5RecommendationResponse
 ### 10.1 在本次实现内
 
 - [ ] `HybridRecommendationPipeline` 核心管道类
-- [ ] 6 个 Source 实现（FMEAGraphSource, SemanticSearchSource, HistoricalCAPASource, HistoricalCAPAMeasureSource, RuleEngineSource, RuleEngineMeasureSource, FMEAControlSource）
+- [ ] 7 个 Source/组件 实现（FMEAGraphSource, SemanticSearchSource, HistoricalCAPASource, HistoricalCAPAMeasureSource, RuleEngineSource, RuleEngineMeasureSource, FMEAControlExpander）
 - [ ] `FusionEngine` 去重排序
 - [ ] `LLMFusionLayer` 融合解释 + 回退生成
 - [ ] `RecommendationContext` / `RecommendationCandidate` 数据模型
@@ -381,16 +427,19 @@ GET /api/capa/{report_id}/d5-fmea-recommendations  → D5RecommendationResponse
 | CAPA embedding 未及时更新 | update_capa 中检测字段变化并重新触发 enqueue_embedding |
 | LLM 调用慢/失败 | 超时控制（`asyncio.wait_for`）；失败时降级为未增强候选 |
 | 历史 CAPA 推荐传播错误经验 | 只复用 `D8_CLOSURE`；confidence 上限 0.8/0.85；LLM 融合层过滤低质量候选 |
+| LLM 同步调用延迟高 | 单次 LLM timeout ≤ 2.0s；限制输出 token（≤ 200）；两阶段 LLM 不串行调用（阶段 1 失败才进入阶段 2）；增加基于 `report_id + stage + content_hash` 的短期缓存（TTL 5 分钟） |
+| 重复触发 embedding 同步 | update_capa 中增加值比对，仅字段内容实际变化时才 enqueue |
 
 ---
 
 ## 12. 附录：Schema 兼容性
 
-保持现有 schema 不变：
+### 向后兼容的 Schema 扩展
 
 ```python
-# D4Recommendation (现有)
+# D4Recommendation (扩展后)
 class D4Recommendation(BaseModel):
+    # --- 现有字段 ---
     failure_cause_node_id: str | None = None
     failure_cause_name: str
     failure_cause_desc: str | None = None
@@ -398,12 +447,16 @@ class D4Recommendation(BaseModel):
     failure_mode_name: str | None = None
     fmea_document_no: str | None = None
     fmea_id: str | None = None
-    match_source: str      # 扩展: "fmea_graph" | "semantic_search" | "historical_capa" | "rule" | "llm"
+    match_source: str      # "fmea_graph" | "semantic_search" | "historical_capa" | "rule" | "llm"
     match_reason: str
     related_d2_keywords: list[str] = []
     confidence: float = 0.5
+    # --- 新增字段（可选，历史 CAPA 来源标识） ---
+    source_capa_id: str | None = None           # 历史 CAPA 的 report_id
+    source_capa_document_no: str | None = None  # 历史 CAPA 的 document_no
+    source_product_line_code: str | None = None # 历史 CAPA 的产品线
 
-# D5ExistingControl (现有)
+# D5ExistingControl (现有，不变)
 class D5ExistingControl(BaseModel):
     failure_mode_node_id: str | None = None
     failure_mode_name: str | None = None
@@ -412,17 +465,38 @@ class D5ExistingControl(BaseModel):
     control_node_id: str
     control_name: str
     control_type: str      # "prevention" | "detection"
-    match_source: str      # 扩展: 同上
+    match_source: str
     match_reason: str
     fmea_id: str | None = None
     fmea_document_no: str | None = None
 
-# D5GeneralSuggestion (现有)
+# D5GeneralSuggestion (扩展后)
 class D5GeneralSuggestion(BaseModel):
+    # --- 现有字段 ---
     content: str
-    category: str          # "预防措施" | "探测措施"
+    category: str          # "预防措施" | "探测措施" | "纠正措施"
     basis: str
     confidence: float
+    # --- 新增字段（可选，历史 CAPA 来源标识） ---
+    match_source: str | None = None             # 来源标识
+    source_capa_id: str | None = None           # 历史 CAPA 的 report_id
+    source_capa_document_no: str | None = None  # 历史 CAPA 的 document_no
 ```
 
-`match_source` 字段的枚举值扩展为新来源标识，前端无需修改即可兼容。
+### 历史 CAPA D5 措施的映射
+
+历史 CAPA 的 `d5_correction` **不**映射到 `D5ExistingControl`（没有 control_node_id），而是映射到 `D5GeneralSuggestion`：
+- `content` = 历史 CAPA 的 `d5_correction`
+- `category` = `"纠正措施"`（历史 CAPA 已验证的纠正措施）
+- `match_source` = `"historical_capa"`
+- `match_reason` = "历史 CAPA [document_no] 相似根因已验证有效"
+
+### match_source 枚举值扩展
+
+| 来源 | match_source 值 |
+|------|----------------|
+| 关联 FMEA 图遍历 | `fmea_graph` |
+| FMEA 语义搜索 | `semantic_search` |
+| 历史 CAPA | `historical_capa` |
+| 规则引擎 | `rule_engine` |
+| LLM 生成 | `llm` |
