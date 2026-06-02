@@ -387,7 +387,37 @@ git commit -m "feat(graph): Neo4jRepository.find_similar_nodes_advanced + TDD te
 
 设计 §6.3 要求 Neo4j 投影在 `FMEDocument` 节点写入 `product_line_name`。当前 projection 只写 `product_line_code`。
 
-- [ ] **Step 1: 更新 `build_cypher_sync` 签名和 Cypher**
+- [ ] **Step 0: Write failing test for product_line_name projection (TDD)**
+
+创建 `backend/tests/test_graph_projection.py`：
+
+```python
+from app.services.graph_projection_service import build_cypher_sync
+
+
+def test_build_cypher_sync_includes_product_line_name():
+    """FMEDocument CREATE 语句 params 必须包含 product_line_name。"""
+    statements = build_cypher_sync(
+        fmea_id="f1", document_no="PFMEA-001", title="测试",
+        fmea_type="PFMEA", product_line_code="DC-DC-100",
+        product_line_name="DC-DC 电源模块",  # 新增参数
+        status="approved", version=1,
+        graph_data={"nodes": [], "edges": []},
+    )
+    # 找到 CREATE FMEDocument 语句
+    doc_statements = [s for s in statements if "CREATE (d:FMEDocument" in s[0]]
+    assert len(doc_statements) == 1
+    _, params = doc_statements[0]
+    assert params["product_line_name"] == "DC-DC 电源模块"
+    assert "product_line_name" in params
+```
+
+- [ ] **Step 1: Run test to verify it fails**
+
+Run: `cd backend && python -m pytest tests/test_graph_projection.py::test_build_cypher_sync_includes_product_line_name -v`
+Expected: FAIL — `TypeError: build_cypher_sync() got an unexpected keyword argument 'product_line_name'`
+
+- [ ] **Step 2: 更新 `build_cypher_sync` 签名和 Cypher**
 
 在 `build_cypher_sync` 参数列表增加 `product_line_name: str`，并在 `CREATE FMEDocument` 语句中加入该字段：
 
@@ -478,7 +508,7 @@ def build_cypher_sync(
     return statements
 ```
 
-- [ ] **Step 2: 更新 `GraphProjectionService.sync_fmea_to_neo4j` 以获取并传入 product_line_name**
+- [ ] **Step 3: 更新 `GraphProjectionService.sync_fmea_to_neo4j` 以获取并传入 product_line_name**
 
 ```python
     async def sync_fmea_to_neo4j(self, fmea_id: uuid.UUID) -> None:
@@ -521,11 +551,11 @@ def build_cypher_sync(
             await session.execute_write(_tx)
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add backend/app/services/graph_projection_service.py
-git commit -m "feat(projection): write product_line_name to Neo4j FMEDocument nodes"
+git add backend/app/services/graph_projection_service.py backend/tests/test_graph_projection.py
+git commit -m "feat(projection): write product_line_name to Neo4j FMEDocument nodes + TDD test"
 ```
 
 ---
@@ -1066,21 +1096,38 @@ git commit -m "feat(recommendation): integrate graph similarity into Recommendat
 class Module(StrEnum):
     FMEA = "fmea"
     CAPA = "capa"
-    # ... existing modules ...
+    DASHBOARD = "dashboard"
+    AUDIT = "audit"
+    CUSTOMER_QUALITY = "customer_quality"
+    CUSTOMER_AUDIT = "customer_audit"
+    SUPPLIER = "supplier"
+    IQC = "iqc"
+    PPAP = "ppap"
+    SPC = "spc"
+    MSA = "msa"
+    PLANNING = "planning"
+    MANAGEMENT_REVIEW = "management_review"
+    USER_MGMT = "user_mgmt"
+    PERMISSION_MGMT = "permission_mgmt"
+    SPECIAL_CHARACTERISTIC = "special_characteristic"
+    QUALITY_GOAL = "quality_goal"
+    SCAR = "scar"
     KNOWLEDGE_GRAPH = "knowledge_graph"  # 新增
 ```
 
-- [ ] **Step 2: 创建 alembic 迁移文件**
+- [ ] **Step 2: 获取当前 alembic head 并创建迁移文件**
 
-先确认当前 migration head：
+```bash
+cd backend
+# 获取当前唯一 head（若多 head 需先 merge）
+HEAD=$(alembic heads | head -1 | awk '{print $1}')
+echo "Current head: $HEAD"
+```
 
-Run: `cd backend && alembic heads`
+然后创建迁移文件：
 
-使用输出的 revision ID 作为 `down_revision`。如果存在多个 head，先创建 merge revision 或选择目标分支的 head。
-
-然后创建迁移文件 `backend/alembic/versions/029_knowledge_graph_permissions.py`：
-
-```python
+```bash
+cat > backend/alembic/versions/029_knowledge_graph_permissions.py << PYEOF
 """add knowledge_graph permissions
 
 Revision ID: 029
@@ -1090,14 +1137,12 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = '029_knowledge_graph_permissions'
-# 替换为 alembic heads 输出的当前 head revision
-down_revision: Union[str, None] = 'REPLACE_WITH_ALEMBIC_HEAD'
+down_revision: Union[str, None] = '$HEAD'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 为 admin 和 manager 角色添加 knowledge_graph VIEW 权限
     op.execute(
         "INSERT INTO role_permissions (role_id, module, permission_level) "
         "SELECT id, 'knowledge_graph', 1 FROM role_definitions WHERE role_key = 'admin'"
@@ -1112,9 +1157,18 @@ def downgrade() -> None:
     op.execute(
         "DELETE FROM role_permissions WHERE module = 'knowledge_graph'"
     )
+PYEOF
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: 验证迁移文件语法**
+
+Run: `cd backend && python -m py_compile alembic/versions/029_knowledge_graph_permissions.py`
+Expected: No output (success)
+
+Run: `cd backend && alembic check`
+Expected: No error, revision chain is valid
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add backend/app/core/permissions.py backend/alembic/versions/029_knowledge_graph_permissions.py
@@ -1136,6 +1190,7 @@ git commit -m "feat(permissions): add KNOWLEDGE_GRAPH module for admin/manager"
 ```python
 from app.graph.deps import get_graph_repository
 from app.graph.repository import FMEAGraphRepository
+from app.core.permissions import get_user_permission
 
 # ... inside recommend() ...
 @router.post("/{fmea_id}/recommend", response_model=RecommendResponse)
@@ -1160,8 +1215,17 @@ async def recommend(
         raise HTTPException(status_code=404, detail="FMEA not found")
     await enforce_product_line_access(user, fmea.product_line_code, db)
 
+    # 提前计算 effective_scope（短输入 early return 也需要正确值）
+    requested_scope = getattr(request, "scope", "global")
+    has_kg = await get_user_permission(user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
+    effective_scope = "current_product_line" if (not has_kg and requested_scope == "global") else requested_scope
+
     if len(request.context.get("function_description", request.context.get("failure_mode", ""))) < 2:
-        return RecommendResponse(suggestions=[], source="rule", cached=False, llm_available=False, graph_match_count=0, effective_scope="global")
+        return RecommendResponse(
+            suggestions=[], source="rule", cached=False,
+            llm_available=False, graph_match_count=0,
+            effective_scope=effective_scope,
+        )
 
     llm = getattr(fastapi_request.app.state, "llm_provider", None)
     service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo)
@@ -1673,6 +1737,21 @@ def test_rule_engine_generic_fallback():
     result = engine.evaluate("failure_mode", {"function_description": "未知操作"})
     assert len(result.suggestions) == 4
     assert result.quality == "generic"
+
+
+def test_graph_matches_to_suggestions_with_parent_node():
+    """neighbor_match 结果 explanation 应包含父节点名称。"""
+    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    matches = [{
+        "node_id": "n1", "name": "密封件老化", "type": "FailureCause",
+        "fmea_id": "f1", "document_no": "PFMEA-001",
+        "product_line_code": "DC-DC-100", "product_line_name": "DC-DC",
+        "similarity_score": 0.75, "match_reason": "substring_match_neighbor",
+        "parent_node_name": "密封失效",
+    }]
+    items = svc._graph_matches_to_suggestions(matches, "DC-DC-100")
+    assert "密封失效" in items[0].explanation
+    assert items[0].source_node_type == "FailureCause"
 ```
 
 - [ ] **Step 2: 运行测试**
