@@ -366,8 +366,11 @@ class RuleEngineSource:
     async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
         from app.services.recommendation_service import RuleEngine
 
-        engine = RuleEngine()
         d2 = context.capa_data.get("d2_description", "")
+        if not d2 or not d2.strip():
+            return []
+
+        engine = RuleEngine()
         result = engine.evaluate("failure_cause", {"input_text": d2, "failure_mode": d2})
 
         candidates: list[RecommendationCandidate] = []
