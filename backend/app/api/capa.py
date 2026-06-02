@@ -1,6 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -255,17 +256,18 @@ async def get_d7_fmea_recommendations(
 @router.get("/{report_id}/d4-fmea-recommendations", response_model=D4RecommendationResponse)
 async def get_d4_fmea_recommendations(
     report_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
     from app.models.fmea import FMEADocument
-    from app.services.capa_recommendation_service import get_d4_recommendations
+    from app.services.capa_service import get_capa
 
     fmea_level = await get_user_permission(user, Module.FMEA, db)
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
-    capa = await capa_service.get_capa(db, report_id)
+    capa = await get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     await enforce_product_line_access(user, capa.product_line_code, db)
@@ -277,41 +279,62 @@ async def get_d4_fmea_recommendations(
         if not allowed_pls:
             return {"items": []}
 
-    fmea_query = select(FMEADocument).where(FMEADocument.product_line_code == capa.product_line_code)
+    # Preload FMEA docs for all allowed product lines (not just current CAPA's PL)
+    # SemanticSearchSource may retrieve cross-PL matches; doc_map must cover them
+    fmea_query = select(FMEADocument)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
+    # admin (allowed_pls=None): load all FMEA docs
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
-        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data}
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
         for f in fmea_result.scalars().all()
     ]
 
-    capa_data = {
-        "d2_description": capa.d2_description or "",
-        "d3_interim": capa.d3_interim or "",
-        "fmea_ref_id": capa.fmea_ref_id,  # keep as UUID, matching D7 pattern
-        "fmea_node_id": capa.fmea_node_id,
-        "product_line_code": capa.product_line_code,
-    }
+    linked_fmea = None
+    if capa.fmea_ref_id:
+        for doc in fmea_docs:
+            if doc["fmea_id"] == capa.fmea_ref_id:
+                linked_fmea = doc
+                break
 
-    items = get_d4_recommendations(capa_data, fmea_docs, allowed_pls)
-    return {"items": items}
+    llm_provider = request.app.state.llm_provider
+    embedding_provider = request.app.state.embedding_provider
+    pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
+
+    context = RecommendationContext(
+        capa_data={
+            "d2_description": capa.d2_description or "",
+            "d3_interim": capa.d3_interim or "",
+            "fmea_ref_id": capa.fmea_ref_id,
+            "fmea_node_id": capa.fmea_node_id,
+            "product_line_code": capa.product_line_code,
+        },
+        user_product_lines=allowed_pls,
+        stage="d4",
+        fmea_docs=fmea_docs,
+        linked_fmea=linked_fmea,
+    )
+
+    result = await pipeline.recommend(context)
+    return {"items": [c.to_d4_schema() for c in result.items]}
 
 
 @router.get("/{report_id}/d5-fmea-recommendations", response_model=D5RecommendationResponse)
 async def get_d5_fmea_recommendations(
     report_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
     from app.models.fmea import FMEADocument
-    from app.services.capa_recommendation_service import get_d5_recommendations
+    from app.services.capa_service import get_capa
 
     fmea_level = await get_user_permission(user, Module.FMEA, db)
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
-    capa = await capa_service.get_capa(db, report_id)
+    capa = await get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     await enforce_product_line_access(user, capa.product_line_code, db)
@@ -323,22 +346,55 @@ async def get_d5_fmea_recommendations(
         if not allowed_pls:
             return {"existing_controls": [], "general_suggestions": []}
 
-    fmea_query = select(FMEADocument).where(FMEADocument.product_line_code == capa.product_line_code)
+    # Preload FMEA docs for all allowed product lines (not just current CAPA's PL)
+    # SemanticSearchSource may retrieve cross-PL matches; doc_map must cover them
+    fmea_query = select(FMEADocument)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
+    # admin (allowed_pls=None): load all FMEA docs
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
-        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data}
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
         for f in fmea_result.scalars().all()
     ]
 
-    capa_data = {
-        "d4_root_cause": capa.d4_root_cause or "",
-        "d2_description": capa.d2_description or "",
-        "fmea_ref_id": capa.fmea_ref_id,  # keep as UUID, matching D7 pattern
-        "fmea_node_id": capa.fmea_node_id,
-        "product_line_code": capa.product_line_code,
-    }
+    linked_fmea = None
+    if capa.fmea_ref_id:
+        for doc in fmea_docs:
+            if doc["fmea_id"] == capa.fmea_ref_id:
+                linked_fmea = doc
+                break
 
-    result = get_d5_recommendations(capa_data, fmea_docs, allowed_pls)
-    return result
+    llm_provider = request.app.state.llm_provider
+    embedding_provider = request.app.state.embedding_provider
+    pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
+
+    context = RecommendationContext(
+        capa_data={
+            "d4_root_cause": capa.d4_root_cause or "",
+            "d2_description": capa.d2_description or "",
+            "fmea_ref_id": capa.fmea_ref_id,
+            "fmea_node_id": capa.fmea_node_id,
+            "product_line_code": capa.product_line_code,
+        },
+        user_product_lines=allowed_pls,
+        stage="d5",
+        fmea_docs=fmea_docs,
+        linked_fmea=linked_fmea,
+    )
+
+    result = await pipeline.recommend(context)
+
+    existing_controls = []
+    general_suggestions = []
+    for c in result.items:
+        control = c.to_d5_control_schema()
+        if control:
+            existing_controls.append(control)
+        else:
+            general_suggestions.append(c.to_d5_suggestion_schema())
+
+    return {
+        "existing_controls": existing_controls,
+        "general_suggestions": general_suggestions,
+    }
