@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 100",
     "test": "vitest",
     "test:ui": "vitest --ui"
   },
@@ -29,10 +29,14 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/react": "^18.3.8",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "eslint": "^10.4.1",
+    "globals": "^17.6.0",
     "typescript": "^5.6.2",
+    "typescript-eslint": "^8.60.1",
     "vite": "^5.4.7",
     "vitest": "^4.1.7"
   }

@@ -33,7 +33,7 @@ export function diffGraphs(
   latestNodes: GraphNode[],
   latestEdges: GraphEdge[],
   localNodes: GraphNode[],
-  localEdges: GraphEdge[]
+  _localEdges: GraphEdge[]
 ): GraphDiff {
   const nodeChanges: NodeChange[] = [];
   const edgeChanges: EdgeChange[] = [];

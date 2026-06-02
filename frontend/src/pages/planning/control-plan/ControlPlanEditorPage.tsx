@@ -225,6 +225,7 @@ export default function ControlPlanEditorPage() {
             lock_version: cp!.lock_version,
           });
           setCp(updated);
+          baseItemsRef.current = JSON.parse(JSON.stringify(items));
           message.success("保存成功");
         } catch (e: unknown) {
           const err = e as { response?: { status?: number; data?: { detail?: string | object } } };
@@ -289,6 +290,7 @@ export default function ControlPlanEditorPage() {
         confirmed_latest_lock_version: conflictInfo.latest_lock_version,
       });
       setCp(updated);
+      baseItemsRef.current = JSON.parse(JSON.stringify(items));
       setConflictVisible(false);
       message.success("强制保存成功");
     } catch (e: unknown) {
