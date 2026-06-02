@@ -15,7 +15,8 @@
 | 文件 | 职责 | 操作 |
 |------|------|------|
 | `backend/app/services/recommendation_types.py` | 数据模型：RecommendationContext, RecommendationCandidate, RecommendationResult | 新建 |
-| `backend/app/services/fusion_engine.py` | FusionEngine（去重排序）+ LLMFusionLayer（LLM 融合） | 新建 |
+| `backend/app/services/fusion_engine.py` | FusionEngine（去重排序） | 新建 |
+| `backend/app/services/llm_fusion_layer.py` | LLMFusionLayer（LLM 融合） | 新建 |
 | `backend/app/services/recommendation_sources.py` | 7 个 Source/Expander 实现 | 新建 |
 | `backend/app/services/hybrid_recommendation_pipeline.py` | HybridRecommendationPipeline 管道编排 | 新建 |
 | `backend/app/schemas/capa.py` | 扩展 D4Recommendation / D5GeneralSuggestion | 修改 |
@@ -548,18 +549,23 @@ from app.services.recommendation_types import RecommendationContext
 class TestSemanticSearchSource:
     @pytest.mark.asyncio
     async def test_d4_uses_d2_description(self):
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock()
+        mock_db.execute.return_value.fetchall.return_value = []
+
         mock_embedding = AsyncMock()
         mock_embedding.embed = AsyncMock(return_value=[[0.1] * 768])
-        source = SemanticSearchSource(mock_embedding)
+
+        source = SemanticSearchSource(mock_db, mock_embedding)
         ctx = RecommendationContext(
             capa_data={"d2_description": "焊接虚焊问题", "d4_root_cause": ""},
             user_product_lines=None,
             stage="d4",
+            fmea_docs=[],
         )
-        # With no real DB, just verify embed was called with d2_description
-        # Real test needs DB fixture or mocked db.execute
-        # This is a placeholder for the real test structure
-        pass
+        results = await source.retrieve(ctx)
+        assert results == []
+        mock_embedding.embed.assert_called_once_with(["焊接虚焊问题"])
 ```
 
 由于 SemanticSearchSource 和 HistoricalCAPASource 需要 DB 和 embedding provider，纯单元测试需要大量 Mock。在计划中我们标记这些测试为集成测试（Task 10），此处先实现 Source 代码。
@@ -575,11 +581,12 @@ from app.services.embedding_provider import EmbeddingProvider
 
 
 class SemanticSearchSource:
-    """FMEA 节点语义搜索。替代关键词子串匹配。"""
+    """FMEA 节点语义搜索。通过 pgvector 检索 + 图结构回溯。"""
 
     name = "semantic_search"
 
-    def __init__(self, embedding_provider: EmbeddingProvider | None):
+    def __init__(self, db, embedding_provider: EmbeddingProvider | None):
+        self.db = db
         self.embedding = embedding_provider
 
     async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
@@ -597,12 +604,131 @@ class SemanticSearchSource:
         if not query_text or not query_text.strip():
             return []
 
-        # 需要通过 context.db 执行查询，但 Source 协议不接收 db
-        # SemanticSearchSource 依赖外部注入的 SearchService 或 raw SQL
-        # 为了 Source 独立性，这里返回空，实际查询在 Pipeline 层通过预加载完成
-        # 或者在 Pipeline 中直接调用 SearchService 而非通过 Source
-        # 实际实现：Pipeline 预加载语义搜索结果到 context
-        return []
+        query_vector = await self.embedding.embed([query_text])
+        if not query_vector:
+            return []
+
+        vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
+        user_pls = context.user_product_lines
+
+        params: dict[str, Any] = {
+            "query_vector": vec_str,
+            "limit": 10,
+        }
+        pl_filter = ""
+        if user_pls is not None:
+            pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
+            params["product_line_codes"] = user_pls
+
+        stmt = text(f"""
+            SELECT de.entity_id AS fmea_id, de.node_id,
+                   1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
+                   de.product_line_code
+            FROM document_embeddings de
+            WHERE de.entity_type = 'fmea_node'
+              {pl_filter}
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
+            LIMIT :limit
+        """)
+
+        rows = await self.db.execute(stmt, params)
+        raw_matches = rows.fetchall()
+
+        # 将预加载的 fmea_docs 转为映射，方便 O(1) 回溯
+        doc_map = {str(d["fmea_id"]): d for d in (context.fmea_docs or []) if d.get("graph_data")}
+
+        candidates: list[RecommendationCandidate] = []
+        for row in raw_matches:
+            fmea_id = str(row.fmea_id)
+            node_id = row.node_id
+            similarity = float(row.similarity)
+
+            doc = doc_map.get(fmea_id)
+            if not doc or not node_id:
+                continue
+
+            graph = doc["graph_data"]
+            node_map = {n["id"]: n for n in graph.get("nodes", [])}
+            node = node_map.get(node_id)
+            if not node:
+                continue
+
+            node_type = node.get("type")
+            edges = graph.get("edges", [])
+
+            # D4: 召回 FailureCause 或 FailureMode
+            if context.stage == "d4":
+                if node_type == "FailureCause":
+                    fm_id = None
+                    fm_name = None
+                    for e in edges:
+                        if e["source"] == node_id and e["type"] == "CAUSE_OF":
+                            parent = node_map.get(e["target"])
+                            if parent and parent.get("type") == "FailureMode":
+                                fm_id = parent["id"]
+                                fm_name = parent.get("name")
+                                break
+                    candidates.append(RecommendationCandidate(
+                        source="semantic_search",
+                        content=node.get("name", ""),
+                        category=None,
+                        confidence=similarity * 0.7,
+                        match_reason="语义相关失效原因",
+                        metadata={
+                            "failure_cause_node_id": node_id,
+                            "failure_cause_desc": node.get("description"),
+                            "failure_mode_node_id": fm_id,
+                            "failure_mode_name": fm_name,
+                            "fmea_id": fmea_id,
+                            "fmea_document_no": doc.get("document_no"),
+                            "product_line_code": doc.get("product_line_code"),
+                        },
+                    ))
+                elif node_type == "FailureMode":
+                    candidates.append(RecommendationCandidate(
+                        source="semantic_search",
+                        content=node.get("name", ""),
+                        category=None,
+                        confidence=similarity * 0.5,
+                        match_reason="语义相关失效模式",
+                        metadata={
+                            "failure_mode_node_id": node_id,
+                            "failure_mode_name": node.get("name"),
+                            "fmea_id": fmea_id,
+                            "fmea_document_no": doc.get("document_no"),
+                            "product_line_code": doc.get("product_line_code"),
+                        },
+                    ))
+
+            # D5: 只召回 FailureCause（后续交给 FMEAControlExpander）
+            elif context.stage == "d5" and node_type == "FailureCause":
+                fm_id = None
+                fm_name = None
+                for e in edges:
+                    if e["source"] == node_id and e["type"] == "CAUSE_OF":
+                        parent = node_map.get(e["target"])
+                        if parent and parent.get("type") == "FailureMode":
+                            fm_id = parent["id"]
+                            fm_name = parent.get("name")
+                            break
+                candidates.append(RecommendationCandidate(
+                    source="semantic_search",
+                    content=node.get("name", ""),
+                    category=None,
+                    confidence=similarity * 0.8,
+                    match_reason="语义相关失效原因",
+                    metadata={
+                        "failure_cause_node_id": node_id,
+                        "failure_cause_desc": node.get("description"),
+                        "failure_mode_node_id": fm_id,
+                        "failure_mode_name": fm_name,
+                        "fmea_id": fmea_id,
+                        "fmea_document_no": doc.get("document_no"),
+                        "product_line_code": doc.get("product_line_code"),
+                    },
+                ))
+
+        return candidates
 
 
 class HistoricalCAPASource:
@@ -629,11 +755,20 @@ class HistoricalCAPASource:
         vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
         user_pls = context.user_product_lines
 
-        # 先尝试同产品线
-        results = await self._search(vec_str, user_pls, "d2_description", limit=5)
-        if not results and user_pls:
-            # 无结果时放宽到跨产品线
-            results = await self._search(vec_str, None, "d2_description", limit=5)
+        # 先尝试同产品线（或用户允许的产品线）
+        # 注意：user_pls 为 None 时表示 admin（无限制），不应放宽
+        # user_pls 为 [] 时表示无权限，应返回空
+        # user_pls 为 ["xxx"] 时优先搜索这些产品线的 CAPA
+        capa_pl = context.capa_data.get("product_line_code")
+        search_pls = user_pls
+        if user_pls is not None and capa_pl and capa_pl in user_pls:
+            # 优先搜索当前 CAPA 的产品线
+            search_pls = [capa_pl]
+
+        results = await self._search(vec_str, search_pls, "d2_description", limit=5)
+        if not results and user_pls is not None and len(user_pls) > 1 and capa_pl in user_pls:
+            # 当前产品线无结果，放宽到用户允许的所有产品线
+            results = await self._search(vec_str, user_pls, "d2_description", limit=5)
 
         return results
 
@@ -716,9 +851,14 @@ class HistoricalCAPAMeasureSource:
         vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
         user_pls = context.user_product_lines
 
-        results = await self._search(vec_str, user_pls, "d4_root_cause", limit=5)
-        if not results and user_pls:
-            results = await self._search(vec_str, None, "d4_root_cause", limit=5)
+        capa_pl = context.capa_data.get("product_line_code")
+        search_pls = user_pls
+        if user_pls is not None and capa_pl and capa_pl in user_pls:
+            search_pls = [capa_pl]
+
+        results = await self._search(vec_str, search_pls, "d4_root_cause", limit=5)
+        if not results and user_pls is not None and len(user_pls) > 1 and capa_pl in user_pls:
+            results = await self._search(vec_str, user_pls, "d4_root_cause", limit=5)
 
         return results
 
@@ -1068,11 +1208,11 @@ class TestLLMFusionLayer:
         assert result[0].match_reason == "original"
 
     @pytest.mark.asyncio
-    async def test_fallback_generation_when_too_few_candidates(self):
+    async def test_fallback_generation_when_no_candidates(self):
         mock_llm = AsyncMock()
-        mock_llm.complete = AsyncMock(side_effect=[
-            [],  # fusion returns empty
-            [{"content": "generated", "confidence": 0.4, "match_reason": "LLM fallback"}],
+        # candidates empty -> stage 1 skipped -> _generate_fallback called directly
+        mock_llm.complete = AsyncMock(return_value=[
+            {"content": "generated", "confidence": 0.4, "match_reason": "LLM fallback"}
         ])
 
         layer = LLMFusionLayer(mock_llm)
@@ -1364,14 +1504,14 @@ class HybridRecommendationPipeline:
         # D4 Sources
         self.d4_sources = [
             FMEAGraphSource(),
-            SemanticSearchSource(embedding_provider),
+            SemanticSearchSource(db, embedding_provider),
             HistoricalCAPASource(db, embedding_provider),
             RuleEngineSource(),
         ]
 
         # D5 Sources (Stage 1: text/semantic recall)
         self.d5_sources = [
-            SemanticSearchSource(embedding_provider),
+            SemanticSearchSource(db, embedding_provider),
             HistoricalCAPAMeasureSource(db, embedding_provider),
             RuleEngineMeasureSource(),
         ]
@@ -1505,14 +1645,17 @@ git commit -m "feat(schema): extend D4Recommendation and D5GeneralSuggestion wit
 EMBEDDING_FIELDS = {"d2_description", "d4_root_cause", "d5_correction", "d7_prevention"}
 
 async def update_capa(db, capa, update_data, user_id):
-    # ... existing logic ...
+    # ... existing logic (before mutation) ...
 
-    # Trigger re-embedding if text fields actually changed
-    changed = {
+    # Detect embedding field changes BEFORE mutating capa
+    embedding_changed = {
         k for k, v in update_data.items()
         if k in EMBEDDING_FIELDS and getattr(capa, k) != v
     }
-    if changed:
+
+    # ... existing mutation logic ...
+
+    if embedding_changed:
         from app.services.embedding_outbox import enqueue_embedding
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
 
@@ -1538,6 +1681,25 @@ git commit -m "feat(capa): trigger re-embedding on d2/d4/d5/d7 field changes"
 在 `fetch_chunks` 函数中修改 `entity_type == "fmea_node"` 分支：
 
 ```python
+# Step 1: 扩展 SQL SELECT 加入 description
+# 在 embedding_sync_worker.py fetch_chunks 的 fmea_node 分支中：
+# 修改前：
+#     SELECT node->>'id' as node_id,
+#            node->>'type' as node_type,
+#            node->>'name' as name,
+#            COALESCE(node->>'requirement', '') as requirement,
+#            COALESCE(node->>'specification', '') as specification,
+#            ...
+# 修改后：
+#     SELECT node->>'id' as node_id,
+#            node->>'type' as node_type,
+#            node->>'name' as name,
+#            COALESCE(node->>'description', '') as description,
+#            COALESCE(node->>'requirement', '') as requirement,
+#            COALESCE(node->>'specification', '') as specification,
+#            ...
+
+# Step 2: 扩展 chunk 内容加入 description
 # 修改前
 text_parts = [row["name"]]
 if row["requirement"]:
@@ -1575,7 +1737,7 @@ git commit -m "feat(embedding): include description in FMEA node chunks"
 
 ```python
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
-from app.services.llm_provider import get_llm_provider
+from app.services.llm_provider import create_llm_provider
 from app.services.embedding_provider import create_embedding_provider
 ```
 
@@ -1627,7 +1789,7 @@ async def get_d4_fmea_recommendations(
                 linked_fmea = doc
                 break
 
-    llm_provider = await get_llm_provider()
+    llm_provider = create_llm_provider()
     embedding_provider = create_embedding_provider()
     pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
 
@@ -1697,7 +1859,7 @@ async def get_d5_fmea_recommendations(
                 linked_fmea = doc
                 break
 
-    llm_provider = await get_llm_provider()
+    llm_provider = create_llm_provider()
     embedding_provider = create_embedding_provider()
     pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
 
@@ -1883,7 +2045,8 @@ git commit -m "test(recommendation): add hybrid pipeline end-to-end tests"
 - 无 "TBD", "TODO", "implement later"
 - 无 "Add appropriate error handling"
 - 无 "Similar to Task N"
-- 每个代码步骤包含完整代码
+- **已修复**: Task 4 SemanticSearchSource 原为空实现 (`return []`)，已替换为完整的 pgvector + 图回溯实现
+- **已修复**: Task 4 测试原为 `pass` placeholder，已替换为真实 Mock 测试
 
 ### 3. Type Consistency
 
