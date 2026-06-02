@@ -196,7 +196,7 @@ CREATE TABLE embedding_sync_outbox (
     entity_id UUID NOT NULL,
     product_line_code VARCHAR(20),
     -- 可靠性字段（镜像 graph_sync_outbox）
-    status VARCHAR(10) DEFAULT 'pending',  -- pending / processing / completed / dead_letter
+    status VARCHAR(20) DEFAULT 'pending',  -- pending / processing / completed / dead_letter
     retry_count INT DEFAULT 0,
     max_attempts INT DEFAULT 5,
     next_attempt_at TIMESTAMPTZ DEFAULT NOW(),
@@ -563,22 +563,32 @@ docker-compose.yml 中 `db` 服务改为 `build: ./docker/postgres` 而非 `imag
 ```python
 # alembic/versions/020_add_vector_extensions.py
 import logging
+from sqlalchemy import text
+
 logger = logging.getLogger("alembic.migration")
 
 def upgrade():
     # pgvector：必须安装（Docker 镜像自带，本地需手动安装）
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-    # zhparser：容错处理，本地开发环境可能未安装
-    try:
+    # zhparser：显式预检查，避免 PostgreSQL 事务 abort
+    # （PostgreSQL 中语句失败会导致整个事务进入 aborted 状态，try/catch 无法恢复）
+    conn = op.get_bind()
+    has_zhparser = conn.execute(
+        text("SELECT 1 FROM pg_available_extensions WHERE name = 'zhparser'")
+    ).fetchone()
+
+    if has_zhparser:
         op.execute("CREATE EXTENSION IF NOT EXISTS zhparser")
         op.execute("""
             CREATE TEXT SEARCH CONFIGURATION zhcfg (PARSER = zhparser);
             ALTER TEXT SEARCH CONFIGURATION zhcfg ADD MAPPING FOR n,v,a,i,e,l WITH simple;
         """)
-    except Exception as e:
-        logger.warning(f"zhparser not available ({e}), falling back to simple config")
+        logger.info("zhparser installed, zhcfg created with zhparser parser")
+    else:
+        # 降级：使用 simple 配置（按空格分词，中文效果有限但零依赖）
         op.execute("CREATE TEXT SEARCH CONFIGURATION zhcfg (COPY = simple)")
+        logger.warning("zhparser not available, zhcfg created with simple config (Chinese tokenization degraded)")
 
 def downgrade():
     op.execute("DROP TEXT SEARCH CONFIGURATION IF EXISTS zhcfg")
@@ -647,23 +657,41 @@ ollama:
 
 ### 向量维度变更的详细缓解方案
 
-pgvector 的 `vector(N)` 类型在 DDL 时固定维度，PostgreSQL 会拒绝插入维度不符的向量。模型切换如果涉及维度变更（如 OpenAI 1536 → Ollama 768），必须执行 DDL 迁移：
+pgvector 的 `vector(N)` 类型在 DDL 时固定维度，PostgreSQL 会拒绝插入维度不符的向量。且 `ALTER COLUMN TYPE vector(M)` 无法将已有向量从 N 维 cast 到 M 维（数据不兼容）。模型切换如果涉及维度变更（如 OpenAI 1536 → Ollama 768），必须重建数据：
+
+**安全迁移步骤**（Alembic 迁移）：
 
 ```python
-# Alembic 迁移伪代码
 def upgrade(new_dim: int):
-    # 1. 删除旧索引
+    # 1. 停止 embedding_sync_worker（避免迁移期间写入）
+    # 通过环境变量 EMBEDDING_WORKER_ENABLED=false 或 docker compose stop embedding-worker
+
+    # 2. 删除旧索引
     op.execute("DROP INDEX IF EXISTS idx_embedding_hnsw")
-    # 2. 变更列维度
+
+    # 3. 清空旧向量数据（维度不兼容，无法保留）
+    op.execute("DELETE FROM document_embeddings")
+
+    # 4. 变更列维度
     op.execute(f"ALTER TABLE document_embeddings ALTER COLUMN embedding TYPE vector({new_dim})")
-    # 3. 重建 HNSW 索引
+
+    # 5. 重建 HNSW 索引
     op.execute(f"""
         CREATE INDEX idx_embedding_hnsw ON document_embeddings
         USING hnsw (embedding vector_cosine_ops)
         WITH (m = 16, ef_construction = 64)
     """)
-    # 4. 触发全量重新嵌入（清空旧向量，由回填命令重新生成）
-    op.execute("UPDATE document_embeddings SET embedding = NULL, embedding_model = ''")
+
+    # 6. 清空 outbox（旧事件的 embedding 已删除，需要重新触发）
+    op.execute("DELETE FROM embedding_sync_outbox")
 ```
 
-**操作流程**：修改 `EMBEDDING_DIMENSIONS` 环境变量 → 运行 Alembic 迁移 → 执行回填命令重新生成全部 embedding。期间搜索功能降级（向量搜索不可用，全文检索仍可工作）。
+**操作流程**：
+1. 停止 embedding-worker
+2. 修改 `EMBEDDING_DIMENSIONS` 和 `EMBEDDING_MODEL` 环境变量
+3. 运行 Alembic 迁移（清空向量 → 变更列 → 重建索引）
+4. 重启 embedding-worker
+5. 执行回填命令重新生成全部 embedding
+6. 期间搜索功能降级（向量搜索不可用，全文检索仍可工作）
+
+**注意**：生产环境建议在低峰期执行，或采用"新建列→回填→切换→删旧列"的零停机方案（更复杂，按需实施）。
