@@ -1,6 +1,7 @@
 import uuid
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +45,60 @@ class CrossFmeaStatsOut(BaseModel):
     high_ap_nodes: list[HighAPNodeOut]
     avg_rpn: float
     top_failure_modes: list[TopFailureModeOut]
+
+
+class MaskedNodeOut(BaseModel):
+    name: str
+    ap: str | None = None
+    rpn: int
+
+
+class GlobalStatsOut(BaseModel):
+    total_fmeas: int
+    total_nodes: int
+    node_type_distribution: dict[str, int]
+    ap_distribution: dict[str, int]
+    avg_rpn: float
+    high_ap_nodes: list[MaskedNodeOut]
+    top_failure_modes: list[MaskedNodeOut]
+
+
+def mask_name(name: Any) -> str:
+    """安全脱敏：保留前 2 个字符（去除首尾空格后），其余替换为 ***；
+    短名称（≤2 字符）仅保留首字符 + ***，防止完整暴露原值。
+    非字符串类型直接返回 ***，避免异常类型被意外展示。
+    """
+    if name is None:
+        return "***"
+    if not isinstance(name, str):
+        return "***"
+    name_str = name.strip()
+    if not name_str:
+        return "***"
+    if len(name_str) <= 2:
+        return name_str[:1] + "***"
+    return name_str[:2] + "***"
+
+
+def _sanitize_global_stats(raw: dict) -> dict:
+    """白名单重建：只保留统计字段，对 name 脱敏，丢弃所有可追溯标识。"""
+
+    def _mask_node(node: dict) -> dict:
+        return {
+            "name": mask_name(node.get("name", "")),
+            "ap": node.get("ap"),
+            "rpn": node.get("rpn", 0),
+        }
+
+    return {
+        "total_fmeas": raw.get("total_fmeas", 0),
+        "total_nodes": raw.get("total_nodes", 0),
+        "node_type_distribution": raw.get("node_type_distribution", {}),
+        "ap_distribution": raw.get("ap_distribution", {}),
+        "avg_rpn": raw.get("avg_rpn", 0.0),
+        "high_ap_nodes": [_mask_node(n) for n in raw.get("high_ap_nodes", [])],
+        "top_failure_modes": [_mask_node(n) for n in raw.get("top_failure_modes", [])],
+    }
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
@@ -100,6 +155,24 @@ async def cross_fmea_stats(
     if not product_line_code:
         raise HTTPException(status_code=422, detail="product_line_code cannot be empty")
     return await repo.get_cross_fmea_stats(product_line_code)
+
+
+@router.get("/global-stats", response_model=GlobalStatsOut, response_model_exclude_none=True)
+async def global_stats(
+    request: Request,
+    repo: FMEAGraphRepository = Depends(get_graph_repository),
+    _user: User = Depends(require_admin),
+):
+    """跨产品线全局知识库统计（Admin Only）。返回数据已脱敏。
+    不接受 product_line_code 参数，传入则返回 400。
+    """
+    if "product_line_code" in request.query_params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="product_line_code is not accepted for global stats",
+        )
+    raw = await repo.get_global_stats()
+    return _sanitize_global_stats(raw)
 
 
 @router.post("/rebuild")
