@@ -234,7 +234,7 @@ class ChangeImpactService:
 # backend/app/api/change_impact.py
 
 from app.core.product_line_filter import enforce_product_line_access
-from app.services.fmea_service import get_fmea_by_id  # 或等效查询
+from app.services.fmea_service import get_fmea  # 现有函数，按 fmea_id 查询
 from app.graph.deps import get_graph_repository  # 从 graph.py 的私有 _repo 提取的公共依赖
 
 router = APIRouter(prefix="/api/change-impact", tags=["变更影响分析"])
