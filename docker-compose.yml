@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   db:
-    image: postgres:15-alpine
+    build: ./docker/postgres
     environment:
       POSTGRES_USER: qms
       POSTGRES_PASSWORD: qms_dev_2026
@@ -92,6 +92,18 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: openqms2026
 
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
 volumes:
   pgdata:
   neo4j_data:
+  ollama_data:
