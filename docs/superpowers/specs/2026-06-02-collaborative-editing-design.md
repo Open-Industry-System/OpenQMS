@@ -146,20 +146,26 @@ Authorization: Bearer <token>
 冲突发生时，前端执行以下步骤：
 1. 收到 409 响应，提取 `latest_lock_version`
 2. 调用 `GET /api/fmea/{id}` 获取当前最新文档数据
-3. 将 **本地内存中的脏状态**（未保存的 nodes/edges）与 **服务器最新数据** 进行 client-side diff
+3. 进行 **三方对比**：
+   - **Base**（打开页面时加载的原始数据）vs **Latest Server** → 对方修改的内容
+   - **Base** vs **Local Dirty**（本地未保存的修改）→ 我方修改的内容
+   - 同一字段在双方都有修改 → 真正冲突（红色高亮）
+
+> **Base snapshot 存储：** 页面加载时将初始 `graph_data` 存入 `useRef` 或独立 state，不参与编辑操作，仅作为 diff 基准。
+
 4. 在 `ConflictResolutionModal` 中展示 diff 结果：
    - 对方新增/删除的节点和边
-   - 对方修改的字段（对比 name、severity、occurrence 等）
-   - 本地也有修改的字段（真正冲突）用红色高亮
+   - 对方修改的字段
+   - 真正冲突字段（双方都有修改）红色高亮
 
 > **优势:** 省去中间版本快照存储，避免数据库膨胀；diff 逻辑纯前端计算，无后端依赖。
 
 ### 4.4 安全覆盖保存（Force Save）
 
-用户确认覆盖时，必须携带确认过的最新版本号：
+用户确认覆盖时，必须携带确认过的最新版本号。FMEA 和 Control Plan 各自更新 API 均支持：
 
 ```
-PUT /api/fmea/{id}
+PUT /api/fmea/{id}          # 或 PUT /api/control-plans/{id}
 Authorization: Bearer <token>
 
 {
@@ -361,16 +367,16 @@ frontend/src/
 
 ## 8. 前提：补全 `lock_version` 字段
 
-第一期覆盖的文档类型必须已有 `lock_version` 乐观锁字段。经核查：
+第一期完整协同（在线状态 + 冲突提示）仅覆盖已有 `lock_version` 的文档类型：
 
-| 模型 | 已有 lock_version | 需要补充 |
+| 模型 | 已有 lock_version | 本期覆盖 |
 |------|------------------|---------|
-| FMEADocument | ✅ 有 | — |
-| ControlPlan | ✅ 有 | — |
-| CAPAEightD | ❌ 无 | 需要 migration |
-| APQP | ❌ 无 | 本期暂不覆盖 |
+| FMEADocument | ✅ 有 | 完整协同 |
+| ControlPlan | ✅ 有 | 完整协同 |
+| CAPAEightD | ❌ 无 | 仅在线状态 |
+| APQP | ❌ 无 | 仅在线状态 |
 
-**补充方案：** 为需要冲突检测但缺失 `lock_version` 的模型添加该字段，模型基类中使用 SQLAlchemy `Column(Integer, default=0)`，保存时自动递增。建议封装为通用 mixin：`LockVersionMixin`。
+**说明：** 本期不为 CAPA/APQP 补充 `lock_version`。这些模块仅接入顶部 `CollaborationBar` 显示在线用户，不启用冲突提示。后续如需为更多模块启用冲突检测，再统一通过 `LockVersionMixin` 补充 `lock_version`。
 
 ## 9. 数据库迁移
 
@@ -438,6 +444,8 @@ async def _cleanup_expired_sessions():
         await delete_expired_sessions()
 ```
 
+> **注：** 多 worker 部署时，每个 worker 都会启动清理协程，但 `DELETE ... WHERE last_activity < ...` 是幂等操作，重复执行无影响。`active-users` 查询仍以 TTL 过滤为准，不依赖清理任务。
+
 ### 10.3 Redis 扩展路径
 
 项目已配置 Redis 但未使用。如需扩展：
@@ -467,7 +475,7 @@ async def _cleanup_expired_sessions():
 - [ ] Control Plan 编辑器同样支持完整协同（在线状态 + 冲突提示）
 - [ ] CAPA、APQP 等其他编辑器顶部显示在线用户列表（本期最小支持）
 - [ ] 构建和 lint 无错误
-- [ ] `lock_version` 已添加到所有需要冲突检测的模型（如 CAPA 等原有缺失的模型）
+- [ ] `lock_version` 检查：FMEA 和 Control Plan 确认已有；CAPA/APQP 本期不补充
 
 ## 12. 后续扩展方向
 
