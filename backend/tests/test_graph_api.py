@@ -9,7 +9,7 @@ from fastapi import status
 
 from app.main import app
 from app.core.deps import get_current_user
-from app.api.graph import _repo
+from app.graph.deps import get_graph_repository
 
 
 class StubGraphRepo:
@@ -62,18 +62,66 @@ class StubGraphRepo:
     async def get_cause_chain(self, fmea_id, node_id):
         return {"nodes": [], "edges": []}
 
+    async def get_global_stats(self):
+        # 模拟跨产品线数据，故意加入敏感字段验证白名单过滤
+        return {
+            "total_fmeas": 5,
+            "total_nodes": 50,
+            "node_type_distribution": {"FailureMode": 5, "Function": 10},
+            "ap_distribution": {"H": 2, "M": 2, "L": 1},
+            "high_ap_nodes": [
+                {
+                    "node_id": "n1",
+                    "name": "焊接不良",
+                    "ap": "H",
+                    "rpn": 360,
+                    "fmea_id": "fmea-1",
+                    "document_no": "PFMEA-2026-001",
+                    "product_line_code": "DC-DC-100",
+                    "leaked_field": "secret",
+                }
+            ],
+            "avg_rpn": 180.0,
+            "top_failure_modes": [
+                {
+                    "name": "密封失效",
+                    "rpn": 280,
+                    "fmea_id": "fmea-2",
+                    "document_no": "PFMEA-2026-002",
+                    "product_line_code": "DC-DC-200",
+                }
+            ],
+        }
 
-async def _override_get_current_user():
+
+import uuid as _uuid
+
+
+def _make_user(role_key: str):
+    """构造测试用的 User + RoleDefinition。"""
     from app.models.user import User
-    return User(
-        user_id="00000000-0000-0000-0000-000000000001",
-        username="tester",
-        display_name="测试员",
-        email="tester@openqms.local",
+    from app.models.role import RoleDefinition
+    role_id = _uuid.uuid4()
+    user = User(
+        user_id=_uuid.uuid4(),
+        username=role_key,
+        display_name=role_key,
+        email=f"{role_key}@openqms.local",
         password_hash="hashed",
         is_active=True,
-        role="admin",
+        role_id=role_id,
     )
+    user.role_definition = RoleDefinition(
+        id=role_id,
+        role_key=role_key,
+        name_zh=role_key,
+        name_en=role_key,
+    )
+    return user
+
+
+async def _override_get_current_user():
+    return _make_user("admin")
 
 
 async def _override_repo():
@@ -84,7 +132,7 @@ async def _override_repo():
 async def client():
     """基于 ASGI transport 的测试客户端，注入 stub repo 和 mock user。"""
     app.dependency_overrides[get_current_user] = _override_get_current_user
-    app.dependency_overrides[_repo] = _override_repo
+    app.dependency_overrides[get_graph_repository] = _override_repo
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -150,3 +198,101 @@ async def test_graph_similar_response_has_document_no(client: AsyncClient):
     # ResponseModel 白名单过滤
     assert "created_by" not in first
     assert "responsible" not in first
+
+
+from app.api.graph import mask_name
+
+
+@pytest.mark.asyncio
+async def test_global_stats_admin_only(client: AsyncClient):
+    """验证 /global-stats 仅 admin 可访问。"""
+    # 默认 client 使用 admin 角色，先验证 200
+    resp = await client.get("/api/graph/global-stats")
+    assert resp.status_code == status.HTTP_200_OK
+
+    # 切换为 non-admin 角色
+    app.dependency_overrides[get_current_user] = lambda: _make_user("viewer")
+    try:
+        resp = await client.get("/api/graph/global-stats")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+    finally:
+        app.dependency_overrides[get_current_user] = _override_get_current_user
+
+
+# mask_name 边界测试（纯函数，不依赖 HTTP）
+def test_mask_name_normal():
+    assert mask_name("焊接不良") == "焊接***"
+
+
+def test_mask_name_short_two_chars():
+    assert mask_name("短路") == "短***"
+
+
+def test_mask_name_short_one_char():
+    assert mask_name("A") == "A***"
+
+
+def test_mask_name_empty():
+    assert mask_name("") == "***"
+
+
+def test_mask_name_none():
+    assert mask_name(None) == "***"
+
+
+def test_mask_name_non_string():
+    assert mask_name(123) == "***"
+    assert mask_name([1, 2, 3]) == "***"
+
+
+def test_mask_name_whitespace():
+    assert mask_name("   ") == "***"
+
+
+def test_mask_name_two_char_alphanumeric():
+    assert mask_name("A1") == "A***"
+
+
+@pytest.mark.asyncio
+async def test_global_stats_response_sanitized(client: AsyncClient):
+    """验证 /global-stats 响应已脱敏，无敏感字段。"""
+    resp = await client.get("/api/graph/global-stats")
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+
+    # 基本统计字段存在
+    assert "total_fmeas" in data
+    assert "ap_distribution" in data
+    assert "high_ap_nodes" in data
+    assert "top_failure_modes" in data
+
+    # 敏感字段不存在
+    assert "fmea_id" not in data
+    assert "document_no" not in data
+    assert "product_line_code" not in data
+    assert "node_id" not in data
+    assert "leaked_field" not in data
+
+    # high_ap_nodes 脱敏检查
+    first = data["high_ap_nodes"][0]
+    assert "name" in first
+    assert first["name"].endswith("***")
+    assert "fmea_id" not in first
+    assert "document_no" not in first
+    assert "node_id" not in first
+    assert "ap" in first  # high_ap_nodes 有 ap
+
+    # top_failure_modes 脱敏检查（ap 不应出现，因为原始数据无 ap）
+    top = data["top_failure_modes"][0]
+    assert "name" in top
+    assert top["name"].endswith("***")
+    assert "fmea_id" not in top
+    assert "document_no" not in top
+    assert "ap" not in top  # response_model_exclude_none=True 过滤了 null
+
+
+@pytest.mark.asyncio
+async def test_global_stats_rejects_product_line_code_param(client: AsyncClient):
+    """验证 /global-stats 传入 product_line_code 参数返回 400。"""
+    resp = await client.get("/api/graph/global-stats?product_line_code=DC-DC-100")
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
