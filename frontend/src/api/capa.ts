@@ -1,5 +1,5 @@
 import client from "./client";
-import type { CAPAReport, CAPAListResponse, D7RecommendationResponse } from "../types";
+import type { CAPAReport, CAPAListResponse, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse } from "../types";
 
 export async function listCAPAs(params: {
   page?: number;
@@ -47,6 +47,16 @@ export async function advanceCAPA(
 
 export async function getD7Recommendations(id: string): Promise<D7RecommendationResponse> {
   const resp = await client.get(`/capa/${id}/d7-fmea-recommendations`);
+  return resp.data;
+}
+
+export async function getD4Recommendations(id: string): Promise<D4RecommendationResponse> {
+  const resp = await client.get(`/capa/${id}/d4-fmea-recommendations`);
+  return resp.data;
+}
+
+export async function getD5Recommendations(id: string): Promise<D5RecommendationResponse> {
+  const resp = await client.get(`/capa/${id}/d5-fmea-recommendations`);
   return resp.data;
 }
 

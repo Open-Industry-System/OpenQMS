@@ -1287,3 +1287,47 @@ export interface D7Recommendation {
 export interface D7RecommendationResponse {
   recommendations: D7Recommendation[];
 }
+
+export interface D4Recommendation {
+  failure_cause_node_id: string | null;
+  failure_cause_name: string;
+  failure_cause_desc: string | null;
+  failure_mode_node_id: string | null;
+  failure_mode_name: string | null;
+  fmea_document_no: string | null;
+  fmea_id: string | null;
+  match_source: "linked" | "keyword" | "rule";
+  match_reason: string;
+  related_d2_keywords: string[];
+  confidence: number;
+}
+
+export interface D4RecommendationResponse {
+  items: D4Recommendation[];
+}
+
+export interface D5ExistingControl {
+  failure_mode_node_id: string | null;
+  failure_mode_name: string | null;
+  failure_cause_node_id: string | null;
+  failure_cause_name: string | null;
+  control_node_id: string;
+  control_name: string;
+  control_type: "prevention" | "detection";
+  match_source: string;
+  match_reason: string;
+  fmea_id: string | null;
+  fmea_document_no: string | null;
+}
+
+export interface D5GeneralSuggestion {
+  content: string;
+  category: string;
+  basis: string;
+  confidence: number;
+}
+
+export interface D5RecommendationResponse {
+  existing_controls: D5ExistingControl[];
+  general_suggestions: D5GeneralSuggestion[];
+}
