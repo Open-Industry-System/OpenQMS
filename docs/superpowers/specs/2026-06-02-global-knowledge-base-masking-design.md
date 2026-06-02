@@ -90,11 +90,9 @@ class MaskedNodeOut(BaseModel):
 
 ```python
 def mask_name(name: str) -> str:
-    """保留前 2 个字符，剩余替换为 ***。"""
+    """保留前 2 个字符，剩余替换为 ***；短名称至少保留首字符，防止完整泄露。"""
     if not name:
         return "***"
-    if len(name) <= 2:
-        return name + "***"
     return name[:2] + "***"
 ```
 
@@ -103,18 +101,42 @@ def mask_name(name: str) -> str:
 | `焊接不良` | `焊接***` |
 | `密封失效` | `密封***` |
 | `A1` | `A1***` |
-| `短路` | `短路***` |
+| `短路` | `短***` |
+| `AB` | `AB***` |
+| `A` | `A***` |
 | `` | `***` |
 
-### 4.2 字段过滤
+### 4.2 白名单响应构建
 
-响应构建时，从 Repository 返回的原始数据中**移除**以下字段：
+`_sanitize_global_stats(raw: dict)` 使用**白名单重建**响应，只从 Repository 原始数据中显式提取需要的字段，绝不从原 dict 删除字段（防止 Repository 返回结构不一致时漏删）：
+
+```python
+def _sanitize_global_stats(raw: dict) -> dict:
+    """白名单重建：只保留统计字段，对 name 脱敏，丢弃所有可追溯标识。"""
+
+    def _mask_node(node: dict) -> dict:
+        return {
+            "name": mask_name(node.get("name", "")),
+            "ap": node.get("ap"),
+            "rpn": node.get("rpn", 0),
+        }
+
+    return {
+        "total_fmeas": raw.get("total_fmeas", 0),
+        "total_nodes": raw.get("total_nodes", 0),
+        "node_type_distribution": raw.get("node_type_distribution", {}),
+        "ap_distribution": raw.get("ap_distribution", {}),
+        "avg_rpn": raw.get("avg_rpn", 0.0),
+        "high_ap_nodes": [_mask_node(n) for n in raw.get("high_ap_nodes", [])],
+        "top_failure_modes": [_mask_node(n) for n in raw.get("top_failure_modes", [])],
+    }
+```
+
+**丢弃的字段（白名单外的任何字段均不传递）：**
 - `fmea_id`
 - `document_no`
 - `product_line_code`
 - `node_id`
-
-仅保留统计需要的字段：`name`（脱敏后）、`ap`、`rpn`。
 
 ## 5. Repository 层
 
@@ -135,13 +157,13 @@ class FMEAGraphRepository(ABC):
 ### 5.2 Neo4j 实现
 
 与 `get_cross_fmea_stats` 基本一致，区别：
-- Cypher 查询中**移除** `WHERE n.product_line_code = $pl` 条件
+- **移除该方法内所有产品线过滤条件**，包括节点类型分布、FailureMode 查询、FMEDocument 计数中的 `$pl` 参数
 - 聚合所有产品线的数据
 
 ### 5.3 JSONB 实现
 
 与 `get_cross_fmea_stats` 基本一致，区别：
-- SQL 查询中**移除** `WHERE product_line_code = ?` 条件
+- 查询全部 `FMEADocument`（不限制 `product_line_code`），复用现有 Python 聚合逻辑遍历 `graph_data`
 - 聚合 `fmea_documents` 全表数据
 
 ## 6. API 层
@@ -156,7 +178,7 @@ async def global_stats(
 ):
     """跨产品线全局知识库统计（Admin Only）。返回数据已脱敏。"""
     raw = await repo.get_global_stats()
-    # 响应阶段脱敏 + 字段过滤
+    # 响应阶段白名单重建 + 脱敏
     return _sanitize_global_stats(raw)
 ```
 
@@ -179,6 +201,8 @@ async def global_stats(
 - [ ] Admin 访问 `/api/graph/global-stats` 返回跨产品线聚合统计
 - [ ] 响应中不包含 `fmea_id`、`document_no`、`product_line_code`、`node_id`
 - [ ] `name` 字段已按规则脱敏（保留前 2 字符 + `***`）
+- [ ] 短名称（如 `"短路"`、`"A1"`、`"X"`）不会完整暴露原值
+- [ ] 接口不接受 `product_line_code` 参数
 - [ ] 非 admin 访问返回 403
 - [ ] Neo4j 和 JSONB 双实现均正确工作
 - [ ] 构建和 lint 无错误
