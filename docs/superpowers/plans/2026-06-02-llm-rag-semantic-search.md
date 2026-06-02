@@ -708,6 +708,24 @@ BACKOFF_BASE = 10  # seconds
 BACKOFF_MAX = 270  # seconds
 
 
+async def recover_stale_events(db: AsyncSession) -> None:
+    """Reset events stuck in 'processing' for more than 10 minutes back to 'pending'.
+
+    Handles cases where the worker crashed mid-processing without marking events as completed or failed.
+    """
+    result = await db.execute(
+        text("""
+            UPDATE embedding_sync_outbox
+            SET status = 'pending', locked_at = NULL
+            WHERE status = 'processing'
+              AND locked_at < NOW() - INTERVAL '10 minutes'
+        """)
+    )
+    if result.rowcount > 0:
+        logger.warning(f"Recovered {result.rowcount} stale embedding events")
+    await db.commit()
+
+
 async def claim_batch(db: AsyncSession, batch_size: int) -> list[dict]:
     """Claim a batch of pending outbox events using FOR UPDATE SKIP LOCKED."""
     result = await db.execute(
@@ -970,6 +988,9 @@ async def run_worker():
     while running:
         try:
             async with async_session() as db:
+                # Recover events stuck in processing from prior crashes
+                await recover_stale_events(db)
+
                 events = await claim_batch(db, BATCH_SIZE)
                 if not events:
                     await asyncio.sleep(POLL_INTERVAL)
