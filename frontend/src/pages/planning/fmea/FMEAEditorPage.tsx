@@ -34,6 +34,11 @@ import { getImpactChain, getCauseChain, normalizeGraphData } from "../../../api/
 import { analyzeChangeImpact } from "../../../api/changeImpact";
 import { ImpactReportPanel } from "../../../components/change-impact";
 import type { AnalyzeChangeImpactRequest, ChangeImpactAnalysis } from "../../../api/changeImpact";
+import { useCollaboration } from "../../../hooks/useCollaboration";
+import { CollaborationBar, ActiveUserIndicator, ConflictResolutionModal } from "../../../components/collaboration";
+import { diffGraphs } from "../../../utils/graphDiff";
+import type { ConflictInfo } from "../../../types/collaboration";
+import type { GraphDiff } from "../../../utils/graphDiff";
 
 const { Title, Text } = Typography;
 
@@ -112,6 +117,16 @@ export default function FMEAEditorPage() {
   const [graphLoading, setGraphLoading] = useState(false);
   const canvasRef = useRef<GraphCanvasRef>(null);
 
+  const { activeUsers, startEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);
+
+  // Base snapshot for three-way diff
+  const baseGraphRef = useRef<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
+
+  // Conflict resolution state
+  const [conflictVisible, setConflictVisible] = useState(false);
+  const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null);
+  const [conflictDiff, setConflictDiff] = useState<GraphDiff | null>(null);
+
   // Change impact analysis state
   const [impactModalOpen, setImpactModalOpen] = useState(false);
   const [impactLoading, setImpactLoading] = useState(false);
@@ -136,6 +151,11 @@ export default function FMEAEditorPage() {
         const loadedNodes = doc.graph_data?.nodes || [];
         setNodes(loadedNodes);
         setEdges(doc.graph_data?.edges || []);
+        // Save base snapshot for conflict diff
+        baseGraphRef.current = {
+          nodes: JSON.parse(JSON.stringify(doc.graph_data?.nodes || [])),
+          edges: JSON.parse(JSON.stringify(doc.graph_data?.edges || [])),
+        };
         // Auto-select first function node so "添加行" is immediately usable
         const firstFn = loadedNodes.find((n: GraphNode) =>
           ["ProcessItem", "ProcessStep", "ProcessWorkElement",
@@ -228,19 +248,87 @@ export default function FMEAEditorPage() {
       const updated = await updateFMEA(id, {
         title: fmea.title,
         graph_data: { nodes, edges },
+        lock_version: fmea.lock_version,
       });
       setFmea(updated);
+      // Update base snapshot after successful save
+      baseGraphRef.current = {
+        nodes: JSON.parse(JSON.stringify(nodes)),
+        edges: JSON.parse(JSON.stringify(edges)),
+      };
       graphDataRef.current = null; // 保存后清空缓存，下次切回 graph 时重新加载
       message.success("保存成功");
       try {
         if (id) await syncFromFMEA(id);
       } catch { /* silent */ }
-    } catch {
-      message.error("保存失败");
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number; data?: { detail?: string | object } } };
+      if (err.response?.status === 409) {
+        const detail = err.response.data?.detail;
+        const conflictData = typeof detail === "string" ? JSON.parse(detail) : detail;
+        setConflictInfo({
+          saved_by: conflictData.conflict?.saved_by || null,
+          saved_at: conflictData.conflict?.saved_at || null,
+          latest_lock_version: conflictData.conflict?.latest_lock_version || 0,
+        });
+
+        // Fetch latest data and compute three-way diff
+        try {
+          const latestDoc = await getFMEA(id);
+          const base = baseGraphRef.current;
+          if (base) {
+            const diff = diffGraphs(
+              base.nodes, base.edges,
+              latestDoc.graph_data?.nodes || [], latestDoc.graph_data?.edges || [],
+              nodes, edges
+            );
+            setConflictDiff(diff);
+          }
+        } catch {
+          /* silently ignore diff failure */
+        }
+        setConflictVisible(true);
+      } else {
+        message.error("保存失败");
+      }
     } finally {
       setSaving(false);
     }
   }, [id, fmea, nodes, edges]);
+
+  const handleConflictRefresh = () => {
+    setConflictVisible(false);
+    window.location.reload();
+  };
+
+  const handleConflictForceSave = async () => {
+    if (!id || !fmea || !conflictInfo) return;
+    setSaving(true);
+    try {
+      const updated = await updateFMEA(id, {
+        title: fmea.title,
+        graph_data: { nodes, edges },
+        lock_version: fmea.lock_version,
+        confirmed_latest_lock_version: conflictInfo.latest_lock_version,
+      });
+      setFmea(updated);
+      baseGraphRef.current = {
+        nodes: JSON.parse(JSON.stringify(nodes)),
+        edges: JSON.parse(JSON.stringify(edges)),
+      };
+      setConflictVisible(false);
+      message.success("强制保存成功");
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number; data?: { detail?: string } } };
+      if (err.response?.status === 409) {
+        message.error("文档又被修改了，请刷新后重试");
+      } else {
+        message.error("强制保存失败");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleTransition = async (target: string) => {
     if (!id) return;
@@ -466,15 +554,24 @@ export default function FMEAEditorPage() {
         if (!row.failureEffectNodeId) return "-";
         const node = nodeMap.get(row.failureEffectNodeId);
         return (
-          <Input
-            min={1}
-            max={10}
-            size="small"
-            value={node?.severity ?? undefined}
-            disabled={!canEdit('fmea')}
-            style={{ width: 55, textAlign: "center" }}
-            onChange={(e) => updateNode(row.failureEffectNodeId!, "severity", Number(e.target.value) || 0)}
-          />
+          <div>
+            <Input
+              min={1}
+              max={10}
+              size="small"
+              value={node?.severity ?? undefined}
+              disabled={!canEdit('fmea')}
+              style={{ width: 55, textAlign: "center" }}
+              onFocus={() => startEditing({ row_key: row.key, field: "severity", node_id: row.failureModeNodeId })}
+              onBlur={stopEditing}
+              onChange={(e) => updateNode(row.failureEffectNodeId!, "severity", Number(e.target.value) || 0)}
+            />
+            <ActiveUserIndicator
+              activeUsers={activeUsers}
+              rowKey={row.key}
+              field="severity"
+            />
+          </div>
         );
       },
     },
@@ -533,15 +630,24 @@ export default function FMEAEditorPage() {
         if (!row.failureCauseNodeId) return "-";
         const node = nodeMap.get(row.failureCauseNodeId);
         return (
-          <Input
-            min={1}
-            max={10}
-            size="small"
-            value={node?.occurrence ?? undefined}
-            disabled={!canEdit('fmea')}
-            style={{ width: 55, textAlign: "center" }}
-            onChange={(e) => updateNode(row.failureCauseNodeId!, "occurrence", Number(e.target.value) || 0)}
-          />
+          <div>
+            <Input
+              min={1}
+              max={10}
+              size="small"
+              value={node?.occurrence ?? undefined}
+              disabled={!canEdit('fmea')}
+              style={{ width: 55, textAlign: "center" }}
+              onFocus={() => startEditing({ row_key: row.key, field: "occurrence", node_id: row.failureModeNodeId })}
+              onBlur={stopEditing}
+              onChange={(e) => updateNode(row.failureCauseNodeId!, "occurrence", Number(e.target.value) || 0)}
+            />
+            <ActiveUserIndicator
+              activeUsers={activeUsers}
+              rowKey={row.key}
+              field="occurrence"
+            />
+          </div>
         );
       },
     },
@@ -609,15 +715,24 @@ export default function FMEAEditorPage() {
         if (row.detectionControlIds.length === 0) return "-";
         const node = nodeMap.get(row.detectionControlIds[0]);
         return (
-          <Input
-            min={1}
-            max={10}
-            size="small"
-            value={node?.detection ?? undefined}
-            disabled={!canEdit('fmea')}
-            style={{ width: 55, textAlign: "center" }}
-            onChange={(e) => updateNode(row.detectionControlIds[0], "detection", Number(e.target.value) || 0)}
-          />
+          <div>
+            <Input
+              min={1}
+              max={10}
+              size="small"
+              value={node?.detection ?? undefined}
+              disabled={!canEdit('fmea')}
+              style={{ width: 55, textAlign: "center" }}
+              onFocus={() => startEditing({ row_key: row.key, field: "detection", node_id: row.failureModeNodeId })}
+              onBlur={stopEditing}
+              onChange={(e) => updateNode(row.detectionControlIds[0], "detection", Number(e.target.value) || 0)}
+            />
+            <ActiveUserIndicator
+              activeUsers={activeUsers}
+              rowKey={row.key}
+              field="detection"
+            />
+          </div>
         );
       },
     },
@@ -874,6 +989,8 @@ export default function FMEAEditorPage() {
 
   return (
     <div>
+      <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
+
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <Space>
@@ -1261,6 +1378,13 @@ export default function FMEAEditorPage() {
           />
         </Modal>
       )}
+      <ConflictResolutionModal
+        visible={conflictVisible}
+        conflictInfo={conflictInfo}
+        diff={conflictDiff}
+        onRefresh={handleConflictRefresh}
+        onForceSave={handleConflictForceSave}
+      />
     </div>
   );
 }
