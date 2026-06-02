@@ -881,7 +881,7 @@ class HistoricalCAPAMeasureSource:
 
         stmt = text(f"""
             SELECT de.entity_id, de.chunk_text,
-                   1 - (de.embedding <=> :query_vector) AS similarity,
+                   1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
                    capa.document_no, capa.severity, capa.updated_at AS source_updated_at,
                    capa.d5_correction, de.product_line_code
             FROM document_embeddings de
@@ -890,7 +890,7 @@ class HistoricalCAPAMeasureSource:
               AND de.entity_field = :target_field
               AND capa.status = 'D8_CLOSURE'
               {pl_filter}
-            ORDER BY de.embedding <=> :query_vector
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
 
@@ -1737,8 +1737,6 @@ git commit -m "feat(embedding): include description in FMEA node chunks"
 
 ```python
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
-from app.services.llm_provider import create_llm_provider
-from app.services.embedding_provider import create_embedding_provider
 from fastapi import Request
 ```
 
@@ -1774,12 +1772,11 @@ async def get_d4_fmea_recommendations(
             return {"items": []}
 
     # Preload FMEA docs for all allowed product lines (not just current CAPA's PL)
-    # SemanticSearchSource may retrieve cross-PL matches
+    # SemanticSearchSource may retrieve cross-PL matches; doc_map must cover them
     fmea_query = select(FMEADocument)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
-    else:
-        fmea_query = fmea_query.where(FMEADocument.product_line_code == capa.product_line_code)
+    # admin (allowed_pls=None): load all FMEA docs
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
         {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
@@ -1847,12 +1844,11 @@ async def get_d5_fmea_recommendations(
             return {"existing_controls": [], "general_suggestions": []}
 
     # Preload FMEA docs for all allowed product lines (not just current CAPA's PL)
-    # SemanticSearchSource may retrieve cross-PL matches
+    # SemanticSearchSource may retrieve cross-PL matches; doc_map must cover them
     fmea_query = select(FMEADocument)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
-    else:
-        fmea_query = fmea_query.where(FMEADocument.product_line_code == capa.product_line_code)
+    # admin (allowed_pls=None): load all FMEA docs
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
         {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
@@ -1998,6 +1994,81 @@ class TestHybridPipelineEndToEnd:
         )
         schema = candidate.to_d4_schema()
         assert schema["match_source"] == "rule"
+
+    @pytest.mark.asyncio
+    async def test_cross_product_line_semantic_search_resolved_by_doc_map(self):
+        """SemanticSearchSource returns an FMEA node from a non-current but allowed product line;
+        doc_map must resolve it because API preloads all allowed PLs."""
+        from unittest.mock import MagicMock, AsyncMock, call
+        import uuid
+
+        # Mock DB returning a cross-PL FMEA node match
+        mock_db = MagicMock()
+        fmea_id = uuid.uuid4()
+        node_id = str(uuid.uuid4())
+        mock_db.execute = AsyncMock()
+        mock_db.execute.return_value.fetchall.return_value = [
+            MagicMock(fmea_id=fmea_id, node_id=node_id, similarity=0.8, product_line_code="OTHER-PL")
+        ]
+
+        mock_embedding = AsyncMock()
+        mock_embedding.embed = AsyncMock(return_value=[[0.1] * 768])
+
+        # Preload FMEA docs from OTHER-PL (simulating API preloading all allowed PLs)
+        other_pl_doc = {
+            "fmea_id": fmea_id,
+            "document_no": "PFMEA-OTHER-001",
+            "product_line_code": "OTHER-PL",
+            "graph_data": {
+                "nodes": [
+                    {"id": node_id, "type": "FailureCause", "name": "跨线原因"},
+                    {"id": "fm1", "type": "FailureMode", "name": "跨线失效"},
+                ],
+                "edges": [
+                    {"source": node_id, "target": "fm1", "type": "CAUSE_OF"},
+                ],
+            },
+        }
+
+        source = SemanticSearchSource(mock_db, mock_embedding)
+        ctx = RecommendationContext(
+            capa_data={"d2_description": "焊接问题", "product_line_code": "DC-DC-100"},
+            user_product_lines=["DC-DC-100", "OTHER-PL"],  # allowed PLs include OTHER-PL
+            stage="d4",
+            fmea_docs=[other_pl_doc],
+        )
+
+        results = await source.retrieve(ctx)
+        assert len(results) == 1
+        assert results[0].content == "跨线原因"
+        assert results[0].metadata["fmea_document_no"] == "PFMEA-OTHER-001"
+
+    @pytest.mark.asyncio
+    async def test_historical_capa_measure_sql_uses_vector_cast(self):
+        """HistoricalCAPAMeasureSource._search SQL must contain CAST(:query_vector AS vector)."""
+        from unittest.mock import MagicMock, AsyncMock
+        import uuid
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock()
+        mock_db.execute.return_value.mappings.return_value = []
+
+        mock_embedding = AsyncMock()
+        mock_embedding.embed = AsyncMock(return_value=[[0.1] * 768])
+
+        source = HistoricalCAPAMeasureSource(mock_db, mock_embedding)
+        ctx = RecommendationContext(
+            capa_data={"d4_root_cause": "参数偏移", "product_line_code": "DC-DC-100"},
+            user_product_lines=["DC-DC-100"],
+            stage="d5",
+        )
+
+        await source.retrieve(ctx)
+
+        # Check the SQL passed to db.execute contains CAST
+        call_args = mock_db.execute.call_args
+        sql_text = str(call_args[0][0])
+        assert "CAST(:query_vector AS vector)" in sql_text
 ```
 
 - [ ] **Step 2: 运行测试**
@@ -2007,7 +2078,7 @@ cd /Users/sam/Documents/Code/OpenQMS/backend
 pytest tests/test_hybrid_pipeline.py -v
 ```
 
-Expected: `5 passed`
+Expected: `7 passed`
 
 - [ ] **Step 3: 运行现有测试确保不破坏**
 
