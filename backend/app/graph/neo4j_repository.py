@@ -11,6 +11,7 @@ from app.graph.repository import FMEAGraphRepository
 from app.config import settings
 from app.schemas.change_impact import ChangeImpactResult, AffectedNode, ImpactSummary
 from app.state_machines.fmea_state import compute_ap
+from app.utils.similarity import compute_similarity
 
 
 class Neo4jRepository(FMEAGraphRepository):
@@ -271,6 +272,51 @@ class Neo4jRepository(FMEAGraphRepository):
                 "avg_rpn": avg_rpn,
                 "top_failure_modes": sorted(top_modes, key=lambda x: x["rpn"], reverse=True)[:10],
             }
+
+    async def find_similar_nodes_advanced(
+        self,
+        node_type: str,
+        query_text: str,
+        scope: str,
+        product_line_code: str | None,
+        limit: int = 10,
+        min_similarity: float = 0.3,
+    ) -> list[dict]:
+        async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+            cypher = """
+            MATCH (d:FMEDocument)-[:HAS_NODE]->(n:GraphNode {type: $node_type})
+            WHERE d.status = 'approved'
+            """
+            params: dict[str, Any] = {"node_type": node_type}
+            if scope == "current_product_line" and product_line_code:
+                cypher += " AND n.product_line_code = $pl"
+                params["pl"] = product_line_code
+            cypher += """
+            RETURN n.node_id AS node_id, n.name AS name, n.type AS type,
+                   n.fmea_id AS fmea_id, n.product_line_code AS product_line_code,
+                   d.document_no AS document_no,
+                   d.product_line_name AS product_line_name
+            """
+            result = await session.run(cypher, **params)
+            records = await result.data()
+
+            matches = []
+            for r in records:
+                score, reason = compute_similarity(query_text, r.get("name", ""))
+                if score >= min_similarity:
+                    matches.append({
+                        "node_id": r.get("node_id", ""),
+                        "name": r.get("name", ""),
+                        "type": node_type,
+                        "fmea_id": r.get("fmea_id", ""),
+                        "document_no": r.get("document_no"),
+                        "product_line_code": r.get("product_line_code"),
+                        "product_line_name": r.get("product_line_name", r.get("product_line_code")),
+                        "similarity_score": round(score, 3),
+                        "match_reason": reason,
+                    })
+            matches.sort(key=lambda x: x["similarity_score"], reverse=True)
+            return matches[:limit]
 
     async def analyze_change_impact(
         self,

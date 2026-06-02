@@ -16,3 +16,11 @@ def test_jsonb_repo_has_find_similar_nodes_advanced():
     assert hasattr(repo, "find_similar_nodes_advanced")
     import inspect
     assert "compute_similarity" in inspect.getsource(repo.find_similar_nodes_advanced)
+
+
+def test_neo4j_repo_has_find_similar_nodes_advanced():
+    """验证 Neo4jRepository 已实现 find_similar_nodes_advanced。"""
+    from app.graph.neo4j_repository import Neo4jRepository
+    assert hasattr(Neo4jRepository, "find_similar_nodes_advanced")
+    import inspect
+    assert "compute_similarity" in inspect.getsource(Neo4jRepository.find_similar_nodes_advanced)
