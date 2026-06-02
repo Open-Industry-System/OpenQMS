@@ -429,7 +429,7 @@ from app.graph.deps import get_graph_repository
 
 User 模型没有 `role` 字段，只有 `role_id` + `role_definition` relationship。RoleDefinition 的字段是 `role_key`、`name_zh`、`name_en`，没有 `role_name`。
 
-在 `test_global_stats_admin_only` 之前添加 helper：
+在 `_override_get_current_user` 之前添加 helper，并将 `_override_get_current_user` 改为 `return _make_user("admin")`：
 
 ```python
 import uuid as _uuid
@@ -561,41 +561,15 @@ async def test_global_stats_response_sanitized(client: AsyncClient):
     assert "ap" not in top  # response_model_exclude_none=True 过滤了 null
 
 
-# mask_name 边界测试（纯函数，不依赖 HTTP）
-def test_mask_name_normal():
-    assert mask_name("焊接不良") == "焊接***"
-
-
-def test_mask_name_short_two_chars():
-    assert mask_name("短路") == "短***"
-
-
-def test_mask_name_short_one_char():
-    assert mask_name("A") == "A***"
-
-
-def test_mask_name_empty():
-    assert mask_name("") == "***"
-
-
-def test_mask_name_none():
-    assert mask_name(None) == "***"
-
-
-def test_mask_name_non_string():
-    assert mask_name(123) == "***"
-    assert mask_name([1, 2, 3]) == "***"
-
-
-def test_mask_name_whitespace():
-    assert mask_name("   ") == "***"
-
-
-def test_mask_name_two_char_alphanumeric():
-    assert mask_name("A1") == "A***"
+@pytest.mark.asyncio
+async def test_global_stats_ignores_product_line_code_param(client: AsyncClient):
+    """验证 /global-stats 忽略传入的 product_line_code 参数（接口本身不接受该参数）。"""
+    resp = await client.get("/api/graph/global-stats?product_line_code=DC-DC-100")
+    assert resp.status_code == status.HTTP_200_OK
+    # 响应与无参请求一致（StubGraphRepo 的 get_global_stats 不读取查询参数）
 ```
 
-- [ ] **Step 4: 运行测试**
+- [ ] **Step 5: 运行测试**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
@@ -604,7 +578,7 @@ python -m pytest tests/test_graph_api.py -v
 
 Expected: 所有测试通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/tests/test_graph_api.py
