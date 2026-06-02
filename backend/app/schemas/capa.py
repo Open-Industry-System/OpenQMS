@@ -87,10 +87,14 @@ class D4Recommendation(BaseModel):
     failure_mode_name: str | None = None
     fmea_document_no: str | None = None
     fmea_id: str | None = None
-    match_source: str  # "linked" | "keyword" | "rule"
+    match_source: str  # "linked" | "keyword" | "rule" | "fmea_graph" | "semantic_search" | "historical_capa" | "llm"
     match_reason: str
     related_d2_keywords: list[str] = []
     confidence: float = 0.5
+    # --- 新增字段（可选，历史 CAPA 来源标识） ---
+    source_capa_id: str | None = None
+    source_capa_document_no: str | None = None
+    source_product_line_code: str | None = None
 
 
 class D4RecommendationResponse(BaseModel):
@@ -113,9 +117,13 @@ class D5ExistingControl(BaseModel):
 
 class D5GeneralSuggestion(BaseModel):
     content: str
-    category: str  # "预防措施" | "探测措施"
+    category: str  # "预防措施" | "探测措施" | "纠正措施"
     basis: str
     confidence: float
+    # --- 新增字段（可选，历史 CAPA 来源标识） ---
+    match_source: str | None = None
+    source_capa_id: str | None = None
+    source_capa_document_no: str | None = None
 
 
 class D5RecommendationResponse(BaseModel):
