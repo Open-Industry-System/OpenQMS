@@ -110,7 +110,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | Neo4j 知识图谱基础设施 | P1 | ✅ 完成 | Neo4j Docker 服务 + Repository 抽象（Neo4j/JSONB 双实现）+ API 路由 |
 | 知识图谱可视化 (G6 v5) | P1 | ✅ 完成 | FMEA 嵌入"图谱" tab（力导向/层次布局 + 节点点击/双击/右键菜单 + 影响/原因追溯高亮）+ 独立全局页面 `/knowledge-graph`（风险地图 + 跨 FMEA 统计 + 历史关键词搜索 + 节点跳转联动） |
 | 全局知识库 | P1 | ✅ 完成 | 跨 FMEA 节点统计（AP 分布 / 高 AP 节点 / 平均 RPN / Top 失效模式）+ 相似节点关键词搜索 + Pydantic 响应白名单脱敏 + `/knowledge-graph` 全局页面 |
-| LLM RAG 语义搜索 | P2 | 🔲 待开发 | 自然语言搜索历史 FMEA/8D |
+| LLM RAG 语义搜索 | P2 | ✅ 完成 | pgvector 向量存储 + 混合搜索（向量余弦 + tsvector 全文）+ RRF 融合 + RAG 问答（LLM + 来源引用）+ 6 实体类型覆盖（FMEA/CAPA/审核/客诉/SCAR/RMA）+ 产品线隔离 + 模块权限预过滤 + 异步 embedding worker + 回填命令 + KnowledgeGraph 第三 Tab |
 | FMEA 编辑时智能推荐 | P2 | ✅ 完成 | 后端混合推荐系统（规则引擎 + 可选 LLM）+ PostgreSQL 缓存 + 前端 SmartSuggestionDropdown 内联下拉（5 种触发类型 × 6 列自动触发 + 500ms 防抖 + 键盘导航 + 回退提示）+ 产品线访问控制 + 限流；LLM 支持 Claude/OpenAI/Local 多提供商可配置 |
 | 8D 根因+措施推荐 | P2 | ✅ 完成 | D4 根因推荐（FMEA 图匹配：关联 FMEA + 跨 FMEA 关键词 + 规则引擎回退）/ D5 措施推荐（已有控制措施 3 路径遍历 + 规则引擎通用建议）+ 推荐面板（采纳/跳过）+ 只读权限控制；后续可升级为全混合管道（历史 CAPA + LLM + RAG 语义搜索） |
 | 变更影响分析（图遍历）| P2 | 🔲 待开发 | 设计参数变更 → 自动追溯影响范围 |
@@ -129,6 +129,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 **Phase 3 已完成 (2026-06-02)**:
 6. ~~8D 根因+措施推荐~~ ✅ D4 根因推荐（3 策略匹配）+ D5 措施推荐（3 路径控制措施 + 通用建议）+ 推荐面板 + 权限控制
+7. ~~LLM RAG 语义搜索~~ ✅ pgvector + 混合搜索（向量+全文）+ RRF 融合 + RAG 问答 + 6 实体类型 + 产品线隔离 + 权限预过滤 + 异步 Worker + 回填命令 + 前端语义搜索 Tab + 17 个单元测试
 
 **验收标准**: GA v2.0 发布 — AI + 知识图谱上线
 
