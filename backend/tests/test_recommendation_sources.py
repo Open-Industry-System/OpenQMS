@@ -1,8 +1,8 @@
 import uuid
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
-from app.services.recommendation_sources import FMEAGraphSource, SemanticSearchSource
+from app.services.recommendation_sources import FMEAGraphSource, SemanticSearchSource, HistoricalCAPASource
 from app.services.recommendation_types import RecommendationContext
 
 
@@ -58,11 +58,71 @@ class TestFMEAGraphSource:
         assert results == []
 
 
+class TestHistoricalCAPASource:
+    @pytest.mark.asyncio
+    async def test_empty_user_pls_returns_empty(self):
+        """Empty user_pls means no permission — should return empty without querying DB."""
+        mock_db = AsyncMock()
+        mock_embedding = AsyncMock()
+
+        source = HistoricalCAPASource(mock_db, mock_embedding)
+        ctx = RecommendationContext(
+            capa_data={"d2_description": "焊接问题", "product_line_code": "DC-DC-100"},
+            user_product_lines=[],  # no permission
+            stage="d4",
+        )
+        results = await source.retrieve(ctx)
+        assert results == []
+        mock_embedding.embed.assert_not_called()
+        mock_db.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retrieve_returns_historical_capa_candidates(self):
+        """HistoricalCAPASource returns candidates from D8_CLOSURE CAPA."""
+        mock_db = AsyncMock()
+        mock_row = {
+            "entity_id": uuid.uuid4(),
+            "chunk_text": "温度不稳定",
+            "similarity": 0.75,
+            "document_no": "8D-2026-001",
+            "severity": "严重",
+            "source_updated_at": "2026-05-01",
+            "d4_root_cause": "温度不稳定",
+            "d5_correction": "增加温控",
+            "product_line_code": "DC-DC-100",
+        }
+        mock_mappings = MagicMock()
+        mock_mappings.__iter__.return_value = iter([mock_row])
+        # mappings() is called as a method and returns an iterable
+        mock_execute_result = MagicMock()
+        mock_execute_result.mappings.return_value = mock_mappings
+        mock_db.execute = AsyncMock(return_value=mock_execute_result)
+
+        mock_embedding = AsyncMock()
+        mock_embedding.embed = AsyncMock(return_value=[[0.1] * 768])
+
+        source = HistoricalCAPASource(mock_db, mock_embedding)
+        ctx = RecommendationContext(
+            capa_data={"d2_description": "焊接温度问题", "product_line_code": "DC-DC-100"},
+            user_product_lines=["DC-DC-100"],
+            stage="d4",
+        )
+        results = await source.retrieve(ctx)
+        assert len(results) >= 1
+        assert results[0].source == "historical_capa"
+        assert results[0].content == "温度不稳定"
+        assert results[0].confidence == pytest.approx(0.6, abs=0.01)  # 0.75 * 0.8 = 0.6
+
+        # Verify SQL contains CAST and D8_CLOSURE
+        call_args = mock_db.execute.call_args
+        sql_text = str(call_args[0][0])
+        assert "CAST(:query_vector AS vector)" in sql_text
+        assert "D8_CLOSURE" in sql_text
+
+
 class TestSemanticSearchSource:
     @pytest.mark.asyncio
     async def test_d4_uses_d2_description(self):
-        from unittest.mock import MagicMock
-
         mock_result = MagicMock()
         mock_result.fetchall.return_value = []
 
@@ -77,6 +137,50 @@ class TestSemanticSearchSource:
             capa_data={"d2_description": "焊接虚焊问题", "d4_root_cause": ""},
             user_product_lines=None,
             stage="d4",
+            fmea_docs=[],
+        )
+        results = await source.retrieve(ctx)
+        assert results == []
+        mock_embedding.embed.assert_called_once_with(["焊接虚焊问题"])
+
+    @pytest.mark.asyncio
+    async def test_d5_uses_d4_root_cause(self):
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_embedding = AsyncMock()
+        mock_embedding.embed = AsyncMock(return_value=[[0.1] * 768])
+
+        source = SemanticSearchSource(mock_db, mock_embedding)
+        ctx = RecommendationContext(
+            capa_data={"d2_description": "焊接虚焊问题", "d4_root_cause": "参数偏移"},
+            user_product_lines=None,
+            stage="d5",
+            fmea_docs=[],
+        )
+        results = await source.retrieve(ctx)
+        assert results == []
+        mock_embedding.embed.assert_called_once_with(["参数偏移"])
+
+    @pytest.mark.asyncio
+    async def test_d5_falls_back_to_d2_when_d4_empty(self):
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_embedding = AsyncMock()
+        mock_embedding.embed = AsyncMock(return_value=[[0.1] * 768])
+
+        source = SemanticSearchSource(mock_db, mock_embedding)
+        ctx = RecommendationContext(
+            capa_data={"d2_description": "焊接虚焊问题", "d4_root_cause": ""},
+            user_product_lines=None,
+            stage="d5",
             fmea_docs=[],
         )
         results = await source.retrieve(ctx)

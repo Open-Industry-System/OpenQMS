@@ -267,6 +267,10 @@ class HistoricalCAPASource:
         if not self.embedding:
             return []
 
+        # NEW: Explicit guard for no permission
+        if context.user_product_lines == []:
+            return []
+
         d2 = context.capa_data.get("d2_description", "")
         if not d2 or not d2.strip():
             return []
