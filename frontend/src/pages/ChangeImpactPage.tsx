@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { App, Card, Col, Row, Typography } from "antd";
 import { ChangeHistoryTable, ImpactReportPanel } from "../components/change-impact";
 import { listAllChangeImpacts, getChangeImpact } from "../api/changeImpact";
-import type { ChangeImpactAnalysis } from "../api/changeImpact";
+import type { ChangeImpactAnalysis, PaginatedChangeImpactResponse } from "../api/changeImpact";
 
 export default function ChangeImpactPage() {
   const { message } = App.useApp();
@@ -15,8 +15,8 @@ export default function ChangeImpactPage() {
   const loadHistory = async () => {
     setLoading(true);
     try {
-      const data = await listAllChangeImpacts();
-      setHistory(data);
+      const resp: PaginatedChangeImpactResponse = await listAllChangeImpacts();
+      setHistory(resp.items);
     } catch (err) {
       message.error("加载历史失败");
     } finally {

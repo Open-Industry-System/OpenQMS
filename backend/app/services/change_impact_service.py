@@ -1,12 +1,12 @@
 import uuid
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.fmea import FMEADocument
 from app.models.audit import AuditLog
-from app.graph.jsonb_repository import JSONBRepository
+from app.graph.repository import FMEAGraphRepository
 from app.schemas.change_impact import ChangeImpactResult, ChangeImpactAnalysisResponse
 
 
@@ -45,9 +45,14 @@ async def _create_audit_log(
 
 
 class ChangeImpactService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, repo: FMEAGraphRepository | None = None):
         self._db = db
-        self._repo = JSONBRepository(db)
+        if repo is not None:
+            self._repo = repo
+        else:
+            # 默认回退到 JSONBRepository（向后兼容）
+            from app.graph.jsonb_repository import JSONBRepository
+            self._repo = JSONBRepository(db)
 
     async def analyze(
         self,
@@ -131,13 +136,12 @@ class ChangeImpactService:
         self, fmea_id: uuid.UUID, page: int = 1, page_size: int = 20
     ) -> tuple[list[ChangeImpactAnalysisResponse], int]:
         """按 FMEA 查询历史分析记录。"""
-        count_query = select(ChangeImpactAnalysis).where(
-            ChangeImpactAnalysis.fmea_id == fmea_id
+        count_result = await self._db.execute(
+            select(func.count())
+            .select_from(ChangeImpactAnalysis)
+            .where(ChangeImpactAnalysis.fmea_id == fmea_id)
         )
-        total_result = await self._db.execute(
-            select(ChangeImpactAnalysis).where(ChangeImpactAnalysis.fmea_id == fmea_id)
-        )
-        total = len(total_result.scalars().all())
+        total = count_result.scalar() or 0
 
         query = (
             select(ChangeImpactAnalysis)
@@ -159,19 +163,19 @@ class ChangeImpactService:
         page_size: int = 20,
     ) -> tuple[list[ChangeImpactAnalysisResponse], int]:
         """查询所有分析记录，支持按产品线过滤（None = 不过滤）。"""
+        count_stmt = select(func.count()).select_from(ChangeImpactAnalysis)
         query = select(ChangeImpactAnalysis)
-        count_query = select(ChangeImpactAnalysis)
 
         if product_line_codes is not None:
+            count_stmt = count_stmt.where(
+                ChangeImpactAnalysis.product_line_code.in_(product_line_codes)
+            )
             query = query.where(
                 ChangeImpactAnalysis.product_line_code.in_(product_line_codes)
             )
-            count_query = count_query.where(
-                ChangeImpactAnalysis.product_line_code.in_(product_line_codes)
-            )
 
-        total_result = await self._db.execute(count_query)
-        total = len(total_result.scalars().all())
+        count_result = await self._db.execute(count_stmt)
+        total = count_result.scalar() or 0
 
         query = (
             query.order_by(desc(ChangeImpactAnalysis.created_at))

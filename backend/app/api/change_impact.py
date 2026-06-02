@@ -28,7 +28,17 @@ async def analyze_change_impact(
         raise HTTPException(status_code=404, detail="FMEA not found")
     await enforce_product_line_access(user, fmea.product_line_code, db)
 
-    service = ChangeImpactService(db)
+    # 从 FMEA 图中提取旧值（如果变更的是属性且有字段名）
+    old_value = None
+    if req.field_name and fmea.graph_data:
+        for node in fmea.graph_data.get("nodes", []):
+            if node.get("id") == req.node_id:
+                old_value = node.get(req.field_name)
+                if old_value is not None:
+                    old_value = str(old_value)
+                break
+
+    service = ChangeImpactService(db, repo)
     try:
         result = await service.analyze(
             fmea_id=req.fmea_id,
@@ -38,7 +48,7 @@ async def analyze_change_impact(
             change_type=req.change_type,
             field_name=req.field_name,
             new_value=req.new_value,
-            old_value=None,
+            old_value=old_value,
             user_id=user.user_id,
         )
     except ValueError as e:
