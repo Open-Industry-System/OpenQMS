@@ -41,7 +41,9 @@ def upgrade():
     # --- document_embeddings table ---
     # Vector dimension is configurable at deployment time (default 1536 for OpenAI)
     # To change: run `alembic upgrade head -x dimensions=768`
-    op.execute("""
+    x_args = op.get_context().get_x_argument(as_dictionary=True)
+    dimensions = x_args.get("dimensions", "1536")
+    op.execute(f"""
         CREATE TABLE document_embeddings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             entity_type VARCHAR(20) NOT NULL,
@@ -50,7 +52,7 @@ def upgrade():
             entity_field VARCHAR(50) NOT NULL,
             chunk_index INT NOT NULL DEFAULT 0,
             chunk_text TEXT NOT NULL,
-            embedding vector(1536) NOT NULL,
+            embedding vector({dimensions}) NOT NULL,
             product_line_code VARCHAR(20),
             metadata JSONB DEFAULT '{}',
             embedding_model VARCHAR(50) NOT NULL,

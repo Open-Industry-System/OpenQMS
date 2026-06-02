@@ -278,6 +278,24 @@ async def run_worker():
 
     logger.info(f"Using embedding provider: {provider.model_name} ({provider.dimensions}d)")
 
+    # Validate that provider dimensions match the table's vector dimensions
+    async with async_session() as db:
+        result = await db.execute(text("""
+            SELECT atttypmod FROM pg_attribute
+            WHERE attrelid = 'document_embeddings'::regclass AND attname = 'embedding'
+        """))
+        row = result.fetchone()
+        if row:
+            # atttypmod = dimensions + 4 (varlena header)
+            table_dim = row[0] - 4
+            if table_dim != provider.dimensions:
+                logger.error(
+                    f"Dimension mismatch: provider produces {provider.dimensions}d vectors "
+                    f"but table expects {table_dim}d. "
+                    f"Run migration with -x dimensions={provider.dimensions} or change EMBEDDING_PROVIDER."
+                )
+                return
+
     running = True
 
     def shutdown(sig, frame):

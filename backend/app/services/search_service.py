@@ -41,7 +41,7 @@ class SearchService:
             select(UserProductLine.product_line_code).where(UserProductLine.user_id == user.user_id)
         )
         codes = [row[0] for row in result.fetchall()]
-        return codes if codes else ["DC-DC-100"]
+        return codes if codes else []
 
     async def semantic_search(
         self,

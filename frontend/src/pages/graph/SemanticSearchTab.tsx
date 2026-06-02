@@ -81,12 +81,20 @@ export default function SemanticSearchTab() {
     }
   }, [query, entityTypes, mode, productLineCode]);
 
-  const handleResultClick = (item: SearchResultItem) => {
-    if (item.entity_type === "fmea_node") {
-      navigate(`/fmea/${item.entity_id}?tab=graph&highlightNode=${item.node_id}`);
-    } else if (item.entity_type === "capa") {
-      navigate(`/capa/${item.entity_id}`);
+  const getEntityRoute = (item: SearchResultItem): string | null => {
+    switch (item.entity_type) {
+      case "fmea_node":
+        return `/fmea/${item.entity_id}?tab=graph&highlightNode=${item.node_id}`;
+      case "capa":
+        return `/capa/${item.entity_id}`;
+      default:
+        return null; // No detail page yet for audit_finding, complaint, scar, rma
     }
+  };
+
+  const handleResultClick = (item: SearchResultItem) => {
+    const route = getEntityRoute(item);
+    if (route) navigate(route);
   };
 
   return (
@@ -142,8 +150,8 @@ export default function SemanticSearchTab() {
           {results.map((item) => (
             <Card
               key={item.entity_id + item.entity_field + (item.node_id || "")}
-              hoverable
-              style={{ marginBottom: 8 }}
+              hoverable={!!getEntityRoute(item)}
+              style={{ marginBottom: 8, cursor: getEntityRoute(item) ? "pointer" : "default" }}
               onClick={() => handleResultClick(item)}
               size="small"
             >
