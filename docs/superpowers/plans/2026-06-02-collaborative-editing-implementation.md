@@ -1818,7 +1818,7 @@ from httpx import AsyncClient, ASGITransport
 from fastapi import status
 
 from app.main import app
-from app.core.deps import get_current_user
+from app.core.permissions import get_current_user
 
 
 async def _override_get_current_user():
