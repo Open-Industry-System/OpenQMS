@@ -83,9 +83,9 @@ class SPCAlarm(Base):
     linked_fmea_node_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     # 新增：推荐的 FMEA 失效模式缓存（异步预匹配结果）
+    # 默认 NULL 表示"未计算"，空列表 [] 表示"已计算但无匹配"
     fmea_recommendations: Mapped[list | None] = mapped_column(
         JSONB,
-        default=list,
         nullable=True,
         comment="缓存的FMEA推荐列表"
     )
