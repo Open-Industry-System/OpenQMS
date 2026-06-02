@@ -268,7 +268,8 @@ class DocumentEmbedding(Base):
     # embedding column is vector type - handled via raw SQL in migration, not mapped here
     # Queries using pgvector operators must use raw SQL or text()
     product_line_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="'{}'")
+    # "metadata" is reserved on SQLAlchemy Base — map DB column "metadata" to attribute "embedding_metadata"
+    embedding_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default="'{}'")
     embedding_model: Mapped[str] = mapped_column(String(50), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default="NOW()")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default="NOW()")
@@ -846,6 +847,8 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
 
     Uses DELETE + INSERT because partial unique indexes can't be used in a single ON CONFLICT clause.
     """
+    import json
+
     for chunk, vector in zip(chunks, vectors):
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
 
@@ -896,7 +899,7 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
                 "chunk_text": chunk["chunk_text"],
                 "embedding": vec_str,
                 "product_line_code": chunk.get("product_line_code"),
-                "metadata": "{}",  # simplified
+                "metadata": json.dumps(chunk.get("metadata", {})),
                 "embedding_model": model_name,
             },
         )
@@ -1237,6 +1240,21 @@ class SearchService:
         self.llm = llm_provider
         self.embedding = embedding_provider
 
+    async def _get_user_product_lines(self, user: User) -> list[str] | None:
+        """Get product lines the user has access to. Returns None for admin (all)."""
+        from app.models.user import UserProductLine
+        from sqlalchemy import select
+
+        # Admin can access all product lines
+        if user.role == "admin":
+            return None  # None means no filter (all)
+
+        result = await self.db.execute(
+            select(UserProductLine.product_line_code).where(UserProductLine.user_id == user.user_id)
+        )
+        codes = [row[0] for row in result.fetchall()]
+        return codes if codes else ["DC-DC-100"]  # fallback to default
+
     async def semantic_search(
         self,
         query: str,
@@ -1249,18 +1267,47 @@ class SearchService:
         start = time.monotonic()
 
         # Build filter conditions
+        # Always enforce product-line isolation
         filters = []
-        params = {"limit": limit}
+        params: dict = {"limit": limit}
 
         if product_line_code:
             filters.append("product_line_code = :product_line_code")
             params["product_line_code"] = product_line_code
+        else:
+            # Derive from user access
+            user_pls = await self._get_user_product_lines(user)
+            if user_pls is not None:  # None = admin, no filter
+                filters.append("product_line_code = ANY(:user_product_lines)")
+                params["user_product_lines"] = user_pls
+
+        # Filter to modules the user can read
+        accessible_modules = []
+        for entity_type, module in ENTITY_MODULE_MAP.items():
+            level = await get_user_permission(user, module, self.db)
+            if level >= PermissionLevel.VIEW:
+                accessible_modules.append(entity_type)
+        if not accessible_modules:
+            elapsed = int((time.monotonic() - start) * 1000)
+            return SemanticSearchResponse(results=[], total=0, query_time_ms=elapsed)
 
         if entity_types:
-            filters.append("entity_type = ANY(:entity_types)")
-            params["entity_types"] = entity_types
+            # Intersect requested types with accessible types
+            allowed = [t for t in entity_types if t in accessible_modules]
+        else:
+            allowed = accessible_modules
+        if not allowed:
+            elapsed = int((time.monotonic() - start) * 1000)
+            return SemanticSearchResponse(results=[], total=0, query_time_ms=elapsed)
+
+        filters.append("entity_type = ANY(:entity_types)")
+        params["entity_types"] = allowed
 
         where_clause = " AND ".join(filters) if filters else "TRUE"
+
+        # Fetch more than needed (3x) to account for RRF fusion dedup
+        fetch_limit = limit * 3
+        params["fetch_limit"] = fetch_limit
 
         # Vector search
         vector_results = []
@@ -1277,7 +1324,7 @@ class SearchService:
                         FROM document_embeddings
                         WHERE {where_clause}
                         ORDER BY embedding <=> :query_vector::vector
-                        LIMIT :limit
+                        LIMIT :fetch_limit
                     """),
                     params,
                 )
@@ -1295,7 +1342,7 @@ class SearchService:
                          plainto_tsquery('zhcfg', :query) query
                     WHERE tsv @@ query AND {where_clause}
                     ORDER BY ts_rank(tsv, query) DESC
-                    LIMIT :limit
+                    LIMIT :fetch_limit
                 """),
                 {**params, "query": query},
             )
@@ -1324,7 +1371,8 @@ class SearchService:
             else:
                 item_map[item_id]["source"] = "hybrid"
 
-        # Sort by RRF score
+        # Sort by RRF score and trim to requested limit
+        # (pre-filtered by accessible modules in SQL, so no post-filter needed)
         sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)[:limit]
 
         results = []
@@ -1332,9 +1380,6 @@ class SearchService:
             item = item_map[item_id]
             item["score"] = round(scores[item_id], 4)
             results.append(SearchResultItem(**item))
-
-        # Permission filter
-        results = await self._filter_by_permission(results, user)
 
         elapsed = int((time.monotonic() - start) * 1000)
         return SemanticSearchResponse(results=results, total=len(results), query_time_ms=elapsed)
@@ -1516,10 +1561,13 @@ async def semantic_search(
 async def ask_question(
     body: QARequest,
     request: Request,
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
+    user: User = Depends(get_current_user),
     service: SearchService = Depends(_get_search_service),
 ):
-    """RAG Q&A: ask a question and get an LLM-generated answer with citations."""
+    """RAG Q&A: ask a question and get an LLM-generated answer with citations.
+
+    Uses generic auth — result-level permission filtering in SearchService handles access control.
+    """
     if not service.llm and not service.embedding:
         raise HTTPException(status_code=503, detail="搜索服务未配置（无 embedding 或 LLM provider）")
     return await service.ask(
@@ -1533,10 +1581,12 @@ async def ask_question(
 @router.post("/reindex", response_model=ReindexResponse)
 async def reindex(
     request: Request,
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.ADMIN)),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Trigger re-indexing of all quality documents (admin only)."""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可执行重新索引")
     from app.services.embedding_backfill import backfill_entity_type, ENTITY_TYPES
 
     total = 0
@@ -1749,7 +1799,7 @@ export default function SemanticSearchTab() {
   const [queryTime, setQueryTime] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const navigate = useNavigate();
-  const productLineCode = useProductLineStore((s) => s.productLineCode);
+  const productLineCode = useProductLineStore((s) => s.selected);
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return;
@@ -1983,7 +2033,7 @@ Expected: returns LLM answer with sources (if LLM configured)
 
 - [ ] **Step 8: Test frontend**
 
-Open `http://localhost:5173/graph`, click "语义搜索" tab, enter a query, verify results display.
+Open `http://localhost:5173/knowledge-graph`, click "语义搜索" tab, enter a query, verify results display.
 
 - [ ] **Step 9: Final commit**
 
