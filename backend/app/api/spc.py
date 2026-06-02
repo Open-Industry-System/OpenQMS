@@ -282,7 +282,7 @@ async def get_fmea_recommendations(
     if not ic:
         raise HTTPException(status_code=400, detail="Inspection characteristic not found")
 
-    if alarm.fmea_recommendations and not force:
+    if alarm.fmea_recommendations is not None and not force:
         recommendations = alarm.fmea_recommendations
     else:
         recommendations = await spc_service.match_fmea_for_alarm(db, alarm)
@@ -310,6 +310,17 @@ async def confirm_fmea_association(
     alarm = await db.get(SPCAlarm, alarm_id)
     if not alarm:
         raise HTTPException(status_code=404, detail="Alarm not found")
+
+    # 验证 node_id 在 FMEA 文档中存在且为 FailureMode
+    from sqlalchemy import select
+    from app.models.fmea import FMEADocument
+    fmea_result = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == req.fmea_id))
+    fmea = fmea_result.scalar_one_or_none()
+    if not fmea or not fmea.graph_data:
+        raise HTTPException(status_code=400, detail="FMEA document not found or has no graph data")
+    node = next((n for n in fmea.graph_data.get("nodes", []) if n.get("id") == req.node_id), None)
+    if not node or node.get("type") != "FailureMode":
+        raise HTTPException(status_code=400, detail="Invalid FMEA node: must be a FailureMode")
 
     alarm.confirmed_fmea_id = req.fmea_id
     alarm.confirmed_fmea_node_id = req.node_id

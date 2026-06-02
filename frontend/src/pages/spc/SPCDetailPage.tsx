@@ -920,6 +920,7 @@ export default function SPCDetailPage() {
             setFmeaMatchPanelOpen(false);
           }
         }}
+        onConfirmed={fetchAll}
       />
     </div>
   );

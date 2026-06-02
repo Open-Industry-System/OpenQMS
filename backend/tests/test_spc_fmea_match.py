@@ -216,7 +216,7 @@ class TestMatchFMEAForAlarm:
         rec = recs[0]
         # RPN = S(8) * O(3) * D(6) = 144
         assert rec["rpn"] == 144
-        assert rec["ap"] == "H"
+        assert rec["ap"] == "M"  # S=8, O=3, D=6 → AP=M per compute_ap rules
         assert rec["severity"] == 8
         assert rec["occurrence"] == 3
         assert rec["detection"] == 6

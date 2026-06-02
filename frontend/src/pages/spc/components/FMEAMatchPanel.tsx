@@ -16,6 +16,7 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   onCreateCAPA: () => void;
+  onConfirmed?: () => void; // 确认成功后回调，父组件可刷新列表
 }
 
 const MATCH_SOURCE_LABELS: Record<string, { text: string; icon: React.ReactNode; color: string }> = {
@@ -24,7 +25,7 @@ const MATCH_SOURCE_LABELS: Record<string, { text: string; icon: React.ReactNode;
   characteristic_name: { text: "特性名称匹配", icon: <SearchOutlined />, color: "orange" },
 };
 
-export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA }: Props) {
+export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA, onConfirmed }: Props) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<FMEAMatchResponse | null>(null);
   // 选中键使用 `${fmea_id}:${node_id}` 组合，避免跨 FMEA 节点 ID 冲突
@@ -59,6 +60,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
     try {
       await confirmFMEAAssociation(alarmId, rec.fmea_id, rec.node_id);
       setSelectedKey(`${rec.fmea_id}:${rec.node_id}`);
+      onConfirmed?.();
     } catch (e) {
       setError("确认关联失败");
     } finally {
