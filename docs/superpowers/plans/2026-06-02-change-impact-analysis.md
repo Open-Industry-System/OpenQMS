@@ -810,7 +810,7 @@ class ChangeImpactService:
         audit = AuditLog(
             table_name="change_impact_analysis",
             record_id=analysis.id,
-            action="change_impact_analyzed",
+            action="ANALYZE",  # String(20) 长度限制，使用短码
             changed_fields={
                 "change_type": change_type,
                 "node_id": node_id,
@@ -1290,7 +1290,7 @@ export default function ChangeHistoryTable({
 - [ ] **Step 4: 创建 ImpactReportPanel.tsx**
 
 ```typescript
-import { Card, Space, Statistic, Button, Typography } from "antd";
+import { Card, Space, Statistic, Button, Typography, Tag } from "antd";
 import {
   RadarChartOutlined,
   BranchesOutlined,
@@ -1369,7 +1369,6 @@ export default function ImpactReportPanel({
 }
 ```
 
-**注意：** 上面的代码中 `Tag` 需要从 `antd` 导入。
 
 - [ ] **Step 5: 创建 index.ts 导出文件**
 
@@ -1574,7 +1573,7 @@ const handleAnalyzeImpact = async () => {
     const request: AnalyzeChangeImpactRequest = {
       fmea_id: fmeaId,
       node_id: selectedGraphNode.id,
-      node_type: selectedGraphNode.type || "",
+      node_type: selectedGraphNode.label || "",
       node_name: selectedGraphNode.properties?.name || selectedGraphNode.label || "",
       change_type: impactForm.change_type,
       field_name: impactForm.field_name || undefined,
@@ -1608,7 +1607,7 @@ const handleAnalyzeImpact = async () => {
         setImpactModalOpen(true);
         setImpactResult(null);
       }}
-      disabled={isViewer}
+      disabled={!canEdit("fmea") || !selectedGraphNode}
     >
       分析影响范围
     </Button>
