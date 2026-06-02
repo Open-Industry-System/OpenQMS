@@ -235,6 +235,7 @@ class ChangeImpactService:
 
 from app.core.product_line_filter import enforce_product_line_access
 from app.services.fmea_service import get_fmea_by_id  # 或等效查询
+from app.graph.deps import get_graph_repository  # 从 graph.py 的私有 _repo 提取的公共依赖
 
 router = APIRouter(prefix="/api/change-impact", tags=["变更影响分析"])
 
@@ -479,21 +480,33 @@ ORDER BY hop_distance
 JSONB 版本新增专用 BFS：
 
 ```python
-def _bfs_with_path(graph_data, start_node_id, edge_filter, max_depth):
+def _bfs_with_path(graph_data, start_node_id, edge_filter, max_depth, direction="downstream"):
     """
     广度优先遍历，返回带路径信息的受影响节点。
     - edge_filter: 边类型白名单函数
     - max_depth: 最大遍历深度
+    - direction: "downstream" | "upstream" | "bidirectional"
     - 返回: [{node_id, node_type, name, path, hop_distance}, ...]
     """
     nodes = {n["id"]: n for n in graph_data.get("nodes", [])}
     edges = graph_data.get("edges", [])
     
-    # 构建邻接表（按 edge_filter 过滤）
+    # 构建邻接表（按 edge_filter 过滤，根据方向决定正反）
     adj = defaultdict(list)
     for e in edges:
-        if edge_filter(e.get("type")):
+        edge_type = e.get("type")
+        if not edge_filter(edge_type):
+            continue
+        if direction == "downstream":
+            # 正向：沿出边走（source -> target）
             adj[e["source"]].append(e["target"])
+        elif direction == "upstream":
+            # 反向：沿入边走（target -> source）
+            adj[e["target"]].append(e["source"])
+        elif direction == "bidirectional":
+            # 双向：合并正反两张邻接表
+            adj[e["source"]].append(e["target"])
+            adj[e["target"]].append(e["source"])
     
     # BFS
     visited = set([start_node_id])
@@ -719,6 +732,7 @@ export async function getChangeImpact(
 | `backend/app/schemas/change_impact.py` | Pydantic Schema |
 | `backend/app/services/change_impact_service.py` | Service 层 |
 | `backend/app/api/change_impact.py` | API 路由 |
+| `backend/app/graph/deps.py` | 公共依赖：`get_graph_repository`（从 `graph.py` 的私有 `_repo` 提取） |
 | `frontend/src/api/changeImpact.ts` | API Client |
 | `frontend/src/components/change-impact/ImpactReportPanel.tsx` | 报告面板组件 |
 | `frontend/src/components/change-impact/ImpactScoreTag.tsx` | 评分标签组件 |
@@ -733,6 +747,7 @@ export async function getChangeImpact(
 |----------|----------|
 | `backend/app/graph/jsonb_repository.py` | 新增 `analyze_change_impact` 方法 |
 | `backend/app/graph/neo4j_repository.py` | 新增 `analyze_change_impact` 方法 |
+| `backend/app/api/graph.py` | 将私有 `_repo` 提取到 `backend/app/graph/deps.py` 作为公共依赖 |
 | `backend/app/main.py` | 注册 `/change-impact` 路由 |
 | `frontend/src/App.tsx` | 新增 `/change-impact` 路由 |
 | `frontend/src/components/layout/AppLayout.tsx` | 新增侧边栏菜单项"变更影响分析" |
@@ -750,7 +765,7 @@ export async function getChangeImpact(
 - [ ] 持久化：分析结果保存到数据库，历史列表可查看
 - [ ] 审计日志：每次分析自动写入 AuditLog
 - [ ] 权限控制：viewer 无法执行分析，engineer 及以上可以
-- [ ] 知识图谱联动：点击"查看图谱"正确高亮影响路径
+- [ ] 知识图谱联动：点击"查看图谱"跳转到 FMEA 编辑器图谱 tab 并聚焦变更节点（多节点/路径高亮为 Phase 4 扩展）
 
 ### 9.2 性能验收
 
