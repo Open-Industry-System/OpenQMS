@@ -102,7 +102,7 @@ CAPA 进入 D4 步骤 (status = D4_ROOT_CAUSE)
 def get_d4_recommendations(
     capa_data: dict,        # {d2_description, d3_interim, fmea_ref_id, fmea_node_id, product_line_code}
     fmea_docs: list[dict],  # 同产品线所有 FMEA 文档 (graph_data + document_no + fmea_id)
-    allowed_product_lines: set[str] | None = None,
+    allowed_product_lines: list[str] | None = None,
 ) -> list[D4Recommendation]:
 ```
 
@@ -134,7 +134,7 @@ def get_d4_recommendations(
 def get_d5_recommendations(
     capa_data: dict,        # {d4_root_cause, d2_description, fmea_ref_id, fmea_node_id, product_line_code}
     fmea_docs: list[dict],
-    allowed_product_lines: set[str] | None = None,
+    allowed_product_lines: list[str] | None = None,
 ) -> D5RecommendationResponse:
 ```
 
