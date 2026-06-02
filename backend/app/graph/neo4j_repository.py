@@ -9,6 +9,7 @@ from neo4j import AsyncDriver
 
 from app.graph.repository import FMEAGraphRepository
 from app.config import settings
+from app.schemas.change_impact import ChangeImpactResult, AffectedNode, ImpactSummary
 from app.state_machines.fmea_state import compute_ap
 
 
@@ -167,6 +168,176 @@ class Neo4jRepository(FMEAGraphRepository):
                 "avg_rpn": avg_rpn,
                 "top_failure_modes": sorted(top_modes, key=lambda x: x["rpn"], reverse=True)[:10],
             }
+
+    async def analyze_change_impact(
+        self,
+        fmea_id: uuid.UUID,
+        node_id: str,
+        change_type: str,
+        field_name: str | None,
+        new_value: str | None,
+    ) -> ChangeImpactResult:
+        # 方向控制逻辑
+        if change_type == "attribute" and field_name in ("name", "description"):
+            return ChangeImpactResult(affected_nodes=[], summary=ImpactSummary(
+                total_affected=0, failure_modes_affected=0, controls_affected=0,
+                ap_upgraded_count=0, max_hop_distance=0,
+            ))
+
+        if change_type == "attribute" and field_name in ("severity", "occurrence", "detection"):
+            directions = ["downstream", "upstream"]
+        else:
+            directions = ["downstream"]
+
+        downstream_rel_types = "HAS_FUNCTION|FUNCTION_MAPPED_TO|HAS_FAILURE_MODE|EFFECT_OF|HAS_PROCESS_STEP"
+        upstream_rel_types = "CAUSE_OF|PREVENTED_BY|DETECTED_BY|OPTIMIZED_BY"
+
+        affected: list[AffectedNode] = []
+        seen_node_ids: set[str] = set()
+
+        async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+            # 获取起始节点信息
+            start_result = await session.run(
+                "MATCH (n:GraphNode {fmea_id: $fmea_id, node_id: $node_id}) RETURN n",
+                fmea_id=str(fmea_id), node_id=node_id,
+            )
+            start_records = await start_result.data()
+            start_node = dict(start_records[0]["n"]) if start_records else {}
+            start_type = start_node.get("type", "")
+
+            for direction in directions:
+                rel_pattern = downstream_rel_types if direction == "downstream" else upstream_rel_types
+                arrow = "-[*1..5]->" if direction == "downstream" else "<-[*1..3]-"
+
+                result = await session.run(
+                    f"""
+                    MATCH path = (start:GraphNode {{fmea_id: $fmea_id, node_id: $node_id}})
+                    {arrow}(end:GraphNode)
+                    WHERE ALL(r IN relationships(path) WHERE type(r) IN $rel_types)
+                    WITH end, path
+                    ORDER BY length(path) ASC
+                    WITH end, head(collect(path)) as shortest_path
+                    RETURN end.node_id AS node_id, end.type AS node_type, end.name AS name,
+                           length(shortest_path) AS hop_distance,
+                           [n IN nodes(shortest_path) | n.name] AS path_names
+                    """,
+                    fmea_id=str(fmea_id), node_id=node_id,
+                    rel_types=rel_pattern.split("|"),
+                )
+                records = await result.data()
+
+                for r in records:
+                    nid = r.get("node_id")
+                    if not nid or nid == node_id or nid in seen_node_ids:
+                        continue
+                    seen_node_ids.add(nid)
+
+                    path_names = r.get("path_names", []) or []
+                    # 去掉起始节点名称，保留从 start 之后的路径
+                    if path_names and path_names[0] == start_node.get("name", ""):
+                        path_names = path_names[1:]
+
+                    risk_change = self._compute_risk_change_neo4j(
+                        start_node, r, field_name, new_value, direction,
+                    )
+                    affected.append(AffectedNode(
+                        node_id=nid,
+                        node_type=r.get("node_type", ""),
+                        name=r.get("name", ""),
+                        path=path_names,
+                        impact_type=direction,
+                        hop_distance=r.get("hop_distance", 0),
+                        risk_change=risk_change,
+                    ))
+
+        # 统计摘要
+        fm_count = sum(1 for a in affected if a.node_type == "FailureMode")
+        ctrl_count = sum(1 for a in affected if a.node_type in ("PreventionControl", "DetectionControl"))
+        ap_upgraded = sum(
+            1 for a in affected
+            if a.risk_change and a.risk_change.get("old_ap") and a.risk_change.get("new_ap")
+            and self._ap_rank(a.risk_change["new_ap"]) > self._ap_rank(a.risk_change["old_ap"])
+        )
+        max_hop = max((a.hop_distance for a in affected), default=0)
+
+        summary = ImpactSummary(
+            total_affected=len(affected),
+            failure_modes_affected=fm_count,
+            controls_affected=ctrl_count,
+            ap_upgraded_count=ap_upgraded,
+            max_hop_distance=max_hop,
+        )
+        return ChangeImpactResult(affected_nodes=affected, summary=summary)
+
+    def _compute_risk_change_neo4j(
+        self,
+        start_node: dict,
+        affected_record: dict,
+        field_name: str | None,
+        new_value: str | None,
+        direction: str,
+    ) -> dict | None:
+        """Neo4j 版风险变化计算（简化版，依赖 Service 层做完整计算）。"""
+        start_type = start_node.get("type", "")
+        affected_type = affected_record.get("node_type", "")
+        affected_id = affected_record.get("node_id", "")
+
+        # Case 1: FailureMode 自身 S/O/D 变更
+        if start_type == "FailureMode" and affected_id == start_node.get("node_id"):
+            if field_name in ("severity", "occurrence", "detection"):
+                old_val = start_node.get(field_name, 0) or 0
+                try:
+                    new_val_int = int(new_value) if new_value is not None else old_val
+                except (ValueError, TypeError):
+                    new_val_int = old_val
+                s = start_node.get("severity", 0) or 0
+                o = start_node.get("occurrence", 0) or 0
+                d = start_node.get("detection", 0) or 0
+                old_ap = compute_ap(s, o, d) if s > 0 and o > 0 and d > 0 else ""
+                if field_name == "severity":
+                    s = new_val_int
+                elif field_name == "occurrence":
+                    o = new_val_int
+                elif field_name == "detection":
+                    d = new_val_int
+                new_ap = compute_ap(s, o, d) if s > 0 and o > 0 and d > 0 else ""
+                return {
+                    "old_ap": old_ap,
+                    "new_ap": new_ap,
+                    "old_value": old_val,
+                    "new_value": new_val_int,
+                    "field": field_name,
+                }
+            return None
+
+        # Case 2: FailureCause 的 O/D 变更 → 影响关联 FailureMode
+        if start_type == "FailureCause" and affected_type == "FailureMode":
+            if field_name in ("occurrence", "detection"):
+                old_val = start_node.get(field_name, 0) or 0
+                try:
+                    new_val_int = int(new_value) if new_value is not None else old_val
+                except (ValueError, TypeError):
+                    new_val_int = old_val
+                # 简化：标记需要重新评估，具体 AP 变化由 Service 层结合完整图计算
+                return {
+                    "old_value": old_val,
+                    "new_value": new_val_int,
+                    "field": field_name,
+                    "needs_recalculation": True,
+                }
+            return None
+
+        # Case 3: Component/ProcessStep 的 design_parameter 变更
+        if start_type in ("Component", "ProcessStep") and field_name == "design_parameter":
+            if affected_type == "FailureMode":
+                return {"needs_reassessment": True, "reason": f"{start_type} design_parameter changed"}
+            return None
+
+        return None
+
+    @staticmethod
+    def _ap_rank(ap: str) -> int:
+        return {"H": 3, "M": 2, "L": 1}.get(ap, 0)
 
     async def _path_result_to_dict(self, result) -> dict:
         """将 Neo4j path 查询结果转为 {nodes, edges} dict。"""

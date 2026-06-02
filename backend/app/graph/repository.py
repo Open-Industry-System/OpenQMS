@@ -8,6 +8,8 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Any
 
+from app.schemas.change_impact import ChangeImpactResult
+
 
 class FMEAGraphRepository(ABC):
     @abstractmethod
@@ -27,3 +29,14 @@ class FMEAGraphRepository(ABC):
     @abstractmethod
     async def get_cross_fmea_stats(self, product_line_code: str) -> dict:
         """跨 FMEA 聚合统计。product_line_code 必填。"""
+
+    @abstractmethod
+    async def analyze_change_impact(
+        self,
+        fmea_id: uuid.UUID,
+        node_id: str,
+        change_type: str,
+        field_name: str | None,
+        new_value: str | None,
+    ) -> ChangeImpactResult:
+        """分析变更影响范围与风险变化。"""

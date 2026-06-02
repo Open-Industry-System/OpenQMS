@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fmea import FMEADocument
 from app.graph.repository import FMEAGraphRepository
+from app.schemas.change_impact import ChangeImpactResult, AffectedNode, ImpactSummary
 from app.state_machines.fmea_state import compute_ap
 
 
@@ -246,3 +247,288 @@ class JSONBRepository(FMEAGraphRepository):
             e.pop("_key", None)
 
         return {"nodes": result_nodes, "edges": result_edges}
+
+    async def analyze_change_impact(
+        self,
+        fmea_id: uuid.UUID,
+        node_id: str,
+        change_type: str,
+        field_name: str | None,
+        new_value: str | None,
+    ) -> ChangeImpactResult:
+        fmea = await self._get_fmea(fmea_id)
+        if not fmea or not fmea.graph_data:
+            return ChangeImpactResult(affected_nodes=[], summary=ImpactSummary(
+                total_affected=0, failure_modes_affected=0, controls_affected=0,
+                ap_upgraded_count=0, max_hop_distance=0,
+            ))
+
+        nodes = fmea.graph_data.get("nodes", [])
+        edges = fmea.graph_data.get("edges", [])
+        node_map = {n["id"]: n for n in nodes}
+        start_node = node_map.get(node_id)
+        if not start_node:
+            return ChangeImpactResult(affected_nodes=[], summary=ImpactSummary(
+                total_affected=0, failure_modes_affected=0, controls_affected=0,
+                ap_upgraded_count=0, max_hop_distance=0,
+            ))
+
+        # 方向控制逻辑
+        if change_type == "attribute" and field_name in ("name", "description"):
+            return ChangeImpactResult(affected_nodes=[], summary=ImpactSummary(
+                total_affected=0, failure_modes_affected=0, controls_affected=0,
+                ap_upgraded_count=0, max_hop_distance=0,
+            ))
+
+        if change_type == "attribute" and field_name in ("severity", "occurrence", "detection"):
+            directions = ["downstream", "upstream"]
+        else:
+            directions = ["downstream"]
+
+        downstream_edges = {"HAS_FUNCTION", "FUNCTION_MAPPED_TO", "HAS_FAILURE_MODE", "EFFECT_OF", "HAS_PROCESS_STEP"}
+        upstream_edges = {"CAUSE_OF", "PREVENTED_BY", "DETECTED_BY", "OPTIMIZED_BY"}
+
+        affected: list[AffectedNode] = []
+        seen_node_ids: set[str] = set()
+
+        for direction in directions:
+            edge_filter = downstream_edges if direction == "downstream" else upstream_edges
+            paths = self._bfs_with_path(fmea.graph_data, node_id, edge_filter, max_depth=5, direction=direction)
+            for path_info in paths:
+                nid = path_info["node_id"]
+                if nid == node_id or nid in seen_node_ids:
+                    continue
+                seen_node_ids.add(nid)
+                n = node_map.get(nid)
+                if not n:
+                    continue
+
+                risk_change = self._compute_risk_change(
+                    start_node, n, field_name, new_value, node_map, edges, direction,
+                )
+                affected.append(AffectedNode(
+                    node_id=nid,
+                    node_type=n.get("type", ""),
+                    name=n.get("name", ""),
+                    path=path_info["path"],
+                    impact_type=direction,
+                    hop_distance=path_info["hop_distance"],
+                    risk_change=risk_change,
+                ))
+
+        # 统计摘要
+        fm_count = sum(1 for a in affected if a.node_type == "FailureMode")
+        ctrl_count = sum(1 for a in affected if a.node_type in ("PreventionControl", "DetectionControl"))
+        ap_upgraded = sum(
+            1 for a in affected
+            if a.risk_change and a.risk_change.get("old_ap") and a.risk_change.get("new_ap")
+            and self._ap_rank(a.risk_change["new_ap"]) > self._ap_rank(a.risk_change["old_ap"])
+        )
+        max_hop = max((a.hop_distance for a in affected), default=0)
+
+        summary = ImpactSummary(
+            total_affected=len(affected),
+            failure_modes_affected=fm_count,
+            controls_affected=ctrl_count,
+            ap_upgraded_count=ap_upgraded,
+            max_hop_distance=max_hop,
+        )
+        return ChangeImpactResult(affected_nodes=affected, summary=summary)
+
+    def _bfs_with_path(
+        self, graph_data: dict, start_node_id: str, edge_filter: set[str], max_depth: int, direction: str,
+    ) -> list[dict]:
+        """BFS 遍历图，返回每个可达节点的路径信息。
+
+        结果项: {"node_id": str, "path": list[str], "hop_distance": int}
+        """
+        nodes = graph_data.get("nodes", [])
+        edges = graph_data.get("edges", [])
+        node_map = {n["id"]: n for n in nodes}
+
+        # 构建邻接表
+        adj: dict[str, list[tuple[str, str]]] = {}
+        for e in edges:
+            src = e.get("source", "")
+            tgt = e.get("target", "")
+            etype = e.get("type", "")
+            if not src or not tgt or not etype:
+                continue
+            if direction == "downstream":
+                adj.setdefault(src, []).append((tgt, etype))
+            else:
+                adj.setdefault(tgt, []).append((src, etype))
+
+        results: list[dict] = []
+        visited: set[str] = set()
+        queue: deque[tuple[str, list[str], int]] = deque([(start_node_id, [node_map.get(start_node_id, {}).get("name", start_node_id)], 0)])
+
+        while queue:
+            current, path, dist = queue.popleft()
+            if current in visited or dist > max_depth:
+                continue
+            visited.add(current)
+            if current != start_node_id:
+                results.append({"node_id": current, "path": path, "hop_distance": dist})
+            for nxt, etype in adj.get(current, []):
+                if etype not in edge_filter:
+                    continue
+                if nxt not in visited and dist < max_depth:
+                    nxt_name = node_map.get(nxt, {}).get("name", nxt)
+                    queue.append((nxt, path + [nxt_name], dist + 1))
+        return results
+
+    def _compute_risk_change(
+        self,
+        start_node: dict,
+        affected_node: dict,
+        field_name: str | None,
+        new_value: str | None,
+        node_map: dict[str, dict],
+        edges: list[dict],
+        direction: str,
+    ) -> dict | None:
+        """计算风险变化。仅对 FailureMode 和 FailureCause 有意义。"""
+        start_type = start_node.get("type", "")
+        affected_type = affected_node.get("type", "")
+
+        # 辅助：从 edges 构建 out/in 映射
+        out_edges: dict[tuple[str, str], list[str]] = {}
+        in_edges: dict[tuple[str, str], list[str]] = {}
+        for e in edges:
+            src = e.get("source", "")
+            tgt = e.get("target", "")
+            etype = e.get("type", "")
+            if src and etype:
+                out_edges.setdefault((src, etype), []).append(tgt)
+            if tgt and etype:
+                in_edges.setdefault((tgt, etype), []).append(src)
+
+        def _first_detection(source_id: str) -> int:
+            det_ids = out_edges.get((source_id, "DETECTED_BY"), [])
+            first_id = det_ids[0] if det_ids else None
+            node = node_map.get(first_id) if first_id else None
+            return node.get("detection", 0) or 0 if node else 0
+
+        def _get_fm_sod(fm_id: str) -> tuple[int, int, int, str]:
+            """返回 (s, o, d, ap)"""
+            effect_ids = out_edges.get((fm_id, "EFFECT_OF"), [])
+            first_effect = node_map.get(effect_ids[0]) if effect_ids else None
+            s = first_effect.get("severity", 0) or 0 if first_effect else 0
+            cause_ids = in_edges.get((fm_id, "CAUSE_OF"), [])
+            if not cause_ids:
+                d = _first_detection(fm_id)
+                o = 0
+            else:
+                # 取最大 RPN 的 cause 的 O/D（与 _collect_failure_mode_rpn 一致）
+                best_rpn = -1
+                o = 0
+                d = 0
+                for cause_id in cause_ids:
+                    cause = node_map.get(cause_id)
+                    oc = cause.get("occurrence", 0) or 0 if cause else 0
+                    cause_dets = out_edges.get((cause_id, "DETECTED_BY"), [])
+                    if cause_dets:
+                        dc = _first_detection(cause_id)
+                    else:
+                        dc = _first_detection(fm_id)
+                    rpn = s * oc * dc
+                    if rpn > best_rpn:
+                        best_rpn = rpn
+                        o = oc
+                        d = dc
+            ap = compute_ap(s, o, d) if s > 0 and o > 0 and d > 0 else ""
+            return s, o, d, ap
+
+        # Case 1: FailureMode 自身 S/O/D 变更
+        if start_type == "FailureMode" and affected_node["id"] == start_node["id"]:
+            if field_name in ("severity", "occurrence", "detection"):
+                old_val = start_node.get(field_name, 0) or 0
+                try:
+                    new_val_int = int(new_value) if new_value is not None else old_val
+                except (ValueError, TypeError):
+                    new_val_int = old_val
+                s, o, d, old_ap = _get_fm_sod(start_node["id"])
+                if field_name == "severity":
+                    s = new_val_int
+                elif field_name == "occurrence":
+                    o = new_val_int
+                elif field_name == "detection":
+                    d = new_val_int
+                new_ap = compute_ap(s, o, d) if s > 0 and o > 0 and d > 0 else ""
+                return {
+                    "old_ap": old_ap,
+                    "new_ap": new_ap,
+                    "old_value": old_val,
+                    "new_value": new_val_int,
+                    "field": field_name,
+                }
+            return None
+
+        # Case 2: FailureCause 的 O/D 变更 → 影响关联 FailureMode
+        if start_type == "FailureCause" and affected_type == "FailureMode":
+            if field_name in ("occurrence", "detection"):
+                # 找到该 cause 关联的 FailureMode（通过 CAUSE_OF）
+                fm_ids = out_edges.get((start_node["id"], "CAUSE_OF"), [])
+                if not fm_ids:
+                    return None
+                fm_id = fm_ids[0]
+                s, o, d, old_ap = _get_fm_sod(fm_id)
+                try:
+                    new_val_int = int(new_value) if new_value is not None else (start_node.get(field_name, 0) or 0)
+                except (ValueError, TypeError):
+                    new_val_int = start_node.get(field_name, 0) or 0
+                # 重新计算：替换该 cause 的值后重新选最佳行
+                effect_ids = out_edges.get((fm_id, "EFFECT_OF"), [])
+                first_effect = node_map.get(effect_ids[0]) if effect_ids else None
+                s = first_effect.get("severity", 0) or 0 if first_effect else 0
+                cause_ids = in_edges.get((fm_id, "CAUSE_OF"), [])
+                best_rpn = -1
+                new_o = o
+                new_d = d
+                for cause_id in cause_ids:
+                    cause = node_map.get(cause_id)
+                    if cause_id == start_node["id"]:
+                        oc = new_val_int
+                    else:
+                        oc = cause.get("occurrence", 0) or 0 if cause else 0
+                    cause_dets = out_edges.get((cause_id, "DETECTED_BY"), [])
+                    if cause_id == start_node["id"] and field_name == "detection":
+                        # 该 cause 的 detection 变了，重新取第一个 detection
+                        dc = _first_detection(cause_id) if not cause_dets else new_val_int
+                        if cause_dets:
+                            first_det = node_map.get(cause_dets[0])
+                            dc = new_val_int if first_det and first_det["id"] == start_node["id"] else _first_detection(cause_id)
+                        else:
+                            dc = _first_detection(fm_id)
+                    else:
+                        if cause_dets:
+                            dc = _first_detection(cause_id)
+                        else:
+                            dc = _first_detection(fm_id)
+                    rpn = s * oc * dc
+                    if rpn > best_rpn:
+                        best_rpn = rpn
+                        new_o = oc
+                        new_d = dc
+                new_ap = compute_ap(s, new_o, new_d) if s > 0 and new_o > 0 and new_d > 0 else ""
+                return {
+                    "old_ap": old_ap,
+                    "new_ap": new_ap,
+                    "old_value": start_node.get(field_name, 0) or 0,
+                    "new_value": new_val_int,
+                    "field": field_name,
+                }
+            return None
+
+        # Case 3: Component/ProcessStep 的 design_parameter 变更
+        if start_type in ("Component", "ProcessStep") and field_name == "design_parameter":
+            if affected_type == "FailureMode":
+                return {"needs_reassessment": True, "reason": f"{start_type} design_parameter changed"}
+            return None
+
+        return None
+
+    @staticmethod
+    def _ap_rank(ap: str) -> int:
+        return {"H": 3, "M": 2, "L": 1}.get(ap, 0)
