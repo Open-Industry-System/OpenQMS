@@ -97,8 +97,19 @@ CREATE TABLE document_embeddings (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
-    UNIQUE (entity_type, entity_id, node_id, entity_field, chunk_index)
+    -- 注意：不使用单个 UNIQUE 约束，因为 node_id 对非 FMEA 实体为 NULL，PostgreSQL 中 NULL != NULL
+    -- 会导致非 FMEA 记录无法去重。改用两个 partial unique index（见下方）
 );
+
+-- 幂等去重：FMEA 节点（node_id 非空）
+CREATE UNIQUE INDEX idx_embedding_uniq_fmea ON document_embeddings
+    (entity_type, entity_id, node_id, entity_field, chunk_index)
+    WHERE node_id IS NOT NULL;
+
+-- 幂等去重：非 FMEA 实体（node_id 为空）
+CREATE UNIQUE INDEX idx_embedding_uniq_other ON document_embeddings
+    (entity_type, entity_id, entity_field, chunk_index)
+    WHERE node_id IS NULL;
 
 -- HNSW 索引（近似最近邻）
 CREATE INDEX idx_embedding_hnsw ON document_embeddings
@@ -184,14 +195,22 @@ CREATE TABLE embedding_sync_outbox (
     entity_type VARCHAR(20) NOT NULL,      -- fmea_node, capa, audit_finding, complaint, scar, rma
     entity_id UUID NOT NULL,
     product_line_code VARCHAR(20),
+    -- 可靠性字段（镜像 graph_sync_outbox）
     status VARCHAR(10) DEFAULT 'pending',  -- pending / processing / completed / dead_letter
     retry_count INT DEFAULT 0,
+    max_attempts INT DEFAULT 5,
+    next_attempt_at TIMESTAMPTZ DEFAULT NOW(),
+    locked_at TIMESTAMPTZ,                 -- Worker 领取时设置，用于 FOR UPDATE SKIP LOCKED
+    last_error TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     processed_at TIMESTAMPTZ
 );
-CREATE INDEX idx_embedding_outbox_pending ON embedding_sync_outbox (created_at)
+-- Worker 领取 pending 事件的索引
+CREATE INDEX idx_embedding_outbox_pending ON embedding_sync_outbox (next_attempt_at)
     WHERE status = 'pending';
 ```
+
+Worker 使用 `FOR UPDATE SKIP LOCKED` 安全领取事件，exponential backoff 从 10s 到 270s，超过 `max_attempts` 后标记为 `dead_letter`。
 
 1. **触发**：各模块 CRUD 服务在写入后插入 `embedding_sync_outbox` 事件
 2. **独立 Worker**：`embedding_sync_worker.py`（独立进程，`python -m app.services.embedding_sync_worker`），仅处理 embedding 事件，不触碰 graph_sync_outbox
@@ -319,6 +338,8 @@ class SearchService:
 
 ### Prompt 模板
 
+**重要**：现有 `LLMProvider.complete()` 对所有响应执行 `json.loads()`，Claude 和 Local provider 的 `response_schema` 仅作为 prompt 指令传入，不是 API 级强约束（不像 OpenAI 的 `response_format={"type": "json_object"}`）。因此 prompt 必须**显式要求只返回 JSON**，不能有 markdown 围栏或其他文本。
+
 ```
 你是一个质量管理系统助手。根据以下历史质量记录回答用户问题。
 
@@ -328,8 +349,12 @@ class SearchService:
 ## 用户问题
 {question}
 
+## 输出要求
 请用中文回答。在回答中引用来源时使用 [1], [2] 等编号。
 如果记录中没有相关信息，请如实说明。
+
+**必须只返回以下 JSON 格式，不要添加任何其他文本、markdown 围栏或解释：**
+{"answer": "你的回答内容"}
 ```
 
 ---
@@ -356,8 +381,9 @@ GET /api/search/semantic?q=焊接虚焊&entity_types=fmea_node,capa&product_line
   "results": [
     {
       "entity_type": "fmea_node",
-      "entity_id": "uuid",
-      "entity_field": "FailureMode.abc123.name",
+      "entity_id": "fmea-uuid",
+      "node_id": "node-uuid-abc123",
+      "entity_field": "name",
       "chunk_text": "焊接虚焊导致接触不良",
       "score": 0.92,
       "source": "hybrid",
@@ -371,6 +397,8 @@ GET /api/search/semantic?q=焊接虚焊&entity_types=fmea_node,capa&product_line
   "query_time_ms": 85
 }
 ```
+
+**说明**：`entity_id` 指向源文档 ID（如 fmea_id），`node_id` 仅 FMEA 节点有值（用于跳转到图编辑器高亮节点），`entity_field` 只存字段名（如 `name`、`d4_root_cause`）。
 
 ### RAG 问答
 
@@ -418,9 +446,9 @@ POST /api/search/ask
    - `fmea_node` → 检查 FMEA 模块读权限
    - `capa` → 检查 CAPA 模块读权限
    - `audit_finding` → 检查审核模块读权限
-   - `complaint` → 检查客诉模块读权限
+   - `complaint` → 检查客诉模块读权限（CUSTOMER_QUALITY）
    - `scar` → 检查 SCAR 模块读权限
-   - `rma` → 检查 RMA 模块读权限
+   - `rma` → 检查客诉模块读权限（CUSTOMER_QUALITY，RMA 路由挂在 customer_quality 下，无独立模块枚举）
 3. **Q&A 同理**：RAG context 仅包含用户有权访问的文档块，prompt 中不出现无权限数据
 
 ```python
