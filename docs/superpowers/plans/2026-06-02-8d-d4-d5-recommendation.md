@@ -794,7 +794,7 @@ def test_d4_linked_match_with_node_id(sample_graph):
     capa_data = {
         "d2_description": "焊接虚焊问题",
         "d3_interim": "",
-        "fmea_ref_id": str(fmea_id),
+        "fmea_ref_id": fmea_id,
         "fmea_node_id": fm_id,
         "product_line_code": "DC-DC-100",
     }
@@ -813,7 +813,7 @@ def test_d4_linked_match_without_node_id(sample_graph):
     capa_data = {
         "d2_description": "焊接参数偏移",
         "d3_interim": "",
-        "fmea_ref_id": str(fmea_id),
+        "fmea_ref_id": fmea_id,
         "fmea_node_id": None,
         "product_line_code": "DC-DC-100",
     }
@@ -878,7 +878,7 @@ def test_d5_existing_controls_three_paths(sample_graph):
     capa_data = {
         "d4_root_cause": "焊接参数偏移",
         "d2_description": "焊接虚焊",
-        "fmea_ref_id": str(fmea_id),
+        "fmea_ref_id": fmea_id,
         "fmea_node_id": sample_graph["nodes"][1]["id"],
         "product_line_code": "DC-DC-100",
     }
@@ -902,7 +902,7 @@ def test_d5_general_suggestions(sample_graph):
     capa_data = {
         "d4_root_cause": "焊接参数偏移",
         "d2_description": "焊接虚焊",
-        "fmea_ref_id": str(fmea_id),
+        "fmea_ref_id": fmea_id,
         "fmea_node_id": sample_graph["nodes"][1]["id"],
         "product_line_code": "DC-DC-100",
     }
@@ -922,7 +922,7 @@ def test_d5_empty_root_cause_falls_back_to_d2(sample_graph):
     capa_data = {
         "d4_root_cause": "",
         "d2_description": "焊接参数偏移",
-        "fmea_ref_id": str(fmea_id),
+        "fmea_ref_id": fmea_id,
         "fmea_node_id": sample_graph["nodes"][1]["id"],
         "product_line_code": "DC-DC-100",
     }
@@ -939,7 +939,7 @@ def test_d5_cause_level_detection_control(sample_graph):
     capa_data = {
         "d4_root_cause": "焊接参数偏移",
         "d2_description": "焊接虚焊",
-        "fmea_ref_id": str(fmea_id),
+        "fmea_ref_id": fmea_id,
         "fmea_node_id": sample_graph["nodes"][1]["id"],
         "product_line_code": "DC-DC-100",
     }
@@ -1028,13 +1028,13 @@ export interface D5RecommendationResponse {
 Find the existing import at the top of `frontend/src/api/capa.ts`:
 
 ```typescript
-import type { CAPAReport, D7RecommendationResponse } from "../types";
+import type { CAPAReport, CAPAListResponse, D7RecommendationResponse } from "../types";
 ```
 
 Replace with:
 
 ```typescript
-import type { CAPAReport, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse } from "../types";
+import type { CAPAReport, CAPAListResponse, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse } from "../types";
 ```
 
 - [ ] **Step 3: Add API functions to api/capa.ts**
