@@ -29,6 +29,7 @@ from app.models.apqp import APQPProject
 from app.models.graph_sync_outbox import GraphSyncOutbox
 from app.models.role import RoleDefinition, RolePermission, UserProductLine
 from app.models.recommendation_cache import RecommendationCache
+from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -53,4 +54,6 @@ __all__ = [
     "GraphSyncOutbox",
     "RoleDefinition", "RolePermission", "UserProductLine",
     "RecommendationCache",
+    "DocumentEmbedding",
+    "EmbeddingSyncOutbox",
 ]
