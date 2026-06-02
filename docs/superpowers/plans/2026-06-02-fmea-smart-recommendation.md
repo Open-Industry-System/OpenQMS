@@ -402,7 +402,7 @@ def test_build_cypher_sync_includes_product_line_name():
         fmea_type="PFMEA", product_line_code="DC-DC-100",
         product_line_name="DC-DC 电源模块",  # 新增参数
         status="approved", version=1,
-        graph_data={"nodes": [], "edges": []},
+        graph_data={"nodes": [{"id": "n1", "type": "FailureMode", "name": "测试"}], "edges": []},
     )
     # 找到 CREATE FMEDocument 语句
     doc_statements = [s for s in statements if "CREATE (d:FMEDocument" in s[0]]
@@ -551,7 +551,12 @@ def build_cypher_sync(
             await session.execute_write(_tx)
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Run projection test to verify it passes**
+
+Run: `cd backend && python -m pytest tests/test_graph_projection.py::test_build_cypher_sync_includes_product_line_name -v`
+Expected: 1 passed
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/graph_projection_service.py backend/tests/test_graph_projection.py
@@ -1119,7 +1124,13 @@ class Module(StrEnum):
 
 ```bash
 cd backend
-# 获取当前唯一 head（若多 head 需先 merge）
+# 检查 head 数量
+HEAD_COUNT=$(alembic heads | wc -l | tr -d ' ')
+if [ "$HEAD_COUNT" -ne 1 ]; then
+    echo "Error: $HEAD_COUNT alembic heads found. Expected exactly 1."
+    echo "Run: alembic merge -m 'merge branches' <head1> <head2>"
+    exit 1
+fi
 HEAD=$(alembic heads | head -1 | awk '{print $1}')
 echo "Current head: $HEAD"
 ```
@@ -1127,7 +1138,7 @@ echo "Current head: $HEAD"
 然后创建迁移文件：
 
 ```bash
-cat > backend/alembic/versions/029_knowledge_graph_permissions.py << PYEOF
+cat > alembic/versions/029_knowledge_graph_permissions.py << PYEOF
 """add knowledge_graph permissions
 
 Revision ID: 029
