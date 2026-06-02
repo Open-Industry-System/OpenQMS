@@ -79,5 +79,49 @@ class D7RecommendationResponse(BaseModel):
     recommendations: list[D7Recommendation]
 
 
+class D4Recommendation(BaseModel):
+    failure_cause_node_id: str | None = None
+    failure_cause_name: str
+    failure_cause_desc: str | None = None
+    failure_mode_node_id: str | None = None
+    failure_mode_name: str | None = None
+    fmea_document_no: str | None = None
+    fmea_id: str | None = None
+    match_source: str  # "linked" | "keyword" | "rule"
+    match_reason: str
+    related_d2_keywords: list[str] = []
+    confidence: float = 0.5
+
+
+class D4RecommendationResponse(BaseModel):
+    items: list[D4Recommendation]
+
+
+class D5ExistingControl(BaseModel):
+    failure_mode_node_id: str | None = None
+    failure_mode_name: str | None = None
+    failure_cause_node_id: str | None = None
+    failure_cause_name: str | None = None
+    control_node_id: str
+    control_name: str
+    control_type: str  # "prevention" | "detection"
+    match_source: str
+    match_reason: str
+    fmea_id: str | None = None
+    fmea_document_no: str | None = None
+
+
+class D5GeneralSuggestion(BaseModel):
+    content: str
+    category: str  # "预防措施" | "探测措施"
+    basis: str
+    confidence: float
+
+
+class D5RecommendationResponse(BaseModel):
+    existing_controls: list[D5ExistingControl]
+    general_suggestions: list[D5GeneralSuggestion]
+
+
 class AdvanceRequest(BaseModel):
     d7_skip_reasons: list[dict] | None = None
