@@ -356,3 +356,210 @@ class HistoricalCAPASource:
                 },
             ))
         return candidates
+
+
+class RuleEngineSource:
+    """规则引擎兜底 — D4 根因建议。"""
+
+    name = "rule_engine"
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        from app.services.recommendation_service import RuleEngine
+
+        engine = RuleEngine()
+        d2 = context.capa_data.get("d2_description", "")
+        result = engine.evaluate("failure_cause", {"input_text": d2, "failure_mode": d2})
+
+        candidates: list[RecommendationCandidate] = []
+        for s in result.suggestions:
+            candidates.append(RecommendationCandidate(
+                source="rule_engine",
+                content=s.name,
+                category=None,
+                confidence=s.confidence * 0.5,
+                match_reason="规则引擎推断",
+                metadata={"explanation": s.explanation},
+            ))
+        return candidates
+
+
+class RuleEngineMeasureSource:
+    """规则引擎兜底 — D5 通用措施建议。"""
+
+    name = "rule_engine"
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        from app.services.recommendation_service import RuleEngine
+
+        engine = RuleEngine()
+
+        # Try to get AP level from linked FMEA
+        ap_level = None
+        linked_fmea = context.linked_fmea
+        target_node_id = context.capa_data.get("fmea_node_id")
+        if linked_fmea and linked_fmea.get("graph_data"):
+            graph = linked_fmea["graph_data"]
+            node_map = {n["id"]: n for n in graph.get("nodes", [])}
+            edges = graph.get("edges", [])
+
+            target_fm_id = None
+            if target_node_id:
+                target_node = node_map.get(target_node_id)
+                if target_node:
+                    if target_node["type"] == "FailureMode":
+                        target_fm_id = target_node_id
+                    elif target_node["type"] == "FailureCause":
+                        for e in edges:
+                            if e["source"] == target_node_id and e["type"] == "CAUSE_OF":
+                                parent = node_map.get(e["target"])
+                                if parent and parent.get("type") == "FailureMode":
+                                    target_fm_id = e["target"]
+                                    break
+
+            if target_fm_id and node_map.get(target_fm_id, {}).get("ap"):
+                ap_level = node_map[target_fm_id]["ap"]
+            else:
+                for node in graph.get("nodes", []):
+                    if node.get("type") == "FailureMode" and node.get("ap"):
+                        ap_level = node["ap"]
+                        break
+
+        failure_mode_text = context.capa_data.get("d2_description", "")
+        ctx = {"failure_mode": failure_mode_text, "ap": ap_level or "M"}
+        result = engine.evaluate("measure", ctx)
+
+        candidates: list[RecommendationCandidate] = []
+        for s in result.suggestions:
+            cat = s.explanation or "预防措施"
+            if cat == "检测措施":
+                cat = "探测措施"
+            candidates.append(RecommendationCandidate(
+                source="rule_engine",
+                content=s.name,
+                category=cat,
+                confidence=s.confidence,
+                match_reason=f"AP={ap_level or 'M'} 规则建议",
+                metadata={"basis": f"AP={ap_level or 'M'}"},
+            ))
+        return candidates
+
+
+class FMEAControlExpander:
+    """D5 Stage 2: 基于召回的 FailureCause 做图遍历扩展 Controls。"""
+
+    name = "fmea_graph"
+
+    async def expand(
+        self,
+        cause_candidates: list[RecommendationCandidate],
+        fmea_docs: list[dict[str, Any]],
+    ) -> list[RecommendationCandidate]:
+        """接收 Stage 1 召回的 FailureCause 候选，扩展出 Control 候选。"""
+        controls: list[RecommendationCandidate] = []
+        seen: set[tuple[str, str]] = set()
+
+        # Build fmea_id -> doc map
+        doc_map = {str(doc["fmea_id"]): doc for doc in fmea_docs if doc.get("graph_data")}
+
+        for cause_candidate in cause_candidates:
+            cause_id = cause_candidate.metadata.get("failure_cause_node_id")
+            fmea_id = cause_candidate.metadata.get("fmea_id")
+            if not cause_id or not fmea_id:
+                continue
+
+            doc = doc_map.get(fmea_id)
+            if not doc:
+                continue
+
+            graph = doc["graph_data"]
+            node_map = {n["id"]: n for n in graph.get("nodes", [])}
+            edges = graph.get("edges", [])
+
+            forward_edges: dict[str, list[tuple[str, str]]] = {}
+            for e in edges:
+                forward_edges.setdefault(e["source"], []).append((e["target"], e["type"]))
+
+            fm_id = cause_candidate.metadata.get("failure_mode_node_id")
+            fm_name = cause_candidate.metadata.get("failure_mode_name")
+            cause_name = cause_candidate.content
+
+            # Path 1: Cause -> PREVENTED_BY -> PreventionControl
+            for tgt, etype in forward_edges.get(cause_id, []):
+                if etype == "PREVENTED_BY":
+                    ctrl = node_map.get(tgt)
+                    if ctrl and ctrl.get("type") == "PreventionControl":
+                        key = (tgt, "prevention")
+                        if key not in seen:
+                            seen.add(key)
+                            controls.append(RecommendationCandidate(
+                                source="fmea_graph",
+                                content=ctrl.get("name", ""),
+                                category="prevention",
+                                confidence=0.6,
+                                match_reason="FMEA 预防措施",
+                                metadata={
+                                    "failure_mode_node_id": fm_id,
+                                    "failure_mode_name": fm_name,
+                                    "failure_cause_node_id": cause_id,
+                                    "failure_cause_name": cause_name,
+                                    "control_node_id": tgt,
+                                    "control_type": "prevention",
+                                    "fmea_id": fmea_id,
+                                    "fmea_document_no": doc.get("document_no"),
+                                },
+                            ))
+
+            # Path 2: Cause -> DETECTED_BY -> DetectionControl
+            for tgt, etype in forward_edges.get(cause_id, []):
+                if etype == "DETECTED_BY":
+                    ctrl = node_map.get(tgt)
+                    if ctrl and ctrl.get("type") == "DetectionControl":
+                        key = (tgt, "detection")
+                        if key not in seen:
+                            seen.add(key)
+                            controls.append(RecommendationCandidate(
+                                source="fmea_graph",
+                                content=ctrl.get("name", ""),
+                                category="detection",
+                                confidence=0.55,
+                                match_reason="FMEA 探测措施（原因级）",
+                                metadata={
+                                    "failure_mode_node_id": fm_id,
+                                    "failure_mode_name": fm_name,
+                                    "failure_cause_node_id": cause_id,
+                                    "failure_cause_name": cause_name,
+                                    "control_node_id": tgt,
+                                    "control_type": "detection",
+                                    "fmea_id": fmea_id,
+                                    "fmea_document_no": doc.get("document_no"),
+                                },
+                            ))
+
+            # Path 3: FailureMode -> DETECTED_BY -> DetectionControl
+            if fm_id:
+                for tgt, etype in forward_edges.get(fm_id, []):
+                    if etype == "DETECTED_BY":
+                        ctrl = node_map.get(tgt)
+                        if ctrl and ctrl.get("type") == "DetectionControl":
+                            key = (tgt, "detection")
+                            if key not in seen:
+                                seen.add(key)
+                                controls.append(RecommendationCandidate(
+                                    source="fmea_graph",
+                                    content=ctrl.get("name", ""),
+                                    category="detection",
+                                    confidence=0.5,
+                                    match_reason="FMEA 探测措施（失效模式级）",
+                                    metadata={
+                                        "failure_mode_node_id": fm_id,
+                                        "failure_mode_name": fm_name,
+                                        "failure_cause_node_id": cause_id,
+                                        "failure_cause_name": cause_name,
+                                        "control_node_id": tgt,
+                                        "control_type": "detection",
+                                        "fmea_id": fmea_id,
+                                    "fmea_document_no": doc.get("document_no"),
+                                    },
+                                ))
+
+        return controls
