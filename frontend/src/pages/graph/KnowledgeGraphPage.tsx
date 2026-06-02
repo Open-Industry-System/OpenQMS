@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Card, Tabs, Input, Select, Table, Tag, Spin, Empty, Space, Statistic, Row, Col, Button } from "antd";
-import { SearchOutlined, BarChartOutlined, FireOutlined, LinkOutlined } from "@ant-design/icons";
+import { SearchOutlined, BarChartOutlined, FireOutlined, LinkOutlined, RobotOutlined } from "@ant-design/icons";
+import SemanticSearchTab from "./SemanticSearchTab";
 import { useNavigate } from "react-router-dom";
 import { useProductLineStore } from "../../store/productLineStore";
 import { searchSimilarNodes, getCrossFmeaStats } from "../../api/graph";
@@ -196,6 +197,11 @@ export default function KnowledgeGraphPage() {
           )}
         </>
       ),
+    },
+    {
+      key: "semantic",
+      label: <span><RobotOutlined /> 语义搜索</span>,
+      children: <SemanticSearchTab />,
     },
   ];
 
