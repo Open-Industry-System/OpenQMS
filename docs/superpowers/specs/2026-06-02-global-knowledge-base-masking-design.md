@@ -202,7 +202,7 @@ async def global_stats(
 
 - **Neo4j**: 移除 `product_line_code` 过滤后，Cypher 查询变为全表扫描。由于 Neo4j 中 GraphNode 数量通常在数千级别，性能可接受。
 - **JSONB**: 实现会读取全部 FMEA 文档及 `graph_data` 后在 Python 内存中遍历聚合，全量统计不做采样。当前数据规模下性能可接受；后续如果文档量增长，再引入分页聚合、SQL JSONB 聚合或缓存。生产环境建议优先使用 Neo4j。
-- **脱敏开销**: Python 字符串切片，单次查询处理 < 100 条记录，开销可忽略。
+- **脱敏开销**: Python 字符串切片，单次查询处理 ≤ 30 条记录（`high_ap_nodes` 固定最多 20 条 + `top_failure_modes` 固定最多 10 条），开销可忽略。
 
 ## 8. 错误处理
 
