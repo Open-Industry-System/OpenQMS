@@ -1080,7 +1080,22 @@ export default function D4RecPanel({ capaId, onAdopt }: D4RecPanelProps) {
   }, [capaId]);
 
   if (loading) return <Spin size="small" />;
-  if (recommendations.length === 0) return <Empty description="暂无推荐" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+  if (recommendations.length === 0) {
+    return (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description={
+          <span>
+            暂无推荐
+            <br />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              提示：在 D2 描述中用空格或逗号分隔关键词可提高匹配率
+            </Text>
+          </span>
+        }
+      />
+    );
+  }
 
   const groups = {
     linked: recommendations.filter((r) => r.match_source === "linked"),
