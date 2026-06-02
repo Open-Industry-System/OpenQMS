@@ -10,6 +10,8 @@ from app.models.audit import AuditLog
 from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
 
+EMBEDDING_FIELDS = {"d2_description", "d4_root_cause", "d5_correction", "d7_prevention"}
+
 
 async def list_capas(
     db: AsyncSession,
@@ -140,6 +142,12 @@ async def update_capa(
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
         await validate_product_line(db, update_data["product_line_code"])
 
+    # Detect embedding field changes BEFORE mutating capa
+    embedding_changed = {
+        k for k, v in update_data.items()
+        if k in EMBEDDING_FIELDS and getattr(capa, k) != v
+    }
+
     changed_fields = {}
     for key, value in update_data.items():
         if value is not None and hasattr(capa, key):
@@ -163,7 +171,8 @@ async def update_capa(
 
     await db.commit()
     await db.refresh(capa)
-    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
+    if embedding_changed:
+        await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
     return capa
 
 

@@ -66,6 +66,7 @@ def build_cypher_sync(
     title: str,
     fmea_type: str,
     product_line_code: str,
+    product_line_name: str,
     status: str,
     version: int,
     graph_data: dict,
@@ -95,6 +96,7 @@ def build_cypher_sync(
     statements.append((
         "CREATE (d:FMEDocument {fmea_id: $fmea_id, document_no: $document_no, "
         "title: $title, fmea_type: $fmea_type, product_line_code: $product_line_code, "
+        "product_line_name: $product_line_name, "
         "status: $status, version: $version})",
         {
             "fmea_id": fmea_id,
@@ -102,6 +104,7 @@ def build_cypher_sync(
             "title": title,
             "fmea_type": fmea_type,
             "product_line_code": product_line_code,
+            "product_line_name": product_line_name,
             "status": status,
             "version": version,
         },
@@ -166,6 +169,7 @@ class GraphProjectionService:
     async def sync_fmea_to_neo4j(self, fmea_id: uuid.UUID) -> None:
         """从 PG 读取 FMEA → 生成 Cypher → 执行到 Neo4j。"""
         from app.models.fmea import FMEADocument
+        from app.models.product_line import ProductLine
         from sqlalchemy import select
 
         async with self._session_factory() as db:
@@ -176,12 +180,19 @@ class GraphProjectionService:
             if fmea is None:
                 return
 
+            # 获取产品线名称
+            pl_result = await db.execute(
+                select(ProductLine.name).where(ProductLine.code == fmea.product_line_code)
+            )
+            product_line_name = pl_result.scalar_one_or_none() or fmea.product_line_code
+
         statements = build_cypher_sync(
             fmea_id=str(fmea.fmea_id),
             document_no=fmea.document_no,
             title=fmea.title,
             fmea_type=fmea.fmea_type,
             product_line_code=fmea.product_line_code,
+            product_line_name=product_line_name,
             status=fmea.status,
             version=fmea.version,
             graph_data=fmea.graph_data or {"nodes": [], "edges": []},
