@@ -334,12 +334,18 @@ def _sanitize_global_stats(raw: dict) -> dict:
 ```python
 @router.get("/global-stats", response_model=GlobalStatsOut, response_model_exclude_none=True)
 async def global_stats(
+    request: Request,
     repo: FMEAGraphRepository = Depends(get_graph_repository),
     _user: User = Depends(require_admin),
 ):
     """跨产品线全局知识库统计（Admin Only）。返回数据已脱敏。
-    不接受 product_line_code 参数（传入则忽略，不做校验）。
+    不接受 product_line_code 参数，传入则返回 400。
     """
+    if "product_line_code" in request.query_params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="product_line_code is not accepted for global stats",
+        )
     raw = await repo.get_global_stats()
     return _sanitize_global_stats(raw)
 ```
@@ -562,11 +568,10 @@ async def test_global_stats_response_sanitized(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_global_stats_ignores_product_line_code_param(client: AsyncClient):
-    """验证 /global-stats 忽略传入的 product_line_code 参数（接口本身不接受该参数）。"""
+async def test_global_stats_rejects_product_line_code_param(client: AsyncClient):
+    """验证 /global-stats 传入 product_line_code 参数返回 400。"""
     resp = await client.get("/api/graph/global-stats?product_line_code=DC-DC-100")
-    assert resp.status_code == status.HTTP_200_OK
-    # 响应与无参请求一致（StubGraphRepo 的 get_global_stats 不读取查询参数）
+    assert resp.status_code == status.HTTP_400_BAD_REQUEST
 ```
 
 - [ ] **Step 5: 运行测试**
@@ -594,7 +599,39 @@ git commit -m "test(graph): fix dependency override, add global-stats tests and 
 
 **注意:** 测试 JSONBRepository 的 `get_global_stats` 和 `get_cross_fmea_stats`（验证 document_no 修复）。测试图数据必须包含 DetectionControl 和 DETECTED_BY 边，否则 `_collect_failure_mode_rpn()` 的 D=0 导致 RPN=0，top_failure_modes 为空。Neo4jRepository 无测试数据库环境，本期不测。
 
-- [ ] **Step 1: 追加测试到现有文件末尾**
+- [ ] **Step 1: 修正现有测试数据 + 追加新测试**
+
+**1a. 修正现有 `test_jsonb_repository_stats_field_structure` 的图数据**
+
+现有测试的 graph_data 缺少 DetectionControl 和 DETECTED_BY 边，导致 `_collect_failure_mode_rpn()` 的 D=0，RPN=0，AP=""，测试断言失败。将现有测试中的 graph_data 替换为：
+
+```python
+graph_data={
+    "nodes": [
+        {"id": "n1", "type": "FailureMode", "name": "焊接不良"},
+        {"id": "n2", "type": "FailureMode", "name": "虚焊"},
+        {"id": "n3", "type": "Function", "name": "导电功能"},
+        {"id": "e1", "type": "FailureEffect", "name": "开裂", "severity": 9},
+        {"id": "e2", "type": "FailureEffect", "name": "断裂", "severity": 7},
+        {"id": "c1", "type": "FailureCause", "name": "温度高", "occurrence": 8},
+        {"id": "c2", "type": "FailureCause", "name": "压力不足", "occurrence": 4},
+        {"id": "d1", "type": "DetectionControl", "name": "目检", "detection": 5},
+        {"id": "d2", "type": "DetectionControl", "name": "X光", "detection": 3},
+    ],
+    "edges": [
+        {"source": "n1", "target": "e1", "type": "EFFECT_OF"},
+        {"source": "n2", "target": "e2", "type": "EFFECT_OF"},
+        {"source": "c1", "target": "n1", "type": "CAUSE_OF"},
+        {"source": "c2", "target": "n2", "type": "CAUSE_OF"},
+        {"source": "c1", "target": "d1", "type": "DETECTED_BY"},
+        {"source": "c2", "target": "d2", "type": "DETECTED_BY"},
+    ],
+}
+```
+
+保持断言不变：`ap == {"H": 1, "M": 1, "L": 0}`（n1=9×8×5=360→H, n2=7×4×3=84→M）。
+
+**1b. 在文件末尾追加新测试**
 
 ```python
 import uuid as _uuid
