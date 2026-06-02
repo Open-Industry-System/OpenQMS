@@ -139,9 +139,12 @@ async def update_control_plan(
     lock_version = data.lock_version
     confirmed_latest_lock_version = data.confirmed_latest_lock_version
 
-    # 原子乐观锁校验：重新 SELECT ... FOR UPDATE 获取最新 lock_version
+    # 原子乐观锁校验：强制刷新 + SELECT ... FOR UPDATE
     result = await db.execute(
-        select(ControlPlan).where(ControlPlan.cp_id == cp.cp_id).with_for_update()
+        select(ControlPlan)
+        .where(ControlPlan.cp_id == cp.cp_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     fresh = result.scalar_one()
 
@@ -171,7 +174,7 @@ async def update_control_plan(
         "product_line_code",
     ]:
         value = getattr(data, field, None)
-        if value is not None:
+        if value is not None and value != getattr(cp, field, None):
             changed_fields[field] = value
             setattr(cp, field, value)
 
@@ -179,38 +182,64 @@ async def update_control_plan(
 
     # Handle items replacement if provided
     if data.items is not None:
-        # Delete existing items
+        # Check if items actually changed before replacing
         items_result = await db.execute(
             select(ControlPlanItem).where(ControlPlanItem.cp_id == cp.cp_id)
         )
         existing_items = list(items_result.scalars().all())
-        for item in existing_items:
-            await db.delete(item)
+        items_changed = len(existing_items) != len(data.items)
+        if not items_changed:
+            import json
+            for old, new in zip(existing_items, data.items):
+                old_dict = {
+                    k: getattr(old, k) for k in [
+                        "step_no", "process_name", "equipment", "characteristic_no",
+                        "product_characteristic", "process_characteristic", "special_class",
+                        "specification_tolerance", "evaluation_method", "sample_size",
+                        "sample_frequency", "control_method", "reaction_plan",
+                        "source_fmea_node_id", "sort_order",
+                    ]
+                }
+                new_dict = {
+                    k: getattr(new, k) for k in [
+                        "step_no", "process_name", "equipment", "characteristic_no",
+                        "product_characteristic", "process_characteristic", "special_class",
+                        "specification_tolerance", "evaluation_method", "sample_size",
+                        "sample_frequency", "control_method", "reaction_plan",
+                        "source_fmea_node_id", "sort_order",
+                    ]
+                }
+                if json.dumps(old_dict, sort_keys=True) != json.dumps(new_dict, sort_keys=True):
+                    items_changed = True
+                    break
 
-        # Create new items
-        for idx, item_data in enumerate(data.items):
-            new_item = ControlPlanItem(
-                item_id=uuid.uuid4(),
-                cp_id=cp.cp_id,
-                step_no=item_data.step_no,
-                process_name=item_data.process_name,
-                equipment=item_data.equipment,
-                characteristic_no=item_data.characteristic_no,
-                product_characteristic=item_data.product_characteristic,
-                process_characteristic=item_data.process_characteristic,
-                special_class=item_data.special_class,
-                specification_tolerance=item_data.specification_tolerance,
-                evaluation_method=item_data.evaluation_method,
-                sample_size=item_data.sample_size,
-                sample_frequency=item_data.sample_frequency,
-                control_method=item_data.control_method,
-                reaction_plan=item_data.reaction_plan,
-                source_fmea_node_id=item_data.source_fmea_node_id,
-                sort_order=idx,
-            )
-            db.add(new_item)
+        if items_changed:
+            for item in existing_items:
+                await db.delete(item)
 
-        changed_fields["items_count"] = len(data.items)
+            for idx, item_data in enumerate(data.items):
+                new_item = ControlPlanItem(
+                    item_id=uuid.uuid4(),
+                    cp_id=cp.cp_id,
+                    step_no=item_data.step_no,
+                    process_name=item_data.process_name,
+                    equipment=item_data.equipment,
+                    characteristic_no=item_data.characteristic_no,
+                    product_characteristic=item_data.product_characteristic,
+                    process_characteristic=item_data.process_characteristic,
+                    special_class=item_data.special_class,
+                    specification_tolerance=item_data.specification_tolerance,
+                    evaluation_method=item_data.evaluation_method,
+                    sample_size=item_data.sample_size,
+                    sample_frequency=item_data.sample_frequency,
+                    control_method=item_data.control_method,
+                    reaction_plan=item_data.reaction_plan,
+                    source_fmea_node_id=item_data.source_fmea_node_id,
+                    sort_order=idx,
+                )
+                db.add(new_item)
+
+            changed_fields["items_count"] = len(data.items)
 
     if changed_fields:
         cp.lock_version += 1  # 只在有实际变更时递增乐观锁版本

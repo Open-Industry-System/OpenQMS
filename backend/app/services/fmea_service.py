@@ -166,9 +166,12 @@ async def update_fmea(
     lock_version: int | None = None,
     confirmed_latest_lock_version: int | None = None,
 ) -> FMEADocument:
-    # 原子乐观锁校验：重新 SELECT ... FOR UPDATE 获取最新 lock_version
+    # 原子乐观锁校验：强制刷新 + SELECT ... FOR UPDATE
     result = await db.execute(
-        select(FMEADocument).where(FMEADocument.fmea_id == fmea.fmea_id).with_for_update()
+        select(FMEADocument)
+        .where(FMEADocument.fmea_id == fmea.fmea_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     fresh = result.scalar_one()
 
@@ -180,13 +183,17 @@ async def update_fmea(
             raise ValueError("lock_version_mismatch")
 
     changed_fields = {}
-    if title is not None:
+    if title is not None and title != fmea.title:
         changed_fields["title"] = title
         fmea.title = title
     if graph_data is not None:
-        changed_fields["graph_data"] = graph_data
-        fmea.graph_data = graph_data
-    if product_line_code is not None:
+        import json
+        old_graph = json.dumps(fmea.graph_data, sort_keys=True) if fmea.graph_data else ""
+        new_graph = json.dumps(graph_data, sort_keys=True)
+        if new_graph != old_graph:
+            changed_fields["graph_data"] = graph_data
+            fmea.graph_data = graph_data
+    if product_line_code is not None and product_line_code != fmea.product_line_code:
         await validate_product_line(db, product_line_code)
         changed_fields["product_line_code"] = product_line_code
         fmea.product_line_code = product_line_code
