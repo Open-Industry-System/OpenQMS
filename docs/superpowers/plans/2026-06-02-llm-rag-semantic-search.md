@@ -786,10 +786,11 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
                     ("d5_correction", "d5_correction"),
                     ("d7_prevention", "d7_prevention"),
                 ]),
-                "audit_finding": ("audit_findings", "finding_id", "NULL", "clause_ref", [
-                    ("description", "description"),
-                    ("root_cause", "root_cause"),
-                    ("corrective_action", "corrective_action"),
+                "audit_finding": ("audit_findings af LEFT JOIN audit_plans ap ON af.audit_id = ap.audit_id",
+                    "af.finding_id", "ap.product_line_code", "ap.plan_no", [
+                    ("af.description", "description"),
+                    ("af.root_cause", "root_cause"),
+                    ("af.corrective_action", "corrective_action"),
                 ]),
                 "complaint": ("customer_complaints", "complaint_id", "product_line_code", "complaint_no", [
                     ("defect_desc", "defect_desc"),
@@ -910,13 +911,14 @@ async def mark_completed(db: AsyncSession, event_ids: list[str]):
     """Mark outbox events as completed."""
     if not event_ids:
         return
+    # Use explicit uuid[] cast to avoid binding ambiguity with text()
+    uuid_list = ", ".join(f"'{eid}'::uuid" for eid in event_ids)
     await db.execute(
-        text("""
+        text(f"""
             UPDATE embedding_sync_outbox
             SET status = 'completed', processed_at = NOW()
-            WHERE id = ANY(:ids)
+            WHERE id IN ({uuid_list})
         """),
-        {"ids": event_ids},
     )
     await db.commit()
 
@@ -1057,9 +1059,14 @@ logger = logging.getLogger(__name__)
 ENTITY_TYPES = ["fmea_node", "capa", "audit_finding", "complaint", "scar", "rma"]
 
 ENTITY_TABLE_MAP = {
+    # (from_clause, pk_expr, plc_expr)
     "fmea_node": ("fmea_documents", "fmea_id", "product_line_code"),
     "capa": ("capa_eightd", "report_id", "product_line_code"),
-    "audit_finding": ("audit_findings", "finding_id", None),  # audit_findings has no product_line_code
+    "audit_finding": (
+        "audit_findings af LEFT JOIN audit_plans ap ON af.audit_id = ap.audit_id",
+        "af.finding_id",
+        "ap.product_line_code",
+    ),
     "complaint": ("customer_complaints", "complaint_id", "product_line_code"),
     "scar": ("supplier_scars", "scar_id", "product_line_code"),
     "rma": ("rma_records", "rma_id", "product_line_code"),
@@ -1072,11 +1079,10 @@ async def backfill_entity_type(
     batch_size: int,
 ) -> int:
     """Enqueue outbox events for all records of a given entity type."""
-    table, pk_col, plc_col = ENTITY_TABLE_MAP[entity_type]
-    plc_select = f", {plc_col}" if plc_col else ", NULL"
+    from_clause, pk_expr, plc_expr = ENTITY_TABLE_MAP[entity_type]
 
     result = await db.execute(
-        text(f"SELECT {pk_col}{plc_select} FROM {table}")
+        text(f"SELECT {pk_expr} AS entity_id, {plc_expr} AS product_line_code FROM {from_clause}")
     )
     rows = result.fetchall()
     total = 0
@@ -1085,9 +1091,7 @@ async def backfill_entity_type(
         batch = rows[i : i + batch_size]
         for row in batch:
             row = row._mapping
-            entity_id = row[pk_col]
-            product_line_code = row.get(plc_col) if plc_col else None
-            await enqueue_embedding(db, entity_type, entity_id, product_line_code)
+            await enqueue_embedding(db, entity_type, row["entity_id"], row["product_line_code"])
         await db.commit()
         total += len(batch)
         logger.info(f"  Enqueued {total}/{len(rows)} {entity_type} events")
@@ -1242,11 +1246,11 @@ class SearchService:
 
     async def _get_user_product_lines(self, user: User) -> list[str] | None:
         """Get product lines the user has access to. Returns None for admin (all)."""
-        from app.models.user import UserProductLine
+        from app.models.role import UserProductLine
         from sqlalchemy import select
 
         # Admin can access all product lines
-        if user.role == "admin":
+        if user.role_definition and user.role_definition.role_key == "admin":
             return None  # None means no filter (all)
 
         result = await self.db.execute(
@@ -1271,12 +1275,18 @@ class SearchService:
         filters = []
         params: dict = {"limit": limit}
 
+        # Derive user's accessible product lines
+        user_pls = await self._get_user_product_lines(user)
+
         if product_line_code:
+            # Validate that user has access to the requested product line
+            if user_pls is not None and product_line_code not in user_pls:
+                elapsed = int((time.monotonic() - start) * 1000)
+                return SemanticSearchResponse(results=[], total=0, query_time_ms=elapsed)
             filters.append("product_line_code = :product_line_code")
             params["product_line_code"] = product_line_code
         else:
-            # Derive from user access
-            user_pls = await self._get_user_product_lines(user)
+            # Use all accessible product lines
             if user_pls is not None:  # None = admin, no filter
                 filters.append("product_line_code = ANY(:user_product_lines)")
                 params["user_product_lines"] = user_pls
@@ -1585,7 +1595,7 @@ async def reindex(
     db: AsyncSession = Depends(get_db),
 ):
     """Trigger re-indexing of all quality documents (admin only)."""
-    if user.role != "admin":
+    if not user.role_definition or user.role_definition.role_key != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可执行重新索引")
     from app.services.embedding_backfill import backfill_entity_type, ENTITY_TYPES
 
