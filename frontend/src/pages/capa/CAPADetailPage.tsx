@@ -8,6 +8,8 @@ import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, Dele
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
 import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
+import D4RecPanel from "../../components/capa/D4RecPanel";
+import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
 import type { CAPAReport, FMEADocument } from "../../types";
 import { useAuthStore } from "../../store/authStore";
@@ -299,31 +301,55 @@ export default function CAPADetailPage() {
             )}
 
             {capa.status === "D4_ROOT_CAUSE" && (
-              <Form layout="vertical">
-                <Form.Item label="根因分析 (5Why / 鱼骨图)">
-                  <TextArea
-                    rows={6}
-                    disabled={!canEdit('capa')}
-                    value={localData.d4_root_cause || ""}
-                    onChange={(e) => setLocalData({ ...localData, d4_root_cause: e.target.value })}
-                    onBlur={() => handleUpdate("d4_root_cause", localData.d4_root_cause)}
-                  />
-                </Form.Item>
-              </Form>
+              <>
+                <D4RecPanel
+                  capaId={id!}
+                  canAdopt={canEdit('capa')}
+                  onAdopt={(text) => {
+                    const current = localData.d4_root_cause || "";
+                    const newVal = current ? `${current}\n${text}` : text;
+                    setLocalData({ ...localData, d4_root_cause: newVal });
+                    handleUpdate("d4_root_cause", newVal);
+                  }}
+                />
+                <Form layout="vertical">
+                  <Form.Item label="根因分析 (5Why / 鱼骨图)">
+                    <TextArea
+                      rows={6}
+                      disabled={!canEdit('capa')}
+                      value={localData.d4_root_cause || ""}
+                      onChange={(e) => setLocalData({ ...localData, d4_root_cause: e.target.value })}
+                      onBlur={() => handleUpdate("d4_root_cause", localData.d4_root_cause)}
+                    />
+                  </Form.Item>
+                </Form>
+              </>
             )}
 
             {capa.status === "D5_CORRECTION" && (
-              <Form layout="vertical">
-                <Form.Item label="永久纠正措施">
-                  <TextArea
-                    rows={4}
-                    disabled={!canEdit('capa')}
-                    value={localData.d5_correction || ""}
-                    onChange={(e) => setLocalData({ ...localData, d5_correction: e.target.value })}
-                    onBlur={() => handleUpdate("d5_correction", localData.d5_correction)}
-                  />
-                </Form.Item>
-              </Form>
+              <>
+                <D5RecPanel
+                  capaId={id!}
+                  canAdopt={canEdit('capa')}
+                  onAdopt={(text) => {
+                    const current = localData.d5_correction || "";
+                    const newVal = current ? `${current}\n${text}` : text;
+                    setLocalData({ ...localData, d5_correction: newVal });
+                    handleUpdate("d5_correction", newVal);
+                  }}
+                />
+                <Form layout="vertical">
+                  <Form.Item label="永久纠正措施">
+                    <TextArea
+                      rows={4}
+                      disabled={!canEdit('capa')}
+                      value={localData.d5_correction || ""}
+                      onChange={(e) => setLocalData({ ...localData, d5_correction: e.target.value })}
+                      onBlur={() => handleUpdate("d5_correction", localData.d5_correction)}
+                    />
+                  </Form.Item>
+                </Form>
+              </>
             )}
 
             {capa.status === "D6_VERIFICATION" && (
