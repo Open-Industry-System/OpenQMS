@@ -1900,7 +1900,7 @@ async def test_leave_endpoint(client: AsyncClient):
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
-python -m pytest tests/collaboration/ -v
+python -m pytest tests/test_collaboration.py -v
 ```
 
 Expected: All tests pass.
@@ -1929,10 +1929,10 @@ Expected: No syntax errors.
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
-python -m pytest tests/collaboration/ -v
+python -m pytest tests/test_collaboration.py -v
 ```
 
-Expected: All tests pass (see Task 21).
+Expected: All tests pass (see Task 20).
 
 - [ ] **Step 3: 前端构建**
 
