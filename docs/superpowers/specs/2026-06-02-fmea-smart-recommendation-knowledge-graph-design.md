@@ -87,18 +87,26 @@ def compute_similarity(query: str, candidate: str) -> float:
 
 **实现：**后端在 `recommend()` 入口处检查权限，无权限则覆盖 `request.scope = "current_product_line"`。
 
-### 4.3 跨产品线脱敏
+### 4.3 跨产品线数据隔离
 
-当用户拥有全局权限且查询返回跨产品线节点时，**当前 FMEA 所在产品线以外的节点名称需脱敏**：
+**数据访问原则：**
+- 有 `KNOWLEDGE_GRAPH_GLOBAL_READ` 权限的用户：可查看完整跨产品线推荐内容（名称不脱敏），因为权限本身已授权跨产品线数据访问
+- 无全局权限的用户：scope 被强制降级为 `current_product_line`，不会看到跨产品线节点
+
+**防御性脱敏：**
+如果无权限用户通过异常路径获取到跨产品线节点（如 API 直接调用），在 API 响应层对跨产品线节点名称脱敏：
 
 ```python
 from app.api.graph import mask_name
 
-is_cross_tenant = match_product_line_code != current_fmea_product_line
-name_to_display = mask_name(match_name) if is_cross_tenant else match_name
+# 仅在 API 层做防御性脱敏，不污染 service 层的 suggestion.name
+if not has_global_permission and match_product_line_code != current_fmea_product_line:
+    display_name = mask_name(match_name)
+else:
+    display_name = match_name
 ```
 
-脱敏规则与全局统计 API 一致：前 2 字符 + `***`，短名称首字符 + `***`。
+**关键决策：** 不在 `_graph_matches_to_suggestions()` 中对 `SuggestionItem.name` 脱敏。脱敏只作为 API 层的防御性措施，不影响有权限用户的完整推荐体验。
 
 ### 4.4 FMEA 状态过滤
 
@@ -170,6 +178,8 @@ Content-Type: application/json
 }
 ```
 
+**权限降级：**与推荐端点同一语义。无 `KNOWLEDGE_GRAPH_GLOBAL_READ` 权限时，`scope="global"` 强制降级为 `"current_product_line"`，响应返回 `effective_scope` 告知前端实际生效范围。
+
 **响应：**
 
 ```json
@@ -182,11 +192,13 @@ Content-Type: application/json
       "fmea_id": "uuid",
       "document_no": "PFMEA-2026-001",
       "product_line_code": "DC-DC-100",
+      "product_line_name": "DC-DC 电源模块",
       "similarity_score": 0.75,
       "match_reason": "substring_match"
     }
   ],
-  "total": 1
+  "total": 1,
+  "effective_scope": "global"
 }
 ```
 
@@ -225,21 +237,19 @@ async def find_similar_nodes_advanced(
 async def find_similar_nodes_advanced(
     self, node_type, query_text, scope, product_line_code, limit=10, min_similarity=0.3
 ):
-    from sqlalchemy import cast, String
-
-    # 基础过滤：已批准 + graph_data 非空
+    # 基础过滤：已批准 + graph_data 非空 + 产品线（如指定）
     query = select(FMEADocument).where(
         FMEADocument.status == "approved",
         FMEADocument.graph_data.isnot(None),
     )
     if scope == "current_product_line" and product_line_code:
         query = query.where(FMEADocument.product_line_code == product_line_code)
-    # 预过滤：只加载名称可能匹配的文档（避免全表扫描）
-    query = query.where(
-        cast(FMEADocument.graph_data, String).ilike(f"%{query_text}%")
-    )
     result = await self._db.execute(query)
     fmeas = result.scalars().all()
+
+    # 加载产品线名称映射（防御性，避免 N+1）
+    pl_codes = {fmea.product_line_code for fmea in fmeas if fmea.product_line_code}
+    pl_name_map = await self._load_product_line_names(pl_codes)
 
     matches = []
     for fmea in fmeas:
@@ -247,15 +257,17 @@ async def find_similar_nodes_advanced(
             if node.get("type") != node_type:
                 continue
             node_name = node.get("name") or ""
-            score, reason = self._compute_similarity(query_text, node_name)
+            score, reason = compute_similarity(query_text, node_name)
             if score >= min_similarity:
+                pl_code = fmea.product_line_code
                 matches.append({
                     "node_id": node.get("id", ""),
                     "name": node_name,
                     "type": node_type,
                     "fmea_id": str(fmea.fmea_id),
                     "document_no": fmea.document_no,
-                    "product_line_code": fmea.product_line_code,
+                    "product_line_code": pl_code,
+                    "product_line_name": pl_name_map.get(pl_code, pl_code),
                     "similarity_score": round(score, 3),
                     "match_reason": reason,
                 })
@@ -263,10 +275,30 @@ async def find_similar_nodes_advanced(
     matches.sort(key=lambda x: x["similarity_score"], reverse=True)
     return matches[:limit]
 
-@staticmethod
-def _compute_similarity(query: str, candidate: str) -> tuple[float, str]:
-    """返回 (score, match_reason)。"""
+async def _load_product_line_names(self, codes: set[str]) -> dict[str, str]:
+    """批量加载产品线名称，避免 N+1。"""
+    if not codes:
+        return {}
+    from app.models.product_line import ProductLine
+    from sqlalchemy import select as sa_select
+    result = await self._db.execute(
+        sa_select(ProductLine.code, ProductLine.name).where(ProductLine.code.in_(codes))
+    )
+    return {row.code: row.name for row in result.all()}
+```
+
+**共享相似度函数（提取至独立模块）：**
+
+```python
+# backend/app/utils/similarity.py
+
+def compute_similarity(query: str, candidate: str) -> tuple[float, str]:
+    """混合相似度：子串命中给基础分，否则走 bigram Jaccard。
+    返回 (score, match_reason)。
+    """
     q, c = query.lower().strip(), candidate.lower().strip()
+    if not q or not c:
+        return 0.0, "text_similarity"
     if q in c or c in q:
         return 0.75, "substring_match"
 
@@ -285,14 +317,15 @@ def _compute_similarity(query: str, candidate: str) -> tuple[float, str]:
 
 ```python
 async def find_similar_nodes_advanced(...):
+    from app.utils.similarity import compute_similarity
+
     async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
-        # Cypher 预过滤：CONTAINS 减少网络传输
+        # 基础过滤：状态 + 节点类型 + 产品线（如指定）
         cypher = """
         MATCH (d:FMEDocument)-[:HAS_NODE]->(n:GraphNode {type: $node_type})
         WHERE d.status = 'approved'
-        AND toLower(n.name) CONTAINS toLower($query_text)
         """
-        params = {"node_type": node_type, "query_text": query_text}
+        params = {"node_type": node_type}
         if scope == "current_product_line" and product_line_code:
             cypher += " AND n.product_line_code = $pl"
             params["pl"] = product_line_code
@@ -303,10 +336,11 @@ async def find_similar_nodes_advanced(...):
         """
         result = await session.run(cypher, **params)
         records = await result.data()
-        # Python 中计算相似度并过滤
+
+        # Python 中计算相似度并过滤（不预过滤 query_text，保证 Jaccard 不遗漏）
         matches = []
         for r in records:
-            score, reason = self._compute_similarity(query_text, r.get("name", ""))
+            score, reason = compute_similarity(query_text, r.get("name", ""))
             if score >= min_similarity:
                 matches.append({
                     "node_id": r.get("node_id", ""),
@@ -315,6 +349,7 @@ async def find_similar_nodes_advanced(...):
                     "fmea_id": r.get("fmea_id", ""),
                     "document_no": r.get("document_no"),
                     "product_line_code": r.get("product_line_code"),
+                    "product_line_name": r.get("product_line_code"),  # Neo4j 中可扩展为 JOIN product_lines
                     "similarity_score": round(score, 3),
                     "match_reason": reason,
                 })
@@ -389,99 +424,111 @@ def _extract_neighbors(graph_data: dict, fm_node_id: str, edge_type: str) -> lis
 
 > 规则引擎是同步 CPU 运算（~1ms），图谱查询是 I/O（~50ms）。将 ~1ms 的 CPU 任务与 I/O 并行收益极低且增加调度开销，因此采用**顺序执行**。
 
-### 8.2 `RecommendationService.recommend()` 改造
+### 8.2 `RecommendationService` 构造函数与 `recommend()` 改造
 
 ```python
-async def recommend(self, fmea_id: uuid.UUID, request: RecommendRequest) -> RecommendResponse:
-    fmea = await self._get_fmea_or_404(fmea_id)
-    scope = getattr(request, "scope", "global")
-    include_graph = getattr(request, "include_graph", True)
+class RecommendationService:
+    def __init__(
+        self,
+        db: AsyncSession,
+        llm_provider: LLMProvider | None,
+        graph_repo: FMEAGraphRepository,
+    ):
+        self.db = db
+        self.llm = llm_provider
+        self.graph_repo = graph_repo
+        self.rules = RuleEngine()
 
-    # 权限检查：无全局权限强制降级
-    effective_scope = self._resolve_scope(scope, fmea.product_line_code)
+    async def recommend(self, fmea_id: uuid.UUID, request: RecommendRequest) -> RecommendResponse:
+        fmea = await self._get_fmea_or_404(fmea_id)
+        scope = getattr(request, "scope", "global")
+        include_graph = getattr(request, "include_graph", True)
 
-    # 1. Check cache
-    context_hash = self._compute_context_hash({
-        **request.context,
-        "scope": effective_scope,
-        "include_graph": include_graph,
-    })
-    cache_result = await self._get_cached(fmea_id, request.trigger_type, context_hash)
-    if cache_result:
-        cached_response, cached_with_llm = cache_result
-        if self.llm is not None and not cached_with_llm:
-            pass  # fall through to re-evaluate with LLM
-        else:
-            return cached_response
+        # 权限检查：无全局权限强制降级
+        effective_scope = self._resolve_scope(scope, fmea.product_line_code)
 
-    # 2. Rule engine (sync, ~1ms)
-    rule_result = self.rules.evaluate(request.trigger_type, request.context)
-    rule_suggestions = [
-        SuggestionItem(name=s.name, confidence=s.confidence, source="rule", explanation=s.explanation)
-        for s in rule_result.suggestions
-    ]
+        # 1. Check cache
+        context_hash = self._compute_context_hash({
+            **request.context,
+            "scope": effective_scope,
+            "include_graph": include_graph,
+        })
+        cache_result = await self._get_cached(fmea_id, request.trigger_type, context_hash)
+        if cache_result:
+            cached_response, cached_with_llm = cache_result
+            if self.llm is not None and not cached_with_llm:
+                pass  # fall through to re-evaluate with LLM
+            else:
+                return cached_response
 
-    # 3. Graph similarity query (~50ms)
-    graph_suggestions: list[SuggestionItem] = []
-    if include_graph:
-        graph_matches = await self._query_graph_similarity(
-            fmea, request.trigger_type, request.context, effective_scope
-        )
-        graph_suggestions = self._graph_matches_to_suggestions(
-            graph_matches, fmea.product_line_code
-        )
+        # 2. Rule engine (sync, ~1ms)
+        rule_result = self.rules.evaluate(request.trigger_type, request.context)
+        rule_suggestions = [
+            SuggestionItem(name=s.name, confidence=s.confidence, source="rule", explanation=s.explanation)
+            for s in rule_result.suggestions
+        ]
 
-    # 4. Merge & deduplicate
-    all_suggestions = self._merge_and_deduplicate(rule_suggestions, graph_suggestions)
-
-    # 5. Determine if LLM is needed
-    has_specific = any(s.confidence >= 0.6 for s in all_suggestions)
-    need_llm = (
-        self.llm is not None
-        and not has_specific
-        and len(all_suggestions) < 3
-    )
-
-    if need_llm:
-        try:
-            llm_context = await self._assemble_context(fmea, request)
-            if graph_suggestions:
-                llm_context["similar_history"] = [
-                    {"name": s.name, "from": s.source_document_no}
-                    for s in graph_suggestions[:5]
-                ]
-            prompt = self._build_prompt(request.trigger_type, llm_context)
-            llm_result = await asyncio.wait_for(
-                self.llm.complete(prompt, {}),
-                timeout=settings.LLM_TIMEOUT,
+        # 3. Graph similarity query (~50ms)
+        graph_suggestions: list[SuggestionItem] = []
+        if include_graph:
+            graph_matches = await self._query_graph_similarity(
+                fmea, request.trigger_type, request.context, effective_scope
             )
-            validated = SuggestionList.model_validate(llm_result)
-            llm_items = [
-                SuggestionItem(
-                    name=s.name, confidence=s.confidence, source="llm", explanation=s.explanation
+            graph_suggestions = self._graph_matches_to_suggestions(
+                graph_matches, fmea.product_line_code
+            )
+
+        # 4. Merge & deduplicate
+        all_suggestions = self._merge_and_deduplicate(rule_suggestions, graph_suggestions)
+
+        # 5. Determine if LLM is needed
+        has_specific = any(s.confidence >= 0.6 for s in all_suggestions)
+        need_llm = (
+            self.llm is not None
+            and not has_specific
+            and len(all_suggestions) < 3
+        )
+
+        if need_llm:
+            try:
+                llm_context = await self._assemble_context(fmea, request)
+                if graph_suggestions:
+                    llm_context["similar_history"] = [
+                        {"name": s.name, "from": s.source_document_no}
+                        for s in graph_suggestions[:5]
+                    ]
+                prompt = self._build_prompt(request.trigger_type, llm_context)
+                llm_result = await asyncio.wait_for(
+                    self.llm.complete(prompt, {}),
+                    timeout=settings.LLM_TIMEOUT,
                 )
-                for s in validated.suggestions
-            ]
-            all_suggestions = self._merge_and_deduplicate(all_suggestions, llm_items)
-            source = "graph_enriched" if graph_suggestions else "hybrid"
-        except Exception as e:
-            source = "graph" if graph_suggestions else "rule_fallback"
-            logger.warning("LLM failed, using rule+graph results: %s", e)
-    else:
-        source = "graph" if graph_suggestions else "rule"
+                validated = SuggestionList.model_validate(llm_result)
+                llm_items = [
+                    SuggestionItem(
+                        name=s.name, confidence=s.confidence, source="llm", explanation=s.explanation
+                    )
+                    for s in validated.suggestions
+                ]
+                all_suggestions = self._merge_and_deduplicate(all_suggestions, llm_items)
+                source = "graph_enriched" if graph_suggestions else "hybrid"
+            except Exception as e:
+                source = "graph" if graph_suggestions else "rule_fallback"
+                logger.warning("LLM failed, using rule+graph results: %s", e)
+        else:
+            source = "graph" if graph_suggestions else "rule"
 
-    response = RecommendResponse(
-        suggestions=all_suggestions[:10],
-        source=source,
-        cached=False,
-        llm_available=self.llm is not None,
-        graph_match_count=len(graph_suggestions),
-        effective_scope=effective_scope,
-    )
+        response = RecommendResponse(
+            suggestions=all_suggestions[:10],
+            source=source,
+            cached=False,
+            llm_available=self.llm is not None,
+            graph_match_count=len(graph_suggestions),
+            effective_scope=effective_scope,
+        )
 
-    if source != "rule_fallback":
-        await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response)
-    return response
+        if source != "rule_fallback":
+            await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response)
+        return response
 ```
 
 ### 8.3 `_query_graph_similarity()` 实现
@@ -490,8 +537,7 @@ async def recommend(self, fmea_id: uuid.UUID, request: RecommendRequest) -> Reco
 async def _query_graph_similarity(
     self, fmea: FMEADocument, trigger_type: str, context: dict, scope: str
 ) -> list[dict]:
-    """根据 trigger_type 提取 query_text，调用 Repository 查询相似节点。"""
-    repo = await get_graph_repository()
+    """根据 trigger_type 提取 query_text，调用 Repository 查询相似节点并提取邻接推荐项。"""
 
     # trigger_type → query_text 来源映射
     query_text = ""
@@ -503,19 +549,9 @@ async def _query_graph_similarity(
     if not query_text or len(query_text) < 2:
         return []
 
-    # trigger_type → 查询 node_type 映射
-    node_type_map = {
-        "failure_mode": "FailureMode",
-        "failure_effect": "FailureMode",
-        "failure_cause": "FailureMode",
-        "measure": "FailureMode",
-        "optimization": "FailureMode",
-    }
-    node_type = node_type_map.get(trigger_type, "FailureMode")
-
-    # 查询相似节点
-    matches = await repo.find_similar_nodes_advanced(
-        node_type=node_type,
+    # 查询相似 FailureMode 节点（所有 trigger_type 都以 FailureMode 为锚点）
+    fm_matches = await self.graph_repo.find_similar_nodes_advanced(
+        node_type="FailureMode",
         query_text=query_text,
         scope=scope,
         product_line_code=fmea.product_line_code,
@@ -523,22 +559,94 @@ async def _query_graph_similarity(
         min_similarity=0.3,
     )
 
-    # 对 failure_effect / failure_cause / measure / optimization：提取邻接节点
-    if trigger_type in ("failure_effect", "failure_cause", "measure", "optimization"):
-        enriched = []
-        edge_type_map = {
-            "failure_effect": "EFFECT_OF",
-            "failure_cause": "CAUSE_OF",
-            "measure": None,  # 特殊处理：需要 PreventionControl + DetectionControl
-            "optimization": "OPTIMIZED_BY",
-        }
-        for match in matches:
-            # 获取匹配节点的 graph_data 以提取邻接
-            # (简化为直接返回匹配节点本身，实际实现需从 graph_data 提取)
-            enriched.append(match)
-        return enriched
+    # failure_mode：直接返回匹配的 FailureMode
+    if trigger_type == "failure_mode":
+        return fm_matches
 
-    return matches
+    # 其他 trigger_type：从匹配的 FailureMode 提取邻接节点作为推荐项
+    recommendations = []
+    for match in fm_matches:
+        neighbors = await self._extract_neighbors_from_match(match, trigger_type)
+        for n in neighbors:
+            recommendations.append({
+                "node_id": n.get("id", ""),
+                "name": n.get("name", ""),
+                "type": n.get("type", ""),
+                "fmea_id": match["fmea_id"],
+                "document_no": match["document_no"],
+                "product_line_code": match["product_line_code"],
+                "product_line_name": match.get("product_line_name", match["product_line_code"]),
+                "similarity_score": match["similarity_score"],  # 继承父节点的相似度
+                "match_reason": f"{match['match_reason']}_neighbor",
+                "parent_node_name": match["name"],  # 用于 explanation
+            })
+
+    return recommendations
+
+async def _extract_neighbors_from_match(self, match: dict, trigger_type: str) -> list[dict]:
+    """从历史匹配节点的 graph_data 中提取指定类型的邻接节点。"""
+    # 获取匹配节点所在 FMEA 的 graph_data
+    fmea_id = uuid.UUID(match["fmea_id"])
+    graph_data = await self._get_graph_data_by_fmea_id(fmea_id)
+    if not graph_data:
+        return []
+
+    nodes = graph_data.get("nodes", [])
+    edges = graph_data.get("edges", [])
+    node_map = {n["id"]: n for n in nodes}
+    fm_id = match["node_id"]
+
+    if trigger_type == "failure_effect":
+        # EFFECT_OF: fm --EFFECT_OF--> effect
+        return [
+            node_map[e["target"]] for e in edges
+            if e.get("type") == "EFFECT_OF" and e.get("source") == fm_id
+            and e.get("target") in node_map
+        ]
+
+    elif trigger_type == "failure_cause":
+        # CAUSE_OF: cause --CAUSE_OF--> fm
+        return [
+            node_map[e["source"]] for e in edges
+            if e.get("type") == "CAUSE_OF" and e.get("target") == fm_id
+            and e.get("source") in node_map
+        ]
+
+    elif trigger_type == "measure":
+        # 控制措施：fm 和其原因节点的 PREVENTED_BY / DETECTED_BY
+        ctrl_ids = set()
+        for e in edges:
+            if e.get("type") in ("PREVENTED_BY", "DETECTED_BY") and e.get("source") == fm_id:
+                ctrl_ids.add(e.get("target"))
+        # 也收集原因节点的控制措施
+        cause_ids = {
+            e.get("source") for e in edges
+            if e.get("type") == "CAUSE_OF" and e.get("target") == fm_id
+        }
+        for e in edges:
+            if e.get("type") in ("PREVENTED_BY", "DETECTED_BY") and e.get("source") in cause_ids:
+                ctrl_ids.add(e.get("target"))
+        return [node_map[cid] for cid in ctrl_ids if cid in node_map]
+
+    elif trigger_type == "optimization":
+        # OPTIMIZED_BY: fm --OPTIMIZED_BY--> action
+        return [
+            node_map[e["target"]] for e in edges
+            if e.get("type") == "OPTIMIZED_BY" and e.get("source") == fm_id
+            and e.get("target") in node_map
+        ]
+
+    return []
+
+async def _get_graph_data_by_fmea_id(self, fmea_id: uuid.UUID) -> dict | None:
+    """通过 FMEA ID 获取 graph_data（优先 JSONB，因为推荐场景通常不走 Neo4j）。"""
+    from app.models.fmea import FMEADocument
+    from sqlalchemy import select as sa_select
+    result = await self.db.execute(
+        sa_select(FMEADocument.graph_data).where(FMEADocument.fmea_id == fmea_id)
+    )
+    row = result.scalar_one_or_none()
+    return row if row else None
 ```
 
 ### 8.4 `_graph_matches_to_suggestions()` 实现
@@ -547,23 +655,25 @@ async def _query_graph_similarity(
 def _graph_matches_to_suggestions(
     self, matches: list[dict], current_product_line_code: str
 ) -> list[SuggestionItem]:
-    """将图谱匹配结果转为 SuggestionItem，处理跨产品线脱敏。"""
-    from app.api.graph import mask_name
-
+    """将图谱匹配结果转为 SuggestionItem。"""
     suggestions = []
     for m in matches:
-        is_cross = m.get("product_line_code") != current_product_line_code
-        name = mask_name(m["name"]) if is_cross else m["name"]
         confidence = 0.5 + (m.get("similarity_score", 0) * 0.5)  # 映射到 0.5~1.0
+        # explanation：failure_mode 直接说明匹配原因；其他 trigger_type 说明来自哪个父节点
+        if m.get("parent_node_name"):
+            explanation = f"来自相似失效模式「{m['parent_node_name']}」的{m.get('type', '节点')}"
+        else:
+            explanation = f"历史相似节点（{m.get('match_reason', '')}）"
 
         suggestions.append(SuggestionItem(
-            name=name,
+            name=m["name"],
             confidence=round(confidence, 2),
             source="graph",
-            explanation=f"历史相似节点（{m.get('match_reason', '')}）",
+            explanation=explanation,
             source_fmea_id=m.get("fmea_id"),
             source_document_no=m.get("document_no"),
             source_product_line_code=m.get("product_line_code"),
+            source_product_line_name=m.get("product_line_name", m.get("product_line_code")),
             source_node_type=m.get("type"),
             source_node_id=m.get("node_id"),
             similarity_score=m.get("similarity_score"),
@@ -693,8 +803,8 @@ def _compute_context_hash(self, context: dict) -> str:
 
 | 场景 | 估算 | 对策 |
 |------|------|------|
-| JSONB 全表扫描 | 假设 100 文档 × 50 节点 = 5000 节点 | SQL `cast(graph_data, String).ilike()` 预过滤，避免加载无关文档 |
-| Neo4j 全节点扫描 | 所有 GraphNode 遍历 | Cypher `CONTAINS` 预过滤，只返回可能匹配的节点 |
+| JSONB 遍历 | 假设 100 文档 × 50 节点 = 5000 节点 | 状态 + 产品线过滤后在 Python 内存中评分；首版数据规模下可接受 |
+| Neo4j 遍历 | 所有 GraphNode 遍历 | 状态 + 产品线过滤后 Cypher 返回；Python 中计算相似度 |
 | 顺序查询延迟 | 规则(~1ms) + 图谱(~50ms) = ~51ms | 规则引擎是同步 CPU，与 I/O 并行收益极低，顺序执行避免调度开销 |
 | LLM 调用 | 仅结果不足时触发 | 减少 LLM 调用次数，降低成本和延迟 |
 | 缓存命中率 | 相同输入 + scope 组合 | context_hash 包含 scope，避免污染 |
@@ -710,7 +820,7 @@ def _compute_context_hash(self, context: dict) -> str:
 | 无匹配结果 | 返回空列表，触发 LLM（如果可用） |
 | LLM 失败 | 返回规则 + 图谱结果（如有），source 标记为对应值 |
 | 用户无跨产品线权限 | 后端强制 scope = "current_product_line"，返回 `effective_scope` 告知前端 |
-| 跨产品线节点 | 名称脱敏（mask_name），保留来源文档编号 |
+| 跨产品线节点（防御性）| API 层对无全局权限用户的跨产品线节点名称脱敏（mask_name），有权限用户不受影响 |
 
 ---
 
@@ -719,7 +829,7 @@ def _compute_context_hash(self, context: dict) -> str:
 - [ ] 知识图谱相似度匹配作为独立推荐源接入推荐管道
 - [ ] 默认跨产品线匹配，支持切换仅当前产品线
 - [ ] 权限控制：`KNOWLEDGE_GRAPH_GLOBAL_READ` 控制全局访问，无权限强制降级
-- [ ] 跨产品线节点名称自动脱敏（mask_name）
+- [ ] 跨产品线节点 API 层防御性脱敏（仅无全局权限用户）
 - [ ] FMEA 状态过滤：仅查询 `approved` 文档
 - [ ] 推荐项显示来源文档编号、产品线 code/name、节点类型、相似度分数
 - [ ] 来源文档编号可点击跳转至对应 FMEA（带 highlightNode 参数）
