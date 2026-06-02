@@ -173,6 +173,9 @@ class SPCAlarmOut(BaseModel):
     status: str
     linked_capa_id: Optional[UUID]
     linked_fmea_node_id: Optional[UUID] = None
+    fmea_recommendations: list | None = None
+    confirmed_fmea_id: Optional[UUID] = None
+    confirmed_fmea_node_id: Optional[str] = None
     acknowledged_by_id: Optional[UUID]
     acknowledged_at: Optional[datetime]
 
@@ -193,3 +196,39 @@ class ExternalDataIngestion(BaseModel):
     batch_no: str
     values: List[float]
     sampled_at: datetime
+
+
+# ============ FMEA Match Recommendation ============
+
+class FMEAMatchOut(BaseModel):
+    node_id: str
+    name: str
+    node_type: str
+    fmea_id: str
+    document_no: str
+    match_source: str
+    match_score: float
+    rpn: int | None = None
+    ap: str | None = None
+    severity: int | None = None
+    occurrence: int | None = None
+    detection: int | None = None
+    path: str
+    cause_preview: list[str]
+    control_count: int
+
+
+class FMEAMatchResponse(BaseModel):
+    alarm_id: str
+    ic_code: str
+    process_name: str
+    characteristic_name: str
+    recommendations: list[FMEAMatchOut]
+    has_confirmed: bool
+    confirmed_fmea_id: str | None = None
+    confirmed_fmea_node_id: str | None = None
+
+
+class ConfirmFMEARequest(BaseModel):
+    fmea_id: UUID  # FMEA 文档 ID
+    node_id: str   # FMEA 节点 ID（成对使用）
