@@ -358,6 +358,102 @@ class HistoricalCAPASource:
         return candidates
 
 
+class HistoricalCAPAMeasureSource:
+    """历史 CAPA D4→D4 匹配 → 推荐 D5 措施。"""
+
+    name = "historical_capa"
+
+    def __init__(self, db, embedding_provider: EmbeddingProvider | None):
+        self.db = db
+        self.embedding = embedding_provider
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        if not self.embedding:
+            return []
+
+        # NEW: Explicit guard for no permission
+        if context.user_product_lines == []:
+            return []
+
+        d4 = context.capa_data.get("d4_root_cause", "")
+        if not d4 or not d4.strip():
+            return []
+
+        query_vector = await self.embedding.embed([d4])
+        if not query_vector:
+            return []
+
+        vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
+        user_pls = context.user_product_lines
+
+        capa_pl = context.capa_data.get("product_line_code")
+        search_pls = user_pls
+        if user_pls is not None and capa_pl and capa_pl in user_pls:
+            search_pls = [capa_pl]
+
+        results = await self._search(vec_str, search_pls, "d4_root_cause", limit=5)
+        if not results and user_pls is not None and len(user_pls) > 1 and capa_pl in user_pls:
+            results = await self._search(vec_str, user_pls, "d4_root_cause", limit=5)
+
+        return results
+
+    async def _search(
+        self,
+        vec_str: str,
+        product_line_codes: list[str] | None,
+        target_field: str,
+        limit: int,
+    ) -> list[RecommendationCandidate]:
+        params: dict[str, Any] = {
+            "query_vector": vec_str,
+            "target_field": target_field,
+            "limit": limit,
+        }
+        pl_filter = ""
+        if product_line_codes is not None:
+            pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
+            params["product_line_codes"] = product_line_codes
+
+        stmt = text(f"""
+            SELECT de.entity_id, de.chunk_text,
+                   1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
+                   capa.document_no, capa.severity, capa.updated_at AS source_updated_at,
+                   capa.d5_correction, de.product_line_code
+            FROM document_embeddings de
+            JOIN capa_eightd capa ON de.entity_id = capa.report_id
+            WHERE de.entity_type = 'capa'
+              AND de.entity_field = :target_field
+              AND capa.status = 'D8_CLOSURE'
+              {pl_filter}
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
+            LIMIT :limit
+        """)
+
+        rows = await self.db.execute(stmt, params)
+        candidates: list[RecommendationCandidate] = []
+        for row in rows.mappings():
+            sim = row["similarity"]
+            capa_id = str(row["entity_id"])
+            d5 = row["d5_correction"]
+            if not d5:
+                continue
+            candidates.append(RecommendationCandidate(
+                source="historical_capa",
+                content=d5,
+                category="纠正措施",
+                confidence=min(float(sim) * 0.85, 0.85),
+                match_reason=f"历史 CAPA [{row['document_no']}] 相似根因已验证有效",
+                metadata={
+                    "historical_capa_id": capa_id,
+                    "document_no": row["document_no"],
+                    "product_line_code": row["product_line_code"],
+                    "severity": row["severity"],
+                    "source_updated_at": row["source_updated_at"],
+                },
+            ))
+        return candidates
+
+
 class RuleEngineSource:
     """规则引擎兜底 — D4 根因建议。"""
 
