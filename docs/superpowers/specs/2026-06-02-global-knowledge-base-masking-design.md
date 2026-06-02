@@ -33,6 +33,8 @@ Authorization: Bearer <token>
 
 **权限:** `require_admin`
 
+**参数约束:** 接口不接受 `product_line_code` 参数。若传入，返回 `400 Bad Request`。
+
 ### 3.2 响应 Schema
 
 ```python
@@ -187,14 +189,21 @@ class FMEAGraphRepository(ABC):
 ```python
 # backend/app/api/graph.py
 
-@router.get("/global-stats", response_model=GlobalStatsOut)
+@router.get("/global-stats", response_model=GlobalStatsOut, response_model_exclude_none=True)
 async def global_stats(
+    request: Request,
     repo: FMEAGraphRepository = Depends(get_graph_repository),
     _user: User = Depends(require_admin),
 ):
-    """跨产品线全局知识库统计（Admin Only）。返回数据已脱敏。"""
+    """跨产品线全局知识库统计（Admin Only）。返回数据已脱敏。
+    不接受 product_line_code 参数，传入则返回 400。
+    """
+    if "product_line_code" in request.query_params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="product_line_code is not accepted for global stats",
+        )
     raw = await repo.get_global_stats()
-    # 响应阶段白名单重建 + 脱敏
     return _sanitize_global_stats(raw)
 ```
 
@@ -209,6 +218,7 @@ async def global_stats(
 | 场景 | 行为 |
 |------|------|
 | 非 admin 访问 | `403 Forbidden`（由 `require_admin` 守卫处理） |
+| 传入 `product_line_code` 参数 | `400 Bad Request` |
 | Neo4j 未配置/数据为空 | 返回全零统计（与现有 stats API 行为一致） |
 | 无 FailureMode 数据 | `avg_rpn: 0`, `high_ap_nodes: []`, `top_failure_modes: []` |
 
@@ -219,7 +229,7 @@ async def global_stats(
 - [ ] `name` 字段已按规则脱敏：长名称保留前 2 字符 + `***`，短名称（≤2 字符）仅保留首字符 + `***`
 - [ ] 短名称（如 `"短路"`、`"A1"`、`"X"`）不会完整暴露原值
 - [ ] `mask_name(None)` / `mask_name(123)` / `mask_name("  ")` 均安全返回 `"***"`，不抛异常
-- [ ] 接口不接受 `product_line_code` 参数
+- [ ] 传入 `product_line_code` 参数返回 `400 Bad Request`
 - [ ] 非 admin 访问返回 403
 - [ ] Neo4j 和 JSONB 双实现均正确工作
 - [ ] JSONB 实现全量聚合，不做静默采样
