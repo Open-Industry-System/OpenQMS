@@ -100,7 +100,7 @@ class Module(StrEnum):
 ### 4.3 跨产品线数据隔离
 
 **数据访问原则：**
-- 有 `KNOWLEDGE_GRAPH_GLOBAL_READ` 权限的用户：可查看完整跨产品线推荐内容（名称不脱敏），因为权限本身已授权跨产品线数据访问
+- 有 `Module.KNOWLEDGE_GRAPH` ≥ `PermissionLevel.VIEW` 权限的用户：可查看完整跨产品线推荐内容（名称不脱敏），因为权限本身已授权跨产品线数据访问
 - 无全局权限的用户：scope 被强制降级为 `current_product_line`，不会看到跨产品线节点
 
 **防御性脱敏：**
@@ -240,7 +240,7 @@ async def find_similar_nodes_advanced(
 
     返回项包含：
     - node_id, name, type, fmea_id, document_no
-    - product_line_code
+    - product_line_code, product_line_name
     - similarity_score (0.0 ~ 1.0)
     - match_reason
     """
@@ -329,6 +329,8 @@ def compute_similarity(query: str, candidate: str) -> tuple[float, str]:
 ```
 
 ### 6.3 Neo4j 实现
+
+> **投影契约：**`GraphProjectionService` 同步 FMEA 到 Neo4j 时，需在 `FMEDocument` 节点写入 `product_line_name`。若该字段缺失（旧数据），repository fallback 到 `product_line_code`。
 
 ```python
 async def find_similar_nodes_advanced(...):
@@ -797,12 +799,12 @@ function SourceTag({ item }: { item: SuggestionItem }) {
 <Radio.Group 
   value={scope} 
   onChange={setScope}
-  disabled={!userHasPermission("KNOWLEDGE_GRAPH_GLOBAL_READ")}
+  disabled={!userHasPermission(Module.KNOWLEDGE_GRAPH, PermissionLevel.VIEW)}
 >
   <Radio.Button value="global">全局经验</Radio.Button>
   <Radio.Button value="current_product_line">仅当前产品线</Radio.Button>
 </Radio.Group>
-{!userHasPermission("KNOWLEDGE_GRAPH_GLOBAL_READ") && (
+{!userHasPermission(Module.KNOWLEDGE_GRAPH, PermissionLevel.VIEW) && (
   <span className="scope-hint">仅当前产品线（无全局权限）</span>
 )}
 ```
@@ -852,7 +854,7 @@ def _compute_context_hash(self, context: dict) -> str:
 
 - [ ] 知识图谱相似度匹配作为独立推荐源接入推荐管道
 - [ ] 默认跨产品线匹配，支持切换仅当前产品线
-- [ ] 权限控制：`KNOWLEDGE_GRAPH_GLOBAL_READ` 控制全局访问，无权限强制降级
+- [ ] 权限控制：`Module.KNOWLEDGE_GRAPH` ≥ `PermissionLevel.VIEW` 控制全局访问，无权限强制降级
 - [ ] 跨产品线节点 API 层防御性脱敏（仅无全局权限用户）
 - [ ] FMEA 状态过滤：仅查询 `approved` 文档
 - [ ] 推荐项显示来源文档编号、产品线 code/name、节点类型、相似度分数
