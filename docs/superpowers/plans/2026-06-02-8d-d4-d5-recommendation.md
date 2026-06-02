@@ -57,8 +57,8 @@ class D4RecommendationResponse(BaseModel):
 
 
 class D5ExistingControl(BaseModel):
-    failure_mode_node_id: str
-    failure_mode_name: str
+    failure_mode_node_id: str | None = None
+    failure_mode_name: str | None = None
     failure_cause_node_id: str | None = None
     failure_cause_name: str | None = None
     control_node_id: str
@@ -210,13 +210,22 @@ def _match_linked_fmea_d4(
                 if etype == "HAS_FAILURE_MODE" and node_map.get(tgt, {}).get("type") == "FailureMode":
                     failure_mode_ids.append(tgt)
     else:
-        # No node ID — search by D2 keywords against FailureMode names
+        # No node ID — search by D2 keywords against both FailureMode and FailureCause
         for node in graph.get("nodes", []):
             if node["type"] == "FailureMode":
                 name = node.get("name", "")
                 desc = node.get("description", "")
                 if any(kw in name or kw in desc for kw in keywords):
                     failure_mode_ids.append(node["id"])
+            elif node["type"] == "FailureCause":
+                name = node.get("name", "")
+                desc = node.get("description", "")
+                if any(kw in name or kw in desc for kw in keywords):
+                    # Find parent FailureMode via CAUSE_OF forward edge
+                    for tgt, etype in forward_edges.get(node["id"], []):
+                        if etype == "CAUSE_OF" and node_map.get(tgt, {}).get("type") == "FailureMode":
+                            if tgt not in failure_mode_ids:
+                                failure_mode_ids.append(tgt)
 
     # For each FailureMode, find FailureCauses and match keywords
     results: list[dict[str, Any]] = []
@@ -648,7 +657,7 @@ async def get_d4_fmea_recommendations(
     capa_data = {
         "d2_description": capa.d2_description or "",
         "d3_interim": capa.d3_interim or "",
-        "fmea_ref_id": str(capa.fmea_ref_id) if capa.fmea_ref_id else None,
+        "fmea_ref_id": capa.fmea_ref_id,  # keep as UUID, matching D7 pattern
         "fmea_node_id": capa.fmea_node_id,
         "product_line_code": capa.product_line_code,
     }
@@ -699,7 +708,7 @@ async def get_d5_fmea_recommendations(
     capa_data = {
         "d4_root_cause": capa.d4_root_cause or "",
         "d2_description": capa.d2_description or "",
-        "fmea_ref_id": str(capa.fmea_ref_id) if capa.fmea_ref_id else None,
+        "fmea_ref_id": capa.fmea_ref_id,  # keep as UUID, matching D7 pattern
         "fmea_node_id": capa.fmea_node_id,
         "product_line_code": capa.product_line_code,
     }
@@ -907,7 +916,7 @@ def test_d5_general_suggestions(sample_graph):
         assert s["category"] in ("预防措施", "探测措施")
 
 
-def test_d5_empty_root_cause_falls_back_to_d2():
+def test_d5_empty_root_cause_falls_back_to_d2(sample_graph):
     """Empty D4 text falls back to D2 keywords for matching."""
     fmea_id = uuid.uuid4()
     capa_data = {
@@ -988,8 +997,8 @@ export interface D4RecommendationResponse {
 }
 
 export interface D5ExistingControl {
-  failure_mode_node_id: string;
-  failure_mode_name: string;
+  failure_mode_node_id: string | null;
+  failure_mode_name: string | null;
   failure_cause_node_id: string | null;
   failure_cause_name: string | null;
   control_node_id: string;
@@ -1014,7 +1023,21 @@ export interface D5RecommendationResponse {
 }
 ```
 
-- [ ] **Step 2: Add API functions to api/capa.ts**
+- [ ] **Step 2: Update type imports in api/capa.ts**
+
+Find the existing import at the top of `frontend/src/api/capa.ts`:
+
+```typescript
+import type { CAPAReport, D7RecommendationResponse } from "../types";
+```
+
+Replace with:
+
+```typescript
+import type { CAPAReport, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse } from "../types";
+```
+
+- [ ] **Step 3: Add API functions to api/capa.ts**
 
 Append after the existing `getD7Recommendations` function:
 
@@ -1030,12 +1053,12 @@ export async function getD5Recommendations(id: string): Promise<D5Recommendation
 }
 ```
 
-- [ ] **Step 3: Verify TypeScript compiles**
+- [ ] **Step 4: Verify TypeScript compiles**
 
 Run: `cd /Users/sam/Documents/Code/OpenQMS/frontend && npx tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add frontend/src/types/index.ts frontend/src/api/capa.ts
@@ -1063,9 +1086,10 @@ const { Text } = Typography;
 interface D4RecPanelProps {
   capaId: string;
   onAdopt: (adoptedText: string) => void;
+  canAdopt?: boolean;
 }
 
-export default function D4RecPanel({ capaId, onAdopt }: D4RecPanelProps) {
+export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPanelProps) {
   const { message } = App.useApp();
   const [recommendations, setRecommendations] = useState<D4Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1123,6 +1147,8 @@ export default function D4RecPanel({ capaId, onAdopt }: D4RecPanelProps) {
                     type="link"
                     size="small"
                     icon={<CheckOutlined />}
+                    disabled={!canAdopt}
+                    title={!canAdopt ? "只读用户无法采纳" : undefined}
                     onClick={() => onAdopt(item.failure_cause_name)}
                   >
                     采纳
@@ -1209,9 +1235,10 @@ const { Text } = Typography;
 interface D5RecPanelProps {
   capaId: string;
   onAdopt: (adoptedText: string) => void;
+  canAdopt?: boolean;
 }
 
-export default function D5RecPanel({ capaId, onAdopt }: D5RecPanelProps) {
+export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPanelProps) {
   const { message } = App.useApp();
   const [controls, setControls] = useState<D5ExistingControl[]>([]);
   const [suggestions, setSuggestions] = useState<D5GeneralSuggestion[]>([]);
@@ -1246,6 +1273,8 @@ export default function D5RecPanel({ capaId, onAdopt }: D5RecPanelProps) {
             type="link"
             size="small"
             icon={<CheckOutlined />}
+            disabled={!canAdopt}
+            title={!canAdopt ? "只读用户无法采纳" : undefined}
             onClick={() => onAdopt(item.control_name)}
           >
             采纳
@@ -1296,6 +1325,8 @@ export default function D5RecPanel({ capaId, onAdopt }: D5RecPanelProps) {
             type="link"
             size="small"
             icon={<CheckOutlined />}
+            disabled={!canAdopt}
+            title={!canAdopt ? "只读用户无法采纳" : undefined}
             onClick={() => onAdopt(item.content)}
           >
             采纳
@@ -1405,6 +1436,7 @@ Replace the D4 section (lines 301-313):
   <>
     <D4RecPanel
       capaId={id!}
+      canAdopt={canEdit('capa')}
       onAdopt={(text) => {
         const current = localData.d4_root_cause || "";
         const newVal = current ? `${current}\n${text}` : text;
@@ -1436,6 +1468,7 @@ Replace the D5 section (lines 315-327):
   <>
     <D5RecPanel
       capaId={id!}
+      canAdopt={canEdit('capa')}
       onAdopt={(text) => {
         const current = localData.d5_correction || "";
         const newVal = current ? `${current}\n${text}` : text;
