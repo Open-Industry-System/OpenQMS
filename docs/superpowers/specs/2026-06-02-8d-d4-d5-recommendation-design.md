@@ -360,7 +360,7 @@ export async function getD5Recommendations(reportId: string): Promise<D5Recommen
 | D5 cause 级探测措施 | FailureCause 直接关联 DetectionControl → 返回 control_type="detection" |
 | D5 通用建议生成 | 无关联 FMEA 时，规则引擎仍返回基于 AP 级别的通用措施 |
 | 产品线隔离 | 不同产品线的 FMEA 不互相推荐 |
-| 权限校验 | viewer 可调用 GET 推荐（VIEW），但采纳走 PATCH 更新端点（EDIT） |
+| 权限校验 | viewer 可调用 GET 推荐（VIEW），但采纳走 PUT 更新端点（EDIT） |
 
 复用 `test_d7_recommendations.py` 的 fixture 模式。
 
