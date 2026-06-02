@@ -42,6 +42,7 @@ class Module(StrEnum):
     SPECIAL_CHARACTERISTIC = "special_characteristic"
     QUALITY_GOAL = "quality_goal"
     SCAR = "scar"
+    KNOWLEDGE_GRAPH = "knowledge_graph"  # 新增
 
 
 async def get_current_user(
