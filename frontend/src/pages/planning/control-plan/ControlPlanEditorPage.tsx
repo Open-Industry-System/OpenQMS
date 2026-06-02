@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Table, Card, Row, Col,
@@ -22,6 +22,8 @@ import { getCPSyncStatus, syncToCP } from "../../../api/specialCharacteristic";
 import { useCollaboration } from "../../../hooks/useCollaboration";
 import { CollaborationBar, ActiveUserIndicator, ConflictResolutionModal } from "../../../components/collaboration";
 import type { ConflictInfo } from "../../../types/collaboration";
+import { diffControlPlanItems, adaptCPDiffToGraphDiff } from "../../../utils/controlPlanDiff";
+import type { ControlPlanDiff } from "../../../utils/controlPlanDiff";
 import ImportFromFMEAModal from "../../../components/control-plan/ImportFromFMEAModal";
 import VersionHistoryTab from "../../../components/version/VersionHistoryTab";
 import CreateVersionModal from "../../../components/version/CreateVersionModal";
@@ -111,6 +113,10 @@ export default function ControlPlanEditorPage() {
   // Conflict resolution state
   const [conflictVisible, setConflictVisible] = useState(false);
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null);
+  const [conflictDiff, setConflictDiff] = useState<ControlPlanDiff | null>(null);
+
+  // Base snapshot for diff
+  const baseItemsRef = useRef<ControlPlanItem[] | null>(null);
 
   // Form state
   const [title, setTitle] = useState("");
@@ -144,6 +150,7 @@ export default function ControlPlanEditorPage() {
         setOrgFactory(doc.org_factory || "");
         setDrawingRev(doc.drawing_rev || "");
         setItems(doc.items || []);
+        baseItemsRef.current = JSON.parse(JSON.stringify(doc.items || []));
         if (id) {
           getCPSyncStatus(id).then((res) => setSyncStatus(res.items)).catch(() => {});
         }
@@ -230,6 +237,21 @@ export default function ControlPlanEditorPage() {
               latest_lock_version: conflictData.conflict?.latest_lock_version || 0,
             });
             setConflictVisible(true);
+            // Fetch latest and compute diff
+            try {
+              const latestDoc = await getControlPlan(id);
+              const base = baseItemsRef.current;
+              if (base) {
+                const diff = diffControlPlanItems(
+                  base,
+                  latestDoc.items || [],
+                  items  // current local items
+                );
+                setConflictDiff(diff);
+              }
+            } catch {
+              /* silently ignore diff failure */
+            }
           } else {
             throw e;
           }
@@ -940,7 +962,7 @@ export default function ControlPlanEditorPage() {
           <ConflictResolutionModal
             visible={conflictVisible}
             conflictInfo={conflictInfo}
-            diff={null}
+            diff={adaptCPDiffToGraphDiff(conflictDiff)}
             onRefresh={handleConflictRefresh}
             onForceSave={handleConflictForceSave}
           />
