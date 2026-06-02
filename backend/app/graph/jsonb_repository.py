@@ -13,6 +13,7 @@ from app.models.fmea import FMEADocument
 from app.graph.repository import FMEAGraphRepository
 from app.schemas.change_impact import ChangeImpactResult, AffectedNode, ImpactSummary
 from app.state_machines.fmea_state import compute_ap
+from app.utils.similarity import compute_similarity
 
 
 class JSONBRepository(FMEAGraphRepository):
@@ -208,6 +209,64 @@ class JSONBRepository(FMEAGraphRepository):
         result = await self._db.execute(query)
         fmeas = result.scalars().all()
         return self._aggregate_stats(fmeas)
+
+    async def _load_product_line_names(self, codes: set[str]) -> dict[str, str]:
+        """批量加载产品线名称，避免 N+1。"""
+        if not codes:
+            return {}
+        from app.models.product_line import ProductLine
+        from sqlalchemy import select as sa_select
+        result = await self._db.execute(
+            sa_select(ProductLine.code, ProductLine.name).where(ProductLine.code.in_(codes))
+        )
+        return {row.code: row.name for row in result.all()}
+
+    async def find_similar_nodes_advanced(
+        self,
+        node_type: str,
+        query_text: str,
+        scope: str,
+        product_line_code: str | None,
+        limit: int = 10,
+        min_similarity: float = 0.3,
+    ) -> list[dict]:
+        from sqlalchemy import select as sa_select
+
+        query = sa_select(FMEADocument).where(
+            FMEADocument.status == "approved",
+            FMEADocument.graph_data.isnot(None),
+        )
+        if scope == "current_product_line" and product_line_code:
+            query = query.where(FMEADocument.product_line_code == product_line_code)
+        result = await self._db.execute(query)
+        fmeas = result.scalars().all()
+
+        pl_codes = {fmea.product_line_code for fmea in fmeas if fmea.product_line_code}
+        pl_name_map = await self._load_product_line_names(pl_codes)
+
+        matches = []
+        for fmea in fmeas:
+            for node in fmea.graph_data.get("nodes", []):
+                if node.get("type") != node_type:
+                    continue
+                node_name = node.get("name") or ""
+                score, reason = compute_similarity(query_text, node_name)
+                if score >= min_similarity:
+                    pl_code = fmea.product_line_code
+                    matches.append({
+                        "node_id": node.get("id", ""),
+                        "name": node_name,
+                        "type": node_type,
+                        "fmea_id": str(fmea.fmea_id),
+                        "document_no": fmea.document_no,
+                        "product_line_code": pl_code,
+                        "product_line_name": pl_name_map.get(pl_code, pl_code),
+                        "similarity_score": round(score, 3),
+                        "match_reason": reason,
+                    })
+
+        matches.sort(key=lambda x: x["similarity_score"], reverse=True)
+        return matches[:limit]
 
     async def _get_fmea(self, fmea_id: uuid.UUID) -> FMEADocument | None:
         result = await self._db.execute(
