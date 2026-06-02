@@ -62,11 +62,13 @@ class HybridRecommendationPipeline:
             RuleEngineSource(),
         ]
         self.d5_sources = [
-            SemanticSearchSource(embedding_provider),      # 找 FailureCause
-            FMEAControlSource(),                           # 图遍历找 Control
+            SemanticSearchSource(embedding_provider),      # Stage 1: 找 FailureCause
             HistoricalCAPAMeasureSource(db, embedding_provider),  # 历史 CAPA D4→D4
             RuleEngineMeasureSource(),
         ]
+        # D5 Stage 2: 基于 Stage 1 召回的 Cause IDs 扩展 Controls
+        # 不是独立 Source，在 pipeline 中顺序执行
+        self.d5_control_expander = FMEAControlExpander()
         self.fusion = FusionEngine()
         self.llm_layer = LLMFusionLayer(llm_provider)
 
@@ -78,6 +80,9 @@ class HybridRecommendationPipeline:
         #    - D5 的 FMEAControlExpander 在 SemanticSearchSource 之后执行（两阶段依赖）
         # 2. FusionEngine 去重排序
         # 3. LLMFusionLayer 增强（只改写 match_reason，保留原 candidate id 和 metadata）
+        #    - 阶段 1（融合理由）：FusionEngine 输出 > 0 条候选时触发
+        #    - 阶段 2（回退生成）：阶段 1 后有效候选仍 < 3 条时触发
+        #    - 两阶段串行执行，但总 LLM 调用受单次/总超时控制
         ...
 ```
 
@@ -107,7 +112,7 @@ class RecommendationContext:
 class RecommendationCandidate:
     source: str           # "fmea_graph" | "semantic_search" | "historical_capa" | "rule_engine" | "llm"
     content: str          # 根因文本 / 措施文本
-    category: str | None  # D5 用: "预防措施" | "探测措施"
+    category: str | None  # D5 用: "预防措施" | "探测措施" | "纠正措施"
     confidence: float     # 0.0 ~ 1.0
     match_reason: str     # 人类可读的理由
     metadata: dict        # {fmea_id, node_id, capa_id, document_no, product_line_code, severity, ...}
@@ -132,7 +137,7 @@ class RecommendationCandidate:
 - `entity_type = "capa"`, `entity_field = "d2_description"`
 - JOIN `capa_eightd` 过滤 `status = 'D8_CLOSURE'`
 - 产品线优先同产品线，无结果时放宽
-- 返回的 `metadata` 包含 `historical_capa_id`, `document_no`, `d5_correction`（给 D5 备用）, `closed_at`
+- 返回的 `metadata` 包含 `historical_capa_id`, `document_no`, `d5_correction`（给 D5 备用）, `source_updated_at`
 
 ### 3.2 D5 Sources
 
@@ -449,7 +454,7 @@ GET /api/capa/{report_id}/d5-fmea-recommendations  → D5RecommendationResponse
 | CAPA embedding 未及时更新 | update_capa 中检测字段变化并重新触发 enqueue_embedding |
 | LLM 调用慢/失败 | 超时控制（`asyncio.wait_for`）；失败时降级为未增强候选 |
 | 历史 CAPA 推荐传播错误经验 | 只复用 `D8_CLOSURE`；confidence 上限 0.8/0.85；LLM 融合层过滤低质量候选 |
-| LLM 同步调用延迟高 | 单次 LLM timeout ≤ 2.0s；限制输出 token（≤ 200）；两阶段 LLM 不串行调用（阶段 1 失败才进入阶段 2）；后续可加基于 `report_id + stage + content_hash` 的短期缓存 |
+| LLM 同步调用延迟高 | 单次 LLM timeout ≤ 2.0s；限制输出 token（≤ 200）；总 LLM 调用时间受控（阶段 1 成功 + 候选不足时进入阶段 2，但总时间不超过 4.0s）；后续可加基于 `report_id + stage + content_hash` 的短期缓存 |
 | 重复触发 embedding 同步 | update_capa 中增加值比对，仅字段内容实际变化时才 enqueue |
 
 ---
