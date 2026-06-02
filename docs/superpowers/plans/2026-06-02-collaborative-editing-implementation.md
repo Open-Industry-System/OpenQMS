@@ -1824,13 +1824,13 @@ from app.core.permissions import get_current_user
 async def _override_get_current_user():
     from app.models.user import User
     return User(
-        user_id="00000000-0000-0000-0000-000000000001",
+        user_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
         username="tester",
         display_name="测试员",
         email="tester@openqms.local",
         password_hash="hashed",
         is_active=True,
-        role="admin",
+        legacy_role="admin",
     )
 
 
