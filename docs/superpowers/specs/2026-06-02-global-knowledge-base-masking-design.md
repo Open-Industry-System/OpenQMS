@@ -17,7 +17,7 @@
 | 决策 | 选择 | 理由 |
 |------|------|------|
 | 脱敏时机 | 查询后、响应前动态脱敏 | 最小改动，不改 Neo4j/JSONB 投影层 |
-| 脱敏规则 | `name` 保留前 2 字符 + `***` | 保留可读性同时阻断追溯 |
+| 脱敏规则 | `name` 保留前 2 字符 + `***`；≤2 字符时保留首字符 + `***` | 保留可读性同时阻断追溯 |
 | 隐藏字段 | `fmea_id`, `document_no`, `product_line_code` | 这些字段可直接定位到具体文档和产品线 |
 | 权限控制 | Admin Only | 跨产品线数据属于高级权限 |
 | 双实现 | Neo4j + JSONB Repository 均需实现 | 保持与现有知识图谱架构一致 |
@@ -92,7 +92,8 @@ class MaskedNodeOut(BaseModel):
 from typing import Any
 
 def mask_name(name: Any) -> str:
-    """安全脱敏：保留前 2 个字符（去除首尾空格后），其余替换为 ***。
+    """安全脱敏：保留前 2 个字符（去除首尾空格后），其余替换为 ***；
+    短名称（≤2 字符）仅保留首字符 + ***，防止完整暴露原值。
     防御性处理 None / 非字符串 / 空值，防止类型异常导致接口崩溃。
     """
     if name is None:
@@ -100,6 +101,8 @@ def mask_name(name: Any) -> str:
     name_str = str(name).strip()
     if not name_str:
         return "***"
+    if len(name_str) <= 2:
+        return name_str[:1] + "***"
     return name_str[:2] + "***"
 ```
 
@@ -107,9 +110,9 @@ def mask_name(name: Any) -> str:
 |--------|--------|
 | `焊接不良` | `焊接***` |
 | `密封失效` | `密封***` |
-| `A1` | `A1***` |
+| `A1` | `A***` |
 | `短路` | `短***` |
-| `AB` | `AB***` |
+| `AB` | `A***` |
 | `A` | `A***` |
 | `` | `***` |
 
@@ -197,7 +200,7 @@ async def global_stats(
 ## 7. 性能考量
 
 - **Neo4j**: 移除 `product_line_code` 过滤后，Cypher 查询变为全表扫描。由于 Neo4j 中 GraphNode 数量通常在数千级别，性能可接受。
-- **JSONB**: 加载全表后在 Python 内存中遍历聚合，受硬上限保护（最多 200 份文档），避免超时/内存溢出。生产环境建议优先使用 Neo4j。
+- **JSONB**: 实现会读取全部 FMEA 文档及 `graph_data` 后在 Python 内存中遍历聚合，适合当前数据规模；受硬上限保护（最多 200 份文档）。后续如果文档量增长，再引入分页聚合、SQL JSONB 聚合或缓存。生产环境建议优先使用 Neo4j。
 - **脱敏开销**: Python 字符串切片，单次查询处理 < 100 条记录，开销可忽略。
 
 ## 8. 错误处理
