@@ -69,6 +69,8 @@ class ControlPlanUpdate(BaseModel):
     core_group: str | None = None
     product_line_code: str | None = None
     items: list[ControlPlanItemCreate] | None = None
+    lock_version: int | None = None
+    confirmed_latest_lock_version: int | None = None
 
 
 # ─── CSR Sync ───

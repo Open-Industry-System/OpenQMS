@@ -74,7 +74,32 @@ async def update_control_plan(
     try:
         cp = await control_plan_service.update_control_plan(db, cp, req, user.user_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        error_msg = str(e)
+        if error_msg == "lock_version_mismatch":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Document has been modified by another user.",
+                    "conflict": {
+                        "saved_by": None,
+                        "saved_at": None,
+                        "latest_lock_version": cp.lock_version,
+                    },
+                },
+            )
+        if error_msg == "lock_version_changed_again":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Document was modified again while you were reviewing. Please refresh.",
+                    "conflict": {
+                        "saved_by": None,
+                        "saved_at": None,
+                        "latest_lock_version": cp.lock_version,
+                    },
+                },
+            )
+        raise HTTPException(status_code=400, detail=error_msg)
     return ControlPlanResponse.model_validate(cp)
 
 

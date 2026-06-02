@@ -136,6 +136,17 @@ async def update_control_plan(
     if cp.status == "approved":
         raise ValueError("Cannot update an approved control plan.")
 
+    lock_version = data.lock_version
+    confirmed_latest_lock_version = data.confirmed_latest_lock_version
+
+    # 乐观锁校验（互斥分支）
+    if confirmed_latest_lock_version is not None:
+        if cp.lock_version != confirmed_latest_lock_version:
+            raise ValueError("lock_version_changed_again")
+    elif lock_version is not None:
+        if cp.lock_version != lock_version:
+            raise ValueError("lock_version_mismatch")
+
     if data.product_line_code is not None:
         await validate_product_line(db, data.product_line_code)
 
@@ -160,6 +171,7 @@ async def update_control_plan(
             setattr(cp, field, value)
 
     cp.updated_by = user_id
+    cp.lock_version += 1
 
     # Handle items replacement if provided
     if data.items is not None:
@@ -205,6 +217,17 @@ async def update_control_plan(
             target_id=cp.cp_id,
             detail=changed_fields,
         )
+
+        # 强制覆盖时记录审计日志
+        if confirmed_latest_lock_version is not None:
+            await create_audit_log(
+                db,
+                user_id=user_id,
+                action="FORCE_SAVE_OVERRIDE",
+                target_type="control_plans",
+                target_id=cp.cp_id,
+                detail={"reason": "User confirmed overwrite after conflict detection"},
+            )
 
     await db.commit()
     await db.refresh(cp)
