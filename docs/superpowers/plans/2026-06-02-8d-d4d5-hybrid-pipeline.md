@@ -23,7 +23,7 @@
 | `backend/app/services/capa_service.py` | update_capa 时触发 embedding 重新同步 | 修改 |
 | `backend/app/services/embedding_sync_worker.py` | FMEA 节点 embedding 加入 description | 修改 |
 | `backend/app/api/capa.py` | 替换 d4/d5 推荐内部实现 | 修改 |
-| `backend/tests/test_fusion_engine.py` | FusionEngine + LLMFusionLayer 单元测试 | 新建 |
+| `backend/tests/test_fusion_engine.py` | FusionEngine 单元测试 | 新建 |
 | `backend/tests/test_recommendation_sources.py` | Source/Expander 单元测试 | 新建 |
 | `backend/tests/test_hybrid_pipeline.py` | 管道集成测试 | 新建 |
 
@@ -791,7 +791,7 @@ class HistoricalCAPASource:
 
         stmt = text(f"""
             SELECT de.entity_id, de.chunk_text,
-                   1 - (de.embedding <=> :query_vector) AS similarity,
+                   1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
                    capa.document_no, capa.severity, capa.updated_at AS source_updated_at,
                    capa.d4_root_cause, capa.d5_correction, de.product_line_code
             FROM document_embeddings de
@@ -800,7 +800,7 @@ class HistoricalCAPASource:
               AND de.entity_field = :target_field
               AND capa.status = 'D8_CLOSURE'
               {pl_filter}
-            ORDER BY de.embedding <=> :query_vector
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
 
@@ -1189,11 +1189,11 @@ class TestLLMFusionLayer:
     async def test_llm_fusion_updates_match_reason(self):
         mock_llm = AsyncMock()
         mock_llm.complete = AsyncMock(return_value=[
-            {"candidate_id": "c1", "match_reason": "LLM improved reason"}
+            {"candidate_id": 0, "match_reason": "LLM improved reason"}
         ])
 
         layer = LLMFusionLayer(mock_llm)
-        candidates = [RecommendationCandidate("rule_engine", "test", None, 0.5, "original", {"_id": "c1"})]
+        candidates = [RecommendationCandidate("rule_engine", "test", None, 0.5, "original", {})]
         result = await layer.enrich(candidates, None)
         assert result[0].match_reason == "LLM improved reason"
 
@@ -1739,6 +1739,7 @@ git commit -m "feat(embedding): include description in FMEA node chunks"
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from app.services.llm_provider import create_llm_provider
 from app.services.embedding_provider import create_embedding_provider
+from fastapi import Request
 ```
 
 - [ ] **Step 2: 替换 d4-fmea-recommendations 路由**
@@ -1749,6 +1750,7 @@ from app.services.embedding_provider import create_embedding_provider
 @router.get("/{report_id}/d4-fmea-recommendations", response_model=D4RecommendationResponse)
 async def get_d4_fmea_recommendations(
     report_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
@@ -1771,14 +1773,16 @@ async def get_d4_fmea_recommendations(
         if not allowed_pls:
             return {"items": []}
 
-    fmea_query = select(FMEADocument).where(
-        FMEADocument.product_line_code == capa.product_line_code
-    )
+    # Preload FMEA docs for all allowed product lines (not just current CAPA's PL)
+    # SemanticSearchSource may retrieve cross-PL matches
+    fmea_query = select(FMEADocument)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
+    else:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code == capa.product_line_code)
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
-        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data}
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
         for f in fmea_result.scalars().all()
     ]
 
@@ -1789,8 +1793,8 @@ async def get_d4_fmea_recommendations(
                 linked_fmea = doc
                 break
 
-    llm_provider = create_llm_provider()
-    embedding_provider = create_embedding_provider()
+    llm_provider = request.app.state.llm_provider
+    embedding_provider = request.app.state.embedding_provider
     pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
 
     context = RecommendationContext(
@@ -1819,6 +1823,7 @@ async def get_d4_fmea_recommendations(
 @router.get("/{report_id}/d5-fmea-recommendations", response_model=D5RecommendationResponse)
 async def get_d5_fmea_recommendations(
     report_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
@@ -1841,14 +1846,16 @@ async def get_d5_fmea_recommendations(
         if not allowed_pls:
             return {"existing_controls": [], "general_suggestions": []}
 
-    fmea_query = select(FMEADocument).where(
-        FMEADocument.product_line_code == capa.product_line_code
-    )
+    # Preload FMEA docs for all allowed product lines (not just current CAPA's PL)
+    # SemanticSearchSource may retrieve cross-PL matches
+    fmea_query = select(FMEADocument)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
+    else:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code == capa.product_line_code)
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
-        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data}
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
         for f in fmea_result.scalars().all()
     ]
 
@@ -1859,8 +1866,8 @@ async def get_d5_fmea_recommendations(
                 linked_fmea = doc
                 break
 
-    llm_provider = create_llm_provider()
-    embedding_provider = create_embedding_provider()
+    llm_provider = request.app.state.llm_provider
+    embedding_provider = request.app.state.embedding_provider
     pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
 
     context = RecommendationContext(
