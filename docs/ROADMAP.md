@@ -116,7 +116,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | 变更影响分析（图遍历）| P2 | ✅ 完成 | 设计参数变更 → 自动追溯影响范围；Neo4j/JSONB 双实现 BFS + AP 预测 + 影响评分 + 审计日志 + 前端报告/图谱联动 |
 | SPC-FMEA 异常关联推荐 | P2 | ✅ 完成 | 控制图异常 → 识别关联 FMEA → 推荐 8D 方案；双路径匹配（控制计划桥接 + 名称模糊匹配）+ enrichment（RPN/AP/path/cause/control_count）+ 推荐弹窗面板 + CAPA 自动关联 |
 | D7 预防复发提示 | P2 | ✅ 完成 | D7 步骤自动推荐关联 FMEA 失效模式（图结构匹配 + 关键词搜索）+ 一键跳转 + D5 措施自动填充 + D8 推进软门禁（未确认项弹窗 + 跳过理由写入审计日志）；产品线隔离 + CAPA/FMEA 双权限校验 |
-| 多人协同编辑 | P2 | 🔲 待开发 | OT/CRDT 实时协同 |
+| 多人协同编辑 | P2 | ✅ 完成 | 乐观锁 + 短轮询在线状态：FMEA/Control Plan 顶部在线用户列表 + 行级编辑指示器 + 409 冲突检测 + 三方 diff 预览 + 安全覆盖保存；CAPA/APQP 等仅接入在线状态 |
 
 **Phase 3 已完成 (2026-05-31)**:
 1. ~~Neo4j 知识图谱基础设施~~ ✅ Docker Compose + Neo4jRepository/JSONBRepository 双实现
@@ -131,6 +131,10 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 6. ~~8D 根因+措施推荐~~ ✅ D4 根因推荐（3 策略匹配）+ D5 措施推荐（3 路径控制措施 + 通用建议）+ 推荐面板 + 权限控制
 7. ~~LLM RAG 语义搜索~~ ✅ pgvector + 混合搜索（向量+全文）+ RRF 融合 + RAG 问答 + 6 实体类型 + 产品线隔离 + 权限预过滤 + 异步 Worker + 回填命令 + 前端语义搜索 Tab + 17 个单元测试
 8. ~~变更影响分析（图遍历）~~ ✅ Neo4j/JSONB 双 Repository BFS 遍历 + 方向控制 + AP 预测 + 影响评分 + 审计日志 + 产品线权限 + 前端报告面板 + FMEA 编辑器集成 + 知识图谱联动
+9. ~~多人协同编辑~~ ✅ 乐观锁 + 短轮询在线状态（15s/8s/30s 动态间隔）
+   - 后端：collaboration_sessions 表 + 心跳 API + lifespan 清理协程 + FMEA/Control Plan 原子乐观锁（SELECT FOR UPDATE + populate_existing）
+   - 前端：useCollaboration Hook + CollaborationBar + ActiveUserIndicator + ConflictResolutionModal + 三方 graph diff + Control Plan items diff
+   - 覆盖：FMEA/Control Plan 完整协同（在线状态 + 冲突提示），CAPA/APQP 等仅在线状态
 
 **验收标准**: GA v2.0 发布 — AI + 知识图谱上线
 
@@ -213,7 +217,9 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 - [ ] 8D D4/D5 全混合管道升级 (历史 CAPA 匹配 + LLM 增强 + RAG 语义搜索替代关键词子串匹配)
 - [x] 变更影响分析 (设计参数变更 → 自动追溯影响范围) — ✅ 已完成 (2026-06-02)
 - [ ] SPC-FMEA 异常关联推荐 (控制图异常 → 关联 FMEA → 推荐 8D)
-- [ ] 多人协同编辑 (OT/CRDT 实时协同)
+- [x] 多人协同编辑 (乐观锁 + 短轮询在线状态) — ✅ 已完成 (2026-06-02)
+  - FMEA/Control Plan 完整协同：顶部在线用户列表 + 行级编辑指示器 + 409 冲突检测 + 三方 diff 预览 + 安全覆盖保存
+  - CAPA/APQP 等仅接入在线状态
 - [ ] 全局知识库脱敏 (跨产品线数据聚合时的敏感信息处理)
 
 **Phase 4 (远期)**:
