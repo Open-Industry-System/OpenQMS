@@ -12,14 +12,36 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.graph.repository import FMEAGraphRepository
 from app.models.fmea import FMEADocument
 from app.models.recommendation_cache import RecommendationCache
+from app.models.user import User
 from app.schemas.recommendation import (
     RecommendRequest, RecommendResponse, SuggestionItem, SuggestionList,
 )
 from app.services.llm_provider import LLMProvider
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# _NullGraphRepo — 用于不依赖 graph 查询的场景（如 cache invalidation）
+# ---------------------------------------------------------------------------
+
+class _NullGraphRepo(FMEAGraphRepository):
+    """仅用于 cache invalidation 等不依赖 graph 查询的场景。"""
+    async def get_impact_chain(self, *a, **kw): return {"nodes": [], "edges": []}
+    async def get_cause_chain(self, *a, **kw): return {"nodes": [], "edges": []}
+    async def find_similar_nodes(self, *a, **kw): return []
+    async def get_cross_fmea_stats(self, *a, **kw): return {}
+    async def get_global_stats(self): return {}
+    async def analyze_change_impact(self, *a, **kw):
+        from app.schemas.change_impact import ChangeImpactResult, ImpactSummary
+        return ChangeImpactResult(affected_nodes=[], summary=ImpactSummary(
+            total_affected=0, failure_modes_affected=0, controls_affected=0,
+            ap_upgraded_count=0, max_hop_distance=0,
+        ))
+    async def find_similar_nodes_advanced(self, *a, **kw): return []
 
 
 # ---------------------------------------------------------------------------
@@ -257,59 +279,265 @@ PROMPT_TEMPLATES = {
 # ---------------------------------------------------------------------------
 
 class RecommendationService:
-    def __init__(self, db: AsyncSession, llm_provider: LLMProvider | None):
+    def __init__(self, db: AsyncSession, llm_provider: LLMProvider | None, graph_repo: FMEAGraphRepository):
         self.db = db
         self.llm = llm_provider
+        self.graph_repo = graph_repo
         self.rules = RuleEngine()
 
-    async def recommend(self, fmea_id: _uuid.UUID, request: RecommendRequest) -> RecommendResponse:
+    async def recommend(self, fmea_id: _uuid.UUID, request: RecommendRequest, user: User) -> RecommendResponse:
+        from app.core.permissions import get_user_permission, Module, PermissionLevel
+
         fmea = await self._get_fmea_or_404(fmea_id)
 
-        # 1. Check cache
-        context_hash = self._compute_context_hash(request.context)
-        cache_result = await self._get_cached(fmea_id, request.trigger_type, context_hash)
+        # 权限检查 + scope 强制降级
+        requested_scope = getattr(request, "scope", "global")
+        has_kg_permission = await get_user_permission(user, Module.KNOWLEDGE_GRAPH, self.db) >= PermissionLevel.VIEW
+        effective_scope = "current_product_line" if (not has_kg_permission and requested_scope == "global") else requested_scope
+        include_graph = getattr(request, "include_graph", True)
+
+        # 1. Check cache（cache key 包含 scope 和 include_graph）
+        context_hash = self._compute_context_hash({
+            **request.context,
+            "scope": effective_scope,
+            "include_graph": include_graph,
+        })
+        cache_result = await self._get_cached(
+            fmea_id, request.trigger_type, context_hash, effective_scope
+        )
         if cache_result:
             cached_response, cached_with_llm = cache_result
-            # Skip cache only if LLM is now available but cache was written without LLM
             if self.llm is not None and not cached_with_llm:
                 pass  # fall through to re-evaluate with LLM
             else:
                 return cached_response
 
-        # 2. Rule engine
+        # 2. Rule engine（sync, ~1ms）
         rule_result = self.rules.evaluate(request.trigger_type, request.context)
+        rule_suggestions = [
+            SuggestionItem(name=s.name, confidence=s.confidence, source="rule", explanation=s.explanation)
+            for s in rule_result.suggestions
+        ]
 
-        # 3. LLM if generic + available
-        if rule_result.quality == "generic" and self.llm is not None:
+        # 3. Graph similarity query
+        graph_suggestions: list[SuggestionItem] = []
+        if include_graph:
+            try:
+                graph_matches = await self._query_graph_similarity(
+                    fmea, request.trigger_type, request.context, effective_scope
+                )
+                graph_suggestions = self._graph_matches_to_suggestions(
+                    graph_matches, fmea.product_line_code
+                )
+            except Exception as e:
+                logger.warning("Graph similarity query failed: %s", e)
+
+        # 4. Merge & deduplicate
+        all_suggestions = self._merge_and_deduplicate(rule_suggestions, graph_suggestions)
+
+        # 5. Determine if LLM is needed
+        has_specific = any(s.confidence >= 0.6 for s in all_suggestions)
+        need_llm = (
+            self.llm is not None
+            and not has_specific
+            and len(all_suggestions) < 3
+        )
+
+        if need_llm:
             try:
                 import asyncio
                 llm_context = await self._assemble_context(fmea, request)
+                if graph_suggestions:
+                    llm_context["similar_history"] = [
+                        {"name": s.name, "from": s.source_document_no}
+                        for s in graph_suggestions[:5]
+                    ]
                 prompt = self._build_prompt(request.trigger_type, llm_context)
                 llm_result = await asyncio.wait_for(
                     self.llm.complete(prompt, {}),
                     timeout=settings.LLM_TIMEOUT,
                 )
                 validated = SuggestionList.model_validate(llm_result)
-                suggestions = self._merge_suggestions(rule_result.suggestions, validated.suggestions)
-                source = "hybrid"
+                llm_items = [
+                    SuggestionItem(
+                        name=s.name, confidence=s.confidence, source="llm", explanation=s.explanation
+                    )
+                    for s in validated.suggestions
+                ]
+                all_suggestions = self._merge_and_deduplicate(all_suggestions, llm_items)
+                source = "graph_enriched" if graph_suggestions else "hybrid"
             except Exception as e:
-                suggestions = [SuggestionItem(name=s.name, confidence=s.confidence, source="rule", explanation=s.explanation) for s in rule_result.suggestions]
-                source = "rule_fallback"
-                logger.warning("LLM failed, falling back to rules: %s", e)
+                source = "graph" if graph_suggestions else "rule_fallback"
+                logger.warning("LLM failed, using rule+graph results: %s", e)
         else:
-            suggestions = [SuggestionItem(name=s.name, confidence=s.confidence, source="rule", explanation=s.explanation) for s in rule_result.suggestions]
-            source = "rule"
+            source = "graph" if graph_suggestions else "rule"
 
         response = RecommendResponse(
-            suggestions=suggestions,
+            suggestions=all_suggestions[:10],
             source=source,
             cached=False,
             llm_available=self.llm is not None,
+            graph_match_count=len(graph_suggestions),
+            effective_scope=effective_scope,
         )
-        # Don't cache rule_fallback — it's a transient LLM failure, retry next time
+
         if source != "rule_fallback":
             await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response)
         return response
+
+    # -- Graph similarity methods --
+
+    async def _query_graph_similarity(
+        self, fmea: FMEADocument, trigger_type: str, context: dict, scope: str
+    ) -> list[dict]:
+        query_text = ""
+        if trigger_type == "failure_mode":
+            query_text = context.get("function_description") or context.get("input_text") or ""
+        else:
+            query_text = context.get("failure_mode") or ""
+
+        if not query_text or len(query_text) < 2:
+            return []
+
+        fm_matches = await self.graph_repo.find_similar_nodes_advanced(
+            node_type="FailureMode",
+            query_text=query_text,
+            scope=scope,
+            product_line_code=fmea.product_line_code,
+            limit=20,
+            min_similarity=0.3,
+        )
+
+        if trigger_type == "failure_mode":
+            return fm_matches
+
+        recommendations = []
+        for match in fm_matches:
+            neighbors = await self._extract_neighbors_from_match(match, trigger_type)
+            for n in neighbors:
+                recommendations.append({
+                    "node_id": n.get("id", ""),
+                    "name": n.get("name", ""),
+                    "type": n.get("type", ""),
+                    "fmea_id": match["fmea_id"],
+                    "document_no": match["document_no"],
+                    "product_line_code": match["product_line_code"],
+                    "product_line_name": match.get("product_line_name", match["product_line_code"]),
+                    "similarity_score": match["similarity_score"],
+                    "match_reason": f"{match['match_reason']}_neighbor",
+                    "parent_node_name": match["name"],
+                })
+        return recommendations
+
+    async def _extract_neighbors_from_match(self, match: dict, trigger_type: str) -> list[dict]:
+        fmea_id = _uuid.UUID(match["fmea_id"])
+        graph_data = await self._get_graph_data_by_fmea_id(fmea_id)
+        if not graph_data:
+            return []
+
+        nodes = graph_data.get("nodes", [])
+        edges = graph_data.get("edges", [])
+        node_map = {n["id"]: n for n in nodes}
+        fm_id = match["node_id"]
+
+        if trigger_type == "failure_effect":
+            return [
+                node_map[e["target"]] for e in edges
+                if e.get("type") == "EFFECT_OF" and e.get("source") == fm_id
+                and e.get("target") in node_map
+            ]
+
+        elif trigger_type == "failure_cause":
+            return [
+                node_map[e["source"]] for e in edges
+                if e.get("type") == "CAUSE_OF" and e.get("target") == fm_id
+                and e.get("source") in node_map
+            ]
+
+        elif trigger_type == "measure":
+            ctrl_ids = set()
+            for e in edges:
+                if e.get("type") in ("PREVENTED_BY", "DETECTED_BY") and e.get("source") == fm_id:
+                    ctrl_ids.add(e.get("target"))
+            cause_ids = {
+                e.get("source") for e in edges
+                if e.get("type") == "CAUSE_OF" and e.get("target") == fm_id
+            }
+            for e in edges:
+                if e.get("type") in ("PREVENTED_BY", "DETECTED_BY") and e.get("source") in cause_ids:
+                    ctrl_ids.add(e.get("target"))
+            return [node_map[cid] for cid in ctrl_ids if cid in node_map]
+
+        elif trigger_type == "optimization":
+            opt_ids = set()
+            for e in edges:
+                if e.get("type") == "OPTIMIZED_BY" and e.get("source") == fm_id:
+                    opt_ids.add(e.get("target"))
+            cause_ids = {
+                e.get("source") for e in edges
+                if e.get("type") == "CAUSE_OF" and e.get("target") == fm_id
+            }
+            for e in edges:
+                if e.get("type") == "OPTIMIZED_BY" and e.get("source") in cause_ids:
+                    opt_ids.add(e.get("target"))
+            return [node_map[oid] for oid in opt_ids if oid in node_map]
+
+        return []
+
+    async def _get_graph_data_by_fmea_id(self, fmea_id: _uuid.UUID) -> dict | None:
+        from sqlalchemy import select as sa_select
+        result = await self.db.execute(
+            sa_select(FMEADocument.graph_data).where(FMEADocument.fmea_id == fmea_id)
+        )
+        row = result.scalar_one_or_none()
+        return row if row else None
+
+    def _graph_matches_to_suggestions(
+        self, matches: list[dict], current_product_line_code: str
+    ) -> list[SuggestionItem]:
+        suggestions = []
+        for m in matches:
+            confidence = 0.5 + (m.get("similarity_score", 0) * 0.5)
+            if m.get("parent_node_name"):
+                explanation = f"来自相似失效模式「{m['parent_node_name']}」的{m.get('type', '节点')}"
+            else:
+                explanation = f"历史相似节点（{m.get('match_reason', '')}）"
+
+            suggestions.append(SuggestionItem(
+                name=m["name"],
+                confidence=round(confidence, 2),
+                source="graph",
+                explanation=explanation,
+                source_fmea_id=m.get("fmea_id"),
+                source_document_no=m.get("document_no"),
+                source_product_line_code=m.get("product_line_code"),
+                source_product_line_name=m.get("product_line_name", m.get("product_line_code")),
+                source_node_type=m.get("type"),
+                source_node_id=m.get("node_id"),
+                similarity_score=m.get("similarity_score"),
+                match_reason=m.get("match_reason"),
+            ))
+        return suggestions
+
+    def _merge_and_deduplicate(
+        self,
+        items_a: list[SuggestionItem],
+        items_b: list[SuggestionItem],
+    ) -> list[SuggestionItem]:
+        seen: dict[str, SuggestionItem] = {}
+        for item in items_a:
+            key = item.name.strip()
+            seen[key] = item
+        for item in items_b:
+            key = item.name.strip()
+            existing = seen.get(key)
+            if existing is None:
+                seen[key] = item
+            elif item.confidence > existing.confidence:
+                seen[key] = item
+            elif item.confidence == existing.confidence and item.source == "graph" and existing.source != "graph":
+                seen[key] = item
+        return sorted(seen.values(), key=lambda x: x.confidence, reverse=True)
 
     # -- Helpers --
 
@@ -326,8 +554,9 @@ class RecommendationService:
         raw = json.dumps(context, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(raw.encode()).hexdigest()
 
-    async def _get_cached(self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str) -> tuple[RecommendResponse, bool] | None:
-        """Returns (response, cached_with_llm) or None if no cache hit."""
+    async def _get_cached(
+        self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str, effective_scope: str
+    ) -> tuple[RecommendResponse, bool] | None:
         stmt = (
             select(RecommendationCache)
             .where(RecommendationCache.fmea_id == fmea_id)
@@ -338,13 +567,17 @@ class RecommendationService:
         result = await self.db.execute(stmt)
         row = result.scalar_one_or_none()
         if row:
+            suggestions = row.suggestions
+            graph_count = sum(1 for s in suggestions if s.get("source") == "graph")
             response = RecommendResponse(
-                suggestions=row.suggestions,
+                suggestions=suggestions,
                 source=row.source,
                 cached=True,
-                llm_available=self.llm is not None,  # current state for frontend
+                llm_available=self.llm is not None,
+                graph_match_count=graph_count,
+                effective_scope=effective_scope,
             )
-            return (response, row.llm_available)  # row.llm_available = cache write time state
+            return (response, row.llm_available)
         return None
 
     async def _cache_result(
@@ -428,12 +661,3 @@ class RecommendationService:
             return template.format(**safe)
         except KeyError:
             return template
-
-    def _merge_suggestions(self, rule_suggestions: list[RuleSuggestion], llm_suggestions: list[SuggestionItem]) -> list[SuggestionItem]:
-        seen = {s.name for s in rule_suggestions}
-        merged = [SuggestionItem(name=s.name, confidence=s.confidence, source="rule", explanation=s.explanation) for s in rule_suggestions]
-        for s in llm_suggestions:
-            if s.name not in seen:
-                merged.append(SuggestionItem(name=s.name, confidence=s.confidence, source="llm", explanation=s.explanation))
-                seen.add(s.name)
-        return merged
