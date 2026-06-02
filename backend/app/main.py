@@ -43,6 +43,7 @@ from app.api.graph import router as graph_router
 from app.api.admin import permissions as admin_permissions_api
 from app.api.search import router as search_router
 from app.api.change_impact import router as change_impact_router
+from app.api.collaboration import router as collaboration_router
 
 
 @asynccontextmanager
@@ -86,7 +87,32 @@ async def lifespan(app: FastAPI):
         _logging.getLogger(__name__).warning("Embedding provider init failed: %s", e)
         app.state.embedding_provider = None
 
+    # Start collaboration session cleanup coroutine
+    import asyncio
+    from app.services.collaboration_service import delete_expired_sessions
+
+    async def _cleanup_loop():
+        while True:
+            await asyncio.sleep(60)
+            try:
+                async with async_session() as db:
+                    deleted = await delete_expired_sessions(db)
+                    if deleted > 0:
+                        print(f"[collaboration] cleaned up {deleted} expired sessions")
+            except Exception as e:
+                print(f"[collaboration] cleanup error: {e}")
+
+    cleanup_task = asyncio.create_task(_cleanup_loop())
+
     yield
+
+    # Cancel cleanup coroutine
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+
     # Cleanup: close LLM provider httpx client if applicable
     provider = getattr(app.state, "llm_provider", None)
     if provider and hasattr(provider, "aclose"):
@@ -139,6 +165,7 @@ app.include_router(graph_router)
 app.include_router(admin_permissions_api.router)
 app.include_router(search_router)
 app.include_router(change_impact_router)
+app.include_router(collaboration_router)
 
 
 @app.get("/api/health")
