@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = ""       # 仅 local 模式
     LLM_TIMEOUT: int = 5         # 超时秒数
 
+    # Embedding & semantic search
+    EMBEDDING_PROVIDER: str = ""        # "openai" | "ollama" | "" (follows LLM_PROVIDER)
+    EMBEDDING_MODEL: str = ""           # optional override
+    EMBEDDING_BASE_URL: str = "http://ollama:11434"
+    EMBEDDING_DIMENSIONS: int = 1536    # 1536 for OpenAI, 768 for nomic-embed-text, 1024 for BGE-M3
+    SEARCH_VECTOR_WEIGHT: float = 0.7   # weight for vector search in RRF
+    SEARCH_FULLTEXT_WEIGHT: float = 0.3 # weight for fulltext search in RRF
+
     model_config = {"env_file": ".env"}
 
     @field_validator("SECRET_KEY")
