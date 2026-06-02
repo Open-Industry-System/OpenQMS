@@ -263,10 +263,10 @@ export function useCollaboration(
 
 冲突处理弹窗：
 - 显示冲突信息（谁、何时保存）
-- **前端 Client-Side Diff**：将本地脏状态与服务器最新数据进行对比
-  - 对方新增/删除的节点和边
-  - 对方修改的字段
-  - 本地与对方都修改的字段（真正冲突）用红色高亮
+- **前端 Client-Side Diff**：Base / Local Dirty / Latest Server 三方对比
+  - Base vs Latest Server → 对方新增/删除/修改
+  - Base vs Local Dirty → 我方新增/删除/修改
+  - 同一字段双方都有修改 → 真正冲突（红色高亮）
 - 两个操作按钮：
   - **放弃我的更改，刷新页面**：重新加载最新版本
   - **强制保存（覆盖对方更改）**：携带 `confirmed_latest_lock_version`，后端再次校验后保存，记录审计日志
@@ -346,7 +346,7 @@ frontend/src/
     |<--- 最新 graph_data ---|                         |
     |                      |                         |
     |-- 前端 client-side diff                          |
-    |   本地脏态 vs 服务器最新                           |
+    |   Base / Local Dirty / Latest Server 三方对比      |
     |                      |                         |
     |-- 弹出 ConflictModal -|-------------------------|
     |   用户选择覆盖/放弃    |                         |
