@@ -103,7 +103,7 @@ def upgrade():
         sa.Column('editing_area', postgresql.JSONB(), nullable=True),
         sa.Column('last_activity', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.PrimaryKeyConstraint('session_id'),
-        sa.UniqueConstraint('document_type', 'document_id', 'user_id'),
+        sa.UniqueConstraint('document_type', 'document_id', 'user_id', name='uq_collab_session'),
         sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ondelete='CASCADE'),
     )
     op.create_index('idx_collab_doc', 'collaboration_sessions', ['document_type', 'document_id'])
@@ -701,15 +701,82 @@ class ControlPlanUpdate(BaseModel):
 
 - [ ] **Step 2: Control Plan service 添加乐观锁校验**
 
-参照 Task 7 Step 2 的模式，在 `control_plan_service.py` 的 `update_control_plan` 函数中添加：
-- `lock_version` 和 `confirmed_latest_lock_version` 参数
-- 校验逻辑（与 FMEA 相同模式）
-- `lock_version += 1`
-- 强制保存时的审计日志
+在 `control_plan_service.py` 的 `update_control_plan` 函数中添加：
+
+```python
+async def update_control_plan(
+    db: AsyncSession,
+    cp: ControlPlan,
+    data: ControlPlanUpdate,
+    user_id: uuid.UUID,
+) -> ControlPlan:
+    lock_version = data.lock_version
+    confirmed_latest_lock_version = data.confirmed_latest_lock_version
+
+    # 乐观锁校验（互斥分支）
+    if confirmed_latest_lock_version is not None:
+        if cp.lock_version != confirmed_latest_lock_version:
+            raise ValueError("lock_version_changed_again")
+    elif lock_version is not None:
+        if cp.lock_version != lock_version:
+            raise ValueError("lock_version_mismatch")
+
+    # ... existing update logic ...
+    cp.lock_version += 1
+
+    # ... existing audit log ...
+
+    # 强制覆盖时记录审计日志
+    if confirmed_latest_lock_version is not None:
+        force_audit = AuditLog(
+            table_name="control_plans",
+            record_id=cp.cp_id,
+            action="FORCE_SAVE_OVERRIDE",
+            changed_fields={"reason": "User confirmed overwrite after conflict detection"},
+            operated_by=user_id,
+        )
+        db.add(force_audit)
+
+    await db.commit()
+    await db.refresh(cp)
+    return cp
+```
 
 - [ ] **Step 3: Control Plan API 添加冲突响应**
 
-参照 Task 7 Step 3 的模式，在 `api/control_plan.py` 的 `update_control_plan` 函数中添加 409 冲突响应处理。
+在 `api/control_plan.py` 的 `update_control_plan` 函数中添加：
+
+```python
+try:
+    cp = await control_plan_service.update_control_plan(db, cp, req, user.user_id)
+except ValueError as e:
+    error_msg = str(e)
+    if error_msg == "lock_version_mismatch":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Document has been modified by another user.",
+                "conflict": {
+                    "saved_by": None,
+                    "saved_at": None,
+                    "latest_lock_version": cp.lock_version,
+                },
+            },
+        )
+    if error_msg == "lock_version_changed_again":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Document was modified again while you were reviewing. Please refresh.",
+                "conflict": {
+                    "saved_by": None,
+                    "saved_at": None,
+                    "latest_lock_version": cp.lock_version,
+                },
+            },
+        )
+    raise HTTPException(status_code=400, detail=error_msg)
+```
 
 - [ ] **Step 4: Commit**
 
@@ -1069,7 +1136,7 @@ export function useCollaboration(
       if (intervalRef.current) clearInterval(intervalRef.current);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [documentId, documentType, sendHeartbeat, fetchActiveUsers]);
+  }, [documentId, schedule, fetchActiveUsers]);
 
   // Page unload: send fetch with keepalive + auth header to clean up session
   useEffect(() => {
@@ -1652,6 +1719,7 @@ git commit -m "feat(collaboration): integrate collaboration into Control Plan ed
 - [ ] **Step 1: 编写 CollaborationService 测试**
 
 ```python
+import uuid
 import pytest
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1664,50 +1732,50 @@ from app.services.collaboration_service import (
 )
 from app.models.collaboration_session import CollaborationSession
 
+DOC_ID = "123e4567-e89b-12d3-a456-426614174000"
+USER_ID = uuid.uuid4()
+
 
 @pytest.mark.asyncio
 async def test_upsert_session_creates_new(db: AsyncSession):
     await upsert_session(
-        db, "fmea", "123e4567-e89b-12d3-a456-426614174000",
-        user_id=pytest.any_uuid, user_name="张三", action="viewing", editing_area=None
+        db, "fmea", DOC_ID,
+        user_id=USER_ID, user_name="张三", action="viewing", editing_area=None
     )
-    users = await get_active_users(db, "fmea", "123e4567-e89b-12d3-a456-426614174000")
+    users = await get_active_users(db, "fmea", DOC_ID)
     assert len(users) == 1
     assert users[0].user_name == "张三"
 
 
 @pytest.mark.asyncio
 async def test_upsert_session_updates_existing(db: AsyncSession):
-    doc_id = "123e4567-e89b-12d3-a456-426614174000"
-    await upsert_session(db, "fmea", doc_id, pytest.any_uuid, "张三", "viewing", None)
-    await upsert_session(db, "fmea", doc_id, pytest.any_uuid, "张三", "editing", {"row_key": "r1"})
-    users = await get_active_users(db, "fmea", doc_id)
+    await upsert_session(db, "fmea", DOC_ID, USER_ID, "张三", "viewing", None)
+    await upsert_session(db, "fmea", DOC_ID, USER_ID, "张三", "editing", {"row_key": "r1"})
+    users = await get_active_users(db, "fmea", DOC_ID)
     assert users[0].action == "editing"
     assert users[0].editing_area == {"row_key": "r1"}
 
 
 @pytest.mark.asyncio
 async def test_get_active_users_filters_expired(db: AsyncSession):
-    doc_id = "123e4567-e89b-12d3-a456-426614174000"
     # Insert expired session directly
     expired = CollaborationSession(
-        document_type="fmea", document_id=doc_id,
-        user_id=pytest.any_uuid, user_name="过期用户",
+        document_type="fmea", document_id=DOC_ID,
+        user_id=USER_ID, user_name="过期用户",
         last_activity=datetime.now(timezone.utc) - timedelta(seconds=120),
     )
     db.add(expired)
     await db.commit()
 
-    users = await get_active_users(db, "fmea", doc_id)
+    users = await get_active_users(db, "fmea", DOC_ID)
     assert len(users) == 0  # expired, filtered out
 
 
 @pytest.mark.asyncio
 async def test_delete_expired_sessions(db: AsyncSession):
-    doc_id = "123e4567-e89b-12d3-a456-426614174000"
     expired = CollaborationSession(
-        document_type="fmea", document_id=doc_id,
-        user_id=pytest.any_uuid, user_name="过期",
+        document_type="fmea", document_id=DOC_ID,
+        user_id=USER_ID, user_name="过期",
         last_activity=datetime.now(timezone.utc) - timedelta(seconds=120),
     )
     db.add(expired)
@@ -1741,14 +1809,15 @@ async def test_heartbeat(client: AsyncClient, auth_headers: dict):
 
 @pytest.mark.asyncio
 async def test_active_users(client: AsyncClient, auth_headers: dict):
+    doc_id = "123e4567-e89b-12d3-a456-426614174001"
     # First heartbeat
     await client.post(
         "/api/collaboration/heartbeat",
-        json={"document_type": "fmea", "document_id": "test-doc-id", "action": "viewing"},
+        json={"document_type": "fmea", "document_id": doc_id, "action": "viewing"},
         headers=auth_headers,
     )
     # Get active users
-    resp = await client.get("/api/collaboration/fmea/test-doc-id/active-users", headers=auth_headers)
+    resp = await client.get(f"/api/collaboration/fmea/{doc_id}/active-users", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] >= 0
@@ -1756,12 +1825,13 @@ async def test_active_users(client: AsyncClient, auth_headers: dict):
 
 @pytest.mark.asyncio
 async def test_leave_session(client: AsyncClient, auth_headers: dict):
+    doc_id = "123e4567-e89b-12d3-a456-426614174002"
     await client.post(
         "/api/collaboration/heartbeat",
-        json={"document_type": "fmea", "document_id": "leave-test", "action": "viewing"},
+        json={"document_type": "fmea", "document_id": doc_id, "action": "viewing"},
         headers=auth_headers,
     )
-    resp = await client.delete("/api/collaboration/leave/fmea/leave-test", headers=auth_headers)
+    resp = await client.delete(f"/api/collaboration/leave/fmea/{doc_id}", headers=auth_headers)
     assert resp.status_code == 204
 ```
 
