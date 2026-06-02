@@ -1760,7 +1760,7 @@ async def test_upsert_session_updates_existing(db: AsyncSession):
 async def test_get_active_users_filters_expired(db: AsyncSession):
     # Insert expired session directly
     expired = CollaborationSession(
-        document_type="fmea", document_id=DOC_ID,
+        document_type="fmea", document_id=uuid.UUID(DOC_ID),
         user_id=USER_ID, user_name="过期用户",
         last_activity=datetime.now(timezone.utc) - timedelta(seconds=120),
     )
@@ -1774,7 +1774,7 @@ async def test_get_active_users_filters_expired(db: AsyncSession):
 @pytest.mark.asyncio
 async def test_delete_expired_sessions(db: AsyncSession):
     expired = CollaborationSession(
-        document_type="fmea", document_id=DOC_ID,
+        document_type="fmea", document_id=uuid.UUID(DOC_ID),
         user_id=USER_ID, user_name="过期",
         last_activity=datetime.now(timezone.utc) - timedelta(seconds=120),
     )
@@ -1808,19 +1808,23 @@ async def test_heartbeat(client: AsyncClient, auth_headers: dict):
 
 
 @pytest.mark.asyncio
-async def test_active_users(client: AsyncClient, auth_headers: dict):
+async def test_active_users_excludes_current_user(client: AsyncClient, auth_headers: dict):
     doc_id = "123e4567-e89b-12d3-a456-426614174001"
-    # First heartbeat
+    # Heartbeat as current user
     await client.post(
         "/api/collaboration/heartbeat",
         json={"document_type": "fmea", "document_id": doc_id, "action": "viewing"},
         headers=auth_headers,
     )
-    # Get active users
+    # Get active users — should exclude current user
     resp = await client.get(f"/api/collaboration/fmea/{doc_id}/active-users", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total"] >= 0
+    assert "users" in data
+    assert "total" in data
+    # Current user is excluded from results
+    current_user_id = auth_headers.get("x-test-user-id")  # set by test fixture
+    assert all(u["user_id"] != current_user_id for u in data["users"])
 
 
 @pytest.mark.asyncio
