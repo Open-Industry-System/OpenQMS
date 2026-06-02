@@ -425,7 +425,47 @@ from app.graph.deps import get_graph_repository
         }
 ```
 
-- [ ] **Step 3: 添加测试用例**
+- [ ] **Step 3: 添加 `_make_user` helper 并修复默认 admin override**
+
+User 模型没有 `role` 字段，只有 `role_id` + `role_definition` relationship。RoleDefinition 的字段是 `role_key`、`name_zh`、`name_en`，没有 `role_name`。
+
+在 `test_global_stats_admin_only` 之前添加 helper：
+
+```python
+import uuid as _uuid
+
+
+def _make_user(role_key: str):
+    """构造测试用的 User + RoleDefinition。"""
+    from app.models.user import User
+    from app.models.role import RoleDefinition
+    role_id = _uuid.uuid4()
+    user = User(
+        user_id=_uuid.uuid4(),
+        username=role_key,
+        display_name=role_key,
+        email=f"{role_key}@openqms.local",
+        password_hash="hashed",
+        is_active=True,
+        role_id=role_id,
+    )
+    user.role_definition = RoleDefinition(
+        id=role_id,
+        role_key=role_key,
+        name_zh=role_key,
+        name_en=role_key,
+    )
+    return user
+```
+
+同时修复默认的 `_override_get_current_user`：
+
+```python
+async def _override_get_current_user():
+    return _make_user("admin")
+```
+
+- [ ] **Step 4: 添加测试用例**
 
 在文件末尾添加：
 
@@ -441,28 +481,46 @@ async def test_global_stats_admin_only(client: AsyncClient):
     assert resp.status_code == status.HTTP_200_OK
 
     # 切换为 non-admin 角色
-    # require_admin 检查 user.role_definition.role_key，不是 user.role
-    async def _non_admin_user():
-        from app.models.user import User
-        from app.models.role import RoleDefinition
-        user = User(
-            user_id="00000000-0000-0000-0000-000000000002",
-            username="viewer",
-            display_name="Viewer",
-            email="viewer@openqms.local",
-            password_hash="hashed",
-            is_active=True,
-            role="viewer",
-        )
-        user.role_definition = RoleDefinition(role_key="viewer", role_name="Viewer")
-        return user
-
-    app.dependency_overrides[get_current_user] = _non_admin_user
+    app.dependency_overrides[get_current_user] = lambda: _make_user("viewer")
     try:
         resp = await client.get("/api/graph/global-stats")
         assert resp.status_code == status.HTTP_403_FORBIDDEN
     finally:
         app.dependency_overrides[get_current_user] = _override_get_current_user
+
+
+# mask_name 边界测试（纯函数，不依赖 HTTP）
+def test_mask_name_normal():
+    assert mask_name("焊接不良") == "焊接***"
+
+
+def test_mask_name_short_two_chars():
+    assert mask_name("短路") == "短***"
+
+
+def test_mask_name_short_one_char():
+    assert mask_name("A") == "A***"
+
+
+def test_mask_name_empty():
+    assert mask_name("") == "***"
+
+
+def test_mask_name_none():
+    assert mask_name(None) == "***"
+
+
+def test_mask_name_non_string():
+    assert mask_name(123) == "***"
+    assert mask_name([1, 2, 3]) == "***"
+
+
+def test_mask_name_whitespace():
+    assert mask_name("   ") == "***"
+
+
+def test_mask_name_two_char_alphanumeric():
+    assert mask_name("A1") == "A***"
 
 
 @pytest.mark.asyncio
@@ -558,48 +616,36 @@ git commit -m "test(graph): fix dependency override, add global-stats tests and 
 ## Task 4: JSONBRepository 测试
 
 **Files:**
-- Create: `backend/tests/test_graph_repository.py`
+- Modify: `backend/tests/test_graph_repository.py`（追加测试，保留现有 compute_ap 和 stats 测试）
 
-**注意:** 测试 JSONBRepository 的 `get_global_stats` 和 `get_cross_fmea_stats`（验证 document_no 修复）。Neo4jRepository 无测试数据库环境，本期不测。
+**注意:** 测试 JSONBRepository 的 `get_global_stats` 和 `get_cross_fmea_stats`（验证 document_no 修复）。测试图数据必须包含 DetectionControl 和 DETECTED_BY 边，否则 `_collect_failure_mode_rpn()` 的 D=0 导致 RPN=0，top_failure_modes 为空。Neo4jRepository 无测试数据库环境，本期不测。
 
-- [ ] **Step 1: 创建测试文件**
+- [ ] **Step 1: 追加测试到现有文件末尾**
 
 ```python
-import os
-
-os.environ.setdefault("SECRET_KEY", "test-secret-key-for-graph-repo-tests")
-
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-
-from app.graph.jsonb_repository import JSONBRepository
+import uuid as _uuid
 
 
-def _create_mock_db():
-    """创建 mock AsyncSession。"""
-    db = MagicMock()
-    db.execute = AsyncMock()
-    db.commit = AsyncMock()
-    return db
-
-
-def _mock_fmea(document_no, product_line_code, graph_data):
-    """构造 mock FMEADocument。"""
-    fmea = MagicMock()
-    fmea.fmea_id = "123e4567-e89b-12d3-a456-426614174000"
-    fmea.document_no = document_no
-    fmea.product_line_code = product_line_code
-    fmea.graph_data = graph_data
-    return fmea
+def _mock_fmea_global(document_no, product_line_code, graph_data):
+    """构造 mock FMEADocument（复用现有文件中的 _make_mock_fmea 风格）。"""
+    import types
+    return types.SimpleNamespace(
+        fmea_id=_uuid.uuid4(),
+        document_no=document_no,
+        product_line_code=product_line_code,
+        graph_data=graph_data,
+    )
 
 
 @pytest.mark.asyncio
 async def test_jsonb_get_cross_fmea_stats_top_failure_modes_has_document_no():
     """验证 JSONB get_cross_fmea_stats 的 top_failure_modes 包含 document_no。"""
-    db = _create_mock_db()
+    from unittest.mock import MagicMock, AsyncMock
+    mock_db = AsyncMock()
+    result_mock = MagicMock()
 
-    # Mock 一个包含 FailureMode 的 FMEA
-    fmea = _mock_fmea(
+    # 图数据必须包含 DetectionControl + DETECTED_BY，否则 D=0 → RPN=0
+    fmea = _mock_fmea_global(
         document_no="PFMEA-2026-001",
         product_line_code="DC-DC-100",
         graph_data={
@@ -607,19 +653,20 @@ async def test_jsonb_get_cross_fmea_stats_top_failure_modes_has_document_no():
                 {"id": "fm1", "type": "FailureMode", "name": "焊接不良"},
                 {"id": "e1", "type": "FailureEffect", "name": "开裂", "severity": 8},
                 {"id": "c1", "type": "FailureCause", "name": "温度高", "occurrence": 5},
+                {"id": "d1", "type": "DetectionControl", "name": "目检", "detection": 4},
             ],
             "edges": [
                 {"source": "fm1", "target": "e1", "type": "EFFECT_OF"},
                 {"source": "c1", "target": "fm1", "type": "CAUSE_OF"},
+                {"source": "c1", "target": "d1", "type": "DETECTED_BY"},
             ],
         },
     )
 
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [fmea]
-    db.execute.return_value = mock_result
+    result_mock.scalars.return_value.all.return_value = [fmea]
+    mock_db.execute.return_value = result_mock
 
-    repo = JSONBRepository(db)
+    repo = JSONBRepository(mock_db)
     stats = await repo.get_cross_fmea_stats("DC-DC-100")
 
     assert "top_failure_modes" in stats
@@ -630,9 +677,11 @@ async def test_jsonb_get_cross_fmea_stats_top_failure_modes_has_document_no():
 @pytest.mark.asyncio
 async def test_jsonb_get_global_stats_aggregates_all_product_lines():
     """验证 JSONB get_global_stats 聚合所有产品线，不限制 product_line_code。"""
-    db = _create_mock_db()
+    from unittest.mock import MagicMock, AsyncMock
+    mock_db = AsyncMock()
+    result_mock = MagicMock()
 
-    fmea_a = _mock_fmea(
+    fmea_a = _mock_fmea_global(
         document_no="PFMEA-2026-001",
         product_line_code="DC-DC-100",
         graph_data={
@@ -640,14 +689,16 @@ async def test_jsonb_get_global_stats_aggregates_all_product_lines():
                 {"id": "fm1", "type": "FailureMode", "name": "焊接不良"},
                 {"id": "e1", "type": "FailureEffect", "name": "开裂", "severity": 8},
                 {"id": "c1", "type": "FailureCause", "name": "温度高", "occurrence": 5},
+                {"id": "d1", "type": "DetectionControl", "name": "目检", "detection": 4},
             ],
             "edges": [
                 {"source": "fm1", "target": "e1", "type": "EFFECT_OF"},
                 {"source": "c1", "target": "fm1", "type": "CAUSE_OF"},
+                {"source": "c1", "target": "d1", "type": "DETECTED_BY"},
             ],
         },
     )
-    fmea_b = _mock_fmea(
+    fmea_b = _mock_fmea_global(
         document_no="PFMEA-2026-002",
         product_line_code="DC-DC-200",
         graph_data={
@@ -655,26 +706,30 @@ async def test_jsonb_get_global_stats_aggregates_all_product_lines():
                 {"id": "fm2", "type": "FailureMode", "name": "密封失效"},
                 {"id": "e2", "type": "FailureEffect", "name": "漏水", "severity": 7},
                 {"id": "c2", "type": "FailureCause", "name": "老化", "occurrence": 4},
+                {"id": "d2", "type": "DetectionControl", "name": "气密测试", "detection": 3},
             ],
             "edges": [
                 {"source": "fm2", "target": "e2", "type": "EFFECT_OF"},
                 {"source": "c2", "target": "fm2", "type": "CAUSE_OF"},
+                {"source": "c2", "target": "d2", "type": "DETECTED_BY"},
             ],
         },
     )
 
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [fmea_a, fmea_b]
-    db.execute.return_value = mock_result
+    result_mock.scalars.return_value.all.return_value = [fmea_a, fmea_b]
+    mock_db.execute.return_value = result_mock
 
-    repo = JSONBRepository(db)
+    repo = JSONBRepository(mock_db)
     stats = await repo.get_global_stats()
 
-    # 应包含两个产品线的所有文档
+    # 聚合两个产品线的全部文档
     assert stats["total_fmeas"] == 2
-    assert stats["total_nodes"] == 6  # 3 nodes * 2 fmeas
+    # 两个 FMEA 的 FailureMode 都因 RPN>0 进入 top_failure_modes
     assert len(stats["top_failure_modes"]) == 2
-    # top_failure_modes 应包含 document_no（来自 Task 3 的修复）
+    # 验证两份文档的 document_no 都在结果中
+    doc_nos = {tm["document_no"] for tm in stats["top_failure_modes"]}
+    assert doc_nos == {"PFMEA-2026-001", "PFMEA-2026-002"}
+    # top_failure_modes 均包含 document_no（Task 1 修复）
     for tm in stats["top_failure_modes"]:
         assert "document_no" in tm
 ```
@@ -686,7 +741,7 @@ cd /Users/sam/Documents/Code/OpenQMS/backend
 python -m pytest tests/test_graph_repository.py -v
 ```
 
-Expected: All tests pass.
+Expected: All tests pass（包括原有的 compute_ap 测试和 stats 结构测试）。
 
 - [ ] **Step 3: Commit**
 
