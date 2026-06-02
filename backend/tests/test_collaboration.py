@@ -205,3 +205,136 @@ async def test_fmea_version_bumps_on_actual_change(mock_embed, mock_validate):
 
     assert fmea.lock_version == 6
     db.commit.assert_called_once()
+
+
+# ─── Control Plan optimistic locking tests ───
+
+CP_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
+
+
+def _mock_cp_for_update_result(lock_version: int):
+    """构造 ControlPlan SELECT ... FOR UPDATE 查询的 mock 结果。"""
+    fresh = MagicMock()
+    fresh.lock_version = lock_version
+    fresh.title = "Original Title"
+    fresh.cp_id = CP_ID
+    fresh.status = "draft"
+    fresh.product_line_code = "DC-DC-100"
+    mock_result = MagicMock()
+    mock_result.scalar_one.return_value = fresh
+    return mock_result
+
+
+def _mock_cp_items_result(items: list):
+    """构造 ControlPlanItem 查询的 mock 结果。"""
+    mock_result = MagicMock()
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = items
+    mock_result.scalars.return_value = mock_scalars
+    return mock_result
+
+
+@pytest.mark.asyncio
+@patch("app.services.control_plan_service.validate_product_line", new_callable=AsyncMock)
+@patch("app.services.control_plan_service.create_audit_log", new_callable=AsyncMock)
+async def test_cp_lock_version_mismatch(mock_audit, mock_validate):
+    """Control Plan: 传入 lock_version 与数据库不匹配时抛出异常。"""
+    from app.services.control_plan_service import update_control_plan
+    from app.schemas.control_plan import ControlPlanUpdate
+
+    db = _create_mock_db()
+    db.execute.return_value = _mock_cp_for_update_result(lock_version=6)
+
+    cp = MagicMock()
+    cp.cp_id = CP_ID
+    cp.status = "draft"
+    cp.lock_version = 5
+    cp.title = "Original Title"
+    cp.product_line_code = "DC-DC-100"
+
+    data = ControlPlanUpdate(title="New Title", lock_version=5)
+
+    with pytest.raises(ValueError, match="lock_version_mismatch"):
+        await update_control_plan(db, cp, data, USER_ID)
+
+
+@pytest.mark.asyncio
+@patch("app.services.control_plan_service.validate_product_line", new_callable=AsyncMock)
+@patch("app.services.control_plan_service.create_audit_log", new_callable=AsyncMock)
+async def test_cp_force_save_changed_again(mock_audit, mock_validate):
+    """Control Plan: force save 时数据库版本再次变化，抛出异常。"""
+    from app.services.control_plan_service import update_control_plan
+    from app.schemas.control_plan import ControlPlanUpdate
+
+    db = _create_mock_db()
+    db.execute.return_value = _mock_cp_for_update_result(lock_version=7)
+
+    cp = MagicMock()
+    cp.cp_id = CP_ID
+    cp.status = "draft"
+    cp.lock_version = 5
+    cp.title = "Original Title"
+    cp.product_line_code = "DC-DC-100"
+
+    data = ControlPlanUpdate(title="New Title", confirmed_latest_lock_version=6)
+
+    with pytest.raises(ValueError, match="lock_version_changed_again"):
+        await update_control_plan(db, cp, data, USER_ID)
+
+
+@pytest.mark.asyncio
+@patch("app.services.control_plan_service.validate_product_line", new_callable=AsyncMock)
+@patch("app.services.control_plan_service.create_audit_log", new_callable=AsyncMock)
+async def test_cp_no_version_bump_when_no_actual_change(mock_audit, mock_validate):
+    """Control Plan: 没有实际变更时不递增 lock_version。"""
+    from app.services.control_plan_service import update_control_plan
+    from app.schemas.control_plan import ControlPlanUpdate
+
+    db = _create_mock_db()
+    # Two executes: FOR UPDATE + items query
+    db.execute.side_effect = [
+        _mock_cp_for_update_result(lock_version=5),
+        _mock_cp_items_result([]),
+    ]
+
+    cp = MagicMock()
+    cp.cp_id = CP_ID
+    cp.status = "draft"
+    cp.lock_version = 5
+    cp.title = "Original Title"
+    cp.product_line_code = "DC-DC-100"
+
+    data = ControlPlanUpdate(title="Original Title", items=[])
+
+    await update_control_plan(db, cp, data, USER_ID)
+
+    assert cp.lock_version == 5
+
+
+@pytest.mark.asyncio
+@patch("app.services.control_plan_service.validate_product_line", new_callable=AsyncMock)
+@patch("app.services.control_plan_service.create_audit_log", new_callable=AsyncMock)
+async def test_cp_version_bumps_on_actual_change(mock_audit, mock_validate):
+    """Control Plan: 有实际变更时递增 lock_version。"""
+    from app.services.control_plan_service import update_control_plan
+    from app.schemas.control_plan import ControlPlanUpdate
+
+    db = _create_mock_db()
+    db.execute.side_effect = [
+        _mock_cp_for_update_result(lock_version=5),
+        _mock_cp_items_result([]),
+    ]
+
+    cp = MagicMock()
+    cp.cp_id = CP_ID
+    cp.status = "draft"
+    cp.lock_version = 5
+    cp.title = "Original Title"
+    cp.product_line_code = "DC-DC-100"
+
+    data = ControlPlanUpdate(title="Changed Title")
+
+    await update_control_plan(db, cp, data, USER_ID)
+
+    assert cp.lock_version == 6
+    db.commit.assert_called_once()
