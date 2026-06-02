@@ -89,11 +89,18 @@ class MaskedNodeOut(BaseModel):
 ### 4.1 名称脱敏函数
 
 ```python
-def mask_name(name: str) -> str:
-    """保留前 2 个字符，剩余替换为 ***；短名称至少保留首字符，防止完整泄露。"""
-    if not name:
+from typing import Any
+
+def mask_name(name: Any) -> str:
+    """安全脱敏：保留前 2 个字符（去除首尾空格后），其余替换为 ***。
+    防御性处理 None / 非字符串 / 空值，防止类型异常导致接口崩溃。
+    """
+    if name is None:
         return "***"
-    return name[:2] + "***"
+    name_str = str(name).strip()
+    if not name_str:
+        return "***"
+    return name_str[:2] + "***"
 ```
 
 | 原始值 | 脱敏后 |
@@ -164,7 +171,12 @@ class FMEAGraphRepository(ABC):
 
 与 `get_cross_fmea_stats` 基本一致，区别：
 - 查询全部 `FMEADocument`（不限制 `product_line_code`），复用现有 Python 聚合逻辑遍历 `graph_data`
-- 聚合 `fmea_documents` 全表数据
+- **性能保护**：JSONB 实现加载全表到内存遍历，必须设置硬上限（最多处理最新 200 份文档），避免无 Neo4j 场景下全表加载导致超时/内存溢出
+- 聚合 `fmea_documents` 采样数据
+
+### 5.4 现有缺陷顺带修复
+
+`JSONBRepository.get_cross_fmea_stats` 中 `top_failure_modes` 遗漏了 `document_no` 字段（`Neo4jRepository` 已包含），导致双实现返回结构不一致。本次改动顺带补齐，确保两套 Repository 行为一致。
 
 ## 6. API 层
 
@@ -185,7 +197,7 @@ async def global_stats(
 ## 7. 性能考量
 
 - **Neo4j**: 移除 `product_line_code` 过滤后，Cypher 查询变为全表扫描。由于 Neo4j 中 GraphNode 数量通常在数千级别，性能可接受。
-- **JSONB**: 同样为全表聚合，但仅涉及聚合计算，无大结果集返回。
+- **JSONB**: 加载全表后在 Python 内存中遍历聚合，受硬上限保护（最多 200 份文档），避免超时/内存溢出。生产环境建议优先使用 Neo4j。
 - **脱敏开销**: Python 字符串切片，单次查询处理 < 100 条记录，开销可忽略。
 
 ## 8. 错误处理
@@ -202,7 +214,10 @@ async def global_stats(
 - [ ] 响应中不包含 `fmea_id`、`document_no`、`product_line_code`、`node_id`
 - [ ] `name` 字段已按规则脱敏（保留前 2 字符 + `***`）
 - [ ] 短名称（如 `"短路"`、`"A1"`、`"X"`）不会完整暴露原值
+- [ ] `mask_name(None)` / `mask_name(123)` / `mask_name("  ")` 均安全返回 `"***"`，不抛异常
 - [ ] 接口不接受 `product_line_code` 参数
 - [ ] 非 admin 访问返回 403
 - [ ] Neo4j 和 JSONB 双实现均正确工作
+- [ ] JSONB 实现加载文档数不超过 200（硬上限保护）
+- [ ] JSONB `get_cross_fmea_stats` 的 `top_failure_modes` 补齐 `document_no`
 - [ ] 构建和 lint 无错误
