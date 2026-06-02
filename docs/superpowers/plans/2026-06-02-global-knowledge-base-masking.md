@@ -262,10 +262,16 @@ git commit -m "feat(graph): add get_global_stats across all repositories + fix d
 **Files:**
 - Modify: `backend/app/api/graph.py`
 
-- [ ] **Step 1: 在文件顶部导入区添加 `typing.Any`**
+- [ ] **Step 1: 更新导入区**
 
 ```python
 from typing import Any
+```
+
+同时修改现有 FastAPI 导入，添加 `Request` 和 `status`：
+
+```python
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Request, status
 ```
 
 - [ ] **Step 2: 添加 Pydantic Schema 和脱敏函数**
