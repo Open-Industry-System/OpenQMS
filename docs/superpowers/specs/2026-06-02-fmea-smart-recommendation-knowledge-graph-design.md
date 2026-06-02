@@ -68,11 +68,21 @@ def compute_similarity(query: str, candidate: str) -> float:
 
 ### 4.1 权限模型
 
-新增权限枚举值：`KNOWLEDGE_GRAPH_GLOBAL_READ`（全局知识库读取）。
+现有 RBAC 系统使用 `Module` + `PermissionLevel` 组合。新增：
 
-绑定至角色：
-- **admin / manager** — 拥有 `KNOWLEDGE_GRAPH_GLOBAL_READ`
-- **quality_engineer / viewer** — 不拥有该权限
+```python
+class Module(StrEnum):
+    ...
+    KNOWLEDGE_GRAPH = "knowledge_graph"  # 新增
+```
+
+权限检查：
+- 全局访问：`require_permission(Module.KNOWLEDGE_GRAPH, PermissionLevel.VIEW)`
+- 当前产品线访问：通过现有产品线访问控制（`enforce_product_line_access`）
+
+角色绑定（在 `role_permissions` 种子数据中配置）：
+- **admin / manager** — `Module.KNOWLEDGE_GRAPH` ≥ `PermissionLevel.VIEW`
+- **quality_engineer / viewer** — 无 `Module.KNOWLEDGE_GRAPH` 权限（或 `PermissionLevel.NONE`）
 
 权限检查由后端统一执行，前端通过用户角色预渲染切换控件状态。
 
@@ -80,10 +90,10 @@ def compute_similarity(query: str, candidate: str) -> float:
 
 | 用户权限 | 请求 scope | 实际生效 scope | 返回数据 |
 |---------|-----------|---------------|---------|
-| 有 `KNOWLEDGE_GRAPH_GLOBAL_READ` | `global` | `global` | 完整来源信息 |
-| 有 `KNOWLEDGE_GRAPH_GLOBAL_READ` | `current_product_line` | `current_product_line` | 完整来源信息 |
-| 无 `KNOWLEDGE_GRAPH_GLOBAL_READ` | `global` | **强制降级为 `current_product_line`** | 完整来源信息 |
-| 无 `KNOWLEDGE_GRAPH_GLOBAL_READ` | `current_product_line` | `current_product_line` | 完整来源信息 |
+| 有 `Module.KNOWLEDGE_GRAPH` ≥ `VIEW` | `global` | `global` | 完整来源信息 |
+| 有 `Module.KNOWLEDGE_GRAPH` ≥ `VIEW` | `current_product_line` | `current_product_line` | 完整来源信息 |
+| 无 `Module.KNOWLEDGE_GRAPH` 权限 | `global` | **强制降级为 `current_product_line`** | 完整来源信息 |
+| 无 `Module.KNOWLEDGE_GRAPH` 权限 | `current_product_line` | `current_product_line` | 完整来源信息 |
 
 **实现：**后端在 `recommend()` 入口处检查权限，无权限则覆盖 `request.scope = "current_product_line"`。
 
@@ -173,12 +183,17 @@ Content-Type: application/json
   "node_type": "FailureMode",
   "query_text": "焊接不良",
   "scope": "global",
+  "product_line_code": "DC-DC-100",
   "limit": 10,
   "min_similarity": 0.3
 }
 ```
 
-**权限降级：**与推荐端点同一语义。无 `KNOWLEDGE_GRAPH_GLOBAL_READ` 权限时，`scope="global"` 强制降级为 `"current_product_line"`，响应返回 `effective_scope` 告知前端实际生效范围。
+**字段说明：**
+- `product_line_code` — **必填**。用于 scope 降级时确定"当前产品线"，同时校验用户是否有该产品线访问权
+- `scope` — `global` 或 `current_product_line`
+
+**权限降级：**与推荐端点同一语义。无 `Module.KNOWLEDGE_GRAPH` ≥ `VIEW` 权限时，`scope="global"` 强制降级为 `"current_product_line"`。后端用 `product_line_code` 执行产品线访问校验（`enforce_product_line_access`）。
 
 **响应：**
 
@@ -332,7 +347,8 @@ async def find_similar_nodes_advanced(...):
         cypher += """
         RETURN n.node_id AS node_id, n.name AS name, n.type AS type,
                n.fmea_id AS fmea_id, n.product_line_code AS product_line_code,
-               d.document_no AS document_no
+               d.document_no AS document_no,
+               d.product_line_name AS product_line_name
         """
         result = await session.run(cypher, **params)
         records = await result.data()
@@ -349,7 +365,7 @@ async def find_similar_nodes_advanced(...):
                     "fmea_id": r.get("fmea_id", ""),
                     "document_no": r.get("document_no"),
                     "product_line_code": r.get("product_line_code"),
-                    "product_line_name": r.get("product_line_code"),  # Neo4j 中可扩展为 JOIN product_lines
+                    "product_line_name": r.get("product_line_name", r.get("product_line_code")),
                     "similarity_score": round(score, 3),
                     "match_reason": reason,
                 })
@@ -629,12 +645,20 @@ async def _extract_neighbors_from_match(self, match: dict, trigger_type: str) ->
         return [node_map[cid] for cid in ctrl_ids if cid in node_map]
 
     elif trigger_type == "optimization":
-        # OPTIMIZED_BY: fm --OPTIMIZED_BY--> action
-        return [
-            node_map[e["target"]] for e in edges
-            if e.get("type") == "OPTIMIZED_BY" and e.get("source") == fm_id
-            and e.get("target") in node_map
-        ]
+        # OPTIMIZED_BY: 收集 fm 自身及其原因节点的优化措施
+        opt_ids = set()
+        for e in edges:
+            if e.get("type") == "OPTIMIZED_BY" and e.get("source") == fm_id:
+                opt_ids.add(e.get("target"))
+        # 也收集原因节点的优化措施
+        cause_ids = {
+            e.get("source") for e in edges
+            if e.get("type") == "CAUSE_OF" and e.get("target") == fm_id
+        }
+        for e in edges:
+            if e.get("type") == "OPTIMIZED_BY" and e.get("source") in cause_ids:
+                opt_ids.add(e.get("target"))
+        return [node_map[oid] for oid in opt_ids if oid in node_map]
 
     return []
 
@@ -838,5 +862,5 @@ def _compute_context_hash(self, context: dict) -> str:
 - [ ] 去重逻辑正确：同名保留最高置信度，相等时 graph 优先
 - [ ] 缓存 key 包含 scope，避免全局/隔离切换污染
 - [ ] `effective_scope` 返回实际生效范围
-- [ ] Neo4j 和 JSONB 双实现均支持相似度匹配（含预过滤优化）
+- [ ] Neo4j 和 JSONB 双实现均支持相似度匹配（状态/产品线基础过滤 + Python 相似度评分）
 - [ ] 构建和测试无错误
