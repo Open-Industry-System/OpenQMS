@@ -3,6 +3,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Request, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import get_db
+from app.schemas.recommendation import SimilarNodesRequest, SimilarNodesResponse, SimilarNodeMatch
+from app.core.permissions import get_user_permission, Module, PermissionLevel
+from app.core.product_line_filter import enforce_product_line_access
 from app.core.deps import get_current_user, require_admin
 from app.models.user import User
 from app.graph.repository import FMEAGraphRepository
@@ -169,6 +174,59 @@ async def global_stats(
         )
     raw = await repo.get_global_stats()
     return _sanitize_global_stats(raw)
+
+
+@router.post("/similar-nodes", response_model=SimilarNodesResponse)
+async def similar_nodes_advanced(
+    req: SimilarNodesRequest,
+    repo: FMEAGraphRepository = Depends(get_graph_repository),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """跨 FMEA 相似节点搜索（增强版，用于调试和预览）。
+    无 KNOWLEDGE_GRAPH 权限时，global scope 强制降级为 current_product_line。
+    """
+
+    # 产品线访问校验
+    await enforce_product_line_access(user, req.product_line_code, db)
+
+    # scope 强制降级
+    has_kg = await get_user_permission(user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
+    effective_scope = "current_product_line" if (not has_kg and req.scope == "global") else req.scope
+
+    matches = await repo.find_similar_nodes_advanced(
+        node_type=req.node_type,
+        query_text=req.query_text,
+        scope=effective_scope,
+        product_line_code=req.product_line_code,
+        limit=req.limit,
+        min_similarity=req.min_similarity,
+    )
+
+    # 防御性脱敏：无全局权限用户的跨产品线节点
+    current_pl = req.product_line_code
+    result_matches = []
+    for m in matches:
+        name = m["name"]
+        if not has_kg and m.get("product_line_code") != current_pl:
+            name = mask_name(name)
+        result_matches.append(SimilarNodeMatch(
+            node_id=m["node_id"],
+            name=name,
+            node_type=m["type"],
+            fmea_id=m["fmea_id"],
+            document_no=m["document_no"],
+            product_line_code=m.get("product_line_code"),
+            product_line_name=m.get("product_line_name"),
+            similarity_score=m["similarity_score"],
+            match_reason=m["match_reason"],
+        ))
+
+    return SimilarNodesResponse(
+        matches=result_matches,
+        total=len(result_matches),
+        effective_scope=effective_scope,
+    )
 
 
 @router.post("/rebuild")

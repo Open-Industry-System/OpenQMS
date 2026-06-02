@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Input, Dropdown, Tag, Spin, Alert, Typography } from "antd";
-import { BulbOutlined, StarOutlined, SettingOutlined } from "@ant-design/icons";
+import { Input, Dropdown, Tag, Spin, Alert, Typography, Radio } from "antd";
+import { BulbOutlined, StarOutlined, SettingOutlined, GlobalOutlined } from "@ant-design/icons";
 import { getRecommendations, type Suggestion, type RecommendResponse } from "../../api/recommendation";
+import { usePermission } from "../../hooks/usePermission";
+import type { ModuleKey } from "../../hooks/usePermission";
 
 const { Text } = Typography;
 
@@ -13,6 +15,7 @@ interface SmartSuggestionDropdownProps {
   disabled?: boolean;
   value?: string;
   onChange?: (value: string) => void;
+  scope?: "global" | "current_product_line";
 }
 
 export default function SmartSuggestionDropdown({
@@ -23,6 +26,7 @@ export default function SmartSuggestionDropdown({
   disabled = false,
   value,
   onChange,
+  scope: externalScope,
 }: SmartSuggestionDropdownProps) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -33,6 +37,32 @@ export default function SmartSuggestionDropdown({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const abortRef = useRef<AbortController>();
   const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [scope, setScope] = useState<"global" | "current_product_line">(externalScope || "global");
+  const [effectiveScope, setEffectiveScope] = useState<"global" | "current_product_line">("global");
+
+  const { canView } = usePermission();
+  const hasKgPermission = canView("knowledge_graph" as ModuleKey);
+
+  const SourceTag = ({ item }: { item: Suggestion }) => {
+    if (item.source === "graph" && item.source_document_no) {
+      const href = `/fmea/${item.source_fmea_id}?tab=graph&highlightNode=${item.source_node_id}`;
+      return (
+        <span style={{ fontSize: 11, color: "#52c41a" }}>
+          来自 <a href={href} target="_blank" rel="noopener" style={{ color: "#52c41a", textDecoration: "underline" }}>{item.source_document_no}</a>
+          {item.source_product_line_code && ` · ${item.source_product_line_code}`}
+          {item.source_product_line_name && `（${item.source_product_line_name}）`}
+          {item.similarity_score !== undefined && ` · 相似度 ${(item.similarity_score * 100).toFixed(0)}%`}
+        </span>
+      );
+    }
+    if (item.source === "rule") {
+      return <span style={{ fontSize: 11, color: "#1890ff" }}>规则引擎</span>;
+    }
+    if (item.source === "llm") {
+      return <span style={{ fontSize: 11, color: "#722ed1" }}>AI 生成</span>;
+    }
+    return null;
+  };
 
   const fetchSuggestions = useCallback(
     async (inputValue: string) => {
@@ -50,12 +80,18 @@ export default function SmartSuggestionDropdown({
       try {
         const res: RecommendResponse = await getRecommendations(
           fmeaId,
-          { trigger_type: triggerType, context: { ...context, input_text: inputValue } },
+          {
+            trigger_type: triggerType,
+            context: { ...context, input_text: inputValue },
+            scope,
+            include_graph: true,
+          },
           abortRef.current.signal
         );
         setSuggestions(res.suggestions.slice(0, 5));
         setLlmAvailable(res.llm_available);
         setFallback(res.source === "rule_fallback");
+        setEffectiveScope(res.effective_scope);
         setOpen(res.suggestions.length > 0);
         setSelectedIndex(-1);
       } catch (e: unknown) {
@@ -74,7 +110,7 @@ export default function SmartSuggestionDropdown({
         setLoading(false);
       }
     },
-    [fmeaId, triggerType, context]
+    [fmeaId, triggerType, context, scope]
   );
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -131,28 +167,39 @@ export default function SmartSuggestionDropdown({
     s === "llm" ? <StarOutlined style={{ color: "#722ed1" }} /> : <SettingOutlined style={{ color: "#1890ff" }} />;
 
   const dropdownContent = (
-    <div style={{ width: 320, background: "#fff", borderRadius: 4, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
+    <div style={{ width: 360, background: "#fff", borderRadius: 4, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
       {error && (
-        <Alert
-          type="error"
-          message={error}
-          banner
-          style={{ fontSize: 12 }}
-        />
+        <Alert type="error" message={error} banner style={{ fontSize: 12 }} />
       )}
       {fallback && (
-        <Alert
-          type="warning"
-          message="AI 建议暂不可用，已使用规则引擎"
-          banner
-          style={{ fontSize: 12 }}
-        />
+        <Alert type="warning" message="AI 建议暂不可用，已使用规则引擎" banner style={{ fontSize: 12 }} />
       )}
       {!llmAvailable && (
         <Text type="secondary" style={{ display: "block", padding: "4px 12px", fontSize: 12 }}>
           仅规则引擎模式
         </Text>
       )}
+      <div style={{ padding: "4px 12px", borderBottom: "1px solid #f0f0f0" }}>
+        <Radio.Group
+          value={scope}
+          onChange={(e) => setScope(e.target.value)}
+          disabled={!hasKgPermission}
+          size="small"
+        >
+          <Radio.Button value="global"><GlobalOutlined /> 全局经验</Radio.Button>
+          <Radio.Button value="current_product_line">仅当前产品线</Radio.Button>
+        </Radio.Group>
+        {!hasKgPermission && (
+          <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+            （无全局权限，仅当前产品线）
+          </Text>
+        )}
+        {effectiveScope !== scope && (
+          <Text type="warning" style={{ fontSize: 11, marginLeft: 8 }}>
+            实际范围：{effectiveScope === "global" ? "全局" : "仅当前产品线"}
+          </Text>
+        )}
+      </div>
       {suggestions.map((s, i) => (
         <div
           key={i}
@@ -162,21 +209,21 @@ export default function SmartSuggestionDropdown({
             cursor: "pointer",
             background: i === selectedIndex ? "#f0f0f0" : "transparent",
             borderBottom: i < suggestions.length - 1 ? "1px solid #f0f0f0" : "none",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
           }}
         >
-          {sourceIcon(s.source)}
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13 }}>{s.name}</div>
-            {s.explanation && (
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                {s.explanation}
-              </Text>
-            )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {sourceIcon(s.source)}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13 }}>{s.name}</div>
+              {s.explanation && (
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {s.explanation}
+                </Text>
+              )}
+              <div><SourceTag item={s} /></div>
+            </div>
+            {confidenceLabel(s.confidence)}
           </div>
-          {confidenceLabel(s.confidence)}
         </div>
       ))}
     </div>

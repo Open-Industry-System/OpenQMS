@@ -232,7 +232,8 @@ async def update_fmea(
         # Invalidate recommendation cache when graph_data or product_line changes
         if graph_data is not None or product_line_code is not None:
             from app.services.recommendation_service import RecommendationService
-            rec_service = RecommendationService(db=db, llm_provider=None)
+            from app.services.recommendation_service import _NullGraphRepo
+            rec_service = RecommendationService(db=db, llm_provider=None, graph_repo=_NullGraphRepo())
             await rec_service.invalidate_cache_for_fmea(fmea.fmea_id)
 
     await db.commit()

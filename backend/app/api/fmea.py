@@ -171,6 +171,10 @@ def _check_rate_limit(key: str, limit: tuple[int, float]) -> bool:
     return True
 
 
+from app.graph.deps import get_graph_repository
+from app.graph.repository import FMEAGraphRepository
+from app.core.permissions import get_user_permission
+
 @router.post("/{fmea_id}/recommend", response_model=RecommendResponse)
 async def recommend(
     fmea_id: uuid.UUID,
@@ -178,8 +182,9 @@ async def recommend(
     fastapi_request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.EDIT)),
+    graph_repo: FMEAGraphRepository = Depends(get_graph_repository),
 ):
-    # Rate limiting
+    # Rate limiting (unchanged)
     user_key = f"rec_user:{user.user_id}"
     fmea_key = f"rec_fmea:{fmea_id}"
     if not _check_rate_limit(user_key, _RATE_LIMITS["per_user"]):
@@ -187,21 +192,27 @@ async def recommend(
     if not _check_rate_limit(fmea_key, _RATE_LIMITS["per_fmea"]):
         raise HTTPException(status_code=429, detail="该文档请求过于频繁，请稍后重试")
 
-    # Load FMEA for product-line access check
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
     await enforce_product_line_access(user, fmea.product_line_code, db)
 
-    # Validate minimum context
-    if len(request.context.get("function_description", request.context.get("failure_mode", ""))) < 2:
-        return RecommendResponse(suggestions=[], source="rule", cached=False, llm_available=False)
+    # 提前计算 effective_scope（短输入 early return 也需要正确值）
+    requested_scope = getattr(request, "scope", "global")
+    has_kg = await get_user_permission(user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
+    effective_scope = "current_product_line" if (not has_kg and requested_scope == "global") else requested_scope
 
-    # Use singleton LLM provider from app.state (initialized in lifespan)
+    if len(request.context.get("function_description", request.context.get("failure_mode", ""))) < 2:
+        return RecommendResponse(
+            suggestions=[], source="rule", cached=False,
+            llm_available=False, graph_match_count=0,
+            effective_scope=effective_scope,
+        )
+
     llm = getattr(fastapi_request.app.state, "llm_provider", None)
-    service = RecommendationService(db=db, llm_provider=llm)
-    result = await service.recommend(fmea_id, request)
-    await db.commit()  # persist cache writes
+    service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo)
+    result = await service.recommend(fmea_id, request, user)
+    await db.commit()
     return result
 
 
