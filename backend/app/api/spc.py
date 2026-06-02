@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
-from app.models.spc import SampleValue
+from app.models.spc import SampleValue, SPCAlarm
 from app import schemas
 from app.schemas.spc import ControlLimitSnapshotOut
 from app.services import spc_service
@@ -262,6 +262,67 @@ async def create_capa_from_alarm(
         return {"capa_id": capa.report_id, "document_number": capa.document_no}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ============ FMEA Match Recommendations ============
+
+@router.get("/alarms/{alarm_id}/fmea-recommendations", response_model=schemas.spc.FMEAMatchResponse)
+async def get_fmea_recommendations(
+    alarm_id: UUID,
+    force: bool = Query(False, description="强制重新匹配，忽略缓存"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """获取 SPC 告警的 FMEA 失效模式推荐。"""
+    alarm = await db.get(SPCAlarm, alarm_id)
+    if not alarm:
+        raise HTTPException(status_code=404, detail="Alarm not found")
+
+    ic = await spc_service.get_inspection_characteristic(db, alarm.ic_id)
+    if not ic:
+        raise HTTPException(status_code=400, detail="Inspection characteristic not found")
+
+    if alarm.fmea_recommendations and not force:
+        recommendations = alarm.fmea_recommendations
+    else:
+        recommendations = await spc_service.match_fmea_for_alarm(db, alarm)
+
+    return {
+        "alarm_id": str(alarm_id),
+        "ic_code": ic.ic_code,
+        "process_name": ic.process_name,
+        "characteristic_name": ic.characteristic_name,
+        "recommendations": recommendations,
+        "has_confirmed": bool(alarm.confirmed_fmea_node_id),
+        "confirmed_fmea_id": str(alarm.confirmed_fmea_id) if alarm.confirmed_fmea_id else None,
+        "confirmed_fmea_node_id": alarm.confirmed_fmea_node_id,
+    }
+
+
+@router.post("/alarms/{alarm_id}/confirm-fmea")
+async def confirm_fmea_association(
+    alarm_id: UUID,
+    req: schemas.spc.ConfirmFMEARequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.EDIT)),
+):
+    """用户确认 FMEA 关联。"""
+    alarm = await db.get(SPCAlarm, alarm_id)
+    if not alarm:
+        raise HTTPException(status_code=404, detail="Alarm not found")
+
+    alarm.confirmed_fmea_id = req.fmea_id
+    alarm.confirmed_fmea_node_id = req.node_id
+
+    await spc_service._add_audit_log_no_commit(
+        db, user.user_id, "UPDATE", "spc_alarms", alarm_id,
+        {
+            "confirmed_fmea_id": str(req.fmea_id),
+            "confirmed_fmea_node_id": req.node_id,
+        }
+    )
+    await db.commit()
+    return {"success": True}
 
 
 # ============ Control Limit Snapshots ============
