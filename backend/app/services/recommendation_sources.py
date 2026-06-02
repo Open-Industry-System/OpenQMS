@@ -116,6 +116,10 @@ class SemanticSearchSource:
         if not self.embedding:
             return []
 
+        # NEW: Explicit guard for no permission
+        if context.user_product_lines == []:
+            return []
+
         capa_data = context.capa_data
         if context.stage == "d4":
             query_text = capa_data.get("d2_description", "")
