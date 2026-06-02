@@ -1,8 +1,9 @@
-"""测试 EmbeddingProvider 工厂逻辑（纯逻辑测试）。"""
+"""测试 EmbeddingProvider 工厂逻辑和向量维度解析（纯逻辑测试）。"""
 import pytest
 from unittest.mock import patch
 
 from app.services.embedding_provider import create_embedding_provider, OllamaEmbeddingProvider
+from app.utils.vector import parse_vector_dimensions
 
 
 class TestCreateEmbeddingProvider:
@@ -52,21 +53,37 @@ class TestOllamaDimensions:
         assert provider.dimensions == 768
 
 
-class TestMigrationDimensionValidation:
-    """测试迁移中的维度参数校验逻辑。"""
+class TestParseVectorDimensions:
+    """测试迁移中的维度参数解析（使用与迁移相同的 parse_vector_dimensions 函数）。"""
 
     def test_valid_dimensions(self):
         """有效维度通过校验。"""
-        for dim in [768, 1024, 1536]:
-            assert 1 <= dim <= 2000
+        assert parse_vector_dimensions("768") == 768
+        assert parse_vector_dimensions("1024") == 1024
+        assert parse_vector_dimensions("1536") == 1536
 
-    def test_invalid_dimensions_rejected(self):
-        """无效维度被拒绝。"""
-        for dim in [0, -1, 2001, 99999]:
-            assert not (1 <= dim <= 2000)
+    def test_none_returns_default(self):
+        """None 返回默认值。"""
+        assert parse_vector_dimensions(None) == 1536
+        assert parse_vector_dimensions(None, default=768) == 768
 
-    def test_dimensions_from_string(self):
-        """字符串维度正确解析为整数。"""
-        assert int("768") == 768
-        with pytest.raises(ValueError):
-            int("not_a_number")
+    def test_empty_string_returns_default(self):
+        """空字符串返回默认值。"""
+        assert parse_vector_dimensions("") == 1536
+        assert parse_vector_dimensions("  ") == 1536
+
+    def test_invalid_string_raises(self):
+        """非法字符串直接 raise，不静默回退。"""
+        with pytest.raises(ValueError, match="Must be an integer"):
+            parse_vector_dimensions("768x")
+        with pytest.raises(ValueError, match="Must be an integer"):
+            parse_vector_dimensions("abc")
+
+    def test_out_of_range_raises(self):
+        """超范围直接 raise。"""
+        with pytest.raises(ValueError, match="Must be 1-2000"):
+            parse_vector_dimensions("0")
+        with pytest.raises(ValueError, match="Must be 1-2000"):
+            parse_vector_dimensions("-1")
+        with pytest.raises(ValueError, match="Must be 1-2000"):
+            parse_vector_dimensions("2001")
