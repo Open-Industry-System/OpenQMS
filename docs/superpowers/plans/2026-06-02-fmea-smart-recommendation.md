@@ -166,13 +166,43 @@ git commit -m "feat(graph): add find_similar_nodes_advanced abstract method"
 **Files:**
 - Modify: `backend/app/graph/jsonb_repository.py`
 
-- [ ] **Step 1: 在文件顶部导入 similarity 函数**
+- [ ] **Step 1: Write failing test for find_similar_nodes_advanced (TDD)**
+
+创建 `backend/tests/test_graph_repository_advanced.py`：
+
+```python
+import os
+os.environ.setdefault("SECRET_KEY", "test-secret-key")
+
+import pytest
+from app.graph.jsonb_repository import JSONBRepository
+
+
+class StubDB:
+    """Minimal async stub for testing abstract method instantiation."""
+    pass
+
+
+def test_jsonb_repo_has_find_similar_nodes_advanced():
+    """验证 JSONBRepository 已实现 find_similar_nodes_advanced。"""
+    repo = JSONBRepository(StubDB())
+    assert hasattr(repo, "find_similar_nodes_advanced")
+    import inspect
+    assert "compute_similarity" in inspect.getsource(repo.find_similar_nodes_advanced)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd backend && python -m pytest tests/test_graph_repository_advanced.py -v`
+Expected: FAIL — `JSONBRepository` has no attribute `find_similar_nodes_advanced` (or import error if method not yet added)
+
+- [ ] **Step 3: 在文件顶部导入 similarity 函数**
 
 ```python
 from app.utils.similarity import compute_similarity
 ```
 
-- [ ] **Step 2: 添加 `_load_product_line_names` 辅助方法**
+- [ ] **Step 4: 添加 `_load_product_line_names` 辅助方法**
 
 在 `JSONBRepository` 类末尾（`analyze_change_impact` 之后）添加：
 
@@ -242,16 +272,16 @@ from app.utils.similarity import compute_similarity
         return matches[:limit]
 ```
 
-- [ ] **Step 4: Run existing repository tests to确认未破坏既有功能**
+- [ ] **Step 6: Run new + existing repository tests**
 
-Run: `cd backend && python -m pytest tests/test_graph_repository.py -v`
-Expected: All existing tests pass
+Run: `cd backend && python -m pytest tests/test_graph_repository_advanced.py tests/test_graph_repository.py -v`
+Expected: All tests pass
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add backend/app/graph/jsonb_repository.py
-git commit -m "feat(graph): JSONBRepository.find_similar_nodes_advanced implementation"
+git add backend/app/graph/jsonb_repository.py backend/tests/test_graph_repository_advanced.py
+git commit -m "feat(graph): JSONBRepository.find_similar_nodes_advanced + TDD tests"
 ```
 
 ---
@@ -261,13 +291,31 @@ git commit -m "feat(graph): JSONBRepository.find_similar_nodes_advanced implemen
 **Files:**
 - Modify: `backend/app/graph/neo4j_repository.py`
 
-- [ ] **Step 1: 在文件顶部导入 similarity 函数**
+- [ ] **Step 1: Write failing test for Neo4j find_similar_nodes_advanced (TDD)**
+
+在 `backend/tests/test_graph_repository_advanced.py` 末尾追加：
+
+```python
+def test_neo4j_repo_has_find_similar_nodes_advanced():
+    """验证 Neo4jRepository 已实现 find_similar_nodes_advanced。"""
+    from app.graph.neo4j_repository import Neo4jRepository
+    assert hasattr(Neo4jRepository, "find_similar_nodes_advanced")
+    import inspect
+    assert "compute_similarity" in inspect.getsource(Neo4jRepository.find_similar_nodes_advanced)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd backend && python -m pytest tests/test_graph_repository_advanced.py::test_neo4j_repo_has_find_similar_nodes_advanced -v`
+Expected: FAIL — `Neo4jRepository` has no attribute `find_similar_nodes_advanced`
+
+- [ ] **Step 3: 在文件顶部导入 similarity 函数**
 
 ```python
 from app.utils.similarity import compute_similarity
 ```
 
-- [ ] **Step 2: 添加 `find_similar_nodes_advanced` 实现**
+- [ ] **Step 4: 添加 `find_similar_nodes_advanced` 实现**
 
 在 `get_global_stats` 方法之后添加：
 
@@ -318,11 +366,16 @@ from app.utils.similarity import compute_similarity
             return matches[:limit]
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Run TDD tests**
+
+Run: `cd backend && python -m pytest tests/test_graph_repository_advanced.py -v`
+Expected: All tests pass
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/graph/neo4j_repository.py
-git commit -m "feat(graph): Neo4jRepository.find_similar_nodes_advanced implementation"
+git add backend/app/graph/neo4j_repository.py backend/tests/test_graph_repository_advanced.py
+git commit -m "feat(graph): Neo4jRepository.find_similar_nodes_advanced + TDD tests"
 ```
 
 ---
@@ -573,7 +626,57 @@ git commit -m "feat(schema): extend recommendation schemas with graph source fie
 **Files:**
 - Modify: `backend/app/services/recommendation_service.py`
 
-- [ ] **Step 1: 更新导入和构造函数**
+- [ ] **Step 1: Write failing tests for new RecommendationService methods (TDD)**
+
+创建 `backend/tests/test_recommendation_service.py`（先写会失败的测试）：
+
+```python
+import os
+os.environ.setdefault("SECRET_KEY", "test-secret-key")
+
+import pytest
+from app.services.recommendation_service import RecommendationService
+from app.schemas.recommendation import SuggestionItem
+
+
+class StubGraphRepo:
+    async def find_similar_nodes_advanced(self, **kwargs):
+        return []
+
+
+def test_merge_and_deduplicate_prefers_higher_confidence():
+    """同名 suggestion 保留 confidence 更高的版本。"""
+    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    a = [SuggestionItem(name="焊接不良", confidence=0.7, source="rule")]
+    b = [SuggestionItem(name="焊接不良", confidence=0.85, source="graph")]
+    result = svc._merge_and_deduplicate(a, b)
+    assert len(result) == 1
+    assert result[0].source == "graph"
+    assert result[0].confidence == 0.85
+
+
+def test_graph_matches_to_suggestions_maps_confidence():
+    """similarity_score 正确映射到 confidence 范围。"""
+    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    matches = [{
+        "node_id": "n1", "name": "焊接不良", "type": "FailureMode",
+        "fmea_id": "f1", "document_no": "PFMEA-001",
+        "product_line_code": "DC-DC-100", "product_line_name": "DC-DC",
+        "similarity_score": 0.75, "match_reason": "substring_match",
+    }]
+    items = svc._graph_matches_to_suggestions(matches, "DC-DC-100")
+    assert len(items) == 1
+    assert items[0].confidence == 0.875  # 0.5 + 0.75 * 0.5
+    assert items[0].source == "graph"
+    assert items[0].source_document_no == "PFMEA-001"
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd backend && python -m pytest tests/test_recommendation_service.py -v`
+Expected: FAIL — `AttributeError: 'RecommendationService' object has no attribute '_merge_and_deduplicate'` (methods not yet implemented)
+
+- [ ] **Step 3: 更新导入和构造函数**
 
 在文件顶部添加导入：
 
@@ -597,7 +700,7 @@ class RecommendationService:
         self.rules = RuleEngine()
 ```
 
-- [ ] **Step 2: 重写 `recommend()` 方法**
+- [ ] **Step 4: 重写 `recommend()` 方法**
 
 替换现有的 `recommend()` 方法为：
 
@@ -705,7 +808,7 @@ class RecommendationService:
         return response
 ```
 
-- [ ] **Step 3: 添加 `_query_graph_similarity` 方法**
+- [ ] **Step 5: 添加 `_query_graph_similarity` 方法**
 
 ```python
     async def _query_graph_similarity(
@@ -751,7 +854,7 @@ class RecommendationService:
         return recommendations
 ```
 
-- [ ] **Step 4: 添加 `_extract_neighbors_from_match` 方法**
+- [ ] **Step 6: 添加 `_extract_neighbors_from_match` 方法**
 
 ```python
     async def _extract_neighbors_from_match(self, match: dict, trigger_type: str) -> list[dict]:
@@ -818,7 +921,7 @@ class RecommendationService:
         return row if row else None
 ```
 
-- [ ] **Step 5: 添加 `_graph_matches_to_suggestions` 方法**
+- [ ] **Step 7: 添加 `_graph_matches_to_suggestions` 方法**
 
 ```python
     def _graph_matches_to_suggestions(
@@ -849,7 +952,7 @@ class RecommendationService:
         return suggestions
 ```
 
-- [ ] **Step 6: 添加 `_merge_and_deduplicate` 方法**
+- [ ] **Step 8: 添加 `_merge_and_deduplicate` 方法**
 
 ```python
     def _merge_and_deduplicate(
@@ -873,7 +976,7 @@ class RecommendationService:
         return sorted(seen.values(), key=lambda x: x.confidence, reverse=True)
 ```
 
-- [ ] **Step 7: 更新 `_get_cached` 以动态计算 `graph_match_count` 和 `effective_scope`**
+- [ ] **Step 9: 更新 `_get_cached` 以动态计算 `graph_match_count` 和 `effective_scope`**
 
 ```python
     async def _get_cached(
@@ -903,7 +1006,7 @@ class RecommendationService:
         return None
 ```
 
-- [ ] **Step 8: 更新 `_cache_result` 以保存新字段**
+- [ ] **Step 10: 更新 `_cache_result` 以保存新字段**
 
 ```python
     async def _cache_result(
@@ -938,15 +1041,15 @@ class RecommendationService:
         await self.db.execute(stmt)
 ```
 
-- [ ] **Step 9: 删除旧的 `_merge_suggestions` 方法（被 `_merge_and_deduplicate` 替代）**
+- [ ] **Step 11: 删除旧的 `_merge_suggestions` 方法（被 `_merge_and_deduplicate` 替代）**
 
 在文件中删除 `_merge_suggestions` 方法。
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
-git add backend/app/services/recommendation_service.py
-git commit -m "feat(recommendation): integrate graph similarity into RecommendationService"
+git add backend/app/services/recommendation_service.py backend/tests/test_recommendation_service.py
+git commit -m "feat(recommendation): integrate graph similarity into RecommendationService + TDD tests"
 ```
 
 ---
