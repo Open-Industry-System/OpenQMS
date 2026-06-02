@@ -20,7 +20,7 @@ import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { getCPSyncStatus, syncToCP } from "../../../api/specialCharacteristic";
 import { useCollaboration } from "../../../hooks/useCollaboration";
-import { CollaborationBar, ConflictResolutionModal } from "../../../components/collaboration";
+import { CollaborationBar, ActiveUserIndicator, ConflictResolutionModal } from "../../../components/collaboration";
 import type { ConflictInfo } from "../../../types/collaboration";
 import ImportFromFMEAModal from "../../../components/control-plan/ImportFromFMEAModal";
 import VersionHistoryTab from "../../../components/version/VersionHistoryTab";
@@ -106,7 +106,7 @@ export default function ControlPlanEditorPage() {
   const canEdit = canEditPerm('planning') && !isApproved;
 
   const cpId = id || "";
-  const { activeUsers, isSyncing } = useCollaboration("control_plan", cpId);
+  const { activeUsers, isSyncing, startEditing, stopEditing } = useCollaboration("control_plan", cpId);
 
   // Conflict resolution state
   const [conflictVisible, setConflictVisible] = useState(false);
@@ -348,13 +348,22 @@ export default function ControlPlanEditorPage() {
       dataIndex: "step_no",
       key: "step_no",
       width: 120,
-      render: (_: string, __: ControlPlanItem, index: number) => (
-        <Input
-          value={items[index]?.step_no || ""}
-          onChange={(e) => updateItem(index, "step_no", e.target.value)}
-          disabled={!canEdit}
-          size="small"
-        />
+      render: (_: string, record: ControlPlanItem, index: number) => (
+        <div>
+          <Input
+            value={items[index]?.step_no || ""}
+            onFocus={() => startEditing({ row_key: record.item_id, field: "step_no" })}
+            onBlur={stopEditing}
+            onChange={(e) => updateItem(index, "step_no", e.target.value)}
+            disabled={!canEdit}
+            size="small"
+          />
+          <ActiveUserIndicator
+            activeUsers={activeUsers}
+            rowKey={record.item_id}
+            field="step_no"
+          />
+        </div>
       ),
     },
     {
@@ -362,13 +371,22 @@ export default function ControlPlanEditorPage() {
       dataIndex: "process_name",
       key: "process_name",
       width: 160,
-      render: (_: string, __: ControlPlanItem, index: number) => (
-        <Input
-          value={items[index]?.process_name || ""}
-          onChange={(e) => updateItem(index, "process_name", e.target.value)}
-          disabled={!canEdit}
-          size="small"
-        />
+      render: (_: string, record: ControlPlanItem, index: number) => (
+        <div>
+          <Input
+            value={items[index]?.process_name || ""}
+            onFocus={() => startEditing({ row_key: record.item_id, field: "process_name" })}
+            onBlur={stopEditing}
+            onChange={(e) => updateItem(index, "process_name", e.target.value)}
+            disabled={!canEdit}
+            size="small"
+          />
+          <ActiveUserIndicator
+            activeUsers={activeUsers}
+            rowKey={record.item_id}
+            field="process_name"
+          />
+        </div>
       ),
     },
     {
@@ -407,13 +425,22 @@ export default function ControlPlanEditorPage() {
           dataIndex: "product_characteristic",
           key: "product_characteristic",
           width: 140,
-          render: (_: string, __: ControlPlanItem, index: number) => (
-            <Input
-              value={items[index]?.product_characteristic || ""}
-              onChange={(e) => updateItem(index, "product_characteristic", e.target.value)}
-              disabled={!canEdit}
-              size="small"
-            />
+          render: (_: string, record: ControlPlanItem, index: number) => (
+            <div>
+              <Input
+                value={items[index]?.product_characteristic || ""}
+                onFocus={() => startEditing({ row_key: record.item_id, field: "product_characteristic" })}
+                onBlur={stopEditing}
+                onChange={(e) => updateItem(index, "product_characteristic", e.target.value)}
+                disabled={!canEdit}
+                size="small"
+              />
+              <ActiveUserIndicator
+                activeUsers={activeUsers}
+                rowKey={record.item_id}
+                field="product_characteristic"
+              />
+            </div>
           ),
         },
         {
@@ -421,13 +448,22 @@ export default function ControlPlanEditorPage() {
           dataIndex: "process_characteristic",
           key: "process_characteristic",
           width: 140,
-          render: (_: string, __: ControlPlanItem, index: number) => (
-            <Input
-              value={items[index]?.process_characteristic || ""}
-              onChange={(e) => updateItem(index, "process_characteristic", e.target.value)}
-              disabled={!canEdit}
-              size="small"
-            />
+          render: (_: string, record: ControlPlanItem, index: number) => (
+            <div>
+              <Input
+                value={items[index]?.process_characteristic || ""}
+                onFocus={() => startEditing({ row_key: record.item_id, field: "process_characteristic" })}
+                onBlur={stopEditing}
+                onChange={(e) => updateItem(index, "process_characteristic", e.target.value)}
+                disabled={!canEdit}
+                size="small"
+              />
+              <ActiveUserIndicator
+                activeUsers={activeUsers}
+                rowKey={record.item_id}
+                field="process_characteristic"
+              />
+            </div>
           ),
         },
       ],
@@ -530,13 +566,22 @@ export default function ControlPlanEditorPage() {
       dataIndex: "control_method",
       key: "control_method",
       width: 140,
-      render: (_: string, __: ControlPlanItem, index: number) => (
-        <Input
-          value={items[index]?.control_method || ""}
-          onChange={(e) => updateItem(index, "control_method", e.target.value)}
-          disabled={!canEdit}
-          size="small"
-        />
+      render: (_: string, record: ControlPlanItem, index: number) => (
+        <div>
+          <Input
+            value={items[index]?.control_method || ""}
+            onFocus={() => startEditing({ row_key: record.item_id, field: "control_method" })}
+            onBlur={stopEditing}
+            onChange={(e) => updateItem(index, "control_method", e.target.value)}
+            disabled={!canEdit}
+            size="small"
+          />
+          <ActiveUserIndicator
+            activeUsers={activeUsers}
+            rowKey={record.item_id}
+            field="control_method"
+          />
+        </div>
       ),
     },
     {
@@ -544,13 +589,22 @@ export default function ControlPlanEditorPage() {
       dataIndex: "reaction_plan",
       key: "reaction_plan",
       width: 140,
-      render: (_: string, __: ControlPlanItem, index: number) => (
-        <Input
-          value={items[index]?.reaction_plan || ""}
-          onChange={(e) => updateItem(index, "reaction_plan", e.target.value)}
-          disabled={!canEdit}
-          size="small"
-        />
+      render: (_: string, record: ControlPlanItem, index: number) => (
+        <div>
+          <Input
+            value={items[index]?.reaction_plan || ""}
+            onFocus={() => startEditing({ row_key: record.item_id, field: "reaction_plan" })}
+            onBlur={stopEditing}
+            onChange={(e) => updateItem(index, "reaction_plan", e.target.value)}
+            disabled={!canEdit}
+            size="small"
+          />
+          <ActiveUserIndicator
+            activeUsers={activeUsers}
+            rowKey={record.item_id}
+            field="reaction_plan"
+          />
+        </div>
       ),
     },
     {
