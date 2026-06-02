@@ -3,12 +3,12 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Select, Table, Card, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
-  Descriptions, Divider, Modal,
+  Descriptions, Divider, Modal, Radio,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, SendOutlined,
   CheckOutlined, UndoOutlined, PlusOutlined, DeleteOutlined,
-  HistoryOutlined,
+  HistoryOutlined, RadarChartOutlined,
 } from "@ant-design/icons";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
@@ -31,6 +31,9 @@ import { GraphCanvas, GraphToolbar, NodeDetailDrawer, GraphLegend } from "../../
 import type { GraphLayout, GraphCanvasRef } from "../../../components/graph";
 import type { GraphNode as APIGraphNode } from "../../../api/graph";
 import { getImpactChain, getCauseChain, normalizeGraphData } from "../../../api/graph";
+import { analyzeChangeImpact } from "../../../api/changeImpact";
+import { ImpactReportPanel } from "../../../components/change-impact";
+import type { AnalyzeChangeImpactRequest, ChangeImpactAnalysis } from "../../../api/changeImpact";
 
 const { Title, Text } = Typography;
 
@@ -109,6 +112,16 @@ export default function FMEAEditorPage() {
   const [graphLoading, setGraphLoading] = useState(false);
   const canvasRef = useRef<GraphCanvasRef>(null);
 
+  // Change impact analysis state
+  const [impactModalOpen, setImpactModalOpen] = useState(false);
+  const [impactLoading, setImpactLoading] = useState(false);
+  const [impactResult, setImpactResult] = useState<ChangeImpactAnalysis | null>(null);
+  const [impactForm, setImpactForm] = useState({
+    change_type: "attribute" as "attribute" | "structural",
+    field_name: "",
+    new_value: "",
+  });
+
   // 右键菜单状态
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -182,6 +195,29 @@ export default function FMEAEditorPage() {
       setDimOthers(true);
     } catch {
       message.error("原因链查询失败");
+    }
+  };
+
+  const handleAnalyzeImpact = async () => {
+    if (!selectedGraphNode) return;
+    setImpactLoading(true);
+    try {
+      const request: AnalyzeChangeImpactRequest = {
+        fmea_id: fmeaId,
+        node_id: selectedGraphNode.id,
+        node_type: selectedGraphNode.label || "",
+        node_name: selectedGraphNode.properties?.name || selectedGraphNode.label || "",
+        change_type: impactForm.change_type,
+        field_name: impactForm.field_name || undefined,
+        new_value: impactForm.new_value || undefined,
+      };
+      const result = await analyzeChangeImpact(request);
+      setImpactResult(result);
+      message.success("分析完成");
+    } catch {
+      message.error("分析失败");
+    } finally {
+      setImpactLoading(false);
     }
   };
 
@@ -1100,6 +1136,19 @@ export default function FMEAEditorPage() {
                   清除高亮
                 </Button>
               )}
+              <Card title="变更影响分析" size="small">
+                <Space direction="vertical" style={{ width: "100%" }}>
+                  <Text type="secondary">分析此节点的变更对上下游的影响范围</Text>
+                  <Button
+                    type="primary"
+                    icon={<RadarChartOutlined />}
+                    onClick={() => { setImpactModalOpen(true); setImpactResult(null); }}
+                    disabled={!canEdit("fmea") || !selectedGraphNode}
+                  >
+                    分析影响范围
+                  </Button>
+                </Space>
+              </Card>
             </div>
           </div>
           <NodeDetailDrawer
@@ -1109,6 +1158,48 @@ export default function FMEAEditorPage() {
             allNodes={graphDataRef.current?.nodes}
             allEdges={graphDataRef.current?.edges}
           />
+          <Modal
+            title="变更影响分析"
+            open={impactModalOpen}
+            onCancel={() => setImpactModalOpen(false)}
+            width={800}
+            footer={
+              impactResult ? (
+                <Button onClick={() => setImpactModalOpen(false)}>关闭</Button>
+              ) : (
+                <>
+                  <Button onClick={() => setImpactModalOpen(false)}>取消</Button>
+                  <Button type="primary" onClick={handleAnalyzeImpact} loading={impactLoading}>执行分析</Button>
+                </>
+              )
+            }
+          >
+            {impactResult ? (
+              <ImpactReportPanel
+                analysis={impactResult}
+                onViewGraph={() => {
+                  const url = `/fmea/${fmeaId}?tab=graph&highlightNode=${impactResult.node_id}`;
+                  window.open(url, "_blank");
+                }}
+              />
+            ) : (
+              <Space direction="vertical" style={{ width: "100%" }}>
+                <Radio.Group
+                  value={impactForm.change_type}
+                  onChange={(e) => setImpactForm({ ...impactForm, change_type: e.target.value })}
+                >
+                  <Radio.Button value="attribute">属性变更</Radio.Button>
+                  <Radio.Button value="structural">结构变更</Radio.Button>
+                </Radio.Group>
+                {impactForm.change_type === "attribute" && (
+                  <>
+                    <Input placeholder="字段名（如 design_parameter）" value={impactForm.field_name} onChange={(e) => setImpactForm({ ...impactForm, field_name: e.target.value })} />
+                    <Input placeholder="新值" value={impactForm.new_value} onChange={(e) => setImpactForm({ ...impactForm, new_value: e.target.value })} />
+                  </>
+                )}
+              </Space>
+            )}
+          </Modal>
         </Tabs.TabPane>
         <Tabs.TabPane tab="关联 CAPA" key="related-capa">
           {selectedFunctionId ? (
