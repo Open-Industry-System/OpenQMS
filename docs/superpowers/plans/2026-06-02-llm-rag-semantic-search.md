@@ -775,28 +775,31 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
                     })
         else:
             # For CAPA, audit, complaint, SCAR, RMA - fetch specific text fields
+            # Format: (table, pk_col, plc_expr, doc_no_col, fields)
+            # plc_expr: SQL expression for product_line_code (NULL if column doesn't exist)
+            # doc_no_col: actual column name for document number (varies by table)
             table_field_map = {
-                "capa": ("capa_eightd", "report_id", [
+                "capa": ("capa_eightd", "report_id", "product_line_code", "document_no", [
                     ("d2_description", "d2_description"),
                     ("d4_root_cause", "d4_root_cause"),
                     ("d5_correction", "d5_correction"),
                     ("d7_prevention", "d7_prevention"),
                 ]),
-                "audit_finding": ("audit_findings", "finding_id", [
+                "audit_finding": ("audit_findings", "finding_id", "NULL", "clause_ref", [
                     ("description", "description"),
                     ("root_cause", "root_cause"),
                     ("corrective_action", "corrective_action"),
                 ]),
-                "complaint": ("customer_complaints", "complaint_id", [
+                "complaint": ("customer_complaints", "complaint_id", "product_line_code", "complaint_no", [
                     ("defect_desc", "defect_desc"),
                     ("root_cause", "root_cause"),
                     ("corrective_action", "corrective_action"),
                 ]),
-                "scar": ("supplier_scars", "scar_id", [
+                "scar": ("supplier_scars", "scar_id", "product_line_code", "scar_no", [
                     ("description", "description"),
                     ("resolution_summary", "resolution_summary"),
                 ]),
-                "rma": ("rma_records", "rma_id", [
+                "rma": ("rma_records", "rma_id", "product_line_code", "rma_no", [
                     ("analysis_result", "analysis_result"),
                     ("corrective_action", "corrective_action"),
                 ]),
@@ -805,11 +808,11 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
             if entity_type not in table_field_map:
                 continue
 
-            table, pk_col, fields = table_field_map[entity_type]
+            table, pk_col, plc_expr, doc_no_col, fields = table_field_map[entity_type]
             field_names = [f[0] for f in fields]
             result = await db.execute(
                 text(f"""
-                    SELECT {', '.join(field_names)}, product_line_code, document_no
+                    SELECT {', '.join(field_names)}, {plc_expr} AS product_line_code, {doc_no_col} AS document_no
                     FROM {table}
                     WHERE {pk_col} = :entity_id
                 """),
@@ -890,6 +893,8 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
                 "entity_id": chunk["entity_id"],
                 "node_id": chunk.get("node_id"),
                 "entity_field": chunk["entity_field"],
+                "chunk_text": chunk["chunk_text"],
+                "embedding": vec_str,
                 "product_line_code": chunk.get("product_line_code"),
                 "metadata": "{}",  # simplified
                 "embedding_model": model_name,
@@ -1051,10 +1056,10 @@ ENTITY_TYPES = ["fmea_node", "capa", "audit_finding", "complaint", "scar", "rma"
 ENTITY_TABLE_MAP = {
     "fmea_node": ("fmea_documents", "fmea_id", "product_line_code"),
     "capa": ("capa_eightd", "report_id", "product_line_code"),
-    "audit_finding": ("audit_findings", "finding_id", None),
-    "complaint": ("customer_complaints", "complaint_id", None),
-    "scar": ("supplier_scars", "scar_id", None),
-    "rma": ("rma_records", "rma_id", None),
+    "audit_finding": ("audit_findings", "finding_id", None),  # audit_findings has no product_line_code
+    "complaint": ("customer_complaints", "complaint_id", "product_line_code"),
+    "scar": ("supplier_scars", "scar_id", "product_line_code"),
+    "rma": ("rma_records", "rma_id", "product_line_code"),
 }
 
 
@@ -1790,7 +1795,7 @@ export default function SemanticSearchTab() {
 
   const handleResultClick = (item: SearchResultItem) => {
     if (item.entity_type === "fmea_node") {
-      navigate(`/fmea/${item.entity_id}?highlight=${item.node_id}`);
+      navigate(`/fmea/${item.entity_id}?tab=graph&highlightNode=${item.node_id}`);
     } else if (item.entity_type === "capa") {
       navigate(`/capa/${item.entity_id}`);
     }
