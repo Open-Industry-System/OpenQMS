@@ -23,6 +23,7 @@ import {
   FileProtectOutlined,
   AuditOutlined,
   ShareAltOutlined,
+  RadarChartOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -40,6 +41,7 @@ const MENU_KEYS = [
   "/suppliers", "/suppliers/quality",
   "/iqc/inspections", "/iqc/materials", "/scars",
   "/knowledge-graph",
+  "/change-impact",
 ];
 
 // 菜单 key → 需要展开的所有 SubMenu key 列表
@@ -66,6 +68,7 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/iqc/materials": ["grp:supplier", "grp:iqc"],
   "/scars": ["grp:supplier"],
   "/knowledge-graph": ["grp:planning"],
+  "/change-impact": ["grp:planning"],
 };
 
 function getSelectedMenuKey(pathname: string): string {
@@ -88,6 +91,7 @@ const menuItems = [
       { key: "/ppap", icon: <FileProtectOutlined />, label: "PPAP" },
       { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
       { key: "/knowledge-graph", icon: <ShareAltOutlined />, label: "知识图谱" },
+      { key: "/change-impact", icon: <RadarChartOutlined />, label: "变更影响分析" },
     ],
   },
   {
