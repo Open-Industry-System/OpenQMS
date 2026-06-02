@@ -329,7 +329,7 @@ async def update_capa(db, capa, update_data, user_id):
 ```sql
 SELECT de.id, de.entity_id, de.chunk_text, de.entity_field,
        1 - (de.embedding <=> :query_vector) AS similarity,
-       capa.document_no, capa.severity, capa.updated_at AS closed_at
+       capa.document_no, capa.severity, capa.updated_at AS source_updated_at
 FROM document_embeddings de
 JOIN capa_eightd capa ON de.entity_id = capa.report_id
 WHERE de.entity_type = 'capa'
@@ -340,7 +340,7 @@ ORDER BY de.embedding <=> :query_vector
 LIMIT :limit
 ```
 
-> **注意**：CAPA 模型没有 `closed_at` 字段，使用 `updated_at` 近似（进入 D8_CLOSURE 时 updated_at 即最后更新时间）。`product_line_codes` 为数组类型，使用 `= ANY()` 支持多产品线权限过滤。
+> **注意**：CAPA 模型没有 `closed_at` 字段，返回 `updated_at AS source_updated_at`（进入 D8_CLOSURE 后若不再编辑，updated_at 即关闭时间）。`product_line_codes` 为数组类型，使用 `= ANY()` 支持多产品线权限过滤。
 
 ---
 
@@ -387,12 +387,34 @@ GET /api/capa/{report_id}/d5-fmea-recommendations  → D5RecommendationResponse
 
 ## 9. 测试策略
 
-1. **单元测试**：每个 Source 独立测试（Mock DB + Mock embedding provider）
-2. **集成测试**：FusionEngine 的去重逻辑、排序逻辑、边界条件（空输入、单 Source）
-3. **端到端测试**：完整 pipeline 输入输出，验证 API 响应格式不变
-4. **回归测试**：
-   - 验证现有 D4RecommendationResponse / D5RecommendationResponse schema 不变
-   - 验证无 embedding provider 时系统不崩溃
+### 9.1 单元测试
+
+每个 Source 独立测试（Mock DB + Mock embedding provider）：
+- `FMEAGraphSource`：关联 FMEA 有/无 `fmea_node_id`、跨 FMEA 场景
+- `SemanticSearchSource`：Mock embedding 返回、空结果、异常降级
+- `HistoricalCAPASource` / `HistoricalCAPAMeasureSource`：D8_CLOSURE 过滤、`source_updated_at` 返回、跨产品线放宽
+- `FusionEngine`：去重逻辑（相同文本不同来源）、排序公式验证、空输入、单 Source
+- `LLMFusionLayer`：LLM 可用/不可用、候选不足回退、超时降级
+
+### 9.2 集成测试
+
+- **Pipeline 完整链路**：D4（D2 → 多 Source 召回 → Fusion → LLM）和 D5（D4 → Stage1/Stage2 → Fusion → LLM）
+- **Schema 扩展验证**：
+  - `D4Recommendation` 新增字段 `source_capa_id`、`source_capa_document_no` 正确填充
+  - `D5GeneralSuggestion` 新增字段 `match_source`、`source_capa_id` 正确填充
+- **历史 CAPA D5 映射**：验证 `d5_correction` 映射到 `D5GeneralSuggestion`（不是 `D5ExistingControl`），`category = "纠正措施"`
+
+### 9.3 端到端测试
+
+- 完整 pipeline 输入输出，验证 API 响应格式向后兼容
+- 现有前端不读取新字段时功能不受影响
+
+### 9.4 回归测试
+
+- 验证 `D4RecommendationResponse` / `D5RecommendationResponse` 现有字段不变
+- **更新现有测试断言**：`D5GeneralSuggestion.category` 允许 `"纠正措施"`（此前仅允许 `"预防措施"`、`"探测措施"`）
+- 验证 `match_source` 保留旧值 `"linked"`、`"keyword"`、`"rule"`，新值 `"historical_capa"`、`"semantic_search"`、`"fmea_graph"`、`"llm"` 正确返回
+- 验证无 embedding provider 时系统不崩溃（降级为 FMEAGraphSource + RuleEngine）
 
 ---
 
@@ -427,7 +449,7 @@ GET /api/capa/{report_id}/d5-fmea-recommendations  → D5RecommendationResponse
 | CAPA embedding 未及时更新 | update_capa 中检测字段变化并重新触发 enqueue_embedding |
 | LLM 调用慢/失败 | 超时控制（`asyncio.wait_for`）；失败时降级为未增强候选 |
 | 历史 CAPA 推荐传播错误经验 | 只复用 `D8_CLOSURE`；confidence 上限 0.8/0.85；LLM 融合层过滤低质量候选 |
-| LLM 同步调用延迟高 | 单次 LLM timeout ≤ 2.0s；限制输出 token（≤ 200）；两阶段 LLM 不串行调用（阶段 1 失败才进入阶段 2）；增加基于 `report_id + stage + content_hash` 的短期缓存（TTL 5 分钟） |
+| LLM 同步调用延迟高 | 单次 LLM timeout ≤ 2.0s；限制输出 token（≤ 200）；两阶段 LLM 不串行调用（阶段 1 失败才进入阶段 2）；后续可加基于 `report_id + stage + content_hash` 的短期缓存 |
 | 重复触发 embedding 同步 | update_capa 中增加值比对，仅字段内容实际变化时才 enqueue |
 
 ---
@@ -447,7 +469,7 @@ class D4Recommendation(BaseModel):
     failure_mode_name: str | None = None
     fmea_document_no: str | None = None
     fmea_id: str | None = None
-    match_source: str      # "fmea_graph" | "semantic_search" | "historical_capa" | "rule" | "llm"
+    match_source: str      # "linked" | "keyword" | "fmea_graph" | "semantic_search" | "historical_capa" | "rule" | "llm"
     match_reason: str
     related_d2_keywords: list[str] = []
     confidence: float = 0.5
@@ -498,5 +520,5 @@ class D5GeneralSuggestion(BaseModel):
 | 关联 FMEA 图遍历 | `fmea_graph` |
 | FMEA 语义搜索 | `semantic_search` |
 | 历史 CAPA | `historical_capa` |
-| 规则引擎 | `rule_engine` |
+| 规则引擎 | `rule` |
 | LLM 生成 | `llm` |
