@@ -1122,7 +1122,16 @@ class Module(StrEnum):
     KNOWLEDGE_GRAPH = "knowledge_graph"  # 新增
 ```
 
-- [ ] **Step 2: 检查 alembic heads，多 head 时自动 merge**
+- [ ] **Step 2: 保存当前 head revision（在创建任何新文件之前）**
+
+```bash
+cd backend
+# 先记录当前 head（创建新文件之前）
+CURRENT_HEAD=$(alembic heads | head -1 | awk '{print $1}')
+echo "Current head: $CURRENT_HEAD"
+```
+
+- [ ] **Step 3: 检查 alembic heads，多 head 时自动 merge**
 
 Run: `cd backend && alembic heads`
 
@@ -1140,7 +1149,14 @@ alembic heads
 
 Expected: 现在 alembic heads 只输出一行
 
-- [ ] **Step 3: 创建迁移文件（先写模板，再填入 down_revision）**
+**注意**：merge 后重新获取 CURRENT_HEAD：
+
+```bash
+cd backend
+CURRENT_HEAD=$(alembic heads | head -1 | awk '{print $1}')
+```
+
+- [ ] **Step 4: 创建迁移文件（直接用 CURRENT_HEAD 填入 down_revision）**
 
 用 Write 工具创建 `backend/alembic/versions/029_knowledge_graph_permissions.py`：
 
@@ -1154,7 +1170,7 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = '029_knowledge_graph_permissions'
-down_revision: Union[str, None] = None  # 将在下一步替换
+down_revision: Union[str, None] = 'CURRENT_HEAD_PLACEHOLDER'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -1176,24 +1192,19 @@ def downgrade() -> None:
     )
 ```
 
-- [ ] **Step 4: 填入正确的 down_revision**
-
-Run: `cd backend && alembic heads | head -1 | awk '{print $1}'`
-Expected: 输出一个 revision ID（例如 `20260602_collab_sessions`）
-
-用 Edit 工具替换迁移文件中的 `None`：
+然后立即用 Edit 工具替换 `CURRENT_HEAD_PLACEHOLDER` 为 Step 2 保存的实际值：
 
 ```python
-down_revision: Union[str, None] = None
+down_revision: Union[str, None] = 'CURRENT_HEAD_PLACEHOLDER'
 ```
 
-替换为 alembic heads 输出的实际 revision ID，例如：
+替换为：
 
 ```python
 down_revision: Union[str, None] = '20260602_collab_sessions'
 ```
 
-（替换为 Step 4 获取的实际 revision ID）
+（使用 Step 2 中 `$CURRENT_HEAD` 的实际值）
 
 - [ ] **Step 5: 验证迁移文件**
 
@@ -1206,7 +1217,8 @@ Expected: No error, revision chain is valid
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/core/permissions.py backend/alembic/versions/029_knowledge_graph_permissions.py
+# 包含可能自动生成的 merge migration 和权限迁移
+git add backend/app/core/permissions.py backend/alembic/versions/*.py
 git commit -m "feat(permissions): add KNOWLEDGE_GRAPH module for admin/manager"
 ```
 
@@ -1274,8 +1286,10 @@ async def recommend(
 
 ```python
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import get_db
 from app.schemas.recommendation import SimilarNodesRequest, SimilarNodesResponse, SimilarNodeMatch
 from app.core.permissions import get_user_permission, Module, PermissionLevel
+from app.core.product_line_filter import enforce_product_line_access
 
 
 @router.post("/similar-nodes", response_model=SimilarNodesResponse)
@@ -1288,8 +1302,6 @@ async def similar_nodes_advanced(
     """跨 FMEA 相似节点搜索（增强版，用于调试和预览）。
     无 KNOWLEDGE_GRAPH 权限时，global scope 强制降级为 current_product_line。
     """
-    from app.database import get_db
-    from app.core.product_line_filter import enforce_product_line_access
 
     # 产品线访问校验
     await enforce_product_line_access(user, req.product_line_code, db)
