@@ -721,7 +721,7 @@ async def claim_batch(db: AsyncSession, batch_size: int) -> list[dict]:
                 LIMIT :batch_size
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING id, entity_type, entity_id, product_line_code
+            RETURNING id, entity_type, entity_id, product_line_code, retry_count, max_attempts
         """),
         {"batch_size": batch_size},
     )
@@ -890,7 +890,7 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
                      chunk_text, embedding, product_line_code, metadata, embedding_model)
                 VALUES
                     (:entity_type, :entity_id, :node_id, :entity_field, 0,
-                     :chunk_text, :embedding::vector, :product_line_code, :metadata::jsonb, :embedding_model)
+                     :chunk_text, CAST(:embedding AS vector), :product_line_code, CAST(:metadata AS jsonb), :embedding_model)
             """),
             {
                 "entity_type": chunk["entity_type"],
@@ -911,14 +911,14 @@ async def mark_completed(db: AsyncSession, event_ids: list[str]):
     """Mark outbox events as completed."""
     if not event_ids:
         return
-    # Use explicit uuid[] cast to avoid binding ambiguity with text()
-    uuid_list = ", ".join(f"'{eid}'::uuid" for eid in event_ids)
+    from sqlalchemy import update
+    from app.models.document_embedding import EmbeddingSyncOutbox
+    from datetime import datetime, timezone
+
     await db.execute(
-        text(f"""
-            UPDATE embedding_sync_outbox
-            SET status = 'completed', processed_at = NOW()
-            WHERE id IN ({uuid_list})
-        """),
+        update(EmbeddingSyncOutbox)
+        .where(EmbeddingSyncOutbox.id.in_(event_ids))
+        .values(status="completed", processed_at=datetime.now(timezone.utc))
     )
     await db.commit()
 
@@ -1330,10 +1330,10 @@ class SearchService:
                     text(f"""
                         SELECT id, entity_type, entity_id, node_id, entity_field,
                                chunk_text, product_line_code, metadata,
-                               1 - (embedding <=> :query_vector::vector) AS score
+                               1 - (embedding <=> CAST(:query_vector AS vector)) AS score
                         FROM document_embeddings
                         WHERE {where_clause}
-                        ORDER BY embedding <=> :query_vector::vector
+                        ORDER BY embedding <=> CAST(:query_vector AS vector)
                         LIMIT :fetch_limit
                     """),
                     params,
