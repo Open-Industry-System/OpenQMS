@@ -250,3 +250,95 @@ async def get_d7_fmea_recommendations(
 
     recs = get_d7_recommendations(capa_data, fmea_docs, allowed_pls)
     return {"recommendations": recs}
+
+
+@router.get("/{report_id}/d4-fmea-recommendations")
+async def get_d4_fmea_recommendations(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+):
+    from app.models.fmea import FMEADocument
+    from app.services.capa_recommendation_service import get_d4_recommendations
+
+    fmea_level = await get_user_permission(user, Module.FMEA, db)
+    if fmea_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    await enforce_product_line_access(user, capa.product_line_code, db)
+
+    if user.role_definition.bypass_row_level_security:
+        allowed_pls = None
+    else:
+        allowed_pls = await get_user_product_line_codes(user, db)
+        if not allowed_pls:
+            return {"items": []}
+
+    fmea_query = select(FMEADocument).where(FMEADocument.product_line_code == capa.product_line_code)
+    if allowed_pls is not None:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
+    fmea_result = await db.execute(fmea_query)
+    fmea_docs = [
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data}
+        for f in fmea_result.scalars().all()
+    ]
+
+    capa_data = {
+        "d2_description": capa.d2_description or "",
+        "d3_interim": capa.d3_interim or "",
+        "fmea_ref_id": capa.fmea_ref_id,  # keep as UUID, matching D7 pattern
+        "fmea_node_id": capa.fmea_node_id,
+        "product_line_code": capa.product_line_code,
+    }
+
+    items = get_d4_recommendations(capa_data, fmea_docs, allowed_pls)
+    return {"items": items}
+
+
+@router.get("/{report_id}/d5-fmea-recommendations")
+async def get_d5_fmea_recommendations(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+):
+    from app.models.fmea import FMEADocument
+    from app.services.capa_recommendation_service import get_d5_recommendations
+
+    fmea_level = await get_user_permission(user, Module.FMEA, db)
+    if fmea_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    await enforce_product_line_access(user, capa.product_line_code, db)
+
+    if user.role_definition.bypass_row_level_security:
+        allowed_pls = None
+    else:
+        allowed_pls = await get_user_product_line_codes(user, db)
+        if not allowed_pls:
+            return {"existing_controls": [], "general_suggestions": []}
+
+    fmea_query = select(FMEADocument).where(FMEADocument.product_line_code == capa.product_line_code)
+    if allowed_pls is not None:
+        fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
+    fmea_result = await db.execute(fmea_query)
+    fmea_docs = [
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data}
+        for f in fmea_result.scalars().all()
+    ]
+
+    capa_data = {
+        "d4_root_cause": capa.d4_root_cause or "",
+        "d2_description": capa.d2_description or "",
+        "fmea_ref_id": capa.fmea_ref_id,  # keep as UUID, matching D7 pattern
+        "fmea_node_id": capa.fmea_node_id,
+        "product_line_code": capa.product_line_code,
+    }
+
+    result = get_d5_recommendations(capa_data, fmea_docs, allowed_pls)
+    return result
