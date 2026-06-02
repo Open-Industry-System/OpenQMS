@@ -779,6 +779,7 @@ function SourceTag({ item }: { item: SuggestionItem }) {
       <span className="source-tag">
         来自 <a href={href} target="_blank" rel="noopener">{item.source_document_no}</a>
         {item.source_product_line_code && ` · ${item.source_product_line_code}`}
+        {item.source_product_line_name && `（${item.source_product_line_name}）`}
         {item.similarity_score !== undefined && ` · 相似度 ${(item.similarity_score * 100).toFixed(0)}%`}
       </span>
     );
