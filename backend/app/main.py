@@ -75,11 +75,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         _logging.getLogger(__name__).warning("LLM provider init failed: %s", e)
         app.state.llm_provider = None
+
+    # Initialize embedding provider (non-fatal)
+    from app.services.embedding_provider import create_embedding_provider
+    try:
+        app.state.embedding_provider = create_embedding_provider()
+    except Exception as e:
+        _logging.getLogger(__name__).warning("Embedding provider init failed: %s", e)
+        app.state.embedding_provider = None
+
     yield
     # Cleanup: close LLM provider httpx client if applicable
     provider = getattr(app.state, "llm_provider", None)
     if provider and hasattr(provider, "aclose"):
         await provider.aclose()
+    embedding_provider = getattr(app.state, "embedding_provider", None)
+    if embedding_provider and hasattr(embedding_provider, "aclose"):
+        await embedding_provider.aclose()
 
 
 app = FastAPI(title="OpenQMS API", version="0.1.0", lifespan=lifespan)
