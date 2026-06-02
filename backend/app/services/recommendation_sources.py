@@ -361,7 +361,7 @@ class HistoricalCAPASource:
 class HistoricalCAPAMeasureSource:
     """历史 CAPA D4→D4 匹配 → 推荐 D5 措施。"""
 
-    name = "historical_capa"
+    name = "historical_capa_measure"
 
     def __init__(self, db, embedding_provider: EmbeddingProvider | None):
         self.db = db

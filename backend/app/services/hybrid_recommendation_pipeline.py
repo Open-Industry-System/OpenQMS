@@ -71,7 +71,7 @@ class HybridRecommendationPipeline:
                 c for c in all_candidates
                 if c.metadata.get("failure_cause_node_id")
             ]
-            if cause_candidates and context.fmea_docs:
+            if cause_candidates and context.fmea_docs is not None:
                 try:
                     control_candidates = await self.d5_control_expander.expand(
                         cause_candidates, context.fmea_docs
