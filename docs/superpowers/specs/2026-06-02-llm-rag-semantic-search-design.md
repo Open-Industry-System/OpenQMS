@@ -220,7 +220,7 @@ Worker 使用 `FOR UPDATE SKIP LOCKED` 安全领取事件，exponential backoff 
    - 将返回的向量按顺序分发，upsert 到 `document_embeddings` 表
    - 标记 outbox 事件为 completed
    - 这样 N 个实体只需 1 次 API 调用，而非 N 次，网络延迟降低一个数量级
-4. **幂等**：`UNIQUE (entity_type, entity_id, entity_field, chunk_index)` 保证 upsert 安全
+4. **幂等**：两个 partial unique index 保证 FMEA 节点（含 node_id）和非 FMEA 实体分别幂等，upsert 安全
 5. **重试与死信**：复用现有 exponential backoff 模式（10s→270s，5 次后标记 dead_letter）
 
 ### 初始回填
@@ -653,7 +653,7 @@ ollama:
 | pgvector 性能上限 | 大数据量查询慢 | HNSW 索引 + 按产品线分区 |
 | LLM 不可用 | Q&A 功能降级 | 降级到纯搜索模式，UI 明确提示 |
 | 向量维度变更 | 模型切换后写入失败 | 见下方详细缓解方案 |
-| 本地开发无 zhparser | Alembic 迁移中断 | 迁移脚本 try-catch 降级到 simple 配置 |
+| 本地开发无 zhparser | Alembic 迁移中断 | 迁移脚本预检查 pg_available_extensions，可用则创建 zhparser 配置，否则创建 simple 配置 |
 
 ### 向量维度变更的详细缓解方案
 
