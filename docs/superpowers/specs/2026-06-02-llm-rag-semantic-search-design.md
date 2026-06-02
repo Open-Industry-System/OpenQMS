@@ -87,6 +87,7 @@ CREATE TABLE document_embeddings (
     entity_type VARCHAR(20) NOT NULL,      -- fmea_node, capa, audit_finding, complaint, scar, rma
     entity_id UUID NOT NULL,               -- 源记录 ID
     entity_field VARCHAR(50) NOT NULL,     -- 嵌入的字段名
+    chunk_index INT NOT NULL DEFAULT 0,   -- 分块索引（当前每个字段一个块，预留未来大文本分块）
     chunk_text TEXT NOT NULL,              -- 被嵌入的文本（用于展示和重新嵌入）
     embedding vector($DIMENSIONS) NOT NULL, -- 嵌入向量（维度由 EMBEDDING_DIMENSIONS 环境变量决定，部署时固定）
     product_line_code VARCHAR(20),         -- 产品线过滤
@@ -95,7 +96,7 @@ CREATE TABLE document_embeddings (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
-    UNIQUE (entity_type, entity_id, entity_field)
+    UNIQUE (entity_type, entity_id, entity_field, chunk_index)
 );
 
 -- HNSW 索引（近似最近邻）
@@ -172,10 +173,13 @@ class EmbeddingProvider(Protocol):
 
 复用 `graph_sync_outbox` 表，新增 `event_type = 'embedding_sync'`：
 
-1. **触发**：各模块 CRUD 服务在写入后插入 outbox 事件
-2. **Worker**：在 `graph_sync_worker.py` 中新增 embedding 事件处理
+1. **触发**：各模块 CRUD 服务在写入后插入 outbox 事件（`event_type = 'embedding_sync'`，`aggregate_type = 'document_embedding'`）
+2. **Worker 路由分发**：现有 `graph_sync_worker.py` 硬编码了 FMEA→Neo4j 同步逻辑且不检查 `event_type`。必须重构 Worker 的 `run_worker` 循环，按 `event_type` 路由：
+   - `event_type = 'graph_sync'`（现有）→ 调用 `projection.sync_fmea_to_neo4j()`
+   - `event_type = 'embedding_sync'`（新增）→ 调用 `EmbeddingService.process_embedding_event()`
+   - 去重函数 `deduplicate_tasks` 也需按 `event_type` 分组，避免 embedding 事件被 FMEA 去重逻辑丢弃
 3. **批量处理**：合并多个待处理事件，单次 API 调用最多 2048 条文本
-4. **幂等**：`UNIQUE (entity_type, entity_id, entity_field)` 保证 upsert 安全
+4. **幂等**：`UNIQUE (entity_type, entity_id, entity_field, chunk_index)` 保证 upsert 安全
 
 ### 初始回填
 
@@ -256,7 +260,18 @@ class SearchService:
 1. 调用 `semantic_search()` 检索 Top-N 相关文档块
 2. 拼接为 RAG context（每块带来源标注：entity_type + document_no）
 3. 构建 prompt：系统指令 + context + 用户问题
-4. 调用 `LLMProvider.complete()` 生成回答
+4. 调用 `LLMProvider.complete()` 生成回答 — **关键适配**：现有 `complete()` 方法内部对所有 LLM 响应执行 `json.loads()`，不支持纯文本输出。因此 RAG prompt 必须要求 LLM 返回 JSON 格式：
+   ```python
+   rag_schema = {
+       "type": "object",
+       "properties": {
+           "answer": {"type": "string", "description": "基于上下文生成的回答，支持 markdown 格式"}
+       },
+       "required": ["answer"]
+   }
+   llm_response = await self.llm_provider.complete(prompt=rag_prompt, response_schema=rag_schema)
+   answer = llm_response.get("answer", "")
+   ```
 5. 返回回答 + 引用来源列表
 
 ### Prompt 模板
@@ -401,14 +416,30 @@ POST /api/search/ask
 
 ### PostgreSQL 安装扩展
 
-在 `db` 服务的初始化脚本中添加：
+需要使用 `pgvector/pgvector:pg15` 替代官方 `postgres:15-alpine` 镜像。
 
+**pgvector 扩展**：镜像自带，初始化脚本直接 `CREATE EXTENSION IF NOT EXISTS vector;`
+
+**中文分词 zhparser**：pgvector 官方镜像**不包含** zhparser。需要自定义 Dockerfile：
+
+```dockerfile
+FROM pgvector/pgvector:pg15
+RUN apt-get update && apt-get install -y build-essential postgresql-server-dev-15 git
+# 安装 scws（zhparser 依赖）
+RUN git clone https://github.com/xutils/scws.git && cd scws && ./configure && make && make install
+# 安装 zhparser
+RUN git clone https://github.com/amutu/zhparser.git && cd zhparser && make && make install
+```
+
+初始化脚本：
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS zhparser;
+CREATE TEXT SEARCH CONFIGURATION zhcfg (PARSER = zhparser);
+ALTER TEXT SEARCH CONFIGURATION zhcfg ADD MAPPING FOR n,v,a,i,e,l WITH simple;
 ```
 
-需要使用 `pgvector/pgvector:pg15` 替代官方 `postgres:15-alpine` 镜像。
+**降级方案**：如果 zhparser 编译复杂度过高，可退而使用 PostgreSQL 内置的 `pg_trgm` 扩展做三元组匹配，或在应用层用 `jieba` 分词后以空格分隔传入 `to_tsquery('simple', ...)`。
 
 ### Ollama 服务（可选）
 
