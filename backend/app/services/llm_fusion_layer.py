@@ -1,5 +1,6 @@
 import asyncio
 import dataclasses
+import json
 import logging
 from typing import Any
 
@@ -11,8 +12,9 @@ logger = logging.getLogger(__name__)
 class LLMFusionLayer:
     """LLM 融合层：为候选生成推荐理由 + 候选不足时回退生成。"""
 
-    def __init__(self, llm_provider):
+    def __init__(self, llm_provider, timeout: float = 2.0):
         self.llm = llm_provider
+        self.timeout = timeout
 
     async def enrich(
         self,
@@ -29,7 +31,7 @@ class LLMFusionLayer:
                 prompt = self._build_fusion_prompt(candidates, context)
                 result = await asyncio.wait_for(
                     self.llm.complete(prompt, {}),
-                    timeout=2.0,
+                    timeout=self.timeout,
                 )
                 enriched = self._merge_explanations(candidates, result)
             except Exception as e:
@@ -83,7 +85,7 @@ D2 问题描述: {d2}
 D4 根因: {d4}
 
 候选列表:
-{items}
+{json.dumps(items, ensure_ascii=False)}
 
 请输出 JSON 数组: [{{"candidate_id": 0, "match_reason": "..."}}, ...]
 """
@@ -95,6 +97,7 @@ D4 根因: {d4}
         result: Any,
     ) -> list[RecommendationCandidate]:
         if not isinstance(result, list):
+            logger.warning(f"LLM fusion returned non-list result: {type(result)}")
             return list(candidates)
 
         reason_map = {}
@@ -132,7 +135,7 @@ D4 根因: {d4}
 
         result = await asyncio.wait_for(
             self.llm.complete(prompt, {}),
-            timeout=2.0,
+            timeout=self.timeout,
         )
 
         candidates: list[RecommendationCandidate] = []
@@ -147,4 +150,6 @@ D4 根因: {d4}
                         match_reason=item.get("match_reason", "LLM 生成建议"),
                         metadata={},
                     ))
+                else:
+                    logger.warning(f"LLM fallback returned invalid item: {item}")
         return candidates
