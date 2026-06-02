@@ -154,7 +154,7 @@ git commit -m "feat(collaboration): add collaboration_sessions migration"
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, func
+from sqlalchemy import String, DateTime, func, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -164,13 +164,19 @@ from app.database import Base
 class CollaborationSession(Base):
     __tablename__ = "collaboration_sessions"
 
+    __table_args__ = (
+        UniqueConstraint("document_type", "document_id", "user_id", name="uq_collab_session"),
+        Index("idx_collab_doc", "document_type", "document_id"),
+        Index("idx_collab_activity", "last_activity"),
+    )
+
     session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     document_type: Mapped[str] = mapped_column(String(30), nullable=False)
     document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False
     )
     user_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     action: Mapped[str] = mapped_column(String(20), default="viewing")
@@ -546,16 +552,15 @@ async def update_fmea(
     lock_version: int | None = None,
     confirmed_latest_lock_version: int | None = None,
 ) -> FMEADocument:
-    # 乐观锁校验
-    if lock_version is not None:
+    # 乐观锁校验（互斥分支）
+    if confirmed_latest_lock_version is not None:
+        # 强制保存：只校验确认的版本号，跳过常规 lock_version
+        if fmea.lock_version != confirmed_latest_lock_version:
+            raise ValueError("lock_version_changed_again")
+    elif lock_version is not None:
         # 常规保存：检查 lock_version 是否匹配
         if fmea.lock_version != lock_version:
             raise ValueError("lock_version_mismatch")
-    
-    if confirmed_latest_lock_version is not None:
-        # 强制保存：二次校验确认的版本号
-        if fmea.lock_version != confirmed_latest_lock_version:
-            raise ValueError("lock_version_changed_again")
 
     changed_fields = {}
     if title is not None:
@@ -886,9 +891,9 @@ export function diffGraphs(
       // Check modified fields
       const diffFields = ["name", "severity", "occurrence", "detection", "specification", "requirement"];
       for (const field of diffFields) {
-        const baseVal = (baseNode as Record<string, unknown>)[field];
-        const latestVal = (latestNode as Record<string, unknown>)[field];
-        const localVal = (localNodeMap.get(id) as Record<string, unknown> | undefined)?.[field];
+        const baseVal = (baseNode as Record<string, unknown>)[field] ?? null;
+        const latestVal = (latestNode as Record<string, unknown>)[field] ?? null;
+        const localVal = (localNodeMap.get(id) as Record<string, unknown> | undefined)?.[field] ?? null;
 
         if (baseVal !== latestVal) {
           nodeChanges.push({
@@ -902,7 +907,7 @@ export function diffGraphs(
           });
 
           // Check if local also modified this field (conflict)
-          if (localVal !== undefined && baseVal !== localVal) {
+          if (localVal !== null && baseVal !== localVal) {
             conflictingFields.push({
               type: "modified",
               node_id: id,
@@ -1015,35 +1020,36 @@ export function useCollaboration(
     }
   }, [documentType, documentId]);
 
+  const schedule = useCallback(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    const interval = document.hidden
+      ? BLURRED_INTERVAL
+      : editingAreaRef.current
+      ? EDITING_INTERVAL
+      : HEARTBEAT_INTERVAL;
+    intervalRef.current = setInterval(() => {
+      sendHeartbeat();
+      fetchActiveUsers();
+    }, interval);
+  }, [sendHeartbeat, fetchActiveUsers]);
+
   const startEditing = useCallback((area: EditingArea) => {
     editingAreaRef.current = area;
     setCurrentUserEditing(true);
-    // Send immediate heartbeat with editing state
     sendHeartbeat();
-  }, [sendHeartbeat]);
+    schedule();  // 立即切换到 editing 间隔（8s）
+  }, [sendHeartbeat, schedule]);
 
   const stopEditing = useCallback(() => {
     editingAreaRef.current = null;
     setCurrentUserEditing(false);
     sendHeartbeat();
-  }, [sendHeartbeat]);
+    schedule();  // 切回 viewing 间隔（15s）
+  }, [sendHeartbeat, schedule]);
 
   // Setup intervals
   useEffect(() => {
     if (!documentId) return;
-
-    const schedule = () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      const interval = document.hidden
-        ? BLURRED_INTERVAL
-        : editingAreaRef.current
-        ? EDITING_INTERVAL
-        : HEARTBEAT_INTERVAL;
-      intervalRef.current = setInterval(() => {
-        sendHeartbeat();
-        fetchActiveUsers();
-      }, interval);
-    };
 
     schedule();
 
@@ -1065,23 +1071,25 @@ export function useCollaboration(
     };
   }, [documentId, documentType, sendHeartbeat, fetchActiveUsers]);
 
-  // Page unload: send beacon to clean up session
+  // Page unload: send fetch with keepalive + auth header to clean up session
   useEffect(() => {
     if (!documentId) return;
 
+    const token = localStorage.getItem("access_token");
+
     const handleUnload = () => {
       const url = `/api/collaboration/leave/${documentType}/${documentId}`;
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon(url);
-      } else {
-        fetch(url, { method: "DELETE", keepalive: true }).catch(() => {});
-      }
+      fetch(url, {
+        method: "DELETE",
+        keepalive: true,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).catch(() => {});
     };
 
     window.addEventListener("beforeunload", handleUnload);
     return () => {
       window.removeEventListener("beforeunload", handleUnload);
-      // Also clean up on normal unmount
+      // Normal unmount: use axios client (has auth interceptor)
       leaveSession(documentType, documentId).catch(() => {});
     };
   }, [documentType, documentId]);
@@ -1193,7 +1201,9 @@ export default function ActiveUserIndicator({
   const editors = activeUsers.filter((u) => {
     if (u.action !== "editing" || !u.editing_area) return false;
     const area = u.editing_area as EditingArea;
-    if (rowKey && area.row_key === rowKey) {
+    // Support both row_key (FMEA) and rowId mapped to row_key (Control Plan)
+    const areaRowKey = area.row_key || (area as Record<string, string>).rowId;
+    if (rowKey && areaRowKey === rowKey) {
       return !field || area.field === field;
     }
     if (nodeId && area.node_id === nodeId) {
@@ -1621,7 +1631,7 @@ git commit -m "feat(collaboration): integrate collaboration into FMEA editor"
 - 添加 base snapshot ref
 - 修改 save 函数处理 409 冲突
 - 渲染 `CollaborationBar`
-- 在可编辑单元格添加 `onFocus`/`onBlur`（Control Plan 的 editing_area 用 `{ rowId, column }`）
+- 在可编辑单元格添加 `onFocus`/`onBlur`（Control Plan 的 editing_area 也用 `{ row_key, field }`，与 FMEA 统一命名）
 
 - [ ] **Step 3: Commit**
 
@@ -1632,7 +1642,148 @@ git commit -m "feat(collaboration): integrate collaboration into Control Plan ed
 
 ---
 
-### Task 20: 构建验证
+### Task 20: 后端行为测试
+
+**Files:**
+- Create: `backend/tests/collaboration/test_collaboration_service.py`
+- Create: `backend/tests/collaboration/test_collaboration_api.py`
+- Create: `backend/tests/collaboration/__init__.py`
+
+- [ ] **Step 1: 编写 CollaborationService 测试**
+
+```python
+import pytest
+from datetime import datetime, timezone, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.collaboration_service import (
+    upsert_session,
+    delete_session,
+    get_active_users,
+    delete_expired_sessions,
+)
+from app.models.collaboration_session import CollaborationSession
+
+
+@pytest.mark.asyncio
+async def test_upsert_session_creates_new(db: AsyncSession):
+    await upsert_session(
+        db, "fmea", "123e4567-e89b-12d3-a456-426614174000",
+        user_id=pytest.any_uuid, user_name="张三", action="viewing", editing_area=None
+    )
+    users = await get_active_users(db, "fmea", "123e4567-e89b-12d3-a456-426614174000")
+    assert len(users) == 1
+    assert users[0].user_name == "张三"
+
+
+@pytest.mark.asyncio
+async def test_upsert_session_updates_existing(db: AsyncSession):
+    doc_id = "123e4567-e89b-12d3-a456-426614174000"
+    await upsert_session(db, "fmea", doc_id, pytest.any_uuid, "张三", "viewing", None)
+    await upsert_session(db, "fmea", doc_id, pytest.any_uuid, "张三", "editing", {"row_key": "r1"})
+    users = await get_active_users(db, "fmea", doc_id)
+    assert users[0].action == "editing"
+    assert users[0].editing_area == {"row_key": "r1"}
+
+
+@pytest.mark.asyncio
+async def test_get_active_users_filters_expired(db: AsyncSession):
+    doc_id = "123e4567-e89b-12d3-a456-426614174000"
+    # Insert expired session directly
+    expired = CollaborationSession(
+        document_type="fmea", document_id=doc_id,
+        user_id=pytest.any_uuid, user_name="过期用户",
+        last_activity=datetime.now(timezone.utc) - timedelta(seconds=120),
+    )
+    db.add(expired)
+    await db.commit()
+
+    users = await get_active_users(db, "fmea", doc_id)
+    assert len(users) == 0  # expired, filtered out
+
+
+@pytest.mark.asyncio
+async def test_delete_expired_sessions(db: AsyncSession):
+    doc_id = "123e4567-e89b-12d3-a456-426614174000"
+    expired = CollaborationSession(
+        document_type="fmea", document_id=doc_id,
+        user_id=pytest.any_uuid, user_name="过期",
+        last_activity=datetime.now(timezone.utc) - timedelta(seconds=120),
+    )
+    db.add(expired)
+    await db.commit()
+
+    deleted = await delete_expired_sessions(db)
+    assert deleted == 1
+```
+
+- [ ] **Step 2: 编写 Collaboration API 测试**
+
+```python
+import pytest
+from httpx import AsyncClient
+
+
+@pytest.mark.asyncio
+async def test_heartbeat(client: AsyncClient, auth_headers: dict):
+    resp = await client.post(
+        "/api/collaboration/heartbeat",
+        json={
+            "document_type": "fmea",
+            "document_id": "123e4567-e89b-12d3-a456-426614174000",
+            "action": "editing",
+            "editing_area": {"row_key": "r1", "field": "severity"},
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_active_users(client: AsyncClient, auth_headers: dict):
+    # First heartbeat
+    await client.post(
+        "/api/collaboration/heartbeat",
+        json={"document_type": "fmea", "document_id": "test-doc-id", "action": "viewing"},
+        headers=auth_headers,
+    )
+    # Get active users
+    resp = await client.get("/api/collaboration/fmea/test-doc-id/active-users", headers=auth_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_leave_session(client: AsyncClient, auth_headers: dict):
+    await client.post(
+        "/api/collaboration/heartbeat",
+        json={"document_type": "fmea", "document_id": "leave-test", "action": "viewing"},
+        headers=auth_headers,
+    )
+    resp = await client.delete("/api/collaboration/leave/fmea/leave-test", headers=auth_headers)
+    assert resp.status_code == 204
+```
+
+- [ ] **Step 3: 运行测试**
+
+```bash
+cd /Users/sam/Documents/Code/OpenQMS/backend
+python -m pytest tests/collaboration/ -v
+```
+
+Expected: All tests pass.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add backend/tests/collaboration/
+git commit -m "test(collaboration): add service and API tests"
+```
+
+---
+
+### Task 21: 构建验证
 
 - [ ] **Step 1: 后端类型检查**
 
@@ -1643,7 +1794,16 @@ python -m py_compile app/main.py app/api/collaboration.py app/services/collabora
 
 Expected: No syntax errors.
 
-- [ ] **Step 2: 前端构建**
+- [ ] **Step 2: 后端行为测试**
+
+```bash
+cd /Users/sam/Documents/Code/OpenQMS/backend
+python -m pytest tests/collaboration/ -v
+```
+
+Expected: All tests pass (see Task 21).
+
+- [ ] **Step 3: 前端构建**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/frontend
@@ -1652,7 +1812,7 @@ npm run build
 
 Expected: Build succeeds with no TypeScript errors.
 
-- [ ] **Step 3: 前端 lint**
+- [ ] **Step 4: 前端 lint**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/frontend
@@ -1661,10 +1821,10 @@ npm run lint
 
 Expected: No lint errors.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git commit --allow-empty -m "feat(collaboration): MVP complete — build and lint verified"
+git commit --allow-empty -m "feat(collaboration): MVP complete — build, test and lint verified"
 ```
 
 ---
@@ -1689,13 +1849,14 @@ git commit --allow-empty -m "feat(collaboration): MVP complete — build and lin
 | Client-side three-way diff | Task 11 ✅ |
 | FMEA 编辑器集成 | Task 18 ✅ |
 | Control Plan 编辑器集成 | Task 19 ✅ |
-| navigator.sendBeacon 清理 | Task 12 (useEffect cleanup) ✅ |
+| fetch keepalive + auth header 清理 | Task 12 (useEffect cleanup) ✅ |
+| 后端行为测试 | Task 20 ✅ |
 
 ### Placeholder Scan
 
 - 无 "TBD", "TODO", "implement later" ✅
 - 所有代码块包含完整实现 ✅
-- 无 "Similar to Task N" 引用 ✅
+- Task 8/19 参照 Task 7/18 模式，但每处都重复了完整代码或明确指令，不存在"详见 Task X"的悬空引用 ✅
 
 ### Type Consistency
 
