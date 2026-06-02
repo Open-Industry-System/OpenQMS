@@ -501,6 +501,9 @@ async def test_global_stats_response_sanitized(client: AsyncClient):
     assert "document_no" not in top
 
 
+from app.api.graph import mask_name
+
+
 # mask_name 边界测试（纯函数，不依赖 HTTP）
 def test_mask_name_normal():
     assert mask_name("焊接不良") == "焊接***"
