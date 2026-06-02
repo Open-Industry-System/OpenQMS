@@ -1,3 +1,4 @@
+import difflib
 import math
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +14,10 @@ from app.models.spc import (
 )
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
+from app.models.control_plan import ControlPlanItem
+from app.models.fmea import FMEADocument
+from app.config import settings
+from app.state_machines.fmea_state import compute_ap
 from app.services.spc_calculation_engine import (
     calculate_xbar_r_limits, calculate_imr_limits,
     calculate_histogram_data, evaluate_western_electric,
@@ -20,6 +25,391 @@ from app.services.spc_calculation_engine import (
     get_capability_grade, get_capability_advice,
     calculate_p_limits, calculate_np_limits, calculate_c_limits, calculate_u_limits,
 )
+
+
+# ─── FMEA Match Helpers ───
+
+def _extract_node_id(node: dict) -> str:
+    """统一获取节点 ID：不同来源返回的字段名可能是 'id' 或 'node_id'。"""
+    return node.get("id") or node.get("node_id", "")
+
+
+def _compute_name_similarity(a: str, b: str) -> float:
+    """中文特性名相似度计算。"""
+    a, b = a.lower().strip(), b.lower().strip()
+    if not a or not b:
+        return 0.0
+    if a in b or b in a:
+        return 0.85
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _build_recommendation(
+    node: dict,
+    match_source: str,
+    score: float,
+    fmea_id: str,
+    document_no: str | None = None,
+) -> dict:
+    """将 FMEA 节点装配为推荐条目。RPN/AP 等由 enrichment 填入。"""
+    return {
+        "node_id": _extract_node_id(node),
+        "name": node.get("name", ""),
+        "node_type": node.get("type", "FailureMode"),
+        "fmea_id": fmea_id,
+        "document_no": document_no or "",
+        "match_source": match_source,
+        "match_score": round(score, 2),
+        "rpn": 0,
+        "ap": "",
+        "severity": 0,
+        "occurrence": 0,
+        "detection": 0,
+        "path": "",
+        "cause_preview": [],
+        "control_count": 0,
+    }
+
+
+async def _get_graph_repo(db: AsyncSession):
+    if settings.GRAPH_REPOSITORY == "neo4j":
+        from app.graph.neo4j_driver import get_neo4j_driver
+        from app.graph.neo4j_repository import Neo4jRepository
+        driver = await get_neo4j_driver()
+        return Neo4jRepository(driver)
+    from app.graph.jsonb_repository import JSONBRepository
+    return JSONBRepository(db)
+
+
+async def compute_failure_mode_metrics(
+    db: AsyncSession,
+    fmea_id: uuid.UUID,
+    fm_node_id: str
+) -> dict:
+    """按 FMEARow 语义计算单个 FailureMode 的 S/O/D/RPN/AP。
+
+    口径与 JSONBRepository._collect_failure_mode_rpn 一致（backend/app/graph/jsonb_repository.py:59）。
+    - S: 取第一个 FailureEffect 的 severity
+    - O: 取每个 FailureCause 的 occurrence，取有最大 RPN 行的值
+    - D: 优先取该 Cause 的第一个 DetectionControl，否则取 FailureMode 的第一个
+    - RPN = S x O x D，取所有真实行的最大值
+    """
+    fmea_result = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id))
+    fmea = fmea_result.scalar_one_or_none()
+    if not fmea or not fmea.graph_data:
+        return {"severity": 0, "occurrence": 0, "detection": 0, "rpn": 0, "ap": ""}
+
+    graph_data = fmea.graph_data
+    nodes = graph_data.get("nodes", [])
+    edges = graph_data.get("edges", [])
+    node_map = {n["id"]: n for n in nodes}
+
+    # 构建 edges 索引
+    out_edges: dict[tuple[str, str], list[str]] = {}
+    in_edges: dict[tuple[str, str], list[str]] = {}
+    for e in edges:
+        src = e.get("source", "")
+        tgt = e.get("target", "")
+        etype = e.get("type", "")
+        if src and etype:
+            out_edges.setdefault((src, etype), []).append(tgt)
+        if tgt and etype:
+            in_edges.setdefault((tgt, etype), []).append(src)
+
+    def _first_detection(source_id: str) -> int:
+        det_ids = out_edges.get((source_id, "DETECTED_BY"), [])
+        first_id = det_ids[0] if det_ids else None
+        node = node_map.get(first_id) if first_id else None
+        return node.get("detection", 0) or 0 if node else 0
+
+    fm = node_map.get(fm_node_id)
+    if not fm or fm.get("type") != "FailureMode":
+        return {"severity": 0, "occurrence": 0, "detection": 0, "rpn": 0, "ap": ""}
+
+    # S: 第一个 FailureEffect 的 severity
+    effect_ids = out_edges.get((fm_node_id, "EFFECT_OF"), [])
+    first_effect = node_map.get(effect_ids[0]) if effect_ids else None
+    s = first_effect.get("severity", 0) or 0 if first_effect else 0
+
+    # Causes
+    cause_ids = in_edges.get((fm_node_id, "CAUSE_OF"), [])
+    rows: list[tuple[int, int, int]] = []  # (o, d, rpn)
+
+    if not cause_ids:
+        d = _first_detection(fm_node_id)
+        rows.append((0, d, 0))
+    else:
+        for cause_id in cause_ids:
+            cause = node_map.get(cause_id)
+            o = cause.get("occurrence", 0) or 0 if cause else 0
+            cause_dets = out_edges.get((cause_id, "DETECTED_BY"), [])
+            if cause_dets:
+                d = _first_detection(cause_id)
+            else:
+                d = _first_detection(fm_node_id)
+            rows.append((o, d, s * o * d))
+
+    best = max(rows, key=lambda x: x[2]) if rows else (0, 0, 0)
+    o_best, d_best, max_rpn = best
+    ap = compute_ap(s, o_best, d_best) if s > 0 and o_best > 0 and d_best > 0 else ""
+
+    return {
+        "severity": s,
+        "occurrence": o_best,
+        "detection": d_best,
+        "rpn": max_rpn,
+        "ap": ap,
+    }
+
+
+async def _enrich_recommendation(
+    db: AsyncSession,
+    node: dict,
+    fmea_id: uuid.UUID,
+    repo
+) -> dict:
+    """为推荐节点补充 UI 所需字段。"""
+    enriched = dict(node)
+    node_id = enriched["node_id"]
+
+    # 1. 计算 RPN / AP
+    metrics = await compute_failure_mode_metrics(db, fmea_id, node_id)
+    enriched["rpn"] = metrics["rpn"]
+    enriched["ap"] = metrics["ap"]
+    enriched["severity"] = metrics["severity"]
+    enriched["occurrence"] = metrics["occurrence"]
+    enriched["detection"] = metrics["detection"]
+
+    # 2. 构建 path
+    chain = await repo.get_cause_chain(fmea_id, node_id)
+    nodes = chain.get("nodes", [])
+    edges = chain.get("edges", [])
+    node_map = {n.get("node_id", n.get("id", "")): n for n in nodes}
+
+    STRUCTURAL_EDGE_TYPES = ("HAS_FAILURE_MODE", "HAS_FUNCTION", "FUNCTION_MAPPED_TO")
+    FUNCTION_TYPES = ("ProcessItemFunction", "ProcessStepFunction", "ProcessWorkElementFunction")
+
+    def _pick_parent_edge(candidates):
+        if not candidates:
+            return None
+        def _score(e):
+            edge_type = e.get("type", "")
+            parent = node_map.get(e.get("source", ""))
+            parent_type = parent.get("type", "") if parent else ""
+            if edge_type == "HAS_FUNCTION" and parent_type == "ProcessStep":
+                return 3
+            if edge_type == "HAS_FAILURE_MODE":
+                return 2
+            if edge_type == "HAS_FUNCTION" and parent_type in FUNCTION_TYPES:
+                return 1
+            return 0
+        return max(candidates, key=_score)
+
+    path_parts = []
+    current_id = node_id
+    for _ in range(5):
+        parent_edges = [
+            e for e in edges
+            if e.get("target") == current_id and e.get("type") in STRUCTURAL_EDGE_TYPES
+        ]
+        best_edge = _pick_parent_edge(parent_edges)
+        if not best_edge:
+            break
+        parent_id = best_edge.get("source", "")
+        parent = node_map.get(parent_id)
+        if not parent:
+            break
+        if parent.get("type") == "ProcessStep":
+            path_parts.insert(0, parent.get("name", ""))
+            break
+        elif parent.get("type") in FUNCTION_TYPES:
+            path_parts.insert(0, parent.get("name", ""))
+        current_id = parent_id
+
+    path_parts.append(enriched.get("name", ""))
+    enriched["path"] = " -> ".join(path_parts)
+
+    # 3. 失效原因预览
+    cause_nodes = [n for n in nodes if n.get("type") == "FailureCause"]
+    enriched["cause_preview"] = [c.get("name", "") for c in cause_nodes[:2]]
+
+    # 4. 控制措施数量
+    impact = await repo.get_impact_chain(fmea_id, node_id)
+    all_nodes = {n.get("node_id", n.get("id", "")): n for n in nodes + impact.get("nodes", [])}
+    all_edges = edges + impact.get("edges", [])
+
+    control_node_ids = set()
+    for e in all_edges:
+        if e.get("type") in ("PREVENTED_BY", "DETECTED_BY"):
+            ctrl_id = e.get("target", "")
+            ctrl = all_nodes.get(ctrl_id)
+            if ctrl and ctrl.get("type") in ("PreventionControl", "DetectionControl"):
+                control_node_ids.add(ctrl_id)
+
+    enriched["control_count"] = len(control_node_ids)
+
+    return enriched
+
+
+async def _match_via_control_plan(
+    db: AsyncSession,
+    ic: InspectionCharacteristic,
+    seen: set[tuple[str, str]]
+) -> list[dict]:
+    """通过控制计划 spc_chart_id -> source_fmea_node_id 桥接。"""
+    from sqlalchemy.orm import joinedload
+
+    query = (
+        select(ControlPlanItem)
+        .options(joinedload(ControlPlanItem.control_plan))
+        .where(ControlPlanItem.spc_chart_id == ic.ic_id)
+    )
+    result = await db.execute(query)
+    items = result.scalars().all()
+
+    # 批量查 FMEADocument document_no
+    fmea_ids = {item.control_plan.fmea_ref_id for item in items if item.control_plan.fmea_ref_id}
+    fmea_doc_map: dict[uuid.UUID, str] = {}
+    if fmea_ids:
+        fmea_query = select(FMEADocument).where(FMEADocument.fmea_id.in_(fmea_ids))
+        fmea_result = await db.execute(fmea_query)
+        for fd in fmea_result.scalars().all():
+            fmea_doc_map[fd.fmea_id] = fd.document_no
+
+    repo = await _get_graph_repo(db)
+    recommendations = []
+    for item in items:
+        if not item.source_fmea_node_id or not item.control_plan.fmea_ref_id:
+            continue
+
+        fmea_id = item.control_plan.fmea_ref_id
+        doc_no = fmea_doc_map.get(fmea_id, "")
+        chain = await repo.get_impact_chain(fmea_id, item.source_fmea_node_id)
+        failure_modes = [n for n in chain.get("nodes", []) if n.get("type") == "FailureMode"]
+
+        for fm in failure_modes:
+            node_id = _extract_node_id(fm)
+            key = (str(fmea_id), node_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            recommendations.append(_build_recommendation(
+                fm, match_source="control_plan", score=1.0,
+                fmea_id=str(fmea_id), document_no=doc_no
+            ))
+    return recommendations
+
+
+async def _match_via_name(
+    db: AsyncSession,
+    ic: InspectionCharacteristic,
+    seen: set[tuple[str, str]]
+) -> list[dict]:
+    """工序名/特性名模糊匹配 PFMEA 节点。"""
+    repo = await _get_graph_repo(db)
+    recommendations = []
+
+    # 步骤 A：工序名匹配 ProcessStep
+    similar_steps = await repo.find_similar_nodes(
+        node_type="ProcessStep",
+        name_keyword=ic.process_name,
+        product_line_code=ic.product_line,
+        limit=5
+    )
+
+    for step in similar_steps:
+        chain = await repo.get_impact_chain(
+            fmea_id=uuid.UUID(step["fmea_id"]),
+            node_id=step["node_id"]
+        )
+        fmea_id = step["fmea_id"]
+        for node in chain.get("nodes", []):
+            if node.get("type") != "FailureMode":
+                continue
+            node_id = _extract_node_id(node)
+            key = (fmea_id, node_id)
+            if key in seen:
+                continue
+            score = _compute_name_similarity(ic.characteristic_name, node.get("name", ""))
+            if score > 0.3:
+                seen.add(key)
+                doc_no = node.get("document_no", "") or step.get("document_no", "")
+                recommendations.append(_build_recommendation(
+                    node, match_source="process_name", score=score,
+                    fmea_id=fmea_id, document_no=doc_no
+                ))
+
+    # 步骤 B：特性名直接匹配 FailureMode（兜底）
+    if len(recommendations) < 3:
+        similar_fms = await repo.find_similar_nodes(
+            node_type="FailureMode",
+            name_keyword=ic.characteristic_name,
+            product_line_code=ic.product_line,
+            limit=5
+        )
+        for fm in similar_fms:
+            fmea_id = fm["fmea_id"]
+            doc_no = fm.get("document_no", "")
+            node_id = _extract_node_id(fm)
+            key = (fmea_id, node_id)
+            if key in seen:
+                continue
+            score = _compute_name_similarity(ic.characteristic_name, fm["name"])
+            if score > 0.5:
+                seen.add(key)
+                recommendations.append(_build_recommendation(
+                    fm, match_source="characteristic_name", score=score,
+                    fmea_id=fmea_id, document_no=doc_no
+                ))
+
+    return recommendations
+
+
+async def match_fmea_for_alarm(
+    db: AsyncSession,
+    alarm: SPCAlarm
+) -> list[dict]:
+    """为 SPC 告警匹配关联的 FMEA 失效模式。
+
+    双路径：控制计划桥接（精确）+ 名称模糊匹配（兜底）。
+    返回最多 3 条推荐。
+    """
+    ic = await get_inspection_characteristic(db, alarm.ic_id)
+    if not ic:
+        return []
+
+    seen: set[tuple[str, str]] = set()
+    recommendations = []
+
+    # 路径 1：控制计划桥接
+    cp_recs = await _match_via_control_plan(db, ic, seen)
+    recommendations.extend(cp_recs)
+
+    # 路径 2：名称模糊匹配（如果控制计划结果不足 3 条）
+    if len(recommendations) < 3:
+        name_recs = await _match_via_name(db, ic, seen)
+        recommendations.extend(name_recs)
+
+    # 排序并截取前 3
+    recommendations.sort(key=lambda x: x["match_score"], reverse=True)
+    top_recs = recommendations[:3]
+
+    # Enrichment：补充 RPN/AP/path/cause/control_count
+    repo = await _get_graph_repo(db)
+    enriched = []
+    for rec in top_recs:
+        try:
+            rec = await _enrich_recommendation(db, rec, uuid.UUID(rec["fmea_id"]), repo)
+        except Exception:
+            # Enrichment 失败不影响返回，使用默认值
+            pass
+        enriched.append(rec)
+
+    # 写入缓存
+    alarm.fmea_recommendations = enriched
+    await db.commit()
+
+    return enriched
 
 
 async def _add_audit_log_no_commit(
@@ -871,6 +1261,8 @@ async def create_capa_from_alarm(
         status="D1_TEAM",
         severity="严重",
         created_by=user_id,
+        fmea_ref_id=alarm.confirmed_fmea_id,
+        fmea_node_id=alarm.confirmed_fmea_node_id,
     )
     db.add(capa)
     await db.flush()
@@ -881,7 +1273,12 @@ async def create_capa_from_alarm(
 
     await _create_audit_log(
         db, user_id, "CREATE", "capa_eightd", capa.report_id,
-        {"alarm_id": str(alarm_id), "ic_code": ic.ic_code}
+        {
+            "alarm_id": str(alarm_id),
+            "ic_code": ic.ic_code,
+            "confirmed_fmea_id": str(alarm.confirmed_fmea_id) if alarm.confirmed_fmea_id else None,
+            "confirmed_fmea_node_id": alarm.confirmed_fmea_node_id,
+        }
     )
     return capa
 
