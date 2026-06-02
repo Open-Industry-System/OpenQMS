@@ -36,7 +36,7 @@
 ```sql
 CREATE TABLE change_impact_analysis (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    fmea_id UUID NOT NULL REFERENCES fmea_documents(id) ON DELETE CASCADE,
+    fmea_id UUID NOT NULL REFERENCES fmea_documents(fmea_id) ON DELETE CASCADE,
     product_line_code VARCHAR NOT NULL,
 
     -- 变更定义
@@ -51,10 +51,10 @@ CREATE TABLE change_impact_analysis (
     -- 分析结果
     scope VARCHAR NOT NULL DEFAULT 'single_fmea',  -- 'single_fmea' | 'cross_fmea'
     status VARCHAR NOT NULL DEFAULT 'completed',   -- 'pending' | 'completed' | 'failed'
-    impact_score INTEGER,               -- 1-10 影响严重程度评分
-    impact_result JSONB NOT NULL DEFAULT '{}',     -- 详细结果
+    impact_score INTEGER,               -- 1-10 影响严重程度评分（Service 单点计算）
+    impact_result JSONB NOT NULL DEFAULT '{}',     -- 详细结果（仅 affected_nodes + summary）
 
-    created_by UUID REFERENCES users(id),
+    created_by UUID REFERENCES users(user_id),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -141,9 +141,9 @@ class ImpactSummary(BaseModel):
     max_hop_distance: int
 
 class ChangeImpactResult(BaseModel):
+    """Repository 返回的纯分析结果，不含评分（评分由 Service 单点计算）"""
     affected_nodes: list[AffectedNode]
     summary: ImpactSummary
-    impact_score: int  # 1-10
 
 class ChangeImpactAnalyzeRequest(BaseModel):
     fmea_id: uuid.UUID
@@ -218,6 +218,7 @@ class ChangeImpactService:
         return analysis
 
     def _compute_impact_score(self, result: ChangeImpactResult) -> int:
+        """Service 单点计算影响评分，确保表字段与响应一致"""
         score = result.summary.failure_modes_affected * 2
         score += result.summary.ap_upgraded_count * 3
         if result.summary.max_hop_distance > 2:
@@ -230,7 +231,7 @@ class ChangeImpactService:
 ```python
 # backend/app/api/change_impact.py
 
-router = APIRouter(prefix="/change-impact", tags=["变更影响分析"])
+router = APIRouter(prefix="/api/change-impact", tags=["变更影响分析"])
 
 @router.post("/analyze", response_model=ChangeImpactAnalysisResponse)
 async def analyze_change_impact(
@@ -363,7 +364,61 @@ ORDER BY hop_distance
 
 ### 4.5 JSONB 遍历实现
 
-复用现有 `_trace_chain` 方法，遍历 `graph_data` 中的 `nodes` 和 `edges` 数组。遍历深度限制与 Neo4j 实现保持一致。
+**不直接复用现有 `_trace_chain`**，因为当前实现缺少深度限制、路径追踪和边类型过滤能力。
+
+JSONB 版本新增专用 BFS：
+
+```python
+def _bfs_with_path(graph_data, start_node_id, edge_filter, max_depth):
+    """
+    广度优先遍历，返回带路径信息的受影响节点。
+    - edge_filter: 边类型白名单函数
+    - max_depth: 最大遍历深度
+    - 返回: [{node_id, node_type, name, path, hop_distance}, ...]
+    """
+    nodes = {n["id"]: n for n in graph_data.get("nodes", [])}
+    edges = graph_data.get("edges", [])
+    
+    # 构建邻接表（按 edge_filter 过滤）
+    adj = defaultdict(list)
+    for e in edges:
+        if edge_filter(e.get("type")):
+            adj[e["source"]].append(e["target"])
+    
+    # BFS
+    visited = set([start_node_id])
+    queue = deque([(start_node_id, [start_node_id], 0)])
+    results = []
+    
+    while queue:
+        current_id, path, depth = queue.popleft()
+        if depth >= max_depth:
+            continue
+        
+        for next_id in adj.get(current_id, []):
+            if next_id not in visited:
+                visited.add(next_id)
+                new_path = path + [next_id]
+                node = nodes.get(next_id)
+                if node:
+                    results.append({
+                        "node_id": next_id,
+                        "node_type": node.get("type", ""),
+                        "name": node.get("name", ""),
+                        "path": [nodes[p].get("name", p) for p in new_path if p in nodes],
+                        "hop_distance": depth + 1,
+                    })
+                queue.append((next_id, new_path, depth + 1))
+    
+    return results
+```
+
+**边类型白名单：**
+
+| 传播方向 | 允许的边类型 |
+|----------|-------------|
+| downstream | `HAS_FAILURE_MODE`, `EFFECT_OF`, `HAS_PROCESS_STEP`, `FUNCTION_MAPPED_TO` |
+| upstream | `CAUSE_OF`, `PREVENTED_BY`, `DETECTED_BY` |
 
 ---
 
@@ -426,19 +481,29 @@ frontend/src/components/change-impact/
 
 ### 5.5 与知识图谱联动
 
+**Phase 1 方案：复用现有 FMEA 编辑器中的"图谱" tab**
+
+当前全局知识图谱页面（`/knowledge-graph`）不接收 `fmea_id`、`highlight_node` 等参数。优先复用已有能力：
+
 ```typescript
+const graphUrl = `/fmea/${analysis.fmea_id}?tab=graph&highlightNode=${analysis.node_id}`;
+```
+
+跳转后：
+- FMEA 编辑器自动切换到"图谱" tab
+- `highlightNode` 参数使图谱自动聚焦到变更节点
+- 用户在图谱中可手动查看上下游关联
+
+**Phase 4 扩展（预留）：**
+如需在全局知识图谱中高亮多条影响路径，需先扩展 `KnowledgeGraphPage` 支持 `fmea_id`、`highlight_node`、`highlight_affected` 参数解析。当前设计不实现此扩展，仅预留 URL 格式：
+```typescript
+// 预留格式，待 KnowledgeGraphPage 扩展后启用
 const graphUrl = `/knowledge-graph?` + new URLSearchParams({
   fmea_id: analysis.fmea_id,
   highlight_node: analysis.node_id,
   highlight_affected: affectedNodeIds.join(","),
-  layout: "hierarchical",
 });
 ```
-
-知识图谱页面读取参数后高亮：
-- 变更节点：红色边框
-- 受影响节点：橙色边框
-- 路径边：加粗 + 红色
 
 ### 5.6 API Client
 
@@ -457,16 +522,27 @@ export interface AnalyzeChangeImpactRequest {
 
 export async function analyzeChangeImpact(
   data: AnalyzeChangeImpactRequest
-): Promise<ChangeImpactAnalysis>;
+): Promise<ChangeImpactAnalysis> {
+  const resp = await client.post("/change-impact/analyze", data);
+  return resp.data;
+}
 
 export async function listChangeImpacts(
   fmeaId: string
-): Promise<ChangeImpactAnalysis[]>;
+): Promise<ChangeImpactAnalysis[]> {
+  const resp = await client.get(`/change-impact/fmea/${fmeaId}`);
+  return resp.data;
+}
 
 export async function getChangeImpact(
   id: string
-): Promise<ChangeImpactAnalysis>;
+): Promise<ChangeImpactAnalysis> {
+  const resp = await client.get(`/change-impact/${id}`);
+  return resp.data;
+}
 ```
+
+**注意：** 前端 axios client 的 `baseURL` 为 `/api`，所以上述路径实际请求的是 `/api/change-impact/...`，与后端路由前缀一致。见 `frontend/src/api/client.ts`。
 
 ---
 
@@ -494,7 +570,7 @@ export async function getChangeImpact(
   ↓
 用户点击"查看图谱"
   ↓
-跳转 /knowledge-graph，高亮变更节点和影响路径
+跳转 `/fmea/{id}?tab=graph&highlightNode={node}`，在 FMEA 编辑器图谱 tab 中聚焦变更节点
 ```
 
 ### 6.2 边界情况处理
@@ -515,7 +591,7 @@ export async function getChangeImpact(
 | 模块 | 集成方式 |
 |------|----------|
 | **AuditLog** | Service 层自动写入 `change_impact_analyzed` 记录 |
-| **知识图谱** | URL 参数联动高亮 |
+| **知识图谱** | 跳转 FMEA 编辑器图谱 tab（`/fmea/{id}?tab=graph&highlightNode={node}`）；全局知识图谱联动预留 |
 | **FMEA 状态机** | 预留：高风险变更（score ≥ 7）可触发状态回退到 `rework` |
 | **D7 预防复发** | 预留：分析结果可作为 D7 步骤的输入数据 |
 | **产品线路由器** | 分析记录按 `product_line_code` 隔离 |
