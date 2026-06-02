@@ -350,12 +350,26 @@ def build_cypher_sync(
     version: int,
     graph_data: dict,
 ) -> list[tuple[str, dict]]:
-    # ... existing code ...
-    # Step 2: CREATE FMEDocument node
+    """为单个 FMEA 文档生成完整的 Neo4j 投影 Cypher 语句序列。"""
+    statements: list[tuple[str, dict]] = []
+
+    # Step 1: DELETE existing projection for this fmea_id
+    statements.append((
+        "MATCH (n) WHERE n.fmea_id = $fmea_id DETACH DELETE n",
+        {"fmea_id": fmea_id},
+    ))
+
+    nodes = graph_data.get("nodes", [])
+    edges = graph_data.get("edges", [])
+
+    if not nodes:
+        return statements
+
+    # Step 2: CREATE FMEDocument node（新增 product_line_name）
     statements.append((
         "CREATE (d:FMEDocument {fmea_id: $fmea_id, document_no: $document_no, "
         "title: $title, fmea_type: $fmea_type, product_line_code: $product_line_code, "
-        "product_line_name: $product_line_name, "  # 新增
+        "product_line_name: $product_line_name, "
         "status: $status, version: $version})",
         {
             "fmea_id": fmea_id,
@@ -363,12 +377,52 @@ def build_cypher_sync(
             "title": title,
             "fmea_type": fmea_type,
             "product_line_code": product_line_code,
-            "product_line_name": product_line_name,  # 新增
+            "product_line_name": product_line_name,
             "status": status,
             "version": version,
         },
     ))
-    # ... rest unchanged ...
+
+    # Step 3: CREATE each GraphNode
+    for node in nodes:
+        raw_type = node.get("type", "")
+        if raw_type not in ALLOWED_NODE_TYPES:
+            continue
+        label = NODE_TYPE_LABEL_MAP.get(raw_type, raw_type)
+        props = _node_properties(node)
+        props["fmea_id"] = fmea_id
+        props["product_line_code"] = product_line_code
+
+        statements.append((
+            f"CREATE (n:GraphNode:{label}) SET n += $props",
+            {"props": props},
+        ))
+
+        statements.append((
+            "MATCH (d:FMEDocument {fmea_id: $fmea_id}), "
+            f"(n:GraphNode {{fmea_id: $fmea_id, node_id: $node_id}}) "
+            "CREATE (d)-[:HAS_NODE]->(n)",
+            {"fmea_id": fmea_id, "node_id": node["id"]},
+        ))
+
+    # Step 4: CREATE edges
+    node_ids = {n["id"] for n in nodes if n.get("type") in ALLOWED_NODE_TYPES}
+    for edge_idx, edge in enumerate(edges):
+        edge_type = edge.get("type", "")
+        source = edge.get("source", "")
+        target = edge.get("target", "")
+        if edge_type not in ALLOWED_EDGE_TYPES:
+            continue
+        if source not in node_ids or target not in node_ids:
+            continue
+        statements.append((
+            f"MATCH (s:GraphNode {{fmea_id: $fmea_id, node_id: $source}}), "
+            f"(t:GraphNode {{fmea_id: $fmea_id, node_id: $target}}) "
+            f"CREATE (s)-[:{edge_type} {{edge_index: $edge_index}}]->(t)",
+            {"fmea_id": fmea_id, "source": source, "target": target, "edge_index": edge_idx},
+        ))
+
+    return statements
 ```
 
 - [ ] **Step 2: 更新 `GraphProjectionService.sync_fmea_to_neo4j` 以获取并传入 product_line_name**
@@ -399,12 +453,19 @@ def build_cypher_sync(
             title=fmea.title,
             fmea_type=fmea.fmea_type,
             product_line_code=fmea.product_line_code,
-            product_line_name=product_line_name,  # 新增
+            product_line_name=product_line_name,
             status=fmea.status,
             version=fmea.version,
             graph_data=fmea.graph_data or {"nodes": [], "edges": []},
         )
-        # ... rest unchanged ...
+
+        async def _tx(tx):
+            for cypher, params in statements:
+                result = await tx.run(cypher, params)
+                await result.consume()
+
+        async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+            await session.execute_write(_tx)
 ```
 
 - [ ] **Step 3: Commit**
@@ -507,7 +568,7 @@ git commit -m "feat(schema): extend recommendation schemas with graph source fie
 
 ---
 
-## Task 6: RecommendationService 核心改造
+## Task 7: RecommendationService 核心改造
 
 **Files:**
 - Modify: `backend/app/services/recommendation_service.py`
@@ -877,18 +938,6 @@ class RecommendationService:
         await self.db.execute(stmt)
 ```
 
-Note: The `context` column doesn't exist in the cache table. The `effective_scope` for cached results will come from... actually we don't store the full context dict. For simplicity, cached responses will default `effective_scope` to the scope embedded in the `context_hash`. We can't reconstruct it from the DB row. Two options:
-1. Add a `context` JSONB column to `recommendation_cache` 
-2. Default `effective_scope` to `"global"` for cached responses
-
-Given the design doc says "缓存 key 包含 scope" and "`graph_match_count` 动态计算", and to avoid a schema migration, I'll go with option 2 for now: cached responses use `"global"` as the default effective_scope. This is a minor UX issue — the frontend shows the scope label and it's mostly relevant for fresh requests.
-
-Actually, let me revise the `_get_cached` to just use `"global"` for cached effective_scope to avoid migration:
-
-```python
-                effective_scope="global",  # cached results default to global; fresh requests compute actual
-```
-
 - [ ] **Step 9: 删除旧的 `_merge_suggestions` 方法（被 `_merge_and_deduplicate` 替代）**
 
 在文件中删除 `_merge_suggestions` 方法。
@@ -902,7 +951,7 @@ git commit -m "feat(recommendation): integrate graph similarity into Recommendat
 
 ---
 
-## Task 7: 权限系统更新
+## Task 8: 权限系统更新
 
 **Files:**
 - Modify: `backend/app/core/permissions.py`
@@ -920,18 +969,26 @@ class Module(StrEnum):
 
 - [ ] **Step 2: 创建 alembic 迁移文件**
 
+先确认当前 migration head：
+
+Run: `cd backend && alembic heads`
+
+使用输出的 revision ID 作为 `down_revision`。如果存在多个 head，先创建 merge revision 或选择目标分支的 head。
+
+然后创建迁移文件 `backend/alembic/versions/029_knowledge_graph_permissions.py`：
+
 ```python
 """add knowledge_graph permissions
 
 Revision ID: 029
-Revises: 028
 Create Date: 2026-06-02
 """
 from typing import Sequence, Union
 from alembic import op
 
 revision: str = '029_knowledge_graph_permissions'
-down_revision: Union[str, None] = '20260602_collab_sessions'
+# 替换为 alembic heads 输出的当前 head revision
+down_revision: Union[str, None] = 'REPLACE_WITH_ALEMBIC_HEAD'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -963,7 +1020,7 @@ git commit -m "feat(permissions): add KNOWLEDGE_GRAPH module for admin/manager"
 
 ---
 
-## Task 8: API 路由更新
+## Task 9: API 路由更新
 
 **Files:**
 - Modify: `backend/app/api/fmea.py`
@@ -1119,7 +1176,7 @@ git commit -m "feat(api): update recommend endpoint + add /similar-nodes + fix f
 
 ---
 
-## Task 9: 前端类型与 API 更新
+## Task 10: 前端类型与 API 更新
 
 **Files:**
 - Modify: `frontend/src/hooks/usePermission.ts`
@@ -1191,7 +1248,7 @@ git commit -m "feat(frontend): extend types for graph-powered recommendations"
 
 ---
 
-## Task 10: 前端 SmartSuggestionDropdown 增强
+## Task 11: 前端 SmartSuggestionDropdown 增强
 
 **Files:**
 - Modify: `frontend/src/components/dfmea/SmartSuggestionDropdown.tsx`
@@ -1405,7 +1462,7 @@ git commit -m "feat(frontend): SmartSuggestionDropdown with source tags and scop
 
 ---
 
-## Task 11: 后端测试
+## Task 12: 后端测试
 
 **Files:**
 - Create: `backend/tests/test_recommendation_service.py`
@@ -1600,9 +1657,6 @@ async def test_similar_nodes_advanced_rejects_unauthorized_product_line(client: 
     })
     assert resp.status_code == 403
 ```
-    finally:
-        app.dependency_overrides[get_current_user] = _override_get_current_user
-```
 
 - [ ] **Step 4: 运行 graph API 测试**
 
@@ -1618,7 +1672,7 @@ git commit -m "test: add recommendation service and similar-nodes endpoint tests
 
 ---
 
-## Task 12: 构建验证
+## Task 13: 构建验证
 
 **Files:** 全项目
 
@@ -1645,19 +1699,20 @@ git commit -m "chore: build verification fixes" || echo "no fixes needed"
 | 设计文档 § | 实施任务 |
 |-----------|---------|
 | §3 相似度算法 | Task 1 |
-| §4.1 权限模型（Module.KNOWLEDGE_GRAPH） | Task 7 |
-| §4.2 scope 强制降级 | Task 6 (recommend)、Task 8 (similar-nodes) |
-| §4.3 跨产品线防御性脱敏 | Task 8 (similar-nodes API 层) |
+| §4.1 权限模型（Module.KNOWLEDGE_GRAPH） | Task 8 |
+| §4.2 scope 强制降级 | Task 7 (recommend)、Task 9 (similar-nodes) |
+| §4.3 跨产品线防御性脱敏 | Task 9 (similar-nodes API 层) |
 | §4.4 FMEA 状态过滤 | Task 3 (JSONB where status==approved)、Task 4 (Neo4j where d.status='approved') |
-| §5.1 扩展推荐端点 | Task 8 |
-| §5.2 响应 Schema 扩展 | Task 5 |
-| §5.3 独立 similar-nodes 端点 | Task 8 |
+| §5.1 扩展推荐端点 | Task 9 |
+| §5.2 响应 Schema 扩展 | Task 6 |
+| §5.3 独立 similar-nodes 端点 | Task 9 |
 | §6 Repository 扩展 | Task 2, 3, 4 |
-| §7 Trigger Type 映射 | Task 6 (_query_graph_similarity, _extract_neighbors_from_match) |
-| §8 推荐服务层改造 | Task 6 |
-| §9 前端改造 | Task 10 |
-| §10 缓存策略 | Task 6 (context_hash 包含 scope) |
-| §12 错误处理 | Task 6 (try/except around graph query) |
+| §6.3 Neo4j 投影契约 | Task 5 |
+| §7 Trigger Type 映射 | Task 7 (_query_graph_similarity, _extract_neighbors_from_match) |
+| §8 推荐服务层改造 | Task 7 |
+| §9 前端改造 | Task 11 |
+| §10 缓存策略 | Task 7 (context_hash 包含 scope) |
+| §12 错误处理 | Task 7 (try/except around graph query) |
 
 **无遗漏。**
 
