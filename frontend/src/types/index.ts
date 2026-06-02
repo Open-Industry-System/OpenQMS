@@ -88,6 +88,7 @@ export interface FMEADocument {
   status: string;
   version: number;
   graph_data: GraphData;
+  lock_version: number;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -230,6 +231,7 @@ export interface ControlPlan {
   core_group: string;
   items: ControlPlanItem[];
   sync_pending: boolean;
+  lock_version: number;
   created_by: string | null;
   updated_by: string | null;
   approved_by: string | null;

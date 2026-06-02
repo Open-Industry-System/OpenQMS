@@ -46,6 +46,8 @@ export async function updateControlPlan(
     org_factory?: string;
     core_group?: string;
     items?: ControlPlan["items"];
+    lock_version?: number;
+    confirmed_latest_lock_version?: number;
   }
 ): Promise<ControlPlan> {
   const resp = await client.put(`/control-plans/${id}`, data);

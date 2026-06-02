@@ -57,9 +57,9 @@ export function diffGraphs(
       // Check modified fields
       const diffFields = ["name", "severity", "occurrence", "detection", "specification", "requirement"];
       for (const field of diffFields) {
-        const baseVal = (baseNode as Record<string, unknown>)[field] ?? null;
-        const latestVal = (latestNode as Record<string, unknown>)[field] ?? null;
-        const localVal = (localNodeMap.get(id) as Record<string, unknown> | undefined)?.[field] ?? null;
+        const baseVal = (baseNode as unknown as Record<string, unknown>)[field] ?? null;
+        const latestVal = (latestNode as unknown as Record<string, unknown>)[field] ?? null;
+        const localVal = (localNodeMap.get(id) as unknown as Record<string, unknown> | undefined)?.[field] ?? null;
 
         if (baseVal !== latestVal) {
           nodeChanges.push({

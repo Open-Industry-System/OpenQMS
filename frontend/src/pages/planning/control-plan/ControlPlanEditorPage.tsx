@@ -19,6 +19,9 @@ import type { CPSyncStatusItem } from "../../../types/specialCharacteristic";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { getCPSyncStatus, syncToCP } from "../../../api/specialCharacteristic";
+import { useCollaboration } from "../../../hooks/useCollaboration";
+import { CollaborationBar, ConflictResolutionModal } from "../../../components/collaboration";
+import type { ConflictInfo } from "../../../types/collaboration";
 import ImportFromFMEAModal from "../../../components/control-plan/ImportFromFMEAModal";
 import VersionHistoryTab from "../../../components/version/VersionHistoryTab";
 import CreateVersionModal from "../../../components/version/CreateVersionModal";
@@ -101,6 +104,13 @@ export default function ControlPlanEditorPage() {
   const { canEdit: canEditPerm, canApprove } = usePermission();
   const isApproved = cp?.status === "approved";
   const canEdit = canEditPerm('planning') && !isApproved;
+
+  const cpId = id || "";
+  const { activeUsers, isSyncing } = useCollaboration("control_plan", cpId);
+
+  // Conflict resolution state
+  const [conflictVisible, setConflictVisible] = useState(false);
+  const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null);
 
   // Form state
   const [title, setTitle] = useState("");
@@ -191,7 +201,7 @@ export default function ControlPlanEditorPage() {
         message.success("创建成功");
         navigate(`/control-plans/${created.cp_id}`);
       } else if (id) {
-        await updateControlPlan(id, {
+        const saveData = {
           title: title.trim(),
           phase,
           part_no: partNo.trim() || undefined,
@@ -201,16 +211,71 @@ export default function ControlPlanEditorPage() {
           org_factory: orgFactory.trim() || undefined,
           drawing_rev: drawingRev.trim() || undefined,
           items,
-        });
-        message.success("保存成功");
-        // Refresh
-        const refreshed = await getControlPlan(id);
-        setCp(refreshed);
+        };
+        try {
+          const updated = await updateControlPlan(id, {
+            ...saveData,
+            lock_version: cp!.lock_version,
+          });
+          setCp(updated);
+          message.success("保存成功");
+        } catch (e: unknown) {
+          const err = e as { response?: { status?: number; data?: { detail?: string | object } } };
+          if (err.response?.status === 409) {
+            const detail = err.response.data?.detail;
+            const conflictData = typeof detail === "string" ? JSON.parse(detail) : detail;
+            setConflictInfo({
+              saved_by: conflictData.conflict?.saved_by || null,
+              saved_at: conflictData.conflict?.saved_at || null,
+              latest_lock_version: conflictData.conflict?.latest_lock_version || 0,
+            });
+            setConflictVisible(true);
+          } else {
+            throw e;
+          }
+        }
       }
     } catch (e: any) {
       message.error(e.response?.data?.detail || (isNew ? "创建失败" : "保存失败"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleConflictRefresh = () => {
+    setConflictVisible(false);
+    window.location.reload();
+  };
+
+  const handleConflictForceSave = async () => {
+    if (!id || !cp || !conflictInfo) return;
+    const saveData = {
+      title: title.trim(),
+      phase,
+      part_no: partNo.trim() || undefined,
+      part_name: partName.trim() || undefined,
+      contact_info: contactInfo.trim() || undefined,
+      core_group: coreGroup.trim() || undefined,
+      org_factory: orgFactory.trim() || undefined,
+      drawing_rev: drawingRev.trim() || undefined,
+      items,
+    };
+    try {
+      const updated = await updateControlPlan(id, {
+        ...saveData,
+        lock_version: cp.lock_version,
+        confirmed_latest_lock_version: conflictInfo.latest_lock_version,
+      });
+      setCp(updated);
+      setConflictVisible(false);
+      message.success("强制保存成功");
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number; data?: { detail?: string } } };
+      if (err.response?.status === 409) {
+        message.error("文档又被修改了，请刷新后重试");
+      } else {
+        message.error("强制保存失败");
+      }
     }
   };
 
@@ -521,6 +586,8 @@ export default function ControlPlanEditorPage() {
 
   return (
     <div>
+      <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
+
       {/* Top bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <Space>
@@ -814,6 +881,14 @@ export default function ControlPlanEditorPage() {
                 setCp(refreshed);
               } catch { /* silent */ }
             }}
+          />
+
+          <ConflictResolutionModal
+            visible={conflictVisible}
+            conflictInfo={conflictInfo}
+            diff={null}
+            onRefresh={handleConflictRefresh}
+            onForceSave={handleConflictForceSave}
           />
 
           <Modal
