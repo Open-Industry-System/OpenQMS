@@ -276,7 +276,7 @@ async def test_global_stats_response_sanitized(client: AsyncClient):
     # high_ap_nodes 脱敏检查
     first = data["high_ap_nodes"][0]
     assert "name" in first
-    assert first["name"].endswith("***")
+    assert first["name"] == "焊接***"  # 精确值：保留前 2 字符 + ***
     assert "fmea_id" not in first
     assert "document_no" not in first
     assert "node_id" not in first
@@ -285,10 +285,24 @@ async def test_global_stats_response_sanitized(client: AsyncClient):
     # top_failure_modes 脱敏检查（ap 不应出现，因为原始数据无 ap）
     top = data["top_failure_modes"][0]
     assert "name" in top
-    assert top["name"].endswith("***")
+    assert top["name"] == "密封***"  # 精确值
     assert "fmea_id" not in top
     assert "document_no" not in top
     assert "ap" not in top  # response_model_exclude_none=True 过滤了 null
+
+    # 验证原始名称未出现在任何响应字段中（防御性检查）
+    raw_names = {"焊接不良", "密封失效"}
+    def _check_no_raw_names(obj):
+        if isinstance(obj, dict):
+            for v in obj.values():
+                _check_no_raw_names(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _check_no_raw_names(item)
+        elif isinstance(obj, str):
+            for raw in raw_names:
+                assert raw not in obj, f"raw name '{raw}' leaked in response"
+    _check_no_raw_names(data)
 
 
 @pytest.mark.asyncio

@@ -142,11 +142,8 @@ class JSONBRepository(FMEAGraphRepository):
 
         return results
 
-    async def get_cross_fmea_stats(self, product_line_code: str) -> dict:
-        query = select(FMEADocument).where(FMEADocument.product_line_code == product_line_code)
-        result = await self._db.execute(query)
-        fmeas = result.scalars().all()
-
+    def _aggregate_stats(self, fmeas) -> dict:
+        """从 FMEADocument 列表聚合统计，供 get_cross_fmea_stats / get_global_stats 复用。"""
         type_counts: dict[str, int] = {}
         total_nodes = 0
         ap_counts = {"H": 0, "M": 0, "L": 0}
@@ -164,7 +161,6 @@ class JSONBRepository(FMEAGraphRepository):
                 t = node.get("type", "Unknown")
                 type_counts[t] = type_counts.get(t, 0) + 1
 
-            # 按链路遍历获取正确的 S/O/D（而非直接从 FailureMode 读取）
             for fm in self._collect_failure_mode_rpn(fmea.graph_data):
                 rpn = fm["rpn"]
                 ap = fm["ap"]
@@ -200,64 +196,18 @@ class JSONBRepository(FMEAGraphRepository):
             "avg_rpn": round(total_rpn / rpn_count, 1) if rpn_count > 0 else 0,
             "top_failure_modes": sorted(top_modes, key=lambda x: x["rpn"], reverse=True)[:10],
         }
+
+    async def get_cross_fmea_stats(self, product_line_code: str) -> dict:
+        query = select(FMEADocument).where(FMEADocument.product_line_code == product_line_code)
+        result = await self._db.execute(query)
+        fmeas = result.scalars().all()
+        return self._aggregate_stats(fmeas)
 
     async def get_global_stats(self) -> dict:
         query = select(FMEADocument)
         result = await self._db.execute(query)
         fmeas = result.scalars().all()
-
-        type_counts: dict[str, int] = {}
-        total_nodes = 0
-        ap_counts = {"H": 0, "M": 0, "L": 0}
-        high_ap_nodes: list[dict] = []
-        total_rpn = 0
-        rpn_count = 0
-        top_modes: list[dict] = []
-
-        for fmea in fmeas:
-            if not fmea.graph_data:
-                continue
-
-            for node in fmea.graph_data.get("nodes", []):
-                total_nodes += 1
-                t = node.get("type", "Unknown")
-                type_counts[t] = type_counts.get(t, 0) + 1
-
-            for fm in self._collect_failure_mode_rpn(fmea.graph_data):
-                rpn = fm["rpn"]
-                ap = fm["ap"]
-
-                if rpn > 0:
-                    total_rpn += rpn
-                    rpn_count += 1
-                    top_modes.append({
-                        "name": fm["name"],
-                        "rpn": rpn,
-                        "fmea_id": str(fmea.fmea_id),
-                        "document_no": fmea.document_no,
-                    })
-
-                if ap:
-                    ap_counts[ap] = ap_counts.get(ap, 0) + 1
-                    if ap == "H":
-                        high_ap_nodes.append({
-                            "node_id": fm["node_id"],
-                            "name": fm["name"],
-                            "ap": ap,
-                            "rpn": rpn,
-                            "fmea_id": str(fmea.fmea_id),
-                            "document_no": fmea.document_no,
-                        })
-
-        return {
-            "total_fmeas": len(fmeas),
-            "total_nodes": total_nodes,
-            "node_type_distribution": type_counts,
-            "ap_distribution": ap_counts,
-            "high_ap_nodes": sorted(high_ap_nodes, key=lambda x: x["rpn"], reverse=True)[:20],
-            "avg_rpn": round(total_rpn / rpn_count, 1) if rpn_count > 0 else 0,
-            "top_failure_modes": sorted(top_modes, key=lambda x: x["rpn"], reverse=True)[:10],
-        }
+        return self._aggregate_stats(fmeas)
 
     async def _get_fmea(self, fmea_id: uuid.UUID) -> FMEADocument | None:
         result = await self._db.execute(
