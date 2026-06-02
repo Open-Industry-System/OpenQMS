@@ -66,7 +66,7 @@
 | 全文检索 | PostgreSQL tsvector + GIN | 原生支持，中文需 zhparser 扩展 |
 | 混合排序 | RRF (倒数排名融合) | 简单有效的多路结果融合算法 |
 | Embedding 生成 | OpenAI API + Ollama | 可配置，复用现有 provider 模式 |
-| 异步写入 | Outbox 模式 | 复用现有 graph_sync_outbox 基础设施 |
+| 异步写入 | 独立 Outbox 模式 | 新建 embedding_sync_outbox + 独立 worker，避免与 graph worker 冲突 |
 | LLM 问答 | 现有 LLMProvider | 复用 Claude/OpenAI/Local 三提供商 |
 
 ---
@@ -85,9 +85,10 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE document_embeddings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     entity_type VARCHAR(20) NOT NULL,      -- fmea_node, capa, audit_finding, complaint, scar, rma
-    entity_id UUID NOT NULL,               -- 源记录 ID
-    entity_field VARCHAR(50) NOT NULL,     -- 嵌入的字段名
-    chunk_index INT NOT NULL DEFAULT 0,   -- 分块索引（当前每个字段一个块，预留未来大文本分块）
+    entity_id UUID NOT NULL,               -- 源记录 ID（fmea_id / report_id / finding_id 等）
+    node_id VARCHAR(36),                   -- FMEA 图节点 ID（仅 entity_type=fmea_node 时有值）
+    entity_field VARCHAR(50) NOT NULL,     -- 嵌入的字段名（如 name, d4_root_cause, description）
+    chunk_index INT NOT NULL DEFAULT 0,    -- 分块索引（当前每个字段一个块，预留未来大文本分块）
     chunk_text TEXT NOT NULL,              -- 被嵌入的文本（用于展示和重新嵌入）
     embedding vector($DIMENSIONS) NOT NULL, -- 嵌入向量（维度由 EMBEDDING_DIMENSIONS 环境变量决定，部署时固定）
     product_line_code VARCHAR(20),         -- 产品线过滤
@@ -96,7 +97,7 @@ CREATE TABLE document_embeddings (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
-    UNIQUE (entity_type, entity_id, entity_field, chunk_index)
+    UNIQUE (entity_type, entity_id, node_id, entity_field, chunk_index)
 );
 
 -- HNSW 索引（近似最近邻）
@@ -127,23 +128,23 @@ $$ LANGUAGE plpgsql;
 
 ### 各实体的嵌入字段映射
 
-| entity_type | entity_id 指向 | entity_field | chunk_text 来源 |
-|-------------|---------------|--------------|----------------|
-| fmea_node | fmea_documents.fmea_id | `{node_type}.{node_id}.name` | 节点 name + requirement + specification（FMEA 特殊：entity_id 指向 fmea_id，节点信息在 metadata.node_id 中） |
-| capa | capa_eightd.report_id | `d2_description` | 问题描述 |
-| capa | capa_eightd.report_id | `d4_root_cause` | 根因分析 |
-| capa | capa_eightd.report_id | `d5_correction` | 纠正措施 |
-| capa | capa_eightd.report_id | `d7_prevention` | 预防措施 |
-| audit_finding | audit_findings.id | `description` | 发现描述 |
-| audit_finding | audit_findings.id | `root_cause` | 根因 |
-| audit_finding | audit_findings.id | `corrective_action` | 纠正措施 |
-| complaint | customer_complaints.id | `defect_desc` | 缺陷描述 |
-| complaint | customer_complaints.id | `root_cause` | 根因 |
-| complaint | customer_complaints.id | `corrective_action` | 纠正措施 |
-| scar | supplier_scars.id | `description` | 问题描述 |
-| scar | supplier_scars.id | `resolution_summary` | 解决方案 |
-| rma | rma_records.id | `analysis_result` | 分析结果 |
-| rma | rma_records.id | `corrective_action` | 纠正措施 |
+| entity_type | entity_id 指向 | node_id | entity_field | chunk_text 来源 |
+|-------------|---------------|---------|--------------|----------------|
+| fmea_node | fmea_documents.fmea_id | graph node UUID | `name` | 节点 name + requirement + specification |
+| capa | capa_eightd.report_id | NULL | `d2_description` | 问题描述 |
+| capa | capa_eightd.report_id | NULL | `d4_root_cause` | 根因分析 |
+| capa | capa_eightd.report_id | NULL | `d5_correction` | 纠正措施 |
+| capa | capa_eightd.report_id | NULL | `d7_prevention` | 预防措施 |
+| audit_finding | audit_findings.finding_id | NULL | `description` | 发现描述 |
+| audit_finding | audit_findings.finding_id | NULL | `root_cause` | 根因 |
+| audit_finding | audit_findings.finding_id | NULL | `corrective_action` | 纠正措施 |
+| complaint | customer_complaints.complaint_id | NULL | `defect_desc` | 缺陷描述 |
+| complaint | customer_complaints.complaint_id | NULL | `root_cause` | 根因 |
+| complaint | customer_complaints.complaint_id | NULL | `corrective_action` | 纠正措施 |
+| scar | supplier_scars.scar_id | NULL | `description` | 问题描述 |
+| scar | supplier_scars.scar_id | NULL | `resolution_summary` | 解决方案 |
+| rma | rma_records.rma_id | NULL | `analysis_result` | 分析结果 |
+| rma | rma_records.rma_id | NULL | `corrective_action` | 纠正措施 |
 
 ---
 
@@ -169,17 +170,30 @@ class EmbeddingProvider(Protocol):
 - `EMBEDDING_MODEL`: 可选覆盖
 - `EMBEDDING_BASE_URL`: Ollama 地址
 
-### 异步生成 — Outbox 模式
+### 异步生成 — 独立 Outbox 模式
 
-复用 `graph_sync_outbox` 表，新增 `event_type = 'embedding_sync'`：
+**不复用** `graph_sync_outbox`。现有 worker 硬编码 FMEA→Neo4j 逻辑且不检查 event_type，强行复用会导致运行异常。新建独立的 `embedding_sync_outbox` 表和 `embedding_sync_worker` 进程。
 
-1. **触发**：各模块 CRUD 服务在写入后插入 outbox 事件（`event_type = 'embedding_sync'`，`aggregate_type = 'document_embedding'`）
-2. **Worker 路由分发**：现有 `graph_sync_worker.py` 硬编码了 FMEA→Neo4j 同步逻辑且不检查 `event_type`。必须重构 Worker 的 `run_worker` 循环，按 `event_type` 路由：
-   - `event_type = 'graph_sync'`（现有）→ 调用 `projection.sync_fmea_to_neo4j()`
-   - `event_type = 'embedding_sync'`（新增）→ 调用 `EmbeddingService.process_embedding_event()`
-   - 去重函数 `deduplicate_tasks` 也需按 `event_type` 分组，避免 embedding 事件被 FMEA 去重逻辑丢弃
-3. **批量处理**：合并多个待处理事件，单次 API 调用最多 2048 条文本
+```sql
+CREATE TABLE embedding_sync_outbox (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_type VARCHAR(20) NOT NULL,      -- fmea_node, capa, audit_finding, complaint, scar, rma
+    entity_id UUID NOT NULL,
+    product_line_code VARCHAR(20),
+    status VARCHAR(10) DEFAULT 'pending',  -- pending / processing / completed / dead_letter
+    retry_count INT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    processed_at TIMESTAMPTZ
+);
+CREATE INDEX idx_embedding_outbox_pending ON embedding_sync_outbox (created_at)
+    WHERE status = 'pending';
+```
+
+1. **触发**：各模块 CRUD 服务在写入后插入 `embedding_sync_outbox` 事件
+2. **独立 Worker**：`embedding_sync_worker.py`（独立进程，`python -m app.services.embedding_sync_worker`），仅处理 embedding 事件，不触碰 graph_sync_outbox
+3. **批量处理**：Worker 批量领取 pending 事件，合并为单次 embedding API 调用（最多 2048 条文本）
 4. **幂等**：`UNIQUE (entity_type, entity_id, entity_field, chunk_index)` 保证 upsert 安全
+5. **重试与死信**：复用现有 exponential backoff 模式（10s→270s，5 次后标记 dead_letter）
 
 ### 初始回填
 
@@ -227,13 +241,20 @@ LIMIT $k;
 **RRF 融合**：
 
 ```python
-def reciprocal_rank_fusion(results_lists: list[list], k: int = 60) -> list:
+def reciprocal_rank_fusion(
+    results_lists: list[list],
+    weights: list[float] = [0.7, 0.3],  # [vector_weight, fulltext_weight]
+    k: int = 60,
+) -> list:
+    """Weighted RRF: score = sum(w_i / (k + rank_i)) for each result."""
     scores = {}
-    for results in results_lists:
+    for weight, results in zip(weights, results_lists):
         for rank, item in enumerate(results):
-            scores[item.id] = scores.get(item.id, 0) + 1 / (k + rank)
+            scores[item.id] = scores.get(item.id, 0) + weight / (k + rank)
     return sorted(scores.items(), key=lambda x: x[1], reverse=True)
 ```
+
+权重通过环境变量 `SEARCH_VECTOR_WEIGHT`（默认 0.7）和 `SEARCH_FULLTEXT_WEIGHT`（默认 0.3）配置，传入 `weights` 参数。
 
 ### SearchService
 
@@ -257,10 +278,12 @@ class SearchService:
 
 ### Q&A 流程
 
-1. 调用 `semantic_search()` 检索 Top-N 相关文档块
+1. 调用 `semantic_search()` 检索 Top-N 相关文档块（含权限过滤）
 2. 拼接为 RAG context（每块带来源标注：entity_type + document_no）
 3. 构建 prompt：系统指令 + context + 用户问题
-4. 调用 `LLMProvider.complete()` 生成回答 — **关键适配**：现有 `complete()` 方法内部对所有 LLM 响应执行 `json.loads()`，不支持纯文本输出。因此 RAG prompt 必须要求 LLM 返回 JSON 格式：
+4. 调用 LLM 生成回答 — **接口适配**：
+
+   **方案 A（推荐）：JSON Schema 包装**，复用现有 `complete()` 接口，RAG prompt 要求 LLM 返回 JSON：
    ```python
    rag_schema = {
        "type": "object",
@@ -272,6 +295,17 @@ class SearchService:
    llm_response = await self.llm_provider.complete(prompt=rag_prompt, response_schema=rag_schema)
    answer = llm_response.get("answer", "")
    ```
+
+   **方案 B：新增 `complete_text()` 方法**，在 `LLMProvider` 协议中扩展一个不做 `json.loads()` 的接口：
+   ```python
+   class LLMProvider(Protocol):
+       async def complete(self, prompt: str, response_schema: dict) -> dict: ...
+       async def complete_text(self, prompt: str) -> str: ...  # 新增，直接返回原始文本
+   ```
+   各提供商实现 `complete_text()` 时跳过 JSON 解析，直接返回 `text`。RAG 调用方使用此方法。
+
+   **实现时选择方案 A**（最小改动），如果后续有更多非 JSON 输出场景再引入方案 B。
+
 5. 返回回答 + 引用来源列表
 
 ### Prompt 模板
@@ -366,6 +400,31 @@ POST /api/search/ask
 | ask | ❌ | ✅ | ✅ | ✅ |
 | reindex | ❌ | ❌ | ❌ | ✅ |
 
+### 结果级权限过滤
+
+搜索结果横跨 FMEA、CAPA、审核、客诉、SCAR、RMA 六个模块，不能仅用路由级角色检查。必须在 SearchService 中做 **per-source authorization**：
+
+1. **检索前过滤**：在 SQL 查询中加入 `product_line_code` 过滤（用户只能搜索其有权访问的产品线）
+2. **检索后过滤**：对返回的每条结果，根据 `entity_type` 映射到对应模块权限，调用现有权限检查：
+   - `fmea_node` → 检查 FMEA 模块读权限
+   - `capa` → 检查 CAPA 模块读权限
+   - `audit_finding` → 检查审核模块读权限
+   - `complaint` → 检查客诉模块读权限
+   - `scar` → 检查 SCAR 模块读权限
+   - `rma` → 检查 RMA 模块读权限
+3. **Q&A 同理**：RAG context 仅包含用户有权访问的文档块，prompt 中不出现无权限数据
+
+```python
+# 伪代码
+async def filter_by_permission(results: list, user: User) -> list:
+    accessible = []
+    for r in results:
+        module = ENTITY_MODULE_MAP[r.entity_type]  # e.g. "fmea" → ModulePermission.FMEA
+        if has_module_access(user, module, r.product_line_code):
+            accessible.append(r)
+    return accessible
+```
+
 ---
 
 ## 7. 前端设计
@@ -416,30 +475,46 @@ POST /api/search/ask
 
 ### PostgreSQL 安装扩展
 
-需要使用 `pgvector/pgvector:pg15` 替代官方 `postgres:15-alpine` 镜像。
+**镜像**：使用 `pgvector/pgvector:pg15` 替代官方 `postgres:15-alpine`（自带 pgvector 扩展）。
 
-**pgvector 扩展**：镜像自带，初始化脚本直接 `CREATE EXTENSION IF NOT EXISTS vector;`
-
-**中文分词 zhparser**：pgvector 官方镜像**不包含** zhparser。需要自定义 Dockerfile：
+**中文分词 zhparser**：pgvector 官方镜像不包含 zhparser，需要自定义 Dockerfile。创建 `docker/postgres/Dockerfile`：
 
 ```dockerfile
 FROM pgvector/pgvector:pg15
-RUN apt-get update && apt-get install -y build-essential postgresql-server-dev-15 git
-# 安装 scws（zhparser 依赖）
-RUN git clone https://github.com/xutils/scws.git && cd scws && ./configure && make && make install
-# 安装 zhparser
-RUN git clone https://github.com/amutu/zhparser.git && cd zhparser && make && make install
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential postgresql-server-dev-15 git ca-certificates && \
+    # scws（zhparser 依赖）
+    git clone https://github.com/xutils/scws.git /tmp/scws && \
+    cd /tmp/scws && ./configure && make && make install && ldconfig && \
+    # zhparser
+    git clone https://github.com/amutu/zhparser.git /tmp/zhparser && \
+    cd /tmp/zhparser && make USE_PGXS=1 && make USE_PGXS=1 install && \
+    # 清理
+    apt-get purge -y build-essential git && apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/* /tmp/scws /tmp/zhparser
 ```
 
-初始化脚本：
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS zhparser;
-CREATE TEXT SEARCH CONFIGURATION zhcfg (PARSER = zhparser);
-ALTER TEXT SEARCH CONFIGURATION zhcfg ADD MAPPING FOR n,v,a,i,e,l WITH simple;
+docker-compose.yml 中 `db` 服务改为 `build: ./docker/postgres` 而非 `image: postgres:15-alpine`。
+
+**扩展创建 — Alembic 迁移**：不依赖 Docker init 脚本（已有 volume 时 init 脚本不重新执行）。在 Alembic 迁移中创建扩展：
+
+```python
+# alembic/versions/020_add_vector_extensions.py
+def upgrade():
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    op.execute("CREATE EXTENSION IF NOT EXISTS zhparser")
+    op.execute("""
+        CREATE TEXT SEARCH CONFIGURATION zhcfg (PARSER = zhparser);
+        ALTER TEXT SEARCH CONFIGURATION zhcfg ADD MAPPING FOR n,v,a,i,e,l WITH simple;
+    """)
+
+def downgrade():
+    op.execute("DROP TEXT SEARCH CONFIGURATION IF EXISTS zhcfg")
+    op.execute("DROP EXTENSION IF EXISTS zhparser")
+    op.execute("DROP EXTENSION IF EXISTS vector")
 ```
 
-**降级方案**：如果 zhparser 编译复杂度过高，可退而使用 PostgreSQL 内置的 `pg_trgm` 扩展做三元组匹配，或在应用层用 `jieba` 分词后以空格分隔传入 `to_tsquery('simple', ...)`。
+**降级方案**：如果 zhparser 编译失败，全文检索退化为 `websearch_to_tsquery('simple', ...)`（按空格分词，对中文效果有限但零依赖），或在应用层用 `jieba` 分词后拼接空格传入 `to_tsquery('simple', ...)`。向量搜索不受影响，仍可独立工作。
 
 ### Ollama 服务（可选）
 
