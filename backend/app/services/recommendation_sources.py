@@ -386,7 +386,7 @@ class RuleEngineSource:
 class RuleEngineMeasureSource:
     """规则引擎兜底 — D5 通用措施建议。"""
 
-    name = "rule_engine"
+    name = "rule_engine_measure"
 
     async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
         from app.services.recommendation_service import RuleEngine
@@ -558,7 +558,7 @@ class FMEAControlExpander:
                                         "control_node_id": tgt,
                                         "control_type": "detection",
                                         "fmea_id": fmea_id,
-                                    "fmea_document_no": doc.get("document_no"),
+                                        "fmea_document_no": doc.get("document_no"),
                                     },
                                 ))
 

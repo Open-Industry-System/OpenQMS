@@ -2,8 +2,15 @@ import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from app.services.recommendation_sources import FMEAGraphSource, SemanticSearchSource, HistoricalCAPASource
-from app.services.recommendation_types import RecommendationContext
+from app.services.recommendation_sources import (
+    FMEAGraphSource,
+    SemanticSearchSource,
+    HistoricalCAPASource,
+    RuleEngineSource,
+    RuleEngineMeasureSource,
+    FMEAControlExpander,
+)
+from app.services.recommendation_types import RecommendationContext, RecommendationCandidate
 
 
 @pytest.fixture
@@ -281,3 +288,185 @@ class TestSemanticSearchSource:
         results = await source.retrieve(ctx)
         assert results == []
         mock_embedding.embed.assert_called_once_with(["焊接虚焊问题"])
+
+
+class TestRuleEngineSource:
+    @pytest.mark.asyncio
+    async def test_returns_candidates_for_d2_text(self):
+        source = RuleEngineSource()
+        ctx = RecommendationContext(
+            capa_data={"d2_description": "密封失效"},
+            user_product_lines=None,
+            stage="d4",
+        )
+        results = await source.retrieve(ctx)
+        # RuleEngine should produce at least one suggestion for "密封失效"
+        assert len(results) >= 1
+        assert results[0].source == "rule_engine"
+        assert results[0].confidence <= 0.5  # scaled by 0.5
+        assert results[0].match_reason == "规则引擎推断"
+
+    @pytest.mark.asyncio
+    async def test_empty_d2_returns_empty(self):
+        source = RuleEngineSource()
+        ctx = RecommendationContext(
+            capa_data={"d2_description": ""},
+            user_product_lines=None,
+            stage="d4",
+        )
+        results = await source.retrieve(ctx)
+        assert results == []
+
+
+class TestRuleEngineMeasureSource:
+    @pytest.mark.asyncio
+    async def test_returns_measure_candidates(self):
+        source = RuleEngineMeasureSource()
+        ctx = RecommendationContext(
+            capa_data={"d2_description": "焊接虚焊"},
+            user_product_lines=None,
+            stage="d5",
+        )
+        results = await source.retrieve(ctx)
+        assert len(results) >= 1
+        assert results[0].source == "rule_engine"
+        # Category should be mapped correctly
+        assert results[0].category in ("预防措施", "探测措施")
+
+    @pytest.mark.asyncio
+    async def test_ap_lookup_from_linked_fmea(self):
+        fmea_id = uuid.uuid4()
+        fm_id = str(uuid.uuid4())
+        source = RuleEngineMeasureSource()
+        ctx = RecommendationContext(
+            capa_data={"d2_description": "焊接虚焊", "fmea_node_id": fm_id},
+            user_product_lines=None,
+            stage="d5",
+            linked_fmea={
+                "fmea_id": fmea_id,
+                "document_no": "PFMEA-001",
+                "graph_data": {
+                    "nodes": [
+                        {"id": fm_id, "type": "FailureMode", "name": "焊接虚焊", "ap": "H"},
+                    ],
+                    "edges": [],
+                },
+            },
+        )
+        results = await source.retrieve(ctx)
+        assert len(results) >= 1
+        # match_reason should contain AP=H
+        assert "AP=H" in results[0].match_reason
+
+
+class TestFMEAControlExpander:
+    @pytest.mark.asyncio
+    async def test_expands_prevention_and_detection_controls(self):
+        expander = FMEAControlExpander()
+
+        fmea_id = str(uuid.uuid4())
+        cause_id = str(uuid.uuid4())
+        fm_id = str(uuid.uuid4())
+        prev_id = str(uuid.uuid4())
+        det_id = str(uuid.uuid4())
+
+        cause_candidate = RecommendationCandidate(
+            source="semantic_search",
+            content="焊接参数偏移",
+            category=None,
+            confidence=0.7,
+            match_reason="语义匹配",
+            metadata={
+                "failure_cause_node_id": cause_id,
+                "failure_mode_node_id": fm_id,
+                "failure_mode_name": "焊接虚焊",
+                "fmea_id": fmea_id,
+            },
+        )
+
+        fmea_docs = [{
+            "fmea_id": fmea_id,
+            "document_no": "PFMEA-001",
+            "graph_data": {
+                "nodes": [
+                    {"id": cause_id, "type": "FailureCause", "name": "焊接参数偏移"},
+                    {"id": fm_id, "type": "FailureMode", "name": "焊接虚焊"},
+                    {"id": prev_id, "type": "PreventionControl", "name": "参数监控"},
+                    {"id": det_id, "type": "DetectionControl", "name": "AOI检测"},
+                ],
+                "edges": [
+                    {"source": cause_id, "target": fm_id, "type": "CAUSE_OF"},
+                    {"source": cause_id, "target": prev_id, "type": "PREVENTED_BY"},
+                    {"source": cause_id, "target": det_id, "type": "DETECTED_BY"},
+                ],
+            },
+        }]
+
+        results = await expander.expand([cause_candidate], fmea_docs)
+
+        assert len(results) == 2
+        prevention = [r for r in results if r.metadata.get("control_type") == "prevention"]
+        detection = [r for r in results if r.metadata.get("control_type") == "detection"]
+        assert len(prevention) == 1
+        assert len(detection) == 1
+        assert prevention[0].content == "参数监控"
+        assert detection[0].content == "AOI检测"
+        assert prevention[0].confidence == 0.6
+        assert detection[0].confidence == 0.55
+
+    @pytest.mark.asyncio
+    async def test_deduplicates_same_control(self):
+        expander = FMEAControlExpander()
+
+        fmea_id = str(uuid.uuid4())
+        cause_id = str(uuid.uuid4())
+        fm_id = str(uuid.uuid4())
+        prev_id = str(uuid.uuid4())
+
+        # Two cause candidates pointing to the same control
+        candidates = [
+            RecommendationCandidate(
+                source="semantic_search",
+                content="原因A",
+                category=None,
+                confidence=0.7,
+                match_reason="",
+                metadata={
+                    "failure_cause_node_id": cause_id,
+                    "failure_mode_node_id": fm_id,
+                    "fmea_id": fmea_id,
+                },
+            ),
+            RecommendationCandidate(
+                source="semantic_search",
+                content="原因B",
+                category=None,
+                confidence=0.7,
+                match_reason="",
+                metadata={
+                    "failure_cause_node_id": cause_id,
+                    "failure_mode_node_id": fm_id,
+                    "fmea_id": fmea_id,
+                },
+            ),
+        ]
+
+        fmea_docs = [{
+            "fmea_id": fmea_id,
+            "document_no": "PFMEA-001",
+            "graph_data": {
+                "nodes": [
+                    {"id": cause_id, "type": "FailureCause", "name": "原因"},
+                    {"id": fm_id, "type": "FailureMode", "name": "失效"},
+                    {"id": prev_id, "type": "PreventionControl", "name": "监控"},
+                ],
+                "edges": [
+                    {"source": cause_id, "target": fm_id, "type": "CAUSE_OF"},
+                    {"source": cause_id, "target": prev_id, "type": "PREVENTED_BY"},
+                ],
+            },
+        }]
+
+        results = await expander.expand(candidates, fmea_docs)
+        # Should deduplicate — only one control returned
+        assert len(results) == 1
