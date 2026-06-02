@@ -9,7 +9,7 @@ from app.config import settings
 from app.core.deps import get_current_user, require_admin
 from app.models.user import User
 from app.graph.repository import FMEAGraphRepository
-from app.graph.jsonb_repository import JSONBRepository
+from app.graph.deps import get_graph_repository
 
 
 class SimilarNodeOut(BaseModel):
@@ -48,21 +48,11 @@ class CrossFmeaStatsOut(BaseModel):
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
 
-async def _repo(db: AsyncSession = Depends(get_db)) -> FMEAGraphRepository:
-    """根据 GRAPH_REPOSITORY 配置选择实现。"""
-    if settings.GRAPH_REPOSITORY == "neo4j":
-        from app.graph.neo4j_driver import get_neo4j_driver
-        from app.graph.neo4j_repository import Neo4jRepository
-        driver = await get_neo4j_driver()
-        return Neo4jRepository(driver)
-    return JSONBRepository(db)
-
-
 @router.get("/fmea/{fmea_id}/impact/{node_id}")
 async def impact_chain(
     fmea_id: uuid.UUID,
     node_id: str,
-    repo: FMEAGraphRepository = Depends(_repo),
+    repo: FMEAGraphRepository = Depends(get_graph_repository),
     _user: User = Depends(get_current_user),
 ):
     """下游影响链：从指定节点出发追踪失效效应和控制措施。"""
@@ -73,7 +63,7 @@ async def impact_chain(
 async def cause_chain(
     fmea_id: uuid.UUID,
     node_id: str,
-    repo: FMEAGraphRepository = Depends(_repo),
+    repo: FMEAGraphRepository = Depends(get_graph_repository),
     _user: User = Depends(get_current_user),
 ):
     """上游原因链：从指定节点出发追踪失效原因。"""
@@ -86,7 +76,7 @@ async def similar_nodes(
     name_keyword: str = Query(..., min_length=1, description="名称关键词"),
     product_line_code: str = Query(..., min_length=1, description="产品线代码（必填，租户隔离）"),
     limit: int = Query(20, ge=1, le=100),
-    repo: FMEAGraphRepository = Depends(_repo),
+    repo: FMEAGraphRepository = Depends(get_graph_repository),
     _user: User = Depends(get_current_user),
 ):
     """跨 FMEA 搜索相似节点。product_line_code 必填且不能为空字符串。返回白名单字段。"""
@@ -102,7 +92,7 @@ async def similar_nodes(
 @router.get("/stats", response_model=CrossFmeaStatsOut)
 async def cross_fmea_stats(
     product_line_code: str = Query(..., min_length=1, description="产品线代码（必填，租户隔离）"),
-    repo: FMEAGraphRepository = Depends(_repo),
+    repo: FMEAGraphRepository = Depends(get_graph_repository),
     _user: User = Depends(get_current_user),
 ):
     """跨 FMEA 聚合统计。product_line_code 必填且不能为空字符串。返回白名单字段。"""
