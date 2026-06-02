@@ -8,9 +8,10 @@ import {
 import {
   ArrowLeftOutlined, LockOutlined, UnlockOutlined,
   DeleteOutlined, PlusOutlined, CheckCircleOutlined,
-  ExclamationCircleOutlined, UploadOutlined,
+  ExclamationCircleOutlined, UploadOutlined, SearchOutlined,
 } from "@ant-design/icons";
 import VersionPanel from "./VersionPanel";
+import FMEAMatchPanel from "./components/FMEAMatchPanel";
 import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
 import { importSamples, downloadSampleImportTemplate } from "../../api/spc";
 import dayjs from "dayjs";
@@ -99,6 +100,8 @@ export default function SPCDetailPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("chart");
   const [importOpen, setImportOpen] = useState(false);
+  const [fmeaMatchPanelOpen, setFmeaMatchPanelOpen] = useState(false);
+  const [selectedAlarmId, setSelectedAlarmId] = useState<string | null>(null);
 
   // Data entry form
   const [batchNo, setBatchNo] = useState("");
@@ -471,9 +474,21 @@ export default function SPCDetailPage() {
       render: (v: string | undefined) => v || "-",
     },
     {
+      title: "关联 FMEA",
+      dataIndex: "confirmed_fmea_id",
+      key: "confirmed_fmea_id",
+      width: 120,
+      render: (_: unknown, record: SPCAlarm) =>
+        record.confirmed_fmea_id ? (
+          <Tag color="blue">已关联</Tag>
+        ) : (
+          <Tag color="default">未关联</Tag>
+        ),
+    },
+    {
       title: "操作",
       key: "actions",
-      width: 180,
+      width: 240,
       render: (_: unknown, record: SPCAlarm) => (
         <Space>
           {record.status === "open" && canEdit('spc') && (
@@ -485,6 +500,16 @@ export default function SPCDetailPage() {
               确认
             </Button>
           )}
+          <Button
+            size="small"
+            icon={<SearchOutlined />}
+            onClick={() => {
+              setSelectedAlarmId(record.alarm_id);
+              setFmeaMatchPanelOpen(true);
+            }}
+          >
+            查看 FMEA 推荐
+          </Button>
           {!record.linked_capa_id && canEdit('spc') && (
             <Button
               size="small"
@@ -884,6 +909,17 @@ export default function SPCDetailPage() {
             ),
           },
         ]}
+      />
+      <FMEAMatchPanel
+        alarmId={selectedAlarmId || ""}
+        visible={fmeaMatchPanelOpen}
+        onClose={() => setFmeaMatchPanelOpen(false)}
+        onCreateCAPA={() => {
+          if (selectedAlarmId) {
+            handleCreateCAPA(selectedAlarmId);
+            setFmeaMatchPanelOpen(false);
+          }
+        }}
       />
     </div>
   );
