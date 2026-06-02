@@ -67,7 +67,7 @@ def upgrade():
             chunk_text TEXT NOT NULL,
             embedding vector({dimensions}) NOT NULL,
             product_line_code VARCHAR(20),
-            metadata JSONB DEFAULT '{}',
+            metadata JSONB DEFAULT '{{}}',
             embedding_model VARCHAR(50) NOT NULL,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW()
