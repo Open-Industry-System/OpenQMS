@@ -109,14 +109,13 @@ def get_d4_recommendations(
 **匹配策略**：
 
 1. **关联 FMEA 匹配**：
-   - 有 `fmea_ref_id` 时，从图中定位 FailureMode 节点
+   - 有 `fmea_ref_id` 时，在该 FMEA 图内搜索匹配的 FailureCause
    - **节点解析逻辑**（与 D7 一致）：
-     - 若 `fmea_node_id` 是 FailureCause → 沿 CAUSE_OF 正向边找到父 FailureMode
-     - 若 `fmea_node_id` 是 FailureMode → 直接使用
+     - 若 `fmea_node_id` 是 FailureCause → 沿 CAUSE_OF 正向边找到父 FailureMode，再反向找所有 FailureCause
+     - 若 `fmea_node_id` 是 FailureMode → 直接使用该 FailureMode
      - 若 `fmea_node_id` 是 Function → 沿 HAS_FAILURE_MODE 正向边找到子 FailureMode
-     - 若 `fmea_node_id` 为空 → 用 D2 关键词对所有 FailureMode 名称做子串匹配
-   - 遍历 `CAUSE_OF` 反向边获取所有 FailureCause 节点
-   - 用 D2 关键词对 FailureCause 的 name + description 做子串匹配
+     - **若 `fmea_node_id` 为空（常见情况，前端 linkFMEA 只传 fmea_id）**→ 用 D2 关键词对图中所有 FailureMode 名称做子串匹配，对匹配到的 FailureMode 遍历 CAUSE_OF 反向边获取 FailureCause
+   - 对每个定位到的 FailureCause，用 D2 关键词对其 name + description 做子串匹配
    - 匹配到的根因按匹配关键词数量排序
 
 2. **跨 FMEA 关键词匹配**：
@@ -148,9 +147,10 @@ def get_d5_recommendations(
 - 关键词匹配排序
 
 **通用建议生成**：
-- 复用 RuleEngine 的 `_suggest_measures` 逻辑
+- 调用 `RuleEngine().evaluate("measure", {"failure_mode": ..., "ap": ...})` 公共接口（不直接调用私有方法）
 - 输入：从关联 FMEA 获取 AP 级别（若有），否则用 D2 关键词推断失效模式类型
 - 输出：按 AP 级别分层的通用预防 + 探测措施
+- 注意：RuleEngine 输出的 explanation 字段为"检测措施"，返回前端前需映射为"探测措施"
 
 ---
 
@@ -163,10 +163,11 @@ GET /api/capa/{report_id}/d4-fmea-recommendations
 GET /api/capa/{report_id}/d5-fmea-recommendations
 ```
 
-**权限**：
+**权限**（与 D7 推荐端点一致，只读操作用 VIEW）：
 - 路由依赖：`user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW))`
 - 程序内校验：`fmea_level = await get_user_permission(user, Module.FMEA, db)`，不足则 403
 - 产品线访问控制
+- 注意："采纳"操作走现有 `PATCH /api/capa/{report_id}` 更新端点，该端点已有 EDIT 权限校验
 
 **逻辑**：
 1. 获取 CAPA 记录
@@ -260,7 +261,7 @@ interface D5RecPanelProps {
 
 - D4 步骤表单上方插入 `<D4RecPanel />`
 - D5 步骤表单上方插入 `<D5RecPanel />`
-- 与现有 D7RecPanel 模式完全一致
+- 复用 D7 的推荐分组/加载/空状态视觉模式（不含 D7 的确认门禁和 FMEA 写回逻辑）
 
 **`frontend/src/api/capa.ts`**
 
@@ -352,12 +353,14 @@ export async function getD5Recommendations(reportId: string): Promise<D5Recommen
 | 测试场景 | 说明 |
 |---------|------|
 | 关联 FMEA 匹配 | CAPA 有 fmea_ref_id，图中有匹配的 FailureCause → 返回 linked 结果 |
+| 关联 FMEA 无节点关联 | CAPA 有 fmea_ref_id 但无 fmea_node_id → 用 D2 关键词搜索图内 FailureMode/FailureCause |
 | 跨 FMEA 关键词匹配 | 无 fmea_ref_id，D2 关键词匹配其他 FMEA 的 FailureCause → 返回 keyword 结果 |
 | 无匹配时返回空列表 | D2 描述无有效关键词 → 返回空 items |
 | D5 已有措施匹配 | D4 根因匹配 FailureCause → 沿 PREVENTED_BY/DETECTED_BY 找到控制措施 |
+| D5 cause 级探测措施 | FailureCause 直接关联 DetectionControl → 返回 control_type="detection" |
 | D5 通用建议生成 | 无关联 FMEA 时，规则引擎仍返回基于 AP 级别的通用措施 |
 | 产品线隔离 | 不同产品线的 FMEA 不互相推荐 |
-| 权限校验 | viewer 角色调用 → 403 |
+| 权限校验 | viewer 可调用 GET 推荐（VIEW），但采纳走 PATCH 更新端点（EDIT） |
 
 复用 `test_d7_recommendations.py` 的 fixture 模式。
 
