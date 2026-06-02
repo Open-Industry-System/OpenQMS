@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import ForeignKey, String, Numeric, Integer, Boolean, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -80,6 +81,28 @@ class SPCAlarm(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
     linked_capa_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id"), nullable=True)
     linked_fmea_node_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+    # 新增：推荐的 FMEA 失效模式缓存（异步预匹配结果）
+    fmea_recommendations: Mapped[list | None] = mapped_column(
+        JSONB,
+        default=list,
+        nullable=True,
+        comment="缓存的FMEA推荐列表"
+    )
+
+    # 新增：用户最终确认的关联 FMEA 信息
+    confirmed_fmea_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        sa.ForeignKey("fmea_documents.fmea_id"),
+        nullable=True,
+        comment="用户确认的FMEA文档ID"
+    )
+    confirmed_fmea_node_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="用户确认的FMEA节点ID（如 fm_1），与 confirmed_fmea_id 成对使用"
+    )
+
     acknowledged_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
     acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
