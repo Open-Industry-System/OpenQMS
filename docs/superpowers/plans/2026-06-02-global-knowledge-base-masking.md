@@ -23,19 +23,24 @@ backend/app/
                                 # + 修复 get_cross_fmea_stats top_failure_modes 缺失 document_no
   api/graph.py                 # 新增 GlobalStatsOut, MaskedNodeOut, mask_name, _sanitize_global_stats
                                 # + /global-stats 路由（require_admin）
-  tests/test_graph_api.py      # 新增 global-stats 测试用例
+  tests/test_graph_api.py      # 新增 global-stats 测试用例（含 dependency override 修复）
+  tests/test_graph_repository.py  # 新增 JSONBRepository 测试
 ```
 
 ---
 
-## Task 1: Repository 抽象接口 — 新增 `get_global_stats`
+## Task 1: Repository 层 — 抽象方法 + Neo4j/JSONB 双实现 + document_no 修复
 
 **Files:**
 - Modify: `backend/app/graph/repository.py`
+- Modify: `backend/app/graph/neo4j_repository.py`
+- Modify: `backend/app/graph/jsonb_repository.py`
+
+**注意:** 抽象方法和两个具体实现必须在**同一个 commit** 中完成，避免中间状态导致 `get_graph_repository()` 实例化失败。
 
 - [ ] **Step 1: 在 `FMEAGraphRepository` 中添加抽象方法**
 
-在 `get_cross_fmea_stats` 之后、`analyze_change_impact` 之前插入：
+在 `backend/app/graph/repository.py` 中，`get_cross_fmea_stats` 之后、`analyze_change_impact` 之前插入：
 
 ```python
     @abstractmethod
@@ -43,25 +48,9 @@ backend/app/
         """跨产品线全局统计。返回结构与 get_cross_fmea_stats 相同。"""
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Neo4jRepository 实现 `get_global_stats`**
 
-```bash
-git add backend/app/graph/repository.py
-git commit -m "feat(graph): add get_global_stats abstract method to FMEAGraphRepository"
-```
-
----
-
-## Task 2: Neo4jRepository 实现 `get_global_stats`
-
-**Files:**
-- Modify: `backend/app/graph/neo4j_repository.py`
-
-**注意:** 与 `get_cross_fmea_stats` 基本一致，区别是**移除所有产品线过滤条件和 `$pl` 参数**。
-
-- [ ] **Step 1: 添加 `get_global_stats` 方法**
-
-在 `get_cross_fmea_stats` 之后插入：
+在 `backend/app/graph/neo4j_repository.py` 中，`get_cross_fmea_stats` 之后插入：
 
 ```python
     async def get_global_stats(self) -> dict:
@@ -168,25 +157,11 @@ git commit -m "feat(graph): add get_global_stats abstract method to FMEAGraphRep
             }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 3: JSONBRepository 修复 document_no + 实现 get_global_stats**
 
-```bash
-git add backend/app/graph/neo4j_repository.py
-git commit -m "feat(graph): implement get_global_stats in Neo4jRepository"
-```
+在 `backend/app/graph/jsonb_repository.py` 中：
 
----
-
-## Task 3: JSONBRepository 实现 `get_global_stats` + 修复 `document_no` 缺陷
-
-**Files:**
-- Modify: `backend/app/graph/jsonb_repository.py`
-
-**注意:** 
-1. `get_global_stats` 与 `get_cross_fmea_stats` 基本一致，只是查询时不限制 `product_line_code`
-2. 顺带修复 `get_cross_fmea_stats` 中 `top_failure_modes` 缺失 `document_no`（line 175-179 只包含 `name`, `rpn`, `fmea_id`，需要加上 `document_no: fmea.document_no`）
-
-- [ ] **Step 1: 修复 `get_cross_fmea_stats` 中 `top_failure_modes` 缺失 `document_no`**
+**3a. 修复 `get_cross_fmea_stats` 中 `top_failure_modes` 缺失 `document_no`**
 
 找到这段代码（约 line 175-179）：
 
@@ -209,7 +184,7 @@ git commit -m "feat(graph): implement get_global_stats in Neo4jRepository"
                     })
 ```
 
-- [ ] **Step 2: 添加 `get_global_stats` 方法**
+**3b. 添加 `get_global_stats` 方法**
 
 在 `get_cross_fmea_stats` 之后插入：
 
@@ -273,16 +248,16 @@ git commit -m "feat(graph): implement get_global_stats in Neo4jRepository"
         }
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit（Repository 层一次性提交）**
 
 ```bash
-git add backend/app/graph/jsonb_repository.py
-git commit -m "feat(graph): implement get_global_stats in JSONBRepository + fix missing document_no in top_failure_modes"
+git add backend/app/graph/repository.py backend/app/graph/neo4j_repository.py backend/app/graph/jsonb_repository.py
+git commit -m "feat(graph): add get_global_stats across all repositories + fix document_no in JSONB top_failure_modes"
 ```
 
 ---
 
-## Task 4: API Schema + 脱敏函数
+## Task 2: API Schema + 脱敏函数 + 路由
 
 **Files:**
 - Modify: `backend/app/api/graph.py`
@@ -352,50 +327,68 @@ def _sanitize_global_stats(raw: dict) -> dict:
     }
 ```
 
-- [ ] **Step 3: Commit**
-
-```bash
-git add backend/app/api/graph.py
-git commit -m "feat(graph): add GlobalStatsOut, MaskedNodeOut, mask_name and _sanitize_global_stats"
-```
-
----
-
-## Task 5: API 路由 `/global-stats`
-
-**Files:**
-- Modify: `backend/app/api/graph.py`
-
-- [ ] **Step 1: 添加路由**
+- [ ] **Step 3: 添加 `/global-stats` 路由**
 
 在 `/stats` 路由之后、`/rebuild` 路由之前插入：
 
 ```python
-@router.get("/global-stats", response_model=GlobalStatsOut)
+@router.get("/global-stats", response_model=GlobalStatsOut, response_model_exclude_none=True)
 async def global_stats(
     repo: FMEAGraphRepository = Depends(get_graph_repository),
     _user: User = Depends(require_admin),
 ):
-    """跨产品线全局知识库统计（Admin Only）。返回数据已脱敏。"""
+    """跨产品线全局知识库统计（Admin Only）。返回数据已脱敏。
+    不接受 product_line_code 参数（传入则忽略，不做校验）。
+    """
     raw = await repo.get_global_stats()
     return _sanitize_global_stats(raw)
 ```
 
-- [ ] **Step 2: Commit**
+**注意:** `response_model_exclude_none=True` 确保 `top_failure_modes` 中 `ap: null` 不会被序列化，与设计示例一致。
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add backend/app/api/graph.py
-git commit -m "feat(graph): add /global-stats endpoint (admin only, sanitized)"
+git commit -m "feat(graph): add GlobalStatsOut, mask_name, _sanitize_global_stats and /global-stats endpoint"
 ```
 
 ---
 
-## Task 6: 测试
+## Task 3: API 测试 + mask_name 边界测试
 
 **Files:**
 - Modify: `backend/tests/test_graph_api.py`
 
-- [ ] **Step 1: 在 `StubGraphRepo` 中添加 `get_global_stats`**
+**注意:** 当前 `test_graph_api.py` 的 dependency override 使用 `app.api.graph._repo`，但 `api/graph.py` 已改用 `get_graph_repository`。必须同步修复 override 目标。
+
+- [ ] **Step 1: 修复测试文件的 dependency override**
+
+将文件顶部的：
+
+```python
+from app.api.graph import _repo
+```
+
+替换为：
+
+```python
+from app.graph.deps import get_graph_repository
+```
+
+将 fixture 中的：
+
+```python
+    app.dependency_overrides[_repo] = _override_repo
+```
+
+替换为：
+
+```python
+    app.dependency_overrides[get_graph_repository] = _override_repo
+```
+
+- [ ] **Step 2: 在 `StubGraphRepo` 中添加 `get_global_stats`**
 
 在 `StubGraphRepo` 的 `get_cause_chain` 之后插入：
 
@@ -432,11 +425,14 @@ git commit -m "feat(graph): add /global-stats endpoint (admin only, sanitized)"
         }
 ```
 
-- [ ] **Step 2: 添加测试用例**
+- [ ] **Step 3: 添加测试用例**
 
 在文件末尾添加：
 
 ```python
+from app.api.graph import mask_name
+
+
 @pytest.mark.asyncio
 async def test_global_stats_admin_only(client: AsyncClient):
     """验证 /global-stats 仅 admin 可访问。"""
@@ -445,9 +441,11 @@ async def test_global_stats_admin_only(client: AsyncClient):
     assert resp.status_code == status.HTTP_200_OK
 
     # 切换为 non-admin 角色
+    # require_admin 检查 user.role_definition.role_key，不是 user.role
     async def _non_admin_user():
         from app.models.user import User
-        return User(
+        from app.models.role import RoleDefinition
+        user = User(
             user_id="00000000-0000-0000-0000-000000000002",
             username="viewer",
             display_name="Viewer",
@@ -456,6 +454,8 @@ async def test_global_stats_admin_only(client: AsyncClient):
             is_active=True,
             role="viewer",
         )
+        user.role_definition = RoleDefinition(role_key="viewer", role_name="Viewer")
+        return user
 
     app.dependency_overrides[get_current_user] = _non_admin_user
     try:
@@ -492,16 +492,15 @@ async def test_global_stats_response_sanitized(client: AsyncClient):
     assert "fmea_id" not in first
     assert "document_no" not in first
     assert "node_id" not in first
+    assert "ap" in first  # high_ap_nodes 有 ap
 
-    # top_failure_modes 脱敏检查
+    # top_failure_modes 脱敏检查（ap 不应出现，因为原始数据无 ap）
     top = data["top_failure_modes"][0]
     assert "name" in top
     assert top["name"].endswith("***")
     assert "fmea_id" not in top
     assert "document_no" not in top
-
-
-from app.api.graph import mask_name
+    assert "ap" not in top  # response_model_exclude_none=True 过滤了 null
 
 
 # mask_name 边界测试（纯函数，不依赖 HTTP）
@@ -538,7 +537,7 @@ def test_mask_name_two_char_alphanumeric():
     assert mask_name("A1") == "A***"
 ```
 
-- [ ] **Step 3: 运行测试**
+- [ ] **Step 4: 运行测试**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
@@ -547,16 +546,158 @@ python -m pytest tests/test_graph_api.py -v
 
 Expected: 所有测试通过。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add backend/tests/test_graph_api.py
-git commit -m "test(graph): add global-stats admin/sanitization tests and mask_name boundary tests"
+git commit -m "test(graph): fix dependency override, add global-stats tests and mask_name boundary tests"
 ```
 
 ---
 
-## Task 7: 构建验证
+## Task 4: JSONBRepository 测试
+
+**Files:**
+- Create: `backend/tests/test_graph_repository.py`
+
+**注意:** 测试 JSONBRepository 的 `get_global_stats` 和 `get_cross_fmea_stats`（验证 document_no 修复）。Neo4jRepository 无测试数据库环境，本期不测。
+
+- [ ] **Step 1: 创建测试文件**
+
+```python
+import os
+
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-graph-repo-tests")
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+
+from app.graph.jsonb_repository import JSONBRepository
+
+
+def _create_mock_db():
+    """创建 mock AsyncSession。"""
+    db = MagicMock()
+    db.execute = AsyncMock()
+    db.commit = AsyncMock()
+    return db
+
+
+def _mock_fmea(document_no, product_line_code, graph_data):
+    """构造 mock FMEADocument。"""
+    fmea = MagicMock()
+    fmea.fmea_id = "123e4567-e89b-12d3-a456-426614174000"
+    fmea.document_no = document_no
+    fmea.product_line_code = product_line_code
+    fmea.graph_data = graph_data
+    return fmea
+
+
+@pytest.mark.asyncio
+async def test_jsonb_get_cross_fmea_stats_top_failure_modes_has_document_no():
+    """验证 JSONB get_cross_fmea_stats 的 top_failure_modes 包含 document_no。"""
+    db = _create_mock_db()
+
+    # Mock 一个包含 FailureMode 的 FMEA
+    fmea = _mock_fmea(
+        document_no="PFMEA-2026-001",
+        product_line_code="DC-DC-100",
+        graph_data={
+            "nodes": [
+                {"id": "fm1", "type": "FailureMode", "name": "焊接不良"},
+                {"id": "e1", "type": "FailureEffect", "name": "开裂", "severity": 8},
+                {"id": "c1", "type": "FailureCause", "name": "温度高", "occurrence": 5},
+            ],
+            "edges": [
+                {"source": "fm1", "target": "e1", "type": "EFFECT_OF"},
+                {"source": "c1", "target": "fm1", "type": "CAUSE_OF"},
+            ],
+        },
+    )
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [fmea]
+    db.execute.return_value = mock_result
+
+    repo = JSONBRepository(db)
+    stats = await repo.get_cross_fmea_stats("DC-DC-100")
+
+    assert "top_failure_modes" in stats
+    assert len(stats["top_failure_modes"]) == 1
+    assert stats["top_failure_modes"][0]["document_no"] == "PFMEA-2026-001"
+
+
+@pytest.mark.asyncio
+async def test_jsonb_get_global_stats_aggregates_all_product_lines():
+    """验证 JSONB get_global_stats 聚合所有产品线，不限制 product_line_code。"""
+    db = _create_mock_db()
+
+    fmea_a = _mock_fmea(
+        document_no="PFMEA-2026-001",
+        product_line_code="DC-DC-100",
+        graph_data={
+            "nodes": [
+                {"id": "fm1", "type": "FailureMode", "name": "焊接不良"},
+                {"id": "e1", "type": "FailureEffect", "name": "开裂", "severity": 8},
+                {"id": "c1", "type": "FailureCause", "name": "温度高", "occurrence": 5},
+            ],
+            "edges": [
+                {"source": "fm1", "target": "e1", "type": "EFFECT_OF"},
+                {"source": "c1", "target": "fm1", "type": "CAUSE_OF"},
+            ],
+        },
+    )
+    fmea_b = _mock_fmea(
+        document_no="PFMEA-2026-002",
+        product_line_code="DC-DC-200",
+        graph_data={
+            "nodes": [
+                {"id": "fm2", "type": "FailureMode", "name": "密封失效"},
+                {"id": "e2", "type": "FailureEffect", "name": "漏水", "severity": 7},
+                {"id": "c2", "type": "FailureCause", "name": "老化", "occurrence": 4},
+            ],
+            "edges": [
+                {"source": "fm2", "target": "e2", "type": "EFFECT_OF"},
+                {"source": "c2", "target": "fm2", "type": "CAUSE_OF"},
+            ],
+        },
+    )
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [fmea_a, fmea_b]
+    db.execute.return_value = mock_result
+
+    repo = JSONBRepository(db)
+    stats = await repo.get_global_stats()
+
+    # 应包含两个产品线的所有文档
+    assert stats["total_fmeas"] == 2
+    assert stats["total_nodes"] == 6  # 3 nodes * 2 fmeas
+    assert len(stats["top_failure_modes"]) == 2
+    # top_failure_modes 应包含 document_no（来自 Task 3 的修复）
+    for tm in stats["top_failure_modes"]:
+        assert "document_no" in tm
+```
+
+- [ ] **Step 2: 运行测试**
+
+```bash
+cd /Users/sam/Documents/Code/OpenQMS/backend
+python -m pytest tests/test_graph_repository.py -v
+```
+
+Expected: All tests pass.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/tests/test_graph_repository.py
+git commit -m "test(graph): add JSONBRepository tests for get_global_stats and document_no fix"
+```
+
+---
+
+## Task 5: 构建验证
 
 - [ ] **Step 1: 后端语法检查**
 
@@ -567,11 +708,11 @@ python -m py_compile app/graph/repository.py app/graph/neo4j_repository.py app/g
 
 Expected: No syntax errors.
 
-- [ ] **Step 2: 运行测试**
+- [ ] **Step 2: 运行全部相关测试**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
-python -m pytest tests/test_graph_api.py -v
+python -m pytest tests/test_graph_api.py tests/test_graph_repository.py -v
 ```
 
 Expected: All tests pass.
@@ -590,17 +731,19 @@ git commit --allow-empty -m "feat(graph): global knowledge base masking complete
 
 | Spec Section | 实现任务 |
 |-------------|---------|
-| `get_global_stats` 抽象方法 | Task 1 ✅ |
-| Neo4j 实现（移除所有 $pl 过滤） | Task 2 ✅ |
-| JSONB 实现（不限制 product_line_code） | Task 3 ✅ |
-| `document_no` 缺陷修复 | Task 3 Step 1 ✅ |
-| `mask_name()` 脱敏函数 | Task 4 ✅ |
-| `_sanitize_global_stats()` 白名单重建 | Task 4 ✅ |
-| `GlobalStatsOut` / `MaskedNodeOut` Schema | Task 4 ✅ |
-| `/global-stats` 路由（require_admin） | Task 5 ✅ |
-| 权限测试 | Task 6 ✅ |
-| 脱敏字段测试 | Task 6 ✅ |
-| `mask_name` 边界测试 | Task 6 ✅ |
+| `get_global_stats` 抽象方法 + 双实现 | Task 1 ✅ |
+| Neo4j 实现（移除所有 $pl 过滤） | Task 1 Step 2 ✅ |
+| JSONB 实现（不限制 product_line_code） | Task 1 Step 3 ✅ |
+| `document_no` 缺陷修复 | Task 1 Step 3a ✅ |
+| `mask_name()` 脱敏函数 | Task 2 ✅ |
+| `_sanitize_global_stats()` 白名单重建 | Task 2 ✅ |
+| `GlobalStatsOut` / `MaskedNodeOut` Schema | Task 2 ✅ |
+| `/global-stats` 路由（require_admin, response_model_exclude_none） | Task 2 Step 3 ✅ |
+| 权限测试（含 role_definition） | Task 3 ✅ |
+| 脱敏字段测试 | Task 3 ✅ |
+| `mask_name` 边界测试 | Task 3 ✅ |
+| dependency override 修复（get_graph_repository） | Task 3 Step 1 ✅ |
+| JSONBRepository 测试 | Task 4 ✅ |
 
 ### 2. Placeholder Scan
 
@@ -611,7 +754,8 @@ git commit --allow-empty -m "feat(graph): global knowledge base masking complete
 
 ### 3. Type Consistency
 
-- `mask_name(name: Any)` — Task 4 和 Task 6 测试一致 ✅
-- `_sanitize_global_stats(raw: dict) -> dict` — Task 4 定义，Task 5 调用 ✅
-- `GlobalStatsOut` / `MaskedNodeOut` — Task 4 定义，Task 5 路由使用 ✅
-- `get_global_stats()` — Task 1 定义，Task 2/3 实现 ✅
+- `mask_name(name: Any)` — Task 2 和 Task 3 测试一致 ✅
+- `_sanitize_global_stats(raw: dict) -> dict` — Task 2 定义，Task 2 Step 3 调用 ✅
+- `GlobalStatsOut` / `MaskedNodeOut` — Task 2 定义，Task 2 Step 3 路由使用 ✅
+- `get_global_stats()` — Task 1 定义和实现 ✅
+- `response_model_exclude_none=True` — Task 2 Step 3 路由声明，Task 3 测试断言 `ap not in top` ✅
