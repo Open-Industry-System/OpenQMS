@@ -34,7 +34,7 @@ CAPA 进入 D4 步骤 (status = D4_ROOT_CAUSE)
     v
 前端 CAPADetailPage 检测状态变化
     |
-    +--> GET /api/capa/{id}/d4-recommendations
+    +--> GET /api/capa/{id}/d4-fmea-recommendations
     |       |
     |       v
     |    capa_recommendation_service.get_d4_recommendations()
@@ -54,15 +54,17 @@ CAPA 进入 D4 步骤 (status = D4_ROOT_CAUSE)
     |       v
     |    返回 D4RecommendationResponse
     |
-    +--> GET /api/capa/{id}/d5-recommendations
+    +--> GET /api/capa/{id}/d5-fmea-recommendations
     |       |
     |       v
     |    capa_recommendation_service.get_d5_recommendations()
     |       |
     |       +--> 基于 D4 根因文本提取关键词
     |       |
-    |       +--> 图遍历: FailureCause --PREVENTED_BY--> PreventionControl
-    |       |                FailureMode --DETECTED_BY--> DetectionControl
+    |       +--> 图遍历三条路径:
+    |       |    FailureCause --PREVENTED_BY--> PreventionControl
+    |       |    FailureCause --DETECTED_BY--> DetectionControl
+    |       |    FailureMode --DETECTED_BY--> DetectionControl
     |       |
     |       +--> 规则引擎: 基于 AP 级别 + 失效模式关键词生成通用措施
     |       |
@@ -108,6 +110,11 @@ def get_d4_recommendations(
 
 1. **关联 FMEA 匹配**：
    - 有 `fmea_ref_id` 时，从图中定位 FailureMode 节点
+   - **节点解析逻辑**（与 D7 一致）：
+     - 若 `fmea_node_id` 是 FailureCause → 沿 CAUSE_OF 正向边找到父 FailureMode
+     - 若 `fmea_node_id` 是 FailureMode → 直接使用
+     - 若 `fmea_node_id` 是 Function → 沿 HAS_FAILURE_MODE 正向边找到子 FailureMode
+     - 若 `fmea_node_id` 为空 → 用 D2 关键词对所有 FailureMode 名称做子串匹配
    - 遍历 `CAUSE_OF` 反向边获取所有 FailureCause 节点
    - 用 D2 关键词对 FailureCause 的 name + description 做子串匹配
    - 匹配到的根因按匹配关键词数量排序
@@ -134,8 +141,10 @@ def get_d5_recommendations(
 
 **已有措施匹配**：
 - 从 D4 根因文本提取关键词
-- 图遍历 FailureCause →（PREVENTED_BY）→ PreventionControl
-- 图遍历 FailureMode →（DETECTED_BY）→ DetectionControl
+- 图遍历三条路径：
+  - FailureCause —(PREVENTED_BY)→ PreventionControl
+  - FailureCause —(DETECTED_BY)→ DetectionControl
+  - FailureMode —(DETECTED_BY)→ DetectionControl
 - 关键词匹配排序
 
 **通用建议生成**：
@@ -150,11 +159,14 @@ def get_d5_recommendations(
 ### 新增端点（在 `backend/app/api/capa.py` 中）
 
 ```
-GET /api/capa/{report_id}/d4-recommendations
-GET /api/capa/{report_id}/d5-recommendations
+GET /api/capa/{report_id}/d4-fmea-recommendations
+GET /api/capa/{report_id}/d5-fmea-recommendations
 ```
 
-**权限**：`require_engineer_or_admin` + CAPA 查看权限 + FMEA 查看权限 + 产品线访问控制
+**权限**：
+- 路由依赖：`user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW))`
+- 程序内校验：`fmea_level = await get_user_permission(user, Module.FMEA, db)`，不足则 403
+- 产品线访问控制
 
 **逻辑**：
 1. 获取 CAPA 记录
@@ -186,17 +198,19 @@ class D4RecommendationResponse(BaseModel):
 class D5ExistingControl(BaseModel):
     failure_mode_node_id: str
     failure_mode_name: str
-    failure_cause_node_id: str
-    failure_cause_name: str
+    failure_cause_node_id: str | None = None   # DetectionControl 可直接关联 FailureMode
+    failure_cause_name: str | None = None
     control_node_id: str
     control_name: str
     control_type: str            # "prevention" | "detection"
     match_source: str
     match_reason: str
+    fmea_id: str | None = None                  # 跨 FMEA 推荐时标识来源
+    fmea_document_no: str | None = None
 
 class D5GeneralSuggestion(BaseModel):
     content: str
-    category: str                # "预防措施" | "探测措施"
+    category: str                # "预防措施" | "探测措施"（注意：规则引擎输出"检测措施"，需映射为"探测措施"）
     basis: str
     confidence: float
 
@@ -213,18 +227,32 @@ class D5RecommendationResponse(BaseModel):
 
 **`frontend/src/components/capa/D4RecPanel.tsx`**
 
+```typescript
+interface D4RecPanelProps {
+  capaId: string;
+  onAdopt: (adoptedText: string) => void;  // 父组件传入回调，采纳时追加到 TextArea
+}
+```
+
 - 触发条件：CAPA status === `D4_ROOT_CAUSE`
 - 调用 `getD4Recommendations(reportId)`
 - 显示分组：关联 FMEA → 相似失效模式 → 规则引擎建议
-- 每项操作：采纳（追加到 TextArea）、跳过（灰色+删除线）
+- 每项操作：采纳（调用 `onAdopt`，父组件追加到 TextArea 并触发 `handleUpdate`）、跳过（灰色+删除线）
 - 空状态："暂无推荐"
 
 **`frontend/src/components/capa/D5RecPanel.tsx`**
 
+```typescript
+interface D5RecPanelProps {
+  capaId: string;
+  onAdopt: (adoptedText: string) => void;
+}
+```
+
 - 触发条件：CAPA status === `D5_CORRECTION`
 - 调用 `getD5Recommendations(reportId)`
 - 两区显示：FMEA 已有控制措施 / 通用建议
-- 每项操作：采纳、跳过
+- 每项操作：采纳（调用 `onAdopt`）、跳过
 
 ### 修改文件
 
@@ -348,6 +376,8 @@ export async function getD5Recommendations(reportId: string): Promise<D5Recommen
 | FMEA 图中无 FailureCause 节点 | 跳过图匹配，降级到规则引擎 |
 | D4 已有内容时采纳 | 追加到已有内容末尾（换行分隔） |
 | 重复采纳同一推荐 | 允许，用户可能需要多次参考 |
+| DetectionControl 直接关联 FailureMode（无 FailureCause） | `failure_cause_*` 字段返回 null，前端显示"—" |
+| D2 描述为长句无标点 | `extract_keywords` 可能返回单个长 token，匹配率低；UX 提示用户用标点/空格分隔关键词 |
 
 ---
 
@@ -356,10 +386,11 @@ export async function getD5Recommendations(reportId: string): Promise<D5Recommen
 **全混合管道（Phase 3+）**：
 
 在 FMEA 图匹配基础上扩展：
-1. 历史 CAPA 匹配：从历史 CAPA 报告中找相似 D4 根因（关键词 + 语义相似度）
-2. LLM 增强：当规则引擎质量为 `generic` 时，调用 LLM 生成更具体的建议
-3. PostgreSQL 缓存：复用 `recommendation_cache` 表模式
-4. 与 RAG 语义搜索集成：当 RAG 上线后，用向量检索替代关键词子串匹配
+1. 中文分词升级：将 `extract_keywords` 从纯标点分割升级为混合分词器（jieba 或 RAG 向量检索），提升长句匹配率
+2. 历史 CAPA 匹配：从历史 CAPA 报告中找相似 D4 根因（关键词 + 语义相似度）
+3. LLM 增强：当规则引擎质量为 `generic` 时，调用 LLM 生成更具体的建议
+4. PostgreSQL 缓存：复用 `recommendation_cache` 表模式
+5. 与 RAG 语义搜索集成：当 RAG 上线后，用向量检索替代关键词子串匹配
 
 触发类型扩展：
 - `d4_root_cause`：D4 根因推荐
