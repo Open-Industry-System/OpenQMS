@@ -14,7 +14,7 @@
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `backend/alembic/versions/2026_06_02_spf_fmea_alarm_fields.py` | Create | Alembic migration: 新增 3 个字段 |
+| `backend/alembic/versions/*_spc_fmea_alarm_fields.py` | Create | Alembic autogenerate 生成的 migration 文件 |
 | `backend/app/models/spc.py` | Modify | SPCAlarm 新增 fmea_recommendations, confirmed_fmea_id, confirmed_fmea_node_id |
 | `backend/app/schemas/spc.py` | Modify | 新增 FMEAMatchOut, FMEAMatchResponse, ConfirmFMEARequest；修改 SPCAlarmOut |
 | `backend/app/services/spc_service.py` | Modify | 新增 match_fmea_for_alarm 及 helpers；修改 create_capa_from_alarm |
@@ -27,12 +27,62 @@
 
 ---
 
-## Task 1: Database Migration
+## Task 1: Update SPCAlarm Model
 
 **Files:**
-- Create: `backend/alembic/versions/2026_06_02_spf_fmea_alarm_fields.py`
+- Modify: `backend/app/models/spc.py`
+
+- [ ] **Step 1: Add fields to SPCAlarm**
+
+Locate the `SPCAlarm` class after the `linked_fmea_node_id` field (around line 82), add:
+
+```python
+    # 新增：推荐的 FMEA 失效模式缓存（异步预匹配结果）
+    fmea_recommendations: Mapped[list | None] = mapped_column(
+        JSONB,
+        default=list,
+        nullable=True,
+        comment="缓存的FMEA推荐列表"
+    )
+
+    # 新增：用户最终确认的关联 FMEA 信息
+    confirmed_fmea_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        sa.ForeignKey("fmea_documents.fmea_id"),
+        nullable=True,
+        comment="用户确认的FMEA文档ID"
+    )
+    confirmed_fmea_node_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="用户确认的FMEA节点ID（如 fm_1），与 confirmed_fmea_id 成对使用"
+    )
+```
+
+- [ ] **Step 2: Verify model imports**
+
+Ensure `spc.py` imports include:
+```python
+import sqlalchemy as sa  # if not already imported
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/app/models/spc.py
+git commit -m "feat(spc-fmea): add fmea_recommendations, confirmed_fmea_id, confirmed_fmea_node_id to SPCAlarm model"
+```
+
+---
+
+## Task 2: Database Migration
+
+**Files:**
+- Create: `backend/alembic/versions/*_spc_fmea_alarm_fields.py`（autogenerate 生成）
 
 - [ ] **Step 1: Run autogenerate migration**
+
+模型已修改，现在 autogenerate 会正确检测差异：
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend
@@ -82,59 +132,11 @@ cd /Users/sam/Documents/Code/OpenQMS/backend
 alembic upgrade head
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add backend/alembic/versions/
 git commit -m "feat(spc-fmea): add fmea_recommendations, confirmed_fmea_id, confirmed_fmea_node_id to spc_alarms"
-```
-
----
-
-## Task 2: Update SPCAlarm Model
-
-**Files:**
-- Modify: `backend/app/models/spc.py`
-
-- [ ] **Step 1: Add fields to SPCAlarm**
-
-Locate the `SPCAlarm` class after the `linked_fmea_node_id` field (around line 82), add:
-
-```python
-    # 新增：推荐的 FMEA 失效模式缓存（异步预匹配结果）
-    fmea_recommendations: Mapped[list | None] = mapped_column(
-        JSONB,
-        default=list,
-        nullable=True,
-        comment="缓存的FMEA推荐列表"
-    )
-
-    # 新增：用户最终确认的关联 FMEA 信息
-    confirmed_fmea_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        sa.ForeignKey("fmea_documents.fmea_id"),
-        nullable=True,
-        comment="用户确认的FMEA文档ID"
-    )
-    confirmed_fmea_node_id: Mapped[Optional[str]] = mapped_column(
-        String(50),
-        nullable=True,
-        comment="用户确认的FMEA节点ID（如 fm_1），与 confirmed_fmea_id 成对使用"
-    )
-```
-
-- [ ] **Step 2: Verify model imports**
-
-Ensure `spc.py` imports include:
-```python
-import sqlalchemy as sa  # if not already imported
-```
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add backend/app/models/spc.py
-git commit -m "feat(spc-fmea): add fmea_recommendations, confirmed_fmea_id, confirmed_fmea_node_id to SPCAlarm model"
 ```
 
 ---
@@ -347,7 +349,7 @@ async def _match_via_name(
     seen: set[tuple[str, str]]
 ) -> list[dict]:
     """工序名/特性名模糊匹配 PFMEA 节点。"""
-    repo = _get_graph_repo(db)
+    repo = await _get_graph_repo(db)
     recommendations = []
 
     # 步骤 A：工序名匹配 ProcessStep
@@ -422,7 +424,7 @@ async def _get_graph_repo(db: AsyncSession):
 
 ```python
 async def compute_failure_mode_metrics(
-    repo,
+    db: AsyncSession,
     fmea_id: uuid.UUID,
     fm_node_id: str
 ) -> dict:
@@ -434,8 +436,12 @@ async def compute_failure_mode_metrics(
     - D: 优先取该 Cause 的第一个 DetectionControl，否则取 FailureMode 的第一个
     - RPN = S × O × D，取所有真实行的最大值
     """
-    # 获取 FMEA 完整图数据
-    fmea = await repo._get_fmea(fmea_id)
+    # 单独查询 FMEADocument 获取 graph_data（不依赖 repo 私有方法）
+    from app.models.fmea import FMEADocument
+    from sqlalchemy import select
+
+    fmea_result = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id))
+    fmea = fmea_result.scalar_one_or_none()
     if not fmea or not fmea.graph_data:
         return {"severity": 0, "occurrence": 0, "detection": 0, "rpn": 0, "ap": ""}
 
@@ -518,7 +524,7 @@ async def _enrich_recommendation(
     node_id = enriched["node_id"]
 
     # 1. 计算 RPN / AP
-    metrics = await compute_failure_mode_metrics(repo, fmea_id, node_id)
+    metrics = await compute_failure_mode_metrics(db, fmea_id, node_id)
     enriched["rpn"] = metrics["rpn"]
     enriched["ap"] = metrics["ap"]
     enriched["severity"] = metrics["severity"]
@@ -639,6 +645,10 @@ async def match_fmea_for_alarm(
             pass
         enriched.append(rec)
 
+    # 写入缓存
+    alarm.fmea_recommendations = enriched
+    await db.commit()
+
     return enriched
 ```
 
@@ -711,14 +721,11 @@ async def get_fmea_recommendations(
     if not ic:
         raise HTTPException(status_code=400, detail="Inspection characteristic not found")
 
-    # 有缓存且未强制刷新时直接返回
+    # 有缓存且未强制刷新时直接返回；否则 service 层会计算并写入缓存
     if alarm.fmea_recommendations and not force:
         recommendations = alarm.fmea_recommendations
     else:
-        # 实时计算并缓存
         recommendations = await spc_service.match_fmea_for_alarm(db, alarm)
-        alarm.fmea_recommendations = recommendations
-        await db.commit()
 
     return {
         "alarm_id": str(alarm_id),
@@ -737,7 +744,7 @@ async def confirm_fmea_association(
     alarm_id: UUID,
     req: schemas.spc.ConfirmFMEARequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.SPC, PermissionLevel.UPDATE)),
+    user: User = Depends(require_permission(Module.SPC, PermissionLevel.EDIT)),
 ):
     """用户确认 FMEA 关联。同时写入 confirmed_fmea_id 和 confirmed_fmea_node_id。"""
     alarm = await db.get(SPCAlarm, alarm_id)
@@ -746,25 +753,26 @@ async def confirm_fmea_association(
 
     alarm.confirmed_fmea_id = req.fmea_id
     alarm.confirmed_fmea_node_id = req.node_id
-    await db.commit()
 
-    await spc_service._create_audit_log(
+    # 审计日志在同一事务中写入（使用 no_commit 版本），然后统一 commit
+    await spc_service._add_audit_log_no_commit(
         db, user.user_id, "UPDATE", "spc_alarms", alarm_id,
         {
             "confirmed_fmea_id": str(req.fmea_id),
             "confirmed_fmea_node_id": req.node_id,
         }
     )
+    await db.commit()
     return {"success": True}
 ```
 
-**Note:** Ensure `_create_audit_log` is accessible from `spc_service` module. If it's a private function (prefixed with `_`), you may need to either make it public or call the audit log creation inline.
+**Note:** `_add_audit_log_no_commit` 只写入审计记录但不 commit，由 endpoint 统一控制事务边界。
 
 - [ ] **Step 2: Verify imports**
 
-Ensure `spc.py` API file imports include:
+Ensure `spc.py` API file imports include (追加到已有的 SampleValue import 行):
 ```python
-from app.models.spc import SPCAlarm
+from app.models.spc import SampleValue, SPCAlarm
 ```
 
 - [ ] **Step 3: Commit**
@@ -822,7 +830,18 @@ export interface ConfirmFMEARequest {
 }
 ```
 
-- [ ] **Step 2: Add API functions to spc.ts**
+- [ ] **Step 2: Update imports in spc.ts**
+
+在文件顶部 `import type { ... } from "../types/spc"` 中添加新类型：
+
+```typescript
+import type {
+  // ... existing types ...
+  FMEAMatchResponse,
+} from "../types/spc";
+```
+
+- [ ] **Step 3: Add API functions to spc.ts**
 
 Add after `createCAPAFromAlarm` (around line 99):
 
@@ -992,7 +1011,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
             const isSelected = `${rec.fmea_id}:${rec.node_id}` === selectedKey;
             return (
               <Card
-                key={rec.node_id}
+                key={`${rec.fmea_id}:${rec.node_id}`}
                 size="small"
                 style={{
                   borderColor: isSelected ? "#1890ff" : undefined,
@@ -1180,8 +1199,13 @@ git commit -m "feat(spc-fmea): integrate FMEAMatchPanel into SPCDetailPage alarm
 ```python
 # backend/tests/test_spc_fmea_match.py
 import uuid
+import os
+from urllib.parse import urlparse
+
 import pytest
-from datetime import datetime, timezone
+import pytest_asyncio
+
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from app.services.spc_service import (
     match_fmea_for_alarm,
@@ -1191,9 +1215,62 @@ from app.services.spc_service import (
 from app.models.spc import SPCAlarm, InspectionCharacteristic
 from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.fmea import FMEADocument
+from app.models.user import User
+from app.models.role import RoleDefinition
+from app.models.product_line import ProductLine
+from app.database import Base
+
+import app.models  # noqa: F401 — ensure all FK-referenced tables are registered in Base.metadata
 
 
 # ─── Fixtures ───
+
+@pytest_asyncio.fixture(scope="function")
+async def db():
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL not set; this test requires a dedicated test database")
+    db_name = urlparse(url).path.lstrip("/")
+    if "_test" not in db_name:
+        pytest.skip(f"Database '{db_name}' does not contain '_test'; refusing to run destructive tests")
+
+    engine = create_async_engine(url)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W")
+        )
+        await conn.commit()
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        yield session
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def user_id(db: AsyncSession):
+    """创建测试角色和用户，返回 user_id。"""
+    role = RoleDefinition(
+        id=uuid.uuid4(),
+        role_key="quality_engineer",
+        name_zh="质量工程师",
+        name_en="Quality Engineer",
+    )
+    db.add(role)
+    await db.flush()
+
+    user = User(
+        user_id=uuid.uuid4(),
+        username="test_user",
+        display_name="Test User",
+        role_id=role.id,
+        password_hash="hash",
+    )
+    db.add(user)
+    await db.commit()
+    return user.user_id
+
 
 @pytest.fixture
 async def ic_with_cp_binding(db, user_id):
@@ -1317,7 +1394,7 @@ class TestMatchFMEAForAlarm:
         assert any(r["match_source"] == "control_plan" for r in recs)
 
     async def test_caching(self, db, alarm, control_plan_with_binding):
-        """第一次调用计算并缓存，第二次调用直接读取缓存。"""
+        """第一次调用计算并写入缓存，第二次调用重复计算但结果一致（API 层负责读缓存）。"""
         recs1 = await match_fmea_for_alarm(db, alarm)
         recs2 = await match_fmea_for_alarm(db, alarm)
         assert recs1 == recs2
