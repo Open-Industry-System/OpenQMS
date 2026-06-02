@@ -285,9 +285,9 @@ async def run_worker():
             WHERE attrelid = 'document_embeddings'::regclass AND attname = 'embedding'
         """))
         row = result.fetchone()
-        if row:
-            # atttypmod = dimensions + 4 (varlena header)
-            table_dim = row[0] - 4
+        if row and row[0] > 0:
+            # pgvector stores dimension directly as atttypmod (no varlena offset)
+            table_dim = row[0]
             if table_dim != provider.dimensions:
                 logger.error(
                     f"Dimension mismatch: provider produces {provider.dimensions}d vectors "
