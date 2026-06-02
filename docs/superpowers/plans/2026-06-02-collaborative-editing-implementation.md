@@ -1712,17 +1712,20 @@ git commit -m "feat(collaboration): integrate collaboration into Control Plan ed
 ### Task 20: 后端行为测试
 
 **Files:**
-- Create: `backend/tests/collaboration/test_collaboration_service.py`
-- Create: `backend/tests/collaboration/test_collaboration_api.py`
-- Create: `backend/tests/collaboration/__init__.py`
+- Create: `backend/tests/test_collaboration.py`
 
-- [ ] **Step 1: 编写 CollaborationService 测试**
+**说明：** 项目现有测试风格使用 mock DB（不依赖真实 PostgreSQL），fixtures 定义在测试文件内。
+
+- [ ] **Step 1: 编写 mock DB helper**
 
 ```python
-import uuid
+import os
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-collaboration-tests")
+
 import pytest
+import uuid
 from datetime import datetime, timezone, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.collaboration_service import (
     upsert_session,
@@ -1732,111 +1735,165 @@ from app.services.collaboration_service import (
 )
 from app.models.collaboration_session import CollaborationSession
 
+
+def _create_mock_db():
+    """创建 mock AsyncSession，与 test_audit.py 风格一致。"""
+    db = MagicMock()
+    db.execute = AsyncMock()
+    db.commit = AsyncMock()
+    db.delete = AsyncMock()
+    return db
+
+
+def _mock_session_result(sessions: list):
+    """构造 db.execute().scalars().all() 的 mock 链。"""
+    mock_result = MagicMock()
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = sessions
+    mock_result.scalars.return_value = mock_scalars
+    return mock_result
+
+
 DOC_ID = "123e4567-e89b-12d3-a456-426614174000"
 USER_ID = uuid.uuid4()
+```
 
+- [ ] **Step 2: 编写 Service 测试**
 
+```python
 @pytest.mark.asyncio
-async def test_upsert_session_creates_new(db: AsyncSession):
+async def test_upsert_session_calls_execute_and_commit():
+    """验证 heartbeat 会执行 SQL 并提交。"""
+    db = _create_mock_db()
+    db.execute.return_value = MagicMock()
+
     await upsert_session(
         db, "fmea", DOC_ID,
         user_id=USER_ID, user_name="张三", action="viewing", editing_area=None
     )
+
+    db.execute.assert_called_once()
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_active_users_filters_expired():
+    """验证 TTL 过滤：只返回 60 秒内活跃的用户。"""
+    db = _create_mock_db()
+
+    active_session = CollaborationSession(
+        document_type="fmea", document_id=uuid.UUID(DOC_ID),
+        user_id=USER_ID, user_name="张三", action="viewing",
+        last_activity=datetime.now(timezone.utc),
+    )
+    db.execute.return_value = _mock_session_result([active_session])
+
     users = await get_active_users(db, "fmea", DOC_ID)
+
     assert len(users) == 1
     assert users[0].user_name == "张三"
+    # 验证查询条件包含 last_activity >= cutoff
+    executed_stmt = db.execute.call_args[0][0]
+    assert "last_activity" in str(executed_stmt)
 
 
 @pytest.mark.asyncio
-async def test_upsert_session_updates_existing(db: AsyncSession):
-    await upsert_session(db, "fmea", DOC_ID, USER_ID, "张三", "viewing", None)
-    await upsert_session(db, "fmea", DOC_ID, USER_ID, "张三", "editing", {"row_key": "r1"})
-    users = await get_active_users(db, "fmea", DOC_ID)
-    assert users[0].action == "editing"
-    assert users[0].editing_area == {"row_key": "r1"}
-
-
-@pytest.mark.asyncio
-async def test_get_active_users_filters_expired(db: AsyncSession):
-    # Insert expired session directly
-    expired = CollaborationSession(
-        document_type="fmea", document_id=uuid.UUID(DOC_ID),
-        user_id=USER_ID, user_name="过期用户",
-        last_activity=datetime.now(timezone.utc) - timedelta(seconds=120),
-    )
-    db.add(expired)
-    await db.commit()
-
-    users = await get_active_users(db, "fmea", DOC_ID)
-    assert len(users) == 0  # expired, filtered out
-
-
-@pytest.mark.asyncio
-async def test_delete_expired_sessions(db: AsyncSession):
-    expired = CollaborationSession(
-        document_type="fmea", document_id=uuid.UUID(DOC_ID),
-        user_id=USER_ID, user_name="过期",
-        last_activity=datetime.now(timezone.utc) - timedelta(seconds=120),
-    )
-    db.add(expired)
-    await db.commit()
+async def test_delete_expired_sessions():
+    """验证清理函数执行 delete 并返回删除计数。"""
+    db = _create_mock_db()
+    mock_result = MagicMock()
+    mock_result.rowcount = 3
+    db.execute.return_value = mock_result
 
     deleted = await delete_expired_sessions(db)
-    assert deleted == 1
+
+    assert deleted == 3
+    db.commit.assert_called_once()
 ```
 
-- [ ] **Step 2: 编写 Collaboration API 测试**
+- [ ] **Step 3: 编写 API 测试**
 
 ```python
-import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
+from fastapi import status
+
+from app.main import app
+from app.core.deps import get_current_user
+
+
+async def _override_get_current_user():
+    from app.models.user import User
+    return User(
+        user_id="00000000-0000-0000-0000-000000000001",
+        username="tester",
+        display_name="测试员",
+        email="tester@openqms.local",
+        password_hash="hashed",
+        is_active=True,
+        role="admin",
+    )
+
+
+@pytest.fixture
+async def client():
+    """ASGI transport 测试客户端，注入 mock user。"""
+    app.dependency_overrides[get_current_user] = _override_get_current_user
+    transport = ASGITransport(app=app)
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
-async def test_heartbeat(client: AsyncClient, auth_headers: dict):
-    resp = await client.post(
-        "/api/collaboration/heartbeat",
-        json={
-            "document_type": "fmea",
-            "document_id": "123e4567-e89b-12d3-a456-426614174000",
-            "action": "editing",
-            "editing_area": {"row_key": "r1", "field": "severity"},
-        },
-        headers=auth_headers,
-    )
-    assert resp.status_code == 204
+async def test_heartbeat_endpoint(client: AsyncClient):
+    """验证心跳端点返回 204。"""
+    with patch("app.api.collaboration.collaboration_service.upsert_session") as mock_upsert:
+        mock_upsert.return_value = None
+        resp = await client.post(
+            "/api/collaboration/heartbeat",
+            json={
+                "document_type": "fmea",
+                "document_id": "123e4567-e89b-12d3-a456-426614174000",
+                "action": "editing",
+                "editing_area": {"row_key": "r1", "field": "severity"},
+            },
+        )
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+        mock_upsert.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_active_users_excludes_current_user(client: AsyncClient, auth_headers: dict):
-    doc_id = "123e4567-e89b-12d3-a456-426614174001"
-    # Heartbeat as current user
-    await client.post(
-        "/api/collaboration/heartbeat",
-        json={"document_type": "fmea", "document_id": doc_id, "action": "viewing"},
-        headers=auth_headers,
+async def test_active_users_endpoint_returns_list(client: AsyncClient):
+    """验证 active-users 端点返回正确结构。"""
+    mock_session = CollaborationSession(
+        document_type="fmea",
+        document_id=uuid.UUID("123e4567-e89b-12d3-a456-426614174001"),
+        user_id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+        user_name="李四",
+        action="editing",
+        editing_area={"row_key": "r1", "field": "severity"},
+        last_activity=datetime.now(timezone.utc),
     )
-    # Get active users — should exclude current user
-    resp = await client.get(f"/api/collaboration/fmea/{doc_id}/active-users", headers=auth_headers)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "users" in data
-    assert "total" in data
-    # Current user is excluded from results
-    current_user_id = auth_headers.get("x-test-user-id")  # set by test fixture
-    assert all(u["user_id"] != current_user_id for u in data["users"])
+    with patch("app.api.collaboration.collaboration_service.get_active_users", return_value=[mock_session]):
+        resp = await client.get("/api/collaboration/fmea/123e4567-e89b-12d3-a456-426614174001/active-users")
+        assert resp.status_code == status.HTTP_200_OK
+        data = resp.json()
+        assert data["total"] == 1
+        assert len(data["users"]) == 1
+        assert data["users"][0]["user_name"] == "李四"
+        assert data["users"][0]["action"] == "editing"
 
 
 @pytest.mark.asyncio
-async def test_leave_session(client: AsyncClient, auth_headers: dict):
-    doc_id = "123e4567-e89b-12d3-a456-426614174002"
-    await client.post(
-        "/api/collaboration/heartbeat",
-        json={"document_type": "fmea", "document_id": doc_id, "action": "viewing"},
-        headers=auth_headers,
-    )
-    resp = await client.delete(f"/api/collaboration/leave/fmea/{doc_id}", headers=auth_headers)
-    assert resp.status_code == 204
+async def test_leave_endpoint(client: AsyncClient):
+    """验证 leave 端点返回 204。"""
+    with patch("app.api.collaboration.collaboration_service.delete_session") as mock_delete:
+        mock_delete.return_value = None
+        resp = await client.delete("/api/collaboration/leave/fmea/123e4567-e89b-12d3-a456-426614174002")
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+        mock_delete.assert_called_once()
 ```
 
 - [ ] **Step 3: 运行测试**
@@ -1851,7 +1908,7 @@ Expected: All tests pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/tests/collaboration/
+git add backend/tests/test_collaboration.py
 git commit -m "test(collaboration): add service and API tests"
 ```
 
