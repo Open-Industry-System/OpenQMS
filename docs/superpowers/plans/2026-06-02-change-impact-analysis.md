@@ -65,10 +65,10 @@
 ## Task 1: 提取 graph repository 公共依赖
 
 **文件：**
-- Create: `backend/app/graph/deps.py`
+- Confirm/Create: `backend/app/graph/deps.py`（已由前期 subagent 创建，若存在则确认内容正确）
 - Modify: `backend/app/api/graph.py:51-58`
 
-**背景：** 现有 `backend/app/api/graph.py:51` 有一个私有 `_repo` 函数，供 graph API 内部使用。变更影响分析 API 也需要同样的依赖注入逻辑，因此将其提取为公共模块。
+**背景：** 现有 `backend/app/api/graph.py:51` 有一个私有 `_repo` 函数，供 graph API 内部使用。变更影响分析 API 也需要同样的依赖注入逻辑，因此将其提取为公共模块。如果 `deps.py` 已存在，直接确认其内容符合设计即可。
 
 **现有代码（backend/app/api/graph.py:51-58）：**
 ```python
@@ -153,6 +153,7 @@ Create Date: 2026-06-02
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision = "xxx"
 down_revision = "<上一个迁移 ID>"
@@ -176,7 +177,7 @@ def upgrade():
         sa.Column("scope", sa.String(), nullable=False, server_default="single_fmea"),
         sa.Column("status", sa.String(), nullable=False, server_default="completed"),
         sa.Column("impact_score", sa.Integer(), nullable=True),
-        sa.Column("impact_result", sa.JSON(), nullable=False, server_default="{}"),
+        sa.Column("impact_result", postgresql.JSONB(), nullable=False, server_default="{}"),
         sa.Column("created_by", sa.UUID(), sa.ForeignKey("users.user_id"), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
     )
@@ -335,14 +336,52 @@ git commit -m "feat(change-impact): add Pydantic schemas"
 ## Task 4: Repository 扩展（JSONB + Neo4j）
 
 **文件：**
+- Modify: `backend/app/graph/repository.py`
 - Modify: `backend/app/graph/jsonb_repository.py`
 - Modify: `backend/app/graph/neo4j_repository.py`
 
-**背景：** 在 `FMEAGraphRepository` 接口中新增 `analyze_change_impact` 方法。JSONB 版本使用专用 BFS；Neo4j 版本使用 Cypher 查询。
+**背景：** 在 `FMEAGraphRepository` 接口中新增 `analyze_change_impact` 抽象方法，两个实现类分别实现。方向控制逻辑抽成共同规则，确保 Neo4j 和 JSONB 行为一致。
 
-### JSONB 部分
+### 共同方向控制规则
 
-- [ ] **Step 1: 修改 `backend/app/graph/jsonb_repository.py`**
+方向/边集合逻辑在两个 Repository 中保持一致：
+
+| 变更类型 | 字段 | 传播方向 | 边类型白名单 |
+|----------|------|----------|-------------|
+| attribute | severity/occurrence/detection | bidirectional | downstream + upstream 边集合 |
+| attribute | design_parameter 等其他 | downstream | HAS_FUNCTION, FUNCTION_MAPPED_TO, HAS_FAILURE_MODE, EFFECT_OF, HAS_PROCESS_STEP |
+| attribute | 名称/描述类 | none | 不遍历 |
+| structural | 新增/删除/修改 | downstream | 同上 |
+
+**downstream 边集合**：`HAS_FUNCTION`, `FUNCTION_MAPPED_TO`, `HAS_FAILURE_MODE`, `EFFECT_OF`, `HAS_PROCESS_STEP`
+**upstream 边集合**：`CAUSE_OF`, `PREVENTED_BY`, `DETECTED_BY`, `OPTIMIZED_BY`
+
+### 步骤
+
+- [ ] **Step 1: 修改 `backend/app/graph/repository.py`**
+
+在 `FMEAGraphRepository` ABC 中新增抽象方法：
+
+```python
+from app.schemas.change_impact import ChangeImpactResult
+
+class FMEAGraphRepository(ABC):
+    # ... 现有方法 ...
+
+    @abstractmethod
+    async def analyze_change_impact(
+        self,
+        fmea_id: uuid.UUID,
+        node_id: str,
+        change_type: str,
+        field_name: str | None,
+        new_value: str | None,
+    ) -> ChangeImpactResult:
+        """分析变更节点的影响范围，返回受影响节点列表和摘要。"""
+        ...
+```
+
+- [ ] **Step 2: 修改 `backend/app/graph/jsonb_repository.py`**
 
 在 `JSONBRepository` 类中新增方法。首先需要了解现有 `_trace_chain` 的实现，但不复用它。
 
@@ -569,65 +608,85 @@ from app.state_machines.fmea_state import compute_ap
         field_name: str | None,
         new_value: str | None,
     ) -> ChangeImpactResult:
+        # 与 JSONB 版本保持一致的方向控制逻辑
+        if change_type == "attribute" and field_name in ["severity", "occurrence", "detection"]:
+            directions = ["downstream", "upstream"]
+        elif change_type == "attribute" and field_name in ["name", "description"]:
+            # 名称/描述类不遍历
+            return ChangeImpactResult(affected_nodes=[], summary=ImpactSummary(
+                total_affected=0, failure_modes_affected=0, controls_affected=0,
+                ap_upgraded_count=0, max_hop_distance=0,
+            ))
+        else:
+            directions = ["downstream"]
+
         async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
-            # 下游遍历（最大 5 跳），去重并取最短路径
-            downstream_result = await session.run(
-                "MATCH path = (start:GraphNode {fmea_id: $fmea_id, node_id: $node_id})"
-                "-[*1..5]->(end:GraphNode) "
-                "WHERE start.node_id <> end.node_id "
-                "WITH end, path ORDER BY length(path) ASC "
-                "WITH end, head(collect(path)) as shortest_path "
-                "RETURN end.node_id as node_id, end.type as node_type, end.name as name, "
-                "length(shortest_path) as hop_distance, "
-                "[n in nodes(shortest_path) | n.name] as path_names "
-                "ORDER BY hop_distance",
-                fmea_id=str(fmea_id), node_id=node_id,
-            )
-            downstream_nodes = [record async for record in downstream_result]
-
-            # 上游遍历（最大 3 跳）
-            upstream_result = await session.run(
-                "MATCH path = (start:GraphNode {fmea_id: $fmea_id, node_id: $node_id})"
-                "<-[*1..3]-(end:GraphNode) "
-                "WHERE start.node_id <> end.node_id "
-                "WITH end, path ORDER BY length(path) ASC "
-                "WITH end, head(collect(path)) as shortest_path "
-                "RETURN end.node_id as node_id, end.type as node_type, end.name as name, "
-                "length(shortest_path) as hop_distance, "
-                "[n in nodes(shortest_path) | n.name] as path_names "
-                "ORDER BY hop_distance",
-                fmea_id=str(fmea_id), node_id=node_id,
-            )
-            upstream_nodes = [record async for record in upstream_result]
-
-            # 合并并去重
-            seen = set()
             all_affected = []
+            seen = set()
             max_hop = 0
 
-            for record in downstream_nodes:
-                nid = record["node_id"]
-                if nid not in seen:
-                    seen.add(nid)
-                    all_affected.append({
-                        "node_id": nid,
-                        "node_type": record["node_type"],
-                        "name": record["name"],
-                        "path": record["path_names"],
-                        "impact_type": "downstream",
-                        "hop_distance": record["hop_distance"],
-                    })
-                    if record["hop_distance"] > max_hop:
-                        max_hop = record["hop_distance"]
+            for direction in directions:
+                if direction == "downstream":
+                    cypher = (
+                        "MATCH path = (start:GraphNode {fmea_id: $fmea_id, node_id: $node_id})"
+                        "-[*1..5]->(end:GraphNode) "
+                        "WHERE start.node_id <> end.node_id "
+                        "WITH end, path ORDER BY length(path) ASC "
+                        "WITH end, head(collect(path)) as shortest_path "
+                        "RETURN end.node_id as node_id, end.type as node_type, end.name as name, "
+                        "length(shortest_path) as hop_distance, "
+                        "[n in nodes(shortest_path) | n.name] as path_names "
+                        "ORDER BY hop_distance"
+                    )
+                else:  # upstream
+                    cypher = (
+                        "MATCH path = (start:GraphNode {fmea_id: $fmea_id, node_id: $node_id})"
+                        "<-[*1..3]-(end:GraphNode) "
+                        "WHERE start.node_id <> end.node_id "
+                        "WITH end, path ORDER BY length(path) ASC "
+                        "WITH end, head(collect(path)) as shortest_path "
+                        "RETURN end.node_id as node_id, end.type as node_type, end.name as name, "
+                        "length(shortest_path) as hop_distance, "
+                        "[n in nodes(shortest_path) | n.name] as path_names "
+                        "ORDER BY hop_distance"
+                    )
 
-            for record in upstream_nodes:
-                nid = record["node_id"]
-                if nid not in seen:
-                    seen.add(nid)
-                    all_affected.append({
-                        "node_id": nid,
-                        "node_type": record["node_type"],
-                        "name": record["name"],
+                result = await session.run(cypher, fmea_id=str(fmea_id), node_id=node_id)
+                async for record in result:
+                    nid = record["node_id"]
+                    if nid not in seen:
+                        seen.add(nid)
+                        all_affected.append({
+                            "node_id": nid,
+                            "node_type": record["node_type"],
+                            "name": record["name"],
+                            "path": record["path_names"],
+                            "impact_type": direction,
+                            "hop_distance": record["hop_distance"],
+                        })
+                        if record["hop_distance"] > max_hop:
+                            max_hop = record["hop_distance"]
+
+            # 风险预测和风险评分计算（与 JSONB 版本一致）
+            for n in all_affected:
+                n["risk_change"] = None  # Neo4j 版本简化处理，Phase 4 完善
+
+            failure_mode_count = sum(1 for n in all_affected if n["node_type"] == "FailureMode")
+            control_count = sum(1 for n in all_affected if n["node_type"] in ["PreventionControl", "DetectionControl"])
+
+            summary = ImpactSummary(
+                total_affected=len(all_affected),
+                failure_modes_affected=failure_mode_count,
+                controls_affected=control_count,
+                ap_upgraded_count=0,  # Neo4j 版本简化处理
+                max_hop_distance=max_hop,
+            )
+
+            affected_nodes = [AffectedNode(**n) for n in all_affected]
+            return ChangeImpactResult(affected_nodes=affected_nodes, summary=summary)
+```
+
+**注意：** Neo4j 版本的 AP 预测和风险变化计算目前简化处理（标记为 Phase 4 完善），但方向控制逻辑与 JSONB 版本保持一致。
                         "path": record["path_names"],
                         "impact_type": "upstream",
                         "hop_distance": record["hop_distance"],
@@ -698,13 +757,13 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.change_impact import ChangeImpactAnalysis
-from app.models.audit_log import AuditLog
+from app.models.audit import AuditLog
 from app.schemas.change_impact import ChangeImpactResult
 from app.graph.repository import FMEAGraphRepository
 
 
 class ChangeImpactService:
-    def __init__(self, db: AsyncSession, graph_repo: FMEAGraphRepository):
+    def __init__(self, db: AsyncSession, graph_repo: FMEAGraphRepository | None = None):
         self._db = db
         self._graph_repo = graph_repo
 
@@ -745,14 +804,19 @@ class ChangeImpactService:
             created_by=user_id,
         )
         self._db.add(analysis)
+        await self._db.flush()  # 获取 analysis.id
 
-        # 4. 审计日志
+        # 4. 审计日志（与现有 AuditLog 模型字段一致：table_name/record_id/action/changed_fields/operated_by）
         audit = AuditLog(
+            table_name="change_impact_analysis",
+            record_id=analysis.id,
             action="change_impact_analyzed",
-            entity_type="change_impact",
-            entity_id=str(analysis.id),
-            detail=f"变更影响分析: {change_type} on {node_id}, score={impact_score}",
-            user_id=user_id,
+            changed_fields={
+                "change_type": change_type,
+                "node_id": node_id,
+                "impact_score": impact_score,
+            },
+            operated_by=user_id,
         )
         self._db.add(audit)
 
@@ -779,6 +843,14 @@ class ChangeImpactService:
         result = await self._db.execute(
             select(ChangeImpactAnalysis)
             .where(ChangeImpactAnalysis.fmea_id == fmea_id)
+            .order_by(ChangeImpactAnalysis.created_at.desc())
+        )
+        return result.scalars().all()
+
+    async def list_all(self, product_line_codes: list[str]):
+        result = await self._db.execute(
+            select(ChangeImpactAnalysis)
+            .where(ChangeImpactAnalysis.product_line_code.in_(product_line_codes))
             .order_by(ChangeImpactAnalysis.created_at.desc())
         )
         return result.scalars().all()
@@ -864,6 +936,33 @@ async def analyze_change_impact(
         new_value=body.new_value,
         user_id=user.id,
     )
+
+
+@router.get("", response_model=list[ChangeImpactAnalysisResponse])
+async def list_change_impacts(
+    product_line_code: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """获取变更影响分析历史列表。按产品线过滤（不传则查用户有权访问的所有产品线）。"""
+    from app.core.product_line_filter import get_user_product_line_codes
+
+    user_codes = await get_user_product_line_codes(user, db)
+    if product_line_code:
+        if product_line_code not in user_codes:
+            raise HTTPException(status_code=403, detail="无权访问该产品线")
+        filter_codes = [product_line_code]
+    else:
+        filter_codes = user_codes
+
+    service = ChangeImpactService(db, None)
+    # 简化分页：先全查再切片（数据量小，后续可优化为数据库分页）
+    all_items = await service.list_all(filter_codes)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return all_items[start:end]
 
 
 @router.get("/fmea/{fmea_id}", response_model=list[ChangeImpactAnalysisResponse])
@@ -1000,6 +1099,15 @@ export async function listChangeImpacts(
   fmeaId: string
 ): Promise<ChangeImpactAnalysis[]> {
   const resp = await client.get(`/change-impact/fmea/${fmeaId}`);
+  return resp.data;
+}
+
+export async function listAllChangeImpacts(
+  productLineCode?: string
+): Promise<ChangeImpactAnalysis[]> {
+  const resp = await client.get("/change-impact", {
+    params: productLineCode ? { product_line_code: productLineCode } : undefined,
+  });
   return resp.data;
 }
 
@@ -1304,7 +1412,7 @@ import {
   ChangeHistoryTable,
   ImpactReportPanel,
 } from "../components/change-impact";
-import { listChangeImpacts, getChangeImpact } from "../api/changeImpact";
+import { listAllChangeImpacts, getChangeImpact } from "../api/changeImpact";
 import type { ChangeImpactAnalysis } from "../api/changeImpact";
 
 const { Title } = Typography;
@@ -1315,7 +1423,7 @@ export default function ChangeImpactPage() {
   const [selected, setSelected] = useState<ChangeImpactAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // 加载历史列表（简化版：加载所有记录，实际应按产品线过滤）
+  // 加载全局历史列表（后端按用户产品线权限自动过滤）
   useEffect(() => {
     loadHistory();
   }, []);
@@ -1323,10 +1431,8 @@ export default function ChangeImpactPage() {
   const loadHistory = async () => {
     setLoading(true);
     try {
-      // 注意：这里需要一个获取所有变更分析记录的接口
-      // 如果没有，可以先通过其他方式获取
-      // 简化处理：留空或调用 listChangeImpacts 需要一个 fmea_id
-      setHistory([]);
+      const data = await listAllChangeImpacts();
+      setHistory(data);
     } catch (err) {
       message.error("加载历史失败");
     } finally {
@@ -1381,36 +1487,6 @@ export default function ChangeImpactPage() {
 }
 ```
 
-**注意：** 当前设计缺少"获取所有变更分析历史"的接口。有两个选择：
-1. 后端新增一个列表端点（如 `GET /change-impact?product_line_code=xxx`）
-2. 前端页面只展示单个 FMEA 的历史（通过 `GET /change-impact/fmea/{id}`）
-
-考虑到复杂度，建议先按方案 2 实现：页面通过 URL 参数接收 `fmea_id`，展示该 FMEA 的变更历史。如果需要全局视图，后续扩展。
-
-简化版实现（通过 URL 参数）：
-
-```typescript
-import { useSearchParams } from "react-router-dom";
-// ...
-const [searchParams] = useSearchParams();
-const fmeaId = searchParams.get("fmea_id");
-
-useEffect(() => {
-  if (fmeaId) loadHistory(fmeaId);
-}, [fmeaId]);
-
-const loadHistory = async (id: string) => {
-  setLoading(true);
-  try {
-    const data = await listChangeImpacts(id);
-    setHistory(data);
-  } catch (err) {
-    message.error("加载历史失败");
-  } finally {
-    setLoading(false);
-  }
-};
-```
 
 - [ ] **Step 2: 添加路由**
 
@@ -1492,14 +1568,14 @@ const [impactForm, setImpactForm] = useState<{
 
 ```typescript
 const handleAnalyzeImpact = async () => {
-  if (!selectedNode) return;
+  if (!selectedGraphNode) return;
   setImpactLoading(true);
   try {
     const request: AnalyzeChangeImpactRequest = {
       fmea_id: fmeaId,
-      node_id: selectedNode.id,
-      node_type: selectedNode.type,
-      node_name: selectedNode.name || "",
+      node_id: selectedGraphNode.id,
+      node_type: selectedGraphNode.type || "",
+      node_name: selectedGraphNode.properties?.name || selectedGraphNode.label || "",
       change_type: impactForm.change_type,
       field_name: impactForm.field_name || undefined,
       new_value: impactForm.new_value || undefined,
@@ -1515,11 +1591,11 @@ const handleAnalyzeImpact = async () => {
 };
 ```
 
-**注意：** `selectedNode` 需要是实际存在的节点选中状态变量。如果 `FMEAEditorPage` 中没有节点选中状态，需要找到等效的状态变量。
+**注意：** 使用 `selectedGraphNode`（图谱 tab 中选中的节点，类型为 `APIGraphNode | null`）。入口放在图谱页的节点详情区域（`NodeDetailDrawer` 或等效区域），与图谱节点选中状态联动。
 
 - [ ] **Step 4: 添加 UI 元素**
 
-在节点详情面板（找到显示节点属性的区域）添加：
+在图谱 tab 的节点详情区域（找到使用 `selectedGraphNode` 的地方，如 `NodeDetailDrawer` 附近）添加：
 
 ```tsx
 <Card title="变更影响分析" size="small">
