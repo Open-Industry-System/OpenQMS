@@ -166,14 +166,17 @@ async def update_fmea(
     lock_version: int | None = None,
     confirmed_latest_lock_version: int | None = None,
 ) -> FMEADocument:
-    # 乐观锁校验（互斥分支）
+    # 原子乐观锁校验：重新 SELECT ... FOR UPDATE 获取最新 lock_version
+    result = await db.execute(
+        select(FMEADocument).where(FMEADocument.fmea_id == fmea.fmea_id).with_for_update()
+    )
+    fresh = result.scalar_one()
+
     if confirmed_latest_lock_version is not None:
-        # 强制保存：只校验确认的版本号，跳过常规 lock_version
-        if fmea.lock_version != confirmed_latest_lock_version:
+        if fresh.lock_version != confirmed_latest_lock_version:
             raise ValueError("lock_version_changed_again")
     elif lock_version is not None:
-        # 常规保存：检查 lock_version 是否匹配
-        if fmea.lock_version != lock_version:
+        if fresh.lock_version != lock_version:
             raise ValueError("lock_version_mismatch")
 
     changed_fields = {}
@@ -188,9 +191,9 @@ async def update_fmea(
         changed_fields["product_line_code"] = product_line_code
         fmea.product_line_code = product_line_code
     fmea.updated_by = user_id
-    fmea.lock_version += 1  # 递增乐观锁版本
 
     if changed_fields:
+        fmea.lock_version += 1  # 只在有实际变更时递增乐观锁版本
         audit_log = AuditLog(
             table_name="fmea_documents",
             record_id=fmea.fmea_id,

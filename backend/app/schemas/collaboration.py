@@ -1,3 +1,4 @@
+import uuid
 from pydantic import BaseModel
 from typing import Literal
 
@@ -12,7 +13,7 @@ class EditingArea(BaseModel):
 
 class HeartbeatRequest(BaseModel):
     document_type: str
-    document_id: str
+    document_id: uuid.UUID
     action: Literal["viewing", "editing", "idle"] = "viewing"
     editing_area: EditingArea | None = None
 

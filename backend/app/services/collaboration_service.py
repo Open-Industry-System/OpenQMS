@@ -13,7 +13,7 @@ SESSION_TTL_SECONDS = 60
 async def upsert_session(
     db: AsyncSession,
     document_type: str,
-    document_id: str,
+    document_id: uuid.UUID,
     user_id: uuid.UUID,
     user_name: str,
     action: str,
@@ -24,7 +24,7 @@ async def upsert_session(
         insert(CollaborationSession)
         .values(
             document_type=document_type,
-            document_id=uuid.UUID(document_id),
+            document_id=document_id,
             user_id=user_id,
             user_name=user_name,
             action=action,
@@ -48,13 +48,13 @@ async def upsert_session(
 async def delete_session(
     db: AsyncSession,
     document_type: str,
-    document_id: str,
+    document_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> None:
     """Delete session on page unload."""
     stmt = delete(CollaborationSession).where(
         CollaborationSession.document_type == document_type,
-        CollaborationSession.document_id == uuid.UUID(document_id),
+        CollaborationSession.document_id == document_id,
         CollaborationSession.user_id == user_id,
     )
     await db.execute(stmt)
@@ -64,7 +64,7 @@ async def delete_session(
 async def get_active_users(
     db: AsyncSession,
     document_type: str,
-    document_id: str,
+    document_id: uuid.UUID,
     exclude_user_id: uuid.UUID | None = None,
 ) -> list[CollaborationSession]:
     """Get active users for a document, filtering expired sessions."""
@@ -73,7 +73,7 @@ async def get_active_users(
         select(CollaborationSession)
         .where(
             CollaborationSession.document_type == document_type,
-            CollaborationSession.document_id == uuid.UUID(document_id),
+            CollaborationSession.document_id == document_id,
             CollaborationSession.last_activity >= cutoff,
         )
         .order_by(CollaborationSession.last_activity.desc())

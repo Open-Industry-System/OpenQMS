@@ -15,7 +15,7 @@ from app.services.collaboration_service import (
 from app.models.collaboration_session import CollaborationSession
 
 
-DOC_ID = "123e4567-e89b-12d3-a456-426614174000"
+DOC_ID = uuid.UUID("123e4567-e89b-12d3-a456-426614174000")
 USER_ID = uuid.uuid4()
 
 
@@ -58,7 +58,7 @@ async def test_get_active_users_filters_expired():
     db = _create_mock_db()
 
     active_session = CollaborationSession(
-        document_type="fmea", document_id=uuid.UUID(DOC_ID),
+        document_type="fmea", document_id=DOC_ID,
         user_id=USER_ID, user_name="张三", action="viewing",
         last_activity=datetime.now(timezone.utc),
     )

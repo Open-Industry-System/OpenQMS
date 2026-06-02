@@ -32,7 +32,7 @@ async def heartbeat(
 @router.delete("/leave/{document_type}/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def leave(
     document_type: str,
-    document_id: str,
+    document_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -47,7 +47,7 @@ async def leave(
 @router.get("/{document_type}/{document_id}/active-users", response_model=ActiveUsersResponse)
 async def active_users(
     document_type: str,
-    document_id: str,
+    document_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

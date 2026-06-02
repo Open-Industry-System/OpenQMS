@@ -139,12 +139,17 @@ async def update_control_plan(
     lock_version = data.lock_version
     confirmed_latest_lock_version = data.confirmed_latest_lock_version
 
-    # 乐观锁校验（互斥分支）
+    # 原子乐观锁校验：重新 SELECT ... FOR UPDATE 获取最新 lock_version
+    result = await db.execute(
+        select(ControlPlan).where(ControlPlan.cp_id == cp.cp_id).with_for_update()
+    )
+    fresh = result.scalar_one()
+
     if confirmed_latest_lock_version is not None:
-        if cp.lock_version != confirmed_latest_lock_version:
+        if fresh.lock_version != confirmed_latest_lock_version:
             raise ValueError("lock_version_changed_again")
     elif lock_version is not None:
-        if cp.lock_version != lock_version:
+        if fresh.lock_version != lock_version:
             raise ValueError("lock_version_mismatch")
 
     if data.product_line_code is not None:
@@ -171,7 +176,6 @@ async def update_control_plan(
             setattr(cp, field, value)
 
     cp.updated_by = user_id
-    cp.lock_version += 1
 
     # Handle items replacement if provided
     if data.items is not None:
@@ -209,6 +213,7 @@ async def update_control_plan(
         changed_fields["items_count"] = len(data.items)
 
     if changed_fields:
+        cp.lock_version += 1  # 只在有实际变更时递增乐观锁版本
         await create_audit_log(
             db,
             user_id=user_id,
