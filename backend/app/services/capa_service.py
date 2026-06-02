@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.models.capa import CAPAEightD
 from app.state_machines.eightd_state import EightDState, can_transition
 from app.models.audit import AuditLog
+from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
 
 
@@ -126,6 +127,7 @@ async def create_capa(
         raise ValueError(f"CAPA report number '{document_no}' already exists.")
 
     await db.refresh(capa)
+    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
     return capa
 
 
@@ -161,6 +163,7 @@ async def update_capa(
 
     await db.commit()
     await db.refresh(capa)
+    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
     return capa
 
 

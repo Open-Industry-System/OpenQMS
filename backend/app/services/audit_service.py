@@ -10,6 +10,7 @@ from app.models.audit_finding import AuditFinding
 from app.models.user import User
 from app.models.capa import CAPAEightD
 from app.models.audit import AuditLog
+from app.services.embedding_outbox import enqueue_embedding
 
 
 # ───────────────────────────────────────────────
@@ -654,6 +655,7 @@ async def create_audit_finding(
         await db.rollback()
         raise ValueError(f"failed to create audit finding: {e}")
     await db.refresh(finding)
+    await enqueue_embedding(db, "audit_finding", finding.finding_id, None)
     return finding
 
 
@@ -715,6 +717,7 @@ async def update_audit_finding(
         await db.rollback()
         raise ValueError(f"failed to update audit finding: {e}")
     await db.refresh(finding)
+    await enqueue_embedding(db, "audit_finding", finding.finding_id, None)
     return finding
 
 

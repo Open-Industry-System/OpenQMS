@@ -11,6 +11,7 @@ from app.models.capa import CAPAEightD
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord, ShipmentRecord, WarrantyRecord
 from app.models.fmea import FMEADocument
 from app.services import scar_service
+from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
 
 
@@ -644,6 +645,7 @@ async def create_complaint(db: AsyncSession, data, user_id: uuid.UUID) -> Custom
         await db.rollback()
         raise ValueError(f"complaint number '{values['complaint_no']}' already exists")
     await db.refresh(complaint)
+    await enqueue_embedding(db, "complaint", complaint.complaint_id, complaint.product_line_code)
     return complaint
 
 
@@ -731,6 +733,7 @@ async def update_complaint(
         await db.rollback()
         raise ValueError("complaint update violates a database constraint")
     await db.refresh(complaint)
+    await enqueue_embedding(db, "complaint", complaint.complaint_id, complaint.product_line_code)
     return complaint
 
 
@@ -1002,6 +1005,7 @@ async def create_rma_record(db: AsyncSession, data, user_id: uuid.UUID) -> RMARe
         await db.rollback()
         raise ValueError(f"RMA number '{values['rma_no']}' already exists")
     await db.refresh(rma)
+    await enqueue_embedding(db, "rma", rma.rma_id, rma.product_line_code)
     return rma
 
 
@@ -1105,6 +1109,7 @@ async def update_rma_record(
         await db.rollback()
         raise ValueError("RMA update violates a database constraint")
     await db.refresh(rma)
+    await enqueue_embedding(db, "rma", rma.rma_id, rma.product_line_code)
     return rma
 
 

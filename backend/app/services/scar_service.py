@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.models.supplier import Supplier, SupplierSCAR
 from app.models.capa import CAPAEightD
 from app.models.audit import AuditLog
+from app.services.embedding_outbox import enqueue_embedding
 
 
 SCAR_TRANSITIONS = {
@@ -135,6 +136,7 @@ async def create_scar(
     ))
     await db.commit()
     await db.refresh(scar)
+    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
     # Re-load with supplier relationship
     return await get_scar(db, scar.scar_id)
 
@@ -208,6 +210,7 @@ async def update_scar(
         operated_by=user_id,
     ))
     await db.commit()
+    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
     return await get_scar(db, scar.scar_id)
 
 

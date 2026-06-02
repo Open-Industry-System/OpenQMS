@@ -8,6 +8,7 @@ from app.models.fmea import FMEADocument
 from app.state_machines.fmea_state import FMEAState, can_transition
 from app.models.audit import AuditLog
 from app.models.graph_sync_outbox import GraphSyncOutbox
+from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import _create_fmea_version_no_commit
 
@@ -151,6 +152,7 @@ async def create_fmea(
         raise ValueError(f"FMEA document number '{document_no}' already exists.")
 
     await db.refresh(fmea)
+    await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code)
     return fmea
 
 
@@ -201,6 +203,7 @@ async def update_fmea(
 
     await db.commit()
     await db.refresh(fmea)
+    await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code)
     return fmea
 
 
