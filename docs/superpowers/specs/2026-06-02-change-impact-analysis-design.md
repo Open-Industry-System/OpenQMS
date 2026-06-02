@@ -171,6 +171,8 @@ class ChangeImpactAnalysisResponse(BaseModel):
     impact_result: ChangeImpactResult
     created_by: uuid.UUID
     created_at: datetime
+
+    model_config = {"from_attributes": True}
 ```
 
 ### 3.3 Service 层
@@ -231,6 +233,9 @@ class ChangeImpactService:
 ```python
 # backend/app/api/change_impact.py
 
+from app.core.product_line_filter import enforce_product_line_access
+from app.services.fmea_service import get_fmea_by_id  # 或等效查询
+
 router = APIRouter(prefix="/api/change-impact", tags=["变更影响分析"])
 
 @router.post("/analyze", response_model=ChangeImpactAnalysisResponse)
@@ -240,7 +245,14 @@ async def analyze_change_impact(
     user: User = Depends(require_engineer_or_admin),
     graph_repo: FMEAGraphRepository = Depends(get_graph_repository),
 ):
-    """执行变更影响分析并持久化结果"""
+    """执行变更影响分析并持久化结果。前置校验产品线访问权限。"""
+    # 1. 产品线越权校验
+    fmea = await get_fmea_by_id(db, body.fmea_id)
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    await enforce_product_line_access(user, fmea.product_line_code, db)
+
+    # 2. 执行分析
     service = ChangeImpactService(db, graph_repo)
     return await service.analyze(
         fmea_id=body.fmea_id,
@@ -260,6 +272,10 @@ async def list_fmea_change_impacts(
     user: User = Depends(get_current_user),
 ):
     """获取某个 FMEA 的所有变更影响分析历史"""
+    fmea = await get_fmea_by_id(db, fmea_id)
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    await enforce_product_line_access(user, fmea.product_line_code, db)
     ...
 
 @router.get("/{analysis_id}", response_model=ChangeImpactAnalysisResponse)
@@ -269,6 +285,10 @@ async def get_change_impact_detail(
     user: User = Depends(get_current_user),
 ):
     """获取某次分析的详细结果"""
+    analysis = await get_change_impact_by_id(db, analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    await enforce_product_line_access(user, analysis.product_line_code, db)
     ...
 ```
 
@@ -298,9 +318,11 @@ async def get_change_impact_detail(
 | 名称/描述类 | none | 信息更新 |
 
 3. 执行图遍历：
-   - downstream：沿出边遍历（HAS_FAILURE_MODE, EFFECT_OF）
-   - upstream：沿入边遍历（CAUSE_OF, PREVENTED_BY）
+   - downstream：沿出边遍历（HAS_FUNCTION → FUNCTION_MAPPED_TO → HAS_FAILURE_MODE → EFFECT_OF）
+   - upstream：沿入边遍历（CAUSE_OF, PREVENTED_BY, DETECTED_BY）
    - 最大深度：下游 5 跳，上游 3 跳
+
+   **重要**：物理组件节点（Component/ProcessStep/ProcessWorkElement）不直接连接到 FailureMode，必须通过功能节点中转。下游遍历边集合必须包含 `HAS_FUNCTION` 和 `FUNCTION_MAPPED_TO`，否则从组件发起的变更将漏报。
 
 4. 对每个访问节点记录：hop_distance、path、impact_type
 
@@ -314,20 +336,106 @@ async def get_change_impact_detail(
 
 ### 4.2 风险变化预测
 
-```python
-def predict_risk_change(node, field_name, new_value):
-    if field_name in ["severity", "occurrence", "detection"]:
-        return {
-            field_name: {"old": node.get(field_name), "new": int(new_value)}
-        }
+AP（Action Priority）由完整的 S/O/D 组合决定，单体节点无法独立计算。因此，当变更可能引发风险重评估时，算法必须从图中重构关联的 FMEARow Context。
 
-    if node["type"] in ["Component", "ProcessStep"] and field_name == "design_parameter":
-        return {"severity": {"old": None, "new": None, "reason": "needs_reassessment"}}
+```python
+def predict_risk_change(graph_data, affected_node, field_name, new_value):
+    """
+    预测受影响节点的风险变化。
+    对于 FailureMode 节点，需要从图中重构完整的 S/O/D 上下文来计算 AP。
+    """
+    node = affected_node
+    node_type = node.get("type", "")
+
+    # 场景 1：直接修改 S/O/D 评分字段
+    if field_name in ["severity", "occurrence", "detection"]:
+        # 如果修改的是 FailureMode 自身的评分，直接计算新旧 AP
+        if node_type == "FailureMode":
+            old_s = node.get("severity", 0)
+            old_o = node.get("occurrence", 0)
+            old_d = node.get("detection", 0)
+            new_val = int(new_value)
+            # 构建新值
+            new_s = new_val if field_name == "severity" else old_s
+            new_o = new_val if field_name == "occurrence" else old_o
+            new_d = new_val if field_name == "detection" else old_d
+            old_ap = compute_ap(old_s, old_o, old_d)
+            new_ap = compute_ap(new_s, new_o, new_d)
+            return {
+                field_name: {"old": node.get(field_name), "new": new_val},
+                "ap": {"old": old_ap, "new": new_ap} if old_ap != new_ap else None
+            }
+        # 如果修改的是 Cause 的 O/D，需要关联到对应的 FailureMode
+        elif node_type in ["FailureCause"]:
+            # 从图中找到关联的 FailureMode，重构完整 S/O/D
+            failure_mode = _find_related_failure_mode(graph_data, node["id"])
+            if failure_mode:
+                old_s = failure_mode.get("severity", 0)
+                old_o = failure_mode.get("occurrence", 0)
+                old_d = failure_mode.get("detection", 0)
+                new_val = int(new_value)
+                new_o = new_val if field_name == "occurrence" else old_o
+                new_d = new_val if field_name == "detection" else old_d
+                old_ap = compute_ap(old_s, old_o, old_d)
+                new_ap = compute_ap(old_s, new_o, new_d)
+                return {
+                    field_name: {"old": node.get(field_name), "new": new_val},
+                    "ap": {"old": old_ap, "new": new_ap} if old_ap != new_ap else None
+                }
+
+    # 场景 2：设计参数变更（Component/ProcessStep）
+    if node_type in ["Component", "ProcessStep", "ProcessWorkElement"] and field_name == "design_parameter":
+        # 设计参数变更可能影响下游 FailureMode 的 severity
+        # 先从图中重构受影响 FailureMode 的完整 FMEARow Context
+        failure_modes = _find_downstream_failure_modes(graph_data, node["id"])
+        if failure_modes:
+            # 标记需要重新评估，AP 变化需人工确认
+            return {
+                "severity": {"old": None, "new": None, "reason": "needs_reassessment"},
+                "affected_failure_modes": [fm["name"] for fm in failure_modes]
+            }
 
     return None
+
+def _find_related_failure_mode(graph_data, cause_id):
+    """从 Cause 节点出发，沿 CAUSE_OF 边找到关联的 FailureMode。"""
+    edges = graph_data.get("edges", [])
+    nodes = {n["id"]: n for n in graph_data.get("nodes", [])}
+    for e in edges:
+        if e["source"] == cause_id and e["type"] == "CAUSE_OF":
+            return nodes.get(e["target"])
+    return None
+
+def _find_downstream_failure_modes(graph_data, start_node_id):
+    """从起始节点出发，沿下游边找到所有 FailureMode 节点。"""
+    edges = graph_data.get("edges", [])
+    nodes = {n["id"]: n for n in graph_data.get("nodes", [])}
+    downstream_edges = ["HAS_FUNCTION", "FUNCTION_MAPPED_TO", "HAS_FAILURE_MODE"]
+    # 简化的 BFS，限制深度为 3
+    from collections import deque
+    queue = deque([(start_node_id, 0)])
+    visited = {start_node_id}
+    failure_modes = []
+    while queue:
+        current, depth = queue.popleft()
+        if depth >= 3:
+            continue
+        for e in edges:
+            if e["source"] == current and e["type"] in downstream_edges:
+                next_id = e["target"]
+                if next_id not in visited:
+                    visited.add(next_id)
+                    node = nodes.get(next_id)
+                    if node and node.get("type") == "FailureMode":
+                        failure_modes.append(node)
+                    queue.append((next_id, depth + 1))
+    return failure_modes
 ```
 
-**说明：** 当前使用规则引擎做简单预测，架构预留 LLM 接入点（Phase 4 可升级为更智能的风险预测）。
+**说明：**
+- 当变更直接影响 S/O/D 时，算法从图中重构完整的 FMEARow Context，调用 `compute_ap()` 精确计算 AP 变化
+- 当变更间接影响（如设计参数变更）时，标记为 "needs_reassessment"，列出受影响的 FailureMode 供人工确认
+- 架构预留 LLM 接入点（Phase 4 可升级为更智能的风险预测）
 
 ### 4.3 影响评分算法
 
@@ -349,16 +457,18 @@ def compute_impact_score(summary):
 ### 4.4 Neo4j 遍历实现
 
 ```cypher
--- 下游遍历（最大 5 跳）
+-- 下游遍历（最大 5 跳），去重并取最短路径
 MATCH path = (start:GraphNode {fmea_id: $fmea_id, node_id: $node_id})
   -[*1..5]->(end:GraphNode)
 WHERE start.node_id <> end.node_id
+WITH end, path ORDER BY length(path) ASC
+WITH end, head(collect(path)) as shortest_path
 RETURN
   end.node_id as node_id,
   end.type as node_type,
   end.name as name,
-  length(path) as hop_distance,
-  [n in nodes(path) | n.name] as path_names
+  length(shortest_path) as hop_distance,
+  [n in nodes(shortest_path) | n.name] as path_names
 ORDER BY hop_distance
 ```
 
@@ -417,8 +527,8 @@ def _bfs_with_path(graph_data, start_node_id, edge_filter, max_depth):
 
 | 传播方向 | 允许的边类型 |
 |----------|-------------|
-| downstream | `HAS_FAILURE_MODE`, `EFFECT_OF`, `HAS_PROCESS_STEP`, `FUNCTION_MAPPED_TO` |
-| upstream | `CAUSE_OF`, `PREVENTED_BY`, `DETECTED_BY` |
+| downstream | `HAS_FUNCTION`, `FUNCTION_MAPPED_TO`, `HAS_FAILURE_MODE`, `EFFECT_OF`, `HAS_PROCESS_STEP` |
+| upstream | `CAUSE_OF`, `PREVENTED_BY`, `DETECTED_BY`, `OPTIMIZED_BY` |
 
 ---
 
