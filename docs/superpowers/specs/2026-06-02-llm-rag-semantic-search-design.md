@@ -235,6 +235,31 @@ python -m app.services.embedding_backfill [--batch-size 100] [--entity-type fmea
 
 当 `embedding_model` 变更时，回填命令检测到 `embedding_model` 不匹配的记录并重新嵌入。
 
+### 孤儿向量清理
+
+`document_embeddings` 采用多态关联（entity_id 指向 6 个不同业务表），无法声明物理外键级联删除。必须在应用层保证删除一致性：
+
+**物理删除**：各业务模块的 CRUD 服务在执行物理删除时，必须在同一事务中清除对应 embedding：
+
+```python
+# 示例：删除 CAPA 时同步清理
+async def delete_capa(db: AsyncSession, report_id: UUID):
+    await db.execute(delete(CAPA).where(CAPA.report_id == report_id))
+    await db.execute(
+        delete(DocumentEmbedding).where(
+            DocumentEmbedding.entity_type == "capa",
+            DocumentEmbedding.entity_id == report_id
+        )
+    )
+    await db.commit()
+```
+
+各模块同理：FMEA 删除时清理 `entity_type='fmea_node' AND entity_id=fmea_id`；审核发现、客诉、SCAR、RMA 类推。
+
+**逻辑删除（Soft Delete）**：对于采用 `is_deleted` 或状态标记删除的模块，搜索 SQL 必须排除已删除实体。在 SearchService 中做后过滤或在 SQL JOIN 时排除。
+
+**兜底清理（可选）**：定期运行脚本检查孤儿向量（embedding 存在但源记录不存在），清理残留数据。
+
 ---
 
 ## 5. 搜索与检索
