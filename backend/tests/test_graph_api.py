@@ -93,6 +93,23 @@ class StubGraphRepo:
             ],
         }
 
+    async def find_similar_nodes_advanced(self, **kwargs):
+        scope = kwargs.get("scope", "global")
+        pl = kwargs.get("product_line_code", "DC-DC-100")
+        return [
+            {
+                "node_id": "fm_001",
+                "name": "焊接虚焊",
+                "type": "FailureMode",
+                "fmea_id": "fmea-1",
+                "document_no": "PFMEA-2026-001",
+                "product_line_code": pl,
+                "product_line_name": "DC-DC 电源模块",
+                "similarity_score": 0.75,
+                "match_reason": "substring_match",
+            }
+        ]
+
 
 import uuid as _uuid
 
@@ -116,6 +133,7 @@ def _make_user(role_key: str):
         role_key=role_key,
         name_zh=role_key,
         name_en=role_key,
+        bypass_row_level_security=(role_key == "admin"),
     )
     return user
 
@@ -128,11 +146,19 @@ async def _override_repo():
     return StubGraphRepo()
 
 
+async def _override_get_user_permission(user, module, db):
+    from app.core.permissions import PermissionLevel
+    # admin 返回 VIEW，viewer 返回 NONE（模拟 scope 降级）
+    return PermissionLevel.VIEW if user.role_definition.role_key == "admin" else PermissionLevel.NONE
+
+
 @pytest.fixture
 async def client():
     """基于 ASGI transport 的测试客户端，注入 stub repo 和 mock user。"""
+    from app.core.permissions import get_user_permission
     app.dependency_overrides[get_current_user] = _override_get_current_user
     app.dependency_overrides[get_graph_repository] = _override_repo
+    app.dependency_overrides[get_user_permission] = _override_get_user_permission
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -310,3 +336,70 @@ async def test_global_stats_rejects_product_line_code_param(client: AsyncClient)
     """验证 /global-stats 传入 product_line_code 参数返回 400。"""
     resp = await client.get("/api/graph/global-stats?product_line_code=DC-DC-100")
     assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_similar_nodes_advanced_success(client: AsyncClient):
+    resp = await client.post("/api/graph/similar-nodes", json={
+        "node_type": "FailureMode",
+        "query_text": "焊接",
+        "scope": "global",
+        "product_line_code": "DC-DC-100",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "matches" in data
+    # 无 KNOWLEDGE_GRAPH 权限记录时会被降级为 current_product_line
+    assert data["effective_scope"] == "current_product_line"
+    assert len(data["matches"]) > 0
+    first = data["matches"][0]
+    assert "node_id" in first
+    assert "similarity_score" in first
+
+
+@pytest.mark.asyncio
+async def test_similar_nodes_advanced_scope_downgrade(client: AsyncClient):
+    """viewer 无 KNOWLEDGE_GRAPH 权限，global 被降级为 current_product_line。"""
+    from unittest.mock import patch, AsyncMock
+    from app.core.permissions import PermissionLevel
+
+    app.dependency_overrides[get_current_user] = lambda: _make_user("viewer")
+    try:
+        with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.NONE),              patch("app.api.graph.enforce_product_line_access", new_callable=AsyncMock):
+            resp = await client.post("/api/graph/similar-nodes", json={
+                "node_type": "FailureMode",
+                "query_text": "焊接",
+                "scope": "global",
+                "product_line_code": "DC-DC-100",
+            })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["effective_scope"] == "current_product_line"
+        assert len(data["matches"]) > 0
+        assert data["matches"][0]["product_line_code"] == "DC-DC-100"
+    finally:
+        app.dependency_overrides[get_current_user] = _override_get_current_user
+
+
+@pytest.mark.asyncio
+async def test_similar_nodes_advanced_rejects_unauthorized_product_line(client: AsyncClient):
+    """无权产品线返回 403。"""
+    from unittest.mock import patch, AsyncMock
+    from app.core.permissions import PermissionLevel
+    from fastapi import HTTPException
+
+    async def _raise_403(*a, **kw):
+        raise HTTPException(status_code=403, detail="无权访问产品线")
+
+    app.dependency_overrides[get_current_user] = lambda: _make_user("viewer")
+    try:
+        with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.NONE),              patch("app.api.graph.enforce_product_line_access", side_effect=_raise_403):
+            resp = await client.post("/api/graph/similar-nodes", json={
+                "node_type": "FailureMode",
+                "query_text": "焊接",
+                "scope": "current_product_line",
+                "product_line_code": "UNAUTHORIZED-PL",
+            })
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides[get_current_user] = _override_get_current_user
