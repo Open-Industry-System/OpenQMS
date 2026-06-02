@@ -1,7 +1,7 @@
 # 多人协同编辑模块设计文档
 
 **日期:** 2026-06-02  
-**范围:** 全文档类型（FMEA、Control Plan、CAPA 8D、APQP 等）  
+**范围:** 第一期 — FMEA + Control Plan 完整协同（在线状态 + 冲突提示）；其他文档类型仅接入顶部在线状态（后续扩展）  
 **方案:** 乐观锁冲突提示（B）+ 轻量在线状态（D），短轮询 MVP，后续可升级 WebSocket  
 
 ---
@@ -11,7 +11,9 @@
 - 解决多人同时编辑同一文档时的保存冲突问题
 - 提供轻量在线状态，显示谁正在查看/编辑文档及具体编辑区域
 - 不阻断编辑（非强制只读），让用户自主决定如何处理冲突
-- 通用化设计，所有文档类型复用同一套协同基础设施
+- 通用化设计，协同基础设施可被所有文档类型复用
+- 第一期优先覆盖 FMEA 和 Control Plan（两者已有 `lock_version` 和版本管理基础）
+- 其他文档类型（CAPA、APQP 等）本期仅接入顶部在线状态，冲突提示后续按需扩展
 - 为未来升级到实时协同预留扩展点
 
 ## 2. 核心决策
@@ -22,7 +24,7 @@
 | 数据传输 | 短轮询 MVP（15s），预留 WebSocket 升级路径 | 快速验证需求，后续可平滑替换传输层 |
 | 编辑区域提示 | 行/字段级（FMEA 行 key + 字段名） | 精确到用户正在编辑的位置，帮助其他人避让 |
 | 冲突处理 | 差异预览 + 用户选择覆盖/放弃 | 让用户了解对方修改内容后再做决定，避免盲目覆盖 |
-| 覆盖范围 | 所有文档编辑器 | 通用组件，后续扩展只需"打开开关" |
+| 覆盖范围 | 第一期：FMEA + Control Plan 完整协同；其他仅在线状态 | 复用协同基础设施，降低 MVP 风险 |
 
 ## 3. 数据库模型
 
@@ -33,8 +35,8 @@ CREATE TABLE collaboration_sessions (
     session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_type VARCHAR(30) NOT NULL,        -- 'fmea', 'control_plan', 'capa', etc.
     document_id UUID NOT NULL,                 -- 对应文档的 PK
-    user_id UUID REFERENCES users(user_id),
-    user_name VARCHAR(50),                     -- 冗余，避免 JOIN
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    user_name VARCHAR(100),                    -- 冗余，避免 JOIN；对齐 users.display_name
     action VARCHAR(20) DEFAULT 'viewing',      -- 'viewing' | 'editing' | 'idle'
     editing_area JSONB DEFAULT NULL,           -- 灵活存储编辑区域
     last_activity TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -58,8 +60,8 @@ CREATE INDEX idx_collab_activity ON collaboration_sessions(last_activity);
 
 ### 3.3 会话清理
 
-- **定时清理**：后端每 60 秒删除 `last_activity < now() - interval '60 seconds'` 的记录
-- **主动清理**：前端页面卸载时（`beforeunload`）发送同步 DELETE 请求立即移除会话
+- **定时清理**：后端通过 FastAPI lifespan + `asyncio.create_task` 启动后台协程，每 60 秒删除 `last_activity < now() - interval '60 seconds'` 的记录
+- **主动清理**：前端页面卸载时使用 `navigator.sendBeacon()` 或 `fetch(..., { keepalive: true })` 发送异步 DELETE 请求清理会话；最终以心跳 TTL 为准
 - **唯一约束**：同一用户同一文档只有一个会话（多标签页时后者覆盖前者）
 
 ## 4. API 设计
@@ -89,6 +91,7 @@ Content-Type: application/json
 - `document_type` + `document_id` + `user_id` 唯一，UPSERT 模式
 - 更新 `last_activity` 和 `editing_area`
 - 如果 `action` 从 `editing` 变为 `viewing`，清空 `editing_area`
+- 查询时强制过滤 `last_activity >= now() - interval '60 seconds'`，避免清理任务延迟导致假在线用户
 
 ### 4.2 获取在线用户（短轮询）
 
@@ -133,52 +136,44 @@ Authorization: Bearer <token>
   "conflict": {
     "saved_by": "张三",
     "saved_at": "2026-06-02T14:30:00+08:00",
-    "their_changes_summary": {
-      "nodes_added": 1,
-      "nodes_modified": 2,
-      "nodes_deleted": 0,
-      "modified_fields": ["severity", "occurrence"]
-    }
+    "latest_lock_version": 6
   }
 }
 ```
 
-### 4.4 差异对比端点
+**前端 Diff 策略（不存储中间快照）:**
+
+冲突发生时，前端执行以下步骤：
+1. 收到 409 响应，提取 `latest_lock_version`
+2. 调用 `GET /api/fmea/{id}` 获取当前最新文档数据
+3. 将 **本地内存中的脏状态**（未保存的 nodes/edges）与 **服务器最新数据** 进行 client-side diff
+4. 在 `ConflictResolutionModal` 中展示 diff 结果：
+   - 对方新增/删除的节点和边
+   - 对方修改的字段（对比 name、severity、occurrence 等）
+   - 本地也有修改的字段（真正冲突）用红色高亮
+
+> **优势:** 省去中间版本快照存储，避免数据库膨胀；diff 逻辑纯前端计算，无后端依赖。
+
+### 4.4 安全覆盖保存（Force Save）
+
+用户确认覆盖时，必须携带确认过的最新版本号：
 
 ```
-GET /api/fmea/{id}/diff?base_version={lock_version}&their_version={latest_version}
+PUT /api/fmea/{id}
 Authorization: Bearer <token>
-```
 
-**响应:**
-
-```json
 {
-  "their_changes": [
-    {
-      "type": "node_modified",
-      "node_id": "n123",
-      "field": "severity",
-      "old_value": 7,
-      "new_value": 8
-    },
-    {
-      "type": "node_added",
-      "node_id": "n456",
-      "node_type": "FailureMode",
-      "name": "新失效模式"
-    },
-    {
-      "type": "edge_added",
-      "source": "n123",
-      "target": "n456",
-      "edge_type": "CAUSE_OF"
-    }
-  ]
+  "title": "...",
+  "graph_data": { ... },
+  "lock_version": 5,                    // 用户本地的 base version
+  "confirmed_latest_lock_version": 6     // 用户在冲突弹窗中确认过的最新版本
 }
 ```
 
-> **注:** 差异对比使用 `lock_version` 字段作为版本标识。后端在保存成功时自动递增 `lock_version`，并记录每个版本的 snapshot（可复用现有 `fmea_versions` 机制或新增轻量版本记录）。
+**后端校验:**
+1. 检查 `confirmed_latest_lock_version` 是否等于当前数据库中的 `lock_version`
+2. 如果不等（又有第三人保存），返回 **新的 409**，要求用户重新确认
+3. 如果相等，执行保存，递增 `lock_version`，记录审计日志（`audit_logs` 表记录 `"force_save_override"` 操作）
 
 ### 4.5 WebSocket 升级路径（预留）
 
@@ -239,7 +234,7 @@ export function useCollaboration(
 **职责:**
 - 管理心跳轮询（动态间隔）
 - 管理本地 `editing_area` 状态
-- 页面卸载时发送同步 DELETE 清理会话
+- 页面卸载时使用 `navigator.sendBeacon()` 发送异步 DELETE 清理会话
 - 返回在线用户列表和同步状态
 
 ### 5.2 `CollaborationBar` 组件
@@ -262,11 +257,13 @@ export function useCollaboration(
 
 冲突处理弹窗：
 - 显示冲突信息（谁、何时保存）
-- 显示差异摘要（新增/修改/删除统计）
-- 可选：展开显示详细差异列表
+- **前端 Client-Side Diff**：将本地脏状态与服务器最新数据进行对比
+  - 对方新增/删除的节点和边
+  - 对方修改的字段
+  - 本地与对方都修改的字段（真正冲突）用红色高亮
 - 两个操作按钮：
   - **放弃我的更改，刷新页面**：重新加载最新版本
-  - **强制保存（覆盖对方更改）**：使用最新 `lock_version` 重新提交
+  - **强制保存（覆盖对方更改）**：携带 `confirmed_latest_lock_version`，后端再次校验后保存，记录审计日志
 
 ### 5.5 各编辑器集成方式
 
@@ -302,12 +299,13 @@ frontend/src/
     ConflictResolutionModal.tsx
     index.ts
   hooks/
-    useCollaboration.ts
-    useConflictResolution.ts   # 封装冲突检测 + 差异获取
+    useCollaboration.ts        # 心跳 + 轮询 + 会话管理
   api/
     collaboration.ts           # heartbeat, getActiveUsers
   types/
     collaboration.ts           # 协同相关类型定义
+  utils/
+    graphDiff.ts               # Client-side diff（nodes/edges 对比）
 ```
 
 ## 6. 数据流
@@ -338,8 +336,11 @@ frontend/src/
     |<--- 409 Conflict -----|                         |
     |    {conflict: {...}} |                         |
     |                      |                         |
-    |-- GET /diff?v=5,6 --->|                         |
-    |<--- diff 结果 --------|                         |
+    |-- GET /fmea/{id} ---->| 获取最新数据             |
+    |<--- 最新 graph_data ---|                         |
+    |                      |                         |
+    |-- 前端 client-side diff                          |
+    |   本地脏态 vs 服务器最新                           |
     |                      |                         |
     |-- 弹出 ConflictModal -|-------------------------|
     |   用户选择覆盖/放弃    |                         |
@@ -352,12 +353,26 @@ frontend/src/
 | 心跳失败（网络抖动） | 静默重试 3 次，超过后标记为离线，不阻断编辑 |
 | 轮询失败 | 同上，UI 显示"协同状态同步失败"但不阻断编辑操作 |
 | 保存冲突（409） | 弹出 `ConflictResolutionModal`，用户必须选择处理方案 |
-| 强制覆盖保存 | 使用最新 `lock_version` 重新提交，成功后刷新本地状态 |
+| 强制覆盖保存 | 携带 `confirmed_latest_lock_version`，后端二次校验，相等则保存并记录审计日志；不等则返回新 409 要求重新确认 |
+| 强制保存后又有第三人保存 | 后端校验 `confirmed_latest_lock_version` 不匹配，返回新 409，用户需重新查看差异并确认 |
 | 后端会话清理延迟 | 用户关闭页面后最多 60 秒仍在在线列表（可接受） |
 | 同一用户多标签页 | 后者覆盖前者，`UNIQUE` 约束保证单一会话 |
 | 用户未登录/token 过期 | 心跳/轮询返回 401，前端跳转到登录页 |
 
-## 8. 数据库迁移
+## 8. 前提：补全 `lock_version` 字段
+
+第一期覆盖的文档类型必须已有 `lock_version` 乐观锁字段。经核查：
+
+| 模型 | 已有 lock_version | 需要补充 |
+|------|------------------|---------|
+| FMEADocument | ✅ 有 | — |
+| ControlPlan | ✅ 有 | — |
+| CAPAEightD | ❌ 无 | 需要 migration |
+| APQP | ❌ 无 | 本期暂不覆盖 |
+
+**补充方案：** 为需要冲突检测但缺失 `lock_version` 的模型添加该字段，模型基类中使用 SQLAlchemy `Column(Integer, default=0)`，保存时自动递增。建议封装为通用 mixin：`LockVersionMixin`。
+
+## 9. 数据库迁移
 
 ```python
 """add collaboration_sessions table
@@ -374,17 +389,17 @@ from sqlalchemy.dialects import postgresql
 def upgrade():
     op.create_table(
         'collaboration_sessions',
-        sa.Column('session_id', sa.UUID(), nullable=False),
+        sa.Column('session_id', sa.UUID(), nullable=False, server_default=sa.text('gen_random_uuid()')),
         sa.Column('document_type', sa.String(30), nullable=False),
         sa.Column('document_id', sa.UUID(), nullable=False),
-        sa.Column('user_id', sa.UUID(), nullable=True),
-        sa.Column('user_name', sa.String(50), nullable=True),
+        sa.Column('user_id', sa.UUID(), nullable=False),
+        sa.Column('user_name', sa.String(100), nullable=True),
         sa.Column('action', sa.String(20), server_default='viewing'),
         sa.Column('editing_area', postgresql.JSONB(), nullable=True),
-        sa.Column('last_activity', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('last_activity', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.PrimaryKeyConstraint('session_id'),
         sa.UniqueConstraint('document_type', 'document_id', 'user_id'),
-        sa.ForeignKeyConstraint(['user_id'], ['users.user_id']),
+        sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ondelete='CASCADE'),
     )
     op.create_index('idx_collab_doc', 'collaboration_sessions', ['document_type', 'document_id'])
     op.create_index('idx_collab_activity', 'collaboration_sessions', ['last_activity'])
@@ -396,16 +411,34 @@ def downgrade():
     op.drop_table('collaboration_sessions')
 ```
 
-## 9. 性能与扩展
+## 10. 性能与扩展
 
-### 9.1 性能估算
+### 10.1 性能估算
 
 - **心跳 QPS**：假设 50 并发用户 × (1/15s) ≈ **3.3 QPS**，极低负载
 - **轮询 QPS**：假设 50 并发文档 × 平均 2 人在线 × (1/15s) ≈ **6.7 QPS**
 - **数据库写入**：仅心跳时 UPSERT，读远大于写
 - **内存占用**：`collaboration_sessions` 表记录数 ≈ 在线用户数，通常 < 100 条
 
-### 9.2 Redis 扩展路径
+### 10.2 会话清理实现
+
+项目未安装 APScheduler/Celery。使用 FastAPI lifespan 机制：
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动后台清理协程
+    cleanup_task = asyncio.create_task(_cleanup_expired_sessions())
+    yield
+    cleanup_task.cancel()
+
+async def _cleanup_expired_sessions():
+    while True:
+        await asyncio.sleep(60)
+        await delete_expired_sessions()
+```
+
+### 10.3 Redis 扩展路径
 
 项目已配置 Redis 但未使用。如需扩展：
 - 将 `collaboration_sessions` 缓存到 Redis（Hash 结构，key = `{doc_type}:{doc_id}`）
@@ -413,7 +446,7 @@ def downgrade():
 - 心跳改为 Redis HSET，轮询改为 Redis HGETALL
 - 大幅降低数据库压力
 
-### 9.3 WebSocket 升级路径
+### 10.4 WebSocket 升级路径
 
 1. 新增 `/ws/collaboration` WebSocket 端点
 2. 连接建立时：发送当前文档的在线用户列表快照
@@ -421,7 +454,7 @@ def downgrade():
 4. 用户状态变更时：服务器主动 push 给同一文档的所有连接
 5. 轮询端点保留作为 fallback（检测 WebSocket 不可用时降级）
 
-## 10. 验收标准
+## 11. 验收标准
 
 - [ ] 打开 FMEA 编辑器，顶部显示在线用户列表
 - [ ] 另一用户打开同一 FMEA，双方都能看到对方在线
@@ -431,10 +464,12 @@ def downgrade():
 - [ ] 用户 B 选择"放弃并刷新"后，页面重新加载最新数据
 - [ ] 用户 B 选择"强制保存"后，成功覆盖并更新 lock_version
 - [ ] 用户关闭页面后，60 秒内从在线列表消失
-- [ ] Control Plan、CAPA 等其他编辑器同样支持协同状态显示
+- [ ] Control Plan 编辑器同样支持完整协同（在线状态 + 冲突提示）
+- [ ] CAPA、APQP 等其他编辑器顶部显示在线用户列表（本期最小支持）
 - [ ] 构建和 lint 无错误
+- [ ] `lock_version` 已添加到所有需要冲突检测的模型（如 CAPA 等原有缺失的模型）
 
-## 11. 后续扩展方向
+## 12. 后续扩展方向
 
 1. **WebSocket 实时推送**：降低延迟，减少轮询开销
 2. **Redis 缓存层**：支撑更大并发量
