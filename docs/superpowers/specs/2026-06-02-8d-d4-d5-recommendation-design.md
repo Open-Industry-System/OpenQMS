@@ -114,7 +114,7 @@ def get_d4_recommendations(
      - 若 `fmea_node_id` 是 FailureCause → 沿 CAUSE_OF 正向边找到父 FailureMode，再反向找所有 FailureCause
      - 若 `fmea_node_id` 是 FailureMode → 直接使用该 FailureMode
      - 若 `fmea_node_id` 是 Function → 沿 HAS_FAILURE_MODE 正向边找到子 FailureMode
-     - **若 `fmea_node_id` 为空（常见情况，前端 linkFMEA 只传 fmea_id）**→ 用 D2 关键词对图中所有 FailureMode 名称做子串匹配，对匹配到的 FailureMode 遍历 CAUSE_OF 反向边获取 FailureCause
+     - **若 `fmea_node_id` 为空（常见情况，前端 linkFMEA 只传 fmea_id）**→ 用 D2 关键词同时对图中 FailureMode 和 FailureCause 的 name + description 做子串匹配，命中任一即可
    - 对每个定位到的 FailureCause，用 D2 关键词对其 name + description 做子串匹配
    - 匹配到的根因按匹配关键词数量排序
 
@@ -167,7 +167,7 @@ GET /api/capa/{report_id}/d5-fmea-recommendations
 - 路由依赖：`user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW))`
 - 程序内校验：`fmea_level = await get_user_permission(user, Module.FMEA, db)`，不足则 403
 - 产品线访问控制
-- 注意："采纳"操作走现有 `PATCH /api/capa/{report_id}` 更新端点，该端点已有 EDIT 权限校验
+- 注意："采纳"操作走现有 `PUT /api/capa/{report_id}` 更新端点，该端点已有 EDIT 权限校验
 
 **逻辑**：
 1. 获取 CAPA 记录
