@@ -5,7 +5,6 @@ Pure functions (no DB access) mirroring get_d7_recommendations pattern.
 """
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from app.utils.text import extract_keywords
@@ -42,7 +41,7 @@ def get_d4_recommendations(
         else:
             other_fmeas.append(doc)
 
-    seen_keys: set[str] = set()
+    seen_keys: set[tuple[str | None, str]] = set()
 
     # --- Strategy A: Linked FMEA matching ---
     if linked_fmea and linked_fmea.get("graph_data"):
