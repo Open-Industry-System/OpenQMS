@@ -94,11 +94,13 @@ from typing import Any
 def mask_name(name: Any) -> str:
     """安全脱敏：保留前 2 个字符（去除首尾空格后），其余替换为 ***；
     短名称（≤2 字符）仅保留首字符 + ***，防止完整暴露原值。
-    防御性处理 None / 非字符串 / 空值，防止类型异常导致接口崩溃。
+    防御性处理 None / 非字符串 / 空值，非字符串类型直接返回 ***，避免异常类型被意外展示。
     """
     if name is None:
         return "***"
-    name_str = str(name).strip()
+    if not isinstance(name, str):
+        return "***"
+    name_str = name.strip()
     if not name_str:
         return "***"
     if len(name_str) <= 2:
@@ -174,8 +176,7 @@ class FMEAGraphRepository(ABC):
 
 与 `get_cross_fmea_stats` 基本一致，区别：
 - 查询全部 `FMEADocument`（不限制 `product_line_code`），复用现有 Python 聚合逻辑遍历 `graph_data`
-- **性能保护**：JSONB 实现加载全表到内存遍历，必须设置硬上限（最多处理最新 200 份文档），避免无 Neo4j 场景下全表加载导致超时/内存溢出
-- 聚合 `fmea_documents` 采样数据
+- 全量聚合，不做静默采样（与 API 名称 `global-stats` 一致）
 
 ### 5.4 现有缺陷顺带修复
 
@@ -200,7 +201,7 @@ async def global_stats(
 ## 7. 性能考量
 
 - **Neo4j**: 移除 `product_line_code` 过滤后，Cypher 查询变为全表扫描。由于 Neo4j 中 GraphNode 数量通常在数千级别，性能可接受。
-- **JSONB**: 实现会读取全部 FMEA 文档及 `graph_data` 后在 Python 内存中遍历聚合，适合当前数据规模；受硬上限保护（最多 200 份文档）。后续如果文档量增长，再引入分页聚合、SQL JSONB 聚合或缓存。生产环境建议优先使用 Neo4j。
+- **JSONB**: 实现会读取全部 FMEA 文档及 `graph_data` 后在 Python 内存中遍历聚合，全量统计不做采样。当前数据规模下性能可接受；后续如果文档量增长，再引入分页聚合、SQL JSONB 聚合或缓存。生产环境建议优先使用 Neo4j。
 - **脱敏开销**: Python 字符串切片，单次查询处理 < 100 条记录，开销可忽略。
 
 ## 8. 错误处理
@@ -215,12 +216,12 @@ async def global_stats(
 
 - [ ] Admin 访问 `/api/graph/global-stats` 返回跨产品线聚合统计
 - [ ] 响应中不包含 `fmea_id`、`document_no`、`product_line_code`、`node_id`
-- [ ] `name` 字段已按规则脱敏（保留前 2 字符 + `***`）
+- [ ] `name` 字段已按规则脱敏：长名称保留前 2 字符 + `***`，短名称（≤2 字符）仅保留首字符 + `***`
 - [ ] 短名称（如 `"短路"`、`"A1"`、`"X"`）不会完整暴露原值
 - [ ] `mask_name(None)` / `mask_name(123)` / `mask_name("  ")` 均安全返回 `"***"`，不抛异常
 - [ ] 接口不接受 `product_line_code` 参数
 - [ ] 非 admin 访问返回 403
 - [ ] Neo4j 和 JSONB 双实现均正确工作
-- [ ] JSONB 实现加载文档数不超过 200（硬上限保护）
+- [ ] JSONB 实现全量聚合，不做静默采样
 - [ ] JSONB `get_cross_fmea_stats` 的 `top_failure_modes` 补齐 `document_no`
 - [ ] 构建和 lint 无错误
