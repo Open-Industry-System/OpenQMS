@@ -169,6 +169,109 @@ class Neo4jRepository(FMEAGraphRepository):
                 "top_failure_modes": sorted(top_modes, key=lambda x: x["rpn"], reverse=True)[:10],
             }
 
+    async def get_global_stats(self) -> dict:
+        async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+            # 节点类型分布（移除 product_line_code 过滤）
+            type_result = await session.run(
+                "MATCH (n:GraphNode) RETURN n.type AS type, count(*) AS cnt ORDER BY cnt DESC"
+            )
+            type_records = await type_result.data()
+            type_dist = {r["type"]: r["cnt"] for r in type_records}
+
+            # FailureMode RPN 计算（同 get_cross_fmea_stats，移除 WHERE fm.product_line_code = $pl）
+            fm_result = await session.run(
+                """
+                MATCH (fm:GraphNode {type: 'FailureMode'})
+                MATCH (d:FMEDocument) WHERE d.fmea_id = fm.fmea_id
+                OPTIONAL MATCH (fm)-[re:EFFECT_OF]->(effect:GraphNode)
+                WITH fm, d, effect, re
+                   ORDER BY re.edge_index ASC
+                WITH fm, d, coalesce(head(collect(effect.severity)), 0) as s
+                OPTIONAL MATCH (cause:GraphNode)-[rc:CAUSE_OF]->(fm)
+                WITH fm, d, s, cause, rc
+                   ORDER BY rc.edge_index ASC
+                WITH fm, d, s, collect(cause) as causes
+                UNWIND CASE WHEN size(causes) = 0 THEN [null] ELSE causes END as cause
+                WITH fm, d, s,
+                     coalesce(cause.occurrence, 0) as o
+                OPTIONAL MATCH (cause)-[rdc:DETECTED_BY]->(det_c:GraphNode)
+                WITH fm, d, s, o, det_c, rdc
+                   ORDER BY rdc.edge_index ASC
+                WITH fm, d, s, o,
+                     coalesce(head(collect(det_c.detection)), 0) as first_d_cause,
+                     count(det_c) > 0 as has_cause_det
+                OPTIONAL MATCH (fm)-[rdf:DETECTED_BY]->(det_f:GraphNode)
+                WITH fm, d, s, o, first_d_cause, has_cause_det, det_f, rdf
+                   ORDER BY rdf.edge_index ASC
+                WITH fm, d, s, o, first_d_cause, has_cause_det,
+                     coalesce(head(collect(det_f.detection)), 0) as first_d_fm
+                WITH fm, d, s, o,
+                     CASE WHEN has_cause_det THEN first_d_cause ELSE first_d_fm END as d_val,
+                     s * o * CASE WHEN has_cause_det THEN first_d_cause ELSE first_d_fm END as rpn
+                ORDER BY rpn DESC
+                WITH fm, d, s,
+                     head(collect(o)) as o_best,
+                     head(collect(d_val)) as d_best,
+                     head(collect(rpn)) as max_rpn
+                RETURN fm.node_id AS node_id, fm.name AS name,
+                       s AS severity, o_best AS occurrence, d_best AS detection, max_rpn AS rpn,
+                       fm.fmea_id AS fmea_id, d.document_no AS document_no
+                """
+            )
+            fm_records = await fm_result.data()
+
+            ap_counts = {"H": 0, "M": 0, "L": 0}
+            high_ap_nodes: list[dict] = []
+            total_rpn = 0
+            rpn_count = 0
+            top_modes: list[dict] = []
+
+            for r in fm_records:
+                s = r.get("severity", 0) or 0
+                o = r.get("occurrence", 0) or 0
+                d = r.get("detection", 0) or 0
+                rpn = s * o * d
+                ap = compute_ap(s, o, d) if s > 0 and o > 0 and d > 0 else ""
+
+                if rpn > 0:
+                    total_rpn += rpn
+                    rpn_count += 1
+                    top_modes.append({
+                        "name": r.get("name", ""),
+                        "rpn": rpn,
+                        "fmea_id": r.get("fmea_id", ""),
+                        "document_no": r.get("document_no"),
+                    })
+
+                if ap:
+                    ap_counts[ap] = ap_counts.get(ap, 0) + 1
+                    if ap == "H":
+                        high_ap_nodes.append({
+                            "node_id": r.get("node_id", ""),
+                            "name": r.get("name", ""),
+                            "ap": ap,
+                            "rpn": rpn,
+                            "fmea_id": r.get("fmea_id", ""),
+                            "document_no": r.get("document_no"),
+                        })
+
+            avg_rpn = round(total_rpn / rpn_count, 1) if rpn_count > 0 else 0
+
+            doc_result = await session.run(
+                "MATCH (d:FMEDocument) RETURN count(*) AS cnt"
+            )
+            doc_records = await doc_result.data()
+
+            return {
+                "total_fmeas": doc_records[0]["cnt"] if doc_records else 0,
+                "total_nodes": sum(type_dist.values()),
+                "node_type_distribution": type_dist,
+                "ap_distribution": ap_counts,
+                "high_ap_nodes": sorted(high_ap_nodes, key=lambda x: x["rpn"], reverse=True)[:20],
+                "avg_rpn": avg_rpn,
+                "top_failure_modes": sorted(top_modes, key=lambda x: x["rpn"], reverse=True)[:10],
+            }
+
     async def analyze_change_impact(
         self,
         fmea_id: uuid.UUID,

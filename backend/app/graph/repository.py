@@ -31,6 +31,10 @@ class FMEAGraphRepository(ABC):
         """跨 FMEA 聚合统计。product_line_code 必填。"""
 
     @abstractmethod
+    async def get_global_stats(self) -> dict:
+        """跨产品线全局统计。返回结构与 get_cross_fmea_stats 相同。"""
+
+    @abstractmethod
     async def analyze_change_impact(
         self,
         fmea_id: uuid.UUID,
