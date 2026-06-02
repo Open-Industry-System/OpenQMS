@@ -1929,6 +1929,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline
+from app.services.recommendation_sources import SemanticSearchSource, HistoricalCAPAMeasureSource
 from app.services.recommendation_types import RecommendationContext, RecommendationCandidate
 
 
