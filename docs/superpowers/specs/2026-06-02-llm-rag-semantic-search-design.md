@@ -117,13 +117,17 @@ CREATE INDEX idx_embedding_entity ON document_embeddings
 ALTER TABLE document_embeddings ADD COLUMN tsv tsvector;
 CREATE INDEX idx_embedding_tsv ON document_embeddings USING gin(tsv);
 
--- 触发器自动更新 tsv
+-- 触发器函数
 CREATE OR REPLACE FUNCTION update_embedding_tsv() RETURNS trigger AS $$
 BEGIN
     NEW.tsv := to_tsvector('zhcfg', NEW.chunk_text);
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- 绑定触发器到表（必须显式创建，否则函数不会自动执行）
+CREATE TRIGGER tsvectorupdate BEFORE INSERT OR UPDATE
+    ON document_embeddings FOR EACH ROW EXECUTE FUNCTION update_embedding_tsv();
 ```
 
 ### 各实体的嵌入字段映射
@@ -191,7 +195,12 @@ CREATE INDEX idx_embedding_outbox_pending ON embedding_sync_outbox (created_at)
 
 1. **触发**：各模块 CRUD 服务在写入后插入 `embedding_sync_outbox` 事件
 2. **独立 Worker**：`embedding_sync_worker.py`（独立进程，`python -m app.services.embedding_sync_worker`），仅处理 embedding 事件，不触碰 graph_sync_outbox
-3. **批量处理**：Worker 批量领取 pending 事件，合并为单次 embedding API 调用（最多 2048 条文本）
+3. **批量处理（关键优化）**：Worker 一次领取 N 个 pending 事件（默认 N=64），按以下流程处理：
+   - 根据每个事件的 `entity_type` + `entity_id` 查询对应的 `chunk_text`
+   - **收集所有 chunk_text 到一个列表**，统一调用一次 `EmbeddingProvider.embed(texts)`（单次 HTTP 请求）
+   - 将返回的向量按顺序分发，upsert 到 `document_embeddings` 表
+   - 标记 outbox 事件为 completed
+   - 这样 N 个实体只需 1 次 API 调用，而非 N 次，网络延迟降低一个数量级
 4. **幂等**：`UNIQUE (entity_type, entity_id, entity_field, chunk_index)` 保证 upsert 安全
 5. **重试与死信**：复用现有 exponential backoff 模式（10s→270s，5 次后标记 dead_letter）
 
@@ -500,17 +509,27 @@ docker-compose.yml 中 `db` 服务改为 `build: ./docker/postgres` 而非 `imag
 
 ```python
 # alembic/versions/020_add_vector_extensions.py
+import logging
+logger = logging.getLogger("alembic.migration")
+
 def upgrade():
+    # pgvector：必须安装（Docker 镜像自带，本地需手动安装）
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    op.execute("CREATE EXTENSION IF NOT EXISTS zhparser")
-    op.execute("""
-        CREATE TEXT SEARCH CONFIGURATION zhcfg (PARSER = zhparser);
-        ALTER TEXT SEARCH CONFIGURATION zhcfg ADD MAPPING FOR n,v,a,i,e,l WITH simple;
-    """)
+
+    # zhparser：容错处理，本地开发环境可能未安装
+    try:
+        op.execute("CREATE EXTENSION IF NOT EXISTS zhparser")
+        op.execute("""
+            CREATE TEXT SEARCH CONFIGURATION zhcfg (PARSER = zhparser);
+            ALTER TEXT SEARCH CONFIGURATION zhcfg ADD MAPPING FOR n,v,a,i,e,l WITH simple;
+        """)
+    except Exception as e:
+        logger.warning(f"zhparser not available ({e}), falling back to simple config")
+        op.execute("CREATE TEXT SEARCH CONFIGURATION zhcfg (COPY = simple)")
 
 def downgrade():
     op.execute("DROP TEXT SEARCH CONFIGURATION IF EXISTS zhcfg")
-    op.execute("DROP EXTENSION IF EXISTS zhparser")
+    op.execute("DROP EXTENSION IF EXISTS zhparser")  # IF EXISTS 防止本地环境报错
     op.execute("DROP EXTENSION IF EXISTS vector")
 ```
 
@@ -536,9 +555,9 @@ ollama:
 ## 10. 实现计划
 
 ### 阶段 1：基础设施
-1. Alembic 迁移：pgvector 扩展 + document_embeddings 表 + tsvector 索引
+1. Alembic 迁移：pgvector 扩展 + zhparser 扩展（容错降级）+ document_embeddings 表 + tsvector 索引 + 触发器 + embedding_sync_outbox 表
 2. EmbeddingProvider 抽象 + OpenAI/Ollama 实现
-3. Docker Compose 更新（pgvector 镜像 + 可选 Ollama）
+3. Docker Compose 更新（自定义 pgvector+zhparser 镜像 + 可选 Ollama）
 
 ### 阶段 2：写入管线
 4. Outbox 事件：各模块 CRUD 服务触发 embedding_sync 事件
@@ -570,4 +589,28 @@ ollama:
 | Embedding API 延迟 | 写入延迟 | 异步 outbox + 批量处理 |
 | pgvector 性能上限 | 大数据量查询慢 | HNSW 索引 + 按产品线分区 |
 | LLM 不可用 | Q&A 功能降级 | 降级到纯搜索模式，UI 明确提示 |
-| 向量维度不匹配 | 模型切换后查询失败 | embedding_model 字段 + 重新索引命令 |
+| 向量维度变更 | 模型切换后写入失败 | 见下方详细缓解方案 |
+| 本地开发无 zhparser | Alembic 迁移中断 | 迁移脚本 try-catch 降级到 simple 配置 |
+
+### 向量维度变更的详细缓解方案
+
+pgvector 的 `vector(N)` 类型在 DDL 时固定维度，PostgreSQL 会拒绝插入维度不符的向量。模型切换如果涉及维度变更（如 OpenAI 1536 → Ollama 768），必须执行 DDL 迁移：
+
+```python
+# Alembic 迁移伪代码
+def upgrade(new_dim: int):
+    # 1. 删除旧索引
+    op.execute("DROP INDEX IF EXISTS idx_embedding_hnsw")
+    # 2. 变更列维度
+    op.execute(f"ALTER TABLE document_embeddings ALTER COLUMN embedding TYPE vector({new_dim})")
+    # 3. 重建 HNSW 索引
+    op.execute(f"""
+        CREATE INDEX idx_embedding_hnsw ON document_embeddings
+        USING hnsw (embedding vector_cosine_ops)
+        WITH (m = 16, ef_construction = 64)
+    """)
+    # 4. 触发全量重新嵌入（清空旧向量，由回填命令重新生成）
+    op.execute("UPDATE document_embeddings SET embedding = NULL, embedding_model = ''")
+```
+
+**操作流程**：修改 `EMBEDDING_DIMENSIONS` 环境变量 → 运行 Alembic 迁移 → 执行回填命令重新生成全部 embedding。期间搜索功能降级（向量搜索不可用，全文检索仍可工作）。
