@@ -96,3 +96,255 @@ class FMEAGraphSource:
                 ))
 
         return results
+
+
+from sqlalchemy import text
+
+from app.services.embedding_provider import EmbeddingProvider
+
+
+class SemanticSearchSource:
+    """FMEA 节点语义搜索。通过 pgvector 检索 + 图结构回溯。"""
+
+    name = "semantic_search"
+
+    def __init__(self, db, embedding_provider: EmbeddingProvider | None):
+        self.db = db
+        self.embedding = embedding_provider
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        if not self.embedding:
+            return []
+
+        capa_data = context.capa_data
+        if context.stage == "d4":
+            query_text = capa_data.get("d2_description", "")
+        else:
+            query_text = capa_data.get("d4_root_cause", "")
+            if not query_text:
+                query_text = capa_data.get("d2_description", "")
+
+        if not query_text or not query_text.strip():
+            return []
+
+        query_vector = await self.embedding.embed([query_text])
+        if not query_vector:
+            return []
+
+        vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
+        user_pls = context.user_product_lines
+
+        params: dict[str, Any] = {
+            "query_vector": vec_str,
+            "limit": 10,
+        }
+        pl_filter = ""
+        if user_pls is not None:
+            pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
+            params["product_line_codes"] = user_pls
+
+        stmt = text(f"""
+            SELECT de.entity_id AS fmea_id, de.node_id,
+                   1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
+                   de.product_line_code
+            FROM document_embeddings de
+            WHERE de.entity_type = 'fmea_node'
+              {pl_filter}
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
+            LIMIT :limit
+        """)
+
+        rows = await self.db.execute(stmt, params)
+        raw_matches = rows.fetchall()
+
+        # 将预加载的 fmea_docs 转为映射，方便 O(1) 回溯
+        doc_map = {str(d["fmea_id"]): d for d in (context.fmea_docs or []) if d.get("graph_data")}
+
+        candidates: list[RecommendationCandidate] = []
+        for row in raw_matches:
+            fmea_id = str(row.fmea_id)
+            node_id = row.node_id
+            similarity = float(row.similarity)
+
+            doc = doc_map.get(fmea_id)
+            if not doc or not node_id:
+                continue
+
+            graph = doc["graph_data"]
+            node_map = {n["id"]: n for n in graph.get("nodes", [])}
+            node = node_map.get(node_id)
+            if not node:
+                continue
+
+            node_type = node.get("type")
+            edges = graph.get("edges", [])
+
+            # D4: 召回 FailureCause 或 FailureMode
+            if context.stage == "d4":
+                if node_type == "FailureCause":
+                    fm_id = None
+                    fm_name = None
+                    for e in edges:
+                        if e["source"] == node_id and e["type"] == "CAUSE_OF":
+                            parent = node_map.get(e["target"])
+                            if parent and parent.get("type") == "FailureMode":
+                                fm_id = parent["id"]
+                                fm_name = parent.get("name")
+                                break
+                    candidates.append(RecommendationCandidate(
+                        source="semantic_search",
+                        content=node.get("name", ""),
+                        category=None,
+                        confidence=similarity * 0.7,
+                        match_reason="语义相关失效原因",
+                        metadata={
+                            "failure_cause_node_id": node_id,
+                            "failure_cause_desc": node.get("description"),
+                            "failure_mode_node_id": fm_id,
+                            "failure_mode_name": fm_name,
+                            "fmea_id": fmea_id,
+                            "fmea_document_no": doc.get("document_no"),
+                            "product_line_code": doc.get("product_line_code"),
+                        },
+                    ))
+                elif node_type == "FailureMode":
+                    candidates.append(RecommendationCandidate(
+                        source="semantic_search",
+                        content=node.get("name", ""),
+                        category=None,
+                        confidence=similarity * 0.5,
+                        match_reason="语义相关失效模式",
+                        metadata={
+                            "failure_mode_node_id": node_id,
+                            "failure_mode_name": node.get("name"),
+                            "fmea_id": fmea_id,
+                            "fmea_document_no": doc.get("document_no"),
+                            "product_line_code": doc.get("product_line_code"),
+                        },
+                    ))
+
+            # D5: 只召回 FailureCause（后续交给 FMEAControlExpander）
+            elif context.stage == "d5" and node_type == "FailureCause":
+                fm_id = None
+                fm_name = None
+                for e in edges:
+                    if e["source"] == node_id and e["type"] == "CAUSE_OF":
+                        parent = node_map.get(e["target"])
+                        if parent and parent.get("type") == "FailureMode":
+                            fm_id = parent["id"]
+                            fm_name = parent.get("name")
+                            break
+                candidates.append(RecommendationCandidate(
+                    source="semantic_search",
+                    content=node.get("name", ""),
+                    category=None,
+                    confidence=similarity * 0.8,
+                    match_reason="语义相关失效原因",
+                    metadata={
+                        "failure_cause_node_id": node_id,
+                        "failure_cause_desc": node.get("description"),
+                        "failure_mode_node_id": fm_id,
+                        "failure_mode_name": fm_name,
+                        "fmea_id": fmea_id,
+                        "fmea_document_no": doc.get("document_no"),
+                        "product_line_code": doc.get("product_line_code"),
+                    },
+                ))
+
+        return candidates
+
+
+class HistoricalCAPASource:
+    """历史 CAPA D2→D2 语义匹配。只搜索 D8_CLOSURE。"""
+
+    name = "historical_capa"
+
+    def __init__(self, db, embedding_provider: EmbeddingProvider | None):
+        self.db = db
+        self.embedding = embedding_provider
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        if not self.embedding:
+            return []
+
+        d2 = context.capa_data.get("d2_description", "")
+        if not d2 or not d2.strip():
+            return []
+
+        query_vector = await self.embedding.embed([d2])
+        if not query_vector:
+            return []
+
+        vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
+        user_pls = context.user_product_lines
+
+        # 先尝试同产品线（或用户允许的产品线）
+        # 注意：user_pls 为 None 时表示 admin（无限制），不应放宽
+        # user_pls 为 [] 时表示无权限，应返回空
+        # user_pls 为 ["xxx"] 时优先搜索这些产品线的 CAPA
+        capa_pl = context.capa_data.get("product_line_code")
+        search_pls = user_pls
+        if user_pls is not None and capa_pl and capa_pl in user_pls:
+            # 优先搜索当前 CAPA 的产品线
+            search_pls = [capa_pl]
+
+        results = await self._search(vec_str, search_pls, "d2_description", limit=5)
+        if not results and user_pls is not None and len(user_pls) > 1 and capa_pl in user_pls:
+            # 当前产品线无结果，放宽到用户允许的所有产品线
+            results = await self._search(vec_str, user_pls, "d2_description", limit=5)
+
+        return results
+
+    async def _search(
+        self,
+        vec_str: str,
+        product_line_codes: list[str] | None,
+        target_field: str,
+        limit: int,
+    ) -> list[RecommendationCandidate]:
+        params: dict[str, Any] = {
+            "query_vector": vec_str,
+            "target_field": target_field,
+            "limit": limit,
+        }
+        pl_filter = ""
+        if product_line_codes is not None:
+            pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
+            params["product_line_codes"] = product_line_codes
+
+        stmt = text(f"""
+            SELECT de.entity_id, de.chunk_text,
+                   1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
+                   capa.document_no, capa.severity, capa.updated_at AS source_updated_at,
+                   capa.d4_root_cause, capa.d5_correction, de.product_line_code
+            FROM document_embeddings de
+            JOIN capa_eightd capa ON de.entity_id = capa.report_id
+            WHERE de.entity_type = 'capa'
+              AND de.entity_field = :target_field
+              AND capa.status = 'D8_CLOSURE'
+              {pl_filter}
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
+            LIMIT :limit
+        """)
+
+        rows = await self.db.execute(stmt, params)
+        candidates: list[RecommendationCandidate] = []
+        for row in rows.mappings():
+            sim = row["similarity"]
+            capa_id = str(row["entity_id"])
+            candidates.append(RecommendationCandidate(
+                source="historical_capa",
+                content=row["d4_root_cause"] or row["chunk_text"],
+                category=None,
+                confidence=min(float(sim) * 0.8, 0.8),
+                match_reason=f"历史 CAPA [{row['document_no']}] 相似问题",
+                metadata={
+                    "historical_capa_id": capa_id,
+                    "document_no": row["document_no"],
+                    "d5_correction": row["d5_correction"],
+                    "product_line_code": row["product_line_code"],
+                    "severity": row["severity"],
+                    "source_updated_at": row["source_updated_at"],
+                },
+            ))
+        return candidates

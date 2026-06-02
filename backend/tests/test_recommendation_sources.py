@@ -1,6 +1,8 @@
 import uuid
 import pytest
-from app.services.recommendation_sources import FMEAGraphSource
+from unittest.mock import AsyncMock
+
+from app.services.recommendation_sources import FMEAGraphSource, SemanticSearchSource
 from app.services.recommendation_types import RecommendationContext
 
 
@@ -54,3 +56,29 @@ class TestFMEAGraphSource:
         )
         results = await source.retrieve(ctx)
         assert results == []
+
+
+class TestSemanticSearchSource:
+    @pytest.mark.asyncio
+    async def test_d4_uses_d2_description(self):
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_embedding = AsyncMock()
+        mock_embedding.embed = AsyncMock(return_value=[[0.1] * 768])
+
+        source = SemanticSearchSource(mock_db, mock_embedding)
+        ctx = RecommendationContext(
+            capa_data={"d2_description": "焊接虚焊问题", "d4_root_cause": ""},
+            user_product_lines=None,
+            stage="d4",
+            fmea_docs=[],
+        )
+        results = await source.retrieve(ctx)
+        assert results == []
+        mock_embedding.embed.assert_called_once_with(["焊接虚焊问题"])
