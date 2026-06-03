@@ -9,7 +9,7 @@ import { darkTheme } from "./utils/darkTheme";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ConfigProvider locale={zhCN} theme={darkTheme}>
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AntdApp>
           <App />
         </AntdApp>
