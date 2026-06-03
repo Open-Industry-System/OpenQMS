@@ -123,7 +123,7 @@ export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPa
           description={
             <Space size={4}>
               <Tag color={item.category === "预防措施" ? "green" : item.category === "纠正措施" ? "blue" : "orange"}>{item.category}</Tag>
-              <Tag color="default">{item.basis}</Tag>
+              <Tag color="default">{item.match_reason || item.basis || "系统推荐"}</Tag>
             </Space>
           }
         />

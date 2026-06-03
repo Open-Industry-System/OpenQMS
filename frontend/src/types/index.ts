@@ -1330,6 +1330,7 @@ export interface D5GeneralSuggestion {
   category: string;
   basis: string;
   confidence: number;
+  match_reason: string | null;
   match_source: string | null;
   source_capa_id: string | null;
   source_capa_document_no: string | null;
