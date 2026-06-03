@@ -36,7 +36,7 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
             暂无推荐
             <br />
             <Text type="secondary" style={{ fontSize: 12 }}>
-              提示：在 D2 描述中用空格或逗号分隔关键词可提高匹配率
+              提示：完善 D2 问题描述可提升语义匹配效果
             </Text>
           </span>
         }
@@ -45,8 +45,14 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
   }
 
   const groups = {
-    linked: recommendations.filter((r) => r.match_source === "linked"),
-    keyword: recommendations.filter((r) => r.match_source === "keyword"),
+    linked: recommendations.filter(
+      (r) => r.match_source === "linked" || r.match_source === "fmea_graph"
+    ),
+    semantic: recommendations.filter(
+      (r) => r.match_source === "semantic_search" || r.match_source === "keyword"
+    ),
+    historical: recommendations.filter((r) => r.match_source === "historical_capa"),
+    llm: recommendations.filter((r) => r.match_source === "llm"),
     rule: recommendations.filter((r) => r.match_source === "rule"),
   };
 
@@ -118,7 +124,9 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
       extra={<Text type="secondary" style={{ fontSize: 12 }}>基于 D2 问题描述和关联 FMEA 分析</Text>}
     >
       {renderGroup("关联 FMEA", groups.linked)}
-      {renderGroup("相似失效模式", groups.keyword)}
+      {renderGroup("语义匹配", groups.semantic)}
+      {renderGroup("历史 CAPA", groups.historical)}
+      {renderGroup("智能建议", groups.llm)}
       {renderGroup("规则引擎建议", groups.rule)}
     </Card>
   );

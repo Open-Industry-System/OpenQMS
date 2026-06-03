@@ -1298,10 +1298,13 @@ export interface D4Recommendation {
   failure_mode_name: string | null;
   fmea_document_no: string | null;
   fmea_id: string | null;
-  match_source: "linked" | "keyword" | "rule";
+  match_source: "linked" | "keyword" | "rule" | "fmea_graph" | "semantic_search" | "historical_capa" | "llm";
   match_reason: string;
   related_d2_keywords: string[];
   confidence: number;
+  source_capa_id: string | null;
+  source_capa_document_no: string | null;
+  source_product_line_code: string | null;
 }
 
 export interface D4RecommendationResponse {
@@ -1327,6 +1330,9 @@ export interface D5GeneralSuggestion {
   category: string;
   basis: string;
   confidence: number;
+  match_source: string | null;
+  source_capa_id: string | null;
+  source_capa_document_no: string | null;
 }
 
 export interface D5RecommendationResponse {

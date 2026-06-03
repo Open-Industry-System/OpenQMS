@@ -340,12 +340,17 @@ async def test_global_stats_rejects_product_line_code_param(client: AsyncClient)
 
 @pytest.mark.asyncio
 async def test_similar_nodes_advanced_success(client: AsyncClient):
-    resp = await client.post("/api/graph/similar-nodes", json={
-        "node_type": "FailureMode",
-        "query_text": "焊接",
-        "scope": "global",
-        "product_line_code": "DC-DC-100",
-    })
+    from unittest.mock import patch
+    from app.core.permissions import PermissionLevel
+
+    # 避免测试环境查询真实数据库
+    with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.NONE):
+        resp = await client.post("/api/graph/similar-nodes", json={
+            "node_type": "FailureMode",
+            "query_text": "焊接",
+            "scope": "global",
+            "product_line_code": "DC-DC-100",
+        })
     assert resp.status_code == 200
     data = resp.json()
     assert "matches" in data
