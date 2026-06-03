@@ -39,8 +39,8 @@ export const darkTheme: ThemeConfig = {
     },
     Menu: {
       colorBgContainer: "#111827",
-      colorItemBgHover: "#1f2937",
-      colorItemBgSelected: "#1f2937",
+      itemHoverBg: "#1f2937",
+      itemSelectedBg: "#1f2937",
     },
     Table: {
       colorBgContainer: "#111827",

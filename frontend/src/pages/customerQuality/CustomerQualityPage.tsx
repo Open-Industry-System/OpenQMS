@@ -482,7 +482,7 @@ export default function CustomerQualityPage() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 16 }}>
-        <Card bodyStyle={{ padding: 0 }}>
+        <Card styles={{ body: { padding: 0 } }}>
           <Table
             columns={customerColumns}
             dataSource={customers}

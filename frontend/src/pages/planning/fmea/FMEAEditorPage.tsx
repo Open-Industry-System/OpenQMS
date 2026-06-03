@@ -1103,7 +1103,7 @@ export default function FMEAEditorPage() {
               </span>
             }
             size="small"
-            bodyStyle={{ padding: "8px 0" }}
+            styles={{ body: { padding: "8px 0" } }}
           >
             <Table
               dataSource={rows}
