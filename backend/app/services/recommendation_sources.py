@@ -140,19 +140,23 @@ class SemanticSearchSource:
 
         params: dict[str, Any] = {
             "query_vector": vec_str,
-            "limit": 10,
+            "limit": 20,
         }
         pl_filter = ""
         if user_pls is not None:
             pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
             params["product_line_codes"] = user_pls
 
+        # SQL-level node_type filter: only FailureCause / FailureMode are useful for D4/D5
+        # Metadata JSONB stores node_type from embedding_sync_worker
         stmt = text(f"""
             SELECT de.entity_id AS fmea_id, de.node_id,
                    1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
                    de.product_line_code
             FROM document_embeddings de
             WHERE de.entity_type = 'fmea_node'
+              AND (de.metadata->>'node_type' = 'FailureCause'
+                   OR de.metadata->>'node_type' = 'FailureMode')
               {pl_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
