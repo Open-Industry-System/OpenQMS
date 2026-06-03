@@ -561,6 +561,83 @@ async def seed():
         )
         db.add_all([rma1, rma2])
 
+        # ─── Supplier seed data ───
+        from app.models.supplier import Supplier, SupplierEvaluation
+        supplier1 = Supplier(
+            supplier_id=uuid.uuid4(),
+            supplier_no="SUP-2026-001",
+            name="测试供应商A",
+            short_name="供应商A",
+            contact_name="李经理",
+            contact_phone="021-55551001",
+            contact_email="li.supplier@example.com",
+            address="上海市浦东新区张江高科技园区",
+            product_scope="电子元器件、PCB板",
+            status="approved",
+            created_by=admin.user_id,
+        )
+        supplier2 = Supplier(
+            supplier_id=uuid.uuid4(),
+            supplier_no="SUP-2026-002",
+            name="测试供应商D",
+            short_name="供应商D",
+            contact_name="张工",
+            contact_phone="0512-55552002",
+            contact_email="zhang.supplier@example.com",
+            address="苏州市工业园区",
+            product_scope="结构件、包装材料",
+            status="approved",
+            created_by=admin.user_id,
+        )
+        db.add_all([supplier1, supplier2])
+        await db.flush()
+
+        # Supplier evaluations
+        eval1 = SupplierEvaluation(
+            eval_id=uuid.uuid4(),
+            supplier_id=supplier1.supplier_id,
+            eval_period="2026-Q1",
+            eval_type="quarterly",
+            quality_score=92.0,
+            delivery_score=95.0,
+            service_score=88.0,
+            capa_count=0,
+            finding_count=0,
+            premium_freight_count=0,
+            customer_disruption_count=0,
+            capa_penalty=0.0,
+            finding_penalty=0.0,
+            premium_freight_penalty=0.0,
+            customer_disruption_penalty=0.0,
+            total_score=91.5,
+            grade="A",
+            notes="供应商表现优秀，按时交付且质量稳定",
+            evaluated_by=admin.user_id,
+        )
+        eval2 = SupplierEvaluation(
+            eval_id=uuid.uuid4(),
+            supplier_id=supplier2.supplier_id,
+            eval_period="2026-Q1",
+            eval_type="quarterly",
+            quality_score=78.0,
+            delivery_score=82.0,
+            service_score=75.0,
+            capa_count=1,
+            finding_count=0,
+            premium_freight_count=0,
+            customer_disruption_count=0,
+            capa_penalty=5.0,
+            finding_penalty=0.0,
+            premium_freight_penalty=0.0,
+            customer_disruption_penalty=0.0,
+            total_score=78.5,
+            grade="B",
+            notes="供应商表现一般，存在一次CAPA需关注",
+            evaluated_by=admin.user_id,
+        )
+        db.add_all([eval1, eval2])
+        await db.flush()
+
         # ─── Shipment records seed ───
         from datetime import date as date_type, timedelta
         for customer in [customer1, customer2]:
