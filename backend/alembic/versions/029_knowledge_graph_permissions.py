@@ -15,11 +15,13 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.execute(
         "INSERT INTO role_permissions (role_id, module, permission_level) "
-        "SELECT id, 'knowledge_graph', 1 FROM role_definitions WHERE role_key = 'admin'"
+        "SELECT id, 'knowledge_graph', 1 FROM role_definitions WHERE role_key = 'admin' "
+        "ON CONFLICT (role_id, module) DO NOTHING"
     )
     op.execute(
         "INSERT INTO role_permissions (role_id, module, permission_level) "
-        "SELECT id, 'knowledge_graph', 1 FROM role_definitions WHERE role_key = 'manager'"
+        "SELECT id, 'knowledge_graph', 1 FROM role_definitions WHERE role_key = 'manager' "
+        "ON CONFLICT (role_id, module) DO NOTHING"
     )
 
 
