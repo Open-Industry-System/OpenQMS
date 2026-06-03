@@ -340,7 +340,7 @@ class RecommendationService:
         need_llm = (
             self.llm is not None
             and not has_specific
-            and len(all_suggestions) < 3
+            and (len(all_suggestions) < 3 or rule_result.quality == "generic")
         )
 
         if need_llm:

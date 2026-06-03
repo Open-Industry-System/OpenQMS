@@ -120,6 +120,7 @@ class D5GeneralSuggestion(BaseModel):
     category: str  # "预防措施" | "探测措施" | "纠正措施"
     basis: str
     confidence: float
+    match_reason: str | None = None
     # --- 新增字段（可选，历史 CAPA 来源标识） ---
     match_source: str | None = None
     source_capa_id: str | None = None

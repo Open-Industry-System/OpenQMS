@@ -129,8 +129,8 @@ D4 根因: {d4}
 D2 问题描述: {d2}
 D4 根因: {d4}
 
-请输出 JSON 数组，每条包含 content、confidence(0.0-1.0)、match_reason：
-[{{"content": "...", "confidence": 0.5, "match_reason": "..."}}]
+请输出 JSON 数组，每条包含 content、confidence(0.0-1.0)、match_reason{"、category（仅 D5 阶段必填，值为：预防措施 / 探测措施 / 纠正措施）" if stage == "d5" else ""}：
+[{{"content": "...", "confidence": 0.5, "match_reason": "..."{', "category": "预防措施"' if stage == "d5" else ""}}}]
 """
 
         result = await asyncio.wait_for(

@@ -73,6 +73,7 @@ class RecommendationCandidate:
             "category": self.category or "预防措施",
             "basis": self.metadata.get("basis", ""),
             "confidence": round(self.confidence, 2),
+            "match_reason": self.match_reason,
         }
         # 历史 CAPA 来源字段（可选）
         if self.source == "historical_capa":
