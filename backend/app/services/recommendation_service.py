@@ -336,11 +336,11 @@ class RecommendationService:
         all_suggestions = self._merge_and_deduplicate(rule_suggestions, graph_suggestions)
 
         # 5. Determine if LLM is needed
-        has_specific = any(s.confidence >= 0.6 for s in all_suggestions)
-        need_llm = (
-            self.llm is not None
-            and not has_specific
-            and (len(all_suggestions) < 3 or rule_result.quality == "generic")
+        need_llm = self._need_llm(
+            llm_available=self.llm is not None,
+            has_specific=any(s.confidence >= 0.6 for s in all_suggestions),
+            suggestion_count=len(all_suggestions),
+            rule_quality=rule_result.quality,
         )
 
         if need_llm:
@@ -538,6 +538,19 @@ class RecommendationService:
             elif item.confidence == existing.confidence and item.source == "graph" and existing.source != "graph":
                 seen[key] = item
         return sorted(seen.values(), key=lambda x: x.confidence, reverse=True)
+
+    @staticmethod
+    def _need_llm(
+        llm_available: bool,
+        has_specific: bool,
+        suggestion_count: int,
+        rule_quality: str,
+    ) -> bool:
+        """判断是否需要调用 LLM 补充建议。
+
+        条件：LLM 可用 + 没有高置信建议 + (建议数量不足 OR rule 结果是 generic)
+        """
+        return llm_available and not has_specific and (suggestion_count < 3 or rule_quality == "generic")
 
     # -- Helpers --
 

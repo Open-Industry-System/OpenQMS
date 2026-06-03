@@ -112,3 +112,43 @@ def test_graph_matches_to_suggestions_with_parent_node():
     items = svc._graph_matches_to_suggestions(matches, "DC-DC-100")
     assert "密封失效" in items[0].explanation
     assert items[0].source_node_type == "FailureCause"
+
+
+def test_need_llm_generic_quality_with_four_suggestions():
+    """generic rule 返回 4 条建议时，LLM 仍应被调用（防止条件回退到 len < 3 单一路径）。"""
+    assert RecommendationService._need_llm(
+        llm_available=True,
+        has_specific=False,
+        suggestion_count=4,
+        rule_quality="generic",
+    ) is True
+
+
+def test_need_llm_len_threshold_without_generic():
+    """非 generic + 4 条建议时，不调用 LLM。"""
+    assert RecommendationService._need_llm(
+        llm_available=True,
+        has_specific=False,
+        suggestion_count=4,
+        rule_quality="specific",
+    ) is False
+
+
+def test_need_llm_no_llm_available():
+    """LLM 不可用时，不调用。"""
+    assert RecommendationService._need_llm(
+        llm_available=False,
+        has_specific=False,
+        suggestion_count=1,
+        rule_quality="generic",
+    ) is False
+
+
+def test_need_llm_has_specific_suggestions():
+    """已有高置信建议时，不调用 LLM。"""
+    assert RecommendationService._need_llm(
+        llm_available=True,
+        has_specific=True,
+        suggestion_count=1,
+        rule_quality="generic",
+    ) is False
