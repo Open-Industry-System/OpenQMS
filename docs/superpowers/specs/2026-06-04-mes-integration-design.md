@@ -503,7 +503,7 @@ MES 推送 POST /api/mes/ingest
 4. **细粒度事务提交**：sync_all() 内将工单、设备状态、报废记录、测量数据四个拉取动作拆分为**四个独立事务提交块**。任一动作失败只回滚当前块，已成功持久化的数据保留，审计日志记录每块结果
 
 ### 推送接收
-- 幂等规则：工单以 `(connection_id, order_no)` 判定并更新；设备状态/报废/测量以 `(connection_id, external_id)` 判定，已有则跳过
+- 幂等规则：工单以 `(connection_id, order_no)` 判定并更新；设备状态以 `(connection_id, external_id)` 判定，已有则跳过；报废记录以 `(connection_id, external_id)` 判定，冲突时仅允许回填 `order_id`/`order_no`（COALESCE），其余字段永不更新
 - 工单推送必须包含 `order_no`；设备状态/报废/测量推送必须包含 `external_id`
 - 重复数据跳过，返回 200 + 提示
 - 数据校验失败返回 400 + 具体错误字段

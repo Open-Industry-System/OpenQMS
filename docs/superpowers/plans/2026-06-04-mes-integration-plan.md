@@ -623,6 +623,7 @@ class MESScrapRecordResponse(BaseModel):
     scrap_id: uuid.UUID
     connection_id: uuid.UUID
     external_id: str
+    order_no: Optional[str]
     order_id: Optional[uuid.UUID]
     equipment_code: Optional[str]
     defect_type: str
@@ -2471,6 +2472,11 @@ async def ingest_mes_data(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+    # Pre-check data_type before TypeAdapter to return clear error message
+    data_type = payload.get("data_type")
+    if data_type not in ("measurement", "production_order", "equipment_status", "scrap_record"):
+        raise HTTPException(status_code=400, detail=f"Unknown data_type: {data_type}")
+
     try:
         validated = _mes_ingest_adapter.validate_python(payload)
     except ValidationError as e:
@@ -2749,6 +2755,7 @@ export interface MESScrapRecord {
   scrap_id: string;
   connection_id: string;
   external_id: string;
+  order_no: string | null;
   order_id: string | null;
   equipment_code: string | null;
   defect_type: string;
@@ -3584,10 +3591,11 @@ class TestIdempotentRedelivery:
 class TestIngestValidation:
     async def test_ingest_missing_field_returns_400(self, test_connection):
         """缺失必填字段通过 HTTP 调用 /api/mes/ingest 返回 400（不是 422）。"""
-        from httpx import AsyncClient
+        from httpx import AsyncClient, ASGITransport
         from app.main import app
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/api/mes/ingest",
                 headers={"X-API-Key": "test-mes-api-key-12345"},
@@ -3602,10 +3610,11 @@ class TestIngestValidation:
 
     async def test_ingest_unknown_data_type_returns_400(self, test_connection):
         """未知 data_type 通过 HTTP 调用返回 400。"""
-        from httpx import AsyncClient
+        from httpx import AsyncClient, ASGITransport
         from app.main import app
 
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/api/mes/ingest",
                 headers={"X-API-Key": "test-mes-api-key-12345"},
