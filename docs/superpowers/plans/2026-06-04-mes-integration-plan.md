@@ -4,7 +4,7 @@
 
 **Goal:** 实现 MES（制造执行系统）集成连接器，支持双向数据交换（拉取+推送），内置 Mock 模拟器，采用适配器模式。
 
-**Architecture:** 后端新增 **7 张表**（mes_connections, mes_production_orders, mes_equipment_status, mes_scrap_records, mes_measurement_ingestions, mes_sync_jobs, mes_push_outbox），7 个模型，适配器抽象基类（MESConnector）+ Mock 实现 + REST 通用实现，同步任务表驱动增量拉取，outbox 模式可靠推送。
+**Architecture:** 后端新增 **9 张表**（mes_connections, mes_production_orders, mes_equipment_status, mes_scrap_records, mes_measurement_ingestions, mes_sync_jobs, mes_push_outbox, mes_scrap_monthly_summary, mes_production_orders_archive），7 个模型，适配器抽象基类（MESConnector）+ Mock 实现 + REST 通用实现，同步任务表驱动增量拉取，outbox 模式可靠推送。
 
 **Tech Stack:** Python 3.11 + FastAPI + SQLAlchemy 2.0 + Pydantic v2 + PostgreSQL + asyncpg | React 18 + TypeScript + Ant Design 5 | Alembic 迁移
 
@@ -44,8 +44,8 @@
 ## 文件结构
 
 ### 后端新增文件
-- `backend/alembic/versions/030_add_mes_tables.py` — Alembic 迁移（7 张表 + MES 权限数据）
-- `backend/app/models/mes.py` — 7 个新模型
+- `backend/alembic/versions/030_add_mes_tables.py` — Alembic 迁移（9 张表 + MES 权限数据）
+- `backend/app/models/mes.py` — 9 个新模型（含生命周期归档/摘要表）
 - `backend/app/schemas/mes.py` — Pydantic v2 schemas（Create/Update/Response/List），含凭证脱敏
 - `backend/app/services/mes_connector.py` — MESConnector ABC + MockMESConnector + RESTMESConnector
 - `backend/app/services/mes_crypto.py` — Fernet 加密 + API Key hash 工具
@@ -227,6 +227,39 @@ def upgrade():
         sa.Column('sent_at', sa.DateTime(timezone=True), nullable=True),
     )
 
+    # mes_scrap_monthly_summary — 报废月度聚合摘要
+    op.create_table(
+        'mes_scrap_monthly_summary',
+        sa.Column('summary_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
+        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
+        sa.Column('product_line_code', sa.String(50), nullable=True),
+        sa.Column('year_month', sa.String(7), nullable=False),  # YYYY-MM
+        sa.Column('defect_category', sa.String(100), nullable=False),
+        sa.Column('total_defect_qty', sa.Integer, nullable=False, server_default=sa.text('0')),
+        sa.Column('total_total_qty', sa.Integer, nullable=False, server_default=sa.text('0')),
+        sa.Column('record_count', sa.Integer, nullable=False, server_default=sa.text('0')),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.UniqueConstraint('connection_id', 'product_line_code', 'year_month', 'defect_category', name='uq_mes_scrap_summary'),
+    )
+
+    # mes_production_orders_archive — 已关闭工单历史归档
+    op.create_table(
+        'mes_production_orders_archive',
+        sa.Column('archive_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
+        sa.Column('order_id', UUID(as_uuid=True), unique=True, nullable=False),
+        sa.Column('connection_id', UUID(as_uuid=True), nullable=False),
+        sa.Column('order_no', sa.String(50), nullable=False),
+        sa.Column('product_model', sa.String(100), nullable=True),
+        sa.Column('process_route', sa.String(200), nullable=True),
+        sa.Column('planned_qty', sa.Integer, nullable=True),
+        sa.Column('actual_qty', sa.Integer, nullable=True),
+        sa.Column('status', sa.String(20), nullable=False),
+        sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('product_line_code', sa.String(50), nullable=True),
+        sa.Column('archived_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
+    )
+
     # ---- MES permissions (do NOT modify 028; insert here in new migration) ----
     # role_key -> {module: level} format
     MES_PERMS = {
@@ -248,6 +281,8 @@ def upgrade():
 
 def downgrade():
     op.execute("DELETE FROM role_permissions WHERE module = 'mes'")
+    op.drop_table('mes_production_orders_archive')
+    op.drop_table('mes_scrap_monthly_summary')
     op.drop_table('mes_push_outbox')
     op.drop_table('mes_sync_jobs')
     op.drop_table('mes_measurement_ingestions')
@@ -272,6 +307,366 @@ git commit -m "feat(migration): add 7 MES integration tables + MES permissions
 - mes_scrap_records, mes_measurement_ingestions
 - mes_sync_jobs, mes_push_outbox
 - Insert MES permissions into role_permissions (new migration, not 028)"
+```
+
+---
+
+## Task 1b: 后端模型层 — mes.py
+
+**Files:**
+- Create: `backend/app/models/mes.py`
+- Modify: `backend/app/models/__init__.py`
+
+- [ ] **Step 1: 编写 7 个 MES 模型**
+
+```python
+# backend/app/models/mes.py
+import uuid
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, Numeric, Boolean, func, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+
+class MESConnection(Base):
+    __tablename__ = "mes_connections"
+
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    connector_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    product_line_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    sync_jobs = relationship("MESSyncJob", back_populates="connection", cascade="all, delete-orphan")
+    outbox = relationship("MESPushOutbox", back_populates="connection", cascade="all, delete-orphan")
+
+
+class MESProductionOrder(Base):
+    __tablename__ = "mes_production_orders"
+    __table_args__ = (UniqueConstraint('connection_id', 'order_no', name='uq_mes_order'),)
+
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    order_no: Mapped[str] = mapped_column(String(50), nullable=False)
+    product_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    process_route: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    planned_qty: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_qty: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    product_line_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=True)
+    mes_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MESEquipmentStatus(Base):
+    __tablename__ = "mes_equipment_status"
+    __table_args__ = (UniqueConstraint('connection_id', 'external_id', name='uq_mes_equipment'),)
+
+    record_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    equipment_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    equipment_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    availability: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
+    performance: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
+    quality: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
+    oee: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
+    downtime_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    product_line_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=True)
+    mes_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+
+class MESScrapRecord(Base):
+    __tablename__ = "mes_scrap_records"
+    __table_args__ = (UniqueConstraint('connection_id', 'external_id', name='uq_mes_scrap'),)
+
+    scrap_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    order_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_production_orders.order_id", ondelete="SET NULL"), nullable=True)
+    equipment_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    defect_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    defect_category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    defect_qty: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_qty: Mapped[int] = mapped_column(Integer, nullable=False)
+    defect_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    product_line_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=True)
+    mes_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+
+class MESMeasurementIngestion(Base):
+    __tablename__ = "mes_measurement_ingestions"
+    __table_args__ = (UniqueConstraint('connection_id', 'external_id', name='uq_mes_ingestion'),)
+
+    ingestion_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    order_no: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    ic_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("sample_batches.batch_id", ondelete="SET NULL"), nullable=True)
+    mes_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    source_sampled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    product_line_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=True)
+
+
+class MESSyncJob(Base):
+    __tablename__ = "mes_sync_jobs"
+    __table_args__ = (UniqueConstraint('connection_id', 'data_type', name='uq_mes_sync_job'),)
+
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    data_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    checkpoint: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    connection = relationship("MESConnection", back_populates="sync_jobs")
+
+
+class MESPushOutbox(Base):
+    __tablename__ = "mes_push_outbox"
+
+    outbox_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    next_retry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    connection = relationship("MESConnection", back_populates="outbox")
+
+
+class MESScrapMonthlySummary(Base):
+    __tablename__ = "mes_scrap_monthly_summary"
+    __table_args__ = (
+        UniqueConstraint('connection_id', 'product_line_code', 'year_month', 'defect_category', name='uq_mes_scrap_summary'),
+    )
+
+    summary_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    product_line_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    year_month: Mapped[str] = mapped_column(String(7), nullable=False)
+    defect_category: Mapped[str] = mapped_column(String(100), nullable=False)
+    total_defect_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_total_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    record_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MESProductionOrderArchive(Base):
+    __tablename__ = "mes_production_orders_archive"
+
+    archive_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    order_no: Mapped[str] = mapped_column(String(50), nullable=False)
+    product_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    process_route: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    planned_qty: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actual_qty: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    product_line_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+```
+
+- [ ] **Step 2: 导出模型**
+
+```python
+# backend/app/models/__init__.py
+from .mes import (
+    MESConnection, MESProductionOrder, MESEquipmentStatus,
+    MESScrapRecord, MESMeasurementIngestion, MESSyncJob, MESPushOutbox,
+    MESScrapMonthlySummary, MESProductionOrderArchive,
+)
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/app/models/mes.py backend/app/models/__init__.py
+git commit -m "feat(models): add 7 MES integration models"
+```
+
+---
+
+## Task 1c: Schemas — Pydantic v2
+
+**Files:**
+- Create: `backend/app/schemas/mes.py`
+
+- [ ] **Step 1: 编写 Schemas**
+
+```python
+# backend/app/schemas/mes.py
+import uuid
+from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class MESConnectionCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    connector_type: str = Field(..., pattern="^(mock|rest)$")
+    config: dict = Field(default_factory=dict)
+    product_line_code: Optional[str] = None
+
+
+class MESConnectionUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    connector_type: Optional[str] = Field(None, pattern="^(mock|rest)$")
+    config: Optional[dict] = None
+    is_active: Optional[bool] = None
+    product_line_code: Optional[str] = None
+
+
+class MESConnectionResponse(BaseModel):
+    connection_id: uuid.UUID
+    name: str
+    connector_type: str
+    config: dict
+    is_active: bool
+    product_line_code: Optional[str]
+    created_by: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class MESConnectionListResponse(BaseModel):
+    items: list[MESConnectionResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class MESProductionOrderResponse(BaseModel):
+    order_id: uuid.UUID
+    connection_id: uuid.UUID
+    order_no: str
+    product_model: Optional[str]
+    process_route: Optional[str]
+    planned_qty: Optional[int]
+    actual_qty: Optional[int]
+    status: str
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    product_line_code: Optional[str]
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class MESEquipmentStatusResponse(BaseModel):
+    record_id: uuid.UUID
+    connection_id: uuid.UUID
+    external_id: str
+    equipment_code: str
+    equipment_name: Optional[str]
+    status: str
+    availability: Optional[float]
+    performance: Optional[float]
+    quality: Optional[float]
+    oee: Optional[float]
+    downtime_reason: Optional[str]
+    recorded_at: datetime
+    product_line_code: Optional[str]
+    model_config = {"from_attributes": True}
+
+
+class MESScrapRecordResponse(BaseModel):
+    scrap_id: uuid.UUID
+    connection_id: uuid.UUID
+    external_id: str
+    order_id: Optional[uuid.UUID]
+    equipment_code: Optional[str]
+    defect_type: str
+    defect_category: Optional[str]
+    defect_qty: int
+    total_qty: int
+    defect_description: Optional[str]
+    recorded_at: datetime
+    product_line_code: Optional[str]
+    model_config = {"from_attributes": True}
+
+
+class MESIngestRequest(BaseModel):
+    data_type: str = Field(..., pattern="^(measurement|production_order|equipment_status|scrap_record)$")
+    connection_id: uuid.UUID
+    external_id: Optional[str] = None
+    order_no: Optional[str] = None
+    ic_code: Optional[str] = None
+    values: Optional[list[float]] = None
+    sampled_at: Optional[datetime] = None
+    batch_no: Optional[str] = None
+    raw_data: Optional[dict] = None
+
+
+class MESEquipmentSummary(BaseModel):
+    equipment_code: str
+    equipment_name: Optional[str]
+    status: str
+    availability: Optional[float]
+    performance: Optional[float]
+    quality: Optional[float]
+    oee: Optional[float]
+
+
+class MESDashboardResponse(BaseModel):
+    equipment_summary: list[MESEquipmentSummary]
+    running_count: int
+    down_count: int
+    total_planned: int
+    total_actual: int
+    scrap_by_category: dict[str, int]
+    scrap_trend_7d: list[dict]
+
+
+class MESSyncJobResponse(BaseModel):
+    job_id: uuid.UUID
+    connection_id: uuid.UUID
+    data_type: str
+    status: str
+    checkpoint: Optional[datetime]
+    next_run_at: datetime
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    error_message: Optional[str]
+    consecutive_failures: int
+    model_config = {"from_attributes": True}
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add backend/app/schemas/mes.py
+git commit -m "feat(schemas): add MES Pydantic v2 schemas"
 ```
 
 ---
@@ -578,7 +973,7 @@ class RESTMESConnector(MESConnector):
             pass
         elif self.auth_type == "api_key":
             key_name = self.auth_config.get("key_name", "X-API-Key")
-            key_encrypted = self.auth_config.get("key_encrypted")
+            key_encrypted = self.auth_config.get("outbound_api_key_encrypted")
             if key_encrypted:
                 headers[key_name] = decrypt_credential(key_encrypted)
         return headers
@@ -896,7 +1291,11 @@ class MESIngestionService:
             }
         )
 
-        # Step 3: Backfill batch_id
+        # Step 3: Re-evaluate SPC alarms (same transaction)
+        from app.services.spc_service import _reevaluate_alarms_no_commit
+        await _reevaluate_alarms_no_commit(db, ic)
+
+        # Step 4: Backfill batch_id
         await db.execute(
             update(MESMeasurementIngestion)
             .where(MESMeasurementIngestion.ingestion_id == ingestion_id)
@@ -1426,6 +1825,7 @@ class MESPushService:
                 outbox_id = fresh.outbox_id
 
             # 3b: HTTP push (NO transaction)
+            connector = None
             try:
                 connector = await get_mes_connector_by_config(connector_type, config)
                 response = await connector.push_quality_event(
@@ -1436,7 +1836,7 @@ class MESPushService:
                 push_ok = False
                 push_error = str(e)
             finally:
-                if hasattr(connector, "close"):
+                if connector and hasattr(connector, "close"):
                     await connector.close()
 
             # 3c: Write result (short tx)
@@ -1499,11 +1899,12 @@ git commit -m "feat(push): add MESPushService with outbox pattern and 3-phase tr
 from app.services.mes_service import MESPushService
 from app.models.mes import MESConnection
 
-async def _write_spc_alarm_outbox(db: AsyncSession, ic_id: uuid.UUID, alarm_data: dict):
-    """将 SPC 告警写入 MES outbox（若存在活跃 MES 连接）。"""
-    result = await db.execute(
-        select(MESConnection).where(MESConnection.is_active == True)
-    )
+async def _write_spc_alarm_outbox(db: AsyncSession, ic_id: uuid.UUID, alarm_data: dict, product_line: str | None):
+    """将 SPC 告警写入对应产品线的 MES outbox。"""
+    query = select(MESConnection).where(MESConnection.is_active == True)
+    if product_line:
+        query = query.where(MESConnection.product_line_code == product_line)
+    result = await db.execute(query)
     connections = result.scalars().all()
     for conn in connections:
         await MESPushService.push_event(
@@ -1516,6 +1917,7 @@ async def _write_spc_alarm_outbox(db: AsyncSession, ic_id: uuid.UUID, alarm_data
                 "ic_code": alarm_data.get("ic_code"),
                 "sampled_at": alarm_data.get("sampled_at"),
                 "values": alarm_data.get("values"),
+                "product_line": product_line,
             }
         )
     # 注意：push_event 只写入 outbox，不 commit；由调用方在同一事务中 commit
@@ -1530,11 +1932,12 @@ async def _write_spc_alarm_outbox(db: AsyncSession, ic_id: uuid.UUID, alarm_data
 from app.services.mes_service import MESPushService
 from app.models.mes import MESConnection
 
-async def _write_capa_status_outbox(db: AsyncSession, capa_id: uuid.UUID, old_status: str, new_status: str):
-    """CAPA 状态变更时写入 MES outbox。"""
-    result = await db.execute(
-        select(MESConnection).where(MESConnection.is_active == True)
-    )
+async def _write_capa_status_outbox(db: AsyncSession, capa_id: uuid.UUID, old_status: str, new_status: str, product_line_code: str | None):
+    """CAPA 状态变更时写入对应产品线的 MES outbox。"""
+    query = select(MESConnection).where(MESConnection.is_active == True)
+    if product_line_code:
+        query = query.where(MESConnection.product_line_code == product_line_code)
+    result = await db.execute(query)
     connections = result.scalars().all()
     for conn in connections:
         await MESPushService.push_event(
@@ -1546,6 +1949,7 @@ async def _write_capa_status_outbox(db: AsyncSession, capa_id: uuid.UUID, old_st
                 "old_status": old_status,
                 "new_status": new_status,
                 "changed_at": datetime.now(timezone.utc).isoformat(),
+                "product_line_code": product_line_code,
             }
         )
 ```
@@ -1646,18 +2050,25 @@ async def create_mes_connection(
     user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
 ):
     config = dict(req.config)
-    # Hash inbound API Key if present
+    # Separate inbound vs outbound credentials
     auth = config.get("auth_config", {})
-    if "api_key" in auth:
-        auth["api_key_hash"] = hash_api_key(auth.pop("api_key"))
-    # Encrypt outbound credentials if present
+    # Inbound: API Key for MES → OpenQMS push
+    if "inbound_api_key" in auth:
+        auth["api_key_hash"] = hash_api_key(auth.pop("inbound_api_key"))
+    # Outbound: credentials for OpenQMS → MES push
     for key in ["token", "password", "secret"]:
         if key in auth and auth[key] != "***" and not auth[key].startswith("gAAAA"):
             auth[key + "_encrypted"] = encrypt_credential(auth.pop(key))
-    # Encrypt basic auth username too
+    if "outbound_api_key" in auth and auth["outbound_api_key"] != "***":
+        auth["outbound_api_key_encrypted"] = encrypt_credential(auth.pop("outbound_api_key"))
+    # Basic auth username
     if "username" in auth and auth["username"] != "***":
         auth["username_encrypted"] = encrypt_credential(auth.pop("username"))
     config["auth_config"] = auth
+
+    # Enforce product line access for creation
+    from app.core.product_line_filter import enforce_product_line_access
+    await enforce_product_line_access(user, req.product_line_code, db)
 
     connection = MESConnection(
         name=req.name,
@@ -1718,16 +2129,21 @@ async def update_mes_connection(
             if v == "***":
                 continue  # Keep existing value
             merged[k] = v
-        if "api_key" in merged:
-            merged["api_key_hash"] = hash_api_key(merged.pop("api_key"))
+        # Inbound API Key
+        if "inbound_api_key" in merged:
+            merged["api_key_hash"] = hash_api_key(merged.pop("inbound_api_key"))
+        # Outbound credentials
         for key in ["token", "password", "secret", "username"]:
             if key in merged and merged[key] != "***" and not merged[key].startswith("gAAAA"):
                 merged[key + "_encrypted"] = encrypt_credential(merged.pop(key))
+        if "outbound_api_key" in merged and merged["outbound_api_key"] != "***":
+            merged["outbound_api_key_encrypted"] = encrypt_credential(merged.pop("outbound_api_key"))
         config["auth_config"] = merged
         connection.config = config
     if req.is_active is not None:
         connection.is_active = req.is_active
     if req.product_line_code is not None:
+        await enforce_product_line_access(user, req.product_line_code, db)
         connection.product_line_code = req.product_line_code
 
     await db.commit()
@@ -1746,6 +2162,8 @@ async def delete_mes_connection(
     connection = await db.get(MESConnection, connection_id)
     if not connection:
         raise HTTPException(404, "Connection not found")
+    from app.core.product_line_filter import enforce_product_line_access
+    await enforce_product_line_access(user, connection.product_line_code, db)
     await db.delete(connection)
     await db.commit()
     return {"message": "Connection deleted"}
@@ -1760,7 +2178,9 @@ async def test_connection(
     connection = await db.get(MESConnection, connection_id)
     if not connection:
         raise HTTPException(404, "Connection not found")
-    result = await test_mes_connection(connection)
+    from app.core.product_line_filter import enforce_product_line_access
+    await enforce_product_line_access(user, connection.product_line_code, db)
+    result = await test_mes_connection(connection, db)
     return result
 
 
@@ -1787,6 +2207,11 @@ async def manual_sync(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
 ):
+    connection = await db.get(MESConnection, connection_id)
+    if not connection:
+        raise HTTPException(404, "Connection not found")
+    from app.core.product_line_filter import enforce_product_line_access
+    await enforce_product_line_access(user, connection.product_line_code, db)
     try:
         await MESSyncService.manual_sync(db, connection_id)
         return {"message": "Sync triggered"}
@@ -1803,8 +2228,11 @@ async def list_production_orders(
     product_line_code: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
+    request: Request = None,
 ):
     query = select(MESProductionOrder)
+    # Apply product line isolation
+    query = await _apply_pl_filter(query, user, MESProductionOrder, db, request)
     if product_line_code:
         query = query.where(MESProductionOrder.product_line_code == product_line_code)
 
@@ -1839,8 +2267,10 @@ async def list_equipment_status(
     product_line_code: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
+    request: Request = None,
 ):
     query = select(MESEquipmentStatus)
+    query = await _apply_pl_filter(query, user, MESEquipmentStatus, db, request)
     if product_line_code:
         query = query.where(MESEquipmentStatus.product_line_code == product_line_code)
     result = await db.execute(query)
@@ -1855,8 +2285,10 @@ async def list_scrap_records(
     product_line_code: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
+    request: Request = None,
 ):
     query = select(MESScrapRecord)
+    query = await _apply_pl_filter(query, user, MESScrapRecord, db, request)
     if product_line_code:
         query = query.where(MESScrapRecord.product_line_code == product_line_code)
 
@@ -1879,8 +2311,10 @@ async def get_mes_dashboard(
     product_line_code: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
+    request: Request = None,
 ):
     query = select(MESEquipmentStatus)
+    query = await _apply_pl_filter(query, user, MESEquipmentStatus, db, request)
     if product_line_code:
         query = query.where(MESEquipmentStatus.product_line_code == product_line_code)
     result = await db.execute(query)
@@ -1891,6 +2325,7 @@ async def get_mes_dashboard(
 
     # Scrap by category
     scrap_query = select(MESScrapRecord)
+    scrap_query = await _apply_pl_filter(scrap_query, user, MESScrapRecord, db, request)
     if product_line_code:
         scrap_query = scrap_query.where(MESScrapRecord.product_line_code == product_line_code)
     scrap_result = await db.execute(scrap_query)
@@ -1902,6 +2337,7 @@ async def get_mes_dashboard(
 
     # Orders
     order_query = select(MESProductionOrder)
+    order_query = await _apply_pl_filter(order_query, user, MESProductionOrder, db, request)
     if product_line_code:
         order_query = order_query.where(MESProductionOrder.product_line_code == product_line_code)
     order_result = await db.execute(order_query)
@@ -2500,47 +2936,52 @@ from app.services.mes_service import MESSyncService, MESPushService, MESIngestio
 from app.services.mes_connector import MockMESConnector
 
 
-@pytest.fixture
-async def db():
-    """提供数据库会话，使用 SAVEPOINT 实现测试隔离。"""
-    async with async_session() as session:
-        async with session.begin():
-            yield session
-            # 外层 begin() 在测试结束后自动回滚整个事务
+# Test data prefix for cleanup isolation
+_TEST_PREFIX = "TEST-MES-"
 
 
 @pytest.fixture
-async def admin_user(db):
-    """获取 admin 用户用于测试外键。"""
-    from app.models.user import User
-    result = await db.execute(select(User).where(User.username == "admin"))
-    user = result.scalar_one_or_none()
-    if not user:
-        pytest.skip("Admin user not found — run seed first")
-    return user
+async def admin_user():
+    """获取 admin 用户用于测试外键。使用独立 session 读取。"""
+    async with async_session() as db:
+        from app.models.user import User
+        result = await db.execute(select(User).where(User.username == "admin"))
+        user = result.scalar_one_or_none()
+        if not user:
+            pytest.skip("Admin user not found — run seed first")
+        return user
 
 
 @pytest.fixture
-async def test_connection(db, admin_user):
-    """创建测试 MES 连接（使用 SAVEPOINT，测试后自动回滚）。"""
+async def test_connection(admin_user):
+    """创建测试 MES 连接，使用独立 session 提交，yield 后显式清理。"""
     conn = MESConnection(
-        name="Test MES",
+        name=f"{_TEST_PREFIX}CONN",
         connector_type="mock",
         config={"auth_config": {"api_key_hash": "dummy"}},
         created_by=admin_user.user_id,
         is_active=True,
     )
-    db.add(conn)
-    await db.flush()  # flush only, no commit — outer tx will rollback
-    await db.refresh(conn)
+    async with async_session() as db:
+        db.add(conn)
+        await db.commit()
+        await db.refresh(conn)
+
     yield conn
+
+    # Cleanup
+    async with async_session() as db:
+        await db.execute(
+            text(f"DELETE FROM mes_connections WHERE name LIKE '{_TEST_PREFIX}%'")
+        )
+        await db.commit()
 
 
 @pytest.fixture
-async def test_ic(db, admin_user):
-    """创建测试检验特性用于测量 ingestion。使用正确字段名。"""
+async def test_ic(admin_user):
+    """创建测试检验特性，yield 后显式清理。"""
     ic = InspectionCharacteristic(
-        ic_code="TEST-IC-001",
+        ic_code=f"{_TEST_PREFIX}IC",
         process_name="测试工序",
         characteristic_name="测试特性",
         chart_type="xbar_r",
@@ -2551,10 +2992,33 @@ async def test_ic(db, admin_user):
         product_line="DC-DC-100",
         created_by_id=admin_user.user_id,
     )
-    db.add(ic)
-    await db.flush()  # flush only, no commit
-    await db.refresh(ic)
+    async with async_session() as db:
+        db.add(ic)
+        await db.commit()
+        await db.refresh(ic)
+
     yield ic
+
+    # Cleanup
+    async with async_session() as db:
+        await db.execute(
+            text(f"DELETE FROM inspection_characteristics WHERE ic_code LIKE '{_TEST_PREFIX}%'")
+        )
+        await db.commit()
+
+
+@pytest.fixture(autouse=True)
+async def cleanup_mes_test_data():
+    """每个测试结束后清理 MES 测试数据。"""
+    yield
+    async with async_session() as db:
+        for table in [
+            "mes_measurement_ingestions", "mes_scrap_records",
+            "mes_equipment_status", "mes_production_orders",
+            "mes_sync_jobs", "mes_push_outbox", "mes_connections",
+        ]:
+            await db.execute(text(f"DELETE FROM {table} WHERE name LIKE '{_TEST_PREFIX}%' OR external_id LIKE '{_TEST_PREFIX}%'"))
+        await db.commit()
 
 
 class TestSyncJobConcurrency:
@@ -2827,7 +3291,13 @@ git commit -m "test(mes): add automated concurrency tests for sync, outbox, and 
 # 追加到 backend/app/services/mes_service.py
 
 class MESLifecycleService:
-    """MES 数据生命周期管理后台任务。"""
+    """MES 数据生命周期管理后台任务。
+
+    设计要求：
+    - 设备状态：90 天保留
+    - 报废记录：1 年保留，超出按月聚合到 mes_scrap_monthly_summary
+    - 已关闭工单：2 年归档到 mes_production_orders_archive
+    """
 
     EQUIPMENT_STATUS_RETENTION_DAYS = 90
     SCRAP_RETENTION_DAYS = 365
@@ -2836,7 +3306,7 @@ class MESLifecycleService:
     @staticmethod
     async def cleanup(db: AsyncSession) -> dict:
         """执行数据清理。返回各表清理数量。"""
-        from sqlalchemy import delete
+        from sqlalchemy import delete, insert
         now = datetime.now(timezone.utc)
 
         # 1. Clean old equipment status (>90 days)
@@ -2846,21 +3316,59 @@ class MESLifecycleService:
         )
         deleted_equipment = result.rowcount
 
-        # 2. Clean old scrap records (>1 year) — optionally aggregate first
+        # 2. Aggregate and clean old scrap records (>1 year)
         cutoff_scrap = now - timedelta(days=MESLifecycleService.SCRAP_RETENTION_DAYS)
+
+        # Aggregate by month before deletion
+        await db.execute(text("""
+            INSERT INTO mes_scrap_monthly_summary
+                (connection_id, product_line_code, year_month, defect_category,
+                 total_defect_qty, total_total_qty, record_count, created_at)
+            SELECT
+                connection_id,
+                product_line_code,
+                TO_CHAR(recorded_at, 'YYYY-MM'),
+                defect_category,
+                SUM(defect_qty),
+                SUM(total_qty),
+                COUNT(*),
+                NOW()
+            FROM mes_scrap_records
+            WHERE recorded_at < :cutoff
+            GROUP BY connection_id, product_line_code, TO_CHAR(recorded_at, 'YYYY-MM'), defect_category
+            ON CONFLICT (connection_id, product_line_code, year_month, defect_category)
+            DO UPDATE SET
+                total_defect_qty = mes_scrap_monthly_summary.total_defect_qty + EXCLUDED.total_defect_qty,
+                total_total_qty = mes_scrap_monthly_summary.total_total_qty + EXCLUDED.total_total_qty,
+                record_count = mes_scrap_monthly_summary.record_count + EXCLUDED.record_count
+        """), {"cutoff": cutoff_scrap})
+
         result = await db.execute(
             delete(MESScrapRecord).where(MESScrapRecord.recorded_at < cutoff_scrap)
         )
         deleted_scrap = result.rowcount
 
-        # 3. Archive closed orders (>2 years) — clear mes_raw_data, keep structured fields
+        # 3. Archive closed orders (>2 years) to history table
         cutoff_order = now - timedelta(days=MESLifecycleService.CLOSED_ORDER_RETENTION_DAYS)
+        # Move to archive table
+        await db.execute(text("""
+            INSERT INTO mes_production_orders_archive
+                (order_id, connection_id, order_no, product_model, process_route,
+                 planned_qty, actual_qty, status, started_at, completed_at,
+                 product_line_code, archived_at)
+            SELECT
+                order_id, connection_id, order_no, product_model, process_route,
+                planned_qty, actual_qty, status, started_at, completed_at,
+                product_line_code, NOW()
+            FROM mes_production_orders
+            WHERE status = 'closed' AND completed_at < :cutoff
+            ON CONFLICT (order_id) DO NOTHING
+        """), {"cutoff": cutoff_order})
+
         result = await db.execute(
-            update(MESProductionOrder)
+            delete(MESProductionOrder)
             .where(MESProductionOrder.status == "closed")
             .where(MESProductionOrder.completed_at < cutoff_order)
-            .where(MESProductionOrder.mes_raw_data.isnot(None))
-            .values(mes_raw_data=None)
         )
         archived_orders = result.rowcount
 
@@ -2869,7 +3377,8 @@ class MESLifecycleService:
         return {
             "deleted_equipment_status": deleted_equipment,
             "deleted_scrap_records": deleted_scrap,
-            "archived_orders_raw_data_cleared": archived_orders,
+            "aggregated_scrap_summary": "merged into mes_scrap_monthly_summary",
+            "archived_orders": archived_orders,
         }
 ```
 
@@ -2957,6 +3466,14 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 | 前端 4 个路由 + 侧边栏菜单 | Task 17 | ✅ |
 | test_mes_concurrency.py 8 场景 | Task 18 | ✅ |
 | 生命周期清理任务 | Task 19 | ✅ |
+| mes_scrap_monthly_summary 表 | Task 1 | ✅ |
+| mes_production_orders_archive 表 | Task 1 | ✅ |
+| 模型与 Schema 显式实施任务 | Task 1b, 1c | ✅ |
+| 产品线隔离真正生效（apply_product_line_filter） | Task 13 | ✅ |
+| SPC 规则检测触发（_reevaluate_alarms_no_commit） | Task 6 | ✅ |
+| 测试隔离可靠（显式清理） | Task 18 | ✅ |
+| Outbox 产品线筛选 | Task 12b | ✅ |
+| 入站/出站 API Key 拆分 | Task 2, 13 | ✅ |
 
 ---
 
@@ -2975,7 +3492,7 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 
 **Plan complete and saved to `docs/superpowers/plans/2026-06-04-mes-integration-plan.md`.**
 
-**注意：** 本计划为 **19 个 Task 的分阶段计划**，建议按 Phase 顺序执行。Phase 1-3 为基础层，Phase 4-6 为核心逻辑，Phase 7 为前端，Phase 8 为测试与运维。
+**注意：** 本计划为 **22 个 Task 的分阶段计划**，建议按 Phase 顺序执行。Phase 1-3 为基础层，Phase 4-6 为核心逻辑，Phase 7 为前端，Phase 8 为测试与运维。
 
 **Two execution options:**
 
