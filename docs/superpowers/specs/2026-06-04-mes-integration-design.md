@@ -324,7 +324,7 @@ MES 推送 POST /api/mes/ingest
 | status | VARCHAR(20) | `pending`/`processing`/`sent`/`failed` |
 | retry_count | INTEGER | 已重试次数（默认 0） |
 | max_retries | INTEGER | 最大重试次数（默认 3） |
-| next_retry_at | TIMESTAMPTZ | 下次重试时间（失败后延迟递增） |
+| next_retry_at | TIMESTAMPTZ NOT NULL DEFAULT now() | 下次重试时间（新记录默认立即领取；失败后指数退避） |
 | started_at | TIMESTAMPTZ | 开始处理时间 |
 | last_error | TEXT | 最近一次失败原因 |
 | created_at | TIMESTAMPTZ | 事件创建时间 |
@@ -349,7 +349,11 @@ MES 推送 POST /api/mes/ingest
 
   阶段 2 — 发送（无事务）：
     加载 MESConnector
-    push_quality_event()
+    push_quality_event(payload, event_id=outbox_id)
+    投递语义：at-least-once。每次推送携带稳定的 event_id=outbox_id，
+    MES 接收方按 event_id 幂等处理（重复 event_id 时忽略）。
+    若 OpenQMS 在更新 status=sent 前崩溃，超时恢复后会再次推送相同
+    event_id，MES 需保证幂等。允许重复，不允许静默丢失。
 
   阶段 3 — 写结果（短事务）：
     成功 → UPDATE status='sent', sent_at=now()
@@ -527,6 +531,7 @@ MES 推送 POST /api/mes/ingest
 - **手动同步不抢占 running job**：对含 running job 的连接调用手动同步，返回 409，running job 不变
 - **inactive 连接不被同步或推送**：is_active=False 的连接的 job 和 outbox 不被领取
 - **测量 ingestion 与 SPC 写入原子回滚**：ingestion INSERT ON CONFLICT 成功但 SPC 写入失败时，整个事务回滚
+- **崩溃后重复投递幂等**：模拟 MES 已接收但 OpenQMS 写 sent 前崩溃，恢复后再次推送时携带相同 event_id，MES 幂等返回成功，OpenQMS 最终标记 sent
 
 ### 手动测试
 
