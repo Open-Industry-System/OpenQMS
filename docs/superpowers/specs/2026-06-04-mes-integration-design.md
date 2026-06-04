@@ -396,6 +396,14 @@ SPC 异常触发 / CAPA 状态变更
 - 同步成功时重置 `consecutive_failures = 0`
 - 多 Worker 安全：`SELECT ... FOR UPDATE SKIP LOCKED`
 
+### 拉取幂等性保障
+
+增量拉取重叠时（失败重试导致 since 时间窗口重叠），需防止重复写入：
+
+1. **工单与报废数据**：写入 `mes_production_orders` 和 `mes_scrap_records` 时使用 `UPSERT`（`ON CONFLICT DO NOTHING`），工单的联合唯一索引 `(connection_id, order_no)` 和 `mes_measurement_ingestions` 的联合唯一索引 `(connection_id, external_id)` 自然支撑幂等
+2. **测量数据导入**：调用 `spc_service.ingest_external_data()` 之前，先查询 `mes_measurement_ingestions` 是否已存在相同 `external_id`，已存在则跳过（整个 ingestion 记录 + SPC 写入均跳过）
+3. **细粒度事务提交**：sync_all() 内将工单、设备状态、报废记录、测量数据四个拉取动作拆分为**四个独立事务提交块**。任一动作失败只回滚当前块，已成功持久化的数据保留，审计日志记录每块结果
+
 ### 推送接收
 - 数据校验失败返回 400 + 具体错误字段
 - 重复数据（相同 `order_no` + `recorded_at`）跳过，返回 200 + 提示
