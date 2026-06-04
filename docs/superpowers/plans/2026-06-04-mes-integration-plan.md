@@ -31,7 +31,7 @@
 | 3 | RESTMESConnector 全 TODO | 完整 HTTP 实现：配置驱动 + 分页 + 字段映射 + 重试 |
 | 4 | API Key 认证是 TODO 占位 | 完整 SHA-256 hash 验证 + Fernet 加密 + 响应脱敏 + /test 端点 |
 | 5 | 测量 ingestion 无法原子回滚 | 调用 `_create_sample_batch_inner`（仅 flush）替代 `add_sample_batch`（内部 commit），同一事务完成 ingestion + SPC + 回填 |
-| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 19 个并发场景 |
+| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 23 个并发场景 |
 | 7 | 修改已执行 028 迁移 | 在 **新迁移 030** 末尾插入 MES 权限，不动 028 |
 | 8 | 查询未产品线隔离 + 凭证泄漏 | 查询 API 按 `product_line_code` 过滤；ConnectionOut 脱敏 `config.auth_config` 敏感字段 |
 | 9 | 前端独立 axios 实例 | 复用现有 `client` 实例（已含 JWT 拦截器） |
@@ -267,6 +267,7 @@ def upgrade():
         sa.Column('status', sa.String(20), nullable=False),
         sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('source_updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('product_line_code', sa.String(50), nullable=True),
         sa.Column('archived_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
@@ -2379,19 +2380,50 @@ async def list_mes_connections(
 
 
 def _validate_rest_config(connector_type: str, config: dict) -> None:
-    """校验 REST connector 配置。connector_type == 'rest' 时 field_mapping 必须包含 source_updated_at。"""
+    """校验 REST connector 配置完整性。connector_type != 'rest' 时直接通过。"""
     if connector_type != "rest":
         return
+
+    # base_url
+    base_url = config.get("base_url", "")
+    if not base_url or not base_url.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=400, detail="REST connector config must include a valid 'base_url' (http:// or https://)"
+        )
+
+    # required endpoints
+    endpoints = config.get("endpoints", {})
+    required = {"production_orders", "equipment_status", "scrap_records", "measurements"}
+    missing = required - set(endpoints.keys())
+    if missing:
+        raise HTTPException(
+            status_code=400, detail=f"REST connector missing endpoints: {sorted(missing)}"
+        )
+
+    # non-empty path for each endpoint
+    for name in required:
+        path = endpoints[name].get("path", "")
+        if not path:
+            raise HTTPException(
+                status_code=400, detail=f"REST endpoint '{name}' must have a non-empty 'path'"
+            )
+
+    # production_orders cursor_field for incremental sync
+    po_cursor = endpoints.get("production_orders", {}).get("cursor_field")
+    if not po_cursor:
+        raise HTTPException(
+            status_code=400, detail="REST endpoint 'production_orders' must define 'cursor_field' for incremental sync"
+        )
+
+    # field_mapping source_updated_at
     field_mapping = config.get("field_mapping", {})
     if "source_updated_at" not in field_mapping:
         raise HTTPException(
-            status_code=400,
-            detail="REST connector field_mapping must include 'source_updated_at' for production order incremental sync"
+            status_code=400, detail="REST connector field_mapping must include 'source_updated_at'"
         )
     if not field_mapping.get("source_updated_at"):
         raise HTTPException(
-            status_code=400,
-            detail="REST connector field_mapping 'source_updated_at' cannot be empty"
+            status_code=400, detail="REST connector field_mapping 'source_updated_at' cannot be empty"
         )
 
 
@@ -2541,20 +2573,31 @@ async def test_connection(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
 ):
+    """轻量连通性测试：先校验配置完整性，再尝试一次轻量请求。"""
     connection = await db.get(MESConnection, connection_id)
     if not connection:
         raise HTTPException(404, "Connection not found")
     from app.core.product_line_filter import enforce_product_line_access
     await enforce_product_line_access(user, connection.product_line_code, db)
+
+    # Step 1: Validate config completeness (catches missing endpoints, mappings, etc.)
+    try:
+        _validate_rest_config(connection.connector_type, connection.config)
+    except HTTPException as e:
+        return {"ok": False, "error": e.detail}
+
+    # Step 2: Lightweight HTTP probe
     result = await test_mes_connection(connection, db)
-    # Validate production order field_mapping includes source_updated_at
-    field_mapping = connection.config.get("field_mapping", {})
-    if "source_updated_at" not in field_mapping:
-        result["warning"] = (
-            "field_mapping missing 'source_updated_at'. "
-            "Production order incremental sync will fail. "
-            "Add 'source_updated_at': 'updated_at' to field_mapping."
-        )
+
+    # Step 3: Warning only for REST connections about incremental sync
+    if connection.connector_type == "rest":
+        field_mapping = connection.config.get("field_mapping", {})
+        mapped_source = field_mapping.get("source_updated_at")
+        if not mapped_source:
+            result["warning"] = (
+                "field_mapping missing 'source_updated_at'. "
+                "Production order incremental sync will fail."
+            )
     return result
 
 
@@ -3988,11 +4031,141 @@ class TestRESTConnectorValidation:
         with pytest.raises(ValidationError):
             connector._validate_items("scrap_records", raw)
 
+
+class TestRESTConfigValidation:
+    async def test_create_rest_missing_source_updated_at_returns_400(self, admin_user):
+        """创建 REST 连接缺少 source_updated_at 映射返回 400。"""
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/mes/connections",
+                headers={"Authorization": "Bearer test-admin-token"},
+                json={
+                    "name": "TEST-REST-BAD",
+                    "connector_type": "rest",
+                    "config": {
+                        "base_url": "https://mes.example.com",
+                        "endpoints": {
+                            "production_orders": {"path": "/orders", "cursor_field": "updated_since"},
+                            "equipment_status": {"path": "/equipment"},
+                            "scrap_records": {"path": "/scrap"},
+                            "measurements": {"path": "/measurements"},
+                        },
+                        "field_mapping": {},  # missing source_updated_at
+                    },
+                    "product_line_code": "DC-DC-100",
+                },
+            )
+            assert resp.status_code == 400
+            assert "source_updated_at" in resp.json().get("detail", "")
+
+    async def test_update_rest_removes_mapping_returns_400(self, test_connection):
+        """更新 REST 连接删除 source_updated_at 映射返回 400。"""
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+        from app.database import async_session
+
+        # Convert test_connection to REST with valid config first
+        async with async_session() as db:
+            conn = await db.get(MESConnection, test_connection.connection_id)
+            conn.connector_type = "rest"
+            conn.config = {
+                "base_url": "https://mes.example.com",
+                "endpoints": {
+                    "production_orders": {"path": "/orders", "cursor_field": "since"},
+                    "equipment_status": {"path": "/equipment"},
+                    "scrap_records": {"path": "/scrap"},
+                    "measurements": {"path": "/measurements"},
+                },
+                "field_mapping": {"source_updated_at": "updated_at"},
+            }
+            await db.commit()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                f"/api/mes/connections/{test_connection.connection_id}",
+                headers={"Authorization": "Bearer test-admin-token"},
+                json={
+                    "config": {
+                        "base_url": "https://mes.example.com",
+                        "endpoints": {
+                            "production_orders": {"path": "/orders", "cursor_field": "since"},
+                            "equipment_status": {"path": "/equipment"},
+                            "scrap_records": {"path": "/scrap"},
+                            "measurements": {"path": "/measurements"},
+                        },
+                        "field_mapping": {},  # removed source_updated_at
+                    },
+                },
+            )
+            assert resp.status_code == 400
+            assert "source_updated_at" in resp.json().get("detail", "")
+
+    async def test_create_rest_missing_endpoint_returns_400(self, admin_user):
+        """创建 REST 连接缺少必需 endpoint 返回 400。"""
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/mes/connections",
+                headers={"Authorization": "Bearer test-admin-token"},
+                json={
+                    "name": "TEST-REST-NO-EP",
+                    "connector_type": "rest",
+                    "config": {
+                        "base_url": "https://mes.example.com",
+                        "endpoints": {
+                            "production_orders": {"path": "/orders", "cursor_field": "since"},
+                            # missing equipment_status, scrap_records, measurements
+                        },
+                        "field_mapping": {"source_updated_at": "updated_at"},
+                    },
+                    "product_line_code": "DC-DC-100",
+                },
+            )
+            assert resp.status_code == 400
+            assert "missing endpoints" in resp.json().get("detail", "")
+
+    async def test_create_rest_empty_base_url_returns_400(self, admin_user):
+        """创建 REST 连接空 base_url 返回 400。"""
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/mes/connections",
+                headers={"Authorization": "Bearer test-admin-token"},
+                json={
+                    "name": "TEST-REST-NO-URL",
+                    "connector_type": "rest",
+                    "config": {
+                        "base_url": "",
+                        "endpoints": {
+                            "production_orders": {"path": "/orders", "cursor_field": "since"},
+                            "equipment_status": {"path": "/equipment"},
+                            "scrap_records": {"path": "/scrap"},
+                            "measurements": {"path": "/measurements"},
+                        },
+                        "field_mapping": {"source_updated_at": "updated_at"},
+                    },
+                    "product_line_code": "DC-DC-100",
+                },
+            )
+            assert resp.status_code == 400
+            assert "base_url" in resp.json().get("detail", "")
+
 - [ ] **Step 2: Commit**
 
 ```bash
 git add backend/tests/test_mes_concurrency.py
-git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (19 cases)
+git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (23 cases)
 
 - Dual worker claim once (sync job + outbox)
 - Running job timeout recovery (>10min)
@@ -4009,7 +4182,11 @@ git commit -m "test(mes): add automated concurrency tests for sync, outbox, and 
 - Manual sync only claims target connection
 - /ingest rejects non-object JSON bodies
 - REST connector validates and converts ISO datetime strings
-- REST connector skips invalid items without crashing batch"
+- REST connector raises on invalid items (fails job, no checkpoint advance)
+- REST config validation: missing source_updated_at → 400
+- REST config validation: update removes mapping → 400
+- REST config validation: missing endpoint → 400
+- REST config validation: empty base_url → 400"
 ```
 
 ---
@@ -4211,7 +4388,7 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 | 前端复用现有 client 实例 | Task 15 | ✅ |
 | 前端 4 个页面完整实现 | Task 16 | ✅ |
 | 前端 4 个路由 + 侧边栏菜单 | Task 17 | ✅ |
-| test_mes_concurrency.py 19 场景 | Task 18 | ✅ |
+| test_mes_concurrency.py 23 场景 | Task 18 | ✅ |
 | 生命周期清理任务 | Task 19 | ✅ |
 | mes_scrap_monthly_summary 表 | Task 1 | ✅ |
 | mes_production_orders_archive 表 | Task 1 | ✅ |
