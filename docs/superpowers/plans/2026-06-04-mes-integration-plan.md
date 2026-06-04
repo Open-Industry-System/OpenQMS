@@ -603,7 +603,14 @@ class RESTPaginationConfig(BaseModel):
 
 class RESTRetryConfig(BaseModel):
     max_retries: int = Field(default=3, ge=0)
-    backoff_seconds: list[float] = Field(default=[1, 2, 4])
+    backoff_seconds: list[float] = Field(default=[1, 2, 4], min_length=1)
+
+    @field_validator("backoff_seconds")
+    @classmethod
+    def _check_non_negative(cls, v: list[float]) -> list[float]:
+        if any(x < 0 for x in v):
+            raise ValueError("backoff_seconds values must be >= 0")
+        return v
 
 
 class RESTEndpointConfig(BaseModel):
@@ -614,23 +621,24 @@ class RESTEndpointConfig(BaseModel):
     response_path: Optional[str] = None
 
 
-# Credential fields that must be strings (checked at validation time, before encryption)
-_CREDENTIAL_KEYS = frozenset({
-    "inbound_api_key", "outbound_api_key", "token", "password", "secret", "username",
-})
-
-
 class RESTAuthConfig(BaseModel):
-    """Permissive schema: any key allowed, but credential values must be str if present.
-    Keys like api_key_hash, *_encrypted are added after validation and are not checked here."""
+    """REST auth config: credential fields declared as Optional[str] so Pydantic validates them.
+    extra='allow' permits post-encryption fields (api_key_hash, *_encrypted) to pass through."""
     model_config = {"extra": "allow"}
 
-    @field_validator("*", mode="before")
-    @classmethod
-    def _credential_values_must_be_str(cls, v, info):
-        if info.field_name in _CREDENTIAL_KEYS and v is not None and not isinstance(v, str):
-            raise ValueError(f"credential field '{info.field_name}' must be a string")
-        return v
+    inbound_api_key: Optional[str] = None
+    outbound_api_key: Optional[str] = None
+    token: Optional[str] = None
+    password: Optional[str] = None
+    secret: Optional[str] = None
+    username: Optional[str] = None
+    auth_type: Optional[str] = None
+    api_key_hash: Optional[str] = None
+    token_encrypted: Optional[str] = None
+    password_encrypted: Optional[str] = None
+    secret_encrypted: Optional[str] = None
+    username_encrypted: Optional[str] = None
+    outbound_api_key_encrypted: Optional[str] = None
 
 
 class RESTConfig(BaseModel):
@@ -2457,21 +2465,25 @@ async def list_mes_connections(
     )
 
 
-def _validate_rest_config(connector_type: str, config: dict) -> None:
-    """校验 REST connector 配置完整性。connector_type != 'rest' 时直接通过。
+def _validate_rest_config(connector_type: str, config: dict) -> dict:
+    """校验 REST connector 配置完整性并返回规范化后的 config dict。
 
-    使用 Pydantic RESTConfig schema 在凭证加密处理之前完成结构化校验，
-    防止畸形 JSON 触发 AttributeError → 500。
+    connector_type != 'rest' 时直接返回原 config。
+    使用 Pydantic RESTConfig schema 完成结构化校验 + 默认值填充，
+    确保运行时不会遇到 None.pagination.get() 等问题。
     """
     if connector_type != "rest":
-        return
+        return config
     try:
-        schemas.RESTConfig.model_validate(config)
+        validated = schemas.RESTConfig.model_validate(config)
     except ValidationError as e:
         # Flatten Pydantic errors into a single detail string for HTTP 400
         errors = e.errors()
         detail = errors[0]["msg"] if len(errors) == 1 else errors
         raise HTTPException(status_code=400, detail=detail)
+    # Return normalized dict: Pydantic fills defaults, strips None optionals,
+    # ensures endpoint configs are typed objects (not bare dicts with null sub-keys)
+    return validated.model_dump(exclude_none=True)
 
 
 @router.post("/connections", response_model=schemas.MESConnectionResponse)
@@ -2480,12 +2492,10 @@ async def create_mes_connection(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
 ):
-    config = dict(req.config)
+    # Validate + normalize FIRST — Pydantic fills defaults, strips None optionals
+    config = _validate_rest_config(req.connector_type, dict(req.config))
 
-    # Validate FIRST — before any credential processing prevents structural issues from becoming 500
-    _validate_rest_config(req.connector_type, config)
-
-    # Separate inbound vs outbound credentials
+    # Separate inbound vs outbound credentials (auth_config is already typed by Pydantic)
     auth = config.get("auth_config", {})
     if not isinstance(auth, dict):
         auth = {}
@@ -2566,10 +2576,9 @@ async def update_mes_connection(
     if req.connector_type is not None:
         connection.connector_type = req.connector_type
     if req.config is not None:
-        config = dict(req.config)
-        # Validate config structure BEFORE merging/processing credentials
+        # Validate + normalize config structure BEFORE merging/processing credentials
         check_type = req.connector_type or connection.connector_type
-        _validate_rest_config(check_type, config)
+        config = _validate_rest_config(check_type, dict(req.config))
 
         # Merge with existing auth_config, ignoring "***" placeholders
         existing_auth = connection.config.get("auth_config", {})
@@ -2597,7 +2606,7 @@ async def update_mes_connection(
 
     # Final guard: validate the RESULTING connector_type + config combination
     # (catches e.g. connector_type changed to "rest" without providing new config)
-    _validate_rest_config(connection.connector_type, connection.config)
+    connection.config = _validate_rest_config(connection.connector_type, connection.config)
 
     if req.is_active is not None:
         connection.is_active = req.is_active
