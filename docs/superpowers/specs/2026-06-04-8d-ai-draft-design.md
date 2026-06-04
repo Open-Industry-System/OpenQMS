@@ -21,7 +21,7 @@
 | 格式偏好存储 | 前端 localStorage |
 | LLM 调用 | 复用现有 `LLMProvider` |
 | 重试策略 | 用户手动重试（取消自动重试） |
-| 超时 | 后端 `asyncio.wait_for()` 15s（草拟服务独立超时，不依赖全局 `LLM_TIMEOUT=5`） |
+| 超时 | 后端 `asyncio.wait_for()` 15s（独立配置 `CAPA_DRAFT_LLM_TIMEOUT=15`，不依赖全局 `LLM_TIMEOUT=5`） |
 
 ---
 
@@ -62,7 +62,7 @@
 
 | 文件 | 修改内容 |
 |------|---------|
-| `backend/app/main.py` | 注册 capa_draft 路由 |
+| `backend/app/api/capa.py` | 新增 `/capa/capabilities` 和 `/capa/{id}/draft/{step}` 端点 |
 | `frontend/src/pages/capa/CAPADetailPage.tsx` | 集成按钮 + 预览弹窗 |
 
 ### 复用文件
@@ -128,11 +128,13 @@ POST /api/capa/{id}/draft/{step}
 
 | 状态码 | 场景 | 前端处理 |
 |--------|------|---------|
-| 404 | CAPA 不存在 | 标准 404 |
+| 400 | request_id 非标准 UUID v4 | message.error("请求 ID 格式错误") |
 | 403 | 无 CAPA 编辑权限 | 按钮不渲染 |
-| 409 | 前置步骤内容为空/不足 | message.warning("请先完成前置步骤") |
+| 404 | CAPA 不存在 | 标准 404 |
+| 409 | 前置步骤不足 / 状态不匹配 / ARCHIVED | message.warning("请先完成前置步骤或检查报告状态") |
 | 422 | LLM 输出格式校验失败 | message.error("AI 输出格式异常，请重试") |
-| 503 | LLM 未配置 | 按钮 disabled，tooltip "AI 功能未启用" |
+| 429 | 调用频率超限（10次/分钟） | message.warning("AI 草拟调用过于频繁，请稍后再试") |
+| 503 | LLM 临时不可用 | 按钮 disabled + tooltip "AI 功能暂时不可用" |
 | 504 | LLM 超时（15s） | message.error("AI 响应超时，请重试"） |
 | 500 | 其他异常 | message.error("AI 服务异常，请稍后重试"） |
 
@@ -262,7 +264,6 @@ FMEA 上下文提取规则：
 
 ```json
 {
-  "content": "string",
   "structured_data": {
     "problem_statement": "问题陈述（一句话概括）",
     "affected_product": "受影响的产品/工序",
@@ -286,7 +287,6 @@ FMEA 上下文提取规则：
 
 ```json
 {
-  "content": "string",
   "structured_data": {
     "containment_actions": [
       {"action": "措施描述", "responsible": "[待填写]", "deadline": "[待填写]"}
@@ -310,7 +310,6 @@ FMEA 上下文提取规则：
 
 ```json
 {
-  "content": "string",
   "structured_data": {
     "candidate_root_causes": [
       {
@@ -335,7 +334,6 @@ FMEA 上下文提取规则：
 
 ```json
 {
-  "content": "string",
   "structured_data": {
     "corrective_actions": [
       {
@@ -360,7 +358,6 @@ FMEA 上下文提取规则：
 
 ```json
 {
-  "content": "string",
   "structured_data": {
     "verification_plan": "建议验证方法",
     "evidence_checklist": ["证据项1", "证据项2"]
@@ -385,7 +382,6 @@ FMEA 上下文提取规则：
 
 ```json
 {
-  "content": "string",
   "structured_data": {
     "preventive_actions": [
       {"action": "预防措施", "implementation_plan": "实施计划"}
@@ -413,7 +409,6 @@ FMEA 上下文提取规则：
 
 ```json
 {
-  "content": "string",
   "structured_data": {
     "summary": "处理过程总结草稿",
     "lessons_learned": "经验教训草稿"
@@ -450,16 +445,19 @@ FMEA 上下文提取规则：
 每个步骤定义独立的 Pydantic 模型，后端在收到 LLM 响应后严格校验：
 
 ```python
-class D2DraftOutput(BaseModel):
-    content: str
-    structured_data: D2StructuredData | None = None
+# LLM 输出校验（按格式分别校验）
+class D2StructuredLLMOutput(BaseModel):
+    structured_data: D2StructuredData
 
-class D2StructuredData(BaseModel):
-    problem_statement: str
-    affected_product: str
-    defect_description: str
-    occurrence_context: str
-    impact_scope: str
+class ParagraphLLMOutput(BaseModel):
+    content: str
+    structured_data: None = None
+
+# API 响应
+class DraftResponse(BaseModel):
+    content: str
+    structured_data: dict | None
+    request_id: uuid.UUID
 ```
 
 校验失败时返回 422，记录审计日志。
@@ -524,7 +522,8 @@ class D2StructuredData(BaseModel):
 | Loading | `Spin` 图标 + "草拟中..." + disabled |
 | 完成 | 弹窗展示预览 |
 | 错误 | 红色，hover 显示错误 tooltip，点击重试 |
-| 禁用（LLM 未配置）| 灰色 disabled |
+| 不可用（能力探测 false）| **不渲染按钮** |
+| 临时不可用（503）| 灰色 disabled + tooltip "AI 功能暂时不可用" |
 
 ### 用户偏好存储
 
@@ -561,7 +560,7 @@ const undo = (step: string) => {
 
 ### 超时与降级
 
-- 后端超时：`asyncio.wait_for()` 15s（独立超时，不依赖全局 `LLM_TIMEOUT=5`）
+- 后端超时：`asyncio.wait_for()` 15s（独立配置 `CAPA_DRAFT_LLM_TIMEOUT=15`，测试中可覆盖为极短时间）
 - 重试策略：**用户手动重试**（取消自动重试，避免重复计费）
 - 幂等控制：`request_id` + 60s 缓存
 - 降级：LLM 不可用时按钮 disabled
