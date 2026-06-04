@@ -272,10 +272,13 @@ MES 推送 POST /api/mes/ingest
 
 阶段 1 — 领取 job（短事务）：
   BEGIN
-    SELECT mes_sync_jobs WHERE status IN ('pending', 'failed')
-        OR (status = 'completed' AND next_run_at <= now())
+    SELECT j FROM mes_sync_jobs j
+      JOIN mes_connections c ON j.connection_id = c.connection_id
+      WHERE c.is_active = TRUE
+        AND (j.status IN ('pending', 'failed')
+             OR (j.status = 'completed' AND j.next_run_at <= now()))
       FOR UPDATE SKIP LOCKED
-    → UPDATE job SET status='running', started_at=now()
+    → UPDATE j SET status='running', started_at=now()
   COMMIT  -- 释放行锁
 
 阶段 2 — 执行外部请求（无事务）：
@@ -293,7 +296,7 @@ MES 推送 POST /api/mes/ingest
 
 **超时恢复**：调度器每轮检查 `status='running' AND started_at < now() - 10min` 的 job，视为崩溃残留，重置为 `status='failed'`，下次调度自动重试。
 
-**手动同步**：`POST /api/mes/connections/{id}/sync` 将该 connection 的所有 job 置为 `pending`，立即触发一轮调度。
+**手动同步**：`POST /api/mes/connections/{id}/sync` 仅将该 connection 中 `status IN ('completed', 'failed')` 的 job 置为 `pending`；若存在 `status = 'running'` 的 job，返回 409 Conflict 及其运行状态。立即触发一轮调度。
 
 **优势**：
 - 每个 connection + data_type 独立 checkpoint，工单/设备/报废/测量可分别追踪进度
@@ -316,9 +319,11 @@ MES 推送 POST /api/mes/ingest
 | event_type | VARCHAR(50) | `spc_alarm`/`capa_status_change`/`fmea_recommendation` 等 |
 | connection_id | UUID FK→mes_connections ON DELETE CASCADE | 目标 MES 连接 |
 | payload | JSONB | 事件数据 |
-| status | VARCHAR(20) | `pending`/`sent`/`failed` |
+| status | VARCHAR(20) | `pending`/`processing`/`sent`/`failed` |
 | retry_count | INTEGER | 已重试次数（默认 0） |
 | max_retries | INTEGER | 最大重试次数（默认 3） |
+| next_retry_at | TIMESTAMPTZ | 下次重试时间（失败后延迟递增） |
+| started_at | TIMESTAMPTZ | 开始处理时间 |
 | last_error | TEXT | 最近一次失败原因 |
 | created_at | TIMESTAMPTZ | 事件创建时间 |
 | sent_at | TIMESTAMPTZ | 成功发送时间 |
@@ -326,14 +331,31 @@ MES 推送 POST /api/mes/ingest
 ```
 业务事件（SPC 异常 / CAPA 状态变更）
   → 同一事务内写入 mes_push_outbox (status=pending)
-  → 后台推送任务轮询 pending outbox
-    → 加载 MESConnector
-    → push_quality_event()
-    → 成功：status=sent, sent_at=now()
-    → 失败：retry_count += 1, last_error=...
-      → retry_count >= max_retries → status=failed（永久失败，人工介入）
-      → 否则保持 pending，下次重试
-    → 审计日志
+
+后台推送任务（短事务领取 + 异步发送 + 短事务写结果）：
+
+  阶段 1 — 领取（短事务）：
+    BEGIN
+      SELECT o FROM mes_push_outbox o
+        JOIN mes_connections c ON o.connection_id = c.connection_id
+        WHERE c.is_active = TRUE
+          AND o.status = 'pending'
+          AND o.next_retry_at <= now()
+        FOR UPDATE SKIP LOCKED
+      → UPDATE o SET status='processing', started_at=now()
+    COMMIT
+
+  阶段 2 — 发送（无事务）：
+    加载 MESConnector
+    push_quality_event()
+
+  阶段 3 — 写结果（短事务）：
+    成功 → UPDATE status='sent', sent_at=now()
+    失败 → UPDATE retry_count += 1, next_retry_at=now()+backoff,
+            last_error=..., status='pending'
+      → retry_count >= max_retries → status='failed'（永久失败，人工介入）
+
+  超时恢复：processing 超过 10 分钟 → 重置为 pending
 ```
 
 ### 与现有系统衔接
@@ -482,14 +504,31 @@ MES 推送 POST /api/mes/ingest
 
 ### 反向推送
 - 采用 outbox 模式：业务事务只写 `mes_push_outbox`，后台任务异步推送
-- MES 返回非 2xx → retry_count += 1，达到 max_retries (默认 3) 则 status=failed（人工介入）
+- 短事务领取（`FOR UPDATE SKIP LOCKED`）+ 异步发送 + 短事务写结果，防多 worker 重复投递
+- `processing` 状态超时（>10min）自动恢复为 `pending`
+- inactive 连接的 outbox 记录暂停投递（不领取），连接恢复后自动继续
+- MES 返回非 2xx → retry_count += 1，指数退避重试，达到 max_retries (默认 3) 则 status=failed（人工介入）
 - 连接超时 30s
 
 ---
 
 ## 测试策略
 
-- **后端**：延续 `test_schema.py` 手动测试模式，新增 `test_mes_connector.py` 验证 Mock 适配器 + API 端点
+### 自动化测试（并发与事务核心风险）
+
+在 `backend/tests/test_mes_concurrency.py` 中覆盖以下场景（使用 pytest + asyncio + 测试数据库）：
+
+- **双 worker 只能领取一次 job**：两个协程同时 claim 同一 sync job，仅一个成功获取 running 状态
+- **双 worker 只能领取一次 outbox**：两个协程同时 claim 同一 outbox 记录，仅一个成功获取 processing 状态
+- **running job 超时恢复**：started_at 超过 10 分钟的 running job 被重置为 failed
+- **processing outbox 超时恢复**：started_at 超过 10 分钟的 processing outbox 被重置为 pending
+- **手动同步不抢占 running job**：对含 running job 的连接调用手动同步，返回 409，running job 不变
+- **inactive 连接不被同步或推送**：is_active=False 的连接的 job 和 outbox 不被领取
+- **测量 ingestion 与 SPC 写入原子回滚**：ingestion INSERT ON CONFLICT 成功但 SPC 写入失败时，整个事务回滚
+
+### 手动测试
+
+- **后端**：延续 `test_schema.py` 模式，新增 `test_mes_connector.py` 验证 Mock 适配器 + API 端点
 - **前端**：无 Vitest，手动验证
 - **集成测试**：Mock 模拟器 + 手动同步 API 触发完整数据流验证
 
