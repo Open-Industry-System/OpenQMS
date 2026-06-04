@@ -56,9 +56,10 @@
 
 ### 后端修改文件
 - `backend/app/core/permissions.py` — 新增 `Module.MES`
+- `backend/app/core/product_line_filter.py` — 添加 `"mes": "product_line_code"`
 - `backend/app/main.py` — 注册 mes_router + 后台调度协程
 - `backend/app/models/__init__.py` — 导出 MES 模型
-- `backend/app/services/spc_service.py` — 暴露 `_create_sample_batch_inner` 或添加 `commit` 参数支持
+- `backend/app/services/spc_service.py` — 暴露 `_create_sample_batch_inner`、添加 `commit` 参数、接入 outbox
 
 ### 前端新增文件
 - `frontend/src/pages/mes/MESConnectionsPage.tsx` — 连接管理
@@ -616,16 +617,71 @@ class MESScrapRecordResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class MESIngestRequest(BaseModel):
-    data_type: str = Field(..., pattern="^(measurement|production_order|equipment_status|scrap_record)$")
+from typing import Literal
+
+
+class MESIngestBase(BaseModel):
     connection_id: uuid.UUID
-    external_id: Optional[str] = None
+    raw_data: Optional[dict] = None
+
+
+class MESIngestMeasurement(MESIngestBase):
+    data_type: Literal["measurement"]
+    external_id: str
     order_no: Optional[str] = None
-    ic_code: Optional[str] = None
-    values: Optional[list[float]] = None
+    ic_code: str
+    values: list[float]
     sampled_at: Optional[datetime] = None
     batch_no: Optional[str] = None
-    raw_data: Optional[dict] = None
+    product_line_code: Optional[str] = None
+
+
+class MESIngestProductionOrder(MESIngestBase):
+    data_type: Literal["production_order"]
+    order_no: str
+    product_model: Optional[str] = None
+    process_route: Optional[str] = None
+    planned_qty: Optional[int] = None
+    actual_qty: Optional[int] = None
+    status: str = "planned"
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    product_line_code: Optional[str] = None
+
+
+class MESIngestEquipmentStatus(MESIngestBase):
+    data_type: Literal["equipment_status"]
+    external_id: str
+    equipment_code: str
+    equipment_name: Optional[str] = None
+    status: str
+    availability: Optional[float] = None
+    performance: Optional[float] = None
+    quality: Optional[float] = None
+    oee: Optional[float] = None
+    downtime_reason: Optional[str] = None
+    recorded_at: Optional[datetime] = None
+    product_line_code: Optional[str] = None
+
+
+class MESIngestScrapRecord(MESIngestBase):
+    data_type: Literal["scrap_record"]
+    external_id: str
+    order_no: Optional[str] = None
+    equipment_code: Optional[str] = None
+    defect_type: str
+    defect_category: Optional[str] = None
+    defect_qty: int
+    total_qty: int
+    defect_description: Optional[str] = None
+    recorded_at: Optional[datetime] = None
+    product_line_code: Optional[str] = None
+
+
+MESIngestRequest = (
+    MESIngestMeasurement | MESIngestProductionOrder |
+    MESIngestEquipmentStatus | MESIngestScrapRecord
+)
 
 
 class MESEquipmentSummary(BaseModel):
@@ -733,7 +789,11 @@ def decrypt_credential(ciphertext: str) -> str:
 
 # ---- Response sanitization --------------------------------------------------
 
-_SENSITIVE_KEYS = {"api_key", "api_key_hash", "token", "password", "secret", "auth_token"}
+_SENSITIVE_KEYS = {
+    "api_key", "api_key_hash", "token", "password", "secret", "auth_token",
+    "token_encrypted", "password_encrypted", "username_encrypted",
+    "outbound_api_key_encrypted", "key_encrypted",
+}
 
 
 def sanitize_config(config: dict) -> dict:
@@ -782,11 +842,21 @@ class Module(StrEnum):
     MES = "mes"  # <-- add this
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: 在 product_line_filter.py 中添加 MES 模块映射**
+
+```python
+# backend/app/core/product_line_filter.py
+PRODUCT_LINE_FIELD_MAP: dict[str, str] = {
+    # ... existing mappings ...
+    "mes": "product_line_code",
+}
+```
+
+- [ ] **Step 3: Commit**
 
 ```bash
-git add backend/app/core/permissions.py
-git commit -m "feat(permissions): add Module.MES to permission enum"
+git add backend/app/core/permissions.py backend/app/core/product_line_filter.py
+git commit -m "feat(permissions): add Module.MES and product line field mapping"
 ```
 
 ---
@@ -1892,66 +1962,88 @@ git commit -m "feat(push): add MESPushService with outbox pattern and 3-phase tr
 
 - [ ] **Step 1: SPC 告警触发时写入 Outbox**
 
-在 `spc_service.py` 的 `_reevaluate_alarms` 或 `add_sample_batch` 中，当检测到新的 SPC 异常（Alarm）时：
+**避免循环导入**：在函数内部局部导入 `MESPushService` 和 `MESConnection`（mes_service.py 顶层已导入 SPC 函数）。
+
+在 `spc_service.py` 的 `add_sample_batch`（commit 之前）调用 `_write_spc_alarm_outbox`：
 
 ```python
-# In backend/app/services/spc_service.py, where alarms are triggered:
-from app.services.mes_service import MESPushService
-from app.models.mes import MESConnection
+# backend/app/services/spc_service.py
+# 在 add_sample_batch 末尾、db.commit() 之前：
 
-async def _write_spc_alarm_outbox(db: AsyncSession, ic_id: uuid.UUID, alarm_data: dict, product_line: str | None):
-    """将 SPC 告警写入对应产品线的 MES outbox。"""
-    query = select(MESConnection).where(MESConnection.is_active == True)
-    if product_line:
-        query = query.where(MESConnection.product_line_code == product_line)
-    result = await db.execute(query)
-    connections = result.scalars().all()
-    for conn in connections:
-        await MESPushService.push_event(
-            db,
-            event_type="spc_alarm",
-            connection_id=conn.connection_id,
-            payload={
-                "ic_id": str(ic_id),
-                "alarm_type": alarm_data.get("alarm_type"),
-                "ic_code": alarm_data.get("ic_code"),
-                "sampled_at": alarm_data.get("sampled_at"),
-                "values": alarm_data.get("values"),
-                "product_line": product_line,
-            }
+async def add_sample_batch(...):
+    batch = await _create_sample_batch_inner(db, user_id, ic_id, data)
+    # ... existing code ...
+    
+    # After re-evaluating alarms, write to MES outbox
+    ic = await get_inspection_characteristic(db, ic_id)
+    if ic and ic.product_line:
+        # Only write outbox if product_line is known
+        from app.services.mes_service import MESPushService
+        from app.models.mes import MESConnection
+        from sqlalchemy import select
+        
+        query = select(MESConnection).where(
+            MESConnection.is_active == True,
+            MESConnection.product_line_code == ic.product_line
         )
-    # 注意：push_event 只写入 outbox，不 commit；由调用方在同一事务中 commit
+        result = await db.execute(query)
+        connections = result.scalars().all()
+        for conn in connections:
+            await MESPushService.push_event(
+                db,
+                event_type="spc_alarm",
+                connection_id=conn.connection_id,
+                payload={
+                    "ic_id": str(ic_id),
+                    "ic_code": ic.ic_code,
+                    "product_line": ic.product_line,
+                }
+            )
+    
+    await db.commit()  # commit 包含 outbox 写入
+    # ... rest of existing code ...
 ```
+
+**注意**：product_line 为 None 时不广播（数据不完整，无法确定目标 MES）。
 
 - [ ] **Step 2: CAPA 状态变更时写入 Outbox**
 
-在 `capa_service.py` 的状态流转方法中，当 CAPA 推进到关键状态（如 `d3_containment`, `d5_corrective_action`, `d8_closure`）时：
+在 `capa_service.py` 的状态流转方法中（commit 之前）：
 
 ```python
-# In backend/app/services/capa_service.py, in status transition method:
-from app.services.mes_service import MESPushService
-from app.models.mes import MESConnection
+# backend/app/services/capa_service.py
+# 在 advance_capa_status() 或类似状态推进函数中、db.commit() 之前：
 
-async def _write_capa_status_outbox(db: AsyncSession, capa_id: uuid.UUID, old_status: str, new_status: str, product_line_code: str | None):
-    """CAPA 状态变更时写入对应产品线的 MES outbox。"""
-    query = select(MESConnection).where(MESConnection.is_active == True)
-    if product_line_code:
-        query = query.where(MESConnection.product_line_code == product_line_code)
-    result = await db.execute(query)
-    connections = result.scalars().all()
-    for conn in connections:
-        await MESPushService.push_event(
-            db,
-            event_type="capa_status_change",
-            connection_id=conn.connection_id,
-            payload={
-                "capa_id": str(capa_id),
-                "old_status": old_status,
-                "new_status": new_status,
-                "changed_at": datetime.now(timezone.utc).isoformat(),
-                "product_line_code": product_line_code,
-            }
+async def advance_capa_status(db: AsyncSession, capa_id: uuid.UUID, new_status: str, user: User):
+    # ... existing transition logic ...
+    
+    # Write to MES outbox before commit
+    if capa.product_line_code:
+        from app.services.mes_service import MESPushService
+        from app.models.mes import MESConnection
+        from sqlalchemy import select
+        
+        query = select(MESConnection).where(
+            MESConnection.is_active == True,
+            MESConnection.product_line_code == capa.product_line_code
         )
+        result = await db.execute(query)
+        connections = result.scalars().all()
+        for conn in connections:
+            await MESPushService.push_event(
+                db,
+                event_type="capa_status_change",
+                connection_id=conn.connection_id,
+                payload={
+                    "capa_id": str(capa_id),
+                    "old_status": old_status,
+                    "new_status": new_status,
+                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                    "product_line_code": capa.product_line_code,
+                }
+            )
+    
+    await db.commit()  # commit 包含 outbox 写入
 ```
 
 - [ ] **Step 3: Commit**
@@ -2020,11 +2112,19 @@ async def list_mes_connections(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
 ):
-    total_result = await db.execute(select(func.count()).select_from(MESConnection))
+    from app.core.product_line_filter import get_user_product_line_codes
+
+    query = select(MESConnection)
+    # Apply product line isolation for connections
+    if not user.role_definition.bypass_row_level_security:
+        user_codes = await get_user_product_line_codes(user, db)
+        query = query.where(MESConnection.product_line_code.in_(user_codes))
+
+    total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar()
 
     result = await db.execute(
-        select(MESConnection).offset((page - 1) * page_size).limit(page_size)
+        query.offset((page - 1) * page_size).limit(page_size)
     )
     items = result.scalars().all()
 
@@ -2114,6 +2214,10 @@ async def update_mes_connection(
     connection = await db.get(MESConnection, connection_id)
     if not connection:
         raise HTTPException(404, "Connection not found")
+
+    # Verify user has access to this connection's current product line
+    from app.core.product_line_filter import enforce_product_line_access
+    await enforce_product_line_access(user, connection.product_line_code, db)
 
     if req.name is not None:
         connection.name = req.name
@@ -2941,6 +3045,13 @@ _TEST_PREFIX = "TEST-MES-"
 
 
 @pytest.fixture
+async def db():
+    """提供数据库会话供测试使用（不自动回滚，依赖 cleanup fixture 清理）。"""
+    async with async_session() as session:
+        yield session
+
+
+@pytest.fixture
 async def admin_user():
     """获取 admin 用户用于测试外键。使用独立 session 读取。"""
     async with async_session() as db:
@@ -3009,20 +3120,23 @@ async def test_ic(admin_user):
 
 @pytest.fixture(autouse=True)
 async def cleanup_mes_test_data():
-    """每个测试结束后清理 MES 测试数据。"""
+    """每个测试结束后清理 MES 测试数据。按表字段分别清理。"""
     yield
     async with async_session() as db:
-        for table in [
-            "mes_measurement_ingestions", "mes_scrap_records",
-            "mes_equipment_status", "mes_production_orders",
-            "mes_sync_jobs", "mes_push_outbox", "mes_connections",
-        ]:
-            await db.execute(text(f"DELETE FROM {table} WHERE name LIKE '{_TEST_PREFIX}%' OR external_id LIKE '{_TEST_PREFIX}%'"))
+        # mes_connections: by name
+        await db.execute(text(f"DELETE FROM mes_connections WHERE name LIKE '{_TEST_PREFIX}%'"))
+        # mes_production_orders: by order_no
+        await db.execute(text(f"DELETE FROM mes_production_orders WHERE order_no LIKE '{_TEST_PREFIX}%'"))
+        # mes_equipment_status, mes_scrap_records, mes_measurement_ingestions: by external_id
+        for table in ["mes_equipment_status", "mes_scrap_records", "mes_measurement_ingestions"]:
+            await db.execute(text(f"DELETE FROM {table} WHERE external_id LIKE '{_TEST_PREFIX}%'"))
+        # mes_sync_jobs: by connection_id (connections already deleted, cascade handles it)
+        # mes_push_outbox: by connection_id
         await db.commit()
 
 
 class TestSyncJobConcurrency:
-    async def test_dual_worker_claim_once(self, db, test_connection):
+    async def test_dual_worker_claim_once(self, test_connection):
         """双 worker 同时 claim，只有一个能获得 running 状态。"""
         job = MESSyncJob(
             connection_id=test_connection.connection_id,
@@ -3305,81 +3419,95 @@ class MESLifecycleService:
 
     @staticmethod
     async def cleanup(db: AsyncSession) -> dict:
-        """执行数据清理。返回各表清理数量。"""
-        from sqlalchemy import delete, insert
+        """执行数据清理。返回各表清理数量。
+
+        使用 PostgreSQL advisory lock 防止多 worker 同时执行。
+        """
+        from sqlalchemy import delete
         now = datetime.now(timezone.utc)
 
-        # 1. Clean old equipment status (>90 days)
-        cutoff_equipment = now - timedelta(days=MESLifecycleService.EQUIPMENT_STATUS_RETENTION_DAYS)
-        result = await db.execute(
-            delete(MESEquipmentStatus).where(MESEquipmentStatus.recorded_at < cutoff_equipment)
-        )
-        deleted_equipment = result.rowcount
+        # Acquire advisory lock (key = 42) to prevent concurrent cleanup
+        lock_result = await db.execute(text("SELECT pg_try_advisory_lock(42)"))
+        has_lock = lock_result.scalar()
+        if not has_lock:
+            return {"skipped": True, "reason": "another worker is running cleanup"}
 
-        # 2. Aggregate and clean old scrap records (>1 year)
-        cutoff_scrap = now - timedelta(days=MESLifecycleService.SCRAP_RETENTION_DAYS)
+        try:
+            # 1. Clean old equipment status (>90 days)
+            cutoff_equipment = now - timedelta(days=MESLifecycleService.EQUIPMENT_STATUS_RETENTION_DAYS)
+            result = await db.execute(
+                delete(MESEquipmentStatus).where(MESEquipmentStatus.recorded_at < cutoff_equipment)
+            )
+            deleted_equipment = result.rowcount
 
-        # Aggregate by month before deletion
-        await db.execute(text("""
-            INSERT INTO mes_scrap_monthly_summary
-                (connection_id, product_line_code, year_month, defect_category,
-                 total_defect_qty, total_total_qty, record_count, created_at)
-            SELECT
-                connection_id,
-                product_line_code,
-                TO_CHAR(recorded_at, 'YYYY-MM'),
-                defect_category,
-                SUM(defect_qty),
-                SUM(total_qty),
-                COUNT(*),
-                NOW()
-            FROM mes_scrap_records
-            WHERE recorded_at < :cutoff
-            GROUP BY connection_id, product_line_code, TO_CHAR(recorded_at, 'YYYY-MM'), defect_category
-            ON CONFLICT (connection_id, product_line_code, year_month, defect_category)
-            DO UPDATE SET
-                total_defect_qty = mes_scrap_monthly_summary.total_defect_qty + EXCLUDED.total_defect_qty,
-                total_total_qty = mes_scrap_monthly_summary.total_total_qty + EXCLUDED.total_total_qty,
-                record_count = mes_scrap_monthly_summary.record_count + EXCLUDED.record_count
-        """), {"cutoff": cutoff_scrap})
+            # 2. Aggregate and clean old scrap records (>1 year)
+            cutoff_scrap = now - timedelta(days=MESLifecycleService.SCRAP_RETENTION_DAYS)
 
-        result = await db.execute(
-            delete(MESScrapRecord).where(MESScrapRecord.recorded_at < cutoff_scrap)
-        )
-        deleted_scrap = result.rowcount
+            # Aggregate by month before deletion (COALESCE NULL defect_category to '未知')
+            agg_result = await db.execute(text("""
+                INSERT INTO mes_scrap_monthly_summary
+                    (connection_id, product_line_code, year_month, defect_category,
+                     total_defect_qty, total_total_qty, record_count, created_at)
+                SELECT
+                    connection_id,
+                    product_line_code,
+                    TO_CHAR(recorded_at, 'YYYY-MM'),
+                    COALESCE(defect_category, '未知'),
+                    SUM(defect_qty),
+                    SUM(total_qty),
+                    COUNT(*),
+                    NOW()
+                FROM mes_scrap_records
+                WHERE recorded_at < :cutoff
+                GROUP BY connection_id, product_line_code,
+                         TO_CHAR(recorded_at, 'YYYY-MM'),
+                         COALESCE(defect_category, '未知')
+                ON CONFLICT (connection_id, product_line_code, year_month, defect_category)
+                DO UPDATE SET
+                    total_defect_qty = mes_scrap_monthly_summary.total_defect_qty + EXCLUDED.total_defect_qty,
+                    total_total_qty = mes_scrap_monthly_summary.total_total_qty + EXCLUDED.total_total_qty,
+                    record_count = mes_scrap_monthly_summary.record_count + EXCLUDED.record_count
+            """), {"cutoff": cutoff_scrap})
+            aggregated_scrap_rows = agg_result.rowcount
 
-        # 3. Archive closed orders (>2 years) to history table
-        cutoff_order = now - timedelta(days=MESLifecycleService.CLOSED_ORDER_RETENTION_DAYS)
-        # Move to archive table
-        await db.execute(text("""
-            INSERT INTO mes_production_orders_archive
-                (order_id, connection_id, order_no, product_model, process_route,
-                 planned_qty, actual_qty, status, started_at, completed_at,
-                 product_line_code, archived_at)
-            SELECT
-                order_id, connection_id, order_no, product_model, process_route,
-                planned_qty, actual_qty, status, started_at, completed_at,
-                product_line_code, NOW()
-            FROM mes_production_orders
-            WHERE status = 'closed' AND completed_at < :cutoff
-            ON CONFLICT (order_id) DO NOTHING
-        """), {"cutoff": cutoff_order})
+            result = await db.execute(
+                delete(MESScrapRecord).where(MESScrapRecord.recorded_at < cutoff_scrap)
+            )
+            deleted_scrap = result.rowcount
 
-        result = await db.execute(
-            delete(MESProductionOrder)
-            .where(MESProductionOrder.status == "closed")
-            .where(MESProductionOrder.completed_at < cutoff_order)
-        )
-        archived_orders = result.rowcount
+            # 3. Archive closed orders (>2 years) to history table
+            cutoff_order = now - timedelta(days=MESLifecycleService.CLOSED_ORDER_RETENTION_DAYS)
+            await db.execute(text("""
+                INSERT INTO mes_production_orders_archive
+                    (order_id, connection_id, order_no, product_model, process_route,
+                     planned_qty, actual_qty, status, started_at, completed_at,
+                     product_line_code, archived_at)
+                SELECT
+                    order_id, connection_id, order_no, product_model, process_route,
+                    planned_qty, actual_qty, status, started_at, completed_at,
+                    product_line_code, NOW()
+                FROM mes_production_orders
+                WHERE status = 'closed' AND completed_at < :cutoff
+                ON CONFLICT (order_id) DO NOTHING
+            """), {"cutoff": cutoff_order})
 
-        await db.commit()
+            result = await db.execute(
+                delete(MESProductionOrder)
+                .where(MESProductionOrder.status == "closed")
+                .where(MESProductionOrder.completed_at < cutoff_order)
+            )
+            archived_orders = result.rowcount
 
-        return {
-            "deleted_equipment_status": deleted_equipment,
-            "deleted_scrap_records": deleted_scrap,
-            "aggregated_scrap_summary": "merged into mes_scrap_monthly_summary",
-            "archived_orders": archived_orders,
-        }
+            await db.commit()
+
+            return {
+                "deleted_equipment_status": deleted_equipment,
+                "deleted_scrap_records": deleted_scrap,
+                "aggregated_scrap_rows": aggregated_scrap_rows,
+                "archived_orders": archived_orders,
+            }
+        finally:
+            await db.execute(text("SELECT pg_advisory_unlock(42)"))
 ```
 
 - [ ] **Step 2: 在 lifespan 中注册清理协程**
