@@ -183,7 +183,8 @@ class MESConnector(ABC):
 | scrap_id | UUID PK | |
 | connection_id | UUID FK→mes_connections ON DELETE CASCADE | |
 | external_id | VARCHAR(100) | MES 外部幂等键 |
-| order_id | UUID FK→mes_production_orders ON DELETE SET NULL | 关联工单 |
+| order_no | VARCHAR(50) | 关联工单号（用于乱序到达时回填 order_id） |
+| order_id | UUID FK→mes_production_orders ON DELETE SET NULL | 关联工单（由 order_no 解析或生产订单回填） |
 | equipment_code | VARCHAR(50) | 关联设备 |
 | defect_type | VARCHAR(50) | `scrap`/`rework`/`reject` |
 | defect_category | VARCHAR(100) | 不良分类 |
@@ -497,7 +498,7 @@ MES 推送 POST /api/mes/ingest
 增量拉取重叠时（失败重试导致 since 时间窗口重叠），需防止重复写入：
 
 1. **工单数据**：`mes_production_orders` 使用 `ON CONFLICT (connection_id, order_no) DO UPDATE` 更新 `actual_qty`/`status`/`completed_at` 等可变字段（工单在 MES 中会持续更新）
-2. **报废与设备数据**：`mes_scrap_records` 和 `mes_equipment_status` 使用 `ON CONFLICT (connection_id, external_id) DO NOTHING`（历史快照，不更新）
+2. **报废与设备数据**：`mes_equipment_status` 使用 `ON CONFLICT (connection_id, external_id) DO NOTHING`（历史快照，不更新）。`mes_scrap_records` 使用 `ON CONFLICT (connection_id, external_id) DO UPDATE` 但**仅允许回填关联字段**：`order_id = COALESCE(existing.order_id, excluded.order_id)`、`order_no = COALESCE(existing.order_no, excluded.order_no)`。其余字段（defect_qty、defect_type 等）永不更新，确保历史快照完整。生产订单写入后，通过 `(connection_id, order_no)` 反向回填所有未关联的报废记录。
 3. **测量数据**：`mes_measurement_ingestions` 使用 `INSERT ... ON CONFLICT (connection_id, external_id) DO NOTHING RETURNING ingestion_id`，只有成功取得 `ingestion_id` 的请求才继续写入 SPC。ingestion 创建、SPC batch 写入、batch_id 回填必须在同一事务内完成，防止并发重复写入
 4. **细粒度事务提交**：sync_all() 内将工单、设备状态、报废记录、测量数据四个拉取动作拆分为**四个独立事务提交块**。任一动作失败只回滚当前块，已成功持久化的数据保留，审计日志记录每块结果
 

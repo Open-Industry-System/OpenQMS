@@ -2474,7 +2474,8 @@ async def ingest_mes_data(
     try:
         validated = _mes_ingest_adapter.validate_python(payload)
     except ValidationError as e:
-        raise HTTPException(status_code=400, detail=e.errors())
+        from fastapi.encoders import jsonable_encoder
+        raise HTTPException(status_code=400, detail=jsonable_encoder(e.errors()))
 
     data = validated.model_dump()
     data["connection_id"] = connection.connection_id
@@ -3222,7 +3223,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
-from app.models.mes import MESConnection, MESSyncJob, MESPushOutbox, MESMeasurementIngestion
+from app.models.mes import MESConnection, MESSyncJob, MESPushOutbox, MESMeasurementIngestion, MESScrapRecord
 from app.models.spc import InspectionCharacteristic
 from app.services.mes_service import MESSyncService, MESPushService, MESIngestionService
 from app.services.mes_connector import MockMESConnector
@@ -3253,12 +3254,15 @@ async def admin_user():
 
 @pytest.fixture
 async def test_connection(admin_user):
-    """创建测试 MES 连接，使用 UUID 保证唯一性，yield 后显式清理。"""
+    """创建测试 MES 连接，使用 UUID 保证唯一性，yield 后显式清理。
+    使用固定 API Key 供 HTTP 路由测试。"""
     suffix = str(uuid.uuid4())[:8]
+    from app.services.mes_crypto import hash_api_key
+    test_api_key = "test-mes-api-key-12345"
     conn = MESConnection(
         name=f"{_TEST_PREFIX}CONN-{suffix}",
         connector_type="mock",
-        config={"auth_config": {"api_key_hash": "dummy"}},
+        config={"auth_config": {"api_key_hash": hash_api_key(test_api_key)}},
         created_by=admin_user.user_id,
         is_active=True,
     )
@@ -3579,27 +3583,42 @@ class TestIdempotentRedelivery:
 
 class TestIngestValidation:
     async def test_ingest_missing_field_returns_400(self, test_connection):
-        """缺失必填字段返回 400（不是 422）。"""
-        from app.database import async_session
-        from app.api.mes import _mes_ingest_adapter
-        from pydantic import ValidationError
+        """缺失必填字段通过 HTTP 调用 /api/mes/ingest 返回 400（不是 422）。"""
+        from httpx import AsyncClient
+        from app.main import app
 
-        # Missing required fields: external_id, defect_type, defect_qty, total_qty
-        payload = {"data_type": "scrap_record"}
-        with pytest.raises(ValidationError):
-            _mes_ingest_adapter.validate_python(payload)
+        async with AsyncClient(app=app, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/mes/ingest",
+                headers={"X-API-Key": "test-mes-api-key-12345"},
+                json={"data_type": "scrap_record"},  # missing external_id, defect_type, etc.
+            )
+            assert resp.status_code == 400
+            body = resp.json()
+            assert "detail" in body
+            # Verify loc points to missing fields
+            locs = [err.get("loc", []) for err in body["detail"]]
+            assert any("external_id" in loc for loc in locs)
 
     async def test_ingest_unknown_data_type_returns_400(self, test_connection):
-        """未知 data_type 在 service 层抛出 ValueError，路由返回 400。"""
-        from app.database import async_session
+        """未知 data_type 通过 HTTP 调用返回 400。"""
+        from httpx import AsyncClient
+        from app.main import app
 
-        async with async_session() as db:
-            with pytest.raises(ValueError, match="Unknown data_type"):
-                await MESIngestionService.ingest(db, {
-                    "connection_id": test_connection.connection_id,
+        async with AsyncClient(app=app, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/mes/ingest",
+                headers={"X-API-Key": "test-mes-api-key-12345"},
+                json={
                     "data_type": "unknown_type",
-                    "product_line_code": test_connection.product_line_code,
-                })
+                    "external_id": "TEST-001",
+                    "defect_type": " scratches",
+                    "defect_qty": 1,
+                    "total_qty": 10,
+                },
+            )
+            assert resp.status_code == 400
+            assert "Unknown data_type" in resp.json().get("detail", "")
 
 
 class TestScrapOrderBackfill:
