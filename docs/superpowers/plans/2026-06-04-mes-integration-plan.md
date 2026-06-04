@@ -31,7 +31,7 @@
 | 3 | RESTMESConnector 全 TODO | 完整 HTTP 实现：配置驱动 + 分页 + 字段映射 + 重试 |
 | 4 | API Key 认证是 TODO 占位 | 完整 SHA-256 hash 验证 + Fernet 加密 + 响应脱敏 + /test 端点 |
 | 5 | 测量 ingestion 无法原子回滚 | 调用 `_create_sample_batch_inner`（仅 flush）替代 `add_sample_batch`（内部 commit），同一事务完成 ingestion + SPC + 回填 |
-| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 23 个并发场景 |
+| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 25 个并发场景 |
 | 7 | 修改已执行 028 迁移 | 在 **新迁移 030** 末尾插入 MES 权限，不动 028 |
 | 8 | 查询未产品线隔离 + 凭证泄漏 | 查询 API 按 `product_line_code` 过滤；ConnectionOut 脱敏 `config.auth_config` 敏感字段 |
 | 9 | 前端独立 axios 实例 | 复用现有 `client` 实例（已含 JWT 拦截器） |
@@ -514,6 +514,7 @@ class MESProductionOrderArchive(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 ```
@@ -2380,19 +2381,26 @@ async def list_mes_connections(
 
 
 def _validate_rest_config(connector_type: str, config: dict) -> None:
-    """校验 REST connector 配置完整性。connector_type != 'rest' 时直接通过。"""
+    """校验 REST connector 配置完整性。connector_type != 'rest' 时直接通过。
+
+    对所有嵌套结构做 isinstance 校验，防止畸形 JSON 触发 AttributeError → 500。
+    """
     if connector_type != "rest":
         return
 
-    # base_url
+    # base_url must be string
     base_url = config.get("base_url", "")
-    if not base_url or not base_url.startswith(("http://", "https://")):
+    if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
         raise HTTPException(
             status_code=400, detail="REST connector config must include a valid 'base_url' (http:// or https://)"
         )
 
-    # required endpoints
+    # required endpoints must be a dict
     endpoints = config.get("endpoints", {})
+    if not isinstance(endpoints, dict):
+        raise HTTPException(
+            status_code=400, detail="REST connector 'endpoints' must be an object"
+        )
     required = {"production_orders", "equipment_status", "scrap_records", "measurements"}
     missing = required - set(endpoints.keys())
     if missing:
@@ -2400,23 +2408,33 @@ def _validate_rest_config(connector_type: str, config: dict) -> None:
             status_code=400, detail=f"REST connector missing endpoints: {sorted(missing)}"
         )
 
-    # non-empty path for each endpoint
+    # each endpoint must be a dict with non-empty path
     for name in required:
-        path = endpoints[name].get("path", "")
-        if not path:
+        ep = endpoints[name]
+        if not isinstance(ep, dict):
+            raise HTTPException(
+                status_code=400, detail=f"REST endpoint '{name}' must be an object"
+            )
+        path = ep.get("path", "")
+        if not isinstance(path, str) or not path:
             raise HTTPException(
                 status_code=400, detail=f"REST endpoint '{name}' must have a non-empty 'path'"
             )
 
-    # production_orders cursor_field for incremental sync
-    po_cursor = endpoints.get("production_orders", {}).get("cursor_field")
-    if not po_cursor:
-        raise HTTPException(
-            status_code=400, detail="REST endpoint 'production_orders' must define 'cursor_field' for incremental sync"
-        )
+    # cursor_field for incremental sync endpoints (equipment_status is full snapshot, no checkpoint)
+    for name in ("production_orders", "scrap_records", "measurements"):
+        cursor = endpoints[name].get("cursor_field")
+        if not cursor:
+            raise HTTPException(
+                status_code=400, detail=f"REST endpoint '{name}' must define 'cursor_field' for incremental sync"
+            )
 
-    # field_mapping source_updated_at
+    # field_mapping must be a dict with source_updated_at
     field_mapping = config.get("field_mapping", {})
+    if not isinstance(field_mapping, dict):
+        raise HTTPException(
+            status_code=400, detail="REST connector 'field_mapping' must be an object"
+        )
     if "source_updated_at" not in field_mapping:
         raise HTTPException(
             status_code=400, detail="REST connector field_mapping must include 'source_updated_at'"
@@ -3385,6 +3403,7 @@ from app.models.mes import MESConnection, MESSyncJob, MESPushOutbox, MESMeasurem
 from app.models.spc import InspectionCharacteristic
 from app.services.mes_service import MESSyncService, MESPushService, MESIngestionService
 from app.services.mes_connector import MockMESConnector
+from app.core.security import create_access_token
 
 
 # Test data prefix for cleanup isolation
@@ -4038,11 +4057,12 @@ class TestRESTConfigValidation:
         from httpx import AsyncClient, ASGITransport
         from app.main import app
 
+        token = create_access_token(str(admin_user.user_id))
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/api/mes/connections",
-                headers={"Authorization": "Bearer test-admin-token"},
+                headers={"Authorization": f"Bearer {token}"},
                 json={
                     "name": "TEST-REST-BAD",
                     "connector_type": "rest",
@@ -4050,9 +4070,9 @@ class TestRESTConfigValidation:
                         "base_url": "https://mes.example.com",
                         "endpoints": {
                             "production_orders": {"path": "/orders", "cursor_field": "updated_since"},
-                            "equipment_status": {"path": "/equipment"},
-                            "scrap_records": {"path": "/scrap"},
-                            "measurements": {"path": "/measurements"},
+                            "equipment_status": {"path": "/equipment", "cursor_field": "since"},
+                            "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                            "measurements": {"path": "/measurements", "cursor_field": "since"},
                         },
                         "field_mapping": {},  # missing source_updated_at
                     },
@@ -4077,26 +4097,27 @@ class TestRESTConfigValidation:
                 "endpoints": {
                     "production_orders": {"path": "/orders", "cursor_field": "since"},
                     "equipment_status": {"path": "/equipment"},
-                    "scrap_records": {"path": "/scrap"},
-                    "measurements": {"path": "/measurements"},
+                    "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                    "measurements": {"path": "/measurements", "cursor_field": "since"},
                 },
                 "field_mapping": {"source_updated_at": "updated_at"},
             }
             await db.commit()
 
+        token = create_access_token(str(test_connection.created_by))
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.put(
                 f"/api/mes/connections/{test_connection.connection_id}",
-                headers={"Authorization": "Bearer test-admin-token"},
+                headers={"Authorization": f"Bearer {token}"},
                 json={
                     "config": {
                         "base_url": "https://mes.example.com",
                         "endpoints": {
                             "production_orders": {"path": "/orders", "cursor_field": "since"},
                             "equipment_status": {"path": "/equipment"},
-                            "scrap_records": {"path": "/scrap"},
-                            "measurements": {"path": "/measurements"},
+                            "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                            "measurements": {"path": "/measurements", "cursor_field": "since"},
                         },
                         "field_mapping": {},  # removed source_updated_at
                     },
@@ -4110,11 +4131,12 @@ class TestRESTConfigValidation:
         from httpx import AsyncClient, ASGITransport
         from app.main import app
 
+        token = create_access_token(str(admin_user.user_id))
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/api/mes/connections",
-                headers={"Authorization": "Bearer test-admin-token"},
+                headers={"Authorization": f"Bearer {token}"},
                 json={
                     "name": "TEST-REST-NO-EP",
                     "connector_type": "rest",
@@ -4137,11 +4159,12 @@ class TestRESTConfigValidation:
         from httpx import AsyncClient, ASGITransport
         from app.main import app
 
+        token = create_access_token(str(admin_user.user_id))
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/api/mes/connections",
-                headers={"Authorization": "Bearer test-admin-token"},
+                headers={"Authorization": f"Bearer {token}"},
                 json={
                     "name": "TEST-REST-NO-URL",
                     "connector_type": "rest",
@@ -4149,9 +4172,9 @@ class TestRESTConfigValidation:
                         "base_url": "",
                         "endpoints": {
                             "production_orders": {"path": "/orders", "cursor_field": "since"},
-                            "equipment_status": {"path": "/equipment"},
-                            "scrap_records": {"path": "/scrap"},
-                            "measurements": {"path": "/measurements"},
+                            "equipment_status": {"path": "/equipment", "cursor_field": "since"},
+                            "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                            "measurements": {"path": "/measurements", "cursor_field": "since"},
                         },
                         "field_mapping": {"source_updated_at": "updated_at"},
                     },
@@ -4161,11 +4184,66 @@ class TestRESTConfigValidation:
             assert resp.status_code == 400
             assert "base_url" in resp.json().get("detail", "")
 
+    async def test_create_rest_malformed_endpoints_returns_400(self, admin_user):
+        """传入非对象 endpoints 返回 400（非 500）。"""
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+
+        token = create_access_token(str(admin_user.user_id))
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/mes/connections",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "name": "TEST-REST-BAD-EP",
+                    "connector_type": "rest",
+                    "config": {
+                        "base_url": "https://mes.example.com",
+                        "endpoints": [],  # array instead of object
+                        "field_mapping": {"source_updated_at": "updated_at"},
+                    },
+                    "product_line_code": "DC-DC-100",
+                },
+            )
+            assert resp.status_code == 400
+            assert "endpoints" in resp.json().get("detail", "")
+
+    async def test_create_rest_malformed_field_mapping_returns_400(self, admin_user):
+        """传入非对象 field_mapping 返回 400（非 500）。"""
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+
+        token = create_access_token(str(admin_user.user_id))
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/mes/connections",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "name": "TEST-REST-BAD-FM",
+                    "connector_type": "rest",
+                    "config": {
+                        "base_url": "https://mes.example.com",
+                        "endpoints": {
+                            "production_orders": {"path": "/orders", "cursor_field": "since"},
+                            "equipment_status": {"path": "/equipment", "cursor_field": "since"},
+                            "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                            "measurements": {"path": "/measurements", "cursor_field": "since"},
+                        },
+                        "field_mapping": "bad",  # string instead of object
+                    },
+                    "product_line_code": "DC-DC-100",
+                },
+            )
+            assert resp.status_code == 400
+            assert "field_mapping" in resp.json().get("detail", "")
+
 - [ ] **Step 2: Commit**
 
 ```bash
 git add backend/tests/test_mes_concurrency.py
-git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (23 cases)
+git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (25 cases)
 
 - Dual worker claim once (sync job + outbox)
 - Running job timeout recovery (>10min)
@@ -4186,7 +4264,11 @@ git commit -m "test(mes): add automated concurrency tests for sync, outbox, and 
 - REST config validation: missing source_updated_at → 400
 - REST config validation: update removes mapping → 400
 - REST config validation: missing endpoint → 400
-- REST config validation: empty base_url → 400"
+- REST config validation: empty base_url → 400
+- REST config validation: malformed endpoints (array) → 400
+- REST config validation: malformed field_mapping (string) → 400
+- REST config API tests use real JWT tokens (not hardcoded)
+- All incremental endpoints require cursor_field (po, scrap, measurements)"
 ```
 
 ---
@@ -4279,11 +4361,11 @@ class MESLifecycleService:
             INSERT INTO mes_production_orders_archive
                 (order_id, connection_id, order_no, product_model, process_route,
                  planned_qty, actual_qty, status, started_at, completed_at,
-                 product_line_code, archived_at)
+                 source_updated_at, product_line_code, archived_at)
             SELECT
                 order_id, connection_id, order_no, product_model, process_route,
                 planned_qty, actual_qty, status, started_at, completed_at,
-                product_line_code, NOW()
+                source_updated_at, product_line_code, NOW()
             FROM mes_production_orders
             WHERE status = 'closed' AND completed_at < :cutoff
             ON CONFLICT (order_id) DO NOTHING
@@ -4388,7 +4470,7 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 | 前端复用现有 client 实例 | Task 15 | ✅ |
 | 前端 4 个页面完整实现 | Task 16 | ✅ |
 | 前端 4 个路由 + 侧边栏菜单 | Task 17 | ✅ |
-| test_mes_concurrency.py 23 场景 | Task 18 | ✅ |
+| test_mes_concurrency.py 25 场景 | Task 18 | ✅ |
 | 生命周期清理任务 | Task 19 | ✅ |
 | mes_scrap_monthly_summary 表 | Task 1 | ✅ |
 | mes_production_orders_archive 表 | Task 1 | ✅ |
