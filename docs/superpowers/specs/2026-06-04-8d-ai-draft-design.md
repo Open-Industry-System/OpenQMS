@@ -21,7 +21,7 @@
 | 格式偏好存储 | 前端 localStorage |
 | LLM 调用 | 复用现有 `LLMProvider` |
 | 重试策略 | 用户手动重试（取消自动重试） |
-| 超时 | 后端 `asyncio.wait_for()` 5s（与现有 `LLM_TIMEOUT=5` 一致） |
+| 超时 | 后端 `asyncio.wait_for()` 15s（草拟服务独立超时，不依赖全局 `LLM_TIMEOUT=5`） |
 
 ---
 
@@ -52,7 +52,6 @@
 | 文件 | 作用 |
 |------|------|
 | `backend/app/services/capa_draft_service.py` | 核心草稿服务 |
-| `backend/app/api/capa_draft.py` | API 路由 |
 | `backend/app/schemas/capa_draft.py` | Pydantic schema（含输出校验模型） |
 | `frontend/src/api/capaDraft.ts` | 前端 API 调用 |
 | `frontend/src/components/capa/AIDraftButton.tsx` | 按钮组件 |
@@ -210,6 +209,11 @@ require_permission(Module.FMEA, PermissionLevel.VIEW)
 【关联 FMEA 信息】
 {fmea_context}
 
+FMEA 上下文提取规则：
+1. 已关联 FMEA 且有 fmea_node_id：提取该节点及其直接相连的失效模式、失效原因名称，格式为"已关联 FMEA 节点 [{node_name}]，其关联根因为 [{cause_name}]"
+2. 已关联 FMEA 但无 fmea_node_id：提取该 FMEA 中 severity 最高的前 3 个失效模式名称
+3. 未关联 FMEA：输出"（未关联 FMEA 数据）"
+
 【当前任务】
 请为步骤 {step_name} 草拟草稿内容。
 
@@ -227,15 +231,19 @@ require_permission(Module.FMEA, PermissionLevel.VIEW)
 
 ### 统一输出格式
 
-LLM **始终**返回以下 JSON 结构：
+LLM **始终**返回以下 JSON 结构（包括段落模式）：
 
 ```json
 {
-  "content": "渲染后的文本内容"
+  "content": "渲染后的文本内容",
+  "structured_data": { ... } | null
 }
 ```
 
-结构化模式下，`content` 是后端渲染后的文本；段落模式下，`content` 是连贯段落文本。
+- 结构化模式：`content` 为后端渲染后的文本，`structured_data` 为结构化数据对象
+- 段落模式：`content` 为连贯段落文本，`structured_data` 为 `null`
+
+> 段落模式的 prompt 仍然要求输出完整 JSON（含 `content` 字段），而非纯文本，以兼容现有 `LLMProvider` 的 `json.loads()` 解析逻辑。
 
 ### 各步骤 JSON Schema
 
@@ -275,6 +283,16 @@ LLM **始终**返回以下 JSON 结构：
     "verification_method": "建议验证方法"
   }
 }
+```
+
+渲染格式：
+```
+临时遏制措施：
+1. 【措施】{action} | 【负责人】{responsible} | 【完成期限】{deadline}
+2. 【措施】...
+
+验证方法：
+{verification_method}
 ```
 
 #### D4 根因分析
@@ -319,6 +337,13 @@ LLM **始终**返回以下 JSON 结构：
 }
 ```
 
+渲染格式：
+```
+纠正与永久预防性措施：
+1. 【措施】{action} | 【针对根因】{target_root_cause} | 【负责人】{responsible} | 【完成期限】{deadline}
+2. 【措施】...
+```
+
 #### D6 实施验证
 
 ```json
@@ -329,6 +354,17 @@ LLM **始终**返回以下 JSON 结构：
     "evidence_checklist": ["证据项1", "证据项2"]
   }
 }
+```
+
+渲染格式：
+```
+验证方法：
+{verification_plan}
+
+证据清单：
+- {evidence_checklist[0]}
+- {evidence_checklist[1]}
+...
 ```
 
 > ⚠️ **禁止生成**：verification_result（验证结果）、effectiveness_proof（有效性结论）。
@@ -348,6 +384,19 @@ LLM **始终**返回以下 JSON 结构：
 }
 ```
 
+渲染格式：
+```
+预防复发措施：
+1. 【预防措施】{action} | 【实施计划】{implementation_plan}
+2. 【预防措施】...
+
+标准化计划：
+{standardization_plan}
+
+培训计划：
+{training_plan}
+```
+
 #### D8 关闭
 
 ```json
@@ -358,6 +407,15 @@ LLM **始终**返回以下 JSON 结构：
     "lessons_learned": "经验教训草稿"
   }
 }
+```
+
+渲染格式：
+```
+处理过程总结：
+{summary}
+
+经验教训：
+{lessons_learned}
 ```
 
 > ⚠️ **禁止生成**：closure_approval（关闭审批意见）。
