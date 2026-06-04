@@ -1474,9 +1474,24 @@ git commit -m "feat(frontend): integrate AI draft into CAPADetailPage"
 ## Task 10: 前端测试
 
 **Files:**
+- Modify: `frontend/package.json`
 - Create: `frontend/src/components/capa/useAIDraft.test.ts`
 
-- [ ] **Step 1: 编写 Hook 测试**
+- [ ] **Step 1: 安装测试依赖**
+
+```bash
+cd frontend
+npm install --save-dev @testing-library/react @testing-library/jest-dom
+```
+
+在 `frontend/package.json` 的 `devDependencies` 中添加：
+
+```json
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+```
+
+- [ ] **Step 2: 编写 Hook 测试**
 
 ```typescript
 // frontend/src/components/capa/useAIDraft.test.ts
@@ -1571,11 +1586,11 @@ describe("useAIDraft", () => {
 });
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/src/components/capa/useAIDraft.test.ts
-git commit -m "test(frontend): add useAIDraft hook tests"
+git add frontend/package.json frontend/src/components/capa/useAIDraft.test.ts
+git commit -m "test(frontend): add useAIDraft hook tests with @testing-library/react"
 ```
 
 ---
@@ -1590,10 +1605,13 @@ git commit -m "test(frontend): add useAIDraft hook tests"
 
 ```python
 # backend/tests/test_capa_draft_service.py
+import time
 import uuid
 import pytest
+from fastapi import HTTPException
 from unittest.mock import AsyncMock, MagicMock
 
+from app.config import settings
 from app.schemas.capa_draft import DraftRequest, STEP_SCHEMA_MAP
 from app.services.capa_draft_service import (
     generate_draft,
@@ -1701,16 +1719,14 @@ class TestPreconditions:
 class TestGenerateDraft:
     @pytest.mark.asyncio
     async def test_draft_success_with_mock_llm(self, monkeypatch):
-        from app.services.capa_draft_service import generate_draft
-
         # Mock CAPA
         capa = MagicMock()
         capa.report_id = uuid.uuid4()
         capa.status = "D2_DESCRIPTION"
-        capa.title = "Test"
+        capa.title = "测试报告标题"
         capa.document_no = "8D-2026-001"
         capa.product_line_code = "DC-DC-100"
-        capa.d2_description = "问题描述内容"
+        capa.d2_description = ""  # D2 不检查自己的前置内容
         capa.fmea_ref_id = None
         capa.fmea_node_id = None
 
@@ -1718,7 +1734,8 @@ class TestGenerateDraft:
         db = MagicMock()
         db.get = AsyncMock(return_value=capa)
         db.commit = AsyncMock()
-        db.add = AsyncMock()
+        db.rollback = AsyncMock()
+        # db.add 是同步调用，不需要 AsyncMock
 
         # Mock user
         user = MagicMock()
@@ -1754,18 +1771,35 @@ class TestGenerateDraft:
 
     @pytest.mark.asyncio
     async def test_draft_rate_limit(self, monkeypatch):
-        from app.services.capa_draft_service import generate_draft, _rate_limit, RATE_LIMIT_PER_MIN
-
+        # 预填限流计数器到上限
         user_id = str(uuid.uuid4())
         now = time.time()
         _rate_limit[user_id] = [now] * RATE_LIMIT_PER_MIN
 
+        # Mock CAPA（确保能走到限流检查，不被 404/409 拦截）
+        capa = MagicMock()
+        capa.status = "D2_DESCRIPTION"
+        capa.title = "测试报告标题"
+        capa.product_line_code = "DC-DC-100"
+        capa.fmea_ref_id = None
+        capa.fmea_node_id = None
+
         db = MagicMock()
-        db.get = AsyncMock(return_value=None)
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
 
         user = MagicMock()
         user.user_id = uuid.UUID(user_id)
         user.role_definition.bypass_row_level_security = True
+
+        # Mock enforce_product_line_access 避免权限检查失败
+        async def mock_enforce(*args, **kwargs):
+            pass
+        monkeypatch.setattr(
+            "app.services.capa_draft_service.enforce_product_line_access",
+            mock_enforce,
+        )
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
@@ -1776,8 +1810,6 @@ class TestGenerateDraft:
 
     @pytest.mark.asyncio
     async def test_draft_invalid_request_id(self):
-        from app.services.capa_draft_service import generate_draft
-
         db = MagicMock()
         user = MagicMock()
         user.role_definition.bypass_row_level_security = True
@@ -1785,7 +1817,259 @@ class TestGenerateDraft:
         with pytest.raises(HTTPException) as exc:
             await generate_draft(db, uuid.uuid4(), "d2", req, user, MagicMock())
         assert exc.value.status_code == 400
-```
+
+    @pytest.mark.asyncio
+    async def test_draft_timeout_returns_504(self, monkeypatch):
+        import asyncio
+        from app.services import capa_draft_service
+
+        # 设置极短超时
+        monkeypatch.setattr(settings, "CAPA_DRAFT_LLM_TIMEOUT", 0.01)
+
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "D2_DESCRIPTION"
+        capa.title = "测试报告标题"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = ""
+        capa.fmea_ref_id = None
+        capa.fmea_node_id = None
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
+        user.role_definition.bypass_row_level_security = True
+
+        # 模拟 LLM 延迟响应（超过 0.01s 超时）
+        request = MagicMock()
+        llm_provider = MagicMock()
+        async def slow_complete(*args, **kwargs):
+            await asyncio.sleep(1)
+            return {}
+        llm_provider.complete = slow_complete
+        request.app.state.llm_provider = llm_provider
+
+        async def mock_enforce(*args, **kwargs):
+            pass
+        monkeypatch.setattr(capa_draft_service.enforce_product_line_access, mock_enforce)
+
+        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        with pytest.raises(HTTPException) as exc:
+            await generate_draft(db, capa.report_id, "d2", req, user, request)
+        assert exc.value.status_code == 504
+        assert "超时" in exc.value.detail
+
+    @pytest.mark.asyncio
+    async def test_draft_cache_hit_returns_cached(self, monkeypatch):
+        from app.services import capa_draft_service
+
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "D2_DESCRIPTION"
+        capa.title = "测试报告标题"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = ""
+        capa.fmea_ref_id = None
+        capa.fmea_node_id = None
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
+        user.role_definition.bypass_row_level_security = True
+
+        request = MagicMock()
+        llm_provider = MagicMock()
+        llm_provider.complete = AsyncMock(return_value={
+            "structured_data": {
+                "problem_statement": "测试",
+                "affected_product": "DC-DC-100",
+                "defect_description": "描述",
+                "occurrence_context": "场景",
+                "impact_scope": "范围",
+            }
+        })
+        request.app.state.llm_provider = llm_provider
+
+        async def mock_enforce(*args, **kwargs):
+            pass
+        monkeypatch.setattr(capa_draft_service.enforce_product_line_access, mock_enforce)
+
+        request_id = str(uuid.uuid4())
+        req = DraftRequest(format="structured", request_id=request_id)
+
+        # 第一次调用：正常 LLM
+        result1 = await generate_draft(db, capa.report_id, "d2", req, user, request)
+        assert llm_provider.complete.call_count == 1
+
+        # 第二次调用：同 request_id，应命中缓存
+        result2 = await generate_draft(db, capa.report_id, "d2", req, user, request)
+        assert result2 == result1
+        assert llm_provider.complete.call_count == 1  # 未再调用 LLM
+
+        # 清理缓存
+        capa_draft_service._draft_cache.clear()
+
+    @pytest.mark.asyncio
+    async def test_draft_cache_isolation_different_users(self, monkeypatch):
+        from app.services import capa_draft_service
+
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "D2_DESCRIPTION"
+        capa.title = "测试报告标题"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = ""
+        capa.fmea_ref_id = None
+        capa.fmea_node_id = None
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+
+        request = MagicMock()
+        llm_provider = MagicMock()
+        llm_provider.complete = AsyncMock(return_value={
+            "structured_data": {
+                "problem_statement": "测试",
+                "affected_product": "DC-DC-100",
+                "defect_description": "描述",
+                "occurrence_context": "场景",
+                "impact_scope": "范围",
+            }
+        })
+        request.app.state.llm_provider = llm_provider
+
+        async def mock_enforce(*args, **kwargs):
+            pass
+        monkeypatch.setattr(capa_draft_service.enforce_product_line_access, mock_enforce)
+
+        request_id = str(uuid.uuid4())
+        req = DraftRequest(format="structured", request_id=request_id)
+
+        # 用户 A 调用
+        user_a = MagicMock()
+        user_a.user_id = uuid.uuid4()
+        user_a.role_definition.bypass_row_level_security = True
+        await generate_draft(db, capa.report_id, "d2", req, user_a, request)
+
+        # 用户 B 同 request_id，不应命中用户 A 的缓存
+        user_b = MagicMock()
+        user_b.user_id = uuid.uuid4()
+        user_b.role_definition.bypass_row_level_security = True
+        await generate_draft(db, capa.report_id, "d2", req, user_b, request)
+        assert llm_provider.complete.call_count == 2  # 两次都调用了 LLM
+
+        capa_draft_service._draft_cache.clear()
+
+    @pytest.mark.asyncio
+    async def test_draft_precondition_d3_requires_d2(self, monkeypatch):
+        from app.services import capa_draft_service
+
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "D3_INTERIM"
+        capa.title = "测试报告标题"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = ""  # 空的 d2_description
+        capa.fmea_ref_id = None
+        capa.fmea_node_id = None
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
+        user.role_definition.bypass_row_level_security = True
+
+        async def mock_enforce(*args, **kwargs):
+            pass
+        monkeypatch.setattr(capa_draft_service.enforce_product_line_access, mock_enforce)
+
+        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        with pytest.raises(HTTPException) as exc:
+            await generate_draft(db, capa.report_id, "d3", req, user, MagicMock())
+        assert exc.value.status_code == 409
+        assert "d2_description" in exc.value.detail
+
+    @pytest.mark.asyncio
+    async def test_draft_audit_log_called(self, monkeypatch):
+        from app.services import capa_draft_service
+
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "D2_DESCRIPTION"
+        capa.title = "测试报告标题"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = ""
+        capa.fmea_ref_id = None
+        capa.fmea_node_id = None
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
+        user.role_definition.bypass_row_level_security = True
+
+        request = MagicMock()
+        llm_provider = MagicMock()
+        llm_provider.complete = AsyncMock(return_value={
+            "structured_data": {
+                "problem_statement": "测试",
+                "affected_product": "DC-DC-100",
+                "defect_description": "描述",
+                "occurrence_context": "场景",
+                "impact_scope": "范围",
+            }
+        })
+        request.app.state.llm_provider = llm_provider
+
+        async def mock_enforce(*args, **kwargs):
+            pass
+        monkeypatch.setattr(capa_draft_service.enforce_product_line_access, mock_enforce)
+
+        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        await generate_draft(db, capa.report_id, "d2", req, user, request)
+
+        # 验证审计日志被记录
+        assert db.add.called
+        audit_log = db.add.call_args[0][0]
+        assert audit_log.action == "AI_DRAFT"
+        assert audit_log.changed_fields["step"] == "d2"
+        assert audit_log.changed_fields["success"] is True
+        assert audit_log.changed_fields["cache_hit"] is False
+        assert audit_log.operated_by == user.user_id
+
+        capa_draft_service._draft_cache.clear()
+
+    def test_prompt_does_not_leak_created_by(self):
+        capa = MagicMock()
+        capa.document_no = "8D-2026-001"
+        capa.title = "测试报告标题"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = ""
+        capa.fmea_ref_id = None
+        capa.fmea_node_id = None
+
+        prompt = _build_prompt(capa, "d2", "structured", "（未关联 FMEA 数据）")
+        assert "created_by" not in prompt
+        assert "fmea_ref_id" not in prompt
 
 - [ ] **Step 2: 编写 API 层测试（使用 dependency_overrides 注入认证）**
 
@@ -1876,13 +2160,12 @@ class TestDraftEndpoint:
             assert resp.status_code == 404
 
     async def test_draft_archived_returns_409(self, auth_override, monkeypatch):
-        from app.services import capa_draft_service
         from fastapi import HTTPException
 
         async def mock_generate(*args, **kwargs):
             raise HTTPException(status_code=409, detail="报告已归档，禁止 AI 草拟")
 
-        monkeypatch.setattr(capa_draft_service, "generate_draft", mock_generate)
+        monkeypatch.setattr("app.api.capa.generate_draft", mock_generate)
         async with AsyncClient(app=app, base_url="http://test") as ac:
             resp = await ac.post(
                 f"/api/capa/{uuid.uuid4()}/draft/d2",
@@ -1892,13 +2175,12 @@ class TestDraftEndpoint:
             assert "归档" in resp.json()["detail"]
 
     async def test_draft_wrong_step_returns_409(self, auth_override, monkeypatch):
-        from app.services import capa_draft_service
         from fastapi import HTTPException
 
         async def mock_generate(*args, **kwargs):
             raise HTTPException(status_code=409, detail="当前步骤为 d3，无法草拟 d2")
 
-        monkeypatch.setattr(capa_draft_service, "generate_draft", mock_generate)
+        monkeypatch.setattr("app.api.capa.generate_draft", mock_generate)
         async with AsyncClient(app=app, base_url="http://test") as ac:
             resp = await ac.post(
                 f"/api/capa/{uuid.uuid4()}/draft/d2",
@@ -1917,7 +2199,7 @@ git commit -m "test: add capa_draft service and API tests with precise assertion
 
 ---
 
-## Task 11: 验证
+## Task 12: 验证
 
 **Files:**
 - 运行: 后端和前端构建/类型检查
