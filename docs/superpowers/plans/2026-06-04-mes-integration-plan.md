@@ -210,6 +210,10 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.UniqueConstraint('connection_id', 'data_type', name='uq_mes_sync_job'),
     )
+    op.create_index(
+        'ix_mes_sync_jobs_status_next_run', 'mes_sync_jobs',
+        ['status', 'next_run_at']
+    )
 
     # mes_push_outbox
     op.create_table(
@@ -226,6 +230,10 @@ def upgrade():
         sa.Column('last_error', sa.Text, nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('sent_at', sa.DateTime(timezone=True), nullable=True),
+    )
+    op.create_index(
+        'ix_mes_push_outbox_status_next_retry', 'mes_push_outbox',
+        ['status', 'next_retry_at']
     )
 
     # mes_scrap_monthly_summary — 报废月度聚合摘要
@@ -284,7 +292,9 @@ def downgrade():
     op.execute("DELETE FROM role_permissions WHERE module = 'mes'")
     op.drop_table('mes_production_orders_archive')
     op.drop_table('mes_scrap_monthly_summary')
+    op.drop_index('ix_mes_push_outbox_status_next_retry', table_name='mes_push_outbox')
     op.drop_table('mes_push_outbox')
+    op.drop_index('ix_mes_sync_jobs_status_next_run', table_name='mes_sync_jobs')
     op.drop_table('mes_sync_jobs')
     op.drop_table('mes_measurement_ingestions')
     op.drop_table('mes_scrap_records')
@@ -326,7 +336,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, Numeric, Boolean, func, UniqueConstraint
+from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, Numeric, Boolean, func, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -426,7 +436,10 @@ class MESMeasurementIngestion(Base):
 
 class MESSyncJob(Base):
     __tablename__ = "mes_sync_jobs"
-    __table_args__ = (UniqueConstraint('connection_id', 'data_type', name='uq_mes_sync_job'),)
+    __table_args__ = (
+        UniqueConstraint('connection_id', 'data_type', name='uq_mes_sync_job'),
+        Index('ix_mes_sync_jobs_status_next_run', 'status', 'next_run_at'),
+    )
 
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
@@ -445,6 +458,9 @@ class MESSyncJob(Base):
 
 class MESPushOutbox(Base):
     __tablename__ = "mes_push_outbox"
+    __table_args__ = (
+        Index('ix_mes_push_outbox_status_next_retry', 'status', 'next_retry_at'),
+    )
 
     outbox_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -621,7 +637,7 @@ from typing import Literal
 
 
 class MESIngestBase(BaseModel):
-    connection_id: uuid.UUID
+    """Inbound ingestion base — connection_id is injected by API key auth, not client."""
     raw_data: Optional[dict] = None
 
 
@@ -633,7 +649,7 @@ class MESIngestMeasurement(MESIngestBase):
     values: list[float]
     sampled_at: Optional[datetime] = None
     batch_no: Optional[str] = None
-    product_line_code: Optional[str] = None
+    product_line_code: Optional[str] = None  # ignored; enforced from connection
 
 
 class MESIngestProductionOrder(MESIngestBase):
@@ -646,7 +662,7 @@ class MESIngestProductionOrder(MESIngestBase):
     status: str = "planned"
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    product_line_code: Optional[str] = None
+    product_line_code: Optional[str] = None  # ignored; enforced from connection
 
 
 class MESIngestEquipmentStatus(MESIngestBase):
@@ -1576,10 +1592,11 @@ class MESSyncService:
     MAX_FAILURES = 3
 
     @staticmethod
-    async def claim_jobs(db: AsyncSession) -> list[MESSyncJob]:
-        """阶段 1 — 领取 job（短事务，调用方需 commit）。"""
+    async def claim_jobs(db: AsyncSession, connection_id: uuid.UUID | None = None) -> list[MESSyncJob]:
+        """阶段 1 — 领取 job（短事务，调用方需 commit）。
+        connection_id 可选，用于测试隔离。"""
         from sqlalchemy import text
-        result = await db.execute(
+        stmt = (
             select(MESSyncJob)
             .join(MESConnection, MESSyncJob.connection_id == MESConnection.connection_id)
             .where(MESConnection.is_active == True)
@@ -1587,8 +1604,10 @@ class MESSyncService:
                 (MESSyncJob.status.in_(["pending", "failed"]))
                 | ((MESSyncJob.status == "completed") & (MESSyncJob.next_run_at <= datetime.now(timezone.utc)))
             )
-            .with_for_update(skip_locked=True)
         )
+        if connection_id:
+            stmt = stmt.where(MESSyncJob.connection_id == connection_id)
+        result = await db.execute(stmt.with_for_update(skip_locked=True))
         jobs = result.scalars().all()
         for job in jobs:
             job.status = "running"
@@ -1596,15 +1615,18 @@ class MESSyncService:
         return jobs
 
     @staticmethod
-    async def recover_stuck_jobs(db: AsyncSession) -> int:
-        """超时恢复：running 超过 10 分钟的 job 重置为 failed。返回重置数量。"""
+    async def recover_stuck_jobs(db: AsyncSession, connection_id: uuid.UUID | None = None) -> int:
+        """超时恢复：running 超过 10 分钟的 job 重置为 failed。返回重置数量。
+        connection_id 可选，用于测试隔离。"""
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=MESSyncService.TIMEOUT_MINUTES)
-        result = await db.execute(
+        stmt = (
             select(MESSyncJob)
             .where(MESSyncJob.status == "running")
             .where(MESSyncJob.started_at < cutoff)
-            .with_for_update(skip_locked=True)
         )
+        if connection_id:
+            stmt = stmt.where(MESSyncJob.connection_id == connection_id)
+        result = await db.execute(stmt.with_for_update(skip_locked=True))
         stuck = result.scalars().all()
         for job in stuck:
             job.status = "failed"
@@ -1657,8 +1679,8 @@ class MESSyncService:
             connection = result.scalar_one()
             connector_type = connection.connector_type
             config = dict(connection.config)
-            # Read product_line_code for data enrichment if needed
-            _ = connection.product_line_code
+            # Capture product_line_code for isolation enforcement
+            connection_product_line_code = connection.product_line_code
 
         # ---- Phase 2b: External fetch (NO transaction) ----
         connector = await get_mes_connector_by_config(connector_type, config, db)
@@ -1692,6 +1714,8 @@ class MESSyncService:
 
             for item in data:
                 item["connection_id"] = job.connection_id
+                # Enforce product line isolation: overwrite whatever MES returned
+                item["product_line_code"] = connection_product_line_code
                 if job.data_type == "production_orders":
                     await MESIngestionService._ingest_production_order(write_db, item)
                     ts = item.get("started_at") or item.get("recorded_at")
@@ -1867,15 +1891,18 @@ class MESPushService:
         return outbox
 
     @staticmethod
-    async def recover_stuck_outbox(db: AsyncSession) -> int:
-        """超时恢复：processing 超过 10 分钟重置为 pending。"""
+    async def recover_stuck_outbox(db: AsyncSession, connection_id: uuid.UUID | None = None) -> int:
+        """超时恢复：processing 超过 10 分钟重置为 pending。
+        connection_id 可选，用于测试隔离。"""
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=MESPushService.OUTBOX_TIMEOUT_MINUTES)
-        result = await db.execute(
+        stmt = (
             select(MESPushOutbox)
             .where(MESPushOutbox.status == "processing")
             .where(MESPushOutbox.started_at < cutoff)
-            .with_for_update(skip_locked=True)
         )
+        if connection_id:
+            stmt = stmt.where(MESPushOutbox.connection_id == connection_id)
+        result = await db.execute(stmt.with_for_update(skip_locked=True))
         stuck = result.scalars().all()
         for item in stuck:
             item.status = "pending"
@@ -3227,13 +3254,13 @@ class TestSyncJobConcurrency:
 
         async def worker():
             async with async_session() as wdb:
-                jobs = await MESSyncService.claim_jobs(wdb)
+                jobs = await MESSyncService.claim_jobs(wdb, connection_id=test_connection.connection_id)
                 await wdb.commit()
                 claimed_counts.append(len(jobs))
 
         await asyncio.gather(worker(), worker())
 
-        # Only one worker should have claimed the job
+        # Only one worker should have claimed the job for this connection
         assert sum(claimed_counts) == 1
 
         # Cleanup: reset job to completed
@@ -3257,7 +3284,7 @@ class TestSyncJobConcurrency:
             job_id = job.job_id
 
         async with async_session() as db:
-            count = await MESSyncService.recover_stuck_jobs(db)
+            count = await MESSyncService.recover_stuck_jobs(db, connection_id=test_connection.connection_id)
             await db.commit()
             assert count == 1
             result = await db.execute(select(MESSyncJob).where(MESSyncJob.job_id == job_id))
@@ -3316,12 +3343,13 @@ class TestOutboxConcurrency:
 
         async def worker():
             async with async_session() as wdb:
-                recovered = await MESPushService.recover_stuck_outbox(wdb)
+                recovered = await MESPushService.recover_stuck_outbox(wdb, connection_id=test_connection.connection_id)
                 await wdb.commit()
                 result = await wdb.execute(
                     select(MESPushOutbox)
                     .join(MESConnection, MESPushOutbox.connection_id == MESConnection.connection_id)
                     .where(MESConnection.is_active == True)
+                    .where(MESPushOutbox.connection_id == test_connection.connection_id)
                     .where(MESPushOutbox.status == "pending")
                     .where(MESPushOutbox.next_retry_at <= datetime.now(timezone.utc))
                     .with_for_update(skip_locked=True)
@@ -3351,7 +3379,7 @@ class TestOutboxConcurrency:
             outbox_id = outbox.outbox_id
 
         async with async_session() as db:
-            count = await MESPushService.recover_stuck_outbox(db)
+            count = await MESPushService.recover_stuck_outbox(db, connection_id=test_connection.connection_id)
             await db.commit()
             assert count == 1
             result = await db.execute(select(MESPushOutbox).where(MESPushOutbox.outbox_id == outbox_id))
@@ -3524,69 +3552,69 @@ class MESLifecycleService:
             return {"deleted_equipment_status": 0, "deleted_scrap_records": 0, "aggregated_scrap_rows": 0, "archived_orders": 0}
 
         # 1. Clean old equipment status (>90 days)
-            cutoff_equipment = now - timedelta(days=MESLifecycleService.EQUIPMENT_STATUS_RETENTION_DAYS)
-            result = await db.execute(
-                delete(MESEquipmentStatus).where(MESEquipmentStatus.recorded_at < cutoff_equipment)
-            )
-            deleted_equipment = result.rowcount
+        cutoff_equipment = now - timedelta(days=MESLifecycleService.EQUIPMENT_STATUS_RETENTION_DAYS)
+        result = await db.execute(
+            delete(MESEquipmentStatus).where(MESEquipmentStatus.recorded_at < cutoff_equipment)
+        )
+        deleted_equipment = result.rowcount
 
-            # 2. Aggregate and clean old scrap records (>1 year)
-            cutoff_scrap = now - timedelta(days=MESLifecycleService.SCRAP_RETENTION_DAYS)
+        # 2. Aggregate and clean old scrap records (>1 year)
+        cutoff_scrap = now - timedelta(days=MESLifecycleService.SCRAP_RETENTION_DAYS)
 
-            # Aggregate by month before deletion (COALESCE NULL defect_category to '未知')
-            agg_result = await db.execute(text("""
-                INSERT INTO mes_scrap_monthly_summary
-                    (connection_id, product_line_code, year_month, defect_category,
-                     total_defect_qty, total_total_qty, record_count, created_at)
-                SELECT
-                    connection_id,
-                    COALESCE(product_line_code, '__none__'),
-                    TO_CHAR(recorded_at, 'YYYY-MM'),
-                    COALESCE(defect_category, '未知'),
-                    SUM(defect_qty),
-                    SUM(total_qty),
-                    COUNT(*),
-                    NOW()
-                FROM mes_scrap_records
-                WHERE recorded_at < :cutoff
-                GROUP BY connection_id, COALESCE(product_line_code, '__none__'),
-                         TO_CHAR(recorded_at, 'YYYY-MM'),
-                         COALESCE(defect_category, '未知')
-                ON CONFLICT (connection_id, product_line_code, year_month, defect_category)
-                DO UPDATE SET
-                    total_defect_qty = mes_scrap_monthly_summary.total_defect_qty + EXCLUDED.total_defect_qty,
-                    total_total_qty = mes_scrap_monthly_summary.total_total_qty + EXCLUDED.total_total_qty,
-                    record_count = mes_scrap_monthly_summary.record_count + EXCLUDED.record_count
-            """), {"cutoff": cutoff_scrap})
-            aggregated_scrap_rows = agg_result.rowcount
+        # Aggregate by month before deletion (COALESCE NULL defect_category to '未知')
+        agg_result = await db.execute(text("""
+            INSERT INTO mes_scrap_monthly_summary
+                (connection_id, product_line_code, year_month, defect_category,
+                 total_defect_qty, total_total_qty, record_count, created_at)
+            SELECT
+                connection_id,
+                COALESCE(product_line_code, '__none__'),
+                TO_CHAR(recorded_at, 'YYYY-MM'),
+                COALESCE(defect_category, '未知'),
+                SUM(defect_qty),
+                SUM(total_qty),
+                COUNT(*),
+                NOW()
+            FROM mes_scrap_records
+            WHERE recorded_at < :cutoff
+            GROUP BY connection_id, COALESCE(product_line_code, '__none__'),
+                     TO_CHAR(recorded_at, 'YYYY-MM'),
+                     COALESCE(defect_category, '未知')
+            ON CONFLICT (connection_id, product_line_code, year_month, defect_category)
+            DO UPDATE SET
+                total_defect_qty = mes_scrap_monthly_summary.total_defect_qty + EXCLUDED.total_defect_qty,
+                total_total_qty = mes_scrap_monthly_summary.total_total_qty + EXCLUDED.total_total_qty,
+                record_count = mes_scrap_monthly_summary.record_count + EXCLUDED.record_count
+        """), {"cutoff": cutoff_scrap})
+        aggregated_scrap_rows = agg_result.rowcount
 
-            result = await db.execute(
-                delete(MESScrapRecord).where(MESScrapRecord.recorded_at < cutoff_scrap)
-            )
-            deleted_scrap = result.rowcount
+        result = await db.execute(
+            delete(MESScrapRecord).where(MESScrapRecord.recorded_at < cutoff_scrap)
+        )
+        deleted_scrap = result.rowcount
 
-            # 3. Archive closed orders (>2 years) to history table
-            cutoff_order = now - timedelta(days=MESLifecycleService.CLOSED_ORDER_RETENTION_DAYS)
-            await db.execute(text("""
-                INSERT INTO mes_production_orders_archive
-                    (order_id, connection_id, order_no, product_model, process_route,
-                     planned_qty, actual_qty, status, started_at, completed_at,
-                     product_line_code, archived_at)
-                SELECT
-                    order_id, connection_id, order_no, product_model, process_route,
-                    planned_qty, actual_qty, status, started_at, completed_at,
-                    product_line_code, NOW()
-                FROM mes_production_orders
-                WHERE status = 'closed' AND completed_at < :cutoff
-                ON CONFLICT (order_id) DO NOTHING
-            """), {"cutoff": cutoff_order})
+        # 3. Archive closed orders (>2 years) to history table
+        cutoff_order = now - timedelta(days=MESLifecycleService.CLOSED_ORDER_RETENTION_DAYS)
+        await db.execute(text("""
+            INSERT INTO mes_production_orders_archive
+                (order_id, connection_id, order_no, product_model, process_route,
+                 planned_qty, actual_qty, status, started_at, completed_at,
+                 product_line_code, archived_at)
+            SELECT
+                order_id, connection_id, order_no, product_model, process_route,
+                planned_qty, actual_qty, status, started_at, completed_at,
+                product_line_code, NOW()
+            FROM mes_production_orders
+            WHERE status = 'closed' AND completed_at < :cutoff
+            ON CONFLICT (order_id) DO NOTHING
+        """), {"cutoff": cutoff_order})
 
-            result = await db.execute(
-                delete(MESProductionOrder)
-                .where(MESProductionOrder.status == "closed")
-                .where(MESProductionOrder.completed_at < cutoff_order)
-            )
-            archived_orders = result.rowcount
+        result = await db.execute(
+            delete(MESProductionOrder)
+            .where(MESProductionOrder.status == "closed")
+            .where(MESProductionOrder.completed_at < cutoff_order)
+        )
+        archived_orders = result.rowcount
 
         await db.commit()
 
