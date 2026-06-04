@@ -471,7 +471,7 @@ MES 推送 POST /api/mes/ingest
 ## 认证与安全
 
 ### MES 推送认证（入站）
-- `POST /api/mes/ingest` 使用 `X-API-Key` 认证
+- `POST /api/mes/ingest` 使用 `X-API-Key` + `X-Connection-Id`（connection_id 前 8 位）认证，支持 O(1) 索引定位；验证使用 `hmac.compare_digest` 防止时序攻击
 - 入站 API Key **只存 SHA-256 hash**（`mes_connections.config.auth_config.api_key_hash`），验证时对比 hash，永不明文读取
 - 每个 connection 有独立 API Key
 - 后续将 SPC ingest 端点认证也改为 hash 验证
