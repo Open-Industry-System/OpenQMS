@@ -31,7 +31,7 @@
 | 3 | RESTMESConnector 全 TODO | 完整 HTTP 实现：配置驱动 + 分页 + 字段映射 + 重试 |
 | 4 | API Key 认证是 TODO 占位 | 完整 SHA-256 hash 验证 + Fernet 加密 + 响应脱敏 + /test 端点 |
 | 5 | 测量 ingestion 无法原子回滚 | 调用 `_create_sample_batch_inner`（仅 flush）替代 `add_sample_batch`（内部 commit），同一事务完成 ingestion + SPC + 回填 |
-| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 33 个并发场景 |
+| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 34 个并发场景 |
 | 7 | 修改已执行 028 迁移 | 在 **新迁移 030** 末尾插入 MES 权限，不动 028 |
 | 8 | 查询未产品线隔离 + 凭证泄漏 | 查询 API 按 `product_line_code` 过滤；ConnectionOut 脱敏 `config.auth_config` 敏感字段 |
 | 9 | 前端独立 axios 实例 | 复用现有 `client` 实例（已含 JWT 拦截器） |
@@ -681,6 +681,18 @@ class RESTConfig(BaseModel):
             raise ValueError("field_mapping 'source_updated_at' cannot be empty")
         return self
 
+    @model_validator(mode="after")
+    def _check_auth_credentials(self):
+        """Validate that required credentials are present for the chosen auth_type."""
+        auth = self.auth_config
+        if self.auth_type == "bearer" and (not auth or not auth.token):
+            raise ValueError("auth_type='bearer' requires auth_config.token")
+        if self.auth_type == "basic" and (not auth or not auth.username or not auth.password):
+            raise ValueError("auth_type='basic' requires auth_config.username and auth_config.password")
+        if self.auth_type == "api_key" and (not auth or not auth.outbound_api_key):
+            raise ValueError("auth_type='api_key' requires auth_config.outbound_api_key")
+        return self
+
 
 class MESProductionOrderResponse(BaseModel):
     order_id: uuid.UUID
@@ -894,8 +906,9 @@ def hash_api_key(api_key: str) -> str:
 
 
 def verify_api_key(api_key: str, api_key_hash: str) -> bool:
-    """验证明文 API Key 是否与存储的 hash 匹配。"""
-    return hash_api_key(api_key) == api_key_hash
+    """验证明文 API Key 是否与存储的 hash 匹配。使用 hmac.compare_digest 防止时序攻击。"""
+    import hmac
+    return hmac.compare_digest(hash_api_key(api_key), api_key_hash)
 
 
 # ---- Fernet encryption (outbound credentials) -------------------------------
@@ -1229,11 +1242,25 @@ class RESTMESConnector(MESConnector):
                 )
                 resp.raise_for_status()
                 return resp.json()
-            except Exception as e:
+            except httpx.HTTPStatusError as e:
+                # Only retry transient HTTP errors: 408, 429, 5xx
+                # Permanent errors (401, 403, 404, 422, etc.) are raised immediately
+                last_exc = e
+                status = e.response.status_code
+                if status in (408, 429) or status >= 500:
+                    if attempt < max_retries:
+                        import asyncio
+                        await asyncio.sleep(backoff[min(attempt, len(backoff) - 1)])
+                        continue
+                raise  # 4xx (except 408/429) — do not retry
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout) as e:
+                # Network errors — always retry
                 last_exc = e
                 if attempt < max_retries:
                     import asyncio
                     await asyncio.sleep(backoff[min(attempt, len(backoff) - 1)])
+                    continue
+                raise
         raise last_exc
 
     async def _fetch_paginated(self, endpoint_name: str, since: datetime | None) -> list[dict]:
@@ -1276,6 +1303,12 @@ class RESTMESConnector(MESConnector):
                     break
             else:
                 break
+        else:
+            # max_pages reached without exhausting data — fail the job to prevent silent data loss
+            raise ValueError(
+                f"Pagination limit ({max_pages} pages) reached for endpoint '{endpoint_name}'. "
+                f"Fetched {len(all_data)} records so far. Remaining data may be lost if checkpoint advances."
+            )
 
         return all_data
 
@@ -1728,16 +1761,31 @@ async def require_mes_api_key(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> MESConnection:
-    """验证 X-API-Key header，返回对应的 MESConnection。"""
+    """验证 X-API-Key header，返回对应的 MESConnection。
+
+    MES 客户端必须同时发送 X-Connection-Id header（connection_id 的前 8 位），
+    用于 O(1) 索引定位而非扫描全部连接。
+    """
+    import uuid as _uuid
+
     api_key = request.headers.get("X-API-Key")
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing X-API-Key header")
 
-    # Find connection by matching hash
-    result = await db.execute(select(MESConnection))
-    connections = result.scalars().all()
+    conn_id_prefix = request.headers.get("X-Connection-Id")
+    if not conn_id_prefix:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing X-Connection-Id header")
 
-    for conn in connections:
+    # Index lookup: find connection by ID prefix (first 8 chars of UUID)
+    # This avoids scanning all connections on every ingest request
+    result = await db.execute(
+        select(MESConnection).where(
+            MESConnection.connection_id.cast(str).like(f"{conn_id_prefix}%")
+        ).limit(5)  # UUID prefix is nearly unique; limit for safety
+    )
+    candidates = result.scalars().all()
+
+    for conn in candidates:
         auth_config = conn.config.get("auth_config", {})
         stored_hash = auth_config.get("api_key_hash")
         if stored_hash and verify_api_key(api_key, stored_hash):
@@ -2402,7 +2450,7 @@ git commit -m "feat(integration): wire SPC alarms and CAPA status changes to MES
 ```python
 # backend/app/api/mes.py
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
@@ -2437,8 +2485,8 @@ async def _apply_pl_filter(query, user: User, model, db: AsyncSession, request: 
 
 @router.get("/connections", response_model=schemas.MESConnectionListResponse)
 async def list_mes_connections(
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
 ):
@@ -2749,8 +2797,8 @@ async def manual_sync(
 
 @router.get("/production-orders")
 async def list_production_orders(
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     product_line_code: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
@@ -2808,8 +2856,8 @@ async def list_equipment_status(
 
 @router.get("/scrap-records")
 async def list_scrap_records(
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     product_line_code: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
@@ -2841,7 +2889,20 @@ async def get_mes_dashboard(
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
     request: Request = None,
 ):
-    query = select(MESEquipmentStatus)
+    # Equipment status: get only the LATEST record per (connection_id, equipment_code)
+    # using DISTINCT ON to avoid counting historical snapshots as current state
+    eq_sub = (
+        select(
+            MESEquipmentStatus,
+            func.row_number().over(
+                partition_by=(MESEquipmentStatus.connection_id, MESEquipmentStatus.equipment_code),
+                order_by=MESEquipmentStatus.recorded_at.desc(),
+            ).label("rn"),
+        )
+    ).subquery()
+    query = select(MESEquipmentStatus).join(
+        eq_sub, MESEquipmentStatus.record_id == eq_sub.c.record_id
+    ).where(eq_sub.c.rn == 1)
     query = await _apply_pl_filter(query, user, MESEquipmentStatus, db, request)
     if product_line_code:
         query = query.where(MESEquipmentStatus.product_line_code == product_line_code)
@@ -3828,7 +3889,10 @@ class TestIngestValidation:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/api/mes/ingest",
-                headers={"X-API-Key": "test-mes-api-key-12345"},
+                headers={
+                    "X-API-Key": "test-mes-api-key-12345",
+                    "X-Connection-Id": str(test_connection.connection_id)[:8],
+                },
                 json={"data_type": "scrap_record"},  # missing external_id, defect_type, etc.
             )
             assert resp.status_code == 400
@@ -3847,7 +3911,10 @@ class TestIngestValidation:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/api/mes/ingest",
-                headers={"X-API-Key": "test-mes-api-key-12345"},
+                headers={
+                    "X-API-Key": "test-mes-api-key-12345",
+                    "X-Connection-Id": str(test_connection.connection_id)[:8],
+                },
                 json={
                     "data_type": "unknown_type",
                     "external_id": "TEST-001",
@@ -4056,7 +4123,10 @@ class TestIngestEdgeCases:
             for bad_payload in ([], None, "string", 123):
                 resp = await client.post(
                     "/api/mes/ingest",
-                    headers={"X-API-Key": "test-mes-api-key-12345"},
+                    headers={
+                    "X-API-Key": "test-mes-api-key-12345",
+                    "X-Connection-Id": str(test_connection.connection_id)[:8],
+                },
                     json=bad_payload,
                 )
                 assert resp.status_code == 400, f"Expected 400 for {bad_payload!r}, got {resp.status_code}"
@@ -4531,7 +4601,7 @@ class TestConfigNormalization:
 
 ```bash
 git add backend/tests/test_mes_concurrency.py
-git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (33 cases)
+git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (34 cases)
 
 - Dual worker claim once (sync job + outbox)
 - Running job timeout recovery (>10min)
@@ -4618,10 +4688,8 @@ class MESLifecycleService:
         if not has_lock:
             return {"deleted_equipment_status": 0, "deleted_scrap_records": 0, "aggregated_scrap_rows": 0, "archived_orders": 0}
 
-        # Load all active connections to read per-connection retention config
-        result = await db.execute(
-            select(MESConnection).where(MESConnection.is_active == True)
-        )
+        # Load ALL connections (active + inactive) — inactive connections' data must also be cleaned
+        result = await db.execute(select(MESConnection))
         connections = result.scalars().all()
 
         total_deleted_equipment = 0
@@ -4792,7 +4860,7 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 | 前端复用现有 client 实例 | Task 15 | ✅ |
 | 前端 4 个页面完整实现 | Task 16 | ✅ |
 | 前端 4 个路由 + 侧边栏菜单 | Task 17 | ✅ |
-| test_mes_concurrency.py 33 场景 | Task 18 | ✅ |
+| test_mes_concurrency.py 34 场景 | Task 18 | ✅ |
 | 生命周期清理任务 | Task 19 | ✅ |
 | mes_scrap_monthly_summary 表 | Task 1 | ✅ |
 | mes_production_orders_archive 表 | Task 1 | ✅ |
