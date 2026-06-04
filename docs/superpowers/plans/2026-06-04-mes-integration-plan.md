@@ -1330,7 +1330,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_
+from sqlalchemy import select, update, and_, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.mes import (
@@ -1339,7 +1339,7 @@ from app.models.mes import (
 )
 from app.models.spc import InspectionCharacteristic
 from app.services.spc_service import add_sample_batch, _create_sample_batch_inner
-from app.services.mes_connector import MESConnector, MockMESConnector, get_mes_connector
+from app.services.mes_connector import MESConnector, MockMESConnector, get_mes_connector, get_mes_connector_by_config
 from app.services.mes_crypto import hash_api_key, verify_api_key, encrypt_credential
 
 
@@ -1541,17 +1541,10 @@ class MESIngestionService:
         ).on_conflict_do_update(
             index_elements=["connection_id", "external_id"],
             set_={
-                # Backfill order_id if it was NULL and is now resolvable
-                "order_id": pg_insert(MESScrapRecord).excluded.order_id,
-                "order_no": pg_insert(MESScrapRecord).excluded.order_no,
-                "equipment_code": pg_insert(MESScrapRecord).excluded.equipment_code,
-                "defect_category": pg_insert(MESScrapRecord).excluded.defect_category,
-                "defect_qty": pg_insert(MESScrapRecord).excluded.defect_qty,
-                "total_qty": pg_insert(MESScrapRecord).excluded.total_qty,
-                "defect_description": pg_insert(MESScrapRecord).excluded.defect_description,
-                "recorded_at": pg_insert(MESScrapRecord).excluded.recorded_at,
-                "product_line_code": pg_insert(MESScrapRecord).excluded.product_line_code,
-                "mes_raw_data": pg_insert(MESScrapRecord).excluded.mes_raw_data,
+                # Only backfill order_id (preserve historical snapshot for all other fields)
+                "order_id": func.coalesce(MESScrapRecord.order_id, pg_insert(MESScrapRecord).excluded.order_id),
+                # Also store order_no for downstream backfill queries
+                "order_no": func.coalesce(MESScrapRecord.order_no, pg_insert(MESScrapRecord).excluded.order_no),
             }
         )
         await db.execute(stmt)
@@ -2264,21 +2257,6 @@ from app.models.mes import (
 router = APIRouter(prefix="/api/mes", tags=["mes"])
 
 
-# --- Exception handler: Pydantic validation -> 400 (design spec requirement) ---
-
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-
-
-@router.exception_handler(RequestValidationError)
-async def _mes_validation_handler(request: Request, exc: RequestValidationError):
-    """MES /ingest returns 400 for all validation errors (not 422)."""
-    return JSONResponse(
-        status_code=400,
-        content={"detail": exc.errors()},
-    )
-
-
 # --- Helper: apply product line filter -----------------------------------------
 # Reuses existing utilities from app.core.product_line_filter
 # Add "mes": "product_line_code" to PRODUCT_LINE_FIELD_MAP in that file
@@ -2476,13 +2454,29 @@ async def test_connection(
 
 # --- Ingestion (API Key auth, no JWT) -----------------------------------------
 
+from pydantic import TypeAdapter, ValidationError
+
+_mes_ingest_adapter = TypeAdapter(schemas.MESIngestRequest)
+
+
 @router.post("/ingest")
 async def ingest_mes_data(
-    req: schemas.MESIngestRequest,
+    request: Request,
     connection: MESConnection = Depends(require_mes_api_key),
     db: AsyncSession = Depends(get_db),
 ):
-    data = req.model_dump()
+    """接收 MES 入站数据。使用 TypeAdapter 手动校验，所有验证错误返回 400。"""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    try:
+        validated = _mes_ingest_adapter.validate_python(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=e.errors())
+
+    data = validated.model_dump()
     data["connection_id"] = connection.connection_id
     # Enforce product line from connection — ignore any product_line_code in request
     data["product_line_code"] = connection.product_line_code
@@ -3582,6 +3576,116 @@ class TestIdempotentRedelivery:
             assert final.status == "sent"
             assert final.sent_at is not None
 
+
+class TestIngestValidation:
+    async def test_ingest_missing_field_returns_400(self, test_connection):
+        """缺失必填字段返回 400（不是 422）。"""
+        from app.database import async_session
+        from app.api.mes import _mes_ingest_adapter
+        from pydantic import ValidationError
+
+        # Missing required fields: external_id, defect_type, defect_qty, total_qty
+        payload = {"data_type": "scrap_record"}
+        with pytest.raises(ValidationError):
+            _mes_ingest_adapter.validate_python(payload)
+
+    async def test_ingest_unknown_data_type_returns_400(self, test_connection):
+        """未知 data_type 在 service 层抛出 ValueError，路由返回 400。"""
+        from app.database import async_session
+
+        async with async_session() as db:
+            with pytest.raises(ValueError, match="Unknown data_type"):
+                await MESIngestionService.ingest(db, {
+                    "connection_id": test_connection.connection_id,
+                    "data_type": "unknown_type",
+                    "product_line_code": test_connection.product_line_code,
+                })
+
+
+class TestScrapOrderBackfill:
+    async def test_scrap_before_order_then_backfill(self, test_connection):
+        """报废先到、工单后到：生产订单写入后回填报废记录的 order_id。"""
+        from app.database import async_session
+
+        async with async_session() as db:
+            # Ingest scrap first (order does not exist yet)
+            await MESIngestionService._ingest_scrap_record(db, {
+                "connection_id": test_connection.connection_id,
+                "external_id": "SCRAP-001",
+                "order_no": "WO-2026-BF",
+                "defect_type": " scratches",
+                "defect_qty": 5,
+                "total_qty": 100,
+            })
+            await db.commit()
+
+            scrap1 = (await db.execute(
+                select(MESScrapRecord).where(MESScrapRecord.external_id == "SCRAP-001")
+            )).scalar_one()
+            assert scrap1.order_id is None  # Order not yet synced
+
+        # Now ingest the production order
+        async with async_session() as db:
+            await MESIngestionService._ingest_production_order(db, {
+                "connection_id": test_connection.connection_id,
+                "order_no": "WO-2026-BF",
+                "status": "planned",
+            })
+            await db.commit()
+
+            # Verify scrap backfill
+            scrap2 = (await db.execute(
+                select(MESScrapRecord).where(MESScrapRecord.external_id == "SCRAP-001")
+            )).scalar_one()
+            assert scrap2.order_id is not None  # Backfilled by production order ingestion
+
+    async def test_duplicate_scrap_preserves_snapshot(self, test_connection):
+        """重复报废投递不会修改已有快照或清空 order_id。"""
+        from app.database import async_session
+
+        async with async_session() as db:
+            # First: order exists, scrap arrives with order link
+            await MESIngestionService._ingest_production_order(db, {
+                "connection_id": test_connection.connection_id,
+                "order_no": "WO-2026-DUP",
+                "status": "planned",
+            })
+            await MESIngestionService._ingest_scrap_record(db, {
+                "connection_id": test_connection.connection_id,
+                "external_id": "SCRAP-DUP-001",
+                "order_no": "WO-2026-DUP",
+                "defect_type": "scratches",
+                "defect_qty": 3,
+                "total_qty": 50,
+            })
+            await db.commit()
+
+            original_scrap = (await db.execute(
+                select(MESScrapRecord).where(MESScrapRecord.external_id == "SCRAP-DUP-001")
+            )).scalar_one()
+            original_order_id = original_scrap.order_id
+            assert original_order_id is not None
+
+        # Re-ingest same scrap without order_no (simulating MES sending incomplete data)
+        async with async_session() as db:
+            await MESIngestionService._ingest_scrap_record(db, {
+                "connection_id": test_connection.connection_id,
+                "external_id": "SCRAP-DUP-001",
+                # order_no omitted
+                "defect_type": "dents",  # different value — should NOT update
+                "defect_qty": 99,        # different value — should NOT update
+                "total_qty": 999,        # different value — should NOT update
+            })
+            await db.commit()
+
+            final_scrap = (await db.execute(
+                select(MESScrapRecord).where(MESScrapRecord.external_id == "SCRAP-DUP-001")
+            )).scalar_one()
+            assert final_scrap.order_id == original_order_id  # Preserved
+            assert final_scrap.defect_type == "scratches"      # Snapshot preserved
+            assert final_scrap.defect_qty == 3                 # Snapshot preserved
+            assert final_scrap.total_qty == 50                 # Snapshot preserved
+
 - [ ] **Step 2: Commit**
 
 ```bash
@@ -3596,7 +3700,9 @@ git commit -m "test(mes): add automated concurrency tests for sync, outbox, and 
 - Measurement ingestion atomic rollback
 - Duplicate external_id idempotency
 - Crash redelivery idempotency via process_outbox()
-- Full process_outbox() flow: pending → claim → push → sent"
+- Full process_outbox() flow: pending → claim → push → sent
+- /ingest validation errors return 400 (missing fields, unknown data_type)
+- Scrap order backfill: out-of-order arrival + duplicate preservation"
 ```
 
 ---
