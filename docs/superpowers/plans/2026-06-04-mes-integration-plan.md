@@ -31,7 +31,7 @@
 | 3 | RESTMESConnector 全 TODO | 完整 HTTP 实现：配置驱动 + 分页 + 字段映射 + 重试 |
 | 4 | API Key 认证是 TODO 占位 | 完整 SHA-256 hash 验证 + Fernet 加密 + 响应脱敏 + /test 端点 |
 | 5 | 测量 ingestion 无法原子回滚 | 调用 `_create_sample_batch_inner`（仅 flush）替代 `add_sample_batch`（内部 commit），同一事务完成 ingestion + SPC + 回填 |
-| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 26 个并发场景 |
+| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 28 个并发场景 |
 | 7 | 修改已执行 028 迁移 | 在 **新迁移 030** 末尾插入 MES 权限，不动 028 |
 | 8 | 查询未产品线隔离 + 凭证泄漏 | 查询 API 按 `product_line_code` 过滤；ConnectionOut 脱敏 `config.auth_config` 敏感字段 |
 | 9 | 前端独立 axios 实例 | 复用现有 `client` 实例（已含 JWT 拦截器） |
@@ -550,9 +550,9 @@ git commit -m "feat(models): add 9 MES integration models"
 # backend/app/schemas/mes.py
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 
 class MESConnectionCreate(BaseModel):
@@ -592,21 +592,54 @@ class MESConnectionListResponse(BaseModel):
 
 # --- REST Config Schema (validates before credential processing) ---
 
+class RESTPaginationConfig(BaseModel):
+    type: Literal["none", "offset", "cursor"] = "none"
+    page_param: Optional[str] = None
+    size_param: Optional[str] = None
+    size: int = Field(default=100, ge=1)
+    cursor_param: Optional[str] = None
+    cursor_response_field: Optional[str] = None
+
+
+class RESTRetryConfig(BaseModel):
+    max_retries: int = Field(default=3, ge=0)
+    backoff_seconds: list[float] = Field(default=[1, 2, 4])
+
+
 class RESTEndpointConfig(BaseModel):
     path: str = Field(..., min_length=1)
     cursor_field: Optional[str] = None
     method: str = "GET"
-    pagination: Optional[dict] = None
+    pagination: Optional[RESTPaginationConfig] = None
     response_path: Optional[str] = None
+
+
+# Credential fields that must be strings (checked at validation time, before encryption)
+_CREDENTIAL_KEYS = frozenset({
+    "inbound_api_key", "outbound_api_key", "token", "password", "secret", "username",
+})
+
+
+class RESTAuthConfig(BaseModel):
+    """Permissive schema: any key allowed, but credential values must be str if present.
+    Keys like api_key_hash, *_encrypted are added after validation and are not checked here."""
+    model_config = {"extra": "allow"}
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _credential_values_must_be_str(cls, v, info):
+        if info.field_name in _CREDENTIAL_KEYS and v is not None and not isinstance(v, str):
+            raise ValueError(f"credential field '{info.field_name}' must be a string")
+        return v
 
 
 class RESTConfig(BaseModel):
     base_url: str = Field(..., pattern=r'^https?://')
     endpoints: dict[str, RESTEndpointConfig]
     field_mapping: dict[str, str]
-    auth_config: Optional[dict] = None
+    auth_config: Optional[RESTAuthConfig] = None
     timeout: int = Field(default=30, ge=1)
-    retry: Optional[dict] = None
+    retry: Optional[RESTRetryConfig] = None
 
     @model_validator(mode="after")
     def _check_required_endpoints(self):
@@ -2354,6 +2387,7 @@ git commit -m "feat(integration): wire SPC alarms and CAPA status changes to MES
 # backend/app/api/mes.py
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
@@ -2433,7 +2467,7 @@ def _validate_rest_config(connector_type: str, config: dict) -> None:
         return
     try:
         schemas.RESTConfig.model_validate(config)
-    except schemas.ValidationError as e:
+    except ValidationError as e:
         # Flatten Pydantic errors into a single detail string for HTTP 400
         errors = e.errors()
         detail = errors[0]["msg"] if len(errors) == 1 else errors
@@ -2533,7 +2567,7 @@ async def update_mes_connection(
         connection.connector_type = req.connector_type
     if req.config is not None:
         config = dict(req.config)
-        # Validate BEFORE merging/processing credentials
+        # Validate config structure BEFORE merging/processing credentials
         check_type = req.connector_type or connection.connector_type
         _validate_rest_config(check_type, config)
 
@@ -2560,6 +2594,11 @@ async def update_mes_connection(
             merged["outbound_api_key_encrypted"] = encrypt_credential(merged.pop("outbound_api_key"))
         config["auth_config"] = merged
         connection.config = config
+
+    # Final guard: validate the RESULTING connector_type + config combination
+    # (catches e.g. connector_type changed to "rest" without providing new config)
+    _validate_rest_config(connection.connector_type, connection.config)
+
     if req.is_active is not None:
         connection.is_active = req.is_active
     if req.product_line_code is not None:
@@ -4099,10 +4138,11 @@ class TestSyncRoundValidationFailure:
         # Monkeypatch fetch to return invalid data that fails _validate_items
         original_fetch = RESTMESConnector.fetch_scrap_records
         async def bad_fetch(self, since):
-            return [
+            raw = [
                 {"external_id": "S-001", "defect_type": "scratches", "defect_qty": 5, "total_qty": 100},
                 {"external_id": "S-002", "defect_type": "scratches", "defect_qty": -1, "total_qty": 100},
             ]
+            return self._validate_items("scrap_records", raw)
         RESTMESConnector.fetch_scrap_records = bad_fetch
 
         try:
@@ -4320,11 +4360,58 @@ class TestRESTConfigValidation:
             assert resp.status_code == 400
             assert "field_mapping" in resp.json().get("detail", "")
 
+    async def test_update_connector_type_only_rejects_rest(self, test_connection):
+        """仅更新 connector_type 为 'rest'（不提供 config）返回 400。"""
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+
+        token = create_access_token(str(test_connection.created_by))
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                f"/api/mes/connections/{test_connection.connection_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"connector_type": "rest"},
+            )
+            assert resp.status_code == 400
+            assert "base_url" in resp.json().get("detail", "")
+
+    async def test_create_rest_credential_field_non_string_returns_400(self, admin_user):
+        """凭证字段为数字时返回 400（非 500）。"""
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+
+        token = create_access_token(str(admin_user.user_id))
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/mes/connections",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "name": "TEST-REST-BAD-CRED",
+                    "connector_type": "rest",
+                    "config": {
+                        "base_url": "https://mes.example.com",
+                        "endpoints": {
+                            "production_orders": {"path": "/orders", "cursor_field": "since"},
+                            "equipment_status": {"path": "/equipment"},
+                            "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                            "measurements": {"path": "/measurements", "cursor_field": "since"},
+                        },
+                        "field_mapping": {"source_updated_at": "updated_at"},
+                        "auth_config": {"token": 12345},  # number instead of string
+                    },
+                    "product_line_code": "DC-DC-100",
+                },
+            )
+            assert resp.status_code == 400
+            assert "token" in resp.json().get("detail", "")
+
 - [ ] **Step 2: Commit**
 
 ```bash
 git add backend/tests/test_mes_concurrency.py
-git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (26 cases)
+git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (28 cases)
 
 - Dual worker claim once (sync job + outbox)
 - Running job timeout recovery (>10min)
@@ -4555,7 +4642,7 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 | 前端复用现有 client 实例 | Task 15 | ✅ |
 | 前端 4 个页面完整实现 | Task 16 | ✅ |
 | 前端 4 个路由 + 侧边栏菜单 | Task 17 | ✅ |
-| test_mes_concurrency.py 26 场景 | Task 18 | ✅ |
+| test_mes_concurrency.py 28 场景 | Task 18 | ✅ |
 | 生命周期清理任务 | Task 19 | ✅ |
 | mes_scrap_monthly_summary 表 | Task 1 | ✅ |
 | mes_production_orders_archive 表 | Task 1 | ✅ |
