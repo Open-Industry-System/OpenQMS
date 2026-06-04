@@ -31,7 +31,7 @@
 | 3 | RESTMESConnector 全 TODO | 完整 HTTP 实现：配置驱动 + 分页 + 字段映射 + 重试 |
 | 4 | API Key 认证是 TODO 占位 | 完整 SHA-256 hash 验证 + Fernet 加密 + 响应脱敏 + /test 端点 |
 | 5 | 测量 ingestion 无法原子回滚 | 调用 `_create_sample_batch_inner`（仅 flush）替代 `add_sample_batch`（内部 commit），同一事务完成 ingestion + SPC + 回填 |
-| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 28 个并发场景 |
+| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 33 个并发场景 |
 | 7 | 修改已执行 028 迁移 | 在 **新迁移 030** 末尾插入 MES 权限，不动 028 |
 | 8 | 查询未产品线隔离 + 凭证泄漏 | 查询 API 按 `product_line_code` 过滤；ConnectionOut 脱敏 `config.auth_config` 敏感字段 |
 | 9 | 前端独立 axios 实例 | 复用现有 `client` 实例（已含 JWT 拦截器） |
@@ -632,7 +632,6 @@ class RESTAuthConfig(BaseModel):
     password: Optional[str] = None
     secret: Optional[str] = None
     username: Optional[str] = None
-    auth_type: Optional[str] = None
     api_key_hash: Optional[str] = None
     token_encrypted: Optional[str] = None
     password_encrypted: Optional[str] = None
@@ -641,13 +640,22 @@ class RESTAuthConfig(BaseModel):
     outbound_api_key_encrypted: Optional[str] = None
 
 
+class MESRetentionConfig(BaseModel):
+    """Per-connection data retention policy (days). Overrides global defaults when set."""
+    equipment_status_days: int = Field(default=90, ge=1)
+    scrap_days: int = Field(default=365, ge=1)
+    closed_order_days: int = Field(default=730, ge=1)
+
+
 class RESTConfig(BaseModel):
     base_url: str = Field(..., pattern=r'^https?://')
     endpoints: dict[str, RESTEndpointConfig]
     field_mapping: dict[str, str]
+    auth_type: Literal["none", "basic", "bearer", "api_key"] = "none"
     auth_config: Optional[RESTAuthConfig] = None
     timeout: int = Field(default=30, ge=1)
     retry: Optional[RESTRetryConfig] = None
+    retention: Optional[MESRetentionConfig] = None
 
     @model_validator(mode="after")
     def _check_required_endpoints(self):
@@ -4416,11 +4424,114 @@ class TestRESTConfigValidation:
             assert resp.status_code == 400
             assert "token" in resp.json().get("detail", "")
 
+
+class TestConfigNormalization:
+    """验证 _validate_rest_config 规范化后的 config 能正确驱动连接器。"""
+
+    def test_auth_type_preserved_after_normalize(self):
+        """auth_type 在规范化后保留在 config 顶层。"""
+        from app.schemas.mes import RESTConfig
+
+        config = {
+            "base_url": "https://mes.example.com",
+            "auth_type": "bearer",
+            "endpoints": {
+                "production_orders": {"path": "/orders", "cursor_field": "since"},
+                "equipment_status": {"path": "/equipment"},
+                "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                "measurements": {"path": "/measurements", "cursor_field": "since"},
+            },
+            "field_mapping": {"source_updated_at": "updated_at"},
+            "auth_config": {"token": "secret-value"},
+        }
+        validated = RESTConfig.model_validate(config)
+        dumped = validated.model_dump(exclude_none=True)
+        assert dumped["auth_type"] == "bearer"
+        assert dumped["auth_config"]["token"] == "secret-value"
+
+    def test_retry_null_normalized_safely(self):
+        """retry: null 被规范化为 None，连接器回退默认重试策略。"""
+        from app.schemas.mes import RESTConfig
+
+        config = {
+            "base_url": "https://mes.example.com",
+            "endpoints": {
+                "production_orders": {"path": "/orders", "cursor_field": "since"},
+                "equipment_status": {"path": "/equipment"},
+                "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                "measurements": {"path": "/measurements", "cursor_field": "since"},
+            },
+            "field_mapping": {"source_updated_at": "updated_at"},
+            "retry": None,
+        }
+        validated = RESTConfig.model_validate(config)
+        dumped = validated.model_dump(exclude_none=True)
+        assert "retry" not in dumped  # None stripped by exclude_none
+
+    def test_pagination_null_normalized_safely(self):
+        """pagination: null 被规范化，连接器回退默认 {'type': 'none'}。"""
+        from app.schemas.mes import RESTConfig
+
+        config = {
+            "base_url": "https://mes.example.com",
+            "endpoints": {
+                "production_orders": {"path": "/orders", "cursor_field": "since", "pagination": None},
+                "equipment_status": {"path": "/equipment"},
+                "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                "measurements": {"path": "/measurements", "cursor_field": "since"},
+            },
+            "field_mapping": {"source_updated_at": "updated_at"},
+        }
+        validated = RESTConfig.model_validate(config)
+        dumped = validated.model_dump(exclude_none=True)
+        assert "pagination" not in dumped["endpoints"]["production_orders"]
+
+    def test_api_key_auth_type_preserved(self):
+        """api_key auth_type 在规范化后保留。"""
+        from app.schemas.mes import RESTConfig
+
+        config = {
+            "base_url": "https://mes.example.com",
+            "auth_type": "api_key",
+            "endpoints": {
+                "production_orders": {"path": "/orders", "cursor_field": "since"},
+                "equipment_status": {"path": "/equipment"},
+                "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                "measurements": {"path": "/measurements", "cursor_field": "since"},
+            },
+            "field_mapping": {"source_updated_at": "updated_at"},
+            "auth_config": {"outbound_api_key": "key-123"},
+        }
+        validated = RESTConfig.model_validate(config)
+        dumped = validated.model_dump(exclude_none=True)
+        assert dumped["auth_type"] == "api_key"
+        assert dumped["auth_config"]["outbound_api_key"] == "key-123"
+
+    def test_retention_config_preserved(self):
+        """retention 配置在规范化后保留。"""
+        from app.schemas.mes import RESTConfig
+
+        config = {
+            "base_url": "https://mes.example.com",
+            "endpoints": {
+                "production_orders": {"path": "/orders", "cursor_field": "since"},
+                "equipment_status": {"path": "/equipment"},
+                "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                "measurements": {"path": "/measurements", "cursor_field": "since"},
+            },
+            "field_mapping": {"source_updated_at": "updated_at"},
+            "retention": {"equipment_status_days": 30, "scrap_days": 180, "closed_order_days": 365},
+        }
+        validated = RESTConfig.model_validate(config)
+        dumped = validated.model_dump(exclude_none=True)
+        assert dumped["retention"]["equipment_status_days"] == 30
+        assert dumped["retention"]["scrap_days"] == 180
+
 - [ ] **Step 2: Commit**
 
 ```bash
 git add backend/tests/test_mes_concurrency.py
-git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (28 cases)
+git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (33 cases)
 
 - Dual worker claim once (sync job + outbox)
 - Running job timeout recovery (>10min)
@@ -4474,13 +4585,26 @@ class MESLifecycleService:
     - 已关闭工单：2 年归档到 mes_production_orders_archive
     """
 
-    EQUIPMENT_STATUS_RETENTION_DAYS = 90
-    SCRAP_RETENTION_DAYS = 365
-    CLOSED_ORDER_RETENTION_DAYS = 730  # 2 years
+    # Global defaults (used when connection config has no retention override)
+    DEFAULT_EQUIPMENT_DAYS = 90
+    DEFAULT_SCRAP_DAYS = 365
+    DEFAULT_CLOSED_ORDER_DAYS = 730  # 2 years
+
+    @staticmethod
+    def _get_retention_days(connection_config: dict) -> dict:
+        """Extract per-connection retention days from config, falling back to global defaults."""
+        ret = connection_config.get("retention", {})
+        if not isinstance(ret, dict):
+            ret = {}
+        return {
+            "equipment_status_days": ret.get("equipment_status_days", MESLifecycleService.DEFAULT_EQUIPMENT_DAYS),
+            "scrap_days": ret.get("scrap_days", MESLifecycleService.DEFAULT_SCRAP_DAYS),
+            "closed_order_days": ret.get("closed_order_days", MESLifecycleService.DEFAULT_CLOSED_ORDER_DAYS),
+        }
 
     @staticmethod
     async def cleanup(db: AsyncSession) -> dict:
-        """执行数据清理。返回各表清理数量。
+        """执行数据清理（按连接分组，各自使用连接配置的保留天数）。
 
         使用 PostgreSQL transaction-level advisory lock 防止多 worker 同时执行。
         xact_lock 随事务结束自动释放，不会泄漏到连接池。
@@ -4494,78 +4618,95 @@ class MESLifecycleService:
         if not has_lock:
             return {"deleted_equipment_status": 0, "deleted_scrap_records": 0, "aggregated_scrap_rows": 0, "archived_orders": 0}
 
-        # 1. Clean old equipment status (>90 days)
-        cutoff_equipment = now - timedelta(days=MESLifecycleService.EQUIPMENT_STATUS_RETENTION_DAYS)
+        # Load all active connections to read per-connection retention config
         result = await db.execute(
-            delete(MESEquipmentStatus).where(MESEquipmentStatus.recorded_at < cutoff_equipment)
+            select(MESConnection).where(MESConnection.is_active == True)
         )
-        deleted_equipment = result.rowcount
+        connections = result.scalars().all()
 
-        # 2. Aggregate and clean old scrap records (>1 year)
-        cutoff_scrap = now - timedelta(days=MESLifecycleService.SCRAP_RETENTION_DAYS)
+        total_deleted_equipment = 0
+        total_deleted_scrap = 0
+        total_aggregated = 0
+        total_archived = 0
 
-        # Aggregate by month before deletion (COALESCE NULL defect_category to '未知')
-        agg_result = await db.execute(text("""
-            INSERT INTO mes_scrap_monthly_summary
-                (connection_id, product_line_code, year_month, defect_category,
-                 total_defect_qty, total_total_qty, record_count, created_at)
-            SELECT
-                connection_id,
-                COALESCE(product_line_code, '__none__'),
-                TO_CHAR(recorded_at, 'YYYY-MM'),
-                COALESCE(defect_category, '未知'),
-                SUM(defect_qty),
-                SUM(total_qty),
-                COUNT(*),
-                NOW()
-            FROM mes_scrap_records
-            WHERE recorded_at < :cutoff
-            GROUP BY connection_id, COALESCE(product_line_code, '__none__'),
-                     TO_CHAR(recorded_at, 'YYYY-MM'),
-                     COALESCE(defect_category, '未知')
-            ON CONFLICT (connection_id, product_line_code, year_month, defect_category)
-            DO UPDATE SET
-                total_defect_qty = mes_scrap_monthly_summary.total_defect_qty + EXCLUDED.total_defect_qty,
-                total_total_qty = mes_scrap_monthly_summary.total_total_qty + EXCLUDED.total_total_qty,
-                record_count = mes_scrap_monthly_summary.record_count + EXCLUDED.record_count
-        """), {"cutoff": cutoff_scrap})
-        aggregated_scrap_rows = agg_result.rowcount
+        for conn in connections:
+            retention = MESLifecycleService._get_retention_days(conn.config)
 
-        result = await db.execute(
-            delete(MESScrapRecord).where(MESScrapRecord.recorded_at < cutoff_scrap)
-        )
-        deleted_scrap = result.rowcount
+            # 1. Clean old equipment status
+            cutoff_equipment = now - timedelta(days=retention["equipment_status_days"])
+            eq_result = await db.execute(
+                delete(MESEquipmentStatus)
+                .where(MESEquipmentStatus.connection_id == conn.connection_id)
+                .where(MESEquipmentStatus.recorded_at < cutoff_equipment)
+            )
+            total_deleted_equipment += eq_result.rowcount
 
-        # 3. Archive closed orders (>2 years) to history table
-        cutoff_order = now - timedelta(days=MESLifecycleService.CLOSED_ORDER_RETENTION_DAYS)
-        await db.execute(text("""
-            INSERT INTO mes_production_orders_archive
-                (order_id, connection_id, order_no, product_model, process_route,
-                 planned_qty, actual_qty, status, started_at, completed_at,
-                 source_updated_at, product_line_code, archived_at)
-            SELECT
-                order_id, connection_id, order_no, product_model, process_route,
-                planned_qty, actual_qty, status, started_at, completed_at,
-                source_updated_at, product_line_code, NOW()
-            FROM mes_production_orders
-            WHERE status = 'closed' AND completed_at < :cutoff
-            ON CONFLICT (order_id) DO NOTHING
-        """), {"cutoff": cutoff_order})
+            # 2. Aggregate and clean old scrap records
+            cutoff_scrap = now - timedelta(days=retention["scrap_days"])
+            agg_result = await db.execute(text("""
+                INSERT INTO mes_scrap_monthly_summary
+                    (connection_id, product_line_code, year_month, defect_category,
+                     total_defect_qty, total_total_qty, record_count, created_at)
+                SELECT
+                    connection_id,
+                    COALESCE(product_line_code, '__none__'),
+                    TO_CHAR(recorded_at, 'YYYY-MM'),
+                    COALESCE(defect_category, '未知'),
+                    SUM(defect_qty),
+                    SUM(total_qty),
+                    COUNT(*),
+                    NOW()
+                FROM mes_scrap_records
+                WHERE connection_id = :cid AND recorded_at < :cutoff
+                GROUP BY connection_id, COALESCE(product_line_code, '__none__'),
+                         TO_CHAR(recorded_at, 'YYYY-MM'),
+                         COALESCE(defect_category, '未知')
+                ON CONFLICT (connection_id, product_line_code, year_month, defect_category)
+                DO UPDATE SET
+                    total_defect_qty = mes_scrap_monthly_summary.total_defect_qty + EXCLUDED.total_defect_qty,
+                    total_total_qty = mes_scrap_monthly_summary.total_total_qty + EXCLUDED.total_total_qty,
+                    record_count = mes_scrap_monthly_summary.record_count + EXCLUDED.record_count
+            """), {"cid": conn.connection_id, "cutoff": cutoff_scrap})
+            total_aggregated += agg_result.rowcount
 
-        result = await db.execute(
-            delete(MESProductionOrder)
-            .where(MESProductionOrder.status == "closed")
-            .where(MESProductionOrder.completed_at < cutoff_order)
-        )
-        archived_orders = result.rowcount
+            sc_result = await db.execute(
+                delete(MESScrapRecord)
+                .where(MESScrapRecord.connection_id == conn.connection_id)
+                .where(MESScrapRecord.recorded_at < cutoff_scrap)
+            )
+            total_deleted_scrap += sc_result.rowcount
+
+            # 3. Archive closed orders
+            cutoff_order = now - timedelta(days=retention["closed_order_days"])
+            await db.execute(text("""
+                INSERT INTO mes_production_orders_archive
+                    (order_id, connection_id, order_no, product_model, process_route,
+                     planned_qty, actual_qty, status, started_at, completed_at,
+                     source_updated_at, product_line_code, archived_at)
+                SELECT
+                    order_id, connection_id, order_no, product_model, process_route,
+                    planned_qty, actual_qty, status, started_at, completed_at,
+                    source_updated_at, product_line_code, NOW()
+                FROM mes_production_orders
+                WHERE connection_id = :cid AND status = 'closed' AND completed_at < :cutoff
+                ON CONFLICT (order_id) DO NOTHING
+            """), {"cid": conn.connection_id, "cutoff": cutoff_order})
+
+            arc_result = await db.execute(
+                delete(MESProductionOrder)
+                .where(MESProductionOrder.connection_id == conn.connection_id)
+                .where(MESProductionOrder.status == "closed")
+                .where(MESProductionOrder.completed_at < cutoff_order)
+            )
+            total_archived += arc_result.rowcount
 
         await db.commit()
 
         return {
-            "deleted_equipment_status": deleted_equipment,
-            "deleted_scrap_records": deleted_scrap,
-            "aggregated_scrap_rows": aggregated_scrap_rows,
-            "archived_orders": archived_orders,
+            "deleted_equipment_status": total_deleted_equipment,
+            "deleted_scrap_records": total_deleted_scrap,
+            "aggregated_scrap_rows": total_aggregated,
+            "archived_orders": total_archived,
         }
 ```
 
@@ -4651,7 +4792,7 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 | 前端复用现有 client 实例 | Task 15 | ✅ |
 | 前端 4 个页面完整实现 | Task 16 | ✅ |
 | 前端 4 个路由 + 侧边栏菜单 | Task 17 | ✅ |
-| test_mes_concurrency.py 28 场景 | Task 18 | ✅ |
+| test_mes_concurrency.py 33 场景 | Task 18 | ✅ |
 | 生命周期清理任务 | Task 19 | ✅ |
 | mes_scrap_monthly_summary 表 | Task 1 | ✅ |
 | mes_production_orders_archive 表 | Task 1 | ✅ |

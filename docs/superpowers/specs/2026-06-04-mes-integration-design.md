@@ -122,14 +122,24 @@ class MESConnector(ABC):
   - `scrap_records`：必填，必须有 `path`（非空字符串）和 `cursor_field`（非空字符串）
   - `measurements`：必填，必须有 `path`（非空字符串）和 `cursor_field`（非空字符串）
 - `field_mapping`：**必填对象**，键值均为字符串；**必须包含** `source_updated_at`（映射到 MES 的 `updated_at` 或 `modified_at`），用于增量同步 checkpoint；缺失时同步任务会失败
+- `auth_type`：**必填**（REST），枚举值：`none` / `basic` / `bearer` / `api_key`（默认 `none`）；决定连接器如何构造认证请求头
 - `auth_config`：可选对象；若提供，其中的凭证字段（`token`/`password`/`secret`/`username`/`inbound_api_key`/`outbound_api_key`）必须为字符串类型
+- `retention`：可选对象，按连接配置数据保留策略（覆盖全局默认值）：
+  - `equipment_status_days`：设备状态保留天数（默认 90）
+  - `scrap_days`：报废记录保留天数（默认 365）
+  - `closed_order_days`：已关闭工单归档天数（默认 730）
 
 **可选字段说明**：
 - `timeout`：请求超时秒数（默认 30）
-- `retry`：重试策略（次数 + 指数退避间隔）
+- `retry`：重试策略（`max_retries` 次数 + `backoff_seconds` 指数退避间隔列表，至少一个元素且每项 >= 0）
 - `endpoints.{name}.method`：HTTP 方法（默认 `GET`）
 - `endpoints.{name}.pagination.type`：分页方式 — `none`（无分页）/ `offset`（页码分页）/ `cursor`（游标分页）
 - `endpoints.{name}.response_path`：响应 JSON 中数据数组的嵌套路径（如 `data.orders`）
+
+**规范化行为**：`_validate_rest_config()` 返回 `RESTConfig.model_dump(exclude_none=True)`，确保：
+- 显式 `null` 的可选字段（如 `retry: null`、`pagination: null`）被移除，连接器回退默认值
+- `auth_type` 和 `retention` 始终保留在顶层
+- 嵌套对象（`pagination`/`retry`）为类型化结构，不会出现运行时 `None.get()` 错误
 
 ---
 
