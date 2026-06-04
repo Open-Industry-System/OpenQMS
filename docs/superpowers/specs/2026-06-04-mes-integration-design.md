@@ -119,7 +119,7 @@ class MESConnector(ABC):
 - `endpoints.{name}.cursor_field`：增量同步时传入的查询参数名（如 `?updated_since=2026-06-04T00:00:00Z`）
 - `endpoints.{name}.pagination.type`：分页方式 — `none`（无分页）/ `offset`（页码分页）/ `cursor`（游标分页）
 - `endpoints.{name}.response_path`：响应 JSON 中数据数组的嵌套路径（如 `data.orders`）
-- `field_mapping`：MES 字段名 → OpenQMS 字段名的映射
+- `field_mapping`：OpenQMS 字段名 → MES 字段名的映射（key 是 OpenQMS 侧，value 是 MES 侧）
 
 ---
 
@@ -230,7 +230,8 @@ MES 推送 POST /api/mes/ingest
 | connection_id | UUID FK→mes_connections | |
 | data_type | VARCHAR(20) | `production_orders`/`equipment_status`/`scrap_records`/`measurements` |
 | status | VARCHAR(20) | `pending`/`running`/`completed`/`failed` |
-| checkpoint | TIMESTAMPTZ | 增量同步起点（上次成功时间） |
+| checkpoint | TIMESTAMPTZ | 增量同步起点（上次成功处理的最大 MES 源时间戳） |
+| next_run_at | TIMESTAMPTZ | 下次调度时间（completed 后 = now() + interval） |
 | started_at | TIMESTAMPTZ | |
 | completed_at | TIMESTAMPTZ | |
 | error_message | TEXT | |
@@ -240,13 +241,15 @@ MES 推送 POST /api/mes/ingest
 
 **同步流程**：
 ```
-定时调度 (asyncio background task, 5min 间隔)
+定时调度 (asyncio background task, 1min 间隔检查)
   → MESSyncService.schedule_and_run()
     → SELECT mes_sync_jobs WHERE status IN ('pending', 'failed')
+        OR (status = 'completed' AND next_run_at <= now())
       FOR UPDATE SKIP LOCKED  -- 防多 worker 重复
     → 加载对应 MESConnector
-    → fetch_{data_type}(since=job.checkpoint) → 增量写入
-    → 更新 job: status=completed, checkpoint=now(), completed_at=now()
+    → fetch_{data_type}(since=job.checkpoint - overlap_window) → 增量写入
+    → 更新 job: status=completed, checkpoint=max_source_timestamp,
+        next_run_at=now()+interval, completed_at=now()
     → 审计日志
 ```
 
@@ -257,6 +260,9 @@ MES 推送 POST /api/mes/ingest
 - `FOR UPDATE SKIP LOCKED` 确保多 worker/多实例安全
 - 失败 job 保留 `error_message`，下次调度自动重试
 - 重启后 job 状态持久化，不丢失
+- `next_run_at` 确保已完成的 job 到期后自动重新调度
+- checkpoint 使用"本次成功处理的最大 MES 源时间戳"而非 now()，避免跳数据
+- 拉取时回看 overlap_window（默认 5 分钟，可在 connection config 中配置），配合幂等键去重
 
 ### 反向推送（OpenQMS → MES）
 
@@ -373,15 +379,15 @@ SPC 异常触发 / CAPA 状态变更
 
 ### 权限控制
 - 新增 `Module.MES` 到权限矩阵（`core/permissions.py`）
-- 权限等级：
+- 权限等级（现有枚举：VIEW/CREATE/EDIT/APPROVE/ADMIN）：
 
-| 操作 | Module.MES 最低等级 |
-|------|:-----:|
-| 连接管理（CRUD + 测试 + 手动同步） | L3 (manager) |
-| 数据查询（工单/设备/报废/看板） | L2 (quality_engineer) |
-| 数据推送接入（`/api/mes/ingest`） | API Key（无 JWT，MES 系统调用） |
+| 操作 | Module.MES 最低等级 | 对应角色 |
+|------|:-----:|------|
+| 连接管理（CRUD + 测试 + 手动同步） | APPROVE | admin/manager |
+| 数据查询（工单/设备/报废/看板） | VIEW | 所有认证用户 |
+| 数据推送接入（`/api/mes/ingest`） | API Key（无 JWT，MES 系统调用） | N/A |
 
-- 通过 `require_permission(Module.MES, PermissionLevel.MANAGE)` 等现有权限守卫实现，不再用角色名硬判断
+- 通过 `require_permission(Module.MES, PermissionLevel.APPROVE)` 等现有权限守卫实现，不再用角色名硬判断
 - 迁移文件需在 `permission_matrix` 表中插入 MES 模块各角色的默认等级
 
 ---
