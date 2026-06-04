@@ -288,8 +288,10 @@ MES 推送 POST /api/mes/ingest
 阶段 3 — 写入结果（短事务）：
   BEGIN
     增量写入数据库（UPSERT 工单/设备/报废/测量）
-    UPDATE job SET status='completed', checkpoint=max_source_timestamp,
+    UPDATE job SET status='completed',
+      checkpoint=COALESCE(max_source_timestamp, job.checkpoint),
       next_run_at=now()+interval, completed_at=now()
+    （空结果时保持原 checkpoint，仅更新 next_run_at/completed_at/status）
   COMMIT
   审计日志
 ```
