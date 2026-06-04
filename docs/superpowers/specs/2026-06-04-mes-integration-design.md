@@ -94,42 +94,43 @@ class MESConnector(ABC):
 | connection_id | UUID PK | |
 | name | VARCHAR(100) | 连接名称 |
 | connector_type | VARCHAR(50) | `mock` / `rest` |
-| config | JSONB | 适配器配置 |
+| config | JSONB | 适配器配置（API Key/Token 等敏感字段在输出 Schema 中脱敏） |
 | is_active | BOOLEAN | 是否启用 |
+| consecutive_failures | INTEGER | 连续同步失败次数，达到 3 次自动置 inactive（默认 0） |
 | product_line | VARCHAR(50) | 关联产品线 |
-| last_sync_at | TIMESTAMP | 最后同步时间 |
+| last_sync_at | TIMESTAMPTZ | 最后同步时间（带时区） |
 | created_by | UUID FK→users | |
-| created_at / updated_at | TIMESTAMP | |
+| created_at / updated_at | TIMESTAMPTZ | |
 
 ### mes_production_orders — 生产工单
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | order_id | UUID PK | |
-| connection_id | UUID FK→mes_connections | 来源 MES |
-| order_no | VARCHAR(50) | 工单号 |
+| connection_id | UUID FK→mes_connections ON DELETE CASCADE | 来源 MES |
+| order_no | VARCHAR(50) | 工单号（联合唯一索引：connection_id + order_no） |
 | product_model | VARCHAR(100) | 产品型号 |
 | process_route | VARCHAR(200) | 工艺路线 |
 | planned_qty | INTEGER | 计划数量 |
 | actual_qty | INTEGER | 实际数量 |
 | status | VARCHAR(20) | `planned`/`in_progress`/`completed`/`closed` |
-| started_at / completed_at | TIMESTAMP | |
+| started_at / completed_at | TIMESTAMPTZ | |
 | product_line | VARCHAR(50) | |
 | mes_raw_data | JSONB | MES 原始数据 |
-| created_at | TIMESTAMP | |
+| created_at | TIMESTAMPTZ | |
 
 ### mes_equipment_status — 设备状态
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | record_id | UUID PK | |
-| connection_id | UUID FK→mes_connections | |
+| connection_id | UUID FK→mes_connections ON DELETE CASCADE | |
 | equipment_code | VARCHAR(50) | 设备编号 |
 | equipment_name | VARCHAR(100) | 设备名称 |
 | status | VARCHAR(20) | `running`/`idle`/`down`/`changeover` |
 | oee | NUMERIC(5,2) | OEE 百分比 |
-| downtime_reason | VARCHAR(200) | 停机原因 |
-| recorded_at | TIMESTAMP | |
+| downtime_reason | VARCHAR(200) | 停机原因（仅 status=down 时有值） |
+| recorded_at | TIMESTAMPTZ | |
 | product_line | VARCHAR(50) | |
 | mes_raw_data | JSONB | |
 
@@ -138,23 +139,27 @@ class MESConnector(ABC):
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | scrap_id | UUID PK | |
-| connection_id | UUID FK→mes_connections | |
-| order_no | VARCHAR(50) | 关联工单 |
+| connection_id | UUID FK→mes_connections ON DELETE CASCADE | |
+| order_id | UUID FK→mes_production_orders ON DELETE SET NULL | 关联工单（外键，替代原 order_no VARCHAR） |
 | equipment_code | VARCHAR(50) | 关联设备 |
 | defect_type | VARCHAR(50) | `scrap`/`rework`/`reject` |
 | defect_category | VARCHAR(100) | 不良分类 |
 | defect_qty | INTEGER | 不良数量 |
 | total_qty | INTEGER | 检验总数 |
 | defect_description | TEXT | 不良描述 |
-| recorded_at | TIMESTAMP | |
+| recorded_at | TIMESTAMPTZ | |
 | product_line | VARCHAR(50) | |
 | mes_raw_data | JSONB | |
 
 **设计决策**：
 - 每条记录带 `connection_id`，支持多 MES 源
 - `mes_raw_data` JSONB 保留 MES 原始数据，避免信息丢失
-- 过程测量数据不建新表，直接写入现有 SPC `SampleBatch`/`SampleValue`
+- 过程测量数据不建新表，直接写入现有 SPC `SampleBatch`/`SampleValue`，但需为 `SampleBatch` 增加 `connection_id`（FK→mes_connections, SET NULL）和 `order_no`（VARCHAR(50)）两个可选字段，确保 MES 来源可追溯
 - 所有表带 `product_line`，与现有产品线隔离一致
+- 所有时间字段使用 `TIMESTAMPTZ`（带时区），与现有模型一致
+- `mes_production_orders` 建联合唯一索引 `UniqueConstraint(connection_id, order_no)`
+- `mes_scrap_records` 通过 `order_id` 外键关联工单（而非 VARCHAR `order_no`），避免多 MES 源工单号碰撞
+- `mes_connections` 增加 `consecutive_failures` 字段，持久化失败计数，重启不丢失
 
 ---
 
@@ -179,11 +184,14 @@ MES 推送 POST /api/mes/ingest
 定时任务 (asyncio background task, 5min 间隔)
   → MESSyncService.sync_all()
     → 遍历所有 is_active=True 的 mes_connections
+    → SELECT ... FOR UPDATE SKIP LOCKED 获取行级锁（防多 worker 重复同步）
     → 加载对应 MESConnector
     → fetch_*() → 增量写入（since = last_sync_at）
-    → 更新 last_sync_at
+    → 更新 last_sync_at, 重置 consecutive_failures=0
     → 审计日志
 ```
+
+**多 Worker/多实例防重同步**：使用 PostgreSQL `SELECT ... FOR UPDATE SKIP LOCKED` 在同步开始时锁定 `mes_connections` 行，确保同一时间只有一个 worker 执行特定连接的同步。后续有需要时可引入 Celery / APScheduler + Redis Job Store。
 
 ### 反向推送（OpenQMS → MES）
 
@@ -285,6 +293,10 @@ SPC 异常触发 / CAPA 状态变更
 - 每个 connection 有独立 API Key
 - 后续将 SPC ingest 端点认证也改为从 connection 配置读取
 
+### 凭证脱敏
+- Pydantic 输出 Schema（如 `ConnectionOut`）中，`config.auth_config` 的敏感字段（api_key/token/password）必须脱敏为 `"***"`，不允许通过 GET 接口明文读回前端
+- 创建/更新时允许写入完整凭证
+
 ### 反向推送认证
 - `push_quality_event()` 使用 connection 的 `config.auth_config` 向 MES 认证
 - 支持 4 种：`none` / `basic` / `bearer` / `api_key`
@@ -302,7 +314,9 @@ SPC 异常触发 / CAPA 状态变更
 - 单个 connection 失败不影响其他（独立 try/catch）
 - 失败记录写入审计日志
 - 失败不更新 `last_sync_at`，下次自动重试增量数据
-- 连续失败 3 次自动标记 `is_active = False`
+- 失败时 `consecutive_failures += 1`，达到 3 次自动标记 `is_active = False`
+- 同步成功时重置 `consecutive_failures = 0`
+- 多 Worker 防重同步：`SELECT ... FOR UPDATE SKIP LOCKED`
 
 ### 推送接收
 - 数据校验失败返回 400 + 具体错误字段
@@ -320,3 +334,13 @@ SPC 异常触发 / CAPA 状态变更
 - **后端**：延续 `test_schema.py` 手动测试模式，新增 `test_mes_connector.py` 验证 Mock 适配器 + API 端点
 - **前端**：无 Vitest，手动验证
 - **集成测试**：Mock 模拟器 + 手动同步 API 触发完整数据流验证
+
+---
+
+## 数据生命周期管理
+
+- `mes_equipment_status`：设备状态历史仅保留 **90 天**，到期自动清理（后台任务每日检查）
+- `mes_scrap_records`：报废/返工明细保留 **1 年**，超出部分按月聚合成统计摘要
+- `mes_production_orders`：已关闭（`closed`）超 **2 年** 的工单归档到历史表
+- `mes_raw_data` JSONB：归档时可清除原始数据，仅保留结构化字段
+- 数据清理策略在 `mes_connections.config` 中可配置保留天数
