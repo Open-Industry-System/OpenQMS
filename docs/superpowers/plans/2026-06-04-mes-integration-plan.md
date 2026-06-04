@@ -31,7 +31,7 @@
 | 3 | RESTMESConnector 全 TODO | 完整 HTTP 实现：配置驱动 + 分页 + 字段映射 + 重试 |
 | 4 | API Key 认证是 TODO 占位 | 完整 SHA-256 hash 验证 + Fernet 加密 + 响应脱敏 + /test 端点 |
 | 5 | 测量 ingestion 无法原子回滚 | 调用 `_create_sample_batch_inner`（仅 flush）替代 `add_sample_batch`（内部 commit），同一事务完成 ingestion + SPC + 回填 |
-| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 8 个并发场景 |
+| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 17 个并发场景 |
 | 7 | 修改已执行 028 迁移 | 在 **新迁移 030** 末尾插入 MES 权限，不动 028 |
 | 8 | 查询未产品线隔离 + 凭证泄漏 | 查询 API 按 `product_line_code` 过滤；ConnectionOut 脱敏 `config.auth_config` 敏感字段 |
 | 9 | 前端独立 axios 实例 | 复用现有 `client` 实例（已含 JWT 拦截器） |
@@ -79,7 +79,7 @@
 
 ---
 
-## Task 1: 数据库迁移 — 创建 7 张 MES 表
+## Task 1: 数据库迁移 — 创建 9 张 MES 表
 
 **Files:**
 - Create: `backend/alembic/versions/030_add_mes_tables.py`
@@ -1180,17 +1180,51 @@ class RESTMESConnector(MESConnector):
 
         return all_data
 
+    def _validate_items(self, endpoint_name: str, raw_items: list[dict]) -> list[dict]:
+        """使用 Pydantic Schema 校验并转换原始 MES 数据（ISO 时间字符串 → datetime 等）。"""
+        from app.schemas import mes as schemas
+        schema_map = {
+            "production_orders": schemas.MESIngestProductionOrder,
+            "equipment_status": schemas.MESIngestEquipmentStatus,
+            "scrap_records": schemas.MESIngestScrapRecord,
+            "measurements": schemas.MESIngestMeasurement,
+        }
+        schema_cls = schema_map.get(endpoint_name)
+        if not schema_cls:
+            return raw_items
+        validated = []
+        dt_map = {
+            "production_orders": "production_order",
+            "equipment_status": "equipment_status",
+            "scrap_records": "scrap_record",
+            "measurements": "measurement",
+        }
+        data_type = dt_map.get(endpoint_name, endpoint_name)
+        for item in raw_items:
+            item["data_type"] = data_type
+            try:
+                v = schema_cls.model_validate(item)
+                validated.append(v.model_dump())
+            except Exception as e:
+                # Log and skip invalid items; do not crash the entire sync batch
+                print(f"[mes_connector] validation error for {endpoint_name}: {e}")
+        return validated
+
     async def fetch_production_orders(self, since: datetime) -> list[dict]:
-        return await self._fetch_paginated("production_orders", since)
+        raw = await self._fetch_paginated("production_orders", since)
+        return self._validate_items("production_orders", raw)
 
     async def fetch_equipment_status(self) -> list[dict]:
-        return await self._fetch_paginated("equipment_status", None)
+        raw = await self._fetch_paginated("equipment_status", None)
+        return self._validate_items("equipment_status", raw)
 
     async def fetch_scrap_records(self, since: datetime) -> list[dict]:
-        return await self._fetch_paginated("scrap_records", since)
+        raw = await self._fetch_paginated("scrap_records", since)
+        return self._validate_items("scrap_records", raw)
 
     async def fetch_measurements(self, since: datetime) -> list[dict]:
-        return await self._fetch_paginated("measurements", since)
+        raw = await self._fetch_paginated("measurements", since)
+        return self._validate_items("measurements", raw)
 
     async def push_quality_event(self, event_type: str, data: dict, event_id: str | None = None) -> dict:
         ep = self.endpoints.get("push_event", {})
@@ -1652,6 +1686,24 @@ class MESSyncService:
 
     BATCH_SIZE = 100
 
+    # Field used to advance checkpoint after successful sync
+    CHECKPOINT_FIELDS = {
+        "production_orders": ["updated_at", "completed_at", "started_at"],
+        "equipment_status": [],  # Full snapshot, no checkpoint
+        "scrap_records": ["recorded_at"],
+        "measurements": ["sampled_at"],
+    }
+
+    @staticmethod
+    def _get_checkpoint_value(data_type: str, item: dict) -> datetime | None:
+        """从同步数据中提取 checkpoint 时间戳。按优先级尝试多个字段。"""
+        fields = MESSyncService.CHECKPOINT_FIELDS.get(data_type, [])
+        for field in fields:
+            ts = item.get(field)
+            if ts and isinstance(ts, datetime):
+                return ts
+        return None
+
     @staticmethod
     async def create_sync_jobs_for_connection(db: AsyncSession, connection_id: uuid.UUID):
         """为新建连接初始化 4 个 pending 同步任务。调用方负责 commit。"""
@@ -1789,18 +1841,13 @@ class MESSyncService:
                 item["product_line_code"] = connection_product_line_code
                 if job.data_type == "production_orders":
                     await MESIngestionService._ingest_production_order(write_db, item)
-                    ts = item.get("started_at") or item.get("recorded_at")
                 elif job.data_type == "equipment_status":
                     await MESIngestionService._ingest_equipment_status(write_db, item)
-                    ts = item.get("recorded_at")
                 elif job.data_type == "scrap_records":
                     await MESIngestionService._ingest_scrap_record(write_db, item)
-                    ts = item.get("recorded_at")
                 elif job.data_type == "measurements":
                     await MESIngestionService._ingest_measurement(write_db, item)
-                    ts = item.get("sampled_at")
-                else:
-                    ts = None
+                ts = MESSyncService._get_checkpoint_value(job.data_type, item)
                 if ts and (max_ts is None or ts > max_ts):
                     max_ts = ts
 
@@ -3850,11 +3897,52 @@ class TestIngestEdgeCases:
                 )
                 assert resp.status_code == 400, f"Expected 400 for {bad_payload!r}, got {resp.status_code}"
 
+
+class TestRESTConnectorValidation:
+    async def test_rest_validate_converts_iso_datetime(self):
+        """RESTMESConnector._validate_items 将 ISO 时间字符串转为 datetime。"""
+        from app.services.mes_connector import RESTMESConnector
+        from datetime import datetime, timezone
+
+        connector = RESTMESConnector({
+            "base_url": "http://test",
+            "endpoints": {},
+        })
+        raw = [{
+            "external_id": "M-001",
+            "ic_code": "IC-TEST",
+            "values": [1.0, 2.0, 3.0],
+            "sampled_at": "2026-06-04T12:00:00+00:00",
+            "data_type": "measurement",  # will be overwritten by validator
+        }]
+        validated = connector._validate_items("measurements", raw)
+        assert len(validated) == 1
+        assert isinstance(validated[0]["sampled_at"], datetime)
+        assert validated[0]["sampled_at"].tzinfo is not None
+
+    async def test_rest_validate_skips_invalid_items(self):
+        """RESTMESConnector._validate_items 跳过非法数据，不中断批次。"""
+        from app.services.mes_connector import RESTMESConnector
+
+        connector = RESTMESConnector({
+            "base_url": "http://test",
+            "endpoints": {},
+        })
+        raw = [
+            {"external_id": "S-001", "defect_type": "scratches", "defect_qty": 5, "total_qty": 100},
+            {"external_id": "S-002", "defect_type": "scratches", "defect_qty": -1, "total_qty": 100},  # invalid
+            {"external_id": "S-003", "defect_type": "scratches", "defect_qty": 3, "total_qty": 50},
+        ]
+        validated = connector._validate_items("scrap_records", raw)
+        assert len(validated) == 2
+        assert validated[0]["external_id"] == "S-001"
+        assert validated[1]["external_id"] == "S-003"
+
 - [ ] **Step 2: Commit**
 
 ```bash
 git add backend/tests/test_mes_concurrency.py
-git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (17 cases)
+git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (19 cases)
 
 - Dual worker claim once (sync job + outbox)
 - Running job timeout recovery (>10min)
@@ -3869,7 +3957,9 @@ git commit -m "test(mes): add automated concurrency tests for sync, outbox, and 
 - Scrap order backfill: out-of-order arrival + duplicate preservation
 - Connection creation auto-generates 4 sync jobs
 - Manual sync only claims target connection
-- /ingest rejects non-object JSON bodies"
+- /ingest rejects non-object JSON bodies
+- REST connector validates and converts ISO datetime strings
+- REST connector skips invalid items without crashing batch"
 ```
 
 ---
@@ -4071,7 +4161,7 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 | 前端复用现有 client 实例 | Task 15 | ✅ |
 | 前端 4 个页面完整实现 | Task 16 | ✅ |
 | 前端 4 个路由 + 侧边栏菜单 | Task 17 | ✅ |
-| test_mes_concurrency.py 17 场景 | Task 18 | ✅ |
+| test_mes_concurrency.py 19 场景 | Task 18 | ✅ |
 | 生命周期清理任务 | Task 19 | ✅ |
 | mes_scrap_monthly_summary 表 | Task 1 | ✅ |
 | mes_production_orders_archive 表 | Task 1 | ✅ |
