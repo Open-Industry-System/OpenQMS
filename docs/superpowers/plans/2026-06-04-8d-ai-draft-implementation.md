@@ -92,8 +92,8 @@ class D2StructuredLLMOutput(BaseModel):
 class D3ContainmentAction(BaseModel):
     model_config = {"extra": "forbid"}
     action: str
-    responsible: str = "[待填写]"
-    deadline: str = "[待填写]"
+    responsible: Literal["[待填写]"] = "[待填写]"
+    deadline: Literal["[待填写]"] = "[待填写]"
 
 
 class D3StructuredData(BaseModel):
@@ -130,8 +130,8 @@ class D5CorrectiveAction(BaseModel):
     model_config = {"extra": "forbid"}
     action: str
     target_root_cause: str
-    responsible: str = "[待填写]"
-    deadline: str = "[待填写]"
+    responsible: Literal["[待填写]"] = "[待填写]"
+    deadline: Literal["[待填写]"] = "[待填写]"
 
 
 class D5StructuredData(BaseModel):
@@ -402,7 +402,10 @@ async def generate_draft(
             "request_id": str(req.request_id),
         }
 
-        # 14. 限流计数 + 缓存结果（限流在请求开始时已记录）
+        # 14. 清理过期缓存 + 写入新缓存
+        expired_keys = [k for k, (_, exp) in _draft_cache.items() if now > exp]
+        for k in expired_keys:
+            del _draft_cache[k]
         _draft_cache[cache_key] = (result, now + 60)
         success = True
 
@@ -433,8 +436,10 @@ async def generate_draft(
             ))
             await db.commit()
         except Exception:
-            # 审计日志失败不阻断主流程
-            pass
+            # 审计日志失败：回滚并记录 warning，不阻断主流程
+            import logging
+            logging.getLogger(__name__).warning("AI draft audit log failed", exc_info=True)
+            await db.rollback()
 
 
 async def _build_fmea_context(
@@ -487,8 +492,7 @@ async def _build_fmea_context(
         return f"已关联 FMEA 节点 [{target_name}]，{cause_str}"
 
     # 场景2: 无关联节点，取 severity 最高的前 3 个失效模式
-    # 限制总节点数，避免超大 Prompt
-    nodes = nodes[:MAX_FMEA_NODES]
+    # 先过滤全部 FailureMode，按 severity 排序，再取前三
     failure_modes = [
         n for n in nodes
         if n.get("type") == "FailureMode"
@@ -497,6 +501,7 @@ async def _build_fmea_context(
         key=lambda n: n.get("severity", 0),
         reverse=True,
     )
+    failure_modes = failure_modes[:MAX_FMEA_NODES]
     top3 = [n.get("name", "") for n in failure_modes[:3] if n.get("name")]
     if top3:
         return f"已关联 FMEA，主要失效模式：{', '.join(top3)}"
@@ -1466,7 +1471,116 @@ git commit -m "feat(frontend): integrate AI draft into CAPADetailPage"
 
 ---
 
-## Task 10: 自动化测试
+## Task 10: 前端测试
+
+**Files:**
+- Create: `frontend/src/components/capa/useAIDraft.test.ts`
+
+- [ ] **Step 1: 编写 Hook 测试**
+
+```typescript
+// frontend/src/components/capa/useAIDraft.test.ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, act, waitFor } from "@testing-library/react";
+import { useAIDraft, getDraftPreference, setDraftPreference } from "./useAIDraft";
+
+vi.mock("../../api/capaDraft", () => ({
+  generateDraft: vi.fn(),
+}));
+
+import { generateDraft } from "../../api/capaDraft";
+
+describe("useAIDraft", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("should have default format as structured", () => {
+    expect(getDraftPreference()).toBe("structured");
+  });
+
+  it("should save and load preference", () => {
+    setDraftPreference("paragraph");
+    expect(getDraftPreference()).toBe("paragraph");
+  });
+
+  it("should set loading while generating", async () => {
+    vi.mocked(generateDraft).mockResolvedValue({
+      content: "测试内容",
+      structured_data: null,
+      request_id: "test-uuid",
+    });
+
+    const { result } = renderHook(() => useAIDraft());
+
+    expect(result.current.loading).toBe(false);
+
+    act(() => {
+      result.current.generate("report-id", "d2", "structured");
+    });
+
+    expect(result.current.loading).toBe(true);
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.draft?.content).toBe("测试内容");
+  });
+
+  it("should map 503 to tempUnavailable", async () => {
+    vi.mocked(generateDraft).mockRejectedValue({
+      response: { status: 503, data: { detail: "未配置" } },
+    });
+
+    const { result } = renderHook(() => useAIDraft());
+
+    await act(async () => {
+      await result.current.generate("report-id", "d2", "structured");
+    });
+
+    expect(result.current.tempUnavailable).toBe(true);
+    expect(result.current.error).toContain("暂时不可用");
+  });
+
+  it("should map 409 to error message", async () => {
+    vi.mocked(generateDraft).mockRejectedValue({
+      response: { status: 409, data: { detail: "前置步骤不足" } },
+    });
+
+    const { result } = renderHook(() => useAIDraft());
+
+    await act(async () => {
+      await result.current.generate("report-id", "d2", "structured");
+    });
+
+    expect(result.current.error).toContain("前置步骤");
+  });
+
+  it("should support undo after saveUndo", () => {
+    const { result } = renderHook(() => useAIDraft());
+
+    act(() => {
+      result.current.saveUndo("d2_description", "原始内容");
+    });
+
+    expect(result.current.canUndo("d2_description")).toBe(true);
+
+    const prev = result.current.undo("d2_description");
+    expect(prev).toBe("原始内容");
+    expect(result.current.canUndo("d2_description")).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add frontend/src/components/capa/useAIDraft.test.ts
+git commit -m "test(frontend): add useAIDraft hook tests"
+```
+
+---
+
+## Task 11: 自动化测试
 
 **Files:**
 - Create: `backend/tests/test_capa_draft_service.py`
@@ -1582,6 +1696,95 @@ class TestPreconditions:
 
     def test_d2_description_min_length(self):
         assert _FIELD_MIN_LENGTH["d2_description"] == 20
+
+
+class TestGenerateDraft:
+    @pytest.mark.asyncio
+    async def test_draft_success_with_mock_llm(self, monkeypatch):
+        from app.services.capa_draft_service import generate_draft
+
+        # Mock CAPA
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "D2_DESCRIPTION"
+        capa.title = "Test"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = "问题描述内容"
+        capa.fmea_ref_id = None
+        capa.fmea_node_id = None
+
+        # Mock db
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.add = AsyncMock()
+
+        # Mock user
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
+        user.role_definition.bypass_row_level_security = True
+
+        # Mock request
+        request = MagicMock()
+        llm_provider = MagicMock()
+        llm_provider.complete = AsyncMock(return_value={
+            "structured_data": {
+                "problem_statement": "测试问题",
+                "affected_product": "DC-DC-100",
+                "defect_description": "描述",
+                "occurrence_context": "场景",
+                "impact_scope": "范围",
+            }
+        })
+        request.app.state.llm_provider = llm_provider
+
+        # Mock enforce_product_line_access
+        async def mock_enforce(*args, **kwargs):
+            pass
+        monkeypatch.setattr("app.services.capa_draft_service.enforce_product_line_access", mock_enforce)
+
+        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        result = await generate_draft(db, capa.report_id, "d2", req, user, request)
+
+        assert "content" in result
+        assert "问题陈述：测试问题" in result["content"]
+        assert result["structured_data"] is not None
+        assert llm_provider.complete.called
+
+    @pytest.mark.asyncio
+    async def test_draft_rate_limit(self, monkeypatch):
+        from app.services.capa_draft_service import generate_draft, _rate_limit, RATE_LIMIT_PER_MIN
+
+        user_id = str(uuid.uuid4())
+        now = time.time()
+        _rate_limit[user_id] = [now] * RATE_LIMIT_PER_MIN
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=None)
+
+        user = MagicMock()
+        user.user_id = uuid.UUID(user_id)
+        user.role_definition.bypass_row_level_security = True
+
+        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        with pytest.raises(HTTPException) as exc:
+            await generate_draft(db, uuid.uuid4(), "d2", req, user, MagicMock())
+        assert exc.value.status_code == 429
+
+        _rate_limit.clear()
+
+    @pytest.mark.asyncio
+    async def test_draft_invalid_request_id(self):
+        from app.services.capa_draft_service import generate_draft
+
+        db = MagicMock()
+        user = MagicMock()
+        user.role_definition.bypass_row_level_security = True
+        req = DraftRequest(format="structured", request_id="not-a-uuid")
+        with pytest.raises(HTTPException) as exc:
+            await generate_draft(db, uuid.uuid4(), "d2", req, user, MagicMock())
+        assert exc.value.status_code == 400
 ```
 
 - [ ] **Step 2: 编写 API 层测试（使用 dependency_overrides 注入认证）**
@@ -1615,7 +1818,11 @@ def auth_override(monkeypatch):
         return PermissionLevel.EDIT  # 给所有模块 EDIT 权限
 
     async def mock_get_db():
-        yield MagicMock()  # mock 数据库 session
+        db = MagicMock()
+        db.get = AsyncMock(return_value=None)  # 默认返回 None，测试可覆盖
+        db.commit = AsyncMock()
+        db.add = AsyncMock()
+        yield db
 
     app.dependency_overrides[get_current_user] = mock_get_current_user
     monkeypatch.setattr("app.core.permissions.get_user_permission", mock_get_user_permission)
@@ -1668,20 +1875,37 @@ class TestDraftEndpoint:
             )
             assert resp.status_code == 404
 
-    async def test_draft_archived_returns_409(self, auth_override):
-        # 使用 mock 数据库返回 ARCHIVED 状态的 CAPA
+    async def test_draft_archived_returns_409(self, auth_override, monkeypatch):
         from app.services import capa_draft_service
-        capa = MagicMock()
-        capa.status = "ARCHIVED"
-        capa.product_line_code = "DC-DC-100"
-        capa.fmea_ref_id = None
-        capa.title = "Test"
-        with patch.object(capa_draft_service, "generate_draft", side_effect=HTTPException(status_code=409, detail="报告已归档")):
-            pass  # 该测试需要在 integration 级别实现
+        from fastapi import HTTPException
 
-    async def test_draft_wrong_step_returns_409(self, auth_override):
-        # 该测试需要在 integration 级别实现
-        pass
+        async def mock_generate(*args, **kwargs):
+            raise HTTPException(status_code=409, detail="报告已归档，禁止 AI 草拟")
+
+        monkeypatch.setattr(capa_draft_service, "generate_draft", mock_generate)
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            resp = await ac.post(
+                f"/api/capa/{uuid.uuid4()}/draft/d2",
+                json={"format": "structured", "request_id": str(uuid.uuid4())},
+            )
+            assert resp.status_code == 409
+            assert "归档" in resp.json()["detail"]
+
+    async def test_draft_wrong_step_returns_409(self, auth_override, monkeypatch):
+        from app.services import capa_draft_service
+        from fastapi import HTTPException
+
+        async def mock_generate(*args, **kwargs):
+            raise HTTPException(status_code=409, detail="当前步骤为 d3，无法草拟 d2")
+
+        monkeypatch.setattr(capa_draft_service, "generate_draft", mock_generate)
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            resp = await ac.post(
+                f"/api/capa/{uuid.uuid4()}/draft/d2",
+                json={"format": "structured", "request_id": str(uuid.uuid4())},
+            )
+            assert resp.status_code == 409
+            assert "当前步骤" in resp.json()["detail"]
 ```
 
 - [ ] **Step 3: Commit**
@@ -1737,7 +1961,14 @@ cd frontend
 npx tsc --noEmit
 ```
 
-- [ ] **Step 5: 前端构建**
+- [ ] **Step 5: 运行前端测试**
+
+```bash
+cd frontend
+npm test -- --run  # vitest 无交互模式
+```
+
+- [ ] **Step 6: 前端构建**
 
 ```bash
 cd frontend
