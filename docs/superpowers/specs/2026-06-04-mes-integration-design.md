@@ -162,6 +162,7 @@ class MESConnector(ABC):
 |------|------|------|
 | record_id | UUID PK | |
 | connection_id | UUID FK→mes_connections ON DELETE CASCADE | |
+| external_id | VARCHAR(100) | MES 外部幂等键 |
 | equipment_code | VARCHAR(50) | 设备编号 |
 | equipment_name | VARCHAR(100) | 设备名称 |
 | status | VARCHAR(20) | `running`/`idle`/`down`/`changeover` |
@@ -174,13 +175,16 @@ class MESConnector(ABC):
 | product_line_code | VARCHAR(50) FK→product_lines.code | 关联产品线 |
 | mes_raw_data | JSONB | |
 
+**联合唯一索引**：`UniqueConstraint(connection_id, external_id)`
+
 ### mes_scrap_records — 报废/返工
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | scrap_id | UUID PK | |
 | connection_id | UUID FK→mes_connections ON DELETE CASCADE | |
-| order_id | UUID FK→mes_production_orders ON DELETE SET NULL | 关联工单（外键，替代原 order_no VARCHAR） |
+| external_id | VARCHAR(100) | MES 外部幂等键 |
+| order_id | UUID FK→mes_production_orders ON DELETE SET NULL | 关联工单 |
 | equipment_code | VARCHAR(50) | 关联设备 |
 | defect_type | VARCHAR(50) | `scrap`/`rework`/`reject` |
 | defect_category | VARCHAR(100) | 不良分类 |
@@ -190,6 +194,8 @@ class MESConnector(ABC):
 | recorded_at | TIMESTAMPTZ | |
 | product_line_code | VARCHAR(50) FK→product_lines.code | 关联产品线 |
 | mes_raw_data | JSONB | |
+
+**联合唯一索引**：`UniqueConstraint(connection_id, external_id)`
 
 ### mes_measurement_ingestions — MES 测量来源追踪
 
@@ -260,19 +266,32 @@ MES 推送 POST /api/mes/ingest
 
 **联合唯一索引**：`UniqueConstraint(connection_id, data_type)` — 每个 connection 的每种数据类型一个 job。
 
-**同步流程**：
+**同步流程**（两阶段短事务，避免长事务持锁）：
 ```
 定时调度 (asyncio background task, 1min 间隔检查)
-  → MESSyncService.schedule_and_run()
-    → SELECT mes_sync_jobs WHERE status IN ('pending', 'failed')
+
+阶段 1 — 领取 job（短事务）：
+  BEGIN
+    SELECT mes_sync_jobs WHERE status IN ('pending', 'failed')
         OR (status = 'completed' AND next_run_at <= now())
-      FOR UPDATE SKIP LOCKED  -- 防多 worker 重复
-    → 加载对应 MESConnector
-    → fetch_{data_type}(since=job.checkpoint - overlap_window) → 增量写入
-    → 更新 job: status=completed, checkpoint=max_source_timestamp,
-        next_run_at=now()+interval, completed_at=now()
-    → 审计日志
+      FOR UPDATE SKIP LOCKED
+    → UPDATE job SET status='running', started_at=now()
+  COMMIT  -- 释放行锁
+
+阶段 2 — 执行外部请求（无事务）：
+  加载对应 MESConnector
+  fetch_{data_type}(since=job.checkpoint - overlap_window) → 数据在内存中
+
+阶段 3 — 写入结果（短事务）：
+  BEGIN
+    增量写入数据库（UPSERT 工单/设备/报废/测量）
+    UPDATE job SET status='completed', checkpoint=max_source_timestamp,
+      next_run_at=now()+interval, completed_at=now()
+  COMMIT
+  审计日志
 ```
+
+**超时恢复**：调度器每轮检查 `status='running' AND started_at < now() - 10min` 的 job，视为崩溃残留，重置为 `status='failed'`，下次调度自动重试。
 
 **手动同步**：`POST /api/mes/connections/{id}/sync` 将该 connection 的所有 job 置为 `pending`，立即触发一轮调度。
 
@@ -427,13 +446,16 @@ SPC 异常触发 / CAPA 状态变更
 
 增量拉取重叠时（失败重试导致 since 时间窗口重叠），需防止重复写入：
 
-1. **工单与报废数据**：写入 `mes_production_orders` 和 `mes_scrap_records` 时使用 `UPSERT`（`ON CONFLICT DO NOTHING`），工单的联合唯一索引 `(connection_id, order_no)` 和 `mes_measurement_ingestions` 的联合唯一索引 `(connection_id, external_id)` 自然支撑幂等
-2. **测量数据导入**：调用 `spc_service.ingest_external_data()` 之前，先查询 `mes_measurement_ingestions` 是否已存在相同 `external_id`，已存在则跳过（整个 ingestion 记录 + SPC 写入均跳过）
+1. **工单数据**：`mes_production_orders` 使用 `ON CONFLICT (connection_id, order_no) DO UPDATE` 更新 `actual_qty`/`status`/`completed_at` 等可变字段（工单在 MES 中会持续更新）
+2. **报废与设备数据**：`mes_scrap_records` 和 `mes_equipment_status` 使用 `ON CONFLICT (connection_id, external_id) DO NOTHING`（历史快照，不更新）
+3. **测量数据**：`mes_measurement_ingestions` 使用 `ON CONFLICT (connection_id, external_id) DO NOTHING`（幂等跳过）
+4. **测量数据导入**：调用 `spc_service.ingest_external_data()` 之前，先查询 `mes_measurement_ingestions` 是否已存在相同 `(connection_id, external_id)`，已存在则跳过（整个 ingestion 记录 + SPC 写入均跳过）
 3. **细粒度事务提交**：sync_all() 内将工单、设备状态、报废记录、测量数据四个拉取动作拆分为**四个独立事务提交块**。任一动作失败只回滚当前块，已成功持久化的数据保留，审计日志记录每块结果
 
 ### 推送接收
+- 所有推送数据必须包含 `external_id` 字段
+- 幂等判定统一使用 `(connection_id, data_type, external_id)`，已有记录则跳过，返回 200 + 提示
 - 数据校验失败返回 400 + 具体错误字段
-- 重复数据（相同 `order_no` + `recorded_at`）跳过，返回 200 + 提示
 - 未知 `data_type` 返回 400
 
 ### 反向推送
