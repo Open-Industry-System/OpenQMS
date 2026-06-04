@@ -1363,7 +1363,29 @@ class MESIngestionService:
 
         # Step 3: Re-evaluate SPC alarms (same transaction)
         from app.services.spc_service import _reevaluate_alarms_no_commit
-        await _reevaluate_alarms_no_commit(db, ic)
+        new_alarms = await _reevaluate_alarms_no_commit(db, ic)
+
+        # Step 3b: Write MES outbox only if new alarms were created
+        if new_alarms and ic.product_line:
+            from app.services.mes_service import MESPushService
+            from app.models.mes import MESConnection
+            query = select(MESConnection).where(
+                MESConnection.is_active == True,
+                MESConnection.product_line_code == ic.product_line
+            )
+            result = await db.execute(query)
+            for conn in result.scalars().all():
+                await MESPushService.push_event(
+                    db,
+                    event_type="spc_alarm",
+                    connection_id=conn.connection_id,
+                    payload={
+                        "ic_id": str(ic.ic_id),
+                        "ic_code": ic.ic_code,
+                        "alarm_count": len(new_alarms),
+                        "product_line": ic.product_line,
+                    }
+                )
 
         # Step 4: Backfill batch_id
         await db.execute(
@@ -1962,63 +1984,102 @@ git commit -m "feat(push): add MESPushService with outbox pattern and 3-phase tr
 
 - [ ] **Step 1: SPC 告警触发时写入 Outbox**
 
-**避免循环导入**：在函数内部局部导入 `MESPushService` 和 `MESConnection`（mes_service.py 顶层已导入 SPC 函数）。
-
-在 `spc_service.py` 的 `add_sample_batch`（commit 之前）调用 `_write_spc_alarm_outbox`：
+**先修改 `_reevaluate_alarms_no_commit` 和 `_reevaluate_alarms` 返回新 Alarm 列表**：
 
 ```python
 # backend/app/services/spc_service.py
-# 在 add_sample_batch 末尾、db.commit() 之前：
+# 修改 _reevaluate_alarms_no_commit 的签名和末尾：
+
+async def _reevaluate_alarms_no_commit(db: AsyncSession, ic: InspectionCharacteristic) -> list[SPCAlarm]:
+    """计算告警 + 生成 SPCAlarm 记录 + db.flush()，不 commit。返回新创建的 Alarm 列表。"""
+    # ... existing logic ...
+    new_alarms: list[SPCAlarm] = []
+    for alarm in alarms:
+        # ... existing check for duplicate ...
+        if existing.scalar_one_or_none():
+            continue
+        spc_alarm = SPCAlarm(...)
+        db.add(spc_alarm)
+        new_alarms.append(spc_alarm)
+    
+    await db.flush()
+    return new_alarms
+
+# _reevaluate_alarms 同样修改：
+async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> list[SPCAlarm]:
+    """计算告警 + 生成 SPCAlarm 记录 + commit。返回新创建的 Alarm 列表。"""
+    new_alarms = await _reevaluate_alarms_no_commit(db, ic)
+    if new_alarms:
+        await db.commit()
+    return new_alarms
+```
+
+**然后在 `add_sample_batch` 中，仅当产生新 Alarm 时才写 Outbox**：
+
+```python
+# backend/app/services/spc_service.py
+# 在 add_sample_batch 中：
 
 async def add_sample_batch(...):
     batch = await _create_sample_batch_inner(db, user_id, ic_id, data)
-    # ... existing code ...
+    await db.commit()
+    await db.refresh(batch)
     
-    # After re-evaluating alarms, write to MES outbox
     ic = await get_inspection_characteristic(db, ic_id)
-    if ic and ic.product_line:
-        # Only write outbox if product_line is known
-        from app.services.mes_service import MESPushService
-        from app.models.mes import MESConnection
-        from sqlalchemy import select
-        
-        query = select(MESConnection).where(
-            MESConnection.is_active == True,
-            MESConnection.product_line_code == ic.product_line
-        )
-        result = await db.execute(query)
-        connections = result.scalars().all()
-        for conn in connections:
-            await MESPushService.push_event(
-                db,
-                event_type="spc_alarm",
-                connection_id=conn.connection_id,
-                payload={
-                    "ic_id": str(ic_id),
-                    "ic_code": ic.ic_code,
-                    "product_line": ic.product_line,
-                }
+    if ic:
+        new_alarms = await _reevaluate_alarms(db, ic)
+        # Only write outbox if new alarms were actually created
+        if new_alarms and ic.product_line:
+            from app.services.mes_service import MESPushService
+            from app.models.mes import MESConnection
+            from sqlalchemy import select
+            
+            query = select(MESConnection).where(
+                MESConnection.is_active == True,
+                MESConnection.product_line_code == ic.product_line
             )
+            result = await db.execute(query)
+            for conn in result.scalars().all():
+                await MESPushService.push_event(
+                    db,
+                    event_type="spc_alarm",
+                    connection_id=conn.connection_id,
+                    payload={
+                        "ic_id": str(ic.ic_id),
+                        "ic_code": ic.ic_code,
+                        "alarm_count": len(new_alarms),
+                        "product_line": ic.product_line,
+                    }
+                )
+            await db.commit()
     
-    await db.commit()  # commit 包含 outbox 写入
-    # ... rest of existing code ...
+    return batch
 ```
 
 **注意**：product_line 为 None 时不广播（数据不完整，无法确定目标 MES）。
 
 - [ ] **Step 2: CAPA 状态变更时写入 Outbox**
 
-在 `capa_service.py` 的状态流转方法中（commit 之前）：
+**修改现有 `advance_capa()`**，在 `await db.commit()` 之前写入 outbox：
 
 ```python
 # backend/app/services/capa_service.py
-# 在 advance_capa_status() 或类似状态推进函数中、db.commit() 之前：
+# 在 advance_capa() 末尾、db.commit() 之前插入：
 
-async def advance_capa_status(db: AsyncSession, capa_id: uuid.UUID, new_status: str, user: User):
-    # ... existing transition logic ...
+async def advance_capa(
+    db: AsyncSession,
+    capa: CAPAEightD,
+    user_id: uuid.UUID,
+    d7_skip_reasons: list[dict] | None = None,
+) -> CAPAEightD:
+    # ... existing logic to compute old_status and next_state ...
+    old_status = capa.status
+    capa.status = next_state.value
+    
+    # ... existing audit log logic ...
     
     # Write to MES outbox before commit
-    if capa.product_line_code:
+    if capa.product_line_code and old_status != capa.status:
         from app.services.mes_service import MESPushService
         from app.models.mes import MESConnection
         from sqlalchemy import select
@@ -2028,23 +2089,26 @@ async def advance_capa_status(db: AsyncSession, capa_id: uuid.UUID, new_status: 
             MESConnection.product_line_code == capa.product_line_code
         )
         result = await db.execute(query)
-        connections = result.scalars().all()
-        for conn in connections:
+        for conn in result.scalars().all():
             await MESPushService.push_event(
                 db,
                 event_type="capa_status_change",
                 connection_id=conn.connection_id,
                 payload={
-                    "capa_id": str(capa_id),
+                    "capa_id": str(capa.report_id),
                     "old_status": old_status,
-                    "new_status": new_status,
+                    "new_status": capa.status,
                     "changed_at": datetime.now(timezone.utc).isoformat(),
                     "product_line_code": capa.product_line_code,
                 }
             )
     
     await db.commit()  # commit 包含 outbox 写入
+    await db.refresh(capa)
+    return capa
 ```
+
+**注意**：使用 `old_status != capa.status` 确保只在状态真正变化时写 outbox。
 
 - [ ] **Step 3: Commit**
 
@@ -2363,6 +2427,8 @@ async def get_production_order(
     order = await db.get(MESProductionOrder, order_id)
     if not order:
         raise HTTPException(404, "Order not found")
+    from app.core.product_line_filter import enforce_product_line_access
+    await enforce_product_line_access(user, order.product_line_code, db)
     return schemas.MESProductionOrderResponse.model_validate(order)
 
 
@@ -3138,13 +3204,16 @@ async def cleanup_mes_test_data():
 class TestSyncJobConcurrency:
     async def test_dual_worker_claim_once(self, test_connection):
         """双 worker 同时 claim，只有一个能获得 running 状态。"""
-        job = MESSyncJob(
-            connection_id=test_connection.connection_id,
-            data_type="production_orders",
-            status="pending",
-        )
-        db.add(job)
-        await db.commit()
+        # Create job in an independent session
+        async with async_session() as db:
+            job = MESSyncJob(
+                connection_id=test_connection.connection_id,
+                data_type="production_orders",
+                status="pending",
+            )
+            db.add(job)
+            await db.commit()
+            job_id = job.job_id
 
         claimed_counts = []
 
@@ -3159,55 +3228,68 @@ class TestSyncJobConcurrency:
         # Only one worker should have claimed the job
         assert sum(claimed_counts) == 1
 
-    async def test_running_job_timeout_recovery(self, db, test_connection):
+        # Cleanup: reset job to completed
+        async with async_session() as db:
+            job = await db.get(MESSyncJob, job_id)
+            if job:
+                job.status = "completed"
+                await db.commit()
+
+    async def test_running_job_timeout_recovery(self, test_connection):
         """running 超过 10 分钟的 job 被重置为 failed。"""
-        job = MESSyncJob(
-            connection_id=test_connection.connection_id,
-            data_type="equipment_status",
-            status="running",
-            started_at=datetime.now(timezone.utc) - timedelta(minutes=15),
-        )
-        db.add(job)
-        await db.commit()
+        async with async_session() as db:
+            job = MESSyncJob(
+                connection_id=test_connection.connection_id,
+                data_type="equipment_status",
+                status="running",
+                started_at=datetime.now(timezone.utc) - timedelta(minutes=15),
+            )
+            db.add(job)
+            await db.commit()
+            job_id = job.job_id
 
-        count = await MESSyncService.recover_stuck_jobs(db)
-        await db.commit()
+        async with async_session() as db:
+            count = await MESSyncService.recover_stuck_jobs(db)
+            await db.commit()
+            assert count == 1
+            result = await db.execute(select(MESSyncJob).where(MESSyncJob.job_id == job_id))
+            updated = result.scalar_one()
+            assert updated.status == "failed"
 
-        assert count == 1
-        result = await db.execute(select(MESSyncJob).where(MESSyncJob.job_id == job.job_id))
-        updated = result.scalar_one()
-        assert updated.status == "failed"
-
-    async def test_manual_sync_blocks_running(self, db, test_connection):
+    async def test_manual_sync_blocks_running(self, test_connection):
         """手动同步时若存在 running job，返回冲突。"""
-        job = MESSyncJob(
-            connection_id=test_connection.connection_id,
-            data_type="production_orders",
-            status="running",
-            started_at=datetime.now(timezone.utc),
-        )
-        db.add(job)
-        await db.commit()
+        async with async_session() as db:
+            job = MESSyncJob(
+                connection_id=test_connection.connection_id,
+                data_type="production_orders",
+                status="running",
+                started_at=datetime.now(timezone.utc),
+            )
+            db.add(job)
+            await db.commit()
 
-        with pytest.raises(ValueError, match="Sync already in progress"):
-            await MESSyncService.manual_sync(db, test_connection.connection_id)
+            with pytest.raises(ValueError, match="Sync already in progress"):
+                await MESSyncService.manual_sync(db, test_connection.connection_id)
 
-    async def test_inactive_connection_not_synced(self, db, test_connection):
+    async def test_inactive_connection_not_synced(self, test_connection):
         """is_active=False 的连接不会被同步。"""
-        test_connection.is_active = False
-        await db.commit()
+        async with async_session() as db:
+            # Reload connection in this session and deactivate
+            conn = await db.get(MESConnection, test_connection.connection_id)
+            conn.is_active = False
+            await db.commit()
 
-        job = MESSyncJob(
-            connection_id=test_connection.connection_id,
-            data_type="production_orders",
-            status="pending",
-        )
-        db.add(job)
-        await db.commit()
+            job = MESSyncJob(
+                connection_id=test_connection.connection_id,
+                data_type="production_orders",
+                status="pending",
+            )
+            db.add(job)
+            await db.commit()
 
-        jobs = await MESSyncService.claim_jobs(db)
-        await db.commit()
-        assert len(jobs) == 0
+            jobs = await MESSyncService.claim_jobs(db)
+            await db.commit()
+            assert len(jobs) == 0
 
 
 class TestOutboxConcurrency:
@@ -3246,55 +3328,57 @@ class TestOutboxConcurrency:
         await asyncio.gather(worker(), worker())
         assert sum(claimed_counts) == 1
 
-    async def test_processing_timeout_recovery(self, db, test_connection):
+    async def test_processing_timeout_recovery(self, test_connection):
         """processing 超过 10 分钟的 outbox 被重置为 pending。"""
-        outbox = MESPushOutbox(
-            event_type="test_event",
-            connection_id=test_connection.connection_id,
-            payload={},
-            status="processing",
-            started_at=datetime.now(timezone.utc) - timedelta(minutes=15),
-        )
-        db.add(outbox)
-        await db.commit()
+        async with async_session() as db:
+            outbox = MESPushOutbox(
+                event_type="test_event",
+                connection_id=test_connection.connection_id,
+                payload={},
+                status="processing",
+                started_at=datetime.now(timezone.utc) - timedelta(minutes=15),
+            )
+            db.add(outbox)
+            await db.commit()
+            outbox_id = outbox.outbox_id
 
-        count = await MESPushService.recover_stuck_outbox(db)
-        await db.commit()
-
-        assert count == 1
-        result = await db.execute(select(MESPushOutbox).where(MESPushOutbox.outbox_id == outbox.outbox_id))
-        updated = result.scalar_one()
-        assert updated.status == "pending"
+        async with async_session() as db:
+            count = await MESPushService.recover_stuck_outbox(db)
+            await db.commit()
+            assert count == 1
+            result = await db.execute(select(MESPushOutbox).where(MESPushOutbox.outbox_id == outbox_id))
+            updated = result.scalar_one()
+            assert updated.status == "pending"
 
 
 class TestMeasurementAtomicity:
-    async def test_ingestion_atomic_rollback(self, db, test_connection, test_ic):
+    async def test_ingestion_atomic_rollback(self, test_connection, test_ic):
         """ingestion INSERT 成功但后续失败时，事务回滚不残留。"""
-        # Use a non-existent ic_code to trigger failure after ingestion insert
-        data = {
-            "connection_id": test_connection.connection_id,
-            "external_id": "TEST-ATOMIC-001",
-            "order_no": "WO-2026-001",
-            "ic_code": "NON-EXISTENT-IC",
-            "values": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "batch_no": "B-TEST-001",
-            "sampled_at": datetime.now(timezone.utc),
-            "product_line_code": "DC-DC-100",
-        }
+        async with async_session() as db:
+            data = {
+                "connection_id": test_connection.connection_id,
+                "external_id": "TEST-ATOMIC-001",
+                "order_no": "WO-2026-001",
+                "ic_code": "NON-EXISTENT-IC",
+                "values": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "batch_no": "B-TEST-001",
+                "sampled_at": datetime.now(timezone.utc),
+                "product_line_code": "DC-DC-100",
+            }
 
-        with pytest.raises(ValueError):
-            await MESIngestionService._ingest_measurement(db, data)
-            await db.commit()
+            with pytest.raises(ValueError):
+                await MESIngestionService._ingest_measurement(db, data)
+                await db.commit()
 
-        await db.rollback()
+            await db.rollback()
 
-        # Verify no ingestion record was persisted
-        result = await db.execute(
-            select(MESMeasurementIngestion).where(MESMeasurementIngestion.external_id == "TEST-ATOMIC-001")
-        )
-        assert result.scalar_one_or_none() is None
+            # Verify no ingestion record was persisted
+            result = await db.execute(
+                select(MESMeasurementIngestion).where(MESMeasurementIngestion.external_id == "TEST-ATOMIC-001")
+            )
+            assert result.scalar_one_or_none() is None
 
-    async def test_duplicate_external_id_skipped(self, db, test_connection, test_ic):
+    async def test_duplicate_external_id_skipped(self, test_connection, test_ic):
         """重复 external_id 返回 skipped 不写入 SPC。"""
         data = {
             "connection_id": test_connection.connection_id,
@@ -3307,70 +3391,68 @@ class TestMeasurementAtomicity:
             "product_line_code": "DC-DC-100",
         }
 
-        result1 = await MESIngestionService._ingest_measurement(db, data)
-        await db.commit()
-        assert result1["status"] == "success"
+        async with async_session() as db:
+            result1 = await MESIngestionService._ingest_measurement(db, data)
+            await db.commit()
+            assert result1["status"] == "success"
 
-        result2 = await MESIngestionService._ingest_measurement(db, data)
-        await db.commit()
-        assert result2["status"] == "skipped"
+        async with async_session() as db:
+            result2 = await MESIngestionService._ingest_measurement(db, data)
+            await db.commit()
+            assert result2["status"] == "skipped"
 
 
 class TestIdempotentRedelivery:
-    async def test_crash_redelivery_idempotent(self, db, test_connection):
+    async def test_crash_redelivery_idempotent(self, test_connection):
         """模拟崩溃后重复投递：processing→崩溃→恢复→再次 claim→推送→最终 sent。"""
         from app.database import async_session
 
-        outbox = MESPushOutbox(
-            event_type="spc_alarm",
-            connection_id=test_connection.connection_id,
-            payload={"alarm": "test"},
-            status="pending",
-        )
-        db.add(outbox)
-        await db.flush()
-        await db.refresh(outbox)
+        # Step 1: Create outbox in independent session and commit
+        async with async_session() as db:
+            outbox = MESPushOutbox(
+                event_type="spc_alarm",
+                connection_id=test_connection.connection_id,
+                payload={"alarm": "test"},
+                status="processing",  # already claimed
+                started_at=datetime.now(timezone.utc) - timedelta(minutes=15),
+            )
+            db.add(outbox)
+            await db.commit()
+            outbox_id = outbox.outbox_id
 
-        # Step 1: Claim as processing (simulating normal processing start)
-        outbox.status = "processing"
-        outbox.started_at = datetime.now(timezone.utc)
-        await db.flush()
+        # Step 2: Timeout recovery resets processing → pending (>10min old)
+        async with async_session() as db:
+            recovered = await MESPushService.recover_stuck_outbox(db)
+            await db.commit()
+            assert recovered == 1
 
-        # Step 2: Simulate crash — processing record left behind
-        # (We don't commit sent status, mimicking crash before Phase 3)
+            refreshed = await db.get(MESPushOutbox, outbox_id)
+            assert refreshed.status == "pending"
 
-        # Step 3: Timeout recovery resets processing → pending
-        recovered = await MESPushService.recover_stuck_outbox(db)
-        await db.flush()
-        assert recovered == 1
+        # Step 3: Re-claim in new session
+        async with async_session() as db:
+            refreshed = await db.get(MESPushOutbox, outbox_id)
+            refreshed.status = "processing"
+            refreshed.started_at = datetime.now(timezone.utc)
+            await db.commit()
 
-        refreshed = await db.get(MESPushOutbox, outbox.outbox_id)
-        assert refreshed.status == "pending"
-
-        # Step 4: Re-claim and process through full MESPushService flow
-        # Manually simulate the 3-phase flow:
-        # Phase 1: claim
-        refreshed.status = "processing"
-        refreshed.started_at = datetime.now(timezone.utc)
-        await db.flush()
-
-        # Phase 2: HTTP push (no tx)
-        connector = MockMESConnector(db)
+        # Step 4: HTTP push (no tx)
+        connector = MockMESConnector(None)
         resp = await connector.push_quality_event(
-            "spc_alarm", {"alarm": "test"}, event_id=str(outbox.outbox_id)
+            "spc_alarm", {"alarm": "test"}, event_id=str(outbox_id)
         )
         assert resp["status"] == "ok"
 
-        # Phase 3: write result (new tx)
+        # Step 5: Write result (new tx)
         async with async_session() as write_db:
-            fresh = await write_db.get(MESPushOutbox, outbox.outbox_id)
+            fresh = await write_db.get(MESPushOutbox, outbox_id)
             fresh.status = "sent"
             fresh.sent_at = datetime.now(timezone.utc)
             await write_db.commit()
 
         # Verify final state
         async with async_session() as verify_db:
-            final = await verify_db.get(MESPushOutbox, outbox.outbox_id)
+            final = await verify_db.get(MESPushOutbox, outbox_id)
             assert final.status == "sent"
             assert final.sent_at is not None
 ```
@@ -3423,14 +3505,14 @@ class MESLifecycleService:
 
         使用 PostgreSQL advisory lock 防止多 worker 同时执行。
         """
-        from sqlalchemy import delete
+        from sqlalchemy import delete, text
         now = datetime.now(timezone.utc)
 
         # Acquire advisory lock (key = 42) to prevent concurrent cleanup
         lock_result = await db.execute(text("SELECT pg_try_advisory_lock(42)"))
         has_lock = lock_result.scalar()
         if not has_lock:
-            return {"skipped": True, "reason": "another worker is running cleanup"}
+            return {"deleted_equipment_status": 0, "deleted_scrap_records": 0, "aggregated_scrap_rows": 0, "archived_orders": 0}
 
         try:
             # 1. Clean old equipment status (>90 days)
