@@ -449,6 +449,9 @@ async def _build_fmea_context(
     if fmea is None or not fmea.graph_data:
         return "（未关联 FMEA 数据）"
 
+    # 校验 FMEA 自身的产品线访问权
+    await enforce_product_line_access(user, fmea.product_line_code, db)
+
     graph = fmea.graph_data
     nodes = graph.get("nodes", [])
     edges = graph.get("edges", [])
