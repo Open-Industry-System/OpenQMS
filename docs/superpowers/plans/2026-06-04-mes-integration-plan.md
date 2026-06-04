@@ -1990,6 +1990,19 @@ class MESSyncService:
                                 .where(MESConnection.connection_id == job_refresh.connection_id)
                                 .values(is_active=False)
                             )
+                            # AuditLog: connection deactivated due to repeated failures
+                            from app.models.audit_log import AuditLog
+                            fail_db.add(AuditLog(
+                                user_id=None,  # System action
+                                action="mes_connection_deactivated",
+                                resource_type="mes_connection",
+                                resource_id=str(job_refresh.connection_id),
+                                new_values={
+                                    "reason": f"Sync job {job_refresh.data_type} failed {job_refresh.consecutive_failures} consecutive times",
+                                    "last_error": str(e),
+                                    "job_id": str(job_refresh.job_id),
+                                },
+                            ))
                         await fail_db.commit()
 
     @staticmethod
@@ -2549,6 +2562,7 @@ async def list_mes_connections(
     if not user.role_definition.bypass_row_level_security:
         user_codes = await get_user_product_line_codes(user, db)
         query = query.where(MESConnection.product_line_code.in_(user_codes))
+    query = query.order_by(MESConnection.created_at.desc())
 
     total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar()
@@ -2883,6 +2897,7 @@ async def list_production_orders(
     query = await _apply_pl_filter(query, user, MESProductionOrder, db, request)
     if product_line_code:
         query = query.where(MESProductionOrder.product_line_code == product_line_code)
+    query = query.order_by(MESProductionOrder.created_at.desc())
 
     total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar()
@@ -2914,18 +2929,32 @@ async def get_production_order(
 
 @router.get("/equipment-status")
 async def list_equipment_status(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     product_line_code: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
     request: Request = None,
 ):
+    """设备状态列表（分页 + 稳定排序）。"""
     query = select(MESEquipmentStatus)
     query = await _apply_pl_filter(query, user, MESEquipmentStatus, db, request)
     if product_line_code:
         query = query.where(MESEquipmentStatus.product_line_code == product_line_code)
-    result = await db.execute(query)
+    query = query.order_by(MESEquipmentStatus.recorded_at.desc())
+
+    total_result = await db.execute(select(func.count()).select_from(query.subquery()))
+    total = total_result.scalar()
+
+    result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
     items = result.scalars().all()
-    return [schemas.MESEquipmentStatusResponse.model_validate(i) for i in items]
+
+    return {
+        "items": [schemas.MESEquipmentStatusResponse.model_validate(i) for i in items],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.get("/scrap-records")
@@ -2941,6 +2970,7 @@ async def list_scrap_records(
     query = await _apply_pl_filter(query, user, MESScrapRecord, db, request)
     if product_line_code:
         query = query.where(MESScrapRecord.product_line_code == product_line_code)
+    query = query.order_by(MESScrapRecord.recorded_at.desc())
 
     total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar()
@@ -2963,8 +2993,14 @@ async def get_mes_dashboard(
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
     request: Request = None,
 ):
-    # Equipment status: get only the LATEST record per (connection_id, equipment_code)
-    # using DISTINCT ON to avoid counting historical snapshots as current state
+    """MES 看板：全部使用 DB 聚合，不加载原始记录到内存。"""
+    from datetime import date, timedelta
+
+    today = date.today()
+    today_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    seven_days_ago = today_start - timedelta(days=7)
+
+    # --- Equipment: latest status per (connection_id, equipment_code) ---
     eq_sub = (
         select(
             MESEquipmentStatus,
@@ -2974,39 +3010,63 @@ async def get_mes_dashboard(
             ).label("rn"),
         )
     ).subquery()
-    query = select(MESEquipmentStatus).join(
+    eq_query = select(MESEquipmentStatus).join(
         eq_sub, MESEquipmentStatus.record_id == eq_sub.c.record_id
     ).where(eq_sub.c.rn == 1)
-    query = await _apply_pl_filter(query, user, MESEquipmentStatus, db, request)
+    eq_query = await _apply_pl_filter(eq_query, user, MESEquipmentStatus, db, request)
     if product_line_code:
-        query = query.where(MESEquipmentStatus.product_line_code == product_line_code)
-    result = await db.execute(query)
-    equipment = result.scalars().all()
-
+        eq_query = eq_query.where(MESEquipmentStatus.product_line_code == product_line_code)
+    eq_result = await db.execute(eq_query)
+    equipment = eq_result.scalars().all()
     running = sum(1 for e in equipment if e.status == "running")
     down = sum(1 for e in equipment if e.status == "down")
 
-    # Scrap by category
-    scrap_query = select(MESScrapRecord)
-    scrap_query = await _apply_pl_filter(scrap_query, user, MESScrapRecord, db, request)
+    # --- Today's production: aggregate actual_qty from orders completed today ---
+    today_orders_q = (
+        select(
+            func.coalesce(func.sum(MESProductionOrder.actual_qty), 0).label("total_actual"),
+            func.coalesce(func.sum(MESProductionOrder.planned_qty), 0).label("total_planned"),
+        )
+        .where(MESProductionOrder.completed_at >= today_start)
+    )
+    today_orders_q = await _apply_pl_filter(today_orders_q, user, MESProductionOrder, db, request)
     if product_line_code:
-        scrap_query = scrap_query.where(MESScrapRecord.product_line_code == product_line_code)
-    scrap_result = await db.execute(scrap_query)
-    scraps = scrap_result.scalars().all()
-    scrap_by_category: dict[str, int] = {}
-    for s in scraps:
-        cat = s.defect_category or "未知"
-        scrap_by_category[cat] = scrap_by_category.get(cat, 0) + s.defect_qty
+        today_orders_q = today_orders_q.where(MESProductionOrder.product_line_code == product_line_code)
+    today_result = await db.execute(today_orders_q)
+    today_row = today_result.one()
+    total_actual = today_row.total_actual
+    total_planned = today_row.total_planned
 
-    # Orders
-    order_query = select(MESProductionOrder)
-    order_query = await _apply_pl_filter(order_query, user, MESProductionOrder, db, request)
+    # --- Scrap by category (today) ---
+    scrap_cat_q = (
+        select(
+            func.coalesce(MESScrapRecord.defect_category, "未知").label("category"),
+            func.sum(MESScrapRecord.defect_qty).label("total_qty"),
+        )
+        .where(MESScrapRecord.recorded_at >= today_start)
+        .group_by("category")
+    )
+    scrap_cat_q = await _apply_pl_filter(scrap_cat_q, user, MESScrapRecord, db, request)
     if product_line_code:
-        order_query = order_query.where(MESProductionOrder.product_line_code == product_line_code)
-    order_result = await db.execute(order_query)
-    orders = order_result.scalars().all()
-    total_planned = sum(o.planned_qty or 0 for o in orders)
-    total_actual = sum(o.actual_qty or 0 for o in orders)
+        scrap_cat_q = scrap_cat_q.where(MESScrapRecord.product_line_code == product_line_code)
+    scrap_cat_result = await db.execute(scrap_cat_q)
+    scrap_by_category = {row.category: row.total_qty for row in scrap_cat_result.all()}
+
+    # --- 7-day scrap trend ---
+    scrap_trend_q = (
+        select(
+            func.date_trunc("day", MESScrapRecord.recorded_at).label("day"),
+            func.sum(MESScrapRecord.defect_qty).label("total_qty"),
+        )
+        .where(MESScrapRecord.recorded_at >= seven_days_ago)
+        .group_by("day")
+        .order_by("day")
+    )
+    scrap_trend_q = await _apply_pl_filter(scrap_trend_q, user, MESScrapRecord, db, request)
+    if product_line_code:
+        scrap_trend_q = scrap_trend_q.where(MESScrapRecord.product_line_code == product_line_code)
+    trend_result = await db.execute(scrap_trend_q)
+    scrap_trend_7d = [{"date": row.day.isoformat(), "qty": row.total_qty} for row in trend_result.all()]
 
     return schemas.MESDashboardResponse(
         equipment_summary=[
@@ -3026,7 +3086,7 @@ async def get_mes_dashboard(
         total_planned=total_planned,
         total_actual=total_actual,
         scrap_by_category=scrap_by_category,
-        scrap_trend_7d=[],
+        scrap_trend_7d=scrap_trend_7d,
     )
 ```
 
