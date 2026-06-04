@@ -188,18 +188,39 @@ class MESConnector(ABC):
 | total_qty | INTEGER | 检验总数 |
 | defect_description | TEXT | 不良描述 |
 | recorded_at | TIMESTAMPTZ | |
-| product_line | VARCHAR(50) | |
+| product_line_code | VARCHAR(50) FK→product_lines.code | 关联产品线 |
 | mes_raw_data | JSONB | |
+
+### mes_measurement_ingestions — MES 测量来源追踪
+
+过程测量数据**不复用 SampleBatch/SampleValue 原表**存储来源元数据，而是新增本表作为 MES→SPC 的桥接层。SPC 仍复用 `SampleBatch/SampleValue` 做控制图计算，本表保存 MES 来源信息。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| ingestion_id | UUID PK | |
+| connection_id | UUID FK→mes_connections ON DELETE CASCADE | 来源 MES |
+| external_id | VARCHAR(100) | MES 外部幂等键（防止重复写入） |
+| order_no | VARCHAR(50) | 关联工单号 |
+| ic_code | VARCHAR(100) | 对应 SPC 检验特性代码 |
+| batch_id | UUID FK→sample_batches ON DELETE SET NULL | 写入的 SPC 批次（写入后回填） |
+| source_sampled_at | TIMESTAMPTZ | MES 原始采样时间 |
+| ingested_at | TIMESTAMPTZ | 写入 OpenQMS 的时间 |
+| product_line_code | VARCHAR(50) FK→product_lines.code | 关联产品线 |
+| mes_raw_data | JSONB | MES 原始测量数据完整保留 |
+
+**联合唯一索引**：`UniqueConstraint(connection_id, external_id)` — 幂等保障，相同 external_id 不重复写入。
 
 **设计决策**：
 - 每条记录带 `connection_id`，支持多 MES 源
 - `mes_raw_data` JSONB 保留 MES 原始数据，避免信息丢失
-- 过程测量数据不建新表，直接写入现有 SPC `SampleBatch`/`SampleValue`，但需为 `SampleBatch` 增加 `connection_id`（FK→mes_connections, SET NULL）和 `order_no`（VARCHAR(50)）两个可选字段，确保 MES 来源可追溯
-- 所有表带 `product_line`，与现有产品线隔离一致
-- 所有时间字段使用 `TIMESTAMPTZ`（带时区），与现有模型一致
+- 过程测量数据通过 `mes_measurement_ingestions` 桥接层追踪来源，SPC 仍复用 `SampleBatch/SampleValue` 做控制图计算，不重复 SPC 逻辑
+- `mes_measurement_ingestions.batch_id` 在 SPC 写入成功后回填，前端通过此字段关联 SPC 批次与 MES 来源
+- `mes_measurement_ingestions.external_id` 提供幂等保障，重复推送跳过不写入
+- 所有时间字段使用 `TIMESTAMPTZ`（带时区）
+- 产品线字段统一使用 `product_line_code` 并 FK 到 `product_lines.code`（与多数模块一致；SPC `InspectionCharacteristic.product_line` 作为历史特例保留不改）
 - `mes_production_orders` 建联合唯一索引 `UniqueConstraint(connection_id, order_no)`
-- `mes_scrap_records` 通过 `order_id` 外键关联工单（而非 VARCHAR `order_no`），避免多 MES 源工单号碰撞
-- `mes_connections` 增加 `consecutive_failures` 字段，持久化失败计数，重启不丢失
+- `mes_scrap_records` 通过 `order_id` 外键关联工单，避免多 MES 源工单号碰撞
+- `mes_connections` 增加 `consecutive_failures` 字段，持久化失败计数
 
 ---
 
