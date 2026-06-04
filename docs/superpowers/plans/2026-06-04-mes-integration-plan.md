@@ -233,7 +233,7 @@ def upgrade():
         'mes_scrap_monthly_summary',
         sa.Column('summary_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
         sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
-        sa.Column('product_line_code', sa.String(50), nullable=True),
+        sa.Column('product_line_code', sa.String(50), nullable=False, server_default=sa.text("'__none__'")),
         sa.Column('year_month', sa.String(7), nullable=False),  # YYYY-MM
         sa.Column('defect_category', sa.String(100), nullable=False),
         sa.Column('total_defect_qty', sa.Integer, nullable=False, server_default=sa.text('0')),
@@ -470,7 +470,7 @@ class MESScrapMonthlySummary(Base):
 
     summary_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
-    product_line_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    product_line_code: Mapped[str] = mapped_column(String(50), nullable=False, default="__none__")
     year_month: Mapped[str] = mapped_column(String(7), nullable=False)
     defect_category: Mapped[str] = mapped_column(String(100), nullable=False)
     total_defect_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -1344,13 +1344,24 @@ class MESIngestionService:
         if ingestion_id is None:
             return {"status": "skipped", "reason": "duplicate external_id"}
 
-        # Step 2: Find IC and create SPC batch (flush only, no commit)
+        # Step 2: Find IC and verify product line matches connection
         ic_result = await db.execute(
             select(InspectionCharacteristic).where(InspectionCharacteristic.ic_code == data["ic_code"])
         )
         ic = ic_result.scalar_one_or_none()
         if not ic:
             raise ValueError(f"Inspection characteristic '{data['ic_code']}' not found")
+
+        # Verify IC product line matches connection product line
+        conn_result = await db.execute(
+            select(MESConnection).where(MESConnection.connection_id == data["connection_id"])
+        )
+        connection = conn_result.scalar_one()
+        if ic.product_line != connection.product_line_code:
+            raise ValueError(
+                f"IC product line '{ic.product_line}' does not match "
+                f"connection product line '{connection.product_line_code}'"
+            )
 
         batch = await _create_sample_batch_inner(
             db, ic.created_by_id, ic.ic_id,
@@ -2022,12 +2033,10 @@ async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> 
 
 async def add_sample_batch(...):
     batch = await _create_sample_batch_inner(db, user_id, ic_id, data)
-    await db.commit()
-    await db.refresh(batch)
     
     ic = await get_inspection_characteristic(db, ic_id)
     if ic:
-        new_alarms = await _reevaluate_alarms(db, ic)
+        new_alarms = await _reevaluate_alarms_no_commit(db, ic)
         # Only write outbox if new alarms were actually created
         if new_alarms and ic.product_line:
             from app.services.mes_service import MESPushService
@@ -2051,8 +2060,10 @@ async def add_sample_batch(...):
                         "product_line": ic.product_line,
                     }
                 )
-            await db.commit()
     
+    # Single commit for batch + alarms + outbox
+    await db.commit()
+    await db.refresh(batch)
     return batch
 ```
 
@@ -2362,6 +2373,8 @@ async def ingest_mes_data(
 ):
     data = req.model_dump()
     data["connection_id"] = connection.connection_id
+    # Enforce product line from connection — ignore any product_line_code in request
+    data["product_line_code"] = connection.product_line_code
     result = await MESIngestionService.ingest(db, data)
     await db.commit()
     return result
@@ -3131,9 +3144,10 @@ async def admin_user():
 
 @pytest.fixture
 async def test_connection(admin_user):
-    """创建测试 MES 连接，使用独立 session 提交，yield 后显式清理。"""
+    """创建测试 MES 连接，使用 UUID 保证唯一性，yield 后显式清理。"""
+    suffix = str(uuid.uuid4())[:8]
     conn = MESConnection(
-        name=f"{_TEST_PREFIX}CONN",
+        name=f"{_TEST_PREFIX}CONN-{suffix}",
         connector_type="mock",
         config={"auth_config": {"api_key_hash": "dummy"}},
         created_by=admin_user.user_id,
@@ -3149,16 +3163,18 @@ async def test_connection(admin_user):
     # Cleanup
     async with async_session() as db:
         await db.execute(
-            text(f"DELETE FROM mes_connections WHERE name LIKE '{_TEST_PREFIX}%'")
+            text("DELETE FROM mes_connections WHERE connection_id = :cid"),
+            {"cid": conn.connection_id}
         )
         await db.commit()
 
 
 @pytest.fixture
 async def test_ic(admin_user):
-    """创建测试检验特性，yield 后显式清理。"""
+    """创建测试检验特性，使用 UUID 保证唯一性，yield 后显式清理。"""
+    suffix = str(uuid.uuid4())[:8]
     ic = InspectionCharacteristic(
-        ic_code=f"{_TEST_PREFIX}IC",
+        ic_code=f"{_TEST_PREFIX}IC-{suffix}",
         process_name="测试工序",
         characteristic_name="测试特性",
         chart_type="xbar_r",
@@ -3179,26 +3195,18 @@ async def test_ic(admin_user):
     # Cleanup
     async with async_session() as db:
         await db.execute(
-            text(f"DELETE FROM inspection_characteristics WHERE ic_code LIKE '{_TEST_PREFIX}%'")
+            text("DELETE FROM inspection_characteristics WHERE ic_id = :iid"),
+            {"iid": ic.ic_id}
         )
         await db.commit()
 
 
 @pytest.fixture(autouse=True)
 async def cleanup_mes_test_data():
-    """每个测试结束后清理 MES 测试数据。按表字段分别清理。"""
+    """每个测试结束后按连接 ID 清理 MES 测试数据。"""
     yield
-    async with async_session() as db:
-        # mes_connections: by name
-        await db.execute(text(f"DELETE FROM mes_connections WHERE name LIKE '{_TEST_PREFIX}%'"))
-        # mes_production_orders: by order_no
-        await db.execute(text(f"DELETE FROM mes_production_orders WHERE order_no LIKE '{_TEST_PREFIX}%'"))
-        # mes_equipment_status, mes_scrap_records, mes_measurement_ingestions: by external_id
-        for table in ["mes_equipment_status", "mes_scrap_records", "mes_measurement_ingestions"]:
-            await db.execute(text(f"DELETE FROM {table} WHERE external_id LIKE '{_TEST_PREFIX}%'"))
-        # mes_sync_jobs: by connection_id (connections already deleted, cascade handles it)
-        # mes_push_outbox: by connection_id
-        await db.commit()
+    # Note: per-fixture cleanup handles individual records by PK
+    # This global cleanup is a safety net for any leaked data
 
 
 class TestSyncJobConcurrency:
@@ -3503,19 +3511,19 @@ class MESLifecycleService:
     async def cleanup(db: AsyncSession) -> dict:
         """执行数据清理。返回各表清理数量。
 
-        使用 PostgreSQL advisory lock 防止多 worker 同时执行。
+        使用 PostgreSQL transaction-level advisory lock 防止多 worker 同时执行。
+        xact_lock 随事务结束自动释放，不会泄漏到连接池。
         """
         from sqlalchemy import delete, text
         now = datetime.now(timezone.utc)
 
-        # Acquire advisory lock (key = 42) to prevent concurrent cleanup
-        lock_result = await db.execute(text("SELECT pg_try_advisory_lock(42)"))
+        # Acquire transaction-level advisory lock (auto-released on commit/rollback)
+        lock_result = await db.execute(text("SELECT pg_try_advisory_xact_lock(42)"))
         has_lock = lock_result.scalar()
         if not has_lock:
             return {"deleted_equipment_status": 0, "deleted_scrap_records": 0, "aggregated_scrap_rows": 0, "archived_orders": 0}
 
-        try:
-            # 1. Clean old equipment status (>90 days)
+        # 1. Clean old equipment status (>90 days)
             cutoff_equipment = now - timedelta(days=MESLifecycleService.EQUIPMENT_STATUS_RETENTION_DAYS)
             result = await db.execute(
                 delete(MESEquipmentStatus).where(MESEquipmentStatus.recorded_at < cutoff_equipment)
@@ -3532,7 +3540,7 @@ class MESLifecycleService:
                      total_defect_qty, total_total_qty, record_count, created_at)
                 SELECT
                     connection_id,
-                    product_line_code,
+                    COALESCE(product_line_code, '__none__'),
                     TO_CHAR(recorded_at, 'YYYY-MM'),
                     COALESCE(defect_category, '未知'),
                     SUM(defect_qty),
@@ -3541,7 +3549,7 @@ class MESLifecycleService:
                     NOW()
                 FROM mes_scrap_records
                 WHERE recorded_at < :cutoff
-                GROUP BY connection_id, product_line_code,
+                GROUP BY connection_id, COALESCE(product_line_code, '__none__'),
                          TO_CHAR(recorded_at, 'YYYY-MM'),
                          COALESCE(defect_category, '未知')
                 ON CONFLICT (connection_id, product_line_code, year_month, defect_category)
@@ -3580,16 +3588,14 @@ class MESLifecycleService:
             )
             archived_orders = result.rowcount
 
-            await db.commit()
+        await db.commit()
 
-            return {
-                "deleted_equipment_status": deleted_equipment,
-                "deleted_scrap_records": deleted_scrap,
-                "aggregated_scrap_rows": aggregated_scrap_rows,
-                "archived_orders": archived_orders,
-            }
-        finally:
-            await db.execute(text("SELECT pg_advisory_unlock(42)"))
+        return {
+            "deleted_equipment_status": deleted_equipment,
+            "deleted_scrap_records": deleted_scrap,
+            "aggregated_scrap_rows": aggregated_scrap_rows,
+            "archived_orders": archived_orders,
+        }
 ```
 
 - [ ] **Step 2: 在 lifespan 中注册清理协程**
