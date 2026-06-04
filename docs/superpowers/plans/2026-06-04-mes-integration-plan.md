@@ -313,7 +313,7 @@ Expected: `Running upgrade 029_knowledge_graph_permissions -> 030_add_mes_tables
 
 ```bash
 git add backend/alembic/versions/030_add_mes_tables.py backend/app/models/__init__.py
-git commit -m "feat(migration): add 7 MES integration tables + MES permissions
+git commit -m "feat(migration): add 9 MES integration tables + MES permissions
 
 - mes_connections, mes_production_orders, mes_equipment_status
 - mes_scrap_records, mes_measurement_ingestions
@@ -329,7 +329,7 @@ git commit -m "feat(migration): add 7 MES integration tables + MES permissions
 - Create: `backend/app/models/mes.py`
 - Modify: `backend/app/models/__init__.py`
 
-- [ ] **Step 1: 编写 7 个 MES 模型**
+- [ ] **Step 1: 编写 9 个 MES 模型**
 
 ```python
 # backend/app/models/mes.py
@@ -530,7 +530,7 @@ from .mes import (
 
 ```bash
 git add backend/app/models/mes.py backend/app/models/__init__.py
-git commit -m "feat(models): add 7 MES integration models"
+git commit -m "feat(models): add 9 MES integration models"
 ```
 
 ---
@@ -1695,15 +1695,15 @@ class MESSyncService:
         return len(stuck)
 
     @staticmethod
-    async def run_sync_round(db: AsyncSession):
-        """执行一轮完整同步调度。"""
+    async def run_sync_round(db: AsyncSession, connection_id: uuid.UUID | None = None):
+        """执行一轮完整同步调度。connection_id 可选，用于手动同步限定范围。"""
         # Step 1: recover stuck jobs
-        recovered = await MESSyncService.recover_stuck_jobs(db)
+        recovered = await MESSyncService.recover_stuck_jobs(db, connection_id=connection_id)
         if recovered:
             await db.commit()
 
-        # Step 2: claim jobs
-        jobs = await MESSyncService.claim_jobs(db)
+        # Step 2: claim jobs (scoped to connection_id if provided)
+        jobs = await MESSyncService.claim_jobs(db, connection_id=connection_id)
         if not jobs:
             return
         await db.commit()  # Release locks
@@ -1823,8 +1823,8 @@ class MESSyncService:
         )
         await db.commit()
 
-        # Trigger immediate sync round
-        await MESSyncService.run_sync_round(db)
+        # Trigger immediate sync round scoped to this connection
+        await MESSyncService.run_sync_round(db, connection_id=connection_id)
 ```
 
 - [ ] **Step 2: Commit**
@@ -1837,7 +1837,8 @@ git commit -m "feat(sync): add MESSyncService with 3-phase short transactions
 - Phase 2: external fetch (no transaction)
 - Phase 3: UPSERT + checkpoint=COALESCE(max_source_timestamp, old_checkpoint) + COMMIT
 - Timeout recovery for stuck running jobs (>10min)
-- Overlap window (5min) for incremental sync"
+- Overlap window (5min) for incremental sync
+- run_sync_round accepts optional connection_id for scoped manual sync"
 ```
 
 ---
@@ -2343,6 +2344,16 @@ async def create_mes_connection(
         created_by=user.user_id,
     )
     db.add(connection)
+    await db.flush()  # Get connection_id before creating jobs
+
+    # Initialize sync jobs for all 4 data types
+    for data_type in ("production_orders", "equipment_status", "scrap_records", "measurements"):
+        db.add(MESSyncJob(
+            connection_id=connection.connection_id,
+            data_type=data_type,
+            status="pending",
+        ))
+
     await db.commit()
     await db.refresh(connection)
 
@@ -2471,6 +2482,9 @@ async def ingest_mes_data(
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
 
     # Pre-check data_type before TypeAdapter to return clear error message
     data_type = payload.get("data_type")
@@ -3714,11 +3728,64 @@ class TestScrapOrderBackfill:
             assert final_scrap.defect_qty == 3                 # Snapshot preserved
             assert final_scrap.total_qty == 50                 # Snapshot preserved
 
+
+class TestConnectionLifecycle:
+    async def test_connection_creates_four_sync_jobs(self, test_connection):
+        """创建连接后自动生成 4 个 pending 同步任务。"""
+        from app.database import async_session
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(MESSyncJob)
+                .where(MESSyncJob.connection_id == test_connection.connection_id)
+                .where(MESSyncJob.status == "pending")
+            )
+            jobs = result.scalars().all()
+            data_types = {j.data_type for j in jobs}
+            assert len(jobs) == 4
+            assert data_types == {"production_orders", "equipment_status", "scrap_records", "measurements"}
+
+    async def test_manual_sync_only_claims_target_connection(self, test_connection):
+        """手动同步只领取目标连接的任务，不处理其他连接。"""
+        from app.database import async_session
+
+        async with async_session() as db:
+            # Mark one job as running on the target connection
+            job = (await db.execute(
+                select(MESSyncJob)
+                .where(MESSyncJob.connection_id == test_connection.connection_id)
+                .where(MESSyncJob.data_type == "production_orders")
+            )).scalar_one()
+            job.status = "running"
+            job.started_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            # manual_sync should only see the target connection's running job
+            with pytest.raises(ValueError, match="Sync already in progress"):
+                await MESSyncService.manual_sync(db, test_connection.connection_id)
+
+
+class TestIngestEdgeCases:
+    async def test_ingest_non_object_json_returns_400(self, test_connection):
+        """/ingest 接收数组、null、字符串时返回 400。"""
+        from httpx import AsyncClient, ASGITransport
+        from app.main import app
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            for bad_payload in ([], None, "string", 123):
+                resp = await client.post(
+                    "/api/mes/ingest",
+                    headers={"X-API-Key": "test-mes-api-key-12345"},
+                    json=bad_payload,
+                )
+                assert resp.status_code == 400, f"Expected 400 for {bad_payload!r}, got {resp.status_code}"
+
 - [ ] **Step 2: Commit**
 
 ```bash
 git add backend/tests/test_mes_concurrency.py
-git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion
+git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (14 cases)
 
 - Dual worker claim once (sync job + outbox)
 - Running job timeout recovery (>10min)
@@ -3730,7 +3797,10 @@ git commit -m "test(mes): add automated concurrency tests for sync, outbox, and 
 - Crash redelivery idempotency via process_outbox()
 - Full process_outbox() flow: pending → claim → push → sent
 - /ingest validation errors return 400 (missing fields, unknown data_type)
-- Scrap order backfill: out-of-order arrival + duplicate preservation"
+- Scrap order backfill: out-of-order arrival + duplicate preservation
+- Connection creation auto-generates 4 sync jobs
+- Manual sync only claims target connection
+- /ingest rejects non-object JSON bodies"
 ```
 
 ---
