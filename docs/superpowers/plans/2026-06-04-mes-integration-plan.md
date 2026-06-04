@@ -31,7 +31,7 @@
 | 3 | RESTMESConnector 全 TODO | 完整 HTTP 实现：配置驱动 + 分页 + 字段映射 + 重试 |
 | 4 | API Key 认证是 TODO 占位 | 完整 SHA-256 hash 验证 + Fernet 加密 + 响应脱敏 + /test 端点 |
 | 5 | 测量 ingestion 无法原子回滚 | 调用 `_create_sample_batch_inner`（仅 flush）替代 `add_sample_batch`（内部 commit），同一事务完成 ingestion + SPC + 回填 |
-| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 25 个并发场景 |
+| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 26 个并发场景 |
 | 7 | 修改已执行 028 迁移 | 在 **新迁移 030** 末尾插入 MES 权限，不动 028 |
 | 8 | 查询未产品线隔离 + 凭证泄漏 | 查询 API 按 `product_line_code` 过滤；ConnectionOut 脱敏 `config.auth_config` 敏感字段 |
 | 9 | 前端独立 axios 实例 | 复用现有 `client` 实例（已含 JWT 拦截器） |
@@ -588,6 +588,49 @@ class MESConnectionListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# --- REST Config Schema (validates before credential processing) ---
+
+class RESTEndpointConfig(BaseModel):
+    path: str = Field(..., min_length=1)
+    cursor_field: Optional[str] = None
+    method: str = "GET"
+    pagination: Optional[dict] = None
+    response_path: Optional[str] = None
+
+
+class RESTConfig(BaseModel):
+    base_url: str = Field(..., pattern=r'^https?://')
+    endpoints: dict[str, RESTEndpointConfig]
+    field_mapping: dict[str, str]
+    auth_config: Optional[dict] = None
+    timeout: int = Field(default=30, ge=1)
+    retry: Optional[dict] = None
+
+    @model_validator(mode="after")
+    def _check_required_endpoints(self):
+        required = {"production_orders", "equipment_status", "scrap_records", "measurements"}
+        missing = required - set(self.endpoints.keys())
+        if missing:
+            raise ValueError(f"missing endpoints: {sorted(missing)}")
+        return self
+
+    @model_validator(mode="after")
+    def _check_cursor_fields(self):
+        for name in ("production_orders", "scrap_records", "measurements"):
+            ep = self.endpoints[name]
+            if not ep.cursor_field:
+                raise ValueError(f"endpoint '{name}' must define 'cursor_field'")
+        return self
+
+    @model_validator(mode="after")
+    def _check_source_updated_at(self):
+        if "source_updated_at" not in self.field_mapping:
+            raise ValueError("field_mapping must include 'source_updated_at'")
+        if not self.field_mapping.get("source_updated_at"):
+            raise ValueError("field_mapping 'source_updated_at' cannot be empty")
+        return self
 
 
 class MESProductionOrderResponse(BaseModel):
@@ -2383,66 +2426,18 @@ async def list_mes_connections(
 def _validate_rest_config(connector_type: str, config: dict) -> None:
     """校验 REST connector 配置完整性。connector_type != 'rest' 时直接通过。
 
-    对所有嵌套结构做 isinstance 校验，防止畸形 JSON 触发 AttributeError → 500。
+    使用 Pydantic RESTConfig schema 在凭证加密处理之前完成结构化校验，
+    防止畸形 JSON 触发 AttributeError → 500。
     """
     if connector_type != "rest":
         return
-
-    # base_url must be string
-    base_url = config.get("base_url", "")
-    if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
-        raise HTTPException(
-            status_code=400, detail="REST connector config must include a valid 'base_url' (http:// or https://)"
-        )
-
-    # required endpoints must be a dict
-    endpoints = config.get("endpoints", {})
-    if not isinstance(endpoints, dict):
-        raise HTTPException(
-            status_code=400, detail="REST connector 'endpoints' must be an object"
-        )
-    required = {"production_orders", "equipment_status", "scrap_records", "measurements"}
-    missing = required - set(endpoints.keys())
-    if missing:
-        raise HTTPException(
-            status_code=400, detail=f"REST connector missing endpoints: {sorted(missing)}"
-        )
-
-    # each endpoint must be a dict with non-empty path
-    for name in required:
-        ep = endpoints[name]
-        if not isinstance(ep, dict):
-            raise HTTPException(
-                status_code=400, detail=f"REST endpoint '{name}' must be an object"
-            )
-        path = ep.get("path", "")
-        if not isinstance(path, str) or not path:
-            raise HTTPException(
-                status_code=400, detail=f"REST endpoint '{name}' must have a non-empty 'path'"
-            )
-
-    # cursor_field for incremental sync endpoints (equipment_status is full snapshot, no checkpoint)
-    for name in ("production_orders", "scrap_records", "measurements"):
-        cursor = endpoints[name].get("cursor_field")
-        if not cursor:
-            raise HTTPException(
-                status_code=400, detail=f"REST endpoint '{name}' must define 'cursor_field' for incremental sync"
-            )
-
-    # field_mapping must be a dict with source_updated_at
-    field_mapping = config.get("field_mapping", {})
-    if not isinstance(field_mapping, dict):
-        raise HTTPException(
-            status_code=400, detail="REST connector 'field_mapping' must be an object"
-        )
-    if "source_updated_at" not in field_mapping:
-        raise HTTPException(
-            status_code=400, detail="REST connector field_mapping must include 'source_updated_at'"
-        )
-    if not field_mapping.get("source_updated_at"):
-        raise HTTPException(
-            status_code=400, detail="REST connector field_mapping 'source_updated_at' cannot be empty"
-        )
+    try:
+        schemas.RESTConfig.model_validate(config)
+    except schemas.ValidationError as e:
+        # Flatten Pydantic errors into a single detail string for HTTP 400
+        errors = e.errors()
+        detail = errors[0]["msg"] if len(errors) == 1 else errors
+        raise HTTPException(status_code=400, detail=detail)
 
 
 @router.post("/connections", response_model=schemas.MESConnectionResponse)
@@ -2452,24 +2447,27 @@ async def create_mes_connection(
     user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
 ):
     config = dict(req.config)
+
+    # Validate FIRST — before any credential processing prevents structural issues from becoming 500
+    _validate_rest_config(req.connector_type, config)
+
     # Separate inbound vs outbound credentials
     auth = config.get("auth_config", {})
+    if not isinstance(auth, dict):
+        auth = {}
     # Inbound: API Key for MES → OpenQMS push
-    if "inbound_api_key" in auth:
+    if "inbound_api_key" in auth and isinstance(auth["inbound_api_key"], str):
         auth["api_key_hash"] = hash_api_key(auth.pop("inbound_api_key"))
     # Outbound: credentials for OpenQMS → MES push
     for key in ["token", "password", "secret"]:
-        if key in auth and auth[key] != "***" and not auth[key].startswith("gAAAA"):
+        if key in auth and isinstance(auth[key], str) and auth[key] != "***" and not auth[key].startswith("gAAAA"):
             auth[key + "_encrypted"] = encrypt_credential(auth.pop(key))
-    if "outbound_api_key" in auth and auth["outbound_api_key"] != "***":
+    if "outbound_api_key" in auth and isinstance(auth.get("outbound_api_key"), str) and auth["outbound_api_key"] != "***":
         auth["outbound_api_key_encrypted"] = encrypt_credential(auth.pop("outbound_api_key"))
     # Basic auth username
-    if "username" in auth and auth["username"] != "***":
+    if "username" in auth and isinstance(auth["username"], str) and auth["username"] != "***":
         auth["username_encrypted"] = encrypt_credential(auth.pop("username"))
     config["auth_config"] = auth
-
-    # Validate REST connector config
-    _validate_rest_config(req.connector_type, config)
 
     # Enforce product line access for creation
     from app.core.product_line_filter import enforce_product_line_access
@@ -2535,27 +2533,33 @@ async def update_mes_connection(
         connection.connector_type = req.connector_type
     if req.config is not None:
         config = dict(req.config)
+        # Validate BEFORE merging/processing credentials
+        check_type = req.connector_type or connection.connector_type
+        _validate_rest_config(check_type, config)
+
         # Merge with existing auth_config, ignoring "***" placeholders
         existing_auth = connection.config.get("auth_config", {})
+        if not isinstance(existing_auth, dict):
+            existing_auth = {}
         auth = config.get("auth_config", {})
+        if not isinstance(auth, dict):
+            auth = {}
         merged = dict(existing_auth)
         for k, v in auth.items():
             if v == "***":
                 continue  # Keep existing value
             merged[k] = v
         # Inbound API Key
-        if "inbound_api_key" in merged:
+        if "inbound_api_key" in merged and isinstance(merged["inbound_api_key"], str):
             merged["api_key_hash"] = hash_api_key(merged.pop("inbound_api_key"))
         # Outbound credentials
         for key in ["token", "password", "secret", "username"]:
-            if key in merged and merged[key] != "***" and not merged[key].startswith("gAAAA"):
+            if key in merged and isinstance(merged[key], str) and merged[key] != "***" and not merged[key].startswith("gAAAA"):
                 merged[key + "_encrypted"] = encrypt_credential(merged.pop(key))
-        if "outbound_api_key" in merged and merged["outbound_api_key"] != "***":
+        if "outbound_api_key" in merged and isinstance(merged.get("outbound_api_key"), str) and merged["outbound_api_key"] != "***":
             merged["outbound_api_key_encrypted"] = encrypt_credential(merged.pop("outbound_api_key"))
         config["auth_config"] = merged
         connection.config = config
-    # Validate REST connector config after all mutations
-    _validate_rest_config(connection.connector_type, connection.config)
     if req.is_active is not None:
         connection.is_active = req.is_active
     if req.product_line_code is not None:
@@ -4041,6 +4045,7 @@ class TestRESTConnectorValidation:
         connector = RESTMESConnector({
             "base_url": "http://test",
             "endpoints": {},
+            "field_mapping": {"source_updated_at": "updated_at"},
         })
         raw = [
             {"external_id": "S-001", "defect_type": "scratches", "defect_qty": 5, "total_qty": 100},
@@ -4049,6 +4054,82 @@ class TestRESTConnectorValidation:
         ]
         with pytest.raises(ValidationError):
             connector._validate_items("scrap_records", raw)
+
+
+class TestSyncRoundValidationFailure:
+    async def test_sync_round_bad_data_fails_job_preserves_checkpoint(self, admin_user):
+        """同步任务遇到坏数据：job 标记为 failed，checkpoint 不变，无数据残留。"""
+        from app.database import async_session
+        from app.services.mes_service import MESSyncService
+        from app.services.mes_connector import RESTMESConnector
+
+        suffix = str(uuid.uuid4())[:8]
+        conn = MESConnection(
+            name=f"TEST-SYNC-FAIL-{suffix}",
+            connector_type="rest",
+            config={
+                "base_url": "https://mes.example.com",
+                "endpoints": {
+                    "production_orders": {"path": "/orders", "cursor_field": "since"},
+                    "equipment_status": {"path": "/equipment"},
+                    "scrap_records": {"path": "/scrap", "cursor_field": "since"},
+                    "measurements": {"path": "/measurements", "cursor_field": "since"},
+                },
+                "field_mapping": {"source_updated_at": "updated_at"},
+            },
+            created_by=admin_user.user_id,
+            is_active=True,
+        )
+        async with async_session() as db:
+            db.add(conn)
+            await db.commit()
+            await db.refresh(conn)
+
+            checkpoint = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            job = MESSyncJob(
+                connection_id=conn.connection_id,
+                data_type="scrap_records",
+                status="pending",
+                checkpoint=checkpoint,
+            )
+            db.add(job)
+            await db.commit()
+            job_id = job.job_id
+
+        # Monkeypatch fetch to return invalid data that fails _validate_items
+        original_fetch = RESTMESConnector.fetch_scrap_records
+        async def bad_fetch(self, since):
+            return [
+                {"external_id": "S-001", "defect_type": "scratches", "defect_qty": 5, "total_qty": 100},
+                {"external_id": "S-002", "defect_type": "scratches", "defect_qty": -1, "total_qty": 100},
+            ]
+        RESTMESConnector.fetch_scrap_records = bad_fetch
+
+        try:
+            async with async_session() as db:
+                await MESSyncService.run_sync_round(db, connection_id=conn.connection_id)
+        finally:
+            RESTMESConnector.fetch_scrap_records = original_fetch
+
+        # Verify: job is failed, checkpoint unchanged
+        async with async_session() as db:
+            job = await db.get(MESSyncJob, job_id)
+            assert job.status == "failed"
+            assert job.checkpoint == checkpoint
+            assert job.error_message is not None
+
+        # Verify: no scrap data was written
+        async with async_session() as db:
+            result = await db.execute(
+                select(MESScrapRecord).where(MESScrapRecord.connection_id == conn.connection_id)
+            )
+            assert result.scalar_one_or_none() is None
+
+        # Cleanup
+        async with async_session() as db:
+            await db.execute(text("DELETE FROM mes_sync_jobs WHERE connection_id = :cid"), {"cid": conn.connection_id})
+            await db.execute(text("DELETE FROM mes_connections WHERE connection_id = :cid"), {"cid": conn.connection_id})
+            await db.commit()
 
 
 class TestRESTConfigValidation:
@@ -4243,7 +4324,7 @@ class TestRESTConfigValidation:
 
 ```bash
 git add backend/tests/test_mes_concurrency.py
-git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (25 cases)
+git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (26 cases)
 
 - Dual worker claim once (sync job + outbox)
 - Running job timeout recovery (>10min)
@@ -4268,7 +4349,11 @@ git commit -m "test(mes): add automated concurrency tests for sync, outbox, and 
 - REST config validation: malformed endpoints (array) → 400
 - REST config validation: malformed field_mapping (string) → 400
 - REST config API tests use real JWT tokens (not hardcoded)
-- All incremental endpoints require cursor_field (po, scrap, measurements)"
+- All incremental endpoints require cursor_field (po, scrap, measurements)
+- REST config validation uses Pydantic RESTConfig schema (before credential encryption)
+- Credential processing guards against non-string auth values (prevents .startswith() on int)
+- Sync round validation failure: job failed, checkpoint preserved, no data written"
+
 ```
 
 ---
@@ -4470,7 +4555,7 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 | 前端复用现有 client 实例 | Task 15 | ✅ |
 | 前端 4 个页面完整实现 | Task 16 | ✅ |
 | 前端 4 个路由 + 侧边栏菜单 | Task 17 | ✅ |
-| test_mes_concurrency.py 25 场景 | Task 18 | ✅ |
+| test_mes_concurrency.py 26 场景 | Task 18 | ✅ |
 | 生命周期清理任务 | Task 19 | ✅ |
 | mes_scrap_monthly_summary 表 | Task 1 | ✅ |
 | mes_production_orders_archive 表 | Task 1 | ✅ |

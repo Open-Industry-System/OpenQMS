@@ -114,13 +114,22 @@ class MESConnector(ABC):
 }
 ```
 
-**配置字段说明**：
+**REST 配置必填契约**（创建/更新连接时由 `RESTConfig` Pydantic schema 校验，**在凭证加密之前执行**，防止畸形 JSON 触发 500）：
+- `base_url`：**必填**，字符串，必须以 `http://` 或 `https://` 开头
+- `endpoints`：**必填对象**，必须包含以下 4 个 endpoint：
+  - `production_orders`：必填，必须有 `path`（非空字符串）和 `cursor_field`（非空字符串）
+  - `equipment_status`：必填，必须有 `path`（非空字符串）；**无 `cursor_field`**（全量快照）
+  - `scrap_records`：必填，必须有 `path`（非空字符串）和 `cursor_field`（非空字符串）
+  - `measurements`：必填，必须有 `path`（非空字符串）和 `cursor_field`（非空字符串）
+- `field_mapping`：**必填对象**，键值均为字符串；**必须包含** `source_updated_at`（映射到 MES 的 `updated_at` 或 `modified_at`），用于增量同步 checkpoint；缺失时同步任务会失败
+- `auth_config`：可选对象；若提供，其中的凭证字段（`token`/`password`/`secret`/`username`/`inbound_api_key`/`outbound_api_key`）必须为字符串类型
+
+**可选字段说明**：
 - `timeout`：请求超时秒数（默认 30）
 - `retry`：重试策略（次数 + 指数退避间隔）
-- `endpoints.{name}.cursor_field`：增量同步时传入的查询参数名（如 `?updated_since=2026-06-04T00:00:00Z`）
+- `endpoints.{name}.method`：HTTP 方法（默认 `GET`）
 - `endpoints.{name}.pagination.type`：分页方式 — `none`（无分页）/ `offset`（页码分页）/ `cursor`（游标分页）
 - `endpoints.{name}.response_path`：响应 JSON 中数据数组的嵌套路径（如 `data.orders`）
-- `field_mapping`：OpenQMS 字段名 → MES 字段名的映射（key 是 OpenQMS 侧，value 是 MES 侧）。生产工单同步**必须**映射 `source_updated_at`（对应 MES 的 `updated_at` 或 `modified_at`），用于增量同步 checkpoint；缺失时同步任务会失败
 
 ---
 
