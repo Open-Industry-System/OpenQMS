@@ -1219,10 +1219,9 @@ async def get_mes_connector(connection, db: AsyncSession | None = None) -> MESCo
 
 
 async def get_mes_connector_by_config(connector_type: str, config: dict, db: AsyncSession | None = None) -> MESConnector:
-    """根据脱耦的配置 dict 创建 MESConnector（用于事务外创建 connector）。"""
+    """根据脱耦的配置 dict 创建 MESConnector（用于事务外创建 connector）。
+    MockMESConnector 允许 db=None，因为 push_quality_event 无需数据库。"""
     if connector_type == "mock":
-        if db is None:
-            raise ValueError("MockMESConnector requires db session")
         return MockMESConnector(db)
     elif connector_type == "rest":
         return RESTMESConnector(config)
@@ -1473,10 +1472,23 @@ class MESIngestionService:
 
     @staticmethod
     async def _ingest_scrap_record(db: AsyncSession, data: dict) -> dict:
+        # Resolve order_no → order_id via (connection_id, order_no) unique key
+        order_id = None
+        order_no = data.get("order_no")
+        if order_no:
+            order_result = await db.execute(
+                select(MESProductionOrder.order_id)
+                .where(MESProductionOrder.connection_id == data["connection_id"])
+                .where(MESProductionOrder.order_no == order_no)
+            )
+            order_row = order_result.scalar_one_or_none()
+            if order_row:
+                order_id = order_row
+
         stmt = pg_insert(MESScrapRecord).values(
             connection_id=data["connection_id"],
             external_id=data["external_id"],
-            order_id=data.get("order_id"),
+            order_id=order_id,
             equipment_code=data.get("equipment_code"),
             defect_type=data["defect_type"],
             defect_category=data.get("defect_category"),
@@ -2402,9 +2414,13 @@ async def ingest_mes_data(
     data["connection_id"] = connection.connection_id
     # Enforce product line from connection — ignore any product_line_code in request
     data["product_line_code"] = connection.product_line_code
-    result = await MESIngestionService.ingest(db, data)
-    await db.commit()
-    return result
+    try:
+        result = await MESIngestionService.ingest(db, data)
+        await db.commit()
+        return result
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # --- Sync ----------------------------------------------------------------------
@@ -3322,7 +3338,7 @@ class TestSyncJobConcurrency:
             db.add(job)
             await db.commit()
 
-            jobs = await MESSyncService.claim_jobs(db)
+            jobs = await MESSyncService.claim_jobs(db, connection_id=test_connection.connection_id)
             await db.commit()
             assert len(jobs) == 0
 
@@ -3458,7 +3474,7 @@ class TestIdempotentRedelivery:
 
         # Step 2: Timeout recovery resets processing → pending (>10min old)
         async with async_session() as db:
-            recovered = await MESPushService.recover_stuck_outbox(db)
+            recovered = await MESPushService.recover_stuck_outbox(db, connection_id=test_connection.connection_id)
             await db.commit()
             assert recovered == 1
 
@@ -3729,6 +3745,25 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 - 所有 `datetime.now()` 已替换为 `datetime.now(timezone.utc)` ✅
 - 所有迁移 `default=` 已替换为 `server_default=` ✅
 - 不修改已执行迁移文件 ✅
+
+---
+
+## Deployment Prerequisites
+
+### MES_ENCRYPTION_KEY
+
+出站凭证使用 Fernet 对称加密。部署前必须设置环境变量：
+
+```bash
+# 生成 32-byte base64-encoded key
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# 输出示例: wJalrXUtnFEMI_K7MDENG_bPxRfiCYEXAMPLEKEY
+
+# 写入 .env 或 docker-compose.yml
+export MES_ENCRYPTION_KEY="<generated-key>"
+```
+
+**未设置时行为：** `encrypt_credential()` / `decrypt_credential()` 在首次调用时抛出 `RuntimeError`，导致创建/更新带出站凭证的连接失败，以及 outbox push 运行时崩溃。
 
 ---
 
