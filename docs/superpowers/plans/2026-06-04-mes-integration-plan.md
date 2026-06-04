@@ -977,6 +977,7 @@ class MockMESConnector(MESConnector):
                 "status": random.choice(["planned", "in_progress", "completed", "closed"]),
                 "started_at": now,
                 "completed_at": None,
+                "source_updated_at": now,
                 "product_line_code": "DC-DC-100",
             })
         return orders
@@ -2377,6 +2378,23 @@ async def list_mes_connections(
     )
 
 
+def _validate_rest_config(connector_type: str, config: dict) -> None:
+    """校验 REST connector 配置。connector_type == 'rest' 时 field_mapping 必须包含 source_updated_at。"""
+    if connector_type != "rest":
+        return
+    field_mapping = config.get("field_mapping", {})
+    if "source_updated_at" not in field_mapping:
+        raise HTTPException(
+            status_code=400,
+            detail="REST connector field_mapping must include 'source_updated_at' for production order incremental sync"
+        )
+    if not field_mapping.get("source_updated_at"):
+        raise HTTPException(
+            status_code=400,
+            detail="REST connector field_mapping 'source_updated_at' cannot be empty"
+        )
+
+
 @router.post("/connections", response_model=schemas.MESConnectionResponse)
 async def create_mes_connection(
     req: schemas.MESConnectionCreate,
@@ -2400,14 +2418,8 @@ async def create_mes_connection(
         auth["username_encrypted"] = encrypt_credential(auth.pop("username"))
     config["auth_config"] = auth
 
-    # Validate REST connector field_mapping for production order checkpoint
-    if req.connector_type == "rest":
-        field_mapping = config.get("field_mapping", {})
-        if "source_updated_at" not in field_mapping:
-            raise HTTPException(
-                status_code=400,
-                detail="REST connector field_mapping must include 'source_updated_at' for production order incremental sync"
-            )
+    # Validate REST connector config
+    _validate_rest_config(req.connector_type, config)
 
     # Enforce product line access for creation
     from app.core.product_line_filter import enforce_product_line_access
@@ -2492,6 +2504,8 @@ async def update_mes_connection(
             merged["outbound_api_key_encrypted"] = encrypt_credential(merged.pop("outbound_api_key"))
         config["auth_config"] = merged
         connection.config = config
+    # Validate REST connector config after all mutations
+    _validate_rest_config(connection.connector_type, connection.config)
     if req.is_active is not None:
         connection.is_active = req.is_active
     if req.product_line_code is not None:
@@ -3935,7 +3949,10 @@ class TestRESTConnectorValidation:
         connector = RESTMESConnector({
             "base_url": "http://test",
             "endpoints": {},
-            "field_mapping": {"source_updated_at": "updated_at"},
+            "field_mapping": {
+                "order_no": "work_order_id",
+                "source_updated_at": "updated_at",
+            },
         })
         # _reverse_map maps MES field names → OpenQMS field names
         mes_raw = [{

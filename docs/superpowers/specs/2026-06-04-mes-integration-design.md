@@ -152,6 +152,7 @@ class MESConnector(ABC):
 | actual_qty | INTEGER | 实际数量 |
 | status | VARCHAR(20) | `planned`/`in_progress`/`completed`/`closed` |
 | started_at / completed_at | TIMESTAMPTZ | |
+| source_updated_at | TIMESTAMPTZ | MES 源更新时间（增量同步 checkpoint 依据） |
 | product_line_code | VARCHAR(50) FK→product_lines.code | 关联产品线 |
 | mes_raw_data | JSONB | MES 原始数据 |
 | created_at | TIMESTAMPTZ | |
