@@ -336,6 +336,9 @@ async def generate_draft(
         if len(timestamps) >= RATE_LIMIT_PER_MIN:
             raise HTTPException(status_code=429, detail="AI 草拟调用过于频繁，请稍后再试")
 
+        # 记录本次请求时间戳（限流计数）
+        _rate_limit[user_limit_key] = timestamps + [now]
+
         # 7. 幂等缓存检查
         if cache_key in _draft_cache:
             cached_resp, expire_at = _draft_cache[cache_key]
@@ -353,10 +356,8 @@ async def generate_draft(
         # 9. 组装 FMEA 上下文
         fmea_context = await _build_fmea_context(db, capa, user)
 
-        # 10. 组装 Prompt
+        # 10. 组装 Prompt（_build_prompt 内部已处理截断，保留 schema 和安全声明）
         prompt = _build_prompt(capa, step, req.format, fmea_context)
-        if len(prompt) > MAX_PROMPT_CHARS:
-            prompt = prompt[:MAX_PROMPT_CHARS] + "\n...（内容已截断）"
 
         # 11. 调用 LLM
         schema_cls = ParagraphLLMOutput if req.format == "paragraph" else STEP_SCHEMA_MAP[step]
@@ -662,9 +663,9 @@ async def draft_capa_step(
     report_id: uuid.UUID,
     step: str,
     req: DraftRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
-    request: Request,
 ):
     if step not in {"d2", "d3", "d4", "d5", "d6", "d7", "d8"}:
         raise HTTPException(status_code=400, detail="无效的步骤")
@@ -751,8 +752,9 @@ interface UseAIDraftResult {
   tempUnavailable: boolean;
   generate: (reportId: string, step: string, format: DraftFormat) => Promise<void>;
   clear: () => void;
-  undo: (step: string, currentValue: string) => string | undefined;
+  undo: (step: string) => string | undefined;
   saveUndo: (step: string, value: string) => void;
+  canUndo: (step: string) => boolean;
 }
 
 const PREF_KEY = "openqms_ai_draft_preference";
@@ -833,7 +835,11 @@ export function useAIDraft(): UseAIDraftResult {
     return undefined;
   }, []);
 
-  return { loading, error, draft, generate, clear, undo, saveUndo };
+  const canUndo = useCallback((step: string) => {
+    return undoStack.current[step] !== undefined;
+  }, []);
+
+  return { loading, error, draft, tempUnavailable, generate, clear, undo, saveUndo, canUndo };
 }
 ```
 
@@ -1023,7 +1029,7 @@ import { getCapabilities } from "../../api/capaDraft";
 ```tsx
   const [aiEnabled, setAiEnabled] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const { loading: draftLoading, error: draftError, draft, generate, clear, undo, saveUndo, tempUnavailable } = useAIDraft();
+  const { loading: draftLoading, error: draftError, draft, generate, clear, undo, saveUndo, canUndo, tempUnavailable } = useAIDraft();
 
   useEffect(() => {
     getCapabilities().then((cap) => setAiEnabled(cap.ai_draft_enabled));
@@ -1054,6 +1060,14 @@ import { getCapabilities } from "../../api/capaDraft";
 
 - [ ] **Step 5: 为每个步骤添加 AI 草拟按钮和撤销按钮**
 
+> **重要：只修改现有 Form.Item 的 label 属性，不要删除或替换任何已有组件。** 以下组件必须保留：
+> - `D4RecPanel`（D4 根因推荐面板）
+> - `D5RecPanel`（D5 措施推荐面板）
+> - `D7RecPanel`（D7 预防复发推荐面板）
+> - `D7UnconfirmedItem` 和 D7 软门禁确认逻辑
+>
+> 修改方式：找到每个步骤的 `Form.Item`，将其 `label` 属性改为包含 AI 草拟按钮和撤销按钮的 React 节点，其余 JSX 保持不变。
+
 以 D2 为例，在 D2 的 JSX 中：
 
 ```tsx
@@ -1074,7 +1088,7 @@ import { getCapabilities } from "../../api/capaDraft";
                     handleUpdate("d2_description", prev);
                   }
                 }}
-                disabled={!undoStack.current?.d2_description}
+                disabled={!canUndo("d2_description")}
               >
                 撤销
               </Button>
