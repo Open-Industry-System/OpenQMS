@@ -165,6 +165,7 @@ def upgrade():
         sa.Column('scrap_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
         sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
         sa.Column('external_id', sa.String(100), nullable=False),
+        sa.Column('order_no', sa.String(50), nullable=True),
         sa.Column('order_id', UUID(as_uuid=True), sa.ForeignKey('mes_production_orders.order_id', ondelete='SET NULL'), nullable=True),
         sa.Column('equipment_code', sa.String(50), nullable=True),
         sa.Column('defect_type', sa.String(50), nullable=False),
@@ -406,6 +407,7 @@ class MESScrapRecord(Base):
     scrap_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
     external_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    order_no: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     order_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_production_orders.order_id", ondelete="SET NULL"), nullable=True)
     equipment_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     defect_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -546,7 +548,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class MESConnectionCreate(BaseModel):
@@ -679,6 +681,13 @@ class MESIngestEquipmentStatus(MESIngestBase):
     recorded_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
 
+    @field_validator("availability", "performance", "quality", "oee")
+    @classmethod
+    def _check_percent(cls, v: float | None) -> float | None:
+        if v is not None and not (0 <= v <= 100):
+            raise ValueError("Must be between 0 and 100")
+        return v
+
 
 class MESIngestScrapRecord(MESIngestBase):
     data_type: Literal["scrap_record"]
@@ -692,6 +701,19 @@ class MESIngestScrapRecord(MESIngestBase):
     defect_description: Optional[str] = None
     recorded_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
+
+    @field_validator("defect_qty", "total_qty")
+    @classmethod
+    def _check_non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("Must be non-negative")
+        return v
+
+    @model_validator(mode="after")
+    def _check_defect_not_exceed_total(self):
+        if self.defect_qty > self.total_qty:
+            raise ValueError("defect_qty cannot exceed total_qty")
+        return self
 
 
 MESIngestRequest = (
@@ -1446,6 +1468,23 @@ class MESIngestionService:
             }
         )
         await db.execute(stmt)
+
+        # Backfill scrap records that arrived before this order
+        from sqlalchemy import select as sa_select
+        order_subq = (
+            sa_select(MESProductionOrder.order_id)
+            .where(MESProductionOrder.connection_id == data["connection_id"])
+            .where(MESProductionOrder.order_no == data["order_no"])
+            .scalar_subquery()
+        )
+        await db.execute(
+            update(MESScrapRecord)
+            .where(MESScrapRecord.connection_id == data["connection_id"])
+            .where(MESScrapRecord.order_no == data["order_no"])
+            .where(MESScrapRecord.order_id.is_(None))
+            .values(order_id=order_subq)
+        )
+
         return {"status": "success"}
 
     @staticmethod
@@ -1488,6 +1527,7 @@ class MESIngestionService:
         stmt = pg_insert(MESScrapRecord).values(
             connection_id=data["connection_id"],
             external_id=data["external_id"],
+            order_no=order_no,
             order_id=order_id,
             equipment_code=data.get("equipment_code"),
             defect_type=data["defect_type"],
@@ -1498,8 +1538,21 @@ class MESIngestionService:
             recorded_at=data.get("recorded_at", datetime.now(timezone.utc)),
             product_line_code=data.get("product_line_code"),
             mes_raw_data=data.get("raw_data"),
-        ).on_conflict_do_nothing(
-            index_elements=["connection_id", "external_id"]
+        ).on_conflict_do_update(
+            index_elements=["connection_id", "external_id"],
+            set_={
+                # Backfill order_id if it was NULL and is now resolvable
+                "order_id": pg_insert(MESScrapRecord).excluded.order_id,
+                "order_no": pg_insert(MESScrapRecord).excluded.order_no,
+                "equipment_code": pg_insert(MESScrapRecord).excluded.equipment_code,
+                "defect_category": pg_insert(MESScrapRecord).excluded.defect_category,
+                "defect_qty": pg_insert(MESScrapRecord).excluded.defect_qty,
+                "total_qty": pg_insert(MESScrapRecord).excluded.total_qty,
+                "defect_description": pg_insert(MESScrapRecord).excluded.defect_description,
+                "recorded_at": pg_insert(MESScrapRecord).excluded.recorded_at,
+                "product_line_code": pg_insert(MESScrapRecord).excluded.product_line_code,
+                "mes_raw_data": pg_insert(MESScrapRecord).excluded.mes_raw_data,
+            }
         )
         await db.execute(stmt)
         return {"status": "success"}
@@ -1603,6 +1656,8 @@ class MESSyncService:
     TIMEOUT_MINUTES = 10
     MAX_FAILURES = 3
 
+    BATCH_SIZE = 100
+
     @staticmethod
     async def claim_jobs(db: AsyncSession, connection_id: uuid.UUID | None = None) -> list[MESSyncJob]:
         """阶段 1 — 领取 job（短事务，调用方需 commit）。
@@ -1619,7 +1674,7 @@ class MESSyncService:
         )
         if connection_id:
             stmt = stmt.where(MESSyncJob.connection_id == connection_id)
-        result = await db.execute(stmt.with_for_update(skip_locked=True))
+        result = await db.execute(stmt.with_for_update(skip_locked=True).limit(MESSyncService.BATCH_SIZE))
         jobs = result.scalars().all()
         for job in jobs:
             job.status = "running"
@@ -1889,6 +1944,7 @@ class MESPushService:
     """MES 反向推送服务（outbox 模式）。三阶段短事务。"""
 
     OUTBOX_TIMEOUT_MINUTES = 10
+    BATCH_SIZE = 100
 
     @staticmethod
     async def push_event(db: AsyncSession, event_type: str, connection_id: uuid.UUID, payload: dict) -> MESPushOutbox:
@@ -1931,7 +1987,7 @@ class MESPushService:
         if recovered:
             await db.commit()
 
-        # Step 2: claim items (short tx)
+        # Step 2: claim items (short tx, limited batch)
         result = await db.execute(
             select(MESPushOutbox)
             .join(MESConnection, MESPushOutbox.connection_id == MESConnection.connection_id)
@@ -1939,6 +1995,7 @@ class MESPushService:
             .where(MESPushOutbox.status == "pending")
             .where(MESPushOutbox.next_retry_at <= datetime.now(timezone.utc))
             .with_for_update(skip_locked=True)
+            .limit(MESPushService.BATCH_SIZE)
         )
         items = result.scalars().all()
         if not items:
@@ -2205,6 +2262,21 @@ from app.models.mes import (
 )
 
 router = APIRouter(prefix="/api/mes", tags=["mes"])
+
+
+# --- Exception handler: Pydantic validation -> 400 (design spec requirement) ---
+
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+
+@router.exception_handler(RequestValidationError)
+async def _mes_validation_handler(request: Request, exc: RequestValidationError):
+    """MES /ingest returns 400 for all validation errors (not 422)."""
+    return JSONResponse(
+        status_code=400,
+        content={"detail": exc.errors()},
+    )
 
 
 # --- Helper: apply product line filter -----------------------------------------
@@ -3456,7 +3528,8 @@ class TestMeasurementAtomicity:
 
 class TestIdempotentRedelivery:
     async def test_crash_redelivery_idempotent(self, test_connection):
-        """模拟崩溃后重复投递：processing→崩溃→恢复→再次 claim→推送→最终 sent。"""
+        """模拟崩溃后重复投递：processing→崩溃→恢复→再次 claim→推送→最终 sent。
+        实际调用 MESPushService.process_outbox() 覆盖完整流程。"""
         from app.database import async_session
 
         # Step 1: Create outbox in independent session and commit
@@ -3472,42 +3545,42 @@ class TestIdempotentRedelivery:
             await db.commit()
             outbox_id = outbox.outbox_id
 
-        # Step 2: Timeout recovery resets processing → pending (>10min old)
+        # Step 2: Call process_outbox — covers recover_stuck + claim + push + result write
         async with async_session() as db:
-            recovered = await MESPushService.recover_stuck_outbox(db, connection_id=test_connection.connection_id)
-            await db.commit()
-            assert recovered == 1
+            await MESPushService.process_outbox(db)
 
-            refreshed = await db.get(MESPushOutbox, outbox_id)
-            assert refreshed.status == "pending"
-
-        # Step 3: Re-claim in new session
-        async with async_session() as db:
-            refreshed = await db.get(MESPushOutbox, outbox_id)
-            refreshed.status = "processing"
-            refreshed.started_at = datetime.now(timezone.utc)
-            await db.commit()
-
-        # Step 4: HTTP push (no tx)
-        connector = MockMESConnector(None)
-        resp = await connector.push_quality_event(
-            "spc_alarm", {"alarm": "test"}, event_id=str(outbox_id)
-        )
-        assert resp["status"] == "ok"
-
-        # Step 5: Write result (new tx)
-        async with async_session() as write_db:
-            fresh = await write_db.get(MESPushOutbox, outbox_id)
-            fresh.status = "sent"
-            fresh.sent_at = datetime.now(timezone.utc)
-            await write_db.commit()
-
-        # Verify final state
+        # Step 3: Verify final state
         async with async_session() as verify_db:
             final = await verify_db.get(MESPushOutbox, outbox_id)
             assert final.status == "sent"
             assert final.sent_at is not None
-```
+
+    async def test_process_outbox_full_flow(self, test_connection):
+        """process_outbox() 完整流程：pending → claim → push → sent。"""
+        from app.database import async_session
+
+        # Create a fresh pending outbox
+        async with async_session() as db:
+            outbox = MESPushOutbox(
+                event_type="spc_alarm",
+                connection_id=test_connection.connection_id,
+                payload={"alarm": "test"},
+                status="pending",
+                next_retry_at=datetime.now(timezone.utc),
+            )
+            db.add(outbox)
+            await db.commit()
+            outbox_id = outbox.outbox_id
+
+        # Run full outbox processor
+        async with async_session() as db:
+            await MESPushService.process_outbox(db)
+
+        # Verify sent
+        async with async_session() as db:
+            final = await db.get(MESPushOutbox, outbox_id)
+            assert final.status == "sent"
+            assert final.sent_at is not None
 
 - [ ] **Step 2: Commit**
 
@@ -3522,7 +3595,8 @@ git commit -m "test(mes): add automated concurrency tests for sync, outbox, and 
 - Inactive connection exclusion
 - Measurement ingestion atomic rollback
 - Duplicate external_id idempotency
-- Crash redelivery idempotency"
+- Crash redelivery idempotency via process_outbox()
+- Full process_outbox() flow: pending → claim → push → sent"
 ```
 
 ---
