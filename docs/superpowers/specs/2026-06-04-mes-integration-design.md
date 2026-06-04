@@ -134,7 +134,6 @@ class MESConnector(ABC):
 | connector_type | VARCHAR(50) | `mock` / `rest` |
 | config | JSONB | 适配器配置（API Key/Token 等敏感字段在输出 Schema 中脱敏） |
 | is_active | BOOLEAN | 是否启用 |
-| consecutive_failures | INTEGER | 连续同步失败次数，达到 3 次自动置 inactive（默认 0） |
 | product_line_code | VARCHAR(50) FK→product_lines.code | 关联产品线 |
 | created_by | UUID FK→users | |
 | created_at / updated_at | TIMESTAMPTZ | |
@@ -226,7 +225,7 @@ class MESConnector(ABC):
 - 产品线字段统一使用 `product_line_code` 并 FK 到 `product_lines.code`（与多数模块一致；SPC `InspectionCharacteristic.product_line` 作为历史特例保留不改）
 - `mes_production_orders` 建联合唯一索引 `UniqueConstraint(connection_id, order_no)`
 - `mes_scrap_records` 通过 `order_id` 外键关联工单，避免多 MES 源工单号碰撞
-- `mes_connections` 增加 `consecutive_failures` 字段，持久化失败计数
+- `mes_sync_jobs` 包含 `consecutive_failures` 字段，按数据类型追踪失败次数，任一 job 达 3 次则连接停用
 
 ---
 
@@ -262,6 +261,7 @@ MES 推送 POST /api/mes/ingest
 | started_at | TIMESTAMPTZ | |
 | completed_at | TIMESTAMPTZ | |
 | error_message | TEXT | |
+| consecutive_failures | INTEGER | 连续失败次数，达到 3 次触发连接告警（默认 0） |
 | created_at | TIMESTAMPTZ | |
 
 **联合唯一索引**：`UniqueConstraint(connection_id, data_type)` — 每个 connection 的每种数据类型一个 job。
@@ -438,8 +438,8 @@ SPC 异常触发 / CAPA 状态变更
 - 单个 job 失败不影响其他（独立 try/catch）
 - 失败时 job.status=failed, error_message 记录详情
 - 失败不更新 checkpoint，下次调度自动重试增量数据
-- 失败时 `mes_connections.consecutive_failures += 1`，达到 3 次自动标记 `is_active = False`
-- 同步成功时重置 `consecutive_failures = 0`
+- 失败时 `mes_sync_jobs.consecutive_failures += 1`，任一 job 达到 3 次自动标记 `mes_connections.is_active = False`
+- 同步成功时重置该 job 的 `consecutive_failures = 0`
 - 多 Worker 安全：`SELECT ... FOR UPDATE SKIP LOCKED`
 
 ### 拉取幂等性保障
@@ -448,13 +448,13 @@ SPC 异常触发 / CAPA 状态变更
 
 1. **工单数据**：`mes_production_orders` 使用 `ON CONFLICT (connection_id, order_no) DO UPDATE` 更新 `actual_qty`/`status`/`completed_at` 等可变字段（工单在 MES 中会持续更新）
 2. **报废与设备数据**：`mes_scrap_records` 和 `mes_equipment_status` 使用 `ON CONFLICT (connection_id, external_id) DO NOTHING`（历史快照，不更新）
-3. **测量数据**：`mes_measurement_ingestions` 使用 `ON CONFLICT (connection_id, external_id) DO NOTHING`（幂等跳过）
-4. **测量数据导入**：调用 `spc_service.ingest_external_data()` 之前，先查询 `mes_measurement_ingestions` 是否已存在相同 `(connection_id, external_id)`，已存在则跳过（整个 ingestion 记录 + SPC 写入均跳过）
-3. **细粒度事务提交**：sync_all() 内将工单、设备状态、报废记录、测量数据四个拉取动作拆分为**四个独立事务提交块**。任一动作失败只回滚当前块，已成功持久化的数据保留，审计日志记录每块结果
+3. **测量数据**：`mes_measurement_ingestions` 使用 `INSERT ... ON CONFLICT (connection_id, external_id) DO NOTHING RETURNING ingestion_id`，只有成功取得 `ingestion_id` 的请求才继续写入 SPC。ingestion 创建、SPC batch 写入、batch_id 回填必须在同一事务内完成，防止并发重复写入
+4. **细粒度事务提交**：sync_all() 内将工单、设备状态、报废记录、测量数据四个拉取动作拆分为**四个独立事务提交块**。任一动作失败只回滚当前块，已成功持久化的数据保留，审计日志记录每块结果
 
 ### 推送接收
-- 所有推送数据必须包含 `external_id` 字段
-- 幂等判定统一使用 `(connection_id, data_type, external_id)`，已有记录则跳过，返回 200 + 提示
+- 幂等规则：工单以 `(connection_id, order_no)` 判定并更新；设备状态/报废/测量以 `(connection_id, external_id)` 判定，已有则跳过
+- 工单推送必须包含 `order_no`；设备状态/报废/测量推送必须包含 `external_id`
+- 重复数据跳过，返回 200 + 提示
 - 数据校验失败返回 400 + 具体错误字段
 - 未知 `data_type` 返回 400
 
