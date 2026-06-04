@@ -70,7 +70,7 @@ class DraftRequest(BaseModel):
 class DraftResponse(BaseModel):
     content: str
     structured_data: dict | None
-    request_id: uuid.UUID
+    request_id: str
 
 
 # --- D2 结构化输出 ---
@@ -281,6 +281,7 @@ async def generate_draft(
 ) -> dict[str, Any]:
     start_time = time.time()
     success = False
+    cache_hit = False
     llm_provider_name = None
     llm_model_name = None
 
@@ -338,6 +339,8 @@ async def generate_draft(
             cached_resp, expire_at = _draft_cache[cache_key]
             if now < expire_at:
                 success = True
+                # 设置 cache_hit 标记供审计使用
+                cache_hit = True
                 return cached_resp
 
         # 7. 限流校验（内存计数器，仅支持单 worker）
@@ -349,11 +352,6 @@ async def generate_draft(
 
         # 记录本次请求时间戳（限流计数）
         _rate_limit[user_limit_key] = timestamps + [now]
-        if cache_key in _draft_cache:
-            cached_resp, expire_at = _draft_cache[cache_key]
-            if now < expire_at:
-                success = True
-                return cached_resp
 
         # 8. 获取 LLM Provider
         llm_provider = getattr(request.app.state, "llm_provider", None)
@@ -426,6 +424,7 @@ async def generate_draft(
                     "llm_model": llm_model_name,
                     "request_id": str(req.request_id),
                     "success": success,
+                    "cache_hit": cache_hit,
                     "duration_ms": duration_ms,
                 },
                 old_values=None,
@@ -474,15 +473,17 @@ async def _build_fmea_context(
         target = node_map[capa.fmea_node_id]
         target_name = target.get("name", "未知节点")
 
-        # 找相连失效原因
+        # 找相连失效原因（限制数量）
         causes = []
         for e in edges:
             if e.get("target") == capa.fmea_node_id and e.get("type") == "CAUSE_OF":
                 cause = node_map.get(e.get("source"))
                 if cause:
                     causes.append(cause.get("name", ""))
+                if len(causes) >= MAX_FMEA_NODES:
+                    break
 
-        cause_str = f"其关联根因为 [{', '.join(causes)}]" if causes else ""
+        cause_str = f"其关联根因为 [{', '.join(causes[:MAX_FMEA_NODES])}]" if causes else ""
         return f"已关联 FMEA 节点 [{target_name}]，{cause_str}"
 
     # 场景2: 无关联节点，取 severity 最高的前 3 个失效模式
@@ -1590,9 +1591,11 @@ class TestPreconditions:
 import uuid
 import pytest
 from httpx import AsyncClient
+from unittest.mock import MagicMock, AsyncMock
 
 from app.main import app
-from app.core.permissions import get_current_user
+from app.database import get_db
+from app.core.permissions import get_current_user, get_user_permission
 from app.models.user import User
 
 
@@ -1607,7 +1610,16 @@ def auth_override(monkeypatch):
     async def mock_get_current_user():
         return mock_user
 
+    async def mock_get_user_permission(user, module, db):
+        from app.core.permissions import PermissionLevel
+        return PermissionLevel.EDIT  # 给所有模块 EDIT 权限
+
+    async def mock_get_db():
+        yield MagicMock()  # mock 数据库 session
+
     app.dependency_overrides[get_current_user] = mock_get_current_user
+    monkeypatch.setattr("app.core.permissions.get_user_permission", mock_get_user_permission)
+    app.dependency_overrides[get_db] = mock_get_db
     yield mock_user
     app.dependency_overrides.clear()
 
@@ -1657,12 +1669,19 @@ class TestDraftEndpoint:
             assert resp.status_code == 404
 
     async def test_draft_archived_returns_409(self, auth_override):
-        # 需要创建 ARCHIVED 状态的 CAPA
-        pass  # TODO: 依赖数据库 seed
+        # 使用 mock 数据库返回 ARCHIVED 状态的 CAPA
+        from app.services import capa_draft_service
+        capa = MagicMock()
+        capa.status = "ARCHIVED"
+        capa.product_line_code = "DC-DC-100"
+        capa.fmea_ref_id = None
+        capa.title = "Test"
+        with patch.object(capa_draft_service, "generate_draft", side_effect=HTTPException(status_code=409, detail="报告已归档")):
+            pass  # 该测试需要在 integration 级别实现
 
     async def test_draft_wrong_step_returns_409(self, auth_override):
-        # 需要创建 D3_INTERIM 状态的 CAPA，请求 d2
-        pass  # TODO: 依赖数据库 seed
+        # 该测试需要在 integration 级别实现
+        pass
 ```
 
 - [ ] **Step 3: Commit**
@@ -1725,7 +1744,7 @@ cd frontend
 npm run build
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git commit -m "chore: verify AI draft integration compiles and runs"
