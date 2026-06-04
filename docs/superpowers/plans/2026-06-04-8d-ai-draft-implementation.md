@@ -476,27 +476,41 @@ async def _build_fmea_context(
     # 场景1: 有关联节点
     if capa.fmea_node_id and capa.fmea_node_id in node_map:
         target = node_map[capa.fmea_node_id]
+        target_type = target.get("type", "")
         target_name = target.get("name", "未知节点")
 
-        # 找相连的失效模式和失效原因（限制数量）
         failure_modes = []
         causes = []
-        for e in edges:
-            if len(failure_modes) + len(causes) >= MAX_FMEA_NODES:
-                break
-            # 从当前节点出发找失效模式（HAS_FAILURE_MODE: source=当前, target=失效模式）
-            if e.get("source") == capa.fmea_node_id and e.get("type") == "HAS_FAILURE_MODE":
-                fm = node_map.get(e.get("target"))
-                if fm:
-                    failure_modes.append(fm.get("name", ""))
-            # 指向当前节点的原因（CAUSE_OF: source=原因, target=当前）
-            if e.get("target") == capa.fmea_node_id and e.get("type") == "CAUSE_OF":
-                cause = node_map.get(e.get("source"))
-                if cause:
-                    causes.append(cause.get("name", ""))
-            # 当前节点自身若是失效模式，找其原因
-            if e.get("target") == capa.fmea_node_id and e.get("type") == "CAUSE_OF":
-                pass  # 已在上面处理
+
+        if target_type == "FailureMode":
+            # 当前节点是失效模式：找其根因（CAUSE_OF: source=原因, target=当前）
+            for e in edges:
+                if len(causes) >= MAX_FMEA_NODES:
+                    break
+                if e.get("target") == capa.fmea_node_id and e.get("type") == "CAUSE_OF":
+                    cause = node_map.get(e.get("source"))
+                    if cause and cause.get("type") == "FailureCause":
+                        causes.append(cause.get("name", ""))
+
+        elif target_type == "FailureCause":
+            # 当前节点是失效原因：找其关联的失效模式（EFFECT_OF: source=当前, target=失效模式）
+            for e in edges:
+                if len(failure_modes) >= MAX_FMEA_NODES:
+                    break
+                if e.get("source") == capa.fmea_node_id and e.get("type") == "EFFECT_OF":
+                    fm = node_map.get(e.get("target"))
+                    if fm and fm.get("type") == "FailureMode":
+                        failure_modes.append(fm.get("name", ""))
+
+        else:
+            # 其他节点类型（Function/ProcessStep 等）：找其下游失效模式
+            for e in edges:
+                if len(failure_modes) + len(causes) >= MAX_FMEA_NODES:
+                    break
+                if e.get("source") == capa.fmea_node_id and e.get("type") == "HAS_FAILURE_MODE":
+                    fm = node_map.get(e.get("target"))
+                    if fm and fm.get("type") == "FailureMode":
+                        failure_modes.append(fm.get("name", ""))
 
         parts = []
         if failure_modes:
@@ -1490,7 +1504,11 @@ git commit -m "feat(frontend): integrate AI draft into CAPADetailPage"
 
 **Files:**
 - Modify: `frontend/package.json`
+- Modify: `frontend/package-lock.json`
+- Modify: `frontend/vite.config.ts`
 - Create: `frontend/src/components/capa/useAIDraft.test.ts`
+- Create: `frontend/src/components/capa/AIDraftButton.test.tsx`
+- Create: `frontend/src/components/capa/AIDraftPreview.test.tsx`
 
 - [ ] **Step 1: 安装测试依赖**
 
@@ -1511,8 +1529,11 @@ npm install --save-dev @testing-library/react @testing-library/jest-dom jsdom
 
 在 `frontend/vite.config.ts` 中添加 `test` 配置块（`defineConfig` 内）：
 
+在 `frontend/vite.config.ts` 的 `defineConfig` 内添加 `test` 块。**需要将导入源从 `vite` 改为 `vitest/config`**，否则 TypeScript 不识别 `test` 属性：
+
 ```typescript
-import { defineConfig } from "vite";
+// frontend/vite.config.ts
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
@@ -1692,11 +1713,126 @@ describe("useAIDraft", () => {
 });
 ```
 
+- [ ] **Step 3b: 编写 AIDraftButton 组件测试**
+
+```typescript
+// frontend/src/components/capa/AIDraftButton.test.tsx
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import AIDraftButton from "./AIDraftButton";
+
+describe("AIDraftButton", () => {
+  it("should render AI草拟 text", () => {
+    render(
+      <AIDraftButton loading={false} tempUnavailable={false} onGenerate={vi.fn()} />
+    );
+    expect(screen.getByText("AI草拟")).toBeDefined();
+  });
+
+  it("should show 草拟中 when loading", () => {
+    render(
+      <AIDraftButton loading={true} tempUnavailable={false} onGenerate={vi.fn()} />
+    );
+    expect(screen.getByText("草拟中...")).toBeDefined();
+  });
+
+  it("should be disabled when tempUnavailable", () => {
+    render(
+      <AIDraftButton loading={false} tempUnavailable={true} onGenerate={vi.fn()} />
+    );
+    const btn = screen.getByText("AI草拟") as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it("should call onGenerate with default format on click", () => {
+    const onGenerate = vi.fn();
+    render(
+      <AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />
+    );
+    fireEvent.click(screen.getByText("AI草拟"));
+    expect(onGenerate).toHaveBeenCalledWith("structured");
+  });
+});
+```
+
+- [ ] **Step 3c: 编写 AIDraftPreview 组件测试**
+
+```typescript
+// frontend/src/components/capa/AIDraftPreview.test.tsx
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import AIDraftPreview from "./AIDraftPreview";
+
+describe("AIDraftPreview", () => {
+  it("should render preview content", () => {
+    render(
+      <AIDraftPreview
+        open={true}
+        content="AI 生成的草稿内容"
+        onClose={vi.fn()}
+        onReplace={vi.fn()}
+        onAppend={vi.fn()}
+      />
+    );
+    expect(screen.getByText("AI 生成的草稿内容")).toBeDefined();
+    expect(screen.getByText("此为 AI 生成的草稿，请审核后再使用")).toBeDefined();
+  });
+
+  it("should call onReplace when 替换 clicked", () => {
+    const onReplace = vi.fn();
+    render(
+      <AIDraftPreview
+        open={true}
+        content="草稿"
+        onClose={vi.fn()}
+        onReplace={onReplace}
+        onAppend={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByText("替换"));
+    expect(onReplace).toHaveBeenCalledTimes(1);
+  });
+
+  it("should call onAppend when 追加 clicked", () => {
+    const onAppend = vi.fn();
+    render(
+      <AIDraftPreview
+        open={true}
+        content="草稿"
+        onClose={vi.fn()}
+        onReplace={vi.fn()}
+        onAppend={onAppend}
+      />
+    );
+    fireEvent.click(screen.getByText("追加"));
+    expect(onAppend).toHaveBeenCalledTimes(1);
+  });
+
+  it("should call onClose when 取消 clicked", () => {
+    const onClose = vi.fn();
+    render(
+      <AIDraftPreview
+        open={true}
+        content="草稿"
+        onClose={onClose}
+        onReplace={vi.fn()}
+        onAppend={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByText("取消"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
 - [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/package.json frontend/vite.config.ts frontend/src/components/capa/useAIDraft.test.ts
-git commit -m "test(frontend): add useAIDraft hook tests with @testing-library/react and jsdom"
+git add frontend/package.json frontend/package-lock.json frontend/vite.config.ts \
+  frontend/src/components/capa/useAIDraft.test.ts \
+  frontend/src/components/capa/AIDraftButton.test.tsx \
+  frontend/src/components/capa/AIDraftPreview.test.tsx
+git commit -m "test(frontend): add AI draft hook + component tests with jsdom"
 ```
 
 ---
@@ -2183,6 +2319,7 @@ class TestGenerateDraft:
 
     @pytest.mark.asyncio
     async def test_draft_product_line_access_denied(self, monkeypatch):
+        """非 bypass 用户访问无权产品线时，enforce_product_line_access 返回 403"""
         from app.services import capa_draft_service
 
         capa = MagicMock()
@@ -2196,13 +2333,15 @@ class TestGenerateDraft:
         db.commit = AsyncMock()
         db.rollback = AsyncMock()
 
+        # 非 bypass 用户
         user = MagicMock()
         user.user_id = uuid.uuid4()
-        user.role_definition.bypass_row_level_security = True
+        user.role_definition.bypass_row_level_security = False
 
-        # 模拟产品线权限拒绝
-        async def mock_enforce_denied(*args, **kwargs):
-            raise HTTPException(status_code=403, detail="无权访问该产品线")
+        # 模拟 enforce_product_line_access 内部检查用户产品线列表后拒绝
+        async def mock_enforce_denied(u, product_line_code, db):
+            if not u.role_definition.bypass_row_level_security:
+                raise HTTPException(status_code=403, detail="无权访问该产品线")
         monkeypatch.setattr(
             capa_draft_service, "enforce_product_line_access", mock_enforce_denied
         )
@@ -2211,6 +2350,27 @@ class TestGenerateDraft:
         with pytest.raises(HTTPException) as exc:
             await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
         assert exc.value.status_code == 403
+
+        # bypass 用户同样场景应通过
+        user.role_definition.bypass_row_level_security = True
+        request = MagicMock()
+        llm_provider = MagicMock()
+        llm_provider.complete = AsyncMock(return_value={
+            "structured_data": {
+                "problem_statement": "测试",
+                "affected_product": "DC-DC-100",
+                "defect_description": "描述",
+                "occurrence_context": "场景",
+                "impact_scope": "范围",
+            }
+        })
+        request.app.state.llm_provider = llm_provider
+
+        req2 = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        result = await generate_draft(db, capa.report_id, "d2", req2, user, request)
+        assert "content" in result
+
+        capa_draft_service._draft_cache.clear()
 
     def test_prompt_injection_sanitized(self):
         """用户输入中包含指令性内容，prompt 应包含安全声明"""
@@ -2333,10 +2493,11 @@ def auth_override(monkeypatch):
 
 @pytest.mark.asyncio
 class TestCapabilities:
-    async def test_capabilities_no_auth_returns_401(self):
+    async def test_capabilities_no_auth_returns_403(self):
+        """HTTPBearer 默认 auto_error=True，缺少 Authorization 头时返回 403"""
         async with AsyncClient(app=app, base_url="http://test") as ac:
             resp = await ac.get("/api/capa/capabilities")
-            assert resp.status_code == 401
+            assert resp.status_code == 403
 
     async def test_capabilities_with_auth_returns_200(self, auth_override):
         async with AsyncClient(app=app, base_url="http://test") as ac:
@@ -2416,9 +2577,6 @@ git commit -m "test: add capa_draft service and API tests with precise assertion
 ---
 
 ## Task 12: 验证
-
-**Files:**
-- 运行: 后端和前端构建/类型检查
 
 - [ ] **Step 1: 后端类型检查**
 
