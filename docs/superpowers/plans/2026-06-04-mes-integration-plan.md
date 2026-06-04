@@ -1208,7 +1208,14 @@ class RESTMESConnector(MESConnector):
         for item in raw_items:
             item["data_type"] = data_type
             v = schema_cls.model_validate(item)
-            validated.append(v.model_dump())
+            dumped = v.model_dump()
+            # Production orders pulled from MES MUST have source_updated_at for checkpoint
+            if endpoint_name == "production_orders" and dumped.get("source_updated_at") is None:
+                raise ValueError(
+                    f"Production order {dumped.get('order_no')} missing source_updated_at. "
+                    "Add 'source_updated_at': 'updated_at' to field_mapping."
+                )
+            validated.append(dumped)
         return validated
 
     async def fetch_production_orders(self, since: datetime) -> list[dict]:
@@ -2393,6 +2400,15 @@ async def create_mes_connection(
         auth["username_encrypted"] = encrypt_credential(auth.pop("username"))
     config["auth_config"] = auth
 
+    # Validate REST connector field_mapping for production order checkpoint
+    if req.connector_type == "rest":
+        field_mapping = config.get("field_mapping", {})
+        if "source_updated_at" not in field_mapping:
+            raise HTTPException(
+                status_code=400,
+                detail="REST connector field_mapping must include 'source_updated_at' for production order incremental sync"
+            )
+
     # Enforce product line access for creation
     from app.core.product_line_filter import enforce_product_line_access
     await enforce_product_line_access(user, req.product_line_code, db)
@@ -2517,6 +2533,14 @@ async def test_connection(
     from app.core.product_line_filter import enforce_product_line_access
     await enforce_product_line_access(user, connection.product_line_code, db)
     result = await test_mes_connection(connection, db)
+    # Validate production order field_mapping includes source_updated_at
+    field_mapping = connection.config.get("field_mapping", {})
+    if "source_updated_at" not in field_mapping:
+        result["warning"] = (
+            "field_mapping missing 'source_updated_at'. "
+            "Production order incremental sync will fail. "
+            "Add 'source_updated_at': 'updated_at' to field_mapping."
+        )
     return result
 
 
@@ -3913,12 +3937,14 @@ class TestRESTConnectorValidation:
             "endpoints": {},
             "field_mapping": {"source_updated_at": "updated_at"},
         })
-        raw = [{
-            "order_no": "WO-001",
+        # _reverse_map maps MES field names → OpenQMS field names
+        mes_raw = [{
+            "work_order_id": "WO-001",
             "status": "running",
             "updated_at": "2026-06-04T15:30:00+00:00",
         }]
-        validated = connector._validate_items("production_orders", raw)
+        mapped = connector._reverse_map(mes_raw[0])
+        validated = connector._validate_items("production_orders", [mapped])
         assert len(validated) == 1
         assert isinstance(validated[0]["source_updated_at"], datetime)
         assert validated[0]["source_updated_at"].tzinfo is not None

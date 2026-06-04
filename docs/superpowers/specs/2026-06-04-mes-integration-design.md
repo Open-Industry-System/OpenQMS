@@ -107,6 +107,7 @@ class MESConnector(ABC):
   "field_mapping": {
     "order_no": "work_order_id",
     "product_model": "product_name",
+    "source_updated_at": "updated_at",
     "equipment_code": "equip_id",
     "external_id": "measurement_id"
   }
@@ -119,7 +120,7 @@ class MESConnector(ABC):
 - `endpoints.{name}.cursor_field`：增量同步时传入的查询参数名（如 `?updated_since=2026-06-04T00:00:00Z`）
 - `endpoints.{name}.pagination.type`：分页方式 — `none`（无分页）/ `offset`（页码分页）/ `cursor`（游标分页）
 - `endpoints.{name}.response_path`：响应 JSON 中数据数组的嵌套路径（如 `data.orders`）
-- `field_mapping`：OpenQMS 字段名 → MES 字段名的映射（key 是 OpenQMS 侧，value 是 MES 侧）
+- `field_mapping`：OpenQMS 字段名 → MES 字段名的映射（key 是 OpenQMS 侧，value 是 MES 侧）。生产工单同步**必须**映射 `source_updated_at`（对应 MES 的 `updated_at` 或 `modified_at`），用于增量同步 checkpoint；缺失时同步任务会失败
 
 ---
 
