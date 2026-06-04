@@ -4,7 +4,7 @@
 
 **Goal:** 实现 MES（制造执行系统）集成连接器，支持双向数据交换（拉取+推送），内置 Mock 模拟器，采用适配器模式。
 
-**Architecture:** 后端新增 **9 张表**（mes_connections, mes_production_orders, mes_equipment_status, mes_scrap_records, mes_measurement_ingestions, mes_sync_jobs, mes_push_outbox, mes_scrap_monthly_summary, mes_production_orders_archive），7 个模型，适配器抽象基类（MESConnector）+ Mock 实现 + REST 通用实现，同步任务表驱动增量拉取，outbox 模式可靠推送。
+**Architecture:** 后端新增 **9 张表**（mes_connections, mes_production_orders, mes_equipment_status, mes_scrap_records, mes_measurement_ingestions, mes_sync_jobs, mes_push_outbox, mes_scrap_monthly_summary, mes_production_orders_archive），9 个模型，适配器抽象基类（MESConnector）+ Mock 实现 + REST 通用实现，同步任务表驱动增量拉取，outbox 模式可靠推送。
 
 **Tech Stack:** Python 3.11 + FastAPI + SQLAlchemy 2.0 + Pydantic v2 + PostgreSQL + asyncpg | React 18 + TypeScript + Ant Design 5 | Alembic 迁移
 
@@ -1653,6 +1653,16 @@ class MESSyncService:
     BATCH_SIZE = 100
 
     @staticmethod
+    async def create_sync_jobs_for_connection(db: AsyncSession, connection_id: uuid.UUID):
+        """为新建连接初始化 4 个 pending 同步任务。调用方负责 commit。"""
+        for data_type in ("production_orders", "equipment_status", "scrap_records", "measurements"):
+            db.add(MESSyncJob(
+                connection_id=connection_id,
+                data_type=data_type,
+                status="pending",
+            ))
+
+    @staticmethod
     async def claim_jobs(db: AsyncSession, connection_id: uuid.UUID | None = None) -> list[MESSyncJob]:
         """阶段 1 — 领取 job（短事务，调用方需 commit）。
         connection_id 可选，用于测试隔离。"""
@@ -2347,12 +2357,7 @@ async def create_mes_connection(
     await db.flush()  # Get connection_id before creating jobs
 
     # Initialize sync jobs for all 4 data types
-    for data_type in ("production_orders", "equipment_status", "scrap_records", "measurements"):
-        db.add(MESSyncJob(
-            connection_id=connection.connection_id,
-            data_type=data_type,
-            status="pending",
-        ))
+    await MESSyncService.create_sync_jobs_for_connection(db, connection.connection_id)
 
     await db.commit()
     await db.refresh(connection)
@@ -3730,14 +3735,28 @@ class TestScrapOrderBackfill:
 
 
 class TestConnectionLifecycle:
-    async def test_connection_creates_four_sync_jobs(self, test_connection):
-        """创建连接后自动生成 4 个 pending 同步任务。"""
+    async def test_connection_creates_four_sync_jobs(self, admin_user):
+        """创建连接后自动生成 4 个 pending 同步任务。测试共享初始化函数。"""
         from app.database import async_session
+        from app.services.mes_service import MESSyncService
 
+        suffix = str(uuid.uuid4())[:8]
+        conn = MESConnection(
+            name=f"TEST-JOBS-{suffix}",
+            connector_type="mock",
+            config={},
+            created_by=admin_user.user_id,
+            is_active=True,
+        )
         async with async_session() as db:
+            db.add(conn)
+            await db.flush()
+            await MESSyncService.create_sync_jobs_for_connection(db, conn.connection_id)
+            await db.commit()
+
             result = await db.execute(
                 select(MESSyncJob)
-                .where(MESSyncJob.connection_id == test_connection.connection_id)
+                .where(MESSyncJob.connection_id == conn.connection_id)
                 .where(MESSyncJob.status == "pending")
             )
             jobs = result.scalars().all()
@@ -3745,24 +3764,74 @@ class TestConnectionLifecycle:
             assert len(jobs) == 4
             assert data_types == {"production_orders", "equipment_status", "scrap_records", "measurements"}
 
-    async def test_manual_sync_only_claims_target_connection(self, test_connection):
-        """手动同步只领取目标连接的任务，不处理其他连接。"""
-        from app.database import async_session
-
-        async with async_session() as db:
-            # Mark one job as running on the target connection
-            job = (await db.execute(
-                select(MESSyncJob)
-                .where(MESSyncJob.connection_id == test_connection.connection_id)
-                .where(MESSyncJob.data_type == "production_orders")
-            )).scalar_one()
-            job.status = "running"
-            job.started_at = datetime.now(timezone.utc)
+            # Cleanup
+            await db.execute(
+                text("DELETE FROM mes_sync_jobs WHERE connection_id = :cid"),
+                {"cid": conn.connection_id}
+            )
+            await db.execute(
+                text("DELETE FROM mes_connections WHERE connection_id = :cid"),
+                {"cid": conn.connection_id}
+            )
             await db.commit()
 
-            # manual_sync should only see the target connection's running job
-            with pytest.raises(ValueError, match="Sync already in progress"):
-                await MESSyncService.manual_sync(db, test_connection.connection_id)
+    async def test_manual_sync_only_claims_target_connection(self, admin_user):
+        """手动同步只领取目标连接的任务，不影响其他连接。"""
+        from app.database import async_session
+        from app.services.mes_service import MESSyncService
+
+        async with async_session() as db:
+            # Create two connections with sync jobs
+            suffix_a = str(uuid.uuid4())[:8]
+            suffix_b = str(uuid.uuid4())[:8]
+            conn_a = MESConnection(
+                name=f"TEST-SCOPE-A-{suffix_a}",
+                connector_type="mock",
+                config={},
+                created_by=admin_user.user_id,
+                is_active=True,
+            )
+            conn_b = MESConnection(
+                name=f"TEST-SCOPE-B-{suffix_b}",
+                connector_type="mock",
+                config={},
+                created_by=admin_user.user_id,
+                is_active=True,
+            )
+            db.add(conn_a)
+            db.add(conn_b)
+            await db.flush()
+            await MESSyncService.create_sync_jobs_for_connection(db, conn_a.connection_id)
+            await MESSyncService.create_sync_jobs_for_connection(db, conn_b.connection_id)
+            await db.commit()
+
+            # Run manual_sync on conn_a
+            await MESSyncService.manual_sync(db, conn_a.connection_id)
+
+            # Assert conn_a jobs are now completed (or running then completed after sync)
+            a_jobs = (await db.execute(
+                select(MESSyncJob).where(MESSyncJob.connection_id == conn_a.connection_id)
+            )).scalars().all()
+            # After manual_sync, jobs should be processed (completed or failed)
+            assert all(j.status in ("completed", "failed") for j in a_jobs), \
+                f"Expected all conn_a jobs processed, got: {[j.status for j in a_jobs]}"
+
+            # Assert conn_b jobs are still pending (not touched)
+            b_jobs = (await db.execute(
+                select(MESSyncJob).where(MESSyncJob.connection_id == conn_b.connection_id)
+            )).scalars().all()
+            assert all(j.status == "pending" for j in b_jobs), \
+                f"Expected all conn_b jobs pending, got: {[j.status for j in b_jobs]}"
+
+            # Cleanup
+            for cid in (conn_a.connection_id, conn_b.connection_id):
+                await db.execute(
+                    text("DELETE FROM mes_sync_jobs WHERE connection_id = :cid"), {"cid": cid}
+                )
+                await db.execute(
+                    text("DELETE FROM mes_connections WHERE connection_id = :cid"), {"cid": cid}
+                )
+            await db.commit()
 
 
 class TestIngestEdgeCases:
@@ -3785,7 +3854,7 @@ class TestIngestEdgeCases:
 
 ```bash
 git add backend/tests/test_mes_concurrency.py
-git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (14 cases)
+git commit -m "test(mes): add automated concurrency tests for sync, outbox, and ingestion (17 cases)
 
 - Dual worker claim once (sync job + outbox)
 - Running job timeout recovery (>10min)
@@ -4002,7 +4071,7 @@ git commit -m "feat(lifecycle): add MES data lifecycle cleanup task
 | 前端复用现有 client 实例 | Task 15 | ✅ |
 | 前端 4 个页面完整实现 | Task 16 | ✅ |
 | 前端 4 个路由 + 侧边栏菜单 | Task 17 | ✅ |
-| test_mes_concurrency.py 8 场景 | Task 18 | ✅ |
+| test_mes_concurrency.py 17 场景 | Task 18 | ✅ |
 | 生命周期清理任务 | Task 19 | ✅ |
 | mes_scrap_monthly_summary 表 | Task 1 | ✅ |
 | mes_production_orders_archive 表 | Task 1 | ✅ |
