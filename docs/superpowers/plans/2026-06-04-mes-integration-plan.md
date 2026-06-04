@@ -114,7 +114,7 @@ def upgrade():
         sa.Column('connector_type', sa.String(50), nullable=False),
         sa.Column('config', JSONB, nullable=False, server_default=sa.text("'{}'")),
         sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.text('true')),
-        sa.Column('product_line_code', sa.String(50), sa.ForeignKey('product_lines.code'), nullable=True),
+        sa.Column('product_line_code', sa.String(50), sa.ForeignKey('product_lines.code'), nullable=False),
         sa.Column('created_by', UUID(as_uuid=True), sa.ForeignKey('users.user_id'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()),
@@ -124,7 +124,7 @@ def upgrade():
     op.create_table(
         'mes_production_orders',
         sa.Column('order_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
+        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='RESTRICT'), nullable=False),
         sa.Column('order_no', sa.String(50), nullable=False),
         sa.Column('product_model', sa.String(100), nullable=True),
         sa.Column('process_route', sa.String(200), nullable=True),
@@ -144,7 +144,7 @@ def upgrade():
     op.create_table(
         'mes_equipment_status',
         sa.Column('record_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
+        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='RESTRICT'), nullable=False),
         sa.Column('external_id', sa.String(100), nullable=False),
         sa.Column('equipment_code', sa.String(50), nullable=False),
         sa.Column('equipment_name', sa.String(100), nullable=True),
@@ -164,7 +164,7 @@ def upgrade():
     op.create_table(
         'mes_scrap_records',
         sa.Column('scrap_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
+        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='RESTRICT'), nullable=False),
         sa.Column('external_id', sa.String(100), nullable=False),
         sa.Column('order_no', sa.String(50), nullable=True),
         sa.Column('order_id', UUID(as_uuid=True), sa.ForeignKey('mes_production_orders.order_id', ondelete='SET NULL'), nullable=True),
@@ -175,6 +175,7 @@ def upgrade():
         sa.Column('total_qty', sa.Integer, nullable=False),
         sa.Column('defect_description', sa.Text, nullable=True),
         sa.Column('recorded_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('source_updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('product_line_code', sa.String(50), sa.ForeignKey('product_lines.code'), nullable=True),
         sa.Column('mes_raw_data', JSONB, nullable=True),
         sa.UniqueConstraint('connection_id', 'external_id', name='uq_mes_scrap'),
@@ -184,13 +185,14 @@ def upgrade():
     op.create_table(
         'mes_measurement_ingestions',
         sa.Column('ingestion_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
+        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='RESTRICT'), nullable=False),
         sa.Column('external_id', sa.String(100), nullable=False),
         sa.Column('order_no', sa.String(50), nullable=True),
         sa.Column('ic_code', sa.String(100), nullable=False),
         sa.Column('batch_id', UUID(as_uuid=True), sa.ForeignKey('sample_batches.batch_id', ondelete='SET NULL'), nullable=True),
         sa.Column('mes_raw_data', JSONB, nullable=True),
         sa.Column('source_sampled_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('source_updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('ingested_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('product_line_code', sa.String(50), sa.ForeignKey('product_lines.code'), nullable=True),
         sa.UniqueConstraint('connection_id', 'external_id', name='uq_mes_ingestion'),
@@ -200,13 +202,14 @@ def upgrade():
     op.create_table(
         'mes_sync_jobs',
         sa.Column('job_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
+        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='RESTRICT'), nullable=False),
         sa.Column('data_type', sa.String(20), nullable=False),
         sa.Column('status', sa.String(20), nullable=False, server_default=sa.text("'pending'")),
         sa.Column('checkpoint', sa.DateTime(timezone=True), nullable=True),
         sa.Column('next_run_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('claim_token', sa.String(36), nullable=True),
         sa.Column('error_message', sa.Text, nullable=True),
         sa.Column('consecutive_failures', sa.Integer, nullable=False, server_default=sa.text('0')),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
@@ -222,13 +225,14 @@ def upgrade():
         'mes_push_outbox',
         sa.Column('outbox_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
         sa.Column('event_type', sa.String(50), nullable=False),
-        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
+        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='RESTRICT'), nullable=False),
         sa.Column('payload', JSONB, nullable=False, server_default=sa.text("'{}'")),
         sa.Column('status', sa.String(20), nullable=False, server_default=sa.text("'pending'")),
         sa.Column('retry_count', sa.Integer, nullable=False, server_default=sa.text('0')),
         sa.Column('max_retries', sa.Integer, nullable=False, server_default=sa.text('3')),
         sa.Column('next_retry_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('claim_token', sa.String(36), nullable=True),
         sa.Column('last_error', sa.Text, nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('sent_at', sa.DateTime(timezone=True), nullable=True),
@@ -242,7 +246,7 @@ def upgrade():
     op.create_table(
         'mes_scrap_monthly_summary',
         sa.Column('summary_id', UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='CASCADE'), nullable=False),
+        sa.Column('connection_id', UUID(as_uuid=True), sa.ForeignKey('mes_connections.connection_id', ondelete='RESTRICT'), nullable=False),
         sa.Column('product_line_code', sa.String(50), nullable=False, server_default=sa.text("'__none__'")),
         sa.Column('year_month', sa.String(7), nullable=False),  # YYYY-MM
         sa.Column('defect_category', sa.String(100), nullable=False),
@@ -271,6 +275,16 @@ def upgrade():
         sa.Column('product_line_code', sa.String(50), nullable=True),
         sa.Column('archived_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
+
+    # ---- DB CheckConstraints (defense-in-depth, not just API validation) ----
+    op.execute("ALTER TABLE mes_production_orders ADD CONSTRAINT chk_mes_order_status CHECK (status IN ('planned','in_progress','completed','closed'))")
+    op.execute("ALTER TABLE mes_production_orders ADD CONSTRAINT chk_mes_order_qty CHECK (planned_qty IS NULL OR planned_qty >= 0) NOT VALID")
+    op.execute("ALTER TABLE mes_production_orders ADD CONSTRAINT chk_mes_order_actual_qty CHECK (actual_qty IS NULL OR actual_qty >= 0) NOT VALID")
+    op.execute("ALTER TABLE mes_equipment_status ADD CONSTRAINT chk_mes_equip_status CHECK (status IN ('running','idle','down','changeover'))")
+    op.execute("ALTER TABLE mes_equipment_status ADD CONSTRAINT chk_mes_equip_oee CHECK (oee IS NULL OR (oee >= 0 AND oee <= 100)) NOT VALID")
+    op.execute("ALTER TABLE mes_scrap_records ADD CONSTRAINT chk_mes_scrap_qty CHECK (defect_qty >= 0 AND total_qty >= 0 AND defect_qty <= total_qty) NOT VALID")
+    op.execute("ALTER TABLE mes_push_outbox ADD CONSTRAINT chk_mes_outbox_retry CHECK (retry_count >= 0 AND max_retries >= 0) NOT VALID")
+    op.execute("ALTER TABLE mes_sync_jobs ADD CONSTRAINT chk_mes_job_failures CHECK (consecutive_failures >= 0) NOT VALID")
 
     # ---- MES permissions (do NOT modify 028; insert here in new migration) ----
     # role_key -> {module: level} format
@@ -354,13 +368,13 @@ class MESConnection(Base):
     connector_type: Mapped[str] = mapped_column(String(50), nullable=False)
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    product_line_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=True)
+    product_line_code: Mapped[str] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=False)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    sync_jobs = relationship("MESSyncJob", back_populates="connection", cascade="all, delete-orphan")
-    outbox = relationship("MESPushOutbox", back_populates="connection", cascade="all, delete-orphan")
+    sync_jobs = relationship("MESSyncJob", back_populates="connection")
+    outbox = relationship("MESPushOutbox", back_populates="connection")
 
 
 class MESProductionOrder(Base):
@@ -368,7 +382,7 @@ class MESProductionOrder(Base):
     __table_args__ = (UniqueConstraint('connection_id', 'order_no', name='uq_mes_order'),)
 
     order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"), nullable=False)
     order_no: Mapped[str] = mapped_column(String(50), nullable=False)
     product_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     process_route: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
@@ -388,7 +402,7 @@ class MESEquipmentStatus(Base):
     __table_args__ = (UniqueConstraint('connection_id', 'external_id', name='uq_mes_equipment'),)
 
     record_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"), nullable=False)
     external_id: Mapped[str] = mapped_column(String(100), nullable=False)
     equipment_code: Mapped[str] = mapped_column(String(50), nullable=False)
     equipment_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -408,7 +422,7 @@ class MESScrapRecord(Base):
     __table_args__ = (UniqueConstraint('connection_id', 'external_id', name='uq_mes_scrap'),)
 
     scrap_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"), nullable=False)
     external_id: Mapped[str] = mapped_column(String(100), nullable=False)
     order_no: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     order_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_production_orders.order_id", ondelete="SET NULL"), nullable=True)
@@ -419,6 +433,7 @@ class MESScrapRecord(Base):
     total_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     defect_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=True)
     mes_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
@@ -428,13 +443,14 @@ class MESMeasurementIngestion(Base):
     __table_args__ = (UniqueConstraint('connection_id', 'external_id', name='uq_mes_ingestion'),)
 
     ingestion_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"), nullable=False)
     external_id: Mapped[str] = mapped_column(String(100), nullable=False)
     order_no: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     ic_code: Mapped[str] = mapped_column(String(100), nullable=False)
     batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("sample_batches.batch_id", ondelete="SET NULL"), nullable=True)
     mes_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     source_sampled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     product_line_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=True)
 
@@ -447,13 +463,14 @@ class MESSyncJob(Base):
     )
 
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"), nullable=False)
     data_type: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     checkpoint: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # UUID set on claim; guards writes
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -469,13 +486,14 @@ class MESPushOutbox(Base):
 
     outbox_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     next_retry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # UUID set on claim; guards writes
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -490,7 +508,7 @@ class MESScrapMonthlySummary(Base):
     )
 
     summary_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="CASCADE"), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"), nullable=False)
     product_line_code: Mapped[str] = mapped_column(String(50), nullable=False, default="__none__")
     year_month: Mapped[str] = mapped_column(String(7), nullable=False)
     defect_category: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -559,7 +577,7 @@ class MESConnectionCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     connector_type: str = Field(..., pattern="^(mock|rest)$")
     config: dict = Field(default_factory=dict)
-    product_line_code: Optional[str] = None
+    product_line_code: str = Field(..., min_length=1)  # Required — cannot be None
 
 
 class MESConnectionUpdate(BaseModel):
@@ -567,7 +585,7 @@ class MESConnectionUpdate(BaseModel):
     connector_type: Optional[str] = Field(None, pattern="^(mock|rest)$")
     config: Optional[dict] = None
     is_active: Optional[bool] = None
-    product_line_code: Optional[str] = None
+    product_line_code: Optional[str] = Field(None, min_length=1)
 
 
 class MESConnectionResponse(BaseModel):
@@ -622,16 +640,19 @@ class RESTEndpointConfig(BaseModel):
 
 
 class RESTAuthConfig(BaseModel):
-    """REST auth config: credential fields declared as Optional[str] so Pydantic validates them.
-    extra='allow' permits post-encryption fields (api_key_hash, *_encrypted) to pass through."""
+    """REST auth config: credential fields declared as Optional[str].
+    extra='allow' permits post-encryption fields (api_key_hash, *_encrypted) to pass through.
+    After creation, plaintext fields are replaced with *_encrypted variants."""
     model_config = {"extra": "allow"}
 
+    # Plaintext (input only — replaced by encryption before storage)
     inbound_api_key: Optional[str] = None
     outbound_api_key: Optional[str] = None
     token: Optional[str] = None
     password: Optional[str] = None
     secret: Optional[str] = None
     username: Optional[str] = None
+    # Encrypted (persisted after creation)
     api_key_hash: Optional[str] = None
     token_encrypted: Optional[str] = None
     password_encrypted: Optional[str] = None
@@ -656,6 +677,7 @@ class RESTConfig(BaseModel):
     timeout: int = Field(default=30, ge=1)
     retry: Optional[RESTRetryConfig] = None
     retention: Optional[MESRetentionConfig] = None
+    push_enabled: bool = False
 
     @model_validator(mode="after")
     def _check_required_endpoints(self):
@@ -683,14 +705,22 @@ class RESTConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_auth_credentials(self):
-        """Validate that required credentials are present for the chosen auth_type."""
+        """Validate that required credentials are present for the chosen auth_type.
+        Accepts either plaintext OR encrypted variants (for re-validation after storage)."""
         auth = self.auth_config
-        if self.auth_type == "bearer" and (not auth or not auth.token):
+        if self.auth_type == "bearer" and (not auth or (not auth.token and not auth.token_encrypted)):
             raise ValueError("auth_type='bearer' requires auth_config.token")
-        if self.auth_type == "basic" and (not auth or not auth.username or not auth.password):
+        if self.auth_type == "basic" and (not auth or not (auth.username or auth.username_encrypted) or not (auth.password or auth.password_encrypted)):
             raise ValueError("auth_type='basic' requires auth_config.username and auth_config.password")
-        if self.auth_type == "api_key" and (not auth or not auth.outbound_api_key):
+        if self.auth_type == "api_key" and (not auth or (not auth.outbound_api_key and not auth.outbound_api_key_encrypted)):
             raise ValueError("auth_type='api_key' requires auth_config.outbound_api_key")
+        return self
+
+    @model_validator(mode="after")
+    def _check_push_event(self):
+        """When push_enabled=True, push_event endpoint must be configured."""
+        if self.push_enabled and "push_event" not in self.endpoints:
+            raise ValueError("push_enabled=True requires a 'push_event' endpoint configuration")
         return self
 
 
@@ -760,6 +790,7 @@ class MESIngestMeasurement(MESIngestBase):
     ic_code: str
     values: list[float]
     sampled_at: Optional[datetime] = None
+    source_updated_at: Optional[datetime] = None  # MES updated_at for incremental checkpoint
     batch_no: Optional[str] = None
     product_line_code: Optional[str] = None  # ignored; enforced from connection
 
@@ -811,6 +842,7 @@ class MESIngestScrapRecord(MESIngestBase):
     total_qty: int
     defect_description: Optional[str] = None
     recorded_at: Optional[datetime] = None
+    source_updated_at: Optional[datetime] = None  # MES updated_at for incremental checkpoint
     product_line_code: Optional[str] = None
 
     @field_validator("defect_qty", "total_qty")
@@ -939,27 +971,25 @@ def decrypt_credential(ciphertext: str) -> str:
 
 # ---- Response sanitization --------------------------------------------------
 
-_SENSITIVE_KEYS = {
-    "api_key", "api_key_hash", "token", "password", "secret", "auth_token",
-    "token_encrypted", "password_encrypted", "username_encrypted",
-    "outbound_api_key_encrypted", "key_encrypted",
+# Whitelist: only these auth_config keys are returned in API responses.
+# All other keys (plaintext credentials, unknown fields from extra="allow") are stripped.
+_AUTH_SAFE_KEYS = {
+    "auth_type",  # only at top level, not in auth_config
 }
 
 
 def sanitize_config(config: dict) -> dict:
-    """脱敏 config 中的敏感字段，用于 API 响应。"""
+    """脱敏 config 中的敏感字段，用于 API 响应。
+    使用白名单策略：auth_config 只返回 auth_type（顶层），其余全部移除。"""
     if not config:
         return config
     sanitized = dict(config)
-    auth = sanitized.get("auth_config")
-    if isinstance(auth, dict):
-        sanitized["auth_config"] = {
-            k: "***" if k in _SENSITIVE_KEYS else v
-            for k, v in auth.items()
-        }
-    # Also scrub top-level sensitive keys
-    for key in _SENSITIVE_KEYS:
-        if key in sanitized:
+    # Remove entire auth_config — all credential fields are sensitive
+    sanitized.pop("auth_config", None)
+    # Keep top-level auth_type (not sensitive)
+    # Also scrub any accidentally top-level sensitive keys
+    for key in list(sanitized.keys()):
+        if key.endswith("_encrypted") or key.endswith("_hash"):
             sanitized[key] = "***"
     return sanitized
 ```
@@ -1250,7 +1280,12 @@ class RESTMESConnector(MESConnector):
                 if status in (408, 429) or status >= 500:
                     if attempt < max_retries:
                         import asyncio
-                        await asyncio.sleep(backoff[min(attempt, len(backoff) - 1)])
+                        # Honor Retry-After header if present (429/503)
+                        retry_after = e.response.headers.get("Retry-After")
+                        if retry_after and retry_after.isdigit():
+                            await asyncio.sleep(int(retry_after))
+                        else:
+                            await asyncio.sleep(backoff[min(attempt, len(backoff) - 1)])
                         continue
                 raise  # 4xx (except 408/429) — do not retry
             except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout) as e:
@@ -1423,13 +1458,19 @@ async def get_mes_connector_by_config(connector_type: str, config: dict, db: Asy
 
 
 async def test_mes_connection(connection, db: AsyncSession | None = None) -> dict:
-    """测试 MES 连接是否可用。返回 {"ok": bool, "error": str|None}。"""
+    """轻量连通性测试：请求第一页数据（page_size=1），不拉取全量。"""
     connector = None
     try:
         connector = await get_mes_connector(connection, db)
-        # Try a lightweight operation
-        if hasattr(connector, "fetch_equipment_status"):
-            await connector.fetch_equipment_status()
+        if isinstance(connector, RESTMESConnector):
+            # Lightweight: override pagination to request only 1 item
+            ep = connector.endpoints.get("production_orders", {})
+            path = ep.get("path", "/orders")
+            await connector._request("GET", path, params={"page_size": 1})
+        elif isinstance(connector, MockMESConnector):
+            # Mock: just call fetch with a dummy since
+            from datetime import datetime, timezone
+            await connector.fetch_production_orders(since=datetime.now(timezone.utc))
         return {"ok": True, "error": None}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -1541,6 +1582,7 @@ class MESIngestionService:
             ic_code=data["ic_code"],
             mes_raw_data=data.get("raw_data"),
             source_sampled_at=data.get("sampled_at", datetime.now(timezone.utc)),
+            source_updated_at=data.get("source_updated_at"),
             product_line_code=data.get("product_line_code"),
         ).on_conflict_do_nothing(
             index_elements=["connection_id", "external_id"]
@@ -1709,6 +1751,7 @@ class MESIngestionService:
             total_qty=data["total_qty"],
             defect_description=data.get("defect_description"),
             recorded_at=data.get("recorded_at", datetime.now(timezone.utc)),
+            source_updated_at=data.get("source_updated_at"),
             product_line_code=data.get("product_line_code"),
             mes_raw_data=data.get("raw_data"),
         ).on_conflict_do_update(
@@ -1839,13 +1882,15 @@ class MESSyncService:
 
     BATCH_SIZE = 100
 
-    # Field used to advance checkpoint after successful sync
+    # Field used to advance checkpoint after successful sync.
+    # ALL incremental types use source_updated_at (MES last-modified timestamp)
+    # to handle late-arriving data. recorded_at/sampled_at are business timestamps
+    # that may predate the checkpoint window, causing permanent data loss.
     CHECKPOINT_FIELDS = {
-        # production_orders uses source_updated_at (MES updated_at mapped via field_mapping)
         "production_orders": ["source_updated_at"],
         "equipment_status": [],  # Full snapshot, no checkpoint
-        "scrap_records": ["recorded_at"],
-        "measurements": ["sampled_at"],
+        "scrap_records": ["source_updated_at", "recorded_at"],
+        "measurements": ["source_updated_at", "sampled_at"],
     }
 
     @staticmethod
@@ -1889,6 +1934,7 @@ class MESSyncService:
         for job in jobs:
             job.status = "running"
             job.started_at = datetime.now(timezone.utc)
+            job.claim_token = str(uuid.uuid4())  # Ownership token — all updates must match
         return jobs
 
     @staticmethod
@@ -1907,6 +1953,7 @@ class MESSyncService:
         stuck = result.scalars().all()
         for job in stuck:
             job.status = "failed"
+            job.claim_token = None  # Clear stale ownership
             job.error_message = "Timeout: sync job exceeded 10 minutes"
         return len(stuck)
 
@@ -1929,11 +1976,12 @@ class MESSyncService:
             try:
                 await MESSyncService._sync_single_job(db, job)
             except Exception as e:
-                # Update job to failed in independent short tx
+                # Update job to failed in independent short tx (verify claim_token)
                 async with async_session() as fail_db:
                     job_refresh = await fail_db.get(MESSyncJob, job.job_id)
-                    if job_refresh:
+                    if job_refresh and job_refresh.claim_token == job.claim_token:
                         job_refresh.status = "failed"
+                        job_refresh.claim_token = None  # Release ownership
                         job_refresh.error_message = str(e)
                         job_refresh.consecutive_failures += 1
                         if job_refresh.consecutive_failures >= MESSyncService.MAX_FAILURES:
@@ -1984,10 +2032,10 @@ class MESSyncService:
         # ---- Phase 3: Write results (short tx, per data_type block) ----
         max_ts = None
         async with async_session() as write_db:
-            # Refresh job in new session
+            # Refresh job in new session AND verify claim_token ownership
             job_refresh = await write_db.get(MESSyncJob, job.job_id)
-            if not job_refresh or job_refresh.status != "running":
-                return  # Job was reset or taken over
+            if not job_refresh or job_refresh.status != "running" or job_refresh.claim_token != job.claim_token:
+                return  # Job was reset, taken over by another worker, or timed out
 
             for item in data:
                 item["connection_id"] = job.connection_id
@@ -2005,8 +2053,9 @@ class MESSyncService:
                 if ts and (max_ts is None or ts > max_ts):
                     max_ts = ts
 
-            # Update job checkpoint
+            # Update job checkpoint (claim_token verified above)
             job_refresh.status = "completed"
+            job_refresh.claim_token = None  # Release ownership
             job_refresh.checkpoint = max_ts if max_ts else job_refresh.checkpoint
             job_refresh.next_run_at = datetime.now(timezone.utc) + timedelta(minutes=MESSyncService.SYNC_INTERVAL_MINUTES)
             job_refresh.completed_at = datetime.now(timezone.utc)
@@ -2016,7 +2065,9 @@ class MESSyncService:
 
     @staticmethod
     async def manual_sync(db: AsyncSession, connection_id: uuid.UUID):
-        """手动触发同步。若存在 running job，返回 409。"""
+        """手动触发同步：将 completed/failed jobs 标记为 pending（立即可领取）。
+        不执行实际同步——后台 worker 在下一轮（~30s）自动领取。
+        若存在 running job，返回 409。"""
         result = await db.execute(
             select(MESSyncJob).where(
                 MESSyncJob.connection_id == connection_id,
@@ -2030,12 +2081,9 @@ class MESSyncService:
             update(MESSyncJob)
             .where(MESSyncJob.connection_id == connection_id)
             .where(MESSyncJob.status.in_(["completed", "failed"]))
-            .values(status="pending")
+            .values(status="pending", next_run_at=datetime.now(timezone.utc))
         )
         await db.commit()
-
-        # Trigger immediate sync round scoped to this connection
-        await MESSyncService.run_sync_round(db, connection_id=connection_id)
 ```
 
 - [ ] **Step 2: Commit**
@@ -2181,6 +2229,7 @@ class MESPushService:
         for item in stuck:
             item.status = "pending"
             item.started_at = None
+            item.claim_token = None  # Clear stale ownership
         return len(stuck)
 
     @staticmethod
@@ -2210,14 +2259,16 @@ class MESPushService:
         for item in items:
             item.status = "processing"
             item.started_at = datetime.now(timezone.utc)
+            item.claim_token = str(uuid.uuid4())  # Ownership token
         await db.commit()  # Release locks
 
         # Step 3: send each item (memory copy → no-tx HTTP → short tx result)
         for item in items:
             # 3a: Copy outbox + connection data to memory (short read tx)
+            claim_token = item.claim_token  # Capture for ownership verification
             async with async_session() as read_db:
                 fresh = await read_db.get(MESPushOutbox, item.outbox_id)
-                if not fresh or fresh.status != "processing":
+                if not fresh or fresh.status != "processing" or fresh.claim_token != claim_token:
                     continue
                 conn_result = await read_db.execute(
                     select(MESConnection).where(MESConnection.connection_id == fresh.connection_id)
@@ -2244,11 +2295,12 @@ class MESPushService:
                 if connector and hasattr(connector, "close"):
                     await connector.close()
 
-            # 3c: Write result (short tx)
+            # 3c: Write result (short tx, verify claim_token ownership)
             async with async_session() as write_db:
                 fresh = await write_db.get(MESPushOutbox, outbox_id)
-                if not fresh:
-                    continue
+                if not fresh or fresh.claim_token != claim_token:
+                    continue  # Stale or taken over by another worker
+                fresh.claim_token = None  # Release ownership on all paths
                 if push_ok:
                     fresh.status = "sent"
                     fresh.sent_at = datetime.now(timezone.utc)
@@ -2683,14 +2735,34 @@ async def delete_mes_connection(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
 ):
+    """Soft-delete: deactivate connection + all sync jobs. Data preserved for audit."""
     connection = await db.get(MESConnection, connection_id)
     if not connection:
         raise HTTPException(404, "Connection not found")
     from app.core.product_line_filter import enforce_product_line_access
     await enforce_product_line_access(user, connection.product_line_code, db)
-    await db.delete(connection)
+    connection.is_active = False
+    # Cancel all running/pending sync jobs
+    result = await db.execute(
+        select(MESSyncJob).where(
+            MESSyncJob.connection_id == connection_id,
+            MESSyncJob.status.in_(["pending", "running"]),
+        )
+    )
+    for job in result.scalars().all():
+        job.status = "cancelled"
+        job.error_message = "Connection deactivated by user"
+    # Cancel pending outbox events
+    result = await db.execute(
+        select(MESPushOutbox).where(
+            MESPushOutbox.connection_id == connection_id,
+            MESPushOutbox.status.in_(["pending", "processing"]),
+        )
+    )
+    for item in result.scalars().all():
+        item.status = "cancelled"
     await db.commit()
-    return {"message": "Connection deleted"}
+    return {"message": "Connection deactivated"}
 
 
 @router.post("/connections/{connection_id}/test")
@@ -2775,12 +2847,14 @@ async def ingest_mes_data(
 
 # --- Sync ----------------------------------------------------------------------
 
-@router.post("/connections/{connection_id}/sync")
+@router.post("/connections/{connection_id}/sync", status_code=202)
 async def manual_sync(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
 ):
+    """Mark sync jobs as ready for immediate execution (async, non-blocking).
+    Returns 202 Accepted; background worker picks up within 30s."""
     connection = await db.get(MESConnection, connection_id)
     if not connection:
         raise HTTPException(404, "Connection not found")
@@ -2788,7 +2862,7 @@ async def manual_sync(
     await enforce_product_line_access(user, connection.product_line_code, db)
     try:
         await MESSyncService.manual_sync(db, connection_id)
-        return {"message": "Sync triggered"}
+        return {"message": "Sync jobs queued for immediate execution"}
     except ValueError as e:
         raise HTTPException(409, str(e))
 
