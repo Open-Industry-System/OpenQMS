@@ -306,11 +306,33 @@ MES 推送 POST /api/mes/ingest
 
 ### 反向推送（OpenQMS → MES）
 
+采用 outbox 模式确保可靠投递，业务事务只写 outbox 表，后台任务异步推送。
+
+**mes_push_outbox — 推送事件发件箱**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| outbox_id | UUID PK | |
+| event_type | VARCHAR(50) | `spc_alarm`/`capa_status_change`/`fmea_recommendation` 等 |
+| connection_id | UUID FK→mes_connections ON DELETE CASCADE | 目标 MES 连接 |
+| payload | JSONB | 事件数据 |
+| status | VARCHAR(20) | `pending`/`sent`/`failed` |
+| retry_count | INTEGER | 已重试次数（默认 0） |
+| max_retries | INTEGER | 最大重试次数（默认 3） |
+| last_error | TEXT | 最近一次失败原因 |
+| created_at | TIMESTAMPTZ | 事件创建时间 |
+| sent_at | TIMESTAMPTZ | 成功发送时间 |
+
 ```
-SPC 异常触发 / CAPA 状态变更
-  → MESPushService.push_event()
-    → 遍历关联 connection 的 MESConnector
+业务事件（SPC 异常 / CAPA 状态变更）
+  → 同一事务内写入 mes_push_outbox (status=pending)
+  → 后台推送任务轮询 pending outbox
+    → 加载 MESConnector
     → push_quality_event()
+    → 成功：status=sent, sent_at=now()
+    → 失败：retry_count += 1, last_error=...
+      → retry_count >= max_retries → status=failed（永久失败，人工介入）
+      → 否则保持 pending，下次重试
     → 审计日志
 ```
 
@@ -459,7 +481,8 @@ SPC 异常触发 / CAPA 状态变更
 - 未知 `data_type` 返回 400
 
 ### 反向推送
-- MES 返回非 2xx → 审计日志 + 不阻塞主流程
+- 采用 outbox 模式：业务事务只写 `mes_push_outbox`，后台任务异步推送
+- MES 返回非 2xx → retry_count += 1，达到 max_retries (默认 3) 则 status=failed（人工介入）
 - 连接超时 30s
 
 ---
