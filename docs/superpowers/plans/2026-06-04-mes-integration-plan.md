@@ -31,7 +31,7 @@
 | 3 | RESTMESConnector 全 TODO | 完整 HTTP 实现：配置驱动 + 分页 + 字段映射 + 重试 |
 | 4 | API Key 认证是 TODO 占位 | 完整 SHA-256 hash 验证 + Fernet 加密 + 响应脱敏 + /test 端点 |
 | 5 | 测量 ingestion 无法原子回滚 | 调用 `_create_sample_batch_inner`（仅 flush）替代 `add_sample_batch`（内部 commit），同一事务完成 ingestion + SPC + 回填 |
-| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 17 个并发场景 |
+| 6 | 无自动化并发测试 | 新增 `test_mes_concurrency.py` 覆盖 19 个并发场景 |
 | 7 | 修改已执行 028 迁移 | 在 **新迁移 030** 末尾插入 MES 权限，不动 028 |
 | 8 | 查询未产品线隔离 + 凭证泄漏 | 查询 API 按 `product_line_code` 过滤；ConnectionOut 脱敏 `config.auth_config` 敏感字段 |
 | 9 | 前端独立 axios 实例 | 复用现有 `client` 实例（已含 JWT 拦截器） |
@@ -133,6 +133,7 @@ def upgrade():
         sa.Column('status', sa.String(20), nullable=False, server_default=sa.text("'planned'")),
         sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('source_updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('product_line_code', sa.String(50), sa.ForeignKey('product_lines.code'), nullable=True),
         sa.Column('mes_raw_data', JSONB, nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
@@ -375,6 +376,7 @@ class MESProductionOrder(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("product_lines.code"), nullable=True)
     mes_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -597,6 +599,7 @@ class MESProductionOrderResponse(BaseModel):
     status: str
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
+    source_updated_at: Optional[datetime]
     product_line_code: Optional[str]
     created_at: datetime
     model_config = {"from_attributes": True}
@@ -665,6 +668,7 @@ class MESIngestProductionOrder(MESIngestBase):
     status: str = "planned"
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    source_updated_at: Optional[datetime] = None  # MES updated_at mapped here
     product_line_code: Optional[str] = None  # ignored; enforced from connection
 
 
@@ -1181,7 +1185,8 @@ class RESTMESConnector(MESConnector):
         return all_data
 
     def _validate_items(self, endpoint_name: str, raw_items: list[dict]) -> list[dict]:
-        """使用 Pydantic Schema 校验并转换原始 MES 数据（ISO 时间字符串 → datetime 等）。"""
+        """使用 Pydantic Schema 校验并转换原始 MES 数据（ISO 时间字符串 → datetime 等）。
+        任一记录校验失败即抛出异常，使整个 sync job 失败且不推进 checkpoint（符合设计契约）。"""
         from app.schemas import mes as schemas
         schema_map = {
             "production_orders": schemas.MESIngestProductionOrder,
@@ -1202,12 +1207,8 @@ class RESTMESConnector(MESConnector):
         data_type = dt_map.get(endpoint_name, endpoint_name)
         for item in raw_items:
             item["data_type"] = data_type
-            try:
-                v = schema_cls.model_validate(item)
-                validated.append(v.model_dump())
-            except Exception as e:
-                # Log and skip invalid items; do not crash the entire sync batch
-                print(f"[mes_connector] validation error for {endpoint_name}: {e}")
+            v = schema_cls.model_validate(item)
+            validated.append(v.model_dump())
         return validated
 
     async def fetch_production_orders(self, since: datetime) -> list[dict]:
@@ -1491,6 +1492,7 @@ class MESIngestionService:
             status=data.get("status", "planned"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
+            source_updated_at=data.get("source_updated_at"),
             product_line_code=data.get("product_line_code"),
             mes_raw_data=data.get("raw_data"),
         ).on_conflict_do_update(
@@ -1499,6 +1501,7 @@ class MESIngestionService:
                 "actual_qty": data.get("actual_qty"),
                 "status": data.get("status"),
                 "completed_at": data.get("completed_at"),
+                "source_updated_at": data.get("source_updated_at"),
                 "mes_raw_data": data.get("raw_data"),
             }
         )
@@ -1688,7 +1691,8 @@ class MESSyncService:
 
     # Field used to advance checkpoint after successful sync
     CHECKPOINT_FIELDS = {
-        "production_orders": ["updated_at", "completed_at", "started_at"],
+        # production_orders uses source_updated_at (MES updated_at mapped via field_mapping)
+        "production_orders": ["source_updated_at"],
         "equipment_status": [],  # Full snapshot, no checkpoint
         "scrap_records": ["recorded_at"],
         "measurements": ["sampled_at"],
@@ -3900,29 +3904,34 @@ class TestIngestEdgeCases:
 
 class TestRESTConnectorValidation:
     async def test_rest_validate_converts_iso_datetime(self):
-        """RESTMESConnector._validate_items 将 ISO 时间字符串转为 datetime。"""
+        """RESTMESConnector._validate_items 将 ISO 时间字符串转为 datetime；source_updated_at 保留用于 checkpoint。"""
         from app.services.mes_connector import RESTMESConnector
         from datetime import datetime, timezone
 
         connector = RESTMESConnector({
             "base_url": "http://test",
             "endpoints": {},
+            "field_mapping": {"source_updated_at": "updated_at"},
         })
         raw = [{
-            "external_id": "M-001",
-            "ic_code": "IC-TEST",
-            "values": [1.0, 2.0, 3.0],
-            "sampled_at": "2026-06-04T12:00:00+00:00",
-            "data_type": "measurement",  # will be overwritten by validator
+            "order_no": "WO-001",
+            "status": "running",
+            "updated_at": "2026-06-04T15:30:00+00:00",
         }]
-        validated = connector._validate_items("measurements", raw)
+        validated = connector._validate_items("production_orders", raw)
         assert len(validated) == 1
-        assert isinstance(validated[0]["sampled_at"], datetime)
-        assert validated[0]["sampled_at"].tzinfo is not None
+        assert isinstance(validated[0]["source_updated_at"], datetime)
+        assert validated[0]["source_updated_at"].tzinfo is not None
+        # Verify checkpoint field is present and typed correctly
+        from app.services.mes_service import MESSyncService
+        ts = MESSyncService._get_checkpoint_value("production_orders", validated[0])
+        assert ts is not None
+        assert isinstance(ts, datetime)
 
-    async def test_rest_validate_skips_invalid_items(self):
-        """RESTMESConnector._validate_items 跳过非法数据，不中断批次。"""
+    async def test_rest_validate_raises_on_invalid_item(self):
+        """RESTMESConnector._validate_items 任一记录校验失败即抛出异常，不跳过。"""
         from app.services.mes_connector import RESTMESConnector
+        from pydantic import ValidationError
 
         connector = RESTMESConnector({
             "base_url": "http://test",
@@ -3933,10 +3942,8 @@ class TestRESTConnectorValidation:
             {"external_id": "S-002", "defect_type": "scratches", "defect_qty": -1, "total_qty": 100},  # invalid
             {"external_id": "S-003", "defect_type": "scratches", "defect_qty": 3, "total_qty": 50},
         ]
-        validated = connector._validate_items("scrap_records", raw)
-        assert len(validated) == 2
-        assert validated[0]["external_id"] == "S-001"
-        assert validated[1]["external_id"] == "S-003"
+        with pytest.raises(ValidationError):
+            connector._validate_items("scrap_records", raw)
 
 - [ ] **Step 2: Commit**
 
