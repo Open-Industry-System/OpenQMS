@@ -4,7 +4,7 @@ import {
   Button, Space, Tag, Typography, Steps, Card, Form, Input,
   Select, App, Spin, Empty, Row, Col, Table, Divider, Modal,
 } from "antd";
-import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from "@ant-design/icons";
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
 import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
@@ -80,6 +80,16 @@ export default function CAPADetailPage() {
       setPreviewOpen(true);
     }
   }, [draft, draftLoading]);
+
+  // 全局 Toast：error 用 message.error，warning 用 message.warning
+  useEffect(() => {
+    if (!draftError || draftLoading) return;
+    if (errorLevel === "error") {
+      message.error(draftError);
+    } else {
+      message.warning(draftError);
+    }
+  }, [draftError, errorLevel, draftLoading, message]);
 
   useEffect(() => {
     if (!id) return;
@@ -168,6 +178,43 @@ export default function CAPADetailPage() {
     }
     setPreviewOpen(false);
     clear();
+  };
+
+  const handleUndo = (field: string) => {
+    const prev = undo(field);
+    if (prev !== undefined) {
+      setLocalData((p) => ({ ...p, [field]: prev }));
+      handleUpdate(field, prev);
+      message.success("已撤销 AI 修改");
+    }
+  };
+
+  const renderLabelWithDraft = (step: string, label: string) => {
+    const field = stepToField[step];
+    const hasHistory = canUndo(field);
+    return (
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>{label}</span>
+        <Space size="small">
+          {hasHistory && (
+            <Button
+              size="small"
+              type="link"
+              icon={<UndoOutlined />}
+              onClick={() => handleUndo(field)}
+            >
+              撤销修改
+            </Button>
+          )}
+          <AIDraftButton
+            loading={draftLoading}
+            tempUnavailable={tempUnavailable}
+            error={errorLevel === "error" ? draftError : null}
+            onGenerate={() => handleGenerate(step)}
+          />
+        </Space>
+      </div>
+    );
   };
 
   const handleAdvance = async () => {
@@ -346,12 +393,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D2_DESCRIPTION" && (
               <Form layout="vertical">
-                <Form.Item label={
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span>5W2H 问题描述</span>
-                    <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null} onGenerate={() => handleGenerate("d2")} />
-                  </div>
-                }>
+                <Form.Item label={renderLabelWithDraft("d2", "5W2H 问题描述")}>
                   <TextArea
                     rows={6}
                     disabled={!canEdit('capa')}
@@ -366,12 +408,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D3_INTERIM" && (
               <Form layout="vertical">
-                <Form.Item label={
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span>临时遏制措施</span>
-                    <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null} onGenerate={() => handleGenerate("d3")} />
-                  </div>
-                }>
+                <Form.Item label={renderLabelWithDraft("d3", "临时遏制措施")}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
@@ -396,12 +433,7 @@ export default function CAPADetailPage() {
                   }}
                 />
                 <Form layout="vertical">
-                  <Form.Item label={
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span>根因分析 (5Why / 鱼骨图)</span>
-                    <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null} onGenerate={() => handleGenerate("d4")} />
-                  </div>
-                }>
+                  <Form.Item label={renderLabelWithDraft("d4", "根因分析 (5Why / 鱼骨图)")}>
                     <TextArea
                       rows={6}
                       disabled={!canEdit('capa')}
@@ -427,12 +459,7 @@ export default function CAPADetailPage() {
                   }}
                 />
                 <Form layout="vertical">
-                  <Form.Item label={
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span>永久纠正措施</span>
-                    <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null} onGenerate={() => handleGenerate("d5")} />
-                  </div>
-                }>
+                  <Form.Item label={renderLabelWithDraft("d5", "永久纠正措施")}>
                     <TextArea
                       rows={4}
                       disabled={!canEdit('capa')}
@@ -447,12 +474,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D6_VERIFICATION" && (
               <Form layout="vertical">
-                <Form.Item label={
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span>效果验证</span>
-                    <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null} onGenerate={() => handleGenerate("d6")} />
-                  </div>
-                }>
+                <Form.Item label={renderLabelWithDraft("d6", "效果验证")}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
@@ -467,12 +489,7 @@ export default function CAPADetailPage() {
             {capa.status === "D7_PREVENTION" && (
               <>
                 <Form layout="vertical">
-                  <Form.Item label={
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span>预防复发措施</span>
-                    <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null} onGenerate={() => handleGenerate("d7")} />
-                  </div>
-                }>
+                  <Form.Item label={renderLabelWithDraft("d7", "预防复发措施")}>
                     <TextArea
                       rows={4}
                       disabled={!canEdit('capa')}
@@ -496,12 +513,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D8_CLOSURE" && (
               <Form layout="vertical">
-                <Form.Item label={
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span>关闭确认</span>
-                    <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null} onGenerate={() => handleGenerate("d8")} />
-                  </div>
-                }>
+                <Form.Item label={renderLabelWithDraft("d8", "关闭确认")}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
