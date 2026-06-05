@@ -63,6 +63,7 @@ export interface MESScrapRecord {
 }
 
 export interface MESEquipmentSummary {
+  connection_id: string;
   equipment_code: string;
   equipment_name: string | null;
   status: string;

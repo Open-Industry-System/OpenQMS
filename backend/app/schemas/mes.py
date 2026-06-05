@@ -354,6 +354,7 @@ MESIngestRequest = (
 # ---------------------------------------------------------------------------
 
 class MESEquipmentSummary(BaseModel):
+    connection_id: str
     equipment_code: str
     equipment_name: Optional[str] = None
     status: str

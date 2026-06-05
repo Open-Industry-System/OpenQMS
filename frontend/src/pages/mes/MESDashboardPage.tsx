@@ -150,7 +150,7 @@ export default function MESDashboardPage() {
       <Table
         columns={columns}
         dataSource={data?.equipment_summary ?? []}
-        rowKey="equipment_code"
+        rowKey={(r: MESEquipmentSummary) => `${r.connection_id}:${r.equipment_code}`}
         loading={loading}
         pagination={false}
         size="small"

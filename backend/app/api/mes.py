@@ -541,6 +541,7 @@ async def get_dashboard(
     down_count = 0
     for row in equipment_rows:
         equipment_summary.append(schemas.MESEquipmentSummary(
+            connection_id=str(row.connection_id),
             equipment_code=row.equipment_code,
             equipment_name=row.equipment_name,
             status=row.status,
