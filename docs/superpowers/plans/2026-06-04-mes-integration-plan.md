@@ -1819,35 +1819,35 @@ async def require_mes_api_key(
 ) -> MESConnection:
     """验证 X-API-Key header，返回对应的 MESConnection。
 
-    MES 客户端必须同时发送 X-Connection-Id header（connection_id 的前 8 位），
-    用于 O(1) 索引定位而非扫描全部连接。
+    MES 客户端必须同时发送 X-Connection-Id header（完整 connection_id UUID），
+    用于主键索引 O(1) 定位，而非扫描全部连接。
     """
-    import uuid as _uuid
-
     api_key = request.headers.get("X-API-Key")
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing X-API-Key header")
 
-    conn_id_prefix = request.headers.get("X-Connection-Id")
-    if not conn_id_prefix:
+    raw_conn_id = request.headers.get("X-Connection-Id")
+    if not raw_conn_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing X-Connection-Id header")
 
-    # Index lookup: find connection by ID prefix (first 8 chars of UUID)
-    # This avoids scanning all connections on every ingest request
-    result = await db.execute(
-        select(MESConnection).where(
-            MESConnection.connection_id.cast(str).like(f"{conn_id_prefix}%")
-        ).limit(5)  # UUID prefix is nearly unique; limit for safety
-    )
-    candidates = result.scalars().all()
+    # Parse as UUID — rejects malformed values immediately
+    try:
+        conn_id = uuid.UUID(raw_conn_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid X-Connection-Id format")
 
-    for conn in candidates:
-        auth_config = conn.config.get("auth_config", {})
-        stored_hash = auth_config.get("api_key_hash")
-        if stored_hash and verify_api_key(api_key, stored_hash):
-            if not conn.is_active:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Connection is inactive")
-            return conn
+    # Primary key lookup — O(1), uses the clustered index
+    conn = await db.get(MESConnection, conn_id)
+    if not conn:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
+
+    auth_config = conn.config.get("auth_config", {})
+    stored_hash = auth_config.get("api_key_hash")
+    if not stored_hash or not verify_api_key(api_key, stored_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
+    if not conn.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Connection is inactive")
+    return conn
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
 ```
@@ -2008,7 +2008,7 @@ class MESSyncService:
                             fail_db.add(AuditLog(
                                 table_name="mes_connections",
                                 record_id=job_refresh.connection_id,
-                                action="mes_connection_deactivated",
+                                action="mes_deactivated",
                                 new_values={
                                     "reason": f"Sync job {job_refresh.data_type} failed {job_refresh.consecutive_failures} consecutive times",
                                     "last_error": str(e),
@@ -3703,7 +3703,7 @@ async def admin_user():
         if user:
             return user
         # Seed not run — create minimal test admin with correct role
-        from app.models.user import RoleDefinition
+        from app.models.role import RoleDefinition
         role_result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
         role = role_result.scalar_one_or_none()
         if not role:
@@ -3711,7 +3711,7 @@ async def admin_user():
         test_user = User(
             username=f"{_TEST_PREFIX}admin-{uuid.uuid4().hex[:8]}",
             password_hash="$2b$12$test",  # Not used for auth in tests
-            role="admin",
+            legacy_role="admin",
             role_id=role.id,
             is_active=True,
         )
@@ -4063,7 +4063,7 @@ class TestIngestValidation:
                 "/api/mes/ingest",
                 headers={
                     "X-API-Key": "test-mes-api-key-12345",
-                    "X-Connection-Id": str(test_connection.connection_id)[:8],
+                    "X-Connection-Id": str(test_connection.connection_id),
                 },
                 json={"data_type": "scrap_record"},  # missing external_id, defect_type, etc.
             )
@@ -4085,7 +4085,7 @@ class TestIngestValidation:
                 "/api/mes/ingest",
                 headers={
                     "X-API-Key": "test-mes-api-key-12345",
-                    "X-Connection-Id": str(test_connection.connection_id)[:8],
+                    "X-Connection-Id": str(test_connection.connection_id),
                 },
                 json={
                     "data_type": "unknown_type",
@@ -4300,7 +4300,7 @@ class TestIngestEdgeCases:
                     "/api/mes/ingest",
                     headers={
                     "X-API-Key": "test-mes-api-key-12345",
-                    "X-Connection-Id": str(test_connection.connection_id)[:8],
+                    "X-Connection-Id": str(test_connection.connection_id),
                 },
                     json=bad_payload,
                 )
