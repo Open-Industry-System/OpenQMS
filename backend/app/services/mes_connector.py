@@ -82,6 +82,9 @@ class MESConnector(ABC):
 class MockMESConnector(MESConnector):
     """Simulation connector that generates realistic MES data."""
 
+    def __init__(self, db: AsyncSession | None = None) -> None:
+        self._db = db
+
     _ORDER_STATUSES = ["planned", "in_progress", "completed", "closed"]
     _EQUIPMENT_DEFS = [
         {"code": "EQ-001", "name": "注塑机"},
