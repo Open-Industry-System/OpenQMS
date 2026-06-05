@@ -902,9 +902,123 @@ class MESPushService:
 
 
 class MESLifecycleService:
-    """MES data lifecycle cleanup service."""
+    """MES data lifecycle management.
+    - Equipment status: 90-day retention
+    - Scrap records: 1-year retention, aggregate to monthly summary before delete
+    - Closed orders: 2-year archive to mes_production_orders_archive
+    """
+
+    DEFAULT_EQUIPMENT_DAYS = 90
+    DEFAULT_SCRAP_DAYS = 365
+    DEFAULT_CLOSED_ORDER_DAYS = 730
+
+    @staticmethod
+    def _get_retention_days(connection_config: dict) -> dict:
+        ret = connection_config.get("retention", {})
+        if not isinstance(ret, dict):
+            ret = {}
+        return {
+            "equipment_status_days": ret.get("equipment_status_days", MESLifecycleService.DEFAULT_EQUIPMENT_DAYS),
+            "scrap_days": ret.get("scrap_days", MESLifecycleService.DEFAULT_SCRAP_DAYS),
+            "closed_order_days": ret.get("closed_order_days", MESLifecycleService.DEFAULT_CLOSED_ORDER_DAYS),
+        }
 
     @staticmethod
     async def cleanup(db: AsyncSession) -> dict:
-        """Placeholder cleanup — returns empty stats."""
-        return {}
+        from sqlalchemy import delete, text
+        now = datetime.now(timezone.utc)
+
+        # Transaction-level advisory lock (auto-released on commit/rollback)
+        lock_result = await db.execute(text("SELECT pg_try_advisory_xact_lock(42)"))
+        has_lock = lock_result.scalar()
+        if not has_lock:
+            return {"deleted_equipment_status": 0, "deleted_scrap_records": 0, "aggregated_scrap_rows": 0, "archived_orders": 0}
+
+        # Load ALL connections (active + inactive)
+        result = await db.execute(select(MESConnection))
+        connections = result.scalars().all()
+
+        total_deleted_equipment = 0
+        total_deleted_scrap = 0
+        total_aggregated = 0
+        total_archived = 0
+
+        for conn in connections:
+            retention = MESLifecycleService._get_retention_days(conn.config)
+
+            # 1. Clean old equipment status
+            cutoff_equipment = now - timedelta(days=retention["equipment_status_days"])
+            eq_result = await db.execute(
+                delete(MESEquipmentStatus)
+                .where(MESEquipmentStatus.connection_id == conn.connection_id)
+                .where(MESEquipmentStatus.recorded_at < cutoff_equipment)
+            )
+            total_deleted_equipment += eq_result.rowcount
+
+            # 2. Aggregate and clean old scrap records
+            cutoff_scrap = now - timedelta(days=retention["scrap_days"])
+            agg_result = await db.execute(text("""
+                INSERT INTO mes_scrap_monthly_summary
+                    (connection_id, product_line_code, year_month, defect_category,
+                     total_defect_qty, total_total_qty, record_count, created_at)
+                SELECT
+                    connection_id,
+                    COALESCE(product_line_code, '__none__'),
+                    TO_CHAR(recorded_at, 'YYYY-MM'),
+                    COALESCE(defect_category, '未知'),
+                    SUM(defect_qty),
+                    SUM(total_qty),
+                    COUNT(*),
+                    NOW()
+                FROM mes_scrap_records
+                WHERE connection_id = :cid AND recorded_at < :cutoff
+                GROUP BY connection_id, COALESCE(product_line_code, '__none__'),
+                         TO_CHAR(recorded_at, 'YYYY-MM'),
+                         COALESCE(defect_category, '未知')
+                ON CONFLICT (connection_id, product_line_code, year_month, defect_category)
+                DO UPDATE SET
+                    total_defect_qty = mes_scrap_monthly_summary.total_defect_qty + EXCLUDED.total_defect_qty,
+                    total_total_qty = mes_scrap_monthly_summary.total_total_qty + EXCLUDED.total_total_qty,
+                    record_count = mes_scrap_monthly_summary.record_count + EXCLUDED.record_count
+            """), {"cid": conn.connection_id, "cutoff": cutoff_scrap})
+            total_aggregated += agg_result.rowcount
+
+            sc_result = await db.execute(
+                delete(MESScrapRecord)
+                .where(MESScrapRecord.connection_id == conn.connection_id)
+                .where(MESScrapRecord.recorded_at < cutoff_scrap)
+            )
+            total_deleted_scrap += sc_result.rowcount
+
+            # 3. Archive closed orders
+            cutoff_order = now - timedelta(days=retention["closed_order_days"])
+            await db.execute(text("""
+                INSERT INTO mes_production_orders_archive
+                    (order_id, connection_id, order_no, product_model, process_route,
+                     planned_qty, actual_qty, status, started_at, completed_at,
+                     source_updated_at, product_line_code, archived_at)
+                SELECT
+                    order_id, connection_id, order_no, product_model, process_route,
+                    planned_qty, actual_qty, status, started_at, completed_at,
+                    source_updated_at, product_line_code, NOW()
+                FROM mes_production_orders
+                WHERE connection_id = :cid AND status = 'closed' AND completed_at < :cutoff
+                ON CONFLICT (order_id) DO NOTHING
+            """), {"cid": conn.connection_id, "cutoff": cutoff_order})
+
+            arc_result = await db.execute(
+                delete(MESProductionOrder)
+                .where(MESProductionOrder.connection_id == conn.connection_id)
+                .where(MESProductionOrder.status == "closed")
+                .where(MESProductionOrder.completed_at < cutoff_order)
+            )
+            total_archived += arc_result.rowcount
+
+        await db.commit()
+
+        return {
+            "deleted_equipment_status": total_deleted_equipment,
+            "deleted_scrap_records": total_deleted_scrap,
+            "aggregated_scrap_rows": total_aggregated,
+            "archived_orders": total_archived,
+        }
