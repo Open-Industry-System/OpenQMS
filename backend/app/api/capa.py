@@ -11,8 +11,11 @@ from app.core.product_line_filter import get_user_product_line_codes, enforce_pr
 from typing import Any
 from app.models.user import User
 
+from app.config import settings
 from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse, AdvanceRequest, D4RecommendationResponse, D5RecommendationResponse
+from app.schemas.capa_draft import DraftRequest, DraftResponse
 from app.services import capa_service
+from app.services.capa_draft_service import generate_draft
 
 router = APIRouter(prefix="/api/capa", tags=["capa"])
 
@@ -398,3 +401,54 @@ async def get_d5_fmea_recommendations(
         "existing_controls": existing_controls,
         "general_suggestions": general_suggestions,
     }
+
+
+@router.get("/{report_id}/draft/capabilities")
+async def draft_capabilities(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
+):
+    """获取当前 CAPA 报告可生成 AI 草稿的步骤列表"""
+    capa = await capa_service.get_capa(db, report_id)
+    if not capa:
+        raise HTTPException(status_code=404, detail="CAPA 报告不存在")
+    await enforce_product_line_access(user, capa.product_line_code, db)
+
+    current_status = capa.status
+    if current_status == "ARCHIVED":
+        return {"available_steps": [], "current_step": current_status}
+
+    # 根据当前状态返回可用步骤
+    status_to_steps = {
+        "D1_TEAM": ["d2"],
+        "D2_DESCRIPTION": ["d2", "d3"],
+        "D3_INTERIM": ["d3", "d4"],
+        "D4_ROOT_CAUSE": ["d4", "d5"],
+        "D5_CORRECTION": ["d5", "d6"],
+        "D6_VERIFICATION": ["d6", "d7"],
+        "D7_PREVENTION": ["d7", "d8"],
+        "D8_CLOSURE": ["d8"],
+        "CLOSED": ["d8"],
+    }
+
+    return {
+        "available_steps": status_to_steps.get(current_status, []),
+        "current_step": current_status,
+    }
+
+
+@router.post("/{report_id}/draft/{step}", response_model=DraftResponse)
+async def draft_capa_step(
+    report_id: uuid.UUID,
+    step: str,
+    req: DraftRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
+):
+    """为指定步骤生成 AI 草稿"""
+    if step not in {"d2", "d3", "d4", "d5", "d6", "d7", "d8"}:
+        raise HTTPException(status_code=400, detail="无效的步骤")
+    result = await generate_draft(db, report_id, step, req, user, request)
+    return DraftResponse(**result)
