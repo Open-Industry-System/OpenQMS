@@ -283,7 +283,9 @@ def upgrade():
     op.execute("ALTER TABLE mes_equipment_status ADD CONSTRAINT chk_mes_equip_status CHECK (status IN ('running','idle','down','changeover'))")
     op.execute("ALTER TABLE mes_equipment_status ADD CONSTRAINT chk_mes_equip_oee CHECK (oee IS NULL OR (oee >= 0 AND oee <= 100)) NOT VALID")
     op.execute("ALTER TABLE mes_scrap_records ADD CONSTRAINT chk_mes_scrap_qty CHECK (defect_qty >= 0 AND total_qty >= 0 AND defect_qty <= total_qty) NOT VALID")
+    op.execute("ALTER TABLE mes_push_outbox ADD CONSTRAINT chk_mes_outbox_status CHECK (status IN ('pending','processing','sent','failed','cancelled')) NOT VALID")
     op.execute("ALTER TABLE mes_push_outbox ADD CONSTRAINT chk_mes_outbox_retry CHECK (retry_count >= 0 AND max_retries >= 0) NOT VALID")
+    op.execute("ALTER TABLE mes_sync_jobs ADD CONSTRAINT chk_mes_job_status CHECK (status IN ('pending','running','completed','failed','cancelled')) NOT VALID")
     op.execute("ALTER TABLE mes_sync_jobs ADD CONSTRAINT chk_mes_job_failures CHECK (consecutive_failures >= 0) NOT VALID")
 
     # ---- MES permissions (do NOT modify 028; insert here in new migration) ----
@@ -1368,15 +1370,16 @@ class RESTMESConnector(MESConnector):
             "measurements": "measurement",
         }
         data_type = dt_map.get(endpoint_name, endpoint_name)
+        # All incremental types require source_updated_at for checkpoint
+        requires_source_updated_at = endpoint_name in ("production_orders", "scrap_records", "measurements")
         for item in raw_items:
             item["data_type"] = data_type
             v = schema_cls.model_validate(item)
             dumped = v.model_dump()
-            # Production orders pulled from MES MUST have source_updated_at for checkpoint
-            if endpoint_name == "production_orders" and dumped.get("source_updated_at") is None:
+            if requires_source_updated_at and dumped.get("source_updated_at") is None:
                 raise ValueError(
-                    f"Production order {dumped.get('order_no')} missing source_updated_at. "
-                    "Add 'source_updated_at': 'updated_at' to field_mapping."
+                    f"{endpoint_name} record {dumped.get('external_id') or dumped.get('order_no')} "
+                    f"missing source_updated_at. Add '{endpoint_name}' source_updated_at to field_mapping."
                 )
             validated.append(dumped)
         return validated
@@ -1398,7 +1401,13 @@ class RESTMESConnector(MESConnector):
         return self._validate_items("measurements", raw)
 
     async def push_quality_event(self, event_type: str, data: dict, event_id: str | None = None) -> dict:
-        ep = self.endpoints.get("push_event", {})
+        ep = self.endpoints.get("push_event")
+        if not ep:
+            raise ValueError(
+                "push_event endpoint not configured. "
+                "Add 'push_event': {'path': '/quality/events', 'method': 'POST'} to endpoints "
+                "and set 'push_enabled': true."
+            )
         path = ep.get("path", "/quality/events")
         method = ep.get("method", "POST")
         payload = dict(data)
@@ -1636,6 +1645,10 @@ class MESIngestionService:
             )
             result = await db.execute(query)
             for conn in result.scalars().all():
+                # Only push to connections with push_enabled (mock always enabled)
+                cfg = conn.config or {}
+                if conn.connector_type != "mock" and not cfg.get("push_enabled", False):
+                    continue
                 await MESPushService.push_event(
                     db,
                     event_type="spc_alarm",
@@ -1883,14 +1896,14 @@ class MESSyncService:
     BATCH_SIZE = 100
 
     # Field used to advance checkpoint after successful sync.
-    # ALL incremental types use source_updated_at (MES last-modified timestamp)
-    # to handle late-arriving data. recorded_at/sampled_at are business timestamps
-    # that may predate the checkpoint window, causing permanent data loss.
+    # ALL incremental types use source_updated_at (MES last-modified timestamp).
+    # Business timestamps (recorded_at, sampled_at) are NOT used for checkpoint
+    # because late-arriving data with old business timestamps would be permanently skipped.
     CHECKPOINT_FIELDS = {
         "production_orders": ["source_updated_at"],
         "equipment_status": [],  # Full snapshot, no checkpoint
-        "scrap_records": ["source_updated_at", "recorded_at"],
-        "measurements": ["source_updated_at", "sampled_at"],
+        "scrap_records": ["source_updated_at"],
+        "measurements": ["source_updated_at"],
     }
 
     @staticmethod
@@ -1991,17 +2004,17 @@ class MESSyncService:
                                 .values(is_active=False)
                             )
                             # AuditLog: connection deactivated due to repeated failures
-                            from app.models.audit_log import AuditLog
+                            from app.models.audit import AuditLog
                             fail_db.add(AuditLog(
-                                user_id=None,  # System action
+                                table_name="mes_connections",
+                                record_id=job_refresh.connection_id,
                                 action="mes_connection_deactivated",
-                                resource_type="mes_connection",
-                                resource_id=str(job_refresh.connection_id),
                                 new_values={
                                     "reason": f"Sync job {job_refresh.data_type} failed {job_refresh.consecutive_failures} consecutive times",
                                     "last_error": str(e),
                                     "job_id": str(job_refresh.job_id),
                                 },
+                                operated_by=None,  # System action
                             ))
                         await fail_db.commit()
 
@@ -2130,7 +2143,7 @@ git commit -m "feat(sync): add MESSyncService with 3-phase short transactions
 
     async def _mes_sync_loop():
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)
             try:
                 async with async_session() as db:
                     await MESSyncService.run_sync_round(db)
@@ -2409,13 +2422,17 @@ async def add_sample_batch(...):
             from app.services.mes_service import MESPushService
             from app.models.mes import MESConnection
             from sqlalchemy import select
-            
+
             query = select(MESConnection).where(
                 MESConnection.is_active == True,
                 MESConnection.product_line_code == ic.product_line
             )
             result = await db.execute(query)
             for conn in result.scalars().all():
+                # Only push to connections with push_enabled (mock always enabled)
+                cfg = conn.config or {}
+                if conn.connector_type != "mock" and not cfg.get("push_enabled", False):
+                    continue
                 await MESPushService.push_event(
                     db,
                     event_type="spc_alarm",
@@ -2468,6 +2485,10 @@ async def advance_capa(
         )
         result = await db.execute(query)
         for conn in result.scalars().all():
+            # Only push to connections with push_enabled (mock always enabled)
+            cfg = conn.config or {}
+            if conn.connector_type != "mock" and not cfg.get("push_enabled", False):
+                continue
             await MESPushService.push_event(
                 db,
                 event_type="capa_status_change",
@@ -3674,14 +3695,30 @@ async def db():
 
 @pytest.fixture
 async def admin_user():
-    """获取 admin 用户用于测试外键。使用独立 session 读取。"""
+    """获取或创建 admin 用户。优先从 seed 读取，不存在时创建测试用户（含 role/权限）。"""
     async with async_session() as db:
         from app.models.user import User
         result = await db.execute(select(User).where(User.username == "admin"))
         user = result.scalar_one_or_none()
-        if not user:
-            pytest.skip("Admin user not found — run seed first")
-        return user
+        if user:
+            return user
+        # Seed not run — create minimal test admin with correct role
+        from app.models.user import RoleDefinition
+        role_result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
+        role = role_result.scalar_one_or_none()
+        if not role:
+            pytest.skip("RoleDefinition 'admin' not found — run migrations first")
+        test_user = User(
+            username=f"{_TEST_PREFIX}admin-{uuid.uuid4().hex[:8]}",
+            password_hash="$2b$12$test",  # Not used for auth in tests
+            role="admin",
+            role_id=role.id,
+            is_active=True,
+        )
+        db.add(test_user)
+        await db.commit()
+        await db.refresh(test_user)
+        return test_user
 
 
 @pytest.fixture
@@ -3695,6 +3732,7 @@ async def test_connection(admin_user):
         name=f"{_TEST_PREFIX}CONN-{suffix}",
         connector_type="mock",
         config={"auth_config": {"api_key_hash": hash_api_key(test_api_key)}},
+        product_line_code="DC-DC-100",
         created_by=admin_user.user_id,
         is_active=True,
     )
@@ -4157,6 +4195,7 @@ class TestConnectionLifecycle:
             name=f"TEST-JOBS-{suffix}",
             connector_type="mock",
             config={},
+            product_line_code="DC-DC-100",
             created_by=admin_user.user_id,
             is_active=True,
         )
@@ -4200,6 +4239,7 @@ class TestConnectionLifecycle:
                 name=f"TEST-SCOPE-A-{suffix_a}",
                 connector_type="mock",
                 config={},
+                product_line_code="DC-DC-100",
                 created_by=admin_user.user_id,
                 is_active=True,
             )
@@ -4207,6 +4247,7 @@ class TestConnectionLifecycle:
                 name=f"TEST-SCOPE-B-{suffix_b}",
                 connector_type="mock",
                 config={},
+                product_line_code="DC-DC-100",
                 created_by=admin_user.user_id,
                 is_active=True,
             )
@@ -4337,6 +4378,7 @@ class TestSyncRoundValidationFailure:
                 },
                 "field_mapping": {"source_updated_at": "updated_at"},
             },
+            product_line_code="DC-DC-100",
             created_by=admin_user.user_id,
             is_active=True,
         )
