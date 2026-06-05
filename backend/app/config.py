@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, Field
 
 
 class Settings(BaseSettings):
@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     LLM_MODEL: str = ""          # 各 provider 有内部默认值
     LLM_BASE_URL: str = ""       # 仅 local 模式
     LLM_TIMEOUT: int = 5         # 超时秒数
+
+    # CAPA 8D AI 草拟超时
+    CAPA_DRAFT_LLM_TIMEOUT: int = Field(default=15, ge=1, le=60)
 
     # Embedding & semantic search
     EMBEDDING_PROVIDER: str = ""        # "openai" | "ollama" | "" (follows LLM_PROVIDER)
