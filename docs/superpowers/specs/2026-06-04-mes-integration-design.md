@@ -121,7 +121,7 @@ class MESConnector(ABC):
   - `equipment_status`：必填，必须有 `path`（非空字符串）；**无 `cursor_field`**（全量快照）
   - `scrap_records`：必填，必须有 `path`（非空字符串）和 `cursor_field`（非空字符串）
   - `measurements`：必填，必须有 `path`（非空字符串）和 `cursor_field`（非空字符串）
-- `field_mapping`：**必填对象**，键值均为字符串；**必须包含** `source_updated_at`（映射到 MES 的 `updated_at` 或 `modified_at`），用于增量同步 checkpoint；缺失时同步任务会失败
+- `field_mapping`：**必填对象**，键值均为字符串；**必须包含** `source_updated_at`（映射到 MES 的 `updated_at` 或 `modified_at`），用于增量同步 checkpoint；**所有增量类型**（生产工单、报废、测量）均要求此映射，缺失时同步任务会失败。设备状态为全量快照，不需要 checkpoint
 - `auth_type`：**必填**（REST），枚举值：`none` / `basic` / `bearer` / `api_key`（默认 `none`）；决定连接器如何构造认证请求头
 - `auth_config`：可选对象；若提供，其中的凭证字段（`token`/`password`/`secret`/`username`/`inbound_api_key`/`outbound_api_key`）必须为字符串类型
 - `retention`：可选对象，按连接配置数据保留策略（覆盖全局默认值）：
