@@ -86,12 +86,23 @@ def test_paragraph_llm_output():
 # backend/app/schemas/capa_draft.py
 import uuid
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class DraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     format: Literal["structured", "paragraph"] = "structured"
     request_id: str
+
+    @field_validator("request_id")
+    @classmethod
+    def _validate_request_id(cls, v: str) -> str:
+        try:
+            uuid.UUID(v)
+        except ValueError:
+            raise ValueError("request_id 必须是标准 UUID")
+        return v
 
 
 class DraftResponse(BaseModel):
@@ -233,10 +244,18 @@ STEP_SCHEMA_MAP: dict[str, type[BaseModel]] = {
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: 运行测试确认通过（green）**
 
 ```bash
-git add backend/app/schemas/capa_draft.py
+cd backend
+pytest tests/test_capa_draft_schema.py -v
+```
+预期：**PASS**
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/app/schemas/capa_draft.py backend/tests/test_capa_draft_schema.py
 git commit -m "schemas: add capa_draft pydantic models with extra=forbid"
 ```
 
@@ -1847,10 +1866,18 @@ def _render_structured(step: str, data: dict) -> str:
     return ""
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: 运行测试确认通过（green）**
 
 ```bash
-git add backend/app/services/capa_draft_service.py
+cd backend
+pytest tests/test_capa_draft_service.py -v
+```
+预期：**PASS**
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/app/services/capa_draft_service.py backend/tests/test_capa_draft_service.py
 git commit -m "feat: add capa_draft_service with prompt, render, cache, rate limit"
 ```
 
@@ -1862,6 +1889,9 @@ git commit -m "feat: add capa_draft_service with prompt, render, cache, rate lim
 
 ```python
 # backend/tests/test_capa_draft_api.py
+import uuid
+import pytest
+from httpx import AsyncClient, ASGITransport
 from unittest.mock import MagicMock, AsyncMock
 
 from app.main import app
@@ -2032,10 +2062,18 @@ async def draft_capa_step(
     return DraftResponse(**result)
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: 运行测试确认通过（green）**
 
 ```bash
-git add backend/app/api/capa.py
+cd backend
+pytest tests/test_capa_draft_api.py -v
+```
+预期：**PASS**
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/app/api/capa.py backend/tests/test_capa_draft_api.py
 git commit -m "feat(capa): add /capabilities and /{id}/draft/{step} endpoints"
 ```
 
@@ -2433,10 +2471,18 @@ export function useAIDraft(): UseAIDraftResult {
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: 运行测试确认通过（green）**
 
 ```bash
-git add frontend/src/components/capa/useAIDraft.ts
+cd frontend
+npx vitest run src/components/capa/useAIDraft.test.ts
+```
+预期：**PASS**
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/components/capa/useAIDraft.ts frontend/src/components/capa/useAIDraft.test.ts
 git commit -m "feat(frontend): add useAIDraft hook with undo and preference"
 ```
 
@@ -2588,10 +2634,18 @@ export default function AIDraftButton({ loading, tempUnavailable, error, onGener
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: 运行测试确认通过（green）**
 
 ```bash
-git add frontend/src/components/capa/AIDraftButton.tsx
+cd frontend
+npx vitest run src/components/capa/AIDraftButton.test.tsx
+```
+预期：**PASS**
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/components/capa/AIDraftButton.tsx frontend/src/components/capa/AIDraftButton.test.tsx
 git commit -m "feat(frontend): add AIDraftButton with format dropdown"
 ```
 
@@ -2732,10 +2786,18 @@ export default function AIDraftPreview({
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: 运行测试确认通过（green）**
 
 ```bash
-git add frontend/src/components/capa/AIDraftPreview.tsx
+cd frontend
+npx vitest run src/components/capa/AIDraftPreview.test.tsx
+```
+预期：**PASS**
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/components/capa/AIDraftPreview.tsx frontend/src/components/capa/AIDraftPreview.test.tsx
 git commit -m "feat(frontend): add AIDraftPreview modal"
 ```
 
