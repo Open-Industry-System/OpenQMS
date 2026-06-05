@@ -1340,3 +1340,24 @@ export interface D5RecommendationResponse {
   existing_controls: D5ExistingControl[];
   general_suggestions: D5GeneralSuggestion[];
 }
+
+// --- CAPA AI Draft ---
+
+export type DraftFormat = "structured" | "paragraph";
+
+export interface DraftRequest {
+  format: DraftFormat;
+  request_id: string;
+}
+
+export interface DraftResponse {
+  content: string;
+  structured_data: Record<string, unknown> | null;
+  request_id: string;
+  step: string;
+}
+
+export interface DraftCapabilitiesResponse {
+  available_steps: string[];
+  current_step: string;
+}
