@@ -62,8 +62,18 @@ export interface MESScrapRecord {
   product_line_code: string | null;
 }
 
+export interface MESEquipmentSummary {
+  equipment_code: string;
+  equipment_name: string | null;
+  status: string;
+  availability: number | null;
+  performance: number | null;
+  quality: number | null;
+  oee: number | null;
+}
+
 export interface MESDashboardData {
-  equipment_summary: MESEquipmentStatus[];
+  equipment_summary: MESEquipmentSummary[];
   running_count: number;
   down_count: number;
   total_planned: number;

@@ -8,7 +8,7 @@ import {
 } from "@ant-design/icons";
 import { getMESDashboard } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
-import type { MESDashboardData, MESEquipmentStatus } from "../../types/mes";
+import type { MESDashboardData, MESEquipmentSummary } from "../../types/mes";
 
 const { Title } = Typography;
 
@@ -49,7 +49,7 @@ export default function MESDashboardPage() {
       title: "设备名称",
       dataIndex: "equipment_name",
       key: "equipment_name",
-      render: (v: string | null, record: MESEquipmentStatus) =>
+      render: (v: string | null, record: MESEquipmentSummary) =>
         v || record.equipment_code,
     },
     {
@@ -150,7 +150,7 @@ export default function MESDashboardPage() {
       <Table
         columns={columns}
         dataSource={data?.equipment_summary ?? []}
-        rowKey="record_id"
+        rowKey="equipment_code"
         loading={loading}
         pagination={false}
         size="small"
