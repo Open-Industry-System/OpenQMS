@@ -1,6 +1,6 @@
 # OpenQMS 开发路线图
 
-**更新日期**: 2026-06-02  
+**更新日期**: 2026-06-05
 **当前版本**: v0.1.0 (MVP)  
 **目标版本**: v3.0 (全功能发布)
 
@@ -140,11 +140,11 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 ---
 
-## Phase 4: 高级分析 + 生态集成 (Month 13-16) 🔲 待开发
+## Phase 4: 高级分析 + 生态集成 (Month 13-16) 🔄 进行中
 
 | 功能 | 优先级 | 状态 | 说明 |
 |------|--------|------|------|
-| MES 集成连接器 | P2 | 🔲 待开发 | 生产过程数据接入 |
+| MES 集成连接器 | P2 | ✅ 完成 | Mock + REST 双连接器；9 张数据表；Outbox 可靠推送；3 类数据接入（生产订单/设备状态/报废记录）；SPC 告警推送；API Key 认证；凭证加密；4 页前端；Dashboard 实时聚合；产品线隔离；并发测试 33 条 |
 | PLM/ERP 集成连接器 | P2 | 🔲 待开发 | 产品生命周期/企业资源数据对接 |
 | 8D 报告 AI 草拟 | P3 | 🔲 待开发 | LLM 辅助填充 8D 模板 |
 | 质量趋势 AI 解读 | P3 | 🔲 待开发 | 自然语言解读 SPC 趋势 |
@@ -157,6 +157,27 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | 自定义看板（拖拽式）| P3 | 🔲 待开发 | 拖拽式自定义 KPI 布局 |
 | 多工厂部署支持 | P3 | 🔲 待开发 | 每工厂独立实例 + 集团汇总 |
 | SaaS 多租户架构 | P3 | 🔲 待开发 | Schema 级别隔离 + 弹性资源 |
+
+**Phase 4 MES 集成已完成 (2026-06-05)**:
+1. ~~数据库迁移~~ ✅ 9 张 MES 表 + CHECK 约束 + 权限种子（alembic/030）
+2. ~~ORM 模型~~ ✅ MESConnection / MESSyncJob / MESProductionOrder / MESEquipmentStatus / MESScrapRecord / MESPushOutbox 等 9 个模型
+3. ~~Schema 层~~ ✅ RESTConfig 校验 + Pydantic v2 请求/响应 + 分页包装 + Dashboard 聚合
+4. ~~连接器适配层~~ ✅ MESConnector ABC + MockMESConnector + RESTMESConnector（分页/重试/auth/字段映射）
+5. ~~凭证安全~~ ✅ SHA-256 API Key hash + Fernet 加密出站凭证 + sanitize_config 脱敏
+6. ~~数据接入服务~~ ✅ MESIngestionService（4 类数据 ingest + 测量→SPC IC 联动 + 去重）
+7. ~~同步调度~~ ✅ MESSyncService（manual/auto + SKIP LOCKED claim + claim_token UUID）
+8. ~~Outbox 推送~~ ✅ MESPushService（3 阶段短事务 + at-least-once + event_id 幂等）
+9. ~~生命周期管理~~ ✅ MESLifecycleService（7 天归档 + 失效 claim + 延迟清理）
+10. ~~API 路由~~ ✅ 13 端点（connections CRUD + test/sync + ingest + 3 类列表 + dashboard）
+11. ~~前端页面~~ ✅ 4 页（Connections + Dashboard + Production Orders + Scrap Records）+ 产品线联动
+12. ~~并发测试~~ ✅ 33 条 pytest（SKIP LOCKED / claim_token / 幂等 / Outbox 3 阶段 / 归档）
+
+**5 轮审查修复**:
+- 第 1 轮：分页 Schema + API 参数 + 产品线同步
+- 第 2 轮：导入缺失 / DB 约束 / 数据完整性 / SQL 参数 / 分页逻辑 / 响应字段
+- 第 3 轮：Optional 导入 / 子查询别名 / 产线参数 / 分区键 / 百分比 / changeover
+- 第 4 轮：Dashboard rowKey/type 不匹配
+- 第 5 轮：复合 rowKey (connection_id:equipment_code)
 
 **验收标准**: GA v3.0 发布 — 全功能发布
 

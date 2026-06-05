@@ -42,6 +42,7 @@ const MENU_KEYS = [
   "/iqc/inspections", "/iqc/materials", "/scars",
   "/knowledge-graph",
   "/change-impact",
+  "/mes/dashboard", "/mes/orders", "/mes/scrap", "/mes/connections",
 ];
 
 // 菜单 key → 需要展开的所有 SubMenu key 列表
@@ -69,6 +70,10 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/scars": ["grp:supplier"],
   "/knowledge-graph": ["grp:planning"],
   "/change-impact": ["grp:planning"],
+  "/mes/dashboard": ["grp:mes"],
+  "/mes/orders": ["grp:mes"],
+  "/mes/scrap": ["grp:mes"],
+  "/mes/connections": ["grp:mes"],
 };
 
 function getSelectedMenuKey(pathname: string): string {
@@ -141,6 +146,17 @@ const menuItems = [
           { key: "/iqc/materials", label: "物料管理" },
         ],
       },
+    ],
+  },
+  {
+    key: "grp:mes",
+    icon: <ToolOutlined />,
+    label: "MES 集成",
+    children: [
+      { key: "/mes/dashboard", label: "MES 看板" },
+      { key: "/mes/orders", label: "工单列表" },
+      { key: "/mes/scrap", label: "报废/返工" },
+      { key: "/mes/connections", label: "连接管理" },
     ],
   },
 ];

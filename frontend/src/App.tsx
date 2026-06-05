@@ -47,6 +47,10 @@ import PPAPListPage from "./pages/planning/ppap/PPAPListPage";
 import PPAPDetailPage from "./pages/planning/ppap/PPAPDetailPage";
 import KnowledgeGraphPage from "./pages/graph/KnowledgeGraphPage";
 import ChangeImpactPage from "./pages/ChangeImpactPage";
+import MESConnectionsPage from "./pages/mes/MESConnectionsPage";
+import MESDashboardPage from "./pages/mes/MESDashboardPage";
+import MESOrdersPage from "./pages/mes/MESOrdersPage";
+import MESScrapPage from "./pages/mes/MESScrapPage";
 
 function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
@@ -130,6 +134,10 @@ export default function App() {
         <Route path="/customer-quality/rma/:id" element={<ProtectedRoute requiredModule="customer_quality"><RMADetailPage /></ProtectedRoute>} />
         <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
         <Route path="/change-impact" element={<ChangeImpactPage />} />
+        <Route path="/mes/dashboard" element={<ProtectedRoute><MESDashboardPage /></ProtectedRoute>} />
+        <Route path="/mes/connections" element={<ProtectedRoute><MESConnectionsPage /></ProtectedRoute>} />
+        <Route path="/mes/orders" element={<ProtectedRoute><MESOrdersPage /></ProtectedRoute>} />
+        <Route path="/mes/scrap" element={<ProtectedRoute><MESScrapPage /></ProtectedRoute>} />
       </Route>
     </Routes>
   );

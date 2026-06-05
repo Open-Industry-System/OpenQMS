@@ -32,6 +32,17 @@ from app.models.recommendation_cache import RecommendationCache
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
+from app.models.mes import (
+    MESConnection,
+    MESProductionOrder,
+    MESEquipmentStatus,
+    MESScrapRecord,
+    MESMeasurementIngestion,
+    MESSyncJob,
+    MESPushOutbox,
+    MESScrapMonthlySummary,
+    MESProductionOrderArchive,
+)
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -60,4 +71,13 @@ __all__ = [
     "EmbeddingSyncOutbox",
     "ChangeImpactAnalysis",
     "CollaborationSession",
+    "MESConnection",
+    "MESProductionOrder",
+    "MESEquipmentStatus",
+    "MESScrapRecord",
+    "MESMeasurementIngestion",
+    "MESSyncJob",
+    "MESPushOutbox",
+    "MESScrapMonthlySummary",
+    "MESProductionOrderArchive",
 ]

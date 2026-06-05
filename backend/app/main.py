@@ -44,6 +44,7 @@ from app.api.admin import permissions as admin_permissions_api
 from app.api.search import router as search_router
 from app.api.change_impact import router as change_impact_router
 from app.api.collaboration import router as collaboration_router
+from app.api.mes import router as mes_router
 
 
 @asynccontextmanager
@@ -104,6 +105,50 @@ async def lifespan(app: FastAPI):
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
 
+    # Start MES sync scheduler loop (every 30s)
+    from app.services.mes_service import MESSyncService
+
+    async def _mes_sync_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                async with async_session() as db:
+                    await MESSyncService.run_sync_round(db)
+            except Exception as e:
+                print(f"[mes_sync] error: {e}")
+
+    mes_sync_task = asyncio.create_task(_mes_sync_loop())
+
+    # Start MES outbox processor loop (every 30s)
+    from app.services.mes_service import MESPushService
+
+    async def _mes_outbox_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                async with async_session() as db:
+                    await MESPushService.process_outbox(db)
+            except Exception as e:
+                print(f"[mes_outbox] error: {e}")
+
+    mes_outbox_task = asyncio.create_task(_mes_outbox_loop())
+
+    # Start MES lifecycle cleanup loop (daily)
+    from app.services.mes_service import MESLifecycleService
+
+    async def _mes_cleanup_loop():
+        while True:
+            await asyncio.sleep(86400)
+            try:
+                async with async_session() as db:
+                    stats = await MESLifecycleService.cleanup(db)
+                    if any(v > 0 for v in stats.values()):
+                        print(f"[mes_lifecycle] cleanup: {stats}")
+            except Exception as e:
+                print(f"[mes_lifecycle] error: {e}")
+
+    mes_cleanup_task = asyncio.create_task(_mes_cleanup_loop())
+
     yield
 
     # Cancel cleanup coroutine
@@ -112,6 +157,14 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+
+    # Cancel MES background tasks
+    for task in (mes_sync_task, mes_outbox_task, mes_cleanup_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Cleanup: close LLM provider httpx client if applicable
     provider = getattr(app.state, "llm_provider", None)
@@ -166,6 +219,7 @@ app.include_router(admin_permissions_api.router)
 app.include_router(search_router)
 app.include_router(change_impact_router)
 app.include_router(collaboration_router)
+app.include_router(mes_router)
 
 
 @app.get("/api/health")
