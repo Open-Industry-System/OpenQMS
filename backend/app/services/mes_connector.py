@@ -460,3 +460,54 @@ class RESTMESConnector(MESConnector):
 
     async def close(self) -> None:
         await self._client.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Connector factory
+# ---------------------------------------------------------------------------
+
+def get_mes_connector(
+    connection, db: AsyncSession | None = None
+) -> MESConnector:
+    """Return an MESConnector instance for the given connection."""
+    if connection.connector_type == "mock":
+        return MockMESConnector(db)
+    if connection.connector_type == "rest":
+        return RESTMESConnector(connection.config)
+    raise ValueError(f"Unsupported connector_type: {connection.connector_type}")
+
+
+def get_mes_connector_by_config(
+    connector_type: str, config: dict, db: AsyncSession | None = None
+) -> MESConnector:
+    """Return an MESConnector instance from raw type + config dict."""
+    if connector_type == "mock":
+        return MockMESConnector(db)
+    if connector_type == "rest":
+        return RESTMESConnector(config)
+    raise ValueError(f"Unsupported connector_type: {connector_type}")
+
+
+async def test_mes_connection(
+    connection, db: AsyncSession | None = None
+) -> dict:
+    """Lightweight connectivity test: fetch one production order."""
+    connector = get_mes_connector(connection, db)
+    try:
+        if isinstance(connector, RESTMESConnector):
+            # Temporarily reduce page size to 1 for a lightweight test
+            connector._endpoints = dict(connector._endpoints)
+            po_ep = connector._endpoints.get("production_orders", {})
+            if po_ep:
+                po_ep = dict(po_ep)
+                pag = dict(po_ep.get("pagination") or {"type": "none"})
+                pag["size"] = 1
+                po_ep["pagination"] = pag
+                connector._endpoints["production_orders"] = po_ep
+        await connector.fetch_production_orders(datetime.now(timezone.utc))
+        return {"ok": True, "error": None}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        if isinstance(connector, RESTMESConnector):
+            await connector.close()
