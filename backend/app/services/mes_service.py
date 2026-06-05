@@ -5,13 +5,14 @@ The caller is responsible for transaction boundaries.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import async_session
 from app.models.mes import (
     MESConnection,
     MESMeasurementIngestion,
@@ -19,9 +20,12 @@ from app.models.mes import (
     MESEquipmentStatus,
     MESScrapRecord,
     MESPushOutbox,
+    MESSyncJob,
 )
+from app.models.audit import AuditLog
 from app.models.spc import InspectionCharacteristic, SampleBatch
 from app.services.spc_service import _create_sample_batch_inner, _reevaluate_alarms_no_commit
+from app.services.mes_connector import get_mes_connector_by_config
 
 
 class MESIngestionService:
@@ -127,17 +131,6 @@ class MESIngestionService:
 
         # 7. Backfill batch_id into ingestion record
         await db.execute(
-            select(MESMeasurementIngestion)
-            .where(MESMeasurementIngestion.ingestion_id == ingestion_id)
-        )
-        # Use UPDATE to set batch_id
-        await db.execute(
-            select(MESMeasurementIngestion)
-            .where(MESMeasurementIngestion.ingestion_id == ingestion_id)
-        )
-        # Actually update
-        from sqlalchemy import update as sa_update
-        await db.execute(
             sa_update(MESMeasurementIngestion)
             .where(MESMeasurementIngestion.ingestion_id == ingestion_id)
             .values(batch_id=batch.batch_id)
@@ -235,14 +228,6 @@ class MESIngestionService:
         order_id = result.scalar()
 
         # Backfill scrap records' order_id
-        await db.execute(
-            select(MESScrapRecord).where(
-                MESScrapRecord.connection_id == connection_id,
-                MESScrapRecord.order_no == order_no,
-                MESScrapRecord.order_id.is_(None),
-            )
-        )
-        from sqlalchemy import update as sa_update
         await db.execute(
             sa_update(MESScrapRecord)
             .where(
@@ -355,3 +340,337 @@ class MESIngestionService:
         scrap_id = result.scalar()
 
         return {"status": "success", "scrap_id": str(scrap_id), "order_id": str(order_id) if order_id else None}
+
+
+class MESSyncService:
+    """MES sync service. 3-phase short transactions to avoid long locks."""
+
+    SYNC_INTERVAL_MINUTES = 5
+    OVERLAP_WINDOW_SECONDS = 300
+    TIMEOUT_MINUTES = 10
+    MAX_FAILURES = 3
+    BATCH_SIZE = 100
+
+    CHECKPOINT_FIELDS = {
+        "production_orders": ["source_updated_at"],
+        "equipment_status": [],  # Full snapshot, no checkpoint
+        "scrap_records": ["source_updated_at"],
+        "measurements": ["source_updated_at"],
+    }
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_checkpoint_value(data_type: str, item: dict) -> datetime | None:
+        """Extract checkpoint timestamp from item using CHECKPOINT_FIELDS."""
+        fields = MESSyncService.CHECKPOINT_FIELDS.get(data_type, [])
+        for field in fields:
+            value = item.get(field)
+            if value is not None:
+                if isinstance(value, datetime):
+                    return value
+                if isinstance(value, str):
+                    try:
+                        # Handle ISO format with or without timezone
+                        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    except (ValueError, AttributeError):
+                        continue
+        return None
+
+    # ------------------------------------------------------------------
+    # Job lifecycle
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def create_sync_jobs_for_connection(
+        db: AsyncSession, connection_id: uuid.UUID
+    ) -> None:
+        """Create 4 pending sync jobs for a connection. Caller commits."""
+        data_types = ["production_orders", "equipment_status", "scrap_records", "measurements"]
+        for dt in data_types:
+            job = MESSyncJob(
+                connection_id=connection_id,
+                data_type=dt,
+                status="pending",
+                next_run_at=datetime.now(timezone.utc),
+            )
+            db.add(job)
+        await db.flush()
+
+    @staticmethod
+    async def claim_jobs(
+        db: AsyncSession, connection_id: uuid.UUID | None = None
+    ) -> list[MESSyncJob]:
+        """Phase 1: SELECT FOR UPDATE SKIP LOCKED.
+
+        - Join mes_connections, filter is_active=True
+        - Filter: status in (pending, failed) OR (status=completed AND next_run_at <= now())
+        - Optional connection_id filter (for testing/manual sync)
+        - Limit BATCH_SIZE
+        - Set status=running, started_at=now(), claim_token=str(uuid.uuid4())
+        - Return jobs (caller must commit)
+        """
+        now = datetime.now(timezone.utc)
+
+        # Build the subquery for eligible jobs with FOR UPDATE SKIP LOCKED
+        from sqlalchemy.orm import joinedload
+
+        stmt = (
+            select(MESSyncJob)
+            .join(MESConnection, MESSyncJob.connection_id == MESConnection.connection_id)
+            .where(
+                MESConnection.is_active == True,  # noqa: E712
+                (
+                    (MESSyncJob.status.in_(["pending", "failed"]))
+                    | (
+                        (MESSyncJob.status == "completed")
+                        & (MESSyncJob.next_run_at <= now)
+                    )
+                ),
+            )
+            .order_by(MESSyncJob.next_run_at)
+            .limit(MESSyncService.BATCH_SIZE)
+            .with_for_update(skip_locked=True)
+        )
+
+        if connection_id is not None:
+            stmt = stmt.where(MESSyncJob.connection_id == connection_id)
+
+        result = await db.execute(stmt)
+        jobs = result.scalars().all()
+
+        claim_token = str(uuid.uuid4())
+        for job in jobs:
+            job.status = "running"
+            job.started_at = now
+            job.claim_token = claim_token
+
+        await db.flush()
+        return list(jobs)
+
+    @staticmethod
+    async def recover_stuck_jobs(
+        db: AsyncSession, connection_id: uuid.UUID | None = None
+    ) -> int:
+        """Find running jobs with started_at < now() - 10 minutes.
+
+        Reset to failed, clear claim_token.
+        Return count (caller must commit).
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=MESSyncService.TIMEOUT_MINUTES)
+
+        stmt = (
+            select(MESSyncJob)
+            .where(
+                MESSyncJob.status == "running",
+                MESSyncJob.started_at < cutoff,
+            )
+            .with_for_update()
+        )
+
+        if connection_id is not None:
+            stmt = stmt.where(MESSyncJob.connection_id == connection_id)
+
+        result = await db.execute(stmt)
+        jobs = result.scalars().all()
+
+        for job in jobs:
+            job.status = "failed"
+            job.claim_token = None
+            job.error_message = "Job timed out after {} minutes".format(MESSyncService.TIMEOUT_MINUTES)
+            job.consecutive_failures += 1
+
+        await db.flush()
+        return len(jobs)
+
+    # ------------------------------------------------------------------
+    # Single job sync (3-phase)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _sync_single_job(db: AsyncSession, job: MESSyncJob) -> None:
+        """Phase 2a: Read connection config in short read-only tx.
+        Phase 2b: External fetch (NO transaction).
+        Phase 3: Write results in short tx.
+        """
+        # Phase 2a: Read connection config in short read-only session
+        connection_id = job.connection_id
+        async with async_session() as read_session:
+            result = await read_session.execute(
+                select(MESConnection).where(MESConnection.connection_id == connection_id)
+            )
+            connection = result.scalar_one()
+            connector_type = connection.connector_type
+            config = connection.config
+            product_line_code = connection.product_line_code
+
+        # Phase 2b: External fetch (NO transaction)
+        connector = get_mes_connector_by_config(connector_type, config)
+        checkpoint = job.checkpoint
+
+        if job.data_type == "production_orders":
+            items = await connector.fetch_production_orders(checkpoint)
+        elif job.data_type == "equipment_status":
+            items = await connector.fetch_equipment_status()
+        elif job.data_type == "scrap_records":
+            items = await connector.fetch_scrap_records(checkpoint)
+        elif job.data_type == "measurements":
+            items = await connector.fetch_measurements(checkpoint)
+        else:
+            raise ValueError(f"Unsupported data_type: {job.data_type}")
+
+        if hasattr(connector, "close"):
+            await connector.close()
+
+        # Phase 3: Write results in short tx (using provided db session)
+        # Refresh job AND verify claim_token ownership
+        result = await db.execute(
+            select(MESSyncJob)
+            .where(MESSyncJob.job_id == job.job_id)
+            .with_for_update()
+        )
+        refreshed_job = result.scalar_one()
+
+        if refreshed_job.claim_token != job.claim_token:
+            raise ValueError("Job claim token mismatch — job was stolen by another worker")
+
+        max_ts: datetime | None = None
+        for item in items:
+            item["connection_id"] = connection_id
+            item["product_line_code"] = product_line_code
+
+            # Route to appropriate ingestion method
+            if job.data_type == "production_orders":
+                await MESIngestionService._ingest_production_order(db, item)
+            elif job.data_type == "equipment_status":
+                await MESIngestionService._ingest_equipment_status(db, item)
+            elif job.data_type == "scrap_records":
+                await MESIngestionService._ingest_scrap_record(db, item)
+            elif job.data_type == "measurements":
+                await MESIngestionService._ingest_measurement(db, item)
+
+            # Track max timestamp for checkpoint
+            ts = MESSyncService._get_checkpoint_value(job.data_type, item)
+            if ts is not None:
+                if max_ts is None or ts > max_ts:
+                    max_ts = ts
+
+        # Update job status
+        now = datetime.now(timezone.utc)
+        refreshed_job.status = "completed"
+        refreshed_job.claim_token = None
+        refreshed_job.checkpoint = max_ts if max_ts is not None else refreshed_job.checkpoint
+        refreshed_job.next_run_at = now + timedelta(minutes=MESSyncService.SYNC_INTERVAL_MINUTES)
+        refreshed_job.completed_at = now
+        refreshed_job.consecutive_failures = 0
+        refreshed_job.error_message = None
+
+        await db.flush()
+
+    # ------------------------------------------------------------------
+    # Orchestration
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def run_sync_round(
+        db: AsyncSession, connection_id: uuid.UUID | None = None
+    ) -> None:
+        """Recover stuck jobs, claim jobs, and sync each one."""
+        # Recover stuck jobs + commit
+        recovered = await MESSyncService.recover_stuck_jobs(db, connection_id)
+        if recovered:
+            await db.commit()
+
+        # Claim jobs + commit
+        jobs = await MESSyncService.claim_jobs(db, connection_id)
+        if jobs:
+            await db.commit()
+
+        # For each job: try/except, call _sync_single_job
+        for job in jobs:
+            try:
+                # Each job gets its own short write session
+                async with async_session() as job_session:
+                    await MESSyncService._sync_single_job(job_session, job)
+                    await job_session.commit()
+            except Exception as e:
+                # On exception: update job to failed in separate session, verify claim_token
+                async with async_session() as fail_session:
+                    result = await fail_session.execute(
+                        select(MESSyncJob)
+                        .where(MESSyncJob.job_id == job.job_id)
+                        .with_for_update()
+                    )
+                    failed_job = result.scalar_one()
+
+                    if failed_job.claim_token != job.claim_token:
+                        # Job was stolen, skip
+                        await fail_session.rollback()
+                        continue
+
+                    failed_job.status = "failed"
+                    failed_job.error_message = str(e)
+                    failed_job.claim_token = None
+                    failed_job.consecutive_failures += 1
+
+                    if failed_job.consecutive_failures >= MESSyncService.MAX_FAILURES:
+                        # Deactivate connection
+                        conn_result = await fail_session.execute(
+                            select(MESConnection).where(
+                                MESConnection.connection_id == job.connection_id
+                            )
+                        )
+                        connection = conn_result.scalar_one()
+                        connection.is_active = False
+
+                        # Create AuditLog
+                        audit = AuditLog(
+                            table_name="mes_connections",
+                            record_id=job.connection_id,
+                            action="mes_deactivated",
+                            new_values={
+                                "reason": "consecutive_failures_exceeded",
+                                "last_error": str(e),
+                                "job_id": str(job.job_id),
+                            },
+                            operated_by=None,
+                        )
+                        fail_session.add(audit)
+
+                    await fail_session.commit()
+
+    @staticmethod
+    async def manual_sync(
+        db: AsyncSession, connection_id: uuid.UUID
+    ) -> dict:
+        """Check if any running job for connection — if so, raise ValueError.
+
+        Set all completed/failed jobs to pending with next_run_at=now().
+        Commit. Return 202 (async — background worker picks up).
+        """
+        # Check if any running job for connection
+        result = await db.execute(
+            select(MESSyncJob).where(
+                MESSyncJob.connection_id == connection_id,
+                MESSyncJob.status == "running",
+            )
+        )
+        running = result.scalar_one_or_none()
+        if running is not None:
+            raise ValueError("Sync already in progress")
+
+        # Set all completed/failed jobs to pending with next_run_at=now()
+        now = datetime.now(timezone.utc)
+        await db.execute(
+            sa_update(MESSyncJob)
+            .where(
+                MESSyncJob.connection_id == connection_id,
+                MESSyncJob.status.in_(["completed", "failed"]),
+            )
+            .values(status="pending", next_run_at=now)
+        )
+
+        await db.commit()
+        return {"status": "accepted"}
