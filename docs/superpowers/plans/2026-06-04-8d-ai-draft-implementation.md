@@ -347,10 +347,13 @@ async def generate_draft(
         cache_key = f"{user.user_id}:{report_id}:{step}:{req.format}:{normalized_request_id}"
         now = time.time()
 
-        # 每次请求都清理过期缓存和限流键（Issue 17）
+        # 每次请求清理过期缓存；限流按用户自身清理（避免全量扫描）
         _cleanup_expired_cache(now)
-        if len(_rate_limit) > 100:
-            _cleanup_rate_limit(now)
+        user_limit_key = str(user.user_id)
+        if user_limit_key in _rate_limit:
+            _rate_limit[user_limit_key] = [t for t in _rate_limit[user_limit_key] if now - t < 60]
+            if not _rate_limit[user_limit_key]:
+                del _rate_limit[user_limit_key]
 
         if cache_key in _draft_cache:
             cached_resp, expire_at = _draft_cache[cache_key]
@@ -371,7 +374,6 @@ async def generate_draft(
             return result
 
         # 7. 限流校验（内存计数器，仅支持单 worker）
-        user_limit_key = str(user.user_id)
         timestamps = _rate_limit.get(user_limit_key, [])
         timestamps = [t for t in timestamps if now - t < 60]
         if len(timestamps) >= RATE_LIMIT_PER_MIN:
@@ -494,12 +496,6 @@ def _cleanup_expired_cache(now: float) -> None:
         del _draft_cache[k]
 
 
-def _cleanup_rate_limit(now: float) -> None:
-    """清理过期限流键（Issue 19）"""
-    expired = [k for k, timestamps in _rate_limit.items()
-               if all(now - t >= 60 for t in timestamps)]
-    for k in expired:
-        del _rate_limit[k]
 
 
 async def _build_fmea_context(
@@ -687,11 +683,11 @@ def _build_prompt(
 
     # 截断策略：仅裁剪用户数据区块，系统指令 + schema + 安全声明永不截断
     fixed_len = len(system_block) + len(safety_trailer)
+    if fixed_len > MAX_PROMPT_CHARS:
+        # Issue 6: 固定部分本身超限，属于配置错误，应上报
+        _logger.error("Fixed prompt sections (%d) exceed MAX_PROMPT_CHARS (%d)", fixed_len, MAX_PROMPT_CHARS)
+        raise ValueError(f"Prompt 固定部分 ({fixed_len} 字符) 超过 {MAX_PROMPT_CHARS} 字符限制")
     max_user_data = MAX_PROMPT_CHARS - fixed_len
-    if max_user_data < 100:
-        # Issue 15: 固定部分超过限制时，只返回系统指令 + 安全声明
-        _logger.warning("Fixed prompt sections exceed MAX_PROMPT_CHARS, dropping user data")
-        return system_block + "\n\n（用户数据已省略）" + safety_trailer
     if len(user_data_block) > max_user_data:
         user_data_block = user_data_block[:max_user_data - 20] + "\n...（用户数据已截断）\n【用户数据结束】"
 
@@ -1029,10 +1025,11 @@ import {
 interface AIDraftButtonProps {
   loading: boolean;
   tempUnavailable: boolean;
+  error?: string | null;
   onGenerate: (format: DraftFormat) => void;
 }
 
-export default function AIDraftButton({ loading, tempUnavailable, onGenerate }: AIDraftButtonProps) {
+export default function AIDraftButton({ loading, tempUnavailable, error, onGenerate }: AIDraftButtonProps) {
   const [format, setFormat] = useState<DraftFormat>(getDraftPreference());
 
   const handleFormatChange = (newFormat: DraftFormat) => {
@@ -1055,7 +1052,7 @@ export default function AIDraftButton({ loading, tempUnavailable, onGenerate }: 
     },
   ];
 
-  // Issue 5: 503 = disabled + tooltip（匹配设计文档 §8）
+  // 503 = disabled + tooltip（设计 §8）
   if (tempUnavailable) {
     return (
       <Button type="text" size="small" disabled title="AI 功能暂时不可用">
@@ -1071,8 +1068,10 @@ export default function AIDraftButton({ loading, tempUnavailable, onGenerate }: 
       icon={loading ? <Spin size="small" /> : <OpenAIOutlined />}
       loading={loading}
       disabled={loading}
+      danger={!!error}
       onClick={() => onGenerate(format)}
       menu={{ items }}
+      title={error || undefined}
     >
       {loading ? "草拟中..." : "AI草拟"}
     </Dropdown.Button>
@@ -1181,15 +1180,23 @@ import { getCapabilities } from "../../api/capaDraft";
 
 - [ ] **Step 1b: 修改 handleUpdate() 使其失败时抛出异常**
 
-当前 `handleUpdate()` 捕获异常后只 `message.error()`，不会重新抛出。AI 草稿预览的"替换/追加"需要感知保存失败。找到 `handleUpdate` 函数，在其 `catch` 块末尾添加 `throw`：
+当前 `handleUpdate()` 捕获异常后只 `message.error()`，不会重新抛出。AI 草稿预览的"替换/追加"需要感知保存失败。找到 `handleUpdate` 函数，重构为 try/catch/finally：
 
 ```tsx
-// 在现有的 handleUpdate catch 块中：
-} catch (err: unknown) {
-  const apiError = err as { response?: { data?: { detail?: string } } };
-  message.error(apiError.response?.data?.detail || "保存失败");
-  throw err;  // 新增：重新抛出让调用方感知失败
-}
+// 替换现有的 handleUpdate 函数体：
+const handleUpdate = async (field: string, value: string) => {
+  setSaving(true);
+  try {
+    await updateCapa(id!, { [field]: value });
+    // 成功后不 message，静默保存
+  } catch (err: unknown) {
+    const apiError = err as { response?: { data?: { detail?: string } } };
+    message.error(apiError.response?.data?.detail || "保存失败");
+    throw err;  // 让调用方（AI 预览）感知失败
+  } finally {
+    setSaving(false);  // 无论成功失败都重置 saving 状态
+  }
+};
 ```
 
 - [ ] **Step 2: 在组件内添加状态和 Hook**
@@ -1263,7 +1270,7 @@ label={
         }} disabled={!canUndo("d2_description")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
           onGenerate={(f) => { if (id) generate(id, "d2", f); }} />
       )}
     </Space>
@@ -1287,7 +1294,7 @@ label={
         }} disabled={!canUndo("d3_interim")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
           onGenerate={(f) => { if (id) generate(id, "d3", f); }} />
       )}
     </Space>
@@ -1309,7 +1316,7 @@ label={
         }} disabled={!canUndo("d4_root_cause")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
           onGenerate={(f) => { if (id) generate(id, "d4", f); }} />
       )}
     </Space>
@@ -1331,7 +1338,7 @@ label={
         }} disabled={!canUndo("d5_correction")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
           onGenerate={(f) => { if (id) generate(id, "d5", f); }} />
       )}
     </Space>
@@ -1353,7 +1360,7 @@ label={
         }} disabled={!canUndo("d6_verification")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
           onGenerate={(f) => { if (id) generate(id, "d6", f); }} />
       )}
     </Space>
@@ -1375,7 +1382,7 @@ label={
         }} disabled={!canUndo("d7_prevention")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
           onGenerate={(f) => { if (id) generate(id, "d7", f); }} />
       )}
     </Space>
@@ -1397,7 +1404,7 @@ label={
         }} disabled={!canUndo("d8_closure")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
           onGenerate={(f) => { if (id) generate(id, "d8", f); }} />
       )}
     </Space>
@@ -1427,14 +1434,15 @@ label={
             };
             const field = stepToField[draft.step];
             if (field) {
-              saveUndo(field, localData[field] || "");
+              const originalValue = localData[field] || "";
+              saveUndo(field, originalValue);
               setLocalData((p) => ({ ...p, [field]: draft.content }));
               try {
                 await handleUpdate(field, draft.content);
               } catch {
-                // Issue 11: 保存失败时回滚本地状态，不关闭预览
-                message.error("保存失败，请重试");
-                return;
+                // handleUpdate 已 message.error，此处只回滚本地状态
+                setLocalData((p) => ({ ...p, [field]: originalValue }));
+                return;  // 不关闭预览，让用户决定重试或取消
               }
             }
           }
@@ -1449,14 +1457,14 @@ label={
             };
             const field = stepToField[draft.step];
             if (field) {
-              const current = localData[field] || "";
-              const appended = current ? `${current}\n\n${draft.content}` : draft.content;
-              saveUndo(field, current);
+              const originalValue = localData[field] || "";
+              const appended = originalValue ? `${originalValue}\n\n${draft.content}` : draft.content;
+              saveUndo(field, originalValue);
               setLocalData((p) => ({ ...p, [field]: appended }));
               try {
                 await handleUpdate(field, appended);
               } catch {
-                message.error("保存失败，请重试");
+                setLocalData((p) => ({ ...p, [field]: originalValue }));
                 return;
               }
             }
