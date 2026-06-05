@@ -1852,7 +1852,7 @@ async def require_mes_api_key(
     if not stored_hash or not verify_api_key(api_key, stored_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
     if not conn.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Connection is inactive")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
     return conn
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
@@ -3021,7 +3021,7 @@ async def get_mes_dashboard(
     request: Request = None,
 ):
     """MES 看板：全部使用 DB 聚合，不加载原始记录到内存。"""
-    from datetime import date, timedelta
+    from datetime import date, datetime, timedelta, timezone
 
     today = date.today()
     today_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
