@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import TypeAdapter, ValidationError
@@ -487,6 +488,7 @@ async def list_scrap_records(
 @router.get("/dashboard", response_model=schemas.MESDashboardResponse)
 async def get_dashboard(
     request: Request,
+    product_line_code: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
 ):
@@ -505,6 +507,14 @@ async def get_dashboard(
                 scrap_trend_7d=[],
             )
 
+    # If a specific product line is requested, enforce access and restrict to it
+    if product_line_code:
+        if user_codes is not None and product_line_code not in user_codes:
+            raise HTTPException(status_code=403, detail="无权访问该产线")
+        effective_codes = [product_line_code]
+    else:
+        effective_codes = user_codes
+
     # Equipment summary: latest per equipment via ROW_NUMBER
     from sqlalchemy.orm import aliased
     from sqlalchemy import desc
@@ -513,15 +523,16 @@ async def get_dashboard(
         select(
             MESEquipmentStatus,
             func.row_number().over(
-                partition_by=MESEquipmentStatus.equipment_code,
+                partition_by=[MESEquipmentStatus.connection_id, MESEquipmentStatus.equipment_code],
                 order_by=desc(MESEquipmentStatus.recorded_at),
             ).label("rn"),
         )
     )
-    if user_codes:
-        eq_sub = eq_sub.where(MESEquipmentStatus.product_line_code.in_(user_codes))
-    eq_alias = aliased(MESEquipmentStatus, eq_sub.subquery())
-    eq_query = select(eq_alias).where(eq_sub.c.rn == 1)
+    if effective_codes:
+        eq_sub = eq_sub.where(MESEquipmentStatus.product_line_code.in_(effective_codes))
+    eq_subq = eq_sub.subquery()
+    eq_alias = aliased(MESEquipmentStatus, eq_subq)
+    eq_query = select(eq_alias).where(eq_subq.c.rn == 1)
     eq_result = await db.execute(eq_query)
     equipment_rows = eq_result.scalars().all()
 
@@ -549,8 +560,8 @@ async def get_dashboard(
         func.coalesce(func.sum(MESProductionOrder.planned_qty), 0).label("total_planned"),
         func.coalesce(func.sum(MESProductionOrder.actual_qty), 0).label("total_actual"),
     ).where(func.date(MESProductionOrder.started_at) == today)
-    if user_codes:
-        prod_query = prod_query.where(MESProductionOrder.product_line_code.in_(user_codes))
+    if effective_codes:
+        prod_query = prod_query.where(MESProductionOrder.product_line_code.in_(effective_codes))
     prod_result = await db.execute(prod_query)
     prod_row = prod_result.one_or_none()
     total_planned = int(prod_row.total_planned) if prod_row else 0
@@ -565,8 +576,8 @@ async def get_dashboard(
         .where(func.date(MESScrapRecord.recorded_at) == today)
         .group_by(MESScrapRecord.defect_category)
     )
-    if user_codes:
-        scrap_cat_query = scrap_cat_query.where(MESScrapRecord.product_line_code.in_(user_codes))
+    if effective_codes:
+        scrap_cat_query = scrap_cat_query.where(MESScrapRecord.product_line_code.in_(effective_codes))
     scrap_cat_result = await db.execute(scrap_cat_query)
     scrap_by_category = {
         row.defect_category or "未分类": int(row.total_defect_qty)
@@ -584,8 +595,8 @@ async def get_dashboard(
         .group_by(func.date(MESScrapRecord.recorded_at))
         .order_by(func.date(MESScrapRecord.recorded_at))
     )
-    if user_codes:
-        trend_query = trend_query.where(MESScrapRecord.product_line_code.in_(user_codes))
+    if effective_codes:
+        trend_query = trend_query.where(MESScrapRecord.product_line_code.in_(effective_codes))
     trend_result = await db.execute(trend_query)
     scrap_trend_7d = [
         {"date": str(row.day), "defect_qty": int(row.total_defect_qty)}

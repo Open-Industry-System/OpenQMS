@@ -16,14 +16,14 @@ const statusColors: Record<string, string> = {
   running: "success",
   idle: "default",
   down: "error",
-  maintenance: "warning",
+  changeover: "warning",
 };
 
 const statusLabels: Record<string, string> = {
   running: "运行中",
   idle: "待机",
   down: "停机",
-  maintenance: "维护中",
+  changeover: "换模中",
 };
 
 export default function MESDashboardPage() {
@@ -69,7 +69,7 @@ export default function MESDashboardPage() {
       key: "availability",
       width: 110,
       render: (v: number | null) =>
-        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
+        v !== null ? `${v.toFixed(1)}%` : "—",
     },
     {
       title: "性能 (%)",
@@ -77,7 +77,7 @@ export default function MESDashboardPage() {
       key: "performance",
       width: 100,
       render: (v: number | null) =>
-        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
+        v !== null ? `${v.toFixed(1)}%` : "—",
     },
     {
       title: "质量 (%)",
@@ -85,7 +85,7 @@ export default function MESDashboardPage() {
       key: "quality",
       width: 100,
       render: (v: number | null) =>
-        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
+        v !== null ? `${v.toFixed(1)}%` : "—",
     },
     {
       title: "OEE (%)",
@@ -93,7 +93,7 @@ export default function MESDashboardPage() {
       key: "oee",
       width: 100,
       render: (v: number | null) =>
-        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
+        v !== null ? `${v.toFixed(1)}%` : "—",
     },
   ];
 
