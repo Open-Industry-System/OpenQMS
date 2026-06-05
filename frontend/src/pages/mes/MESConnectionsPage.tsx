@@ -90,10 +90,10 @@ export default function MESConnectionsPage() {
   const handleTest = async (id: string) => {
     try {
       const res = await testConnection(id);
-      if (res.success) {
-        message.success(`连接测试成功: ${res.message || "OK"}`);
+      if (res.ok) {
+        message.success("连接测试成功");
       } else {
-        message.error(`连接测试失败: ${res.message || "Error"}`);
+        message.error(`连接测试失败: ${res.error || "Unknown error"}`);
       }
     } catch {
       message.error("连接测试失败");
@@ -102,14 +102,10 @@ export default function MESConnectionsPage() {
 
   const handleSync = async (id: string) => {
     try {
-      const res = await manualSync(id);
-      if (res.success) {
-        message.success(`同步成功: ${res.message || "OK"}`);
-      } else {
-        message.error(`同步失败: ${res.message || "Error"}`);
-      }
+      await manualSync(id);
+      message.success("同步已触发，后台将在 30 秒内开始执行");
     } catch {
-      message.error("同步失败");
+      message.error("同步触发失败");
     }
   };
 

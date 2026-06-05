@@ -70,7 +70,21 @@ class MESIngestionService:
         ic_code = data["ic_code"]
         product_line_code = data.get("product_line_code")
 
-        # 1. Deduplication insert
+        # 1. Validate IC exists BEFORE dedupe insert (so bad data never marks external_id as processed)
+        ic_result = await db.execute(
+            select(InspectionCharacteristic).where(InspectionCharacteristic.ic_code == ic_code)
+        )
+        ic = ic_result.scalar_one_or_none()
+        if ic is None:
+            raise ValueError(f"Inspection characteristic not found: {ic_code}")
+
+        # Verify product_line matches connection
+        if product_line_code and ic.product_line != product_line_code:
+            raise ValueError(
+                f"Product line mismatch: IC={ic.product_line}, connection={product_line_code}"
+            )
+
+        # 2. Deduplication insert
         ingest_stmt = (
             pg_insert(MESMeasurementIngestion)
             .values(
@@ -91,24 +105,9 @@ class MESIngestionService:
         result = await db.execute(ingest_stmt)
         ingestion_id = result.scalar()
 
-        # 2. Duplicate check
+        # 3. Duplicate check
         if ingestion_id is None:
             return {"status": "skipped", "reason": "duplicate"}
-
-        # 3. Find InspectionCharacteristic
-        ic_result = await db.execute(
-            select(InspectionCharacteristic).where(InspectionCharacteristic.ic_code == ic_code)
-        )
-        ic = ic_result.scalar_one_or_none()
-        if ic is None:
-            return {"status": "skipped", "reason": f"ic_code not found: {ic_code}"}
-
-        # Verify product_line matches connection
-        if product_line_code and ic.product_line != product_line_code:
-            return {
-                "status": "skipped",
-                "reason": f"product_line mismatch: IC={ic.product_line}, data={product_line_code}",
-            }
 
         # 4. Create SampleBatch (flush only, no commit)
         batch_data = {
@@ -146,10 +145,13 @@ class MESIngestionService:
         batch: SampleBatch,
         alarms: list[Any],
     ) -> None:
-        """Write MESPushOutbox records for all active connections with push_enabled."""
+        """Write MESPushOutbox records for active connections matching IC product line.
+        Skips the source connection to avoid echoing back to the originating MES."""
         conn_result = await db.execute(
             select(MESConnection).where(
                 MESConnection.is_active == True,  # noqa: E712
+                MESConnection.product_line_code == ic.product_line,
+                MESConnection.connection_id != source_connection_id,
             )
         )
         connections = conn_result.scalars().all()

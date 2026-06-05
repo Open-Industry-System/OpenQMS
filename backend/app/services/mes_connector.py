@@ -88,7 +88,7 @@ class MockMESConnector(MESConnector):
         {"code": "EQ-002", "name": "焊接机"},
         {"code": "EQ-003", "name": "组装线"},
     ]
-    _EQUIPMENT_STATUSES = ["running", "idle", "maintenance", "down"]
+    _EQUIPMENT_STATUSES = ["running", "idle", "down", "changeover"]
     _DEFECT_TYPES = ["尺寸超差", "外观缺陷", "功能不良", "材料异常"]
     _DEFECT_CATEGORIES = ["来料问题", "过程异常", "设备故障", "操作失误"]
 
@@ -373,18 +373,16 @@ class RESTMESConnector(MESConnector):
         page_count = 0
         max_pages = 100
 
+        next_cursor: str | None = None
+
         while page_count < max_pages:
             page_count += 1
 
             if pag_type == "offset":
                 params[pagination["page_param"]] = page_count
                 params[pagination["size_param"]] = page_size
-            elif pag_type == "cursor" and page_count > 1 and all_items:
-                last_item = all_items[-1]
-                cursor_value = last_item.get(pagination["cursor_response_field"])
-                if cursor_value is None:
-                    break
-                params[pagination["cursor_param"]] = cursor_value
+            elif pag_type == "cursor" and next_cursor is not None:
+                params[pagination["cursor_param"]] = next_cursor
 
             resp_json = await self._request(method, path, params=params)
             items = self._get_response_data(resp_json, endpoint_name)
@@ -396,9 +394,25 @@ class RESTMESConnector(MESConnector):
 
             if pag_type == "none":
                 break
+            elif pag_type == "cursor":
+                # Cursor is in the response envelope (e.g., resp_json["next_cursor"]), not the last item
+                cursor_field = pagination.get("cursor_response_field", "next_cursor")
+                next_cursor = resp_json.get(cursor_field) if isinstance(resp_json, dict) else None
+                if not next_cursor:
+                    break
+            elif pag_type == "offset":
+                if len(items) < page_size:
+                    break
 
-        if page_count >= max_pages:
-            raise ValueError(f"Pagination exceeded max {max_pages} pages for '{endpoint_name}'")
+        if page_count >= max_pages and pag_type != "none":
+            # Only raise if we actually hit the cap and there's still more data
+            has_more = False
+            if pag_type == "offset" and len(items) >= page_size:
+                has_more = True
+            elif pag_type == "cursor" and next_cursor:
+                has_more = True
+            if has_more:
+                raise ValueError(f"Pagination exceeded max {max_pages} pages for '{endpoint_name}'")
 
         return all_items
 
