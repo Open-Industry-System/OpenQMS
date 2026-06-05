@@ -1180,24 +1180,38 @@ import { getCapabilities } from "../../api/capaDraft";
 
 - [ ] **Step 1b: 修改 handleUpdate() 使其失败时抛出异常**
 
-当前 `handleUpdate()` 捕获异常后只 `message.error()`，不会重新抛出。AI 草稿预览的"替换/追加"需要感知保存失败。找到 `handleUpdate` 函数，重构为 try/catch/finally：
+当前 `handleUpdate()` 捕获异常后只 `message.error()`，不会重新抛出。AI 草稿预览的"替换/追加"需要感知保存失败。
+
+**替换整个 `handleUpdate` 函数**（保留 guard、no-op 检查、`setCapa(updated)`）：
 
 ```tsx
-// 替换现有的 handleUpdate 函数体：
-const handleUpdate = async (field: string, value: string) => {
-  setSaving(true);
-  try {
-    await updateCapa(id!, { [field]: value });
-    // 成功后不 message，静默保存
-  } catch (err: unknown) {
-    const apiError = err as { response?: { data?: { detail?: string } } };
-    message.error(apiError.response?.data?.detail || "保存失败");
-    throw err;  // 让调用方（AI 预览）感知失败
-  } finally {
-    setSaving(false);  // 无论成功失败都重置 saving 状态
-  }
-};
+  const handleUpdate = async (field: string, value: unknown) => {
+    if (!id || !canEdit('capa')) return;
+
+    // 值未变化则不保存
+    if (capa && JSON.stringify(capa[field as keyof CAPAReport]) === JSON.stringify(value)) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const updated = await updateCAPA(id, { [field]: value });
+      setCapa(updated);
+    } catch (err: unknown) {
+      const apiError = err as { response?: { data?: { detail?: string } } };
+      message.error(apiError.response?.data?.detail || "保存失败");
+      throw err;  // 让调用方（AI 预览）感知失败
+    } finally {
+      setSaving(false);
+    }
+  };
 ```
+
+> **变更点**（相对于现有代码）：
+> 1. `setSaving(true)` 保留在 try 之前
+> 2. catch 块末尾添加 `throw err`
+> 3. `setSaving(false)` 从 try/catch 之后移入 `finally` 块
+> 4. 其余逻辑（guard、no-op、`updateCAPA`、`setCapa`）完全保留
 
 - [ ] **Step 2: 在组件内添加状态和 Hook**
 
@@ -1411,8 +1425,6 @@ label={
   </div>
 }
 ```
-
-（D3-D8 按上述模式替换对应 label 即可，不再重复完整 JSX）
 
 - [ ] **Step 6: 在页面末尾添加预览弹窗**
 
