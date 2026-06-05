@@ -6,6 +6,7 @@ import {
 } from "antd";
 import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from "@ant-design/icons";
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
+import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 import D4RecPanel from "../../components/capa/D4RecPanel";
@@ -61,6 +62,9 @@ export default function CAPADetailPage() {
   const [d7SkipDialogOpen, setD7SkipDialogOpen] = useState(false);
   const [d7SkipReasons, setD7SkipReasons] = useState<Record<string, string>>({});
 
+  // AI Draft capabilities
+  const [aiDraftEnabled, setAiDraftEnabled] = useState(false);
+
   // AI Draft state
   const {
     loading: draftLoading,
@@ -95,6 +99,9 @@ export default function CAPADetailPage() {
     if (!id) return;
     getCAPA(id).then(setCapa).finally(() => setLoading(false));
     listFMEAs({ page_size: 100 }).then((res) => setFmeas(res.items));
+    getAIDraftCapabilities()
+      .then((caps) => setAiDraftEnabled(caps.ai_draft_enabled))
+      .catch(() => setAiDraftEnabled(false));
   }, [id]);
 
   useEffect(() => {
@@ -139,10 +146,10 @@ export default function CAPADetailPage() {
     d5: "d5_correction", d6: "d6_verification", d7: "d7_prevention", d8: "d8_closure",
   };
 
-  const handleGenerate = (step: string) => {
+  const handleGenerate = (step: string, format: DraftFormat) => {
     if (!id) return;
     clear();
-    generate(id, step, "structured");
+    generate(id, step, format);
   };
 
   const handleReplace = async () => {
@@ -192,6 +199,7 @@ export default function CAPADetailPage() {
   const renderLabelWithDraft = (step: string, label: string) => {
     const field = stepToField[step];
     const hasHistory = canUndo(field);
+    const showAIButton = aiDraftEnabled && canEdit('capa');
     return (
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span>{label}</span>
@@ -206,12 +214,14 @@ export default function CAPADetailPage() {
               撤销修改
             </Button>
           )}
-          <AIDraftButton
-            loading={draftLoading}
-            tempUnavailable={tempUnavailable}
-            error={errorLevel === "error" ? draftError : null}
-            onGenerate={() => handleGenerate(step)}
-          />
+          {showAIButton && (
+            <AIDraftButton
+              loading={draftLoading}
+              tempUnavailable={tempUnavailable}
+              error={errorLevel === "error" ? draftError : null}
+              onGenerate={(format) => handleGenerate(step, format)}
+            />
+          )}
         </Space>
       </div>
     );

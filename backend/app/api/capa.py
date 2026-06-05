@@ -403,6 +403,19 @@ async def get_d5_fmea_recommendations(
     }
 
 
+@router.get("/capabilities")
+async def capa_capabilities(
+    request: Request,
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+):
+    """获取 AI 草拟功能是否可用及当前 LLM Provider"""
+    llm_provider = getattr(request.app.state, "llm_provider", None)
+    return {
+        "ai_draft_enabled": llm_provider is not None,
+        "llm_provider": getattr(llm_provider, "model", None) or settings.LLM_PROVIDER or None,
+    }
+
+
 @router.get("/{report_id}/draft/capabilities")
 async def draft_capabilities(
     report_id: uuid.UUID,

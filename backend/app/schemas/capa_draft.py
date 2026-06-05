@@ -54,8 +54,8 @@ class D2StructuredLLMOutput(BaseModel):
 class ContainmentAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: str
-    responsible: str = Field(default="[待填写]")
-    deadline: str = Field(default="[待填写]")
+    responsible: Literal["[待填写]"] = "[待填写]"
+    deadline: Literal["[待填写]"] = "[待填写]"
 
 
 class D3StructuredData(BaseModel):
@@ -72,7 +72,7 @@ class D3StructuredLLMOutput(BaseModel):
 # --- D4 结构化输出 ---
 class CandidateRootCause(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    category: str
+    category: Literal["人", "机", "料", "法", "环", "测"]
     description: str
     evidence: str
 
@@ -92,8 +92,8 @@ class CorrectiveAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: str
     target_root_cause: str = Field(default="[待填写]")
-    responsible: str = Field(default="[待填写]")
-    deadline: str = Field(default="[待填写]")
+    responsible: Literal["[待填写]"] = "[待填写]"
+    deadline: Literal["[待填写]"] = "[待填写]"
 
 
 class D5StructuredData(BaseModel):

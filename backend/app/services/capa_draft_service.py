@@ -235,163 +235,211 @@ async def generate_draft(
     user: "User",
     request: Request,
 ) -> dict:
-    now = time.time()
+    start_time = time.time()
     normalized_request_id = str(uuid.UUID(req.request_id))
-    cache_key = f"{report_id}:{step}:{req.format}:{normalized_request_id}"
+    # Critical Fix: cache key must include user_id to prevent cross-user cache leaks
+    cache_key = f"{user.user_id}:{report_id}:{step}:{req.format}:{normalized_request_id}"
     user_limit_key = str(user.user_id)
 
-    # 1. 检查缓存
-    if cache_key in _draft_cache:
-        result, expire = _draft_cache[cache_key]
-        if now < expire:
-            return result
-        del _draft_cache[cache_key]
-
-    # 2. 获取 CAPA 实体
-    capa = await db.get(CAPAEightD, report_id)
-    if not capa:
-        raise HTTPException(status_code=404, detail="CAPA 报告不存在")
-
-    # 2. 产品线隔离
-    await enforce_product_line_access(user, capa.product_line_code, db)
-
-    # 3. 状态校验
-    current_status = capa.status
-    if current_status == "ARCHIVED":
-        raise HTTPException(status_code=409, detail="报告已归档，无法生成草稿")
-
-    # 4. 步骤有效性
-    if step not in _STEP_PRECONDITIONS:
-        raise HTTPException(status_code=400, detail="无效的步骤")
-
-    precondition = _STEP_PRECONDITIONS[step]
-    min_status = precondition["min_status"]
-    required_field = precondition["required_field"]
-
-    # 5. 状态顺序校验
-    try:
-        current_idx = _STATUS_ORDER.index(current_status)
-        min_idx = _STATUS_ORDER.index(min_status)
-    except ValueError:
-        raise HTTPException(status_code=409, detail="当前报告状态不支持此步骤")
-
-    if current_idx < min_idx:
-        raise HTTPException(
-            status_code=409,
-            detail=f"当前步骤为 {current_status}，需先完成至 {min_status} 才能生成 {step.upper()} 草稿",
-        )
-
-    # 6. 数据充足性校验（仅检查指定字段长度）
-    field_value = getattr(capa, required_field, None) or ""
-    min_len = _FIELD_MIN_LENGTH.get(required_field, 0)
-    if len(field_value.strip()) < min_len:
-        raise HTTPException(
-            status_code=409,
-            detail=f"{required_field} 内容不足（当前 {len(field_value)} 字符，至少需要 {min_len} 字符）",
-        )
-
-    # 7. 限流校验（内存计数器，仅支持单 worker）
-    timestamps = _rate_limit.get(user_limit_key, [])
-    timestamps = [t for t in timestamps if now - t < 60]
-    if len(timestamps) >= RATE_LIMIT_PER_MIN:
-        raise HTTPException(status_code=429, detail="AI 草拟调用过于频繁，请稍后再试")
-    _rate_limit[user_limit_key] = timestamps + [now]
-
-    # 8. 检查是否有相同请求正在处理中（in-flight 复用）
-    if cache_key in _in_flight:
-        try:
-            result = await asyncio.shield(_in_flight[cache_key])
-        except asyncio.CancelledError:
-            raise HTTPException(status_code=503, detail="请求处理中，请稍后重试")
-        return result
-
-    # 9. 获取 LLM Provider
     llm_provider = getattr(request.app.state, "llm_provider", None)
-    if llm_provider is None:
-        raise HTTPException(status_code=503, detail="AI 服务未配置")
+    llm_model_name = getattr(llm_provider, "model", None) or settings.LLM_MODEL or "unknown"
 
-    # 10. 组装 FMEA 上下文
-    fmea_context = await _build_fmea_context(db, capa, user)
-    has_fmea_context = bool(fmea_context) and "未关联" not in fmea_context
+    # Audit tracking
+    audit_success = False
+    audit_error = None
+    audit_status_code = 200
+    result = None
 
-    # 11. 组装 Prompt
-    try:
-        prompt = _build_prompt(capa, step, req.format, fmea_context)
-    except ValueError as e:
-        raise HTTPException(status_code=500, detail="AI Prompt 配置错误") from e
-
-    # 12. 完整生成流程（LLM + 校验 + 渲染 + 缓存）
-    schema_cls = STEP_SCHEMA_MAP[step] if req.format == "structured" else None
-    response_schema = schema_cls.model_json_schema() if schema_cls else None
-
-    async def _generate_and_validate():
+    async def _write_audit():
+        """Write audit log for every call (success or failure)."""
+        duration_ms = int((time.time() - start_time) * 1000)
+        audit_log = AuditLog(
+            table_name="capa_eightd",
+            record_id=report_id,
+            action="AI_DRAFT",
+            changed_fields={
+                "step": step,
+                "format": req.format,
+                "request_id": normalized_request_id,
+                "success": audit_success,
+                "duration_ms": duration_ms,
+                "model": llm_model_name,
+                "status_code": audit_status_code,
+                "error": audit_error,
+            },
+            operated_by=user.user_id,
+        )
+        db.add(audit_log)
         try:
-            llm_raw = await asyncio.wait_for(
-                llm_provider.complete(prompt, response_schema),
-                timeout=settings.CAPA_DRAFT_LLM_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="AI 响应超时，请重试")
-        except (ConnectionError, OSError) as e:
-            raise HTTPException(status_code=503, detail="AI 服务暂时不可用，请稍后重试") from e
-        except Exception as e:
-            if "JSON" in str(e) or "json" in str(e) or "decode" in str(e).lower():
-                raise HTTPException(status_code=422, detail=f"AI 输出解析失败: {e}") from e
-            raise HTTPException(status_code=503, detail="AI 服务异常，请稍后重试") from e
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            import logging
+            logging.getLogger(__name__).exception("Audit log commit failed")
 
-        if req.format == "paragraph":
-            from app.schemas.capa_draft import ParagraphLLMOutput
-            try:
-                validated = ParagraphLLMOutput.model_validate(llm_raw)
-            except Exception as e:
-                raise HTTPException(status_code=422, detail=f"AI 输出格式校验失败: {str(e)}")
-            content = validated.content
-            structured_data = None
-        else:
-            try:
-                validated = schema_cls.model_validate(llm_raw)
-            except Exception as e:
-                raise HTTPException(status_code=422, detail=f"AI 输出格式校验失败: {str(e)}")
-            structured_data = validated.structured_data.model_dump()
-            content = _render_structured(step, structured_data)
-
-        result = {
-            "content": content,
-            "structured_data": structured_data,
-            "request_id": normalized_request_id,
-            "step": step,
-        }
-
-        _cleanup_expired_cache(now)
-        _draft_cache[cache_key] = (result, now + 60)
-        return result
-
-    task = asyncio.ensure_future(_generate_and_validate())
-    _in_flight[cache_key] = task
     try:
-        result = await task
-    except HTTPException:
+        # 1. 获取 CAPA 实体
+        capa = await db.get(CAPAEightD, report_id)
+        if not capa:
+            audit_status_code = 404
+            raise HTTPException(status_code=404, detail="CAPA 报告不存在")
+
+        # 2. 产品线隔离
+        await enforce_product_line_access(user, capa.product_line_code, db)
+
+        # 3. 检查缓存（在权限校验之后）
+        if cache_key in _draft_cache:
+            cached_result, expire = _draft_cache[cache_key]
+            if start_time < expire:
+                audit_success = True
+                audit_status_code = 200
+                return cached_result
+            del _draft_cache[cache_key]
+
+        # 4. 状态校验
+        current_status = capa.status
+        if current_status == "ARCHIVED":
+            audit_status_code = 409
+            raise HTTPException(status_code=409, detail="报告已归档，无法生成草稿")
+
+        # 5. 步骤有效性
+        if step not in _STEP_PRECONDITIONS:
+            audit_status_code = 400
+            raise HTTPException(status_code=400, detail="无效的步骤")
+
+        precondition = _STEP_PRECONDITIONS[step]
+        min_status = precondition["min_status"]
+        required_field = precondition["required_field"]
+
+        # 6. 状态顺序校验
+        try:
+            current_idx = _STATUS_ORDER.index(current_status)
+            min_idx = _STATUS_ORDER.index(min_status)
+        except ValueError:
+            audit_status_code = 409
+            raise HTTPException(status_code=409, detail="当前报告状态不支持此步骤")
+
+        if current_idx < min_idx:
+            audit_status_code = 409
+            raise HTTPException(
+                status_code=409,
+                detail=f"当前步骤为 {current_status}，需先完成至 {min_status} 才能生成 {step.upper()} 草稿",
+            )
+
+        # 7. 数据充足性校验
+        field_value = getattr(capa, required_field, None) or ""
+        min_len = _FIELD_MIN_LENGTH.get(required_field, 0)
+        if len(field_value.strip()) < min_len:
+            audit_status_code = 409
+            raise HTTPException(
+                status_code=409,
+                detail=f"{required_field} 内容不足（当前 {len(field_value)} 字符，至少需要 {min_len} 字符）",
+            )
+
+        # 8. 限流校验
+        timestamps = _rate_limit.get(user_limit_key, [])
+        timestamps = [t for t in timestamps if start_time - t < 60]
+        if len(timestamps) >= RATE_LIMIT_PER_MIN:
+            audit_status_code = 429
+            raise HTTPException(status_code=429, detail="AI 草拟调用过于频繁，请稍后再试")
+        _rate_limit[user_limit_key] = timestamps + [start_time]
+
+        # 9. in-flight 复用
+        if cache_key in _in_flight:
+            try:
+                result = await asyncio.shield(_in_flight[cache_key])
+                audit_success = True
+                audit_status_code = 200
+                return result
+            except asyncio.CancelledError:
+                audit_status_code = 503
+                raise HTTPException(status_code=503, detail="请求处理中，请稍后重试")
+
+        # 10. LLM Provider
+        if llm_provider is None:
+            audit_status_code = 503
+            raise HTTPException(status_code=503, detail="AI 服务未配置")
+
+        # 11. FMEA 上下文
+        fmea_context = await _build_fmea_context(db, capa, user)
+
+        # 12. Prompt
+        try:
+            prompt = _build_prompt(capa, step, req.format, fmea_context)
+        except ValueError:
+            audit_status_code = 500
+            raise HTTPException(status_code=500, detail="AI Prompt 配置错误")
+
+        # 13. 生成流程
+        schema_cls = STEP_SCHEMA_MAP[step] if req.format == "structured" else None
+        response_schema = schema_cls.model_json_schema() if schema_cls else None
+
+        async def _generate_and_validate():
+            try:
+                llm_raw = await asyncio.wait_for(
+                    llm_provider.complete(prompt, response_schema),
+                    timeout=settings.CAPA_DRAFT_LLM_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                raise HTTPException(status_code=504, detail="AI 响应超时，请重试")
+            except (ConnectionError, OSError) as e:
+                raise HTTPException(status_code=503, detail="AI 服务暂时不可用，请稍后重试") from e
+            except Exception as e:
+                if "JSON" in str(e) or "json" in str(e) or "decode" in str(e).lower():
+                    raise HTTPException(status_code=422, detail=f"AI 输出解析失败: {e}") from e
+                raise HTTPException(status_code=503, detail="AI 服务异常，请稍后重试") from e
+
+            if req.format == "paragraph":
+                from app.schemas.capa_draft import ParagraphLLMOutput
+                try:
+                    validated = ParagraphLLMOutput.model_validate(llm_raw)
+                except Exception as e:
+                    raise HTTPException(status_code=422, detail=f"AI 输出格式校验失败: {str(e)}")
+                content = validated.content
+                structured_data = None
+            else:
+                try:
+                    validated = schema_cls.model_validate(llm_raw)
+                except Exception as e:
+                    raise HTTPException(status_code=422, detail=f"AI 输出格式校验失败: {str(e)}")
+                structured_data = validated.structured_data.model_dump()
+                content = _render_structured(step, structured_data)
+
+            res = {
+                "content": content,
+                "structured_data": structured_data,
+                "request_id": normalized_request_id,
+                "step": step,
+            }
+            _cleanup_expired_cache(start_time)
+            _draft_cache[cache_key] = (res, start_time + 60)
+            return res
+
+        task = asyncio.ensure_future(_generate_and_validate())
+        _in_flight[cache_key] = task
+        try:
+            result = await task
+            audit_success = True
+            audit_status_code = 200
+            return result
+        except HTTPException as exc:
+            audit_status_code = exc.status_code
+            audit_error = exc.detail
+            raise
+        except Exception as e:
+            audit_status_code = 503
+            audit_error = str(e)
+            raise HTTPException(status_code=503, detail="AI 服务异常，请稍后重试") from e
+        finally:
+            _in_flight.pop(cache_key, None)
+
+    except HTTPException as exc:
+        audit_status_code = exc.status_code
+        audit_error = exc.detail
         raise
     except Exception as e:
-        raise HTTPException(status_code=503, detail="AI 服务异常，请稍后重试") from e
+        audit_status_code = 500
+        audit_error = str(e)
+        raise
     finally:
-        _in_flight.pop(cache_key, None)
-
-    # 13. 审计日志
-    audit_log = AuditLog(
-        table_name="capa_eightd",
-        record_id=report_id,
-        action="AI_DRAFT",
-        changed_fields={"step": step, "format": req.format},
-        operated_by=user.user_id,
-    )
-    db.add(audit_log)
-    try:
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        # 审计日志失败不阻塞主流程，但记录异常
-        import logging
-        logging.getLogger(__name__).exception("Audit log commit failed")
-
-    return result
+        await _write_audit()

@@ -1357,6 +1357,11 @@ export interface DraftResponse {
   step: string;
 }
 
+export interface AIDraftCapabilitiesResponse {
+  ai_draft_enabled: boolean;
+  llm_provider: string | null;
+}
+
 export interface DraftCapabilitiesResponse {
   available_steps: string[];
   current_step: string;
