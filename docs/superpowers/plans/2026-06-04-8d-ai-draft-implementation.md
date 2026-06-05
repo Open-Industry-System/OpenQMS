@@ -368,7 +368,7 @@ async def generate_draft(
             try:
                 result = await asyncio.shield(_in_flight[cache_key])
             except asyncio.CancelledError:
-                raise HTTPException(status_code=499, detail="请求已取消")
+                raise HTTPException(status_code=503, detail="请求处理中，请稍后重试")
             success = True
             cache_hit = True
             return result
@@ -394,7 +394,11 @@ async def generate_draft(
         has_fmea_context = bool(fmea_context) and "未关联" not in fmea_context  # Issue 12
 
         # 10. 组装 Prompt
-        prompt = _build_prompt(capa, step, req.format, fmea_context)
+        try:
+            prompt = _build_prompt(capa, step, req.format, fmea_context)
+        except ValueError as e:
+            _logger.error("Prompt build failed: %s", e)
+            raise HTTPException(status_code=500, detail="AI Prompt 配置错误") from e
 
         # 11. 完整生成流程（LLM + 校验 + 渲染 + 缓存）包装为 in-flight 任务
         schema_cls = ParagraphLLMOutput if req.format == "paragraph" else STEP_SCHEMA_MAP[step]
@@ -1475,7 +1479,7 @@ label={
               saveUndo(field, originalValue);
               setLocalData((p) => ({ ...p, [field]: appended }));
               try {
-                await handleUpdate(field, appended);
+                await handleUpdate(field, appended, true);
               } catch {
                 setLocalData((p) => ({ ...p, [field]: originalValue }));
                 return;
@@ -2637,13 +2641,58 @@ class TestGenerateDraft:
 
         # 模拟 enforce 内部查询 db.execute 返回空（用户无该产品线权限）
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []  # 无权限
+        mock_result.all.return_value = []  # 无权限
         db.execute = AsyncMock(return_value=mock_result)
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
             await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
         assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_product_line_access_allowed(self, monkeypatch):
+        """有权限时应正常通过产品线检查"""
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "D2_DESCRIPTION"
+        capa.title = "测试报告标题"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = ""
+        capa.fmea_ref_id = None
+        capa.fmea_node_id = None
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
+        user.role_definition.bypass_row_level_security = False
+
+        # 模拟 enforce 内部查询返回用户有权限的产品线
+        mock_result = MagicMock()
+        mock_result.all.return_value = [("DC-DC-100",)]
+        db.execute = AsyncMock(return_value=mock_result)
+
+        # Mock LLM provider
+        llm_provider = MagicMock()
+        llm_provider.complete = AsyncMock(return_value={
+            "structured_data": {
+                "problem_statement": "问题描述",
+                "affected_product": "产品A",
+                "defect_description": "缺陷",
+                "occurrence_context": "场景",
+                "impact_scope": "范围",
+            }
+        })
+        request = MagicMock()
+        request.app.state.llm_provider = llm_provider
+
+        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        resp = await generate_draft(db, capa.report_id, "d2", req, user, request)
+        assert resp["step"] == "d2"
 
     @pytest.mark.asyncio
     async def test_inflight_deduplication(self, monkeypatch):
