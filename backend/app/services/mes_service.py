@@ -899,3 +899,12 @@ class MESPushService:
                     refreshed.claim_token = None
 
             await write_session.commit()
+
+
+class MESLifecycleService:
+    """MES data lifecycle cleanup service."""
+
+    @staticmethod
+    async def cleanup(db: AsyncSession) -> dict:
+        """Placeholder cleanup — returns empty stats."""
+        return {}
