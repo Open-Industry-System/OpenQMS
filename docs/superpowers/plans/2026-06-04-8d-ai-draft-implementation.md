@@ -1185,7 +1185,7 @@ import { getCapabilities } from "../../api/capaDraft";
 **替换整个 `handleUpdate` 函数**（保留 guard、no-op 检查、`setCapa(updated)`）：
 
 ```tsx
-  const handleUpdate = async (field: string, value: unknown) => {
+  const handleUpdate = async (field: string, value: unknown, throwOnError = false) => {
     if (!id || !canEdit('capa')) return;
 
     // 值未变化则不保存
@@ -1200,7 +1200,7 @@ import { getCapabilities } from "../../api/capaDraft";
     } catch (err: unknown) {
       const apiError = err as { response?: { data?: { detail?: string } } };
       message.error(apiError.response?.data?.detail || "保存失败");
-      throw err;  // 让调用方（AI 预览）感知失败
+      if (throwOnError) throw err;  // 仅 AI 预览路径需要感知失败
     } finally {
       setSaving(false);
     }
@@ -1208,10 +1208,11 @@ import { getCapabilities } from "../../api/capaDraft";
 ```
 
 > **变更点**（相对于现有代码）：
-> 1. `setSaving(true)` 保留在 try 之前
-> 2. catch 块末尾添加 `throw err`
-> 3. `setSaving(false)` 从 try/catch 之后移入 `finally` 块
-> 4. 其余逻辑（guard、no-op、`updateCAPA`、`setCapa`）完全保留
+> 1. 新增 `throwOnError = false` 参数——默认不抛出，现有调用点（D1 成员、D4/D5 推荐、onBlur）行为不变
+> 2. `setSaving(true)` 保留在 try 之前
+> 3. catch 块中仅 `throwOnError` 为 true 时才 throw
+> 4. `setSaving(false)` 从 try/catch 之后移入 `finally` 块
+> 5. 其余逻辑（guard、no-op、`updateCAPA`、`setCapa`）完全保留
 
 - [ ] **Step 2: 在组件内添加状态和 Hook**
 
@@ -1284,7 +1285,7 @@ label={
         }} disabled={!canUndo("d2_description")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null}
           onGenerate={(f) => { if (id) generate(id, "d2", f); }} />
       )}
     </Space>
@@ -1308,7 +1309,7 @@ label={
         }} disabled={!canUndo("d3_interim")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null}
           onGenerate={(f) => { if (id) generate(id, "d3", f); }} />
       )}
     </Space>
@@ -1330,7 +1331,7 @@ label={
         }} disabled={!canUndo("d4_root_cause")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null}
           onGenerate={(f) => { if (id) generate(id, "d4", f); }} />
       )}
     </Space>
@@ -1352,7 +1353,7 @@ label={
         }} disabled={!canUndo("d5_correction")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null}
           onGenerate={(f) => { if (id) generate(id, "d5", f); }} />
       )}
     </Space>
@@ -1374,7 +1375,7 @@ label={
         }} disabled={!canUndo("d6_verification")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null}
           onGenerate={(f) => { if (id) generate(id, "d6", f); }} />
       )}
     </Space>
@@ -1396,7 +1397,7 @@ label={
         }} disabled={!canUndo("d7_prevention")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null}
           onGenerate={(f) => { if (id) generate(id, "d7", f); }} />
       )}
     </Space>
@@ -1418,7 +1419,7 @@ label={
         }} disabled={!canUndo("d8_closure")}>撤销</Button>
       )}
       {canEdit("capa") && aiEnabled && (
-        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={draftError}
+        <AIDraftButton loading={draftLoading} tempUnavailable={tempUnavailable} error={errorLevel === "error" ? draftError : null}
           onGenerate={(f) => { if (id) generate(id, "d8", f); }} />
       )}
     </Space>
@@ -1450,7 +1451,7 @@ label={
               saveUndo(field, originalValue);
               setLocalData((p) => ({ ...p, [field]: draft.content }));
               try {
-                await handleUpdate(field, draft.content);
+                await handleUpdate(field, draft.content, true);
               } catch {
                 // handleUpdate 已 message.error，此处只回滚本地状态
                 setLocalData((p) => ({ ...p, [field]: originalValue }));
@@ -1748,6 +1749,33 @@ describe("AIDraftButton", () => {
     const onGenerate = vi.fn();
     render(
       <AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />
+    );
+    fireEvent.click(screen.getByText("AI草拟"));
+    expect(onGenerate).toHaveBeenCalledWith("structured");
+  });
+
+  it("should show danger style and tooltip when error is set", () => {
+    render(
+      <AIDraftButton loading={false} tempUnavailable={false} error="前置步骤不足" onGenerate={vi.fn()} />
+    );
+    const btn = screen.getByRole("button", { name: "AI草拟" });
+    // Ant Design Dropdown.Button with danger prop adds ant-btn-dangerous class
+    expect(btn.className).toContain("dangerous");
+    expect(btn.title).toBe("前置步骤不足");
+  });
+
+  it("should not show danger when error is null", () => {
+    render(
+      <AIDraftButton loading={false} tempUnavailable={false} error={null} onGenerate={vi.fn()} />
+    );
+    const btn = screen.getByRole("button", { name: "AI草拟" });
+    expect(btn.className).not.toContain("dangerous");
+  });
+
+  it("should still trigger onGenerate when in error state", () => {
+    const onGenerate = vi.fn();
+    render(
+      <AIDraftButton loading={false} tempUnavailable={false} error="超时" onGenerate={onGenerate} />
     );
     fireEvent.click(screen.getByText("AI草拟"));
     expect(onGenerate).toHaveBeenCalledWith("structured");
