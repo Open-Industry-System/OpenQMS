@@ -68,7 +68,7 @@ export default function MESDashboardPage() {
       key: "availability",
       width: 110,
       render: (v: number | null) =>
-        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
+        v !== null ? `${v.toFixed(1)}%` : "—",
     },
     {
       title: "性能 (%)",
@@ -76,7 +76,7 @@ export default function MESDashboardPage() {
       key: "performance",
       width: 100,
       render: (v: number | null) =>
-        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
+        v !== null ? `${v.toFixed(1)}%` : "—",
     },
     {
       title: "质量 (%)",
@@ -84,7 +84,7 @@ export default function MESDashboardPage() {
       key: "quality",
       width: 100,
       render: (v: number | null) =>
-        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
+        v !== null ? `${v.toFixed(1)}%` : "—",
     },
     {
       title: "OEE (%)",
@@ -92,7 +92,7 @@ export default function MESDashboardPage() {
       key: "oee",
       width: 100,
       render: (v: number | null) =>
-        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
+        v !== null ? `${v.toFixed(1)}%` : "—",
     },
   ];
 
