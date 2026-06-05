@@ -674,3 +674,228 @@ class MESSyncService:
 
         await db.commit()
         return {"status": "accepted"}
+
+
+class MESPushService:
+    """MES reverse push service (outbox pattern). 3-phase short transactions."""
+
+    OUTBOX_TIMEOUT_MINUTES = 10
+    BATCH_SIZE = 100
+
+    @staticmethod
+    async def push_event(
+        db: AsyncSession, event_type: str, connection_id: uuid.UUID, payload: dict
+    ) -> MESPushOutbox:
+        """Create outbox record with status='pending'. Caller commits."""
+        outbox = MESPushOutbox(
+            event_type=event_type,
+            connection_id=connection_id,
+            payload=payload,
+            status="pending",
+        )
+        db.add(outbox)
+        await db.flush()
+        return outbox
+
+    @staticmethod
+    async def recover_stuck_outbox(
+        db: AsyncSession, connection_id: uuid.UUID | None = None
+    ) -> int:
+        """Find processing items with started_at < now() - 10 minutes.
+
+        Reset to pending, clear started_at and claim_token.
+        Return count (caller must commit).
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            minutes=MESPushService.OUTBOX_TIMEOUT_MINUTES
+        )
+
+        stmt = (
+            select(MESPushOutbox)
+            .where(
+                MESPushOutbox.status == "processing",
+                MESPushOutbox.started_at < cutoff,
+            )
+            .with_for_update()
+        )
+
+        if connection_id is not None:
+            stmt = stmt.where(MESPushOutbox.connection_id == connection_id)
+
+        result = await db.execute(stmt)
+        items = result.scalars().all()
+
+        for item in items:
+            item.status = "pending"
+            item.started_at = None
+            item.claim_token = None
+
+        await db.flush()
+        return len(items)
+
+    @staticmethod
+    async def claim_items(db: AsyncSession) -> list[MESPushOutbox]:
+        """Phase 2: SELECT FOR UPDATE SKIP LOCKED.
+
+        - Join mes_connections, filter is_active=True
+        - Filter: status=pending AND next_retry_at <= now()
+        - Limit BATCH_SIZE
+        - Set status=processing, started_at=now(), claim_token=str(uuid.uuid4())
+        - Return items (caller must commit to release locks)
+        """
+        now = datetime.now(timezone.utc)
+
+        stmt = (
+            select(MESPushOutbox)
+            .join(MESConnection, MESPushOutbox.connection_id == MESConnection.connection_id)
+            .where(
+                MESConnection.is_active == True,  # noqa: E712
+                MESPushOutbox.status == "pending",
+                MESPushOutbox.next_retry_at <= now,
+            )
+            .order_by(MESPushOutbox.next_retry_at)
+            .limit(MESPushService.BATCH_SIZE)
+            .with_for_update(skip_locked=True)
+        )
+
+        result = await db.execute(stmt)
+        items = result.scalars().all()
+
+        for item in items:
+            item.status = "processing"
+            item.started_at = now
+            item.claim_token = str(uuid.uuid4())
+
+        await db.flush()
+        return list(items)
+
+    @staticmethod
+    async def process_outbox(db: AsyncSession) -> None:
+        """3-phase outbox processing.
+
+        Step 1: recover_stuck_outbox + commit
+        Step 2: claim items + commit (release locks)
+        Step 3: For each item: read config, HTTP push, write result.
+        """
+        # Step 1: recover stuck items + commit
+        recovered = await MESPushService.recover_stuck_outbox(db)
+        if recovered:
+            await db.commit()
+
+        # Step 2: claim items + commit
+        items = await MESPushService.claim_items(db)
+        if not items:
+            return
+        await db.commit()
+
+        # Step 3: process each item independently
+        for item in items:
+            try:
+                await MESPushService._process_single_item(item)
+            except Exception as e:
+                # On exception: mark as failed in separate session, verify claim_token
+                async with async_session() as fail_session:
+                    result = await fail_session.execute(
+                        select(MESPushOutbox)
+                        .where(MESPushOutbox.outbox_id == item.outbox_id)
+                        .with_for_update()
+                    )
+                    failed_item = result.scalar_one_or_none()
+
+                    if failed_item is None or failed_item.claim_token != item.claim_token:
+                        # Item was stolen or deleted, skip
+                        await fail_session.rollback()
+                        continue
+
+                    failed_item.retry_count += 1
+                    failed_item.last_error = str(e)
+
+                    if failed_item.retry_count >= failed_item.max_retries:
+                        failed_item.status = "failed"
+                        failed_item.claim_token = None
+                    else:
+                        failed_item.status = "pending"
+                        backoff_minutes = 2 ** min(failed_item.retry_count, 5)
+                        failed_item.next_retry_at = datetime.now(timezone.utc) + timedelta(
+                            minutes=backoff_minutes
+                        )
+                        failed_item.claim_token = None
+
+                    await fail_session.commit()
+
+    @staticmethod
+    async def _process_single_item(item: MESPushOutbox) -> None:
+        """3a: Read config. 3b: HTTP push. 3c: Write result."""
+        # 3a: Copy data to memory (short read tx)
+        async with async_session() as read_session:
+            result = await read_session.execute(
+                select(MESPushOutbox).where(
+                    MESPushOutbox.outbox_id == item.outbox_id,
+                    MESPushOutbox.claim_token == item.claim_token,
+                    MESPushOutbox.status == "processing",
+                )
+            )
+            verified = result.scalar_one_or_none()
+            if verified is None:
+                # Item no longer ours or no longer processing
+                return
+
+            result = await read_session.execute(
+                select(MESConnection).where(
+                    MESConnection.connection_id == item.connection_id
+                )
+            )
+            connection = result.scalar_one()
+            connector_type = connection.connector_type
+            config = connection.config
+
+        # 3b: HTTP push (NO transaction)
+        connector = get_mes_connector_by_config(connector_type, config)
+        try:
+            response = await connector.push_quality_event(
+                item.event_type,
+                item.payload,
+                event_id=str(item.outbox_id),
+            )
+            push_success = True
+            error_msg = None
+        except Exception as e:
+            push_success = False
+            error_msg = str(e)
+        finally:
+            if hasattr(connector, "close"):
+                await connector.close()
+
+        # 3c: Write result (short tx)
+        async with async_session() as write_session:
+            result = await write_session.execute(
+                select(MESPushOutbox)
+                .where(MESPushOutbox.outbox_id == item.outbox_id)
+                .with_for_update()
+            )
+            refreshed = result.scalar_one()
+
+            if refreshed.claim_token != item.claim_token:
+                raise ValueError("Outbox claim token mismatch — item was stolen by another worker")
+
+            if push_success:
+                refreshed.status = "sent"
+                refreshed.sent_at = datetime.now(timezone.utc)
+                refreshed.claim_token = None
+                refreshed.last_error = None
+            else:
+                refreshed.retry_count += 1
+                refreshed.last_error = error_msg
+
+                if refreshed.retry_count >= refreshed.max_retries:
+                    refreshed.status = "failed"
+                    refreshed.claim_token = None
+                else:
+                    refreshed.status = "pending"
+                    backoff_minutes = 2 ** min(refreshed.retry_count, 5)
+                    refreshed.next_retry_at = datetime.now(timezone.utc) + timedelta(
+                        minutes=backoff_minutes
+                    )
+                    refreshed.claim_token = None
+
+            await write_session.commit()
