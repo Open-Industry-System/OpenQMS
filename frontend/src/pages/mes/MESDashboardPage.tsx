@@ -7,6 +7,7 @@ import {
   ScheduleOutlined, CarryOutOutlined,
 } from "@ant-design/icons";
 import { getMESDashboard } from "../../api/mes";
+import { useProductLineStore } from "../../store/productLineStore";
 import type { MESDashboardData, MESEquipmentStatus } from "../../types/mes";
 
 const { Title } = Typography;
@@ -29,19 +30,19 @@ export default function MESDashboardPage() {
   const { message } = App.useApp();
   const [data, setData] = useState<MESDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const productLine = useProductLineStore((s) => s.selected);
 
-  const fetchData = () => {
+  const fetchData = (plCode?: string | null) => {
     setLoading(true);
-    getMESDashboard()
+    getMESDashboard(plCode || undefined)
       .then((res) => setData(res))
       .catch(() => message.error("加载 MES 仪表盘失败"))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    fetchData(productLine);
+  }, [productLine]);
 
   const columns = [
     {
@@ -68,7 +69,7 @@ export default function MESDashboardPage() {
       key: "availability",
       width: 110,
       render: (v: number | null) =>
-        v !== null ? `${v.toFixed(1)}%` : "—",
+        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
     },
     {
       title: "性能 (%)",
@@ -76,7 +77,7 @@ export default function MESDashboardPage() {
       key: "performance",
       width: 100,
       render: (v: number | null) =>
-        v !== null ? `${v.toFixed(1)}%` : "—",
+        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
     },
     {
       title: "质量 (%)",
@@ -84,7 +85,7 @@ export default function MESDashboardPage() {
       key: "quality",
       width: 100,
       render: (v: number | null) =>
-        v !== null ? `${v.toFixed(1)}%` : "—",
+        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
     },
     {
       title: "OEE (%)",
@@ -92,7 +93,7 @@ export default function MESDashboardPage() {
       key: "oee",
       width: 100,
       render: (v: number | null) =>
-        v !== null ? `${v.toFixed(1)}%` : "—",
+        v !== null ? `${(v * 100).toFixed(1)}%` : "—",
     },
   ];
 

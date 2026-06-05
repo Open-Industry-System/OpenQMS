@@ -3,6 +3,7 @@ import {
   Table, Tag, Typography, Select, App,
 } from "antd";
 import { listProductionOrders } from "../../api/mes";
+import { useProductLineStore } from "../../store/productLineStore";
 import type { MESProductionOrder } from "../../types/mes";
 
 const { Title } = Typography;
@@ -28,10 +29,11 @@ export default function MESOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const productLine = useProductLineStore((s) => s.selected);
 
-  const fetchData = (p: number = page, status?: string) => {
+  const fetchData = (p: number = page, currentStatus?: string, plCode?: string | null) => {
     setLoading(true);
-    listProductionOrders(p, 20, status)
+    listProductionOrders(p, 20, plCode || undefined, currentStatus || undefined)
       .then((res) => {
         setData(res.items);
         setTotal(res.total);
@@ -41,9 +43,8 @@ export default function MESOrdersPage() {
   };
 
   useEffect(() => {
-    fetchData(1, statusFilter || undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+    fetchData(1, statusFilter || undefined, productLine);
+  }, [statusFilter, productLine]);
 
   const handleStatusChange = (value: string) => {
     setStatusFilter(value);
@@ -132,7 +133,7 @@ export default function MESOrdersPage() {
           pageSize: 20,
           onChange: (p) => {
             setPage(p);
-            fetchData(p, statusFilter || undefined);
+            fetchData(p, statusFilter || undefined, productLine);
           },
         }}
       />

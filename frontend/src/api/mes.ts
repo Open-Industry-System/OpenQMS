@@ -22,8 +22,8 @@ export const testConnection = (id: string) =>
 export const manualSync = (id: string) =>
   client.post(`/mes/connections/${id}/sync`).then((r) => r.data);
 
-export const listProductionOrders = (page = 1, page_size = 20, product_line_code?: string) =>
-  client.get("/mes/production-orders", { params: { page, page_size, product_line_code } }).then((r) => r.data);
+export const listProductionOrders = (page = 1, page_size = 20, product_line_code?: string, status?: string) =>
+  client.get("/mes/production-orders", { params: { page, page_size, product_line_code, status } }).then((r) => r.data);
 
 export const getProductionOrder = (id: string) =>
   client.get(`/mes/production-orders/${id}`).then((r) => r.data);
@@ -31,8 +31,8 @@ export const getProductionOrder = (id: string) =>
 export const listEquipmentStatus = (product_line_code?: string) =>
   client.get("/mes/equipment-status", { params: { product_line_code } }).then((r) => r.data);
 
-export const listScrapRecords = (page = 1, page_size = 20, product_line_code?: string) =>
-  client.get("/mes/scrap-records", { params: { page, page_size, product_line_code } }).then((r) => r.data);
+export const listScrapRecords = (page = 1, page_size = 20, product_line_code?: string, defect_type?: string) =>
+  client.get("/mes/scrap-records", { params: { page, page_size, product_line_code, defect_type } }).then((r) => r.data);
 
 export const getMESDashboard = (product_line_code?: string) =>
   client.get("/mes/dashboard", { params: { product_line_code } }).then((r) => r.data);

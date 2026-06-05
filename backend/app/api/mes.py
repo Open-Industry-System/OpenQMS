@@ -375,22 +375,35 @@ async def manual_sync(
 # Production Orders
 # ---------------------------------------------------------------------------
 
-@router.get("/production-orders", response_model=list[schemas.MESProductionOrderResponse])
+@router.get("/production-orders", response_model=schemas.MESProductionOrderListResponse)
 async def list_production_orders(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
+    status: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
 ):
     query = select(MESProductionOrder)
+    if status:
+        query = query.where(MESProductionOrder.status == status)
     query = await apply_product_line_filter(query, user, MESProductionOrder, "mes", db, request)
+
+    # Count query
+    count_query = select(func.count()).select_from(query.subquery())
+    total_res = await db.execute(count_query)
+    total = total_res.scalar() or 0
 
     query = query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     items = result.scalars().all()
 
-    return [schemas.MESProductionOrderResponse.model_validate(o) for o in items]
+    return schemas.MESProductionOrderListResponse(
+        items=[schemas.MESProductionOrderResponse.model_validate(o) for o in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/production-orders/{order_id}", response_model=schemas.MESProductionOrderResponse)
@@ -433,22 +446,35 @@ async def list_equipment_status(
 # Scrap Records
 # ---------------------------------------------------------------------------
 
-@router.get("/scrap-records", response_model=list[schemas.MESScrapRecordResponse])
+@router.get("/scrap-records", response_model=schemas.MESScrapRecordListResponse)
 async def list_scrap_records(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
+    defect_type: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
 ):
     query = select(MESScrapRecord)
+    if defect_type:
+        query = query.where(MESScrapRecord.defect_type == defect_type)
     query = await apply_product_line_filter(query, user, MESScrapRecord, "mes", db, request)
+
+    # Count query
+    count_query = select(func.count()).select_from(query.subquery())
+    total_res = await db.execute(count_query)
+    total = total_res.scalar() or 0
 
     query = query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     items = result.scalars().all()
 
-    return [schemas.MESScrapRecordResponse.model_validate(s) for s in items]
+    return schemas.MESScrapRecordListResponse(
+        items=[schemas.MESScrapRecordResponse.model_validate(s) for s in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -243,6 +243,20 @@ class MESScrapRecordResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MESProductionOrderListResponse(BaseModel):
+    items: list[MESProductionOrderResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class MESScrapRecordListResponse(BaseModel):
+    items: list[MESScrapRecordResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 # ---------------------------------------------------------------------------
 # Ingestion request schemas
 # ---------------------------------------------------------------------------

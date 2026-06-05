@@ -3,6 +3,7 @@ import {
   Table, Tag, Typography, Select, App,
 } from "antd";
 import { listScrapRecords } from "../../api/mes";
+import { useProductLineStore } from "../../store/productLineStore";
 import type { MESScrapRecord } from "../../types/mes";
 
 const { Title } = Typography;
@@ -26,10 +27,11 @@ export default function MESScrapPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [defectFilter, setDefectFilter] = useState<string>("");
+  const productLine = useProductLineStore((s) => s.selected);
 
-  const fetchData = (p: number = page, defectType?: string) => {
+  const fetchData = (p: number = page, currentDefectType?: string, plCode?: string | null) => {
     setLoading(true);
-    listScrapRecords(p, 20, defectType)
+    listScrapRecords(p, 20, plCode || undefined, currentDefectType || undefined)
       .then((res) => {
         setData(res.items);
         setTotal(res.total);
@@ -39,9 +41,8 @@ export default function MESScrapPage() {
   };
 
   useEffect(() => {
-    fetchData(1, defectFilter || undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defectFilter]);
+    fetchData(1, defectFilter || undefined, productLine);
+  }, [defectFilter, productLine]);
 
   const handleDefectChange = (value: string) => {
     setDefectFilter(value);
@@ -136,7 +137,7 @@ export default function MESScrapPage() {
           pageSize: 20,
           onChange: (p) => {
             setPage(p);
-            fetchData(p, defectFilter || undefined);
+            fetchData(p, defectFilter || undefined, productLine);
           },
         }}
       />
