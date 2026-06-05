@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -231,7 +231,35 @@ async def advance_capa(
         )
         db.add(skip_log)
 
-    await db.commit()
+    # Write to MES outbox before commit
+    if capa.product_line_code and old_status != capa.status:
+        from app.services.mes_service import MESPushService
+        from app.models.mes import MESConnection
+        from sqlalchemy import select
+
+        query = select(MESConnection).where(
+            MESConnection.is_active == True,
+            MESConnection.product_line_code == capa.product_line_code,
+        )
+        result = await db.execute(query)
+        for conn in result.scalars().all():
+            cfg = conn.config or {}
+            if conn.connector_type != "mock" and not cfg.get("push_enabled", False):
+                continue
+            await MESPushService.push_event(
+                db,
+                event_type="capa_status_change",
+                connection_id=conn.connection_id,
+                payload={
+                    "capa_id": str(capa.report_id),
+                    "old_status": old_status,
+                    "new_status": capa.status,
+                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                    "product_line_code": capa.product_line_code,
+                },
+            )
+
+    await db.commit()  # existing commit includes outbox
     await db.refresh(capa)
     return capa
 

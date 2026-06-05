@@ -814,11 +814,40 @@ async def add_sample_batch(
 ) -> SampleBatch:
     batch = await _create_sample_batch_inner(db, user_id, ic_id, data)
     if commit:
-        await db.commit()
-        await db.refresh(batch)
         ic = await get_inspection_characteristic(db, ic_id)
         if ic:
-            await _reevaluate_alarms(db, ic)
+            new_alarms = await _reevaluate_alarms_no_commit(db, ic)
+            # Only write outbox if new alarms were actually created
+            if new_alarms and ic.product_line:
+                from app.services.mes_service import MESPushService
+                from app.models.mes import MESConnection
+                from sqlalchemy import select
+
+                query = select(MESConnection).where(
+                    MESConnection.is_active == True,
+                    MESConnection.product_line_code == ic.product_line,
+                )
+                result = await db.execute(query)
+                for conn in result.scalars().all():
+                    # Only push to connections with push_enabled (mock always enabled)
+                    cfg = conn.config or {}
+                    if conn.connector_type != "mock" and not cfg.get("push_enabled", False):
+                        continue
+                    await MESPushService.push_event(
+                        db,
+                        event_type="spc_alarm",
+                        connection_id=conn.connection_id,
+                        payload={
+                            "ic_id": str(ic.ic_id),
+                            "ic_code": ic.ic_code,
+                            "alarm_count": len(new_alarms),
+                            "product_line": ic.product_line,
+                        },
+                    )
+
+        # Single commit for batch + alarms + outbox
+        await db.commit()
+        await db.refresh(batch)
     return batch
 
 
