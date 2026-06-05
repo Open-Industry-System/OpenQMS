@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 
 from app.config import settings
 from app.core.product_line_filter import enforce_product_line_access
+from app.database import async_session
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
@@ -236,22 +237,19 @@ async def generate_draft(
     request: Request,
 ) -> dict:
     start_time = time.time()
-    normalized_request_id = str(uuid.UUID(req.request_id))
-    # Critical Fix: cache key must include user_id to prevent cross-user cache leaks
-    cache_key = f"{user.user_id}:{report_id}:{step}:{req.format}:{normalized_request_id}"
-    user_limit_key = str(user.user_id)
 
     llm_provider = getattr(request.app.state, "llm_provider", None)
     llm_model_name = getattr(llm_provider, "model", None) or settings.LLM_MODEL or "unknown"
 
-    # Audit tracking
+    # Audit tracking — initialized before any validation so all paths are logged
     audit_success = False
     audit_error = None
     audit_status_code = 200
     result = None
+    normalized_request_id = None
 
     async def _write_audit():
-        """Write audit log for every call (success or failure)."""
+        """Write audit log for every call (success or failure) in a separate session."""
         duration_ms = int((time.time() - start_time) * 1000)
         audit_log = AuditLog(
             table_name="capa_eightd",
@@ -260,7 +258,7 @@ async def generate_draft(
             changed_fields={
                 "step": step,
                 "format": req.format,
-                "request_id": normalized_request_id,
+                "request_id": normalized_request_id or req.request_id,
                 "success": audit_success,
                 "duration_ms": duration_ms,
                 "model": llm_model_name,
@@ -269,15 +267,31 @@ async def generate_draft(
             },
             operated_by=user.user_id,
         )
-        db.add(audit_log)
-        try:
-            await db.commit()
-        except Exception:
-            await db.rollback()
-            import logging
-            logging.getLogger(__name__).exception("Audit log commit failed")
+        async with async_session() as audit_db:
+            audit_db.add(audit_log)
+            try:
+                await audit_db.commit()
+            except Exception:
+                await audit_db.rollback()
+                import logging
+                logging.getLogger(__name__).exception("Audit log commit failed")
 
     try:
+        # Validate request_id (400, not FastAPI's 422)
+        try:
+            parsed = uuid.UUID(req.request_id)
+            if parsed.version != 4:
+                raise ValueError("request_id must be UUID v4")
+        except ValueError as exc:
+            audit_status_code = 400
+            audit_error = "request_id 必须是标准 UUID v4"
+            raise HTTPException(status_code=400, detail="request_id 必须是标准 UUID v4") from exc
+        normalized_request_id = str(parsed)
+
+        # Critical Fix: cache key must include user_id to prevent cross-user cache leaks
+        cache_key = f"{user.user_id}:{report_id}:{step}:{req.format}:{normalized_request_id}"
+        user_limit_key = str(user.user_id)
+
         # 1. 获取 CAPA 实体
         capa = await db.get(CAPAEightD, report_id)
         if not capa:

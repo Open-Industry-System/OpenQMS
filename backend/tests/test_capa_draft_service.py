@@ -4,8 +4,9 @@ import time
 import uuid
 import pytest
 from fastapi import HTTPException
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import app.services.capa_draft_service as capa_draft_service
 from app.config import settings
 from app.schemas.capa_draft import DraftRequest, STEP_SCHEMA_MAP
 from app.services.capa_draft_service import (
@@ -150,6 +151,42 @@ class TestGenerateDraftSuccess:
 
 class TestGenerateDraftValidation:
     """Issue 15: 前置条件校验"""
+
+    @pytest.mark.asyncio
+    async def test_invalid_request_id(self):
+        """request_id 非标准 UUID → 400, 审计仍然写入"""
+        req = DraftRequest(format="structured", request_id="not-a-uuid")
+        audit_session = MagicMock()
+        audit_session.commit = AsyncMock()
+        audit_session.rollback = AsyncMock()
+        audit_session.add = MagicMock()
+        audit_cm = MagicMock()
+        audit_cm.__aenter__ = AsyncMock(return_value=audit_session)
+        audit_cm.__aexit__ = AsyncMock(return_value=False)
+        with patch.object(capa_draft_service, "async_session", return_value=audit_cm):
+            with pytest.raises(HTTPException) as exc:
+                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, MagicMock(), MagicMock())
+        assert exc.value.status_code == 400
+        assert "request_id" in exc.value.detail
+        assert audit_session.commit.called  # audit written even on 400
+
+    @pytest.mark.asyncio
+    async def test_non_v4_request_id(self):
+        """request_id 是 UUID 但非 v4 → 400, 审计仍然写入"""
+        req = DraftRequest(format="structured", request_id="192a2fa8-6082-11f1-84b8-12fd368e6bd2")
+        audit_session = MagicMock()
+        audit_session.commit = AsyncMock()
+        audit_session.rollback = AsyncMock()
+        audit_session.add = MagicMock()
+        audit_cm = MagicMock()
+        audit_cm.__aenter__ = AsyncMock(return_value=audit_session)
+        audit_cm.__aexit__ = AsyncMock(return_value=False)
+        with patch.object(capa_draft_service, "async_session", return_value=audit_cm):
+            with pytest.raises(HTTPException) as exc:
+                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, MagicMock(), MagicMock())
+        assert exc.value.status_code == 400
+        assert "request_id" in exc.value.detail
+        assert audit_session.commit.called  # audit written even on 400
 
     @pytest.mark.asyncio
     async def test_unsupported_step(self):
@@ -553,7 +590,7 @@ class TestProductLineEnforcement:
 
     @pytest.mark.asyncio
     async def test_audit_log(self, monkeypatch):
-        """Issue 22: 成功/失败均写审计日志"""
+        """Issue 22: 成功/失败均写审计日志（独立 session）"""
         capa = MagicMock()
         capa.report_id = uuid.uuid4()
         capa.status = "D2_DESCRIPTION"
@@ -583,6 +620,18 @@ class TestProductLineEnforcement:
         })
         request.app.state.llm_provider = llm_provider
 
+        # Mock async_session for audit log isolation
+        audit_session = MagicMock()
+        audit_session.commit = AsyncMock()
+        audit_session.rollback = AsyncMock()
+        audit_session.add = MagicMock()
+        audit_cm = MagicMock()
+        audit_cm.__aenter__ = AsyncMock(return_value=audit_session)
+        audit_cm.__aexit__ = AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            capa_draft_service, "async_session", MagicMock(return_value=audit_cm)
+        )
+
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         await generate_draft(db, capa.report_id, "d2", req, user, request)
-        assert db.commit.called
+        assert audit_session.commit.called

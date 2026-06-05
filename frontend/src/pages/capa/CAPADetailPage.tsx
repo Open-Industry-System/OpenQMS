@@ -76,6 +76,7 @@ export default function CAPADetailPage() {
     clear,
     undo,
     saveUndo,
+    canUndo,
   } = useAIDraft();
   const [previewOpen, setPreviewOpen] = useState(false);
 

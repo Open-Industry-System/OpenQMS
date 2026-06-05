@@ -10,17 +10,6 @@ class DraftRequest(BaseModel):
     format: Literal["structured", "paragraph"] = "structured"
     request_id: str
 
-    @field_validator("request_id")
-    @classmethod
-    def _validate_request_id(cls, v: str) -> str:
-        try:
-            parsed = uuid.UUID(v)
-        except ValueError:
-            raise ValueError("request_id 必须是标准 UUID")
-        if parsed.version != 4:
-            raise ValueError("request_id 必须是 UUID v4")
-        return v
-
 
 class DraftResponse(BaseModel):
     content: str
