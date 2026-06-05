@@ -23,6 +23,7 @@ PRODUCT_LINE_FIELD_MAP: dict[str, str] = {
     "special_characteristic": "product_line_code",
     "quality_goal": "product_line_code",
     "scar": "product_line_code",
+    "mes": "product_line_code",
 }
 
 
