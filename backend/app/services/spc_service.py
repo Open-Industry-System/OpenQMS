@@ -810,14 +810,15 @@ async def _create_sample_batch_inner(
 
 async def add_sample_batch(
     db: AsyncSession, user_id: uuid.UUID, ic_id: uuid.UUID,
-    data: dict
+    data: dict, commit: bool = True,
 ) -> SampleBatch:
     batch = await _create_sample_batch_inner(db, user_id, ic_id, data)
-    await db.commit()
-    await db.refresh(batch)
-    ic = await get_inspection_characteristic(db, ic_id)
-    if ic:
-        await _reevaluate_alarms(db, ic)
+    if commit:
+        await db.commit()
+        await db.refresh(batch)
+        ic = await get_inspection_characteristic(db, ic_id)
+        if ic:
+            await _reevaluate_alarms(db, ic)
     return batch
 
 
@@ -911,15 +912,18 @@ async def _compute_chart_data(db: AsyncSession, ic: InspectionCharacteristic) ->
     }
 
 
-async def _reevaluate_alarms_no_commit(db: AsyncSession, ic: InspectionCharacteristic) -> None:
+async def _reevaluate_alarms_no_commit(db: AsyncSession, ic: InspectionCharacteristic) -> list[SPCAlarm]:
     """计算告警 + 生成 SPCAlarm 记录 + db.flush()，不 commit。
-    批量导入只创建 SPCAlarm，不自动创建 CAPA。"""
+    批量导入只创建 SPCAlarm，不自动创建 CAPA。
+    返回新创建的告警列表。"""
     chart_data = await _compute_chart_data(db, ic)
     data_points = chart_data["data_points"]
     limits = chart_data["limits"]
 
+    new_alarms: list[SPCAlarm] = []
+
     if not data_points or (limits.get("ucl") is None and limits.get("ucl_list") is None):
-        return
+        return new_alarms
 
     # Evaluate rules
     subgroup_stats = [dp["x_value"] for dp in data_points if dp["x_value"] is not None]
@@ -961,8 +965,10 @@ async def _reevaluate_alarms_no_commit(db: AsyncSession, ic: InspectionCharacter
             status="open",
         )
         db.add(spc_alarm)
+        new_alarms.append(spc_alarm)
 
     await db.flush()
+    return new_alarms
 
 
 async def bulk_import_samples(
@@ -1087,14 +1093,17 @@ async def bulk_import_samples(
     return ImportResult(len(created), [])
 
 
-async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> None:
-    """Re-evaluate all Western Electric rules after new data is added."""
+async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> list[SPCAlarm]:
+    """Re-evaluate all Western Electric rules after new data is added.
+    返回新创建的告警列表。"""
     chart_data = await _compute_chart_data(db, ic)
     data_points = chart_data["data_points"]
     limits = chart_data["limits"]
 
+    new_alarms: list[SPCAlarm] = []
+
     if not data_points or (limits.get("ucl") is None and limits.get("ucl_list") is None):
-        return
+        return new_alarms
 
     # Evaluate rules
     subgroup_stats = [dp["x_value"] for dp in data_points if dp["x_value"] is not None]
@@ -1136,6 +1145,7 @@ async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> 
             status="open",
         )
         db.add(spc_alarm)
+        new_alarms.append(spc_alarm)
 
         # Auto-create CAPA for critical alarms
         if alarm["severity"] == "critical":
@@ -1153,6 +1163,7 @@ async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> 
             spc_alarm.linked_capa_id = capa.report_id
 
     await db.commit()
+    return new_alarms
 
 
 async def get_chart_data(db: AsyncSession, ic_id: uuid.UUID) -> Dict[str, Any]:
