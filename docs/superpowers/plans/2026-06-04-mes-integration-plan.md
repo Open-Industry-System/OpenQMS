@@ -720,9 +720,13 @@ class RESTConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_push_event(self):
-        """When push_enabled=True, push_event endpoint must be configured."""
-        if self.push_enabled and "push_event" not in self.endpoints:
-            raise ValueError("push_enabled=True requires a 'push_event' endpoint configuration")
+        """When push_enabled=True, push_event endpoint must be configured with method=POST."""
+        if self.push_enabled:
+            if "push_event" not in self.endpoints:
+                raise ValueError("push_enabled=True requires a 'push_event' endpoint configuration")
+            ep = self.endpoints["push_event"]
+            if ep.method.upper() != "POST":
+                raise ValueError("push_event endpoint must use method='POST'")
         return self
 
 
@@ -1804,6 +1808,8 @@ git commit -m "feat(service): add MESIngestionService with atomic measurement in
 ```python
 # backend/app/api/mes_deps.py
 """MES 专用依赖：API Key 认证（用于 /api/mes/ingest）。"""
+import uuid
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
