@@ -249,7 +249,8 @@ async def generate_draft(
     normalized_request_id = None
 
     async def _write_audit():
-        """Write audit log for every call (success or failure) in a separate session."""
+        """Write audit log for every call (success or failure) in a separate session.
+        Auditing must never mask or override the original error."""
         duration_ms = int((time.time() - start_time) * 1000)
         audit_log = AuditLog(
             table_name="capa_eightd",
@@ -267,14 +268,13 @@ async def generate_draft(
             },
             operated_by=user.user_id,
         )
-        async with async_session() as audit_db:
-            audit_db.add(audit_log)
-            try:
+        try:
+            async with async_session() as audit_db:
+                audit_db.add(audit_log)
                 await audit_db.commit()
-            except Exception:
-                await audit_db.rollback()
-                import logging
-                logging.getLogger(__name__).exception("Audit log commit failed")
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Audit log write failed")
 
     try:
         # Validate request_id (400, not FastAPI's 422)
