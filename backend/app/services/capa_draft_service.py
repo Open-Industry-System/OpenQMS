@@ -325,19 +325,24 @@ async def generate_draft(
         min_status = precondition["min_status"]
         required_field = precondition["required_field"]
 
-        # 6. 状态顺序校验
-        try:
-            current_idx = _STATUS_ORDER.index(current_status)
-            min_idx = _STATUS_ORDER.index(min_status)
-        except ValueError:
-            audit_status_code = 409
-            raise HTTPException(status_code=409, detail="当前报告状态不支持此步骤")
-
-        if current_idx < min_idx:
+        # 6. 状态精确匹配校验：仅允许草拟当前步骤
+        _STATUS_TO_STEP = {
+            "D1_TEAM": "d2",
+            "D2_DESCRIPTION": "d2",
+            "D3_INTERIM": "d3",
+            "D4_ROOT_CAUSE": "d4",
+            "D5_CORRECTION": "d5",
+            "D6_VERIFICATION": "d6",
+            "D7_PREVENTION": "d7",
+            "D8_CLOSURE": "d8",
+            "CLOSED": "d8",
+        }
+        allowed_step = _STATUS_TO_STEP.get(current_status)
+        if allowed_step is None or step != allowed_step:
             audit_status_code = 409
             raise HTTPException(
                 status_code=409,
-                detail=f"当前步骤为 {current_status}，需先完成至 {min_status} 才能生成 {step.upper()} 草稿",
+                detail=f"当前步骤为 {current_status}，只能草拟 {allowed_step or '无'} 步骤",
             )
 
         # 7. 数据充足性校验

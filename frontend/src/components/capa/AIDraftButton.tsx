@@ -1,7 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button, Dropdown, Spin } from "antd";
 import { OpenAIOutlined } from "@ant-design/icons";
 import type { DraftFormat } from "../../types";
+
+const STORAGE_KEY = "capa_draft_format";
+
+function loadFormat(): DraftFormat {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === "structured" || stored === "paragraph") return stored;
+  } catch { /* localStorage unavailable */ }
+  return "structured";
+}
 
 interface AIDraftButtonProps {
   loading: boolean;
@@ -16,7 +26,11 @@ export default function AIDraftButton({
   error,
   onGenerate,
 }: AIDraftButtonProps) {
-  const [format, setFormat] = useState<DraftFormat>("structured");
+  const [format, setFormat] = useState<DraftFormat>(loadFormat);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, format); } catch { /* ignore */ }
+  }, [format]);
 
   const items = [
     {

@@ -263,10 +263,10 @@ class TestGenerateDraftValidation:
 
     @pytest.mark.asyncio
     async def test_status_mismatch_d3(self):
-        """Issue 15: D3 步骤但状态不是 D3_INTERIM → 409"""
+        """D3 步骤但状态不是 D3_INTERIM → 409"""
         capa = MagicMock()
         capa.report_id = uuid.uuid4()
-        capa.status = "D2_DESCRIPTION"  # 不是 D3_INTERIM
+        capa.status = "D2_DESCRIPTION"  # 只允许 d2
         capa.title = "测试报告标题"
         capa.document_no = "8D-2026-001"
         capa.product_line_code = "DC-DC-100"
@@ -285,6 +285,31 @@ class TestGenerateDraftValidation:
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
             await generate_draft(db, capa.report_id, "d3", req, user, MagicMock())
+        assert exc.value.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_backward_step_blocked(self):
+        """D8_CLOSURE 状态下请求 d2 → 409（不允许回头草拟）"""
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "D8_CLOSURE"
+        capa.title = "测试报告标题"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = "已有描述"
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
+        user.role_definition.bypass_row_level_security = True
+
+        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        with pytest.raises(HTTPException) as exc:
+            await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
         assert exc.value.status_code == 409
 
 
