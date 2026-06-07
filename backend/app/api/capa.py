@@ -429,20 +429,18 @@ async def draft_capabilities(
     await enforce_product_line_access(user, capa.product_line_code, db)
 
     current_status = capa.status
-    if current_status == "ARCHIVED":
+    if current_status in ("ARCHIVED", "CLOSED", "D1_TEAM"):
         return {"available_steps": [], "current_step": current_status}
 
-    # 根据当前状态返回可用步骤
+    # 根据当前状态返回可用步骤（仅 D2_DESCRIPTION ~ D8_CLOSURE）
     status_to_steps = {
-        "D1_TEAM": ["d2"],
-        "D2_DESCRIPTION": ["d2", "d3"],
-        "D3_INTERIM": ["d3", "d4"],
-        "D4_ROOT_CAUSE": ["d4", "d5"],
-        "D5_CORRECTION": ["d5", "d6"],
-        "D6_VERIFICATION": ["d6", "d7"],
-        "D7_PREVENTION": ["d7", "d8"],
+        "D2_DESCRIPTION": ["d2"],
+        "D3_INTERIM": ["d3"],
+        "D4_ROOT_CAUSE": ["d4"],
+        "D5_CORRECTION": ["d5"],
+        "D6_VERIFICATION": ["d6"],
+        "D7_PREVENTION": ["d7"],
         "D8_CLOSURE": ["d8"],
-        "CLOSED": ["d8"],
     }
 
     return {

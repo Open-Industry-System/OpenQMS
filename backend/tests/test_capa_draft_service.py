@@ -312,6 +312,56 @@ class TestGenerateDraftValidation:
             await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
         assert exc.value.status_code == 409
 
+    @pytest.mark.asyncio
+    async def test_d1_team_status_blocked(self):
+        """D1_TEAM 状态下请求 d2 → 409（D1 无可草拟步骤）"""
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "D1_TEAM"
+        capa.title = "测试报告标题"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = ""
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
+        user.role_definition.bypass_row_level_security = True
+
+        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        with pytest.raises(HTTPException) as exc:
+            await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
+        assert exc.value.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_closed_status_blocked(self):
+        """CLOSED 状态下请求 d8 → 409（已关闭无可草拟步骤）"""
+        capa = MagicMock()
+        capa.report_id = uuid.uuid4()
+        capa.status = "CLOSED"
+        capa.title = "测试报告标题"
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d2_description = "描述"
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=capa)
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
+        user.role_definition.bypass_row_level_security = True
+
+        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+        with pytest.raises(HTTPException) as exc:
+            await generate_draft(db, capa.report_id, "d8", req, user, MagicMock())
+        assert exc.value.status_code == 409
+
 
 class TestRateLimitAndErrors:
     """Issue 16: 限流与异常路径"""

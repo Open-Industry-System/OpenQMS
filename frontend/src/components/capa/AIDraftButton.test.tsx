@@ -27,7 +27,7 @@ describe("AIDraftButton", () => {
   });
 
   it("reads format from localStorage on mount", () => {
-    localStorage.setItem("capa_draft_format", "paragraph");
+    localStorage.setItem("openqms_ai_draft_preference", JSON.stringify({ format: "paragraph" }));
     const onGenerate = vi.fn();
 
     render(<AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />);
@@ -37,13 +37,22 @@ describe("AIDraftButton", () => {
   });
 
   it("defaults to structured when localStorage has invalid value", () => {
-    localStorage.setItem("capa_draft_format", "invalid");
+    localStorage.setItem("openqms_ai_draft_preference", "invalid");
     const onGenerate = vi.fn();
 
     render(<AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />);
     fireEvent.click(screen.getByText("AI草拟"));
 
     expect(onGenerate).toHaveBeenCalledWith("structured");
+  });
+
+  it("persists format to localStorage with correct schema", () => {
+    const onGenerate = vi.fn();
+    render(<AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />);
+    fireEvent.click(screen.getByText("AI草拟"));
+
+    const stored = JSON.parse(localStorage.getItem("openqms_ai_draft_preference")!);
+    expect(stored).toEqual({ format: "structured" });
   });
 
   it("is disabled when tempUnavailable", () => {

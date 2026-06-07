@@ -326,8 +326,8 @@ async def generate_draft(
         required_field = precondition["required_field"]
 
         # 6. 状态精确匹配校验：仅允许草拟当前步骤
+        # D1_TEAM / CLOSED / ARCHIVED 无可草拟步骤
         _STATUS_TO_STEP = {
-            "D1_TEAM": "d2",
             "D2_DESCRIPTION": "d2",
             "D3_INTERIM": "d3",
             "D4_ROOT_CAUSE": "d4",
@@ -335,7 +335,6 @@ async def generate_draft(
             "D6_VERIFICATION": "d6",
             "D7_PREVENTION": "d7",
             "D8_CLOSURE": "d8",
-            "CLOSED": "d8",
         }
         allowed_step = _STATUS_TO_STEP.get(current_status)
         if allowed_step is None or step != allowed_step:

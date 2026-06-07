@@ -3,14 +3,21 @@ import { Button, Dropdown, Spin } from "antd";
 import { OpenAIOutlined } from "@ant-design/icons";
 import type { DraftFormat } from "../../types";
 
-const STORAGE_KEY = "capa_draft_format";
+const STORAGE_KEY = "openqms_ai_draft_preference";
 
 function loadFormat(): DraftFormat {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "structured" || stored === "paragraph") return stored;
-  } catch { /* localStorage unavailable */ }
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.format === "structured" || parsed.format === "paragraph") return parsed.format;
+    }
+  } catch { /* localStorage unavailable or invalid JSON */ }
   return "structured";
+}
+
+function saveFormat(fmt: DraftFormat) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ format: fmt })); } catch { /* ignore */ }
 }
 
 interface AIDraftButtonProps {
@@ -29,7 +36,7 @@ export default function AIDraftButton({
   const [format, setFormat] = useState<DraftFormat>(loadFormat);
 
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, format); } catch { /* ignore */ }
+    saveFormat(format);
   }, [format]);
 
   const items = [
