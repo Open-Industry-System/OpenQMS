@@ -7,6 +7,7 @@ Provides:
 - test_plm_connection: lightweight connectivity test
 """
 
+import logging
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -15,6 +16,21 @@ from typing import Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+try:
+    from app.models.plm import PLMConnection as PLMConnectionType
+except ImportError:
+    PLMConnectionType = Any  # type: ignore[assignment,misc]
+
+
+# ---------------------------------------------------------------------------
+# Custom exceptions
+# ---------------------------------------------------------------------------
+
+class ConnectorConfigError(Exception):
+    """Raised when a connector receives invalid or unsupported configuration."""
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +67,7 @@ class PLMConnector(ABC):
         ...
 
     async def close(self) -> None:
-        """Release any resources (HTTP clients, etc.)."""
+        """Release any resources (HTTP clients, etc.). Default no-op."""
 
 
 # ---------------------------------------------------------------------------
@@ -161,14 +177,14 @@ _DEMO_BOMS = [
         "bom_revision": "C",
         "level": 2,
     },
-    # Level 3: derived component (virtual sub-component of capacitor bank)
+    # Level 3: capacitor bank sub-component (non-circular, no back-reference to parent)
     {
         "external_id": "BOM-005",
         "parent_part_number": "CAP-CER-100UF",
         "parent_revision": "A",
-        "child_part_number": "PCBA-MAIN-01",
-        "child_revision": "C",
-        "quantity": Decimal("1"),
+        "child_part_number": "CAP-CER-082UF",
+        "child_revision": "A",
+        "quantity": Decimal("2"),
         "bom_revision": "A",
         "level": 3,
     },
@@ -276,12 +292,12 @@ class RESTPLMConnector(PLMConnector):
     def __init__(self, config: dict[str, Any]) -> None:
         self._config = config
         self._base_url = config.get("base_url", "").rstrip("/")
-        self._timeout = config.get("timeout", 30)
+        self._timeout = float(config.get("timeout", 30))
         self._retry = config.get("retry", {"max_retries": 3, "backoff_seconds": [1, 2, 4]})
         self._endpoints = config.get("endpoints", {})
         self._auth_type = config.get("auth_type", "none")
         self._auth_config = config.get("auth_config", {})
-        self._client = httpx.AsyncClient(timeout=self._timeout)
+        self._client: httpx.AsyncClient | None = httpx.AsyncClient(timeout=self._timeout)
 
     async def fetch_parts(self, since: datetime) -> list[dict]:
         # TODO: Implement REST call to PLM parts endpoint
@@ -302,7 +318,9 @@ class RESTPLMConnector(PLMConnector):
         raise NotImplementedError("REST PLM connector not yet implemented")
 
     async def close(self) -> None:
-        await self._client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
 
 # ---------------------------------------------------------------------------
@@ -310,14 +328,14 @@ class RESTPLMConnector(PLMConnector):
 # ---------------------------------------------------------------------------
 
 def get_plm_connector(
-    connection, db: AsyncSession | None = None
+    connection: PLMConnectionType, db: AsyncSession | None = None
 ) -> PLMConnector:
     """Return a PLMConnector instance for the given PLMConnection."""
     if connection.connector_type == "mock":
         return MockPLMConnector(db)
     if connection.connector_type in ("rest", "siemens_tc", "dassault_enovia", "ptc_windchill"):
         return RESTPLMConnector(connection.config)
-    raise ValueError(f"Unsupported PLM connector_type: {connection.connector_type}")
+    raise ConnectorConfigError(f"Unsupported PLM connector_type: {connection.connector_type}")
 
 
 # ---------------------------------------------------------------------------
@@ -325,12 +343,12 @@ def get_plm_connector(
 # ---------------------------------------------------------------------------
 
 async def test_plm_connection(
-    conn, db: AsyncSession | None = None
+    conn: PLMConnectionType, db: AsyncSession | None = None
 ) -> dict:
     """Lightweight connectivity test: fetch parts since epoch start.
 
     Returns {"status": "ok", "parts_count": n} on success,
-    or {"status": "error", "error": "..."} on failure.
+    or {"status": "error", "error": "...", "error_class": "..."} on failure.
     """
     connector = get_plm_connector(conn, db)
     try:
@@ -338,6 +356,13 @@ async def test_plm_connection(
         parts = await connector.fetch_parts(epoch_start)
         return {"status": "ok", "parts_count": len(parts)}
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        logger.error(
+            "PLM connection test failed: %s: %s", type(e).__name__, e,
+        )
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_class": type(e).__name__,
+        }
     finally:
         await connector.close()
