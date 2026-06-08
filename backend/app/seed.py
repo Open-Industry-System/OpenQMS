@@ -3,6 +3,7 @@ Seed script: creates demo data for development.
 Run: docker compose exec backend python -m app.seed
 """
 import asyncio
+import secrets
 from datetime import date, datetime, timezone, timedelta
 from sqlalchemy import select
 
@@ -131,22 +132,27 @@ async def seed():
             select(User).where(User.user_id == SYSTEM_USER_ID)
         )
         if not system_user_result.scalar_one_or_none():
+            # Guard: skip system user creation if admin role is missing
             admin_role_result = await db.execute(
                 select(RoleDefinition).where(RoleDefinition.role_key == "admin")
             )
-            admin_role_id = admin_role_result.scalar_one().id
-            db.add(User(
-                user_id=SYSTEM_USER_ID,
-                username="system",
-                display_name="System",
-                email="system@openqms.local",
-                password_hash="$2b$12$LbSwNeUzYlHkIBO5YZAo6eHGTx/ist7Y4TJmC6FH9Hqa6NgZEhBpa",
-                legacy_role="admin",
-                role_id=admin_role_id,
-                is_active=True,
-            ))
-            await db.flush()
-            print("System user created for PLM background tasks.")
+            admin_role_row = admin_role_result.scalar_one_or_none()
+            if admin_role_row is None:
+                print("WARNING: admin role not found, skipping system user creation.")
+            else:
+                db.add(User(
+                    user_id=SYSTEM_USER_ID,
+                    username="system",
+                    display_name="System",
+                    email="system@openqms.local",
+                    # System user is FK-only and should never login
+                    password_hash=hash_password(secrets.token_urlsafe()),
+                    legacy_role="admin",
+                    role_id=admin_role_row.id,
+                    is_active=True,
+                ))
+                await db.flush()
+                print("System user created for PLM background tasks.")
 
         # Check if already seeded
         result = await db.execute(select(User).where(User.username == "engineer"))
@@ -690,24 +696,33 @@ async def seed():
             db.add(plm_conn)
             await db.flush()
 
-            mock_connector = MockPLMConnector(config={})
+            mock_connector = MockPLMConnector()
             ingestion = PLMIngestionService(db)
             epoch = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
             for part in await mock_connector.fetch_parts(epoch):
                 part["data_type"] = "part"
                 part["connection_id"] = plm_conn.connection_id
-                await ingestion.ingest(part)
+                try:
+                    await ingestion.ingest(part)
+                except Exception as e:
+                    print(f"WARNING: failed to ingest PLM part {part.get('part_number', '?')}: {e}")
 
             for bom in await mock_connector.fetch_boms(epoch):
                 bom["data_type"] = "bom"
                 bom["connection_id"] = plm_conn.connection_id
-                await ingestion.ingest(bom)
+                try:
+                    await ingestion.ingest(bom)
+                except Exception as e:
+                    print(f"WARNING: failed to ingest PLM BOM {bom.get('external_id', '?')}: {e}")
 
             for co in await mock_connector.fetch_change_orders(epoch):
                 co["data_type"] = "change_order"
                 co["connection_id"] = plm_conn.connection_id
-                await ingestion.ingest(co)
+                try:
+                    await ingestion.ingest(co)
+                except Exception as e:
+                    print(f"WARNING: failed to ingest PLM change order {co.get('change_number', '?')}: {e}")
 
             print("PLM demo data seeded (mock connector).")
 
