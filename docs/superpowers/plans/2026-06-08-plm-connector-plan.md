@@ -60,6 +60,28 @@
 **Files:**
 - Create: `backend/alembic/versions/031_add_plm_tables.py`
 
+- [ ] **Task 3 schema note: add response fields that already exist in model/migration**
+
+```python
+class PLMPartResponse(BaseModel):
+    ...
+    source_updated_at: Optional[datetime] = None
+    product_line_code: Optional[str] = None
+    plm_raw_data: Optional[dict] = None
+
+class PLMBOMResponse(BaseModel):
+    ...
+    source_updated_at: Optional[datetime] = None
+    product_line_code: Optional[str] = None
+    plm_raw_data: Optional[dict] = None
+
+class PLMChangeOrderResponse(BaseModel):
+    ...
+    source_updated_at: Optional[datetime] = None
+    product_line_code: Optional[str] = None
+    plm_raw_data: Optional[dict] = None
+```
+
 - [ ] **Step 1: 编写 Alembic 迁移**
 
 参考 `backend/alembic/versions/030_add_mes_tables.py` 的结构，创建 9 张表：

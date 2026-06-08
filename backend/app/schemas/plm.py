@@ -62,6 +62,7 @@ class PLMPartResponse(BaseModel):
     is_key_characteristic: bool
     source_updated_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
+    plm_raw_data: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 
@@ -77,7 +78,9 @@ class PLMBOMResponse(BaseModel):
     quantity: float
     bom_revision: str
     level: int
+    source_updated_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
+    plm_raw_data: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 
@@ -100,6 +103,7 @@ class PLMChangeOrderResponse(BaseModel):
     actual_implementation_date: Optional[datetime] = None
     source_updated_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
+    plm_raw_data: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 
