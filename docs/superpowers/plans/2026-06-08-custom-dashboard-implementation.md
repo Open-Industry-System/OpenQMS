@@ -192,10 +192,10 @@ Alternatively, verify via async query:
 cd backend && python -c "
 import asyncio
 from sqlalchemy import text
-from app.database import async_engine
+from app.database import engine
 
 async def check():
-    async with async_engine.begin() as conn:
+    async with engine.begin() as conn:
         result = await conn.execute(text(\"SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename='user_dashboard_layouts'\"))
         print(bool(result.scalar_one_or_none()))
 
@@ -1344,7 +1344,44 @@ import AlertOverdueCapaWidget from "./AlertOverdueCapaWidget";
 import AlertHighPpmWidget from "./AlertHighPpmWidget";
 import RecentActionsWidget from "./RecentActionsWidget";
 
-// Update registry entries...
+// Replace placeholderComponent for these entries in the registry:
+
+alert_high_rpn_fmea: {
+  type: "alert_high_rpn_fmea",
+  name: "高 RPN FMEA Top5",
+  category: "alert",
+  defaultSize: { w: 4, h: 4 },
+  minSize: { w: 3, h: 3 },
+  module: "fmea",
+  component: AlertHighRpnWidget,
+},
+alert_overdue_capa: {
+  type: "alert_overdue_capa",
+  name: "超期 CAPA Top5",
+  category: "alert",
+  defaultSize: { w: 4, h: 4 },
+  minSize: { w: 3, h: 3 },
+  module: "capa",
+  component: AlertOverdueCapaWidget,
+},
+alert_high_ppm_suppliers: {
+  type: "alert_high_ppm_suppliers",
+  name: "PPM 超标供应商 Top5",
+  category: "alert",
+  defaultSize: { w: 4, h: 4 },
+  minSize: { w: 3, h: 3 },
+  module: "supplier",
+  component: AlertHighPpmWidget,
+},
+recent_actions: {
+  type: "recent_actions",
+  name: "最近操作",
+  category: "list",
+  defaultSize: { w: 12, h: 3 },
+  minSize: { w: 6, h: 2 },
+  module: "dashboard",
+  component: RecentActionsWidget,
+},
 ```
 
 - [ ] **Step 6: Commit**
@@ -1367,12 +1404,10 @@ git commit -m "feat: add alert and list widget components"
 - Create: `frontend/src/components/dashboard/widgets/SupplierPpmWidget.tsx`
 - Modify: `frontend/src/components/dashboard/widgets/registry.ts`
 
-- [ ] **Step 1-6: Create each extended widget component**
-
-Follow the same pattern as KPI widgets for simple ones, and Card+List/Table for chart-like ones. For brevity, here are the implementations:
+- [ ] **Step 1: Create SpcAbnormalWidget.tsx**
 
 ```tsx
-// SpcAbnormalWidget.tsx
+// frontend/src/components/dashboard/widgets/SpcAbnormalWidget.tsx
 import { WarningOutlined } from "@ant-design/icons";
 import KPICard from "../../dashboard/KPICard";
 import type { WidgetProps } from "./types";
@@ -1394,8 +1429,10 @@ export default function SpcAbnormalWidget({ data, loading, error, onRetry }: Wid
 }
 ```
 
+- [ ] **Step 2: Create SpcCapabilityWidget.tsx**
+
 ```tsx
-// SpcCapabilityWidget.tsx
+// frontend/src/components/dashboard/widgets/SpcCapabilityWidget.tsx
 import { Card, Statistic, Button, Row, Col } from "antd";
 import { BarChartOutlined } from "@ant-design/icons";
 import type { WidgetProps } from "./types";
@@ -1421,8 +1458,12 @@ export default function SpcCapabilityWidget({ data, loading, error, onRetry }: W
 }
 ```
 
+```
+
+- [ ] **Step 3: Create MsaGaugeExpiryWidget.tsx**
+
 ```tsx
-// MsaGaugeExpiryWidget.tsx
+// frontend/src/components/dashboard/widgets/MsaGaugeExpiryWidget.tsx
 import { ToolOutlined } from "@ant-design/icons";
 import KPICard from "../../dashboard/KPICard";
 import type { WidgetProps } from "./types";
@@ -1444,8 +1485,10 @@ export default function MsaGaugeExpiryWidget({ data, loading, error, onRetry }: 
 }
 ```
 
+- [ ] **Step 4: Create IqcPendingWidget.tsx**
+
 ```tsx
-// IqcPendingWidget.tsx
+// frontend/src/components/dashboard/widgets/IqcPendingWidget.tsx
 import { ExperimentOutlined } from "@ant-design/icons";
 import KPICard from "../../dashboard/KPICard";
 import type { WidgetProps } from "./types";
@@ -1466,8 +1509,12 @@ export default function IqcPendingWidget({ data, loading, error, onRetry }: Widg
 }
 ```
 
+```
+
+- [ ] **Step 5: Create MesEquipmentWidget.tsx**
+
 ```tsx
-// MesEquipmentWidget.tsx
+// frontend/src/components/dashboard/widgets/MesEquipmentWidget.tsx
 import { Card, Statistic, Button, Row, Col } from "antd";
 import { ToolOutlined } from "@ant-design/icons";
 import type { WidgetProps } from "./types";
@@ -1496,8 +1543,12 @@ export default function MesEquipmentWidget({ data, loading, error, onRetry }: Wi
 }
 ```
 
+```
+
+- [ ] **Step 6: Create SupplierPpmWidget.tsx**
+
 ```tsx
-// SupplierPpmWidget.tsx
+// frontend/src/components/dashboard/widgets/SupplierPpmWidget.tsx
 import { Card, List, Button, Tag } from "antd";
 import { ShopOutlined } from "@ant-design/icons";
 import type { WidgetProps } from "./types";
@@ -1685,29 +1736,17 @@ export default function WidgetWrapper({
   const hasModuleError = !!data.errors?.[meta.module];
 
   return (
-    <div ref={containerRef} style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {/* Widget title bar + controls — widgets render their own Card/KPICard internally */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "4px 8px",
-          borderBottom: `1px solid ${token.colorBorderSecondary}`,
-          background: token.colorBgContainer,
-          minHeight: 32,
-        }}
-      >
-        <Space>
-          <span style={{ fontSize: 13, fontWeight: 500 }}>{meta.name}</span>
-          {hasModuleError && (
-            <ReloadOutlined
-              style={{ color: token.colorError, cursor: "pointer" }}
-              onClick={onRetry}
-            />
-          )}
-        </Space>
-        {isEditing ? (
+    <div ref={containerRef} style={{ height: "100%", display: "flex", flexDirection: "column", position: "relative" }}>
+      {/* Edit-mode controls overlay — widget renders its own title internally */}
+      {isEditing && (
+        <div
+          style={{
+            position: "absolute",
+            top: 4,
+            right: 4,
+            zIndex: 10,
+          }}
+        >
           <Button
             type="text"
             size="small"
@@ -1715,9 +1754,24 @@ export default function WidgetWrapper({
             icon={<CloseOutlined />}
             onClick={() => onRemove(item.i)}
           />
-        ) : null}
-      </div>
-      <div style={{ flex: 1, overflow: "auto", padding: 8 }}>
+        </div>
+      )}
+      {hasModuleError && !isEditing && (
+        <div
+          style={{
+            position: "absolute",
+            top: 4,
+            right: 4,
+            zIndex: 10,
+          }}
+        >
+          <ReloadOutlined
+            style={{ color: token.colorError, cursor: "pointer" }}
+            onClick={onRetry}
+          />
+        </div>
+      )}
+      <div style={{ flex: 1, overflow: "auto", height: "100%" }}>
         <Component
           data={data}
           loading={loading}
