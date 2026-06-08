@@ -105,10 +105,12 @@ In `backend/app/models/__init__.py`, add:
 from app.models.user_dashboard_layout import UserDashboardLayout
 ```
 
-- [ ] **Step 3: Find the latest migration**
+- [ ] **Step 3: Verify current alembic head**
 
-Run: `ls backend/alembic/versions/ | tail -5`
-Note the most recent revision ID for `down_revision`.
+Run: `cd backend && alembic heads`
+Expected: `030_add_mes_tables (head)`
+
+This is the `down_revision` for the new migration.
 
 - [ ] **Step 4: Create the migration file**
 
@@ -269,6 +271,7 @@ class DashboardWidgetsResponse(BaseModel):
 Modify `backend/app/api/dashboard.py`. Add imports and new endpoints:
 
 ```python
+from sqlalchemy import select
 from app.models.user_dashboard_layout import UserDashboardLayout
 from app.schemas import dashboard_layout as layout_schemas
 
@@ -736,7 +739,16 @@ git commit -m "feat: add get_default_layout and get_widgets_data to dashboard se
 cd frontend && npm install react-grid-layout && npm install -D @types/react-grid-layout
 ```
 
-- [ ] **Step 2: Create widget types**
+- [ ] **Step 2: Import CSS in global entry**
+
+Add to `frontend/src/main.tsx` (before all other imports):
+
+```typescript
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+```
+
+- [ ] **Step 3: Create widget types**
 
 ```typescript
 // frontend/src/components/dashboard/widgets/types.ts
@@ -815,7 +827,7 @@ export interface WidgetProps {
 }
 ```
 
-- [ ] **Step 3: Add types to frontend types index**
+- [ ] **Step 4: Add types to frontend types index**
 
 In `frontend/src/types/index.ts`, append:
 
@@ -830,7 +842,7 @@ export type {
 } from "../components/dashboard/widgets/types";
 ```
 
-- [ ] **Step 4: Add "mes" to ModuleKey**
+- [ ] **Step 5: Add "mes" to ModuleKey**
 
 In `frontend/src/hooks/usePermission.ts`, modify:
 
@@ -843,7 +855,7 @@ export type ModuleKey =
   | "knowledge_graph" | "mes";  // Added
 ```
 
-- [ ] **Step 5: Create widget registry**
+- [ ] **Step 6: Create widget registry**
 
 ```typescript
 // frontend/src/components/dashboard/widgets/registry.ts
@@ -1008,15 +1020,15 @@ export function getAllWidgets(): (WidgetMeta & { component: React.FC<WidgetProps
 }
 ```
 
-- [ ] **Step 6: Verify TypeScript compiles**
+- [ ] **Step 7: Verify TypeScript compiles**
 
 Run: `cd frontend && npx tsc --noEmit`
 Expected: No errors (placeholder components won't cause issues).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add frontend/package.json frontend/package-lock.json frontend/src/components/dashboard/widgets/types.ts frontend/src/components/dashboard/widgets/registry.ts frontend/src/types/index.ts frontend/src/hooks/usePermission.ts
+git add frontend/package.json frontend/package-lock.json frontend/src/main.tsx frontend/src/components/dashboard/widgets/types.ts frontend/src/components/dashboard/widgets/registry.ts frontend/src/types/index.ts frontend/src/hooks/usePermission.ts
 git commit -m "feat: add react-grid-layout, widget types, registry, and mes module key"
 ```
 
@@ -1535,14 +1547,67 @@ import MesEquipmentWidget from "./MesEquipmentWidget";
 import SupplierPpmWidget from "./SupplierPpmWidget";
 ```
 
-Replace `placeholderComponent` with actual components in registry entries:
+Replace each `placeholderComponent` in the registry with the actual component. Here are the full updated entries:
+
 ```typescript
-spc_abnormal_count: { ... component: SpcAbnormalWidget ... },
-spc_capability_summary: { ... component: SpcCapabilityWidget ... },
-msa_gauge_expiry: { ... component: MsaGaugeExpiryWidget ... },
-iqc_pending_inspections: { ... component: IqcPendingWidget ... },
-mes_equipment_status: { ... component: MesEquipmentWidget ... },
-supplier_ppm_trend: { ... component: SupplierPpmWidget ... },
+export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<WidgetProps> }> = {
+  // ... existing entries (kpi_pending_actions through recent_actions) unchanged ...
+
+  spc_abnormal_count: {
+    type: "spc_abnormal_count",
+    name: "SPC 异常点数",
+    category: "kpi",
+    defaultSize: { w: 3, h: 2 },
+    minSize: { w: 2, h: 2 },
+    module: "spc",
+    component: SpcAbnormalWidget,
+  },
+  spc_capability_summary: {
+    type: "spc_capability_summary",
+    name: "过程能力摘要",
+    category: "chart",
+    defaultSize: { w: 4, h: 4 },
+    minSize: { w: 3, h: 3 },
+    module: "spc",
+    component: SpcCapabilityWidget,
+  },
+  msa_gauge_expiry: {
+    type: "msa_gauge_expiry",
+    name: "量具到期提醒",
+    category: "kpi",
+    defaultSize: { w: 3, h: 2 },
+    minSize: { w: 2, h: 2 },
+    module: "msa",
+    component: MsaGaugeExpiryWidget,
+  },
+  iqc_pending_inspections: {
+    type: "iqc_pending_inspections",
+    name: "IQC 待检批次",
+    category: "kpi",
+    defaultSize: { w: 3, h: 2 },
+    minSize: { w: 2, h: 2 },
+    module: "iqc",
+    component: IqcPendingWidget,
+  },
+  mes_equipment_status: {
+    type: "mes_equipment_status",
+    name: "设备状态概览",
+    category: "chart",
+    defaultSize: { w: 4, h: 3 },
+    minSize: { w: 3, h: 2 },
+    module: "mes",
+    component: MesEquipmentWidget,
+  },
+  supplier_ppm_trend: {
+    type: "supplier_ppm_trend",
+    name: "供应商 PPM 趋势",
+    category: "chart",
+    defaultSize: { w: 4, h: 4 },
+    minSize: { w: 3, h: 3 },
+    module: "supplier",
+    component: SupplierPpmWidget,
+  },
+};
 ```
 
 - [ ] **Step 8: Commit**
@@ -1598,16 +1663,14 @@ export default function WidgetWrapper({
     const el = containerRef.current;
     if (!el) return;
 
-    let ro: ResizeObserver | null = null;
-    // Debounced resize callback would go here for chart components
-    // For now, the ResizeObserver is prepared for future chart widgets
-    ro = new ResizeObserver(() => {
-      // Chart widgets can listen to a resize context or ref
+    const ro = new ResizeObserver(() => {
+      // Chart widgets that need resize should accept a ref or listen to a resize event
+      // This observer fires whenever the widget container size changes
     });
     ro.observe(el);
 
     return () => {
-      if (ro) ro.disconnect();
+      ro.disconnect();
     };
   }, []);
 
@@ -1623,40 +1686,45 @@ export default function WidgetWrapper({
 
   return (
     <div ref={containerRef} style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <Card
-        size="small"
-        title={
-          <Space>
-            {meta.name}
-            {hasModuleError && (
-              <ReloadOutlined
-                style={{ color: token.colorError, cursor: "pointer" }}
-                onClick={onRetry}
-              />
-            )}
-          </Space>
-        }
-        extra={
-          isEditing ? (
-            <Button
-              type="text"
-              size="small"
-              danger
-              icon={<CloseOutlined />}
-              onClick={() => onRemove(item.i)}
-            />
-          ) : null
-        }
-        styles={{ body: { flex: 1, overflow: "auto", padding: "8px 12px" } }}
-        style={{ height: "100%", display: "flex", flexDirection: "column" }}
+      {/* Widget title bar + controls — widgets render their own Card/KPICard internally */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "4px 8px",
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          background: token.colorBgContainer,
+          minHeight: 32,
+        }}
       >
+        <Space>
+          <span style={{ fontSize: 13, fontWeight: 500 }}>{meta.name}</span>
+          {hasModuleError && (
+            <ReloadOutlined
+              style={{ color: token.colorError, cursor: "pointer" }}
+              onClick={onRetry}
+            />
+          )}
+        </Space>
+        {isEditing ? (
+          <Button
+            type="text"
+            size="small"
+            danger
+            icon={<CloseOutlined />}
+            onClick={() => onRemove(item.i)}
+          />
+        ) : null}
+      </div>
+      <div style={{ flex: 1, overflow: "auto", padding: 8 }}>
         <Component
           data={data}
           loading={loading}
           error={hasModuleError}
           onRetry={onRetry}
         />
-      </Card>
+      </div>
     </div>
   );
 }
@@ -1666,6 +1734,7 @@ export default function WidgetWrapper({
 
 ```tsx
 // frontend/src/components/dashboard/DashboardGrid.tsx
+import { useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout";
 import type { WidgetLayoutItem, DashboardWidgetsData } from "./widgets/types";
 import WidgetWrapper from "./WidgetWrapper";
@@ -1935,8 +2004,6 @@ import {
   ReloadOutlined,
   RollbackOutlined,
 } from "@ant-design/icons";
-import "react-grid-layout/css/styles.css";
-import "react-resizable/css/styles.css";
 import DashboardGrid from "../../components/dashboard/DashboardGrid";
 import WidgetLibraryPanel from "../../components/dashboard/WidgetLibraryPanel";
 import {
