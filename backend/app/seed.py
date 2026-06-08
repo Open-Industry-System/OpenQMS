@@ -14,6 +14,7 @@ from app.models.management_review import ManagementReview, ReviewOutput
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord, ShipmentRecord, WarrantyRecord
 from app.models.role import RoleDefinition, UserProductLine
 from app.core.security import hash_password
+from app.config import SYSTEM_USER_ID
 
 
 SAMPLE_GRAPH = {
@@ -125,6 +126,28 @@ SAMPLE_DFMEA_GRAPH = {
 
 async def seed():
     async with async_session() as db:
+        # ─── Ensure system user exists (for PLM background task FKs) ───
+        system_user_result = await db.execute(
+            select(User).where(User.user_id == SYSTEM_USER_ID)
+        )
+        if not system_user_result.scalar_one_or_none():
+            admin_role_result = await db.execute(
+                select(RoleDefinition).where(RoleDefinition.role_key == "admin")
+            )
+            admin_role_id = admin_role_result.scalar_one().id
+            db.add(User(
+                user_id=SYSTEM_USER_ID,
+                username="system",
+                display_name="System",
+                email="system@openqms.local",
+                password_hash="$2b$12$LbSwNeUzYlHkIBO5YZAo6eHGTx/ist7Y4TJmC6FH9Hqa6NgZEhBpa",
+                legacy_role="admin",
+                role_id=admin_role_id,
+                is_active=True,
+            ))
+            await db.flush()
+            print("System user created for PLM background tasks.")
+
         # Check if already seeded
         result = await db.execute(select(User).where(User.username == "engineer"))
         if result.scalar_one_or_none():
@@ -646,6 +669,47 @@ async def seed():
                     failure_mode="短路" if i == 0 else ("开路" if i == 1 else "参数漂移"),
                     description=f"保修索赔 {i+1} - {customer.name}",
                 ))
+
+        # ─── PLM demo data ───
+        from app.models.plm import PLMConnection
+        from app.services.plm_service import PLMIngestionService
+        from app.services.plm_connector import MockPLMConnector
+
+        existing_conn = await db.execute(
+            select(PLMConnection).where(PLMConnection.name == "DC-DC PLM (Mock)")
+        )
+        if not existing_conn.scalar_one_or_none():
+            plm_conn = PLMConnection(
+                name="DC-DC PLM (Mock)",
+                connector_type="mock",
+                product_line_code="DC-DC-100",
+                config={},
+                is_active=True,
+                created_by=SYSTEM_USER_ID,
+            )
+            db.add(plm_conn)
+            await db.flush()
+
+            mock_connector = MockPLMConnector(config={})
+            ingestion = PLMIngestionService(db)
+            epoch = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+            for part in await mock_connector.fetch_parts(epoch):
+                part["data_type"] = "part"
+                part["connection_id"] = plm_conn.connection_id
+                await ingestion.ingest(part)
+
+            for bom in await mock_connector.fetch_boms(epoch):
+                bom["data_type"] = "bom"
+                bom["connection_id"] = plm_conn.connection_id
+                await ingestion.ingest(bom)
+
+            for co in await mock_connector.fetch_change_orders(epoch):
+                co["data_type"] = "change_order"
+                co["connection_id"] = plm_conn.connection_id
+                await ingestion.ingest(co)
+
+            print("PLM demo data seeded (mock connector).")
 
         await db.commit()
 
