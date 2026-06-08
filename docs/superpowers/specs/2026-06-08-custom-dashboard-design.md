@@ -157,12 +157,13 @@
 
 ### 4.3 GET /api/dashboard/widgets
 
-统一数据接口，一次性返回所有 widget 所需数据。
+统一数据接口，按需返回 widget 数据。**只查询用户看板上实际存在的 widget 类型**，避免无用查询。
 
 **权限**: `Module.DASHBOARD, PermissionLevel.VIEW`
 
 **查询参数**:
 - `product_line?: string` — 产品线过滤
+- `types: string` — **必填**，逗号分隔的 widget type 列表，如 `types=kpi_pending_actions,alert_overdue_capa,spc_abnormal_count`
 
 **响应结构**:
 ```json
@@ -201,14 +202,23 @@
 ```
 
 **数据聚合逻辑**:
-- `kpi` / `alerts` / `recent_actions`: 复用现有 `dashboard_service` 方法
-- `spc`: 调用 `spc_service` 查询近 7 天异常点 + CPK 汇总
-- `msa`: 查询 `gauges` 表 `next_calibration_date <= now() + 30d`
-- `iqc`: 查询 `iqc_inspections` 状态为 `pending`
-- `mes`: 查询 `mes_equipment_status` 按状态聚合
-- `supplier`: 查询 `iqc_inspections` 按供应商分组计算 PPM
+后端根据 `types` 参数，用 `asyncio.gather` 并行查询所需数据：
+- `kpi` 相关 types → `get_summary()` + `get_dashboard()`
+- `alert` 相关 types → `get_alerts()`
+- `recent_actions` → `get_recent_actions()`
+- `spc_*` → `spc_service` 查询（带 `product_line_codes` 过滤）
+- `msa_*` → `gauge` 表查询（带 `product_line_codes` 过滤）
+- `iqc_*` → `iqc_inspections` 查询（带 `product_line_codes` 过滤）
+- `mes_*` → `mes_equipment_status` 查询（带 `product_line_codes` 过滤）
+- `supplier_*` → `iqc_inspections` 分组查询（带 `product_line_codes` 过滤）
 
-**权限过滤**: 后端根据用户模块权限，删除无权限模块的数据。如用户无 `spc` 权限，则响应中不包含 `spc` 字段。
+**权限过滤**（双层）：
+1. **模块级过滤**：后端根据用户模块权限，删除无权限模块的数据
+2. **行级过滤 (RLS)**：所有查询通过 `get_user_product_line_codes()` 获取用户授权产线，SQL 层做 `product_line_code.in_(codes)` 物理过滤
+
+**性能保障**：
+- `asyncio.gather` 并行执行各模块查询，总耗时 ≈ 最慢单个查询
+- 单个模块查询失败不影响其他模块（返回该模块为空，前端降级显示）
 
 ---
 
@@ -313,7 +323,39 @@ DashboardPage
         └── WidgetWrapper × N（带删除按钮）
 ```
 
-### 5.5 react-grid-layout 配置
+### 5.5 WidgetWrapper 设计
+
+**ResizeObserver + 图表自适应**:
+```typescript
+// WidgetWrapper.tsx 内部
+const containerRef = useRef<HTMLDivElement>(null);
+useEffect(() => {
+  const el = containerRef.current;
+  if (!el) return;
+  const ro = new ResizeObserver(
+    debounce((entries) => {
+      const { width, height } = entries[0].contentRect;
+      onResize?.({ width, height });
+    }, 200)
+  );
+  ro.observe(el);
+  return () => ro.disconnect();
+}, []);
+```
+
+- 子图表组件（ECharts / Ant Design Charts）通过 `onResize` 回调触发 `.resize()`
+- 防抖 200ms，避免拖拽过程中频繁重绘
+
+**废弃 Widget 防御**:
+```typescript
+// DashboardPage 加载 layout 时
+const validWidgets = layoutConfig.widgets.filter(
+  item => widgetRegistry[item.type] !== undefined
+);
+```
+- 当后端 JSONB 中存在已废弃/改名的 widget type 时，前端静默过滤，不渲染报错
+
+### 5.6 react-grid-layout 配置
 
 ```typescript
 const GRID_CONFIG = {
@@ -325,6 +367,14 @@ const GRID_CONFIG = {
   colsResponsive: { lg: 12, md: 10, sm: 6, xs: 4 },
 };
 ```
+
+**移动端降级策略**:
+- 屏幕宽度 `< 768px`（sm 断点）时：
+  - 隐藏「编辑布局」按钮
+  - `react-grid-layout` 切换为 `isDraggable=false, isResizable=false`
+  - 使用 CSS `display: block; width: 100%` 强制所有 widget 线性垂直排列
+  - 按 `y` 坐标升序排列，同 `y` 按 `x` 升序
+- 编辑模式仅在 `lg` / `md` 断点可用
 
 ### 5.6 编辑模式交互流程
 
@@ -481,6 +531,13 @@ frontend/
 - [ ] 后端新增 Alembic 迁移可正常升级/降级
 - [ ] 后端 API 响应符合 Pydantic Schema
 - [ ] react-grid-layout 响应式断点正常工作（大屏 12 列 → 小屏 4 列）
+- [ ] **ResizeObserver**：widget 调整大小后内部图表自动自适应重绘
+- [ ] **废弃 Widget 防御**：layout_config 中存在无效 type 时不报错，静默过滤
+- [ ] **移动端降级**：屏幕 `< 768px` 时禁用编辑、强制线性布局
+- [ ] **按需查询**：GET `/widgets?types=...` 只查询实际用到的 widget 数据
+- [ ] **RLS 隔离**：所有跨模块查询均带 `product_line_codes` 过滤
+- [ ] **并行查询**：后端用 `asyncio.gather` 聚合各模块数据
+- [ ] **容错**：单个模块查询失败不影响其他 widget 渲染
 
 ---
 
