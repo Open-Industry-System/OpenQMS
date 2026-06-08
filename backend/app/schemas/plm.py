@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 CONNECTOR_TYPE_PATTERN = r"^(mock|rest|siemens_tc|dassault_enovia|ptc_windchill)$"
@@ -36,7 +36,7 @@ class PLMConnectionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PLMConnectionListResponse(BaseModel):
@@ -45,7 +45,7 @@ class PLMConnectionListResponse(BaseModel):
     page: int
     page_size: int
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PLMPartResponse(BaseModel):
@@ -64,7 +64,7 @@ class PLMPartResponse(BaseModel):
     product_line_code: Optional[str] = None
     plm_raw_data: Optional[dict] = None
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PLMBOMResponse(BaseModel):
@@ -82,7 +82,7 @@ class PLMBOMResponse(BaseModel):
     product_line_code: Optional[str] = None
     plm_raw_data: Optional[dict] = None
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PLMChangeOrderResponse(BaseModel):
@@ -105,7 +105,7 @@ class PLMChangeOrderResponse(BaseModel):
     product_line_code: Optional[str] = None
     plm_raw_data: Optional[dict] = None
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PLMChangeImpactTaskResponse(BaseModel):
@@ -119,7 +119,7 @@ class PLMChangeImpactTaskResponse(BaseModel):
     error_message: Optional[str] = None
     result: Optional[dict] = None
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PLMDashboardResponse(BaseModel):
@@ -129,7 +129,7 @@ class PLMDashboardResponse(BaseModel):
     pending_sc_count: int
     recent_changes: list[PLMChangeOrderResponse]
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BOMImportRequest(BaseModel):
