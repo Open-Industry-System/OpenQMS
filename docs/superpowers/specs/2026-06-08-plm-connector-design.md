@@ -19,7 +19,7 @@
 - **不在这个版本**: PLM 厂商专用适配器（西门子 TC、达索 ENOVIA、PTC Windchill）仅预留接口，先实现 mock + REST 通用适配器
 
 ### 1.3 验收标准
-- [ ] 6 张数据表 + Alembic 迁移
+- [ ] 7 张数据表 + Alembic 迁移（含 PLM SC 待处理申请表）
 - [ ] PLMConnector ABC + Mock + REST 实现
 - [ ] 三阶段短事务同步（parts → boms → change_orders 顺序）
 - [ ] 4 页前端（Connections + Dashboard + Parts + Change Orders）
@@ -66,7 +66,7 @@
 
 ---
 
-## 3. 数据模型（6 张表）
+## 3. 数据模型（7 张表）
 
 ### 3.1 `plm_connections`
 
@@ -99,7 +99,7 @@
 | is_safety_related | Boolean | 安全特性标识 |
 | is_key_characteristic | Boolean | 关键特性标识 |
 | source_updated_at | DateTime | PLM 更新时间戳 |
-| product_line_code | String(50) FK | 产品线 |
+| product_line_code | String(50) FK, nullable | 产品线（Ingestion 层从 connection 强制拷贝） |
 | plm_raw_data | JSONB | 原始数据 |
 
 **唯一约束**: `(connection_id, part_number)`
@@ -117,7 +117,7 @@
 | revision | String(20) | BOM 版本 |
 | level | Integer | BOM 层级（1=顶层） |
 | source_updated_at | DateTime | PLM 更新时间戳 |
-| product_line_code | String(50) FK | 产品线 |
+| product_line_code | String(50) FK, nullable | 产品线（Ingestion 层从 connection 强制拷贝） |
 | plm_raw_data | JSONB | 原始数据 |
 
 **唯一约束**: `(connection_id, parent_part_number, child_part_number, revision)`
@@ -142,7 +142,7 @@
 | planned_implementation_date | DateTime | 计划实施日期 |
 | actual_implementation_date | DateTime | 实际实施日期 |
 | source_updated_at | DateTime | PLM 更新时间戳 |
-| product_line_code | String(50) FK | 产品线 |
+| product_line_code | String(50) FK, nullable | 产品线（Ingestion 层从 connection 强制拷贝） |
 | plm_raw_data | JSONB | 原始数据 |
 
 **唯一约束**: `(connection_id, change_number)`
@@ -154,6 +154,30 @@
 ### 3.6 `plm_push_outbox`
 
 与 `mes_push_outbox` 结构一致。
+
+### 3.7 `plm_sc_pending_requests` — PLM 特殊特性待处理申请
+
+**设计理由**：`special_characteristics` 表的 `source_type` CHECK 约束仅允许 `DFMEA`/`PFMEA`，且 `source_node_id` 为 `nullable=False`。PLM Part 刚同步时无关联 FMEA 节点，直接写入会触发约束错误。因此新建待处理表，由质量工程师在界面上确认关联 FMEA 节点后，再正式写入 `special_characteristics`。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| request_id | UUID PK | 主键 |
+| part_id | UUID FK | 关联 `plm_parts.part_id` |
+| part_number | String(100) | 零部件编码（冗余，便于查询） |
+| characteristic_type | String(20) | `safety` / `key_characteristic` |
+| status | String(20) | `pending` → `confirmed` → `rejected` |
+| source_fmea_node_id | String(36), nullable | 关联的 FMEA 节点 ID（确认后回填） |
+| source_fmea_id | UUID, nullable | 关联的 FMEA 文档 ID（确认后回填） |
+| confirmed_by | UUID FK, nullable | 确认人 |
+| confirmed_at | DateTime, nullable | 确认时间 |
+| product_line_code | String(50) FK | 产品线 |
+| created_at | DateTime | 创建时间 |
+
+**处理流程**：
+1. PLM Part 同步时，若 `is_safety_related=True` 或 `is_key_characteristic=True`，自动创建 `pending` 记录
+2. 前端 Part 详情页显示待处理 SC 申请，工程师选择关联 FMEA 节点后确认
+3. 确认后：写入 `special_characteristics` 表（此时 `source_type="DFMEA"`，`source_node_id` 已合法）
+4. 同时更新 `plm_sc_pending_requests.status = "confirmed"`
 
 ---
 
@@ -208,19 +232,28 @@ class PLMConnector(ABC):
 
 ### 5.3 ECN 自动触发变更影响分析
 
-当 ECN 状态变为 `approved` 时：
+当 ECN 状态变为 `approved` 时，由后台同步任务触发：
 
 ```python
+SYSTEM_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")  # 系统内置用户，需在 config 中统一定义
+
 for part_number in change_order.affected_part_numbers:
     fmea_nodes = await find_fmea_nodes_by_part_number(db, part_number)
     for node in fmea_nodes:
         await change_impact_service.analyze(
             fmea_id=node.fmea_id,
             node_id=node.id,
+            node_type=node.get("type", "Component"),
+            node_name=node.get("name", ""),
             change_type="plm_ecn",
-            change_ref=change_order.change_number,
+            field_name="part_number",
+            new_value=change_order.change_number,
+            old_value=None,
+            user_id=SYSTEM_USER_ID,
         )
 ```
+
+**注意**：`change_impact_service.analyze` 签名要求 `node_type`、`node_name`、`field_name`、`new_value`、`old_value`、`user_id`，不可省略。`change_order.change_number` 通过 `new_value` 传递，用于审计追溯。后台触发时使用系统内置用户 `SYSTEM_USER_ID`。
 
 ---
 
@@ -238,14 +271,14 @@ POST   /api/plm/connections/{id}/sync          # 手动触发同步
 GET    /api/plm/parts                          # 零部件列表
 GET    /api/plm/parts/{part_id}                # 零部件详情（含 BOM 父子）
 GET    /api/plm/boms                           # BOM 列表
-GET    /api/plm/boms/tree/{part_number}        # BOM 树形展开
+GET    /api/plm/connections/{connection_id}/boms/tree/{part_number}  # BOM 树形展开（含 connection_id 避免多连接歧义）
 GET    /api/plm/change-orders                  # ECN 列表
 GET    /api/plm/change-orders/{id}             # ECN 详情（含影响分析结果）
 GET    /api/plm/dashboard                      # 概览统计
 
-POST   /api/plm/parts/{part_id}/link-fmea                  # Part 关联 FMEA 节点
-POST   /api/plm/change-orders/{id}/impact-analysis          # 手动触发影响分析
-POST   /api/plm/boms/{part_number}/import-to-fmea           # BOM 导入 DFMEA
+POST   /api/plm/parts/{part_id}/link-fmea                           # Part 关联 FMEA 节点
+POST   /api/plm/change-orders/{id}/impact-analysis                   # 手动触发影响分析
+POST   /api/plm/connections/{connection_id}/boms/{part_number}/import-to-fmea  # BOM 导入 DFMEA（含 connection_id）
 ```
 
 ---
@@ -264,7 +297,8 @@ POST   /api/plm/boms/{part_number}/import-to-fmea           # BOM 导入 DFMEA
 ## 8. 与现有模块联动
 
 ### 8.1 BOM → FMEA 结构树导入
-- Part 详情页或 BOM 页提供 **"导入到 DFMEA"** 按钮
+- **前置条件**：目标 FMEA 文档状态必须为 `draft`，且 `graph_data.nodes` 为空（或用户显式选择覆盖）
+- **覆盖策略**：首次导入为"创建"；重复导入需前端二次确认弹窗，后端清空原有节点后全量覆写
 - 后端遍历 BOM 邻接表 → 按 `level` 构建树 → 写入 `fmea_documents.graph_data.nodes`
 - 节点类型映射：level 1=system, level 2=subsystem, level 3+=component
 
@@ -273,10 +307,16 @@ POST   /api/plm/boms/{part_number}/import-to-fmea           # BOM 导入 DFMEA
 - **手动触发**: ECN 详情页 **"运行影响分析"** 按钮
 - 结果展示：受影响 FMEA 列表 + 高风险节点红色高亮 + 建议优化措施
 
-### 8.3 Part → Special Characteristic 关联
-- `is_safety_related=True` 或 `is_key_characteristic=True` 的 Part 同步时，自动在 SC 模块创建待确认条目
-- Part 详情页显示关联 SC 记录
+### 8.3 Part → Special Characteristic 关联（通过待处理申请表）
+- `is_safety_related=True` 或 `is_key_characteristic=True` 的 Part 同步时，自动创建 `plm_sc_pending_requests` 记录（`status=pending`）
+- Part 详情页显示待处理 SC 申请列表，工程师选择关联 FMEA 节点后确认
+- 确认后写入 `special_characteristics` 表（`source_type="DFMEA"`，`source_node_id` 已合法）
 - SC 审批完成后通过 `plm_push_outbox` 回写 PLM
+
+**为什么不直接写入 `special_characteristics`？**
+- `source_type` CHECK 约束仅允许 `DFMEA`/`PFMEA`，PLM 来源不合法
+- `source_node_id` 为 `nullable=False`，PLM Part 刚同步时无关联 FMEA 节点
+- 新建待处理表实现解耦，避免修改已稳定的 SC 表结构
 
 ---
 
@@ -290,6 +330,11 @@ POST   /api/plm/boms/{part_number}/import-to-fmea           # BOM 导入 DFMEA
 | ECN 触发时机 | approved | 在正式实施前给质量团队预留分析时间 |
 | 同步顺序 | 延迟 next_run_at | 无需复杂依赖图，利用现有调度机制 |
 | 厂商适配器 | 预留接口 | 先验证通用 REST 模式，再扩展专用适配器 |
+| SC 关联方式 | 新建待处理表 | 避免修改 `special_characteristics` 的 CHECK 约束和 `nullable=False` |
+| product_line_code | nullable=True | 外部 PLM 通常无 OpenQMS 产品线码，由 Ingestion 层强制拷贝 |
+| BOM 导入限制 | 仅 draft + 空 graph_data | 防止误覆盖已编辑的 FMEA 结构 |
+| API 路由 | 含 connection_id | 消除多 PLM 连接下 part_number 重复的歧义 |
+| SYSTEM_USER_ID | config 统一定义 | 后台自动触发变更分析时的审计归属 |
 
 ---
 
@@ -306,8 +351,12 @@ POST   /api/plm/boms/{part_number}/import-to-fmea           # BOM 导入 DFMEA
 ### 后端修改
 - `backend/app/core/permissions.py` — 新增 `Module.PLM`
 - `backend/app/core/product_line_filter.py` — 添加 `"plm": "product_line_code"`
+- `backend/app/core/config.py` — 定义 `SYSTEM_USER_ID` 常量
 - `backend/app/models/__init__.py` — 导出 PLM 模型
+- `backend/app/services/graph_projection_service.py` — `_node_properties` 白名单增加 `"part_number"`
 - `backend/app/main.py` — 注册 plm_router + 后台协程
+- `backend/app/seed.py` — 插入 PLM 模块权限种子数据
+- `backend/alembic/versions/028_permission_matrix.py` 或后续迁移 — 插入 PLM 角色权限（参考 MES 在 030 中的做法）
 
 ### 前端新增
 - `frontend/src/pages/plm/PLMConnectionsPage.tsx`
