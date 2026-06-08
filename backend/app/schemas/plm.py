@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,14 +13,14 @@ CONNECTOR_TYPE_PATTERN = r"^(mock|rest|siemens_tc|dassault_enovia|ptc_windchill)
 class PLMConnectionCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     connector_type: str = Field(..., pattern=CONNECTOR_TYPE_PATTERN)
-    config: dict = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
     product_line_code: str = Field(..., min_length=1)
 
 
 class PLMConnectionUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     connector_type: Optional[str] = Field(None, pattern=CONNECTOR_TYPE_PATTERN)
-    config: Optional[dict] = None
+    config: Optional[dict[str, Any]] = None
     is_active: Optional[bool] = None
     product_line_code: Optional[str] = Field(None, min_length=1)
 
@@ -29,7 +29,7 @@ class PLMConnectionResponse(BaseModel):
     connection_id: uuid.UUID
     name: str
     connector_type: str
-    config: dict
+    config: dict[str, Any]
     is_active: bool
     product_line_code: str
     created_by: uuid.UUID
@@ -62,7 +62,7 @@ class PLMPartResponse(BaseModel):
     is_key_characteristic: bool
     source_updated_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
-    plm_raw_data: Optional[dict] = None
+    plm_raw_data: Optional[dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -80,7 +80,7 @@ class PLMBOMResponse(BaseModel):
     level: int
     source_updated_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
-    plm_raw_data: Optional[dict] = None
+    plm_raw_data: Optional[dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -96,14 +96,14 @@ class PLMChangeOrderResponse(BaseModel):
     status: str
     priority: str
     affected_part_numbers: list[str]
-    proposed_changes: Optional[dict] = None
+    proposed_changes: Optional[dict[str, Any]] = None
     requested_by: Optional[str] = None
     approved_by: Optional[str] = None
     planned_implementation_date: Optional[datetime] = None
     actual_implementation_date: Optional[datetime] = None
     source_updated_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
-    plm_raw_data: Optional[dict] = None
+    plm_raw_data: Optional[dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -117,7 +117,7 @@ class PLMChangeImpactTaskResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
-    result: Optional[dict] = None
+    result: Optional[dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
