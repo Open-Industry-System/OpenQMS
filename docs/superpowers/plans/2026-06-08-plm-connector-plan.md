@@ -30,8 +30,9 @@
 | `backend/app/core/product_line_filter.py` | 添加 `"plm": "product_line_code"` |
 | `backend/app/core/config.py` | 定义 `SYSTEM_USER_ID` 常量 |
 | `backend/app/models/__init__.py` | 导出 PLM 模型 |
-| `backend/app/services/graph_projection_service.py` | 边白名单增加 `"HAS_CHILD"` |
+| `backend/app/services/graph_projection_service.py` | `ALLOWED_EDGE_TYPES` 增加 `"HAS_CHILD"`；`_node_properties` 白名单增加 `"part_number"` |
 | `backend/app/graph/jsonb_repository.py` | `downstream_edges` 增加 `"HAS_CHILD"` |
+| `backend/app/graph/neo4j_repository.py` | `downstream_rel_types` 追加 `\|HAS_CHILD` |
 | `backend/app/main.py` | 注册 plm_router + 后台协程 |
 | `backend/app/seed.py` | 预置 system 用户 + PLM 演示数据 |
 
@@ -1746,19 +1747,31 @@ git commit -m "feat(api): add PLM routes — 13 endpoints with permission guards
 **Files:**
 - Modify: `backend/app/services/graph_projection_service.py`
 - Modify: `backend/app/graph/jsonb_repository.py`
+- Modify: `backend/app/graph/neo4j_repository.py`
 - Modify: `backend/app/main.py`
 
-- [ ] **Step 1: graph_projection_service.py — 增加 HAS_CHILD 边白名单**
+- [ ] **Step 1: graph_projection_service.py — 增加 HAS_CHILD 边白名单 + part_number 属性**
 
 ```python
 # backend/app/services/graph_projection_service.py
-# Find the EDGE_TYPES tuple/list, add "HAS_CHILD"
-EDGE_TYPES = [
-    "HAS_NODE", "HAS_PROCESS_STEP", "HAS_WORK_ELEMENT", "HAS_FUNCTION",
-    "FUNCTION_MAPPED_TO", "HAS_FAILURE_MODE", "EFFECT_OF", "CAUSE_OF",
+# 1. ALLOWED_EDGE_TYPES is a set[str], not a list
+ALLOWED_EDGE_TYPES: set[str] = {
+    "HAS_PROCESS_STEP", "HAS_WORK_ELEMENT", "HAS_FUNCTION",
+    "FUNCTION_MAPPED_TO", "HAS_FAILURE_MODE",
+    "EFFECT_OF", "CAUSE_OF",
     "PREVENTED_BY", "DETECTED_BY", "OPTIMIZED_BY",
+    "HAS_NODE",
     "HAS_CHILD",  # <-- add this (PLM BOM hierarchy)
-]
+}
+
+# 2. In _node_properties(), add "part_number" to the property extraction loop
+    for key in ("process_number", "classification", "requirement", "specification",
+                "severity", "occurrence", "detection", "ap",
+                "revised_severity", "revised_occurrence", "revised_detection", "revised_ap",
+                "severity_plant", "severity_customer", "severity_user",
+                "responsible", "due_date", "status", "action_taken", "completion_date",
+                "part_number",  # <-- add this (PLM part reference)
+               ):
 ```
 
 - [ ] **Step 2: jsonb_repository.py — 增加 HAS_CHILD 到 downstream edges**
@@ -1772,7 +1785,16 @@ downstream_edges = {
 }
 ```
 
-- [ ] **Step 3: main.py — 注册 PLM 路由和后台协程**
+- [ ] **Step 3: neo4j_repository.py — 增加 HAS_CHILD 到 downstream_rel_types**
+
+```python
+# backend/app/graph/neo4j_repository.py
+# In analyze_change_impact, find downstream_rel_types string, add |HAS_CHILD
+downstream_rel_types = "HAS_FUNCTION|FUNCTION_MAPPED_TO|HAS_FAILURE_MODE|EFFECT_OF|HAS_PROCESS_STEP|HAS_CHILD"
+#                                                                                          ^^^^^^^^^^^^^^^ add this
+```
+
+- [ ] **Step 4: main.py — 注册 PLM 路由和后台协程**
 
 ```python
 # backend/app/main.py
@@ -1829,7 +1851,7 @@ plm_impact_task.cancel()
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/app/services/graph_projection_service.py backend/app/graph/jsonb_repository.py backend/app/main.py
+git add backend/app/services/graph_projection_service.py backend/app/graph/jsonb_repository.py backend/app/graph/neo4j_repository.py backend/app/main.py
 git commit -m "feat(integration): add HAS_CHILD edge support + PLM background workers"
 ```
 
