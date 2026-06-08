@@ -29,7 +29,7 @@
 | `backend/app/core/permissions.py` | Module 枚举新增 `PLM = "plm"` |
 | `backend/app/core/product_line_filter.py` | 添加 `"plm": "product_line_code"` |
 | `backend/app/core/config.py` | 定义 `SYSTEM_USER_ID` 常量 |
-| `backend/app/models/__init__.py` | 导出 PLM 模型 |
+| `backend/app/models/__init__.py` | Task 2：导出 PLM 模型（`plm.py` 创建后） |
 | `backend/app/services/graph_projection_service.py` | `ALLOWED_EDGE_TYPES` 增加 `"HAS_CHILD"` |
 | `backend/app/graph/jsonb_repository.py` | `downstream_edges` 增加 `"HAS_CHILD"` |
 | `backend/app/graph/neo4j_repository.py` | `downstream_rel_types` 追加 `\|HAS_CHILD` |
