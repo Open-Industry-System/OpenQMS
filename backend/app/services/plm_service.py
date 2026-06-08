@@ -116,12 +116,19 @@ class PLMIngestionService:
         )
         await self._db.execute(stmt)
 
-        # Side-effect: create SC link for safety-related parts
+        # Side-effect: create SC link for safety-related or key-characteristic parts
         if data.get("is_safety_related"):
-            await self._upsert_sc_link(connection_id, data)
+            await self._upsert_sc_link(connection_id, data, "safety")
+        if data.get("is_key_characteristic") and not data.get("is_safety_related"):
+            await self._upsert_sc_link(connection_id, data, "key_characteristic")
 
-    async def _upsert_sc_link(self, connection_id: uuid.UUID, data: dict) -> None:
-        """Upsert PLMPartSCLink for a safety-related part."""
+    async def _upsert_sc_link(
+        self,
+        connection_id: uuid.UUID,
+        data: dict,
+        characteristic_type: str,
+    ) -> None:
+        """Upsert PLMPartSCLink for a safety-related or key-characteristic part."""
         # Resolve the part_id via the unique constraint columns
         part_result = await self._db.execute(
             select(PLMPart.part_id).where(
@@ -133,11 +140,6 @@ class PLMIngestionService:
         part_id = part_result.scalar_one_or_none()
         if part_id is None:
             return  # Part not found after upsert -- should not happen
-
-        # Determine characteristic type from business flags
-        char_type = "safety"
-        if data.get("is_key_characteristic") and not data.get("is_safety_related"):
-            char_type = "key_characteristic"
 
         product_line_code = data.get("product_line_code")
         if not product_line_code:
@@ -155,7 +157,7 @@ class PLMIngestionService:
                 link_id=uuid.uuid4(),
                 part_id=part_id,
                 sc_id=None,
-                characteristic_type=char_type,
+                characteristic_type=characteristic_type,
                 status="pending",
                 product_line_code=product_line_code,
             )
@@ -225,7 +227,21 @@ class PLMIngestionService:
         raw_fields = _extract_raw(data, _CO_COLUMNS)
 
         new_status = data.get("status", "draft")
-        create_impact_task = new_status == "approved"
+
+        # Determine whether to create/reset impact task: only when the
+        # change order is *transitioning* to "approved" -- not when it is
+        # already approved (avoids resetting in-progress tasks).
+        create_impact_task = False
+        if new_status == "approved":
+            existing_result = await self._db.execute(
+                select(PLMChangeOrder.status).where(
+                    PLMChangeOrder.connection_id == connection_id,
+                    PLMChangeOrder.change_number == data["change_number"],
+                )
+            )
+            current_status = existing_result.scalar_one_or_none()
+            # Create/reset task only when transitioning TO approved
+            create_impact_task = current_status != "approved"
 
         stmt = (
             pg_insert(PLMChangeOrder)
@@ -284,7 +300,7 @@ class PLMIngestionService:
         )
         await self._db.execute(stmt)
 
-        # Side-effect: create/reset impact task when status == "approved"
+        # Side-effect: create/reset impact task when transitioning to approved
         if create_impact_task:
             await self._upsert_impact_task(connection_id, data)
 
@@ -515,8 +531,14 @@ class PLMSyncService:
 async def _run_single_sync_job(
     db: AsyncSession, job: PLMSyncJob, claim_token: str
 ) -> None:
-    """Execute a single sync job: fetch from connector, ingest results."""
-    # Fetch the connection
+    """Execute a single sync job using a three-phase pattern.
+
+    Phase 1 (short txn): Read connection config and job state, then commit.
+    Phase 2 (outside txn): Fetch data from the PLM connector.
+    Phase 3 (short txn): Ingest results using PLMIngestionService with
+        periodic commits to keep transactions small.
+    """
+    # --- Phase 1: read connection + job config in short transaction ---
     conn_result = await db.execute(
         select(PLMConnection).where(
             PLMConnection.connection_id == job.connection_id
@@ -526,42 +548,57 @@ async def _run_single_sync_job(
     if connection is None:
         raise ValueError(f"PLM connection not found: {job.connection_id}")
 
-    connector = get_plm_connector(connection, db)
     since = job.checkpoint or datetime(2000, 1, 1, tzinfo=timezone.utc)
+    data_type = job.data_type
 
+    await db.commit()
+
+    # --- Phase 2: external fetch outside transaction ---
+    connector = get_plm_connector(connection, None)
     try:
-        # Fetch data based on job.data_type
-        if job.data_type == "part":
+        if data_type == "part":
             items = await connector.fetch_parts(since)
-        elif job.data_type == "bom":
+        elif data_type == "bom":
             items = await connector.fetch_boms(since)
-        elif job.data_type == "change_order":
+        elif data_type == "change_order":
             items = await connector.fetch_change_orders(since)
         else:
             items = []
-
-        # Ingest each item
-        ingestion = PLMIngestionService(db)
-        for item in items:
-            item["data_type"] = job.data_type
-            item["connection_id"] = job.connection_id
-            await ingestion.ingest(item)
-
-        await db.flush()
-
-        # Update job status on success
-        now = datetime.now(timezone.utc)
-        job.status = "completed"
-        job.checkpoint = now
-        job.completed_at = now
-        job.next_run_at = now + timedelta(minutes=5)
-        job.claim_token = None
-        job.error_message = None
-        job.consecutive_failures = 0
-        await db.flush()
-
     finally:
         await connector.close()
+
+    # --- Phase 3: ingest results in short transaction(s) ---
+    BATCH_SIZE = 50
+    now = datetime.now(timezone.utc)
+
+    async with async_session() as ingest_db:
+        ingestion = PLMIngestionService(ingest_db)
+        for i, item in enumerate(items):
+            item["data_type"] = data_type
+            item["connection_id"] = job.connection_id
+            await ingestion.ingest(item)
+            # Periodic commit to keep transaction size bounded
+            if (i + 1) % BATCH_SIZE == 0:
+                await ingest_db.commit()
+
+        # Final commit for remaining items
+        await ingest_db.commit()
+
+    # Update job status on success (re-fetch in the caller's session)
+    async with async_session() as update_db:
+        result = await update_db.execute(
+            select(PLMSyncJob).where(PLMSyncJob.job_id == job.job_id)
+        )
+        refreshed_job = result.scalar_one_or_none()
+        if refreshed_job is not None:
+            refreshed_job.status = "completed"
+            refreshed_job.checkpoint = now
+            refreshed_job.completed_at = now
+            refreshed_job.next_run_at = now + timedelta(minutes=5)
+            refreshed_job.claim_token = None
+            refreshed_job.error_message = None
+            refreshed_job.consecutive_failures = 0
+            await update_db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -680,22 +717,38 @@ class PLMChangeImpactWorker:
                 await db.flush()
                 return
 
-            # Find FMEA links for affected parts
+            # Parse "PART_NUMBER|REVISION" entries and build queries
             from app.models.plm import PLMPartFMEALink
 
-            links_result = await db.execute(
-                select(PLMPartFMEALink).join(
-                    PLMPart, PLMPartFMEALink.part_id == PLMPart.part_id
-                ).where(
+            part_filters = []
+            for part_ref in affected_parts:
+                if "|" in str(part_ref):
+                    pn, rev = str(part_ref).split("|", 1)
+                    part_filters.append(
+                        (PLMPart.part_number == pn, PLMPart.revision == rev)
+                    )
+                else:
+                    part_filters.append(
+                        (PLMPart.part_number == str(part_ref),)
+                    )
+
+            # Find FMEA links for affected parts
+            links: list = []
+            for pf in part_filters:
+                filter_conditions = [
                     PLMPart.connection_id == change_order.connection_id,
-                    PLMPart.part_number.in_(affected_parts),
+                    *pf,
+                ]
+                links_result = await db.execute(
+                    select(PLMPartFMEALink).join(
+                        PLMPart, PLMPartFMEALink.part_id == PLMPart.part_id
+                    ).where(*filter_conditions)
                 )
-            )
-            links = list(links_result.scalars().all())
+                links.extend(links_result.scalars().all())
 
             if not links:
                 warnings.append(
-                    f"No FMEA links found for parts: {', '.join(affected_parts)}"
+                    f"No FMEA links found for parts: {', '.join(str(p) for p in affected_parts)}"
                 )
 
             for link in links:
