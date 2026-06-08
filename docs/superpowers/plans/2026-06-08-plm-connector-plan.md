@@ -254,10 +254,11 @@ def upgrade():
         )
 
     # ---- system user for background tasks ----
-    # Use ON CONFLICT to avoid duplicate if already exists
+    # Users table: password_hash, role_id (FK to role_definitions), no hashed_password/role column
     op.execute(
-        "INSERT INTO users (user_id, username, email, hashed_password, role, is_active) "
-        "VALUES ('00000000-0000-0000-0000-000000000001', 'system', 'system@openqms.local', '', 'admin', true) "
+        "INSERT INTO users (user_id, username, display_name, email, password_hash, role_id, is_active) "
+        "SELECT '00000000-0000-0000-0000-000000000001', 'system', 'System', 'system@openqms.local', '', id, true "
+        "FROM role_definitions WHERE role_key = 'admin' "
         "ON CONFLICT (user_id) DO NOTHING"
     )
 
@@ -1310,19 +1311,23 @@ class PLMChangeImpactWorker:
                 if not node:
                     continue
 
-                service = ChangeImpactService(db)
-                result = await service.analyze(
-                    fmea_id=link.fmea_id,
-                    node_id=link.node_id,
-                    node_type=node.get("type", "Component"),
-                    node_name=node.get("name", ""),
-                    change_type="plm_ecn",
-                    field_name="part_number",
-                    new_value=change_order.change_number,
-                    old_value=None,
-                    user_id=PLMChangeImpactWorker.SYSTEM_USER_ID,
-                )
+                # Analyze in independent session because ChangeImpactService.analyze() commits internally
+                from app.database import async_session
+                async with async_session() as analysis_db:
+                    service = ChangeImpactService(analysis_db)
+                    result = await service.analyze(
+                        fmea_id=link.fmea_id,
+                        node_id=link.node_id,
+                        node_type=node.get("type", "Component"),
+                        node_name=node.get("name", ""),
+                        change_type="plm_ecn",
+                        field_name="part_number",
+                        new_value=change_order.change_number,
+                        old_value=None,
+                        user_id=PLMChangeImpactWorker.SYSTEM_USER_ID,
+                    )
                 has_any_analysis = True
+                # result is ChangeImpactAnalysisResponse with `id: uuid.UUID` (verified schema field)
                 analysis_ids.append(str(result.id))
 
         if not has_any_analysis and warnings:
@@ -1362,7 +1367,7 @@ git commit -m "feat(service): add PLM ingestion, sync, and impact task worker"
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
@@ -1397,22 +1402,23 @@ async def create_connection(
         created_by=user.user_id,
     )
     db.add(conn)
-    await db.commit()
+    await db.flush()          # Get connection_id without committing
     await db.refresh(conn)
     await PLMSyncService.create_sync_jobs_for_connection(db, conn.connection_id)
-    await db.commit()
+    await db.commit()         # Single commit for connection + jobs
     return conn
 
 
 @router.get("/connections", response_model=schemas.PLMConnectionListResponse)
 async def list_connections(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
 ):
     stmt = select(PLMConnection)
-    stmt = apply_product_line_filter(stmt, user, "plm")
+    stmt = await apply_product_line_filter(stmt, user, PLMConnection, "plm", db, request)
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = await db.scalar(count_stmt)
 
@@ -1491,6 +1497,7 @@ async def manual_sync(
 
 @router.get("/parts", response_model=list[schemas.PLMPartResponse])
 async def list_parts(
+    request: Request,
     connection_id: uuid.UUID | None = None,
     search: str | None = None,
     page: int = Query(1, ge=1),
@@ -1505,7 +1512,7 @@ async def list_parts(
         stmt = stmt.where(
             (PLMPart.part_number.ilike(f"%{search}%")) | (PLMPart.name.ilike(f"%{search}%"))
         )
-    stmt = apply_product_line_filter(stmt, user, "plm")
+    stmt = await apply_product_line_filter(stmt, user, PLMPart, "plm", db, request)
     stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
     return result.scalars().all()
@@ -1525,6 +1532,7 @@ async def get_part(
 
 @router.get("/boms")
 async def list_boms(
+    request: Request,
     connection_id: uuid.UUID,
     parent_part_number: str | None = None,
     db: AsyncSession = Depends(get_db),
@@ -1533,6 +1541,7 @@ async def list_boms(
     stmt = select(PLMBOM).where(PLMBOM.connection_id == connection_id)
     if parent_part_number:
         stmt = stmt.where(PLMBOM.parent_part_number == parent_part_number)
+    stmt = await apply_product_line_filter(stmt, user, PLMBOM, "plm", db, request)
     result = await db.execute(stmt)
     return result.scalars().all()
 
@@ -1561,6 +1570,7 @@ async def get_bom_tree(
 
 @router.get("/change-orders", response_model=list[schemas.PLMChangeOrderResponse])
 async def list_change_orders(
+    request: Request,
     connection_id: uuid.UUID | None = None,
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
@@ -1571,7 +1581,7 @@ async def list_change_orders(
         stmt = stmt.where(PLMChangeOrder.connection_id == connection_id)
     if status:
         stmt = stmt.where(PLMChangeOrder.status == status)
-    stmt = apply_product_line_filter(stmt, user, "plm")
+    stmt = await apply_product_line_filter(stmt, user, PLMChangeOrder, "plm", db, request)
     result = await db.execute(stmt)
     return result.scalars().all()
 
@@ -1590,20 +1600,31 @@ async def get_change_order(
 
 @router.get("/dashboard", response_model=schemas.PLMDashboardResponse)
 async def get_dashboard(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
 ):
-    part_count = await db.scalar(select(func.count()).select_from(PLMPart))
-    bom_count = await db.scalar(select(func.count()).select_from(PLMBOM))
-    pending_ecn = await db.scalar(
-        select(func.count()).select_from(PLMChangeOrder).where(PLMChangeOrder.status == "approved")
+    # Apply product line filter to each aggregate query
+    part_stmt = await apply_product_line_filter(select(PLMPart), user, PLMPart, "plm", db, request)
+    part_count = await db.scalar(select(func.count()).select_from(part_stmt.subquery()))
+
+    bom_stmt = await apply_product_line_filter(select(PLMBOM), user, PLMBOM, "plm", db, request)
+    bom_count = await db.scalar(select(func.count()).select_from(bom_stmt.subquery()))
+
+    ecn_stmt = select(PLMChangeOrder).where(PLMChangeOrder.status == "approved")
+    ecn_stmt = await apply_product_line_filter(ecn_stmt, user, PLMChangeOrder, "plm", db, request)
+    pending_ecn = await db.scalar(select(func.count()).select_from(ecn_stmt.subquery()))
+
+    sc_stmt = select(PLMPartSCLink).where(PLMPartSCLink.status == "pending")
+    sc_stmt = await apply_product_line_filter(sc_stmt, user, PLMPartSCLink, "plm", db, request)
+    pending_sc = await db.scalar(select(func.count()).select_from(sc_stmt.subquery()))
+
+    recent_stmt = await apply_product_line_filter(
+        select(PLMChangeOrder).order_by(PLMChangeOrder.created_at.desc()).limit(5),
+        user, PLMChangeOrder, "plm", db, request,
     )
-    pending_sc = await db.scalar(
-        select(func.count()).select_from(PLMPartSCLink).where(PLMPartSCLink.status == "pending")
-    )
-    recent = await db.execute(
-        select(PLMChangeOrder).order_by(PLMChangeOrder.created_at.desc()).limit(5)
-    )
+    recent = await db.execute(recent_stmt)
+
     return {
         "part_count": part_count or 0,
         "bom_count": bom_count or 0,
@@ -1640,9 +1661,24 @@ async def trigger_impact_analysis(
     user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
 ):
     from app.services.plm_service import PLMChangeImpactWorker
-    task = PLMChangeImpactTask(change_id=change_id, status="pending")
-    db.add(task)
+    # Upsert: avoid unique constraint violation on uq_plm_impact_task_change
+    existing = await db.execute(
+        select(PLMChangeImpactTask).where(PLMChangeImpactTask.change_id == change_id)
+    )
+    task = existing.scalar_one_or_none()
+    if task:
+        task.status = "pending"
+        task.retry_count = 0
+        task.next_retry_at = datetime.now(timezone.utc)
+        task.claim_token = None
+        task.error_message = None
+        task.result = None
+        task.completed_at = None
+    else:
+        task = PLMChangeImpactTask(change_id=change_id, status="pending")
+        db.add(task)
     await db.commit()
+    await db.refresh(task)
     return {"status": "task created", "task_id": task.task_id}
 
 
@@ -1678,8 +1714,8 @@ async def import_bom_to_fmea(
     if not boms:
         raise HTTPException(status_code=404, detail="BOM not found")
 
-    # Build nodes and edges
-    node_type_map = {1: "system", 2: "subsystem"}
+    # Build nodes and edges (node types must match FMEA white-list: System, Subsystem, Component)
+    node_type_map = {1: "System", 2: "Subsystem"}
     fmea_nodes = []
     fmea_edges = []
     node_meta = []
@@ -1687,27 +1723,33 @@ async def import_bom_to_fmea(
     # Root node
     root_hash = hashlib.sha256(f"{connection_id}|{part_number}|{revision}".encode()).hexdigest()[:16]
     root_id = f"plm-{root_hash}"
-    fmea_nodes.append({"id": root_id, "type": "system", "name": part_number})
+    fmea_nodes.append({"id": root_id, "type": "System", "name": part_number})
     node_meta.append((root_id, part_number, revision))
 
     for bom in boms:
         child_hash = hashlib.sha256(f"{connection_id}|{bom.child_part_number}|{bom.child_revision}".encode()).hexdigest()[:16]
         child_id = f"plm-{child_hash}"
-        node_type = node_type_map.get(bom.level, "component")
+        node_type = node_type_map.get(bom.level, "Component")
         fmea_nodes.append({"id": child_id, "type": node_type, "name": bom.child_part_number})
         fmea_edges.append({"id": f"edge-{root_id}-{child_id}", "source": root_id, "target": child_id, "type": "HAS_CHILD"})
         node_meta.append((child_id, bom.child_part_number, bom.child_revision))
 
-    # If overwrite, clear existing auto_import links
-    if req.overwrite:
-        old_links = await db.execute(
-            select(PLMPartFMEALink).where(
-                PLMPartFMEALink.fmea_id == req.fmea_id,
-                PLMPartFMEALink.link_type == "auto_import",
-            )
+    # Guard against overwriting non-empty graph without explicit consent
+    existing_nodes = fmea.graph_data.get("nodes", []) if fmea.graph_data else []
+    existing_edges = fmea.graph_data.get("edges", []) if fmea.graph_data else []
+    has_existing_graph = len(existing_nodes) > 1 or len(existing_edges) > 0
+    if has_existing_graph and not req.overwrite:
+        raise HTTPException(status_code=400, detail="FMEA already has graph data; use overwrite=true to replace")
+
+    # Always clear old auto_import links before writing new graph (prevents orphaned links)
+    old_links = await db.execute(
+        select(PLMPartFMEALink).where(
+            PLMPartFMEALink.fmea_id == req.fmea_id,
+            PLMPartFMEALink.link_type == "auto_import",
         )
-        for old in old_links.scalars().all():
-            await db.delete(old)
+    )
+    for old in old_links.scalars().all():
+        await db.delete(old)
 
     fmea.graph_data = {"nodes": fmea_nodes, "edges": fmea_edges}
 
@@ -2242,10 +2284,10 @@ import PLMPartsPage from "./pages/plm/PLMPartsPage";
 import PLMChangeOrdersPage from "./pages/plm/PLMChangeOrdersPage";
 
 // 在 Route 列表中添加：
-<Route path="/plm/dashboard" element={<ProtectedRoute><PLMDashboardPage /></ProtectedRoute>} />
-<Route path="/plm/connections" element={<ProtectedRoute><PLMConnectionsPage /></ProtectedRoute>} />
-<Route path="/plm/parts" element={<ProtectedRoute><PLMPartsPage /></ProtectedRoute>} />
-<Route path="/plm/change-orders" element={<ProtectedRoute><PLMChangeOrdersPage /></ProtectedRoute>} />
+<Route path="/plm/dashboard" element={<ProtectedRoute requiredModule="plm"><PLMDashboardPage /></ProtectedRoute>} />
+<Route path="/plm/connections" element={<ProtectedRoute requiredModule="plm"><PLMConnectionsPage /></ProtectedRoute>} />
+<Route path="/plm/parts" element={<ProtectedRoute requiredModule="plm"><PLMPartsPage /></ProtectedRoute>} />
+<Route path="/plm/change-orders" element={<ProtectedRoute requiredModule="plm"><PLMChangeOrdersPage /></ProtectedRoute>} />
 ```
 
 - [ ] **Step 5: AppLayout.tsx 新增菜单**
@@ -2290,16 +2332,26 @@ git commit -m "feat(frontend): add PLM dashboard, parts, change-orders pages + r
 # backend/app/seed.py — 在 seed() 函数开头或适当位置
 # Ensure system user exists
 from app.core.config import SYSTEM_USER_ID
+from app.models.role import RoleDefinition
+from sqlalchemy import select
+
 system_user = await db.get(User, SYSTEM_USER_ID)
 if not system_user:
-    db.add(User(
-        user_id=SYSTEM_USER_ID,
-        username="system",
-        email="system@openqms.local",
-        hashed_password="",  # No login
-        role="admin",
-        is_active=True,
-    ))
+    # Get admin role_id
+    role_result = await db.execute(
+        select(RoleDefinition.id).where(RoleDefinition.role_key == "admin")
+    )
+    admin_role_id = role_result.scalar_one_or_none()
+    if admin_role_id:
+        db.add(User(
+            user_id=SYSTEM_USER_ID,
+            username="system",
+            display_name="System",
+            email="system@openqms.local",
+            password_hash="",  # No login
+            role_id=admin_role_id,
+            is_active=True,
+        ))
 ```
 
 - [ ] **Step 2: Commit**
