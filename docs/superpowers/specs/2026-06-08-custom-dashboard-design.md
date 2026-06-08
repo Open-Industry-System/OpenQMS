@@ -161,7 +161,7 @@
 {
   "layout_id": "uuid",
   "user_id": "uuid",
-  "layout_config": { "widgets": [...] },
+  "layout_config": { "lg": [...] },
   "updated_at": "2026-06-08T10:00:00Z"
 }
 ```
@@ -235,7 +235,22 @@
 1. **模块级过滤**：后端根据用户模块权限，跳过无权限模块的查询
 2. **行级过滤 (RLS)**：所有查询通过 `get_user_product_line_codes()` 获取用户授权产线，SQL 层做 `product_line_code.in_(codes)` 物理过滤
 
-**容错**：单个模块查询失败（如 MES 表被锁定）不影响其他模块，返回该模块为空对象 `{}`，前端降级显示
+**容错与错误报告**：
+单个模块查询失败（如 MES 表被锁定）不影响其他模块。响应结构增加 `errors` 字段：
+```json
+{
+  "kpi": { "pending_actions": 12, ... },
+  "spc": { "abnormal_count": 2, ... },
+  "mes": {},
+  "errors": {
+    "mes": "equipment_status query timeout"
+  }
+}
+```
+- 失败模块返回空对象 `{}`
+- `errors` 记录失败原因（仅包含失败模块）
+- 前端 `WidgetWrapper` 检测到对应模块在 `errors` 中时，显示 error state + retry 按钮
+- `errors` 为空对象时前端正常渲染
 
 ---
 
@@ -387,7 +402,7 @@ const GRID_CONFIG = {
   margin: [16, 16],      // widget 间距
   containerPadding: [0, 0],
   breakpoints: { lg: 1200, md: 996, sm: 768, xs: 480 },
-  colsResponsive: { lg: 12, md: 10, sm: 6, xs: 4 },
+  cols: { lg: 12, md: 10, sm: 6, xs: 4 },
 };
 ```
 
@@ -562,7 +577,7 @@ frontend/
 
 ### 9.1 功能验收
 
-- [ ] 新用户首次访问 `/dashboard` 看到与当前一致的默认布局
+- [ ] 有完整模块权限的新用户首次访问 `/dashboard` 看到与当前一致的默认布局；权限不足用户看到过滤后的默认布局
 - [ ] 点击「编辑布局」进入编辑模式，显示左侧面板 + 可拖拽画布
 - [ ] 可从左侧面板添加 widget 到画布
 - [ ] 可拖拽 widget 调整位置
