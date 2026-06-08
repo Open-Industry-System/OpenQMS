@@ -44,6 +44,7 @@ class Module(StrEnum):
     SCAR = "scar"
     KNOWLEDGE_GRAPH = "knowledge_graph"  # 新增
     MES = "mes"
+    PLM = "plm"
 
 
 async def get_current_user(

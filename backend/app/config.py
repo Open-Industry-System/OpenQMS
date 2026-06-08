@@ -1,6 +1,9 @@
+import uuid
+
 from pydantic_settings import BaseSettings
 from pydantic import field_validator, Field
 
+SYSTEM_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms"
