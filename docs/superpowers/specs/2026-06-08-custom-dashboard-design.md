@@ -397,7 +397,7 @@ const validWidgets = layoutConfig.lg.filter(
 
 ```typescript
 const GRID_CONFIG = {
-  cols: 12,              // 12 列网格
+  defaultCols: 12,       // 桌面端默认列数
   rowHeight: 40,         // 每行 40px
   margin: [16, 16],      // widget 间距
   containerPadding: [0, 0],
