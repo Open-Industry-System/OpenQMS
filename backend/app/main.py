@@ -173,7 +173,6 @@ async def lifespan(app: FastAPI):
         # recover_stuck_tasks and claim_tasks run in separate sessions because
         # they operate on independent state: recovery resets stuck tasks back to
         # pending, while claiming advances pending tasks to running.
-        from app.models.plm import PLMChangeImpactTask as _PLMTask
 
         while True:
             await asyncio.sleep(30)
