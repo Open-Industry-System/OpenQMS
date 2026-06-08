@@ -2485,7 +2485,7 @@ from sqlalchemy import select
 
 from app.models.plm import (
     PLMConnection, PLMPart, PLMBOM, PLMChangeOrder,
-    PLMPartFMEALink, PLMChangeImpactTask,
+    PLMPartFMEALink, PLMPartSCLink, PLMChangeImpactTask,
 )
 from app.services.plm_service import PLMIngestionService, PLMSyncService
 
