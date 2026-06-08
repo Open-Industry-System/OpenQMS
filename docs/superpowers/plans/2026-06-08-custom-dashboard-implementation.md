@@ -1463,6 +1463,27 @@ export default function SupplierPpmWidget({ data, loading, error, onRetry }: Wid
 
 - [ ] **Step 7: Update registry with all components**
 
+In `frontend/src/components/dashboard/widgets/registry.ts`, add imports:
+
+```typescript
+import SpcAbnormalWidget from "./SpcAbnormalWidget";
+import SpcCapabilityWidget from "./SpcCapabilityWidget";
+import MsaGaugeExpiryWidget from "./MsaGaugeExpiryWidget";
+import IqcPendingWidget from "./IqcPendingWidget";
+import MesEquipmentWidget from "./MesEquipmentWidget";
+import SupplierPpmWidget from "./SupplierPpmWidget";
+```
+
+Replace `placeholderComponent` with actual components in registry entries:
+```typescript
+spc_abnormal_count: { ... component: SpcAbnormalWidget ... },
+spc_capability_summary: { ... component: SpcCapabilityWidget ... },
+msa_gauge_expiry: { ... component: MsaGaugeExpiryWidget ... },
+iqc_pending_inspections: { ... component: IqcPendingWidget ... },
+mes_equipment_status: { ... component: MesEquipmentWidget ... },
+supplier_ppm_trend: { ... component: SupplierPpmWidget ... },
+```
+
 - [ ] **Step 8: Commit**
 
 ```bash
@@ -1623,12 +1644,17 @@ function computeMdLayout(lgLayout: WidgetLayoutItem[]): WidgetLayoutItem[] {
 
 function computeMobileLayout(lgLayout: WidgetLayoutItem[]): WidgetLayoutItem[] {
   const sorted = [...lgLayout].sort((a, b) => (a.y === b.y ? a.x - b.x : a.y - b.y));
-  return sorted.map((item, index) => ({
-    ...item,
-    x: 0,
-    y: index,
-    w: 6, // Will be overridden by cols for sm/xs
-  }));
+  let currentY = 0;
+  return sorted.map((item) => {
+    const y = currentY;
+    currentY += item.h;
+    return {
+      ...item,
+      x: 0,
+      y,
+      w: 6, // Will be overridden by cols for sm/xs
+    };
+  });
 }
 
 export default function DashboardGrid({
@@ -1953,8 +1979,12 @@ export default function DashboardPage() {
 
   const handleAddWidget = (type: string) => {
     if (!editLayout) return;
+    const id =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).substring(2, 11);
     const newItem: WidgetLayoutItem = {
-      i: `${type}-${crypto.randomUUID()}`,
+      i: `${type}-${id}`,
       type,
       x: 0,
       y: 100, // Will be compacted by react-grid-layout
