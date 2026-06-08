@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
@@ -81,8 +82,8 @@ class PLMPart(Base):
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     connection: Mapped["PLMConnection"] = relationship(back_populates="parts")
-    fmea_links: Mapped[list["PLMPartFMEALink"]] = relationship(back_populates="part", passive_deletes=True)
-    sc_links: Mapped[list["PLMPartSCLink"]] = relationship(back_populates="part", passive_deletes=True)
+    fmea_links: Mapped[list["PLMPartFMEALink"]] = relationship(back_populates="part", cascade="all, delete-orphan", passive_deletes=True)
+    sc_links: Mapped[list["PLMPartSCLink"]] = relationship(back_populates="part", cascade="all, delete-orphan", passive_deletes=True)
 
 
 class PLMBOM(Base):
@@ -112,7 +113,7 @@ class PLMBOM(Base):
     parent_revision: Mapped[str] = mapped_column(String(20), nullable=False, default="A", server_default=text("'A'"))
     child_part_number: Mapped[str] = mapped_column(String(100), nullable=False)
     child_revision: Mapped[str] = mapped_column(String(20), nullable=False, default="A", server_default=text("'A'"))
-    quantity: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=1.0, server_default=text("1.0"))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, default=Decimal("1.0"), server_default=text("1.0"))
     bom_revision: Mapped[str] = mapped_column(String(20), nullable=False, default="A", server_default=text("'A'"))
     level: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -159,7 +160,7 @@ class PLMChangeOrder(Base):
 
     connection: Mapped["PLMConnection"] = relationship(back_populates="change_orders")
     impact_task: Mapped[Optional["PLMChangeImpactTask"]] = relationship(
-        back_populates="change_order", uselist=False, passive_deletes=True
+        back_populates="change_order", uselist=False, cascade="all, delete-orphan", passive_deletes=True
     )
 
 
