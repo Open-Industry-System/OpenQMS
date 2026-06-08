@@ -1380,7 +1380,7 @@ from app.core.product_line_filter import apply_product_line_filter, enforce_prod
 from app.models.user import User
 from app.models.plm import (
     PLMConnection, PLMPart, PLMBOM, PLMChangeOrder,
-    PLMSyncJob, PLMPartFMEALink, PLMPartSCLink,
+    PLMSyncJob, PLMPartFMEALink, PLMPartSCLink, PLMChangeImpactTask,
 )
 from app.schemas import plm as schemas
 from app.services.plm_service import PLMIngestionService, PLMSyncService
@@ -1456,12 +1456,12 @@ async def update_connection(
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
     await enforce_product_line_access(user, conn.product_line_code, db)
-    for field, value in req.model_dump(exclude_unset=True).items():
-        setattr(conn, field, value)
-    # If product_line_code changed, verify user has access to the new one too
+    # If product_line_code changed, verify BEFORE setattr
     new_plc = req.product_line_code
     if new_plc is not None and new_plc != conn.product_line_code:
         await enforce_product_line_access(user, new_plc, db)
+    for field, value in req.model_dump(exclude_unset=True).items():
+        setattr(conn, field, value)
     await db.commit()
     await db.refresh(conn)
     return conn
@@ -1787,6 +1787,15 @@ async def import_bom_to_fmea(
     if not all_boms:
         raise HTTPException(status_code=404, detail="BOM not found")
 
+    # Validate root part exists and is actually a parent in this BOM tree
+    children_map = {}
+    for bom in all_boms:
+        key = (bom.parent_part_number, bom.parent_revision)
+        children_map.setdefault(key, []).append(bom)
+    if (part_number, revision) not in children_map:
+        # Root must appear as a parent in at least one BOM row
+        raise HTTPException(status_code=404, detail="Root part not found in BOM tree")
+
     # Build nodes and edges using real parent->child relationships
     def _node_id(pn: str, rev: str) -> str:
         h = hashlib.sha256(f"{connection_id}|{pn}|{rev}".encode()).hexdigest()[:16]
@@ -1802,10 +1811,6 @@ async def import_bom_to_fmea(
     from collections import deque
     queue = deque([(part_number, revision, 0)])
     visited = set()
-    children_map = {}
-    for bom in all_boms:
-        key = (bom.parent_part_number, bom.parent_revision)
-        children_map.setdefault(key, []).append(bom)
 
     while queue:
         pn, rev, level = queue.popleft()
