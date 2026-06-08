@@ -5,81 +5,160 @@ import type {
   PLMConnectionUpdate,
   PLMConnectionListResponse,
   PLMPart,
+  PLMPartListResponse,
   PLMBOM,
+  PLMBOMListResponse,
   PLMBOMTreeResponse,
   PLMChangeOrder,
+  PLMChangeOrderListResponse,
   PLMChangeImpactTask,
   PLMDashboard,
 } from "../types/plm";
 
 // ─── Connections ───
 
-export const createPLMConnection = (data: PLMConnectionCreate) =>
-  client.post<PLMConnection>("/plm/connections", data).then((r) => r.data);
+export async function createPLMConnection(
+  data: PLMConnectionCreate,
+): Promise<PLMConnection> {
+  const resp = await client.post<PLMConnection>("/plm/connections", data);
+  return resp.data;
+}
 
-export const getPLMConnections = (page = 1, page_size = 20) =>
-  client.get<PLMConnectionListResponse>("/plm/connections", { params: { page, page_size } }).then((r) => r.data);
+export async function getPLMConnections(
+  page = 1,
+  page_size = 20,
+): Promise<PLMConnectionListResponse> {
+  const resp = await client.get<PLMConnectionListResponse>(
+    "/plm/connections",
+    { params: { page, page_size } },
+  );
+  return resp.data;
+}
 
-export const getPLMConnection = (id: string) =>
-  client.get<PLMConnection>(`/plm/connections/${id}`).then((r) => r.data);
+export async function getPLMConnection(id: string): Promise<PLMConnection> {
+  const resp = await client.get<PLMConnection>(`/plm/connections/${id}`);
+  return resp.data;
+}
 
-export const updatePLMConnection = (id: string, data: PLMConnectionUpdate) =>
-  client.put<PLMConnection>(`/plm/connections/${id}`, data).then((r) => r.data);
+export async function updatePLMConnection(
+  id: string,
+  data: PLMConnectionUpdate,
+): Promise<PLMConnection> {
+  const resp = await client.put<PLMConnection>(
+    `/plm/connections/${id}`,
+    data,
+  );
+  return resp.data;
+}
 
-export const deletePLMConnection = (id: string) =>
-  client.delete(`/plm/connections/${id}`).then((r) => r.data);
+export async function deletePLMConnection(id: string): Promise<void> {
+  await client.delete(`/plm/connections/${id}`);
+}
 
-export const testPLMConnection = (id: string) =>
-  client.post<{ success: boolean }>(`/plm/connections/${id}/test`).then((r) => r.data);
+export async function testPLMConnection(
+  id: string,
+): Promise<{ success: boolean }> {
+  const resp = await client.post<{ success: boolean }>(
+    `/plm/connections/${id}/test`,
+  );
+  return resp.data;
+}
 
-export const syncPLMConnection = (id: string) =>
-  client.post<{ synced_jobs: number }>(`/plm/connections/${id}/sync`).then((r) => r.data);
+export async function syncPLMConnection(
+  id: string,
+): Promise<{ synced_jobs: number }> {
+  const resp = await client.post<{ synced_jobs: number }>(
+    `/plm/connections/${id}/sync`,
+  );
+  return resp.data;
+}
 
 // ─── Parts ───
 
-export const getPLMParts = (params?: { connection_id?: string; page?: number; page_size?: number }) =>
-  client.get<{ items: PLMPart[]; total: number; page: number; page_size: number }>("/plm/parts", { params }).then((r) => r.data);
+export async function getPLMParts(params?: {
+  connection_id?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<PLMPartListResponse> {
+  const resp = await client.get<PLMPartListResponse>("/plm/parts", {
+    params,
+  });
+  return resp.data;
+}
 
-export const getPLMPart = (id: string) =>
-  client.get<PLMPart>(`/plm/parts/${id}`).then((r) => r.data);
+export async function getPLMPart(id: string): Promise<PLMPart> {
+  const resp = await client.get<PLMPart>(`/plm/parts/${id}`);
+  return resp.data;
+}
 
 // ─── BOMs ───
 
-export const getPLMBOMs = (params?: { connection_id?: string; page?: number; page_size?: number }) =>
-  client.get<{ items: PLMBOM[]; total: number; page: number; page_size: number }>("/plm/boms", { params }).then((r) => r.data);
+export async function getPLMBOMs(params?: {
+  connection_id?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<PLMBOMListResponse> {
+  const resp = await client.get<PLMBOMListResponse>("/plm/boms", { params });
+  return resp.data;
+}
 
-export const getPLMBOMTree = (
+export async function getPLMBOMTree(
   connectionId: string,
   partNumber: string,
-) =>
-  client.get<PLMBOMTreeResponse>(`/plm/connections/${connectionId}/boms/tree/${encodeURIComponent(partNumber)}`).then((r) => r.data);
+): Promise<PLMBOMTreeResponse> {
+  const resp = await client.get<PLMBOMTreeResponse>(
+    `/plm/connections/${connectionId}/boms/tree/${encodeURIComponent(partNumber)}`,
+  );
+  return resp.data;
+}
 
 // ─── Change Orders ───
 
-export const getPLMChangeOrders = (params?: { connection_id?: string; page?: number; page_size?: number }) =>
-  client.get<{ items: PLMChangeOrder[]; total: number; page: number; page_size: number }>("/plm/change-orders", { params }).then((r) => r.data);
+export async function getPLMChangeOrders(params?: {
+  connection_id?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<PLMChangeOrderListResponse> {
+  const resp = await client.get<PLMChangeOrderListResponse>(
+    "/plm/change-orders",
+    { params },
+  );
+  return resp.data;
+}
 
-export const getPLMChangeOrder = (id: string) =>
-  client.get<PLMChangeOrder>(`/plm/change-orders/${id}`).then((r) => r.data);
+export async function getPLMChangeOrder(id: string): Promise<PLMChangeOrder> {
+  const resp = await client.get<PLMChangeOrder>(`/plm/change-orders/${id}`);
+  return resp.data;
+}
 
 // ─── Dashboard ───
 
-export const getPLMDashboard = () =>
-  client.get<PLMDashboard>("/plm/dashboard").then((r) => r.data);
+export async function getPLMDashboard(): Promise<PLMDashboard> {
+  const resp = await client.get<PLMDashboard>("/plm/dashboard");
+  return resp.data;
+}
 
 // ─── Impact Analysis ───
 
-export const triggerImpactAnalysis = (changeId: string) =>
-  client.post<PLMChangeImpactTask>(`/plm/change-orders/${changeId}/impact-analysis`).then((r) => r.data);
+export async function triggerImpactAnalysis(
+  changeId: string,
+): Promise<PLMChangeImpactTask> {
+  const resp = await client.post<PLMChangeImpactTask>(
+    `/plm/change-orders/${changeId}/impact-analysis`,
+  );
+  return resp.data;
+}
 
 // ─── Import BOM to FMEA ───
 
-export const importBOMToFMEA = (
+export async function importBOMToFMEA(
   connectionId: string,
   partNumber: string,
   body: { fmea_id: string; overwrite?: boolean },
-) =>
-  client.post<{ imported_nodes: number; imported_edges: number; root: string; fmea_id: string }>(
+): Promise<{ imported_nodes: number; imported_edges: number; root: string; fmea_id: string }> {
+  const resp = await client.post<{ imported_nodes: number; imported_edges: number; root: string; fmea_id: string }>(
     `/plm/connections/${connectionId}/boms/${encodeURIComponent(partNumber)}/import-to-fmea`,
     body,
-  ).then((r) => r.data);
+  );
+  return resp.data;
+}

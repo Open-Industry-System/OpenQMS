@@ -4,7 +4,7 @@ export interface PLMConnection {
   connection_id: string;
   name: string;
   connector_type: string;
-  config: Record<string, any>;
+  config: Record<string, unknown>;
   is_active: boolean;
   product_line_code: string;
   created_by: string;
@@ -15,14 +15,14 @@ export interface PLMConnection {
 export interface PLMConnectionCreate {
   name: string;
   connector_type: string;
-  config: Record<string, any>;
+  config: Record<string, unknown>;
   product_line_code: string;
 }
 
 export interface PLMConnectionUpdate {
   name?: string;
   connector_type?: string;
-  config?: Record<string, any>;
+  config?: Record<string, unknown>;
   is_active?: boolean;
   product_line_code?: string;
 }
@@ -50,7 +50,14 @@ export interface PLMPart {
   is_key_characteristic: boolean;
   source_updated_at: string | null;
   product_line_code: string | null;
-  plm_raw_data: Record<string, any> | null;
+  plm_raw_data: Record<string, unknown> | null;
+}
+
+export interface PLMPartListResponse {
+  items: PLMPart[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 // ─── PLM BOM ───
@@ -68,7 +75,14 @@ export interface PLMBOM {
   level: number;
   source_updated_at: string | null;
   product_line_code: string | null;
-  plm_raw_data: Record<string, any> | null;
+  plm_raw_data: Record<string, unknown> | null;
+}
+
+export interface PLMBOMListResponse {
+  items: PLMBOM[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface PLMBOMTreeNode {
@@ -100,14 +114,21 @@ export interface PLMChangeOrder {
   status: string;
   priority: string;
   affected_part_numbers: string[];
-  proposed_changes: Record<string, any> | null;
+  proposed_changes: Record<string, unknown> | null;
   requested_by: string | null;
   approved_by: string | null;
   planned_implementation_date: string | null;
   actual_implementation_date: string | null;
   source_updated_at: string | null;
   product_line_code: string | null;
-  plm_raw_data: Record<string, any> | null;
+  plm_raw_data: Record<string, unknown> | null;
+}
+
+export interface PLMChangeOrderListResponse {
+  items: PLMChangeOrder[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 // ─── PLM Change Impact Task ───
@@ -121,7 +142,7 @@ export interface PLMChangeImpactTask {
   started_at: string | null;
   completed_at: string | null;
   error_message: string | null;
-  result: Record<string, any> | null;
+  result: Record<string, unknown> | null;
 }
 
 // ─── PLM Dashboard ───

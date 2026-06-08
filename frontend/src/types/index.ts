@@ -460,6 +460,7 @@ export interface ProductLine {
 export * from "./spc";
 export * from "./msa";
 export * from "./specialCharacteristic";
+export * from "./plm";
 
 // --- Management Review ---
 export interface ManagementReview {
