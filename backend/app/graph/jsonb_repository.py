@@ -353,7 +353,7 @@ class JSONBRepository(FMEAGraphRepository):
         else:
             directions = ["downstream"]
 
-        downstream_edges = {"HAS_FUNCTION", "FUNCTION_MAPPED_TO", "HAS_FAILURE_MODE", "EFFECT_OF", "HAS_PROCESS_STEP"}
+        downstream_edges = {"HAS_FUNCTION", "FUNCTION_MAPPED_TO", "HAS_FAILURE_MODE", "EFFECT_OF", "HAS_PROCESS_STEP", "HAS_CHILD"}
         upstream_edges = {"CAUSE_OF", "PREVENTED_BY", "DETECTED_BY", "OPTIMIZED_BY"}
 
         affected: list[AffectedNode] = []

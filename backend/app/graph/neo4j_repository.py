@@ -338,7 +338,7 @@ class Neo4jRepository(FMEAGraphRepository):
         else:
             directions = ["downstream"]
 
-        downstream_rel_types = "HAS_FUNCTION|FUNCTION_MAPPED_TO|HAS_FAILURE_MODE|EFFECT_OF|HAS_PROCESS_STEP"
+        downstream_rel_types = "HAS_FUNCTION|FUNCTION_MAPPED_TO|HAS_FAILURE_MODE|EFFECT_OF|HAS_PROCESS_STEP|HAS_CHILD"
         upstream_rel_types = "CAUSE_OF|PREVENTED_BY|DETECTED_BY|OPTIMIZED_BY"
 
         affected: list[AffectedNode] = []

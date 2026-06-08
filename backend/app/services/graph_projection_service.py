@@ -35,6 +35,7 @@ ALLOWED_EDGE_TYPES: set[str] = {
     "EFFECT_OF", "CAUSE_OF",
     "PREVENTED_BY", "DETECTED_BY", "OPTIMIZED_BY",
     "HAS_NODE",
+    "HAS_CHILD",
 }
 
 

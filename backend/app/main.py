@@ -45,6 +45,7 @@ from app.api.search import router as search_router
 from app.api.change_impact import router as change_impact_router
 from app.api.collaboration import router as collaboration_router
 from app.api.mes import router as mes_router
+from app.api.plm import router as plm_router
 
 
 @asynccontextmanager
@@ -149,6 +150,60 @@ async def lifespan(app: FastAPI):
 
     mes_cleanup_task = asyncio.create_task(_mes_cleanup_loop())
 
+    # Start PLM sync scheduler loop (every 30s)
+    from app.services.plm_service import PLMSyncService
+
+    async def _plm_sync_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                async with async_session() as db:
+                    await PLMSyncService.run_sync_round(db)
+            except Exception as e:
+                print(f"[plm_sync] error: {e}")
+
+    plm_sync_task = asyncio.create_task(_plm_sync_loop())
+
+    # Start PLM change impact worker loop (every 30s)
+    from app.services.plm_service import PLMChangeImpactWorker
+
+    async def _plm_impact_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                # Phase 1: recover stuck + claim in one session
+                async with async_session() as db:
+                    await PLMChangeImpactWorker.recover_stuck_tasks(db)
+                    await db.commit()
+                async with async_session() as db:
+                    claimed = await PLMChangeImpactWorker.claim_tasks(db)
+                    await db.commit()
+
+                # Phase 2: process each claimed task in independent session
+                for task in claimed:
+                    try:
+                        async with async_session() as proc_db:
+                            # Re-verify claim before processing
+                            from sqlalchemy import select as sa_select
+                            from app.models.plm import PLMChangeImpactTask
+                            check = await proc_db.execute(
+                                sa_select(PLMChangeImpactTask).where(
+                                    PLMChangeImpactTask.task_id == task.task_id,
+                                    PLMChangeImpactTask.claim_token == task.claim_token,
+                                    PLMChangeImpactTask.status == "running",
+                                )
+                            )
+                            if check.scalar_one_or_none() is None:
+                                continue
+                            await PLMChangeImpactWorker.process_task(proc_db, task)
+                            await proc_db.commit()
+                    except Exception as e:
+                        print(f"[plm_impact] task {task.task_id} error: {e}")
+            except Exception as e:
+                print(f"[plm_impact] error: {e}")
+
+    plm_impact_task = asyncio.create_task(_plm_impact_loop())
+
     yield
 
     # Cancel cleanup coroutine
@@ -160,6 +215,14 @@ async def lifespan(app: FastAPI):
 
     # Cancel MES background tasks
     for task in (mes_sync_task, mes_outbox_task, mes_cleanup_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    # Cancel PLM background tasks
+    for task in (plm_sync_task, plm_impact_task):
         task.cancel()
         try:
             await task
@@ -220,6 +283,7 @@ app.include_router(search_router)
 app.include_router(change_impact_router)
 app.include_router(collaboration_router)
 app.include_router(mes_router)
+app.include_router(plm_router)
 
 
 @app.get("/api/health")
