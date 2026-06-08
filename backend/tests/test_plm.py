@@ -99,6 +99,8 @@ async def test_plm_part_ingestion_idempotent(
     parts = list(result.scalars().all())
 
     assert len(parts) == 1
+    assert parts[0].name == "Part TEST-001"
+    assert parts[0].revision == "A"
     assert parts[0].is_safety_related is False
 
 
@@ -201,3 +203,39 @@ async def test_part_sc_link_created_for_safety_related(
 
     assert len(links) == 1
     assert links[0].characteristic_type == "safety"
+
+
+# ---------------------------------------------------------------------------
+# 5. Key-characteristic part -> SC link with characteristic_type="key_characteristic"
+# ---------------------------------------------------------------------------
+
+
+async def test_key_characteristic_part_creates_sc_link(
+    db: AsyncSession, plm_connection: PLMConnection
+):
+    """A part with is_key_characteristic=True (and is_safety_related=False)
+    should create a PLMPartSCLink with
+    characteristic_type='key_characteristic'."""
+    svc = PLMIngestionService(db)
+    conn_id = plm_connection.connection_id
+    data = _part_data(
+        conn_id,
+        part_number="KC-001",
+        revision="A",
+        is_key_characteristic=True,
+        is_safety_related=False,
+    )
+
+    await svc.ingest(data)
+    await db.commit()
+
+    result = await db.execute(
+        select(PLMPartSCLink).join(PLMPart).where(
+            PLMPart.connection_id == conn_id,
+            PLMPart.part_number == "KC-001",
+        )
+    )
+    links = list(result.scalars().all())
+
+    assert len(links) == 1
+    assert links[0].characteristic_type == "key_characteristic"

@@ -20,13 +20,16 @@ from app.models.user import User
 
 @pytest_asyncio.fixture
 async def db():
-    """Yield an async session; roll back after the test for isolation."""
+    """Yield an async session wrapped in nested transactions (savepoints).
+
+    Tests may call ``await db.commit()`` which commits only the inner
+    savepoint; the outer transaction is always rolled back on teardown,
+    giving each test a clean slate.
+    """
     async with async_session() as session:
-        try:
-            yield session
-        finally:
-            await session.rollback()
-            await session.close()
+        async with session.begin():
+            async with session.begin_nested():
+                yield session
 
 
 @pytest_asyncio.fixture
