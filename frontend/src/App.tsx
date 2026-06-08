@@ -51,6 +51,10 @@ import MESConnectionsPage from "./pages/mes/MESConnectionsPage";
 import MESDashboardPage from "./pages/mes/MESDashboardPage";
 import MESOrdersPage from "./pages/mes/MESOrdersPage";
 import MESScrapPage from "./pages/mes/MESScrapPage";
+import PLMDashboardPage from "./pages/plm/PLMDashboardPage";
+import PLMConnectionsPage from "./pages/plm/PLMConnectionsPage";
+import PLMPartsPage from "./pages/plm/PLMPartsPage";
+import PLMChangeOrdersPage from "./pages/plm/PLMChangeOrdersPage";
 
 function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
@@ -138,6 +142,10 @@ export default function App() {
         <Route path="/mes/connections" element={<ProtectedRoute><MESConnectionsPage /></ProtectedRoute>} />
         <Route path="/mes/orders" element={<ProtectedRoute><MESOrdersPage /></ProtectedRoute>} />
         <Route path="/mes/scrap" element={<ProtectedRoute><MESScrapPage /></ProtectedRoute>} />
+        <Route path="/plm/dashboard" element={<ProtectedRoute requiredModule="plm"><PLMDashboardPage /></ProtectedRoute>} />
+        <Route path="/plm/connections" element={<ProtectedRoute requiredModule="plm"><PLMConnectionsPage /></ProtectedRoute>} />
+        <Route path="/plm/parts" element={<ProtectedRoute requiredModule="plm"><PLMPartsPage /></ProtectedRoute>} />
+        <Route path="/plm/change-orders" element={<ProtectedRoute requiredModule="plm"><PLMChangeOrdersPage /></ProtectedRoute>} />
       </Route>
     </Routes>
   );

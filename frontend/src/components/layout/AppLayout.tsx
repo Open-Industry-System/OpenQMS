@@ -24,9 +24,11 @@ import {
   AuditOutlined,
   ShareAltOutlined,
   RadarChartOutlined,
+  BuildOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
+import { usePermission } from "../../hooks/usePermission";
 
 const { Header, Sider, Content } = Layout;
 
@@ -43,6 +45,7 @@ const MENU_KEYS = [
   "/knowledge-graph",
   "/change-impact",
   "/mes/dashboard", "/mes/orders", "/mes/scrap", "/mes/connections",
+  "/plm/dashboard", "/plm/connections", "/plm/parts", "/plm/change-orders",
 ];
 
 // 菜单 key → 需要展开的所有 SubMenu key 列表
@@ -74,6 +77,10 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/mes/orders": ["grp:mes"],
   "/mes/scrap": ["grp:mes"],
   "/mes/connections": ["grp:mes"],
+  "/plm/dashboard": ["grp:plm"],
+  "/plm/connections": ["grp:plm"],
+  "/plm/parts": ["grp:plm"],
+  "/plm/change-orders": ["grp:plm"],
 };
 
 function getSelectedMenuKey(pathname: string): string {
@@ -159,6 +166,17 @@ const menuItems = [
       { key: "/mes/connections", label: "连接管理" },
     ],
   },
+  {
+    key: "grp:plm",
+    icon: <BuildOutlined />,
+    label: "PLM 集成",
+    children: [
+      { key: "/plm/dashboard", label: "PLM 看板" },
+      { key: "/plm/parts", label: "零件列表" },
+      { key: "/plm/change-orders", label: "变更单管理" },
+      { key: "/plm/connections", label: "连接管理" },
+    ],
+  },
 ];
 
 export default function AppLayout() {
@@ -169,6 +187,7 @@ export default function AppLayout() {
   const logout = useAuthStore((s) => s.logout);
   const { token: themeToken } = theme.useToken();
   const { productLines, selected, setSelected, load } = useProductLineStore();
+  const { canView } = usePermission();
   useEffect(() => { load(); }, [load]);
 
   const selectedKey = getSelectedMenuKey(location.pathname);
@@ -182,6 +201,11 @@ export default function AppLayout() {
       return Array.from(merged);
     });
   }, [selectedKey]);
+
+  // Filter out PLM group if user cannot view plm module
+  const visibleMenuItems = menuItems.filter(
+    (item) => item.key !== "grp:plm" || canView("plm"),
+  );
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
@@ -209,7 +233,7 @@ export default function AppLayout() {
           selectedKeys={[selectedKey]}
           openKeys={openKeys}
           onOpenChange={setOpenKeys}
-          items={menuItems}
+          items={visibleMenuItems}
           onClick={({ key }) => {
             if (key.startsWith("grp:")) return;
             navigate(key);
