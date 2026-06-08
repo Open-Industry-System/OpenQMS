@@ -110,7 +110,7 @@
 {
   "layout_id": "uuid",
   "user_id": "uuid",
-  "layout_config": { "widgets": [...] },
+  "layout_config": { "lg": [...] },
   "created_at": "2026-06-08T10:00:00Z",
   "updated_at": "2026-06-08T10:00:00Z"
 }
@@ -121,7 +121,7 @@
 {
   "layout_id": null,
   "user_id": "uuid",
-  "layout_config": { "widgets": [...] },
+  "layout_config": { "lg": [...] },
   "created_at": null,
   "updated_at": null
 }
@@ -137,7 +137,7 @@
 ```json
 {
   "layout_config": {
-    "widgets": [
+    "lg": [
       { "i": "kpi-pending", "type": "kpi_pending_actions", "x": 0, "y": 0, "w": 3, "h": 2 }
     ]
   }
@@ -176,6 +176,12 @@
 - `product_line?: string` — 产品线过滤
 - `types: string` — **必填**，逗号分隔的 widget type 列表，如 `types=kpi_pending_actions,alert_overdue_capa,spc_abnormal_count`
 
+**边界处理**:
+- `types` 缺失或空字符串 → `400 Bad Request`，`{"detail": "types parameter is required"}`
+- `types` 包含非法 type → `400 Bad Request`，`{"detail": "unknown widget type: xxx"}`
+- `types` 包含重复 type → 自动去重，只查一次
+- `types` 包含用户无权限模块的 type → 该 type 被静默忽略，不返回对应模块数据
+
 **响应结构**:
 ```json
 {
@@ -213,23 +219,23 @@
 ```
 
 **数据聚合逻辑**:
-后端根据 `types` 参数，用 `asyncio.gather` 并行查询所需数据：
-- `kpi` 相关 types → `get_summary()` + `get_dashboard()`
-- `alert` 相关 types → `get_alerts()`
-- `recent_actions` → `get_recent_actions()`
-- `spc_*` → `spc_service` 查询（带 `product_line_codes` 过滤）
-- `msa_*` → `gauge` 表查询（带 `product_line_codes` 过滤）
-- `iqc_*` → `iqc_inspections` 查询（带 `product_line_codes` 过滤）
-- `mes_*` → `mes_equipment_status` 查询（带 `product_line_codes` 过滤）
-- `supplier_*` → `iqc_inspections` 分组查询（带 `product_line_codes` 过滤）
+后端根据 `types` 参数，按模块**顺序查询**所需数据（同一 AsyncSession 不适合并发，MVP 采用顺序查询保证稳定性）：
+1. 解析 `types` 参数，去重，映射到对应数据模块
+2. 按模块顺序执行查询：
+   - `kpi` 相关 types → `get_summary()` + `get_dashboard()`
+   - `alert` 相关 types → `get_alerts()`
+   - `recent_actions` → `get_recent_actions()`
+   - `spc_*` → `spc_service` 查询（带 `product_line_codes` 过滤）
+   - `msa_*` → `gauge` 表查询（带 `product_line_codes` 过滤）
+   - `iqc_*` → `iqc_inspections` 查询（带 `product_line_codes` 过滤）
+   - `mes_*` → `mes_equipment_status` 查询（带 `product_line_codes` 过滤）
+   - `supplier_*` → `iqc_inspections` 分组查询（带 `product_line_codes` 过滤）
 
 **权限过滤**（双层）：
-1. **模块级过滤**：后端根据用户模块权限，删除无权限模块的数据
+1. **模块级过滤**：后端根据用户模块权限，跳过无权限模块的查询
 2. **行级过滤 (RLS)**：所有查询通过 `get_user_product_line_codes()` 获取用户授权产线，SQL 层做 `product_line_code.in_(codes)` 物理过滤
 
-**性能保障**：
-- `asyncio.gather` 并行执行各模块查询，总耗时 ≈ 最慢单个查询
-- 单个模块查询失败不影响其他模块（返回该模块为空，前端降级显示）
+**容错**：单个模块查询失败（如 MES 表被锁定）不影响其他模块，返回该模块为空对象 `{}`，前端降级显示
 
 ---
 
@@ -273,7 +279,7 @@ export interface WidgetLayoutItem {
 }
 
 export interface DashboardLayoutConfig {
-  widgets: WidgetLayoutItem[];
+  lg: WidgetLayoutItem[];
 }
 
 export interface WidgetProps {
@@ -385,15 +391,36 @@ const GRID_CONFIG = {
 };
 ```
 
-**移动端降级策略**:
-- 屏幕宽度 `< 768px`（sm 断点）时：
-  - 隐藏「编辑布局」按钮
-  - `react-grid-layout` 切换为 `isDraggable=false, isResizable=false`
-  - 使用 CSS `display: block; width: 100%` 强制所有 widget 线性垂直排列
-  - 按 `y` 坐标升序排列，同 `y` 按 `x` 升序
-- 编辑模式仅在 `lg` / `md` 断点可用
+**响应式布局规则**:
 
-### 5.6 编辑模式交互流程
+react-grid-layout 通过 `layouts` prop 接收各断点布局：
+```typescript
+<ResponsiveGridLayout
+  layouts={{
+    lg: layoutConfig.lg,           // 桌面端：用户保存的布局
+    md: computeMdLayout(layoutConfig.lg),  // 平板端：自动计算
+    sm: computeMobileLayout(layoutConfig.lg), // 移动端：线性排列
+    xs: computeMobileLayout(layoutConfig.lg),
+  }}
+/>
+```
+
+**`md` 断点（996px-1200px，10 列）计算规则**:
+1. 等比缩放：`w_md = round(w_lg * 10 / 12)`, `x_md = round(x_lg * 10 / 12)`
+2. 最小宽度保护：`w_md >= minSize.w`
+3. 水平越界修正：`x_md + w_md <= 10`
+4. 垂直紧凑：使用 `compactType="vertical"` 自动消除空隙
+
+**`sm/xs` 断点（<768px，6/4 列）计算规则**:
+1. 所有 widget 强制 `w = cols`（占满整行）
+2. 按 `y` 坐标升序排列，同 `y` 按 `x` 升序
+3. 每个 widget 垂直堆叠，无重叠
+
+**编辑模式可用性**:
+- 编辑模式仅在 `lg` / `md` 断点可用
+- `sm/xs` 断点隐藏「编辑布局」按钮，`isDraggable=false, isResizable=false`
+
+### 5.7 编辑模式交互流程
 
 1. **进入编辑**: 点击「编辑布局」→ 复制当前 layout 到 editState → 显示编辑 UI
 2. **添加 widget**: 点击左侧面板 widget → 生成新 `i`（`crypto.randomUUID()`）→ 添加到 `lg` 数组末尾（右下角）
@@ -460,11 +487,14 @@ if not can_view(user, Module.MSA):
 - `canEdit("dashboard") === false`：隐藏「编辑布局」按钮（Viewer 角色）
 - `canEdit("dashboard") === true`：显示「编辑布局」按钮，可保存布局（Engineer / Manager / Admin）
 
-### 7.3 Widget 降级显示
+### 7.3 布局权限清洗
 
-当用户有 dashboard 权限但无某个 widget 对应模块权限时：
-- 该 widget 不会出现在组件库面板
-- 如果默认布局包含该 widget，后端返回数据时该模块字段为空 → 前端显示「暂无权限」占位
+**默认布局**：后端返回前按当前用户模块权限过滤，只包含用户有权限的 widget。
+
+**已保存布局**：用户权限可能随时间变化（如从 Engineer 降级为 Viewer，或管理员撤销某模块权限）。GET / PUT 时后端按当前权限重新清洗：
+- 过滤掉无权限模块的 widget
+- 返回清洗后的 layout_config
+- 前端始终信任后端返回的 widget 列表，不做二次权限判断
 
 ---
 
@@ -556,7 +586,7 @@ frontend/
 - [ ] **移动端降级**：屏幕 `< 768px` 时禁用编辑、强制线性布局
 - [ ] **按需查询**：GET `/widgets?types=...` 只查询实际用到的 widget 数据
 - [ ] **RLS 隔离**：所有跨模块查询均带 `product_line_codes` 过滤
-- [ ] **并行查询**：后端用 `asyncio.gather` 聚合各模块数据
+- [ ] **顺序查询**：后端按模块顺序查询各 widget 数据（同一 AsyncSession 安全）
 - [ ] **容错**：单个模块查询失败不影响其他 widget 渲染
 
 ---
@@ -564,6 +594,6 @@ frontend/
 ## 10. 扩展点
 
 后续可轻松扩展：
-- **新增 Widget**: 在 `registry.ts` 注册 + 添加组件 + 在 `dashboard_widget_service.py` 添加数据查询
+- **新增 Widget**: 在 `registry.ts` 注册 + 添加组件 + 在 `dashboard_service.py` 添加数据查询
 - **预设模板**: 在 `layout_config` 中增加 `template_id` 字段，支持管理员配置多套模板
 - **共享布局**: 增加 `is_shared` 字段，支持团队共享看板模板
