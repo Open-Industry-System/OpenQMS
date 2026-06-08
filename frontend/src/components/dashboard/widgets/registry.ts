@@ -3,6 +3,10 @@ import KpiPendingWidget from "./KpiPendingWidget";
 import KpiOverdueWidget from "./KpiOverdueWidget";
 import KpiRiskWidget from "./KpiRiskWidget";
 import KpiTrendWidget from "./KpiTrendWidget";
+import AlertHighRpnWidget from "./AlertHighRpnWidget";
+import AlertOverdueCapaWidget from "./AlertOverdueCapaWidget";
+import AlertHighPpmWidget from "./AlertHighPpmWidget";
+import RecentActionsWidget from "./RecentActionsWidget";
 
 const placeholderComponent: React.FC<WidgetProps> = () => null;
 
@@ -50,7 +54,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 4, h: 4 },
     minSize: { w: 3, h: 3 },
     module: "fmea",
-    component: placeholderComponent,
+    component: AlertHighRpnWidget,
   },
   alert_overdue_capa: {
     type: "alert_overdue_capa",
@@ -59,7 +63,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 4, h: 4 },
     minSize: { w: 3, h: 3 },
     module: "capa",
-    component: placeholderComponent,
+    component: AlertOverdueCapaWidget,
   },
   alert_high_ppm_suppliers: {
     type: "alert_high_ppm_suppliers",
@@ -68,7 +72,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 4, h: 4 },
     minSize: { w: 3, h: 3 },
     module: "supplier",
-    component: placeholderComponent,
+    component: AlertHighPpmWidget,
   },
   recent_actions: {
     type: "recent_actions",
@@ -77,7 +81,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 12, h: 3 },
     minSize: { w: 6, h: 2 },
     module: "dashboard",
-    component: placeholderComponent,
+    component: RecentActionsWidget,
   },
   spc_abnormal_count: {
     type: "spc_abnormal_count",
