@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -47,6 +48,8 @@ from app.api.collaboration import router as collaboration_router
 from app.api.mes import router as mes_router
 from app.api.plm import router as plm_router
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -74,11 +77,10 @@ async def lifespan(app: FastAPI):
 
     # Initialize LLM provider (non-fatal)
     from app.services.llm_provider import create_llm_provider
-    import logging as _logging
     try:
         app.state.llm_provider = create_llm_provider()
     except Exception as e:
-        _logging.getLogger(__name__).warning("LLM provider init failed: %s", e)
+        logger.warning("LLM provider init failed: %s", e)
         app.state.llm_provider = None
 
     # Initialize embedding provider (non-fatal)
@@ -86,7 +88,7 @@ async def lifespan(app: FastAPI):
     try:
         app.state.embedding_provider = create_embedding_provider()
     except Exception as e:
-        _logging.getLogger(__name__).warning("Embedding provider init failed: %s", e)
+        logger.warning("Embedding provider init failed: %s", e)
         app.state.embedding_provider = None
 
     # Start collaboration session cleanup coroutine
@@ -100,9 +102,9 @@ async def lifespan(app: FastAPI):
                 async with async_session() as db:
                     deleted = await delete_expired_sessions(db)
                     if deleted > 0:
-                        print(f"[collaboration] cleaned up {deleted} expired sessions")
+                        logger.info("[collaboration] cleaned up %d expired sessions", deleted)
             except Exception as e:
-                print(f"[collaboration] cleanup error: {e}")
+                logger.error("[collaboration] cleanup error: %s", e)
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
 
@@ -116,7 +118,7 @@ async def lifespan(app: FastAPI):
                 async with async_session() as db:
                     await MESSyncService.run_sync_round(db)
             except Exception as e:
-                print(f"[mes_sync] error: {e}")
+                logger.error("[mes_sync] error: %s", e)
 
     mes_sync_task = asyncio.create_task(_mes_sync_loop())
 
@@ -130,7 +132,7 @@ async def lifespan(app: FastAPI):
                 async with async_session() as db:
                     await MESPushService.process_outbox(db)
             except Exception as e:
-                print(f"[mes_outbox] error: {e}")
+                logger.error("[mes_outbox] error: %s", e)
 
     mes_outbox_task = asyncio.create_task(_mes_outbox_loop())
 
@@ -144,9 +146,9 @@ async def lifespan(app: FastAPI):
                 async with async_session() as db:
                     stats = await MESLifecycleService.cleanup(db)
                     if any(v > 0 for v in stats.values()):
-                        print(f"[mes_lifecycle] cleanup: {stats}")
+                        logger.info("[mes_lifecycle] cleanup: %s", stats)
             except Exception as e:
-                print(f"[mes_lifecycle] error: {e}")
+                logger.error("[mes_lifecycle] error: %s", e)
 
     mes_cleanup_task = asyncio.create_task(_mes_cleanup_loop())
 
@@ -160,7 +162,7 @@ async def lifespan(app: FastAPI):
                 async with async_session() as db:
                     await PLMSyncService.run_sync_round(db)
             except Exception as e:
-                print(f"[plm_sync] error: {e}")
+                logger.error("[plm_sync] error: %s", e)
 
     plm_sync_task = asyncio.create_task(_plm_sync_loop())
 
@@ -168,10 +170,15 @@ async def lifespan(app: FastAPI):
     from app.services.plm_service import PLMChangeImpactWorker
 
     async def _plm_impact_loop():
+        # recover_stuck_tasks and claim_tasks run in separate sessions because
+        # they operate on independent state: recovery resets stuck tasks back to
+        # pending, while claiming advances pending tasks to running.
+        from app.models.plm import PLMChangeImpactTask as _PLMTask
+
         while True:
             await asyncio.sleep(30)
             try:
-                # Phase 1: recover stuck + claim in one session
+                # Phase 1: recover stuck + claim in separate sessions
                 async with async_session() as db:
                     await PLMChangeImpactWorker.recover_stuck_tasks(db)
                     await db.commit()
@@ -179,28 +186,17 @@ async def lifespan(app: FastAPI):
                     claimed = await PLMChangeImpactWorker.claim_tasks(db)
                     await db.commit()
 
-                # Phase 2: process each claimed task in independent session
+                # Phase 2: process each claimed task — process_task() already
+                # re-verifies the claim token in its own session.
                 for task in claimed:
                     try:
                         async with async_session() as proc_db:
-                            # Re-verify claim before processing
-                            from sqlalchemy import select as sa_select
-                            from app.models.plm import PLMChangeImpactTask
-                            check = await proc_db.execute(
-                                sa_select(PLMChangeImpactTask).where(
-                                    PLMChangeImpactTask.task_id == task.task_id,
-                                    PLMChangeImpactTask.claim_token == task.claim_token,
-                                    PLMChangeImpactTask.status == "running",
-                                )
-                            )
-                            if check.scalar_one_or_none() is None:
-                                continue
                             await PLMChangeImpactWorker.process_task(proc_db, task)
                             await proc_db.commit()
                     except Exception as e:
-                        print(f"[plm_impact] task {task.task_id} error: {e}")
+                        logger.error("[plm_impact] task %s error: %s", task.task_id, e)
             except Exception as e:
-                print(f"[plm_impact] error: {e}")
+                logger.error("[plm_impact] error: %s", e)
 
     plm_impact_task = asyncio.create_task(_plm_impact_loop())
 
