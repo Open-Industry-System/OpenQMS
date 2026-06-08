@@ -1,4 +1,8 @@
 import type { WidgetMeta, WidgetProps } from "./types";
+import KpiPendingWidget from "./KpiPendingWidget";
+import KpiOverdueWidget from "./KpiOverdueWidget";
+import KpiRiskWidget from "./KpiRiskWidget";
+import KpiTrendWidget from "./KpiTrendWidget";
 
 const placeholderComponent: React.FC<WidgetProps> = () => null;
 
@@ -10,7 +14,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
     module: "dashboard",
-    component: placeholderComponent,
+    component: KpiPendingWidget,
   },
   kpi_overdue_tasks: {
     type: "kpi_overdue_tasks",
@@ -19,7 +23,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
     module: "dashboard",
-    component: placeholderComponent,
+    component: KpiOverdueWidget,
   },
   kpi_high_risk_items: {
     type: "kpi_high_risk_items",
@@ -28,7 +32,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
     module: "dashboard",
-    component: placeholderComponent,
+    component: KpiRiskWidget,
   },
   kpi_month_trend: {
     type: "kpi_month_trend",
@@ -37,7 +41,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
     module: "dashboard",
-    component: placeholderComponent,
+    component: KpiTrendWidget,
   },
   alert_high_rpn_fmea: {
     type: "alert_high_rpn_fmea",
