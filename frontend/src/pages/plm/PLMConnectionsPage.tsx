@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Table, Button, Tag, Typography, Modal, Form, Input, Select, App, Space,
   InputNumber,
@@ -11,7 +11,7 @@ import {
   getPLMConnections, createPLMConnection, updatePLMConnection,
   deletePLMConnection, testPLMConnection, syncPLMConnection,
 } from "../../api/plm";
-import type { PLMConnection, PLMConnectionCreate } from "../../types/plm";
+import type { PLMConnection, PLMConnectionCreate, PLMConnectionUpdate } from "../../types/plm";
 import { usePermission } from "../../hooks/usePermission";
 
 const { Title } = Typography;
@@ -69,19 +69,16 @@ export default function PLMConnectionsPage() {
   };
 
   const handleUpdate = async (
-    values: Partial<PLMConnectionCreate> & { config_port?: number },
+    values: PLMConnectionUpdate & { config_port?: number },
   ) => {
     if (!editingId) return;
     const { config_port, ...rest } = values;
-    const payload: Record<string, unknown> = { ...rest };
+    const payload: PLMConnectionUpdate = { ...rest };
     if (config_port !== undefined) {
       payload.config = { port: config_port };
     }
     try {
-      await updatePLMConnection(
-        editingId,
-        payload as Partial<PLMConnectionCreate>,
-      );
+      await updatePLMConnection(editingId, payload);
       message.success("连接更新成功");
       setModalOpen(false);
       setEditingId(null);
@@ -153,7 +150,7 @@ export default function PLMConnectionsPage() {
     setModalOpen(true);
   };
 
-  const columns = [
+  const columns = useMemo(() => [
     { title: "连接名称", dataIndex: "name", key: "name", ellipsis: true },
     {
       title: "类型",
@@ -193,7 +190,7 @@ export default function PLMConnectionsPage() {
       width: 260,
       render: (_: unknown, record: PLMConnection) => (
         <Space size="small">
-          {canEdit("plm" as never) && (
+          {canEdit("plm") && (
             <Button
               type="link"
               size="small"
@@ -221,7 +218,7 @@ export default function PLMConnectionsPage() {
           >
             同步
           </Button>
-          {canEdit("plm" as never) && (
+          {canEdit("plm") && (
             <Button
               type="link"
               size="small"
@@ -235,7 +232,7 @@ export default function PLMConnectionsPage() {
         </Space>
       ),
     },
-  ];
+  ], [canEdit, testLoading, syncLoading]);
 
   return (
     <div>
@@ -249,7 +246,7 @@ export default function PLMConnectionsPage() {
         <Title level={4} style={{ margin: 0 }}>
           PLM 连接管理
         </Title>
-        {canCreate("plm" as never) && (
+        {canCreate("plm") && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新建连接
           </Button>
