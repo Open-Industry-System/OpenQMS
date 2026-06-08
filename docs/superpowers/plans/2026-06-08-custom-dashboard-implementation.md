@@ -118,7 +118,7 @@ Create `backend/alembic/versions/20260608_add_user_dashboard_layouts.py`:
 """add user_dashboard_layouts table
 
 Revision ID: 20260608_user_dashboard_layouts
-Revises: <latest_revision_id>
+Revises: 030_add_mes_tables
 Create Date: 2026-06-08
 
 """
@@ -128,7 +128,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "20260608_user_dashboard_layouts"
-down_revision = "<latest_revision_id>"  # Replace with actual latest
+down_revision = "030_add_mes_tables"
 branch_labels = None
 depends_on = None
 
@@ -182,7 +182,24 @@ Expected: Migration succeeds, no errors.
 
 - [ ] **Step 6: Verify the table exists**
 
-Run: `cd backend && python -c "from app.database import engine; from sqlalchemy import inspect; i = inspect(engine); print('user_dashboard_layouts' in i.get_table_names())"`
+Run: `cd backend && alembic current`
+Expected: Shows `20260608_user_dashboard_layouts` as current revision.
+
+Alternatively, verify via async query:
+```bash
+cd backend && python -c "
+import asyncio
+from sqlalchemy import text
+from app.database import async_engine
+
+async def check():
+    async with async_engine.begin() as conn:
+        result = await conn.execute(text(\"SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename='user_dashboard_layouts'\"))
+        print(bool(result.scalar_one_or_none()))
+
+asyncio.run(check())
+"
+```
 Expected: `True`
 
 - [ ] **Step 7: Commit**
@@ -269,7 +286,6 @@ async def get_layout(
     layout = result.scalar_one_or_none()
 
     if layout is None:
-        # Return default layout (filtered by permissions done in service)
         from app.services.dashboard_service import get_default_layout
         default_config = await get_default_layout(db, user)
         return layout_schemas.DashboardLayoutResponse(
@@ -280,10 +296,14 @@ async def get_layout(
             updated_at=None,
         )
 
+    # Filter saved layout by current permissions (permissions may have changed)
+    from app.services.dashboard_service import filter_layout_by_permissions
+    filtered_config = await filter_layout_by_permissions(layout.layout_config, user, db)
+
     return layout_schemas.DashboardLayoutResponse(
         layout_id=layout.layout_id,
         user_id=layout.user_id,
-        layout_config=layout_schemas.LayoutConfig.model_validate(layout.layout_config),
+        layout_config=layout_schemas.LayoutConfig.model_validate(filtered_config),
         created_at=layout.created_at.isoformat() if layout.created_at else None,
         updated_at=layout.updated_at.isoformat() if layout.updated_at else None,
     )
@@ -296,6 +316,10 @@ async def save_layout(
     user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.EDIT)),
 ):
     """Save current user's dashboard layout."""
+    from app.services.dashboard_service import (
+        WIDGET_MODULE_MAP, _user_can_view_module, WIDGET_MIN_SIZES,
+    )
+
     # Validation: i uniqueness, bounds, type whitelist, module permissions
     widgets = req.layout_config.lg
     seen_i = set()
@@ -309,6 +333,17 @@ async def save_layout(
             raise HTTPException(status_code=400, detail="widget size exceeds grid bounds")
         if w.x + w.w > 12:
             raise HTTPException(status_code=400, detail="widget exceeds horizontal grid boundary")
+        # Type whitelist check
+        if w.type not in WIDGET_MODULE_MAP:
+            raise HTTPException(status_code=400, detail=f"invalid widget type: {w.type}")
+        # Module permission check
+        module = WIDGET_MODULE_MAP[w.type]
+        if not await _user_can_view_module(user, module, db):
+            raise HTTPException(status_code=403, detail=f"no permission for widget type: {w.type}")
+        # MinSize check
+        min_size = WIDGET_MIN_SIZES.get(w.type, {"w": 1, "h": 1})
+        if w.w < min_size["w"] or w.h < min_size["h"]:
+            raise HTTPException(status_code=400, detail=f"widget {w.type} size below minimum")
 
     result = await db.execute(
         select(UserDashboardLayout).where(UserDashboardLayout.user_id == user.user_id)
@@ -367,6 +402,14 @@ async def get_widgets(
     if invalid:
         raise HTTPException(status_code=400, detail=f"unknown widget type: {', '.join(invalid)}")
 
+    # Filter by module permissions
+    from app.services.dashboard_service import WIDGET_MODULE_MAP, _user_can_view_module
+    allowed_types = []
+    for t in type_list:
+        module = WIDGET_MODULE_MAP.get(t, "dashboard")
+        if await _user_can_view_module(user, module, db):
+            allowed_types.append(t)
+
     # Resolve product line filter
     if user.role_definition.bypass_row_level_security:
         filter_codes = [product_line] if product_line else None
@@ -382,7 +425,7 @@ async def get_widgets(
         else:
             filter_codes = user_codes
 
-    data = await dashboard_service.get_widgets_data(db, type_list, filter_codes, user.user_id)
+    data = await dashboard_service.get_widgets_data(db, allowed_types, filter_codes, user.user_id)
     return layout_schemas.DashboardWidgetsResponse(**data)
 ```
 
@@ -433,22 +476,44 @@ WIDGET_MODULE_MAP = {
     "mes_equipment_status": "mes", "supplier_ppm_trend": "supplier",
 }
 
+WIDGET_MIN_SIZES = {
+    "kpi_pending_actions": {"w": 2, "h": 2},
+    "kpi_overdue_tasks": {"w": 2, "h": 2},
+    "kpi_high_risk_items": {"w": 2, "h": 2},
+    "kpi_month_trend": {"w": 2, "h": 2},
+    "alert_high_rpn_fmea": {"w": 3, "h": 3},
+    "alert_overdue_capa": {"w": 3, "h": 3},
+    "alert_high_ppm_suppliers": {"w": 3, "h": 3},
+    "recent_actions": {"w": 6, "h": 2},
+    "spc_abnormal_count": {"w": 2, "h": 2},
+    "spc_capability_summary": {"w": 3, "h": 3},
+    "msa_gauge_expiry": {"w": 2, "h": 2},
+    "iqc_pending_inspections": {"w": 2, "h": 2},
+    "mes_equipment_status": {"w": 3, "h": 2},
+    "supplier_ppm_trend": {"w": 3, "h": 3},
+}
 
-def _user_can_view_module(user, module: str) -> bool:
+
+async def _user_can_view_module(user, module: str, db: AsyncSession) -> bool:
     """Check if user has VIEW permission for a module."""
-    from app.core.permissions import Module, PermissionLevel
-    perms = user.permissions or {}
-    return perms.get(module, 0) >= PermissionLevel.VIEW
+    from app.core.permissions import Module, PermissionLevel, get_user_permission
+    level = await get_user_permission(user, Module(module), db)
+    return level >= PermissionLevel.VIEW
+
+
+async def filter_layout_by_permissions(layout: dict, user, db: AsyncSession) -> dict:
+    """Filter layout widgets by user module permissions."""
+    widgets = []
+    for item in layout.get("lg", []):
+        module = WIDGET_MODULE_MAP.get(item.get("type", ""), "dashboard")
+        if await _user_can_view_module(user, module, db):
+            widgets.append(item)
+    return {"lg": widgets}
 
 
 async def get_default_layout(db: AsyncSession, user) -> dict:
     """Return default layout filtered by user module permissions."""
-    widgets = []
-    for item in DEFAULT_LAYOUT["lg"]:
-        module = WIDGET_MODULE_MAP.get(item["type"], "dashboard")
-        if _user_can_view_module(user, module):
-            widgets.append(item)
-    return {"lg": widgets}
+    return await filter_layout_by_permissions(DEFAULT_LAYOUT, user, db)
 ```
 
 - [ ] **Step 2: Add get_widgets_data function**
@@ -509,37 +574,36 @@ async def get_widgets_data(
     # SPC data
     if needs_spc:
         try:
-            from app.models.spc import SPCControlChart, SPCDataPoint
+            from app.models.spc import SPCAlarm, InspectionCharacteristic
             from sqlalchemy import func, select
             now = datetime.now(timezone.utc)
             week_ago = now - timedelta(days=7)
 
-            abnormal_q = select(func.count(SPCDataPoint.point_id)).where(
-                SPCDataPoint.is_abnormal == True,
-                SPCDataPoint.recorded_at >= week_ago,
+            # Count open alarms in last 7 days
+            abnormal_q = select(func.count(SPCAlarm.alarm_id)).where(
+                SPCAlarm.status == "open",
+                SPCAlarm.triggered_at >= week_ago,
             )
             if product_line_codes:
-                abnormal_q = abnormal_q.where(SPCControlChart.product_line_code.in_(product_line_codes))
+                abnormal_q = abnormal_q.join(
+                    InspectionCharacteristic,
+                    SPCAlarm.ic_id == InspectionCharacteristic.ic_id,
+                ).where(InspectionCharacteristic.product_line.in_(product_line_codes))
 
             abnormal_count = await db.scalar(abnormal_q) or 0
 
-            # CPK summary
-            cpk_q = select(
-                func.count(SPCControlChart.chart_id),
-                func.avg(SPCControlChart.cpk),
-            ).where(SPCControlChart.cpk.isnot(None))
+            # Count total inspection characteristics (as capability proxy)
+            ic_q = select(func.count(InspectionCharacteristic.ic_id))
             if product_line_codes:
-                cpk_q = cpk_q.where(SPCControlChart.product_line_code.in_(product_line_codes))
+                ic_q = ic_q.where(InspectionCharacteristic.product_line.in_(product_line_codes))
 
-            cpk_row = (await db.execute(cpk_q)).one_or_none()
-            cpk_count = cpk_row[0] if cpk_row else 0
-            cpk_avg = round(cpk_row[1], 2) if cpk_row and cpk_row[1] else None
+            ic_count = await db.scalar(ic_q) or 0
 
             result["spc"] = {
                 "abnormal_count": abnormal_count,
                 "capability_summary": {
-                    "count": cpk_count,
-                    "cpk_avg": cpk_avg,
+                    "count": ic_count,
+                    "cpk_avg": None,  # CPK requires per-IC calculation via spc_service
                 },
             }
         except Exception as e:
@@ -590,7 +654,7 @@ async def get_widgets_data(
 
             status_q = select(
                 MESEquipmentStatus.status,
-                func.count(MESEquipmentStatus.id),
+                func.count(MESEquipmentStatus.record_id),
             ).group_by(MESEquipmentStatus.status)
             if product_line_codes:
                 status_q = status_q.where(MESEquipmentStatus.product_line_code.in_(product_line_codes))
@@ -1910,24 +1974,19 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const widgetTypes = useMemo(
-    () => layout.map((w) => w.type).filter((v, i, a) => a.indexOf(v) === i),
-    [layout]
-  );
-
+  // Fetch layout first, then fetch widgets based on returned layout types
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
-      const [layoutResp, widgetsResp] = await Promise.all([
-        getDashboardLayout(),
-        getDashboardWidgets(widgetTypes, productLine || undefined),
-      ]);
-
+      const layoutResp = await getDashboardLayout();
       const validWidgets = (layoutResp.layout_config?.lg ?? DEFAULT_LAYOUT.lg).filter(
         (item) => !!item.type
       );
       setLayout(validWidgets);
+
+      const widgetTypes = validWidgets.map((w) => w.type).filter((v, i, a) => a.indexOf(v) === i);
+      const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch (e) {
       console.error("Dashboard fetch error:", e);
@@ -1935,7 +1994,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [widgetTypes, productLine]);
+  }, [productLine]);
 
   useEffect(() => {
     fetchData();
