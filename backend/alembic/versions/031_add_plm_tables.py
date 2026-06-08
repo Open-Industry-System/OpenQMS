@@ -192,24 +192,44 @@ def upgrade() -> None:
         sa.UniqueConstraint("part_id", "characteristic_type", name="uq_plm_part_sc"),
     )
 
+    bind = op.get_bind()
     for role_key, level in PLM_PERMS.items():
-        op.execute(
-            "INSERT INTO role_permissions (role_id, module, permission_level) "
-            f"SELECT id, 'plm', {level} FROM role_definitions WHERE role_key = '{role_key}' "
-            "ON CONFLICT (role_id, module) DO NOTHING"
+        bind.execute(
+            sa.text(
+                "INSERT INTO role_permissions (role_id, module, permission_level) "
+                "SELECT id, :module, :permission_level FROM role_definitions WHERE role_key = :role_key "
+                "ON CONFLICT (role_id, module) DO NOTHING"
+            ),
+            {"module": "plm", "permission_level": level, "role_key": role_key},
         )
 
-    op.execute(
-        "INSERT INTO users (user_id, username, display_name, email, password_hash, legacy_role, role_id, is_active) "
-        f"SELECT '{SYSTEM_USER_ID}', 'system', 'System', 'system@openqms.local', '', 'admin', id, true "
-        "FROM role_definitions WHERE role_key = 'admin' "
-        "ON CONFLICT (user_id) DO NOTHING"
+    bind.execute(
+        sa.text(
+            "INSERT INTO users (user_id, username, display_name, email, password_hash, legacy_role, role_id, is_active) "
+            "SELECT :user_id, :username, :display_name, :email, :password_hash, :legacy_role, id, :is_active "
+            "FROM role_definitions WHERE role_key = :role_key "
+            "ON CONFLICT (user_id) DO NOTHING"
+        ),
+        {
+            "user_id": SYSTEM_USER_ID,
+            "username": "system",
+            "display_name": "System",
+            "email": "system@openqms.local",
+            "password_hash": "",
+            "legacy_role": "admin",
+            "is_active": True,
+            "role_key": "admin",
+        },
     )
 
 
 def downgrade() -> None:
-    op.execute("DELETE FROM role_permissions WHERE module = 'plm'")
-    op.execute(f"DELETE FROM users WHERE user_id = '{SYSTEM_USER_ID}'")
+    bind = op.get_bind()
+    bind.execute(sa.text("DELETE FROM role_permissions WHERE module = 'plm'"))
+    bind.execute(
+        sa.text("DELETE FROM users WHERE user_id = :user_id AND username = :username AND email = :email"),
+        {"user_id": SYSTEM_USER_ID, "username": "system", "email": "system@openqms.local"},
+    )
     op.drop_table("plm_part_sc_links")
     op.drop_table("plm_part_fmea_links")
     op.drop_index("ix_plm_change_impact_tasks_status_next_retry", table_name="plm_change_impact_tasks")
