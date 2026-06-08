@@ -29,6 +29,7 @@ PLM_PERMS = {
 
 
 SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001"
+SYSTEM_USER_PASSWORD_HASH = "$2b$12$LbSwNeUzYlHkIBO5YZAo6eHGTx/ist7Y4TJmC6FH9Hqa6NgZEhBpa"  # Non-login system user hash for a discarded random password.
 
 
 def upgrade() -> None:
@@ -221,12 +222,13 @@ def upgrade() -> None:
             "username": "system",
             "display_name": "System",
             "email": "system@openqms.local",
-            "password_hash": "",
+            "password_hash": SYSTEM_USER_PASSWORD_HASH,
             "legacy_role": "admin",
             "role_id": admin_role_id,
             "is_active": True,
         },
     )
+    op.create_index("ix_plm_part_sc_links_sc_id", "plm_part_sc_links", ["sc_id"])
 
 
 def downgrade() -> None:
@@ -236,6 +238,7 @@ def downgrade() -> None:
         sa.text("DELETE FROM users WHERE user_id = :user_id"),
         {"user_id": SYSTEM_USER_ID},
     )
+    op.drop_index("ix_plm_part_sc_links_sc_id", table_name="plm_part_sc_links")
     op.drop_table("plm_part_sc_links")
     op.drop_table("plm_part_fmea_links")
     op.drop_index("ix_plm_change_impact_tasks_status_next_retry", table_name="plm_change_impact_tasks")
