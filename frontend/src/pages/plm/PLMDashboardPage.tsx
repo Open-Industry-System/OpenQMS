@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Row, Col, Card, Statistic, Table, Typography, Spin, App } from "antd";
+import { Row, Col, Card, Statistic, Table, Tag, Typography, Spin, App } from "antd";
 import {
   InboxOutlined,
   ApartmentOutlined,
@@ -7,21 +7,23 @@ import {
   SafetyOutlined,
 } from "@ant-design/icons";
 import { getPLMDashboard } from "../../api/plm";
+import { useProductLineStore } from "../../store/productLineStore";
 import type { PLMDashboard, PLMChangeOrder } from "../../types/plm";
 
 const { Title } = Typography;
 
 export default function PLMDashboardPage() {
   const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<PLMDashboard | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getPLMDashboard()
+    getPLMDashboard({ product_line_code: productLine || undefined })
       .then(setData)
       .catch(() => message.error("加载 PLM 看板数据失败"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [productLine]);
 
   if (loading) {
     return (
@@ -40,7 +42,7 @@ export default function PLMDashboardPage() {
       dataIndex: "status",
       key: "status",
       width: 100,
-      render: (s: string) => <span>{s}</span>,
+      render: (s: string) => <Tag>{s}</Tag>,
     },
     { title: "优先级", dataIndex: "priority", key: "priority", width: 80 },
     {

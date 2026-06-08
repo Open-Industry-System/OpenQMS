@@ -77,6 +77,8 @@ export async function syncPLMConnection(
 
 export async function getPLMParts(params?: {
   connection_id?: string;
+  search?: string;
+  product_line_code?: string;
   page?: number;
   page_size?: number;
 }): Promise<PLMPartListResponse> {
@@ -116,6 +118,7 @@ export async function getPLMBOMTree(
 
 export async function getPLMChangeOrders(params?: {
   connection_id?: string;
+  product_line_code?: string;
   page?: number;
   page_size?: number;
 }): Promise<PLMChangeOrderListResponse> {
@@ -133,8 +136,10 @@ export async function getPLMChangeOrder(id: string): Promise<PLMChangeOrder> {
 
 // ─── Dashboard ───
 
-export async function getPLMDashboard(): Promise<PLMDashboard> {
-  const resp = await client.get<PLMDashboard>("/plm/dashboard");
+export async function getPLMDashboard(params?: {
+  product_line_code?: string;
+}): Promise<PLMDashboard> {
+  const resp = await client.get<PLMDashboard>("/plm/dashboard", { params });
   return resp.data;
 }
 

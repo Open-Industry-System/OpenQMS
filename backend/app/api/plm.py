@@ -202,6 +202,7 @@ async def manual_sync(
 async def list_parts(
     request: Request,
     connection_id: uuid.UUID | None = Query(None),
+    search: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
@@ -210,12 +211,22 @@ async def list_parts(
     query = select(PLMPart)
     if connection_id:
         query = query.where(PLMPart.connection_id == connection_id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.where(
+            PLMPart.part_number.ilike(pattern) | PLMPart.name.ilike(pattern)
+        )
 
     query = await apply_product_line_filter(query, user, PLMPart, "plm", db, request)
 
     count_query = select(func.count()).select_from(PLMPart)
     if connection_id:
         count_query = count_query.where(PLMPart.connection_id == connection_id)
+    if search:
+        pattern = f"%{search}%"
+        count_query = count_query.where(
+            PLMPart.part_number.ilike(pattern) | PLMPart.name.ilike(pattern)
+        )
     count_query = await apply_product_line_filter(count_query, user, PLMPart, "plm", db, request)
 
     total = (await db.execute(count_query)).scalar() or 0

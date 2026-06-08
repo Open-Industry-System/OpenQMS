@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { Table, Button, Tag, Typography, App } from "antd";
 import { ThunderboltOutlined } from "@ant-design/icons";
 import { getPLMChangeOrders, triggerImpactAnalysis } from "../../api/plm";
+import { useProductLineStore } from "../../store/productLineStore";
 import type { PLMChangeOrder } from "../../types/plm";
 
 const { Title } = Typography;
@@ -23,15 +24,16 @@ const changeTypeLabels: Record<string, string> = {
 
 export default function PLMChangeOrdersPage() {
   const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<PLMChangeOrder[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [impactLoading, setImpactLoading] = useState<Record<string, boolean>>({});
 
-  const fetchData = (p: number = page) => {
+  const fetchData = (p: number = page, plCode?: string | null) => {
     setLoading(true);
-    getPLMChangeOrders({ page: p, page_size: 20 })
+    getPLMChangeOrders({ page: p, page_size: 20, product_line_code: plCode || undefined })
       .then((res) => {
         setData(res.items);
         setTotal(res.total);
@@ -41,8 +43,8 @@ export default function PLMChangeOrdersPage() {
   };
 
   useEffect(() => {
-    fetchData(1);
-  }, []);
+    fetchData(1, productLine);
+  }, [productLine]);
 
   const handleImpactAnalysis = async (changeId: string) => {
     setImpactLoading((prev) => ({ ...prev, [changeId]: true }));
@@ -112,7 +114,7 @@ export default function PLMChangeOrdersPage() {
           pageSize: 20,
           onChange: (p) => {
             setPage(p);
-            fetchData(p);
+            fetchData(p, productLine);
           },
         }}
       />

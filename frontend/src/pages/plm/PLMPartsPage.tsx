@@ -1,12 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
-import { Table, Input, Typography, Tag, Drawer, Descriptions, App } from "antd";
+import { Table, Input, Button, Typography, Tag, Drawer, Descriptions, App } from "antd";
 import { getPLMParts } from "../../api/plm";
+import { useProductLineStore } from "../../store/productLineStore";
 import type { PLMPart } from "../../types/plm";
 
 const { Title } = Typography;
 
 export default function PLMPartsPage() {
   const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<PLMPart[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -14,32 +16,30 @@ export default function PLMPartsPage() {
   const [search, setSearch] = useState("");
   const [drawerPart, setDrawerPart] = useState<PLMPart | null>(null);
 
-  const fetchData = useCallback((p: number, q: string) => {
+  const fetchData = useCallback((p: number, q: string, plCode?: string | null) => {
     setLoading(true);
-    getPLMParts({ page: p, page_size: 20 })
+    getPLMParts({
+      page: p,
+      page_size: 20,
+      search: q || undefined,
+      product_line_code: plCode || undefined,
+    })
       .then((res) => {
-        const filtered = q
-          ? res.items.filter(
-              (item) =>
-                item.part_number.toLowerCase().includes(q.toLowerCase()) ||
-                item.name.toLowerCase().includes(q.toLowerCase()),
-            )
-          : res.items;
-        setData(filtered);
-        setTotal(q ? filtered.length : res.total);
+        setData(res.items);
+        setTotal(res.total);
       })
       .catch(() => message.error("加载零件列表失败"))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    fetchData(1, search);
-  }, []);
+    fetchData(1, search, productLine);
+  }, [productLine]);
 
   const handleSearch = (value: string) => {
     setSearch(value);
     setPage(1);
-    fetchData(1, value);
+    fetchData(1, value, productLine);
   };
 
   const columns = [
@@ -72,7 +72,7 @@ export default function PLMPartsPage() {
       key: "actions",
       width: 80,
       render: (_: unknown, record: PLMPart) => (
-        <a onClick={() => setDrawerPart(record)}>详情</a>
+        <Button type="link" size="small" onClick={() => setDrawerPart(record)}>详情</Button>
       ),
     },
   ];
@@ -109,7 +109,7 @@ export default function PLMPartsPage() {
           pageSize: 20,
           onChange: (p) => {
             setPage(p);
-            fetchData(p, search);
+            fetchData(p, search, productLine);
           },
         }}
       />
