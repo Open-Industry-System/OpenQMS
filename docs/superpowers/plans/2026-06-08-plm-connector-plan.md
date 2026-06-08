@@ -51,6 +51,7 @@
 |------|---------|
 | `frontend/src/App.tsx` | 新增 PLM 路由 |
 | `frontend/src/components/layout/AppLayout.tsx` | 新增 PLM 菜单（权限控制） |
+| `frontend/src/hooks/usePermission.ts` | ModuleKey union 新增 `"plm"` |
 
 ---
 
@@ -265,6 +266,8 @@ def upgrade():
 
 def downgrade():
     op.execute("DELETE FROM role_permissions WHERE module = 'plm'")
+    # Remove system user inserted by this migration (safe: only if it matches our specific ID)
+    op.execute("DELETE FROM users WHERE user_id = '00000000-0000-0000-0000-000000000001'")
     op.drop_table('plm_part_sc_links')
     op.drop_table('plm_part_fmea_links')
     op.drop_index('ix_plm_change_impact_tasks_status_next_retry', table_name='plm_change_impact_tasks')
@@ -1373,7 +1376,7 @@ from sqlalchemy import select, func, and_
 
 from app.database import get_db
 from app.core.permissions import get_current_user, require_permission, Module, PermissionLevel
-from app.core.product_line_filter import apply_product_line_filter
+from app.core.product_line_filter import apply_product_line_filter, enforce_product_line_access
 from app.models.user import User
 from app.models.plm import (
     PLMConnection, PLMPart, PLMBOM, PLMChangeOrder,
@@ -1437,6 +1440,7 @@ async def get_connection(
     conn = await db.get(PLMConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
     return conn
 
 
@@ -1450,6 +1454,7 @@ async def update_connection(
     conn = await db.get(PLMConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
     for field, value in req.model_dump(exclude_unset=True).items():
         setattr(conn, field, value)
     await db.commit()
@@ -1466,6 +1471,7 @@ async def delete_connection(
     conn = await db.get(PLMConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
     await db.delete(conn)
     await db.commit()
     return {"status": "deleted"}
@@ -1480,6 +1486,7 @@ async def test_connection(
     conn = await db.get(PLMConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
     return await test_plm_connection(conn, db)
 
 
@@ -1489,6 +1496,10 @@ async def manual_sync(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
 ):
+    conn = await db.get(PLMConnection, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
     await PLMSyncService.manual_sync(db, connection_id)
     return {"status": "sync triggered"}
 
@@ -1527,6 +1538,7 @@ async def get_part(
     part = await db.get(PLMPart, part_id)
     if not part:
         raise HTTPException(status_code=404, detail="Part not found")
+    await enforce_product_line_access(user, part.product_line_code, db)
     return part
 
 
@@ -1555,17 +1567,42 @@ async def get_bom_tree(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
 ):
-    """Return BOM tree starting from part_number."""
-    # Build tree via recursive query or in-memory BFS
+    """Return multi-level BOM tree starting from part_number via BFS."""
+    # Fetch all BOM rows for this connection+revision, then build tree in-memory
     stmt = select(PLMBOM).where(
         PLMBOM.connection_id == connection_id,
-        PLMBOM.parent_part_number == part_number,
         PLMBOM.parent_revision == revision,
         PLMBOM.bom_revision == bom_revision,
     )
     result = await db.execute(stmt)
-    rows = result.scalars().all()
-    return {"root": part_number, "revision": revision, "bom_revision": bom_revision, "children": rows}
+    all_boms = result.scalars().all()
+
+    # Build adjacency: (parent_pn, parent_rev) -> list of BOM rows
+    children_map: dict[tuple[str, str], list] = {}
+    for bom in all_boms:
+        key = (bom.parent_part_number, bom.parent_revision)
+        children_map.setdefault(key, []).append(bom)
+
+    # BFS from root
+    tree_nodes = []
+    queue = [(part_number, revision, 0)]  # (pn, rev, level)
+    visited = set()
+    while queue:
+        pn, rev, level = queue.pop(0)
+        if (pn, rev) in visited:
+            continue
+        visited.add((pn, rev))
+        for bom in children_map.get((pn, rev), []):
+            tree_nodes.append({
+                "parent_part_number": bom.parent_part_number,
+                "child_part_number": bom.child_part_number,
+                "child_revision": bom.child_revision,
+                "quantity": bom.quantity,
+                "level": level + 1,
+            })
+            queue.append((bom.child_part_number, bom.child_revision, level + 1))
+
+    return {"root": part_number, "revision": revision, "bom_revision": bom_revision, "tree": tree_nodes}
 
 
 @router.get("/change-orders", response_model=list[schemas.PLMChangeOrderResponse])
@@ -1595,6 +1632,7 @@ async def get_change_order(
     co = await db.get(PLMChangeOrder, change_id)
     if not co:
         raise HTTPException(status_code=404, detail="Change order not found")
+    await enforce_product_line_access(user, co.product_line_code, db)
     return co
 
 
@@ -1643,6 +1681,10 @@ async def link_part_to_fmea(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
 ):
+    part = await db.get(PLMPart, part_id)
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    await enforce_product_line_access(user, part.product_line_code, db)
     link = PLMPartFMEALink(
         part_id=part_id,
         fmea_id=req.fmea_id,
@@ -1661,6 +1703,10 @@ async def trigger_impact_analysis(
     user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
 ):
     from app.services.plm_service import PLMChangeImpactWorker
+    co = await db.get(PLMChangeOrder, change_id)
+    if not co:
+        raise HTTPException(status_code=404, detail="Change order not found")
+    await enforce_product_line_access(user, co.product_line_code, db)
     # Upsert: avoid unique constraint violation on uq_plm_impact_task_change
     existing = await db.execute(
         select(PLMChangeImpactTask).where(PLMChangeImpactTask.change_id == change_id)
@@ -1701,38 +1747,61 @@ async def import_bom_to_fmea(
         raise HTTPException(status_code=404, detail="FMEA not found")
     if fmea.status != "draft":
         raise HTTPException(status_code=400, detail="FMEA must be in draft status")
+    await enforce_product_line_access(user, fmea.product_line_code, db)
 
-    # Fetch BOM tree
+    # Fetch all BOM rows for this connection+revision (multi-level)
     stmt = select(PLMBOM).where(
         PLMBOM.connection_id == connection_id,
-        PLMBOM.parent_part_number == part_number,
         PLMBOM.parent_revision == revision,
         PLMBOM.bom_revision == bom_revision,
     )
     result = await db.execute(stmt)
-    boms = result.scalars().all()
-    if not boms:
+    all_boms = result.scalars().all()
+    if not all_boms:
         raise HTTPException(status_code=404, detail="BOM not found")
 
-    # Build nodes and edges (node types must match FMEA white-list: System, Subsystem, Component)
+    # Build nodes and edges using real parent->child relationships
+    def _node_id(pn: str, rev: str) -> str:
+        h = hashlib.sha256(f"{connection_id}|{pn}|{rev}".encode()).hexdigest()[:16]
+        return f"plm-{h}"
+
     node_type_map = {1: "System", 2: "Subsystem"}
     fmea_nodes = []
     fmea_edges = []
-    node_meta = []
+    node_meta = []  # (node_id, part_number, revision)
+    seen_ids = set()
 
-    # Root node
-    root_hash = hashlib.sha256(f"{connection_id}|{part_number}|{revision}".encode()).hexdigest()[:16]
-    root_id = f"plm-{root_hash}"
-    fmea_nodes.append({"id": root_id, "type": "System", "name": part_number})
-    node_meta.append((root_id, part_number, revision))
+    # BFS to discover all levels
+    from collections import deque
+    queue = deque([(part_number, revision, 0)])
+    visited = set()
+    children_map = {}
+    for bom in all_boms:
+        key = (bom.parent_part_number, bom.parent_revision)
+        children_map.setdefault(key, []).append(bom)
 
-    for bom in boms:
-        child_hash = hashlib.sha256(f"{connection_id}|{bom.child_part_number}|{bom.child_revision}".encode()).hexdigest()[:16]
-        child_id = f"plm-{child_hash}"
-        node_type = node_type_map.get(bom.level, "Component")
-        fmea_nodes.append({"id": child_id, "type": node_type, "name": bom.child_part_number})
-        fmea_edges.append({"id": f"edge-{root_id}-{child_id}", "source": root_id, "target": child_id, "type": "HAS_CHILD"})
-        node_meta.append((child_id, bom.child_part_number, bom.child_revision))
+    while queue:
+        pn, rev, level = queue.popleft()
+        if (pn, rev) in visited:
+            continue
+        visited.add((pn, rev))
+        nid = _node_id(pn, rev)
+        if nid not in seen_ids:
+            seen_ids.add(nid)
+            node_type = node_type_map.get(level, "Component")
+            fmea_nodes.append({"id": nid, "type": node_type, "name": pn})
+            node_meta.append((nid, pn, rev))
+        for bom in children_map.get((pn, rev), []):
+            child_nid = _node_id(bom.child_part_number, bom.child_revision)
+            if child_nid not in seen_ids:
+                seen_ids.add(child_nid)
+                child_level = level + 1
+                child_type = node_type_map.get(child_level, "Component")
+                fmea_nodes.append({"id": child_nid, "type": child_type, "name": bom.child_part_number})
+                node_meta.append((child_nid, bom.child_part_number, bom.child_revision))
+            # Edge: parent -> child (real BOM hierarchy, not all to root)
+            fmea_edges.append({"id": f"edge-{nid}-{child_nid}", "source": nid, "target": child_nid, "type": "HAS_CHILD"})
+            queue.append((bom.child_part_number, bom.child_revision, level + 1))
 
     # Guard against overwriting non-empty graph without explicit consent
     existing_nodes = fmea.graph_data.get("nodes", []) if fmea.graph_data else []
@@ -2155,6 +2224,7 @@ git commit -m "feat(frontend): add PLM connections page"
 - Create: `frontend/src/pages/plm/PLMDashboardPage.tsx`
 - Create: `frontend/src/pages/plm/PLMPartsPage.tsx`
 - Create: `frontend/src/pages/plm/PLMChangeOrdersPage.tsx`
+- Modify: `frontend/src/hooks/usePermission.ts`
 - Modify: `frontend/src/App.tsx`
 - Modify: `frontend/src/components/layout/AppLayout.tsx`
 
@@ -2274,7 +2344,20 @@ export default function PLMChangeOrdersPage() {
 }
 ```
 
-- [ ] **Step 4: App.tsx 新增路由**
+- [ ] **Step 4: usePermission.ts 添加 "plm" ModuleKey**
+
+```typescript
+// frontend/src/hooks/usePermission.ts
+export type ModuleKey =
+  | "fmea" | "capa" | "dashboard" | "audit" | "customer_quality"
+  | "customer_audit" | "supplier" | "iqc" | "ppap" | "spc"
+  | "msa" | "planning" | "management_review" | "user_mgmt"
+  | "permission_mgmt" | "special_characteristic" | "quality_goal" | "scar"
+  | "knowledge_graph"
+  | "plm";  // <-- add this
+```
+
+- [ ] **Step 5: App.tsx 新增路由**
 
 ```tsx
 // frontend/src/App.tsx — 在 MES 路由之后添加
