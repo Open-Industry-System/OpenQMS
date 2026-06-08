@@ -63,7 +63,7 @@
 **响应式持久化策略**：
 - 只持久化 **桌面端（`lg` 断点，≥1200px）** 的布局
 - `md/sm/xs` 断点由前端根据 `lg` 布局自动计算（等比压缩 + 单列 fallback），不单独存储
-- 编辑模式仅在 `lg` / `md` 断点可用；移动端（`sm/xs`）为只读自适应视图
+- **编辑模式仅在 `lg` 断点可用**；`md/sm/xs` 为只读自适应视图（避免 md 布局覆盖 lg 持久化状态）
 
 字段说明：
 - `i`: 唯一实例 ID，使用 `crypto.randomUUID()` 生成
@@ -174,10 +174,10 @@
 
 **查询参数**:
 - `product_line?: string` — 产品线过滤
-- `types: string` — **必填**，逗号分隔的 widget type 列表，如 `types=kpi_pending_actions,alert_overdue_capa,spc_abnormal_count`
+- `types: string` — 逗号分隔的 widget type 列表，如 `types=kpi_pending_actions,alert_overdue_capa,spc_abnormal_count`
 
 **边界处理**:
-- `types` 缺失或空字符串 → `400 Bad Request`，`{"detail": "types parameter is required"}`
+- `types` 为空或空字符串 → 返回空响应 `{}`（空看板是合法状态，前端显示空状态）
 - `types` 包含非法 type → `400 Bad Request`，`{"detail": "unknown widget type: xxx"}`
 - `types` 包含重复 type → 自动去重，只查一次
 - `types` 包含用户无权限模块的 type → 该 type 被静默忽略，不返回对应模块数据
@@ -432,14 +432,16 @@ react-grid-layout 通过 `layouts` prop 接收各断点布局：
 3. 每个 widget 垂直堆叠，无重叠
 
 **编辑模式可用性**:
-- 编辑模式仅在 `lg` / `md` 断点可用
-- `sm/xs` 断点隐藏「编辑布局」按钮，`isDraggable=false, isResizable=false`
+- 编辑模式 **仅在 `lg` 断点（≥1200px）可用**
+- `md/sm/xs` 断点隐藏「编辑布局」按钮，`isDraggable=false, isResizable=false`
+- 原因：`md` 布局由 `lg` 自动计算生成，若允许 `md` 编辑会导致 `md` 布局覆盖 `lg` 持久化状态
 
 ### 5.7 编辑模式交互流程
 
 1. **进入编辑**: 点击「编辑布局」→ 复制当前 layout 到 editState → 显示编辑 UI
 2. **添加 widget**: 点击左侧面板 widget → 生成新 `i`（`crypto.randomUUID()`）→ 添加到 `lg` 数组末尾（右下角）
-3. **拖拽/调整大小**: react-grid-layout 回调更新 `editState.layout`
+3. **拖拽/调整大小**: react-grid-layout `onLayoutChange` 回调触发 → **按 `i` 匹配原始 widget，merge 回 `type` 字段** → 更新 `editState.layout`
+   - 注意：react-grid-layout 回调只返回 `{i, x, y, w, h}`，不会携带 `type`。必须按 `i` 从原始 layout 查找对应的 `type` 并 merge
 4. **删除 widget**: 点击 widget 右上角 🗑️ → 从数组移除
 5. **完成**: 调用 `PUT /api/dashboard/layout` → 成功后刷新页面数据 → 切换回查看模式
 6. **取消**: 丢弃 `editState` → 恢复 `originalLayout` → 切换回查看模式
