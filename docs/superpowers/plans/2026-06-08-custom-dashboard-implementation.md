@@ -381,13 +381,10 @@ async def get_widgets(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
 ):
-    """Get widget data for specified types."""
-    if not types or not types.strip():
-        raise HTTPException(status_code=400, detail="types parameter is required")
-
-    type_list = list(dict.fromkeys(t.strip() for t in types.split(",") if t.strip()))
+    """Get widget data for specified types. Empty types returns empty data (valid for empty dashboard)."""
+    type_list = list(dict.fromkeys(t.strip() for t in (types or "").split(",") if t.strip()))
     if not type_list:
-        raise HTTPException(status_code=400, detail="types parameter is required")
+        return layout_schemas.DashboardWidgetsResponse()  # Empty dashboard is valid
 
     # Validate types against whitelist
     valid_types = {
@@ -1730,12 +1727,17 @@ export default function DashboardGrid({
   onRemoveWidget,
   onRetry,
 }: DashboardGridProps) {
+  const [currentBreakpoint, setCurrentBreakpoint] = useState<string>("lg");
+
   const layouts = {
     lg: layout,
     md: computeMdLayout(layout),
     sm: computeMobileLayout(layout).map((i) => ({ ...i, w: 6 })),
     xs: computeMobileLayout(layout).map((i) => ({ ...i, w: 4 })),
   };
+
+  // Only allow editing on lg breakpoint to avoid md layout overwriting lg persisted state
+  const canEdit = isEditing && currentBreakpoint === "lg";
 
   return (
     <ResponsiveGridLayout
@@ -1746,14 +1748,19 @@ export default function DashboardGrid({
       rowHeight={GRID_CONFIG.rowHeight}
       margin={GRID_CONFIG.margin}
       containerPadding={GRID_CONFIG.containerPadding}
-      isDraggable={isEditing}
-      isResizable={isEditing}
+      onBreakpointChange={(bp) => setCurrentBreakpoint(bp)}
+      compactType="vertical"
+      isDraggable={canEdit}
+      isResizable={canEdit}
       onLayoutChange={(currentLayout, allLayouts) => {
-        // Only save lg layout changes
+        // IMPORTANT: react-grid-layout onLayoutChange only returns {i,x,y,w,h}.
+        // We must merge 'type' back from the original layout by matching 'i'.
+        // Also: we only persist lg breakpoint; edit mode is disabled on md/sm/xs.
         if (isEditing && allLayouts.lg) {
+          const typeMap = new Map(layout.map((w) => [w.i, w.type]));
           const newLayout = allLayouts.lg.map((l) => ({
             i: l.i,
-            type: layout.find((w) => w.i === l.i)?.type || "",
+            type: typeMap.get(l.i) || "",
             x: l.x,
             y: l.y,
             w: l.w,
