@@ -192,10 +192,11 @@
 
 **处理流程**：
 1. PLMIngestionService 摄入 ECN 时，若状态变为 `approved`，创建 `pending` 任务记录（同一事务内，`ON CONFLICT (change_id) DO NOTHING` 幂等）
-2. 后台 worker 用 `SELECT FOR UPDATE SKIP LOCKED` 领取 `pending` 且 `next_retry_at <= now()` 的任务，设置 `claim_token` 和 `status=running`
-3. Worker 在**独立事务**中调用 `change_impact_service.analyze()`
-4. 成功：更新 `status=completed`，清空 `claim_token`
-5. 失败：`retry_count += 1`，`next_retry_at = now() + 指数退避`，`status = pending`（若 `retry_count < max_retries`）或 `failed`
+2. 后台 worker 先执行 `recover_stuck_tasks()`：将 `running` 超过 10 分钟且未完成的任务重置为 `pending`（`status='running' AND started_at < now() - interval '10 minutes'`），清空 `claim_token`
+3. 后台 worker 用 `SELECT FOR UPDATE SKIP LOCKED` 领取 `pending` 且 `next_retry_at <= now()` 的任务，设置 `claim_token` 和 `status=running`
+4. Worker 在**独立事务**中调用 `change_impact_service.analyze()`
+5. 成功：更新 `status=completed`，清空 `claim_token`
+6. 失败：`retry_count += 1`，`next_retry_at = now() + 指数退避`，`status = pending`（若 `retry_count < max_retries`）或 `failed`
 
 ### 3.8 `plm_part_fmea_links` — Part 与 FMEA 节点关联表
 
@@ -308,22 +309,31 @@ if old_status != "approved" and new_status == "approved":
 
 ```python
 SYSTEM_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+# 注意：该 UUID 必须在 seed 中对应一个真实用户记录，否则外键约束失败。
+# 建议在 backend/app/seed.py 中预置 "system" 用户：
+#   User(user_id=SYSTEM_USER_ID, username="system", role="admin", ...)
 
 async def process_plm_change_impact_task(db, task: PLMChangeImpactTask):
     change_order = await db.get(PLMChangeOrder, task.change_id)
+    connection_id = change_order.connection_id
     for part_ref in change_order.affected_part_numbers:
         # part_ref 格式: "part_number|revision" 或仅 "part_number"
-        part_number = part_ref.split("|")[0] if "|" in part_ref else part_ref
+        if "|" in part_ref:
+            part_number, revision = part_ref.split("|", 1)
+        else:
+            part_number, revision = part_ref, None
         
-        # 通过关联表查找 FMEA 节点（不假设 FMEA 节点字典内部含 fmea_id 字段）
-        # find_part_fmea_links 返回承载对象（fmea_id, node_id），而非 FMEA 节点字典
-        links = await find_part_fmea_links(db, part_number=part_number)
+        # 先通过 (connection_id, part_number, revision) 精确查找 part_id
+        part = await find_plm_part(db, connection_id, part_number, revision)
+        if not part:
+            continue
+        
+        # 再通过 part_id 查关联表，避免 A/B/C 版本全部命中
+        links = await find_part_fmea_links(db, part_id=part.part_id)
         for link in links:
-            # link.fmea_id 来自关联表，link.node_id 来自关联表
             node = await get_fmea_node(db, link.fmea_id, link.node_id)
             if not node:
                 continue
-            # node 是 JSONB 中的字典，不含 fmea_id；fmea_id 从 link 对象获取
             await change_impact_service.analyze(
                 fmea_id=link.fmea_id,
                 node_id=link.node_id,
@@ -362,7 +372,7 @@ POST   /api/plm/connections/{id}/sync          # 手动触发同步 [EDIT]
 GET    /api/plm/parts                          # 零部件列表 [VIEW]
 GET    /api/plm/parts/{part_id}                # 零部件详情（含 BOM 父子 + FMEA links + SC links）[VIEW]
 GET    /api/plm/boms                           # BOM 列表 [VIEW]
-GET    /api/plm/connections/{connection_id}/boms/tree/{part_number}  # BOM 树形展开 [VIEW]
+GET    /api/plm/connections/{connection_id}/boms/tree/{part_number}?revision={rev}&bom_revision={bom_rev}  # BOM 树形展开（含 revision 避免多版本歧义）[VIEW]
 GET    /api/plm/change-orders                  # ECN 列表 [VIEW]
 GET    /api/plm/change-orders/{id}             # ECN 详情（含影响分析任务结果）[VIEW]
 GET    /api/plm/dashboard                      # 概览统计 [VIEW]
@@ -417,13 +427,15 @@ import hashlib
 
 # 1. 遍历 BOM 邻接表，按 level 构建树
 # 2. 为每个 BOM 节点创建 FMEA node（仅写入标准字段，不扩展 FMEA schema）
+node_meta = []  # 保存 (node_id, part_number, revision) 用于后续创建关联表
 for bom_node in bom_tree:
     # 短 hash ID：plm-{sha256(conn_id|pn|rev)[:16]}，确保唯一且不超过 128 字符
     node_hash = hashlib.sha256(
         f"{connection_id}|{bom_node.part_number}|{bom_node.revision}".encode()
     ).hexdigest()[:16]
+    node_id = f"plm-{node_hash}"
     fmea_node = {
-        "id": f"plm-{node_hash}",
+        "id": node_id,
         "type": node_type_map[bom_node.level],  # 1=System, 2=Subsystem, 3+=Component
         "name": bom_node.name,
         # 不写入 part_number/revision/function/failure_mode 等字段
@@ -431,6 +443,7 @@ for bom_node in bom_tree:
         # PLM 信息通过 plm_part_fmea_links 关联表查询
     }
     fmea_nodes.append(fmea_node)
+    node_meta.append((node_id, bom_node.part_number, bom_node.revision))
 
 # 3. 为父子关系创建 edges
 for bom in boms:
@@ -445,12 +458,12 @@ for bom in boms:
 fmea.graph_data = {"nodes": fmea_nodes, "edges": fmea_edges}
 
 # 5. 创建 plm_part_fmea_links 关联记录（Part 信息存在关联表，不污染 FMEA node）
-for node in fmea_nodes:
+for node_id, part_number, revision in node_meta:
     await create_part_fmea_link(
-        part_number=bom_node.part_number,
-        revision=bom_node.revision,
+        part_number=part_number,
+        revision=revision,
         fmea_id=fmea.fmea_id,
-        node_id=node["id"]
+        node_id=node_id
     )
 ```
 
@@ -530,10 +543,10 @@ for node in fmea_nodes:
 - `backend/app/core/product_line_filter.py` — 添加 `"plm": "product_line_code"`
 - `backend/app/core/config.py` — 定义 `SYSTEM_USER_ID` 常量
 - `backend/app/models/__init__.py` — 导出 PLM 模型
-- `backend/app/services/graph_projection_service.py` — `_node_properties` 白名单增加 `"part_number"`；边类型白名单增加 `"HAS_CHILD"`
+- `backend/app/services/graph_projection_service.py` — 边类型白名单增加 `"HAS_CHILD"`
 - `backend/app/graph/jsonb_repository.py` — BFS downstream 边集合增加 `"HAS_CHILD"`
 - `backend/app/main.py` — 注册 plm_router + 后台协程（sync + outbox + impact task worker）
-- `backend/app/seed.py` — 插入 PLM 模块权限种子数据
+- `backend/app/seed.py` — 插入 PLM 模块权限种子数据 + 预置 "system" 用户（`user_id=SYSTEM_USER_ID`）
 - `backend/alembic/versions/031_add_plm_tables.py` 末尾 — 插入 PLM 角色权限（参考 MES 在 030 中的做法）
 
 ### 前端新增
