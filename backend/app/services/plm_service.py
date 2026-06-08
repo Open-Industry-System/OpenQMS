@@ -129,17 +129,22 @@ class PLMIngestionService:
         characteristic_type: str,
     ) -> None:
         """Upsert PLMPartSCLink for a safety-related or key-characteristic part."""
-        # Resolve the part_id via the unique constraint columns
-        part_result = await self._db.execute(
-            select(PLMPart.part_id).where(
-                PLMPart.connection_id == connection_id,
-                PLMPart.part_number == data["part_number"],
-                PLMPart.revision == data.get("revision", "A"),
-            )
-        )
-        part_id = part_result.scalar_one_or_none()
+        # Resolve the part_id via RETURNING on the part upsert, or fall back to
+        # a lookup.  Using a deterministic lookup avoids the race where the
+        # INSERT for the part has flushed but the SELECT here sees a stale
+        # snapshot in READ COMMITTED.
+        part_id = data.get("_resolved_part_id")
         if part_id is None:
-            return  # Part not found after upsert -- should not happen
+            part_result = await self._db.execute(
+                select(PLMPart.part_id).where(
+                    PLMPart.connection_id == connection_id,
+                    PLMPart.part_number == data["part_number"],
+                    PLMPart.revision == data.get("revision", "A"),
+                )
+            )
+            part_id = part_result.scalar_one_or_none()
+            if part_id is None:
+                return  # Part not found after upsert -- should not happen
 
         product_line_code = data.get("product_line_code")
         if not product_line_code:
@@ -495,6 +500,10 @@ class PLMSyncService:
                 job.next_run_at = now + timedelta(seconds=backoff)
                 await db.flush()
 
+        # Commit all failure-path status updates so they persist even if the
+        # caller does not call db.commit() (e.g. fire-and-forget round).
+        await db.commit()
+
         return processed
 
     @staticmethod
@@ -574,9 +583,9 @@ async def _run_single_sync_job(
     async with async_session() as ingest_db:
         ingestion = PLMIngestionService(ingest_db)
         for i, item in enumerate(items):
-            item["data_type"] = data_type
-            item["connection_id"] = job.connection_id
-            await ingestion.ingest(item)
+            # Copy to avoid mutating the caller's dict; inject metadata keys.
+            row = dict(item, data_type=data_type, connection_id=job.connection_id)
+            await ingestion.ingest(row)
             # Periodic commit to keep transaction size bounded
             if (i + 1) % BATCH_SIZE == 0:
                 await ingest_db.commit()
@@ -615,7 +624,13 @@ class PLMChangeImpactWorker:
 
     @staticmethod
     async def claim_tasks(db: AsyncSession) -> list[PLMChangeImpactTask]:
-        """Claim pending tasks using SELECT FOR UPDATE SKIP LOCKED."""
+        """Claim pending tasks using SELECT FOR UPDATE SKIP LOCKED.
+
+        Caller must commit the returned session after processing to persist
+        the claim state.  Tasks are claimed with status="running" and a
+        unique claim_token; the caller should mark them completed/failed
+        before or at commit time.
+        """
         claim_token = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
 
@@ -643,7 +658,12 @@ class PLMChangeImpactWorker:
     async def recover_stuck_tasks(
         db: AsyncSession, timeout_minutes: int = STALE_MINUTES
     ) -> int:
-        """Reset tasks stuck in 'running' longer than *timeout_minutes* back to pending."""
+        """Reset tasks stuck in 'running' longer than *timeout_minutes* back to pending.
+
+        The update is flushed but NOT committed.  The caller must commit
+        the session for the recovery to take effect; this keeps the method
+        composable with other transactional work in the same round.
+        """
         threshold = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
 
         result = await db.execute(
@@ -818,8 +838,17 @@ class PLMChangeImpactWorker:
             )
             still_owned = recheck.scalar_one_or_none()
             if still_owned is not None:
-                still_owned.status = "failed"
+                still_owned.retry_count += 1
                 still_owned.error_message = str(exc)[:2000]
-                still_owned.claim_token = None
-                still_owned.completed_at = datetime.now(timezone.utc)
+                if still_owned.retry_count < still_owned.max_retries:
+                    # Re-queue with exponential backoff (1 min * 2^retry_count)
+                    still_owned.status = "pending"
+                    backoff = min(60 * (2 ** still_owned.retry_count), 3600)
+                    still_owned.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=backoff)
+                    still_owned.claim_token = None
+                else:
+                    # Exhausted retries – mark permanently failed
+                    still_owned.status = "failed"
+                    still_owned.claim_token = None
+                    still_owned.completed_at = datetime.now(timezone.utc)
                 await db.flush()
