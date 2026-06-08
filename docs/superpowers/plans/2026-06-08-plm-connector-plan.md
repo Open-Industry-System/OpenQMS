@@ -59,7 +59,6 @@
 
 **Files:**
 - Create: `backend/alembic/versions/031_add_plm_tables.py`
-- Modify: `backend/app/models/__init__.py`
 
 - [ ] **Step 1: 编写 Alembic 迁移**
 
@@ -287,21 +286,12 @@ def downgrade():
 Run: `cd backend && alembic upgrade head`
 Expected: `Running upgrade 030_add_mes_tables -> 031_add_plm_tables, done`
 
-- [ ] **Step 3: 修改 models/__init__.py 导出 PLM 模型**
-
-```python
-# backend/app/models/__init__.py
-from .plm import (
-    PLMConnection, PLMPart, PLMBOM, PLMChangeOrder,
-    PLMSyncJob, PLMPushOutbox, PLMChangeImpactTask,
-    PLMPartFMEALink, PLMPartSCLink,
-)
-```
+- [ ] **Step 3: Model exports are handled in Task 2 after `plm.py` exists**
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/alembic/versions/031_add_plm_tables.py backend/app/models/__init__.py
+git add backend/alembic/versions/031_add_plm_tables.py
 git commit -m "feat(migration): add 9 PLM tables + permissions + system user"
 ```
 
@@ -311,12 +301,11 @@ git commit -m "feat(migration): add 9 PLM tables + permissions + system user"
 
 **Files:**
 - Create: `backend/app/models/plm.py`
+- Modify: `backend/app/models/__init__.py`
 
 - [ ] **Step 1: 编写 9 个 PLM 模型**
 
 ```python
-"""PLM integration models."""
-import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -553,7 +542,7 @@ class PLMPartSCLink(Base):
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/app/models/plm.py
+git add backend/app/models/plm.py backend/app/models/__init__.py
 git commit -m "feat(models): add 9 PLM integration models"
 ```
 
