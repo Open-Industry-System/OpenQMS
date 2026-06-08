@@ -31,7 +31,7 @@ class PLMConnectionResponse(BaseModel):
     connector_type: str
     config: dict
     is_active: bool
-    product_line_code: Optional[str] = None
+    product_line_code: str
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
