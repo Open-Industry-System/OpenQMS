@@ -44,6 +44,9 @@ class PLMConnection(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    parts: Mapped[list["PLMPart"]] = relationship(back_populates="connection", passive_deletes=True)
+    boms: Mapped[list["PLMBOM"]] = relationship(back_populates="connection", passive_deletes=True)
+    change_orders: Mapped[list["PLMChangeOrder"]] = relationship(back_populates="connection", passive_deletes=True)
     sync_jobs: Mapped[list["PLMSyncJob"]] = relationship(back_populates="connection", passive_deletes=True)
     outbox: Mapped[list["PLMPushOutbox"]] = relationship(back_populates="connection", passive_deletes=True)
 
@@ -76,6 +79,10 @@ class PLMPart(Base):
         String(50), ForeignKey("product_lines.code"), nullable=True
     )
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    connection: Mapped["PLMConnection"] = relationship(back_populates="parts")
+    fmea_links: Mapped[list["PLMPartFMEALink"]] = relationship(back_populates="part", passive_deletes=True)
+    sc_links: Mapped[list["PLMPartSCLink"]] = relationship(back_populates="part", passive_deletes=True)
 
 
 class PLMBOM(Base):
@@ -114,6 +121,8 @@ class PLMBOM(Base):
     )
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
+    connection: Mapped["PLMConnection"] = relationship(back_populates="boms")
+
 
 class PLMChangeOrder(Base):
     __tablename__ = "plm_change_orders"
@@ -147,6 +156,11 @@ class PLMChangeOrder(Base):
         String(50), ForeignKey("product_lines.code"), nullable=True
     )
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    connection: Mapped["PLMConnection"] = relationship(back_populates="change_orders")
+    impact_task: Mapped[Optional["PLMChangeImpactTask"]] = relationship(
+        back_populates="change_order", uselist=False, passive_deletes=True
+    )
 
 
 class PLMSyncJob(Base):
@@ -245,6 +259,8 @@ class PLMChangeImpactTask(Base):
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
+    change_order: Mapped["PLMChangeOrder"] = relationship(back_populates="impact_task")
+
 
 class PLMPartFMEALink(Base):
     __tablename__ = "plm_part_fmea_links"
@@ -270,6 +286,9 @@ class PLMPartFMEALink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+    part: Mapped["PLMPart"] = relationship(back_populates="fmea_links")
+    fmea: Mapped[Optional["FMEADocument"]] = relationship("FMEADocument")
 
 
 class PLMPartSCLink(Base):
@@ -304,3 +323,7 @@ class PLMPartSCLink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+    part: Mapped["PLMPart"] = relationship(back_populates="sc_links")
+    sc: Mapped[Optional["SpecialCharacteristic"]] = relationship("SpecialCharacteristic")
+    confirmed_by_user: Mapped[Optional["User"]] = relationship("User")
