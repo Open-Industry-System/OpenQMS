@@ -167,26 +167,35 @@
 
 与 `mes_push_outbox` 结构一致。
 
-### 3.7 `plm_change_impact_tasks` — 变更影响分析任务队列
+### 3.7 `plm_change_impact_tasks` — 变更影响分析任务队列（并发安全）
 
 **设计理由**：`change_impact_service.analyze()` 内部会调用 `db.commit()`（见 `backend/app/services/change_impact_service.py:130`），如果在 PLM 摄入事务中直接调用，会破坏"三阶段短事务同步"的事务边界。因此 ECN approved 时只写入任务记录，由后台 worker 在独立事务中执行分析。
+
+**并发安全**：复用 MES sync job / outbox 的领取模式（`claim_token` + `next_retry_at`），防止多实例 worker 重复处理同一 ECN。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | task_id | UUID PK | 主键 |
 | change_id | UUID FK | 关联 `plm_change_orders.change_id` |
 | status | String(20) | `pending` → `running` → `completed` / `failed` |
+| claim_token | String(36), nullable | 领取令牌（UUID），防止并发重复处理 |
+| retry_count | Integer | 重试次数，默认 0 |
+| max_retries | Integer | 最大重试次数，默认 3 |
+| next_retry_at | DateTime | 下次重试时间，默认 `now()` |
 | created_at | DateTime | 创建时间 |
 | started_at | DateTime, nullable | 开始时间 |
 | completed_at | DateTime, nullable | 完成时间 |
 | error_message | Text, nullable | 错误信息 |
 | result | JSONB, nullable | 分析结果（影响节点列表、评分等） |
 
+**唯一约束**: `UniqueConstraint("change_id", name="uq_plm_impact_task_change")` — 一个 ECN 只产生一个分析任务。
+
 **处理流程**：
-1. PLMIngestionService 摄入 ECN 时，若状态变为 `approved`，创建 `pending` 任务记录（同一事务内）
-2. 后台 worker 轮询 `plm_change_impact_tasks`，领取 `pending` 任务
+1. PLMIngestionService 摄入 ECN 时，若状态变为 `approved`，创建 `pending` 任务记录（同一事务内，`ON CONFLICT (change_id) DO NOTHING` 幂等）
+2. 后台 worker 用 `SELECT FOR UPDATE SKIP LOCKED` 领取 `pending` 且 `next_retry_at <= now()` 的任务，设置 `claim_token` 和 `status=running`
 3. Worker 在**独立事务**中调用 `change_impact_service.analyze()`
-4. 更新任务状态为 `completed` 或 `failed`
+4. 成功：更新 `status=completed`，清空 `claim_token`
+5. 失败：`retry_count += 1`，`next_retry_at = now() + 指数退避`，`status = pending`（若 `retry_count < max_retries`）或 `failed`
 
 ### 3.8 `plm_part_fmea_links` — Part 与 FMEA 节点关联表
 
@@ -197,7 +206,7 @@
 | link_id | UUID PK | 主键 |
 | part_id | UUID FK | 关联 `plm_parts.part_id` |
 | fmea_id | UUID FK | 关联 `fmea_documents.fmea_id` |
-| node_id | String(36) | FMEA 节点 ID（`graph_data.nodes[].id`） |
+| node_id | String(128) | FMEA 节点 ID（`graph_data.nodes[].id`），PLM 导入节点使用短 hash 格式 |
 | link_type | String(20) | `auto_import`（BOM 导入自动创建）/ `manual_link`（工程师手动关联） |
 | created_at | DateTime | 创建时间 |
 
@@ -214,7 +223,7 @@
 |------|------|------|
 | link_id | UUID PK | 主键 |
 | part_id | UUID FK | 关联 `plm_parts.part_id` |
-| sc_id | UUID FK, nullable | 关联 `special_characteristics.id`（确认后回填） |
+| sc_id | UUID FK, nullable | 关联 `special_characteristics.sc_id`（确认后回填） |
 | characteristic_type | String(20) | `safety` / `key_characteristic` |
 | status | String(20) | `pending` → `confirmed` → `rejected` |
 | confirmed_by | UUID FK, nullable | 确认人 |
@@ -396,26 +405,30 @@ POST   /api/plm/connections/{connection_id}/boms/{part_number}/import-to-fmea  #
 
 **前置条件**：
 - 目标 FMEA 文档状态必须为 `draft`
-- 首次导入：`graph_data.nodes` 为空
-- 重复导入：需前端二次确认弹窗，后端清空原有节点和边后全量覆写
+- 首次导入：`graph_data` 为空，或仅包含系统模板节点（新建 DFMEA 默认带一个 System 节点，`backend/app/services/fmea_service.py:102`）
+- 导入策略：若存在系统模板节点，替换为 BOM 树结构；若已有工程师编辑的节点，需前端二次确认后全量覆写
 
 **导入逻辑（同时创建 nodes 和 edges）**：
 
 > ⚠️ **必须同时写入 edges**。仅写入 nodes 会导致前端和图投影服务无法还原层级树关系（变成孤立节点）。
 
 ```python
+import hashlib
+
 # 1. 遍历 BOM 邻接表，按 level 构建树
-# 2. 为每个 BOM 节点创建 FMEA node
+# 2. 为每个 BOM 节点创建 FMEA node（仅写入标准字段，不扩展 FMEA schema）
 for bom_node in bom_tree:
+    # 短 hash ID：plm-{sha256(conn_id|pn|rev)[:16]}，确保唯一且不超过 128 字符
+    node_hash = hashlib.sha256(
+        f"{connection_id}|{bom_node.part_number}|{bom_node.revision}".encode()
+    ).hexdigest()[:16]
     fmea_node = {
-        "id": f"plm-{connection_id}-{bom_node.part_number}-{bom_node.revision}",
+        "id": f"plm-{node_hash}",
         "type": node_type_map[bom_node.level],  # 1=System, 2=Subsystem, 3+=Component
         "name": bom_node.name,
-        "part_number": bom_node.part_number,     # 写入节点属性（前端显示用）
-        "revision": bom_node.revision,
-        # 功能/失效模式占位符，工程师后续补充
-        "function": "",
-        "failure_mode": "",
+        # 不写入 part_number/revision/function/failure_mode 等字段
+        # FMEA node schema 没有这些字段，Pydantic 会丢弃未知字段
+        # PLM 信息通过 plm_part_fmea_links 关联表查询
     }
     fmea_nodes.append(fmea_node)
 
@@ -431,21 +444,28 @@ for bom in boms:
 # 4. 写入 FMEA 文档
 fmea.graph_data = {"nodes": fmea_nodes, "edges": fmea_edges}
 
-# 5. 创建 plm_part_fmea_links 关联记录
+# 5. 创建 plm_part_fmea_links 关联记录（Part 信息存在关联表，不污染 FMEA node）
 for node in fmea_nodes:
-    await create_part_fmea_link(part_number=node["part_number"], fmea_id=fmea.fmea_id, node_id=node["id"])
+    await create_part_fmea_link(
+        part_number=bom_node.part_number,
+        revision=bom_node.revision,
+        fmea_id=fmea.fmea_id,
+        node_id=node["id"]
+    )
 ```
 
-**节点 ID 稳定规则**：`plm-{connection_id}-{part_number}-{revision}` — 确保同一 Part 多次导入时 ID 一致，避免重复节点。
+**节点 ID 稳定规则**：`plm-{sha256(connection_id|part_number|revision)[:16]}` — 16 位 hash 确保唯一、长度可控（< 32 字符），重复导入幂等。
 
 **边类型定义**：
 | 边类型 | 来源 | 目标 | 语义 |
 |--------|------|------|------|
 | `HAS_CHILD` | 父零部件节点 | 子零部件节点 | BOM 父子结构 |
-| `HAS_FUNCTION` | 零部件节点 | 功能节点 | 功能映射（占位） |
-| `HAS_FAILURE_MODE` | 功能节点 | 失效模式节点 | 失效分析（占位） |
 
-**注意**：初始导入仅创建 `HAS_CHILD` 边（BOM 结构）。`HAS_FUNCTION` 和 `HAS_FAILURE_MODE` 需要工程师在 FMEA 编辑器中补充。
+**已有代码修改**（BOM 导入使 `HAS_CHILD` 生效）：
+- `backend/app/services/graph_projection_service.py:32` — 边类型白名单增加 `"HAS_CHILD"`
+- `backend/app/graph/jsonb_repository.py:356` — BFS downstream 边集合增加 `"HAS_CHILD"`
+
+**注意**：初始导入仅创建 `HAS_CHILD` 边（BOM 结构）。功能节点、失效模式节点及其边需要工程师在 FMEA 编辑器中后续补充。
 
 ### 8.2 ECN → 变更影响分析
 
@@ -487,7 +507,10 @@ for node in fmea_nodes:
 | FMEA 节点关联 | `plm_part_fmea_links` 关联表 | FMEA 节点 schema 无 part_number 字段，不假设 schema 扩展 |
 | 变更分析调用 | 任务队列 `plm_change_impact_tasks` | `change_impact_service.analyze()` 内部 commit()，不能在摄入事务内调用 |
 | BOM 导入边创建 | 同时创建 nodes + edges | 影响分析 BFS 依赖边类型（`backend/app/graph/jsonb_repository.py:356`） |
-| 节点 ID 规则 | `plm-{connection_id}-{part_number}-{revision}` | 稳定唯一，重复导入幂等 |
+| 节点 ID 规则 | `plm-{sha256(conn\|pn\|rev)[:16]}` | 短 hash 确保长度可控（< 32 字符），关联表 node_id 用 String(128) |
+| FMEA node 字段 | 仅标准字段（id, type, name） | 不写入 part_number/revision 等，Pydantic 会丢弃未知字段 |
+| HAS_CHILD 边 | 新增边类型 | 需修改 `graph_projection_service.py` 白名单 + `jsonb_repository.py` BFS 边集合 |
+| BOM 导入前置 | draft + 空图或仅系统模板节点 | 新建 DFMEA 默认带 System 节点，导入时替换模板 |
 | 权限控制 | 完整守卫（路由+前端+菜单+种子） | 避免复制 MES 路由未传 requiredModule 的漏洞 |
 
 ---
@@ -507,7 +530,8 @@ for node in fmea_nodes:
 - `backend/app/core/product_line_filter.py` — 添加 `"plm": "product_line_code"`
 - `backend/app/core/config.py` — 定义 `SYSTEM_USER_ID` 常量
 - `backend/app/models/__init__.py` — 导出 PLM 模型
-- `backend/app/services/graph_projection_service.py` — `_node_properties` 白名单增加 `"part_number"`
+- `backend/app/services/graph_projection_service.py` — `_node_properties` 白名单增加 `"part_number"`；边类型白名单增加 `"HAS_CHILD"`
+- `backend/app/graph/jsonb_repository.py` — BFS downstream 边集合增加 `"HAS_CHILD"`
 - `backend/app/main.py` — 注册 plm_router + 后台协程（sync + outbox + impact task worker）
 - `backend/app/seed.py` — 插入 PLM 模块权限种子数据
 - `backend/alembic/versions/031_add_plm_tables.py` 末尾 — 插入 PLM 角色权限（参考 MES 在 030 中的做法）
