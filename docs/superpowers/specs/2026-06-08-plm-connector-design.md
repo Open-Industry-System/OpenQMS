@@ -1,7 +1,7 @@
 # PLM 集成连接器设计文档
 
 > **日期**: 2026-06-08
-> **版本**: v2.0
+> **版本**: v2.3
 > **方案**: 方案 C — 独立但相似（复用 MES 已验证模式，保持数据独立）
 > **前置模块**: MES 集成连接器（已完成，2026-06-05）
 
@@ -211,6 +211,8 @@
 | link_type | String(20) | `auto_import`（BOM 导入自动创建）/ `manual_link`（工程师手动关联） |
 | created_at | DateTime | 创建时间 |
 
+**唯一约束**: `UniqueConstraint("part_id", "fmea_id", "node_id", name="uq_plm_part_fmea_link")` — 避免重复导入或重复手动关联产生重复记录。
+
 **使用场景**：
 - BOM 导入 DFMEA 时，为每个创建的 FMEA 节点同时写入关联记录
 - ECN 触发影响分析时，通过 `part_id` → `plm_part_fmea_links` → `node_id` 查找受影响节点
@@ -317,16 +319,21 @@ async def process_plm_change_impact_task(db, task: PLMChangeImpactTask):
     change_order = await db.get(PLMChangeOrder, task.change_id)
     connection_id = change_order.connection_id
     for part_ref in change_order.affected_part_numbers:
-        # part_ref 格式: "part_number|revision" 或仅 "part_number"
-        if "|" in part_ref:
-            part_number, revision = part_ref.split("|", 1)
+        # part_ref 格式: "part_number|revision"（必须带 revision，避免多版本歧义）
+        if "|" not in part_ref:
+            # 不带 revision 时只允许命中唯一版本，否则记录任务 warning/failed
+            parts = await find_plm_parts_by_number(db, connection_id, part_ref)
+            if len(parts) == 0:
+                continue
+            if len(parts) > 1:
+                task.warning = f"Part {part_ref} has multiple revisions, cannot determine target"
+                continue
+            part = parts[0]
         else:
-            part_number, revision = part_ref, None
-        
-        # 先通过 (connection_id, part_number, revision) 精确查找 part_id
-        part = await find_plm_part(db, connection_id, part_number, revision)
-        if not part:
-            continue
+            part_number, revision = part_ref.split("|", 1)
+            part = await find_plm_part(db, connection_id, part_number, revision)
+            if not part:
+                continue
         
         # 再通过 part_id 查关联表，避免 A/B/C 版本全部命中
         links = await find_part_fmea_links(db, part_id=part.part_id)
@@ -380,7 +387,7 @@ GET    /api/plm/dashboard                      # 概览统计 [VIEW]
 # --- Integration Actions ---
 POST   /api/plm/parts/{part_id}/link-fmea                           # Part 关联 FMEA 节点 [EDIT]
 POST   /api/plm/change-orders/{id}/impact-analysis                   # 手动触发/刷新影响分析任务 [EDIT]
-POST   /api/plm/connections/{connection_id}/boms/{part_number}/import-to-fmea  # BOM 导入 DFMEA [EDIT]
+POST   /api/plm/connections/{connection_id}/boms/{part_number}/import-to-fmea?revision={rev}&bom_revision={bom_rev}  # BOM 导入 DFMEA（含 revision 避免多版本歧义）[EDIT]
 ```
 
 **权限映射**：
@@ -457,13 +464,19 @@ for bom in boms:
 # 4. 写入 FMEA 文档
 fmea.graph_data = {"nodes": fmea_nodes, "edges": fmea_edges}
 
-# 5. 创建 plm_part_fmea_links 关联记录（Part 信息存在关联表，不污染 FMEA node）
+# 5. 清理旧的 auto_import 关联记录（覆写时避免残留）
+await delete_part_fmea_links(
+    db, fmea_id=fmea.fmea_id, link_type="auto_import"
+)
+
+# 6. 创建新的 plm_part_fmea_links 关联记录（Part 信息存在关联表，不污染 FMEA node）
 for node_id, part_number, revision in node_meta:
     await create_part_fmea_link(
         part_number=part_number,
         revision=revision,
         fmea_id=fmea.fmea_id,
-        node_id=node_id
+        node_id=node_id,
+        link_type="auto_import"
     )
 ```
 
