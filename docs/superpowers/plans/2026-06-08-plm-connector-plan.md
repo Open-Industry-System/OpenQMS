@@ -2483,15 +2483,34 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from app.models.plm import PLMPart, PLMBOM, PLMChangeOrder, PLMPartFMEALink, PLMChangeImpactTask
+from app.models.plm import (
+    PLMConnection, PLMPart, PLMBOM, PLMChangeOrder,
+    PLMPartFMEALink, PLMChangeImpactTask,
+)
 from app.services.plm_service import PLMIngestionService, PLMSyncService
 
 
+@pytest.fixture
+async def plm_connection(db, admin_user):
+    """Create a PLMConnection for tests; FK target for parts/boms/change_orders."""
+    conn = PLMConnection(
+        name="Test PLM Conn",
+        connector_type="mock",
+        config={},
+        product_line_code="DC-DC-100",
+        created_by=admin_user.user_id,
+    )
+    db.add(conn)
+    await db.flush()
+    await db.refresh(conn)
+    return conn
+
+
 @pytest.mark.asyncio
-async def test_plm_part_ingestion_idempotent(db, admin_user):
+async def test_plm_part_ingestion_idempotent(db, plm_connection):
     """Same part_number+revision ingested twice should not create duplicates."""
     data = {
-        "connection_id": uuid.uuid4(),
+        "connection_id": plm_connection.connection_id,
         "data_type": "part",
         "external_id": "EXT-001",
         "part_number": "TEST-001",
@@ -2512,12 +2531,11 @@ async def test_plm_part_ingestion_idempotent(db, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_plm_multi_revision_coexist(db, admin_user):
+async def test_plm_multi_revision_coexist(db, plm_connection):
     """Same part_number with different revisions should coexist."""
-    conn_id = uuid.uuid4()
     for rev in ["A", "B", "C"]:
         await PLMIngestionService.ingest(db, {
-            "connection_id": conn_id,
+            "connection_id": plm_connection.connection_id,
             "data_type": "part",
             "external_id": f"EXT-{rev}",
             "part_number": "MULTI-001",
@@ -2535,11 +2553,10 @@ async def test_plm_multi_revision_coexist(db, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_ecn_approved_creates_impact_task(db, admin_user):
+async def test_ecn_approved_creates_impact_task(db, plm_connection):
     """ECN status approved should create PLMChangeImpactTask."""
-    conn_id = uuid.uuid4()
     await PLMIngestionService.ingest(db, {
-        "connection_id": conn_id,
+        "connection_id": plm_connection.connection_id,
         "data_type": "change_order",
         "external_id": "ECN-001",
         "change_number": "ECN-2026-001",
@@ -2553,7 +2570,7 @@ async def test_ecn_approved_creates_impact_task(db, admin_user):
 
     # Now update to approved
     await PLMIngestionService.ingest(db, {
-        "connection_id": conn_id,
+        "connection_id": plm_connection.connection_id,
         "data_type": "change_order",
         "external_id": "ECN-001",
         "change_number": "ECN-2026-001",
@@ -2572,11 +2589,10 @@ async def test_ecn_approved_creates_impact_task(db, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_part_sc_link_created_for_safety_related(db, admin_user):
+async def test_part_sc_link_created_for_safety_related(db, plm_connection):
     """Safety-related part should auto-create PLMPartSCLink."""
-    conn_id = uuid.uuid4()
     await PLMIngestionService.ingest(db, {
-        "connection_id": conn_id,
+        "connection_id": plm_connection.connection_id,
         "data_type": "part",
         "external_id": "SAFE-001",
         "part_number": "SAFE-001",
