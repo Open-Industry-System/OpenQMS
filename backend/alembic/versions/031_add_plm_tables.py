@@ -37,12 +37,12 @@ def upgrade() -> None:
         sa.Column("connection_id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("connector_type", sa.String(50), nullable=False),
-        sa.Column("config", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("config", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'")),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("product_line_code", sa.String(50), sa.ForeignKey("product_lines.code"), nullable=False),
         sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()),
     )
 
     op.create_table(
@@ -101,7 +101,7 @@ def upgrade() -> None:
         sa.Column("change_type", sa.String(50), nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default=sa.text("'draft'")),
         sa.Column("priority", sa.String(20), nullable=False, server_default=sa.text("'normal'")),
-        sa.Column("affected_part_numbers", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column("affected_part_numbers", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'")),
         sa.Column("proposed_changes", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("requested_by", sa.String(100), nullable=True),
         sa.Column("approved_by", sa.String(100), nullable=True),
@@ -136,7 +136,7 @@ def upgrade() -> None:
         sa.Column("outbox_id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("event_type", sa.String(50), nullable=False),
         sa.Column("connection_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("plm_connections.connection_id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'")),
         sa.Column("status", sa.String(20), nullable=False, server_default=sa.text("'pending'")),
         sa.Column("retry_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("max_retries", sa.Integer(), nullable=False, server_default=sa.text("3")),
