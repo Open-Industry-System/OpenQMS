@@ -32,6 +32,11 @@ from app.models.recommendation_cache import RecommendationCache
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
+from .plm import (
+    PLMConnection, PLMPart, PLMBOM, PLMChangeOrder,
+    PLMSyncJob, PLMPushOutbox, PLMChangeImpactTask,
+    PLMPartFMEALink, PLMPartSCLink,
+)
 from app.models.mes import (
     MESConnection,
     MESProductionOrder,
@@ -71,6 +76,15 @@ __all__ = [
     "EmbeddingSyncOutbox",
     "ChangeImpactAnalysis",
     "CollaborationSession",
+    "PLMConnection",
+    "PLMPart",
+    "PLMBOM",
+    "PLMChangeOrder",
+    "PLMSyncJob",
+    "PLMPushOutbox",
+    "PLMChangeImpactTask",
+    "PLMPartFMEALink",
+    "PLMPartSCLink",
     "MESConnection",
     "MESProductionOrder",
     "MESEquipmentStatus",
