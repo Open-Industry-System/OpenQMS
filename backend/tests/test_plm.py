@@ -61,7 +61,7 @@ def _ecn_data(
     data = {
         "data_type": "change_order",
         "connection_id": str(connection_id),
-        "external_id": "ext-ecn-1",
+        "external_id": f"ext-{change_number.lower().replace(' ', '-')}",
         "change_number": change_number,
         "title": "Test ECN",
         "change_type": "design",
