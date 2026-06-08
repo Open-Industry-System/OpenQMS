@@ -53,31 +53,31 @@
 
 ```json
 {
-  "widgets": [
-    {
-      "i": "kpi-pending",
-      "type": "kpi_pending_actions",
-      "x": 0,
-      "y": 0,
-      "w": 3,
-      "h": 2
-    }
+  "lg": [
+    { "i": "kpi-pending", "type": "kpi_pending_actions", "x": 0, "y": 0, "w": 3, "h": 2 },
+    { "i": "kpi-overdue", "type": "kpi_overdue_tasks", "x": 3, "y": 0, "w": 3, "h": 2 }
   ]
 }
 ```
 
-- `i`: 唯一实例 ID（用户可添加多个同类型 widget，用不同 `i`）
+**响应式持久化策略**：
+- 只持久化 **桌面端（`lg` 断点，≥1200px）** 的布局
+- `md/sm/xs` 断点由前端根据 `lg` 布局自动计算（等比压缩 + 单列 fallback），不单独存储
+- 编辑模式仅在 `lg` / `md` 断点可用；移动端（`sm/xs`）为只读自适应视图
+
+字段说明：
+- `i`: 唯一实例 ID，使用 `crypto.randomUUID()` 生成
 - `type`: widget 类型标识
 - `x`, `y`: 网格坐标
 - `w`, `h`: 网格宽高（react-grid-layout 的 grid units）
 
 ### 3.3 默认布局
 
-新用户无记录时，后端返回默认布局（与当前 Dashboard 一致）：
+新用户无记录时，后端根据用户**模块权限过滤后**返回默认布局：
 
 ```json
 {
-  "widgets": [
+  "lg": [
     { "i": "kpi-pending", "type": "kpi_pending_actions", "x": 0, "y": 0, "w": 3, "h": 2 },
     { "i": "kpi-overdue", "type": "kpi_overdue_tasks", "x": 3, "y": 0, "w": 3, "h": 2 },
     { "i": "kpi-risk", "type": "kpi_high_risk_items", "x": 6, "y": 0, "w": 3, "h": 2 },
@@ -89,6 +89,11 @@
   ]
 }
 ```
+
+**权限过滤规则**：
+- 后端返回默认布局前，先过滤掉用户无权限模块的 widget
+- 例如：用户无 `fmea` 权限，则默认布局中不包含 `alert_high_rpn_fmea`
+- 前端不做"暂无权限"占位，直接不渲染（后端已保证返回的 widget 均可访问）
 
 ---
 
@@ -140,10 +145,16 @@
 ```
 
 **校验规则**:
-- `widgets` 数组长度 ≤ 20
+- `lg` 数组长度 ≤ 20
 - 每个 widget 必须包含 `i`, `type`, `x`, `y`, `w`, `h`
 - `type` 必须在白名单内（14 个合法类型，见第 6 节）
-- `w`, `h` 必须 ≥ 该 widget 的 `minSize`（前端也做相同限制）
+- `w`, `h` 必须 ≥ 该 widget 的 `minSize`
+- **`i` 唯一性**：所有 widget 的 `i` 字段必须互不相同
+- **坐标非负**：`x >= 0`, `y >= 0`
+- **宽度边界**：`w >= minSize.w` 且 `w <= 12`（总列数）
+- **高度边界**：`h >= minSize.h` 且 `h <= 50`
+- **水平不越界**：`x + w <= 12`
+- **类型过滤**：后端再次校验所有 `type` 对应模块是否在用户权限范围内
 
 **响应**:
 ```json
@@ -229,6 +240,12 @@
 ```bash
 npm install react-grid-layout
 npm install -D @types/react-grid-layout
+```
+
+**CSS 导入**（在 `DashboardPage.tsx` 或全局入口导入）：
+```typescript
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 ```
 
 ### 5.2 Widget 元数据结构
@@ -349,7 +366,7 @@ useEffect(() => {
 **废弃 Widget 防御**:
 ```typescript
 // DashboardPage 加载 layout 时
-const validWidgets = layoutConfig.widgets.filter(
+const validWidgets = layoutConfig.lg.filter(
   item => widgetRegistry[item.type] !== undefined
 );
 ```
@@ -379,7 +396,7 @@ const GRID_CONFIG = {
 ### 5.6 编辑模式交互流程
 
 1. **进入编辑**: 点击「编辑布局」→ 复制当前 layout 到 editState → 显示编辑 UI
-2. **添加 widget**: 点击左侧面板 widget → 生成新 `i`（`type-${Date.now()}`）→ 添加到 widgets 数组末尾（右下角）
+2. **添加 widget**: 点击左侧面板 widget → 生成新 `i`（`crypto.randomUUID()`）→ 添加到 `lg` 数组末尾（右下角）
 3. **拖拽/调整大小**: react-grid-layout 回调更新 `editState.layout`
 4. **删除 widget**: 点击 widget 右上角 🗑️ → 从数组移除
 5. **完成**: 调用 `PUT /api/dashboard/layout` → 成功后刷新页面数据 → 切换回查看模式
@@ -438,8 +455,10 @@ if not can_view(user, Module.MSA):
 
 ### 7.2 编辑权限
 
-- **Viewer**: 只能查看，无「编辑布局」按钮
-- **Quality Engineer / Manager / Admin**: 显示「编辑布局」按钮，可保存布局
+统一使用 `canEdit("dashboard")` 判断，不按角色硬编码：
+
+- `canEdit("dashboard") === false`：隐藏「编辑布局」按钮（Viewer 角色）
+- `canEdit("dashboard") === true`：显示「编辑布局」按钮，可保存布局（Engineer / Manager / Admin）
 
 ### 7.3 Widget 降级显示
 
@@ -503,6 +522,7 @@ frontend/
 ├── src/
 │   ├── App.tsx                                               # 无需修改
 │   ├── components/layout/AppLayout.tsx                       # 无需修改
+│   ├── hooks/usePermission.ts                                # ModuleKey 补充 "mes"
 │   └── types/index.ts                                        # 新增 DashboardWidgetsData 等类型
 ```
 
