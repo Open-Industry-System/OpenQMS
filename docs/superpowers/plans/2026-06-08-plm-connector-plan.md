@@ -255,10 +255,10 @@ def upgrade():
         )
 
     # ---- system user for background tasks ----
-    # Users table: password_hash, role_id (FK to role_definitions), no hashed_password/role column
+    # Users table has NOT NULL legacy_role plus role_id (FK to role_definitions)
     op.execute(
-        "INSERT INTO users (user_id, username, display_name, email, password_hash, role_id, is_active) "
-        "SELECT '00000000-0000-0000-0000-000000000001', 'system', 'System', 'system@openqms.local', '', id, true "
+        "INSERT INTO users (user_id, username, display_name, email, password_hash, legacy_role, role_id, is_active) "
+        "SELECT '00000000-0000-0000-0000-000000000001', 'system', 'System', 'system@openqms.local', '', 'admin', id, true "
         "FROM role_definitions WHERE role_key = 'admin' "
         "ON CONFLICT (user_id) DO NOTHING"
     )
