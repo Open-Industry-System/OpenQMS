@@ -7,8 +7,12 @@ import AlertHighRpnWidget from "./AlertHighRpnWidget";
 import AlertOverdueCapaWidget from "./AlertOverdueCapaWidget";
 import AlertHighPpmWidget from "./AlertHighPpmWidget";
 import RecentActionsWidget from "./RecentActionsWidget";
-
-const placeholderComponent: React.FC<WidgetProps> = () => null;
+import SpcAbnormalWidget from "./SpcAbnormalWidget";
+import SpcCapabilityWidget from "./SpcCapabilityWidget";
+import MsaGaugeExpiryWidget from "./MsaGaugeExpiryWidget";
+import IqcPendingWidget from "./IqcPendingWidget";
+import MesEquipmentWidget from "./MesEquipmentWidget";
+import SupplierPpmWidget from "./SupplierPpmWidget";
 
 export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<WidgetProps> }> = {
   kpi_pending_actions: {
@@ -90,7 +94,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
     module: "spc",
-    component: placeholderComponent,
+    component: SpcAbnormalWidget,
   },
   spc_capability_summary: {
     type: "spc_capability_summary",
@@ -99,7 +103,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 4, h: 4 },
     minSize: { w: 3, h: 3 },
     module: "spc",
-    component: placeholderComponent,
+    component: SpcCapabilityWidget,
   },
   msa_gauge_expiry: {
     type: "msa_gauge_expiry",
@@ -108,7 +112,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
     module: "msa",
-    component: placeholderComponent,
+    component: MsaGaugeExpiryWidget,
   },
   iqc_pending_inspections: {
     type: "iqc_pending_inspections",
@@ -117,7 +121,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
     module: "iqc",
-    component: placeholderComponent,
+    component: IqcPendingWidget,
   },
   mes_equipment_status: {
     type: "mes_equipment_status",
@@ -126,7 +130,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
     module: "mes",
-    component: placeholderComponent,
+    component: MesEquipmentWidget,
   },
   supplier_ppm_trend: {
     type: "supplier_ppm_trend",
@@ -135,7 +139,7 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     defaultSize: { w: 4, h: 4 },
     minSize: { w: 3, h: 3 },
     module: "supplier",
-    component: placeholderComponent,
+    component: SupplierPpmWidget,
   },
 };
 
