@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 5         # 超时秒数
     CAPA_DRAFT_LLM_TIMEOUT: int = Field(default=15, ge=1, le=60)  # CAPA 8D AI 起草超时
 
+    # CAPA 8D AI 草拟超时
+    CAPA_DRAFT_LLM_TIMEOUT: int = Field(default=15, ge=1, le=60)
+
     # Embedding & semantic search
     EMBEDDING_PROVIDER: str = ""        # "openai" | "ollama" | "" (follows LLM_PROVIDER)
     EMBEDDING_MODEL: str = ""           # optional override

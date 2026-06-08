@@ -4,14 +4,18 @@ import {
   Button, Space, Tag, Typography, Steps, Card, Form, Input,
   Select, App, Spin, Empty, Row, Col, Table, Divider, Modal,
 } from "antd";
-import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from "@ant-design/icons";
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
+import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 import D4RecPanel from "../../components/capa/D4RecPanel";
 import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
-import type { CAPAReport, FMEADocument } from "../../types";
+import AIDraftButton from "../../components/capa/AIDraftButton";
+import AIDraftPreview from "../../components/capa/AIDraftPreview";
+import { useAIDraft } from "../../components/capa/useAIDraft";
+import type { CAPAReport, FMEADocument, DraftFormat } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 
@@ -58,10 +62,47 @@ export default function CAPADetailPage() {
   const [d7SkipDialogOpen, setD7SkipDialogOpen] = useState(false);
   const [d7SkipReasons, setD7SkipReasons] = useState<Record<string, string>>({});
 
+  // AI Draft capabilities
+  const [aiDraftEnabled, setAiDraftEnabled] = useState(false);
+
+  // AI Draft state
+  const {
+    loading: draftLoading,
+    draft,
+    error: draftError,
+    errorLevel,
+    tempUnavailable,
+    generate,
+    clear,
+    undo,
+    saveUndo,
+    canUndo,
+  } = useAIDraft();
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  useEffect(() => {
+    if (draft && !draftLoading) {
+      setPreviewOpen(true);
+    }
+  }, [draft, draftLoading]);
+
+  // 全局 Toast：error 用 message.error，warning 用 message.warning
+  useEffect(() => {
+    if (!draftError || draftLoading) return;
+    if (errorLevel === "error") {
+      message.error(draftError);
+    } else {
+      message.warning(draftError);
+    }
+  }, [draftError, errorLevel, draftLoading, message]);
+
   useEffect(() => {
     if (!id) return;
     getCAPA(id).then(setCapa).finally(() => setLoading(false));
     listFMEAs({ page_size: 100 }).then((res) => setFmeas(res.items));
+    getAIDraftCapabilities()
+      .then((caps) => setAiDraftEnabled(caps.ai_draft_enabled))
+      .catch(() => setAiDraftEnabled(false));
   }, [id]);
 
   useEffect(() => {
@@ -81,20 +122,110 @@ export default function CAPADetailPage() {
 
   const currentStep = capa ? (stepIndex[capa.status] ?? 0) : 0;
 
-  const handleUpdate = async (field: string, value: unknown) => {
+  const handleUpdate = async (field: string, value: unknown, throwOnError = false) => {
     if (!id || !canEdit('capa')) return;
-    
+
     // Check if value actually changed to prevent redundant network hits
     if (capa && JSON.stringify(capa[field as keyof CAPAReport]) === JSON.stringify(value)) {
       return;
     }
-    
+
     setSaving(true);
     try {
       const updated = await updateCAPA(id, { [field]: value });
       setCapa(updated);
-    } catch { message.error("保存失败"); }
-    setSaving(false);
+    } catch (e) {
+      message.error("保存失败");
+      if (throwOnError) throw e;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const stepToField: Record<string, string> = {
+    d2: "d2_description", d3: "d3_interim", d4: "d4_root_cause",
+    d5: "d5_correction", d6: "d6_verification", d7: "d7_prevention", d8: "d8_closure",
+  };
+
+  const handleGenerate = (step: string, format: DraftFormat) => {
+    if (!id) return;
+    clear();
+    generate(id, step, format);
+  };
+
+  const handleReplace = async () => {
+    if (!draft) return;
+    const field = stepToField[draft.step];
+    if (!field) return;
+    const originalValue = localData[field] || "";
+    saveUndo(field, originalValue);
+    setLocalData((p) => ({ ...p, [field]: draft.content }));
+    try {
+      await handleUpdate(field, draft.content, true);
+    } catch {
+      setLocalData((p) => ({ ...p, [field]: originalValue }));
+      return;
+    }
+    setPreviewOpen(false);
+    clear();
+  };
+
+  const handleAppend = async () => {
+    if (!draft) return;
+    const field = stepToField[draft.step];
+    if (!field) return;
+    const originalValue = localData[field] || "";
+    const appended = originalValue ? `${originalValue}\n\n${draft.content}` : draft.content;
+    saveUndo(field, originalValue);
+    setLocalData((p) => ({ ...p, [field]: appended }));
+    try {
+      await handleUpdate(field, appended, true);
+    } catch {
+      setLocalData((p) => ({ ...p, [field]: originalValue }));
+      return;
+    }
+    setPreviewOpen(false);
+    clear();
+  };
+
+  const handleUndo = (field: string) => {
+    const prev = undo(field);
+    if (prev !== undefined) {
+      setLocalData((p) => ({ ...p, [field]: prev }));
+      handleUpdate(field, prev);
+      message.success("已撤销 AI 修改");
+    }
+  };
+
+  const renderLabelWithDraft = (step: string, label: string) => {
+    const field = stepToField[step];
+    const hasHistory = canUndo(field);
+    const showAIButton = aiDraftEnabled && canEdit('capa');
+    return (
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>{label}</span>
+        <Space size="small">
+          {hasHistory && (
+            <Button
+              size="small"
+              type="link"
+              icon={<UndoOutlined />}
+              onClick={() => handleUndo(field)}
+            >
+              撤销修改
+            </Button>
+          )}
+          {showAIButton && (
+            <AIDraftButton
+              loading={draftLoading}
+              tempUnavailable={tempUnavailable}
+              error={errorLevel === "error" ? draftError : null}
+              onGenerate={(format) => handleGenerate(step, format)}
+            />
+          )}
+        </Space>
+      </div>
+    );
   };
 
   const handleAdvance = async () => {
@@ -273,7 +404,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D2_DESCRIPTION" && (
               <Form layout="vertical">
-                <Form.Item label="5W2H 问题描述">
+                <Form.Item label={renderLabelWithDraft("d2", "5W2H 问题描述")}>
                   <TextArea
                     rows={6}
                     disabled={!canEdit('capa')}
@@ -288,7 +419,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D3_INTERIM" && (
               <Form layout="vertical">
-                <Form.Item label="临时遏制措施">
+                <Form.Item label={renderLabelWithDraft("d3", "临时遏制措施")}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
@@ -313,7 +444,7 @@ export default function CAPADetailPage() {
                   }}
                 />
                 <Form layout="vertical">
-                  <Form.Item label="根因分析 (5Why / 鱼骨图)">
+                  <Form.Item label={renderLabelWithDraft("d4", "根因分析 (5Why / 鱼骨图)")}>
                     <TextArea
                       rows={6}
                       disabled={!canEdit('capa')}
@@ -339,7 +470,7 @@ export default function CAPADetailPage() {
                   }}
                 />
                 <Form layout="vertical">
-                  <Form.Item label="永久纠正措施">
+                  <Form.Item label={renderLabelWithDraft("d5", "永久纠正措施")}>
                     <TextArea
                       rows={4}
                       disabled={!canEdit('capa')}
@@ -354,7 +485,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D6_VERIFICATION" && (
               <Form layout="vertical">
-                <Form.Item label="效果验证">
+                <Form.Item label={renderLabelWithDraft("d6", "效果验证")}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
@@ -369,7 +500,7 @@ export default function CAPADetailPage() {
             {capa.status === "D7_PREVENTION" && (
               <>
                 <Form layout="vertical">
-                  <Form.Item label="预防复发措施">
+                  <Form.Item label={renderLabelWithDraft("d7", "预防复发措施")}>
                     <TextArea
                       rows={4}
                       disabled={!canEdit('capa')}
@@ -393,7 +524,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D8_CLOSURE" && (
               <Form layout="vertical">
-                <Form.Item label="关闭确认">
+                <Form.Item label={renderLabelWithDraft("d8", "关闭确认")}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
@@ -468,6 +599,17 @@ export default function CAPADetailPage() {
           }
         />
       </Modal>
+
+      <AIDraftPreview
+        open={previewOpen}
+        content={draft?.content || ""}
+        onClose={() => {
+          setPreviewOpen(false);
+          clear();
+        }}
+        onReplace={handleReplace}
+        onAppend={handleAppend}
+      />
     </>
   );
 }

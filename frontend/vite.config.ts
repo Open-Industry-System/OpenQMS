@@ -17,4 +17,9 @@ export default defineConfig({
   optimizeDeps: {
     include: ["@ant-design/charts"],
   },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test-setup.ts"],
+  },
 });
