@@ -30,7 +30,7 @@
 | `backend/app/core/product_line_filter.py` | 添加 `"plm": "product_line_code"` |
 | `backend/app/core/config.py` | 定义 `SYSTEM_USER_ID` 常量 |
 | `backend/app/models/__init__.py` | 导出 PLM 模型 |
-| `backend/app/services/graph_projection_service.py` | `ALLOWED_EDGE_TYPES` 增加 `"HAS_CHILD"`；`_node_properties` 白名单增加 `"part_number"` |
+| `backend/app/services/graph_projection_service.py` | `ALLOWED_EDGE_TYPES` 增加 `"HAS_CHILD"` |
 | `backend/app/graph/jsonb_repository.py` | `downstream_edges` 增加 `"HAS_CHILD"` |
 | `backend/app/graph/neo4j_repository.py` | `downstream_rel_types` 追加 `\|HAS_CHILD` |
 | `backend/app/main.py` | 注册 plm_router + 后台协程 |
@@ -1397,6 +1397,7 @@ async def create_connection(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLM, PermissionLevel.CREATE)),
 ):
+    await enforce_product_line_access(user, req.product_line_code, db)
     conn = PLMConnection(
         name=req.name,
         connector_type=req.connector_type,
@@ -1457,6 +1458,10 @@ async def update_connection(
     await enforce_product_line_access(user, conn.product_line_code, db)
     for field, value in req.model_dump(exclude_unset=True).items():
         setattr(conn, field, value)
+    # If product_line_code changed, verify user has access to the new one too
+    new_plc = req.product_line_code
+    if new_plc is not None and new_plc != conn.product_line_code:
+        await enforce_product_line_access(user, new_plc, db)
     await db.commit()
     await db.refresh(conn)
     return conn
@@ -1560,6 +1565,7 @@ async def list_boms(
 
 @router.get("/connections/{connection_id}/boms/tree/{part_number}")
 async def get_bom_tree(
+    request: Request,
     connection_id: uuid.UUID,
     part_number: str,
     revision: str = Query("A"),
@@ -1567,11 +1573,16 @@ async def get_bom_tree(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
 ):
+    # Verify connection access first
+    conn = await db.get(PLMConnection, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
     """Return multi-level BOM tree starting from part_number via BFS."""
-    # Fetch all BOM rows for this connection+revision, then build tree in-memory
+    # Fetch all BOM rows for this connection+bom_revision, then build tree in-memory
+    # Do NOT filter by parent_revision — child rows may have different parent revisions at deeper levels
     stmt = select(PLMBOM).where(
         PLMBOM.connection_id == connection_id,
-        PLMBOM.parent_revision == revision,
         PLMBOM.bom_revision == bom_revision,
     )
     result = await db.execute(stmt)
@@ -1685,6 +1696,14 @@ async def link_part_to_fmea(
     if not part:
         raise HTTPException(status_code=404, detail="Part not found")
     await enforce_product_line_access(user, part.product_line_code, db)
+    # Verify FMEA access and require same product line
+    from app.models.fmea import FMEADocument
+    fmea = await db.get(FMEADocument, req.fmea_id)
+    if not fmea:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    await enforce_product_line_access(user, fmea.product_line_code, db)
+    if fmea.product_line_code != part.product_line_code:
+        raise HTTPException(status_code=403, detail="FMEA product line does not match part product line")
     link = PLMPartFMEALink(
         part_id=part_id,
         fmea_id=req.fmea_id,
@@ -1749,10 +1768,18 @@ async def import_bom_to_fmea(
         raise HTTPException(status_code=400, detail="FMEA must be in draft status")
     await enforce_product_line_access(user, fmea.product_line_code, db)
 
-    # Fetch all BOM rows for this connection+revision (multi-level)
+    # Also verify source connection access and require same product line
+    conn = await db.get(PLMConnection, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
+    if conn.product_line_code != fmea.product_line_code:
+        raise HTTPException(status_code=403, detail="BOM connection product line does not match target FMEA product line")
+
+    # Fetch all BOM rows for this connection+bom_revision (multi-level)
+    # Do NOT filter by parent_revision — child rows may have different parent revisions at deeper levels
     stmt = select(PLMBOM).where(
         PLMBOM.connection_id == connection_id,
-        PLMBOM.parent_revision == revision,
         PLMBOM.bom_revision == bom_revision,
     )
     result = await db.execute(stmt)
@@ -1875,14 +1902,6 @@ ALLOWED_EDGE_TYPES: set[str] = {
     "HAS_CHILD",  # <-- add this (PLM BOM hierarchy)
 }
 
-# 2. In _node_properties(), add "part_number" to the property extraction loop
-    for key in ("process_number", "classification", "requirement", "specification",
-                "severity", "occurrence", "detection", "ap",
-                "revised_severity", "revised_occurrence", "revised_detection", "revised_ap",
-                "severity_plant", "severity_customer", "severity_user",
-                "responsible", "due_date", "status", "action_taken", "completion_date",
-                "part_number",  # <-- add this (PLM part reference)
-               ):
 ```
 
 - [ ] **Step 2: jsonb_repository.py — 增加 HAS_CHILD 到 downstream edges**
