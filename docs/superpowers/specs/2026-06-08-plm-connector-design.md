@@ -318,30 +318,39 @@ SYSTEM_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 async def process_plm_change_impact_task(db, task: PLMChangeImpactTask):
     change_order = await db.get(PLMChangeOrder, task.change_id)
     connection_id = change_order.connection_id
+    warnings = []
+    analysis_ids = []
+    has_any_analysis = False
+
     for part_ref in change_order.affected_part_numbers:
         # part_ref 格式: "part_number|revision"（必须带 revision，避免多版本歧义）
         if "|" not in part_ref:
-            # 不带 revision 时只允许命中唯一版本，否则记录任务 warning/failed
             parts = await find_plm_parts_by_number(db, connection_id, part_ref)
             if len(parts) == 0:
+                warnings.append(f"Part {part_ref} not found")
                 continue
             if len(parts) > 1:
-                task.warning = f"Part {part_ref} has multiple revisions, cannot determine target"
+                warnings.append(f"Part {part_ref} has multiple revisions, cannot determine target")
                 continue
             part = parts[0]
         else:
             part_number, revision = part_ref.split("|", 1)
             part = await find_plm_part(db, connection_id, part_number, revision)
             if not part:
+                warnings.append(f"Part {part_number}|{revision} not found")
                 continue
         
-        # 再通过 part_id 查关联表，避免 A/B/C 版本全部命中
+        # 通过 part_id 查关联表，避免 A/B/C 版本全部命中
         links = await find_part_fmea_links(db, part_id=part.part_id)
+        if not links:
+            warnings.append(f"Part {part_ref} has no linked FMEA nodes")
+            continue
+
         for link in links:
             node = await get_fmea_node(db, link.fmea_id, link.node_id)
             if not node:
                 continue
-            await change_impact_service.analyze(
+            result = await change_impact_service.analyze(
                 fmea_id=link.fmea_id,
                 node_id=link.node_id,
                 node_type=node.get("type", "Component"),
@@ -352,7 +361,21 @@ async def process_plm_change_impact_task(db, task: PLMChangeImpactTask):
                 old_value=None,
                 user_id=SYSTEM_USER_ID,
             )
-    task.status = "completed"
+            has_any_analysis = True
+            analysis_ids.append(str(result.id))
+
+    # 状态判定
+    if not has_any_analysis and warnings:
+        # 全部 Part 都无法解析 → 失败（无有效分析结果）
+        task.status = "failed"
+        task.error_message = "; ".join(warnings)
+    else:
+        task.status = "completed"
+        task.result = {
+            "warnings": warnings,
+            "analysis_ids": analysis_ids,
+            "skipped_all": not has_any_analysis and not warnings,
+        }
 ```
 
 **关键约束**：`change_impact_service.analyze()` 内部会 `commit()`，因此必须在**独立事务**中调用，不能在 PLM 摄入事务内调用。
@@ -388,6 +411,7 @@ GET    /api/plm/dashboard                      # 概览统计 [VIEW]
 POST   /api/plm/parts/{part_id}/link-fmea                           # Part 关联 FMEA 节点 [EDIT]
 POST   /api/plm/change-orders/{id}/impact-analysis                   # 手动触发/刷新影响分析任务 [EDIT]
 POST   /api/plm/connections/{connection_id}/boms/{part_number}/import-to-fmea?revision={rev}&bom_revision={bom_rev}  # BOM 导入 DFMEA（含 revision 避免多版本歧义）[EDIT]
+# Request Body: { "fmea_id": "...", "overwrite": false }
 ```
 
 **权限映射**：
@@ -469,15 +493,16 @@ await delete_part_fmea_links(
     db, fmea_id=fmea.fmea_id, link_type="auto_import"
 )
 
-# 6. 创建新的 plm_part_fmea_links 关联记录（Part 信息存在关联表，不污染 FMEA node）
+# 6. 创建新的 plm_part_fmea_links 关联记录（先解析 part_id，避免多连接歧义）
 for node_id, part_number, revision in node_meta:
-    await create_part_fmea_link(
-        part_number=part_number,
-        revision=revision,
-        fmea_id=fmea.fmea_id,
-        node_id=node_id,
-        link_type="auto_import"
-    )
+    part = await find_plm_part(db, connection_id, part_number, revision)
+    if part:
+        await create_part_fmea_link(
+            part_id=part.part_id,
+            fmea_id=fmea.fmea_id,
+            node_id=node_id,
+            link_type="auto_import"
+        )
 ```
 
 **节点 ID 稳定规则**：`plm-{sha256(connection_id|part_number|revision)[:16]}` — 16 位 hash 确保唯一、长度可控（< 32 字符），重复导入幂等。
