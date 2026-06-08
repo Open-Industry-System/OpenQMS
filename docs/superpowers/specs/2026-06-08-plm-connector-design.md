@@ -222,6 +222,8 @@
 | product_line_code | String(50) FK | 产品线 |
 | created_at | DateTime | 创建时间 |
 
+**唯一约束**: `UniqueConstraint("part_id", "characteristic_type", name="uq_plm_part_sc")` — 同一 Part 的同一特性类型只产生一条待处理记录，幂等。
+
 **处理流程**：
 1. PLM Part 同步时，若 `is_safety_related=True` 或 `is_key_characteristic=True`，自动创建 `pending` 记录
 2. 前端 Part 详情页显示待处理 SC 申请，工程师选择关联 FMEA 节点后确认
@@ -304,12 +306,15 @@ async def process_plm_change_impact_task(db, task: PLMChangeImpactTask):
         # part_ref 格式: "part_number|revision" 或仅 "part_number"
         part_number = part_ref.split("|")[0] if "|" in part_ref else part_ref
         
-        # 通过关联表查找 FMEA 节点（不假设 FMEA 节点含 part_number 字段）
+        # 通过关联表查找 FMEA 节点（不假设 FMEA 节点字典内部含 fmea_id 字段）
+        # find_part_fmea_links 返回承载对象（fmea_id, node_id），而非 FMEA 节点字典
         links = await find_part_fmea_links(db, part_number=part_number)
         for link in links:
+            # link.fmea_id 来自关联表，link.node_id 来自关联表
             node = await get_fmea_node(db, link.fmea_id, link.node_id)
             if not node:
                 continue
+            # node 是 JSONB 中的字典，不含 fmea_id；fmea_id 从 link 对象获取
             await change_impact_service.analyze(
                 fmea_id=link.fmea_id,
                 node_id=link.node_id,
@@ -395,6 +400,8 @@ POST   /api/plm/connections/{connection_id}/boms/{part_number}/import-to-fmea  #
 - 重复导入：需前端二次确认弹窗，后端清空原有节点和边后全量覆写
 
 **导入逻辑（同时创建 nodes 和 edges）**：
+
+> ⚠️ **必须同时写入 edges**。仅写入 nodes 会导致前端和图投影服务无法还原层级树关系（变成孤立节点）。
 
 ```python
 # 1. 遍历 BOM 邻接表，按 level 构建树
