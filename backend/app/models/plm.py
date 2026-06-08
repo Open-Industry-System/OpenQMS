@@ -259,7 +259,7 @@ class PLMChangeImpactTask(Base):
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
-    change_order: Mapped["PLMChangeOrder"] = relationship(back_populates="impact_task")
+    change_order: Mapped["PLMChangeOrder"] = relationship(back_populates="impact_task", uselist=False)
 
 
 class PLMPartFMEALink(Base):
