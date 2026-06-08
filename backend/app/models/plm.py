@@ -77,7 +77,7 @@ class PLMPart(Base):
     source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
-    )
+    )  # Nullable because source may omit; services should fill or filter via connection product line.
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     connection: Mapped["PLMConnection"] = relationship(back_populates="parts")
@@ -118,7 +118,7 @@ class PLMBOM(Base):
     source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
-    )
+    )  # Nullable because source may omit; services should fill or filter via connection product line.
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     connection: Mapped["PLMConnection"] = relationship(back_populates="boms")
@@ -154,7 +154,7 @@ class PLMChangeOrder(Base):
     source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
-    )
+    )  # Nullable because source may omit; services should fill or filter via connection product line.
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     connection: Mapped["PLMConnection"] = relationship(back_populates="change_orders")
@@ -288,7 +288,6 @@ class PLMPartFMEALink(Base):
     )
 
     part: Mapped["PLMPart"] = relationship(back_populates="fmea_links")
-    fmea: Mapped[Optional["FMEADocument"]] = relationship("FMEADocument")
 
 
 class PLMPartSCLink(Base):
@@ -325,5 +324,3 @@ class PLMPartSCLink(Base):
     )
 
     part: Mapped["PLMPart"] = relationship(back_populates="sc_links")
-    sc: Mapped[Optional["SpecialCharacteristic"]] = relationship("SpecialCharacteristic")
-    confirmed_by_user: Mapped[Optional["User"]] = relationship("User")
