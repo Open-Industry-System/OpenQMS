@@ -62,7 +62,6 @@ class PLMPartResponse(BaseModel):
     is_key_characteristic: bool
     source_updated_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
-    created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
