@@ -203,11 +203,17 @@ def upgrade() -> None:
             {"module": "plm", "permission_level": level, "role_key": role_key},
         )
 
+    admin_role_id = bind.execute(
+        sa.text("SELECT id FROM role_definitions WHERE role_key = :role_key"),
+        {"role_key": "admin"},
+    ).scalar_one_or_none()
+    if admin_role_id is None:
+        raise RuntimeError("admin role_definition not found; cannot seed PLM system user")
+
     bind.execute(
         sa.text(
             "INSERT INTO users (user_id, username, display_name, email, password_hash, legacy_role, role_id, is_active) "
-            "SELECT :user_id, :username, :display_name, :email, :password_hash, :legacy_role, id, :is_active "
-            "FROM role_definitions WHERE role_key = :role_key "
+            "VALUES (:user_id, :username, :display_name, :email, :password_hash, :legacy_role, :role_id, :is_active) "
             "ON CONFLICT (user_id) DO NOTHING"
         ),
         {
@@ -217,8 +223,8 @@ def upgrade() -> None:
             "email": "system@openqms.local",
             "password_hash": "",
             "legacy_role": "admin",
+            "role_id": admin_role_id,
             "is_active": True,
-            "role_key": "admin",
         },
     )
 
@@ -227,8 +233,8 @@ def downgrade() -> None:
     bind = op.get_bind()
     bind.execute(sa.text("DELETE FROM role_permissions WHERE module = 'plm'"))
     bind.execute(
-        sa.text("DELETE FROM users WHERE user_id = :user_id AND username = :username AND email = :email"),
-        {"user_id": SYSTEM_USER_ID, "username": "system", "email": "system@openqms.local"},
+        sa.text("DELETE FROM users WHERE user_id = :user_id"),
+        {"user_id": SYSTEM_USER_ID},
     )
     op.drop_table("plm_part_sc_links")
     op.drop_table("plm_part_fmea_links")
