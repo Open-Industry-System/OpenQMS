@@ -32,6 +32,7 @@ from app.models.recommendation_cache import RecommendationCache
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
+from app.models.user_dashboard_layout import UserDashboardLayout
 from app.models.mes import (
     MESConnection,
     MESProductionOrder,
@@ -71,6 +72,7 @@ __all__ = [
     "EmbeddingSyncOutbox",
     "ChangeImpactAnalysis",
     "CollaborationSession",
+    "UserDashboardLayout",
     "MESConnection",
     "MESProductionOrder",
     "MESEquipmentStatus",
