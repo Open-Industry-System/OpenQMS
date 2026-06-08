@@ -37,15 +37,15 @@ class PLMConnection(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=True
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    sync_jobs: Mapped[list["PLMSyncJob"]] = relationship(back_populates="connection")
-    outbox: Mapped[list["PLMPushOutbox"]] = relationship(back_populates="connection")
+    sync_jobs: Mapped[list["PLMSyncJob"]] = relationship(back_populates="connection", passive_deletes=True)
+    outbox: Mapped[list["PLMPushOutbox"]] = relationship(back_populates="connection", passive_deletes=True)
 
 
 class PLMPart(Base):
@@ -136,7 +136,7 @@ class PLMChangeOrder(Base):
     change_type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", server_default=text("'draft'"))
     priority: Mapped[str] = mapped_column(String(20), nullable=False, default="normal", server_default=text("'normal'"))
-    affected_part_numbers: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'"))
+    affected_part_numbers: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'"))
     proposed_changes: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     requested_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     approved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -167,16 +167,16 @@ class PLMSyncJob(Base):
     data_type: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default=text("'pending'"))
     checkpoint: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    next_run_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=True
+    next_run_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     claim_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=True
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     connection: Mapped[PLMConnection] = relationship(back_populates="sync_jobs")
@@ -207,8 +207,8 @@ class PLMPushOutbox(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     claim_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=True
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -237,8 +237,8 @@ class PLMChangeImpactTask(Base):
     next_retry_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=True
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -267,8 +267,8 @@ class PLMPartFMEALink(Base):
     )
     node_id: Mapped[str] = mapped_column(String(128), nullable=False)
     link_type: Mapped[str] = mapped_column(String(20), nullable=False, default="auto_import", server_default=text("'auto_import'"))
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=True
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 
@@ -301,6 +301,6 @@ class PLMPartSCLink(Base):
     product_line_code: Mapped[str] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=False
     )
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=True
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
