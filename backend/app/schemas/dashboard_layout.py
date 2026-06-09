@@ -39,4 +39,5 @@ class DashboardWidgetsResponse(BaseModel):
     iqc: dict = Field(default_factory=dict)
     mes: dict = Field(default_factory=dict)
     supplier: dict = Field(default_factory=dict)
+    quality_trend: dict = Field(default_factory=dict)
     errors: dict[str, str] = Field(default_factory=dict)

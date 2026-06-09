@@ -1,0 +1,24 @@
+import pytest
+from app.schemas.quality_trend import QualityTrendMetadata, QualityTrendSummary
+
+
+def test_quality_trend_summary_metadata_fields():
+    summary = QualityTrendSummary(
+        risk_level="medium",
+        headline="SPC 异常增加",
+        evidence=[{"id": "spc_alarm_count", "label": "SPC 异常告警", "value": 4, "trend": "+2", "severity": "warning"}],
+        actions=[{"priority": "high", "text": "复核异常"}],
+        data_window_days=30,
+        generated_at="2026-06-09T00:00:00Z",
+        evidence_hash="hash",
+        scope_hash="scope_hash_abc",
+        ai_available=True,
+        metadata=QualityTrendMetadata(
+            omitted_modules=[],
+            available_modules=["spc", "capa"],
+            scope_description="产品线范围：DC-DC-100",
+            selected_product_line="DC-DC-100",
+        ),
+    )
+    assert summary.metadata.available_modules == ["spc", "capa"]
+    assert summary.metadata.omitted_modules == []
