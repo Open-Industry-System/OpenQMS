@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("SECRET_KEY", "test-non-default-secret-key")
+
 import pytest
 from pydantic import ValidationError
 from app.schemas.quality_trend import (
@@ -5,6 +9,13 @@ from app.schemas.quality_trend import (
     QualityTrendSummary,
     QualityTrendInterpretation,
 )
+from app.services.dashboard_service import WIDGET_MODULE_MAP, WIDGET_MIN_SIZES
+
+
+def test_quality_trend_widget_registered():
+    assert WIDGET_MODULE_MAP["quality_trend_ai_summary"] == "dashboard"
+    assert WIDGET_MIN_SIZES["quality_trend_ai_summary"]["w"] >= 4
+    assert WIDGET_MIN_SIZES["quality_trend_ai_summary"]["h"] >= 3
 
 
 def test_quality_trend_summary_metadata_fields():

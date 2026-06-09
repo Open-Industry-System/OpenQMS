@@ -34,6 +34,7 @@ WIDGET_MODULE_MAP = {
     "iqc_pending_inspections": "iqc",
     "mes_equipment_status": "mes",
     "supplier_ppm_trend": "supplier",
+    "quality_trend_ai_summary": "dashboard",
 }
 
 WIDGET_MIN_SIZES = {
@@ -51,6 +52,7 @@ WIDGET_MIN_SIZES = {
     "iqc_pending_inspections": {"w": 2, "h": 2},
     "mes_equipment_status": {"w": 3, "h": 2},
     "supplier_ppm_trend": {"w": 3, "h": 3},
+    "quality_trend_ai_summary": {"w": 6, "h": 4},
 }
 
 
@@ -428,6 +430,8 @@ async def get_recent_actions(db: AsyncSession, user_id: str, limit: int = 5) -> 
     query = (
         select(AuditLog)
         .where(AuditLog.operated_by == user_id)
+        .where(AuditLog.action != "AI_TREND_INTERPRET")
+        .where(AuditLog.table_name != "quality_trends")
         .order_by(AuditLog.operated_at.desc())
         .limit(limit)
     )
