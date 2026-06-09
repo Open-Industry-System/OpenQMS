@@ -258,6 +258,12 @@ async def get_widgets(
         if await _user_can_view_module(user, module, db):
             allowed_types.append(widget_type)
 
+    quality_trend_allowed_modules = set()
+    if "quality_trend_ai_summary" in allowed_types:
+        for module in ("spc", "capa", "fmea"):
+            if await dashboard_service._user_can_view_module(user, module, db):
+                quality_trend_allowed_modules.add(module)
+
     if user.role_definition.bypass_row_level_security:
         filter_codes = [product_line] if product_line else None
     else:
@@ -271,5 +277,8 @@ async def get_widgets(
         else:
             filter_codes = user_codes
 
-    data = await dashboard_service.get_widgets_data(db, allowed_types, filter_codes, user.user_id)
+    data = await dashboard_service.get_widgets_data(
+        db, allowed_types, filter_codes, user.user_id,
+        quality_trend_allowed_modules=quality_trend_allowed_modules,
+    )
     return layout_schemas.DashboardWidgetsResponse(**data)

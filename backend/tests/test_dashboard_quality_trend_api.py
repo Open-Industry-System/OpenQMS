@@ -1,0 +1,74 @@
+import os
+os.environ.setdefault("SECRET_KEY", "test-non-default-secret-key")
+
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+import pytest
+from httpx import ASGITransport, AsyncClient
+from app.core.permissions import PermissionLevel, get_current_user
+from app.database import get_db
+from app.main import app
+from app.models.user import User
+
+
+@pytest.mark.anyio
+async def test_dashboard_widgets_passes_quality_trend_module_permissions(monkeypatch):
+    service_call = {}
+
+    async def mock_get_db():
+        return MagicMock()
+
+    async def mock_get_current_user():
+        user = MagicMock(spec=User)
+        user.user_id = uuid.uuid4()
+        user.role_id = uuid.uuid4()
+        user.role_definition = MagicMock()
+        user.role_definition.bypass_row_level_security = True
+        return user
+
+    async def fake_get_widgets_data(db, types, product_line_codes, user_id, quality_trend_allowed_modules=None):
+        service_call["types"] = types
+        service_call["product_line_codes"] = product_line_codes
+        service_call["quality_trend_allowed_modules"] = quality_trend_allowed_modules
+        return {
+            "quality_trend": {
+                "summary": {
+                    "risk_level": "insufficient_data",
+                    "headline": "数据不足以判断趋势",
+                    "evidence": [],
+                    "actions": [],
+                    "data_window_days": 30,
+                    "generated_at": "2026-06-09T00:00:00Z",
+                    "evidence_hash": "sha256:test",
+                    "ai_available": False,
+                    "metadata": {"omitted_modules": [], "available_modules": []},
+                }
+            },
+            "errors": {},
+        }
+
+    app.dependency_overrides[get_db] = mock_get_db
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    monkeypatch.setattr("app.services.dashboard_service.get_widgets_data", fake_get_widgets_data)
+
+    async def mock_get_user_permission(user, module, db):
+        return PermissionLevel.VIEW if module.value in {"dashboard", "spc", "capa", "fmea"} else PermissionLevel.NONE
+
+    try:
+        with patch("app.core.permissions.get_user_permission", new=mock_get_user_permission):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                response = await ac.get(
+                    "/api/dashboard/widgets",
+                    params={"types": "quality_trend_ai_summary", "product_line": "DC-DC-100"},
+                )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "quality_trend" in body
+    assert "summary" in body["quality_trend"]
+    assert service_call["types"] == ["quality_trend_ai_summary"]
+    assert service_call["product_line_codes"] == ["DC-DC-100"]
+    assert service_call["quality_trend_allowed_modules"] == {"spc", "capa", "fmea"}
