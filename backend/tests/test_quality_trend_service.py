@@ -83,3 +83,71 @@ def test_invalid_risk_level_raises_validation_error():
             scope_hash="scope",
             ai_available=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Aggregation service tests
+# ---------------------------------------------------------------------------
+
+from unittest.mock import AsyncMock
+from app.services.quality_trend_service import build_quality_trend_summary
+
+
+@pytest.mark.anyio
+async def test_returns_insufficient_data_when_no_modules_allowed():
+    summary = await build_quality_trend_summary(
+        db=AsyncMock(),
+        filter_codes=["DC-DC-100"],
+        allowed_modules=set(),
+        scope_description="产品线范围：DC-DC-100",
+        selected_product_line="DC-DC-100",
+    )
+    assert summary.risk_level == "insufficient_data"
+    assert summary.ai_available is False
+    assert summary.metadata.available_modules == []
+    assert summary.metadata.omitted_modules == ["capa", "fmea", "spc"]
+
+
+@pytest.mark.anyio
+async def test_single_effective_module_is_insufficient_data():
+    db = AsyncMock()
+    db.scalar.side_effect = [
+        4,   # SPC current window
+        1,   # SPC previous window
+        2,   # SPC open alarms
+    ]
+
+    summary = await build_quality_trend_summary(
+        db=db,
+        filter_codes=["DC-DC-100"],
+        allowed_modules={"spc"},
+        scope_description="产品线范围：DC-DC-100",
+        selected_product_line="DC-DC-100",
+    )
+    assert summary.risk_level == "insufficient_data"
+    assert summary.ai_available is False
+    assert [e.id for e in summary.evidence] == ["spc_alarm_count", "spc_open_unack"]
+
+
+@pytest.mark.anyio
+async def test_detects_open_spc_and_capa_risk():
+    db = AsyncMock()
+    db.scalar.side_effect = [
+        4,   # SPC current window
+        1,   # SPC previous window
+        2,   # SPC open alarms
+        3,   # CAPA open
+        2,   # CAPA overdue
+    ]
+
+    summary = await build_quality_trend_summary(
+        db=db,
+        filter_codes=["DC-DC-100"],
+        allowed_modules={"spc", "capa"},
+        scope_description="产品线范围：DC-DC-100",
+        selected_product_line="DC-DC-100",
+    )
+    assert summary.risk_level in {"medium", "high"}
+    assert any(e.id == "spc_alarm_count" for e in summary.evidence)
+    assert any(e.id == "capa_overdue_count" for e in summary.evidence)
+    assert summary.ai_available is True
