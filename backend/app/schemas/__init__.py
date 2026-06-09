@@ -16,3 +16,4 @@ from app.schemas import customer_quality
 from app.schemas import scar
 from app.schemas import apqp
 from app.schemas import ppap
+from app.schemas import quality_trend
