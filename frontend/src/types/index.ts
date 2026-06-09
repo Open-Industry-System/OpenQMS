@@ -1367,3 +1367,12 @@ export interface DraftCapabilitiesResponse {
   available_steps: string[];
   current_step: string;
 }
+
+export type {
+  WidgetMeta as DashboardWidgetMeta,
+  WidgetLayoutItem as DashboardWidgetLayoutItem,
+  DashboardLayoutConfig as DashboardWidgetLayoutConfig,
+  DashboardWidgetsData as DashboardWidgetData,
+  WidgetProps as DashboardWidgetProps,
+  WidgetCategory as DashboardWidgetCategory,
+} from "../components/dashboard/widgets/types";

@@ -32,6 +32,7 @@ from app.models.recommendation_cache import RecommendationCache
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
+from app.models.user_dashboard_layout import UserDashboardLayout
 from .plm import (
     PLMConnection, PLMPart, PLMBOM, PLMChangeOrder,
     PLMSyncJob, PLMPushOutbox, PLMChangeImpactTask,
@@ -76,6 +77,7 @@ __all__ = [
     "EmbeddingSyncOutbox",
     "ChangeImpactAnalysis",
     "CollaborationSession",
+    "UserDashboardLayout",
     "PLMConnection",
     "PLMPart",
     "PLMBOM",
