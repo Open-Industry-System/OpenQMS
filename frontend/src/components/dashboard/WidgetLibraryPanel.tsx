@@ -14,6 +14,7 @@ const categoryLabels: Record<string, string> = {
   alert: "预警提醒",
   chart: "图表分析",
   list: "列表",
+  ai: "AI/高级分析",
 };
 
 export default function WidgetLibraryPanel({ onAddWidget }: WidgetLibraryPanelProps) {
@@ -73,7 +74,7 @@ export default function WidgetLibraryPanel({ onAddWidget }: WidgetLibraryPanelPr
         onChange={(e) => setSearch(e.target.value)}
         style={{ marginBottom: 12 }}
       />
-      <Collapse items={items} defaultActiveKey={["kpi", "alert"]} ghost />
+      <Collapse items={items} defaultActiveKey={["kpi", "alert", "ai"]} ghost />
     </div>
   );
 }
