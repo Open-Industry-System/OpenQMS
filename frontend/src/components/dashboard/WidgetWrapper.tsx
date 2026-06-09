@@ -3,6 +3,7 @@ import { Button, theme } from "antd";
 import { CloseOutlined, ReloadOutlined } from "@ant-design/icons";
 import type { WidgetLayoutItem, DashboardWidgetsData } from "./widgets/types";
 import { getWidgetMeta, getWidgetComponent } from "./widgets/registry";
+import { getWidgetErrorKey } from "./dashboardLayoutUtils";
 
 interface WidgetWrapperProps {
   item: WidgetLayoutItem;
@@ -25,7 +26,6 @@ export default function WidgetWrapper({
   const meta = getWidgetMeta(item.type);
   const Component = getWidgetComponent(item.type);
 
-
   if (!Component || !meta) {
     return (
       <div style={{ padding: 16, color: token.colorTextSecondary }}>
@@ -34,7 +34,8 @@ export default function WidgetWrapper({
     );
   }
 
-  const hasModuleError = !!data.errors?.[meta.module];
+  const errorKey = getWidgetErrorKey(item.type);
+  const hasModuleError = !!data.errors?.[errorKey];
 
   return (
     <div

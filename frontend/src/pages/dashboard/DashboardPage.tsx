@@ -21,6 +21,10 @@ import type {
   DashboardLayoutConfig,
   DashboardWidgetsData,
 } from "../../components/dashboard/widgets/types";
+import {
+  createWidgetLayoutItem,
+  filterLayoutByPermission,
+} from "../../components/dashboard/dashboardLayoutUtils";
 
 const DEFAULT_LAYOUT: DashboardLayoutConfig = {
   lg: [
@@ -53,7 +57,7 @@ const { Title } = Typography;
 
 export default function DashboardPage() {
   const productLine = useProductLineStore((s) => s.selected);
-  const { canEdit } = usePermission();
+  const { canEdit, canView } = usePermission();
   const canEditDashboard = canEdit("dashboard");
 
   const [layout, setLayout] = useState<WidgetLayoutItem[]>(() =>
@@ -118,8 +122,8 @@ export default function DashboardPage() {
 
   const handleReset = async () => {
     try {
-      await saveDashboardLayout(DEFAULT_LAYOUT);
-      const resetLayout = DEFAULT_LAYOUT.lg.map((item) => ({ ...item }));
+      const resetLayout = filterLayoutByPermission(DEFAULT_LAYOUT.lg, canView);
+      await saveDashboardLayout({ lg: resetLayout });
       setLayout(resetLayout);
       setEditLayout(resetLayout);
       message.success("已恢复默认布局");
@@ -138,14 +142,7 @@ export default function DashboardPage() {
       typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
         : Math.random().toString(36).substring(2, 11);
-    const newItem: WidgetLayoutItem = {
-      i: `${type}-${id}`,
-      type,
-      x: 0,
-      y: 100, // Will be compacted by react-grid-layout
-      w: 3,
-      h: 2,
-    };
+    const newItem = createWidgetLayoutItem(type, id);
     setEditLayout([...editLayout, newItem]);
   };
 

@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import type { ModuleKey } from "../../../hooks/usePermission";
 
 export type WidgetCategory = "kpi" | "alert" | "chart" | "list";

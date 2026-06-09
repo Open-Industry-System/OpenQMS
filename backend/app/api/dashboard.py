@@ -273,4 +273,3 @@ async def get_widgets(
 
     data = await dashboard_service.get_widgets_data(db, allowed_types, filter_codes, user.user_id)
     return layout_schemas.DashboardWidgetsResponse(**data)
-
