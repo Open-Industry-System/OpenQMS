@@ -1,6 +1,6 @@
 import type { ModuleKey } from "../../../hooks/usePermission";
 
-export type WidgetCategory = "kpi" | "alert" | "chart" | "list";
+export type WidgetCategory = "kpi" | "alert" | "chart" | "list" | "ai";
 
 export interface WidgetMeta {
   type: string;
@@ -22,6 +22,42 @@ export interface WidgetLayoutItem {
 
 export interface DashboardLayoutConfig {
   lg: WidgetLayoutItem[];
+}
+
+export interface QualityTrendMetadata {
+  omitted_modules?: string[];
+  available_modules?: string[];
+  scope_description?: string;
+  selected_product_line?: string | null;
+}
+
+export type QualityTrendRiskLevel = "low" | "medium" | "high" | "insufficient_data";
+
+export interface QualityTrendSummary {
+  risk_level?: QualityTrendRiskLevel;
+  headline?: string;
+  evidence?: Array<{ id?: string; label?: string; value?: number; trend?: string; severity?: string }>;
+  actions?: Array<{ priority?: string; text?: string }>;
+  data_window_days?: number;
+  generated_at?: string;
+  evidence_hash?: string;
+  scope_hash?: string;
+  ai_available?: boolean;
+  metadata?: QualityTrendMetadata;
+}
+
+export interface QualityTrendInterpretation {
+  summary: string;
+  possible_causes: string[];
+  impact_scope: string[];
+  recommended_actions: Array<{ priority?: string; action?: string; reason?: string }>;
+  evidence_refs: string[];
+  confidence: "low" | "medium" | "high";
+  model: string;
+  evidence_hash: string;
+  scope_hash: string;
+  generated_at: string;
+  cached: boolean;
 }
 
 export interface DashboardWidgetsData {
@@ -61,6 +97,7 @@ export interface DashboardWidgetsData {
   supplier: {
     ppm_trend?: Array<{ supplier_id: string; supplier_name: string; ppm: number }>;
   };
+  quality_trend?: { summary?: QualityTrendSummary };
   errors: Record<string, string>;
 }
 

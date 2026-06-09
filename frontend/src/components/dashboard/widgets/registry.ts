@@ -1,4 +1,5 @@
 import type { WidgetMeta, WidgetProps } from "./types";
+import QualityTrendAIWidget from "./QualityTrendAIWidget";
 import KpiPendingWidget from "./KpiPendingWidget";
 import KpiOverdueWidget from "./KpiOverdueWidget";
 import KpiRiskWidget from "./KpiRiskWidget";
@@ -140,6 +141,15 @@ export const widgetRegistry: Record<string, WidgetMeta & { component: React.FC<W
     minSize: { w: 3, h: 3 },
     module: "supplier",
     component: SupplierPpmWidget,
+  },
+  quality_trend_ai_summary: {
+    type: "quality_trend_ai_summary",
+    name: "质量趋势 AI 解读",
+    category: "ai",
+    defaultSize: { w: 8, h: 5 },
+    minSize: { w: 6, h: 4 },
+    module: "dashboard",
+    component: QualityTrendAIWidget,
   },
 };
 

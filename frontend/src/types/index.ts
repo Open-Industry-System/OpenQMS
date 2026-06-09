@@ -1374,4 +1374,5 @@ export type {
   DashboardWidgetsData as DashboardWidgetData,
   WidgetProps as DashboardWidgetProps,
   WidgetCategory as DashboardWidgetCategory,
+  QualityTrendInterpretation,
 } from "../components/dashboard/widgets/types";
