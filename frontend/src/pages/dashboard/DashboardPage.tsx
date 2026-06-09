@@ -1,217 +1,208 @@
 import { useEffect, useState, useCallback } from "react";
-import { Row, Col, Card, Button, Typography } from "antd";
+import { Button, Typography, Space, message } from "antd";
 import {
-  AlertOutlined,
-  ClockCircleOutlined,
-  WarningOutlined,
-  RiseOutlined,
-  PlusOutlined,
+  EditOutlined,
+  CheckOutlined,
+  CloseOutlined,
+  ReloadOutlined,
+  RollbackOutlined,
 } from "@ant-design/icons";
-import { useNavigate } from "react-router-dom";
+import DashboardGrid from "../../components/dashboard/DashboardGrid";
+import WidgetLibraryPanel from "../../components/dashboard/WidgetLibraryPanel";
 import {
-  getDashboardSummary,
-  getDashboardAlerts,
-  getDashboardRecentActions,
+  getDashboardLayout,
+  saveDashboardLayout,
+  getDashboardWidgets,
 } from "../../api/dashboard";
-import type { DashboardSummary, DashboardAlerts, DashboardRecentAction } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
-import { useAuthStore } from "../../store/authStore";
-import KPICard from "../../components/dashboard/KPICard";
-import RiskList from "../../components/dashboard/RiskList";
-import RecentActions from "../../components/dashboard/RecentActions";
-import CollapsibleSection from "../../components/dashboard/CollapsibleSection";
+import { usePermission } from "../../hooks/usePermission";
+import type {
+  WidgetLayoutItem,
+  DashboardLayoutConfig,
+  DashboardWidgetsData,
+} from "../../components/dashboard/widgets/types";
+import {
+  createWidgetLayoutItem,
+  filterLayoutByPermission,
+} from "../../components/dashboard/dashboardLayoutUtils";
+
+const DEFAULT_LAYOUT: DashboardLayoutConfig = {
+  lg: [
+    { i: "kpi-pending", type: "kpi_pending_actions", x: 0, y: 0, w: 3, h: 2 },
+    { i: "kpi-overdue", type: "kpi_overdue_tasks", x: 3, y: 0, w: 3, h: 2 },
+    { i: "kpi-risk", type: "kpi_high_risk_items", x: 6, y: 0, w: 3, h: 2 },
+    { i: "kpi-trend", type: "kpi_month_trend", x: 9, y: 0, w: 3, h: 2 },
+    { i: "alert-fmea", type: "alert_high_rpn_fmea", x: 0, y: 2, w: 4, h: 4 },
+    { i: "alert-capa", type: "alert_overdue_capa", x: 4, y: 2, w: 4, h: 4 },
+    { i: "alert-ppm", type: "alert_high_ppm_suppliers", x: 8, y: 2, w: 4, h: 4 },
+    { i: "recent-actions", type: "recent_actions", x: 0, y: 6, w: 12, h: 3 },
+  ],
+};
+
+function createEmptyData(): DashboardWidgetsData {
+  return {
+    kpi: {},
+    alerts: {},
+    recent_actions: [],
+    spc: {},
+    msa: {},
+    iqc: {},
+    mes: {},
+    supplier: {},
+    errors: {},
+  };
+}
 
 const { Title } = Typography;
 
-function formatTrend(trend: number | undefined): string {
-  if (trend === undefined || trend === null) return "—";
-  if (trend > 0) return `↑ +${trend}`;
-  if (trend < 0) return `↓ ${trend}`;
-  return "—";
-}
-
 export default function DashboardPage() {
-  const navigate = useNavigate();
   const productLine = useProductLineStore((s) => s.selected);
-  const user = useAuthStore((s) => s.user);
-  const isViewer = user?.role_key === "viewer";
+  const { canEdit, canView } = usePermission();
+  const canEditDashboard = canEdit("dashboard");
 
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [alerts, setAlerts] = useState<DashboardAlerts | null>(null);
-  const [recentActions, setRecentActions] = useState<DashboardRecentAction[]>([]);
+  const [layout, setLayout] = useState<WidgetLayoutItem[]>(() =>
+    DEFAULT_LAYOUT.lg.map((item) => ({ ...item }))
+  );
+  const [editLayout, setEditLayout] = useState<WidgetLayoutItem[] | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [data, setData] = useState<DashboardWidgetsData>(createEmptyData);
   const [loading, setLoading] = useState(true);
-  const [summaryError, setSummaryError] = useState(false);
-  const [alertsError, setAlertsError] = useState(false);
-  const [actionsError, setActionsError] = useState(false);
 
-  const fetchData = useCallback(() => {
+  // Fetch layout first, then fetch widgets based on returned layout types
+  const fetchData = useCallback(async () => {
     setLoading(true);
-    setSummaryError(false);
-    setAlertsError(false);
-    setActionsError(false);
+    try {
+      const layoutResp = await getDashboardLayout();
+      const validWidgets = (layoutResp.layout_config?.lg ?? DEFAULT_LAYOUT.lg).filter(
+        (item) => !!item.type
+      );
+      setLayout(validWidgets);
 
-    Promise.allSettled([
-      getDashboardSummary(productLine || undefined),
-      getDashboardAlerts(productLine || undefined),
-      getDashboardRecentActions(),
-    ]).then(([summaryResult, alertsResult, actionsResult]) => {
-      if (summaryResult.status === "fulfilled") setSummary(summaryResult.value);
-      else setSummaryError(true);
-
-      if (alertsResult.status === "fulfilled") setAlerts(alertsResult.value);
-      else setAlertsError(true);
-
-      if (actionsResult.status === "fulfilled") setRecentActions(actionsResult.value);
-      else setActionsError(true);
-
+      const widgetTypes = [...new Set(validWidgets.map((w) => w.type))];
+      const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
+      setData(widgetsResp);
+    } catch (e) {
+      console.error("Dashboard fetch error:", e);
+      message.error("仪表盘加载失败");
+    } finally {
       setLoading(false);
-    });
+    }
   }, [productLine]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  const pendingStatus = (summary?.pending_actions ?? 0) > 0 ? "warning" : "success";
-  const overdueStatus = (summary?.overdue_tasks ?? 0) > 0 ? "danger" : "success";
-  const highRiskStatus = (summary?.high_risk_items ?? 0) > 0 ? "danger" : "success";
+  const handleEdit = () => {
+    setEditLayout([...layout]);
+    setIsEditing(true);
+  };
 
-  const trend = summary?.month_trend ?? 0;
-  const trendStatus = trend > 0 ? "success" : trend < 0 ? "danger" : "success";
+  const handleSave = async () => {
+    if (!editLayout) return;
+    try {
+      await saveDashboardLayout({ lg: editLayout });
+      setLayout(editLayout);
+      setIsEditing(false);
+      setEditLayout(null);
+      message.success("布局已保存");
+      // Re-fetch only widget data for the new layout types, no loading flicker
+      const widgetTypes = [...new Set(editLayout.map((w) => w.type))];
+      const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
+      setData(widgetsResp);
+    } catch {
+      message.error("保存失败");
+    }
+  };
+
+  const handleCancel = () => {
+    setEditLayout(null);
+    setIsEditing(false);
+  };
+
+  const handleReset = async () => {
+    try {
+      const resetLayout = filterLayoutByPermission(DEFAULT_LAYOUT.lg, canView);
+      await saveDashboardLayout({ lg: resetLayout });
+      setLayout(resetLayout);
+      setEditLayout(resetLayout);
+      message.success("已恢复默认布局");
+      // Re-fetch only widget data for default layout types, no loading flicker
+      const widgetTypes = [...new Set(resetLayout.map((w) => w.type))];
+      const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
+      setData(widgetsResp);
+    } catch {
+      message.error("恢复失败");
+    }
+  };
+
+  const handleAddWidget = (type: string) => {
+    if (!editLayout) return;
+    const id =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).substring(2, 11);
+    const newItem = createWidgetLayoutItem(type, id);
+    setEditLayout([...editLayout, newItem]);
+  };
+
+  const handleRemoveWidget = (i: string) => {
+    if (!editLayout) return;
+    setEditLayout(editLayout.filter((w) => w.i !== i));
+  };
+
+  const currentLayout = isEditing && editLayout ? editLayout : layout;
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 24 }}>
-        质量仪表盘
-      </Title>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <Title level={4} style={{ margin: 0 }}>质量仪表盘</Title>
+        <Space>
+          {isEditing ? (
+            <>
+              <Button icon={<CheckOutlined />} type="primary" onClick={handleSave}>
+                完成
+              </Button>
+              <Button icon={<CloseOutlined />} onClick={handleCancel}>
+                取消
+              </Button>
+              <Button icon={<RollbackOutlined />} onClick={handleReset}>
+                恢复默认
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
+                刷新
+              </Button>
+              {canEditDashboard && (
+                <Button icon={<EditOutlined />} onClick={handleEdit}>
+                  编辑布局
+                </Button>
+              )}
+            </>
+          )}
+        </Space>
+      </div>
 
-      {/* P0: KPI section */}
-      <section aria-label="质量指标概览">
-        <Row gutter={[16, 16]}>
-          <Col xs={24} sm={12} lg={6}>
-            <KPICard
-              title="待办事项"
-              value={summary?.pending_actions ?? 0}
-              status={pendingStatus}
-              icon={<ClockCircleOutlined />}
-              onClick={() => navigate("/capa?pending_action=true")}
-              loading={loading}
-              error={summaryError}
-              onRetry={fetchData}
-              disabled={isViewer}
-            />
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <KPICard
-              title="超期任务"
-              value={summary?.overdue_tasks ?? 0}
-              status={overdueStatus}
-              icon={<AlertOutlined />}
-              onClick={() => navigate("/capa?overdue=true")}
-              loading={loading}
-              error={summaryError}
-              onRetry={fetchData}
-              disabled={isViewer}
-            />
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <KPICard
-              title="高风险项"
-              value={summary?.high_risk_items ?? 0}
-              status={highRiskStatus}
-              icon={<WarningOutlined />}
-              onClick={() => navigate("/fmea?risk=high")}
-              loading={loading}
-              error={summaryError}
-              onRetry={fetchData}
-              disabled={isViewer}
-            />
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <KPICard
-              title="本月新增"
-              value={summary?.month_trend ?? 0}
-              status={trendStatus}
-              subtitle={formatTrend(summary?.month_trend)}
-              icon={<RiseOutlined />}
-              loading={loading}
-              error={summaryError}
-              onRetry={fetchData}
-              disabled={isViewer}
-            />
-          </Col>
-        </Row>
-      </section>
-
-      {/* P1: 待处置事项 section */}
-      <section aria-label="待处置事项" style={{ marginTop: 24 }}>
-        <Title level={5}>待处置事项</Title>
-        <Row gutter={[16, 16]} style={{ marginTop: 8 }}>
-          <Col xs={24} lg={8}>
-            <Card title="高 RPN FMEA" size="small">
-              <RiskList
-                data={alerts}
-                category="fmea"
-                loading={loading}
-                error={alertsError}
-                onRetry={fetchData}
-                disabled={isViewer}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} lg={8}>
-            <Card title="超期 CAPA" size="small">
-              <RiskList
-                data={alerts}
-                category="capa"
-                loading={loading}
-                error={alertsError}
-                onRetry={fetchData}
-                disabled={isViewer}
-              />
-            </Card>
-          </Col>
-          <Col xs={24} lg={8}>
-            <Card title="PPM 超标供应商" size="small">
-              <RiskList
-                data={alerts}
-                category="supplier"
-                loading={loading}
-                error={alertsError}
-                onRetry={fetchData}
-                disabled={isViewer}
-              />
-            </Card>
-          </Col>
-        </Row>
-      </section>
-
-      {/* P2: 最近操作 section */}
-      <CollapsibleSection title="最近操作" collapseAt={767} style={{ marginTop: 24 }}>
-        <Card size="small">
-          <RecentActions
-            data={recentActions}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {isEditing && (
+          <WidgetLibraryPanel onAddWidget={handleAddWidget} />
+        )}
+        <div style={{ flex: 1, overflow: "auto", padding: "0 8px" }}>
+          <DashboardGrid
+            layout={currentLayout}
+            data={data}
             loading={loading}
-            error={actionsError}
+            isEditing={isEditing}
+            onLayoutChange={(newLayout) => {
+              if (isEditing) setEditLayout(newLayout);
+            }}
+            onRemoveWidget={handleRemoveWidget}
             onRetry={fetchData}
           />
-        </Card>
-      </CollapsibleSection>
-
-      {/* P3: 快速入口 section */}
-      <CollapsibleSection title="快速入口" collapseAt={767} hidden={isViewer} style={{ marginTop: 16 }}>
-        <Card size="small">
-          <Button type="default" icon={<PlusOutlined />} block onClick={() => navigate("/fmea")}>
-            新建 FMEA
-          </Button>
-          <Button type="default" icon={<PlusOutlined />} block onClick={() => navigate("/capa")} style={{ marginTop: 8 }}>
-            新建 CAPA
-          </Button>
-          <Button type="default" icon={<PlusOutlined />} block onClick={() => navigate("/customer-quality")} style={{ marginTop: 8 }}>
-            新建客诉
-          </Button>
-        </Card>
-      </CollapsibleSection>
+        </div>
+      </div>
     </div>
   );
 }

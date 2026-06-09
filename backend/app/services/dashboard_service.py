@@ -6,6 +6,76 @@ from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
 
 
+DEFAULT_LAYOUT = {
+    "lg": [
+        {"i": "kpi-pending", "type": "kpi_pending_actions", "x": 0, "y": 0, "w": 3, "h": 2},
+        {"i": "kpi-overdue", "type": "kpi_overdue_tasks", "x": 3, "y": 0, "w": 3, "h": 2},
+        {"i": "kpi-risk", "type": "kpi_high_risk_items", "x": 6, "y": 0, "w": 3, "h": 2},
+        {"i": "kpi-trend", "type": "kpi_month_trend", "x": 9, "y": 0, "w": 3, "h": 2},
+        {"i": "alert-fmea", "type": "alert_high_rpn_fmea", "x": 0, "y": 2, "w": 4, "h": 4},
+        {"i": "alert-capa", "type": "alert_overdue_capa", "x": 4, "y": 2, "w": 4, "h": 4},
+        {"i": "alert-ppm", "type": "alert_high_ppm_suppliers", "x": 8, "y": 2, "w": 4, "h": 4},
+        {"i": "recent-actions", "type": "recent_actions", "x": 0, "y": 6, "w": 12, "h": 3},
+    ]
+}
+
+WIDGET_MODULE_MAP = {
+    "kpi_pending_actions": "dashboard",
+    "kpi_overdue_tasks": "dashboard",
+    "kpi_high_risk_items": "dashboard",
+    "kpi_month_trend": "dashboard",
+    "alert_high_rpn_fmea": "fmea",
+    "alert_overdue_capa": "capa",
+    "alert_high_ppm_suppliers": "supplier",
+    "recent_actions": "dashboard",
+    "spc_abnormal_count": "spc",
+    "spc_capability_summary": "spc",
+    "msa_gauge_expiry": "msa",
+    "iqc_pending_inspections": "iqc",
+    "mes_equipment_status": "mes",
+    "supplier_ppm_trend": "supplier",
+}
+
+WIDGET_MIN_SIZES = {
+    "kpi_pending_actions": {"w": 2, "h": 2},
+    "kpi_overdue_tasks": {"w": 2, "h": 2},
+    "kpi_high_risk_items": {"w": 2, "h": 2},
+    "kpi_month_trend": {"w": 2, "h": 2},
+    "alert_high_rpn_fmea": {"w": 3, "h": 3},
+    "alert_overdue_capa": {"w": 3, "h": 3},
+    "alert_high_ppm_suppliers": {"w": 3, "h": 3},
+    "recent_actions": {"w": 6, "h": 2},
+    "spc_abnormal_count": {"w": 2, "h": 2},
+    "spc_capability_summary": {"w": 3, "h": 3},
+    "msa_gauge_expiry": {"w": 2, "h": 2},
+    "iqc_pending_inspections": {"w": 2, "h": 2},
+    "mes_equipment_status": {"w": 3, "h": 2},
+    "supplier_ppm_trend": {"w": 3, "h": 3},
+}
+
+
+async def _user_can_view_module(user, module: str, db: AsyncSession) -> bool:
+    from app.core.permissions import Module, PermissionLevel, get_user_permission
+
+    level = await get_user_permission(user, Module(module), db)
+    return level >= PermissionLevel.VIEW
+
+
+async def filter_layout_by_permissions(layout: dict, user, db: AsyncSession) -> dict:
+    filtered_layout = dict(layout or {})
+    widgets = []
+    for item in (layout or {}).get("lg", []):
+        module = WIDGET_MODULE_MAP.get(item.get("type", ""), "dashboard")
+        if await _user_can_view_module(user, module, db):
+            widgets.append(dict(item))
+    filtered_layout["lg"] = widgets
+    return filtered_layout
+
+
+async def get_default_layout(db: AsyncSession, user) -> dict:
+    return await filter_layout_by_permissions(DEFAULT_LAYOUT, user, db)
+
+
 async def get_dashboard(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None) -> dict:
     now = datetime.now(timezone.utc)
 
@@ -383,3 +453,193 @@ async def get_recent_actions(db: AsyncSession, user_id: str, limit: int = 5) -> 
         })
 
     return actions
+
+
+async def get_widgets_data(
+    db: AsyncSession,
+    types: list[str],
+    product_line_codes: list[str] | None,
+    user_id: str,
+) -> dict:
+    result = {
+        "kpi": {},
+        "alerts": {},
+        "recent_actions": [],
+        "spc": {},
+        "msa": {},
+        "iqc": {},
+        "mes": {},
+        "supplier": {},
+        "errors": {},
+    }
+
+    needs_kpi = any(widget_type.startswith("kpi_") for widget_type in types)
+    needs_alerts = any(widget_type.startswith("alert_") for widget_type in types)
+    needs_recent = "recent_actions" in types
+    needs_spc = any(widget_type.startswith("spc_") for widget_type in types)
+    needs_msa = any(widget_type.startswith("msa_") for widget_type in types)
+    needs_iqc = any(widget_type.startswith("iqc_") for widget_type in types)
+    needs_mes = any(widget_type.startswith("mes_") for widget_type in types)
+    needs_supplier = any(widget_type.startswith("supplier_") for widget_type in types)
+
+    if needs_kpi:
+        try:
+            summary = await get_summary(db, product_line_codes=product_line_codes)
+            result["kpi"] = {
+                "pending_actions": summary.get("pending_actions", 0),
+                "overdue_tasks": summary.get("overdue_tasks", 0),
+                "high_risk_items": summary.get("high_risk_items", 0),
+                "month_trend": summary.get("month_trend", 0),
+            }
+        except Exception as e:
+            result["errors"]["kpi"] = str(e)
+
+    if needs_alerts:
+        try:
+            alerts = await get_alerts(db, product_line_codes=product_line_codes)
+            alert_payload_map = {
+                "alert_high_rpn_fmea": "high_rpn_fmeas",
+                "alert_overdue_capa": "overdue_capas",
+                "alert_high_ppm_suppliers": "high_ppm_suppliers",
+            }
+            result["alerts"] = {
+                payload_key: alerts.get(payload_key, [])
+                for widget_type, payload_key in alert_payload_map.items()
+                if widget_type in types
+            }
+        except Exception as e:
+            result["errors"]["alerts"] = str(e)
+
+    if needs_recent:
+        try:
+            result["recent_actions"] = await get_recent_actions(db, user_id)
+        except Exception as e:
+            result["errors"]["recent_actions"] = str(e)
+
+    if needs_spc:
+        try:
+            from app.models.spc import InspectionCharacteristic, SPCAlarm
+
+            week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            abnormal_q = select(func.count(SPCAlarm.alarm_id)).where(
+                SPCAlarm.status == "open",
+                SPCAlarm.triggered_at >= week_ago,
+            )
+            if product_line_codes:
+                abnormal_q = abnormal_q.join(
+                    InspectionCharacteristic,
+                    SPCAlarm.ic_id == InspectionCharacteristic.ic_id,
+                ).where(InspectionCharacteristic.product_line.in_(product_line_codes))
+            abnormal_count = await db.scalar(abnormal_q) or 0
+
+            ic_q = select(func.count(InspectionCharacteristic.ic_id))
+            if product_line_codes:
+                ic_q = ic_q.where(InspectionCharacteristic.product_line.in_(product_line_codes))
+            ic_count = await db.scalar(ic_q) or 0
+
+            result["spc"] = {
+                "abnormal_count": abnormal_count,
+                "capability_summary": {"count": ic_count, "cpk_avg": None},
+            }
+        except Exception as e:
+            result["errors"]["spc"] = str(e)
+
+    if needs_msa:
+        try:
+            from app.models.gauge import Gauge
+
+            expiry_date = datetime.now(timezone.utc).date() + timedelta(days=30)
+            expiry_q = select(func.count(Gauge.gauge_id)).where(
+                Gauge.status == "active",
+                Gauge.next_calibration_date.isnot(None),
+                Gauge.next_calibration_date <= expiry_date,
+            )
+            if product_line_codes:
+                expiry_q = expiry_q.where(Gauge.product_line_code.in_(product_line_codes))
+            result["msa"] = {"gauges_expiring_30d": await db.scalar(expiry_q) or 0}
+        except Exception as e:
+            result["errors"]["msa"] = str(e)
+
+    if needs_iqc:
+        try:
+            from app.models.iqc_inspection import IqcInspection
+
+            pending_q = select(func.count(IqcInspection.inspection_id)).where(
+                IqcInspection.status == "pending"
+            )
+            if product_line_codes:
+                pending_q = pending_q.where(IqcInspection.product_line_code.in_(product_line_codes))
+            result["iqc"] = {"pending_inspections": await db.scalar(pending_q) or 0}
+        except Exception as e:
+            result["errors"]["iqc"] = str(e)
+
+    if needs_mes:
+        try:
+            from app.models.mes import MESEquipmentStatus
+
+            latest_status_q = select(
+                MESEquipmentStatus.status,
+                func.row_number().over(
+                    partition_by=[MESEquipmentStatus.connection_id, MESEquipmentStatus.equipment_code],
+                    order_by=MESEquipmentStatus.recorded_at.desc(),
+                ).label("rn"),
+            )
+            if product_line_codes:
+                latest_status_q = latest_status_q.where(MESEquipmentStatus.product_line_code.in_(product_line_codes))
+
+            latest_status_subq = latest_status_q.subquery()
+            status_q = (
+                select(latest_status_subq.c.status, func.count())
+                .where(latest_status_subq.c.rn == 1)
+                .group_by(latest_status_subq.c.status)
+            )
+            status_rows = (await db.execute(status_q)).all()
+            status_counts = {row[0]: row[1] for row in status_rows}
+
+            result["mes"] = {
+                "equipment_running": status_counts.get("running", 0),
+                "equipment_down": status_counts.get("down", 0),
+                "equipment_idle": status_counts.get("idle", 0),
+                "status_counts": status_counts,
+            }
+        except Exception as e:
+            result["errors"]["mes"] = str(e)
+
+    if needs_supplier:
+        try:
+            from app.models.iqc_inspection import IqcInspection
+            from app.models.supplier import Supplier
+
+            total_lots = func.sum(IqcInspection.lot_qty)
+            total_defects = func.sum(IqcInspection.defect_qty)
+            ppm_expr = (total_defects * 1_000_000.0) / func.nullif(total_lots, 0)
+            ppm_q = (
+                select(
+                    IqcInspection.supplier_id,
+                    total_defects.label("defects"),
+                    total_lots.label("lots"),
+                    ppm_expr.label("ppm"),
+                )
+                .where(IqcInspection.supplier_id.isnot(None))
+                .group_by(IqcInspection.supplier_id)
+                .having(total_lots > 0)
+                .order_by(ppm_expr.desc())
+                .limit(5)
+            )
+            if product_line_codes:
+                ppm_q = ppm_q.where(IqcInspection.product_line_code.in_(product_line_codes))
+
+            ppm_rows = (await db.execute(ppm_q)).all()
+            ppm_trend = []
+            for row in ppm_rows:
+                supplier = await db.get(Supplier, row.supplier_id)
+                ppm_trend.append({
+                    "supplier_id": str(row.supplier_id),
+                    "supplier_name": supplier.name if supplier else "Unknown",
+                    "ppm": round(float(row.ppm or 0), 1),
+                })
+            result["supplier"] = {"ppm_trend": ppm_trend}
+        except Exception as e:
+            result["errors"]["supplier"] = str(e)
+
+    return result
