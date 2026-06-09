@@ -159,3 +159,194 @@ def build_scope_description(product_line_codes: list[str] | None) -> str:
     if len(product_line_codes) == 1:
         return f"产品线范围：{product_line_codes[0]}"
     return "产品线范围：" + ", ".join(product_line_codes)
+
+
+import time
+import uuid as uuid_mod
+
+from app.models.audit import AuditLog
+from app.schemas.quality_trend import QualityTrendInterpretation
+
+_interpret_cache: dict[str, tuple[QualityTrendInterpretation, float]] = {}
+_rate_limit: dict[str, list[float]] = {}
+RATE_LIMIT_WINDOW = 60.0
+RATE_LIMIT_MAX = 5
+CACHE_TTL = 30 * 60
+
+
+class RateLimitError(ValueError):
+    pass
+
+
+class LLMNotConfiguredError(ValueError):
+    pass
+
+
+class InsufficientTrendDataError(ValueError):
+    pass
+
+
+class LLMResponseParseError(ValueError):
+    pass
+
+
+async def interpret_quality_trend(
+    db,
+    user_id: str,
+    llm_provider,
+    filter_codes: list[str],
+    allowed_modules: set[str],
+    scope_description: str,
+    selected_product_line: str | None,
+    scope_hash: str,
+) -> QualityTrendInterpretation:
+    try:
+        _enforce_rate_limit(user_id)
+    except RateLimitError:
+        await _write_interpret_audit(db, user_id, "rate_limited", {
+            "scope_hash": scope_hash,
+            "product_line_codes": filter_codes,
+        })
+        raise
+
+    summary = await build_quality_trend_summary(db, filter_codes, allowed_modules, scope_description, selected_product_line)
+    audit_context = {
+        "scope_hash": scope_hash,
+        "evidence_hash": summary.evidence_hash,
+        "risk_level": summary.risk_level,
+        "product_line_codes": filter_codes,
+        "allowed_modules": sorted(allowed_modules),
+        "omitted_modules": summary.metadata.omitted_modules,
+        "evidence_ids": [e.id for e in summary.evidence],
+    }
+
+    if summary.risk_level == "insufficient_data":
+        await _write_interpret_audit(db, user_id, "insufficient_data", audit_context)
+        raise InsufficientTrendDataError("数据不足，无法生成 AI 解读")
+
+    if llm_provider is None:
+        await _write_interpret_audit(db, user_id, "llm_not_configured", audit_context)
+        raise LLMNotConfiguredError("LLM 未配置")
+
+    cache_key = f"{scope_hash}:{summary.data_window_days}:{summary.evidence_hash}"
+    cached = _get_cached_interpretation(cache_key)
+    if cached:
+        await _write_interpret_audit(db, user_id, "cache_hit", audit_context)
+        return cached
+
+    prompt = _build_interpret_prompt(summary, allowed_modules, scope_description)
+    try:
+        raw = await llm_provider.complete(prompt, _interpret_response_schema())
+    except Exception as exc:
+        await _write_interpret_audit(db, user_id, "llm_failed", audit_context | {"error": str(exc)})
+        raise
+
+    try:
+        result = _parse_interpretation(raw, summary, scope_hash)
+    except LLMResponseParseError as exc:
+        await _write_interpret_audit(db, user_id, "parse_failed", audit_context | {"error": str(exc)})
+        raise
+
+    _set_cached_interpretation(cache_key, result)
+    await _write_interpret_audit(db, user_id, "success", audit_context | {"model": result.model})
+    return result
+
+
+def _parse_interpretation(raw: dict, summary, scope_hash: str) -> QualityTrendInterpretation:
+    evidence_ids = {e.id for e in summary.evidence}
+    refs = set(raw.get("evidence_refs") or [])
+    unknown_refs = refs - evidence_ids
+    if unknown_refs:
+        raise LLMResponseParseError(f"LLM returned unknown evidence_refs: {sorted(unknown_refs)}")
+    payload = {
+        **raw,
+        "model": raw.get("model", "unknown"),
+        "evidence_hash": summary.evidence_hash,
+        "scope_hash": scope_hash,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cached": False,
+    }
+    return QualityTrendInterpretation(**payload)
+
+
+async def _write_interpret_audit(db, user_id: str, status: str, context: dict) -> None:
+    db.add(AuditLog(
+        table_name="quality_trends",
+        record_id=uuid_mod.uuid4(),
+        action="AI_TREND_INTERPRET",
+        changed_fields={"status": status},
+        old_values=None,
+        new_values={"status": status, **context},
+        operated_by=uuid_mod.UUID(str(user_id)),
+    ))
+    await db.commit()
+
+
+def _get_cached_interpretation(cache_key: str) -> QualityTrendInterpretation | None:
+    entry = _interpret_cache.get(cache_key)
+    if entry is None:
+        return None
+    result, ts = entry
+    if time.monotonic() - ts > CACHE_TTL:
+        del _interpret_cache[cache_key]
+        return None
+    return result.model_copy(update={"cached": True})
+
+
+def _set_cached_interpretation(cache_key: str, result: QualityTrendInterpretation) -> None:
+    _interpret_cache[cache_key] = (result, time.monotonic())
+
+
+def _enforce_rate_limit(user_id: str) -> None:
+    now = time.monotonic()
+    window = []
+    for ts in _rate_limit.get(user_id, []):
+        if now - ts < RATE_LIMIT_WINDOW:
+            window.append(ts)
+    if len(window) >= RATE_LIMIT_MAX:
+        raise RateLimitError("rate limit exceeded")
+    window.append(now)
+    _rate_limit[user_id] = window
+
+
+def _build_interpret_prompt(summary, allowed_modules: set[str], scope_description: str) -> str:
+    evidence_text = "\n".join(f"- {e.label}: {e.value} (trend: {e.trend})" for e in summary.evidence)
+    actions_text = "\n".join(f"- [{a.priority}] {a.text}" for a in summary.actions)
+    return f"""你是一位质量趋势分析专家。请基于以下数据生成结构化解读。
+
+产品线范围：{scope_description}
+可用模块：{', '.join(sorted(allowed_modules))}
+风险等级：{summary.risk_level}
+
+证据：
+{evidence_text}
+
+建议动作：
+{actions_text}
+
+请用中文输出以下 JSON 格式：
+{{
+  "summary": "总体趋势判断（一句话）",
+  "possible_causes": ["可能原因1", "可能原因2"],
+  "impact_scope": ["影响范围"],
+  "recommended_actions": [
+    {{"priority": "high|medium|low", "action": "具体动作", "reason": "原因"}}
+  ],
+  "evidence_refs": ["引用的 evidence id 列表"],
+  "confidence": "low|medium|high"
+}}"""
+
+
+def _interpret_response_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "possible_causes": {"type": "array", "items": {"type": "string"}},
+            "impact_scope": {"type": "array", "items": {"type": "string"}},
+            "recommended_actions": {"type": "array", "items": {"type": "object"}},
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+        },
+        "required": ["summary", "possible_causes", "impact_scope", "recommended_actions", "evidence_refs", "confidence"],
+    }
