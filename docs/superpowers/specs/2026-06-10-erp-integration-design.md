@@ -471,6 +471,9 @@ class ERPConnector(ABC):
 
 ### 5.2 双写关联逻辑（Ingestion 层）
 
+**实现说明**：
+- `SYSTEM_USER_ID`：在 `backend/app/core/config.py` 中定义常量 `uuid.UUID("00000000-0000-0000-0000-000000000001")`，对应 `seed.py` 中预置的 "system" 用户（`role="admin"`）。后台同步和自动映射操作均以此用户身份执行，确保审计日志有确定的 actor。
+
 **supplier_master → suppliers**
 
 ```python
@@ -526,20 +529,22 @@ async def _link_erp_shipment(db, erp_shipment: ERPShipment):
         shipment_date=erp_shipment.shipment_date,
         product_line_code=erp_shipment.product_line_code,
     )
+    # 3. 多行发货单聚合：按 customer_id + lot_no + shipment_date 汇总所有已摄入的 ERP 行
+    existing_lines = await find_erp_shipment_lines(
+        db, customer_id=customer_id, lot_no=erp_shipment.lot_no,
+        shipment_date=erp_shipment.shipment_date,
+    )
+    total_qty = sum(int(line.quantity) for line in existing_lines)
+    line_refs = ",".join([f"{line.shipment_number}-{line.line_number}" for line in existing_lines])
+
     if record:
+        # 3a. 已有 ShipmentRecord：幂等更新 quantity 和 notes（增量到达场景）
+        record.quantity = total_qty
+        record.notes = f"ERP auto-import: {line_refs}"
         erp_shipment.openqms_shipment_id = record.shipment_id
         erp_shipment.link_status = "linked"
     else:
-        # 3. 创建补充 ShipmentRecord（不覆盖已有记录）
-        # 多行发货单去重：同一 customer_id + lot_no + shipment_date 的多个 line 聚合为一条 ShipmentRecord
-        # 聚合语义：quantity 求和，notes 记录原始 ERP 行号列表
-        existing_lines = await find_erp_shipment_lines(
-            db, customer_id=customer_id, lot_no=erp_shipment.lot_no,
-            shipment_date=erp_shipment.shipment_date,
-        )
-        total_qty = sum(int(line.quantity) for line in existing_lines)
-        line_refs = ",".join([f"{line.shipment_number}-{line.line_number}" for line in existing_lines])
-
+        # 3b. 创建新 ShipmentRecord
         new_record = await create_shipment_record(
             db,
             customer_id=customer_id,
@@ -549,7 +554,7 @@ async def _link_erp_shipment(db, erp_shipment: ERPShipment):
             product_line_code=erp_shipment.product_line_code,
             destination=None,
             notes=f"ERP auto-import: {line_refs}",
-            created_by=SYSTEM_USER_ID,  # 后台同步使用系统用户
+            created_by=SYSTEM_USER_ID,  # 后台同步使用系统用户，见实现说明
         )
         erp_shipment.openqms_shipment_id = new_record.shipment_id
         erp_shipment.link_status = "linked"
@@ -816,7 +821,7 @@ GET /api/erp/traceability/{node_type}/{node_id}
 - 权限控制（viewer 403，admin/manager CRUD）
 - **字段级脱敏测试**：viewer/quality_engineer 请求 `erp_suppliers`/`erp_customers` 时，`bank_info` 返回 `"***"`，`tax_id` 返回前 6 位 + `****`；manager/admin 请求返回完整字段
 - **shipment 多行聚合测试**：同一 customer_id + lot_no + shipment_date 的多行发货单聚合为一条 ShipmentRecord，quantity 求和正确
-- **shipment 系统用户审计**：ERP 同步创建的 ShipmentRecord，`created_by` 为 `SYSTEM_USER_ID`，审计日志记录 `source="erp_sync"`
+- **shipment 系统用户审计**：ERP 同步创建的 ShipmentRecord，`created_by` 为 `SYSTEM_USER_ID`（见 5.2 节实现说明）
 
 ---
 
