@@ -461,6 +461,7 @@ export * from "./spc";
 export * from "./msa";
 export * from "./specialCharacteristic";
 export * from "./plm";
+export * from "./erp";
 
 // --- Management Review ---
 export interface ManagementReview {
