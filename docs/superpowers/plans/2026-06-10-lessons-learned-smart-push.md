@@ -263,7 +263,7 @@ Replace the `_cache_result` method in `RecommendationService` (around line 596).
             )
             .on_conflict_do_update(
                 index_elements=["fmea_id", "trigger_type", "context_hash"],
-                index_where=RecommendationCache.fmea_id.isnot(None),
+                index_where=text("fmea_id IS NOT NULL"),
                 set_={
                     "suggestions": [s.model_dump() for s in response.suggestions],
                     "source": response.source,
@@ -463,9 +463,37 @@ class HistoricalFMEASource(LessonsSource):
         if not keywords:
             return []
 
-        # Query approved FMEAs within user's accessible product lines
+        # Step 1: Find matching FMEA node embeddings to narrow down candidate FMEAs
+        from sqlalchemy import text as sa_text
+        ilike_clauses = " OR ".join([f"de.chunk_text ILIKE :kw_{i}" for i in range(len(keywords))])
+        params: dict = {f"kw_{i}": f"%{kw}%" for i, kw in enumerate(keywords)}
+        params["limit"] = 50
+
+        pl_filter = ""
+        if context.user_product_lines is not None:
+            pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
+            params["product_line_codes"] = context.user_product_lines
+
+        embed_stmt = sa_text(f"""
+            SELECT DISTINCT de.entity_id AS fmea_id
+            FROM document_embeddings de
+            WHERE de.entity_type = 'fmea_node'
+              AND (de.metadata->>'node_type' = 'FailureMode'
+                   OR de.metadata->>'node_type' = 'FailureCause')
+              AND ({ilike_clauses})
+              {pl_filter}
+            LIMIT :limit
+        """)
+        embed_result = await self.db.execute(embed_stmt, params)
+        matched_fmea_ids = [row[0] for row in embed_result.fetchall()]
+
+        if not matched_fmea_ids:
+            return []
+
+        # Step 2: Load only the matched FMEA documents
         query = (
             select(FMEADocument)
+            .where(FMEADocument.fmea_id.in_(matched_fmea_ids))
             .where(FMEADocument.status == "approved")
             .where(FMEADocument.fmea_id != context.doc_id)
         )
@@ -778,7 +806,7 @@ class AuditFindingSource(LessonsSource):
                    1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
                    af.description, af.root_cause, af.corrective_action,
                    af.status, af.finding_type,
-                   ap.plan_no, ap.product_line_code
+                   ap.plan_no, ap.product_line_code, ap.audit_id, ap.audit_category
             FROM document_embeddings de
             JOIN audit_findings af ON de.entity_id = af.finding_id
             JOIN audit_plans ap ON af.audit_id = ap.audit_id
@@ -807,6 +835,8 @@ class AuditFindingSource(LessonsSource):
                     "finding_id": str(row["entity_id"]),
                     "document_no": row["plan_no"],
                     "product_line_code": row["product_line_code"],
+                    "audit_id": str(row["audit_id"]),
+                    "audit_category": row["audit_category"],
                     "root_cause": row["root_cause"],
                     "action": row["corrective_action"],
                     "same_product_line": same_pl,
@@ -849,7 +879,7 @@ from app.services.embedding_provider import EmbeddingProvider
 
 
 class LessonsSemanticSource(LessonsSource):
-    """Generic semantic search across FMEA nodes and CAPA documents."""
+    """Generic semantic search across FMEA nodes (FailureMode / FailureCause)."""
     name = "semantic_search"
 
     def __init__(self, db: AsyncSession, embedding: EmbeddingProvider | None):
@@ -1262,7 +1292,7 @@ class LessonsLearnedService:
             )
             .on_conflict_do_update(
                 index_elements=["trigger_type", "context_hash"],
-                index_where=RecommendationCache.fmea_id.is_(None) & RecommendationCache.report_id.is_(None),
+                index_where=text("fmea_id IS NULL AND report_id IS NULL"),
                 set_={
                     "suggestions": [c.model_dump() for c in self._flatten(response)],
                     "source": response.source,
@@ -1904,7 +1934,13 @@ At the end of the return JSX, before the closing fragment:
     } else if (card.source_type === "capa") {
       window.open(`/capa/${card.source_id}`, "_blank");
     } else {
-      window.open(`/audit`, "_blank");
+      } else if (card.source_type === "audit") {
+      const auditId = card.metadata?.audit_id;
+      const category = card.metadata?.audit_category;
+      if (auditId) {
+        const path = category === "customer" ? `/customer-audits/${auditId}` : `/internal-audits/${auditId}`;
+        window.open(path, "_blank");
+      }
     }
   }}
 />
@@ -1978,7 +2014,13 @@ At the end of the return JSX:
     } else if (card.source_type === "capa") {
       window.open(`/capa/${card.source_id}`, "_blank");
     } else {
-      window.open(`/audit`, "_blank");
+      } else if (card.source_type === "audit") {
+      const auditId = card.metadata?.audit_id;
+      const category = card.metadata?.audit_category;
+      if (auditId) {
+        const path = category === "customer" ? `/customer-audits/${auditId}` : `/internal-audits/${auditId}`;
+        window.open(path, "_blank");
+      }
     }
   }}
 />
