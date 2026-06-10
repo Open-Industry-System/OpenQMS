@@ -151,3 +151,14 @@ async def test_detects_open_spc_and_capa_risk():
     assert any(e.id == "spc_alarm_count" for e in summary.evidence)
     assert any(e.id == "capa_overdue_count" for e in summary.evidence)
     assert summary.ai_available is True
+
+
+@pytest.mark.anyio
+async def test_scope_hash_is_order_independent():
+    from app.services.quality_trend_service import build_scope_hash
+    h_ab = await build_scope_hash(["A", "B"])
+    h_ba = await build_scope_hash(["B", "A"])
+    h_dup = await build_scope_hash(["A", "B", "A"])
+    assert h_ab == h_ba
+    assert h_ab == h_dup
+    assert h_ab.startswith("sha256:")

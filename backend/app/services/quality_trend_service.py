@@ -151,16 +151,18 @@ def _hash_evidence(scope_description: str, available_modules: list[str], omitted
 
 
 async def build_scope_hash(filter_codes: list[str]) -> str:
-    payload = json.dumps(filter_codes, ensure_ascii=False, sort_keys=True)
+    canonical = sorted(set(filter_codes))
+    payload = json.dumps(canonical, ensure_ascii=False, sort_keys=True)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def build_scope_description(product_line_codes: list[str] | None) -> str:
     if not product_line_codes:
         return "全部可访问产品线"
-    if len(product_line_codes) == 1:
-        return f"产品线范围：{product_line_codes[0]}"
-    return "产品线范围：" + ", ".join(product_line_codes)
+    canonical = sorted(set(product_line_codes))
+    if len(canonical) == 1:
+        return f"产品线范围：{canonical[0]}"
+    return "产品线范围：" + ", ".join(canonical)
 
 
 import time
