@@ -1422,22 +1422,31 @@ git commit -m "feat(lessons): add LessonsLearnedService
 In `backend/app/api/fmea.py`, add after the existing endpoints (around line 100+):
 
 ```python
+from fastapi import Request
+from app.core.product_line_filter import enforce_product_line_access
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.services.lessons_learned.service import LessonsLearnedService
-from app.services.embedding_provider import create_embedding_provider
 
 
 @router.post("/{fmea_id}/lessons-learned", response_model=LessonsLearnedResponse)
 async def get_fmea_lessons(
     fmea_id: uuid.UUID,
     req: LessonsLearnedRequest | None = None,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.VIEW)),
 ):
     """Get lessons learned recommendations for a newly created FMEA."""
-    embedding = create_embedding_provider()
+    # Verify user has access to this FMEA's product line
+    from app.services.fmea_service import get_fmea
+    fmea_doc = await get_fmea(db, fmea_id)
+    await enforce_product_line_access(user, fmea_doc.product_line_code, db)
+
+    embedding = getattr(request.app.state, "embedding_provider", None)
     service = LessonsLearnedService(db, embedding)
-    return await service.recommend(fmea_id, "fmea", req.problem_description if req else None, user)
+    result = await service.recommend(fmea_id, "fmea", req.problem_description if req else None, user)
+    await db.commit()
+    return result
 ```
 
 - [ ] **Step 2: Add CAPA endpoint**
@@ -1445,22 +1454,32 @@ async def get_fmea_lessons(
 In `backend/app/api/capa.py`, add after existing endpoints:
 
 ```python
+from fastapi import Request
+from app.core.product_line_filter import enforce_product_line_access
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.services.lessons_learned.service import LessonsLearnedService
-from app.services.embedding_provider import create_embedding_provider
 
 
 @router.post("/{report_id}/lessons-learned", response_model=LessonsLearnedResponse)
 async def get_capa_lessons(
     report_id: uuid.UUID,
     req: LessonsLearnedRequest | None = None,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
     """Get lessons learned recommendations for a newly created CAPA."""
-    embedding = create_embedding_provider()
+    # Verify user has access to this CAPA's product line
+    from app.services.capa_service import get_capa
+    capa_doc = await get_capa(db, report_id)
+    await enforce_product_line_access(user, capa_doc.product_line_code, db)
+
+    # If FMEA source will be used, also check FMEA VIEW permission
+    embedding = getattr(request.app.state, "embedding_provider", None)
     service = LessonsLearnedService(db, embedding)
-    return await service.recommend(report_id, "capa", req.problem_description if req else None, user)
+    result = await service.recommend(report_id, "capa", req.problem_description if req else None, user)
+    await db.commit()
+    return result
 ```
 
 - [ ] **Step 3: Test endpoints with curl**
