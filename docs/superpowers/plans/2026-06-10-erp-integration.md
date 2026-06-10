@@ -2314,7 +2314,7 @@ from sqlalchemy import select, func, and_, text, bindparam
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, Module, PermissionLevel
+from app.core.permissions import get_current_user, require_permission, get_user_permission, Module, PermissionLevel
 from app.core.product_line_filter import (
     apply_product_line_filter,
     enforce_product_line_access,
@@ -2368,16 +2368,14 @@ def _process_credentials(config: dict) -> dict:
     return config
 
 
-def _mask_entity(entity, user: User):
+def _mask_entity(entity, permission_level: int):
     """Apply field-level masking for viewer/QE roles on supplier/customer data.
-    viewer and field_qe see: bank_info → '***', tax_id → first 6 + '****'
-    manager/admin see full values. Uses role_key (not permission_level,
-    which is per-module in RolePermission, not on RoleDefinition)."""
+    Mask when permission_level < 4 (APPROVE). Manager/admin or any role with
+    level ≥ 4 sees full values. Uses resolved module-level permission, not
+    role_key, so custom roles with ERP level 4/5 are correctly handled."""
     from copy import copy
 
-    role_key = user.role_definition.role_key if user.role_definition else "viewer"
-    should_mask = role_key not in ("admin", "manager")
-    if not should_mask:
+    if permission_level >= 4:  # APPROVE or above
         return entity
 
     # Only mask ERPSupplier and ERPCustomer
@@ -2585,7 +2583,8 @@ async def _list_entities(
     result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
     items = result.scalars().all()
     # Apply masking for supplier/customer responses
-    masked_items = [_mask_entity(i, user) for i in items]
+    perm_level = await get_user_permission(user, Module.ERP, db)
+    masked_items = [_mask_entity(i, perm_level.value) for i in items]
     return {
         "items": [out_schema.model_validate(m) for m in masked_items],
         "total": total, "page": page, "page_size": page_size,
@@ -2614,7 +2613,8 @@ async def get_supplier(
     if not sup:
         raise HTTPException(status_code=404, detail="Supplier not found")
     await enforce_product_line_access(user, sup.product_line_code, db)
-    return schemas.SupplierOut.model_validate(_mask_entity(sup, user))
+    perm = await get_user_permission(user, Module.ERP, db)
+    return schemas.SupplierOut.model_validate(_mask_entity(sup, perm.value))
 
 
 @router.post("/suppliers/{supplier_id}/link")
@@ -2630,7 +2630,8 @@ async def link_supplier(
     sup.openqms_supplier_id = data.supplier_id
     sup.link_status = "linked"
     await db.commit()
-    return schemas.SupplierOut.model_validate(_mask_entity(sup, user))
+    perm = await get_user_permission(user, Module.ERP, db)
+    return schemas.SupplierOut.model_validate(_mask_entity(sup, perm.value))
 
 
 @router.post("/suppliers/{supplier_id}/unlink")
@@ -2645,7 +2646,8 @@ async def unlink_supplier(
     sup.openqms_supplier_id = None
     sup.link_status = "unlinked"
     await db.commit()
-    return schemas.SupplierOut.model_validate(_mask_entity(sup, user))
+    perm = await get_user_permission(user, Module.ERP, db)
+    return schemas.SupplierOut.model_validate(_mask_entity(sup, perm.value))
 
 
 @router.get("/customers")
@@ -2670,7 +2672,8 @@ async def get_customer(
     if not cust:
         raise HTTPException(status_code=404, detail="Customer not found")
     await enforce_product_line_access(user, cust.product_line_code, db)
-    return schemas.CustomerOut.model_validate(_mask_entity(cust, user))
+    perm = await get_user_permission(user, Module.ERP, db)
+    return schemas.CustomerOut.model_validate(_mask_entity(cust, perm.value))
 
 
 @router.post("/customers/{customer_id}/link")
@@ -2686,7 +2689,8 @@ async def link_customer(
     cust.openqms_customer_id = data.customer_id
     cust.link_status = "linked"
     await db.commit()
-    return schemas.CustomerOut.model_validate(_mask_entity(cust, user))
+    perm = await get_user_permission(user, Module.ERP, db)
+    return schemas.CustomerOut.model_validate(_mask_entity(cust, perm.value))
 
 
 @router.post("/customers/{customer_id}/unlink")
@@ -2701,7 +2705,8 @@ async def unlink_customer(
     cust.openqms_customer_id = None
     cust.link_status = "unlinked"
     await db.commit()
-    return schemas.CustomerOut.model_validate(_mask_entity(cust, user))
+    perm = await get_user_permission(user, Module.ERP, db)
+    return schemas.CustomerOut.model_validate(_mask_entity(cust, perm.value))
 
 
 @router.get("/materials")
@@ -2915,7 +2920,7 @@ app.include_router(erp_router)
 
 ```python
 # backend/app/seed.py
-# 在 seed 函数中添加（在 role_permissions 插入后）：
+# 在 seed() 函数外添加（在文件顶部附近，与其他 seed_* 函数放一起）：
 async def seed_erp_permissions(db):
     from app.models.role import RolePermission
     from sqlalchemy import select
@@ -2926,12 +2931,17 @@ async def seed_erp_permissions(db):
         level = {"admin": 5, "manager": 4, "field_qe": 2, "viewer": 1}.get(role.role_key, 1)
         existing = await db.execute(
             select(RolePermission).where(
-                RolePermission.role_id == role.role_id,
+                RolePermission.role_id == role.id,
                 RolePermission.module == "erp"
             )
         )
         if not existing.scalar_one_or_none():
-            db.add(RolePermission(role_id=role.role_id, module="erp", permission_level=level))
+            db.add(RolePermission(role_id=role.id, module="erp", permission_level=level))
+
+# 在 seed() 函数内部，在最后的 await db.commit() 之前添加调用：
+# (搜索 "await db.commit()" — 最后一个在 PLM demo data 之后)
+    await seed_erp_permissions(db)
+    await db.commit()
 ```
 
 - [ ] **Step 3: Commit**
@@ -3745,69 +3755,43 @@ class TestTraceability:
 class TestMasking:
     @pytest.mark.asyncio
     async def test_supplier_masking_for_viewer(self, db_session):
-        """Viewer should see bank_info='***' and tax_id partially masked."""
+        """Viewer (permission_level=1) should see bank_info='***' and tax_id partially masked."""
         from app.api.erp import _mask_entity
 
-        # Create a mock viewer user (role_key='viewer')
-        class MockRoleDef:
-            role_key = "viewer"
-
-        class MockUser:
-            role_definition = MockRoleDef()
-
-        user = MockUser()
-
-        # Create an ERPSupplier with sensitive fields
         from app.models.erp import ERPSupplier
         sup = ERPSupplier.__new__(ERPSupplier)
         sup.bank_info = {"account": "1234567890"}
         sup.tax_id = "91310000MA1FL2XX3X"
 
-        masked = _mask_entity(sup, user)
+        masked = _mask_entity(sup, 1)  # VIEW level
         assert masked.bank_info == "***"
         assert masked.tax_id == "913100****"
 
     @pytest.mark.asyncio
     async def test_supplier_no_masking_for_manager(self, db_session):
-        """Manager should see full bank_info and tax_id."""
+        """Manager (permission_level=4) should see full bank_info and tax_id."""
         from app.api.erp import _mask_entity
-
-        class MockRoleDef:
-            role_key = "manager"
-
-        class MockUser:
-            role_definition = MockRoleDef()
-
-        user = MockUser()
 
         from app.models.erp import ERPSupplier
         sup = ERPSupplier.__new__(ERPSupplier)
         sup.bank_info = {"account": "1234567890"}
         sup.tax_id = "91310000MA1FL2XX3X"
 
-        masked = _mask_entity(sup, user)
+        masked = _mask_entity(sup, 4)  # APPROVE level
         assert masked.bank_info == {"account": "1234567890"}
         assert masked.tax_id == "91310000MA1FL2XX3X"
 
     @pytest.mark.asyncio
     async def test_supplier_masking_for_field_qe(self, db_session):
-        """field_qe should also see masked bank_info and tax_id."""
+        """field_qe (permission_level=2) should also see masked bank_info and tax_id."""
         from app.api.erp import _mask_entity
-
-        class MockRoleDef:
-            role_key = "field_qe"
-
-        class MockUser:
-            role_definition = MockRoleDef()
-
-        user = MockUser()
 
         from app.models.erp import ERPSupplier
         sup = ERPSupplier.__new__(ERPSupplier)
         sup.bank_info = {"account": "1234567890"}
         sup.tax_id = "91310000MA1FL2XX3X"
 
-        masked = _mask_entity(sup, user)
+        masked = _mask_entity(sup, 2)  # CREATE level
         assert masked.bank_info == "***"
         assert masked.tax_id == "913100****"
 
