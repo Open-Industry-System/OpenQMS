@@ -23,7 +23,7 @@
 | `backend/app/services/lessons_learned/sources/historical_fmea.py` | `HistoricalFMEASource` — keyword-match approved FMEA FailureMode nodes |
 | `backend/app/services/lessons_learned/sources/historical_capa.py` | `LessonsCAPASource` — pgvector search closed CAPA d2_descriptions |
 | `backend/app/services/lessons_learned/sources/audit_finding.py` | `AuditFindingSource` — pgvector search audit findings with audit_plans JOIN |
-| `backend/app/services/lessons_learned/sources/semantic.py` | `LessonsSemanticSource` — pgvector search across FMEA nodes |
+| `backend/app/services/lessons_learned/sources/semantic.py` | `LessonsSemanticSource` — generic pgvector search across fmea_node + capa |
 | `backend/app/services/lessons_learned/sources/rule_engine.py` | `LessonsRuleSource` — RuleEngine fallback for keyword extraction |
 | `backend/app/services/lessons_learned/fusion.py` | `LessonsFusionEngine` — deduplicate, rank, PL boost |
 | `backend/app/services/lessons_learned/service.py` | `LessonsLearnedService` — orchestrate sources, cache, format response |
@@ -633,9 +633,7 @@ class TestHistoricalFMEASource:
                 {"source": "cause1", "target": "fm1", "type": "CAUSE_OF"},
             ],
         }
-        embed_result = MagicMock(fetchall=MagicMock(return_value=[(fmea.fmea_id,)]))
-        fmea_result = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[fmea]))))
-        db.execute.side_effect = [embed_result, fmea_result]
+        db.execute.return_value = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[fmea]))))
         source = HistoricalFMEASource(db)
         ctx = LessonsLearnedContext(
             doc_type="fmea", doc_id=uuid.uuid4(), query_text="焊接不良",
@@ -1164,7 +1162,7 @@ class LessonsLearnedService:
             return cached
 
         # 3. Retrieve from all sources
-        sources: list = [
+        sources = [
             LessonsCAPASource(self.db, self.embedding),
             AuditFindingSource(self.db, self.embedding),
             LessonsRuleSource(),
@@ -1172,6 +1170,8 @@ class LessonsLearnedService:
         if not skip_fmea_sources:
             sources.insert(0, HistoricalFMEASource(self.db))
             sources.insert(3, LessonsSemanticSource(self.db, self.embedding))
+        else:
+            sources.insert(0, LessonsSemanticSource(self.db, self.embedding))
 
         all_candidates = []
         active_sources = []
@@ -1492,10 +1492,14 @@ async def get_capa_lessons(
         raise HTTPException(status_code=404, detail="CAPA not found")
     await enforce_product_line_access(user, capa_doc.product_line_code, db)
 
-    # Check FMEA VIEW permission since service may query FMEA sources
-    from app.core.permissions import get_user_permission, Module as _Module, PermissionLevel as _PL
-    fmea_level = await get_user_permission(user, _Module.FMEA, db)
-    has_fmea_view = fmea_level >= _PL.VIEW
+    # Check FMEA VIEW permission since service always queries FMEA sources
+    from app.core.deps import require_permission as _require_permission
+    from app.core.permissions import Module, PermissionLevel
+    try:
+        await _require_permission(Module.FMEA, PermissionLevel.VIEW)(request, user)
+        has_fmea_view = True
+    except HTTPException:
+        has_fmea_view = False
 
     embedding = getattr(request.app.state, "embedding_provider", None)
     service = LessonsLearnedService(db, embedding)
@@ -1601,23 +1605,17 @@ import type { LessonsLearnedResponse, LessonsLearnedRequest } from "../types";
 
 export async function getFMEALessons(
   fmeaId: string,
-  body?: LessonsLearnedRequest,
-  options?: { signal?: AbortSignal }
+  body?: LessonsLearnedRequest
 ): Promise<LessonsLearnedResponse> {
-  const resp = await client.post(`/fmea/${fmeaId}/lessons-learned`, body || {}, {
-    signal: options?.signal,
-  });
+  const resp = await client.post(`/fmea/${fmeaId}/lessons-learned`, body || {});
   return resp.data;
 }
 
 export async function getCAPALessons(
   reportId: string,
-  body?: LessonsLearnedRequest,
-  options?: { signal?: AbortSignal }
+  body?: LessonsLearnedRequest
 ): Promise<LessonsLearnedResponse> {
-  const resp = await client.post(`/capa/${reportId}/lessons-learned`, body || {}, {
-    signal: options?.signal,
-  });
+  const resp = await client.post(`/capa/${reportId}/lessons-learned`, body || {});
   return resp.data;
 }
 ```
@@ -1974,11 +1972,7 @@ useEffect(() => {
     }, 10000);
 
     const problemDescription = location.state?.problemDescription;
-    getFMEALessons(
-      fmeaId,
-      problemDescription ? { problem_description: problemDescription } : undefined,
-      { signal: controller.signal }
-    )
+    getFMEALessons(fmeaId, problemDescription ? { problem_description: problemDescription } : undefined)
       .then((res) => {
         clearTimeout(timeoutId);
         setLessonsData(res);
@@ -2035,7 +2029,7 @@ git commit -m "feat(fmea): integrate LessonsLearnedModal in editor page
 
 - Detect navigate state showLessonsLearned
 - Call API on mount, render modal with results
-- 10s timeout via AbortController + setTimeout"
+- 10s timeout handled by API layer"
 ```
 
 ---
@@ -2080,11 +2074,7 @@ useEffect(() => {
     }, 10000);
 
     const problemDescription = location.state?.problemDescription;
-    getCAPALessons(
-      id!,
-      problemDescription ? { problem_description: problemDescription } : undefined,
-      { signal: controller.signal }
-    )
+    getCAPALessons(id!, problemDescription ? { problem_description: problemDescription } : undefined)
       .then((res) => {
         clearTimeout(timeoutId);
         setLessonsData(res);
