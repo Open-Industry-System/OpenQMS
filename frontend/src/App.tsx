@@ -55,6 +55,12 @@ import PLMDashboardPage from "./pages/plm/PLMDashboardPage";
 import PLMConnectionsPage from "./pages/plm/PLMConnectionsPage";
 import PLMPartsPage from "./pages/plm/PLMPartsPage";
 import PLMChangeOrdersPage from "./pages/plm/PLMChangeOrdersPage";
+import ERPDashboardPage from "./pages/erp/ERPDashboardPage";
+import ERPConnectionsPage from "./pages/erp/ERPConnectionsPage";
+import ERPMasterDataPage from "./pages/erp/ERPMasterDataPage";
+import ERPSupplyChainPage from "./pages/erp/ERPSupplyChainPage";
+import ERPSalesAndCostPage from "./pages/erp/ERPSalesAndCostPage";
+import ERPTraceabilityPage from "./pages/erp/ERPTraceabilityPage";
 
 function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
@@ -146,6 +152,12 @@ export default function App() {
         <Route path="/plm/connections" element={<ProtectedRoute requiredModule="plm"><PLMConnectionsPage /></ProtectedRoute>} />
         <Route path="/plm/parts" element={<ProtectedRoute requiredModule="plm"><PLMPartsPage /></ProtectedRoute>} />
         <Route path="/plm/change-orders" element={<ProtectedRoute requiredModule="plm"><PLMChangeOrdersPage /></ProtectedRoute>} />
+        <Route path="/erp" element={<ProtectedRoute requiredModule="erp"><ERPDashboardPage /></ProtectedRoute>} />
+        <Route path="/erp/connections" element={<ProtectedRoute requiredModule="erp"><ERPConnectionsPage /></ProtectedRoute>} />
+        <Route path="/erp/master-data" element={<ProtectedRoute requiredModule="erp"><ERPMasterDataPage /></ProtectedRoute>} />
+        <Route path="/erp/supply-chain" element={<ProtectedRoute requiredModule="erp"><ERPSupplyChainPage /></ProtectedRoute>} />
+        <Route path="/erp/commercial" element={<ProtectedRoute requiredModule="erp"><ERPSalesAndCostPage /></ProtectedRoute>} />
+        <Route path="/erp/traceability" element={<ProtectedRoute requiredModule="erp"><ERPTraceabilityPage /></ProtectedRoute>} />
       </Route>
     </Routes>
   );
