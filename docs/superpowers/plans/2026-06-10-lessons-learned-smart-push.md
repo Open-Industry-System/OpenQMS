@@ -101,13 +101,9 @@ def upgrade() -> None:
                     existing_type=sa.String(length=20),
                     nullable=True)
 
-    # 6. Add doc_type column (NOT NULL after backfill)
+    # 6. Add doc_type column with server_default
     op.add_column('recommendation_cache',
-                  sa.Column('doc_type', sa.String(length=20), nullable=True))
-    op.execute("UPDATE recommendation_cache SET doc_type = 'fmea' WHERE doc_type IS NULL")
-    op.alter_column('recommendation_cache', 'doc_type',
-                    existing_type=sa.String(length=20),
-                    nullable=False)
+                  sa.Column('doc_type', sa.String(length=20), nullable=False, server_default='fmea'))
 
     # 7. Create partial unique indexes
     op.create_index('uq_cache_fmea', 'recommendation_cache',
@@ -812,7 +808,7 @@ class AuditFindingSource(LessonsSource):
             JOIN audit_plans ap ON af.audit_id = ap.audit_id
             WHERE de.entity_type = 'audit_finding'
               AND af.corrective_action IS NOT NULL
-              AND af.status IN ('confirmed', 'closed')
+              AND af.status = 'closed'
               {pl_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
@@ -879,7 +875,8 @@ from app.services.embedding_provider import EmbeddingProvider
 
 
 class LessonsSemanticSource(LessonsSource):
-    """Generic semantic search across FMEA nodes (FailureMode / FailureCause)."""
+    """Semantic search across FMEA nodes (FailureMode / FailureCause).
+CAPA semantic search is handled by LessonsCAPASource separately."""
     name = "semantic_search"
 
     def __init__(self, db: AsyncSession, embedding: EmbeddingProvider | None):
@@ -1366,18 +1363,24 @@ class LessonsLearnedService:
         highlights = [c for c in all_cards if c.confidence >= 0.7][:2]
         return highlights, LessonCategories(fmea=fmea_cards, capa=capa_cards, audit=audit_cards)
 
-    def _infer_source_type(self, source_name: str) -> str:
-        if source_name == "historical_fmea":
+    def _infer_source_type(self, candidate) -> str:
+        # Metadata takes priority; fallback by source name
+        explicit = candidate.metadata.get("source_type")
+        if explicit in ("fmea", "capa", "audit"):
+            return explicit
+        name = candidate.source
+        if name == "historical_fmea":
             return "fmea"
-        elif source_name == "historical_capa":
+        elif name == "historical_capa":
             return "capa"
-        elif source_name == "audit_finding":
+        elif name == "audit_finding":
             return "audit"
-        elif source_name == "semantic_search":
-            # Semantic search can return both FMEA and CAPA; infer from metadata
-            return "fmea"  # default, metadata should clarify
+        elif name == "semantic_search":
+            # Default to fmea for semantic search; metadata should override
+            return candidate.metadata.get("source_type", "fmea")
         else:
-            return "audit"
+            # Rule engine and unknown sources go to a generic category
+            return candidate.metadata.get("source_type", "fmea")
 
     def _flatten(self, response: LessonsLearnedResponse) -> list:
         """Flatten all cards back to RecommendationCandidate-compatible dicts for caching."""
@@ -1609,7 +1612,7 @@ git commit -m "feat(api): add lessons learned frontend API client"
 ```tsx
 import { useState, useEffect } from "react";
 import { Modal, Card, Button, Spin, Empty, Collapse, Tag, Typography, Tooltip } from "antd";
-import { EyeOutlined, ArrowRightOutlined } from "@ant/icons";
+import { EyeOutlined, ArrowRightOutlined } from "@ant-design/icons";
 import type { LessonsLearnedResponse, LessonCard } from "../../types";
 
 const { Text } = Typography;
@@ -1633,6 +1636,10 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
       setActiveKeys(firstNonEmpty);
     }
   }, [data, loading]);
+
+  const handleCollapseChange = (keys: string | string[]) => {
+    setActiveKeys(Array.isArray(keys) ? keys : [keys]);
+  };
 
   const renderCard = (card: LessonCard, index: number) => (
     <Card
@@ -1749,7 +1756,7 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
           </Text>
           <Collapse
             activeKey={activeKeys}
-            onChange={setActiveKeys}
+            onChange={handleCollapseChange}
             items={collapseItems}
           />
         </>
@@ -1928,11 +1935,34 @@ useEffect(() => {
     lessonsShownRef.current = true;
     setLessonsModalOpen(true);
     setLessonsLoading(true);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      setLessonsLoading(false);
+      setLessonsModalOpen(false);
+      message.warning("检索超时，请稍后在编辑过程中使用推荐功能");
+    }, 10000);
+
     const problemDescription = location.state?.problemDescription;
     getFMEALessons(fmeaId, problemDescription ? { problem_description: problemDescription } : undefined)
-      .then((res) => setLessonsData(res))
-      .catch(() => message.error("检索经验教训失败"))
-      .finally(() => setLessonsLoading(false));
+      .then((res) => {
+        clearTimeout(timeoutId);
+        setLessonsData(res);
+        setLessonsLoading(false);
+      })
+      .catch((err) => {
+        clearTimeout(timeoutId);
+        if (err.name !== "AbortError") {
+          message.error("检索经验教训失败");
+        }
+        setLessonsLoading(false);
+      });
+
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
   }
 }, [location.state, fmeaId]);
 ```
@@ -2008,11 +2038,34 @@ useEffect(() => {
     lessonsShownRef.current = true;
     setLessonsModalOpen(true);
     setLessonsLoading(true);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      setLessonsLoading(false);
+      setLessonsModalOpen(false);
+      message.warning("检索超时，请稍后在编辑过程中使用推荐功能");
+    }, 10000);
+
     const problemDescription = location.state?.problemDescription;
     getCAPALessons(id!, problemDescription ? { problem_description: problemDescription } : undefined)
-      .then((res) => setLessonsData(res))
-      .catch(() => message.error("检索经验教训失败"))
-      .finally(() => setLessonsLoading(false));
+      .then((res) => {
+        clearTimeout(timeoutId);
+        setLessonsData(res);
+        setLessonsLoading(false);
+      })
+      .catch((err) => {
+        clearTimeout(timeoutId);
+        if (err.name !== "AbortError") {
+          message.error("检索经验教训失败");
+        }
+        setLessonsLoading(false);
+      });
+
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
   }
 }, [location.state, id]);
 ```
@@ -2170,7 +2223,7 @@ git commit --allow-empty -m "feat(lessons): complete lessons learned smart push 
 | CAPA create modal + navigate state | Task 17 |
 | FMEAEditorPage modal integration | Task 18 |
 | CAPADetailPage modal integration | Task 19 |
-| 10s timeout | Handled by API layer (no explicit timeout in code, rely on FastAPI default) |
+| 10s timeout | Frontend AbortController + setTimeout (Task 18, 19) |
 | Refresh loses state | Documented in spec, not handled by code (acceptable) |
 
 ### Placeholder Scan
