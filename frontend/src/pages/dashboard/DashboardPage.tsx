@@ -49,6 +49,7 @@ function createEmptyData(): DashboardWidgetsData {
     iqc: {},
     mes: {},
     supplier: {},
+    quality_trend: {},
     errors: {},
   };
 }

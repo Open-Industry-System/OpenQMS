@@ -6,6 +6,7 @@ import type {
   DashboardRecentAction,
   DashboardWidgetLayoutConfig,
   DashboardWidgetData,
+  QualityTrendInterpretation,
 } from "../types";
 
 export async function getDashboard(productLine?: string): Promise<DashboardData> {
@@ -53,5 +54,10 @@ export async function getDashboardWidgets(
       product_line: productLine || undefined,
     },
   });
+  return resp.data;
+}
+
+export async function interpretQualityTrend(params: { product_line?: string }): Promise<QualityTrendInterpretation> {
+  const resp = await client.post("/dashboard/widgets/quality-trend/interpret", params);
   return resp.data;
 }

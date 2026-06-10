@@ -34,6 +34,7 @@ WIDGET_MODULE_MAP = {
     "iqc_pending_inspections": "iqc",
     "mes_equipment_status": "mes",
     "supplier_ppm_trend": "supplier",
+    "quality_trend_ai_summary": "dashboard",
 }
 
 WIDGET_MIN_SIZES = {
@@ -51,6 +52,7 @@ WIDGET_MIN_SIZES = {
     "iqc_pending_inspections": {"w": 2, "h": 2},
     "mes_equipment_status": {"w": 3, "h": 2},
     "supplier_ppm_trend": {"w": 3, "h": 3},
+    "quality_trend_ai_summary": {"w": 6, "h": 4},
 }
 
 
@@ -428,6 +430,8 @@ async def get_recent_actions(db: AsyncSession, user_id: str, limit: int = 5) -> 
     query = (
         select(AuditLog)
         .where(AuditLog.operated_by == user_id)
+        .where(AuditLog.action != "AI_TREND_INTERPRET")
+        .where(AuditLog.table_name != "quality_trends")
         .order_by(AuditLog.operated_at.desc())
         .limit(limit)
     )
@@ -460,6 +464,7 @@ async def get_widgets_data(
     types: list[str],
     product_line_codes: list[str] | None,
     user_id: str,
+    quality_trend_allowed_modules: set[str] | None = None,
 ) -> dict:
     result = {
         "kpi": {},
@@ -470,6 +475,7 @@ async def get_widgets_data(
         "iqc": {},
         "mes": {},
         "supplier": {},
+        "quality_trend": {},
         "errors": {},
     }
 
@@ -641,5 +647,24 @@ async def get_widgets_data(
             result["supplier"] = {"ppm_trend": ppm_trend}
         except Exception as e:
             result["errors"]["supplier"] = str(e)
+
+    needs_quality_trend = "quality_trend_ai_summary" in types
+    if needs_quality_trend:
+        try:
+            from app.services.quality_trend_service import build_quality_trend_summary, build_scope_description, build_scope_hash
+
+            scope_description = build_scope_description(product_line_codes)
+            scope_hash = await build_scope_hash(product_line_codes or [])
+            summary = await build_quality_trend_summary(
+                db=db,
+                filter_codes=product_line_codes or [],
+                allowed_modules=quality_trend_allowed_modules or set(),
+                scope_description=scope_description,
+                selected_product_line=product_line_codes[0] if product_line_codes and len(product_line_codes) == 1 else None,
+                scope_hash=scope_hash,
+            )
+            result["quality_trend"] = {"summary": summary.model_dump()}
+        except Exception as e:
+            result["errors"]["quality_trend"] = str(e)
 
     return result

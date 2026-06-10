@@ -258,6 +258,12 @@ async def get_widgets(
         if await _user_can_view_module(user, module, db):
             allowed_types.append(widget_type)
 
+    quality_trend_allowed_modules = set()
+    if "quality_trend_ai_summary" in allowed_types:
+        for module in ("spc", "capa", "fmea"):
+            if await dashboard_service._user_can_view_module(user, module, db):
+                quality_trend_allowed_modules.add(module)
+
     if user.role_definition.bypass_row_level_security:
         filter_codes = [product_line] if product_line else None
     else:
@@ -271,5 +277,77 @@ async def get_widgets(
         else:
             filter_codes = user_codes
 
-    data = await dashboard_service.get_widgets_data(db, allowed_types, filter_codes, user.user_id)
+    data = await dashboard_service.get_widgets_data(
+        db, allowed_types, filter_codes, user.user_id,
+        quality_trend_allowed_modules=quality_trend_allowed_modules,
+    )
     return layout_schemas.DashboardWidgetsResponse(**data)
+
+
+from fastapi import Request
+from pydantic import BaseModel
+from app.services.quality_trend_service import (
+    InsufficientTrendDataError,
+    LLMNotConfiguredError,
+    LLMResponseParseError,
+    RateLimitError,
+    build_scope_description,
+    build_scope_hash,
+    interpret_quality_trend as interpret_quality_trend_service,
+)
+
+
+class QualityTrendInterpretRequest(BaseModel):
+    product_line: str | None = None
+
+
+@router.post("/widgets/quality-trend/interpret")
+async def interpret_quality_trend(
+    req: QualityTrendInterpretRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+):
+    if user.role_definition.bypass_row_level_security:
+        filter_codes = [req.product_line] if req.product_line else []
+    else:
+        user_codes = await get_user_product_line_codes(user, db)
+        if not user_codes:
+            raise HTTPException(status_code=403, detail="无可访问产品线")
+        if req.product_line:
+            if req.product_line not in user_codes:
+                raise HTTPException(status_code=403, detail=f"无权访问产品线 '{req.product_line}'")
+            filter_codes = [req.product_line]
+        else:
+            filter_codes = user_codes
+
+    quality_trend_allowed_modules = set()
+    for module in ("spc", "capa", "fmea"):
+        if await dashboard_service._user_can_view_module(user, module, db):
+            quality_trend_allowed_modules.add(module)
+
+    scope_description = build_scope_description(filter_codes or None)
+    scope_hash = await build_scope_hash(filter_codes)
+    llm_provider = getattr(request.app.state, "llm_provider", None)
+
+    try:
+        return await interpret_quality_trend_service(
+            db=db,
+            user_id=str(user.user_id),
+            llm_provider=llm_provider,
+            filter_codes=filter_codes,
+            allowed_modules=quality_trend_allowed_modules,
+            scope_description=scope_description,
+            selected_product_line=filter_codes[0] if len(filter_codes) == 1 else None,
+            scope_hash=scope_hash,
+        )
+    except RateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except LLMNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except InsufficientTrendDataError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMResponseParseError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="AI 解读生成失败") from exc
