@@ -87,7 +87,7 @@
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │              关联映射（ERP ↔ OpenQMS）                   │    │
-│  │  erp_suppliers.supplier_id → suppliers.supplier_id      │    │
+│  │  erp_suppliers.openqms_supplier_id → suppliers.supplier_id │    │
 │  │  erp_shipments → shipment_records（受控映射/补充）       │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                  │
@@ -154,11 +154,11 @@
 
 #### `erp_suppliers`
 
-供应商财务主数据镜像，通过 `supplier_id` 外键与 OpenQMS `suppliers` 表受控关联。
+供应商财务主数据镜像，通过 `openqms_supplier_id` 外键与 OpenQMS `suppliers` 表受控关联。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| supplier_id | UUID PK | 主键 |
+| erp_supplier_id | UUID PK | 主键（避免与 OpenQMS suppliers.supplier_id 概念冲突） |
 | connection_id | UUID FK | 所属连接 |
 | external_id | VARCHAR(100) | ERP 系统内部 ID |
 | erp_supplier_code | VARCHAR(100) | ERP 供应商编码（唯一键） |
@@ -168,8 +168,8 @@
 | currency | VARCHAR(10) | 结算币种 |
 | tax_id | VARCHAR(100) | 税务登记号 |
 | bank_info | JSONB | 银行信息（开户行、账号、SWIFT） |
-| **supplier_id_fk** | UUID FK→suppliers (nullable) | OpenQMS 供应商外键（受控关联） |
-| **link_status** | VARCHAR(20) | `linked` / `pending` / `unlinked` |
+| **openqms_supplier_id** | UUID FK→suppliers (nullable) | OpenQMS 供应商外键（受控关联） |
+| **link_status** | VARCHAR(20) | `linked` / `pending` / `unlinked` / `review_required` |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
 | product_line_code | VARCHAR(50) FK | 产品线 |
 | erp_raw_data | JSONB | ERP 原始数据 |
@@ -178,11 +178,11 @@
 
 #### `erp_customers`
 
-客户主数据镜像。
+客户主数据镜像，通过 `openqms_customer_id` 外键与 OpenQMS `customers` 表受控关联。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| customer_id | UUID PK | 主键 |
+| erp_customer_id | UUID PK | 主键（避免与 OpenQMS customers.customer_id 概念冲突） |
 | connection_id | UUID FK | 所属连接 |
 | external_id | VARCHAR(100) | ERP 内部 ID |
 | customer_code | VARCHAR(100) | 客户编码（唯一键） |
@@ -191,6 +191,8 @@
 | region | VARCHAR(100) | 区域 |
 | customer_level | VARCHAR(50) | 客户等级 |
 | tax_id | VARCHAR(100) | 税务登记号 |
+| **openqms_customer_id** | UUID FK→customers (nullable) | OpenQMS 客户外键（受控关联） |
+| **link_status** | VARCHAR(20) | `linked` / `pending` / `unlinked` / `review_required` |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
 | product_line_code | VARCHAR(50) FK | 产品线 |
 | erp_raw_data | JSONB | ERP 原始数据 |
@@ -313,7 +315,11 @@
 | product_line_code | VARCHAR(50) FK | 产品线 |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
-**唯一约束**: `(connection_id, material_code, location_code, lot_no)`
+**唯一约束**: 使用函数式索引 `UniqueConstraint(connection_id, material_code, location_code, COALESCE(lot_no, ''))` — 避免 nullable lot_no 导致非批次管控物料重复。
+
+或备选方案：
+- 使用 `external_id` 作为唯一约束 `(connection_id, external_id)`
+- 或引入 `normalized_lot_key` 字段，无批次时填 `"_NO_LOT_"`
 
 #### `erp_shipments`
 
@@ -321,7 +327,7 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| shipment_id | UUID PK | 主键 |
+| erp_shipment_id | UUID PK | 主键（避免与 OpenQMS shipment_records.shipment_id 概念冲突） |
 | connection_id | UUID FK | 所属连接 |
 | external_id | VARCHAR(100) | ERP 内部 ID |
 | shipment_number | VARCHAR(100) | 发货单号（唯一键） |
@@ -331,7 +337,8 @@
 | lot_no | VARCHAR(100) | 成品批次号 |
 | quantity | NUMERIC(18,4) | 发货数量 |
 | shipment_date | DATE | 发货日期 |
-| **shipment_record_id** | UUID FK→shipment_records (nullable) | OpenQMS 发运记录外键（受控映射） |
+| **openqms_shipment_id** | UUID FK→shipment_records (nullable) | OpenQMS 发运记录外键（受控映射） |
+| **link_status** | VARCHAR(20) | `linked` / `pending` / `unlinked` |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
 | product_line_code | VARCHAR(50) FK | 产品线 |
 | erp_raw_data | JSONB | ERP 原始数据 |
@@ -449,11 +456,12 @@ class ERPConnector(ABC):
   └─ 依赖前序所有数据（关联 SCAR/RMA/客诉/MES 工单/IQC 批次）
 ```
 
-**同步调度实现**：每个 data_type 有独立 `erp_sync_jobs` 记录。阶段化延迟通过 `next_run_at` 控制：
+**同步调度实现**：每个 data_type 有独立 `erp_sync_jobs` 记录。阶段化通过**依赖门控**而非固定时间延迟：
 
-- 阶段 1 完成后，`stage 2` 的 `next_run_at = now() + 2min`
-- 阶段 2 完成后，`stage 3` 的 `next_run_at = now() + 4min`
-- 阶段 3 完成后，`stage 4` 的 `next_run_at = now() + 6min`
+- `sync_all()` 查询阶段 N 的所有 sync jobs，确认所有上游 jobs 的 `status='completed'` 且 `checkpoint >= required_checkpoint` 后，才将阶段 N+1 的 jobs 置为 `pending`
+- 若上游 job 失败，下游阶段不启动（保留 `next_run_at`，调度器检查到上游未完成则跳过）
+- 手动同步时，按阶段顺序依次触发：阶段 1 → 等待完成 → 阶段 2 → ...
+- 缺失引用处理：下游摄入时如果引用键不存在（如 PO 的 supplier_code 找不到 erp_suppliers 记录），允许写入但标记 `reference_missing=True`，在详情页提示用户
 
 ### 5.2 双写关联逻辑（Ingestion 层）
 
@@ -461,34 +469,56 @@ class ERPConnector(ABC):
 
 ```python
 async def _link_erp_supplier(db, erp_supplier: ERPSupplier):
-    # 1. 按 supplier_code 强键自动匹配
-    supplier = await find_supplier_by_code(db, erp_supplier.erp_supplier_code)
+    # 1. 按 erp_supplier_code == suppliers.supplier_no 强键自动匹配
+    supplier = await find_supplier_by_no(db, erp_supplier.erp_supplier_code)
     if supplier:
-        erp_supplier.supplier_id_fk = supplier.supplier_id
+        erp_supplier.openqms_supplier_id = supplier.supplier_id
         erp_supplier.link_status = "linked"
     else:
         erp_supplier.link_status = "pending"
     
-    # 2. 停用标记同步状态，不自动禁用 OpenQMS 供应商
+    # 2. 停用标记 link_status=review_required，不自动禁用 OpenQMS 供应商
     if erp_supplier.status == "inactive":
-        erp_supplier.link_status = "warning"  # 提示质量负责人复核
+        erp_supplier.link_status = "review_required"  # 提示质量负责人复核
 ```
 
 **shipments → shipment_records**
 
 ```python
 async def _link_erp_shipment(db, erp_shipment: ERPShipment):
-    # 1. 按 shipment_number + customer_code + lot_no 受控匹配
+    # 1. 通过 erp_customers.openqms_customer_id 解析客户引用
+    erp_customer = await find_erp_customer(db, erp_shipment.customer_code)
+    if not erp_customer or not erp_customer.openqms_customer_id:
+        # 无法解析客户引用，标记为待处理
+        erp_shipment.link_status = "pending"
+        return
+
+    customer_id = erp_customer.openqms_customer_id
+
+    # 2. 按 customer_id + lot_no + shipment_date 受控匹配 ShipmentRecord
     record = await find_shipment_record(
-        db, 
-        customer_name=erp_shipment.customer_code,
+        db,
+        customer_id=customer_id,
         lot_no=erp_shipment.lot_no,
-        shipment_date=erp_shipment.shipment_date
+        shipment_date=erp_shipment.shipment_date,
+        product_line_code=erp_shipment.product_line_code,
     )
     if record:
-        erp_shipment.shipment_record_id = record.shipment_record_id
-    # 2. 写入 shipment_records 的补充字段（不覆盖已有记录）
-    await upsert_shipment_record(db, erp_shipment)
+        erp_shipment.openqms_shipment_id = record.shipment_id
+        erp_shipment.link_status = "linked"
+    else:
+        # 3. 创建补充 ShipmentRecord（不覆盖已有记录）
+        new_record = await create_shipment_record(
+            db,
+            customer_id=customer_id,
+            shipment_date=erp_shipment.shipment_date,
+            quantity=int(erp_shipment.quantity),
+            batch_no=erp_shipment.lot_no,
+            product_line_code=erp_shipment.product_line_code,
+            destination=None,  # 可选：从 erp_raw_data 提取
+        )
+        erp_shipment.openqms_shipment_id = new_record.shipment_id
+        erp_shipment.link_status = "linked"
 ```
 
 ---
@@ -508,21 +538,31 @@ async def _link_erp_shipment(db, erp_shipment: ERPShipment):
 **正向**
 ```
 ERP 原料批次 (lot_no)
-  → IQC 检验记录 (inspection_batch_no)
-  → MES 工单 (work_order_no)  
-  → 成品批次/发货单 (shipment_number)
-  → 客户 (customer_code)
-  → 客诉/RMA (complaint_no)
+  → IQC 检验记录 (inspection_no, lot_no)    [✅ 可用：iqc_inspections.lot_no]
+  → MES 工单 (order_no)                     [⚠️ 可用但无投料批次关联：mes_production_orders.order_no]
+  → 成品批次/发货单 (shipment_number)        [✅ 可用：shipment_records + erp_shipments]
+  → 客户 (customer_id)                      [✅ 可用：customers.customer_id]
+  → 客诉/RMA (complaint_no / rma_no)        [✅ 可用：customer_complaints, rma_records]
 ```
 
 **反向**
 ```
 客诉/RMA (complaint_no)
-  → 成品批次/发货单 (shipment_number)
-  → MES 工单 (work_order_no)
-  → 原料批次 (lot_no)
-  → PO/供应商 (po_number, supplier_code)
+  → 成品批次/发货单 (shipment_number)        [✅ 可用]
+  → MES 工单 (order_no)                     [⚠️ 可用但无产出批次关联]
+  → 原料批次 (lot_no)                       [⚠️ 可用但无消耗关联]
+  → PO/供应商 (po_number, supplier_code)     [✅ 可用：erp_purchase_orders + erp_suppliers]
 ```
+
+**首版可用 Join**
+
+| 跳 | 正向 | 反向 | 状态 |
+|----|------|------|------|
+| 1 | `erp_purchase_orders.lot_no` → `iqc_inspections.lot_no` | `customer_complaints.batch_no` → `shipment_records.batch_no` | ✅ 可用 |
+| 2 | `iqc_inspections.supplier_id` → `suppliers.supplier_id` | `shipment_records.customer_id` → `customers.customer_id` | ✅ 可用 |
+| 3 | `shipment_records` → `erp_shipments` (openqms_shipment_id) | `customers.customer_code` → `erp_customers.customer_code` | ✅ 可用 |
+| 4 | `erp_shipments.so_number` → `erp_sales_orders` | `erp_purchase_orders.supplier_code` → `erp_suppliers` | ✅ 可用 |
+| MES | `mes_production_orders` → `erp_shipments`/`erp_purchase_orders` | 同上 | ⚠️ gaps 始终返回：MES 无投料/产出批次表 |
 
 ### 6.3 API 端点
 
@@ -684,6 +724,13 @@ GET /api/erp/traceability/{node_type}/{node_id}
 
 - Pydantic 输出 Schema 中，`config.auth_config` 敏感字段脱敏为 `"***"`
 - 创建/更新时允许写入完整凭证
+
+### 9.4 财务敏感字段脱敏
+
+- `erp_suppliers.bank_info`、`erp_suppliers.tax_id` 等财务字段在 API 响应中按角色脱敏：
+  - **viewer/quality_engineer**: `bank_info` 脱敏为 `"***"`，`tax_id` 脱敏为前 6 位 + `****`
+  - **manager/admin**: 完整返回
+- 前端详情 Drawer 中，ERP 财务信息标签页默认折叠，仅 admin/manager 可展开
 
 ---
 
