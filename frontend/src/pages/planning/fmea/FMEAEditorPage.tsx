@@ -153,7 +153,7 @@ export default function FMEAEditorPage() {
         })
         .catch((err) => {
           clearTimeout(timeoutId);
-          if (err.name !== "AbortError") {
+          if (!axios.isCancel(err)) {
             message.error("检索经验教训失败");
           }
           setLessonsLoading(false);

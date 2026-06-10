@@ -151,7 +151,7 @@ class TestHistoricalFMEASource:
 
         source = HistoricalFMEASource(db)
         ctx = LessonsLearnedContext(
-            doc_type="fmea", doc_id=uuid.uuid4(), query_text="焊接不良",
+            doc_type="fmea", doc_id=uuid.uuid4(), query_text="焊接虚焊",
             fmea_type="PFMEA", severity=None,
             product_line_code="DC-DC-100", user_product_lines=["DC-DC-100"],
         )
@@ -162,7 +162,7 @@ class TestHistoricalFMEASource:
 
 
 # ---------------------------------------------------------------------------
-# AuditFindingSource: audit_id in metadata
+# AuditFindingSource: audit_id in metadata + embed([text]) + CAST
 # ---------------------------------------------------------------------------
 
 class TestAuditFindingSource:
@@ -180,9 +180,42 @@ class TestAuditFindingSource:
         result = await source.retrieve(ctx)
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_audit_id_is_real_audit_plan_id(self):
+        """Verify embed([text]) protocol, CAST(:query_vector AS vector), and real audit_id."""
+        from app.services.lessons_learned.sources.audit_finding import AuditFindingSource
+
+        finding_id = uuid.uuid4()
+        real_audit_id = uuid.uuid4()
+
+        # Mock embedding provider: embed(texts: list[str]) -> list[list[float]]
+        embedding = MagicMock()
+        embedding.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+
+        db = AsyncMock()
+        row = (finding_id, "焊接不良发现", "AP-2026-001", "DC-DC-100", "internal", real_audit_id, 0.85)
+        db.execute.return_value = MagicMock(fetchall=MagicMock(return_value=[row]))
+
+        source = AuditFindingSource(db, embedding)
+        ctx = LessonsLearnedContext(
+            doc_type="fmea", doc_id=uuid.uuid4(), query_text="焊接不良",
+            fmea_type="PFMEA", severity=None,
+            product_line_code="DC-DC-100", user_product_lines=["DC-DC-100"],
+        )
+        result = await source.retrieve(ctx)
+
+        assert len(result) == 1
+        assert result[0].metadata["audit_id"] == str(real_audit_id)
+        assert result[0].metadata["finding_id"] == str(finding_id)
+        # Verify embed was called with list
+        embedding.embed.assert_awaited_once()
+        call_args = embedding.embed.await_args[0][0]
+        assert isinstance(call_args, list) and len(call_args) == 1
+        assert call_args[0] == "焊接不良"
+
 
 # ---------------------------------------------------------------------------
-# LessonsCAPASource: embedding protocol
+# LessonsCAPASource: embed([text]) + CAST + metadata
 # ---------------------------------------------------------------------------
 
 class TestLessonsCAPASource:
@@ -199,3 +232,45 @@ class TestLessonsCAPASource:
         )
         result = await source.retrieve(ctx)
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_embed_protocol_and_capa_metadata(self):
+        """Verify embed([text]) -> vec_str -> CAST(:query_vector AS vector) and capa metadata."""
+        from app.services.lessons_learned.sources.historical_capa import LessonsCAPASource
+        from app.models.capa import CAPAEightD
+
+        capa_id = uuid.uuid4()
+
+        embedding = MagicMock()
+        embedding.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+
+        capa = MagicMock()
+        capa.report_id = capa_id
+        capa.document_no = "8D-2026-001"
+        capa.product_line_code = "DC-DC-100"
+        capa.d4_root_cause = "温度设定错误"
+        capa.d5_correction = "更新SOP"
+        capa.severity = "严重"
+
+        db = AsyncMock()
+        embed_rows = [(capa_id, "焊接不良描述", "DC-DC-100", 0.82)]
+        embed_result = MagicMock(fetchall=MagicMock(return_value=embed_rows))
+        capa_result = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[capa]))))
+        db.execute.side_effect = [embed_result, capa_result]
+
+        source = LessonsCAPASource(db, embedding)
+        ctx = LessonsLearnedContext(
+            doc_type="capa", doc_id=uuid.uuid4(), query_text="焊接不良",
+            fmea_type=None, severity="严重",
+            product_line_code="DC-DC-100", user_product_lines=["DC-DC-100"],
+        )
+        result = await source.retrieve(ctx)
+
+        assert len(result) == 1
+        assert result[0].metadata["capa_id"] == str(capa_id)
+        assert result[0].metadata["document_no"] == "8D-2026-001"
+        assert result[0].metadata["root_cause"] == "温度设定错误"
+        # Verify embed called with list
+        embedding.embed.assert_awaited_once()
+        call_args = embedding.embed.await_args[0][0]
+        assert isinstance(call_args, list) and call_args[0] == "焊接不良"
