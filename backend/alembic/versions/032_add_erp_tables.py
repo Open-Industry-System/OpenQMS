@@ -57,7 +57,7 @@ def upgrade() -> None:
             "product_line_code",
             sa.String(50),
             sa.ForeignKey("product_lines.code"),
-            nullable=True,  # Global ERP connection support
+            nullable=True,
         ),
         sa.Column(
             "created_by",
@@ -92,7 +92,7 @@ def upgrade() -> None:
             sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("data_type", sa.String(20), nullable=False),
+        sa.Column("data_type", sa.String(50), nullable=False),
         sa.Column(
             "status",
             sa.String(20),
@@ -107,7 +107,6 @@ def upgrade() -> None:
         ),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("claim_token", sa.String(36), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column(
             "consecutive_failures",
@@ -141,7 +140,7 @@ def upgrade() -> None:
         sa.Column(
             "connection_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
+            sa.ForeignKey("erp_connections.connection_id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
@@ -175,7 +174,6 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("claim_token", sa.String(36), nullable=True),
         sa.Column("last_error", sa.Text(), nullable=True),
         sa.Column(
             "created_at",
@@ -205,13 +203,22 @@ def upgrade() -> None:
             sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("supplier_code", sa.String(50), nullable=False),
-        sa.Column("name", sa.String(255), nullable=False),
+        sa.Column("external_id", sa.String(100), nullable=False),
+        sa.Column("supplier_code", sa.String(100), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
         sa.Column(
             "status",
             sa.String(20),
             nullable=False,
             server_default=sa.text("'active'"),
+        ),
+        sa.Column("payment_terms", sa.String(100), nullable=True),
+        sa.Column("currency", sa.String(10), nullable=True),
+        sa.Column("tax_id", sa.String(100), nullable=True),
+        sa.Column(
+            "bank_info",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=True,
         ),
         sa.Column(
             "openqms_supplier_id",
@@ -223,11 +230,15 @@ def upgrade() -> None:
             "link_status",
             sa.String(20),
             nullable=False,
-            server_default=sa.text("'unlinked'"),
+            server_default=sa.text("'pending'"),
         ),
-        sa.Column("bank_info", sa.Text(), nullable=True),
-        sa.Column("tax_id", sa.String(100), nullable=True),
         sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "product_line_code",
+            sa.String(50),
+            sa.ForeignKey("product_lines.code"),
+            nullable=True,
+        ),
         sa.Column(
             "erp_raw_data",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -251,14 +262,18 @@ def upgrade() -> None:
             sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("customer_code", sa.String(50), nullable=False),
-        sa.Column("name", sa.String(255), nullable=False),
+        sa.Column("external_id", sa.String(100), nullable=False),
+        sa.Column("customer_code", sa.String(100), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
         sa.Column(
             "status",
             sa.String(20),
             nullable=False,
             server_default=sa.text("'active'"),
         ),
+        sa.Column("region", sa.String(100), nullable=True),
+        sa.Column("customer_level", sa.String(50), nullable=True),
+        sa.Column("tax_id", sa.String(100), nullable=True),
         sa.Column(
             "openqms_customer_id",
             postgresql.UUID(as_uuid=True),
@@ -269,9 +284,15 @@ def upgrade() -> None:
             "link_status",
             sa.String(20),
             nullable=False,
-            server_default=sa.text("'unlinked'"),
+            server_default=sa.text("'pending'"),
         ),
         sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "product_line_code",
+            sa.String(50),
+            sa.ForeignKey("product_lines.code"),
+            nullable=True,
+        ),
         sa.Column(
             "erp_raw_data",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -295,8 +316,12 @@ def upgrade() -> None:
             sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
             nullable=False,
         ),
+        sa.Column("external_id", sa.String(100), nullable=False),
         sa.Column("material_code", sa.String(100), nullable=False),
-        sa.Column("name", sa.String(255), nullable=False),
+        sa.Column("name", sa.String(200), nullable=False),
+        sa.Column("specification", sa.Text(), nullable=True),
+        sa.Column("unit", sa.String(20), nullable=True),
+        sa.Column("material_type", sa.String(50), nullable=True),
         sa.Column(
             "is_purchased",
             sa.Boolean(),
@@ -309,9 +334,20 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("false"),
         ),
-        sa.Column("specification", sa.Text(), nullable=True),
-        sa.Column("unit", sa.String(20), nullable=True),
+        sa.Column("default_supplier_code", sa.String(100), nullable=True),
+        sa.Column(
+            "status",
+            sa.String(20),
+            nullable=False,
+            server_default=sa.text("'active'"),
+        ),
         sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "product_line_code",
+            sa.String(50),
+            sa.ForeignKey("product_lines.code"),
+            nullable=True,
+        ),
         sa.Column(
             "erp_raw_data",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -335,16 +371,29 @@ def upgrade() -> None:
             sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("location_code", sa.String(50), nullable=False),
-        sa.Column("warehouse_code", sa.String(50), nullable=True),
+        sa.Column("external_id", sa.String(100), nullable=False),
+        sa.Column("location_code", sa.String(100), nullable=False),
+        sa.Column("warehouse_code", sa.String(100), nullable=True),
+        sa.Column("zone_code", sa.String(100), nullable=True),
         sa.Column(
             "location_type",
-            sa.String(20),
+            sa.String(50),
             nullable=False,
-            server_default=sa.text("'storage'"),
+            server_default=sa.text("'normal'"),
         ),
-        sa.Column("name", sa.String(255), nullable=True),
+        sa.Column(
+            "is_enabled",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("true"),
+        ),
         sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "product_line_code",
+            sa.String(50),
+            sa.ForeignKey("product_lines.code"),
+            nullable=True,
+        ),
         sa.Column(
             "erp_raw_data",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -357,7 +406,7 @@ def upgrade() -> None:
     op.create_table(
         "erp_purchase_orders",
         sa.Column(
-            "po_line_id",
+            "po_id",
             postgresql.UUID(as_uuid=True),
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
@@ -368,17 +417,35 @@ def upgrade() -> None:
             sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("po_number", sa.String(50), nullable=False),
-        sa.Column("line_number", sa.Integer(), nullable=False),
-        sa.Column("supplier_code", sa.String(50), nullable=False),
-        sa.Column("material_code", sa.String(100), nullable=False),
+        sa.Column("external_id", sa.String(100), nullable=False),
+        sa.Column("po_number", sa.String(100), nullable=False),
+        sa.Column(
+            "line_number",
+            sa.String(20),
+            nullable=False,
+            server_default=sa.text("'1'"),
+        ),
+        sa.Column("supplier_code", sa.String(100), nullable=True),
+        sa.Column("material_code", sa.String(100), nullable=True),
+        sa.Column("quantity", sa.Numeric(18, 4), nullable=True),
+        sa.Column("unit_price", sa.Numeric(18, 4), nullable=True),
+        sa.Column("currency", sa.String(10), nullable=True),
+        sa.Column("delivery_date", sa.Date(), nullable=True),
+        sa.Column("received_quantity", sa.Numeric(18, 4), nullable=True),
+        sa.Column(
+            "status",
+            sa.String(20),
+            nullable=False,
+            server_default=sa.text("'draft'"),
+        ),
         sa.Column("lot_no", sa.String(100), nullable=True),
-        sa.Column("quantity", sa.Numeric(12, 2), nullable=True),
-        sa.Column("unit_price", sa.Numeric(12, 2), nullable=True),
-        sa.Column("po_date", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("delivery_date", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("status", sa.String(20), nullable=True),
         sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "product_line_code",
+            sa.String(50),
+            sa.ForeignKey("product_lines.code"),
+            nullable=True,
+        ),
         sa.Column(
             "erp_raw_data",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -396,7 +463,7 @@ def upgrade() -> None:
     op.create_table(
         "erp_sales_orders",
         sa.Column(
-            "so_line_id",
+            "so_id",
             postgresql.UUID(as_uuid=True),
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
@@ -407,16 +474,32 @@ def upgrade() -> None:
             sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("so_number", sa.String(50), nullable=False),
-        sa.Column("line_number", sa.Integer(), nullable=False),
-        sa.Column("customer_code", sa.String(50), nullable=False),
-        sa.Column("material_code", sa.String(100), nullable=False),
-        sa.Column("quantity", sa.Numeric(12, 2), nullable=True),
-        sa.Column("unit_price", sa.Numeric(12, 2), nullable=True),
-        sa.Column("so_date", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("delivery_date", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("status", sa.String(20), nullable=True),
+        sa.Column("external_id", sa.String(100), nullable=False),
+        sa.Column("so_number", sa.String(100), nullable=False),
+        sa.Column(
+            "line_number",
+            sa.String(20),
+            nullable=False,
+            server_default=sa.text("'1'"),
+        ),
+        sa.Column("customer_code", sa.String(100), nullable=True),
+        sa.Column("material_code", sa.String(100), nullable=True),
+        sa.Column("quantity", sa.Numeric(18, 4), nullable=True),
+        sa.Column("unit_price", sa.Numeric(18, 4), nullable=True),
+        sa.Column("delivery_date", sa.Date(), nullable=True),
+        sa.Column(
+            "status",
+            sa.String(20),
+            nullable=False,
+            server_default=sa.text("'draft'"),
+        ),
         sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "product_line_code",
+            sa.String(50),
+            sa.ForeignKey("product_lines.code"),
+            nullable=True,
+        ),
         sa.Column(
             "erp_raw_data",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -445,22 +528,32 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("material_code", sa.String(100), nullable=False),
-        sa.Column("location_code", sa.String(50), nullable=False),
+        sa.Column("location_code", sa.String(100), nullable=False),
         sa.Column(
             "lot_no",
             sa.String(100),
             nullable=False,
-            server_default=sa.text("''"),  # NOT NULL DEFAULT '' for unique constraint dedup
+            server_default=sa.text("''"),
         ),
+        sa.Column("supplier_lot_no", sa.String(100), nullable=True),
+        sa.Column("quantity", sa.Numeric(18, 4), nullable=True),
+        sa.Column("unit", sa.String(20), nullable=True),
         sa.Column(
             "inventory_status",
             sa.String(20),
             nullable=False,
             server_default=sa.text("'available'"),
         ),
-        sa.Column("quantity", sa.Numeric(12, 2), nullable=True),
-        sa.Column("snapshot_date", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("manufacture_date", sa.Date(), nullable=True),
+        sa.Column("expiry_date", sa.Date(), nullable=True),
+        sa.Column("snapshot_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "product_line_code",
+            sa.String(50),
+            sa.ForeignKey("product_lines.code"),
+            nullable=True,
+        ),
         sa.Column(
             "erp_raw_data",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -468,7 +561,7 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint(
             "connection_id", "material_code", "location_code", "lot_no",
-            name="uq_erp_inventory_conn_mat_loc_lot",
+            name="uq_erp_inv_conn_mat_loc_lot",
         ),
     )
     op.create_index(
@@ -482,7 +575,7 @@ def upgrade() -> None:
     op.create_table(
         "erp_shipments",
         sa.Column(
-            "shipment_line_id",
+            "erp_shipment_id",
             postgresql.UUID(as_uuid=True),
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
@@ -493,14 +586,20 @@ def upgrade() -> None:
             sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("shipment_number", sa.String(50), nullable=False),
-        sa.Column("line_number", sa.Integer(), nullable=False),
-        sa.Column("customer_code", sa.String(50), nullable=False),
+        sa.Column("external_id", sa.String(100), nullable=False),
+        sa.Column("shipment_number", sa.String(100), nullable=False),
+        sa.Column(
+            "line_number",
+            sa.String(20),
+            nullable=False,
+            server_default=sa.text("'1'"),
+        ),
+        sa.Column("so_number", sa.String(100), nullable=True),
+        sa.Column("customer_code", sa.String(100), nullable=True),
         sa.Column("material_code", sa.String(100), nullable=True),
         sa.Column("lot_no", sa.String(100), nullable=True),
-        sa.Column("quantity", sa.Numeric(12, 2), nullable=True),
-        sa.Column("shipment_date", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("status", sa.String(20), nullable=True),
+        sa.Column("quantity", sa.Integer(), nullable=True),
+        sa.Column("shipment_date", sa.Date(), nullable=True),
         sa.Column(
             "openqms_shipment_id",
             postgresql.UUID(as_uuid=True),
@@ -511,16 +610,22 @@ def upgrade() -> None:
             "link_status",
             sa.String(20),
             nullable=False,
-            server_default=sa.text("'unlinked'"),
+            server_default=sa.text("'pending'"),
         ),
         sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "product_line_code",
+            sa.String(50),
+            sa.ForeignKey("product_lines.code"),
+            nullable=True,
+        ),
         sa.Column(
             "erp_raw_data",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=True,
         ),
         sa.UniqueConstraint(
-            "connection_id", "shipment_number", "line_number", name="uq_erp_shipment_conn_num_line"
+            "connection_id", "shipment_number", "line_number", name="uq_erp_shipments_conn_num_line"
         ),
     )
     op.create_index("ix_erp_shipment_customer_code", "erp_shipments", ["customer_code"])
@@ -541,19 +646,30 @@ def upgrade() -> None:
             sa.ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("external_id", sa.String(100), nullable=True),
+        sa.Column("external_id", sa.String(100), nullable=False),
         sa.Column(
             "record_type",
             sa.String(20),
             nullable=False,
-            server_default=sa.text("'coq'"),
         ),
         sa.Column("cost_category", sa.String(50), nullable=False),
-        sa.Column("cost_type", sa.String(100), nullable=False),
-        sa.Column("amount", sa.Numeric(12, 2), nullable=False),
-        sa.Column("currency", sa.String(10), nullable=True, server_default=sa.text("'CNY'")),
-        sa.Column("record_date", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("cost_type", sa.String(50), nullable=False),
+        sa.Column("amount", sa.Numeric(18, 4), nullable=False),
+        sa.Column("currency", sa.String(10), nullable=True),
+        sa.Column("period_month", sa.String(7), nullable=True),
+        sa.Column("source_document_no", sa.String(100), nullable=True),
+        sa.Column("material_code", sa.String(100), nullable=True),
+        sa.Column("supplier_code", sa.String(100), nullable=True),
+        sa.Column("cost_center", sa.String(100), nullable=True),
+        sa.Column("cost_date", sa.Date(), nullable=True),
+        sa.Column("description", sa.Text(), nullable=True),
         sa.Column("source_updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "product_line_code",
+            sa.String(50),
+            sa.ForeignKey("product_lines.code"),
+            nullable=True,
+        ),
         sa.Column(
             "erp_raw_data",
             postgresql.JSONB(astext_type=sa.Text()),
@@ -567,8 +683,7 @@ def upgrade() -> None:
         ["cost_category", "cost_type"],
     )
 
-    # ---- CHECK constraints (status enums + data integrity) --------------------
-    # Status enums (enforced)
+    # ---- CHECK constraints (aligned with mock connector + design spec) --------
     op.create_check_constraint(
         "ck_erp_suppliers_status",
         "erp_suppliers",
@@ -577,7 +692,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_erp_suppliers_link_status",
         "erp_suppliers",
-        sa.text("link_status IN ('unlinked', 'linked', 'pending', 'rejected')"),
+        sa.text("link_status IN ('linked', 'pending', 'unlinked', 'review_required')"),
     )
     op.create_check_constraint(
         "ck_erp_customers_status",
@@ -587,27 +702,32 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_erp_customers_link_status",
         "erp_customers",
-        sa.text("link_status IN ('unlinked', 'linked', 'pending', 'rejected')"),
+        sa.text("link_status IN ('linked', 'pending', 'unlinked', 'review_required')"),
     )
     op.create_check_constraint(
         "ck_erp_shipments_link_status",
         "erp_shipments",
-        sa.text("link_status IN ('unlinked', 'linked', 'pending', 'rejected')"),
+        sa.text("link_status IN ('linked', 'pending', 'unlinked', 'review_required')"),
     )
     op.create_check_constraint(
         "ck_erp_cost_records_record_type",
         "erp_cost_records",
-        sa.text("record_type IN ('coq', 'copq', 'general')"),
+        sa.text("record_type IN ('detail', 'period_summary')"),
+    )
+    op.create_check_constraint(
+        "ck_erp_cost_records_cost_category",
+        "erp_cost_records",
+        sa.text("cost_category IN ('prevention', 'appraisal', 'internal_failure', 'external_failure')"),
     )
     op.create_check_constraint(
         "ck_erp_inventory_status",
         "erp_inventory_balances",
-        sa.text("inventory_status IN ('available', 'reserved', 'quarantined', 'blocked')"),
+        sa.text("inventory_status IN ('available', 'frozen', 'quarantine', 'inspection', 'rejected')"),
     )
     op.create_check_constraint(
         "ck_erp_locations_location_type",
         "erp_locations",
-        sa.text("location_type IN ('storage', 'production', 'shipping', 'quarantine')"),
+        sa.text("location_type IN ('receiving', 'inspection', 'quarantine', 'frozen', 'scrap', 'normal')"),
     )
 
     # Data integrity constraints (NOT VALID - skip existing rows)
@@ -651,6 +771,7 @@ def downgrade() -> None:
     op.execute("ALTER TABLE erp_push_outbox DROP CONSTRAINT IF EXISTS ck_erp_push_outbox_status")
     op.execute("ALTER TABLE erp_sync_jobs DROP CONSTRAINT IF EXISTS ck_erp_sync_jobs_consecutive_failures")
     op.execute("ALTER TABLE erp_sync_jobs DROP CONSTRAINT IF EXISTS ck_erp_sync_jobs_status")
+    op.execute("ALTER TABLE erp_cost_records DROP CONSTRAINT IF EXISTS ck_erp_cost_records_cost_category")
     op.execute("ALTER TABLE erp_locations DROP CONSTRAINT IF EXISTS ck_erp_locations_location_type")
     op.execute("ALTER TABLE erp_inventory_balances DROP CONSTRAINT IF EXISTS ck_erp_inventory_status")
     op.execute("ALTER TABLE erp_cost_records DROP CONSTRAINT IF EXISTS ck_erp_cost_records_record_type")
