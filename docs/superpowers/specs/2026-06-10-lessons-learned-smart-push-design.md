@@ -176,6 +176,25 @@ LessonsLearnedService.recommend()
 
 **PostgreSQL NULL + UNIQUE 陷阱**：当 `fmea_id` 设为可空后，PostgreSQL 多列唯一约束在任一列为 NULL 时不视为冲突。这会导致 `on_conflict_do_update`（UPSERT）无法命中 CAPA 记录，不断插入重复数据。
 
+**同步更新 ORM 模型**：
+
+迁移文件外，还需同步修改 `backend/app/models/recommendation_cache.py`：
+- `fmea_id`: `nullable=False` → `nullable=True`
+- `fmea_type`: `nullable=False` → `nullable=True`
+- `source`: `String(15)` → `String(100)`
+- 新增 `report_id: Mapped[uuid.UUID | None]`（nullable，FK capa_eightd）
+- 新增 `doc_type: Mapped[str]`（default='fmea'）
+- 删除 `__table_args__` 中的 `UniqueConstraint`（旧约束已删除，由部分唯一索引替代）
+
+**现有 FMEA 推荐缓存的 UPSERT 同步更新**：
+
+`backend/app/services/recommendation_service.py` 中 `_cache_result()` 使用 `on_conflict_do_update(index_elements=["fmea_id", "trigger_type", "context_hash"])`。部分唯一索引需要额外指定 `index_where`，否则 UPSERT 会报 "no unique constraint matching"。
+
+修改后的 `_cache_result()` 需根据 cache 类型指定不同的 `index_where`：
+- **FMEA cache**：`index_where=RecommendationCache.fmea_id.isnot(None)`
+- **CAPA cache**：`index_where=RecommendationCache.report_id.isnot(None)`
+- **Lessons global cache**：`index_where=RecommendationCache.fmea_id.is_(None) & RecommendationCache.report_id.is_(None)`
+
 **解决方案：部分唯一索引（Partial Unique Indexes）**
 
 ```sql
@@ -212,7 +231,7 @@ CREATE UNIQUE INDEX uq_cache_capa
     WHERE report_id IS NOT NULL;
 
 -- Lessons 全局缓存场景：fmea_id IS NULL AND report_id IS NULL 时，(trigger_type, context_hash) 唯一
--- lessons 按内容 hash 共享缓存（不按文档 ID），所以不需要 fmea_id/report_id 参与唯一约束
+-- lessons 按内容 hash 共享缓存（不按文档 ID），trigger_type 固定为 "lessons_learned"
 CREATE UNIQUE INDEX uq_cache_global
     ON recommendation_cache (trigger_type, context_hash)
     WHERE fmea_id IS NULL AND report_id IS NULL;
@@ -224,7 +243,7 @@ CREATE UNIQUE INDEX uq_cache_global
 - `sorted(user_product_lines)` 确保相同产品线集合产生相同 hash，避免顺序差异导致 miss
 - **admin 处理**：admin（bypass RLS，user_product_lines 为 None）使用固定 sentinel `"__ALL_PRODUCT_LINES__"`，与有权限列表的用户隔离
 - **查询**：先查 `context_hash` 命中缓存，miss 时走完整召回
-- **写入**：lessons 缓存写入 `fmea_id IS NULL AND report_id IS NULL` 的行（全局缓存，不按文档 ID 隔离）
+- **写入**：lessons 缓存写入 `fmea_id IS NULL AND report_id IS NULL` 的行（全局缓存，不按文档 ID 隔离），`trigger_type` 固定为 `"lessons_learned"`
 - **TTL**：24 小时（与现有 `recommendation_cache` 一致）
 - **隔离规则**：cache key 包含用户可访问产品线集合的 hash。不同产品线权限的用户不会命中同一缓存条目，避免越权。同角色用户如果可访问的产品线集合相同，可以共享缓存。
 - **失效**：新 FMEA/CAPA 审批状态变更时，不清除此缓存（lessons 是创建时快照，不需要实时更新）
