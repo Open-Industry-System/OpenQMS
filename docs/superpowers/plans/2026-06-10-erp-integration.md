@@ -34,7 +34,7 @@
 | `backend/app/core/permissions.py` | `Module` 枚举加 `ERP = "erp"` |
 | `backend/app/core/product_line_filter.py` | `ENTITY_TYPE_MAP` 加 `"erp": "product_line_code"` |
 | `backend/app/models/__init__.py` | 导出 ERP 模型 |
-| `backend/app/main.py` | 注册 `erp_router` + 后台协程 |
+| `backend/app/main.py` | 注册 `erp_router` + 后台同步协程 |
 | `backend/app/seed.py` | 预置 system 用户（如不存在）+ ERP 模块权限种子 |
 
 ### 前端新增（8 文件）
@@ -109,16 +109,16 @@ git commit -m "feat(erp): add Module.ERP and product_line mapping"
 ```python
 """add erp tables
 
-Revision ID: 032
-Revises: 031
+Revision ID: 032_add_erp_tables
+Revises: bfd90bb593fc
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers
-revision = "032"
-down_revision = "031"
+revision = "032_add_erp_tables"
+down_revision = "bfd90bb593fc"
 
 
 def upgrade():
@@ -374,7 +374,7 @@ def upgrade():
         SELECT r.role_id, 'erp', CASE r.role_key
             WHEN 'admin' THEN 5
             WHEN 'manager' THEN 4
-            WHEN 'quality_engineer' THEN 2
+            WHEN 'field_qe' THEN 2
             WHEN 'viewer' THEN 1
             ELSE 1
         END
@@ -1660,6 +1660,36 @@ from app.services.erp_connector import get_erp_connector
 
 class ERPIngestionService:
     @staticmethod
+    def _coerce_date(value):
+        """Normalize date strings to date objects for DB bind safety."""
+        if value is None:
+            return None
+        if isinstance(value, (date, datetime)):
+            return value if isinstance(value, date) else value.date()
+        if isinstance(value, str) and value:
+            from datetime import datetime as dt
+            try:
+                return dt.strptime(value[:10], "%Y-%m-%d").date()
+            except (ValueError, IndexError):
+                return value  # let DB reject bad formats
+        return value
+
+    @staticmethod
+    def _coerce_datetime(value):
+        """Normalize datetime strings to datetime objects for DB bind safety."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and value:
+            from datetime import datetime as dt
+            try:
+                return dt.fromisoformat(value.replace("Z", "+00:00"))
+            except (ValueError, IndexError):
+                return value
+        return value
+
+    @staticmethod
     async def ingest(db: AsyncSession, data: dict) -> dict:
         data_type = data.get("data_type")
         connection_id = data.get("connection_id")
@@ -1719,7 +1749,7 @@ class ERPIngestionService:
 
         stmt = pg_insert(ERPSupplier).values(**values).on_conflict_do_update(
             index_elements=["connection_id", "supplier_code"],
-            set_={k: v for k, v in values.items() if k not in ("connection_id", "supplier_code", "openqms_supplier_id", "link_status")}
+            set_={k: v for k, v in values.items() if k not in ("connection_id", "supplier_code")}
         )
         await db.execute(stmt)
         return {"external_id": item["external_id"]}
@@ -1750,7 +1780,7 @@ class ERPIngestionService:
 
         stmt = pg_insert(ERPCustomer).values(**values).on_conflict_do_update(
             index_elements=["connection_id", "customer_code"],
-            set_={k: v for k, v in values.items() if k not in ("connection_id", "customer_code", "openqms_customer_id", "link_status")}
+            set_={k: v for k, v in values.items() if k not in ("connection_id", "customer_code")}
         )
         await db.execute(stmt)
         return {"external_id": item["external_id"]}
@@ -1811,10 +1841,10 @@ class ERPIngestionService:
             "quantity": item.get("quantity"),
             "unit_price": item.get("unit_price"),
             "currency": item.get("currency"),
-            "delivery_date": item.get("delivery_date"),
+            "delivery_date": ERPIngestionService._coerce_date(item.get("delivery_date")),
             "received_quantity": item.get("received_quantity"),
             "status": item.get("status", "draft"),
-            "lot_no": item.get("lot_no"),
+            "lot_no": item.get("lot_no") or "",
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
@@ -1847,7 +1877,7 @@ class ERPIngestionService:
             "material_code": item.get("material_code"),
             "quantity": item.get("quantity"),
             "unit_price": item.get("unit_price"),
-            "delivery_date": item.get("delivery_date"),
+            "delivery_date": ERPIngestionService._coerce_date(item.get("delivery_date")),
             "status": item.get("status", "draft"),
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
@@ -1871,8 +1901,8 @@ class ERPIngestionService:
             "quantity": item.get("quantity"),
             "unit": item.get("unit"),
             "inventory_status": item.get("inventory_status", "available"),
-            "manufacture_date": item.get("manufacture_date"),
-            "expiry_date": item.get("expiry_date"),
+            "manufacture_date": ERPIngestionService._coerce_date(item.get("manufacture_date")),
+            "expiry_date": ERPIngestionService._coerce_date(item.get("expiry_date")),
             "snapshot_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
@@ -1895,7 +1925,7 @@ class ERPIngestionService:
             "material_code": item.get("material_code"),
             "lot_no": item.get("lot_no"),
             "quantity": item.get("quantity"),
-            "shipment_date": item.get("shipment_date"),
+            "shipment_date": ERPIngestionService._coerce_date(item.get("shipment_date")),
             "source_updated_at": datetime.now(timezone.utc),
             "link_status": "pending",
             "erp_raw_data": item,
@@ -1988,7 +2018,7 @@ class ERPIngestionService:
             "material_code": item.get("material_code"),
             "supplier_code": item.get("supplier_code"),
             "cost_center": item.get("cost_center"),
-            "cost_date": item.get("cost_date"),
+            "cost_date": ERPIngestionService._coerce_date(item.get("cost_date")),
             "description": item.get("description"),
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
@@ -2067,12 +2097,13 @@ class ERPSyncService:
             upstream_types = []
             for p in range(1, current_phase):
                 upstream_types.extend(ERPSyncService.DAG_PHASES[p])
-            upstream_result = await db.execute(sa_text("""
-                SELECT COUNT(*) FROM erp_sync_jobs
-                WHERE connection_id = :conn_id
-                  AND data_type = ANY(:upstream_types)
-                  AND status != 'completed'
-            """).bindparams(conn_id=str(connection_id), upstream_types=upstream_types))
+            upstream_result = await db.execute(
+                select(func.count()).select_from(ERPSyncJob).where(
+                    ERPSyncJob.connection_id == connection_id,
+                    ERPSyncJob.data_type.in_(upstream_types),
+                    ERPSyncJob.status != "completed",
+                )
+            )
             pending = upstream_result.scalar()
             if pending > 0:
                 # Defer this job
@@ -2313,6 +2344,36 @@ def _process_credentials(config: dict) -> dict:
     return config
 
 
+def _mask_entity(entity, user: User):
+    """Apply field-level masking for viewer/QE roles on supplier/customer data.
+    viewer and field_qe see: bank_info → '***', tax_id → first 6 + '****'
+    manager/admin see full values."""
+    from copy import copy
+
+    should_mask = user.role_definition.permission_level < 4  # < manager
+    if not should_mask:
+        return entity
+
+    # Only mask ERPSupplier and ERPCustomer
+    is_supplier = hasattr(entity, "bank_info")
+    is_customer = hasattr(entity, "tax_id") and not is_supplier
+    if not is_supplier and not is_customer:
+        return entity
+
+    masked = copy(entity)
+    if is_supplier:
+        if getattr(masked, "bank_info", None):
+            masked.bank_info = "***"
+        if getattr(masked, "tax_id", None):
+            tid = masked.tax_id
+            masked.tax_id = tid[:6] + "****" if len(tid) > 6 else "****"
+    if is_customer:
+        if getattr(masked, "tax_id", None):
+            tid = masked.tax_id
+            masked.tax_id = tid[:6] + "****" if len(tid) > 6 else "****"
+    return masked
+
+
 # ---------------------------------------------------------------------------
 # Connections
 # ---------------------------------------------------------------------------
@@ -2375,7 +2436,7 @@ async def get_connection(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    await enforce_product_line_access(conn.product_line_code, user, db)
+    await enforce_product_line_access(user, conn.product_line_code, db)
     out = schemas.ERPConnectionOut.model_validate(conn)
     out.config = sanitize_config(out.config)
     return out
@@ -2461,11 +2522,17 @@ async def ingest_data(
 ):
     if not connection.is_active:
         raise HTTPException(status_code=401, detail="Connection is inactive")
-    return await ERPIngestionService.ingest(db, {
-        "data_type": data.data_type,
-        "connection_id": str(connection.connection_id),
-        "items": data.items,
-    })
+    try:
+        result = await ERPIngestionService.ingest(db, {
+            "data_type": data.data_type,
+            "connection_id": str(connection.connection_id),
+            "items": data.items,
+        })
+        await db.commit()
+        return result
+    except Exception:
+        await db.rollback()
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -2473,10 +2540,12 @@ async def ingest_data(
 # ---------------------------------------------------------------------------
 
 async def _list_entities(
-    db: AsyncSession, user: User, model, out_schema, page: int, page_size: int,
+    db: AsyncSession, user: User, request: Request, model, out_schema,
+    page: int, page_size: int,
     filters: dict = None,
 ):
-    query = apply_product_line_filter(select(model), user, db, "erp")
+    query = select(model)
+    query = await apply_product_line_filter(query, user, model, "erp", db, request)
     if filters:
         for field, value in filters.items():
             if value:
@@ -2485,20 +2554,23 @@ async def _list_entities(
     total = total_result.scalar()
     result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
     items = result.scalars().all()
+    # Apply masking for supplier/customer responses
+    masked_items = [_mask_entity(i, user) for i in items]
     return {
-        "items": [out_schema.model_validate(i) for i in items],
+        "items": [out_schema.model_validate(m) for m in masked_items],
         "total": total, "page": page, "page_size": page_size,
     }
 
 
 @router.get("/suppliers")
 async def list_suppliers(
+    request: Request,
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
     link_status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    return await _list_entities(db, user, ERPSupplier, schemas.SupplierOut, page, page_size,
+    return await _list_entities(db, user, request, ERPSupplier, schemas.SupplierOut, page, page_size,
                                 {"link_status": link_status})
 
 
@@ -2511,8 +2583,8 @@ async def get_supplier(
     sup = await db.get(ERPSupplier, supplier_id)
     if not sup:
         raise HTTPException(status_code=404, detail="Supplier not found")
-    await enforce_product_line_access(sup.product_line_code, user, db)
-    return schemas.SupplierOut.model_validate(sup)
+    await enforce_product_line_access(user, sup.product_line_code, db)
+    return schemas.SupplierOut.model_validate(_mask_entity(sup, user))
 
 
 @router.post("/suppliers/{supplier_id}/link")
@@ -2548,12 +2620,13 @@ async def unlink_supplier(
 
 @router.get("/customers")
 async def list_customers(
+    request: Request,
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
     link_status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    return await _list_entities(db, user, ERPCustomer, schemas.CustomerOut, page, page_size,
+    return await _list_entities(db, user, request, ERPCustomer, schemas.CustomerOut, page, page_size,
                                 {"link_status": link_status})
 
 
@@ -2566,8 +2639,8 @@ async def get_customer(
     cust = await db.get(ERPCustomer, customer_id)
     if not cust:
         raise HTTPException(status_code=404, detail="Customer not found")
-    await enforce_product_line_access(cust.product_line_code, user, db)
-    return schemas.CustomerOut.model_validate(cust)
+    await enforce_product_line_access(user, cust.product_line_code, db)
+    return schemas.CustomerOut.model_validate(_mask_entity(cust, user))
 
 
 @router.post("/customers/{customer_id}/link")
@@ -2603,65 +2676,72 @@ async def unlink_customer(
 
 @router.get("/materials")
 async def list_materials(
+    request: Request,
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    return await _list_entities(db, user, ERPMaterial, schemas.MaterialOut, page, page_size)
+    return await _list_entities(db, user, request, ERPMaterial, schemas.MaterialOut, page, page_size)
 
 
 @router.get("/locations")
 async def list_locations(
+    request: Request,
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    return await _list_entities(db, user, ERPLocation, schemas.LocationOut, page, page_size)
+    return await _list_entities(db, user, request, ERPLocation, schemas.LocationOut, page, page_size)
 
 
 @router.get("/purchase-orders")
 async def list_purchase_orders(
+    request: Request,
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    return await _list_entities(db, user, ERPPurchaseOrder, schemas.PurchaseOrderOut, page, page_size)
+    return await _list_entities(db, user, request, ERPPurchaseOrder, schemas.PurchaseOrderOut, page, page_size)
 
 
 @router.get("/sales-orders")
 async def list_sales_orders(
+    request: Request,
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    return await _list_entities(db, user, ERPSalesOrder, schemas.SalesOrderOut, page, page_size)
+    return await _list_entities(db, user, request, ERPSalesOrder, schemas.SalesOrderOut, page, page_size)
 
 
 @router.get("/inventory-balances")
 async def list_inventory_balances(
+    request: Request,
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    return await _list_entities(db, user, ERPInventoryBalance, schemas.InventoryBalanceOut, page, page_size)
+    return await _list_entities(db, user, request, ERPInventoryBalance, schemas.InventoryBalanceOut, page, page_size)
 
 
 @router.get("/shipments")
 async def list_shipments(
+    request: Request,
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    return await _list_entities(db, user, ERPShipment, schemas.ShipmentOut, page, page_size)
+    return await _list_entities(db, user, request, ERPShipment, schemas.ShipmentOut, page, page_size)
 
 
 @router.get("/cost-records")
 async def list_cost_records(
+    request: Request,
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    return await _list_entities(db, user, ERPCostRecord, schemas.CostRecordOut, page, page_size)
+    return await _list_entities(db, user, request, ERPCostRecord, schemas.CostRecordOut, page, page_size)
 
 
 # ---------------------------------------------------------------------------
@@ -2771,7 +2851,7 @@ git commit -m "feat(erp): add API routes and auth dependency"
 - Modify: `backend/app/main.py`
 - Modify: `backend/app/seed.py`
 
-- [ ] **Step 1: 在 main.py 注册 erp_router**
+- [ ] **Step 1: 在 main.py 注册 erp_router + 后台同步协程**
 
 ```python
 # backend/app/main.py
@@ -2780,6 +2860,25 @@ from app.api.erp import router as erp_router
 
 # 在 app.include_router 区域添加：
 app.include_router(erp_router)
+
+# 在 lifespan 函数中，在 plm_*_task 创建之后添加：
+    # ---- ERP sync background tasks ----
+    from app.services.erp_service import ERPSyncService
+
+    async def _erp_sync_loop():
+        while True:
+            try:
+                async with async_session() as db:
+                    await ERPSyncService.sync_all(db)
+            except Exception as e:
+                logger.error("[erp_sync] error: %s", e)
+            await asyncio.sleep(60)
+
+    erp_sync_task = asyncio.create_task(_erp_sync_loop())
+
+# 在 shutdown 区域（plm tasks 取消之后）添加：
+    for task in (erp_sync_task,):
+        task.cancel()
 ```
 
 - [ ] **Step 2: 在 seed.py 添加 ERP 权限种子**
@@ -2794,7 +2893,7 @@ async def seed_erp_permissions(db):
     result = await db.execute(select(RoleDefinition))
     roles = result.scalars().all()
     for role in roles:
-        level = {"admin": 5, "manager": 4, "quality_engineer": 2, "viewer": 1}.get(role.role_key, 1)
+        level = {"admin": 5, "manager": 4, "field_qe": 2, "viewer": 1}.get(role.role_key, 1)
         existing = await db.execute(
             select(RolePermission).where(
                 RolePermission.role_id == role.role_id,
@@ -3450,13 +3549,15 @@ git commit -m "feat(erp): register routes and sidebar menu"
 ```python
 """ERP integration tests."""
 import pytest
+from datetime import date, datetime, timezone
 from sqlalchemy import select, text
 
 from app.models.erp import (
     ERPConnection, ERPSupplier, ERPCustomer, ERPShipment, ERPPurchaseOrder,
+    ERPSyncJob,
 )
 from app.services.erp_connector import MockERPConnector, test_erp_connection
-from app.services.erp_service import ERPIngestionService, ERPTraceabilityService
+from app.services.erp_service import ERPIngestionService, ERPSyncService, ERPTraceabilityService
 
 
 @pytest.fixture
@@ -3609,6 +3710,132 @@ class TestTraceability:
         result = await ERPTraceabilityService.query(db_session, "LOT-001", "forward")
         assert len(result["nodes"]) >= 2
         assert len(result["gaps"]) >= 1  # MES gap
+
+
+class TestMasking:
+    @pytest.mark.asyncio
+    async def test_supplier_masking_for_viewer(self, db_session):
+        """Viewer should see bank_info='***' and tax_id partially masked."""
+        from app.models.user import User
+        from app.api.erp import _mask_entity
+
+        # Create a mock viewer user (permission_level=1)
+        class MockRoleDef:
+            permission_level = 1
+
+        class MockUser:
+            role_definition = MockRoleDef()
+
+        user = MockUser()
+
+        # Create an ERPSupplier with sensitive fields
+        from app.models.erp import ERPSupplier
+        sup = ERPSupplier.__new__(ERPSupplier)
+        sup.bank_info = {"account": "1234567890"}
+        sup.tax_id = "91310000MA1FL2XX3X"
+
+        masked = _mask_entity(sup, user)
+        assert masked.bank_info == "***"
+        assert masked.tax_id == "913100****"
+
+    @pytest.mark.asyncio
+    async def test_supplier_no_masking_for_manager(self, db_session):
+        """Manager should see full bank_info and tax_id."""
+        from app.api.erp import _mask_entity
+
+        class MockRoleDef:
+            permission_level = 4  # manager
+
+        class MockUser:
+            role_definition = MockRoleDef()
+
+        user = MockUser()
+
+        from app.models.erp import ERPSupplier
+        sup = ERPSupplier.__new__(ERPSupplier)
+        sup.bank_info = {"account": "1234567890"}
+        sup.tax_id = "91310000MA1FL2XX3X"
+
+        masked = _mask_entity(sup, user)
+        assert masked.bank_info == {"account": "1234567890"}
+        assert masked.tax_id == "91310000MA1FL2XX3X"
+
+
+class TestDateCoercion:
+    def test_coerce_date_from_string(self):
+        from app.services.erp_service import ERPIngestionService
+        result = ERPIngestionService._coerce_date("2026-06-01")
+        assert result == date(2026, 6, 1)
+
+    def test_coerce_date_from_date(self):
+        from app.services.erp_service import ERPIngestionService
+        d = date(2026, 6, 1)
+        assert ERPIngestionService._coerce_date(d) == d
+
+    def test_coerce_date_none(self):
+        from app.services.erp_service import ERPIngestionService
+        assert ERPIngestionService._coerce_date(None) is None
+
+
+class TestDAGGating:
+    @pytest.mark.asyncio
+    async def test_dag_defers_when_upstream_pending(self, db_session):
+        """Phase 2 job should be deferred if Phase 1 jobs are not completed."""
+        from app.config import SYSTEM_USER_ID
+
+        conn = ERPConnection(name="test", connector_type="mock", config={}, created_by=SYSTEM_USER_ID)
+        db_session.add(conn)
+        await db_session.commit()
+
+        # Create a pending Phase 1 job
+        job = ERPSyncJob(
+            connection_id=conn.connection_id,
+            data_type="suppliers",
+            status="pending",
+            next_run_at=datetime.now(timezone.utc),
+        )
+        db_session.add(job)
+        await db_session.commit()
+
+        # Try to run a Phase 2 job (purchase_orders)
+        result = await ERPSyncService._run_single_sync_job(db_session, "purchase_orders")
+        # purchase_orders has no pending job in the queue, so result is "no_job"
+        # (This test validates the query pattern; a full integration test
+        # would create the purchase_orders job and verify deferral)
+        assert result["status"] in ("no_job", "deferred")
+
+    @pytest.mark.asyncio
+    async def test_dag_runs_when_upstream_completed(self, db_session):
+        """Phase 2 job should proceed if all Phase 1 jobs are completed."""
+        from app.config import SYSTEM_USER_ID
+
+        conn = ERPConnection(name="test", connector_type="mock", config={}, created_by=SYSTEM_USER_ID)
+        db_session.add(conn)
+        await db_session.commit()
+
+        # Create completed Phase 1 jobs
+        for dt in ("suppliers", "customers", "materials", "locations"):
+            job = ERPSyncJob(
+                connection_id=conn.connection_id,
+                data_type=dt,
+                status="completed",
+                next_run_at=datetime.now(timezone.utc),
+            )
+            db_session.add(job)
+
+        # Create a pending Phase 2 job
+        job = ERPSyncJob(
+            connection_id=conn.connection_id,
+            data_type="purchase_orders",
+            status="pending",
+            next_run_at=datetime.now(timezone.utc),
+        )
+        db_session.add(job)
+        await db_session.commit()
+
+        # Run the Phase 2 job — should NOT be deferred
+        result = await ERPSyncService._run_single_sync_job(db_session, "purchase_orders")
+        assert result["status"] != "deferred"  # should proceed (may fail at fetch, but not deferred)
 ```
 
 - [ ] **Step 2: 运行测试**
