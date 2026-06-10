@@ -467,7 +467,7 @@ class ERPConnector(ABC):
 - `sync_all()` 查询阶段 N 的所有 sync jobs，确认所有上游 jobs 的 `status='completed'` 且 `checkpoint >= required_checkpoint` 后，才将阶段 N+1 的 jobs 置为 `pending`
 - 若上游 job 失败，下游阶段不启动（保留 `next_run_at`，调度器检查到上游未完成则跳过）
 - 手动同步时，按阶段顺序依次触发：阶段 1 → 等待完成 → 阶段 2 → ...
-- 缺失引用处理：下游摄入时如果引用键不存在（如 PO 的 supplier_code 找不到 erp_suppliers 记录），允许写入但标记 `reference_missing=True`，在详情页提示用户
+- 缺失引用处理：下游摄入时如果引用键不存在（如 PO 的 supplier_code 找不到 erp_suppliers 记录），允许写入，缺失信息记录在 `erp_raw_data["_reference_errors"]` 中（如 `[{"field": "supplier_code", "value": "SUP-999", "reason": "not_found"}]`），查询时在响应中动态计算 `reference_missing` 字段提示用户，详情页展示具体缺失引用
 
 ### 5.2 双写关联逻辑（Ingestion 层）
 
@@ -486,6 +486,23 @@ async def _link_erp_supplier(db, erp_supplier: ERPSupplier):
     # 2. 停用标记 link_status=review_required，不自动禁用 OpenQMS 供应商
     if erp_supplier.status == "inactive":
         erp_supplier.link_status = "review_required"  # 提示质量负责人复核
+```
+
+**customer_master → customers**
+
+```python
+async def _link_erp_customer(db, erp_customer: ERPCustomer):
+    # 1. 按 customer_code == customers.customer_code 强键自动匹配
+    customer = await find_customer_by_code(db, erp_customer.customer_code)
+    if customer:
+        erp_customer.openqms_customer_id = customer.customer_id
+        erp_customer.link_status = "linked"
+    else:
+        erp_customer.link_status = "pending"
+    
+    # 2. 停用标记 link_status=review_required，不自动禁用 OpenQMS 客户
+    if erp_customer.status == "inactive":
+        erp_customer.link_status = "review_required"
 ```
 
 **shipments → shipment_records**
@@ -661,6 +678,8 @@ GET /api/erp/traceability/{node_type}/{node_id}
 |------|------|------|
 | `/api/erp/suppliers/{id}/link` | POST | 手动关联 OpenQMS 供应商 |
 | `/api/erp/suppliers/{id}/unlink` | POST | 取消关联 |
+| `/api/erp/customers/{id}/link` | POST | 手动关联 OpenQMS 客户 |
+| `/api/erp/customers/{id}/unlink` | POST | 取消关联 |
 | `/api/erp/shipments/{id}/sync-to-shipment-records` | POST | 手动同步到 shipment_records |
 
 ### 7.6 权限映射
@@ -733,8 +752,8 @@ GET /api/erp/traceability/{node_type}/{node_id}
 
 ### 9.4 财务敏感字段脱敏
 
-- `erp_suppliers.bank_info`、`erp_suppliers.tax_id` 等财务字段在 API 响应中按角色脱敏：
-  - **viewer/quality_engineer**: `bank_info` 脱敏为 `"***"`，`tax_id` 脱敏为前 6 位 + `****`
+- `erp_suppliers.bank_info`、`erp_suppliers.tax_id`、`erp_customers.tax_id` 等财务字段在 API 响应中按角色脱敏：
+  - **viewer/quality_engineer**: `bank_info` 脱敏为 `"***"`，`tax_id`（供应商和客户）脱敏为前 6 位 + `****`
   - **manager/admin**: 完整返回
 - 前端详情 Drawer 中，ERP 财务信息标签页默认折叠，仅 admin/manager 可展开
 
