@@ -1994,6 +1994,7 @@ class ERPIngestionService:
                 shipment_date=shipment_date,
                 quantity=total_qty,
                 batch_no=lot_no,
+                product_line_code=lines[0].product_line_code if lines else None,
                 notes=f"ERP auto-import: {line_refs}",
                 created_by=SYSTEM_USER_ID,
             )
@@ -2179,41 +2180,57 @@ class ERPSyncService:
 class ERPTraceabilityService:
     @staticmethod
     async def query(db: AsyncSession, lot_no: str, direction: str = "forward") -> dict:
-        """Bidirectional traceability query."""
+        """Bidirectional traceability query. Supports multiple PO/shipment lines per lot_no."""
         nodes = []
         edges = []
         gaps = []
+        seen_node_ids = set()
+        seen_edge_keys = set()
+
+        def _add_node(node_id: str, node_type: str, label: str):
+            if node_id not in seen_node_ids:
+                nodes.append({"id": node_id, "type": node_type, "label": label})
+                seen_node_ids.add(node_id)
+
+        def _add_edge(from_id: str, to_id: str, edge_type: str):
+            key = (from_id, to_id, edge_type)
+            if key not in seen_edge_keys:
+                edges.append({"from": from_id, "to": to_id, "type": edge_type})
+                seen_edge_keys.add(key)
+
+        lot_node_id = f"lot:{lot_no}"
 
         if direction == "forward":
-            # 1. Find PO/IQC by lot_no
+            # 1. Find POs by lot_no (may be multiple lines)
             po_result = await db.execute(select(ERPPurchaseOrder).where(ERPPurchaseOrder.lot_no == lot_no))
-            po = po_result.scalar_one_or_none()
-            if po:
-                nodes.append({"id": f"lot:{lot_no}", "type": "erp_lot", "label": lot_no})
-                nodes.append({"id": f"po:{po.po_number}", "type": "po", "label": po.po_number})
-                edges.append({"from": f"lot:{lot_no}", "to": f"po:{po.po_number}", "type": "inspected_as"})
+            pos = po_result.scalars().all()
+            if pos:
+                _add_node(lot_node_id, "erp_lot", lot_no)
+                for po in pos:
+                    _add_node(f"po:{po.po_number}", "po", po.po_number)
+                    _add_edge(lot_node_id, f"po:{po.po_number}", "inspected_as")
 
-                # 2. Find supplier
-                if po.supplier_code:
-                    sup_result = await db.execute(select(ERPSupplier).where(
-                        ERPSupplier.connection_id == po.connection_id,
-                        ERPSupplier.supplier_code == po.supplier_code
-                    ))
-                    sup = sup_result.scalar_one_or_none()
-                    if sup:
-                        nodes.append({"id": f"supplier:{po.supplier_code}", "type": "supplier", "label": sup.name})
-                        edges.append({"from": f"supplier:{po.supplier_code}", "to": f"lot:{lot_no}", "type": "supplied"})
+                    # 2. Find supplier for each PO
+                    if po.supplier_code:
+                        sup_result = await db.execute(select(ERPSupplier).where(
+                            ERPSupplier.connection_id == po.connection_id,
+                            ERPSupplier.supplier_code == po.supplier_code
+                        ))
+                        sup = sup_result.scalar_one_or_none()
+                        if sup:
+                            _add_node(f"supplier:{po.supplier_code}", "supplier", sup.name)
+                            _add_edge(f"supplier:{po.supplier_code}", lot_node_id, "supplied")
             else:
-                nodes.append({"id": f"lot:{lot_no}", "type": "erp_lot", "label": lot_no})
+                _add_node(lot_node_id, "erp_lot", lot_no)
 
-            # 3. Find shipment by lot_no (as finished goods)
+            # 3. Find shipments by lot_no (may be multiple lines)
             ship_result = await db.execute(select(ERPShipment).where(ERPShipment.lot_no == lot_no))
             shipments = ship_result.scalars().all()
             for ship in shipments:
-                nodes.append({"id": f"shipment:{ship.shipment_number}", "type": "shipment", "label": ship.shipment_number})
-                edges.append({"from": f"lot:{lot_no}", "to": f"shipment:{ship.shipment_number}", "type": "shipped_in"})
+                _add_node(f"shipment:{ship.shipment_number}", "shipment", ship.shipment_number)
+                _add_edge(lot_node_id, f"shipment:{ship.shipment_number}", "shipped_in")
 
-                # 4. Find customer
+                # 4. Find customer for each shipment
                 if ship.customer_code:
                     cust_result = await db.execute(select(ERPCustomer).where(
                         ERPCustomer.connection_id == ship.connection_id,
@@ -2221,29 +2238,28 @@ class ERPTraceabilityService:
                     ))
                     cust = cust_result.scalar_one_or_none()
                     if cust:
-                        nodes.append({"id": f"customer:{ship.customer_code}", "type": "customer", "label": cust.name})
-                        edges.append({"from": f"shipment:{ship.shipment_number}", "to": f"customer:{ship.customer_code}", "type": "delivered_to"})
+                        _add_node(f"customer:{ship.customer_code}", "customer", cust.name)
+                        _add_edge(f"shipment:{ship.shipment_number}", f"customer:{ship.customer_code}", "delivered_to")
 
             # MES gap
-            gaps.append({"type": "missing_mes_consumption", "message": "MES 工单投料/产出关联尚未建立", "node_id": f"lot:{lot_no}"})
+            gaps.append({"type": "missing_mes_consumption", "message": "MES 工单投料/产出关联尚未建立", "node_id": lot_node_id})
 
         else:  # backward
-            # 1. Find shipment by lot_no
-            ship_result = await db.execute(select(ERPShipment).where(ERPShipment.lot_no == lot_no))
-            ship = ship_result.scalar_one_or_none()
-            if ship:
-                nodes.append({"id": f"lot:{lot_no}", "type": "erp_lot", "label": lot_no})
-                nodes.append({"id": f"shipment:{ship.shipment_number}", "type": "shipment", "label": ship.shipment_number})
-                edges.append({"from": f"shipment:{ship.shipment_number}", "to": f"lot:{lot_no}", "type": "shipped_in"})
+            _add_node(lot_node_id, "erp_lot", lot_no)
 
-            # 2. Find PO by lot_no (raw material)
+            # 1. Find shipments by lot_no (may be multiple lines)
+            ship_result = await db.execute(select(ERPShipment).where(ERPShipment.lot_no == lot_no))
+            ships = ship_result.scalars().all()
+            for ship in ships:
+                _add_node(f"shipment:{ship.shipment_number}", "shipment", ship.shipment_number)
+                _add_edge(f"shipment:{ship.shipment_number}", lot_node_id, "shipped_in")
+
+            # 2. Find POs by lot_no (may be multiple lines)
             po_result = await db.execute(select(ERPPurchaseOrder).where(ERPPurchaseOrder.lot_no == lot_no))
-            po = po_result.scalar_one_or_none()
-            if po:
-                if not nodes:
-                    nodes.append({"id": f"lot:{lot_no}", "type": "erp_lot", "label": lot_no})
-                nodes.append({"id": f"po:{po.po_number}", "type": "po", "label": po.po_number})
-                edges.append({"from": f"po:{po.po_number}", "to": f"lot:{lot_no}", "type": "purchased_as"})
+            pos = po_result.scalars().all()
+            for po in pos:
+                _add_node(f"po:{po.po_number}", "po", po.po_number)
+                _add_edge(f"po:{po.po_number}", lot_node_id, "purchased_as")
 
                 if po.supplier_code:
                     sup_result = await db.execute(select(ERPSupplier).where(
@@ -2252,11 +2268,11 @@ class ERPTraceabilityService:
                     ))
                     sup = sup_result.scalar_one_or_none()
                     if sup:
-                        nodes.append({"id": f"supplier:{po.supplier_code}", "type": "supplier", "label": sup.name})
-                        edges.append({"from": f"po:{po.po_number}", "to": f"supplier:{po.supplier_code}", "type": "ordered_from"})
+                        _add_node(f"supplier:{po.supplier_code}", "supplier", sup.name)
+                        _add_edge(f"po:{po.po_number}", f"supplier:{po.supplier_code}", "ordered_from")
 
             # MES gap
-            gaps.append({"type": "missing_mes_consumption", "message": "MES 工单投料/产出关联尚未建立", "node_id": f"lot:{lot_no}"})
+            gaps.append({"type": "missing_mes_consumption", "message": "MES 工单投料/产出关联尚未建立", "node_id": lot_node_id})
 
         return {"nodes": nodes, "edges": edges, "gaps": gaps}
 ```
@@ -2600,7 +2616,7 @@ async def link_supplier(
     sup.openqms_supplier_id = data.supplier_id
     sup.link_status = "linked"
     await db.commit()
-    return schemas.SupplierOut.model_validate(sup)
+    return schemas.SupplierOut.model_validate(_mask_entity(sup, user))
 
 
 @router.post("/suppliers/{supplier_id}/unlink")
@@ -2615,7 +2631,7 @@ async def unlink_supplier(
     sup.openqms_supplier_id = None
     sup.link_status = "unlinked"
     await db.commit()
-    return schemas.SupplierOut.model_validate(sup)
+    return schemas.SupplierOut.model_validate(_mask_entity(sup, user))
 
 
 @router.get("/customers")
@@ -2656,7 +2672,7 @@ async def link_customer(
     cust.openqms_customer_id = data.customer_id
     cust.link_status = "linked"
     await db.commit()
-    return schemas.CustomerOut.model_validate(cust)
+    return schemas.CustomerOut.model_validate(_mask_entity(cust, user))
 
 
 @router.post("/customers/{customer_id}/unlink")
@@ -2671,7 +2687,7 @@ async def unlink_customer(
     cust.openqms_customer_id = None
     cust.link_status = "unlinked"
     await db.commit()
-    return schemas.CustomerOut.model_validate(cust)
+    return schemas.CustomerOut.model_validate(_mask_entity(cust, user))
 
 
 @router.get("/materials")
