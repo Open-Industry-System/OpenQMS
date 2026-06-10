@@ -71,6 +71,7 @@ export async function fetchERPSuppliers(params?: {
   page?: number;
   page_size?: number;
   link_status?: string;
+  product_line_code?: string;
 }): Promise<PaginatedResponse<ERPSupplier>> {
   const resp = await client.get<PaginatedResponse<ERPSupplier>>(
     "/erp/suppliers",
@@ -96,6 +97,7 @@ export async function fetchERPCustomers(params?: {
   page?: number;
   page_size?: number;
   link_status?: string;
+  product_line_code?: string;
 }): Promise<PaginatedResponse<ERPCustomer>> {
   const resp = await client.get<PaginatedResponse<ERPCustomer>>(
     "/erp/customers",
@@ -120,6 +122,7 @@ export async function unlinkERPCustomer(id: string): Promise<void> {
 export async function fetchERPMaterials(params?: {
   page?: number;
   page_size?: number;
+  product_line_code?: string;
 }): Promise<PaginatedResponse<ERPMaterial>> {
   const resp = await client.get<PaginatedResponse<ERPMaterial>>(
     "/erp/materials",
@@ -133,6 +136,7 @@ export async function fetchERPMaterials(params?: {
 export async function fetchERPLocations(params?: {
   page?: number;
   page_size?: number;
+  product_line_code?: string;
 }): Promise<PaginatedResponse<ERPLocation>> {
   const resp = await client.get<PaginatedResponse<ERPLocation>>(
     "/erp/locations",
@@ -146,6 +150,7 @@ export async function fetchERPLocations(params?: {
 export async function fetchERPPurchaseOrders(params?: {
   page?: number;
   page_size?: number;
+  product_line_code?: string;
 }): Promise<PaginatedResponse<ERPPurchaseOrder>> {
   const resp = await client.get<PaginatedResponse<ERPPurchaseOrder>>(
     "/erp/purchase-orders",
@@ -159,6 +164,7 @@ export async function fetchERPPurchaseOrders(params?: {
 export async function fetchERPSalesOrders(params?: {
   page?: number;
   page_size?: number;
+  product_line_code?: string;
 }): Promise<PaginatedResponse<ERPSalesOrder>> {
   const resp = await client.get<PaginatedResponse<ERPSalesOrder>>(
     "/erp/sales-orders",
@@ -172,6 +178,7 @@ export async function fetchERPSalesOrders(params?: {
 export async function fetchERPInventoryBalances(params?: {
   page?: number;
   page_size?: number;
+  product_line_code?: string;
 }): Promise<PaginatedResponse<ERPInventoryBalance>> {
   const resp = await client.get<PaginatedResponse<ERPInventoryBalance>>(
     "/erp/inventory-balances",
@@ -185,6 +192,7 @@ export async function fetchERPInventoryBalances(params?: {
 export async function fetchERPShipments(params?: {
   page?: number;
   page_size?: number;
+  product_line_code?: string;
 }): Promise<PaginatedResponse<ERPShipment>> {
   const resp = await client.get<PaginatedResponse<ERPShipment>>(
     "/erp/shipments",
@@ -198,6 +206,7 @@ export async function fetchERPShipments(params?: {
 export async function fetchERPCostRecords(params?: {
   page?: number;
   page_size?: number;
+  product_line_code?: string;
 }): Promise<PaginatedResponse<ERPCostRecord>> {
   const resp = await client.get<PaginatedResponse<ERPCostRecord>>(
     "/erp/cost-records",

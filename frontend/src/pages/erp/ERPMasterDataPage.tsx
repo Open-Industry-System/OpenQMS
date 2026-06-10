@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Table, Tag, Button, Typography, App, Space, Input, Tabs,
+  Table, Tag, Button, Typography, App, Space, Input, Tabs, Modal, Select,
 } from "antd";
 import {
   fetchERPSuppliers,
@@ -46,6 +46,11 @@ function SuppliersTab() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkingRecord, setLinkingRecord] = useState<ERPSupplier | null>(null);
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
+  const [openqmsSuppliers, setOpenqmsSuppliers] = useState<Array<{ id: string; name: string }>>([]);
+  const [suppliersLoading, setSuppliersLoading] = useState(false);
 
   const fetchData = (p: number) => {
     setLoading(true);
@@ -60,10 +65,31 @@ function SuppliersTab() {
 
   useEffect(() => { fetchData(1); }, []);
 
-  const handleLink = async (record: ERPSupplier) => {
+  const openLinkModal = async (record: ERPSupplier) => {
+    setLinkingRecord(record);
+    setSelectedSupplierId(null);
+    setLinkModalOpen(true);
+    setSuppliersLoading(true);
     try {
-      await linkERPSupplier(record.erp_supplier_id, record.erp_supplier_id);
+      const resp = await fetchERPSuppliers({ page: 1, page_size: 100 });
+      setOpenqmsSuppliers(
+        resp.items
+          .filter((s) => s.openqms_supplier_id)
+          .map((s) => ({ id: s.openqms_supplier_id!, name: `${s.supplier_code} - ${s.name}` })),
+      );
+    } catch {
+      message.error("加载供应商列表失败");
+    } finally {
+      setSuppliersLoading(false);
+    }
+  };
+
+  const handleLink = async () => {
+    if (!linkingRecord || !selectedSupplierId) return;
+    try {
+      await linkERPSupplier(linkingRecord.erp_supplier_id, selectedSupplierId);
       message.success("关联成功");
+      setLinkModalOpen(false);
       fetchData(page);
     } catch {
       message.error("关联失败");
@@ -98,7 +124,7 @@ function SuppliersTab() {
       render: (_: unknown, record: ERPSupplier) => (
         <Space size={4}>
           {record.link_status !== "linked" && (
-            <Button type="link" size="small" onClick={() => handleLink(record)}>关联</Button>
+            <Button type="link" size="small" onClick={() => openLinkModal(record)}>关联</Button>
           )}
           {record.link_status === "linked" && (
             <Button type="link" size="small" danger onClick={() => handleUnlink(record)}>取消关联</Button>
@@ -109,18 +135,43 @@ function SuppliersTab() {
   ];
 
   return (
-    <Table
-      columns={columns}
-      dataSource={data}
-      rowKey="erp_supplier_id"
-      loading={loading}
-      pagination={{
-        current: page,
-        total,
-        pageSize: 20,
-        onChange: (p) => { setPage(p); fetchData(p); },
-      }}
-    />
+    <>
+      <Table
+        columns={columns}
+        dataSource={data}
+        rowKey="erp_supplier_id"
+        loading={loading}
+        pagination={{
+          current: page,
+          total,
+          pageSize: 20,
+          onChange: (p) => { setPage(p); fetchData(p); },
+        }}
+      />
+      <Modal
+        title="关联 OpenQMS 供应商"
+        open={linkModalOpen}
+        onOk={handleLink}
+        onCancel={() => setLinkModalOpen(false)}
+        okButtonProps={{ disabled: !selectedSupplierId }}
+        okText="确认关联"
+        cancelText="取消"
+      >
+        <p style={{ marginBottom: 12 }}>
+          选择要关联的 OpenQMS 供应商：
+        </p>
+        <Select
+          style={{ width: "100%" }}
+          placeholder="请选择供应商"
+          loading={suppliersLoading}
+          value={selectedSupplierId}
+          onChange={setSelectedSupplierId}
+          options={openqmsSuppliers.map((s) => ({ value: s.id, label: s.name }))}
+          showSearch
+          optionFilterProp="label"
+        />
+      </Modal>
+    </>
   );
 }
 
@@ -132,6 +183,11 @@ function CustomersTab() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkingRecord, setLinkingRecord] = useState<ERPCustomer | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [openqmsCustomers, setOpenqmsCustomers] = useState<Array<{ id: string; name: string }>>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
 
   const fetchData = (p: number) => {
     setLoading(true);
@@ -146,10 +202,31 @@ function CustomersTab() {
 
   useEffect(() => { fetchData(1); }, []);
 
-  const handleLink = async (record: ERPCustomer) => {
+  const openLinkModal = async (record: ERPCustomer) => {
+    setLinkingRecord(record);
+    setSelectedCustomerId(null);
+    setLinkModalOpen(true);
+    setCustomersLoading(true);
     try {
-      await linkERPCustomer(record.erp_customer_id, record.erp_customer_id);
+      const resp = await fetchERPCustomers({ page: 1, page_size: 100 });
+      setOpenqmsCustomers(
+        resp.items
+          .filter((c) => c.openqms_customer_id)
+          .map((c) => ({ id: c.openqms_customer_id!, name: `${c.customer_code} - ${c.name}` })),
+      );
+    } catch {
+      message.error("加载客户列表失败");
+    } finally {
+      setCustomersLoading(false);
+    }
+  };
+
+  const handleLink = async () => {
+    if (!linkingRecord || !selectedCustomerId) return;
+    try {
+      await linkERPCustomer(linkingRecord.erp_customer_id, selectedCustomerId);
       message.success("关联成功");
+      setLinkModalOpen(false);
       fetchData(page);
     } catch {
       message.error("关联失败");
@@ -184,7 +261,7 @@ function CustomersTab() {
       render: (_: unknown, record: ERPCustomer) => (
         <Space size={4}>
           {record.link_status !== "linked" && (
-            <Button type="link" size="small" onClick={() => handleLink(record)}>关联</Button>
+            <Button type="link" size="small" onClick={() => openLinkModal(record)}>关联</Button>
           )}
           {record.link_status === "linked" && (
             <Button type="link" size="small" danger onClick={() => handleUnlink(record)}>取消关联</Button>
@@ -195,18 +272,43 @@ function CustomersTab() {
   ];
 
   return (
-    <Table
-      columns={columns}
-      dataSource={data}
-      rowKey="erp_customer_id"
-      loading={loading}
-      pagination={{
-        current: page,
-        total,
-        pageSize: 20,
-        onChange: (p) => { setPage(p); fetchData(p); },
-      }}
-    />
+    <>
+      <Table
+        columns={columns}
+        dataSource={data}
+        rowKey="erp_customer_id"
+        loading={loading}
+        pagination={{
+          current: page,
+          total,
+          pageSize: 20,
+          onChange: (p) => { setPage(p); fetchData(p); },
+        }}
+      />
+      <Modal
+        title="关联 OpenQMS 客户"
+        open={linkModalOpen}
+        onOk={handleLink}
+        onCancel={() => setLinkModalOpen(false)}
+        okButtonProps={{ disabled: !selectedCustomerId }}
+        okText="确认关联"
+        cancelText="取消"
+      >
+        <p style={{ marginBottom: 12 }}>
+          选择要关联的 OpenQMS 客户：
+        </p>
+        <Select
+          style={{ width: "100%" }}
+          placeholder="请选择客户"
+          loading={customersLoading}
+          value={selectedCustomerId}
+          onChange={setSelectedCustomerId}
+          options={openqmsCustomers.map((c) => ({ value: c.id, label: c.name }))}
+          showSearch
+          optionFilterProp="label"
+        />
+      </Modal>
+    </>
   );
 }
 

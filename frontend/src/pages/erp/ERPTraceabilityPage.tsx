@@ -6,13 +6,11 @@ import type { TraceabilityResponse, TraceabilityNode } from "../../types/erp";
 const { Title } = Typography;
 
 const nodeTypeColors: Record<string, string> = {
+  erp_lot: "purple",
+  po: "green",
   supplier: "blue",
-  material: "cyan",
-  purchase_order: "green",
-  inventory: "purple",
-  production: "orange",
-  shipment: "geekblue",
-  customer: "gold",
+  shipment: "orange",
+  customer: "cyan",
 };
 
 export default function ERPTraceabilityPage() {
