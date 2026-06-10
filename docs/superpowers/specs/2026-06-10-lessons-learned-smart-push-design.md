@@ -183,17 +183,18 @@ LessonsLearnedService.recommend()
 - `fmea_type`: `nullable=False` → `nullable=True`
 - `source`: `String(15)` → `String(100)`
 - 新增 `report_id: Mapped[uuid.UUID | None]`（nullable，FK capa_eightd）
-- 新增 `doc_type: Mapped[str]`（default='fmea'）
+- 新增 `doc_type: Mapped[str]`（存储目标文档类型 "fmea" | "capa"，NOT NULL，default='fmea'）
+  - lessons global cache 也用这个字段标记目标文档类型（fmea 或 capa），不额外使用 "lesson" 值；是否为 lessons cache 由 `trigger_type = "lessons_learned"` 表达
 - 删除 `__table_args__` 中的 `UniqueConstraint`（旧约束已删除，由部分唯一索引替代）
 
 **现有 FMEA 推荐缓存的 UPSERT 同步更新**：
 
 `backend/app/services/recommendation_service.py` 中 `_cache_result()` 使用 `on_conflict_do_update(index_elements=["fmea_id", "trigger_type", "context_hash"])`。部分唯一索引需要额外指定 `index_where`，否则 UPSERT 会报 "no unique constraint matching"。
 
-修改后的 `_cache_result()` 需根据 cache 类型指定不同的 `index_where`：
-- **FMEA cache**：`index_where=RecommendationCache.fmea_id.isnot(None)`
-- **CAPA cache**：`index_where=RecommendationCache.report_id.isnot(None)`
-- **Lessons global cache**：`index_where=RecommendationCache.fmea_id.is_(None) & RecommendationCache.report_id.is_(None)`
+修改后的 `_cache_result()` 需根据 cache 类型指定不同的 `index_elements` 和 `index_where`：
+- **FMEA cache**：`index_elements=["fmea_id", "trigger_type", "context_hash"]`，`index_where=RecommendationCache.fmea_id.isnot(None)`
+- **CAPA cache**：`index_elements=["report_id", "trigger_type", "context_hash"]`，`index_where=RecommendationCache.report_id.isnot(None)`
+- **Lessons global cache**：`index_elements=["trigger_type", "context_hash"]`，`index_where=RecommendationCache.fmea_id.is_(None) & RecommendationCache.report_id.is_(None)`
 
 **解决方案：部分唯一索引（Partial Unique Indexes）**
 
@@ -216,8 +217,10 @@ ALTER TABLE recommendation_cache ALTER COLUMN source TYPE VARCHAR(100);
 -- 5. 使 fmea_type 可空（CAPA/global cache 无 fmea_type）
 ALTER TABLE recommendation_cache ALTER COLUMN fmea_type DROP NOT NULL;
 
--- 6. 新增 doc_type 列，区分 "fmea" | "capa" | "lesson"
+-- 6. 新增 doc_type 列，存储目标文档类型 "fmea" | "capa"
 ALTER TABLE recommendation_cache ADD COLUMN doc_type VARCHAR(20) DEFAULT 'fmea';
+UPDATE recommendation_cache SET doc_type = 'fmea' WHERE doc_type IS NULL;
+ALTER TABLE recommendation_cache ALTER COLUMN doc_type SET NOT NULL;
 
 -- 7. 创建三个部分唯一索引，分别覆盖不同场景
 -- FMEA 内联推荐场景：fmea_id 非空时，(fmea_id, trigger_type, context_hash) 唯一
