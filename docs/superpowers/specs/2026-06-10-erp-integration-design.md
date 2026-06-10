@@ -531,14 +531,25 @@ async def _link_erp_shipment(db, erp_shipment: ERPShipment):
         erp_shipment.link_status = "linked"
     else:
         # 3. 创建补充 ShipmentRecord（不覆盖已有记录）
+        # 多行发货单去重：同一 customer_id + lot_no + shipment_date 的多个 line 聚合为一条 ShipmentRecord
+        # 聚合语义：quantity 求和，notes 记录原始 ERP 行号列表
+        existing_lines = await find_erp_shipment_lines(
+            db, customer_id=customer_id, lot_no=erp_shipment.lot_no,
+            shipment_date=erp_shipment.shipment_date,
+        )
+        total_qty = sum(int(line.quantity) for line in existing_lines)
+        line_refs = ",".join([f"{line.shipment_number}-{line.line_number}" for line in existing_lines])
+
         new_record = await create_shipment_record(
             db,
             customer_id=customer_id,
             shipment_date=erp_shipment.shipment_date,
-            quantity=int(erp_shipment.quantity),
+            quantity=total_qty,
             batch_no=erp_shipment.lot_no,
             product_line_code=erp_shipment.product_line_code,
-            destination=None,  # 可选：从 erp_raw_data 提取
+            destination=None,
+            notes=f"ERP auto-import: {line_refs}",
+            created_by=SYSTEM_USER_ID,  # 后台同步使用系统用户
         )
         erp_shipment.openqms_shipment_id = new_record.shipment_id
         erp_shipment.link_status = "linked"
@@ -803,6 +814,9 @@ GET /api/erp/traceability/{node_type}/{node_id}
 - COQ 四类成本分类正确性
 - Traceability 正向/反向查询
 - 权限控制（viewer 403，admin/manager CRUD）
+- **字段级脱敏测试**：viewer/quality_engineer 请求 `erp_suppliers`/`erp_customers` 时，`bank_info` 返回 `"***"`，`tax_id` 返回前 6 位 + `****`；manager/admin 请求返回完整字段
+- **shipment 多行聚合测试**：同一 customer_id + lot_no + shipment_date 的多行发货单聚合为一条 ShipmentRecord，quantity 求和正确
+- **shipment 系统用户审计**：ERP 同步创建的 ShipmentRecord，`created_by` 为 `SYSTEM_USER_ID`，审计日志记录 `source="erp_sync"`
 
 ---
 
