@@ -28,7 +28,7 @@ export interface ERPSupplier {
   payment_terms?: string;
   currency?: string;
   tax_id?: string;
-  bank_info?: Record<string, unknown>;
+  bank_info?: Record<string, unknown> | string;
   product_line_code: string | null;
 }
 

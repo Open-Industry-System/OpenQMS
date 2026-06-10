@@ -84,13 +84,15 @@ class RESTConfig(BaseModel):
     retry: Optional[RESTRetryConfig] = Field(default=None)
     auth_type: Literal["none", "basic", "bearer", "api_key"] = "none"
     auth_config: Optional[dict] = Field(default=None)
-    endpoints: dict[str, RESTEndpointConfig] = Field(..., min_length=1)
+    endpoints: dict[str, RESTEndpointConfig] = Field(default_factory=dict)
     field_mapping: dict[str, str] = Field(default_factory=dict)
     retention: Optional[dict] = Field(default=None)
 
     @field_validator("endpoints")
     @classmethod
     def validate_endpoints(cls, v: dict[str, RESTEndpointConfig]) -> dict[str, RESTEndpointConfig]:
+        if not v:
+            return v
         required = {"suppliers", "customers", "materials", "locations",
                     "purchase_orders", "sales_orders", "inventory_balances",
                     "shipments", "cost_records"}
@@ -131,7 +133,7 @@ class SupplierOut(BaseModel):
     payment_terms: Optional[str]
     currency: Optional[str]
     tax_id: Optional[str]
-    bank_info: Optional[dict]
+    bank_info: Optional[dict | str]
     source_updated_at: Optional[datetime]
     product_line_code: Optional[str]
 
