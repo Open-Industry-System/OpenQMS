@@ -169,15 +169,44 @@ LessonsLearnedService.recommend()
 
 ### 缓存表迁移
 
-`recommendation_cache` 表的 `fmea_id` 是非空外键。为支持 CAPA：
+`recommendation_cache` 表的 `fmea_id` 是非空外键。为支持 CAPA，需要改动表结构。
+
+**PostgreSQL NULL + UNIQUE 陷阱**：当 `fmea_id` 设为可空后，PostgreSQL 多列唯一约束在任一列为 NULL 时不视为冲突。这会导致 `on_conflict_do_update`（UPSERT）无法命中 CAPA 记录，不断插入重复数据。
+
+**解决方案：部分唯一索引（Partial Unique Indexes）**
 
 ```sql
 -- 032_lessons_learned_cache.py
+
+-- 1. 使 fmea_id 可空
 ALTER TABLE recommendation_cache ALTER COLUMN fmea_id DROP NOT NULL;
+
+-- 2. 添加 report_id 列
 ALTER TABLE recommendation_cache ADD COLUMN report_id UUID
     REFERENCES capa_eightd(report_id) ON DELETE CASCADE;
--- 新增 lesson context hash 列（可选，复用 context_hash 即可）
+
+-- 3. 删除旧的唯一约束（如有）
+-- （旧约束基于 fmea_id + trigger_type + context_hash）
+ALTER TABLE recommendation_cache DROP CONSTRAINT IF EXISTS recommendation_cache_fmea_id_trigger_type_context_hash_key;
+
+-- 4. 创建三个部分唯一索引，分别覆盖不同场景
+-- FMEA 场景：fmea_id 非空时，(fmea_id, trigger_type, context_hash) 唯一
+CREATE UNIQUE INDEX uq_cache_fmea
+    ON recommendation_cache (fmea_id, trigger_type, context_hash)
+    WHERE fmea_id IS NOT NULL;
+
+-- CAPA 场景：report_id 非空时，(report_id, trigger_type, context_hash) 唯一
+CREATE UNIQUE INDEX uq_cache_capa
+    ON recommendation_cache (report_id, trigger_type, context_hash)
+    WHERE report_id IS NOT NULL;
+
+-- 全局缓存场景（lessons）：两者均为空时，(trigger_type, context_hash) 唯一
+CREATE UNIQUE INDEX uq_cache_global
+    ON recommendation_cache (trigger_type, context_hash)
+    WHERE fmea_id IS NULL AND report_id IS NULL;
 ```
+
+这样每种场景的 UPSERT 都能正确命中唯一约束。
 
 ### Cache Key
 
