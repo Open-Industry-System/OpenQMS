@@ -2,7 +2,7 @@
 
 **日期**: 2026-06-10
 **模块**: Phase 4 P3 经验教训智能推送
-**状态**: 设计定稿（v3 — 整合第二轮 review）
+**状态**: 设计定稿（v4 — 整合第三轮 review）
 
 ---
 
@@ -17,10 +17,10 @@
 | 数据来源 | 已批准 FMEA + 已关闭 CAPA + 审核发现 | 全量覆盖，不遗漏任何教训 |
 | 触发时机 | 创建弹窗收集最小上下文 → 提交后立即推送 | 解决请求体为空导致推荐上下文不足的问题 |
 | UI 形态 | 混合面板：高匹配卡片 + 分类列表 | 重要教训突出、其余分类可查阅 |
-| 匹配策略 | 全混合管道 — lessons 专用 source adapter 层 | 复用 embedding/FusionEngine 思路，不直接套 8D D4/D5 pipeline |
+| 匹配策略 | lessons 专用 context + source adapter 层 | 复用 embedding/candidate 结构和 FusionEngine 思路，不复用现有 Source 类 |
 | 产品线策略 | 用户可访问产品线范围内，当前产品线优先 | 不跨权限边界，避免需要额外授权模型 |
 | 编辑时推荐 | 不改动，沿用 SmartSuggestionDropdown / D4/D5 推荐 / D7 推荐 | 各系统职责清晰 |
-| 缓存策略 | `hash(title + problem_desc + product_line + doc_type)` 作为 cache key，24h TTL，按用户权限隔离（同角色共享） | 新文档 ID 无意义，基于内容 hash 可命中缓存 |
+| 缓存策略 | content hash key + 24h TTL，不按用户隔离 | 新文档 ID 无意义；权限过滤在 source 层保证不返回越权数据 |
 | 面板宿主 | 编辑器页面内弹出（navigate 后 state 驱动） | 避免列表页停留卡死，用户已到正确 URL |
 
 ## 架构
@@ -34,7 +34,8 @@
 │  │      ├─ FMEA: title, document_no, fmea_type, problem_description │
 │  │      └─ CAPA: title, document_no, severity, problem_description  │
 │  ├─ createFMEA(values) / createCAPA(values) 成功                     │
-│  ├─ navigate 到编辑器（携带 state: { showLessonsLearned: true }）     │
+│  ├─ navigate 到编辑器（携带 state: { showLessonsLearned: true,       │
+│  │                       problemDescription }）                      │
 │  │                                                                    │
 │  ▼                                                                    │
 │  FMEAEditorPage / CAPADetailPage（编辑器页面）                        │
@@ -103,7 +104,8 @@ interface LessonsLearnedResponse {
     capa: LessonCard[];            // 来源：已关闭 8D 的根因+措施
     audit: LessonCard[];           // 来源：审核发现项
   };
-  source: string;                  // "fmea_graph + semantic_search + historical_capa + audit_finding + rule"
+  source: string;                  // 详细列出参与召回的 source 名称，用 " + " 连接
+                                   // 如 "fmea_graph + semantic_search + historical_capa"
   cached: boolean;
 }
 
@@ -124,7 +126,7 @@ interface LessonCard {
 }
 ```
 
-`source` 字段改为详细字符串，列出参与召回的 source 名称（用 `+` 连接），便于前端解释推荐依据。
+`source` 字段为详细字符串，列出参与召回的 source 名称（用 ` + ` 连接），便于前端解释推荐依据。
 
 ## 数据流
 
@@ -132,7 +134,7 @@ interface LessonCard {
 createFMEA / createCAPA 成功
        │
        ▼
-navigate 到编辑器（state: { showLessonsLearned: true }）
+navigate 到编辑器（state: { showLessonsLearned: true, problemDescription }）
        │
        ▼
 编辑器页面检测 state → 调用 POST /api/{module}/{id}/lessons-learned
@@ -141,15 +143,15 @@ navigate 到编辑器（state: { showLessonsLearned: true }）
 LessonsLearnedService.recommend()
        │
        ├─ 1. 加载新文档 + 请求体 problem_description
-       │      构建 LessonsLearnedContext
+       │      构建 LessonsLearnedContext（独立于 RecommendationContext）
        ├─ 2. 多源并行召回（lessons 专用 source adapter）
-       │      ├─ HistoricalFMEASource   → 已批准 FMEA 失效模式匹配 ★ 新增
-       │      ├─ SemanticSearchSource   → pgvector 语义搜索（通用 adapter）
-       │      ├─ HistoricalCAPASource   → 已关闭 8D 根因匹配 ★ 新增
-       │      ├─ AuditFindingSource     → 审核发现项 pgvector 匹配 ★ 新增
-       │      └─ RuleEngineSource       → 关键词 fallback
+       │      ├─ HistoricalFMEASource   → 已批准 FMEA 失效模式匹配
+       │      ├─ LessonsSemanticSource  → pgvector 语义搜索（lessons adapter）
+       │      ├─ LessonsCAPASource      → 已关闭 8D 根因匹配（lessons adapter）
+       │      ├─ AuditFindingSource     → 审核发现项 pgvector 匹配
+       │      └─ LessonsRuleSource      → 关键词 fallback
        ├─ 3. LessonsFusionEngine 去重 + 排序
-       │      └─ 同产品线 +0.10（lessons 专用，不改现有 FusionEngine）
+       │      └─ 同产品线 +0.10（lessons 专用，不改现有 FusionEngine 的 +0.05）
        ├─ 4. 分类：highlights (≥0.7) + 按 source_type 分组
        └─ 5. 返回 LessonsLearnedResponse
 ```
@@ -159,11 +161,12 @@ LessonsLearnedService.recommend()
 ### 核心原则：不跨权限边界
 
 - **检索范围**：仅在用户可访问的产品线内检索（与现有 recommendation_sources 行为一致）
+- **"跨产品线"定义**：指用户有权限访问的其他产品线，不是跨越权限边界
 - **同产品线**：confidence + 0.10，排在前
 - **其他已授权产品线**：不加成，排在后，标注来源产品线
 - **兜底规则**：如果同产品线结果 < 3 条，补充用户有权限的其他产品线结果至至少 5 条
 
-不实施跨权限边界的检索，避免需要额外的授权模型。
+不实施跨权限边界的检索。不返回用户无权访问的产品线数据（即使脱敏后也不返回）。
 
 ## 缓存策略
 
@@ -187,7 +190,8 @@ ALTER TABLE recommendation_cache ADD COLUMN report_id UUID
 
 -- 3. 删除旧的唯一约束（如有）
 -- （旧约束基于 fmea_id + trigger_type + context_hash）
-ALTER TABLE recommendation_cache DROP CONSTRAINT IF EXISTS recommendation_cache_fmea_id_trigger_type_context_hash_key;
+ALTER TABLE recommendation_cache DROP CONSTRAINT IF EXISTS
+    recommendation_cache_fmea_id_trigger_type_context_hash_key;
 
 -- 4. 创建三个部分唯一索引，分别覆盖不同场景
 -- FMEA 场景：fmea_id 非空时，(fmea_id, trigger_type, context_hash) 唯一
@@ -206,13 +210,11 @@ CREATE UNIQUE INDEX uq_cache_global
     WHERE fmea_id IS NULL AND report_id IS NULL;
 ```
 
-这样每种场景的 UPSERT 都能正确命中唯一约束。
-
 ### Cache Key
 
 - **key**：`context_hash = SHA256(problem_description + product_line_code + doc_type + fmea_type/severity)`
 - **查询**：先查 `context_hash` 命中缓存，miss 时走完整召回
-- **TTL**：24 小时
+- **TTL**：24 小时（与现有 `recommendation_cache` 一致）
 - **用户隔离**：不按用户隔离（同产品线、同问题描述的推荐结果一致）。权限过滤在 source 层已保证不返回越权数据。
 - **失效**：新 FMEA/CAPA 审批状态变更时，不清除此缓存（lessons 是创建时快照，不需要实时更新）
 
@@ -233,10 +235,10 @@ backend/app/
 │       │   ├── __init__.py
 │       │   ├── base.py                 # LessonsSource ABC
 │       │   ├── historical_fmea.py      # HistoricalFMEASource
-│       │   ├── historical_capa.py      # HistoricalCAPASource
+│       │   ├── historical_capa.py      # LessonsCAPASource
 │       │   ├── audit_finding.py        # AuditFindingSource
-│       │   ├── semantic.py             # SemanticSearchSource (lessons adapter)
-│       │   └── rule_engine.py          # RuleEngineSource (lessons adapter)
+│       │   ├── semantic.py             # LessonsSemanticSource
+│       │   └── rule_engine.py          # LessonsRuleSource
 │       └── fusion.py                   # LessonsFusionEngine
 └── api/
     └── fmea.py                         # 新增 POST /fmea/{id}/lessons-learned
@@ -248,10 +250,10 @@ backend/app/
 ```python
 @dataclass
 class LessonsLearnedContext:
-    """经验教训推送上下文 — 独立于 RecommendationContext。"""
+    """经验教训推送上下文 — 独立于 RecommendationContext（后者是 CAPA D4/D5 专用）。"""
     doc_type: Literal["fmea", "capa"]
     doc_id: uuid.UUID
-    query_text: str                 # problem_description 或 title
+    query_text: str                 # problem_description 或 title（fallback）
     fmea_type: str | None           # 仅 FMEA
     severity: str | None            # 仅 CAPA
     product_line_code: str
@@ -259,7 +261,7 @@ class LessonsLearnedContext:
     fmea_ref_id: uuid.UUID | None   # CAPA 关联的 FMEA（如有）
 ```
 
-独立于 `RecommendationContext`（后者是 CAPA D4/D5 专用，stage 只允许 "d4" | "d5"）。
+独立于 `RecommendationContext`（后者 stage 只允许 "d4" | "d5"，capa_data 依赖 d2_description/d4_root_cause）。
 
 ### LessonsSource ABC
 
@@ -273,11 +275,11 @@ class LessonsSource(ABC):
         ...
 ```
 
-复用 `RecommendationCandidate` 数据结构（已定义在 `recommendation_types.py`），但不复用现有 Source 类。
+复用 `RecommendationCandidate` 数据结构（已定义在 `recommendation_types.py`），但不复用现有 Source 类（现有 Source 依赖 `RecommendationContext` 和 CAPA D4/D5 字段）。
 
 ### HistoricalFMEASource
 
-新建，处理"新建 FMEA 时从历史已批准 FMEA 全局召回"。
+新建。从历史已批准 FMEA 的 graph_data 中召回匹配的失效模式+原因+控制。
 
 ```python
 class HistoricalFMEASource:
@@ -285,32 +287,34 @@ class HistoricalFMEASource:
     name = "fmea_graph"
 
     async def retrieve(self, context: LessonsLearnedContext) -> list[RecommendationCandidate]:
-        # 1. 查询已批准 FMEA（同产品线优先，补充其他已授权产品线）
+        # 1. 查询已批准 FMEA（status='approved'，product_line_code IN context.user_product_lines）
         # 2. 遍历 graph_data 中的 FailureMode 节点
-        # 3. 关键词匹配 query_text against FailureMode.name / description
+        # 3. 关键词匹配 context.query_text against FailureMode.name / description
         # 4. 提取关联的 FailureCause、PreventionControl、DetectionControl
-        # 5. 转换为 RecommendationCandidate
+        # 5. 同产品线 confidence 0.7，其他已授权产品线 confidence 0.5
+        # 6. 转换为 RecommendationCandidate
 ```
 
-### HistoricalCAPASource
+### LessonsCAPASource
 
-新建，处理"已关闭 8D 的根因+措施匹配"。
+新建。从已关闭/已归档 CAPA 中召回匹配的根因+措施。
 
 ```python
-class HistoricalCAPASource:
+class LessonsCAPASource:
     """历史 CAPA 召回源。"""
     name = "historical_capa"
 
     async def retrieve(self, context: LessonsLearnedContext) -> list[RecommendationCandidate]:
-        # 1. 查询已关闭/已归档 CAPA（status IN D8_CLOSURE, ARCHIVED）
-        # 2. 关键词匹配 query_text against d2_description + d4_root_cause
-        # 3. 提取 d5_correction 作为 action
+        # 1. 查询已关闭/已归档 CAPA（status IN ('D8_CLOSURE', 'ARCHIVED')）
+        #    product_line_code IN context.user_product_lines
+        # 2. pgvector 语义搜索 d2_description（entity_type='capa', entity_field='d2_description'）
+        # 3. 提取 d4_root_cause 作为 root_cause，d5_correction 作为 action
         # 4. 转换为 RecommendationCandidate
 ```
 
 ### AuditFindingSource
 
-新建，审核发现项召回。
+新建。审核发现项召回，使用 pgvector 语义搜索。
 
 ```python
 class AuditFindingSource:
@@ -318,19 +322,24 @@ class AuditFindingSource:
     name = "audit_finding"
 
     async def retrieve(self, context: LessonsLearnedContext) -> list[RecommendationCandidate]:
-        # 1. 查询 document_embeddings WHERE entity_type = 'audit_finding'
-        #    JOIN audit_findings af ON af.finding_id = entity_id
-        #    JOIN audit_plans ap ON af.audit_id = ap.audit_id
-        # 2. 过滤：ap.product_line_code IN context.user_product_lines
-        # 3. 过滤：只召回有 corrective_action 的已确认/已关闭发现项
-        # 4. 按 pgvector 余弦相似度排序
-        # 5. 取 ap.product_line_code、ap.plan_no 作为来源字段
-        # 6. 转换为 RecommendationCandidate
+        # 1. pgvector 查询 document_embeddings WHERE entity_type = 'audit_finding'
+        # 2. JOIN audit_findings af ON af.finding_id = de.entity_id
+        # 3. JOIN audit_plans ap ON af.audit_id = ap.audit_id
+        # 4. 过滤：ap.product_line_code IN context.user_product_lines
+        # 5. 过滤：只召回 af.corrective_action IS NOT NULL 的已确认/已关闭发现项
+        # 6. 按 pgvector 余弦相似度排序
+        # 7. 取 ap.product_line_code、ap.plan_no 作为来源字段
+        # 8. 转换为 RecommendationCandidate
 ```
 
-### SemanticSearchSource（lessons adapter）
+注意：
+- `audit_findings` 表无 `product_line_code`，需 JOIN `audit_plans` 获取
+- `plan_no` 作为 `source_document_no`
+- `embedding_sync_worker.py` 已支持 `entity_type = 'audit_finding'`，无需新建同步逻辑
 
-复用 pgvector 基础设施，但适配 LessonsLearnedContext。
+### LessonsSemanticSource
+
+lessons 专用语义搜索 adapter。复用 pgvector 基础设施，但适配 LessonsLearnedContext。
 
 ```python
 class LessonsSemanticSearchSource:
@@ -339,18 +348,28 @@ class LessonsSemanticSearchSource:
 
     async def retrieve(self, context: LessonsLearnedContext) -> list[RecommendationCandidate]:
         # 1. 使用 context.query_text 生成 embedding
-        # 2. 查询 document_embeddings（entity_type IN fmea, capa）
+        # 2. 查询 document_embeddings（entity_type IN ('fmea_node', 'capa')）
         # 3. 过滤产品线权限
         # 4. 转换为 RecommendationCandidate
 ```
 
-### RuleEngineSource（lessons adapter）
+### LessonsRuleSource
 
-复用 `RuleEngine` 规则引擎（`recommendation_service.py` 中已有），适配 LessonsLearnedContext。
+lessons 专用规则引擎 adapter。复用 `RuleEngine`（`recommendation_service.py`），适配 LessonsLearnedContext。
+
+```python
+class LessonsRuleSource:
+    """lessons 专用规则引擎 fallback。"""
+    name = "rule_engine"
+
+    async def retrieve(self, context: LessonsLearnedContext) -> list[RecommendationCandidate]:
+        # 1. 使用 RuleEngine.evaluate("failure_mode", {"input_text": context.query_text})
+        # 2. 转换为 RecommendationCandidate
+```
 
 ### LessonsFusionEngine
 
-复用 FusionEngine 思路，但 lessons 专用：
+lessons 专用去重排序引擎。复用 FusionEngine 思路，但独立实现。
 
 ```python
 class LessonsFusionEngine:
@@ -364,7 +383,14 @@ class LessonsFusionEngine:
         "rule_engine": 0.5,
     }
 
-    PL_BOOST = 0.10  # 同产品线加成（lessons 专用，不改现有 FusionEngine 的 +0.05）
+    PL_BOOST = 0.10  # 同产品线加成（lessons 专用）
+    # 注意：现有 FusionEngine 使用 +0.05，不修改
+
+    def merge(self, candidates: list[RecommendationCandidate],
+              product_line_code: str) -> list[RecommendationCandidate]:
+        # 1. 来源优先级归一化 + 同产品线 bonus
+        # 2. 去重（归一化文本匹配）
+        # 3. 截断 Top 10
 ```
 
 ### 权限
@@ -479,4 +505,5 @@ CAPA 创建弹窗同理。
 |------|------|------|
 | v1 | 2026-06-10 | 初稿 |
 | v2 | 2026-06-10 | 整合第一轮 review：通用化上下文、AuditFindingSource 用 pgvector、全局检索+动态脱敏、缓存迁移、编辑器内弹出、超时、权限控制 |
-| v3 | 2026-06-10 | 整合第二轮 review：lessons 专用 context/source adapter 层（不直接套 8D pipeline）；创建弹窗新增 problem_description；产品线不跨权限边界；权限用 require_permission；FusionEngine lessons 专用（+0.10 不改现有）；source 字段详细化；缓存按内容 hash 不按用户隔离 |
+| v3 | 2026-06-10 | 整合第二轮 review：lessons 专用 context/source adapter 层；创建弹窗新增 problem_description；产品线不跨权限边界；权限用 require_permission；FusionEngine lessons 专用（+0.10 不改现有）；source 字段详细化；缓存按内容 hash 不按用户隔离 |
+| v4 | 2026-06-10 | 整合第三轮 review：修正请求体空问题（problem_description 可选 + title fallback）；明确 HistoricalFMEASource 独立于 FMEAGraphSource；明确 lessons 专用 source adapter 不复用现有 Source 类；产品线策略明确"不跨权限边界"=不返回无权数据；AuditFindingSource 明确 JOIN + 只召回有 corrective_action 的发现项；缓存策略补充 TTL/用户隔离说明；FusionEngine +0.10 与现有 +0.05 并存；source 字段详细列出参与的 source 名称 |
