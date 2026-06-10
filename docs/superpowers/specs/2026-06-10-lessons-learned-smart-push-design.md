@@ -2,7 +2,7 @@
 
 **日期**: 2026-06-10
 **模块**: Phase 4 P3 经验教训智能推送
-**状态**: 设计定稿（v4 — 整合第三轮 review）
+**状态**: 设计定稿（v5 — 整合第四轮 review）
 
 ---
 
@@ -20,7 +20,7 @@
 | 匹配策略 | lessons 专用 context + source adapter 层 | 复用 embedding/candidate 结构和 FusionEngine 思路，不复用现有 Source 类 |
 | 产品线策略 | 用户可访问产品线范围内，当前产品线优先 | 不跨权限边界，避免需要额外授权模型 |
 | 编辑时推荐 | 不改动，沿用 SmartSuggestionDropdown / D4/D5 推荐 / D7 推荐 | 各系统职责清晰 |
-| 缓存策略 | content hash key + 24h TTL，不按用户隔离 | 新文档 ID 无意义；权限过滤在 source 层保证不返回越权数据 |
+| 缓存策略 | content hash key 包含 allowed_pls_hash + 24h TTL，按用户可访问产品线集隔离 | 缓存 key 包含产品线集合 hash，避免不同权限用户共享缓存导致越权 |
 | 面板宿主 | 编辑器页面内弹出（navigate 后 state 驱动） | 避免列表页停留卡死，用户已到正确 URL |
 
 ## 架构
@@ -105,7 +105,7 @@ interface LessonsLearnedResponse {
     audit: LessonCard[];           // 来源：审核发现项
   };
   source: string;                  // 详细列出参与召回的 source 名称，用 " + " 连接
-                                   // 如 "fmea_graph + semantic_search + historical_capa"
+                                   // 如 "historical_fmea + semantic_search + historical_capa"
   cached: boolean;
 }
 
@@ -212,10 +212,11 @@ CREATE UNIQUE INDEX uq_cache_global
 
 ### Cache Key
 
-- **key**：`context_hash = SHA256(problem_description + product_line_code + doc_type + fmea_type/severity)`
+- **key**：`context_hash = SHA256(problem_description + product_line_code + doc_type + fmea_type/severity + sorted(user_product_lines))`
+- `sorted(user_product_lines)` 确保相同产品线集合产生相同 hash，避免顺序差异导致 miss
 - **查询**：先查 `context_hash` 命中缓存，miss 时走完整召回
 - **TTL**：24 小时（与现有 `recommendation_cache` 一致）
-- **用户隔离**：不按用户隔离（同产品线、同问题描述的推荐结果一致）。权限过滤在 source 层已保证不返回越权数据。
+- **隔离规则**：cache key 包含用户可访问产品线集合的 hash（`allowed_pls_hash`）。不同产品线权限的用户不会命中同一缓存条目，避免越权。同角色用户如果可访问的产品线集合相同，可以共享缓存。
 - **失效**：新 FMEA/CAPA 审批状态变更时，不清除此缓存（lessons 是创建时快照，不需要实时更新）
 
 ## 后端架构
@@ -284,7 +285,7 @@ class LessonsSource(ABC):
 ```python
 class HistoricalFMEASource:
     """历史 FMEA 失效模式召回源。"""
-    name = "fmea_graph"
+    name = "historical_fmea"
 
     async def retrieve(self, context: LessonsLearnedContext) -> list[RecommendationCandidate]:
         # 1. 查询已批准 FMEA（status='approved'，product_line_code IN context.user_product_lines）
@@ -349,8 +350,10 @@ class LessonsSemanticSearchSource:
     async def retrieve(self, context: LessonsLearnedContext) -> list[RecommendationCandidate]:
         # 1. 使用 context.query_text 生成 embedding
         # 2. 查询 document_embeddings（entity_type IN ('fmea_node', 'capa')）
+        #    注意：FMEA embedding 的 entity_type 是 'fmea_node'（不是 'fmea'）
         # 3. 过滤产品线权限
-        # 4. 转换为 RecommendationCandidate
+        # 4. FMEA 结果需从 metadata.node_type 或 node_id 回溯 graph_data 组装 LessonCard
+        # 5. 转换为 RecommendationCandidate
 ```
 
 ### LessonsRuleSource
@@ -376,7 +379,7 @@ class LessonsFusionEngine:
     """lessons 专用去重排序引擎。"""
 
     SOURCE_PRIORITY = {
-        "fmea_graph": 1.0,
+        "historical_fmea": 1.0,
         "historical_capa": 0.9,
         "semantic_search": 0.7,
         "audit_finding": 0.6,
@@ -450,12 +453,14 @@ CAPA 创建弹窗同理。
 ### LessonsLearnedModal 交互
 
 - Modal 宽度 720px
-- loading 状态：显示 "正在检索相关经验教训..."，**3 秒超时**自动关闭并提示
+- loading 状态：显示 "正在检索相关经验教训..."，**10 秒超时**自动关闭并提示 "检索超时，请稍后在编辑过程中使用推荐功能"
+  - embedding/pgvector/多源并行在冷启动或本地环境可能较慢，3 秒过于激进
 - 渲染面板（见下方布局）
 - "跳过，直接编辑" → 关闭面板
 - "查看详情" → 新标签页打开来源文档（所有条目均在权限范围内，无需禁用）
 - viewer 角色不弹出
 - 全部为空 → "未找到相关经验教训，开始创建吧！" + 自动关闭面板
+- **注意**：弹窗状态通过 `location.state` 传递，页面刷新后 state 丢失，弹窗不会恢复。这是可接受的行为——创建后的一次性提醒，刷新后不再重复弹出。
 
 ### 面板布局
 
@@ -507,3 +512,4 @@ CAPA 创建弹窗同理。
 | v2 | 2026-06-10 | 整合第一轮 review：通用化上下文、AuditFindingSource 用 pgvector、全局检索+动态脱敏、缓存迁移、编辑器内弹出、超时、权限控制 |
 | v3 | 2026-06-10 | 整合第二轮 review：lessons 专用 context/source adapter 层；创建弹窗新增 problem_description；产品线不跨权限边界；权限用 require_permission；FusionEngine lessons 专用（+0.10 不改现有）；source 字段详细化；缓存按内容 hash 不按用户隔离 |
 | v4 | 2026-06-10 | 整合第三轮 review：修正请求体空问题（problem_description 可选 + title fallback）；明确 HistoricalFMEASource 独立于 FMEAGraphSource；明确 lessons 专用 source adapter 不复用现有 Source 类；产品线策略明确"不跨权限边界"=不返回无权数据；AuditFindingSource 明确 JOIN + 只召回有 corrective_action 的发现项；缓存策略补充 TTL/用户隔离说明；FusionEngine +0.10 与现有 +0.05 并存；source 字段详细列出参与的 source 名称 |
+| v5 | 2026-06-10 | 整合第四轮 review：cache key 加入 sorted(user_product_lines) 防止缓存越权；统一缓存隔离规则为"按可访问产品线集合隔离"；HistoricalFMEASource name 改为 historical_fmea（不与 FMEAGraphSource 的 fmea_graph 冲突）；LessonsSemanticSource entity_type 改为 ('fmea_node', 'capa')；超时从 3s 改为 10s；明确刷新页面后弹窗不恢复 |
