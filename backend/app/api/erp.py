@@ -24,7 +24,7 @@ from app.models.erp import (
 from app.schemas import erp as schemas
 from app.services.erp_service import ERPIngestionService, ERPSyncService, ERPTraceabilityService
 from app.services.erp_connector import test_erp_connection, get_erp_connector, get_erp_connector_by_config
-from app.services.erp_crypto import hash_api_key, encrypt_credential, sanitize_config
+from app.services.erp_crypto import hash_api_key, encrypt_credential, decrypt_credential, sanitize_config
 from app.api.erp_deps import require_erp_api_key
 
 router = APIRouter(prefix="/api/erp", tags=["erp"])
@@ -54,7 +54,8 @@ def _process_credentials(config: dict) -> dict:
     if inbound_key:
         auth_config["api_key_hash"] = hash_api_key(inbound_key)
         auth_config.pop("inbound_api_key", None)
-    for field in ("outbound_api_key", "token", "password", "secret", "username"):
+    # NOTE: username is NOT encrypted — needed in plaintext for Basic auth
+    for field in ("outbound_api_key", "token", "password", "secret"):
         plaintext = auth_config.get(field)
         if plaintext:
             encrypted_field = f"{field}_encrypted"
@@ -118,6 +119,8 @@ async def create_connection(
     db.add(conn)
     await db.flush()
 
+    await enforce_product_line_access(user, conn.product_line_code, db)
+
     # Create sync jobs for all 9 data types
     for data_type in ["suppliers", "customers", "materials", "locations",
                       "purchase_orders", "sales_orders", "inventory_balances",
@@ -174,6 +177,7 @@ async def update_connection(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
 
     if data.config is not None:
         data.config = _validate_rest_config(data.connector_type or conn.connector_type, data.config)
@@ -194,6 +198,7 @@ async def delete_connection(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
     await db.delete(conn)
     await db.commit()
     return {"message": "Deleted"}
@@ -208,7 +213,18 @@ async def test_connection(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    return test_erp_connection(conn.connector_type, sanitize_config(conn.config))
+    await enforce_product_line_access(user, conn.product_line_code, db)
+
+    # Decrypt credentials for testing — use raw config, not sanitize_config
+    test_config = dict(conn.config)
+    auth_config = test_config.get("auth_config", {})
+    if isinstance(auth_config, dict):
+        for field in ("outbound_api_key", "token", "password", "secret"):
+            encrypted = auth_config.get(f"{field}_encrypted")
+            if encrypted:
+                auth_config[field] = decrypt_credential(encrypted)
+
+    return await test_erp_connection(conn.connector_type, test_config)
 
 
 @router.post("/connections/{connection_id}/sync")
@@ -225,6 +241,7 @@ async def trigger_sync(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
+    await enforce_product_line_access(user, conn.product_line_code, db)
     if not conn.is_active:
         raise HTTPException(status_code=400, detail="Connection is inactive")
 
@@ -326,6 +343,7 @@ async def link_supplier(
     sup = await db.get(ERPSupplier, supplier_id)
     if not sup:
         raise HTTPException(status_code=404, detail="Supplier not found")
+    await enforce_product_line_access(user, sup.product_line_code, db)
     sup.openqms_supplier_id = data.supplier_id
     sup.link_status = "linked"
     await db.commit()
@@ -342,6 +360,7 @@ async def unlink_supplier(
     sup = await db.get(ERPSupplier, supplier_id)
     if not sup:
         raise HTTPException(status_code=404, detail="Supplier not found")
+    await enforce_product_line_access(user, sup.product_line_code, db)
     sup.openqms_supplier_id = None
     sup.link_status = "unlinked"
     await db.commit()
@@ -385,6 +404,7 @@ async def link_customer(
     cust = await db.get(ERPCustomer, customer_id)
     if not cust:
         raise HTTPException(status_code=404, detail="Customer not found")
+    await enforce_product_line_access(user, cust.product_line_code, db)
     cust.openqms_customer_id = data.customer_id
     cust.link_status = "linked"
     await db.commit()
@@ -401,6 +421,7 @@ async def unlink_customer(
     cust = await db.get(ERPCustomer, customer_id)
     if not cust:
         raise HTTPException(status_code=404, detail="Customer not found")
+    await enforce_product_line_access(user, cust.product_line_code, db)
     cust.openqms_customer_id = None
     cust.link_status = "unlinked"
     await db.commit()
@@ -487,7 +508,74 @@ async def get_dashboard(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    # Sync health
+    kpis: list[schemas.DashboardKPI] = []
+
+    # Connection count
+    conn_total_result = await db.execute(select(func.count()).select_from(ERPConnection))
+    conn_total = conn_total_result.scalar() or 0
+    conn_active_result = await db.execute(
+        select(func.count()).select_from(ERPConnection).where(ERPConnection.is_active == True)
+    )
+    conn_active = conn_active_result.scalar() or 0
+    kpis.append(schemas.DashboardKPI(
+        label="活跃连接", value=f"{conn_active}/{conn_total}",
+        status="success" if conn_active > 0 else "error",
+    ))
+
+    # Sync job status (last success/failure)
+    sync_success_result = await db.execute(
+        select(func.count()).select_from(ERPSyncJob).where(ERPSyncJob.status == "completed")
+    )
+    sync_success = sync_success_result.scalar() or 0
+    sync_failed_result = await db.execute(
+        select(func.count()).select_from(ERPSyncJob).where(ERPSyncJob.status == "failed")
+    )
+    sync_failed = sync_failed_result.scalar() or 0
+    sync_total_result = await db.execute(select(func.count()).select_from(ERPSyncJob))
+    sync_total = sync_total_result.scalar() or 0
+    kpis.append(schemas.DashboardKPI(
+        label="同步状态",
+        value=f"{sync_success} 成功 / {sync_failed} 失败",
+        status="error" if sync_failed > 0 else "success" if sync_success > 0 else "warning",
+    ))
+
+    # Supplier/customer link rates
+    sup_linked_result = await db.execute(
+        select(func.count()).select_from(ERPSupplier).where(ERPSupplier.link_status == "linked")
+    )
+    sup_linked = sup_linked_result.scalar() or 0
+    sup_total_result = await db.execute(select(func.count()).select_from(ERPSupplier))
+    sup_total = sup_total_result.scalar() or 0
+    kpis.append(schemas.DashboardKPI(
+        label="供应商关联率",
+        value=f"{sup_linked}/{sup_total}",
+        status="success" if sup_total == 0 or sup_linked / sup_total >= 0.5 else "warning",
+    ))
+
+    cust_linked_result = await db.execute(
+        select(func.count()).select_from(ERPCustomer).where(ERPCustomer.link_status == "linked")
+    )
+    cust_linked = cust_linked_result.scalar() or 0
+    cust_total_result = await db.execute(select(func.count()).select_from(ERPCustomer))
+    cust_total = cust_total_result.scalar() or 0
+    kpis.append(schemas.DashboardKPI(
+        label="客户关联率",
+        value=f"{cust_linked}/{cust_total}",
+        status="success" if cust_total == 0 or cust_linked / cust_total >= 0.5 else "warning",
+    ))
+
+    # COQ total
+    coq_total_result = await db.execute(
+        select(func.coalesce(func.sum(ERPCostRecord.amount), 0))
+    )
+    coq_total = float(coq_total_result.scalar() or 0)
+    kpis.append(schemas.DashboardKPI(
+        label="质量成本总计",
+        value=f"¥{coq_total:,.2f}",
+        status="warning" if coq_total > 0 else "success",
+    ))
+
+    # Sync health (for detailed view)
     sync_result = await db.execute(select(ERPSyncJob.data_type, ERPSyncJob.status, ERPSyncJob.completed_at))
     sync_health = [{"data_type": r[0], "status": r[1], "last_sync": r[2]} for r in sync_result.all()]
 
@@ -508,7 +596,7 @@ async def get_dashboard(
         pending_actions=[],
         inventory_alerts=[],
         shipment_risks=[],
-        kpis=[],
+        kpis=kpis,
     )
 
 
