@@ -67,6 +67,7 @@
 3. **双写关联** — ERP 数据镜像落表，再受控映射到 OpenQMS 质量实体（suppliers→suppliers, shipments→shipment_records）
 4. **4 阶段 DAG 同步** — 主数据 → 业务单据 → 库存/发货 → 成本，确保依赖顺序
 5. **显式 gaps** — 追溯链路不完整时显式返回缺口，不假装完整
+6. **全局连接支持** — 集中式 ERP 实例可配置为 `product_line_code=NULL` 的全局连接，主数据对所有产品线可见
 
 ### 2.2 系统架构
 
@@ -124,7 +125,7 @@
 | connector_type | VARCHAR(50) | `mock` / `rest` / `sap` / `oracle` / `ufida` / `kingdee` |
 | config | JSONB | 适配器配置（端点、字段映射、认证，敏感字段脱敏） |
 | is_active | BOOLEAN | 是否启用 |
-| product_line_code | VARCHAR(50) FK | 产品线隔离 |
+| product_line_code | VARCHAR(50) FK, nullable | 产品线隔离（全局连接可为 NULL） |
 | created_by | UUID FK | 创建人 |
 | created_at / updated_at | TIMESTAMPTZ | 时间戳 |
 
@@ -161,7 +162,7 @@
 | erp_supplier_id | UUID PK | 主键（避免与 OpenQMS suppliers.supplier_id 概念冲突） |
 | connection_id | UUID FK | 所属连接 |
 | external_id | VARCHAR(100) | ERP 系统内部 ID |
-| erp_supplier_code | VARCHAR(100) | ERP 供应商编码（唯一键） |
+| supplier_code | VARCHAR(100) | 供应商编码（唯一键，与 customers.customer_code、materials.material_code 对称） |
 | name | VARCHAR(200) | 供应商名称 |
 | status | VARCHAR(20) | `active` / `inactive` / `blocked` |
 | payment_terms | VARCHAR(100) | 付款条款 |
@@ -171,10 +172,12 @@
 | **openqms_supplier_id** | UUID FK→suppliers (nullable) | OpenQMS 供应商外键（受控关联） |
 | **link_status** | VARCHAR(20) | `linked` / `pending` / `unlinked` / `review_required` |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
-| product_line_code | VARCHAR(50) FK | 产品线 |
+| product_line_code | VARCHAR(50) FK, nullable | 产品线（全局连接可为 NULL） |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
-**唯一约束**: `(connection_id, erp_supplier_code)`
+**唯一约束**: `(connection_id, supplier_code)`
+
+**关联映射**: `erp_suppliers.supplier_code` ↔ `suppliers.supplier_no`
 
 #### `erp_customers`
 
@@ -194,7 +197,7 @@
 | **openqms_customer_id** | UUID FK→customers (nullable) | OpenQMS 客户外键（受控关联） |
 | **link_status** | VARCHAR(20) | `linked` / `pending` / `unlinked` / `review_required` |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
-| product_line_code | VARCHAR(50) FK | 产品线 |
+| product_line_code | VARCHAR(50) FK, nullable | 产品线（全局连接可为 NULL） |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
 **唯一约束**: `(connection_id, customer_code)`
@@ -218,7 +221,7 @@
 | default_supplier_code | VARCHAR(100) | 默认供应商编码 |
 | status | VARCHAR(20) | `active` / `inactive` / `obsolete` |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
-| product_line_code | VARCHAR(50) FK | 产品线 |
+| product_line_code | VARCHAR(50) FK, nullable | 产品线（全局连接可为 NULL） |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
 **唯一约束**: `(connection_id, material_code)`
@@ -238,7 +241,7 @@
 | location_type | VARCHAR(50) | `receiving` / `inspection` / `quarantine` / `frozen` / `scrap` / `normal` |
 | is_enabled | BOOLEAN | 是否启用 |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
-| product_line_code | VARCHAR(50) FK | 产品线 |
+| product_line_code | VARCHAR(50) FK, nullable | 产品线（全局连接可为 NULL） |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
 **唯一约束**: `(connection_id, location_code)`
@@ -254,7 +257,8 @@
 | po_id | UUID PK | 主键 |
 | connection_id | UUID FK | 所属连接 |
 | external_id | VARCHAR(100) | ERP 内部 ID |
-| po_number | VARCHAR(100) | 采购单号（唯一键） |
+| po_number | VARCHAR(100) | 采购单号 |
+| **line_number** | VARCHAR(20) | **行号**（多行单据必填） |
 | supplier_code | VARCHAR(100) | 供应商编码（关联 erp_suppliers） |
 | material_code | VARCHAR(100) | 物料编码（关联 erp_materials） |
 | quantity | NUMERIC(18,4) | 采购数量 |
@@ -265,10 +269,10 @@
 | status | VARCHAR(20) | `draft` / `approved` / `partial` / `completed` / `cancelled` |
 | lot_no | VARCHAR(100) | 供应商批次号 |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
-| product_line_code | VARCHAR(50) FK | 产品线 |
+| product_line_code | VARCHAR(50) FK, nullable | 产品线（全局连接可为 NULL） |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
-**唯一约束**: `(connection_id, po_number)`
+**唯一约束**: `(connection_id, po_number, line_number)` — 支持多行采购单
 
 #### `erp_sales_orders`
 
@@ -279,7 +283,8 @@
 | so_id | UUID PK | 主键 |
 | connection_id | UUID FK | 所属连接 |
 | external_id | VARCHAR(100) | ERP 内部 ID |
-| so_number | VARCHAR(100) | 销售单号（唯一键） |
+| so_number | VARCHAR(100) | 销售单号 |
+| **line_number** | VARCHAR(20) | **行号**（多行单据必填） |
 | customer_code | VARCHAR(100) | 客户编码（关联 erp_customers） |
 | material_code | VARCHAR(100) | 物料编码 |
 | quantity | NUMERIC(18,4) | 订单数量 |
@@ -287,10 +292,10 @@
 | delivery_date | DATE | 计划交货日期 |
 | status | VARCHAR(20) | `draft` / `confirmed` / `partial` / `completed` / `cancelled` |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
-| product_line_code | VARCHAR(50) FK | 产品线 |
+| product_line_code | VARCHAR(50) FK, nullable | 产品线（全局连接可为 NULL） |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
-**唯一约束**: `(connection_id, so_number)`
+**唯一约束**: `(connection_id, so_number, line_number)` — 支持多行销售单
 
 ### 3.4 库存/发货层（阶段 3）
 
@@ -304,7 +309,7 @@
 | connection_id | UUID FK | 所属连接 |
 | material_code | VARCHAR(100) | 物料编码 |
 | location_code | VARCHAR(100) | 库位编码 |
-| lot_no | VARCHAR(100) | 批次号 |
+| lot_no | VARCHAR(100) NOT NULL DEFAULT '' | 批次号（非批次管控物料为空字符串） |
 | supplier_lot_no | VARCHAR(100) | 供应商批次号 |
 | quantity | NUMERIC(18,4) | 数量 |
 | unit | VARCHAR(20) | 单位 |
@@ -315,11 +320,7 @@
 | product_line_code | VARCHAR(50) FK | 产品线 |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
-**唯一约束**: 使用函数式索引 `UniqueConstraint(connection_id, material_code, location_code, COALESCE(lot_no, ''))` — 避免 nullable lot_no 导致非批次管控物料重复。
-
-或备选方案：
-- 使用 `external_id` 作为唯一约束 `(connection_id, external_id)`
-- 或引入 `normalized_lot_key` 字段，无批次时填 `"_NO_LOT_"`
+**唯一约束**: `(connection_id, material_code, location_code, lot_no)` — `lot_no` 为 `NOT NULL DEFAULT ''`，非批次管控物料统一为空字符串，确保唯一性约束生效。
 
 #### `erp_shipments`
 
@@ -330,20 +331,21 @@
 | erp_shipment_id | UUID PK | 主键（避免与 OpenQMS shipment_records.shipment_id 概念冲突） |
 | connection_id | UUID FK | 所属连接 |
 | external_id | VARCHAR(100) | ERP 内部 ID |
-| shipment_number | VARCHAR(100) | 发货单号（唯一键） |
+| shipment_number | VARCHAR(100) | 发货单号 |
+| **line_number** | VARCHAR(20) | **行号**（多行发货单必填） |
 | so_number | VARCHAR(100) | 关联销售单号 |
 | customer_code | VARCHAR(100) | 客户编码 |
 | material_code | VARCHAR(100) | 物料编码 |
 | lot_no | VARCHAR(100) | 成品批次号 |
-| quantity | NUMERIC(18,4) | 发货数量 |
+| **quantity** | INTEGER | 发货数量（与 `shipment_records.quantity` 类型对齐） |
 | shipment_date | DATE | 发货日期 |
 | **openqms_shipment_id** | UUID FK→shipment_records (nullable) | OpenQMS 发运记录外键（受控映射） |
 | **link_status** | VARCHAR(20) | `linked` / `pending` / `unlinked` |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
-| product_line_code | VARCHAR(50) FK | 产品线 |
+| product_line_code | VARCHAR(50) FK, nullable | 产品线（全局连接可为 NULL） |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
-**唯一约束**: `(connection_id, shipment_number)`
+**唯一约束**: `(connection_id, shipment_number, line_number)` — 支持多行发货单
 
 ### 3.5 成本层（阶段 4）
 
@@ -369,10 +371,14 @@
 | cost_date | DATE | 发生日期 |
 | description | TEXT | 描述 |
 | source_updated_at | TIMESTAMPTZ | ERP 更新时间戳 |
-| product_line_code | VARCHAR(50) FK | 产品线 |
+| product_line_code | VARCHAR(50) FK, nullable | 产品线（全局连接可为 NULL） |
 | erp_raw_data | JSONB | ERP 原始数据 |
 
 **唯一约束**: `(connection_id, external_id)`
+
+**external_id 生成规则**：
+- 明细记录：直接使用 ERP 原始 `external_id`
+- 月度汇总：使用确定性生成算法 `f"summary_{cost_category}_{cost_type}_{period_month}_{cost_center}"`，确保多次同步幂等
 
 ---
 
@@ -469,8 +475,8 @@ class ERPConnector(ABC):
 
 ```python
 async def _link_erp_supplier(db, erp_supplier: ERPSupplier):
-    # 1. 按 erp_supplier_code == suppliers.supplier_no 强键自动匹配
-    supplier = await find_supplier_by_no(db, erp_supplier.erp_supplier_code)
+    # 1. 按 supplier_code == suppliers.supplier_no 强键自动匹配
+    supplier = await find_supplier_by_no(db, erp_supplier.supplier_code)
     if supplier:
         erp_supplier.openqms_supplier_id = supplier.supplier_id
         erp_supplier.link_status = "linked"
@@ -792,6 +798,8 @@ GET /api/erp/traceability/{node_type}/{node_id}
 | 追溯缓存 | 首版运行时 SQL 聚合，不建缓存表 | 数据量增大时加 traceability_links 表或知识图谱 |
 | 预防/检验成本 | 首版按月汇总，不做逐条明细 | 数据源完善后细化 |
 | PLM 物料关联 | 未建立 erp_materials ↔ plm_parts 映射 | 需要时扩展 |
+| ERP 全局连接 | 集中式 ERP 实例支持 `product_line_code=NULL` 的全局连接，主数据对所有产品线可见 | 首版已支持 |
+| Outbox 写入 | 首版业务代码完全跳过 `erp_push_outbox` 写入，表结构仅预留 | v2 激活时启用 |
 
 ---
 
