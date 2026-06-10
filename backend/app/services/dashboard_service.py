@@ -651,14 +651,17 @@ async def get_widgets_data(
     needs_quality_trend = "quality_trend_ai_summary" in types
     if needs_quality_trend:
         try:
-            from app.services.quality_trend_service import build_quality_trend_summary, build_scope_description
+            from app.services.quality_trend_service import build_quality_trend_summary, build_scope_description, build_scope_hash
 
+            scope_description = build_scope_description(product_line_codes)
+            scope_hash = await build_scope_hash(product_line_codes or [])
             summary = await build_quality_trend_summary(
                 db=db,
                 filter_codes=product_line_codes or [],
                 allowed_modules=quality_trend_allowed_modules or set(),
-                scope_description=build_scope_description(product_line_codes),
+                scope_description=scope_description,
                 selected_product_line=product_line_codes[0] if product_line_codes and len(product_line_codes) == 1 else None,
+                scope_hash=scope_hash,
             )
             result["quality_trend"] = {"summary": summary.model_dump()}
         except Exception as e:

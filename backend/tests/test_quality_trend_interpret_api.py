@@ -31,7 +31,11 @@ def _make_user():
 
 
 class FakeLLMProvider:
+    def __init__(self):
+        self.last_prompt: str | None = None
+
     async def complete(self, prompt: str, response_schema: dict) -> dict:
+        self.last_prompt = prompt
         return {
             "summary": "SPC 告警与 CAPA 超期共同推高趋势风险。",
             "possible_causes": ["制程波动未及时确认"],
@@ -107,12 +111,18 @@ async def test_interpret_returns_503_when_llm_not_configured_and_writes_audit():
 
 @pytest.mark.anyio
 async def test_interpret_returns_success_with_fake_llm_and_writes_audit():
-    response, db = await _call_interpret(FakeLLMProvider())
+    provider = FakeLLMProvider()
+    response, db = await _call_interpret(provider)
     assert response.status_code == 200
     body = response.json()
     assert body["evidence_hash"] != ""
     assert body["scope_hash"] != ""
     assert body["cached"] is False
+    # Verify prompt contains evidence ids so LLM knows valid refs
+    assert provider.last_prompt is not None
+    assert "id=spc_alarm_count" in provider.last_prompt
+    assert "id=capa_overdue_count" in provider.last_prompt
+    assert "evidence_refs 必须且只能使用上面列出的 evidence id" in provider.last_prompt
     audit = next(obj for obj in db.add.call_args_list if isinstance(obj.args[0], AuditLog)).args[0]
     assert audit.table_name == "quality_trends"
     assert audit.action == "AI_TREND_INTERPRET"

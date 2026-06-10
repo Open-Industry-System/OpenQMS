@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, func
@@ -26,6 +27,7 @@ async def build_quality_trend_summary(
     allowed_modules: set[str],
     scope_description: str,
     selected_product_line: str | None,
+    scope_hash: str = "",
 ) -> QualityTrendSummary:
     now = datetime.now(timezone.utc)
     current_start = now - timedelta(days=WINDOW_DAYS)
@@ -119,7 +121,7 @@ async def build_quality_trend_summary(
         data_window_days=WINDOW_DAYS,
         generated_at=generated_at,
         evidence_hash=_hash_evidence(scope_description, sorted(effective_modules), omitted_modules, WINDOW_DAYS, evidence, actions),
-        scope_hash="",  # will be set by caller
+        scope_hash=scope_hash,
         ai_available=risk_level not in {"insufficient_data", "low"},
         metadata=metadata,
     )
@@ -172,6 +174,7 @@ _rate_limit: dict[str, list[float]] = {}
 RATE_LIMIT_WINDOW = 60.0
 RATE_LIMIT_MAX = 5
 CACHE_TTL = 30 * 60
+LLM_TIMEOUT = 30.0
 
 
 class RateLimitError(ValueError):
@@ -236,7 +239,13 @@ async def interpret_quality_trend(
 
     prompt = _build_interpret_prompt(summary, allowed_modules, scope_description)
     try:
-        raw = await llm_provider.complete(prompt, _interpret_response_schema())
+        raw = await asyncio.wait_for(
+            llm_provider.complete(prompt, _interpret_response_schema()),
+            timeout=LLM_TIMEOUT,
+        )
+    except asyncio.TimeoutError as exc:
+        await _write_interpret_audit(db, user_id, "llm_failed", audit_context | {"error": f"LLM 调用超时（>{LLM_TIMEOUT}s）"})
+        raise LLMNotConfiguredError("AI 解读服务响应超时，请稍后重试") from exc
     except Exception as exc:
         await _write_interpret_audit(db, user_id, "llm_failed", audit_context | {"error": str(exc)})
         raise
@@ -310,21 +319,25 @@ def _enforce_rate_limit(user_id: str) -> None:
 
 
 def _build_interpret_prompt(summary, allowed_modules: set[str], scope_description: str) -> str:
-    evidence_text = "\n".join(f"- {e.label}: {e.value} (trend: {e.trend})" for e in summary.evidence)
+    evidence_text = "\n".join(
+        f"- id={e.id} | {e.label}: {e.value} (trend: {e.trend}, severity: {e.severity})"
+        for e in summary.evidence
+    )
     actions_text = "\n".join(f"- [{a.priority}] {a.text}" for a in summary.actions)
+    allowed_ids = ", ".join(e.id for e in summary.evidence)
     return f"""你是一位质量趋势分析专家。请基于以下数据生成结构化解读。
 
 产品线范围：{scope_description}
 可用模块：{', '.join(sorted(allowed_modules))}
 风险等级：{summary.risk_level}
 
-证据：
+证据（每条证据都有唯一 id，后续引用时必须使用这些 id）：
 {evidence_text}
 
 建议动作：
 {actions_text}
 
-请用中文输出以下 JSON 格式：
+请用中文输出以下 JSON 格式。注意：evidence_refs 必须且只能使用上面列出的 evidence id（{allowed_ids}），不要编造 id，也不要用 label 代替 id。
 {{
   "summary": "总体趋势判断（一句话）",
   "possible_causes": ["可能原因1", "可能原因2"],
@@ -332,7 +345,7 @@ def _build_interpret_prompt(summary, allowed_modules: set[str], scope_descriptio
   "recommended_actions": [
     {{"priority": "high|medium|low", "action": "具体动作", "reason": "原因"}}
   ],
-  "evidence_refs": ["引用的 evidence id 列表"],
+  "evidence_refs": ["从上面证据列表中选择对应的 id"],
   "confidence": "low|medium|high"
 }}"""
 

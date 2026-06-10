@@ -9,6 +9,8 @@ from app.core.permissions import PermissionLevel, get_current_user
 from app.database import get_db
 from app.main import app
 from app.models.user import User
+from app.services.dashboard_service import get_widgets_data
+from app.services.quality_trend_service import build_scope_hash
 
 
 @pytest.mark.anyio
@@ -40,6 +42,7 @@ async def test_dashboard_widgets_passes_quality_trend_module_permissions(monkeyp
                     "data_window_days": 30,
                     "generated_at": "2026-06-09T00:00:00Z",
                     "evidence_hash": "sha256:test",
+                    "scope_hash": "sha256:scope_test",
                     "ai_available": False,
                     "metadata": {"omitted_modules": [], "available_modules": []},
                 }
@@ -72,3 +75,34 @@ async def test_dashboard_widgets_passes_quality_trend_module_permissions(monkeyp
     assert service_call["types"] == ["quality_trend_ai_summary"]
     assert service_call["product_line_codes"] == ["DC-DC-100"]
     assert service_call["quality_trend_allowed_modules"] == {"spc", "capa", "fmea"}
+
+
+@pytest.mark.anyio
+async def test_widgets_data_returns_scope_hash_for_quality_trend(monkeypatch):
+    """Verify that get_widgets_data populates scope_hash in the quality_trend summary."""
+    db = AsyncMock()
+    db.scalar = AsyncMock(side_effect=[0, 0, 0, 0, 0])
+    db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+    data = await get_widgets_data(
+        db=db,
+        types=["quality_trend_ai_summary"],
+        product_line_codes=["DC-DC-100"],
+        user_id="test-user",
+        quality_trend_allowed_modules={"spc", "capa"},
+    )
+    summary = data["quality_trend"]["summary"]
+    assert summary["scope_hash"] != ""
+    assert summary["scope_hash"].startswith("sha256:")
+    # Changing product line should change scope_hash
+    db2 = AsyncMock()
+    db2.scalar = AsyncMock(side_effect=[0, 0, 0, 0, 0])
+    db2.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    data2 = await get_widgets_data(
+        db=db2,
+        types=["quality_trend_ai_summary"],
+        product_line_codes=["AC-DC-200"],
+        user_id="test-user",
+        quality_trend_allowed_modules={"spc", "capa"},
+    )
+    assert data2["quality_trend"]["summary"]["scope_hash"] != summary["scope_hash"]
