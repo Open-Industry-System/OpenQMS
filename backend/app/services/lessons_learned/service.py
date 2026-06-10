@@ -46,7 +46,7 @@ class LessonsLearnedService:
         context = await self._build_context(doc_id, doc_type, problem_description, user)
 
         # 2. Check cache
-        context_hash = self._compute_context_hash(context)
+        context_hash = self._compute_context_hash(context, skip_fmea_sources)
         cached = await self._get_cached(context_hash)
         if cached:
             return cached
@@ -140,7 +140,7 @@ class LessonsLearnedService:
                 fmea_ref_id=doc.fmea_ref_id,
             )
 
-    def _compute_context_hash(self, context: LessonsLearnedContext) -> str:
+    def _compute_context_hash(self, context: LessonsLearnedContext, skip_fmea_sources: bool = False) -> str:
         raw = json.dumps({
             "query_text": context.query_text,
             "product_line_code": context.product_line_code,
@@ -148,6 +148,7 @@ class LessonsLearnedService:
             "fmea_type": context.fmea_type,
             "severity": context.severity,
             "pl_hash": context.pl_hash_for_cache(),
+            "fmea_sources": not skip_fmea_sources,
         }, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(raw.encode()).hexdigest()
 

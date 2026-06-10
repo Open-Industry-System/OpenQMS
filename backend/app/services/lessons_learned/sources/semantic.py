@@ -19,13 +19,19 @@ class LessonsSemanticSource(LessonsSource):
         if self.embedding is None:
             return []
 
+        if not context.query_text or not context.query_text.strip():
+            return []
+
         try:
-            embedding_vec = await self.embedding.embed(context.query_text)
+            query_vector = await self.embedding.embed([context.query_text])
+            if not query_vector:
+                return []
+            vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
         except Exception:
             return []
 
         pl_filter = ""
-        params: dict = {"embedding": embedding_vec, "limit": 20}
+        params: dict = {"query_vector": vec_str, "limit": 20}
         if context.user_product_lines is not None:
             placeholders = ", ".join(f":pl{i}" for i in range(len(context.user_product_lines)))
             pl_filter = f"AND de.product_line_code IN ({placeholders})"
@@ -40,11 +46,11 @@ class LessonsSemanticSource(LessonsSource):
                 de.chunk_text,
                 de.product_line_code,
                 de.metadata,
-                1 - (de.embedding <=> :embedding) AS similarity
+                1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity
             FROM document_embeddings de
             WHERE de.entity_type = 'fmea_node'
               {pl_filter}
-            ORDER BY de.embedding <=> :embedding
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
 

@@ -23,14 +23,20 @@ class AuditFindingSource(LessonsSource):
         if self.embedding is None:
             return []
 
+        if not context.query_text or not context.query_text.strip():
+            return []
+
         try:
-            embedding_vec = await self.embedding.embed(context.query_text)
+            query_vector = await self.embedding.embed([context.query_text])
+            if not query_vector:
+                return []
+            vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
         except Exception:
             return []
 
         # Query via pgvector on document_embeddings
         pl_filter = ""
-        params: dict = {"embedding": embedding_vec, "limit": 20}
+        params: dict = {"query_vector": vec_str, "limit": 20}
         if context.user_product_lines is not None:
             placeholders = ", ".join(f":pl{i}" for i in range(len(context.user_product_lines)))
             pl_filter = f"AND ap.product_line_code IN ({placeholders})"
@@ -44,7 +50,8 @@ class AuditFindingSource(LessonsSource):
                 ap.plan_no,
                 ap.product_line_code,
                 ap.audit_category,
-                1 - (de.embedding <=> :embedding) AS similarity
+                ap.audit_id,
+                1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity
             FROM document_embeddings de
             JOIN audit_findings af ON af.finding_id = de.entity_id
             JOIN audit_plans ap ON ap.audit_id = af.audit_id
@@ -52,7 +59,7 @@ class AuditFindingSource(LessonsSource):
               AND af.corrective_action IS NOT NULL
               AND af.status = 'closed'
               {pl_filter}
-            ORDER BY de.embedding <=> :embedding
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
 
@@ -61,7 +68,7 @@ class AuditFindingSource(LessonsSource):
 
         candidates: list[RecommendationCandidate] = []
         for row in rows:
-            finding_id, chunk_text, plan_no, pl_code, audit_category, similarity = row
+            finding_id, chunk_text, plan_no, pl_code, audit_category, audit_id, similarity = row
             same_pl = pl_code == context.product_line_code
             confidence = min(similarity + (0.1 if same_pl else 0.0), 0.85)
 
@@ -80,7 +87,7 @@ class AuditFindingSource(LessonsSource):
                         "action": None,
                         "severity": None,
                         "source_type": "audit",
-                        "audit_id": str(finding_id),
+                        "audit_id": str(audit_id),
                         "audit_category": audit_category,
                     },
                 )

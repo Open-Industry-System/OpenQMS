@@ -18,6 +18,7 @@ import { useAIDraft } from "../../components/capa/useAIDraft";
 import type { CAPAReport, FMEADocument, DraftFormat, LessonsLearnedResponse, LessonCard } from "../../types";
 import LessonsLearnedModal from "../../components/lessons/LessonsLearnedModal";
 import { getCAPALessons } from "../../api/lessonsLearned";
+import axios from "axios";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 
@@ -92,7 +93,7 @@ export default function CAPADetailPage() {
         })
         .catch((err) => {
           clearTimeout(timeoutId);
-          if (err.name !== "AbortError") {
+          if (!axios.isCancel(err)) {
             message.error("检索经验教训失败");
           }
           setLessonsLoading(false);

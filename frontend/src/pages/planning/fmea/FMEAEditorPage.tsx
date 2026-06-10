@@ -15,6 +15,7 @@ import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacter
 import type { FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse, LessonCard } from "../../../types";
 import LessonsLearnedModal from "../../../components/lessons/LessonsLearnedModal";
 import { getFMEALessons } from "../../../api/lessonsLearned";
+import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
