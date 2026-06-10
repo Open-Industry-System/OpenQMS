@@ -6,6 +6,7 @@ import {
   fetchERPPurchaseOrders,
   fetchERPInventoryBalances,
 } from "../../api/erp";
+import { useProductLineStore } from "../../store/productLineStore";
 import type { ERPPurchaseOrder, ERPInventoryBalance } from "../../types/erp";
 
 const { Title } = Typography;
@@ -32,15 +33,16 @@ const poStatusLabel: Record<string, string> = {
 
 function PurchaseOrdersTab() {
   const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPPurchaseOrder[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>("");
 
-  const fetchData = (p: number, status?: string) => {
+  const fetchData = (p: number, status?: string, plCode?: string | null) => {
     setLoading(true);
-    fetchERPPurchaseOrders({ page: p, page_size: 20 })
+    fetchERPPurchaseOrders({ page: p, page_size: 20, product_line_code: plCode || undefined })
       .then((res) => {
         if (status) {
           const filtered = res.items.filter((item) => item.status === status);
@@ -55,12 +57,12 @@ function PurchaseOrdersTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1, statusFilter || undefined); }, []);
+  useEffect(() => { fetchData(1, statusFilter || undefined, productLine); }, [productLine]);
 
   const handleStatusChange = (value: string) => {
     setStatusFilter(value);
     setPage(1);
-    fetchData(1, value || undefined);
+    fetchData(1, value || undefined, productLine);
   };
 
   const columns = [
@@ -124,7 +126,7 @@ function PurchaseOrdersTab() {
           current: page,
           total,
           pageSize: 20,
-          onChange: (p) => { setPage(p); fetchData(p, statusFilter || undefined); },
+          onChange: (p) => { setPage(p); fetchData(p, statusFilter || undefined, productLine); },
         }}
       />
     </div>
@@ -149,14 +151,15 @@ const invStatusLabel: Record<string, string> = {
 
 function InventoryBalancesTab() {
   const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPInventoryBalance[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
 
-  const fetchData = (p: number) => {
+  const fetchData = (p: number, plCode?: string | null) => {
     setLoading(true);
-    fetchERPInventoryBalances({ page: p, page_size: 20 })
+    fetchERPInventoryBalances({ page: p, page_size: 20, product_line_code: plCode || undefined })
       .then((res) => {
         setData(res.items);
         setTotal(res.total);
@@ -165,7 +168,7 @@ function InventoryBalancesTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1); }, []);
+  useEffect(() => { fetchData(1, productLine); }, [productLine]);
 
   const columns = [
     { title: "物料编码", dataIndex: "material_code", key: "material_code", width: 140 },
@@ -203,7 +206,7 @@ function InventoryBalancesTab() {
         current: page,
         total,
         pageSize: 20,
-        onChange: (p) => { setPage(p); fetchData(p); },
+        onChange: (p) => { setPage(p); fetchData(p, productLine); },
       }}
     />
   );

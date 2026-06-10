@@ -37,6 +37,16 @@ class ERPConnectionOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @field_validator("config", mode="before")
+    @classmethod
+    def _sanitize_config_output(cls, value):
+        """Always return sanitized config (no api_key_hash, *_encrypted, etc.)."""
+        from app.services.erp_crypto import sanitize_config
+
+        if value is None:
+            return {}
+        return sanitize_config(value)
+
 
 class ERPConnectionListResponse(BaseModel):
     items: list[ERPConnectionOut]

@@ -64,7 +64,7 @@ function SalesOrdersTab() {
   const fetchData = useCallback(
     (p: number, plCode?: string | null) => {
       setLoading(true);
-      fetchERPSalesOrders({ page: p, page_size: 20 })
+      fetchERPSalesOrders({ page: p, page_size: 20, product_line_code: plCode || undefined })
         .then((res) => {
           setData(res.items);
           setTotal(res.total);
@@ -171,7 +171,7 @@ function ShipmentsTab() {
   const fetchData = useCallback(
     (p: number, plCode?: string | null) => {
       setLoading(true);
-      fetchERPShipments({ page: p, page_size: 20 })
+      fetchERPShipments({ page: p, page_size: 20, product_line_code: plCode || undefined })
         .then((res) => {
           setData(res.items);
           setTotal(res.total);
@@ -271,7 +271,7 @@ function CostRecordsTab() {
   const fetchData = useCallback(
     (p: number, plCode?: string | null) => {
       setLoading(true);
-      fetchERPCostRecords({ page: p, page_size: 20 })
+      fetchERPCostRecords({ page: p, page_size: 20, product_line_code: plCode || undefined })
         .then((res) => {
           setData(res.items);
           setTotal(res.total);

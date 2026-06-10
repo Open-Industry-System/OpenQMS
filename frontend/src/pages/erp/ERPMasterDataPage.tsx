@@ -12,6 +12,9 @@ import {
   linkERPCustomer,
   unlinkERPCustomer,
 } from "../../api/erp";
+import { listSuppliers } from "../../api/supplier";
+import { listCustomers } from "../../api/customerQuality";
+import { useProductLineStore } from "../../store/productLineStore";
 import type {
   ERPSupplier,
   ERPCustomer,
@@ -42,6 +45,7 @@ const linkStatusLabel = (v: string) => {
 
 function SuppliersTab() {
   const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPSupplier[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -52,9 +56,9 @@ function SuppliersTab() {
   const [openqmsSuppliers, setOpenqmsSuppliers] = useState<Array<{ id: string; name: string }>>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
 
-  const fetchData = (p: number) => {
+  const fetchData = (p: number, plCode?: string | null) => {
     setLoading(true);
-    fetchERPSuppliers({ page: p, page_size: 20 })
+    fetchERPSuppliers({ page: p, page_size: 20, product_line_code: plCode || undefined })
       .then((res) => {
         setData(res.items);
         setTotal(res.total);
@@ -63,7 +67,7 @@ function SuppliersTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1); }, []);
+  useEffect(() => { fetchData(1, productLine); }, [productLine]);
 
   const openLinkModal = async (record: ERPSupplier) => {
     setLinkingRecord(record);
@@ -71,11 +75,9 @@ function SuppliersTab() {
     setLinkModalOpen(true);
     setSuppliersLoading(true);
     try {
-      const resp = await fetchERPSuppliers({ page: 1, page_size: 100 });
+      const resp = await listSuppliers({ page: 1, page_size: 500 });
       setOpenqmsSuppliers(
-        resp.items
-          .filter((s) => s.openqms_supplier_id)
-          .map((s) => ({ id: s.openqms_supplier_id!, name: `${s.supplier_code} - ${s.name}` })),
+        resp.items.map((s) => ({ id: s.supplier_id, name: `${s.supplier_no} - ${s.name}` })),
       );
     } catch {
       message.error("加载供应商列表失败");
@@ -145,7 +147,7 @@ function SuppliersTab() {
           current: page,
           total,
           pageSize: 20,
-          onChange: (p) => { setPage(p); fetchData(p); },
+          onChange: (p) => { setPage(p); fetchData(p, productLine); },
         }}
       />
       <Modal
@@ -179,6 +181,7 @@ function SuppliersTab() {
 
 function CustomersTab() {
   const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPCustomer[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -189,9 +192,9 @@ function CustomersTab() {
   const [openqmsCustomers, setOpenqmsCustomers] = useState<Array<{ id: string; name: string }>>([]);
   const [customersLoading, setCustomersLoading] = useState(false);
 
-  const fetchData = (p: number) => {
+  const fetchData = (p: number, plCode?: string | null) => {
     setLoading(true);
-    fetchERPCustomers({ page: p, page_size: 20 })
+    fetchERPCustomers({ page: p, page_size: 20, product_line_code: plCode || undefined })
       .then((res) => {
         setData(res.items);
         setTotal(res.total);
@@ -200,7 +203,7 @@ function CustomersTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1); }, []);
+  useEffect(() => { fetchData(1, productLine); }, [productLine]);
 
   const openLinkModal = async (record: ERPCustomer) => {
     setLinkingRecord(record);
@@ -208,11 +211,9 @@ function CustomersTab() {
     setLinkModalOpen(true);
     setCustomersLoading(true);
     try {
-      const resp = await fetchERPCustomers({ page: 1, page_size: 100 });
+      const resp = await listCustomers({ page: 1, page_size: 500 });
       setOpenqmsCustomers(
-        resp.items
-          .filter((c) => c.openqms_customer_id)
-          .map((c) => ({ id: c.openqms_customer_id!, name: `${c.customer_code} - ${c.name}` })),
+        resp.items.map((c) => ({ id: c.customer_id, name: `${c.customer_code} - ${c.name}` })),
       );
     } catch {
       message.error("加载客户列表失败");
@@ -282,7 +283,7 @@ function CustomersTab() {
           current: page,
           total,
           pageSize: 20,
-          onChange: (p) => { setPage(p); fetchData(p); },
+          onChange: (p) => { setPage(p); fetchData(p, productLine); },
         }}
       />
       <Modal
@@ -316,15 +317,16 @@ function CustomersTab() {
 
 function MaterialsTab() {
   const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPMaterial[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
 
-  const fetchData = (p: number, q: string) => {
+  const fetchData = (p: number, q: string, plCode?: string | null) => {
     setLoading(true);
-    fetchERPMaterials({ page: p, page_size: 20 })
+    fetchERPMaterials({ page: p, page_size: 20, product_line_code: plCode || undefined })
       .then((res) => {
         if (q) {
           const filtered = res.items.filter(
@@ -343,12 +345,12 @@ function MaterialsTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1, ""); }, []);
+  useEffect(() => { fetchData(1, "", productLine); }, [productLine]);
 
   const handleSearch = (value: string) => {
     setSearch(value);
     setPage(1);
-    fetchData(1, value);
+    fetchData(1, value, productLine);
   };
 
   const columns = [
@@ -392,7 +394,7 @@ function MaterialsTab() {
           current: page,
           total,
           pageSize: 20,
-          onChange: (p) => { setPage(p); fetchData(p, search); },
+          onChange: (p) => { setPage(p); fetchData(p, search, productLine); },
         }}
       />
     </div>
@@ -410,14 +412,15 @@ const locationTypeLabel: Record<string, string> = {
 
 function LocationsTab() {
   const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPLocation[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
 
-  const fetchData = (p: number) => {
+  const fetchData = (p: number, plCode?: string | null) => {
     setLoading(true);
-    fetchERPLocations({ page: p, page_size: 20 })
+    fetchERPLocations({ page: p, page_size: 20, product_line_code: plCode || undefined })
       .then((res) => {
         setData(res.items);
         setTotal(res.total);
@@ -426,7 +429,7 @@ function LocationsTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1); }, []);
+  useEffect(() => { fetchData(1, productLine); }, [productLine]);
 
   const columns = [
     { title: "库位编码", dataIndex: "location_code", key: "location_code", width: 140 },
@@ -458,7 +461,7 @@ function LocationsTab() {
         current: page,
         total,
         pageSize: 20,
-        onChange: (p) => { setPage(p); fetchData(p); },
+        onChange: (p) => { setPage(p); fetchData(p, productLine); },
       }}
     />
   );

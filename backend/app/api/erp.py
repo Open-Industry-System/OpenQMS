@@ -185,6 +185,11 @@ async def update_connection(
 
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(conn, field, value)
+
+    # Re-enforce access on the new product_line_code if changed
+    if data.product_line_code is not None:
+        await enforce_product_line_access(user, conn.product_line_code, db)
+
     await db.commit()
     return schemas.ERPConnectionOut.model_validate(conn)
 
