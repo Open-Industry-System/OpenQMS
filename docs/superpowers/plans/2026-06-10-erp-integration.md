@@ -104,6 +104,14 @@ git commit -m "feat(erp): add Module.ERP and product_line mapping"
 
 参考 `030_add_mes_tables.py` 和 `031_add_plm_tables.py` 的结构。
 
+- [ ] **Step 0: 确认当前 Alembic head**
+
+```bash
+cd backend && python -c "from alembic.config import Config; from alembic.script import ScriptDirectory; sd = ScriptDirectory.from_config(Config('alembic.ini')); print('HEAD:', sd.get_heads())"
+```
+
+如果 head 不再是 `bfd90bb593fc`，则将下方 `down_revision` 改为实际的当前 head 值。
+
 - [ ] **Step 1: 编写迁移文件**
 
 ```python
@@ -379,7 +387,7 @@ def upgrade():
             ELSE 1
         END
         FROM role_definitions r
-        WHERE r.role_key IN ('admin', 'manager', 'quality_engineer', 'viewer')
+        WHERE r.role_key IN ('admin', 'manager', 'field_qe', 'viewer')
         ON CONFLICT (role_id, module) DO NOTHING
     """)
 
@@ -2363,10 +2371,12 @@ def _process_credentials(config: dict) -> dict:
 def _mask_entity(entity, user: User):
     """Apply field-level masking for viewer/QE roles on supplier/customer data.
     viewer and field_qe see: bank_info → '***', tax_id → first 6 + '****'
-    manager/admin see full values."""
+    manager/admin see full values. Uses role_key (not permission_level,
+    which is per-module in RolePermission, not on RoleDefinition)."""
     from copy import copy
 
-    should_mask = user.role_definition.permission_level < 4  # < manager
+    role_key = user.role_definition.role_key if user.role_definition else "viewer"
+    should_mask = role_key not in ("admin", "manager")
     if not should_mask:
         return entity
 
@@ -2425,12 +2435,13 @@ async def create_connection(
 
 @router.get("/connections")
 async def list_connections(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.VIEW)),
 ):
-    query = apply_product_line_filter(select(ERPConnection), user, db, "erp")
+    query = await apply_product_line_filter(select(ERPConnection), user, ERPConnection, "erp", db, request)
     total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar()
 
@@ -2511,6 +2522,9 @@ async def trigger_sync(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.ERP, PermissionLevel.APPROVE)),
 ):
+    """Schedule a sync for this connection.
+    Jobs are picked up by the background sync loop within ~60s.
+    For synchronous execution in tests, call ERPSyncService.sync_all() directly."""
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -3732,12 +3746,11 @@ class TestMasking:
     @pytest.mark.asyncio
     async def test_supplier_masking_for_viewer(self, db_session):
         """Viewer should see bank_info='***' and tax_id partially masked."""
-        from app.models.user import User
         from app.api.erp import _mask_entity
 
-        # Create a mock viewer user (permission_level=1)
+        # Create a mock viewer user (role_key='viewer')
         class MockRoleDef:
-            permission_level = 1
+            role_key = "viewer"
 
         class MockUser:
             role_definition = MockRoleDef()
@@ -3760,7 +3773,7 @@ class TestMasking:
         from app.api.erp import _mask_entity
 
         class MockRoleDef:
-            permission_level = 4  # manager
+            role_key = "manager"
 
         class MockUser:
             role_definition = MockRoleDef()
@@ -3775,6 +3788,28 @@ class TestMasking:
         masked = _mask_entity(sup, user)
         assert masked.bank_info == {"account": "1234567890"}
         assert masked.tax_id == "91310000MA1FL2XX3X"
+
+    @pytest.mark.asyncio
+    async def test_supplier_masking_for_field_qe(self, db_session):
+        """field_qe should also see masked bank_info and tax_id."""
+        from app.api.erp import _mask_entity
+
+        class MockRoleDef:
+            role_key = "field_qe"
+
+        class MockUser:
+            role_definition = MockRoleDef()
+
+        user = MockUser()
+
+        from app.models.erp import ERPSupplier
+        sup = ERPSupplier.__new__(ERPSupplier)
+        sup.bank_info = {"account": "1234567890"}
+        sup.tax_id = "91310000MA1FL2XX3X"
+
+        masked = _mask_entity(sup, user)
+        assert masked.bank_info == "***"
+        assert masked.tax_id == "913100****"
 
 
 class TestDateCoercion:
