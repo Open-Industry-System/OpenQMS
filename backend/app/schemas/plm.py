@@ -48,6 +48,22 @@ class PLMConnectionListResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PLMPartSCLinkResponse(BaseModel):
+    link_id: uuid.UUID
+    characteristic_type: str
+    status: str
+    sc_id: uuid.UUID | None = None
+    confirmed_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PLMPartConfirmSCResponse(BaseModel):
+    status: str
+    sc_id: uuid.UUID
+    link_id: uuid.UUID
+
+
 class PLMPartResponse(BaseModel):
     part_id: uuid.UUID
     connection_id: uuid.UUID
@@ -63,6 +79,7 @@ class PLMPartResponse(BaseModel):
     source_updated_at: Optional[datetime] = None
     product_line_code: Optional[str] = None
     plm_raw_data: Optional[dict[str, Any]] = None
+    sc_links: list[PLMPartSCLinkResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 

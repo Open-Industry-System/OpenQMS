@@ -11,7 +11,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -116,11 +116,15 @@ class PLMIngestionService:
         )
         await self._db.execute(stmt)
 
-        # Side-effect: create SC link for safety-related or key-characteristic parts
+        # Side-effect: keep pending SC links aligned with current PLM flags.
         if data.get("is_safety_related"):
             await self._upsert_sc_link(connection_id, data, "safety")
-        if data.get("is_key_characteristic") and not data.get("is_safety_related"):
+        else:
+            await self._delete_pending_sc_link(connection_id, data, "safety")
+        if data.get("is_key_characteristic"):
             await self._upsert_sc_link(connection_id, data, "key_characteristic")
+        else:
+            await self._delete_pending_sc_link(connection_id, data, "key_characteristic")
 
     async def _upsert_sc_link(
         self,
@@ -154,7 +158,9 @@ class PLMIngestionService:
                     PLMConnection.connection_id == connection_id
                 )
             )
-            product_line_code = conn_result.scalar_one_or_none() or "DC-DC-100"
+            product_line_code = conn_result.scalar_one_or_none()
+            if not product_line_code:
+                return
 
         stmt = (
             pg_insert(PLMPartSCLink)
@@ -174,9 +180,34 @@ class PLMIngestionService:
                     "confirmed_by": None,
                     "confirmed_at": None,
                 },
+                where=PLMPartSCLink.status != "confirmed",
             )
         )
         await self._db.execute(stmt)
+
+    async def _delete_pending_sc_link(
+        self,
+        connection_id: uuid.UUID,
+        data: dict,
+        characteristic_type: str,
+    ) -> None:
+        """Remove stale unconfirmed SC requests when PLM flags are turned off."""
+        part_id_subquery = (
+            select(PLMPart.part_id)
+            .where(
+                PLMPart.connection_id == connection_id,
+                PLMPart.part_number == data["part_number"],
+                PLMPart.revision == data.get("revision", "A"),
+            )
+            .scalar_subquery()
+        )
+        await self._db.execute(
+            delete(PLMPartSCLink).where(
+                PLMPartSCLink.part_id == part_id_subquery,
+                PLMPartSCLink.characteristic_type == characteristic_type,
+                PLMPartSCLink.status == "pending",
+            )
+        )
 
     # ------------------------------------------------------------------
     # BOMs
@@ -437,7 +468,10 @@ class PLMSyncService:
         await db.flush()
 
     @staticmethod
-    async def run_sync_round(db: AsyncSession) -> int:
+    async def run_sync_round(
+        db: AsyncSession,
+        connection_id: uuid.UUID | None = None,
+    ) -> int:
         """Claim available sync jobs, run them, return count of processed jobs.
 
         Claims jobs where:
@@ -463,6 +497,11 @@ class PLMSyncService:
                     & (PLMSyncJob.next_run_at <= now)
                 )
             )
+        )
+        if connection_id is not None:
+            claim_stmt = claim_stmt.where(PLMSyncJob.connection_id == connection_id)
+        claim_stmt = (
+            claim_stmt
             .order_by(PLMSyncJob.next_run_at)
             .limit(10)
             .with_for_update(skip_locked=True)
@@ -534,7 +573,7 @@ class PLMSyncService:
         )
         await db.flush()
 
-        return await PLMSyncService.run_sync_round(db)
+        return await PLMSyncService.run_sync_round(db, connection_id=connection_id)
 
 
 async def _run_single_sync_job(
@@ -584,7 +623,12 @@ async def _run_single_sync_job(
         ingestion = PLMIngestionService(ingest_db)
         for i, item in enumerate(items):
             # Copy to avoid mutating the caller's dict; inject metadata keys.
-            row = dict(item, data_type=data_type, connection_id=job.connection_id)
+            row = dict(
+                item,
+                data_type=data_type,
+                connection_id=job.connection_id,
+                product_line_code=item.get("product_line_code") or connection.product_line_code,
+            )
             await ingestion.ingest(row)
             # Periodic commit to keep transaction size bounded
             if (i + 1) % BATCH_SIZE == 0:

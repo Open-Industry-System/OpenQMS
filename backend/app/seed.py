@@ -703,6 +703,7 @@ async def seed():
             for part in await mock_connector.fetch_parts(epoch):
                 part["data_type"] = "part"
                 part["connection_id"] = plm_conn.connection_id
+                part["product_line_code"] = plm_conn.product_line_code
                 try:
                     await ingestion.ingest(part)
                 except Exception as e:
@@ -711,6 +712,7 @@ async def seed():
             for bom in await mock_connector.fetch_boms(epoch):
                 bom["data_type"] = "bom"
                 bom["connection_id"] = plm_conn.connection_id
+                bom["product_line_code"] = plm_conn.product_line_code
                 try:
                     await ingestion.ingest(bom)
                 except Exception as e:
@@ -719,6 +721,7 @@ async def seed():
             for co in await mock_connector.fetch_change_orders(epoch):
                 co["data_type"] = "change_order"
                 co["connection_id"] = plm_conn.connection_id
+                co["product_line_code"] = plm_conn.product_line_code
                 try:
                     await ingestion.ingest(co)
                 except Exception as e:

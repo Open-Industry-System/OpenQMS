@@ -26,7 +26,10 @@ const typeLabels: Record<string, string> = {
 
 export default function PLMConnectionsPage() {
   const { message, modal: modalConfirm } = App.useApp();
-  const { canCreate, canEdit } = usePermission();
+  const { canCreate, canEdit, canAdmin } = usePermission();
+  const canCreatePlm = canCreate("plm");
+  const canEditPlm = canEdit("plm");
+  const canAdminPlm = canAdmin("plm");
   const [data, setData] = useState<PLMConnection[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -50,7 +53,6 @@ export default function PLMConnectionsPage() {
 
   useEffect(() => {
     fetchData(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCreate = async (values: PLMConnectionCreate & { config_port?: number }) => {
@@ -109,10 +111,10 @@ export default function PLMConnectionsPage() {
     setTestLoading((prev) => ({ ...prev, [id]: true }));
     try {
       const res = await testPLMConnection(id);
-      if (res.success) {
-        message.success("连接测试成功");
+      if (res.status === "ok") {
+        message.success(`连接测试成功，读取 ${res.parts_count ?? 0} 个物料`);
       } else {
-        message.error("连接测试失败");
+        message.error(res.error ? `连接测试失败: ${res.error}` : "连接测试失败");
       }
     } catch {
       message.error("连接测试失败");
@@ -190,7 +192,7 @@ export default function PLMConnectionsPage() {
       width: 260,
       render: (_: unknown, record: PLMConnection) => (
         <Space size="small">
-          {canEdit("plm") && (
+          {canEditPlm && (
             <Button
               type="link"
               size="small"
@@ -200,25 +202,29 @@ export default function PLMConnectionsPage() {
               编辑
             </Button>
           )}
-          <Button
-            type="link"
-            size="small"
-            icon={<ApiOutlined />}
-            loading={testLoading[record.connection_id]}
-            onClick={() => handleTest(record.connection_id)}
-          >
-            测试
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<SyncOutlined />}
-            loading={syncLoading[record.connection_id]}
-            onClick={() => handleSync(record.connection_id)}
-          >
-            同步
-          </Button>
-          {canEdit("plm") && (
+          {canEditPlm && (
+            <>
+              <Button
+                type="link"
+                size="small"
+                icon={<ApiOutlined />}
+                loading={testLoading[record.connection_id]}
+                onClick={() => handleTest(record.connection_id)}
+              >
+                测试
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                icon={<SyncOutlined />}
+                loading={syncLoading[record.connection_id]}
+                onClick={() => handleSync(record.connection_id)}
+              >
+                同步
+              </Button>
+            </>
+          )}
+          {canAdminPlm && (
             <Button
               type="link"
               size="small"
@@ -232,7 +238,7 @@ export default function PLMConnectionsPage() {
         </Space>
       ),
     },
-  ], [canEdit, testLoading, syncLoading]);
+  ], [canEditPlm, canAdminPlm, testLoading, syncLoading]);
 
   return (
     <div>
@@ -246,7 +252,7 @@ export default function PLMConnectionsPage() {
         <Title level={4} style={{ margin: 0 }}>
           PLM 连接管理
         </Title>
-        {canCreate("plm") && (
+        {canCreatePlm && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新建连接
           </Button>
@@ -299,14 +305,18 @@ export default function PLMConnectionsPage() {
             <Select
               options={[
                 { value: "mock", label: "Mock - 模拟数据" },
-                { value: "rest", label: "REST API" },
-                { value: "siemens_tc", label: "Siemens Teamcenter" },
-                { value: "dassault_enovia", label: "Dassault ENOVIA" },
-                { value: "ptc_windchill", label: "PTC Windchill" },
+                { value: "rest", label: "REST API - 未实现", disabled: true },
+                { value: "siemens_tc", label: "Siemens Teamcenter - 未实现", disabled: true },
+                { value: "dassault_enovia", label: "Dassault ENOVIA - 未实现", disabled: true },
+                { value: "ptc_windchill", label: "PTC Windchill - 未实现", disabled: true },
               ]}
             />
           </Form.Item>
-          <Form.Item name="product_line_code" label="产线代码">
+          <Form.Item
+            name="product_line_code"
+            label="产线代码"
+            rules={[{ required: true, message: "请输入产线代码" }]}
+          >
             <Input placeholder="如 DC-DC-100" />
           </Form.Item>
           <Form.Item name="config_port" label="端口号">

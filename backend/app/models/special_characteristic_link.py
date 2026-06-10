@@ -24,4 +24,4 @@ class SpecialCharacteristicLink(Base):
     )
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)
     source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    source_item_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_item_id: Mapped[str] = mapped_column(String(128), nullable=False)

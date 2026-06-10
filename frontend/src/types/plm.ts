@@ -34,7 +34,22 @@ export interface PLMConnectionListResponse {
   page_size: number;
 }
 
+export interface PLMConnectionTestResponse {
+  status: "ok" | "error";
+  parts_count?: number;
+  error?: string;
+  error_class?: string;
+}
+
 // ─── PLM Part ───
+
+export interface PLMPartSCLink {
+  link_id: string;
+  characteristic_type: string;
+  status: string;
+  sc_id: string | null;
+  confirmed_at: string | null;
+}
 
 export interface PLMPart {
   part_id: string;
@@ -51,6 +66,19 @@ export interface PLMPart {
   source_updated_at: string | null;
   product_line_code: string | null;
   plm_raw_data: Record<string, unknown> | null;
+  sc_links: PLMPartSCLink[];
+}
+
+export interface PLMPartConfirmSCRequest {
+  fmea_id: string;
+  node_id: string;
+  characteristic_type: "safety" | "key_characteristic";
+}
+
+export interface PLMPartConfirmSCResponse {
+  status: string;
+  sc_id: string;
+  link_id: string;
 }
 
 export interface PLMPartListResponse {
@@ -97,8 +125,19 @@ export interface PLMBOMTreeNode {
 
 export interface PLMBOMTreeResponse {
   root: string;
+  revision: string;
+  bom_revision: string;
   items: PLMBOMTreeNode[];
   total: number;
+}
+
+export interface PLMBOMImportResponse {
+  imported_nodes: number;
+  imported_edges: number;
+  root: string;
+  revision: string;
+  bom_revision: string;
+  fmea_id: string;
 }
 
 // ─── PLM Change Order ───
