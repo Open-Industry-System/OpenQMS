@@ -14,8 +14,10 @@ from app.models.user import User
 from app.config import settings
 from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse, AdvanceRequest, D4RecommendationResponse, D5RecommendationResponse
 from app.schemas.capa_draft import DraftRequest, DraftResponse
+from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.services import capa_service
 from app.services.capa_draft_service import generate_draft
+from app.services.lessons_learned.service import LessonsLearnedService
 
 router = APIRouter(prefix="/api/capa", tags=["capa"])
 
@@ -463,3 +465,33 @@ async def draft_capa_step(
         raise HTTPException(status_code=400, detail="无效的步骤")
     result = await generate_draft(db, report_id, step, req, user, request)
     return DraftResponse(**result)
+
+
+@router.post("/{report_id}/lessons-learned", response_model=LessonsLearnedResponse)
+async def get_capa_lessons(
+    report_id: uuid.UUID,
+    request: Request,
+    req: LessonsLearnedRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+):
+    """Get lessons learned recommendations for a newly created CAPA."""
+    from app.services.capa_service import get_capa
+    capa_doc = await get_capa(db, report_id)
+    if capa_doc is None:
+        raise HTTPException(status_code=404, detail="CAPA not found")
+    await enforce_product_line_access(user, capa_doc.product_line_code, db)
+
+    # Check FMEA VIEW permission since service may query FMEA sources
+    from app.core.permissions import get_user_permission, Module as _Module, PermissionLevel as _PL
+    fmea_level = await get_user_permission(user, _Module.FMEA, db)
+    has_fmea_view = fmea_level >= _PL.VIEW
+
+    embedding = getattr(request.app.state, "embedding_provider", None)
+    service = LessonsLearnedService(db, embedding)
+    result = await service.recommend(
+        report_id, "capa", req.problem_description if req else None, user,
+        skip_fmea_sources=not has_fmea_view,
+    )
+    await db.commit()
+    return result

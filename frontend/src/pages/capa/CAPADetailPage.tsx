@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useEffect, useState, useRef } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Steps, Card, Form, Input,
   Select, App, Spin, Empty, Row, Col, Table, Divider, Modal,
@@ -15,7 +15,9 @@ import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecP
 import AIDraftButton from "../../components/capa/AIDraftButton";
 import AIDraftPreview from "../../components/capa/AIDraftPreview";
 import { useAIDraft } from "../../components/capa/useAIDraft";
-import type { CAPAReport, FMEADocument, DraftFormat } from "../../types";
+import type { CAPAReport, FMEADocument, DraftFormat, LessonsLearnedResponse, LessonCard } from "../../types";
+import LessonsLearnedModal from "../../components/lessons/LessonsLearnedModal";
+import { getCAPALessons } from "../../api/lessonsLearned";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 
@@ -55,6 +57,53 @@ export default function CAPADetailPage() {
   // D1 Team Adding UI State
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberRole, setNewMemberRole] = useState("质量工程师");
+
+  // Lessons learned modal
+  const location = useLocation();
+  const [lessonsModalOpen, setLessonsModalOpen] = useState(false);
+  const [lessonsLoading, setLessonsLoading] = useState(false);
+  const [lessonsData, setLessonsData] = useState<LessonsLearnedResponse | null>(null);
+  const lessonsShownRef = useRef(false);
+
+  useEffect(() => {
+    if (location.state?.showLessonsLearned && !lessonsShownRef.current) {
+      lessonsShownRef.current = true;
+      setLessonsModalOpen(true);
+      setLessonsLoading(true);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        setLessonsLoading(false);
+        setLessonsModalOpen(false);
+        message.warning("检索超时，请稍后在编辑过程中使用推荐功能");
+      }, 10000);
+
+      const problemDescription = location.state?.problemDescription;
+      getCAPALessons(
+        id!,
+        problemDescription ? { problem_description: problemDescription } : undefined,
+        { signal: controller.signal }
+      )
+        .then((res) => {
+          clearTimeout(timeoutId);
+          setLessonsData(res);
+          setLessonsLoading(false);
+        })
+        .catch((err) => {
+          clearTimeout(timeoutId);
+          if (err.name !== "AbortError") {
+            message.error("检索经验教训失败");
+          }
+          setLessonsLoading(false);
+        });
+
+      return () => {
+        clearTimeout(timeoutId);
+        controller.abort();
+      };
+    }
+  }, [location.state, id]);
 
   // D7 soft gate state
   const [allD7Confirmed, setAllD7Confirmed] = useState(true);
@@ -609,6 +658,26 @@ export default function CAPADetailPage() {
         }}
         onReplace={handleReplace}
         onAppend={handleAppend}
+      />
+      <LessonsLearnedModal
+        open={lessonsModalOpen}
+        loading={lessonsLoading}
+        data={lessonsData}
+        onClose={() => setLessonsModalOpen(false)}
+        onViewDetail={(card) => {
+          if (card.source_type === "fmea") {
+            window.open(`/fmea/${card.source_id}`, "_blank");
+          } else if (card.source_type === "capa") {
+            window.open(`/capa/${card.source_id}`, "_blank");
+          } else if (card.source_type === "audit") {
+            const auditId = card.metadata?.audit_id;
+            const category = card.metadata?.audit_category;
+            if (auditId) {
+              const path = category === "customer" ? `/customer-audits/${auditId}` : `/internal-audits/${auditId}`;
+              window.open(path, "_blank");
+            }
+          }
+        }}
       />
     </>
   );

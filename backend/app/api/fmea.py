@@ -11,7 +11,9 @@ from app.models.user import User
 from app.schemas.fmea import (
     FMEACreate, FMEAUpdate, FMEAResponse, FMEAListResponse, TransitionRequest,
 )
+from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.services import fmea_service
+from app.services.lessons_learned.service import LessonsLearnedService
 
 router = APIRouter(prefix="/api/fmea", tags=["fmea"])
 
@@ -241,3 +243,25 @@ async def severity_warnings(
     await enforce_product_line_access(user, fmea.product_line_code, db)
     from app.services.special_characteristic_service import check_severity_compliance
     return await check_severity_compliance(db, fmea_id)
+
+
+@router.post("/{fmea_id}/lessons-learned", response_model=LessonsLearnedResponse)
+async def get_fmea_lessons(
+    fmea_id: uuid.UUID,
+    request: Request,
+    req: LessonsLearnedRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.VIEW)),
+):
+    """Get lessons learned recommendations for a newly created FMEA."""
+    from app.services.fmea_service import get_fmea
+    fmea_doc = await get_fmea(db, fmea_id)
+    if fmea_doc is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    await enforce_product_line_access(user, fmea_doc.product_line_code, db)
+
+    embedding = getattr(request.app.state, "embedding_provider", None)
+    service = LessonsLearnedService(db, embedding)
+    result = await service.recommend(fmea_id, "fmea", req.problem_description if req else None, user)
+    await db.commit()
+    return result

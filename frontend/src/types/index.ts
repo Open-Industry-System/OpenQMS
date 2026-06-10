@@ -1377,3 +1377,39 @@ export type {
   WidgetCategory as DashboardWidgetCategory,
   QualityTrendInterpretation,
 } from "../components/dashboard/widgets/types";
+
+// --- Lessons Learned ---
+
+export interface LessonsLearnedRequest {
+  problem_description?: string;
+}
+
+export interface LessonCard {
+  id: string;
+  title: string;
+  summary: string;
+  source_type: "fmea" | "capa" | "audit";
+  source_document_no: string;
+  source_id: string;
+  source_product_line: string;
+  same_product_line: boolean;
+  confidence: number;
+  match_reason: string;
+  root_cause?: string;
+  action?: string;
+  severity?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LessonCategories {
+  fmea: LessonCard[];
+  capa: LessonCard[];
+  audit: LessonCard[];
+}
+
+export interface LessonsLearnedResponse {
+  highlights: LessonCard[];
+  categories: LessonCategories;
+  source: string;
+  cached: boolean;
+}

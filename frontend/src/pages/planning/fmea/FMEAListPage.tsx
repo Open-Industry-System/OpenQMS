@@ -74,7 +74,7 @@ export default function FMEAListPage() {
     fetchData(1);
   }, [productLine, searchParams]);
 
-  const handleCreate = async (values: { title: string; document_no: string; fmea_type: string }) => {
+  const handleCreate = async (values: { title: string; document_no: string; fmea_type: string; problem_description?: string }) => {
     if (values.fmea_type === "DFMEA") {
       setModalOpen(false);
       setWizardOpen(true);
@@ -85,7 +85,7 @@ export default function FMEAListPage() {
       message.success("FMEA 创建成功");
       setModalOpen(false);
       form.resetFields();
-      navigate(`/fmea/${fmea.fmea_id}`);
+      navigate(`/fmea/${fmea.fmea_id}`, { state: { showLessonsLearned: true, problemDescription: values.problem_description } });
     } catch {
       message.error("创建失败");
     }
@@ -104,7 +104,7 @@ export default function FMEAListPage() {
       message.success("DFMEA 创建成功");
       setWizardOpen(false);
       form.resetFields();
-      navigate(`/fmea/${fmea.fmea_id}`);
+      navigate(`/fmea/${fmea.fmea_id}`, { state: { showLessonsLearned: true, problemDescription: undefined } });
     } catch {
       message.error("创建失败");
     }
@@ -199,6 +199,9 @@ export default function FMEAListPage() {
           </Form.Item>
           <Form.Item name="title" label="标题" rules={[{ required: true, message: "请输入标题" }]}>
             <Input placeholder="如 SMT焊接工序PFMEA" />
+          </Form.Item>
+          <Form.Item name="problem_description" label="问题描述（可选）">
+            <Input.TextArea rows={2} placeholder="简述工艺步骤或关注点（可选，用于智能推荐）" />
           </Form.Item>
         </Form>
       </Modal>
