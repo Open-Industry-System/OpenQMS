@@ -23,7 +23,7 @@
 | `backend/app/services/lessons_learned/sources/historical_fmea.py` | `HistoricalFMEASource` — keyword-match approved FMEA FailureMode nodes |
 | `backend/app/services/lessons_learned/sources/historical_capa.py` | `LessonsCAPASource` — pgvector search closed CAPA d2_descriptions |
 | `backend/app/services/lessons_learned/sources/audit_finding.py` | `AuditFindingSource` — pgvector search audit findings with audit_plans JOIN |
-| `backend/app/services/lessons_learned/sources/semantic.py` | `LessonsSemanticSource` — generic pgvector search across fmea_node + capa |
+| `backend/app/services/lessons_learned/sources/semantic.py` | `LessonsSemanticSource` — pgvector search across FMEA nodes |
 | `backend/app/services/lessons_learned/sources/rule_engine.py` | `LessonsRuleSource` — RuleEngine fallback for keyword extraction |
 | `backend/app/services/lessons_learned/fusion.py` | `LessonsFusionEngine` — deduplicate, rank, PL boost |
 | `backend/app/services/lessons_learned/service.py` | `LessonsLearnedService` — orchestrate sources, cache, format response |
@@ -305,6 +305,8 @@ for on_conflict_do_update to resolve correctly."
 
 ```python
 import uuid
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -331,6 +333,7 @@ class LessonCard(BaseModel):
     root_cause: str | None = None
     action: str | None = None
     severity: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)  # audit_id, audit_category, etc.
 
 
 class LessonCategories(BaseModel):
@@ -630,7 +633,9 @@ class TestHistoricalFMEASource:
                 {"source": "cause1", "target": "fm1", "type": "CAUSE_OF"},
             ],
         }
-        db.execute.return_value = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[fmea]))))
+        embed_result = MagicMock(fetchall=MagicMock(return_value=[(fmea.fmea_id,)]))
+        fmea_result = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[fmea]))))
+        db.execute.side_effect = [embed_result, fmea_result]
         source = HistoricalFMEASource(db)
         ctx = LessonsLearnedContext(
             doc_type="fmea", doc_id=uuid.uuid4(), query_text="焊接不良",
@@ -850,7 +855,7 @@ git commit -m "feat(lessons): add AuditFindingSource
 
 - pgvector semantic search on audit_finding embeddings
 - JOIN audit_plans for product_line_code and plan_no
-- Only confirmed/closed findings with corrective_action
+- Only closed findings with corrective_action
 - PL-filtered, confidence capped at 0.85"
 ```
 
@@ -1147,6 +1152,7 @@ class LessonsLearnedService:
         doc_type: str,
         problem_description: str | None,
         user: User,
+        skip_fmea_sources: bool = False,
     ) -> LessonsLearnedResponse:
         # 1. Build context
         context = await self._build_context(doc_id, doc_type, problem_description, user)
@@ -1157,14 +1163,15 @@ class LessonsLearnedService:
         if cached:
             return cached
 
-        # 3. Retrieve from all sources (parallel would be better but sequential is simpler)
-        sources = [
-            HistoricalFMEASource(self.db),
+        # 3. Retrieve from all sources
+        sources: list = [
             LessonsCAPASource(self.db, self.embedding),
             AuditFindingSource(self.db, self.embedding),
-            LessonsSemanticSource(self.db, self.embedding),
             LessonsRuleSource(),
         ]
+        if not skip_fmea_sources:
+            sources.insert(0, HistoricalFMEASource(self.db))
+            sources.insert(3, LessonsSemanticSource(self.db, self.embedding))
 
         all_candidates = []
         active_sources = []
@@ -1314,7 +1321,7 @@ class LessonsLearnedService:
         audit_cards: list[LessonCard] = []
 
         for c in candidates:
-            source_type = self._infer_source_type(c.source)
+            source_type = self._infer_source_type(c)
             same_pl = c.metadata.get("product_line_code") == current_pl
             card = LessonCard(
                 id=f"{c.source}:{c.metadata.get('document_no', '')}:{c.content[:20]}",
@@ -1330,6 +1337,10 @@ class LessonsLearnedService:
                 root_cause=c.metadata.get("root_cause"),
                 action=c.metadata.get("action"),
                 severity=c.metadata.get("severity"),
+                metadata={k: v for k, v in c.metadata.items() if k not in {
+                    "fmea_id", "capa_id", "finding_id", "document_no", "product_line_code",
+                    "root_cause", "action", "severity", "source_type",
+                }},
             )
             if source_type == "fmea":
                 fmea_cards.append(card)
@@ -1434,8 +1445,8 @@ from app.services.lessons_learned.service import LessonsLearnedService
 @router.post("/{fmea_id}/lessons-learned", response_model=LessonsLearnedResponse)
 async def get_fmea_lessons(
     fmea_id: uuid.UUID,
-    req: LessonsLearnedRequest | None = None,
     request: Request,
+    req: LessonsLearnedRequest | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.VIEW)),
 ):
@@ -1443,6 +1454,8 @@ async def get_fmea_lessons(
     # Verify user has access to this FMEA's product line
     from app.services.fmea_service import get_fmea
     fmea_doc = await get_fmea(db, fmea_id)
+    if fmea_doc is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
     await enforce_product_line_access(user, fmea_doc.product_line_code, db)
 
     embedding = getattr(request.app.state, "embedding_provider", None)
@@ -1466,8 +1479,8 @@ from app.services.lessons_learned.service import LessonsLearnedService
 @router.post("/{report_id}/lessons-learned", response_model=LessonsLearnedResponse)
 async def get_capa_lessons(
     report_id: uuid.UUID,
-    req: LessonsLearnedRequest | None = None,
     request: Request,
+    req: LessonsLearnedRequest | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
 ):
@@ -1475,12 +1488,21 @@ async def get_capa_lessons(
     # Verify user has access to this CAPA's product line
     from app.services.capa_service import get_capa
     capa_doc = await get_capa(db, report_id)
+    if capa_doc is None:
+        raise HTTPException(status_code=404, detail="CAPA not found")
     await enforce_product_line_access(user, capa_doc.product_line_code, db)
 
-    # If FMEA source will be used, also check FMEA VIEW permission
+    # Check FMEA VIEW permission since service may query FMEA sources
+    from app.core.permissions import get_user_permission, Module as _Module, PermissionLevel as _PL
+    fmea_level = await get_user_permission(user, _Module.FMEA, db)
+    has_fmea_view = fmea_level >= _PL.VIEW
+
     embedding = getattr(request.app.state, "embedding_provider", None)
     service = LessonsLearnedService(db, embedding)
-    result = await service.recommend(report_id, "capa", req.problem_description if req else None, user)
+    result = await service.recommend(
+        report_id, "capa", req.problem_description if req else None, user,
+        skip_fmea_sources=not has_fmea_view,
+    )
     await db.commit()
     return result
 ```
@@ -1540,6 +1562,7 @@ export interface LessonCard {
   root_cause?: string;
   action?: string;
   severity?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface LessonCategories {
@@ -1578,17 +1601,23 @@ import type { LessonsLearnedResponse, LessonsLearnedRequest } from "../types";
 
 export async function getFMEALessons(
   fmeaId: string,
-  body?: LessonsLearnedRequest
+  body?: LessonsLearnedRequest,
+  options?: { signal?: AbortSignal }
 ): Promise<LessonsLearnedResponse> {
-  const resp = await client.post(`/fmea/${fmeaId}/lessons-learned`, body || {});
+  const resp = await client.post(`/fmea/${fmeaId}/lessons-learned`, body || {}, {
+    signal: options?.signal,
+  });
   return resp.data;
 }
 
 export async function getCAPALessons(
   reportId: string,
-  body?: LessonsLearnedRequest
+  body?: LessonsLearnedRequest,
+  options?: { signal?: AbortSignal }
 ): Promise<LessonsLearnedResponse> {
-  const resp = await client.post(`/capa/${reportId}/lessons-learned`, body || {});
+  const resp = await client.post(`/capa/${reportId}/lessons-learned`, body || {}, {
+    signal: options?.signal,
+  });
   return resp.data;
 }
 ```
@@ -1945,7 +1974,11 @@ useEffect(() => {
     }, 10000);
 
     const problemDescription = location.state?.problemDescription;
-    getFMEALessons(fmeaId, problemDescription ? { problem_description: problemDescription } : undefined)
+    getFMEALessons(
+      fmeaId,
+      problemDescription ? { problem_description: problemDescription } : undefined,
+      { signal: controller.signal }
+    )
       .then((res) => {
         clearTimeout(timeoutId);
         setLessonsData(res);
@@ -2002,7 +2035,7 @@ git commit -m "feat(fmea): integrate LessonsLearnedModal in editor page
 
 - Detect navigate state showLessonsLearned
 - Call API on mount, render modal with results
-- 10s timeout handled by API layer"
+- 10s timeout via AbortController + setTimeout"
 ```
 
 ---
@@ -2047,7 +2080,11 @@ useEffect(() => {
     }, 10000);
 
     const problemDescription = location.state?.problemDescription;
-    getCAPALessons(id!, problemDescription ? { problem_description: problemDescription } : undefined)
+    getCAPALessons(
+      id!,
+      problemDescription ? { problem_description: problemDescription } : undefined,
+      { signal: controller.signal }
+    )
       .then((res) => {
         clearTimeout(timeoutId);
         setLessonsData(res);

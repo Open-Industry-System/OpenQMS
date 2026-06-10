@@ -49,7 +49,7 @@ export default function CAPAListPage() {
 
   useEffect(() => { fetchData(1); }, [productLine, searchParams]);
 
-  const handleCreate = async (values: { title: string; document_no: string; severity: string; due_date?: dayjs.Dayjs }) => {
+  const handleCreate = async (values: { title: string; document_no: string; severity: string; due_date?: dayjs.Dayjs; problem_description?: string }) => {
     try {
       const capa = await createCAPA({
         title: values.title,
@@ -60,7 +60,7 @@ export default function CAPAListPage() {
       message.success("8D 报告创建成功");
       setModalOpen(false);
       form.resetFields();
-      navigate(`/capa/${capa.report_id}`);
+      navigate(`/capa/${capa.report_id}`, { state: { showLessonsLearned: true, problemDescription: values.problem_description } });
     } catch { message.error("创建失败"); }
   };
 
@@ -112,6 +112,9 @@ export default function CAPAListPage() {
           </Form.Item>
           <Form.Item name="due_date" label="完成期限">
             <DatePicker style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="problem_description" label="问题描述（可选）">
+            <Input.TextArea rows={2} placeholder="简述问题现象（可选，用于智能推荐）" />
           </Form.Item>
         </Form>
       </Modal>

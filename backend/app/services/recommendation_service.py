@@ -611,6 +611,7 @@ class RecommendationService:
             )
             .on_conflict_do_update(
                 index_elements=["fmea_id", "trigger_type", "context_hash"],
+                index_where=text("fmea_id IS NOT NULL"),
                 set_={
                     "suggestions": [s.model_dump() for s in response.suggestions],
                     "source": response.source,

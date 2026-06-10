@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Input, Select, Table, Card, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
@@ -12,7 +12,10 @@ import {
 } from "@ant-design/icons";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
-import type { FMEADocument, GraphNode, GraphEdge } from "../../../types";
+import type { FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse, LessonCard } from "../../../types";
+import LessonsLearnedModal from "../../../components/lessons/LessonsLearnedModal";
+import { getFMEALessons } from "../../../api/lessonsLearned";
+import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
@@ -115,6 +118,53 @@ export default function FMEAEditorPage() {
   const [highlightNodes, setHighlightNodes] = useState<string[]>([]);
   const [dimOthers, setDimOthers] = useState(false);
   const [graphLoading, setGraphLoading] = useState(false);
+
+  // Lessons learned modal
+  const location = useLocation();
+  const [lessonsModalOpen, setLessonsModalOpen] = useState(false);
+  const [lessonsLoading, setLessonsLoading] = useState(false);
+  const [lessonsData, setLessonsData] = useState<LessonsLearnedResponse | null>(null);
+  const lessonsShownRef = useRef(false);
+
+  useEffect(() => {
+    if (location.state?.showLessonsLearned && !lessonsShownRef.current) {
+      lessonsShownRef.current = true;
+      setLessonsModalOpen(true);
+      setLessonsLoading(true);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        setLessonsLoading(false);
+        setLessonsModalOpen(false);
+        message.warning("检索超时，请稍后在编辑过程中使用推荐功能");
+      }, 10000);
+
+      const problemDescription = location.state?.problemDescription;
+      getFMEALessons(
+        fmeaId,
+        problemDescription ? { problem_description: problemDescription } : undefined,
+        { signal: controller.signal }
+      )
+        .then((res) => {
+          clearTimeout(timeoutId);
+          setLessonsData(res);
+          setLessonsLoading(false);
+        })
+        .catch((err) => {
+          clearTimeout(timeoutId);
+          if (!axios.isCancel(err)) {
+            message.error("检索经验教训失败");
+          }
+          setLessonsLoading(false);
+        });
+
+      return () => {
+        clearTimeout(timeoutId);
+        controller.abort();
+      };
+    }
+  }, [location.state, fmeaId]);
   const canvasRef = useRef<GraphCanvasRef>(null);
 
   const { activeUsers, startEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);
@@ -1384,6 +1434,26 @@ export default function FMEAEditorPage() {
         diff={conflictDiff}
         onRefresh={handleConflictRefresh}
         onForceSave={handleConflictForceSave}
+      />
+      <LessonsLearnedModal
+        open={lessonsModalOpen}
+        loading={lessonsLoading}
+        data={lessonsData}
+        onClose={() => setLessonsModalOpen(false)}
+        onViewDetail={(card) => {
+          if (card.source_type === "fmea") {
+            window.open(`/fmea/${card.source_id}`, "_blank");
+          } else if (card.source_type === "capa") {
+            window.open(`/capa/${card.source_id}`, "_blank");
+          } else if (card.source_type === "audit") {
+            const auditId = card.metadata?.audit_id;
+            const category = card.metadata?.audit_category;
+            if (auditId) {
+              const path = category === "customer" ? `/customer-audits/${auditId}` : `/internal-audits/${auditId}`;
+              window.open(path, "_blank");
+            }
+          }
+        }}
       />
     </div>
   );
