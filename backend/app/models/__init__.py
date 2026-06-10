@@ -49,6 +49,20 @@ from app.models.mes import (
     MESScrapMonthlySummary,
     MESProductionOrderArchive,
 )
+from app.models.erp import (
+    ERPConnection,
+    ERPSyncJob,
+    ERPPushOutbox,
+    ERPSupplier,
+    ERPCustomer,
+    ERPMaterial,
+    ERPLocation,
+    ERPPurchaseOrder,
+    ERPSalesOrder,
+    ERPInventoryBalance,
+    ERPShipment,
+    ERPCostRecord,
+)
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -96,4 +110,16 @@ __all__ = [
     "MESPushOutbox",
     "MESScrapMonthlySummary",
     "MESProductionOrderArchive",
+    "ERPConnection",
+    "ERPSyncJob",
+    "ERPPushOutbox",
+    "ERPSupplier",
+    "ERPCustomer",
+    "ERPMaterial",
+    "ERPLocation",
+    "ERPPurchaseOrder",
+    "ERPSalesOrder",
+    "ERPInventoryBalance",
+    "ERPShipment",
+    "ERPCostRecord",
 ]
