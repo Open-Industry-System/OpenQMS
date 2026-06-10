@@ -379,7 +379,7 @@ def upgrade():
     # Permission seeds for ERP module
     op.execute("""
         INSERT INTO role_permissions (role_id, module, permission_level)
-        SELECT r.role_id, 'erp', CASE r.role_key
+        SELECT r.id, 'erp', CASE r.role_key
             WHEN 'admin' THEN 5
             WHEN 'manager' THEN 4
             WHEN 'field_qe' THEN 2
