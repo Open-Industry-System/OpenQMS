@@ -1,7 +1,7 @@
 # OpenQMS 开发路线图
 
-**更新日期**: 2026-06-09
-**当前版本**: v0.1.0 (MVP)  
+**更新日期**: 2026-06-10
+**当前版本**: v0.1.0 (MVP)
 **目标版本**: v3.0 (全功能发布)
 
 ---
@@ -154,7 +154,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | 供应商风险智能预警 | P3 | 🔲 待开发 | PPM + 交付 + SCAR 综合风险评估 |
 | 管理评审报告自动生成 | P3 | 🔲 待开发 | 汇总输入数据 → 生成报告初稿 |
 | 供应链风险地图 | P3 | 🔲 待开发 | 多维度供应风险热力图 |
-| 自定义看板（拖拽式）| P3 | 🔲 待开发 | 拖拽式自定义 KPI 布局 |
+| 自定义看板（拖拽式）| P3 | ✅ 完成 | react-grid-layout 拖拽布局，widget 库面板（18 种 widget），用户级 layout 存储，产品线过滤，权限控制 |
 | 多工厂部署支持 | P3 | 🔲 待开发 | 每工厂独立实例 + 集团汇总 |
 | SaaS 多租户架构 | P3 | 🔲 待开发 | Schema 级别隔离 + 弹性资源 |
 
@@ -172,14 +172,44 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 11. ~~前端页面~~ ✅ 4 页（Connections + Dashboard + Production Orders + Scrap Records）+ 产品线联动
 12. ~~并发测试~~ ✅ 33 条 pytest（SKIP LOCKED / claim_token / 幂等 / Outbox 3 阶段 / 归档）
 
-**5 轮审查修复**:
-- 第 1 轮：分页 Schema + API 参数 + 产品线同步
-- 第 2 轮：导入缺失 / DB 约束 / 数据完整性 / SQL 参数 / 分页逻辑 / 响应字段
-- 第 3 轮：Optional 导入 / 子查询别名 / 产线参数 / 分区键 / 百分比 / changeover
-- 第 4 轮：Dashboard rowKey/type 不匹配
-- 第 5 轮：复合 rowKey (connection_id:equipment_code)
+**Phase 4 PLM 集成已完成 (2026-06-09)**:
+1. ~~数据库迁移~~ ✅ 9 张 PLM 表 + CHECK 约束（alembic/031）
+2. ~~ORM 模型~~ ✅ PLMConnection / PLMPart / PLMBOM / PLMChangeOrder / PLMSyncJob / PLMPushOutbox 等 9 个模型
+3. ~~Schema 层~~ ✅ RESTConfig 校验 + Pydantic v2 请求/响应 + BOM 树结构 + Part 特殊特性确认
+4. ~~连接器适配层~~ ✅ PLMConnector ABC + MockPLMConnector（分页/重试/auth/字段映射）
+5. ~~凭证安全~~ ✅ SHA-256 API Key hash + Fernet 加密出站凭证
+6. ~~数据接入服务~~ ✅ PLMIngestionService（BOM 导入 FMEA + Part→SC 特殊特性确认）
+7. ~~同步调度~~ ✅ PLMSyncService（manual/auto + SKIP LOCKED claim）
+8. ~~Outbox 推送~~ ✅ PLMPushService（3 阶段短事务 + at-least-once + event_id 幂等）
+9. ~~API 路由~~ ✅ 13 端点（connections CRUD + test/sync + ingest + BOM + parts + change orders）
+10. ~~前端页面~~ ✅ 4 页（Dashboard + Connections + Parts + ChangeOrders）+ 产品线联动
+11. ~~测试覆盖~~ ✅ 46 条后端回归测试 + 11 条前端权限测试
+
+**Phase 4 自定义拖拽看板已完成 (2026-06-09)**:
+1. ~~后端模型~~ ✅ user_dashboard_layouts 表（JSONB 布局配置 + 用户级隔离）
+2. ~~后端 API~~ ✅ DashboardPage 路由：GET/PUT 布局配置 + 产品线过滤 + 权限校验
+3. ~~前端组件~~ ✅ WidgetLibraryPanel（分类面板）+ WidgetWrapper（拖拽容器）+ 18 种 widget
+4. ~~拖拽引擎~~ ✅ react-grid-layout：resize + drag + 自动持久化 + 响应式断点
+5. ~~Widget 库~~ ✅ KPI 卡片（6 种）+ 告警（4 种）+ SPC/MES/MSA/IQC/质量趋势 AI 等
+6. ~~产品线过滤~~ ✅ 所有 widget 统一 product_line 过滤 + service 层校验
+7. ~~权限控制~~ ✅ viewer 角色隐藏编辑按钮 + 后端 403 拦截
 
 **验收标准**: GA v3.0 发布 — 全功能发布
+
+---
+
+## 项目统计 (截至 2026-06-10)
+
+| 指标 | 数量 |
+|------|------|
+| Git 提交 | 1,021 次 |
+| 后端 Python 文件 | 198 个 |
+| 前端 TS/TSX 文件 | 181 个 |
+| API 路由模块 | 33 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/...) |
+| 前端页面 | 58 个 TSX 页面 |
+| 数据库表 | 86 张 (含多对多关联表) |
+| 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
+| 种子数据 | 4 用户 + 多模块演示数据 |
 
 ---
 
@@ -202,14 +232,14 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 | 类别 | 内容 |
 |------|------|
-| 提交数 | 20 commits |
-| 后端文件 | 29 个 Python 文件 |
-| 前端文件 | 17 个 TS/TSX 文件 |
-| API 端点 | 16 个 (auth 3 + fmea 6 + capa 6 + dashboard 1) |
-| 前端页面 | 6 个 (登录 + 仪表盘 + FMEA列表 + FMEA编辑器 + 8D列表 + 8D详情) |
-| 数据库表 | 4 张 (users + fmea_documents + capa_eightd + audit_logs) |
+| 提交数 | 1,021 次 |
+| 后端文件 | 198 个 Python 文件 |
+| 前端文件 | 181 个 TS/TSX 文件 |
+| API 端点 | 33 个路由模块 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/...) |
+| 前端页面 | 58 个 TSX 页面 |
+| 数据库表 | 86 张 (含多对多关联表) |
 | 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
-| 种子数据 | 3 用户 + 3 FMEA + 6 CAPA |
+| 种子数据 | 4 用户 + 3 FMEA + 6 CAPA + 多模块演示数据 |
 
 ---
 
@@ -244,11 +274,23 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 - [x] 多人协同编辑 (乐观锁 + 短轮询在线状态) — ✅ 已完成 (2026-06-02)
 - [x] 全局知识库脱敏 (跨产品线数据聚合时的敏感信息处理) — ✅ 已完成 (2026-06-02)
 
-**Phase 4 已完成 (2026-06-09)**:
-- [x] PLM 集成连接器 — BOM 查询/导入 FMEA + Part→SC 特殊特性确认；Mock 连接器；9 张表；4 页前端；双权限校验；46 + 11 测试
+**Phase 4 质量趋势 AI 解读已完成 (2026-06-10)**:
+1. ~~后端服务~~ ✅ QualityTrendService（规则摘要 + 按需 LLM 深度解读）
+2. ~~数据聚合~~ ✅ SPC/CAPA/FMEA 三源聚合 + 模块级权限过滤 + 产品线隔离
+3. ~~证据缓存~~ ✅ scope_hash 规范化（列表排序/去重）+ description hash + LLM 超时处理
+4. ~~审计日志~~ ✅ ai_interpretation 类型 + 模块过滤 + 限流
+5. ~~前端 Widget~~ ✅ QualityTrendAIWidget + AI 分类面板 + stale 检测 + 手动触发
+6. ~~API 端点~~ ✅ POST /dashboard/quality-trend/interpret（手动解读）
+7. ~~Dashboard 集成~~ ✅ Widget 注册 + 布局持久化 + 前端类型定义
+
+**Phase 4 已完成汇总 (截至 2026-06-10)**:
+- [x] MES 集成连接器 — 9 张表 + Mock/REST 双连接器 + Outbox 推送 + 33 并发测试
+- [x] PLM 集成连接器 — BOM 查询/导入 FMEA + Part→SC 特殊特性确认；9 张表；4 页前端；46 + 11 测试
+- [x] 8D 报告 AI 草拟 — LLM 辅助填充 D2-D8；结构化/段落双格式；限流 + 审计日志
+- [x] 质量趋势 AI 解读 — SPC/CAPA/FMEA 三源聚合 + 规则摘要 + 按需 LLM 深度解读 + Widget 集成
+- [x] 自定义看板（拖拽式）— react-grid-layout + 18 种 widget + 用户级 layout 存储 + 产品线过滤
 
 **Phase 4 剩余 (待开发)**:
-- [ ] 自定义看板（拖拽式）— react-grid-layout 拖拽布局，widget 库面板
 - [ ] SaaS 多租户架构 — Schema 级别隔离 + 弹性资源
 - [ ] 供应商风险智能预警
 - [ ] 经验教训智能推送
