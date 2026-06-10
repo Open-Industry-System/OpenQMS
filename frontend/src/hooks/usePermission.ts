@@ -26,6 +26,7 @@ export function usePermission() {
     canCreate: (module: ModuleKey) => getLevel(module) >= PermissionLevel.CREATE,
     canEdit: (module: ModuleKey) => getLevel(module) >= PermissionLevel.EDIT,
     canApprove: (module: ModuleKey) => getLevel(module) >= PermissionLevel.APPROVE,
+    canAdmin: (module: ModuleKey) => getLevel(module) >= PermissionLevel.ADMIN,
     isAdmin: user?.role_key === "admin",
     roleKey: user?.role_key ?? "viewer",
   };

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from app.models.special_characteristic import SpecialCharacteristic
@@ -102,6 +102,44 @@ async def create_special_characteristic(db: AsyncSession, data: SCCreate, user_i
     await db.commit()
     await db.refresh(item)
     return _to_response(item)
+
+
+async def prepare_special_characteristic(
+    db: AsyncSession,
+    data: SCCreate,
+    user_id: uuid.UUID,
+) -> SpecialCharacteristic:
+    """Stage a SpecialCharacteristic without committing.
+
+    Explicitly flushes so the caller can safely reference the newly created
+    ``sc_id`` before any follow-on writes (e.g., PLM SC link confirmation).
+    """
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('special_characteristics_sc_code'))"))
+    sc_code = await generate_sc_code(db)
+    item = SpecialCharacteristic(
+        sc_code=sc_code,
+        sc_name=data.sc_name,
+        sc_type=data.sc_type,
+        customer_symbol=data.customer_symbol,
+        sc_category=data.sc_category,
+        spec_requirement=data.spec_requirement,
+        source_fmea_id=data.source_fmea_id,
+        source_node_id=data.source_node_id or "",
+        source_type=data.source_type or "PFMEA",
+        sop_ref=data.sop_ref,
+        product_line_code=data.product_line_code,
+        created_by=user_id,
+    )
+    db.add(item)
+    await db.flush()
+    await _create_audit(
+        db,
+        "CREATE",
+        item.sc_id,
+        user_id,
+        {"sc_code": sc_code, "sc_name": data.sc_name},
+    )
+    return item
 
 
 async def update_special_characteristic(

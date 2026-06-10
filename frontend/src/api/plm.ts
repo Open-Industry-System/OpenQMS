@@ -4,6 +4,7 @@ import type {
   PLMConnectionCreate,
   PLMConnectionUpdate,
   PLMConnectionListResponse,
+  PLMConnectionTestResponse,
   PLMPart,
   PLMPartListResponse,
   PLMBOM,
@@ -13,6 +14,9 @@ import type {
   PLMChangeOrderListResponse,
   PLMChangeImpactTask,
   PLMDashboard,
+  PLMPartConfirmSCRequest,
+  PLMPartConfirmSCResponse,
+  PLMBOMImportResponse,
 } from "../types/plm";
 
 // ─── Connections ───
@@ -57,8 +61,8 @@ export async function deletePLMConnection(id: string): Promise<void> {
 
 export async function testPLMConnection(
   id: string,
-): Promise<{ success: boolean }> {
-  const resp = await client.post<{ success: boolean }>(
+): Promise<PLMConnectionTestResponse> {
+  const resp = await client.post<PLMConnectionTestResponse>(
     `/plm/connections/${id}/test`,
   );
   return resp.data;
@@ -107,9 +111,11 @@ export async function getPLMBOMs(params?: {
 export async function getPLMBOMTree(
   connectionId: string,
   partNumber: string,
+  params?: { revision?: string; bom_revision?: string },
 ): Promise<PLMBOMTreeResponse> {
   const resp = await client.get<PLMBOMTreeResponse>(
     `/plm/connections/${connectionId}/boms/tree/${encodeURIComponent(partNumber)}`,
+    { params },
   );
   return resp.data;
 }
@@ -160,9 +166,22 @@ export async function importBOMToFMEA(
   connectionId: string,
   partNumber: string,
   body: { fmea_id: string; overwrite?: boolean },
-): Promise<{ imported_nodes: number; imported_edges: number; root: string; fmea_id: string }> {
-  const resp = await client.post<{ imported_nodes: number; imported_edges: number; root: string; fmea_id: string }>(
+  params?: { revision?: string; bom_revision?: string },
+): Promise<PLMBOMImportResponse> {
+  const resp = await client.post<PLMBOMImportResponse>(
     `/plm/connections/${connectionId}/boms/${encodeURIComponent(partNumber)}/import-to-fmea`,
+    body,
+    { params },
+  );
+  return resp.data;
+}
+
+export async function confirmPLMPartSC(
+  partId: string,
+  body: PLMPartConfirmSCRequest,
+): Promise<PLMPartConfirmSCResponse> {
+  const resp = await client.post<PLMPartConfirmSCResponse>(
+    `/plm/parts/${partId}/confirm-sc`,
     body,
   );
   return resp.data;

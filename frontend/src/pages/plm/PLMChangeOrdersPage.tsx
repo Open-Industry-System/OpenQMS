@@ -4,6 +4,7 @@ import { ThunderboltOutlined } from "@ant-design/icons";
 import { getPLMChangeOrders, triggerImpactAnalysis } from "../../api/plm";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { PLMChangeOrder } from "../../types/plm";
+import { usePermission } from "../../hooks/usePermission";
 
 const { Title } = Typography;
 
@@ -24,6 +25,8 @@ const changeTypeLabels: Record<string, string> = {
 
 export default function PLMChangeOrdersPage() {
   const { message } = App.useApp();
+  const { canEdit } = usePermission();
+  const canEditPlm = canEdit("plm");
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<PLMChangeOrder[]>([]);
   const [total, setTotal] = useState(0);
@@ -43,6 +46,7 @@ export default function PLMChangeOrdersPage() {
   };
 
   useEffect(() => {
+    setPage(1);
     fetchData(1, productLine);
   }, [productLine]);
 
@@ -59,42 +63,50 @@ export default function PLMChangeOrdersPage() {
   };
 
   const columns = useMemo(
-    () => [
-      { title: "变更编号", dataIndex: "change_number", key: "change_number", width: 160 },
-      { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
-      {
-        title: "变更类型",
-        dataIndex: "change_type",
-        key: "change_type",
-        width: 130,
-        render: (t: string) => changeTypeLabels[t] || t,
-      },
-      {
-        title: "状态",
-        dataIndex: "status",
-        key: "status",
-        width: 100,
-        render: (s: string) => <Tag color={statusColors[s] || "default"}>{s}</Tag>,
-      },
-      { title: "优先级", dataIndex: "priority", key: "priority", width: 80 },
-      {
-        title: "操作",
-        key: "actions",
-        width: 160,
-        render: (_: unknown, record: PLMChangeOrder) => (
-          <Button
-            type="link"
-            size="small"
-            icon={<ThunderboltOutlined />}
-            loading={impactLoading[record.change_id]}
-            onClick={() => handleImpactAnalysis(record.change_id)}
-          >
-            影响分析
-          </Button>
-        ),
-      },
-    ],
-    [impactLoading],
+    () => {
+      const baseColumns = [
+        { title: "变更编号", dataIndex: "change_number", key: "change_number", width: 160 },
+        { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
+        {
+          title: "变更类型",
+          dataIndex: "change_type",
+          key: "change_type",
+          width: 130,
+          render: (t: string) => changeTypeLabels[t] || t,
+        },
+        {
+          title: "状态",
+          dataIndex: "status",
+          key: "status",
+          width: 100,
+          render: (s: string) => <Tag color={statusColors[s] || "default"}>{s}</Tag>,
+        },
+        { title: "优先级", dataIndex: "priority", key: "priority", width: 80 },
+      ];
+
+      if (!canEditPlm) return baseColumns;
+
+      return [
+        ...baseColumns,
+        {
+          title: "操作",
+          key: "actions",
+          width: 160,
+          render: (_: unknown, record: PLMChangeOrder) => (
+            <Button
+              type="link"
+              size="small"
+              icon={<ThunderboltOutlined />}
+              loading={impactLoading[record.change_id]}
+              onClick={() => handleImpactAnalysis(record.change_id)}
+            >
+              影响分析
+            </Button>
+          ),
+        },
+      ];
+    },
+    [canEditPlm, impactLoading],
   );
 
   return (
