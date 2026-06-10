@@ -1982,8 +1982,7 @@ At the end of the return JSX, before the closing fragment:
       window.open(`/fmea/${card.source_id}`, "_blank");
     } else if (card.source_type === "capa") {
       window.open(`/capa/${card.source_id}`, "_blank");
-    } else {
-      } else if (card.source_type === "audit") {
+    } else if (card.source_type === "audit") {
       const auditId = card.metadata?.audit_id;
       const category = card.metadata?.audit_category;
       if (auditId) {
@@ -2085,8 +2084,7 @@ At the end of the return JSX:
       window.open(`/fmea/${card.source_id}`, "_blank");
     } else if (card.source_type === "capa") {
       window.open(`/capa/${card.source_id}`, "_blank");
-    } else {
-      } else if (card.source_type === "audit") {
+    } else if (card.source_type === "audit") {
       const auditId = card.metadata?.audit_id;
       const category = card.metadata?.audit_category;
       if (auditId) {
