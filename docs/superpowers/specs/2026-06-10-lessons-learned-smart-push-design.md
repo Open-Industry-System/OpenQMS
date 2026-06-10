@@ -2,7 +2,7 @@
 
 **日期**: 2026-06-10
 **模块**: Phase 4 P3 经验教训智能推送
-**状态**: 设计定稿（v5 — 整合第四轮 review）
+**状态**: 设计定稿（v6 — 整合第五轮 review）
 
 ---
 
@@ -188,23 +188,31 @@ ALTER TABLE recommendation_cache ALTER COLUMN fmea_id DROP NOT NULL;
 ALTER TABLE recommendation_cache ADD COLUMN report_id UUID
     REFERENCES capa_eightd(report_id) ON DELETE CASCADE;
 
--- 3. 删除旧的唯一约束（如有）
--- （旧约束基于 fmea_id + trigger_type + context_hash）
-ALTER TABLE recommendation_cache DROP CONSTRAINT IF EXISTS
-    recommendation_cache_fmea_id_trigger_type_context_hash_key;
+-- 3. 删除旧的唯一约束
+ALTER TABLE recommendation_cache DROP CONSTRAINT IF EXISTS uq_recommendation_cache_lookup;
 
--- 4. 创建三个部分唯一索引，分别覆盖不同场景
--- FMEA 场景：fmea_id 非空时，(fmea_id, trigger_type, context_hash) 唯一
+-- 4. 扩展 source 列长度
+ALTER TABLE recommendation_cache ALTER COLUMN source TYPE VARCHAR(100);
+
+-- 5. 使 fmea_type 可空（CAPA/global cache 无 fmea_type）
+ALTER TABLE recommendation_cache ALTER COLUMN fmea_type DROP NOT NULL;
+
+-- 6. 新增 doc_type 列，区分 "fmea" | "capa" | "lesson"
+ALTER TABLE recommendation_cache ADD COLUMN doc_type VARCHAR(20) DEFAULT 'fmea';
+
+-- 7. 创建三个部分唯一索引，分别覆盖不同场景
+-- FMEA 内联推荐场景：fmea_id 非空时，(fmea_id, trigger_type, context_hash) 唯一
 CREATE UNIQUE INDEX uq_cache_fmea
     ON recommendation_cache (fmea_id, trigger_type, context_hash)
     WHERE fmea_id IS NOT NULL;
 
--- CAPA 场景：report_id 非空时，(report_id, trigger_type, context_hash) 唯一
+-- CAPA D4/D5 推荐场景：report_id 非空时，(report_id, trigger_type, context_hash) 唯一
 CREATE UNIQUE INDEX uq_cache_capa
     ON recommendation_cache (report_id, trigger_type, context_hash)
     WHERE report_id IS NOT NULL;
 
--- 全局缓存场景（lessons）：两者均为空时，(trigger_type, context_hash) 唯一
+-- Lessons 全局缓存场景：fmea_id IS NULL AND report_id IS NULL 时，(trigger_type, context_hash) 唯一
+-- lessons 按内容 hash 共享缓存（不按文档 ID），所以不需要 fmea_id/report_id 参与唯一约束
 CREATE UNIQUE INDEX uq_cache_global
     ON recommendation_cache (trigger_type, context_hash)
     WHERE fmea_id IS NULL AND report_id IS NULL;
@@ -212,11 +220,13 @@ CREATE UNIQUE INDEX uq_cache_global
 
 ### Cache Key
 
-- **key**：`context_hash = SHA256(problem_description + product_line_code + doc_type + fmea_type/severity + sorted(user_product_lines))`
+- **key**：`context_hash = SHA256(problem_description + product_line_code + doc_type + fmea_type/severity + sorted(user_product_lines_or_sentinel))`
 - `sorted(user_product_lines)` 确保相同产品线集合产生相同 hash，避免顺序差异导致 miss
+- **admin 处理**：admin（bypass RLS，user_product_lines 为 None）使用固定 sentinel `"__ALL_PRODUCT_LINES__"`，与有权限列表的用户隔离
 - **查询**：先查 `context_hash` 命中缓存，miss 时走完整召回
+- **写入**：lessons 缓存写入 `fmea_id IS NULL AND report_id IS NULL` 的行（全局缓存，不按文档 ID 隔离）
 - **TTL**：24 小时（与现有 `recommendation_cache` 一致）
-- **隔离规则**：cache key 包含用户可访问产品线集合的 hash（`allowed_pls_hash`）。不同产品线权限的用户不会命中同一缓存条目，避免越权。同角色用户如果可访问的产品线集合相同，可以共享缓存。
+- **隔离规则**：cache key 包含用户可访问产品线集合的 hash。不同产品线权限的用户不会命中同一缓存条目，避免越权。同角色用户如果可访问的产品线集合相同，可以共享缓存。
 - **失效**：新 FMEA/CAPA 审批状态变更时，不清除此缓存（lessons 是创建时快照，不需要实时更新）
 
 ## 后端架构
@@ -258,7 +268,7 @@ class LessonsLearnedContext:
     fmea_type: str | None           # 仅 FMEA
     severity: str | None            # 仅 CAPA
     product_line_code: str
-    user_product_lines: list[str]   # 用户可访问的产品线（用于权限过滤）
+    user_product_lines: list[str] | None   # 用户可访问的产品线（None = admin 全权限）
     fmea_ref_id: uuid.UUID | None   # CAPA 关联的 FMEA（如有）
 ```
 
@@ -513,3 +523,4 @@ CAPA 创建弹窗同理。
 | v3 | 2026-06-10 | 整合第二轮 review：lessons 专用 context/source adapter 层；创建弹窗新增 problem_description；产品线不跨权限边界；权限用 require_permission；FusionEngine lessons 专用（+0.10 不改现有）；source 字段详细化；缓存按内容 hash 不按用户隔离 |
 | v4 | 2026-06-10 | 整合第三轮 review：修正请求体空问题（problem_description 可选 + title fallback）；明确 HistoricalFMEASource 独立于 FMEAGraphSource；明确 lessons 专用 source adapter 不复用现有 Source 类；产品线策略明确"不跨权限边界"=不返回无权数据；AuditFindingSource 明确 JOIN + 只召回有 corrective_action 的发现项；缓存策略补充 TTL/用户隔离说明；FusionEngine +0.10 与现有 +0.05 并存；source 字段详细列出参与的 source 名称 |
 | v5 | 2026-06-10 | 整合第四轮 review：cache key 加入 sorted(user_product_lines) 防止缓存越权；统一缓存隔离规则为"按可访问产品线集合隔离"；HistoricalFMEASource name 改为 historical_fmea（不与 FMEAGraphSource 的 fmea_graph 冲突）；LessonsSemanticSource entity_type 改为 ('fmea_node', 'capa')；超时从 3s 改为 10s；明确刷新页面后弹窗不恢复 |
+| v6 | 2026-06-10 | 整合第五轮 review：修正旧约束名 uq_recommendation_cache_lookup；lessons 缓存使用全局模式（fmea_id IS NULL + report_id IS NULL），与旧 FMEA/CAPA 缓存分离；source 列扩为 VARCHAR(100)；fmea_type 改为可空 + 新增 doc_type 列；user_product_lines 改为 list[str] | None，admin sentinel "__ALL_PRODUCT_LINES__" |
