@@ -25,6 +25,7 @@ PRODUCT_LINE_FIELD_MAP: dict[str, str] = {
     "scar": "product_line_code",
     "mes": "product_line_code",
     "plm": "product_line_code",
+    "erp": "product_line_code",
 }
 
 
