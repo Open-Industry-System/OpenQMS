@@ -40,9 +40,9 @@
 | `review_id` | `UUID` | FK → `management_reviews.review_id` (CASCADE) |
 | `version_no` | `INT` | 版本号，同一 `review_id` 内自动递增 |
 | `content` | `JSONB` | 完整报告内容快照 |
-| `generated_by` | `UUID` | FK → `users.user_id` |
-| `finalized_by` | `UUID` | FK → `users.user_id`（仅 `final` 时填写）|
-| `finalized_at` | `TIMESTAMP` | 定稿时间（仅 `final` 时填写）|
+| `created_by` | `UUID` | FK → `users.user_id`，创建该定稿快照的人 |
+| `finalized_by` | `UUID` | FK → `users.user_id`，执行定稿操作的人（通常与 `created_by` 相同）|
+| `finalized_at` | `TIMESTAMP` | 定稿时间 |
 | `created_at` | `TIMESTAMP` | 创建时间 |
 | `updated_at` | `TIMESTAMP` | 更新时间 |
 
@@ -121,9 +121,9 @@
 
 | 方法 | 说明 |
 |------|------|
-| `generate_report(db, review, user, use_llm=True)` | 生成报告，写入 `management_reviews.generated_report`，设置 `report_status=draft`，不创建版本快照 |
+| `generate_report(db, review, user, llm_provider=None, use_llm=True)` | 生成报告，写入 `management_reviews.generated_report`，设置 `report_status=draft`，不创建版本快照 |
 | `_build_sections(data_package, manual_inputs)` | 从已有数据构建 13 章节基础内容 |
-| `_enrich_with_llm(sections, review, llm_provider)` | 逐章节调用 LLM 生成洞察、总结、建议 |
+| `_enrich_with_llm(sections, review, llm_provider)` | 逐章节调用 LLM 生成洞察、总结、建议；API 层从 `request.app.state.llm_provider` 取出后传入 |
 | `save_report_draft(db, review, content, user)` | 保存当前草稿到 `management_reviews.generated_report`，设置 `report_status=draft`，不创建版本快照 |
 | `finalize_report(db, review, user)` | 将当前 `generated_report` 写入 `review_reports` 作为定稿快照，递增 `version_no`，设置 `report_status=final` |
 | `reopen_to_draft(db, review, user)` | 从 final 回退到 draft（admin/manager）|
@@ -169,7 +169,7 @@ LLM 返回后，将结果填充到对应章节的 `ai_analysis` / `findings` / `
 - LLM 输出必须匹配 4.3 的 schema
 - 校验失败时该章节回退到规则生成，记录 warning 日志
 
-### 4.4 审计日志
+### 4.5 审计日志
 每次生成、保存草稿、定稿、回退都写入 `AuditLog`，`action` 类型为 `REPORT_GENERATE`、`REPORT_SAVE_DRAFT`、`REPORT_FINALIZE`、`REPORT_REOPEN`。
 
 ---
@@ -235,6 +235,11 @@ final → draft（admin/manager 点击重新打开）
 | `in_review` | 生成报告、保存草稿、定稿 |
 | `closed` | 仅查看；如需修改需先 reopen 评审 |
 
+**报告状态约束**：
+- 当 `report_status = final` 时，`generate` 和 `save-draft` 禁用
+- 必须先调用 `report/reopen` 回到 `draft`，且主评审不能是 `closed`，才能重新编辑报告
+- `reopen` 操作需要 manager / admin 权限
+
 生成报告时若 `data_package` 为空或缺失，服务仍返回规则生成的提示性内容，并在 `executive_summary` 中提示用户先汇总数据。
 
 ### 6.4 权限
@@ -293,7 +298,7 @@ final → draft（admin/manager 点击重新打开）
 ## 9. 依赖
 
 - 后端：`app.services.llm_provider`（已存在）
-- 前端：Ant Design `Tabs`、`Collapse`、`Input`、`Button`、`Tag`
+- 前端：Ant Design `Collapse`、`Input`、`Button`、`Tag`
 - 导出：纯 Markdown 文本，无需新依赖
 
 ---
