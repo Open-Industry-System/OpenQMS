@@ -509,7 +509,7 @@ git commit -m "feat(multi-factory): return FactoryScope and permissions.group fr
 **Files:**
 - Modify: ~50 model files to add `factory_id` column
 
-Add `factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True)` to each model per §3.5 derivation matrix. All nullable for now — the migration already backfills and sets NOT NULL at the DB level.
+Add `factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True)` to each model per §3.5 derivation matrix. All nullable — Part 1 migration (Task 6) backfills data while columns are nullable; Part 2 (Task 13) enforces NOT NULL after all services write factory_id correctly.
 
 **Important for background sync services:** ERP/MES ingestion services must read `factory_id` from their parent `ERPConnection`/`MESConnection` record, not from request context. The `populate_factory_id` function handles this via parent-object derivation.
 
@@ -632,31 +632,34 @@ git add backend/app/api/
 git commit -m "feat(multi-factory): apply scope filter to all remaining APIs + background sync factory_id"
 ```
 
-### Task 17: Alembic Migration Part 2 — NOT NULL Enforcement
+### Task 13: Alembic Migration Part 2 — NOT NULL Enforcement
 
 **Files:**
 - Create: `backend/alembic/versions/036_factory_id_not_null_enforcement.py`
 
-This migration runs **after** Tasks 4-12 have added `populate_factory_id` to all services. It converts all `factory_id` columns from NULLABLE to NOT NULL.
+This migration runs **after** Tasks 4-12 have added `populate_factory_id` to all services. It converts business ownership `factory_id` columns from NULLABLE to NOT NULL.
 
 **Why two migrations:** Between Part 1 (nullable + backfill) and this migration, existing create/update APIs work because `factory_id` is nullable. Once all services populate `factory_id` via `populate_factory_id()`, we can safely enforce NOT NULL without breaking inserts.
+
+**Important exclusion:** `users.factory_id` must remain **NULLABLE** per the design — group users can have no default factory (`factory_id IS NULL`). This migration only enforces NOT NULL on business ownership tables.
 
 - [ ] **Step 1: Generate migration**
 
 Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && alembic revision -m "factory_id_not_null_enforcement"`
 
-- [ ] **Step 2: Write ALTER COLUMN SET NOT NULL for all factory_id columns**
+- [ ] **Step 2: Write ALTER COLUMN SET NOT NULL for business ownership factory_id columns**
 
-For each table that has `factory_id`:
+For each business table that has `factory_id` (excluding `users.factory_id` which stays nullable):
 ```python
 op.alter_column('fmea_documents', 'factory_id', nullable=False)
 op.alter_column('capa_eightd', 'factory_id', nullable=False)
-# ... all ~50 business tables
+# ... all ~50 business tables, BUT NOT users.factory_id
 op.alter_column('suppliers', 'factory_id', nullable=False)
 op.alter_column('product_lines', 'factory_id', nullable=False)
+# NOTE: users.factory_id stays NULLABLE — group users have no default factory
 ```
 
-Also add any missing indexes:
+Also add indexes for factory_id on all affected tables:
 ```python
 op.create_index('ix_fmea_documents_factory_id', 'fmea_documents', ['factory_id'])
 # ... one index per table with factory_id
@@ -666,22 +669,24 @@ op.create_index('ix_fmea_documents_factory_id', 'fmea_documents', ['factory_id']
 
 Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && alembic upgrade head`
 
-- [ ] **Step 4: Verify all factory_id columns are NOT NULL**
+- [ ] **Step 4: Verify all business factory_id columns are NOT NULL (users.factory_id should remain nullable)**
 
 ```python
 # scripts/verify_not_null.py
 import asyncio
-from sqlalchemy import text, inspect
+from sqlalchemy import text
 from app.database import engine
 
 async def check():
     async with engine.connect() as conn:
-        # Check that no factory_id column allows NULL
+        # Check that no business ownership factory_id column allows NULL
+        # (users.factory_id is intentionally nullable — group users have no default factory)
         result = await conn.execute(text("""
-            SELECT table_name, column_name, is_nullable
+            SELECT table_name, column_name
             FROM information_schema.columns
             WHERE column_name = 'factory_id' AND is_nullable = 'YES'
             AND table_schema = 'public'
+            AND table_name != 'users'
         """))
         nullable = result.fetchall()
         if nullable:
@@ -689,7 +694,18 @@ async def check():
             for row in nullable:
                 print(f"  {row[0]}.{row[1]}")
         else:
-            print("All factory_id columns are NOT NULL ✓")
+            print("All business factory_id columns are NOT NULL ✓")
+
+        # Verify users.factory_id is still nullable
+        result2 = await conn.execute(text("""
+            SELECT is_nullable FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'factory_id'
+        """))
+        row = result2.fetchone()
+        if row and row[0] == 'YES':
+            print("users.factory_id is correctly nullable ✓")
+        else:
+            print("ERROR: users.factory_id should be nullable!")
 
 asyncio.run(check())
 ```
@@ -698,14 +714,14 @@ asyncio.run(check())
 
 ```bash
 git add backend/alembic/versions/036_factory_id_not_null_enforcement.py
-git commit -m "feat(multi-factory): migration part 2 — enforce NOT NULL on factory_id columns"
+git commit -m "feat(multi-factory): migration part 2 — enforce NOT NULL on business factory_id columns"
 ```
 
 ---
 
 ## Phase 3: Group APIs
 
-### Task 13: Group API — Dashboard, Comparison, Factory CRUD
+### Task 14: Group API — Dashboard, Comparison, Factory CRUD
 
 **Files:**
 - Create: `backend/app/schemas/group.py`
@@ -736,7 +752,7 @@ git commit -m "feat(multi-factory): Group API — dashboard, comparison, factory
 
 ---
 
-### Task 14: Group Supplier + Audit APIs
+### Task 15: Group Supplier + Audit APIs
 
 **Files:**
 - Modify: `backend/app/api/group.py` — add supplier and audit endpoints
@@ -759,7 +775,7 @@ git commit -m "feat(multi-factory): Group supplier and audit endpoints"
 
 ## Phase 4: Frontend
 
-### Task 15: Factory Switcher + Auth Store Update
+### Task 16: Factory Switcher + Auth Store Update
 
 **Files:**
 - Modify: `frontend/src/store/authStore.ts`
@@ -787,7 +803,7 @@ git commit -m "feat(multi-factory): factory switcher and group menu in sidebar"
 
 ---
 
-### Task 16: Axios Interceptor for factory_id Auto-Injection
+### Task 17: Axios Interceptor for factory_id Auto-Injection
 
 **Files:**
 - Modify: `frontend/src/api/client.ts` (or equivalent Axios instance file)
@@ -828,7 +844,7 @@ git commit -m "feat(multi-factory): Axios interceptor auto-injects factory_id on
 
 ---
 
-### Task 17: Frontend API Clients
+### Task 18: Frontend API Clients
 
 **Files:**
 - Create: `frontend/src/api/group.ts` (includes factory CRUD + group endpoints)
@@ -846,7 +862,7 @@ git commit -m "feat(multi-factory): frontend API client for group endpoints"
 
 ---
 
-### Task 18: Group Dashboard + Factory Management Pages
+### Task 19: Group Dashboard + Factory Management Pages
 
 **Files:**
 - Create: `frontend/src/pages/group/GroupDashboard.tsx`
@@ -868,7 +884,7 @@ git commit -m "feat(multi-factory): Group dashboard and factory management pages
 
 ---
 
-### Task 19: Factory Comparison + Shared Suppliers + Cross-Factory Audits Pages
+### Task 20: Factory Comparison + Shared Suppliers + Cross-Factory Audits Pages
 
 **Files:**
 - Create: `frontend/src/pages/group/FactoryComparison.tsx`
@@ -894,7 +910,7 @@ git commit -m "feat(multi-factory): comparison, shared suppliers, cross-factory 
 
 ## Phase 5: Testing + Seed Data
 
-### Task 20: Seed Data — Second Factory
+### Task 21: Seed Data — Second Factory
 
 **Files:**
 - Modify: `backend/app/seed.py`
@@ -920,7 +936,7 @@ git commit -m "feat(multi-factory): add second factory and group admin to seed d
 
 ---
 
-### Task 21: Integration + Isolation Tests
+### Task 22: Integration + Isolation Tests
 
 **Files:**
 - Create: `backend/tests/test_factory_isolation.py`
@@ -948,7 +964,7 @@ git commit -m "test(multi-factory): factory isolation, bypass/GROUP decoupling, 
 
 ---
 
-### Task 22: Integration Verification
+### Task 23: Integration Verification
 
 - [ ] **Step 1: Verify no import/startup errors**
 
@@ -988,7 +1004,7 @@ git commit -m "feat(multi-factory): integration verification and fixes"
 
 ---
 
-### Task 23: Update ROADMAP
+### Task 24: Update ROADMAP
 
 **Files:**
 - Modify: `docs/ROADMAP.md`
