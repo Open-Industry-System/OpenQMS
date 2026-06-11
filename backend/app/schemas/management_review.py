@@ -106,3 +106,55 @@ class ManagementReviewListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ReportSection(BaseModel):
+    key: str
+    title: str
+    source: str
+    base_text: str
+    ai_analysis: str
+    findings: list[str]
+    recommendations: list[str]
+    manual_text: str
+    data_snapshot: dict | str | list | int | float | bool | None
+
+
+class ReportContent(BaseModel):
+    generated_at: str
+    generation_model: str
+    llm_enriched: bool
+    sections: list[ReportSection]
+    executive_summary: str
+    overall_recommendations: list[str]
+
+
+class ReportGenerateRequest(BaseModel):
+    use_llm: bool = True
+
+
+class ReportGenerateResponse(BaseModel):
+    report_status: str
+    generated_report: ReportContent
+
+
+class ReportSaveDraftRequest(BaseModel):
+    generated_report: ReportContent
+
+
+class ReportVersionResponse(BaseModel):
+    report_id: uuid.UUID
+    review_id: uuid.UUID
+    version_no: int
+    content: ReportContent
+    created_by: uuid.UUID
+    finalized_by: uuid.UUID | None
+    finalized_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ReportExportResponse(BaseModel):
+    markdown: str
