@@ -205,6 +205,8 @@ class IqcInspectionJudge(BaseModel):
     defect_qty: int = 0
     defect_description: str | None = None
     sample_qty: int | None = None
+    has_safety_defect: bool = False
+    linked_customer_complaint_id: uuid.UUID | None = None
 
 
 class IqcInspectionConcession(BaseModel):
