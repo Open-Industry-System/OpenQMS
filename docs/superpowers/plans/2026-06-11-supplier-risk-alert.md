@@ -90,8 +90,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision: str = "033_add_supplier_risk_tables"
-down_revision: Union[str, None] = "bfd90bb593fc"
+revision: str = "034_add_supplier_risk_tables"
+down_revision: Union[str, None] = "033_add_iqc_aql_optimization"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -231,14 +231,8 @@ def upgrade() -> None:
     )
 
     # ---- 4. Permission seed -----------------------------------------------------
-    op.execute("""
-        INSERT INTO role_permissions (role_id, module, permission_level)
-        SELECT rd.id, 'supplier_risk', %s
-        FROM role_definitions rd
-        WHERE rd.role_key = %s
-        ON CONFLICT DO NOTHING;
-    """ % (RISK_PERMS.get("admin", 5), "'admin'"))
-    # Repeat for each role...
+    # Single loop for all roles (no redundant separate admin insert)
+    # Role keys match project's actual role_definitions: admin, manager, field_qe, supplier_qe, etc.
     for role_key, level in RISK_PERMS.items():
         op.execute(f"""
             INSERT INTO role_permissions (role_id, module, permission_level)
@@ -249,12 +243,17 @@ def upgrade() -> None:
         """)
 
     # ---- 5. Default rule configs ------------------------------------------------
+    # updated_by: COALESCE ensures a valid user_id even if 'admin' doesn't exist yet
+    # (falls back to earliest created user). Required because updated_by is NOT NULL.
     for cfg in DEFAULT_CONFIGS:
         op.execute(f"""
             INSERT INTO supplier_risk_configs (rule_id, enabled, category, weight, thresholds, updated_by)
             SELECT '{cfg['rule_id']}', {cfg['enabled']}, '{cfg['category']}', {cfg['weight']},
                    '{__import__('json').dumps(cfg['thresholds'])}'::jsonb,
-                   (SELECT user_id FROM users WHERE username = 'admin' LIMIT 1)
+                   COALESCE(
+                       (SELECT user_id FROM users WHERE username = 'admin' LIMIT 1),
+                       (SELECT user_id FROM users ORDER BY created_at LIMIT 1)
+                   )
             WHERE NOT EXISTS (
                 SELECT 1 FROM supplier_risk_configs
                 WHERE rule_id = '{cfg['rule_id']}' AND supplier_id IS NULL AND product_line_code IS NULL
@@ -372,7 +371,7 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # ─── Alerts ────────────────────────────────────────────────────────────────────
@@ -409,8 +408,7 @@ class AlertResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlertListResponse(BaseModel):
@@ -450,8 +448,7 @@ class RuleConfigResponse(BaseModel):
     updated_by: uuid.UUID
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RuleConfigUpdateRequest(BaseModel):
@@ -488,8 +485,7 @@ class ChannelResponse(BaseModel):
     created_by: uuid.UUID
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ─── Evaluation ────────────────────────────────────────────────────────────────
@@ -822,183 +818,209 @@ git add -A && git commit -m "feat(supplier-risk): config service with 4-layer pr
 
 ---
 
-### Task 6: Main Service + CAPA No-Commit Helper
+### Task 6: Main Service — Evaluate (TDD)
 
 **Files:**
-- Create: `backend/app/services/supplier_risk/service.py`
-- Create: `backend/app/services/supplier_risk/notifier.py`
-- Modify: `backend/app/services/capa_service.py` (add `_create_capa_without_commit`)
-- Modify: `backend/app/services/scar_service.py` (add alert-close on SCAR close)
-- Modify: `backend/app/services/iqc_inspection_service.py` (add incremental evaluation hook)
+- Create: `backend/app/services/supplier_risk/service.py` (initial: `evaluate_supplier_risk` only)
 
-- [ ] **Step 1: Add `_create_capa_without_commit` to capa_service.py**
+- [ ] **Step 1: Write failing test for evaluate_supplier_risk**
 
-At the end of `backend/app/services/capa_service.py`, add a function that mirrors `create_capa` but uses `db.flush()` instead of `db.commit()`, and defers `enqueue_embedding` to the caller:
+Test: given a supplier with high PPM IQC data, evaluation returns risk_level="high" and creates an alert record.
 
-```python
-async def _create_capa_without_commit(
-    db: AsyncSession,
-    title: str,
-    document_no: str,
-    severity: str,
-    due_date,
-    user_id: uuid.UUID,
-    product_line_code: str = "DC-DC-100",
-) -> CAPAEightD:
-    """Create CAPA without committing — caller must commit and enqueue embedding."""
-    await validate_product_line(db, product_line_code)
-    existing_result = await db.execute(
-        select(CAPAEightD).where(CAPAEightD.document_no == document_no)
-    )
-    if existing_result.scalar_one_or_none():
-        raise ValueError(f"CAPA report number '{document_no}' already exists.")
+- [ ] **Step 2: Run test to verify it fails**
 
-    report_id = uuid.uuid4()
-    capa = CAPAEightD(
-        report_id=report_id,
-        title=title,
-        document_no=document_no,
-        severity=severity,
-        due_date=due_date,
-        product_line_code=product_line_code,
-        created_by=user_id,
-    )
-    db.add(capa)
+- [ ] **Step 3: Implement evaluate_supplier_risk**
 
-    audit_log = AuditLog(
-        table_name="capa_eightd",
-        record_id=report_id,
-        action="CREATE",
-        changed_fields={
-            "title": title, "document_no": document_no,
-            "severity": severity, "due_date": str(due_date) if due_date else None,
-            "product_line_code": product_line_code, "status": capa.status,
-        },
-        operated_by=user_id,
-    )
-    db.add(audit_log)
-    await db.flush()
-    await db.refresh(capa)
-    return capa
-```
-
-- [ ] **Step 2: Implement main service**
-
-Create `backend/app/services/supplier_risk/service.py` with:
-
-1. `evaluate_supplier_risk(db, supplier_id, product_line_code)` — gather data, run rules, score, upsert alert
-2. `evaluate_all_suppliers(db, product_line_code)` — batch aggregate query, iterate suppliers
-3. `handle_alert(db, alert_id, action, note, user_id)` — state transitions (open→acknowledged/ignored, acknowledged→action_taken/closed)
-4. `create_scar_from_alert(db, alert_id, user_id)` — call `_create_scar_without_commit`, link, commit
-5. `create_capa_from_alert(db, alert_id, user_id)` — call `_create_capa_without_commit`, link, commit
-6. `get_risk_dashboard(db, product_line_code)` — aggregate queries for dashboard
-
-Data gathering for `evaluate_supplier_risk`:
-- `IqcInspection` filtered by `supplier_id` + `product_line_code` (if not NULL)
-- `SupplierSCAR` filtered by `supplier_id` + `product_line_code`
-- `SupplierEvaluation` filtered by `supplier_id` (global)
-- `SupplierCertification` filtered by `supplier_id` (global)
+Gather data (IQC filtered by supplier_id + product_line_code; SCAR filtered by supplier_id + product_line_code; Evaluation/Certification filtered by supplier_id only), run rules, score, upsert alert.
 
 Alert upsert logic:
-- Try to find existing alert for `(supplier_id, product_line_code, snapshot_date=today)`
+- Find existing alert for `(supplier_id, product_line_code, snapshot_date=today)`
 - If exists and new risk_level > existing: update scores, set `alert_type="escalated"`
-- If exists and new risk_level <= existing: skip (no downgrade auto-close)
+- If exists and new risk_level <= existing: skip
 - If not exists and risk_level != "low": insert new alert
 
-- [ ] **Step 3: Implement notifier.py**
+- [ ] **Step 4: Run test to verify it passes**
 
-Create `backend/app/services/supplier_risk/notifier.py` with `send_notifications(db, alert, product_line_code)` that:
+- [ ] **Step 5: Write failing test for evaluate_all_suppliers (batch, no N+1)**
 
-1. Queries enabled notification channels matching the alert's risk_level threshold
-2. For email channels: sends via aiosmtplib (SMTP config from env vars, non-blocking, failures logged only)
-3. For webhook channels: decrypts `config.secret_encrypted` via Fernet (`RISK_ENCRYPTION_KEY`), computes HMAC-SHA256 signature, POSTs JSON payload with 5s timeout, 1 retry. Validates URL is not private (SSRF check).
-4. All notification errors are caught and logged, never blocking the alert creation flow
+Test: given 3 suppliers, evaluate_all returns 3 results using a single batch aggregate query (not 3 separate per-supplier queries).
 
-- [ ] **Step 4: Add SCAR close → alert close trigger**
+- [ ] **Step 6: Implement evaluate_all_suppliers with batch aggregate query**
 
-In `backend/app/services/scar_service.py`, in the SCAR status transition where status becomes "closed", add:
+One SQL query per data type (IQC, SCAR, Evaluation, Certification) grouped by supplier_id, then iterate.
 
-```python
-# Close linked risk alerts
-from app.models.supplier_risk import SupplierRiskAlert
-from sqlalchemy import select, and_
+- [ ] **Step 7: Run test to verify it passes**
 
-linked_alerts = await db.execute(
-    select(SupplierRiskAlert).where(and_(
-        SupplierRiskAlert.linked_scar_id == scar.scar_id,
-        SupplierRiskAlert.status != "closed",
-    ))
-)
-for alert in linked_alerts.scalars().all():
-    alert.status = "closed"
-    alert.handled_by = scar.issued_by
-    alert.handled_at = datetime.now(timezone.utc)
-```
-
-- [ ] **Step 5: Add incremental evaluation hook on IQC judgment**
-
-In `backend/app/services/iqc_inspection_service.py`, after judgment completes (where `inspection_result` is set), add:
-
-```python
-# Trigger incremental risk evaluation
-import asyncio
-from app.database import async_session
-
-async def _trigger_risk_eval(supplier_id, product_line_code):
-    async with async_session() as db:
-        from app.services.supplier_risk.service import evaluate_supplier_risk
-        await evaluate_supplier_risk(db, supplier_id, product_line_code)
-
-asyncio.create_task(_trigger_risk_eval(inspection.supplier_id, inspection.product_line_code))
-```
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add -A && git commit -m "feat(supplier-risk): main service, notifier, CAPA no-commit helper, SCAR/IQC hooks"
+git add -A && git commit -m "feat(supplier-risk): evaluate_supplier_risk and evaluate_all_suppliers with batch query"
 ```
 
 ---
 
-### Task 7: API Routes
+### Task 7: Main Service — Handle Alert (TDD)
+
+**Files:**
+- Modify: `backend/app/services/supplier_risk/service.py` (add `handle_alert`)
+
+- [ ] **Step 1: Write failing test for handle_alert**
+
+Test: alert in "open" status, action="acknowledge" → status becomes "acknowledged". Test: action="ignore" without note → raises ValueError.
+
+- [ ] **Step 2: Implement handle_alert**
+
+State transitions: open→acknowledged, open→ignored (requires note), acknowledged→closed (manager only).
+
+- [ ] **Step 3: Run tests to verify they pass**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A && git commit -m "feat(supplier-risk): handle_alert with state machine"
+```
+
+---
+
+### Task 8: Main Service — Create SCAR/CAPA from Alert (TDD)
+
+**Files:**
+- Modify: `backend/app/services/supplier_risk/service.py` (add `create_scar_from_alert`, `create_capa_from_alert`)
+- Modify: `backend/app/services/capa_service.py` (add `_create_capa_without_commit`)
+
+- [ ] **Step 1: Write failing test for create_scar_from_alert**
+
+Test: calls `_create_scar_without_commit`, links alert.linked_scar_id, sets alert.status="action_taken", all in one transaction. On SCAR creation failure, alert unchanged.
+
+- [ ] **Step 2: Add `_create_capa_without_commit` to capa_service.py**
+
+Mirror of existing `create_capa` but uses `db.flush()` instead of `db.commit()`, defers `enqueue_embedding` to caller.
+
+- [ ] **Step 3: Implement create_scar_from_alert and create_capa_from_alert**
+
+Both use the same pattern: `begin → _create_without_commit → update alert → commit → enqueue_embedding`.
+
+- [ ] **Step 4: Write failing test for transaction rollback**
+
+Test: mock `_create_scar_without_commit` to raise ValueError → alert status remains unchanged.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A && git commit -m "feat(supplier-risk): create_scar/capa_from_alert with atomic transaction"
+```
+
+---
+
+### Task 9: Notifier Service
+
+**Files:**
+- Create: `backend/app/services/supplier_risk/notifier.py`
+
+- [ ] **Step 1: Write failing test for send_notifications**
+
+Test: email channel configured → sends email (mock aiosmtplib). Test: webhook channel → POSTs with HMAC signature. Test: webhook to private IP → raises ValueError (SSRF). Test: email send failure → alert still exists (non-blocking).
+
+- [ ] **Step 2: Implement notifier.py**
+
+1. Query enabled channels matching alert's risk_level
+2. Email: aiosmtplib async send, SMTP from env vars, failures logged only
+3. Webhook: decrypt `config.secret_encrypted` via Fernet (`RISK_ENCRYPTION_KEY`), HMAC-SHA256 signature, POST JSON with 5s timeout + 1 retry. SSRF: reject private IPs.
+4. All errors caught and logged, never blocking
+
+- [ ] **Step 3: Run tests to verify they pass**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A && git commit -m "feat(supplier-risk): notifier with email, webhook, SSRF protection"
+```
+
+---
+
+### Task 10: SCAR/CAPA Close → Alert Close Hooks
+
+**Files:**
+- Modify: `backend/app/services/scar_service.py` (add alert-close on SCAR close)
+- Modify: `backend/app/services/capa_service.py` (add alert-close on CAPA D8_CLOSURE)
+- Modify: `backend/app/services/iqc_inspection_service.py` (add incremental evaluation hook)
+
+- [ ] **Step 1: Write failing test for CAPA close → alert close**
+
+Test: CAPA with linked_capa_id pointing to an open alert. CAPA status transitions to D8_CLOSURE → alert.status becomes "closed".
+
+- [ ] **Step 2: Add hook in capa_service.update_capa**
+
+After status changes to D8_CLOSURE, query `supplier_risk_alerts` where `linked_capa_id = capa.report_id` and `status != 'closed'`, set to "closed".
+
+- [ ] **Step 3: Add hook in scar_service SCAR close transition**
+
+Same pattern: after status becomes "closed", close linked alerts.
+
+- [ ] **Step 4: Add incremental evaluation hook on IQC judgment**
+
+In `iqc_inspection_service.py`, after judgment completes, fire `asyncio.create_task(_trigger_risk_eval(...))` with independent Session.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A && git commit -m "feat(supplier-risk): CAPA/SCAR close hooks and IQC incremental evaluation"
+```
+
+---
+
+### Task 11: API Routes (TDD)
 
 **Files:**
 - Create: `backend/app/api/supplier_risk.py`
 - Modify: `backend/app/main.py` (register router + start daily loop)
 
-- [ ] **Step 1: Create API routes file**
+- [ ] **Step 1: Write failing test for GET /api/supplier-risk/alerts**
 
-Create `backend/app/api/supplier_risk.py` with 14 endpoints following existing route patterns (thin API layer: parse request, call service, return response). Use `require_permission(Module.SUPPLIER_RISK, ...)` for authorization.
+Test: returns paginated alert list with correct schema.
 
-Key endpoints:
-- `GET /supplier-risk/alerts` — paginated list with filters
-- `GET /supplier-risk/alerts/{alert_id}` — detail
-- `POST /supplier-risk/alerts/{alert_id}/handle` — acknowledge/ignore/close
-- `POST /supplier-risk/alerts/{alert_id}/scar` — create SCAR from alert
-- `POST /supplier-risk/alerts/{alert_id}/capa` — create CAPA from alert
-- `POST /supplier-risk/evaluate/{supplier_id}` — manual single evaluation
-- `POST /supplier-risk/evaluate` — manual full evaluation
-- `GET /supplier-risk/dashboard` — dashboard data
-- `GET /supplier-risk/configs` — config list
-- `PUT /supplier-risk/configs/{config_id}` — update config
-- `GET /supplier-risk/channels` — channel list
-- `POST /supplier-risk/channels` — create channel
-- `PUT /supplier-risk/channels/{channel_id}` — update channel
-- `DELETE /supplier-risk/channels/{channel_id}` — delete channel
+- [ ] **Step 2: Create API routes file with 14 endpoints**
 
-- [ ] **Step 2: Register router and start daily loop in main.py**
+Router prefix: `APIRouter(prefix="/api/supplier-risk", tags=["supplier-risk"])`. All endpoints use `require_permission(Module.SUPPLIER_RISK, ...)`.
 
-In `backend/app/main.py`:
+| Endpoint | Method | Permission |
+|----------|--------|------------|
+| `/alerts` | GET | VIEW |
+| `/alerts/{alert_id}` | GET | VIEW |
+| `/alerts/{alert_id}/handle` | POST | EDIT |
+| `/alerts/{alert_id}/scar` | POST | EDIT |
+| `/alerts/{alert_id}/capa` | POST | EDIT |
+| `/evaluate/{supplier_id}` | POST | EDIT |
+| `/evaluate` | POST | APPROVE |
+| `/dashboard` | GET | VIEW |
+| `/configs` | GET | VIEW |
+| `/configs/{config_id}` | PUT | APPROVE |
+| `/channels` | GET | VIEW |
+| `/channels` | POST | APPROVE |
+| `/channels/{channel_id}` | PUT | APPROVE |
+| `/channels/{channel_id}` | DELETE | APPROVE |
 
-1. Add import: `from app.api.supplier_risk import router as supplier_risk_router`
-2. Add `app.include_router(supplier_risk_router)` after erp_router
-3. Add daily evaluation loop in lifespan (after existing MES/PLM/ERP loops):
+- [ ] **Step 3: Register router and start daily loop in main.py**
+
+Add `from app.api.supplier_risk import router as supplier_risk_router` and `app.include_router(supplier_risk_router)`.
+
+Daily evaluation loop with initial execution on startup:
 
 ```python
-# Start supplier risk daily evaluation loop
-from app.services.supplier_risk.service import evaluate_all_suppliers
-
 async def _risk_eval_loop():
+    # Initial evaluation 10 seconds after startup (avoids startup peak)
+    await asyncio.sleep(10)
+    try:
+        async with async_session() as db:
+            await evaluate_all_suppliers(db, product_line_code=None)
+    except Exception as e:
+        logger.error("[risk_eval_init] error: %s", e)
+
+    # Then every 24 hours
     while True:
         await asyncio.sleep(86400)
         try:
@@ -1010,22 +1032,19 @@ async def _risk_eval_loop():
 risk_eval_task = asyncio.create_task(_risk_eval_loop())
 ```
 
-4. Add `risk_eval_task.cancel()` in the shutdown section.
+Add `risk_eval_task.cancel()` in shutdown section.
 
-- [ ] **Step 3: Verify app starts**
+- [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd backend && timeout 5 python -c "from app.main import app; print('OK')" 2>/dev/null || echo "Timeout expected — app started"`
-Expected: No import errors
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat(supplier-risk): API routes, router registration, daily eval loop"
+git add -A && git commit -m "feat(supplier-risk): API routes with /api/supplier-risk prefix, daily eval loop"
 ```
 
 ---
 
-### Task 8: Backend Tests — Service and Integration
+### Task 12: Backend Tests — Service and Integration
 
 **Files:**
 - Create: `backend/tests/test_supplier_risk_service.py`
@@ -1071,7 +1090,7 @@ git add -A && git commit -m "test(supplier-risk): 6 service tests + 11 integrati
 
 ---
 
-### Task 9: Frontend — Types, API Client, and Routes
+### Task 13: Frontend — Types, API Client, Routes, and Sidebar
 
 **Files:**
 - Modify: `frontend/src/types/index.ts`
@@ -1079,7 +1098,11 @@ git add -A && git commit -m "test(supplier-risk): 6 service tests + 11 integrati
 - Modify: `frontend/src/App.tsx`
 - Modify: `frontend/src/components/layout/AppLayout.tsx`
 
-- [ ] **Step 1: Add TypeScript types**
+- [ ] **Step 1: Ensure @ant-design/charts is installed**
+
+Run: `cd frontend && grep -q '"@ant-design/charts"' package.json || npm install @ant-design/charts`
+
+- [ ] **Step 2: Add TypeScript types**
 
 Append to `frontend/src/types/index.ts`:
 
@@ -1211,7 +1234,7 @@ git add -A && git commit -m "feat(supplier-risk): frontend types, API client, ro
 
 ---
 
-### Task 10: Frontend — Risk Dashboard Page
+### Task 14: Frontend — Risk Dashboard Page
 
 **Files:**
 - Create: `frontend/src/pages/supplierRisk/SupplierRiskPage.tsx`
@@ -1221,26 +1244,188 @@ git add -A && git commit -m "feat(supplier-risk): frontend types, API client, ro
 
 - [ ] **Step 1: Create RiskMatrixChart component**
 
-Scatter plot using `@ant-design/charts` (already a project dependency): X=quality_score, Y=delivery_score, bubble size=compliance_score, color=risk_level. Four color zones: green/yellow/orange/red.
+```tsx
+// frontend/src/pages/supplierRisk/components/RiskMatrixChart.tsx
+import React from "react";
+import { Scatter } from "@ant-design/charts";
+import type { RiskDashboard } from "../../../types";
+
+interface Props { data: RiskDashboard["supplier_risk_points"]; }
+
+const RiskMatrixChart: React.FC<Props> = ({ data }) => {
+  const config = {
+    data,
+    xField: "quality_score",
+    yField: "delivery_score",
+    sizeField: "compliance_score",
+    colorField: "risk_level",
+    color: { low: "#52c41a", medium: "#faad14", high: "#fa8c16", critical: "#f5222d" },
+    xAxis: { title: { text: "质量风险" }, min: 0, max: 100 },
+    yAxis: { title: { text: "交付风险" }, min: 0, max: 100 },
+    tooltip: { fields: ["supplier_name", "risk_score", "risk_level"] },
+  };
+  return <Scatter {...config} />;
+};
+export default RiskMatrixChart;
+```
 
 - [ ] **Step 2: Create AlertTable component**
 
-Ant Design Table with columns: supplier_no, supplier_name, risk_level (colored tag), risk_score, alert_type, status, snapshot_date, actions. Filters: risk_level, status. Sort by risk_score desc.
+```tsx
+// frontend/src/pages/supplierRisk/components/AlertTable.tsx
+import React, { useState, useEffect } from "react";
+import { Table, Tag, Button, Space } from "antd";
+import type { SupplierRiskAlert } from "../../../types";
+import { riskAlertApi } from "../../../api/supplierRisk";
+import HandleAlertDrawer from "./HandleAlertDrawer";
+
+const RISK_COLORS: Record<string, string> = { low: "green", medium: "gold", high: "orange", critical: "red" };
+const STATUS_LABELS: Record<string, string> = { open: "开放", acknowledged: "已确认", action_taken: "已处置", ignored: "已忽略", closed: "已关闭" };
+
+interface Props {
+  productLineCode?: string;
+  onRefresh?: () => void;
+}
+
+const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
+  const [data, setData] = useState<SupplierRiskAlert[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [selectedAlert, setSelectedAlert] = useState<SupplierRiskAlert | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const res = await riskAlertApi.list({ page, page_size: 20, product_line_code: productLineCode });
+      setData(res.data.items); setTotal(res.data.total);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetchData(); }, [page, productLineCode]);
+
+  const columns = [
+    { title: "供应商编号", dataIndex: "supplier_no", sorter: true },
+    { title: "供应商名称", dataIndex: "supplier_name" },
+    { title: "风险等级", dataIndex: "risk_level", render: (v: string) => <Tag color={RISK_COLORS[v]}>{v}</Tag> },
+    { title: "风险分", dataIndex: "risk_score", sorter: true },
+    { title: "状态", dataIndex: "status", render: (v: string) => STATUS_LABELS[v] || v },
+    { title: "快照日期", dataIndex: "snapshot_date" },
+    { title: "操作", render: (_: unknown, record: SupplierRiskAlert) => (
+      <Button size="small" onClick={() => { setSelectedAlert(record); setDrawerOpen(true); }}>处置</Button>
+    )},
+  ];
+
+  return (
+    <>
+      <Table rowKey="alert_id" columns={columns} dataSource={data} loading={loading}
+             pagination={{ current: page, total, pageSize: 20, onChange: setPage }} />
+      <HandleAlertDrawer alert={selectedAlert} open={drawerOpen}
+        onClose={() => { setDrawerOpen(false); fetchData(); onRefresh?.(); }} />
+    </>
+  );
+};
+export default AlertTable;
+```
 
 - [ ] **Step 3: Create HandleAlertDrawer component**
 
-Ant Drawer with:
-- Action buttons: 确认 (acknowledge), 忽略 (ignore, requires note input), 关闭 (close)
-- "创建 SCAR" button → calls createScar API
-- "创建 CAPA" button → calls createCapa API
-- Note textarea for handle_note
+```tsx
+// frontend/src/pages/supplierRisk/components/HandleAlertDrawer.tsx
+import React, { useState } from "react";
+import { Drawer, Button, Space, Input, message } from "antd";
+import type { SupplierRiskAlert } from "../../../types";
+import { riskAlertApi } from "../../../api/supplierRisk";
+
+interface Props { alert: SupplierRiskAlert | null; open: boolean; onClose: () => void; }
+
+const HandleAlertDrawer: React.FC<Props> = ({ alert, open, onClose }) => {
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  if (!alert) return null;
+
+  const handle = async (action: string) => {
+    if (action === "ignore" && !note.trim()) { message.warning("忽略预警需填写理由"); return; }
+    setLoading(true);
+    try {
+      await riskAlertApi.handle(alert.alert_id, { action, note: note || undefined });
+      message.success("操作成功"); onClose();
+    } catch { message.error("操作失败"); } finally { setLoading(false); }
+  };
+
+  const createScar = async () => {
+    setLoading(true);
+    try { await riskAlertApi.createScar(alert.alert_id); message.success("SCAR 已创建"); onClose(); }
+    catch { message.error("创建失败"); } finally { setLoading(false); }
+  };
+
+  const createCapa = async () => {
+    setLoading(true);
+    try { await riskAlertApi.createCapa(alert.alert_id); message.success("CAPA 已创建"); onClose(); }
+    catch { message.error("创建失败"); } finally { setLoading(false); }
+  };
+
+  return (
+    <Drawer title={`预警处置 — ${alert.supplier_name}`} open={open} onClose={onClose} width={400}>
+      <Space direction="vertical" style={{ width: "100%" }}>
+        <p>风险等级: <b>{alert.risk_level}</b> | 风险分: <b>{alert.risk_score}</b></p>
+        <Input.TextArea placeholder="处置备注（忽略时必填）" value={note} onChange={e => setNote(e.target.value)} rows={3} />
+        <Space>
+          <Button onClick={() => handle("acknowledge")} loading={loading}>确认</Button>
+          <Button onClick={() => handle("ignore")} loading={loading}>忽略</Button>
+          <Button onClick={() => handle("close")} loading={loading}>关闭</Button>
+        </Space>
+        <Space>
+          <Button type="primary" onClick={createScar} loading={loading}>创建 SCAR</Button>
+          <Button type="primary" onClick={createCapa} loading={loading}>创建 CAPA</Button>
+        </Space>
+      </Space>
+    </Drawer>
+  );
+};
+export default HandleAlertDrawer;
+```
 
 - [ ] **Step 4: Create SupplierRiskPage**
 
-Layout:
-- Top row: 4 KPI cards (高风险, 极高风险, 开放预警, 平均风险分)
-- Middle: RiskMatrixChart
-- Bottom: AlertTable with HandleAlertDrawer on row click
+```tsx
+// frontend/src/pages/supplierRisk/SupplierRiskPage.tsx
+import React, { useState, useEffect } from "react";
+import { Row, Col, Card, Statistic } from "antd";
+import { WarningOutlined, AlertOutlined } from "@ant-design/icons";
+import RiskMatrixChart from "./components/RiskMatrixChart";
+import AlertTable from "./components/AlertTable";
+import { riskAlertApi } from "../../api/supplierRisk";
+import type { RiskDashboard } from "../../types";
+
+const SupplierRiskPage: React.FC = () => {
+  const [dashboard, setDashboard] = useState<RiskDashboard | null>(null);
+
+  useEffect(() => {
+    riskAlertApi.dashboard().then(res => setDashboard(res.data));
+  }, []);
+
+  return (
+    <div style={{ padding: 24 }}>
+      <Row gutter={16} style={{ marginBottom: 24 }}>
+        <Col span={6}><Card><Statistic title="高风险供应商" value={dashboard?.high_risk_count ?? 0} prefix={<WarningOutlined />} valueStyle={{ color: "#fa8c16" }} /></Card></Col>
+        <Col span={6}><Card><Statistic title="极高风险" value={dashboard?.critical_risk_count ?? 0} prefix={<AlertOutlined />} valueStyle={{ color: "#f5222d" }} /></Card></Col>
+        <Col span={6}><Card><Statistic title="开放预警" value={dashboard?.open_alert_count ?? 0} /></Card></Col>
+        <Col span={6}><Card><Statistic title="平均风险分" value={dashboard?.avg_risk_score ?? 0} precision={1} /></Card></Col>
+      </Row>
+      <Card title="风险矩阵" style={{ marginBottom: 24 }}>
+        {dashboard && <RiskMatrixChart data={dashboard.supplier_risk_points} />}
+      </Card>
+      <Card title="预警列表">
+        <AlertTable onRefresh={() => riskAlertApi.dashboard().then(res => setDashboard(res.data))} />
+      </Card>
+    </div>
+  );
+};
+export default SupplierRiskPage;
+```
 
 - [ ] **Step 5: Verify page renders**
 
@@ -1255,7 +1440,7 @@ git add -A && git commit -m "feat(supplier-risk): risk dashboard page with matri
 
 ---
 
-### Task 11: Frontend — Config Page
+### Task 15: Frontend — Config Page
 
 **Files:**
 - Create: `frontend/src/pages/supplierRisk/RiskConfigPage.tsx`
@@ -1264,17 +1449,143 @@ git add -A && git commit -m "feat(supplier-risk): risk dashboard page with matri
 
 - [ ] **Step 1: Create RuleConfigTable component**
 
-Ant Table with columns: rule_id, category (tag), enabled (switch), thresholds (JSON editor modal), weight (input number). Each row editable inline. Save button per row.
+```tsx
+// frontend/src/pages/supplierRisk/components/RuleConfigTable.tsx
+import React, { useState, useEffect } from "react";
+import { Table, Switch, InputNumber, Button, message, Modal, Form, Input } from "antd";
+import type { SupplierRiskConfig } from "../../../types";
+import { riskAlertApi } from "../../../api/supplierRisk";
+
+const RuleConfigTable: React.FC = () => {
+  const [data, setData] = useState<SupplierRiskConfig[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try { const res = await riskAlertApi.listConfigs(); setData(res.data); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { fetchData(); }, []);
+
+  const toggleEnabled = async (record: SupplierRiskConfig, enabled: boolean) => {
+    await riskAlertApi.updateConfig(record.config_id, { enabled });
+    message.success("已更新"); fetchData();
+  };
+
+  const updateWeight = async (record: SupplierRiskConfig, weight: number) => {
+    await riskAlertApi.updateConfig(record.config_id, { weight });
+    message.success("权重已更新");
+  };
+
+  const columns = [
+    { title: "规则", dataIndex: "rule_id" },
+    { title: "类别", dataIndex: "category", render: (v: string) => ({ quality: "质量", delivery: "交付", compliance: "合规" }[v] || v) },
+    { title: "启用", dataIndex: "enabled", render: (v: boolean, record: SupplierRiskConfig) => <Switch checked={v} onChange={val => toggleEnabled(record, val)} /> },
+    { title: "权重", dataIndex: "weight", render: (v: number, record: SupplierRiskConfig) => <InputNumber min={0} max={100} value={v} onBlur={() => updateWeight(record, v)} size="small" /> },
+    { title: "阈值", dataIndex: "thresholds", render: (v: Record<string, unknown>) => <span>{JSON.stringify(v)}</span> },
+  ];
+
+  return <Table rowKey="config_id" columns={columns} dataSource={data} loading={loading} pagination={false} />;
+};
+export default RuleConfigTable;
+```
 
 - [ ] **Step 2: Create ChannelConfigTable component**
 
-Ant Table with columns: channel_type, config summary, min_risk_level, enabled. Add button opens modal for creating email or webhook channel. Edit/delete actions.
+```tsx
+// frontend/src/pages/supplierRisk/components/ChannelConfigTable.tsx
+import React, { useState, useEffect } from "react";
+import { Table, Button, Modal, Form, Input, Select, Switch, message, Popconfirm } from "antd";
+import type { NotificationChannel } from "../../../types";
+import { riskAlertApi } from "../../../api/supplierRisk";
 
-For webhook: URL input + secret input (masked on display). SSRF validation message.
+const ChannelConfigTable: React.FC = () => {
+  const [data, setData] = useState<NotificationChannel[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form] = Form.useForm();
+
+  const fetchData = async () => {
+    setLoading(true);
+    try { const res = await riskAlertApi.listChannels(); setData(res.data); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { fetchData(); }, []);
+
+  const createChannel = async (values: Record<string, unknown>) => {
+    try { await riskAlertApi.createChannel(values); message.success("已创建"); setModalOpen(false); fetchData(); }
+    catch { message.error("创建失败"); }
+  };
+
+  const deleteChannel = async (id: string) => {
+    try { await riskAlertApi.deleteChannel(id); message.success("已删除"); fetchData(); }
+    catch { message.error("删除失败"); }
+  };
+
+  const columns = [
+    { title: "类型", dataIndex: "channel_type", render: (v: string) => v === "email" ? "邮件" : "Webhook" },
+    { title: "最低风险等级", dataIndex: "min_risk_level" },
+    { title: "启用", dataIndex: "enabled", render: (v: boolean) => <Switch checked={v} disabled /> },
+    { title: "操作", render: (_: unknown, record: NotificationChannel) => (
+      <Popconfirm title="确定删除?" onConfirm={() => deleteChannel(record.channel_id)}><Button size="small" danger>删除</Button></Popconfirm>
+    )},
+  ];
+
+  return (
+    <>
+      <Button type="primary" onClick={() => setModalOpen(true)} style={{ marginBottom: 16 }}>添加渠道</Button>
+      <Table rowKey="channel_id" columns={columns} dataSource={data} loading={loading} />
+      <Modal title="添加通知渠道" open={modalOpen} onCancel={() => setModalOpen(false)} onOk={() => form.submit()}>
+        <Form form={form} onFinish={createChannel} layout="vertical">
+          <Form.Item name="channel_type" label="类型" rules={[{ required: true }]}>
+            <Select options={[{ value: "email", label: "邮件" }, { value: "webhook", label: "Webhook" }]} />
+          </Form.Item>
+          <Form.Item name="min_risk_level" label="最低风险等级" initialValue="high">
+            <Select options={[{ value: "high", label: "高" }, { value: "critical", label: "极高" }]} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.channel_type !== cur.channel_type}>
+            {({ getFieldValue }) => getFieldValue("channel_type") === "email" ? (
+              <Form.Item name={["config", "addresses"]} label="邮件地址（逗号分隔）" rules={[{ required: true }]}>
+                <Input placeholder="a@b.com,c@d.com" />
+              </Form.Item>
+            ) : (
+              <>
+                <Form.Item name={["config", "url"]} label="Webhook URL" rules={[{ required: true }]}>
+                  <Input placeholder="https://hooks.example.com/..." />
+                </Form.Item>
+                <Form.Item name={["config", "secret"]} label="签名密钥" rules={[{ required: true }]}>
+                  <Input.Password />
+                </Form.Item>
+              </>
+            )}
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
+  );
+};
+export default ChannelConfigTable;
+```
 
 - [ ] **Step 3: Create RiskConfigPage**
 
-Two tabs: "规则配置" (RuleConfigTable) and "通知渠道" (ChannelConfigTable). Product line selector at top.
+```tsx
+// frontend/src/pages/supplierRisk/RiskConfigPage.tsx
+import React from "react";
+import { Tabs, Card } from "antd";
+import RuleConfigTable from "./components/RuleConfigTable";
+import ChannelConfigTable from "./components/ChannelConfigTable";
+
+const RiskConfigPage: React.FC = () => (
+  <Card style={{ margin: 24 }}>
+    <Tabs items={[
+      { key: "rules", label: "规则配置", children: <RuleConfigTable /> },
+      { key: "channels", label: "通知渠道", children: <ChannelConfigTable /> },
+    ]} />
+  </Card>
+);
+export default RiskConfigPage;
+```
 
 - [ ] **Step 4: Verify page renders**
 
@@ -1289,18 +1600,18 @@ git add -A && git commit -m "feat(supplier-risk): config page with rule config a
 
 ---
 
-### Task 12: End-to-End Verification
+### Task 16: End-to-End Verification
 
 **Files:** None (verification only)
 
 - [ ] **Step 1: Start backend and verify API**
 
 Run: `cd backend && uvicorn app.main:app --reload`
-Then verify endpoints respond:
+Then verify endpoints respond (all under `/api/supplier-risk/`):
 - `GET /api/supplier-risk/dashboard` → 200
-- `GET /supplier-risk/alerts` → 200 with empty list
-- `GET /supplier-risk/configs` → 200 with 10 default configs
-- `POST /supplier-risk/evaluate` → 200 (triggers full evaluation)
+- `GET /api/supplier-risk/alerts` → 200 with empty list
+- `GET /api/supplier-risk/configs` → 200 with 10 default configs
+- `POST /api/supplier-risk/evaluate` → 200 (triggers full evaluation)
 
 - [ ] **Step 2: Start frontend and verify pages**
 
