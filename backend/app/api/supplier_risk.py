@@ -293,7 +293,10 @@ async def create_channel(
     from app.services.supplier_risk.notifier import encrypt_secret
     config = req.config.copy()
     if req.channel_type == "webhook" and "secret" in config:
-        config["secret_encrypted"] = encrypt_secret(config.pop("secret"))
+        try:
+            config["secret_encrypted"] = encrypt_secret(config.pop("secret"))
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
 
     channel = SupplierRiskNotificationChannel(
         channel_type=req.channel_type,
@@ -328,7 +331,10 @@ async def update_channel(
     if "config" in updates:
         new_config = updates["config"].copy()
         if channel.channel_type == "webhook" and "secret" in new_config:
-            new_config["secret_encrypted"] = encrypt_secret(new_config.pop("secret"))
+            try:
+                new_config["secret_encrypted"] = encrypt_secret(new_config.pop("secret"))
+            except RuntimeError as e:
+                raise HTTPException(status_code=503, detail=str(e))
         channel.config = new_config
 
     if "min_risk_level" in updates:

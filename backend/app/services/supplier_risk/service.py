@@ -51,8 +51,8 @@ async def evaluate_supplier_risk(
     # 5. Calculate score
     risk_score = calculate_risk_score(results, configs)
 
-    # 6. Upsert alert
-    alert = await _upsert_alert(
+    # 6. Upsert alert (returns alert + event type)
+    alert, event_type = await _upsert_alert(
         db, supplier_id, product_line_code, risk_score, results, failed_ids
     )
 
@@ -61,8 +61,8 @@ async def evaluate_supplier_risk(
     if alert:
         await db.refresh(alert)
 
-    # 8. Send notifications for new/escalated high-risk alerts (non-blocking)
-    if alert and alert.risk_level in ("high", "critical"):
+    # 8. Send notifications ONLY for new or escalated high-risk alerts (non-blocking)
+    if alert and event_type in ("new", "escalated") and alert.risk_level in ("high", "critical"):
         from app.services.supplier_risk.notifier import send_notifications
         try:
             await send_notifications(db, alert, product_line_code)
@@ -90,28 +90,85 @@ async def evaluate_all_suppliers(
     db: AsyncSession,
     product_line_code: Optional[str] = None,
 ) -> list[dict]:
-    """Evaluate all active suppliers. Iterates per supplier; data is gathered per supplier.
+    """Evaluate all active suppliers.
 
-    TODO: For large supplier counts, refactor to batch aggregate queries
-    (single SQL per data type grouped by supplier_id) to avoid N+1.
+    Uses a batch strategy: one query per data type (IQC, SCAR, Evaluation,
+    Certification) to load all relevant records, then groups by supplier in
+    Python. Avoids the per-supplier N+1 query pattern.
     """
     # Get all active suppliers
     result = await db.execute(
         select(Supplier).where(Supplier.status == "approved")
     )
     suppliers = list(result.scalars().all())
+    if not suppliers:
+        return []
+
+    supplier_ids = [s.supplier_id for s in suppliers]
+
+    # Batch load all data types in parallel-friendly queries
+    inspections_by_supplier = await _batch_gather_inspections(db, supplier_ids, product_line_code)
+    scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
+    evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
+    certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
 
     results = []
     for supplier in suppliers:
         try:
-            eval_result = await evaluate_supplier_risk(db, supplier.supplier_id, product_line_code)
-            results.append(eval_result)
+            configs = await get_effective_configs(db, product_line_code, supplier.supplier_id)
+            if not configs:
+                continue
+
+            input_data = SupplierRiskInput(
+                supplier=supplier,
+                inspections=inspections_by_supplier.get(supplier.supplier_id, []),
+                scars=scars_by_supplier.get(supplier.supplier_id, []),
+                evaluations=evaluations_by_supplier.get(supplier.supplier_id, []),
+                certifications=certifications_by_supplier.get(supplier.supplier_id, []),
+            )
+            rule_results, failed_ids = run_all_rules(input_data, configs)
+            risk_score = calculate_risk_score(rule_results, configs)
+
+            alert, event_type = await _upsert_alert(
+                db, supplier.supplier_id, product_line_code, risk_score, rule_results, failed_ids
+            )
+
+            # Commit per supplier so partial failures don't lose all progress
+            await db.commit()
+            if alert:
+                await db.refresh(alert)
+
+            if alert and event_type in ("new", "escalated") and alert.risk_level in ("high", "critical"):
+                from app.services.supplier_risk.notifier import send_notifications
+                try:
+                    await send_notifications(db, alert, product_line_code)
+                except Exception:
+                    logger = __import__("logging").getLogger(__name__)
+                    logger.exception("Notification failed for alert %s", alert.alert_id)
+
+            results.append({
+                "supplier_id": supplier.supplier_id,
+                "risk_level": risk_score.risk_level,
+                "risk_score": risk_score.risk_score,
+                "quality_score": risk_score.quality_score,
+                "delivery_score": risk_score.delivery_score,
+                "compliance_score": risk_score.compliance_score,
+                "rule_results": [
+                    {"rule_id": r.rule_id, "triggered": r.triggered, "score": r.score,
+                     "detail": r.detail, "category": r.category, "critical": r.critical}
+                    for r in rule_results
+                ],
+                "alert_id": alert.alert_id if alert else None,
+            })
         except Exception:
-            # Skip suppliers with config/data issues
+            # Skip suppliers with config/data issues; rollback to avoid dirty session
+            await db.rollback()
             continue
 
     return results
 
+
+# ── Per-supplier gatherers (used by single-supplier evaluation) ────────────────
 
 async def _gather_inspections(db, supplier_id, product_line_code):
     """Gather IQC inspections for supplier, optionally filtered by product line."""
@@ -152,12 +209,67 @@ async def _gather_certifications(db, supplier_id):
     return list(result.scalars().all())
 
 
+# ── Batch gatherers (used by evaluate_all_suppliers) ───────────────────────────
+
+async def _batch_gather_inspections(db, supplier_ids, product_line_code):
+    query = select(IqcInspection).where(IqcInspection.supplier_id.in_(supplier_ids))
+    if product_line_code:
+        query = query.where(IqcInspection.product_line_code == product_line_code)
+    result = await db.execute(query)
+    rows = list(result.scalars().all())
+    by_supplier = {}
+    for r in rows:
+        by_supplier.setdefault(r.supplier_id, []).append(r)
+    return by_supplier
+
+
+async def _batch_gather_scars(db, supplier_ids, product_line_code):
+    query = select(SupplierSCAR).where(SupplierSCAR.supplier_id.in_(supplier_ids))
+    if product_line_code:
+        query = query.where(SupplierSCAR.product_line_code == product_line_code)
+    result = await db.execute(query)
+    rows = list(result.scalars().all())
+    by_supplier = {}
+    for r in rows:
+        by_supplier.setdefault(r.supplier_id, []).append(r)
+    return by_supplier
+
+
+async def _batch_gather_evaluations(db, supplier_ids):
+    result = await db.execute(
+        select(SupplierEvaluation)
+        .where(SupplierEvaluation.supplier_id.in_(supplier_ids))
+        .order_by(SupplierEvaluation.created_at.desc())
+    )
+    rows = list(result.scalars().all())
+    by_supplier = {}
+    for r in rows:
+        by_supplier.setdefault(r.supplier_id, []).append(r)
+    return by_supplier
+
+
+async def _batch_gather_certifications(db, supplier_ids):
+    result = await db.execute(
+        select(SupplierCertification)
+        .where(SupplierCertification.supplier_id.in_(supplier_ids))
+    )
+    rows = list(result.scalars().all())
+    by_supplier = {}
+    for r in rows:
+        by_supplier.setdefault(r.supplier_id, []).append(r)
+    return by_supplier
+
+
+# ── Alert upsert with event type ───────────────────────────────────────────────
+
 async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results, failed_ids):
     """Upsert alert: dedup by (supplier_id, product_line_code, snapshot_date).
 
-    - If existing alert and new risk_level > existing → update scores, set alert_type="escalated"
-    - If existing alert and new risk_level <= existing → skip (no update)
-    - If no existing alert and risk_level != "low" → insert new alert
+    Returns (alert, event_type) where event_type is:
+    - "new": newly created alert
+    - "escalated": existing alert risk level increased
+    - "unchanged": existing alert, same or lower level (or newly low)
+    - None: no alert created (low risk, no existing)
     """
     today = date.today()
 
@@ -183,7 +295,7 @@ async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results,
 
     # Don't create alerts for low-risk suppliers
     if risk_score.risk_level == "low" and not existing:
-        return None
+        return None, None
 
     if existing:
         # Check if risk level escalated
@@ -196,10 +308,10 @@ async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results,
             existing.compliance_score = risk_score.compliance_score
             existing.rule_results = rule_results_data
             existing.alert_type = "escalated"
-            # updated_at handled by SQLAlchemy onupdate
             await db.flush()
+            return existing, "escalated"
         # If same or lower level, skip update
-        return existing
+        return existing, "unchanged"
 
     # Create new alert
     alert = SupplierRiskAlert(
@@ -218,8 +330,10 @@ async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results,
     db.add(alert)
     await db.flush()
     await db.refresh(alert)
-    return alert
+    return alert, "new"
 
+
+# ── Alert state machine ────────────────────────────────────────────────────────
 
 async def handle_alert(
     db: AsyncSession,
