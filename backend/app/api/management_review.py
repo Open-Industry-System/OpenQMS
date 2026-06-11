@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
@@ -374,7 +374,6 @@ async def reopen_report(
     try:
         await report_service.reopen_report_to_draft(db, review, user)
         await db.commit()
-        await db.refresh(review)
         return schemas.management_review.ManagementReviewResponse.model_validate(review)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -59,6 +59,32 @@ class ReviewOutputResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ReportSection(BaseModel):
+    key: str
+    title: str
+    source: Literal["data_package", "manual_input"]
+    base_text: str
+    ai_analysis: str
+    findings: list[str]
+    recommendations: list[str]
+    manual_text: str
+    data_snapshot: dict | str | list | int | float | bool | None
+
+    model_config = {"extra": "ignore"}
+
+
+class ReportContent(BaseModel):
+    generated_at: str
+    generation_model: str
+    llm_enriched: bool
+    sections: list[ReportSection]
+    executive_summary: str
+    overall_recommendations: list[str]
+    updated_at: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+
 class ManagementReviewCreate(BaseModel):
     title: str
     review_date: date
@@ -111,32 +137,6 @@ class ManagementReviewListResponse(BaseModel):
     total: int
     page: int
     page_size: int
-
-
-class ReportSection(BaseModel):
-    key: str
-    title: str
-    source: Literal["data_package", "manual_input"]
-    base_text: str
-    ai_analysis: str
-    findings: list[str]
-    recommendations: list[str]
-    manual_text: str
-    data_snapshot: dict | str | list | int | float | bool | None
-
-    model_config = {"extra": "ignore"}
-
-
-class ReportContent(BaseModel):
-    generated_at: str
-    generation_model: str
-    llm_enriched: bool
-    sections: list[ReportSection]
-    executive_summary: str
-    overall_recommendations: list[str]
-    updated_at: str | None = None
-
-    model_config = {"extra": "ignore"}
 
 
 class ReportGenerateRequest(BaseModel):
