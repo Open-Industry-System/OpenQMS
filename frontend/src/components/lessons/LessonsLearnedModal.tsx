@@ -41,8 +41,8 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
           <Text strong style={{ fontSize: 14 }}>{card.title}</Text>
           <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
             {card.source_document_no} · {card.source_product_line}
-            {card.severity && <Tag size="small" style={{ marginLeft: 8 }}>{card.severity}</Tag>}
-            <Tag size="small" color={card.same_product_line ? "red" : "orange"} style={{ marginLeft: 8 }}>
+            {card.severity && <Tag style={{ marginLeft: 8 }}>{card.severity}</Tag>}
+            <Tag color={card.same_product_line ? "red" : "orange"} style={{ marginLeft: 8 }}>
               置信度 {Math.round(card.confidence * 100)}%
             </Tag>
           </div>
