@@ -9,7 +9,7 @@
 ## 1. 目标与范围
 
 ### 1.1 目标
-基于现有 `ManagementReview` 的数据包 (`data_package`) 和人工输入 (`manual_inputs`)，自动生成符合 **ISO 9001 §9.3** 管理评审要求的报告初稿，支持人工编辑、AI 增强、版本定稿与历史归档。
+基于现有 `ManagementReview` 的数据包 (`data_package`) 和人工输入 (`manual_inputs`)，自动生成符合 **ISO 9001 §9.3** 管理评审要求的报告初稿，支持人工编辑、AI 增强、定稿归档与定稿版本历史。草稿阶段只保存在当前评审记录中，不保留每次草稿保存历史。
 
 ### 1.2 范围
 - 后端：新增报告生成服务、API 路由、数据模型扩展、Alembic 迁移
@@ -28,18 +28,17 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `report_status` | `VARCHAR(20)` | `none`(默认) / `draft` / `final` |
-| `generated_report` | `JSONB` | 当前编辑中的报告内容 |
+| `generated_report` | `JSONB` | 当前编辑中的报告内容。AI 生成、人工编辑、保存草稿都更新该字段；未定稿的草稿不写入版本历史。 |
 
 ### 2.2 新增 `review_reports` 表
 
-用于保存每一次有意义的报告快照，包括 AI 生成、人工保存、定稿归档。
+`review_reports` 只保存定稿快照。每次点击「定稿归档」时创建一条新版本记录；草稿、重新生成、普通保存不写入该表。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `report_id` | `UUID` | 主键 |
 | `review_id` | `UUID` | FK → `management_reviews.review_id` (CASCADE) |
 | `version_no` | `INT` | 版本号，同一 `review_id` 内自动递增 |
-| `snapshot_type` | `VARCHAR(20)` | `draft` / `revision` / `final` |
 | `content` | `JSONB` | 完整报告内容快照 |
 | `generated_by` | `UUID` | FK → `users.user_id` |
 | `finalized_by` | `UUID` | FK → `users.user_id`（仅 `final` 时填写）|
@@ -49,12 +48,7 @@
 
 约束：`UNIQUE(review_id, version_no)`
 
-**快照语义**：
-- `draft`：每次调用 `generate_report()` 自动保存的快照（AI 生成时）
-- `revision`：用户在草稿基础上「保存草稿」时创建的快照
-- `final`：点击「定稿归档」时创建的快照
-
-`management_reviews.generated_report` 始终保存**当前编辑中**的内容，是工作副本；`review_reports` 是历史快照。
+**核心原则**：当前草稿保存在 `management_reviews.generated_report` 中；历史版本只记录定稿，存入 `review_reports`。
 
 ### 2.3 `generated_report` / `review_reports.content` JSONB 结构
 
@@ -127,11 +121,11 @@
 
 | 方法 | 说明 |
 |------|------|
-| `generate_report(db, review, user, use_llm=True)` | 生成报告，自动保存 `draft` 快照，返回报告 JSON |
+| `generate_report(db, review, user, use_llm=True)` | 生成报告，写入 `management_reviews.generated_report`，设置 `report_status=draft`，不创建版本快照 |
 | `_build_sections(data_package, manual_inputs)` | 从已有数据构建 13 章节基础内容 |
 | `_enrich_with_llm(sections, review, llm_provider)` | 逐章节调用 LLM 生成洞察、总结、建议 |
-| `save_report_draft(db, review, content, user)` | 保存当前内容为草稿，创建 `revision` 快照 |
-| `finalize_report(db, review, user)` | 定稿，创建 `final` 快照，设置 `report_status=final` |
+| `save_report_draft(db, review, content, user)` | 保存当前草稿到 `management_reviews.generated_report`，设置 `report_status=draft`，不创建版本快照 |
+| `finalize_report(db, review, user)` | 将当前 `generated_report` 写入 `review_reports` 作为定稿快照，递增 `version_no`，设置 `report_status=final` |
 | `reopen_to_draft(db, review, user)` | 从 final 回退到 draft（admin/manager）|
 | `list_report_versions(db, review_id)` | 历史版本列表 |
 | `get_report_version(db, report_id)` | 查看某个历史版本 |
@@ -230,6 +224,8 @@ draft → final（点击定稿归档）
 final → draft（admin/manager 点击重新打开）
 ```
 
+只有 `draft → final` 的「定稿归档」动作会创建 `review_reports` 历史版本；`none → draft` 和 `draft → draft` 只更新当前草稿。
+
 报告操作与主评审状态的前置条件：
 
 | 主状态 | 允许的报告操作 |
@@ -254,7 +250,9 @@ final → draft（admin/manager 点击重新打开）
 - `test_management_review_report_service.py`
   - 规则生成：data_package → sections 映射正确
   - LLM fallback：未配置 provider 时返回规则内容
+  - 保存草稿只更新 `management_reviews.generated_report`，不创建 `review_reports`
   - 定稿创建 `review_reports` 记录
+  - 多次定稿创建递增的 final 版本快照
   - 回退状态流转
   - 历史版本列表
   - 空 data_package 时的提示性生成
