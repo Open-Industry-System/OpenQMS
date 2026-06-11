@@ -1244,7 +1244,7 @@ git add -A && git commit -m "feat(supplier-risk): API routes with /api/supplier-
 - Test create CAPA from alert (calls `_create_capa_without_commit`, links, commits atomically)
 - Test config priority resolution (supplier+PL > supplier global > PL default > global)
 
-Use pytest with async fixtures, in-memory test DB or mock session.
+Use pytest with async PostgreSQL fixtures (same `db_session` fixture as integration tests).
 
 - [ ] **Step 2: Write integration tests (11 tests)**
 
