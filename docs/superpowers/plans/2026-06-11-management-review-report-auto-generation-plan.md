@@ -1221,10 +1221,17 @@ async def test_permission_levels(monkeypatch):
     resp = await run_with_permission(PermissionLevel.VIEW)
     assert resp.status_code == status.HTTP_403_FORBIDDEN
 
-    # CREATE level should succeed (mock service returns valid ReportContent)
-    with patch.object(report_service, "generate_report", new=AsyncMock(return_value=_sample_report_content())):
+    # CREATE level should succeed (mock service returns valid ReportContent and mutates review state)
+    async def mock_generate(db, review, user, llm_provider=None, use_llm=True):
+        review.report_status = "draft"
+        review.generated_report = _sample_report_content()
+        return review.generated_report
+
+    with patch.object(report_service, "generate_report", new=mock_generate):
         resp = await run_with_permission(PermissionLevel.CREATE)
     assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+    assert data["report_status"] == "draft"
 
     app.dependency_overrides.clear()
 
