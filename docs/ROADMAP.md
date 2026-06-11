@@ -152,7 +152,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | 经验教训智能推送 | P3 | ✅ 完成 (2026-06-10) | 5 源适配器（FMEA 关键词 + CAPA 语义 + 审核发现 + 语义搜索 + 规则引擎）+ 融合排序 + 权限隔离缓存 + 前端 Modal 推送；14 单元测试 |
 | 控制计划智能校验 | P3 | ✅ 完成 (2026-06-11) | 规则引擎校验（4 规则：控制方法/反应计划缺失、FMEA 一致性、特殊特性覆盖）+ 两表模型（findings 稳定身份 + occurrences 快照）+ 批量汇总 API + 前端校验面板/徽章 + 自动触发 + 30 测试 |
 | IQC 抽样方案智能优化 | P3 | ✅ 完成 | 基于历史质量动态调整 AQL；组合规则引擎（10 条规则）+ 多级审批（engineer/manager）+ 质量画像 + PPM/SCAR/安全缺陷触发；4 张新表 + 配置化参数；4 页前端；18 条单元测试 |
-| 供应商风险智能预警 | P3 | 🔲 待开发 | PPM + 交付 + SCAR 综合风险评估 |
+| 供应商风险智能预警 | P3 | ✅ 完成 (2026-06-11) | 10 规则引擎（质量/交付/合规）+ 加权评分 + 4 级风险（低/中/高/严重）+ 批量评估 + 每日定时触发 + IQC 判决增量触发 + SCAR/CAPA 闭环（一键创建 + 关闭联动）+ 邮件/钉钉 Webhook 通知（SSRF 保护 + Fernet 加密）+ 风险矩阵散点图 + 规则配置页 + 通知渠道管理 + 45 测试全绿 |
 | 管理评审报告自动生成 | P3 | 🔲 待开发 | 汇总输入数据 → 生成报告初稿 |
 | 供应链风险地图 | P3 | 🔲 待开发 | 多维度供应风险热力图 |
 | 自定义看板（拖拽式）| P3 | ✅ 完成 | react-grid-layout 拖拽布局，widget 库面板（18 种 widget），用户级 layout 存储，产品线过滤，权限控制 |
@@ -308,6 +308,19 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 - [x] 经验教训智能推送 — 5 源适配器 + 融合排序 + 权限隔离缓存 + 前端 Modal；14 单元测试
 - [x] 控制计划智能校验 — 4 规则引擎 + 两表模型（findings/occurrences）+ 批量汇总 API + 前端面板/徽章 + 自动触发；30 测试
 - [x] IQC 抽样方案智能优化 — 规则引擎（10 条规则）+ 多级审批 + 质量画像 + PPM/SCAR/安全缺陷触发；4 张新表；4 页前端；18 单元测试
+- [x] 供应商风险智能预警 — 10 规则引擎 + 加权评分 + 4 级风险 + SCAR/CAPA 闭环 + 邮件/Webhook + 风险矩阵 + 45 测试
+
+**Phase 4 供应商风险智能预警已完成 (2026-06-11)**:
+1. ~~数据库迁移~~ ✅ 3 张新表 + 6 个部分唯一索引 + 权限种子
+2. ~~ORM + Schema~~ ✅ SupplierRiskAlert / Config / NotificationChannel + Pydantic v2
+3. ~~规则引擎~~ ✅ 10 条纯函数规则（R01-R10）+ SupplierRiskInput + RuleResult + RULE_REGISTRY
+4. ~~评分器~~ ✅ 按维度加权评分（分母 = 所有 active 规则权重）+ critical bypass（≥61 强制 high）
+5. ~~配置服务~~ ✅ 4 层优先级解析（supplier+PL > supplier > PL > global）+ batch 批量加载
+6. ~~评估服务~~ ✅ evaluate_supplier_risk（单供应商）+ evaluate_all_suppliers（批量查询）+ _upsert_alert（去重/升级）+ handle_alert（状态机）+ SCAR/CAPA 一键创建
+7. ~~通知服务~~ ✅ email（aiosmtplib）+ webhook（httpx + HMAC-SHA256）+ SSRF 保护 + Fernet 加密 + 批量加载优化
+8. ~~闭环联动~~ ✅ SCAR 关闭 → 预警关闭；CAPA D8 → 预警关闭；IQC 判决 → 增量评估触发；每日定时循环
+9. ~~API 路由~~ ✅ 14 端点（alerts CRUD / evaluate / dashboard / configs / channels）
+10. ~~前端~~ ✅ 风险矩阵散点图 + 预警表格 + 处置抽屉 + 规则配置页 + 通知渠道管理 + 侧边栏路由
 
 **Phase 4 IQC 抽样方案智能优化已完成 (2026-06-11)**:
 1. ~~Alembic merge + 数据库迁移~~ ✅ 4 张新表 + 2 新列 + 配置种子
@@ -321,7 +334,6 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 9. ~~前端页面~~ ✅ 4 页 + 2 组件 + 路由 + 侧边栏
 
 **Phase 4 剩余 (待开发)**:
-- [ ] SaaS 多租户架构 — Schema 级别隔离 + 弹性资源
-- [ ] 供应商风险智能预警
 - [ ] 管理评审报告自动生成
 - [ ] 供应链风险地图
+- [ ] SaaS 多租户架构 — Schema 级别隔离 + 弹性资源
