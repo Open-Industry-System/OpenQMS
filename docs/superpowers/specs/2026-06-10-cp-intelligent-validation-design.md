@@ -51,44 +51,68 @@ CREATE INDEX idx_cpvrn_status ON cp_validation_runs(status);
 CREATE UNIQUE INDEX idx_cpvrn_running ON cp_validation_runs(cp_id) WHERE status = 'running';
 ```
 
-### 2.2 `cp_validation_results` 表（校验结果明细）
+### 2.2 `cp_validation_findings` 表（稳定问题实体）
+
+`findings` 表示“同一个校验问题”的持久身份，不因 run 改变而丢失。状态继承在此表上发生。
 
 ```sql
-CREATE TABLE cp_validation_results (
-    validation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id UUID NOT NULL REFERENCES cp_validation_runs(run_id) ON DELETE CASCADE,
+CREATE TABLE cp_validation_findings (
+    finding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     cp_id UUID NOT NULL REFERENCES control_plans(cp_id) ON DELETE CASCADE,
-    validation_type VARCHAR(20) NOT NULL CHECK (validation_type IN ('rule','llm','recommendation')),
+    finding_hash VARCHAR(64) NOT NULL,
     rule_id VARCHAR(20) NOT NULL,
     severity VARCHAR(10) NOT NULL CHECK (severity IN ('error','warning','info')),
     category VARCHAR(20) NOT NULL CHECK (category IN ('coverage','consistency','completeness','risk','optimization')),
-    title VARCHAR(200) NOT NULL,
-    description TEXT,
-    affected_items JSONB DEFAULT '[]',
-    fmea_node_ids JSONB DEFAULT '[]',
-    finding_hash VARCHAR(64) NOT NULL,
-    suggestion TEXT,
-    suggestion_data JSONB DEFAULT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open','accepted','rejected','resolved','superseded')),
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open','accepted','rejected','resolved')),
     resolved_by UUID REFERENCES users(user_id) ON DELETE SET NULL,
     resolved_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_cpvr_run_id ON cp_validation_results(run_id);
-CREATE INDEX idx_cpvr_cp_id ON cp_validation_results(cp_id);
-CREATE INDEX idx_cpvr_type_status ON cp_validation_results(validation_type, status);
-CREATE INDEX idx_cpvr_severity ON cp_validation_results(severity);
-CREATE UNIQUE INDEX idx_cpvr_hash ON cp_validation_results(cp_id, finding_hash) WHERE status != 'superseded';
+CREATE INDEX idx_cvf_cp_id ON cp_validation_findings(cp_id);
+CREATE INDEX idx_cvf_status ON cp_validation_findings(status);
+CREATE UNIQUE INDEX idx_cvf_hash ON cp_validation_findings(cp_id, finding_hash);
+```
+
+### 2.3 `cp_validation_occurrences` 表（每次 run 的出现记录）
+
+`occurrences` 记录每次校验 run 的具体内容。同一 `finding` 可以在多个 run 中出现，保证完整历史追溯。
+
+```sql
+CREATE TABLE cp_validation_occurrences (
+    occurrence_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id UUID NOT NULL REFERENCES cp_validation_runs(run_id) ON DELETE CASCADE,
+    finding_id UUID NOT NULL REFERENCES cp_validation_findings(finding_id) ON DELETE CASCADE,
+    cp_id UUID NOT NULL REFERENCES control_plans(cp_id) ON DELETE CASCADE,
+    validation_type VARCHAR(20) NOT NULL CHECK (validation_type IN ('rule','llm','recommendation')),
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    affected_items JSONB DEFAULT '[]',
+    fmea_node_ids JSONB DEFAULT '[]',
+    suggestion TEXT,
+    suggestion_data JSONB DEFAULT NULL,
+    present BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_cvo_run_id ON cp_validation_occurrences(run_id);
+CREATE INDEX idx_cvo_finding_id ON cp_validation_occurrences(finding_id);
+CREATE INDEX idx_cvo_cp_id ON cp_validation_occurrences(cp_id);
+CREATE UNIQUE INDEX idx_cvo_run_hash ON cp_validation_occurrences(run_id, finding_id);
 ```
 
 **指纹生成算法**：
 `finding_hash = SHA256(rule_id + '|' + item_id + '|' + key_content)`
-每次校验时，新发现的哈希若已存在且状态为 `accepted`/`rejected`/`resolved`，则保留原状态；仅插入新哈希的记录；旧 run 中不再出现的 `open` 结果标记为 `superseded`。
 
-### 2.3 Alembic 迁移
+每次校验时：
+- 根据 `finding_hash` 查找 `cp_validation_findings`。
+- 若不存在 → 新建 `finding`（status=`open`）+ 新建 `occurrence`（present=true）。
+- 若存在 → **不修改原 finding 的 status**，直接新建 `occurrence` 指向该 finding，present=true。
+- 当前 run 中未出现的已有 finding → 新建 `occurrence`（present=false），表示该问题在当前 run 中已消失。
 
-新增 migration 文件，创建 `cp_validation_runs` 和 `cp_validation_results` 表，建立外键关联。
+### 2.4 Alembic 迁移
+
+新增 migration 文件，创建 `cp_validation_runs`、`cp_validation_findings`、`cp_validation_occurrences` 三个表，建立外键关联。
 
 ---
 
@@ -128,15 +152,16 @@ class CPValidationEngine:
 1. 创建 `cp_validation_runs` 记录（status=`running`）
 2. 加载 CP 及其 items + 关联的 FMEA graph
 3. 执行规则引擎，每条规则返回 `ValidationFinding` 列表
-4. 计算每条 `finding_hash`，与历史结果比对：
-   - 哈希已存在且状态为 `accepted`/`rejected`/`resolved` → **更新 `run_id` 为当前 run，保留原状态**
-   - 哈希已存在且状态为 `open` → **更新 `run_id` 为当前 run**，不要重复创建
-   - 哈希不存在 → 插入新记录（status=`open`，`run_id`=当前 run）
-   - 旧 run 中 `open` 但在新 run 中不存在的 → 标记为 `superseded`
-5. 更新 run 记录（status=`completed`，统计计数）
-6. 返回 run 结果
+4. 计算每条 `finding_hash`：
+   - 在 `cp_validation_findings` 中查找该 hash
+   - 若不存在 → 新建 `finding`（status=`open`，记录 rule_id/severity/category）
+   - 若存在 → **不修改 finding 的 status**
+5. 为每条发现的 finding 新建 `cp_validation_occurrence` 记录（run_id=当前 run，present=true，记录 title/description/...）
+6. 对当前 run 未出现的已有 finding → 新建 `occurrence`（present=false），表示该问题在当前 run 中已消失
+7. 更新 run 记录（status=`completed`，统计计数：按 occurrence present=true 的 severity 统计）
+8. 返回 run 结果
 
-**注意**：保留的历史记录必须更新 `run_id`，否则查询最新 run 时会遗漏已处理项。
+**查询最新结果**：join `cp_validation_occurrences` + `cp_validation_findings` on latest run_id，取 present=true 的 occurrences，并读取 finding 的当前状态。
 
 ### 3.3 规则引擎（`rule_engine.py`）— v1: 4 条规则
 
@@ -164,13 +189,13 @@ class CPValidationEngine:
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/api/control-plans/{cp_id}/validation-results` | Module.PLANNING + VIEW | 查询当前 CP 的校验结果（仅最新 run 的 `open`/`accepted`/`rejected`/`resolved`，不含 `superseded`） |
+| GET | `/api/control-plans/{cp_id}/validation-results` | Module.PLANNING + VIEW | 查询当前 CP 的校验结果（最新 run 的 present=true occurrences join findings，包含当前状态） |
 | POST | `/api/control-plans/{cp_id}/validate` | Module.PLANNING + EDIT | 手动触发校验，同步返回 run 结果 |
 | GET | `/api/control-plans/{cp_id}/validation-runs` | Module.PLANNING + VIEW | 查询校验历史 runs |
 | GET | `/api/control-plans/{cp_id}/validation-summary` | Module.PLANNING + VIEW | 最新 run 的摘要统计 |
-| POST | `/api/validation-results/{id}/reject` | Module.PLANNING + EDIT | 拒绝建议（状态 → `rejected`） |
-| POST | `/api/validation-results/{id}/resolve` | Module.PLANNING + EDIT | 标记已解决（状态 → `resolved`，记录 `resolved_by`） |
-| POST | `/api/validation-results/{id}/reopen` | Module.PLANNING + EDIT | 将 `rejected` 或 `resolved` 状态恢复为 `open` |
+| POST | `/api/validation-results/{finding_id}/reject` | Module.PLANNING + EDIT | 拒绝建议（修改 `cp_validation_findings.status` → `rejected`） |
+| POST | `/api/validation-results/{finding_id}/resolve` | Module.PLANNING + EDIT | 标记已解决（修改 `cp_validation_findings.status` → `resolved`） |
+| POST | `/api/validation-results/{finding_id}/reopen` | Module.PLANNING + EDIT | 将 `cp_validation_findings.status` 恢复为 `open` |
 
 **v2 将新增**：
 - `POST /api/validation-results/{id}/accept` — 接受建议（需要 suggestion_data 协议和乐观锁）
