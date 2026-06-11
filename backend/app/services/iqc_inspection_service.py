@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, date, timezone
 from sqlalchemy import select, func, or_
@@ -142,6 +143,24 @@ async def create_inspection(
         status="pending",
         inspection_result="pending",
     )
+
+    # Dynamic AQL injection from optimization profile
+    if not aql_level and material_id and supplier_id:
+        from app.services.iqc_aql_service import AqlService
+        try:
+            profile = await AqlService.get_profile(db, supplier_id, material_id)
+            if profile:
+                # frozen 状态继续使用 profile.current_aql，不降级
+                aql_level = profile.current_aql
+        except Exception:
+            pass  # Fall through to material default
+
+    # Fallback: load material and use default_aql if no profile set AQL
+    if not aql_level and material_id:
+        from app.models.iqc_material import IqcMaterial
+        material = await db.get(IqcMaterial, material_id)
+        if material and material.default_aql:
+            aql_level = material.default_aql
 
     # AQL auto-calculate
     if lot_qty and aql_level:
@@ -331,6 +350,8 @@ async def judge_inspection(
     defect_description: str | None,
     sample_qty: int | None,
     user_id: uuid.UUID,
+    has_safety_defect: bool = False,
+    linked_customer_complaint_id: uuid.UUID | None = None,
 ) -> IqcInspection:
     inspection = await get_inspection(db, inspection_id)
     if not inspection:
@@ -345,6 +366,9 @@ async def judge_inspection(
         inspection.sample_qty = sample_qty
     inspection.judged_by = user_id
     inspection.judged_at = datetime.now(timezone.utc)
+    inspection.has_safety_defect = has_safety_defect
+    if linked_customer_complaint_id:
+        inspection.linked_customer_complaint_id = linked_customer_complaint_id
 
     db.add(AuditLog(
         table_name="iqc_inspections",
@@ -358,6 +382,15 @@ async def judge_inspection(
         operated_by=user_id,
     ))
     await db.commit()
+
+    # Trigger AQL rule evaluation after judgment
+    if inspection.material_id:
+        try:
+            from app.services.iqc_aql_service import AqlService
+            await AqlService.on_inspection_judged(db, inspection.supplier_id, inspection.material_id, inspection_id)
+        except Exception as e:
+            logging.getLogger(__name__).warning("AQL rule evaluation failed: %s", e)
+
     return inspection
 
 

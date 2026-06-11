@@ -35,6 +35,10 @@ import ManagementReviewDetailPage from "./pages/managementReview/ManagementRevie
 import IqcInspectionListPage from "./pages/iqc/IqcInspectionListPage";
 import IqcInspectionDetailPage from "./pages/iqc/IqcInspectionDetailPage";
 import IqcMaterialListPage from "./pages/iqc/IqcMaterialListPage";
+import AqlOptimizationPage from "./pages/iqc/AqlOptimizationPage";
+import AqlProfileListPage from "./pages/iqc/AqlProfileListPage";
+import AqlProfileDetailPage from "./pages/iqc/AqlProfileDetailPage";
+import AqlConfigPage from "./pages/iqc/AqlConfigPage";
 import CustomerQualityPage from "./pages/customerQuality/CustomerQualityPage";
 import ComplaintDetailPage from "./pages/customerQuality/ComplaintDetailPage";
 import RMADetailPage from "./pages/customerQuality/RMADetailPage";
@@ -133,6 +137,10 @@ export default function App() {
         <Route path="/iqc/inspections" element={<ProtectedRoute requiredModule="iqc"><IqcInspectionListPage /></ProtectedRoute>} />
         <Route path="/iqc/inspections/:id" element={<ProtectedRoute requiredModule="iqc"><IqcInspectionDetailPage /></ProtectedRoute>} />
         <Route path="/iqc/materials" element={<ProtectedRoute requiredModule="iqc"><IqcMaterialListPage /></ProtectedRoute>} />
+        <Route path="/iqc/aql-optimization" element={<ProtectedRoute requiredModule="iqc"><AqlOptimizationPage /></ProtectedRoute>} />
+        <Route path="/iqc/aql-optimization/profiles" element={<ProtectedRoute requiredModule="iqc"><AqlProfileListPage /></ProtectedRoute>} />
+        <Route path="/iqc/aql-optimization/profiles/:supplierId/:materialId" element={<ProtectedRoute requiredModule="iqc"><AqlProfileDetailPage /></ProtectedRoute>} />
+        <Route path="/iqc/aql-optimization/config" element={<ProtectedRoute requiredModule="iqc"><AqlConfigPage /></ProtectedRoute>} />
         <Route path="/scars" element={<ProtectedRoute requiredModule="scar"><SCARListPage /></ProtectedRoute>} />
         <Route path="/scars/:id" element={<ProtectedRoute requiredModule="scar"><SCARDetailPage /></ProtectedRoute>} />
         <Route path="/apqp" element={<ProtectedRoute requiredModule="planning"><APQPListPage /></ProtectedRoute>} />

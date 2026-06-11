@@ -125,6 +125,59 @@ SAMPLE_DFMEA_GRAPH = {
 }
 
 
+async def seed_supplier_risk_configs(db):
+    """Seed default supplier risk rule configs if not present."""
+    from app.models.supplier_risk import SupplierRiskConfig
+    from app.models.user import User
+    from sqlalchemy import select
+
+    admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one_or_none()
+    if not admin:
+        return
+
+    DEFAULT_CONFIGS = [
+        {"rule_id": "R01", "enabled": True, "category": "quality", "weight": 15.0,
+         "thresholds": {"ppm_limit": 1000, "window_days": 90}},
+        {"rule_id": "R02", "enabled": True, "category": "quality", "weight": 12.0,
+         "thresholds": {"acceptance_rate_min": 0.9, "decline_ratio": 0.1, "window_days": 90, "compare_window_days": 180}},
+        {"rule_id": "R03", "enabled": True, "category": "quality", "weight": 18.0,
+         "thresholds": {"consecutive_batches": 3, "batch_limit": 10}},
+        {"rule_id": "R04", "enabled": True, "category": "quality", "weight": 10.0,
+         "thresholds": {"open_days_limit": 30}},
+        {"rule_id": "R05", "enabled": True, "category": "quality", "weight": 12.0,
+         "thresholds": {"scar_count_limit": 3, "window_days": 90}},
+        {"rule_id": "R06", "enabled": True, "category": "delivery", "weight": 12.0,
+         "thresholds": {"delivery_score_min": 70, "decline_ratio": 0.15}},
+        {"rule_id": "R07", "enabled": True, "category": "delivery", "weight": 10.0,
+         "thresholds": {"from_grades": ["A", "B"], "to_grades": ["C", "D"]}},
+        {"rule_id": "R08", "enabled": True, "category": "compliance", "weight": 8.0,
+         "thresholds": {"warning_days": [90, 60, 30]}},
+        {"rule_id": "R09", "enabled": True, "category": "compliance", "weight": 8.0,
+         "thresholds": {"score_decline_limit": 15}},
+        {"rule_id": "R10", "enabled": True, "category": "compliance", "weight": 15.0,
+         "thresholds": {"keywords": ["安全", "安全特性", "safety"]}},
+    ]
+
+    for cfg in DEFAULT_CONFIGS:
+        existing = (await db.execute(
+            select(SupplierRiskConfig).where(
+                SupplierRiskConfig.rule_id == cfg["rule_id"],
+                SupplierRiskConfig.supplier_id.is_(None),
+                SupplierRiskConfig.product_line_code.is_(None),
+            )
+        )).scalar_one_or_none()
+        if not existing:
+            db.add(SupplierRiskConfig(
+                rule_id=cfg["rule_id"],
+                enabled=cfg["enabled"],
+                category=cfg["category"],
+                weight=cfg["weight"],
+                thresholds=cfg["thresholds"],
+                updated_by=admin.user_id,
+            ))
+    await db.commit()
+
+
 async def seed_erp_permissions(db):
     from app.models.role import RolePermission
     from sqlalchemy import select
@@ -749,6 +802,9 @@ async def seed():
 
         # ─── ERP permissions ───
         await seed_erp_permissions(db)
+
+        # ─── Supplier risk default configs ───
+        await seed_supplier_risk_configs(db)
 
         await db.commit()
 

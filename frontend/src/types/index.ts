@@ -1414,3 +1414,85 @@ export interface LessonsLearnedResponse {
   source: string;
   cached: boolean;
 }
+
+// ─── IQC AQL Optimization Types ───
+
+export interface AqlProfile {
+  profile_id: string;
+  supplier_id: string;
+  material_id: string;
+  base_aql: number;
+  current_aql: number;
+  min_aql: number | null;
+  max_aql: number | null;
+  inspection_level: string;
+  state: 'normal' | 'tightened' | 'reduced' | 'frozen';
+  frozen_until: string | null;
+  frozen_reason: string | null;
+  effective_from: string;
+  approved_by: string | null;
+  approved_at: string | null;
+  state_changed_at: string | null;
+  product_line_code: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AqlRecommendation {
+  recommendation_id: string;
+  profile_id: string;
+  supplier_id: string;
+  material_id: string;
+  current_aql: number;
+  recommended_aql: number;
+  direction: 'keep' | 'reduce' | 'tighten' | 'freeze';
+  trigger_rules: { rule_id: string; reason: string }[];
+  evidence: Record<string, unknown>;
+  status: 'pending' | 'forwarded' | 'approved' | 'effective' | 'rejected' | 'expired';
+  approval_level: 'engineer' | 'manager';
+  engineer_decision: string | null;
+  engineer_decided_by: string | null;
+  engineer_decided_at: string | null;
+  manager_decision: string | null;
+  manager_decided_by: string | null;
+  manager_decided_at: string | null;
+  effective_from: string | null;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface AqlQualitySnapshot {
+  snapshot_id: string;
+  supplier_id: string;
+  material_id: string;
+  total_batches: number;
+  consecutive_accepted: number;
+  consecutive_rejected: number;
+  last_30d_batch_count: number;
+  last_30d_ppm: number | null;
+  last_90d_ppm: number | null;
+  open_scar_count: number;
+  supplier_rating: string | null;
+  has_safety_defect: boolean;
+  linked_customer_complaint: boolean;
+  calculated_state: string | null;
+  snapshot_at: string;
+}
+
+export interface AqlConfig {
+  config_id: string;
+  config_key: string;
+  config_value: string;
+  value_type: string;
+  description: string | null;
+  product_line_code: string | null;
+  is_editable: boolean;
+}
+
+export interface AqlPreviewResult {
+  target_state: string;
+  recommended_aql: number;
+  direction: string;
+  trigger_rules: { rule_id: string; reason: string }[];
+  evidence: Record<string, unknown>;
+}
