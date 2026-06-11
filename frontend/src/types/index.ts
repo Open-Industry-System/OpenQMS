@@ -471,6 +471,8 @@ export interface ManagementReview {
   review_date: string;
   actual_date: string | null;
   status: "draft" | "data_collected" | "in_review" | "closed";
+  report_status: "none" | "draft" | "final";
+  generated_report: ManagementReviewReport | null;
   product_line_code: string | null;
   location: string | null;
   chair_person_id: string;
@@ -504,6 +506,40 @@ export interface ReviewOutput {
   verified_by: string | null;
   verified_at: string | null;
   verification_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManagementReviewReportSection {
+  key: string;
+  title: string;
+  source: "data_package" | "manual_input";
+  base_text: string;
+  ai_analysis: string;
+  findings: string[];
+  recommendations: string[];
+  manual_text: string;
+  data_snapshot: Record<string, unknown> | string | unknown[] | number | boolean | null;
+}
+
+export interface ManagementReviewReport {
+  generated_at: string;
+  generation_model: string;
+  llm_enriched: boolean;
+  sections: ManagementReviewReportSection[];
+  executive_summary: string;
+  overall_recommendations: string[];
+  updated_at?: string | null;
+}
+
+export interface ReviewReportVersion {
+  report_id: string;
+  review_id: string;
+  version_no: number;
+  content: ManagementReviewReport;
+  created_by: string;
+  finalized_by: string | null;
+  finalized_at: string | null;
   created_at: string;
   updated_at: string;
 }
