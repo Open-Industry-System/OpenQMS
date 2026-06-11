@@ -331,6 +331,8 @@ async def judge_inspection(
     defect_description: str | None,
     sample_qty: int | None,
     user_id: uuid.UUID,
+    has_safety_defect: bool = False,
+    linked_customer_complaint_id: uuid.UUID | None = None,
 ) -> IqcInspection:
     inspection = await get_inspection(db, inspection_id)
     if not inspection:
@@ -345,6 +347,9 @@ async def judge_inspection(
         inspection.sample_qty = sample_qty
     inspection.judged_by = user_id
     inspection.judged_at = datetime.now(timezone.utc)
+    inspection.has_safety_defect = has_safety_defect
+    if linked_customer_complaint_id:
+        inspection.linked_customer_complaint_id = linked_customer_complaint_id
 
     db.add(AuditLog(
         table_name="iqc_inspections",
