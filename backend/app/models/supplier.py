@@ -60,6 +60,9 @@ class SupplierCertification(Base):
     supplier_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=False
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     cert_type: Mapped[str] = mapped_column(String(100), nullable=False)
     cert_no: Mapped[str] = mapped_column(String(100), nullable=False)
     issued_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -79,6 +82,9 @@ class SupplierEvaluation(Base):
     )
     supplier_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=False
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     eval_period: Mapped[str] = mapped_column(String(20), nullable=False)
     eval_type: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -112,6 +118,9 @@ class SupplierPPAPSubmission(Base):
     )
     supplier_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=False
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     part_no: Mapped[str] = mapped_column(String(100), nullable=False)
     part_name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -175,6 +184,9 @@ class SupplierSCAR(Base):
     scar_no: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     supplier_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=False
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)
     source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

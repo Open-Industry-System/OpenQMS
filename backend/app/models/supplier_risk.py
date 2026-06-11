@@ -14,6 +14,9 @@ class SupplierRiskAlert(Base):
 
     alert_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     supplier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     risk_level: Mapped[str] = mapped_column(String(10), nullable=False)
     risk_score: Mapped[float] = mapped_column(Float, nullable=False)
     quality_score: Mapped[float] = mapped_column(Float, nullable=False)
@@ -42,6 +45,9 @@ class SupplierRiskConfig(Base):
     thresholds: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     weight: Mapped[float] = mapped_column(Float, nullable=False)
     supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=True)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     category: Mapped[str] = mapped_column(String(20), nullable=False)
     product_line_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     updated_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
@@ -57,6 +63,9 @@ class SupplierRiskNotificationChannel(Base):
     min_risk_level: Mapped[str] = mapped_column(String(10), nullable=False, default="high")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=True)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     product_line_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

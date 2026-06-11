@@ -17,6 +17,9 @@ class AuditFinding(Base):
     audit_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("audit_plans.audit_id"), nullable=False
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     clause_ref: Mapped[str | None] = mapped_column(String(50), nullable=True)
     finding_type: Mapped[str] = mapped_column(String(20), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)

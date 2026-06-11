@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, DateTime, Text
+from sqlalchemy import String, Integer, DateTime, Text, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
@@ -19,6 +19,9 @@ class DocumentEmbedding(Base):
     # embedding column is vector type - handled via raw SQL in migration, not mapped here
     # Queries using pgvector operators must use raw SQL or text()
     product_line_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     # "metadata" is reserved on SQLAlchemy Base — map DB column "metadata" to attribute "embedding_metadata"
     embedding_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default="'{}'")
     embedding_model: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -33,6 +36,9 @@ class EmbeddingSyncOutbox(Base):
     entity_type: Mapped[str] = mapped_column(String(20), nullable=False)
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     product_line_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(20), default="pending", server_default="'pending'")
     retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     max_attempts: Mapped[int] = mapped_column(Integer, default=5, server_default="5")

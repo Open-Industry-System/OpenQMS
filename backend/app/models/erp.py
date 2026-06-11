@@ -25,6 +25,9 @@ class ERPConnection(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
@@ -46,6 +49,9 @@ class ERPSyncJob(Base):
     connection_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("erp_connections.connection_id", ondelete="RESTRICT"), nullable=False
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     data_type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     checkpoint: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -66,6 +72,9 @@ class ERPPushOutbox(Base):
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     connection_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("erp_connections.connection_id", ondelete="CASCADE"), nullable=False
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
@@ -106,6 +115,9 @@ class ERPSupplier(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     erp_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
 
@@ -136,6 +148,9 @@ class ERPCustomer(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     erp_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
 
@@ -165,6 +180,9 @@ class ERPMaterial(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     erp_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
 
@@ -189,6 +207,9 @@ class ERPLocation(Base):
     source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     erp_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
@@ -221,6 +242,9 @@ class ERPPurchaseOrder(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     erp_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
 
@@ -249,6 +273,9 @@ class ERPSalesOrder(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     erp_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
 
@@ -276,6 +303,9 @@ class ERPInventoryBalance(Base):
     snapshot_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     erp_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
@@ -309,6 +339,9 @@ class ERPShipment(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     erp_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
 
@@ -340,5 +373,8 @@ class ERPCostRecord(Base):
     source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     erp_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)

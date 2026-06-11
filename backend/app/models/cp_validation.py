@@ -40,6 +40,9 @@ class CPValidationRun(Base):
         DateTime(timezone=True), nullable=True
     )
     failed_rules: Mapped[list | None] = mapped_column(JSONB, default=list)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
     )
@@ -68,6 +71,9 @@ class CPValidationFinding(Base):
     )
     cp_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("control_plans.cp_id", ondelete="CASCADE"), nullable=False
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     finding_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     rule_id: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -108,6 +114,9 @@ class CPValidationOccurrence(Base):
         UUID(as_uuid=True), ForeignKey("control_plans.cp_id", ondelete="CASCADE"), nullable=False
     )
     validation_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     affected_items: Mapped[list | None] = mapped_column(JSONB, default=list)

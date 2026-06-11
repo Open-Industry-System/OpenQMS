@@ -18,6 +18,9 @@ class ChangeImpactAnalysis(Base):
         UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="CASCADE"), nullable=False
     )
     product_line_code: Mapped[str] = mapped_column(String, nullable=False)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     node_id: Mapped[str] = mapped_column(String, nullable=False)
     node_type: Mapped[str] = mapped_column(String, nullable=False)
     node_name: Mapped[str] = mapped_column(String, nullable=False)

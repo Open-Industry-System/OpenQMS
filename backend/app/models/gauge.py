@@ -30,6 +30,9 @@ class Gauge(Base):
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
     product_line_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -46,6 +49,9 @@ class GaugeCalibration(Base):
     )
     gauge_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("gauges.gauge_id", ondelete="CASCADE"), nullable=False
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     calibration_date: Mapped[date] = mapped_column(Date, nullable=False)
     result: Mapped[str] = mapped_column(String(20), nullable=False)

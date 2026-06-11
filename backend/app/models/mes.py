@@ -25,6 +25,9 @@ class MESConnection(Base):
     product_line_code: Mapped[str] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=False
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
@@ -49,6 +52,9 @@ class MESProductionOrder(Base):
         UUID(as_uuid=True),
         ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     order_no: Mapped[str] = mapped_column(String(50), nullable=False)
     product_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -81,6 +87,9 @@ class MESEquipmentStatus(Base):
         ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"),
         nullable=False,
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     external_id: Mapped[str] = mapped_column(String(100), nullable=False)
     equipment_code: Mapped[str] = mapped_column(String(50), nullable=False)
     equipment_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -110,6 +119,9 @@ class MESScrapRecord(Base):
         UUID(as_uuid=True),
         ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     external_id: Mapped[str] = mapped_column(String(100), nullable=False)
     order_no: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -149,6 +161,9 @@ class MESMeasurementIngestion(Base):
         ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"),
         nullable=False,
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     external_id: Mapped[str] = mapped_column(String(100), nullable=False)
     order_no: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     ic_code: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -182,6 +197,9 @@ class MESSyncJob(Base):
         ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"),
         nullable=False,
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     data_type: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
@@ -213,6 +231,9 @@ class MESPushOutbox(Base):
         UUID(as_uuid=True),
         ForeignKey("mes_connections.connection_id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(
@@ -252,6 +273,9 @@ class MESScrapMonthlySummary(Base):
     product_line_code: Mapped[str] = mapped_column(
         String(50), nullable=False, default="__none__"
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     year_month: Mapped[str] = mapped_column(String(7), nullable=False)
     defect_category: Mapped[str] = mapped_column(String(100), nullable=False)
     total_defect_qty: Mapped[int] = mapped_column(
@@ -279,6 +303,9 @@ class MESProductionOrderArchive(Base):
     )
     connection_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     order_no: Mapped[str] = mapped_column(String(50), nullable=False)
     product_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
