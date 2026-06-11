@@ -39,26 +39,35 @@
 
 ### 3.1 规则定义
 
-10 条规则，分三类：
+10 条规则，分三类。每条规则需指定**时间窗口**（`window_days`），用于限定指标计算范围。仅 R03（连续拒收）使用批次窗口，其余均为天数窗口。R03 仅统计已判定的检验单（`status` 为 `judged` 或 `closed`，`inspection_result` 为 `rejected`），排除 `pending`/`inspecting` 中间状态。
 
-| 规则 ID | 名称 | 类别 | 输入 | 触发条件 | 默认权重 |
-|---------|------|------|------|----------|----------|
-| R01 | PPM 超标 | 质量 | IQC 检验记录 | 供应商 PPM > 阈值（默认 1000） | 15 |
-| R02 | 批次合格率下降 | 质量 | IQC 检验记录 | 合格率 < 阈值（默认 90%）或环比下降 > 比例（默认 10%） | 12 |
-| R03 | 连续拒收 | 质量 | IQC 检验记录 | 连续 N 批（默认 3）拒收 | 18 |
-| R04 | SCAR 超期未关闭 | 质量 | SCAR 记录 | 开放 SCAR 超过 N 天（默认 30） | 10 |
-| R05 | SCAR 频发 | 质量 | SCAR 记录 | 时间窗口（默认 90 天）内 SCAR 数量 > 阈值（默认 3） | 12 |
-| R06 | 交付准时率下降 | 交付 | 供应商评价 | delivery_score < 阈值（默认 70）或环比下降 > 比例（默认 15%） | 12 |
-| R07 | 评级降级 | 交付 | 供应商评价 | 最近评级从 A/B 降为 C/D | 10 |
-| R08 | 证书即将过期 | 合规 | 资质证书 | 证书在 30/60/90 天内过期 | 8 |
-| R09 | 评价分数下滑 | 合规 | 供应商评价 | 总评分环比下降 > 阈值（默认 15 分） | 8 |
-| R10 | 安全缺陷检测 | 合规 | IQC 检验记录 | 缺陷描述包含安全关键词 | 15 |
+| 规则 ID | 名称 | 类别 | 输入 | 触发条件 | 默认阈值 (thresholds) | 默认权重 |
+|---------|------|------|------|----------|----------------------|----------|
+| R01 | PPM 超标 | 质量 | IQC 检验记录 | 供应商 PPM > 阈值 | `{"ppm_limit": 1000, "window_days": 90}` | 15 |
+| R02 | 批次合格率下降 | 质量 | IQC 检验记录 | 合格率 < 阈值 或环比下降 > 比例 | `{"acceptance_rate_min": 0.9, "decline_ratio": 0.1, "window_days": 90, "compare_window_days": 180}` | 12 |
+| R03 | 连续拒收 | 质量 | IQC 检验记录 | 连续 N 批已判定拒收 | `{"consecutive_batches": 3, "batch_limit": 10}` | 18 |
+| R04 | SCAR 超期未关闭 | 质量 | SCAR 记录 | 开放 SCAR 超过 N 天 | `{"overdue_days": 30}` | 10 |
+| R05 | SCAR 频发 | 质量 | SCAR 记录 | 时间窗口内 SCAR 数量 > 阈值 | `{"scar_count_limit": 3, "window_days": 90}` | 12 |
+| R06 | 交付准时率下降 | 交付 | 供应商评价 | delivery_score < 阈值 或环比下降 > 比例 | `{"delivery_score_min": 70, "decline_ratio": 0.15}` | 12 |
+| R07 | 评级降级 | 交付 | 供应商评价 | 最近评级从 A/B 降为 C/D | `{}` | 10 |
+| R08 | 证书即将过期 | 合规 | 资质证书 | 证书在 N 天内过期 | `{"warning_days": [90, 60, 30]}` | 8 |
+| R09 | 评价分数下滑 | 合规 | 供应商评价 | 总评分环比下降 > 阈值 | `{"score_decline_limit": 15}` | 8 |
+| R10 | 安全缺陷检测 | 合规 | IQC 检验记录 | 缺陷描述包含安全关键词 | `{"keywords": ["安全", "安全特性", "safety"]}` | 15 |
 
 ### 3.2 规则执行模式
 
-规则是纯函数：`(supplier_data) -> (list[RuleResult])`
+规则是纯函数：`(SupplierRiskInput, dict) -> (list[RuleResult])`，接收结构化数据对象和规则配置阈值。
 
 ```python
+@dataclass
+class SupplierRiskInput:
+    """类型安全的规则引擎输入，由 service 层查询后传入。"""
+    supplier: Supplier
+    inspections: list[IqcInspection]         # 关联的最近检验单（已判定）
+    scars: list[SupplierSCAR]                # 关联的活跃及历史 SCAR
+    evaluations: list[SupplierEvaluation]    # 供应商评价（按时间排序）
+    certifications: list[SupplierCertification]  # 资质证书
+
 @dataclass
 class RuleResult:
     rule_id: str
@@ -74,13 +83,13 @@ class RuleResult:
 
 ### 3.3 风险评分计算
 
-每个维度只计算有触发规则的加权均值。若某维度无规则触发，该维度得 0 分。
+每个维度用**所有已启用规则**的权重之和作为分母，使维度分随触发规则增多而按权重比例上升——体现风险累积效应。若某维度无已启用规则，该维度得 0 分。
 
 ```
-# 仅对触发规则求加权均值；若无触发则维度分=0
-quality_score   = Σ(triggered R01..R05 scores × weights) / Σ(triggered R01..R05 weights)  (if any triggered, else 0)
-delivery_score  = Σ(triggered R06..R07 scores × weights) / Σ(triggered R06..R07 weights)  (if any triggered, else 0)
-compliance_score = Σ(triggered R08..R10 scores × weights) / Σ(triggered R08..R10 weights) (if any triggered, else 0)
+# 分母用所有已启用(active)规则的权重，分子仅计入触发规则
+quality_score   = Σ(triggered R01..R05 scores × weights) / Σ(active R01..R05 weights)  (if any active, else 0)
+delivery_score  = Σ(triggered R06..R07 scores × weights) / Σ(active R06..R07 weights)  (if any active, else 0)
+compliance_score = Σ(triggered R08..R10 scores × weights) / Σ(active R08..R10 weights) (if any active, else 0)
 
 综合分 = quality_score × 0.50 + delivery_score × 0.30 + compliance_score × 0.20
 ```
@@ -118,13 +127,13 @@ compliance_score = Σ(triggered R08..R10 scores × weights) / Σ(triggered R08..
 | handled_at | TIMESTAMP | 处置时间 |
 | handle_note | TEXT | 处置备注 |
 | linked_scar_id | UUID FK → supplier_scars | 关联 SCAR |
-| linked_capa_id | UUID FK → capa_eightd | 关联 CAPA |
+| linked_capa_id | UUID FK → capa_eightd(report_id) | 关联 CAPA |
 | snapshot_date | DATE | 快照日期（用于去重） |
 | product_line_code | VARCHAR(20) | 产品线 |
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
 
-唯一约束：`(supplier_id, snapshot_date)` — 每个供应商每天最多一条预警。
+唯一约束：`(supplier_id, product_line_code, snapshot_date)` — 每个供应商每个产品线每天最多一条预警。
 
 #### `supplier_risk_configs` — 规则配置
 
@@ -141,7 +150,19 @@ compliance_score = Σ(triggered R08..R10 scores × weights) / Σ(triggered R08..
 | updated_by | UUID FK → users | 更新人 |
 | updated_at | TIMESTAMP | 更新时间 |
 
-唯一约束：`(rule_id, supplier_id, product_line_code)` — 全局默认为 supplier_id=NULL。
+唯一约束使用 PostgreSQL 部分唯一索引，避免 NULL 不参与唯一约束的问题：
+
+```sql
+-- 全局默认配置：每个 rule_id 仅一条
+CREATE UNIQUE INDEX idx_risk_config_global
+ON supplier_risk_configs (rule_id)
+WHERE supplier_id IS NULL AND product_line_code IS NULL;
+
+-- 供应商级覆盖：每个 rule_id + supplier_id + product_line_code 仅一条
+CREATE UNIQUE INDEX idx_risk_config_supplier
+ON supplier_risk_configs (rule_id, supplier_id, product_line_code)
+WHERE supplier_id IS NOT NULL;
+```
 
 #### `supplier_risk_notification_channels` — 通知渠道配置
 
@@ -210,7 +231,15 @@ async def send_notifications(db, alert, product_line_code) -> None
 | 事件增量评估 | IQC 判定完成、SCAR 状态变更 | 仅评估相关供应商 |
 | 手动触发 | 用户点击"立即评估" | 单个供应商 |
 
-定时任务使用 `asyncio.create_task` + 后台协程，与项目已有的 MES 生命周期服务模式一致。
+**后台协程 Session 隔离**：定时任务和事件触发的增量评估通过 `asyncio.create_task` 启动后台协程。后台协程**必须在内部独立创建 `AsyncSession`**，不能复用请求上下文的 Session（请求返回后 Session 即关闭）。
+
+```python
+async def _incremental_evaluate(supplier_id: UUID, product_line_code: str):
+    async with async_session() as db:  # 独立 Session
+        await evaluate_supplier_risk(db, supplier_id, product_line_code)
+```
+
+手动触发的评估直接使用请求注入的 Session，无需特殊处理。
 
 ### 5.4 预警去重与升级
 
