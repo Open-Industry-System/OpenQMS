@@ -1058,15 +1058,26 @@ class AqlService:
     ) -> IqcAqlRecommendation | None:
         """Trigger rule evaluation after inspection judgment."""
         # 1. Get or create profile
-        # Need product_line_code — get from inspection if available
-        product_line_code = "DC-DC-100"  # fallback
+        # Need product_line_code — resolve from inspection → material → fallback
+        product_line_code: str | None = None
         if inspection_id:
             insp_result = await db.execute(
                 select(IqcInspection).where(IqcInspection.inspection_id == inspection_id)
             )
             inspection = insp_result.scalar_one_or_none()
-            if inspection:
+            if inspection and inspection.product_line_code:
                 product_line_code = inspection.product_line_code
+
+        if not product_line_code and material_id:
+            mat_result = await db.execute(
+                select(IqcMaterial.product_line_code).where(IqcMaterial.material_id == material_id)
+            )
+            mat_plc = mat_result.scalar_one_or_none()
+            if mat_plc:
+                product_line_code = mat_plc
+
+        if not product_line_code:
+            product_line_code = "DC-DC-100"
 
         profile = await ProfileManager.get_or_create_profile(
             db, supplier_id, material_id, product_line_code
