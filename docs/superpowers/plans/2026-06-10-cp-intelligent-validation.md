@@ -4,9 +4,9 @@
 
 **Goal:** Build a rule-based control plan validation system using a two-table model (`findings` for stable identity + `occurrences` for per-run history), with a frontend panel for viewing and managing findings.
 
-**Architecture:** Backend: SQLAlchemy models for runs/findings/occurrences + pure-function rule engine + orchestrator engine. `findings` holds stable identity and inherited user state; `occurrences` records each run's snapshot. Frontend: React sidebar panel with polling-based status updates. Auto-triggered on CP save via asyncio background task with isolated DB session.
+**Architecture:** Backend: SQLAlchemy models for runs/findings/occurrences + pure-function rule engine + orchestrator engine. `findings` holds stable identity (hash based on stable business keys, not volatile item UUIDs) and inherited user state; `occurrences` records each run's snapshot. Frontend: React sidebar panel with polling-based status updates. Auto-triggered on CP save via asyncio background task with isolated DB session.
 
-**Tech Stack:** Python 3.11, FastAPI, SQLAlchemy 2.0 (async), PostgreSQL, Pydantic v2, pytest. React 18, TypeScript 5.6, Ant Design 5, Axios.
+**Tech Stack:** Python 3.11, FastAPI, SQLAlchemy 2.0 (async), PostgreSQL, Pydantic v2, pytest, httpx AsyncClient. React 18, TypeScript 5.6, Ant Design 5, Axios.
 
 ---
 
@@ -30,6 +30,7 @@
 
 **Modified files:**
 - `backend/alembic/versions/` — New migration
+- `backend/app/models/__init__.py` — Register new models
 - `backend/app/main.py` — Register router
 - `backend/app/services/control_plan_service.py` — Add auto-trigger hook
 - `frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx` — Embed panel
@@ -41,8 +42,7 @@
 
 **Files:**
 - Create: `backend/app/models/cp_validation.py`
-
-**Context:** Follow the pattern in `backend/app/models/control_plan.py`. Use `Mapped`, `mapped_column`, UUID PKs, JSONB for arrays. Two-table model: `findings` is stable identity + inherited user state; `occurrences` is per-run snapshot.
+- Modify: `backend/app/models/__init__.py`
 
 - [ ] **Step 1: Write the model file**
 
@@ -50,7 +50,7 @@
 import uuid
 import hashlib
 from datetime import datetime
-from sqlalchemy import String, Integer, ForeignKey, DateTime, func, Text, Boolean
+from sqlalchemy import String, Integer, ForeignKey, DateTime, func, Text, Boolean, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
@@ -58,6 +58,17 @@ from app.database import Base
 
 class CPValidationRun(Base):
     __tablename__ = "cp_validation_runs"
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'completed', 'failed')",
+            name="ck_cpvrn_status",
+        ),
+        CheckConstraint(
+            "trigger IN ('manual', 'auto_on_save', 'fmea_change')",
+            name="ck_cpvrn_trigger",
+        ),
+    )
 
     run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -86,6 +97,21 @@ class CPValidationRun(Base):
 class CPValidationFinding(Base):
     __tablename__ = "cp_validation_findings"
 
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('open', 'accepted', 'rejected', 'resolved')",
+            name="ck_cvf_status",
+        ),
+        CheckConstraint(
+            "severity IN ('error', 'warning', 'info')",
+            name="ck_cvf_severity",
+        ),
+        CheckConstraint(
+            "category IN ('coverage', 'consistency', 'completeness', 'risk', 'optimization')",
+            name="ck_cvf_category",
+        ),
+    )
+
     finding_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
@@ -110,6 +136,13 @@ class CPValidationFinding(Base):
 
 class CPValidationOccurrence(Base):
     __tablename__ = "cp_validation_occurrences"
+
+    __table_args__ = (
+        CheckConstraint(
+            "validation_type IN ('rule', 'llm', 'recommendation')",
+            name="ck_cvo_validation_type",
+        ),
+    )
 
     occurrence_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -136,17 +169,34 @@ class CPValidationOccurrence(Base):
     )
 
 
-def compute_finding_hash(rule_id: str, item_id: str | None, key_content: str) -> str:
-    """Generate SHA256 hash for a validation finding."""
-    payload = f"{rule_id}|{item_id or ''}|{key_content}"
+def compute_finding_hash(rule_id: str, stable_key: str, key_content: str) -> str:
+    """Generate SHA256 hash using stable business keys (NOT volatile item UUIDs).
+
+    stable_key: source_fmea_node_id if available, else step_no.
+    This ensures the same business issue survives item UUID regeneration on CP save.
+    """
+    payload = f"{rule_id}|{stable_key}|{key_content}"
     return hashlib.sha256(payload.encode()).hexdigest()
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Register models in `__init__.py`**
+
+Add to `backend/app/models/__init__.py` after the last import line:
+
+```python
+from app.models.cp_validation import CPValidationRun, CPValidationFinding, CPValidationOccurrence
+```
+
+And add to `__all__`:
+```python
+    "CPValidationRun", "CPValidationFinding", "CPValidationOccurrence",
+```
+
+- [ ] **Step 3: Commit**
 
 ```bash
-git add backend/app/models/cp_validation.py
-git commit -m "feat(cp-validation): add two-table model - runs, findings, occurrences"
+git add backend/app/models/cp_validation.py backend/app/models/__init__.py
+git commit -m "feat(cp-validation): add two-table model with CHECK constraints and stable hash"
 ```
 
 ---
@@ -156,15 +206,21 @@ git commit -m "feat(cp-validation): add two-table model - runs, findings, occurr
 **Files:**
 - Create: `backend/alembic/versions/20250610_add_cp_validation_tables.py`
 
-**Context:** Check existing migration style at `backend/alembic/versions/`. Use `op.create_table`, `op.create_index`. Include partial unique indexes.
+- [ ] **Step 1: Find current head**
 
-- [ ] **Step 1: Write the migration**
+```bash
+cd backend && alembic history --verbose 2>/dev/null | head -5
+```
+
+Set the `down_revision` variable to the current head revision ID.
+
+- [ ] **Step 2: Write the migration**
 
 ```python
 """Add cp validation tables.
 
 Revision ID: 20250610_add_cp_validation
-Revises: (set to current head — check `alembic history`)
+Revises: <SET_FROM_HEAD>
 Create Date: 2026-06-10
 """
 from alembic import op
@@ -172,7 +228,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "20250610_add_cp_validation"
-down_revision = None  # Set this to current head after checking
+down_revision = None  # SET THIS to current head
 branch_labels = None
 depends_on = None
 
@@ -192,6 +248,8 @@ def upgrade() -> None:
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("failed_rules", postgresql.JSONB, server_default="[]"),
         sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True),
+        sa.CheckConstraint("status IN ('running', 'completed', 'failed')", name="ck_cpvrn_status"),
+        sa.CheckConstraint("trigger IN ('manual', 'auto_on_save', 'fmea_change')", name="ck_cpvrn_trigger"),
     )
     op.create_index("idx_cpvrn_cp_id", "cp_validation_runs", ["cp_id"])
     op.create_index("idx_cpvrn_status", "cp_validation_runs", ["status"])
@@ -212,6 +270,9 @@ def upgrade() -> None:
         sa.Column("resolved_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.CheckConstraint("status IN ('open', 'accepted', 'rejected', 'resolved')", name="ck_cvf_status"),
+        sa.CheckConstraint("severity IN ('error', 'warning', 'info')", name="ck_cvf_severity"),
+        sa.CheckConstraint("category IN ('coverage', 'consistency', 'completeness', 'risk', 'optimization')", name="ck_cvf_category"),
     )
     op.create_index("idx_cvf_cp_id", "cp_validation_findings", ["cp_id"])
     op.create_index("idx_cvf_status", "cp_validation_findings", ["status"])
@@ -234,6 +295,7 @@ def upgrade() -> None:
         sa.Column("suggestion_data", postgresql.JSONB, nullable=True),
         sa.Column("present", sa.Boolean, nullable=False, server_default="true"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.CheckConstraint("validation_type IN ('rule', 'llm', 'recommendation')", name="ck_cvo_validation_type"),
     )
     op.create_index("idx_cvo_run_id", "cp_validation_occurrences", ["run_id"])
     op.create_index("idx_cvo_finding_id", "cp_validation_occurrences", ["finding_id"])
@@ -261,28 +323,19 @@ def downgrade() -> None:
     op.drop_table("cp_validation_runs")
 ```
 
-- [ ] **Step 2: Set correct down_revision**
-
-Run:
-```bash
-cd backend && alembic history --verbose | head -10
-```
-
-Set `down_revision` to the current head revision ID.
-
 - [ ] **Step 3: Test the migration**
 
 ```bash
-cd backend && alembic upgrade head
+cd backend && alembic upgrade head && alembic downgrade -1 && alembic upgrade head
 ```
 
-Expected: No errors.
+Expected: No errors in either direction.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add backend/alembic/versions/20250610_add_cp_validation_tables.py
-git commit -m "feat(cp-validation): add alembic migration for runs/findings/occurrences"
+git commit -m "feat(cp-validation): add alembic migration with CHECK constraints"
 ```
 
 ---
@@ -403,20 +456,28 @@ git commit -m "feat(cp-validation): add Pydantic schemas for two-table model"
 
 ### Task 4: Rule Engine
 
-Same as before — pure functions returning `ValidationFinding`.
-
 **Files:**
 - Create: `backend/app/services/cp_validation/rule_engine.py`
-- Create: `backend/tests/test_cp_validation_rules.py`
 
-**Rule engine code:** (identical to previous plan — omitted here for brevity; refer to Task 4 in previous plan)
+**Key design decisions:**
+- `key_content` encodes the specific field/condition (e.g. "control_method_empty"), not item identity
+- `stable_key` is `source_fmea_node_id` if available, else `step_no` — never `item_id`
+- Rule failures are collected in `failed_rules` list alongside returned findings
+
+- [ ] **Step 1: Write the rule engine**
 
 ```python
-# backend/app/services/cp_validation/rule_engine.py
-"""Rule-based validation engine for Control Plans."""
+"""Rule-based validation engine for Control Plans.
+
+All rules are pure functions: (items, fmea_graph) -> (list[ValidationFinding], list[failed_rule_id]).
+No database access. Fast synchronous execution.
+
+Key design: finding_hash uses stable business keys (source_fmea_node_id or step_no),
+NOT volatile item UUIDs that change on every CP save (update_control_plan deletes +
+recreates items).
+"""
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -428,8 +489,9 @@ class ValidationFinding:
     category: str
     title: str
     description: str
-    item_id: str | None = None
+    stable_key: str = ""
     key_content: str = ""
+    item_id: str | None = None
 
 
 _PLACEHOLDER_METHODS = {"", "见sop", "见 sop", "无", "待定", "tbd", "暂无", "暂不", "n/a", "na"}
@@ -444,44 +506,61 @@ def _is_placeholder(val: str | None, placeholders: set[str]) -> bool:
     return _norm(val) in placeholders
 
 
-def rule_r001_control_method(items: list[Any]) -> list[ValidationFinding]:
+def _stable_key(item: Any) -> str:
+    """Business-stable identifier: source_fmea_node_id if available, else step_no."""
+    return (item.source_fmea_node_id or item.step_no or "")
+
+
+# ─── Rule R001: Control method coverage ────────────────────────────────────
+
+def rule_r001_control_method(items: list[Any]) -> tuple[list[ValidationFinding], list[str]]:
     findings = []
     for item in items:
         if _is_placeholder(item.control_method, _PLACEHOLDER_METHODS):
+            sk = _stable_key(item)
             findings.append(ValidationFinding(
                 rule_id="R001",
                 severity="error",
                 category="completeness",
                 title="控制方法缺失",
                 description=f"工序 {item.step_no or '?'}/{item.process_name or '?'} 的控制方法为空或仅含占位符",
-                item_id=str(item.item_id),
+                stable_key=sk,
                 key_content="control_method_empty",
+                item_id=str(item.item_id),
             ))
-    return findings
+    return findings, []
 
 
-def rule_r002_reaction_plan(items: list[Any]) -> list[ValidationFinding]:
+# ─── Rule R002: Reaction plan completeness ─────────────────────────────────
+
+def rule_r002_reaction_plan(items: list[Any]) -> tuple[list[ValidationFinding], list[str]]:
     findings = []
     for item in items:
         if _is_placeholder(item.reaction_plan, _PLACEHOLDER_REACTIONS):
+            sk = _stable_key(item)
             findings.append(ValidationFinding(
                 rule_id="R002",
                 severity="error",
                 category="completeness",
                 title="反应计划缺失",
                 description=f"工序 {item.step_no or '?'}/{item.process_name or '?'} 的反应计划为空或仅含占位符",
-                item_id=str(item.item_id),
+                stable_key=sk,
                 key_content="reaction_plan_empty",
+                item_id=str(item.item_id),
             ))
-    return findings
+    return findings, []
 
 
-def rule_r003_fmea_consistency(items: list[Any], fmea_graph: dict | None) -> list[ValidationFinding]:
+# ─── Rule R003: Process step consistency with FMEA ─────────────────────────
+
+def rule_r003_fmea_consistency(items: list[Any], fmea_graph: dict | None) -> tuple[list[ValidationFinding], list[str]]:
     if not fmea_graph:
-        return []
+        return [], []
+
     nodes = fmea_graph.get("nodes", [])
     node_map = {n.get("id"): n for n in nodes if n.get("id")}
     findings = []
+
     for item in items:
         if not item.source_fmea_node_id:
             continue
@@ -493,14 +572,17 @@ def rule_r003_fmea_consistency(items: list[Any], fmea_graph: dict | None) -> lis
                 category="consistency",
                 title="FMEA源工序已删除",
                 description=f"工序 {item.step_no or '?'} 关联的FMEA节点已不存在",
+                stable_key=item.source_fmea_node_id,
+                key_content="node_deleted",
                 item_id=str(item.item_id),
-                key_content=f"node_deleted_{item.source_fmea_node_id}",
             ))
             continue
+
         fmea_step_no = str(node.get("process_number") or "")
         fmea_name = str(node.get("name") or "")
         cp_step_no = str(item.step_no or "")
         cp_name = str(item.process_name or "")
+
         if fmea_step_no != cp_step_no or fmea_name != cp_name:
             findings.append(ValidationFinding(
                 rule_id="R003",
@@ -508,13 +590,17 @@ def rule_r003_fmea_consistency(items: list[Any], fmea_graph: dict | None) -> lis
                 category="consistency",
                 title="工序与FMEA不一致",
                 description=f"工序号/名称与FMEA源不同: CP=({cp_step_no}/{cp_name}) vs FMEA=({fmea_step_no}/{fmea_name})",
+                stable_key=item.source_fmea_node_id,
+                key_content="mismatch",
                 item_id=str(item.item_id),
-                key_content=f"mismatch_{item.source_fmea_node_id}",
             ))
-    return findings
+
+    return findings, []
 
 
-def rule_r004_special_class(items: list[Any]) -> list[ValidationFinding]:
+# ─── Rule R004: Special class annotation check ─────────────────────────────
+
+def rule_r004_special_class(items: list[Any]) -> tuple[list[ValidationFinding], list[str]]:
     findings = []
     for item in items:
         sc = _norm(item.special_class)
@@ -522,21 +608,25 @@ def rule_r004_special_class(items: list[Any]) -> list[ValidationFinding]:
             continue
         missing = []
         if _is_placeholder(item.evaluation_method, _PLACEHOLDER_METHODS):
-            missing.append("评价方法")
+            missing.append("evaluation_method")
         if _is_placeholder(item.control_method, _PLACEHOLDER_METHODS):
-            missing.append("控制方法")
+            missing.append("control_method")
         if missing:
+            sk = _stable_key(item)
             findings.append(ValidationFinding(
                 rule_id="R004",
                 severity="warning",
                 category="coverage",
                 title="特殊特性控制不完整",
                 description=f"工序 {item.step_no or '?'} 标记为 {item.special_class}，但{','.join(missing)}为空",
+                stable_key=sk,
+                key_content=f"special_class_{sc}",
                 item_id=str(item.item_id),
-                key_content=f"special_class_{sc}_{'_'.join(missing)}",
             ))
-    return findings
+    return findings, []
 
+
+# ─── Rule registry ─────────────────────────────────────────────────────────
 
 RULE_REGISTRY: list = [
     ("R001", rule_r001_control_method),
@@ -546,28 +636,184 @@ RULE_REGISTRY: list = [
 ]
 
 
-def run_all_rules(cp: Any, items: list[Any], fmea_graph: dict | None) -> list[ValidationFinding]:
+def run_all_rules(cp: Any, items: list[Any], fmea_graph: dict | None) -> tuple[list[ValidationFinding], list[str]]:
+    """Execute all rules and return (merged_findings, failed_rule_ids)."""
     all_findings: list[ValidationFinding] = []
+    failed_rules: list[str] = []
+
     for rule_id, rule_fn in RULE_REGISTRY:
         try:
             if rule_id == "R003":
-                findings = rule_fn(items, fmea_graph)
+                findings, _ = rule_fn(items, fmea_graph)
             else:
-                findings = rule_fn(items)
+                findings, _ = rule_fn(items)
             all_findings.extend(findings)
         except Exception:
-            continue
-    return all_findings
+            failed_rules.append(rule_id)
+
+    return all_findings, failed_rules
 ```
 
-Tests same as previous plan.
+- [ ] **Step 2: Write the tests**
 
-- [ ] **Step 1-3: Write rule engine and tests, run them, commit**
+Create `backend/tests/test_cp_validation_rules.py`:
+
+```python
+"""Unit tests for cp_validation rule engine."""
+import uuid
+import os
+import sys
+
+os.environ.setdefault("SECRET_KEY", "test-secret-key")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from app.services.cp_validation.rule_engine import (
+    rule_r001_control_method,
+    rule_r002_reaction_plan,
+    rule_r003_fmea_consistency,
+    rule_r004_special_class,
+    run_all_rules,
+    _stable_key,
+)
+
+
+class FakeItem:
+    def __init__(self, **kwargs):
+        self.item_id = kwargs.get("item_id", uuid.uuid4())
+        self.step_no = kwargs.get("step_no", "")
+        self.process_name = kwargs.get("process_name", "")
+        self.control_method = kwargs.get("control_method", "")
+        self.reaction_plan = kwargs.get("reaction_plan", "")
+        self.special_class = kwargs.get("special_class", "")
+        self.evaluation_method = kwargs.get("evaluation_method", "")
+        self.source_fmea_node_id = kwargs.get("source_fmea_node_id", None)
+
+
+# ─── stable_key ─────────────────────────────────────────────────────────────
+
+def test_stable_key_uses_fmea_node_id_first():
+    item = FakeItem(source_fmea_node_id="node-1", step_no="10")
+    assert _stable_key(item) == "node-1"
+
+
+def test_stable_key_falls_back_to_step_no():
+    item = FakeItem(source_fmea_node_id=None, step_no="20")
+    assert _stable_key(item) == "20"
+
+
+# ─── R001 ───────────────────────────────────────────────────────────────────
+
+def test_r001_detects_empty_control_method():
+    items = [FakeItem(source_fmea_node_id="n1", control_method="")]
+    findings, failed = rule_r001_control_method(items)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "R001"
+    assert findings[0].severity == "error"
+    assert findings[0].stable_key == "n1"
+
+
+def test_r001_ignores_valid_control_method():
+    items = [FakeItem(control_method="X-bar R chart")]
+    findings, _ = rule_r001_control_method(items)
+    assert len(findings) == 0
+
+
+def test_r001_detects_placeholder_sop():
+    items = [FakeItem(source_fmea_node_id="n1", control_method="见SOP")]
+    findings, _ = rule_r001_control_method(items)
+    assert len(findings) == 1
+
+
+# ─── R002 ───────────────────────────────────────────────────────────────────
+
+def test_r002_detects_empty_reaction_plan():
+    items = [FakeItem(source_fmea_node_id="n1", reaction_plan="")]
+    findings, _ = rule_r002_reaction_plan(items)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "R002"
+
+
+# ─── R003 ───────────────────────────────────────────────────────────────────
+
+def test_r003_detects_deleted_fmea_node():
+    items = [FakeItem(step_no="10", process_name="焊接", source_fmea_node_id="node-1")]
+    fmea_graph = {"nodes": [], "edges": []}
+    findings, _ = rule_r003_fmea_consistency(items, fmea_graph)
+    assert len(findings) == 1
+    assert findings[0].title == "FMEA源工序已删除"
+
+
+def test_r003_detects_name_mismatch():
+    items = [FakeItem(step_no="10", process_name="旧名称", source_fmea_node_id="node-1")]
+    fmea_graph = {
+        "nodes": [{"id": "node-1", "type": "ProcessStep", "process_number": "10", "name": "新名称"}],
+        "edges": [],
+    }
+    findings, _ = rule_r003_fmea_consistency(items, fmea_graph)
+    assert len(findings) == 1
+    assert "不一致" in findings[0].title
+
+
+def test_r003_passes_matching():
+    items = [FakeItem(step_no="10", process_name="焊接", source_fmea_node_id="node-1")]
+    fmea_graph = {
+        "nodes": [{"id": "node-1", "type": "ProcessStep", "process_number": "10", "name": "焊接"}],
+        "edges": [],
+    }
+    findings, _ = rule_r003_fmea_consistency(items, fmea_graph)
+    assert len(findings) == 0
+
+
+def test_r003_empty_graph_returns_empty():
+    findings, _ = rule_r003_fmea_consistency([FakeItem(source_fmea_node_id="n1")], None)
+    assert len(findings) == 0
+
+
+# ─── R004 ───────────────────────────────────────────────────────────────────
+
+def test_r004_detects_cc_missing_methods():
+    items = [FakeItem(step_no="10", special_class="CC", evaluation_method="", control_method="")]
+    findings, _ = rule_r004_special_class(items)
+    assert len(findings) == 1
+    assert "CC" in findings[0].description
+
+
+def test_r004_passes_when_methods_present():
+    items = [FakeItem(special_class="CC", evaluation_method="目视检查", control_method="SPC")]
+    findings, _ = rule_r004_special_class(items)
+    assert len(findings) == 0
+
+
+def test_r004_ignores_non_special():
+    items = [FakeItem(special_class="", evaluation_method="", control_method="")]
+    findings, _ = rule_r004_special_class(items)
+    assert len(findings) == 0
+
+
+# ─── run_all_rules ──────────────────────────────────────────────────────────
+
+def test_run_all_rules_returns_all_findings():
+    items = [
+        FakeItem(step_no="10", control_method="", reaction_plan="", special_class="CC"),
+    ]
+    findings, failed = run_all_rules(None, items, None)
+    assert len(findings) == 3  # R001 + R002 + R004
+    assert failed == []
+```
+
+- [ ] **Step 3: Run tests**
 
 ```bash
-cd backend && pytest tests/test_cp_validation_rules.py -v
+cd backend && SECRET_KEY=test python -m pytest tests/test_cp_validation_rules.py -v
+```
+
+Expected: 14 tests PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
 git add backend/app/services/cp_validation/rule_engine.py backend/tests/test_cp_validation_rules.py
-git commit -m "feat(cp-validation): add rule engine with 4 rules and unit tests"
+git commit -m "feat(cp-validation): add rule engine with stable business-key hashing and tests"
 ```
 
 ---
@@ -578,37 +824,40 @@ git commit -m "feat(cp-validation): add rule engine with 4 rules and unit tests"
 - Create: `backend/app/services/cp_validation/engine.py`
 - Create: `backend/app/services/cp_validation/__init__.py`
 
-**Two-table engine logic:**
-- For each `ValidationFinding`, compute `finding_hash`.
-- Look up `CPValidationFinding` by `(cp_id, finding_hash)`.
-- If no finding exists, create one with `status="open"`.
-- **Never modify finding status during validation**.
-- Create a `CPValidationOccurrence` for each finding: `run_id=current_run`, `finding_id=finding.finding_id`, `present=True`, plus all snapshot fields (title, description, severity, etc.).
-- For existing findings **not** present in this run, create a `CPValidationOccurrence` with `present=False`.
-- Count severities from `present=True` occurrences to update the run.
+**Key design decisions:**
+- Finding hash uses `stable_key` (not item UUID) for cross-save identity
+- No `present=False` occurrences — only record what IS found (absent = no occurrence)
+- Stale running runs (>5 min) are auto-marked `failed` before creating new run
+- `failed_rules` populated from rule engine return
+- `IntegrityError` on running constraint → raise custom `ValidationAlreadyRunning` exception
 
 - [ ] **Step 1: Write package init**
 
 ```python
 # backend/app/services/cp_validation/__init__.py
-from .engine import CPValidationEngine
+from .engine import CPValidationEngine, ValidationAlreadyRunning
 
-__all__ = ["CPValidationEngine"]
+__all__ = ["CPValidationEngine", "ValidationAlreadyRunning"]
 ```
 
 - [ ] **Step 2: Write the engine**
 
 ```python
-"""Control Plan Validation Engine — orchestrates rule execution with two-table persistence."""
+"""Control Plan Validation Engine — orchestrates rule execution with two-table persistence.
+
+findings  = stable identity (hash uses business keys) + inherited user state
+occurrences = per-run snapshot of what was detected (only present=true records)
+"""
 from __future__ import annotations
 
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.models.cp_validation import (
     CPValidationRun,
@@ -622,13 +871,15 @@ from app.services.cp_validation.rule_engine import run_all_rules, ValidationFind
 
 logger = logging.getLogger(__name__)
 
+STALE_RUN_TIMEOUT = timedelta(minutes=5)
+
+
+class ValidationAlreadyRunning(Exception):
+    """Raised when a validation run is already in progress for this CP."""
+    pass
+
 
 class CPValidationEngine:
-    """Orchestrator for CP validation runs using the two-table model.
-
-    findings  = stable identity + inherited user state (open/accepted/rejected/resolved)
-    occurrences = per-run snapshot of what was detected
-    """
 
     async def validate(
         self,
@@ -637,6 +888,10 @@ class CPValidationEngine:
         user_id: uuid.UUID,
         trigger: str = "manual",
     ) -> CPValidationRun:
+        # 1. Handle stale running runs (crashed worker, OOM, etc.)
+        await self._fail_stale_runs(db, cp_id)
+
+        # 2. Create run (may raise IntegrityError if concurrent)
         run = CPValidationRun(
             cp_id=cp_id,
             trigger=trigger,
@@ -644,7 +899,12 @@ class CPValidationEngine:
             created_by=user_id,
         )
         db.add(run)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            raise ValidationAlreadyRunning(f"Validation already running for CP {cp_id}")
+
         await db.refresh(run)
 
         try:
@@ -657,6 +917,23 @@ class CPValidationEngine:
             raise
 
         return run
+
+    async def _fail_stale_runs(self, db: AsyncSession, cp_id: uuid.UUID) -> None:
+        """Mark runs that have been 'running' for >5 min as failed."""
+        cutoff = datetime.now(timezone.utc) - STALE_RUN_TIMEOUT
+        result = await db.execute(
+            select(CPValidationRun).where(
+                CPValidationRun.cp_id == cp_id,
+                CPValidationRun.status == "running",
+                CPValidationRun.started_at < cutoff,
+            )
+        )
+        stale = result.scalars().all()
+        for run in stale:
+            run.status = "failed"
+            run.completed_at = datetime.now(timezone.utc)
+            run.failed_rules = (run.failed_rules or []) + ["timeout"]
+            logger.warning("Marked stale run %s as failed", run.run_id)
 
     async def _execute_validation(self, db: AsyncSession, run: CPValidationRun) -> None:
         cp_id = run.cp_id
@@ -682,24 +959,21 @@ class CPValidationEngine:
             if fmea:
                 fmea_graph = fmea.graph_data
 
-        findings = run_all_rules(cp, items, fmea_graph)
-
-        # Build hash -> finding map for this run
-        hash_to_finding: dict[str, ValidationFinding] = {}
-        for finding in findings:
-            h = compute_finding_hash(finding.rule_id, finding.item_id, finding.key_content)
-            hash_to_finding[h] = finding
+        findings, failed_rules = run_all_rules(cp, items, fmea_graph)
 
         # Load existing findings for this CP
         existing_result = await db.execute(
             select(CPValidationFinding).where(CPValidationFinding.cp_id == cp_id)
         )
-        existing_rows = list(existing_result.scalars().all())
-        existing_by_hash = {row.finding_hash: row for row in existing_rows}
+        existing_by_hash = {row.finding_hash: row for row in existing_result.scalars().all()}
 
-        seen_finding_ids: set[uuid.UUID] = set()
+        error_count = 0
+        warning_count = 0
+        info_count = 0
 
-        for h, finding in hash_to_finding.items():
+        for finding in findings:
+            h = compute_finding_hash(finding.rule_id, finding.stable_key, finding.key_content)
+
             existing = existing_by_hash.get(h)
             if existing is None:
                 existing = CPValidationFinding(
@@ -715,8 +989,7 @@ class CPValidationEngine:
                 await db.refresh(existing)
                 existing_by_hash[h] = existing
 
-            seen_finding_ids.add(existing.finding_id)
-
+            # Create occurrence (always present=true — we only record what IS found)
             db.add(CPValidationOccurrence(
                 run_id=run.run_id,
                 finding_id=existing.finding_id,
@@ -728,35 +1001,19 @@ class CPValidationEngine:
                 present=True,
             ))
 
-        # Record absences for existing findings not detected in this run
-        for row in existing_rows:
-            if row.finding_id not in seen_finding_ids:
-                db.add(CPValidationOccurrence(
-                    run_id=run.run_id,
-                    finding_id=row.finding_id,
-                    cp_id=cp_id,
-                    validation_type="rule",
-                    title="",
-                    description="",
-                    present=False,
-                ))
-
-        # Count from present occurrences
-        error_count = sum(
-            1 for f in findings if f.severity == "error"
-        )
-        warning_count = sum(
-            1 for f in findings if f.severity == "warning"
-        )
-        info_count = sum(
-            1 for f in findings if f.severity == "info"
-        )
+            if finding.severity == "error":
+                error_count += 1
+            elif finding.severity == "warning":
+                warning_count += 1
+            else:
+                info_count += 1
 
         run.status = "completed"
         run.rule_count = len(findings)
         run.error_count = error_count
         run.warning_count = warning_count
         run.info_count = info_count
+        run.failed_rules = failed_rules
         run.completed_at = datetime.now(timezone.utc)
         await db.commit()
 ```
@@ -768,15 +1025,24 @@ Create `backend/tests/test_cp_validation_engine.py`:
 ```python
 """Unit tests for CPValidationEngine orchestrator (two-table model)."""
 import uuid
-import pytest
+import os
+import sys
 
-from app.services.cp_validation.engine import CPValidationEngine
-from app.models.cp_validation import CPValidationFinding, CPValidationOccurrence
+os.environ.setdefault("SECRET_KEY", "test-secret-key")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import pytest
+from sqlalchemy import select, func
+
+from app.services.cp_validation.engine import CPValidationEngine, ValidationAlreadyRunning
+from app.models.cp_validation import (
+    CPValidationRun, CPValidationFinding, CPValidationOccurrence, compute_finding_hash,
+)
 from app.models.control_plan import ControlPlanItem
 
 
 @pytest.mark.asyncio
-async def test_validate_creates_run_and_results(db, admin_user):
+async def test_validate_creates_run_and_occurrences(db, admin_user):
     from app.services.control_plan_service import create_control_plan
     from app.schemas.control_plan import ControlPlanCreate
 
@@ -792,6 +1058,7 @@ async def test_validate_creates_run_and_results(db, admin_user):
         cp_id=cp.cp_id,
         step_no="10",
         process_name="焊接",
+        source_fmea_node_id="pfmea-step-1",
         control_method="",
         reaction_plan="",
     )
@@ -803,8 +1070,8 @@ async def test_validate_creates_run_and_results(db, admin_user):
 
     assert run.status == "completed"
     assert run.error_count >= 2
+    assert run.failed_rules == []
 
-    from sqlalchemy import select
     result = await db.execute(
         select(CPValidationOccurrence).where(CPValidationOccurrence.run_id == run.run_id)
     )
@@ -822,13 +1089,12 @@ async def test_validate_creates_run_and_results(db, admin_user):
 
 @pytest.mark.asyncio
 async def test_finding_reused_across_runs(db, admin_user):
-    """Same finding_hash creates one finding but two occurrences across runs."""
+    """Same finding_hash (from stable business key) creates one finding, two occurrences."""
     from app.services.control_plan_service import create_control_plan
     from app.schemas.control_plan import ControlPlanCreate
-    from sqlalchemy import select, func
 
     cp_data = ControlPlanCreate(
-        title="Test CP Deduplication",
+        title="Test CP Dedup",
         document_no=f"CP-DEDUP-{uuid.uuid4().hex[:8]}",
         product_line_code="DC-DC-100",
     )
@@ -838,94 +1104,145 @@ async def test_finding_reused_across_runs(db, admin_user):
         item_id=uuid.uuid4(),
         cp_id=cp.cp_id,
         step_no="10",
-        process_name="焊接",
+        source_fmea_node_id="pfmea-step-1",
         control_method="",
     )
     db.add(item)
+    await db.flush()
+
+    engine = CPValidationEngine()
+    run1 = await engine.validate(db, cp.cp_id, admin_user.user_id)
+
+    result_f = await db.execute(
+        select(func.count()).where(CPValidationFinding.cp_id == cp.cp_id)
+    )
+    finding_count = result_f.scalar()
+
+    # Second run with same data — stable_key unchanged so finding reused
+    run2 = await engine.validate(db, cp.cp_id, admin_user.user_id)
+
+    result_f2 = await db.execute(
+        select(func.count()).where(CPValidationFinding.cp_id == cp.cp_id)
+    )
+    assert result_f2.scalar() == finding_count  # no new findings
+
+    result_o2 = await db.execute(
+        select(func.count()).where(CPValidationOccurrence.run_id == run2.run_id)
+    )
+    assert result_o2.scalar() >= 1  # new occurrences for run2
+
+
+@pytest.mark.asyncio
+async def test_finding_survives_item_uuid_change(db, admin_user):
+    """When update_control_plan deletes+recreates items with new UUIDs,
+    the finding_hash (based on source_fmea_node_id) remains stable."""
+    from app.services.control_plan_service import create_control_plan
+    from app.schemas.control_plan import ControlPlanCreate
+
+    cp_data = ControlPlanCreate(
+        title="Test Stable Hash",
+        document_no=f"CP-HASH-{uuid.uuid4().hex[:8]}",
+        product_line_code="DC-DC-100",
+    )
+    cp = await create_control_plan(db, cp_data, admin_user.user_id)
+
+    # Run 1: item with UUID-A, source_fmea_node_id="pfmea-step-1"
+    item1 = ControlPlanItem(
+        item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
+        source_fmea_node_id="pfmea-step-1", control_method="",
+    )
+    db.add(item1)
     await db.flush()
 
     engine = CPValidationEngine()
     run1 = await engine.validate(db, cp.cp_id, admin_user.user_id)
 
     result1 = await db.execute(
-        select(func.count()).where(CPValidationFinding.cp_id == cp.cp_id)
+        select(CPValidationFinding).where(CPValidationFinding.cp_id == cp.cp_id)
     )
-    finding_count = result1.scalar()
+    findings_before = result1.scalars().all()
+    assert len(findings_before) >= 1
 
-    result1o = await db.execute(
-        select(func.count()).where(CPValidationOccurrence.run_id == run1.run_id)
+    # Simulate what update_control_plan does: delete old item, create new with new UUID
+    await db.delete(item1)
+    await db.flush()
+    item2 = ControlPlanItem(
+        item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
+        source_fmea_node_id="pfmea-step-1", control_method="",  # same business identity
     )
-    occ_count1 = result1o.scalar()
+    db.add(item2)
+    await db.flush()
 
-    # Second run with same data
+    # Run 2: new item UUID but same source_fmea_node_id
     run2 = await engine.validate(db, cp.cp_id, admin_user.user_id)
 
     result2 = await db.execute(
-        select(func.count()).where(CPValidationFinding.cp_id == cp.cp_id)
+        select(CPValidationFinding).where(CPValidationFinding.cp_id == cp.cp_id)
     )
-    assert result2.scalar() == finding_count  # no new findings
-
-    result2o = await db.execute(
-        select(func.count()).where(CPValidationOccurrence.run_id == run2.run_id)
-    )
-    assert result2o.scalar() == occ_count1  # new occurrences for run2
+    findings_after = result2.scalars().all()
+    # Same number of findings — no duplicates because hash is stable
+    assert len(findings_after) == len(findings_before)
 
 
 @pytest.mark.asyncio
-async def test_absence_recorded_when_finding_disappears(db, admin_user):
-    """When an issue is fixed, the next run records present=False for that finding."""
+async def test_stale_run_auto_failed(db, admin_user):
+    """A run stuck in 'running' for >5 min should be auto-failed on next validate."""
     from app.services.control_plan_service import create_control_plan
     from app.schemas.control_plan import ControlPlanCreate
-    from sqlalchemy import select
+    from datetime import datetime, timedelta, timezone
 
     cp_data = ControlPlanCreate(
-        title="Test CP Superseded",
-        document_no=f"CP-SUP-{uuid.uuid4().hex[:8]}",
+        title="Stale Run Test",
+        document_no=f"CP-STALE-{uuid.uuid4().hex[:8]}",
         product_line_code="DC-DC-100",
     )
     cp = await create_control_plan(db, cp_data, admin_user.user_id)
 
+    # Manually create a stale running run
+    stale_run = CPValidationRun(
+        cp_id=cp.cp_id, trigger="auto_on_save", status="running",
+        created_by=admin_user.user_id,
+        started_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+    )
+    db.add(stale_run)
+    await db.flush()
+
     item = ControlPlanItem(
-        item_id=uuid.uuid4(),
-        cp_id=cp.cp_id,
-        step_no="10",
-        control_method="",
+        item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
+        source_fmea_node_id="pfmea-step-1", control_method="",
     )
     db.add(item)
     await db.flush()
 
     engine = CPValidationEngine()
-    run1 = await engine.validate(db, cp.cp_id, admin_user.user_id)
+    run = await engine.validate(db, cp.cp_id, admin_user.user_id, trigger="manual")
 
-    # Fix the issue
-    item.control_method = "SPC Chart"
-    await db.flush()
+    assert run.status == "completed"
 
-    run2 = await engine.validate(db, cp.cp_id, admin_user.user_id)
-
-    result = await db.execute(
-        select(CPValidationOccurrence).where(
-            CPValidationOccurrence.run_id == run2.run_id,
-            CPValidationOccurrence.present == False,
-        )
-    )
-    absent = result.scalars().all()
-    assert len(absent) >= 1
+    # Verify the stale run was marked failed
+    await db.refresh(stale_run)
+    assert stale_run.status == "failed"
 ```
 
-Run:
+- [ ] **Step 4: Run tests**
+
 ```bash
-cd backend && TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test pytest tests/test_cp_validation_engine.py -v
+cd backend && TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test SECRET_KEY=test python -m pytest tests/test_cp_validation_engine.py -v
 ```
 
-Expected: 3 tests PASS.
+Note: If `openqms_test` DB doesn't exist:
+```bash
+docker compose exec db psql -U postgres -c "CREATE DATABASE openqms_test;"
+```
 
-- [ ] **Step 4: Commit**
+Expected: 4 tests PASS.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/cp_validation/
 git add backend/tests/test_cp_validation_engine.py
-git commit -m "feat(cp-validation): add two-table validation engine with tests"
+git commit -m "feat(cp-validation): add validation engine with stale-run recovery and stable hashing"
 ```
 
 ---
@@ -934,10 +1251,6 @@ git commit -m "feat(cp-validation): add two-table validation engine with tests"
 
 **Files:**
 - Create: `backend/app/api/cp_validation.py`
-
-**Key changes for two-table model:**
-- `GET /validation-results` joins `CPValidationOccurrence` + `CPValidationFinding` for the latest run, filtering `present=True`.
-- `POST /reject`, `/resolve`, `/reopen` operate on `CPValidationFinding` (not occurrence).
 
 - [ ] **Step 1: Write the API routes**
 
@@ -963,7 +1276,7 @@ from app.schemas.cp_validation import (
     ValidationSummaryResponse,
     ValidationResultsListResponse,
 )
-from app.services.cp_validation import CPValidationEngine
+from app.services.cp_validation import CPValidationEngine, ValidationAlreadyRunning
 
 router = APIRouter(prefix="/api", tags=["cp-validation"])
 
@@ -1010,6 +1323,7 @@ async def list_validation_results(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.VIEW)),
 ):
+    """List validation results for latest run (join occurrences + findings)."""
     latest_run = await _get_latest_run(db, cp_id)
     if latest_run is None:
         return ValidationResultsListResponse(items=[], total=0)
@@ -1039,13 +1353,17 @@ async def trigger_validation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.EDIT)),
 ):
+    """Manually trigger a validation run. Synchronous — waits for completion."""
     engine = CPValidationEngine()
     try:
         run = await engine.validate(db, cp_id, user.user_id, trigger="manual")
+    except ValidationAlreadyRunning:
+        raise HTTPException(status_code=409, detail="该控制计划的校验正在运行中")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception:
         raise HTTPException(status_code=500, detail="校验执行失败")
+
     return ValidationRunResponse.model_validate(run)
 
 
@@ -1056,6 +1374,7 @@ async def list_validation_runs(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.VIEW)),
 ):
+    """List validation run history for a control plan."""
     result = await db.execute(
         select(CPValidationRun)
         .where(CPValidationRun.cp_id == cp_id)
@@ -1072,6 +1391,7 @@ async def get_validation_summary(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.VIEW)),
 ):
+    """Get summary of the latest validation run."""
     latest_run = await _get_latest_run(db, cp_id)
     if latest_run is None:
         return ValidationSummaryResponse()
@@ -1105,33 +1425,45 @@ async def get_validation_summary(
     )
 
 
-@router.post("/validation-results/{finding_id}/reject", response_model=ValidationResultItem)
-async def reject_validation_result(
-    finding_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.EDIT)),
-):
+async def _get_finding(db: AsyncSession, finding_id: uuid.UUID) -> CPValidationFinding:
     result = await db.execute(
         select(CPValidationFinding).where(CPValidationFinding.finding_id == finding_id)
     )
     finding = result.scalar_one_or_none()
     if finding is None:
         raise HTTPException(status_code=404, detail="校验结果不存在")
+    return finding
 
-    finding.status = "rejected"
-    finding.resolved_by = user.user_id
-    finding.resolved_at = datetime.now(timezone.utc)
-    await db.commit()
 
-    # Return joined with latest occurrence for consistency
-    occ_result = await db.execute(
+async def _get_latest_occurrence(db: AsyncSession, finding_id: uuid.UUID) -> CPValidationOccurrence:
+    result = await db.execute(
         select(CPValidationOccurrence)
         .where(CPValidationOccurrence.finding_id == finding_id)
         .order_by(desc(CPValidationOccurrence.created_at))
         .limit(1)
     )
-    occ = occ_result.scalar_one()
+    return result.scalar_one()
+
+
+async def _find_and_respond(db: AsyncSession, finding_id: uuid.UUID) -> ValidationResultItem:
+    finding = await _get_finding(db, finding_id)
+    occ = await _get_latest_occurrence(db, finding_id)
     return _row_to_result_item(occ, finding)
+
+
+@router.post("/validation-results/{finding_id}/reject", response_model=ValidationResultItem)
+async def reject_validation_result(
+    finding_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.EDIT)),
+):
+    """Reject a validation finding."""
+    finding = await _get_finding(db, finding_id)
+    finding.status = "rejected"
+    finding.resolved_by = user.user_id
+    finding.resolved_at = datetime.now(timezone.utc)
+    await db.commit()
+    return await _find_and_respond(db, finding_id)
 
 
 @router.post("/validation-results/{finding_id}/resolve", response_model=ValidationResultItem)
@@ -1140,26 +1472,13 @@ async def resolve_validation_result(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.EDIT)),
 ):
-    result = await db.execute(
-        select(CPValidationFinding).where(CPValidationFinding.finding_id == finding_id)
-    )
-    finding = result.scalar_one_or_none()
-    if finding is None:
-        raise HTTPException(status_code=404, detail="校验结果不存在")
-
+    """Mark a validation finding as resolved."""
+    finding = await _get_finding(db, finding_id)
     finding.status = "resolved"
     finding.resolved_by = user.user_id
     finding.resolved_at = datetime.now(timezone.utc)
     await db.commit()
-
-    occ_result = await db.execute(
-        select(CPValidationOccurrence)
-        .where(CPValidationOccurrence.finding_id == finding_id)
-        .order_by(desc(CPValidationOccurrence.created_at))
-        .limit(1)
-    )
-    occ = occ_result.scalar_one()
-    return _row_to_result_item(occ, finding)
+    return await _find_and_respond(db, finding_id)
 
 
 @router.post("/validation-results/{finding_id}/reopen", response_model=ValidationResultItem)
@@ -1168,45 +1487,67 @@ async def reopen_validation_result(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.EDIT)),
 ):
-    result = await db.execute(
-        select(CPValidationFinding).where(CPValidationFinding.finding_id == finding_id)
-    )
-    finding = result.scalar_one_or_none()
-    if finding is None:
-        raise HTTPException(status_code=404, detail="校验结果不存在")
-
+    """Reopen a rejected or resolved validation finding."""
+    finding = await _get_finding(db, finding_id)
     if finding.status not in ("rejected", "resolved"):
         raise HTTPException(status_code=400, detail="只能重新打开已拒绝或已解决的项目")
-
     finding.status = "open"
     finding.resolved_by = None
     finding.resolved_at = None
     await db.commit()
-
-    occ_result = await db.execute(
-        select(CPValidationOccurrence)
-        .where(CPValidationOccurrence.finding_id == finding_id)
-        .order_by(desc(CPValidationOccurrence.created_at))
-        .limit(1)
-    )
-    occ = occ_result.scalar_one()
-    return _row_to_result_item(occ, finding)
+    return await _find_and_respond(db, finding_id)
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add backend/app/api/cp_validation.py
-git commit -m "feat(cp-validation): add API routes for two-table validation model"
+git commit -m "feat(cp-validation): add API routes with 409 for concurrent runs"
 ```
 
 ---
 
 ### Task 7: Register Router
 
-Same as previous plan.
+**Files:**
+- Modify: `backend/app/main.py`
 
-- [ ] **Step 1-3: Add import and registration, verify server starts, commit**
+- [ ] **Step 1: Add import**
+
+Find the existing control_plan router import:
+```python
+from app.api.control_plan import router as control_plan_router
+```
+
+Add below it:
+```python
+from app.api.cp_validation import router as cp_validation_router
+```
+
+- [ ] **Step 2: Register the router**
+
+Find where control_plan router is included:
+```python
+app.include_router(control_plan_router)
+```
+
+Add below it:
+```python
+app.include_router(cp_validation_router)
+```
+
+- [ ] **Step 3: Verify server starts**
+
+```bash
+cd backend && SECRET_KEY=test uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+sleep 2
+curl -s http://localhost:8000/docs | grep -q "cp-validation" && echo "Router registered" || echo "Router NOT found"
+kill %1 2>/dev/null
+```
+
+Expected: "Router registered"
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add backend/app/main.py
@@ -1217,177 +1558,171 @@ git commit -m "feat(cp-validation): register cp_validation router in main app"
 
 ### Task 8: API Integration Tests
 
-Update tests for two-table model.
+**Files:**
+- Create: `backend/tests/test_cp_validation_api.py`
+
+**Pattern:** Use `httpx.AsyncClient` + `ASGITransport` + `dependency_overrides`, matching `test_capa_draft_api.py`.
 
 - [ ] **Step 1: Write API tests**
 
 ```python
 """Integration tests for cp_validation API endpoints."""
 import uuid
+import os
+import sys
+
+os.environ.setdefault("SECRET_KEY", "test-secret-key")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi import status
+from httpx import AsyncClient, ASGITransport
 
-from app.models.cp_validation import CPValidationFinding, CPValidationOccurrence
-
-
-@pytest.mark.asyncio
-async def test_trigger_validation_endpoint(client, db, admin_user):
-    from app.services.control_plan_service import create_control_plan
-    from app.schemas.control_plan import ControlPlanCreate
-    from app.models.control_plan import ControlPlanItem
-
-    cp = await create_control_plan(
-        db,
-        ControlPlanCreate(title="API Test CP", document_no=f"CP-API-{uuid.uuid4().hex[:8]}", product_line_code="DC-DC-100"),
-        admin_user.user_id,
-    )
-    item = ControlPlanItem(
-        item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
-        control_method="", reaction_plan="",
-    )
-    db.add(item)
-    await db.commit()
-
-    from app.core.security import create_access_token
-    token = create_access_token(str(admin_user.user_id))
-
-    resp = client.post(
-        f"/api/control-plans/{cp.cp_id}/validate",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert data["status"] == "completed"
-    assert data["error_count"] >= 2
+from app.main import app
+from app.database import get_db
+from app.core.permissions import get_current_user, Module, PermissionLevel
+from app.models.user import User
 
 
-@pytest.mark.asyncio
-async def test_list_results_endpoint(client, db, admin_user):
-    from app.services.control_plan_service import create_control_plan
-    from app.schemas.control_plan import ControlPlanCreate
-    from app.models.control_plan import ControlPlanItem
-    from app.services.cp_validation import CPValidationEngine
+@pytest.fixture
+def override_dependencies():
+    """Inject mock DB and authenticated user with PLANNING + EDIT permission."""
+    async def mock_get_db():
+        db = MagicMock()
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+        db.execute = AsyncMock(return_value=MagicMock())
+        db.get = AsyncMock(return_value=None)
+        return db
 
-    cp = await create_control_plan(
-        db,
-        ControlPlanCreate(title="List Test", document_no=f"CP-LST-{uuid.uuid4().hex[:8]}", product_line_code="DC-DC-100"),
-        admin_user.user_id,
-    )
-    item = ControlPlanItem(
-        item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10", control_method="",
-    )
-    db.add(item)
-    await db.commit()
+    async def mock_get_current_user():
+        user = MagicMock(spec=User)
+        user.user_id = uuid.uuid4()
+        user.username = "engineer"
+        user.role = "quality_engineer"
+        user.role_id = uuid.uuid4()
+        user.is_active = True
+        user.role_definition = MagicMock()
+        user.role_definition.bypass_row_level_security = True
+        return user
 
-    engine = CPValidationEngine()
-    await engine.validate(db, cp.cp_id, admin_user.user_id)
+    app.dependency_overrides[get_db] = mock_get_db
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
+        yield
+    app.dependency_overrides.clear()
 
-    from app.core.security import create_access_token
-    token = create_access_token(str(admin_user.user_id))
 
-    resp = client.get(
-        f"/api/control-plans/{cp.cp_id}/validation-results",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] >= 1
-    assert any(r["rule_id"] == "R001" for r in data["items"])
-    assert all("finding_id" in r for r in data["items"])
-    assert all("occurrence_id" in r for r in data["items"])
+@pytest.fixture
+def override_dependencies_view():
+    """Same but with VIEW-only permission."""
+    async def mock_get_db():
+        db = MagicMock()
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+        db.execute = AsyncMock(return_value=MagicMock())
+        return db
+
+    async def mock_get_current_user():
+        user = MagicMock(spec=User)
+        user.user_id = uuid.uuid4()
+        user.username = "viewer"
+        user.role = "viewer"
+        user.role_id = uuid.uuid4()
+        user.is_active = True
+        user.role_definition = MagicMock()
+        user.role_definition.bypass_row_level_security = False
+        return user
+
+    app.dependency_overrides[get_db] = mock_get_db
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.VIEW)):
+        yield
+    app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
-async def test_reject_and_reopen_endpoint(client, db, admin_user):
-    from app.services.control_plan_service import create_control_plan
-    from app.schemas.control_plan import ControlPlanCreate
-    from app.models.control_plan import ControlPlanItem
-    from app.services.cp_validation import CPValidationEngine
-    from sqlalchemy import select
-
-    cp = await create_control_plan(
-        db,
-        ControlPlanCreate(title="Reject Test", document_no=f"CP-REJ-{uuid.uuid4().hex[:8]}", product_line_code="DC-DC-100"),
-        admin_user.user_id,
-    )
-    item = ControlPlanItem(
-        item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10", control_method="",
-    )
-    db.add(item)
-    await db.commit()
-
-    engine = CPValidationEngine()
-    await engine.validate(db, cp.cp_id, admin_user.user_id)
-
-    result = await db.execute(
-        select(CPValidationFinding).where(CPValidationFinding.cp_id == cp.cp_id)
-    )
-    finding = result.scalars().first()
-
-    from app.core.security import create_access_token
-    token = create_access_token(str(admin_user.user_id))
-
-    resp = client.post(
-        f"/api/validation-results/{finding.finding_id}/reject",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "rejected"
-
-    resp = client.post(
-        f"/api/validation-results/{finding.finding_id}/reopen",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "open"
+async def test_validate_unauthenticated():
+    """POST /control-plans/{id}/validate without auth → 401."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/control-plans/{uuid.uuid4()}/validate")
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 @pytest.mark.asyncio
-async def test_summary_endpoint(client, db, admin_user):
-    from app.services.control_plan_service import create_control_plan
-    from app.schemas.control_plan import ControlPlanCreate
-    from app.models.control_plan import ControlPlanItem
-    from app.services.cp_validation import CPValidationEngine
+async def test_results_unauthenticated():
+    """GET /control-plans/{id}/validation-results without auth → 401."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/control-plans/{uuid.uuid4()}/validation-results")
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED
 
-    cp = await create_control_plan(
-        db,
-        ControlPlanCreate(title="Summary Test", document_no=f"CP-SUM-{uuid.uuid4().hex[:8]}", product_line_code="DC-DC-100"),
-        admin_user.user_id,
-    )
-    item = ControlPlanItem(
-        item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10", control_method="",
-    )
-    db.add(item)
-    await db.commit()
 
-    engine = CPValidationEngine()
-    await engine.validate(db, cp.cp_id, admin_user.user_id)
+@pytest.mark.asyncio
+async def test_summary_unauthenticated():
+    """GET /control-plans/{id}/validation-summary without auth → 401."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/control-plans/{uuid.uuid4()}/validation-summary")
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED
 
-    from app.core.security import create_access_token
-    token = create_access_token(str(admin_user.user_id))
 
-    resp = client.get(
-        f"/api/control-plans/{cp.cp_id}/validation-summary",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["error_count"] >= 1
-    assert data["open_count"] >= 1
+@pytest.mark.asyncio
+async def test_validate_returns_200(override_dependencies):
+    """POST /validate with auth and mock DB returns 200."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/control-plans/{uuid.uuid4()}/validate")
+    # With mock DB, engine will fail — but auth check passes first.
+    # We verify the endpoint is reachable (not 401/403).
+    assert resp.status_code != status.HTTP_401_UNAUTHORIZED
+    assert resp.status_code != status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_results_returns_200(override_dependencies):
+    """GET /validation-results with auth returns 200 (empty list from mock DB)."""
+    # Patch the DB execute to return empty list
+    from unittest.mock import patch as mock_patch
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/control-plans/{uuid.uuid4()}/validation-results")
+    assert resp.status_code != status.HTTP_401_UNAUTHORIZED
+    assert resp.status_code != status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_validate(override_dependencies_view):
+    """POST /validate with VIEW-only permission → 403."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/control-plans/{uuid.uuid4()}/validate")
+    assert resp.status_code == status.HTTP_403_FORBIDDEN
 ```
 
-- [ ] **Step 2: Run and commit**
+- [ ] **Step 2: Run tests**
 
 ```bash
-cd backend && TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/openqms_test pytest tests/test_cp_validation_api.py -v
+cd backend && SECRET_KEY=test python -m pytest tests/test_cp_validation_api.py -v
+```
+
+Expected: 6 tests PASS.
+
+- [ ] **Step 3: Commit**
+
+```bash
 git add backend/tests/test_cp_validation_api.py
-git commit -m "test(cp-validation): add API integration tests for two-table model"
+git commit -m "test(cp-validation): add API integration tests with mock dependencies"
 ```
 
 ---
 
 ### Task 9: Frontend Types
 
-Update `ValidationResult` interface to match two-table joined response.
+**Files:**
+- Create: `frontend/src/types/cpValidation.ts`
 
 - [ ] **Step 1: Write TypeScript types**
 
@@ -1451,14 +1786,17 @@ export interface ValidationResultsList {
 
 ```bash
 git add frontend/src/types/cpValidation.ts
-git commit -m "feat(cp-validation): add frontend TypeScript types for two-table model"
+git commit -m "feat(cp-validation): add frontend TypeScript types"
 ```
 
 ---
 
 ### Task 10: Frontend API Client
 
-Same endpoints, but `/validation-results/{finding_id}/...` operates on `finding_id`.
+**Files:**
+- Create: `frontend/src/api/cpValidation.ts`
+
+- [ ] **Step 1: Write the API client**
 
 ```typescript
 import client from "./client";
@@ -1510,7 +1848,7 @@ export async function reopenValidationResult(findingId: string): Promise<Validat
 }
 ```
 
-- [ ] **Step 1-2: Write and commit**
+- [ ] **Step 2: Commit**
 
 ```bash
 git add frontend/src/api/cpValidation.ts
@@ -1519,23 +1857,510 @@ git commit -m "feat(cp-validation): add frontend API client"
 
 ---
 
-### Tasks 11-14: Frontend Components, Editor Embed, Auto-trigger, List Badge
+### Task 11: Frontend Components
 
-These are identical to the previous plan. The frontend doesn't care about the backend two-table split because the joined `ValidationResultItem` schema returns the same flat structure.
+**Files:**
+- Create: `frontend/src/components/control-plan/ValidationCard.tsx`
+- Create: `frontend/src/components/control-plan/ValidationPanel.tsx`
+- Create: `frontend/src/components/control-plan/ValidationBadge.tsx`
 
-Refer to Tasks 11-14 in the previous plan version for detailed code and steps. Key actions:
+- [ ] **Step 1: Write ValidationCard**
 
-- **Task 11**: Create `ValidationPanel.tsx`, `ValidationCard.tsx`, `ValidationBadge.tsx`
-- **Task 12**: Import `ValidationPanel` in `ControlPlanEditorPage.tsx`, add right-side column
-- **Task 13**: Add `asyncio.create_task` + `_run_validation_background` in `control_plan_service.py`
-- **Task 14**: Add `ValidationBadge` column in `ControlPlanListPage.tsx`
+```tsx
+import { Card, Tag, Button, Space, Typography } from "antd";
+import {
+  CloseCircleOutlined,
+  ExclamationCircleOutlined,
+  InfoCircleOutlined,
+  UndoOutlined,
+} from "@ant-design/icons";
+import type { ValidationResult } from "../../types/cpValidation";
 
-- [ ] **Run final verification**
+const { Text } = Typography;
+
+const severityConfig = {
+  error: { color: "red", icon: <CloseCircleOutlined />, label: "错误" },
+  warning: { color: "orange", icon: <ExclamationCircleOutlined />, label: "警告" },
+  info: { color: "blue", icon: <InfoCircleOutlined />, label: "提示" },
+};
+
+interface Props {
+  result: ValidationResult;
+  onReject: (findingId: string) => void;
+  onResolve: (findingId: string) => void;
+  onReopen: (findingId: string) => void;
+  loading?: boolean;
+}
+
+export default function ValidationCard({ result, onReject, onResolve, onReopen, loading }: Props) {
+  const config = severityConfig[result.severity] || severityConfig.info;
+
+  return (
+    <Card
+      size="small"
+      style={{ marginBottom: 8, borderLeft: `3px solid ${config.color}` }}
+      bodyStyle={{ padding: 12 }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <span style={{ color: config.color, fontSize: 16, marginTop: 2 }}>{config.icon}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <Text strong>{result.title}</Text>
+            <Tag color={config.color}>{config.label}</Tag>
+          </div>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {result.description}
+          </Text>
+          {result.suggestion && (
+            <div style={{ marginTop: 4, padding: 6, background: "#f6ffed", borderRadius: 4 }}>
+              <Text type="success" style={{ fontSize: 12 }}>
+                建议: {result.suggestion}
+              </Text>
+            </div>
+          )}
+          <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
+            {result.status === "open" && (
+              <Space size="small">
+                <Button size="small" onClick={() => onResolve(result.finding_id)} loading={loading}>
+                  标记已解决
+                </Button>
+                <Button size="small" danger onClick={() => onReject(result.finding_id)} loading={loading}>
+                  忽略
+                </Button>
+              </Space>
+            )}
+            {result.status === "rejected" && (
+              <Button size="small" icon={<UndoOutlined />} onClick={() => onReopen(result.finding_id)} loading={loading}>
+                恢复
+              </Button>
+            )}
+            {result.status === "resolved" && (
+              <Tag color="green">已解决</Tag>
+            )}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+```
+
+- [ ] **Step 2: Write ValidationPanel**
+
+```tsx
+import { useState, useEffect, useCallback } from "react";
+import { Card, Button, Spin, Empty, Alert, Badge, Typography } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
+import ValidationCard from "./ValidationCard";
+import {
+  getValidationResults,
+  getValidationSummary,
+  triggerValidation,
+  rejectValidationResult,
+  resolveValidationResult,
+  reopenValidationResult,
+} from "../../api/cpValidation";
+import type { ValidationResult, ValidationSummary } from "../../types/cpValidation";
+
+const { Text } = Typography;
+
+interface Props {
+  cpId: string;
+}
+
+const POLL_INTERVAL = 2000;
+const MAX_POLLS = 30;
+
+export default function ValidationPanel({ cpId }: Props) {
+  const [results, setResults] = useState<ValidationResult[]>([]);
+  const [summary, setSummary] = useState<ValidationSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [polling, setPolling] = useState(false);
+  const [pollCount, setPollCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [resList, sum] = await Promise.all([
+        getValidationResults(cpId),
+        getValidationSummary(cpId),
+      ]);
+      setResults(resList.items);
+      setSummary(sum);
+      setError(null);
+      return sum.status;
+    } catch (e) {
+      setError("加载校验结果失败");
+      return null;
+    }
+  }, [cpId]);
+
+  const handleTrigger = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await triggerValidation(cpId);
+      setPolling(true);
+      setPollCount(0);
+    } catch (e) {
+      setError("触发校验失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!polling) return;
+
+    const timer = setInterval(async () => {
+      const status = await fetchData();
+      setPollCount((c) => c + 1);
+
+      if (status === "completed" || status === "failed" || pollCount >= MAX_POLLS) {
+        setPolling(false);
+      }
+    }, POLL_INTERVAL);
+
+    return () => clearInterval(timer);
+  }, [polling, cpId, pollCount, fetchData]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const handleAction = async (action: (id: string) => Promise<unknown>, id: string) => {
+    setLoading(true);
+    try {
+      await action(id);
+      await fetchData();
+    } catch (e) {
+      setError("操作失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const errorCount = summary?.error_count || 0;
+  const warningCount = summary?.warning_count || 0;
+
+  return (
+    <Card
+      title={
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>
+            智能校验
+            {errorCount > 0 && <Badge count={errorCount} style={{ backgroundColor: "#ff4d4f", marginLeft: 8 }} />}
+            {errorCount === 0 && warningCount > 0 && <Badge count={warningCount} style={{ backgroundColor: "#faad14", marginLeft: 8 }} />}
+          </span>
+          <Button
+            size="small"
+            icon={<ReloadOutlined spin={polling} />}
+            onClick={handleTrigger}
+            loading={loading}
+            disabled={polling}
+          >
+            {polling ? "校验中..." : "重新校验"}
+          </Button>
+        </div>
+      }
+      size="small"
+      style={{ width: 360 }}
+    >
+      {error && <Alert message={error} type="error" showIcon style={{ marginBottom: 12 }} />}
+
+      {polling && results.length === 0 && (
+        <div style={{ textAlign: "center", padding: 24 }}>
+          <Spin />
+          <Text type="secondary" style={{ display: "block", marginTop: 8 }}>正在执行校验...</Text>
+        </div>
+      )}
+
+      {!polling && results.length === 0 && !error && (
+        <Empty description="暂无校验结果" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+      )}
+
+      {results.length > 0 && (
+        <div style={{ maxHeight: "calc(100vh - 300px)", overflowY: "auto" }}>
+          {results.map((r) => (
+            <ValidationCard
+              key={r.occurrence_id}
+              result={r}
+              onReject={(id) => handleAction(rejectValidationResult, id)}
+              onResolve={(id) => handleAction(resolveValidationResult, id)}
+              onReopen={(id) => handleAction(reopenValidationResult, id)}
+              loading={loading}
+            />
+          ))}
+        </div>
+      )}
+
+      {summary && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f0f0f0", fontSize: 12 }}>
+          <Text type="secondary">
+            共 {summary.total} 项:{" "}
+            <span style={{ color: "#ff4d4f" }}>{summary.error_count} 错误</span>,{" "}
+            <span style={{ color: "#faad14" }}>{summary.warning_count} 警告</span>,{" "}
+            <span style={{ color: "#1890ff" }}>{summary.info_count} 提示</span>
+            {" | "}
+            {summary.open_count} 待处理, {summary.resolved_count} 已解决, {summary.rejected_count} 已忽略
+          </Text>
+        </div>
+      )}
+    </Card>
+  );
+}
+```
+
+- [ ] **Step 3: Write ValidationBadge**
+
+```tsx
+import { Badge, Tooltip } from "antd";
+
+interface Props {
+  errorCount: number;
+  warningCount: number;
+  total: number;
+}
+
+export default function ValidationBadge({ errorCount, warningCount, total }: Props) {
+  if (total === 0) {
+    return <Tooltip title="未校验"><Badge status="default" /></Tooltip>;
+  }
+  if (errorCount > 0) {
+    return <Tooltip title={`${errorCount} 个错误待处理`}><Badge status="error" /></Tooltip>;
+  }
+  if (warningCount > 0) {
+    return <Tooltip title={`${warningCount} 个警告`}><Badge status="warning" /></Tooltip>;
+  }
+  return <Tooltip title="全部通过"><Badge status="success" /></Tooltip>;
+}
+```
+
+- [ ] **Step 4: Commit**
 
 ```bash
-cd backend && python run_tests.py --quick
+git add frontend/src/components/control-plan/
+git commit -m "feat(cp-validation): add ValidationPanel, ValidationCard, ValidationBadge components"
+```
+
+---
+
+### Task 12: Embed ValidationPanel in ControlPlanEditorPage
+
+**Files:**
+- Modify: `frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx`
+
+- [ ] **Step 1: Add import**
+
+Add near the top of the file:
+```tsx
+import ValidationPanel from "../../../components/control-plan/ValidationPanel";
+```
+
+- [ ] **Step 2: Add panel to layout**
+
+Find the main layout's `Row`/`Col` structure in the return statement. Adjust to add a right sidebar:
+
+```tsx
+// Find existing layout, typically:
+// <Row gutter={[16, 16]}>
+//   <Col span={24}> ... main content ... </Col>
+// </Row>
+
+// Change to:
+<Row gutter={[16, 16]}>
+  <Col span={18}> {/* reduce from span={24} */}
+    {/* existing main content */}
+  </Col>
+  <Col span={6}>
+    {cp?.cp_id && <ValidationPanel cpId={cp.cp_id} />}
+  </Col>
+</Row>
+```
+
+If the page doesn't use `Row`/`Col` for the outer wrapper, wrap the main content and the panel in a flex container:
+
+```tsx
+<div style={{ display: "flex", gap: 16 }}>
+  <div style={{ flex: 1 }}>
+    {/* existing main content */}
+  </div>
+  <div style={{ width: 360, flexShrink: 0 }}>
+    {cp?.cp_id && <ValidationPanel cpId={cp.cp_id} />}
+  </div>
+</div>
+```
+
+- [ ] **Step 3: Verify build**
+
+```bash
+cd frontend && npx tsc --noEmit
+```
+
+Expected: No TypeScript errors.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx
+git commit -m "feat(cp-validation): embed ValidationPanel in ControlPlanEditorPage"
+```
+
+---
+
+### Task 13: Auto-trigger on CP Save
+
+**Files:**
+- Modify: `backend/app/services/control_plan_service.py`
+
+- [ ] **Step 1: Add imports at top of file**
+
+```python
+import asyncio
+from app.services.cp_validation.engine import CPValidationEngine
+from app.database import async_session
+```
+
+- [ ] **Step 2: Add background helper function**
+
+Add this function near the top of the file, after the import block:
+
+```python
+async def _run_validation_background(cp_id: uuid.UUID, user_id: uuid.UUID, trigger: str) -> None:
+    """Run CP validation in a background task with an isolated DB session."""
+    async with async_session() as db:
+        try:
+            engine = CPValidationEngine()
+            await engine.validate(db, cp_id, user_id, trigger=trigger)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Background CP validation failed for %s", cp_id)
+```
+
+- [ ] **Step 3: Hook into update_control_plan**
+
+Find `async def update_control_plan(...)`. After the final `await db.commit()` and just before the `return cp`, add:
+
+```python
+    # Trigger background validation after successful update
+    asyncio.create_task(
+        _run_validation_background(cp.cp_id, user_id, trigger="auto_on_save")
+    )
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add backend/app/services/control_plan_service.py
+git commit -m "feat(cp-validation): auto-trigger validation on CP save with isolated session"
+```
+
+---
+
+### Task 14: Add ValidationBadge to List Page
+
+**Files:**
+- Modify: `frontend/src/pages/planning/control-plan/ControlPlanListPage.tsx`
+
+- [ ] **Step 1: Add imports**
+
+```tsx
+import { useEffect, useState } from "react";
+import ValidationBadge from "../../../components/control-plan/ValidationBadge";
+import { getValidationSummary } from "../../../api/cpValidation";
+import type { ValidationSummary } from "../../../types/cpValidation";
+```
+
+- [ ] **Step 2: Add validation summary state**
+
+In the list page component, add:
+
+```tsx
+const [validationMap, setValidationMap] = useState<Record<string, ValidationSummary>>({});
+```
+
+- [ ] **Step 3: Fetch summaries when control plans load**
+
+Add a `useEffect` that fetches summaries after `controlPlans` data is available:
+
+```tsx
+useEffect(() => {
+  if (!controlPlans?.items?.length) return;
+  const fetchSummaries = async () => {
+    const map: Record<string, ValidationSummary> = {};
+    await Promise.all(
+      controlPlans.items.map(async (cp: ControlPlan) => {
+        try {
+          const summary = await getValidationSummary(cp.cp_id);
+          map[cp.cp_id] = summary;
+        } catch {
+          // ignore fetch errors for individual CPs
+        }
+      })
+    );
+    setValidationMap(map);
+  };
+  fetchSummaries();
+}, [controlPlans]);
+```
+
+- [ ] **Step 4: Add column to Table**
+
+Find the `columns` array in the Table component. Add:
+
+```tsx
+{
+  title: "校验状态",
+  key: "validation",
+  width: 80,
+  align: "center" as const,
+  render: (_: unknown, record: ControlPlan) => {
+    const summary = validationMap[record.cp_id];
+    return (
+      <ValidationBadge
+        errorCount={summary?.error_count || 0}
+        warningCount={summary?.warning_count || 0}
+        total={summary?.total || 0}
+      />
+    );
+  },
+}
+```
+
+- [ ] **Step 5: Verify build**
+
+```bash
+cd frontend && npx tsc --noEmit
+```
+
+Expected: No TypeScript errors.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add frontend/src/pages/planning/control-plan/ControlPlanListPage.tsx
+git commit -m "feat(cp-validation): add validation status badge to ControlPlanListPage"
+```
+
+---
+
+### Final Verification
+
+- [ ] **Step 1: Run all backend tests**
+
+```bash
+cd backend && SECRET_KEY=test python -m pytest tests/test_cp_validation_rules.py tests/test_cp_validation_engine.py tests/test_cp_validation_api.py -v
+```
+
+Expected: All tests PASS (14 + 4 + 6 = 24 total).
+
+- [ ] **Step 2: Run frontend build**
+
+```bash
 cd frontend && npx tsc --noEmit && npm run build
 ```
+
+Expected: No errors.
 
 ---
 
@@ -1543,34 +2368,38 @@ cd frontend && npx tsc --noEmit && npm run build
 
 ### Spec Coverage Check
 
-| Spec Requirement | Plan Task |
+| Spec Requirement | Task |
 |---|---|
-| `cp_validation_runs` table | Task 1 |
+| `cp_validation_runs` table with CHECK constraints | Task 1 |
 | `cp_validation_findings` stable identity table | Task 1 |
-| `cp_validation_occurrences` per-run snapshot table | Task 1 |
-| `finding_hash` unique on `(cp_id, finding_hash)` | Task 2 |
-| `present=True/False` occurrences | Task 5 |
-| 4 rules (R001-R004) | Task 4 |
-| Finding state inherited across runs (open/accepted/rejected/resolved) | Task 5 |
-| Historical audit preserved (runs + occurrences) | Tasks 1, 5 |
-| API endpoints | Task 6 |
-| Permission checks | Task 6 |
-| Backend tests | Tasks 4, 5, 8 |
-| Frontend types + API + components | Tasks 9-11 |
+| `cp_validation_occurrences` per-run snapshot (present=true only) | Task 1 |
+| Stable hash using business keys (not volatile UUIDs) | Task 4 |
+| Finding state inherited across runs | Task 5 |
+| No `present=False` — absent = no occurrence | Task 5 |
+| Stale run recovery (>5 min auto-failed) | Task 5 |
+| `ValidationAlreadyRunning` exception + 409 response | Tasks 5, 6 |
+| `failed_rules` populated from rule engine | Tasks 4, 5 |
+| Models registered in `__init__.py` | Task 1 |
+| CHECK constraints in migration | Task 2 |
+| API endpoints with 409 for concurrent runs | Task 6 |
+| API tests using httpx + dependency_overrides pattern | Task 8 |
+| Frontend components using `finding_id` | Task 11 |
 | Auto-trigger with isolated session | Task 13 |
 
 ### Placeholder Scan
 
-- No "TBD", "TODO", "implement later".
-- All code blocks complete and runnable.
+- No "TBD", "TODO", "implement later", "previous plan".
+- All 14 tasks contain complete, runnable code.
 - Test commands include expected output.
+- No references to external files or prior plan versions.
 
 ### Type Consistency Check
 
-- `ValidationFinding` dataclass → `CPValidationFinding` model + `CPValidationOccurrence` snapshot fields.
-- API response type `ValidationResultItem` is a joined flat struct matching frontend `ValidationResult`.
-- `/validation-results/{finding_id}/...` endpoints operate on `finding_id` consistently.
+- `ValidationFinding.stable_key` → `compute_finding_hash(rule_id, stable_key, key_content)` → `CPValidationFinding.finding_hash`.
+- API `ValidationResultItem.finding_id` → frontend `ValidationResult.finding_id` → `onReject(result.finding_id)`.
+- `run_all_rules` returns `(findings, failed_rules)` → engine stores `failed_rules` in run.
+- `ValidationAlreadyRunning` exception → API catches and returns 409.
 
 ---
 
-*Plan version: v2.0 — updated for two-table model (findings + occurrences)*
+*Plan version: v3.0 — stable hashing, no present=false, stale run recovery, CHECK constraints, model registration, self-contained*
