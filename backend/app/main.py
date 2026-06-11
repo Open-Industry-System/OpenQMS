@@ -49,6 +49,7 @@ from app.api.collaboration import router as collaboration_router
 from app.api.mes import router as mes_router
 from app.api.plm import router as plm_router
 from app.api.erp import router as erp_router
+from app.api.supplier_risk import router as supplier_risk_router
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,29 @@ async def lifespan(app: FastAPI):
 
     aql_expiry_task = asyncio.create_task(_aql_expiry_loop())
 
+    # Start supplier risk evaluation loop (daily)
+    from app.services.supplier_risk.service import evaluate_all_suppliers
+
+    async def _risk_eval_loop():
+        # Initial evaluation 10 seconds after startup (avoids startup peak)
+        await asyncio.sleep(10)
+        try:
+            async with async_session() as db:
+                await evaluate_all_suppliers(db, product_line_code=None)
+        except Exception as e:
+            logger.error("[risk_eval_init] error: %s", e)
+
+        # Then every 24 hours
+        while True:
+            await asyncio.sleep(86400)
+            try:
+                async with async_session() as db:
+                    await evaluate_all_suppliers(db, product_line_code=None)
+            except Exception as e:
+                logger.error("[risk_eval] error: %s", e)
+
+    risk_eval_task = asyncio.create_task(_risk_eval_loop())
+
     yield
 
     # Cancel cleanup coroutine
@@ -263,6 +287,13 @@ async def lifespan(app: FastAPI):
     # Cancel AQL background tasks
     for task in (aql_expiry_task,):
         task.cancel()
+
+    # Cancel risk eval task
+    risk_eval_task.cancel()
+    try:
+        await risk_eval_task
+    except asyncio.CancelledError:
+        pass
 
     # Cleanup: close LLM provider httpx client if applicable
     provider = getattr(app.state, "llm_provider", None)
@@ -321,6 +352,7 @@ app.include_router(collaboration_router)
 app.include_router(mes_router)
 app.include_router(plm_router)
 app.include_router(erp_router)
+app.include_router(supplier_risk_router)
 
 
 @app.get("/api/health")
