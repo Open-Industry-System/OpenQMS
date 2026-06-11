@@ -45,6 +45,7 @@ class Module(StrEnum):
     KNOWLEDGE_GRAPH = "knowledge_graph"  # 新增
     MES = "mes"
     PLM = "plm"
+    ERP = "erp"
 
 
 async def get_current_user(

@@ -25,6 +25,7 @@ import {
   ShareAltOutlined,
   RadarChartOutlined,
   BuildOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -46,6 +47,7 @@ const MENU_KEYS = [
   "/change-impact",
   "/mes/dashboard", "/mes/orders", "/mes/scrap", "/mes/connections",
   "/plm/dashboard", "/plm/connections", "/plm/parts", "/plm/change-orders",
+  "/erp", "/erp/connections", "/erp/master-data", "/erp/supply-chain", "/erp/commercial", "/erp/traceability",
 ];
 
 // 菜单 key → 需要展开的所有 SubMenu key 列表
@@ -81,6 +83,12 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/plm/connections": ["grp:plm"],
   "/plm/parts": ["grp:plm"],
   "/plm/change-orders": ["grp:plm"],
+  "/erp": ["grp:erp"],
+  "/erp/connections": ["grp:erp"],
+  "/erp/master-data": ["grp:erp"],
+  "/erp/supply-chain": ["grp:erp"],
+  "/erp/commercial": ["grp:erp"],
+  "/erp/traceability": ["grp:erp"],
 };
 
 function getSelectedMenuKey(pathname: string): string {
@@ -177,6 +185,19 @@ const menuItems = [
       { key: "/plm/connections", label: "连接管理" },
     ],
   },
+  {
+    key: "grp:erp",
+    icon: <SettingOutlined />,
+    label: "ERP 集成",
+    children: [
+      { key: "/erp", label: "ERP 看板" },
+      { key: "/erp/connections", label: "连接管理" },
+      { key: "/erp/master-data", label: "主数据" },
+      { key: "/erp/supply-chain", label: "供应链" },
+      { key: "/erp/commercial", label: "销售与成本" },
+      { key: "/erp/traceability", label: "批次追溯" },
+    ],
+  },
 ];
 
 export default function AppLayout() {
@@ -202,9 +223,11 @@ export default function AppLayout() {
     });
   }, [selectedKey]);
 
-  // Filter out PLM group if user cannot view plm module
+  // Filter out PLM/ERP groups if user cannot view those modules
   const visibleMenuItems = menuItems.filter(
     (item) => item.key !== "grp:plm" || canView("plm"),
+  ).filter(
+    (item) => item.key !== "grp:erp" || canView("erp"),
   );
 
   return (

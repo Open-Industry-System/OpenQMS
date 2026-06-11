@@ -145,7 +145,8 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | 功能 | 优先级 | 状态 | 说明 |
 |------|--------|------|------|
 | MES 集成连接器 | P2 | ✅ 完成 | Mock + REST 双连接器；9 张数据表；Outbox 可靠推送；3 类数据接入（生产订单/设备状态/报废记录）；SPC 告警推送；API Key 认证；凭证加密；4 页前端；Dashboard 实时聚合；产品线隔离；并发测试 33 条 |
-| PLM/ERP 集成连接器 | P2 | ✅ 完成 (2026-06-09) | PLM BOM 树查询/导入 FMEA + Part→SC 特殊特性确认；Mock 连接器；9 张 PLM 表；前端 4 页（Dashboard/Connections/Parts/ChangeOrders）；双权限校验；46 后端回归测试 + 11 前端权限测试 |
+| PLM 集成连接器 | P2 | ✅ 完成 (2026-06-09) | PLM BOM 树查询/导入 FMEA + Part→SC 特殊特性确认；Mock 连接器；9 张 PLM 表；前端 4 页（Dashboard/Connections/Parts/ChangeOrders）；双权限校验；46 后端回归测试 + 11 前端权限测试 |
+| ERP 集成连接器 | P2 | ✅ 完成 (2026-06-11) | 商务与供应链事实源集成；9+1 同步对象；12 张数据表；Mock + REST 连接器；4 阶段 DAG 同步；双写关联（suppliers/shipments）；COQ 四类成本；字段级脱敏；双向批次追溯；6 页前端；30 测试全绿；config 统一脱敏；产品线更新前校验；测试契约对齐 |
 | 8D 报告 AI 草拟 | P3 | ✅ 完成 | LLM 辅助填充 D2-D8 步骤；结构化/段落双格式；localStorage 格式偏好；预览确认（替换/追加/取消）；撤销；权限控制（仅当前步骤可草拟）；独立审计日志；限流；FMEA 上下文关联；产品线隔离 |
 | 质量趋势 AI 解读 | P3 | ✅ 完成 | 自定义仪表盘 Widget：规则摘要 + 按需 LLM 深度解读；SPC/CAPA/FMEA 三源聚合；模块级权限过滤；证据 hash 缓存；限流 + 审计日志；前端 stale 检测 |
 | 经验教训智能推送 | P3 | ✅ 完成 (2026-06-10) | 5 源适配器（FMEA 关键词 + CAPA 语义 + 审核发现 + 语义搜索 + 规则引擎）+ 融合排序 + 权限隔离缓存 + 前端 Modal 推送；14 单元测试 |
@@ -185,6 +186,20 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 10. ~~前端页面~~ ✅ 4 页（Dashboard + Connections + Parts + ChangeOrders）+ 产品线联动
 11. ~~测试覆盖~~ ✅ 46 条后端回归测试 + 11 条前端权限测试
 
+**Phase 4 ERP 集成已完成 (2026-06-10)**:
+1. ~~权限注册~~ ✅ Module.ERP 枚举 + product_line_filter 映射
+2. ~~数据库迁移~~ ✅ 12 张 ERP 表 + 8 个 CHECK 约束 + 权限种子（alembic/032）
+3. ~~ORM 模型~~ ✅ ERPConnection / ERPSyncJob / ERPPushOutbox / ERPSupplier / ERPCustomer / ERPMaterial / ERPLocation / ERPPurchaseOrder / ERPSalesOrder / ERPInventoryBalance / ERPShipment / ERPCostRecord
+4. ~~Pydantic Schemas~~ ✅ RESTConfig 校验 + 分页 + Traceability + Dashboard 聚合
+5. ~~凭证安全~~ ✅ SHA-256 API Key + Fernet 加密（ERP_ENCRYPTION_KEY）
+6. ~~连接器~~ ✅ ERPConnector ABC + MockERPConnector（9 类数据）+ RESTERPConnector
+7. ~~服务层~~ ✅ ERPIngestionService（9 类 push + 日期强制转换 + 自动关联）+ ERPSyncService（4 阶段 DAG 依赖门控）+ ERPTraceabilityService（双向多记录追溯）
+8. ~~API 路由~~ ✅ 20+ 端点（CRUD + ingest + 列表 + link/unlink + dashboard + traceability）
+9. ~~字段脱敏~~ ✅ bank_info/tax_id 基于 permission_level < 4 动态脱敏
+10. ~~前端页面~~ ✅ 6 页（Dashboard + Connections + Master Data + Supply Chain + Sales & Cost + Traceability）
+11. ~~测试覆盖~~ ✅ Mock 连接器 + 数据摄取 + 追溯 + 脱敏 + 日期强制转换 + DAG 门控
+12. ~~5 轮代码审查~~ ✅ Alembic head 修正 + 事务提交/回滚 + 过滤器签名 + 角色键修正 + 脱敏完善 + 多记录追溯 + product_line_code 补全
+
 **Phase 4 自定义拖拽看板已完成 (2026-06-09)**:
 1. ~~后端模型~~ ✅ user_dashboard_layouts 表（JSONB 布局配置 + 用户级隔离）
 2. ~~后端 API~~ ✅ DashboardPage 路由：GET/PUT 布局配置 + 产品线过滤 + 权限校验
@@ -205,9 +220,9 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | Git 提交 | 1,021 次 |
 | 后端 Python 文件 | 198 个 |
 | 前端 TS/TSX 文件 | 181 个 |
-| API 路由模块 | 33 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/...) |
-| 前端页面 | 58 个 TSX 页面 |
-| 数据库表 | 86 张 (含多对多关联表) |
+| API 路由模块 | 34 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/...) |
+| 前端页面 | 64 个 TSX 页面 |
+| 数据库表 | 98 张 (含 ERP 12 张 + 多对多关联表) |
 | 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
 | 种子数据 | 4 用户 + 多模块演示数据 |
 

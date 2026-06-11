@@ -47,6 +47,7 @@ from app.api.change_impact import router as change_impact_router
 from app.api.collaboration import router as collaboration_router
 from app.api.mes import router as mes_router
 from app.api.plm import router as plm_router
+from app.api.erp import router as erp_router
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +200,20 @@ async def lifespan(app: FastAPI):
 
     plm_impact_task = asyncio.create_task(_plm_impact_loop())
 
+    # Start ERP sync background loop (every 60s)
+    from app.services.erp_service import ERPSyncService
+
+    async def _erp_sync_loop():
+        while True:
+            try:
+                async with async_session() as db:
+                    await ERPSyncService.sync_all(db)
+            except Exception as e:
+                logger.error("[erp_sync] error: %s", e)
+            await asyncio.sleep(60)
+
+    erp_sync_task = asyncio.create_task(_erp_sync_loop())
+
     yield
 
     # Cancel cleanup coroutine
@@ -223,6 +238,10 @@ async def lifespan(app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
+
+    # Cancel ERP background tasks
+    for task in (erp_sync_task,):
+        task.cancel()
 
     # Cleanup: close LLM provider httpx client if applicable
     provider = getattr(app.state, "llm_provider", None)
@@ -279,6 +298,7 @@ app.include_router(change_impact_router)
 app.include_router(collaboration_router)
 app.include_router(mes_router)
 app.include_router(plm_router)
+app.include_router(erp_router)
 
 
 @app.get("/api/health")

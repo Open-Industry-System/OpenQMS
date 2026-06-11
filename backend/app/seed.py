@@ -125,6 +125,24 @@ SAMPLE_DFMEA_GRAPH = {
 }
 
 
+async def seed_erp_permissions(db):
+    from app.models.role import RolePermission
+    from sqlalchemy import select
+
+    result = await db.execute(select(RoleDefinition))
+    roles = result.scalars().all()
+    for role in roles:
+        level = {"admin": 5, "manager": 4, "field_qe": 2, "viewer": 1}.get(role.role_key, 1)
+        existing = await db.execute(
+            select(RolePermission).where(
+                RolePermission.role_id == role.id,
+                RolePermission.module == "erp"
+            )
+        )
+        if not existing.scalar_one_or_none():
+            db.add(RolePermission(role_id=role.id, module="erp", permission_level=level))
+
+
 async def seed():
     async with async_session() as db:
         # ─── Ensure system user exists (for PLM background task FKs) ───
@@ -728,6 +746,9 @@ async def seed():
                     print(f"WARNING: failed to ingest PLM change order {co.get('change_number', '?')}: {e}")
 
             print("PLM demo data seeded (mock connector).")
+
+        # ─── ERP permissions ───
+        await seed_erp_permissions(db)
 
         await db.commit()
 
