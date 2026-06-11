@@ -70,6 +70,7 @@ from app.models.iqc_aql_recommendation import IqcAqlRecommendation
 from app.models.iqc_aql_quality_snapshot import IqcAqlQualitySnapshot
 from app.models.iqc_aql_config import IqcAqlConfig
 from app.models.supplier_risk import SupplierRiskAlert, SupplierRiskConfig, SupplierRiskNotificationChannel
+from app.models.factory import Factory, UserFactory
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -139,4 +140,6 @@ __all__ = [
     "SupplierRiskAlert",
     "SupplierRiskConfig",
     "SupplierRiskNotificationChannel",
+    "Factory",
+    "UserFactory",
 ]
