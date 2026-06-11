@@ -79,6 +79,8 @@ async def list_suppliers(
     status: str | None = None,
     grade: str | None = None,
     search: str | None = None,
+    allowed_product_line_codes: list[str] | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[Supplier], int]:
     query = select(Supplier)
     count_query = select(func.count()).select_from(Supplier)
@@ -106,6 +108,14 @@ async def list_suppliers(
             subq.c.grade == grade
         )
 
+    if factory_id is not None:
+        query = query.where(Supplier.factory_id == factory_id)
+        count_query = count_query.where(Supplier.factory_id == factory_id)
+
+    if allowed_product_line_codes is not None:
+        query = query.where(Supplier.product_scope.in_(allowed_product_line_codes))
+        count_query = count_query.where(Supplier.product_scope.in_(allowed_product_line_codes))
+
     query = query.order_by(Supplier.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
 
@@ -123,9 +133,14 @@ async def export_suppliers_excel(
     status: str | None = None,
     grade: str | None = None,
     search: str | None = None,
+    allowed_product_line_codes: list[str] | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> bytes:
     from app.utils.excel import create_workbook, append_row, workbook_to_bytes, MAX_EXPORT_ROWS
-    items, _ = await list_suppliers(db, page=1, page_size=MAX_EXPORT_ROWS, status=status, grade=grade, search=search)
+    items, _ = await list_suppliers(
+        db, page=1, page_size=MAX_EXPORT_ROWS, status=status, grade=grade, search=search,
+        allowed_product_line_codes=allowed_product_line_codes, factory_id=factory_id,
+    )
     headers = ["供应商编号", "名称", "简称", "联系人", "电话", "邮箱", "地址", "供货范围", "状态", "创建时间"]
     wb, ws = create_workbook("供应商", headers)
     for s in items:
@@ -658,25 +673,27 @@ async def create_evaluation(
 
 # ─── Stats ───
 
-async def get_supplier_stats(db: AsyncSession) -> dict:
+async def get_supplier_stats(db: AsyncSession, factory_id: uuid.UUID | None = None, allowed_product_line_codes: list[str] | None = None) -> dict:
     from sqlalchemy import case
 
-    result = await db.execute(
-        select(
-            func.count().label("total_count"),
-            func.count(case((Supplier.status == "pending_review", 1))).label("pending_review_count"),
-            func.count(case((Supplier.status == "approved", 1))).label("approved_count"),
-        ).select_from(Supplier)
-    )
+    base_query = select(
+        func.count().label("total_count"),
+        func.count(case((Supplier.status == "pending_review", 1))).label("pending_review_count"),
+        func.count(case((Supplier.status == "approved", 1))).label("approved_count"),
+    ).select_from(Supplier)
+    if factory_id is not None:
+        base_query = base_query.where(Supplier.factory_id == factory_id)
+    result = await db.execute(base_query)
     row = result.one()
 
     today = date.today()
-    expiry_result = await db.execute(
-        select(func.count()).select_from(SupplierCertification).where(
-            SupplierCertification.expiry_date >= today,
-            SupplierCertification.expiry_date <= today + timedelta(days=30),
-        )
+    cert_query = select(func.count()).select_from(SupplierCertification).where(
+        SupplierCertification.expiry_date >= today,
+        SupplierCertification.expiry_date <= today + timedelta(days=30),
     )
+    if factory_id is not None:
+        cert_query = cert_query.where(SupplierCertification.factory_id == factory_id)
+    expiry_result = await db.execute(cert_query)
     cert_expiry_30d_count = expiry_result.scalar() or 0
 
     return {
@@ -689,11 +706,11 @@ async def get_supplier_stats(db: AsyncSession) -> dict:
 
 # ─── Expiry alerts ───
 
-async def get_expiry_alerts(db: AsyncSession, days: int = 90) -> list[dict]:
+async def get_expiry_alerts(db: AsyncSession, days: int = 90, factory_id: uuid.UUID | None = None, allowed_product_line_codes: list[str] | None = None) -> list[dict]:
     today = date.today()
     cutoff = today + timedelta(days=days)
 
-    result = await db.execute(
+    query = (
         select(
             SupplierCertification.cert_id,
             SupplierCertification.supplier_id,
@@ -710,6 +727,9 @@ async def get_expiry_alerts(db: AsyncSession, days: int = 90) -> list[dict]:
         )
         .order_by(SupplierCertification.expiry_date.asc())
     )
+    if factory_id is not None:
+        query = query.where(SupplierCertification.factory_id == factory_id)
+    result = await db.execute(query)
 
     rows = result.all()
     alerts = []

@@ -1,12 +1,14 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, Module, PermissionLevel
-from app.core.product_line_filter import get_user_product_line_codes, enforce_product_line_access
+from app.core.permissions import get_user_permission, Module, PermissionLevel, get_current_user
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import populate_factory_id, validate_factory_invariant
 from app.models.user import User
+from app.models.fmea import FMEADocument
 
 from app.schemas.fmea import (
     FMEACreate, FMEAUpdate, FMEAResponse, FMEAListResponse, TransitionRequest,
@@ -26,14 +28,26 @@ async def list_fmeas(
     product_line: str | None = None,
     high_rpn: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
+
+    # Product line filtering
     allowed_pls = None
-    if not user.role_definition.bypass_row_level_security:
-        allowed_pls = await get_user_product_line_codes(user, db)
-        if not allowed_pls:
-            return FMEAListResponse(items=[], total=0, page=page, page_size=page_size)
-    items, total = await fmea_service.list_fmeas(db, page, page_size, status, product_line, high_rpn=high_rpn, allowed_product_line_codes=allowed_pls)
+    if scope.pl_scope.mode == "NONE":
+        return FMEAListResponse(items=[], total=0, page=page, page_size=page_size)
+    elif scope.pl_scope.mode == "EXPLICIT":
+        allowed_pls = scope.pl_scope.codes
+
+    items, total = await fmea_service.list_fmeas(
+        db, page, page_size, status, product_line,
+        high_rpn=high_rpn,
+        allowed_product_line_codes=allowed_pls,
+        factory_id=scope.effective_factory_id,
+    )
     return FMEAListResponse(
         items=[FMEAResponse.model_validate(f) for f in items],
         total=total,
@@ -46,11 +60,16 @@ async def list_fmeas(
 async def create_fmea(
     req: FMEACreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 CREATE 权限")
     try:
-        await enforce_product_line_access(user, req.product_line_code, db)
-        fmea = await fmea_service.create_fmea(db, req.title, req.document_no, req.fmea_type, user.user_id, req.product_line_code)
+        fmea = await fmea_service.create_fmea(db, req.title, req.document_no, req.fmea_type, scope.user.user_id, req.product_line_code)
+        await populate_factory_id(fmea, FMEADocument, db, scope=scope)
+        await validate_factory_invariant(fmea, db)
+        await db.commit()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return FMEAResponse.model_validate(fmea)
@@ -60,12 +79,20 @@ async def create_fmea(
 async def get_fmea(
     fmea_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea.product_line_code, db)
+    # Factory access check
+    if scope.effective_factory_id and fmea.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="FMEA not found")
     return FMEAResponse.model_validate(fmea)
 
 
@@ -74,18 +101,24 @@ async def update_fmea(
     fmea_id: uuid.UUID,
     req: FMEAUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea.product_line_code, db)
-    if req.product_line_code is not None and req.product_line_code != fmea.product_line_code:
-        await enforce_product_line_access(user, req.product_line_code, db)
+    # Factory access check
+    if scope.effective_factory_id and fmea.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="FMEA not found")
     graph_dict = req.graph_data.model_dump() if req.graph_data else None
     try:
         fmea = await fmea_service.update_fmea(
-            db, fmea, req.title, graph_dict, user.user_id, req.product_line_code,
+            db, fmea, req.title, graph_dict, scope.user.user_id, req.product_line_code,
             lock_version=req.lock_version,
             confirmed_latest_lock_version=req.confirmed_latest_lock_version,
         )
@@ -121,7 +154,7 @@ async def update_fmea(
 
 async def require_approve_permission(
     req: TransitionRequest,
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.EDIT)),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     if req.target_status == "approved":
@@ -142,7 +175,6 @@ async def transition_fmea(
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea.product_line_code, db)
     try:
         fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, user.user_id)
     except ValueError as e:
@@ -183,11 +215,16 @@ async def recommend(
     request: RecommendRequest,
     fastapi_request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
     graph_repo: FMEAGraphRepository = Depends(get_graph_repository),
 ):
+    # Permission check
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
+
     # Rate limiting (unchanged)
-    user_key = f"rec_user:{user.user_id}"
+    user_key = f"rec_user:{scope.user.user_id}"
     fmea_key = f"rec_fmea:{fmea_id}"
     if not _check_rate_limit(user_key, _RATE_LIMITS["per_user"]):
         raise HTTPException(status_code=429, detail="请求过于频繁，请稍后重试")
@@ -197,11 +234,16 @@ async def recommend(
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea.product_line_code, db)
+    # Factory access check
+    if scope.effective_factory_id and fmea.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="FMEA not found")
 
     # 提前计算 effective_scope（短输入 early return 也需要正确值）
     requested_scope = getattr(request, "scope", "global")
-    has_kg = await get_user_permission(user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
+    has_kg = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
     effective_scope = "current_product_line" if (not has_kg and requested_scope == "global") else requested_scope
 
     if len(request.context.get("function_description", request.context.get("failure_mode", ""))) < 2:
@@ -213,7 +255,7 @@ async def recommend(
 
     llm = getattr(fastapi_request.app.state, "llm_provider", None)
     service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo)
-    result = await service.recommend(fmea_id, request, user)
+    result = await service.recommend(fmea_id, request, scope.user)
     await db.commit()
     return result
 
@@ -222,12 +264,20 @@ async def recommend(
 async def get_fmea_graph(
     fmea_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea.product_line_code, db)
+    # Factory access check
+    if scope.effective_factory_id and fmea.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="FMEA not found")
     return fmea.graph_data
 
 
@@ -235,12 +285,20 @@ async def get_fmea_graph(
 async def severity_warnings(
     fmea_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea.product_line_code, db)
+    # Factory access check
+    if scope.effective_factory_id and fmea.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="FMEA not found")
     from app.services.special_characteristic_service import check_severity_compliance
     return await check_severity_compliance(db, fmea_id)
 
@@ -251,17 +309,25 @@ async def get_fmea_lessons(
     request: Request,
     req: LessonsLearnedRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Get lessons learned recommendations for a newly created FMEA."""
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
     from app.services.fmea_service import get_fmea
     fmea_doc = await get_fmea(db, fmea_id)
     if fmea_doc is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea_doc.product_line_code, db)
+    # Factory access check
+    if scope.effective_factory_id and fmea_doc.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if fmea_doc.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="FMEA not found")
 
     embedding = getattr(request.app.state, "embedding_provider", None)
     service = LessonsLearnedService(db, embedding)
-    result = await service.recommend(fmea_id, "fmea", req.problem_description if req else None, user)
+    result = await service.recommend(fmea_id, "fmea", req.problem_description if req else None, scope.user)
     await db.commit()
     return result
