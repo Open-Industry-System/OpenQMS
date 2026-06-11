@@ -13,6 +13,20 @@ from app.models.supplier import SupplierSCAR
 from app.services.aql_engine import calculate_aql_plan
 
 
+async def _trigger_risk_eval(supplier_id, product_line_code):
+    """Trigger incremental risk evaluation in an independent session."""
+    import asyncio
+    from app.database import async_session
+    from app.services.supplier_risk.service import evaluate_supplier_risk
+
+    await asyncio.sleep(0.5)  # brief delay to let caller transaction settle
+    try:
+        async with async_session() as db:
+            await evaluate_supplier_risk(db, supplier_id, product_line_code)
+    except Exception:
+        logging.getLogger(__name__).exception("Incremental risk eval failed for supplier %s", supplier_id)
+
+
 # ─── Numbering ───
 
 async def _generate_inspection_no(db: AsyncSession) -> str:
@@ -390,6 +404,10 @@ async def judge_inspection(
             await AqlService.on_inspection_judged(db, inspection.supplier_id, inspection.material_id, inspection_id)
         except Exception as e:
             logging.getLogger(__name__).warning("AQL rule evaluation failed: %s", e)
+
+    # Trigger incremental supplier risk evaluation
+    import asyncio
+    asyncio.create_task(_trigger_risk_eval(inspection.supplier_id, inspection.product_line_code))
 
     return inspection
 

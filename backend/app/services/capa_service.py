@@ -225,6 +225,17 @@ async def update_capa(
         )
         db.add(audit_log)
 
+    # Close linked risk alerts if CAPA reached D8_CLOSURE
+    if capa.status == "D8_CLOSURE":
+        from sqlalchemy import update
+        from app.models.supplier_risk import SupplierRiskAlert
+        await db.execute(
+            update(SupplierRiskAlert)
+            .where(SupplierRiskAlert.linked_capa_id == capa.report_id)
+            .where(SupplierRiskAlert.status != "closed")
+            .values(status="closed", handled_at=func.now())
+        )
+
     await db.commit()
     await db.refresh(capa)
     if embedding_changed:
