@@ -1,9 +1,9 @@
 """Main service: evaluate supplier risk, handle alerts, create SCAR/CAPA from alerts."""
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.supplier_risk import SupplierRiskAlert
@@ -198,5 +198,49 @@ async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results,
     )
     db.add(alert)
     await db.flush()
+    await db.refresh(alert)
+    return alert
+
+
+async def handle_alert(
+    db: AsyncSession,
+    alert_id: uuid.UUID,
+    action: str,
+    note: Optional[str],
+    user_id: uuid.UUID,
+) -> SupplierRiskAlert:
+    """Handle an alert with state machine transitions.
+
+    Actions:
+    - "acknowledge": open -> acknowledged
+    - "ignore": open -> ignored (requires note)
+    - "close": acknowledged/action_taken -> closed
+    """
+    alert = await db.get(SupplierRiskAlert, alert_id)
+    if not alert:
+        raise ValueError("预警不存在")
+
+    if action == "acknowledge":
+        if alert.status != "open":
+            raise ValueError("只能确认开放状态的预警")
+        alert.status = "acknowledged"
+    elif action == "ignore":
+        if alert.status != "open":
+            raise ValueError("只能忽略开放状态的预警")
+        if not note or not note.strip():
+            raise ValueError("忽略预警需填写理由")
+        alert.status = "ignored"
+        alert.handle_note = note.strip()
+    elif action == "close":
+        if alert.status not in ("acknowledged", "action_taken"):
+            raise ValueError("只能关闭已确认或已处置的预警")
+        alert.status = "closed"
+    else:
+        raise ValueError(f"无效的操作: {action}")
+
+    alert.handled_by = user_id
+    alert.handled_at = func.now()
+
+    await db.commit()
     await db.refresh(alert)
     return alert
