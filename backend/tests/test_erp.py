@@ -1,8 +1,10 @@
 """Tests for ERP integration -- mock connector, ingestion, traceability, masking,
 date coercion, and DAG gating.
 
-Uses an isolated engine + transaction per test to avoid asyncpg event-loop
-contention with the shared application engine.
+Uses per-test isolated engine + session fixtures to avoid asyncpg event-loop
+contention (``Future attached to a different loop`` / ``another operation is in
+progress``) that occurs when sharing the conftest.py fixtures.
+
 Database-dependent tests require a running PostgreSQL and DATABASE_URL set.
 
 Run:  DATABASE_URL="postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms" \
@@ -17,9 +19,7 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from app.config import SYSTEM_USER_ID
 from app.config import settings
-from app.database import Base
 from app.models.customer_quality import Customer, ShipmentRecord
 from app.models.erp import (
     ERPConnection,
@@ -41,24 +41,24 @@ from app.services.erp_service import (
 
 
 # ---------------------------------------------------------------------------
-# Isolated db fixture -- fresh engine + session per test.
+# Isolated db fixtures — per-test engine + session.
 #
-# Creating a fresh engine inside each test's event loop avoids the classic
-# pytest-asyncio + asyncpg "Future attached to a different loop" errors
-# caused by sharing an engine created in a different loop.
+# Creating a fresh engine inside each test's event loop avoids asyncpg
+# loop-migration errors.  The session is wrapped in a real transaction
+# that is always rolled back, giving each test a clean slate.
 # ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
-async def db_session() -> AsyncSession:
-    """Yield a fresh async session with a transaction that is always rolled back."""
+async def erp_db() -> AsyncSession:
+    """Yield a fresh async session inside a transaction that is always rolled back."""
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
     async with engine.connect() as conn:
         async with conn.begin() as tx:
-            session_factory = async_sessionmaker(
-                engine, class_=AsyncSession, expire_on_commit=False
+            _sf = async_sessionmaker(
+                bind=conn, class_=AsyncSession, expire_on_commit=False
             )
-            session = session_factory(bind=conn)
+            session = _sf()
             try:
                 yield session
             finally:
@@ -68,21 +68,16 @@ async def db_session() -> AsyncSession:
 
 
 @pytest_asyncio.fixture
-async def admin_user(db_session: AsyncSession) -> User:
-    """Create and return a test admin user inside the isolated transaction.
-
-    Uses a random UUID to avoid collision with seed data (SYSTEM_USER_ID).
-    """
-    # Ensure product line exists
-    result = await db_session.execute(
+async def erp_admin(erp_db: AsyncSession) -> User:
+    """Create and return a test admin user with a random UUID."""
+    result = await erp_db.execute(
         select(ProductLine).where(ProductLine.code == "DC-DC-100")
     )
     if result.scalar_one_or_none() is None:
-        db_session.add(ProductLine(code="DC-DC-100", name="DC-DC-100"))
-        await db_session.flush()
+        erp_db.add(ProductLine(code="DC-DC-100", name="DC-DC-100"))
+        await erp_db.flush()
 
-    # Ensure admin role exists
-    result = await db_session.execute(
+    result = await erp_db.execute(
         select(RoleDefinition).where(RoleDefinition.role_key == "admin")
     )
     role = result.scalar_one_or_none()
@@ -94,8 +89,8 @@ async def admin_user(db_session: AsyncSession) -> User:
             is_system=True,
             is_active=True,
         )
-        db_session.add(role)
-        await db_session.flush()
+        erp_db.add(role)
+        await erp_db.flush()
 
     user = User(
         user_id=uuid.uuid4(),
@@ -106,9 +101,9 @@ async def admin_user(db_session: AsyncSession) -> User:
         legacy_role="admin",
         is_active=True,
     )
-    db_session.add(user)
-    await db_session.flush()
-    await db_session.refresh(user)
+    erp_db.add(user)
+    await erp_db.flush()
+    await erp_db.refresh(user)
     return user
 
 
@@ -183,7 +178,7 @@ class TestIngestion:
     """Supplier auto-link, PO reference error, shipment creates ShipmentRecord."""
 
     @pytest.mark.asyncio
-    async def test_supplier_auto_link(self, db_session: AsyncSession, admin_user: User):
+    async def test_supplier_auto_link(self, erp_db: AsyncSession, erp_admin: User):
         """Supplier ingestion should auto-link when supplier_no matches."""
         suffix = uuid.uuid4().hex[:8]
         supplier_no = f"SUP-{suffix}"
@@ -194,15 +189,15 @@ class TestIngestion:
             name="Test Supplier",
             short_name="TS",
             status="approved",
-            created_by=admin_user.user_id,
+            created_by=erp_admin.user_id,
         )
-        db_session.add(supplier)
-        await db_session.flush()
+        erp_db.add(supplier)
+        await erp_db.flush()
 
-        conn = await _create_connection(db_session, admin_user, name="auto-link-test")
+        conn = await _create_connection(erp_db, erp_admin, name="auto-link-test")
 
         await ERPIngestionService._ingest_suppliers(
-            db_session,
+            erp_db,
             conn.connection_id,
             {
                 "external_id": "SUP-EXT",
@@ -211,7 +206,7 @@ class TestIngestion:
             },
         )
 
-        result = await db_session.execute(
+        result = await erp_db.execute(
             select(ERPSupplier).where(
                 ERPSupplier.connection_id == conn.connection_id,
                 ERPSupplier.supplier_code == supplier_no,
@@ -223,13 +218,13 @@ class TestIngestion:
 
     @pytest.mark.asyncio
     async def test_po_reference_error_when_supplier_not_found(
-        self, db_session: AsyncSession, admin_user: User
+        self, erp_db: AsyncSession, erp_admin: User
     ):
         """PO ingestion with unknown supplier_code sets _reference_errors."""
-        conn = await _create_connection(db_session, admin_user, name="po-ref-test")
+        conn = await _create_connection(erp_db, erp_admin, name="po-ref-test")
 
         await ERPIngestionService._ingest_purchase_orders(
-            db_session,
+            erp_db,
             conn.connection_id,
             {
                 "external_id": "PO-1",
@@ -240,7 +235,7 @@ class TestIngestion:
             },
         )
 
-        result = await db_session.execute(
+        result = await erp_db.execute(
             select(ERPPurchaseOrder).where(ERPPurchaseOrder.po_number == "PO-001")
         )
         po = result.scalar_one()
@@ -249,19 +244,19 @@ class TestIngestion:
 
     @pytest.mark.asyncio
     async def test_ingest_shipment_creates_shipment_record(
-        self, db_session: AsyncSession, admin_user: User
+        self, erp_db: AsyncSession, erp_admin: User
     ):
         """Shipment ingestion should create ShipmentRecord and link erp_shipment."""
         # Create customer
         customer = Customer(customer_code="CUST-TEST", name="Test Customer")
-        db_session.add(customer)
-        await db_session.flush()
+        erp_db.add(customer)
+        await erp_db.flush()
 
-        conn = await _create_connection(db_session, admin_user, name="shipment-test")
+        conn = await _create_connection(erp_db, erp_admin, name="shipment-test")
 
         # Ingest customer first so openqms_customer_id gets linked
         await ERPIngestionService._ingest_customers(
-            db_session,
+            erp_db,
             conn.connection_id,
             {
                 "external_id": "CUST-EXT",
@@ -272,7 +267,7 @@ class TestIngestion:
 
         # Ingest shipment
         await ERPIngestionService._ingest_shipments(
-            db_session,
+            erp_db,
             conn.connection_id,
             {
                 "external_id": "SHIP-1",
@@ -286,7 +281,7 @@ class TestIngestion:
         )
 
         # Verify ShipmentRecord created
-        result = await db_session.execute(
+        result = await erp_db.execute(
             select(ShipmentRecord).where(ShipmentRecord.batch_no == "LOT-001")
         )
         record = result.scalar_one()
@@ -294,7 +289,7 @@ class TestIngestion:
         assert record.customer_id == customer.customer_id
 
         # Verify erp_shipment linked
-        ship_result = await db_session.execute(
+        ship_result = await erp_db.execute(
             select(ERPShipment).where(ERPShipment.shipment_number == "DN-001")
         )
         ship = ship_result.scalar_one()
@@ -309,13 +304,13 @@ class TestIngestion:
 
 class TestTraceability:
     @pytest.mark.asyncio
-    async def test_traceability_forward(self, db_session: AsyncSession, admin_user: User):
+    async def test_traceability_forward(self, erp_db: AsyncSession, erp_admin: User):
         """Forward traceability returns nodes, edges, and gaps."""
-        conn = await _create_connection(db_session, admin_user, name="trace-test")
+        conn = await _create_connection(erp_db, erp_admin, name="trace-test")
 
         # Create supplier
         await ERPIngestionService._ingest_suppliers(
-            db_session,
+            erp_db,
             conn.connection_id,
             {
                 "external_id": "SUP-EXT",
@@ -325,7 +320,7 @@ class TestTraceability:
         )
         # Create PO
         await ERPIngestionService._ingest_purchase_orders(
-            db_session,
+            erp_db,
             conn.connection_id,
             {
                 "external_id": "PO-EXT",
@@ -338,7 +333,7 @@ class TestTraceability:
         )
 
         result = await ERPTraceabilityService.query(
-            db_session, "LOT-001", "forward"
+            erp_db, "LOT-001", "forward"
         )
         assert len(result["nodes"]) >= 2
         # MES gap is expected since there is no MES data
@@ -422,9 +417,11 @@ class TestDateCoercion:
 
 class TestDAGGating:
     @pytest.mark.asyncio
-    async def test_dag_defers_when_upstream_pending(self, db_session: AsyncSession, admin_user: User):
+    async def test_dag_defers_when_upstream_pending(
+        self, erp_db: AsyncSession, erp_admin: User
+    ):
         """Phase 2 job should be deferred if Phase 1 jobs are not completed."""
-        conn = await _create_connection(db_session, admin_user, name="dag-defer-test")
+        conn = await _create_connection(erp_db, erp_admin, name="dag-defer-test")
 
         past = datetime.now(timezone.utc) - timedelta(minutes=5)
 
@@ -435,7 +432,7 @@ class TestDAGGating:
             status="pending",
             next_run_at=past,
         )
-        db_session.add(job)
+        erp_db.add(job)
 
         # Create a pending Phase 2 job that targets the same connection
         job2 = ERPSyncJob(
@@ -444,20 +441,22 @@ class TestDAGGating:
             status="pending",
             next_run_at=past,
         )
-        db_session.add(job2)
-        await db_session.flush()
+        erp_db.add(job2)
+        await erp_db.flush()
 
         # Try to run a Phase 2 job (purchase_orders) -- should be deferred
         # because Phase 1 (suppliers) is still pending
         result = await ERPSyncService._run_single_sync_job(
-            db_session, "purchase_orders"
+            erp_db, "purchase_orders"
         )
         assert result["status"] == "deferred"
 
     @pytest.mark.asyncio
-    async def test_dag_runs_when_upstream_completed(self, db_session: AsyncSession, admin_user: User):
+    async def test_dag_runs_when_upstream_completed(
+        self, erp_db: AsyncSession, erp_admin: User
+    ):
         """Phase 2 job should proceed if all Phase 1 jobs are completed."""
-        conn = await _create_connection(db_session, admin_user, name="dag-proceed-test")
+        conn = await _create_connection(erp_db, erp_admin, name="dag-proceed-test")
 
         # Create completed Phase 1 jobs
         for dt in ("suppliers", "customers", "materials", "locations"):
@@ -467,7 +466,7 @@ class TestDAGGating:
                 status="completed",
                 next_run_at=datetime.now(timezone.utc),
             )
-            db_session.add(job)
+            erp_db.add(job)
 
         # Create a pending Phase 2 job
         job = ERPSyncJob(
@@ -476,11 +475,11 @@ class TestDAGGating:
             status="pending",
             next_run_at=datetime.now(timezone.utc),
         )
-        db_session.add(job)
-        await db_session.flush()
+        erp_db.add(job)
+        await erp_db.flush()
 
         # Run the Phase 2 job -- should NOT be deferred
         result = await ERPSyncService._run_single_sync_job(
-            db_session, "purchase_orders"
+            erp_db, "purchase_orders"
         )
         assert result["status"] != "deferred"

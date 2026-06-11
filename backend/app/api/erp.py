@@ -128,7 +128,9 @@ async def create_connection(
         db.add(ERPSyncJob(connection_id=conn.connection_id, data_type=data_type))
 
     await db.commit()
-    return schemas.ERPConnectionOut.model_validate(conn)
+    out = schemas.ERPConnectionOut.model_validate(conn)
+    out.config = sanitize_config(out.config)
+    return out
 
 
 @router.get("/connections")
@@ -146,8 +148,16 @@ async def list_connections(
     result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
     items = result.scalars().all()
 
+    # Explicitly sanitize config for each item (defense-in-depth: schema
+    # validator also runs, but explicit sanitize_config is belt-and-suspenders).
+    sanitized_items = []
+    for i in items:
+        out = schemas.ERPConnectionOut.model_validate(i)
+        out.config = sanitize_config(out.config)
+        sanitized_items.append(out)
+
     return schemas.ERPConnectionListResponse(
-        items=[schemas.ERPConnectionOut.model_validate(i) for i in items],
+        items=sanitized_items,
         total=total, page=page, page_size=page_size,
     )
 
@@ -179,6 +189,10 @@ async def update_connection(
         raise HTTPException(status_code=404, detail="Connection not found")
     await enforce_product_line_access(user, conn.product_line_code, db)
 
+    # Validate new product_line_code BEFORE applying changes
+    if data.product_line_code is not None and data.product_line_code != conn.product_line_code:
+        await enforce_product_line_access(user, data.product_line_code, db)
+
     if data.config is not None:
         data.config = _validate_rest_config(data.connector_type or conn.connector_type, data.config)
         data.config = _process_credentials(data.config)
@@ -186,12 +200,10 @@ async def update_connection(
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(conn, field, value)
 
-    # Re-enforce access on the new product_line_code if changed
-    if data.product_line_code is not None:
-        await enforce_product_line_access(user, conn.product_line_code, db)
-
     await db.commit()
-    return schemas.ERPConnectionOut.model_validate(conn)
+    out = schemas.ERPConnectionOut.model_validate(conn)
+    out.config = sanitize_config(out.config)
+    return out
 
 
 @router.delete("/connections/{connection_id}")
