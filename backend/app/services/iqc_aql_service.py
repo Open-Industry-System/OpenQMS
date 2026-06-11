@@ -801,12 +801,14 @@ class RecommendationManager:
         if target_state == profile.state and recommended_aql == profile.current_aql:
             return None
 
-        # 3. Dedup check: existing pending/forwarded with same profile+target_state+recommended_aql
+        # 3. Dedup check: existing pending/forwarded with same profile+direction+recommended_aql
+        # direction encodes target_state (tighten≠freeze), so "tighten→0.65" won't block "freeze→0.65"
         existing = await db.execute(
             select(func.count()).where(
                 IqcAqlRecommendation.profile_id == profile.profile_id,
                 IqcAqlRecommendation.status.in_(["pending", "forwarded"]),
                 IqcAqlRecommendation.recommended_aql == recommended_aql,
+                IqcAqlRecommendation.direction == direction,
             )
         )
         if (existing.scalar() or 0) > 0:
@@ -855,6 +857,7 @@ class RecommendationManager:
             expires_at=now + timedelta(days=expiry_days),
         )
         db.add(recommendation)
+        await db.flush()  # Ensure recommendation_id is assigned before writing AuditLog
 
         db.add(AuditLog(
             table_name="iqc_aql_recommendations",
@@ -869,7 +872,6 @@ class RecommendationManager:
             },
         ))
 
-        await db.flush()
         return recommendation
 
     @staticmethod
@@ -915,6 +917,11 @@ class RecommendationManager:
             },
             operated_by=user_id,
         ))
+
+        await db.flush()
+
+        # Apply recommendation to profile (approved → effective)
+        await ProfileManager.apply_recommendation(db, rec)
 
         await db.flush()
         return rec

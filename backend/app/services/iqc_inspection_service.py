@@ -162,6 +162,10 @@ async def create_inspection(
         if material and material.default_aql:
             aql_level = material.default_aql
 
+    # Write resolved AQL back to inspection record
+    if aql_level and not inspection.aql_level:
+        inspection.aql_level = str(aql_level)
+
     # AQL auto-calculate
     if lot_qty and aql_level:
         try:
@@ -388,7 +392,9 @@ async def judge_inspection(
         try:
             from app.services.iqc_aql_service import AqlService
             await AqlService.on_inspection_judged(db, inspection.supplier_id, inspection.material_id, inspection_id)
+            await db.commit()
         except Exception as e:
+            await db.rollback()
             logging.getLogger(__name__).warning("AQL rule evaluation failed: %s", e)
 
     return inspection
