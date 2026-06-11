@@ -1,8 +1,8 @@
-# 多工厂部署支持 — 设计文档 v3
+# 多工厂部署支持 — 设计文档 v4
 
 **日期:** 2026-06-11  
 **模块:** 多工厂部署支持 (P3)  
-**状态:** 待审核（v3 — 解决第二轮审查反馈）
+**状态:** 待审核（v4 — 解决第三轮审查反馈）
 
 ## 1. 概述
 
@@ -52,24 +52,47 @@ Factory (工厂)
 
 ## 2. 三层范围模型
 
-审查 v1 的核心问题是用 `factory_id IS NULL` 表示集团权限，混淆了归属与授权。修订后采用三层范围模型：
+审查 v1 的核心问题是用 `factory_id IS NULL` 表示集团权限，混淆了归属与授权。v2/v3 用 `bypass_row_level_security` 代表集团可见性仍有问题——现有 bypass 同时绕过产品线和工厂，把工厂管理员提升成全集团可见。
+
+修订后采用**完全解耦**的三层范围模型，每层独立解析：
 
 ```
-FactoryScope      → 用户可访问哪些工厂（来自 user_factories 或 user.factory_id）
-ProductLineScope  → 用户可访问哪些产品线（来自 user_product_lines 或工厂下全部）
-PermissionScope   → 用户对模块有什么操作权限（来自 role_permissions）
+FactoryScope       → 用户可访问哪些工厂（来自 user_factories 或 user.factory_id）
+ProductLineScope   → 用户可访问哪些产品线（来自 user_product_lines 或工厂下全部）
+PermissionScope    → 用户对模块有什么操作权限（来自 role_permissions）
 ```
+
+**关键设计：`bypass_row_level_security` 只绕过产品线，不绕过工厂。** 只有同时具备 `Module.GROUP ADMIN` 权限的用户才能跨工厂可见。
 
 ### 规则
 
-| 用户类型 | `user.factory_id` | `user_factories` | `user_product_lines` | 可见数据范围 |
-|---------|-------------------|-------------------|----------------------|-------------|
-| 工厂用户 | NOT NULL | 空 | 指定的产品线（现有逻辑） | 所属工厂 + 指定产品线 |
-| 工厂管理员 | NOT NULL | 空 | bypass（全厂产品线） | 所属工厂 + 全部产品线 |
-| 集团用户 | NULL | 有记录 | bypass 或指定 | `user_factories` 中所有工厂 |
-| 集团管理员 | NULL | 有记录 | bypass | 全部工厂 + 全部产品线 |
+| 用户类型 | `user.factory_id` | `user_factories` | `user_product_lines` | 工厂范围 | 产品线范围 |
+|---------|-------------------|-------------------|----------------------|---------|----------|
+| 工厂操作员 | NOT NULL | 空 | 指定的产品线 | 本厂 | 指定产品线 |
+| 工厂管理员 | NOT NULL | 空 | bypass（全厂产品线） | 本厂 | 全厂产品线 |
+| 集团只读 | NULL | 有记录 | 指定产品线 | `user_factories` | 指定产品线 |
+| 集团管理员 | NULL | 有记录 | bypass | `user_factories` | 全部产品线 |
+| 系统管理员 | 任意 | 空 | bypass | 所有工厂（GROUP ADMIN） | 全部 |
 
-**关键变更：** 集团访问权限由 `role_permissions` 中的 `Module.GROUP` 模块权限 + `user_factories` 关联共同决定（见 §4.1）。`user.factory_id` 只表示用户的**默认归属工厂**（影响创建记录时的默认值），不表示授权范围。现有 `Module` 枚举新增 `GROUP = "group"` 模块，集团路由组使用 `require_permission(Module.GROUP, PermissionLevel.VIEW)` 守护。`bypass_row_level_security` 仍用于 admin 超级权限，但**不再作为判断集团可见性的唯一依据**。
+**与 v3 的关键区别：**
+- `bypass_row_level_security = True` **不再**意味着 `accessible_factory_ids = None`（全集团可见）
+- `bypass_row_level_security = True` 仅意味着产品线层不过滤（`ProductLineScope = ALL`）
+- 工厂层可见性由 `Module.GROUP` 权限决定：有 `GROUP ADMIN` 则全厂可见，否则限定在 `user_factories`
+
+### `Module.GROUP` 权限
+
+`permissions.py` 的 `Module` 枚举新增 `GROUP = "group"`：
+
+```python
+class Module(StrEnum):
+    # ... 现有模块 ...
+    GROUP = "group"  # 新增：集团管理模块
+```
+
+- `GROUP VIEW` = 可查看集团汇总仪表盘
+- `GROUP CREATE` = 可创建跨工厂审核计划
+- `GROUP ADMIN` = 可管理所有工厂的数据，`accessible_factory_ids = None`
+- 没有 `GROUP` 权限的用户，即使 `bypass_row_level_security = True`，也只能看自己所属工厂的数据
 
 ---
 
@@ -153,9 +176,11 @@ CREATE TABLE user_factories (
 
 | 表族 | 表 | 派生来源 | 说明 |
 |------|---|---------|------|
-| **FMEA** | FMEADocument, FMEAVersion | 产品线派生 | `product_line_code → factory_id` |
+| **FMEA** | FMEADocument | 产品线派生 | `product_line_code → factory_id` |
+| **FMEA** | FMEAVersion | 父对象派生 | `fmea_id → FMEADocument.factory_id`（无 product_line_code） |
 | **CAPA** | CAPAEightD | 产品线派生 | `product_line_code → factory_id` |
-| **控制计划** | ControlPlan, ControlPlanItem, ControlPlanVersion | 产品线派生 | `product_line_code → factory_id` |
+| **控制计划** | ControlPlan, ControlPlanItem | 产品线派生 | `product_line_code → factory_id` |
+| **控制计划** | ControlPlanVersion | 父对象派生 | `cp_id → ControlPlan.factory_id`（无 product_line_code） |
 | **SPC** | InspectionCharacteristic, SampleBatch, SampleValue, SPCAlarm, ControlLimitSnapshot | 产品线派生 | `product_line_code` (或 `product_line`) |
 | **MSA** | GrrStudy, GrrMeasurement, GrrResult, BiasStudy, BiasMeasurement, BiasResult, LinearityStudy, LinearityMeasurement, LinearityResult, StabilityStudy, StabilityMeasurement, StabilityResult, AttributeStudy, AttributeMeasurement, AttributeResult | 产品线派生 | `product_line_code → factory_id` |
 | **IQC** | IqcInspection, IqcInspectionItem, IqcItemMeasurement | 产品线派生 | `product_line_code` (nullable) → 回填后 NOT NULL |
@@ -173,7 +198,7 @@ CREATE TABLE user_factories (
 | **供应商风险** | SupplierRiskNotificationChannel | 产品线派生 | `product_line_code → factory_id` |
 | **审核** | AuditProgram | 产品线派生 | `product_line_code (nullable) → factory_id` |
 | **审核子表** | AuditPlan, AuditFinding | 审核计划派生 | `program_id → AuditProgram.factory_id` |
-| **审核** | AuditChecklistTemplate | 产品线派生 | `product_line_code (nullable)` |
+| **审核** | AuditChecklistTemplate | 显式工厂范围 | 无 product_line_code，无 program_id；创建时从 scope.default_factory_id 填充 |
 | **特殊特性** | SpecialCharacteristic | 产品线派生 | `product_line_code (nullable)` |
 | **质量目标** | QualityGoal | 产品线派生 | `product_line_code → factory_id` |
 | **客户质量** | Customer, CustomerComplaint, RMARecord | 产品线派生 | `product_line_code → factory_id` |
@@ -193,6 +218,7 @@ CREATE TABLE user_factories (
 | **ERP** | ERPSyncJob, ERPPushOutbox | ERP连接派生 | `connection_id → ERPConnection.factory_id` |
 | **量具** | Gauge, GaugeCalibration | 产品线派生 | `product_line_code` (nullable) |
 | **知识** | DocumentEmbedding, EmbeddingSyncOutbox | 产品线派生 | `product_line_code` (nullable) |
+| **知识** | RecommendationCache | 产品线派生 | `product_line_code NOT NULL` — 注意：不是系统表 |
 | **协作** | CollaborationSession | 产品线派生 | `product_line_code` (nullable) |
 | **控制计划校验** | CPValidationRun, CPValidationFinding, CPValidationOccurrence | 产品线派生 | `product_line_code → factory_id` |
 | **用户偏好** | UserDashboardLayout | **不加 factory_id** | 用户偏好，跨工厂通用 |
@@ -204,7 +230,7 @@ CREATE TABLE user_factories (
 1. **nullable `product_line_code` 的表**：回填时若 `product_line_code` 为 NULL，使用 `scope.default_factory_id`（即种子工厂 UUID）。后续新记录必有 `product_line_code` 或从父对象派生。
 2. **供应商子表**不从 `product_line_code` 派生，而从 `Supplier.factory_id` 派生。创建时自动从父对象获取，不做 `product_line_code` 校验。
 3. **连接子表**（MES/PLM/ERP 的 SyncJob、PushOutbox 等）从 `connection_id → Connection.factory_id` 派生。
-4. **UserDashboardLayout、AuditLog、RecommendationCache、RoleDefinition、RolePermission** 不加 `factory_id`，因为它们是用户级或系统级数据，不按工厂隔离。
+4. **UserDashboardLayout、AuditLog、RoleDefinition、RolePermission、UserProductLine** 不加 `factory_id`，因为它们是用户级或系统级数据，不按工厂隔离。**RecommendationCache 有 `product_line_code NOT NULL`，归入产品线派生类，需要加 `factory_id`。**
 
 ### 3.6 新增 `supplier_shared_profiles` 表
 
@@ -267,7 +293,9 @@ CREATE TABLE audit_program_target_factories (
 
 ## 4. 后端范围解析与数据过滤
 
-### 4.1 工厂上下文解析（修订版）
+### 4.1 工厂与产品线范围解析（v4 修订版）
+
+**核心设计：bypass_row_level_security 只绕过产品线，不绕过工厂。** 工厂可见性由 `Module.GROUP` 权限独立决定。
 
 ```python
 # core/factory_scope.py
@@ -278,54 +306,77 @@ from fastapi import HTTPException
 @dataclass
 class FactoryScope:
     """解析后的工厂范围，不可变，贯穿整个请求生命周期。"""
-    accessible_factory_ids: list[UUID] | None  # None = 全部（bypass）
+    accessible_factory_ids: list[UUID] | None  # None = 所有工厂（仅 GROUP ADMIN）
     default_factory_id: UUID | None            # 创建记录时的默认工厂
+
+@dataclass
+class ProductLineScope:
+    """解析后的产品线范围。"""
+    mode: str               # "ALL" | "EXPLICIT" | "NONE"
+    codes: list[str] | None # EXPLICIT 模式下的产品线列表
 
 def resolve_factory_scope(
     user: User,
     user_factory_ids: list[UUID],   # 预查询 user_factories
+    has_group_admin: bool,           # 预查询：用户是否有 GROUP ADMIN 权限
 ) -> FactoryScope:
-    if user.role_definition.bypass_row_level_security:
-        # admin 超级权限：可访问所有工厂
+    # 1. GROUP ADMIN → 全工厂可见
+    if has_group_admin:
         return FactoryScope(accessible_factory_ids=None, default_factory_id=user.factory_id)
 
+    # 2. 有 user_factories 记录 → 限定在这些工厂
     if user_factory_ids:
         return FactoryScope(
             accessible_factory_ids=user_factory_ids,
             default_factory_id=user.factory_id or user_factory_ids[0],
         )
 
-    # 工厂用户无 user_factories 记录时，回退到 user.factory_id
+    # 3. 工厂用户（无 user_factories 但有 factory_id）→ 回退到本厂
     if user.factory_id:
         return FactoryScope(
             accessible_factory_ids=[user.factory_id],
             default_factory_id=user.factory_id,
         )
 
-    # 无任何工厂关联 → 无数据访问
+    # 4. 无任何工厂关联 → 无数据访问
     return FactoryScope(accessible_factory_ids=[], default_factory_id=None)
+
+def resolve_product_line_scope(
+    user: User,
+    user_product_line_codes: list[str],  # 预查询 user_product_lines
+    factory_scope: FactoryScope,
+    db: AsyncSession,
+) -> ProductLineScope:
+    # 1. bypass_row_level_security → 产品线不过滤（但工厂仍然过滤！）
+    if user.role_definition.bypass_row_level_security:
+        return ProductLineScope(mode="ALL", codes=None)
+
+    # 2. 无产品线分配 → 无数据访问
+    if not user_product_line_codes:
+        # 工厂管理员可能没有逐条分配，但属于全厂
+        # 如果用户有 factory_id 且 bypass，在步骤 1 已返回 ALL
+        # 走到这里意味着非 bypass 且无产品线分配 → 无数据
+        return ProductLineScope(mode="NONE", codes=None)
+
+    # 3. 有明确的产品线分配
+    return ProductLineScope(mode="EXPLICIT", codes=user_product_line_codes)
 
 def resolve_effective_factory_id(
     scope: FactoryScope,
-    requested_factory_id: UUID | None,  # 来自 ?factory_id= 查询参数
+    requested_factory_id: UUID | None,
 ) -> UUID | None:
     """
     解析本次请求的有效工厂 ID。
-    - requested_factory_id=None → 返回 None（集团用户看全部）或 scope.default_factory_id（工厂用户看本厂）
-    - requested_factory_id=UUID → 校验是否在 scope 内，越权则 403
-    返回 None 表示"不过滤工厂"（仅 bypass 用户或集团用户未指定工厂时）。
+    返回 None 表示"不过滤工厂"（仅 GROUP ADMIN 未指定工厂时）。
     """
-    # bypass 用户：允许指定任意工厂，或不过滤
     if scope.accessible_factory_ids is None:
-        return requested_factory_id  # None = 看全部，UUID = 看指定工厂
+        return requested_factory_id  # GROUP ADMIN：允许任意或不过滤
 
-    # 非指定工厂：返回默认（工厂用户）或全部可访问
     if requested_factory_id is None:
         if len(scope.accessible_factory_ids) == 1:
             return scope.accessible_factory_ids[0]  # 单工厂用户直接锁定
         return None  # 多工厂用户未指定 → 看所有可访问工厂
 
-    # 指定了工厂：必须在自己可访问范围内
     if requested_factory_id not in scope.accessible_factory_ids:
         raise HTTPException(status_code=403, detail=f"无权访问工厂 '{requested_factory_id}'")
     return requested_factory_id
@@ -339,11 +390,13 @@ class Module(StrEnum):
     GROUP = "group"  # 新增：集团管理模块
 ```
 
-集团路由组使用 `require_permission(Module.GROUP, PermissionLevel.VIEW)` 守护，取代 `bypass_row_level_security` 判断。
+集团路由组使用 `require_permission(Module.GROUP, PermissionLevel.VIEW)` 守护。
 
-### 4.2 统一过滤层（与现有 product_line_filter 整合）
+### 4.2 统一过滤层（不再复用旧 product_line_filter）
 
-现有 `product_line_filter.py` 已提供 `apply_product_line_filter` 和 `enforce_product_line_access`。修订后的设计将工厂过滤整合进此层：
+现有 `product_line_filter.py` 的 `apply_product_line_filter` 对非 bypass 且无 `user_product_lines` 的用户返回 `where(False)`（无数据）。在多工厂场景下，工厂管理员可能没有逐条分配 `user_product_lines`，但仍应看到本厂全部产品线。
+
+修订后的设计**不再调用旧的 `apply_product_line_filter`**，而是在 `apply_scope_filter` 中使用已解析的 `ProductLineScope` 独立处理产品线过滤：
 
 ```python
 # core/factory_scope.py（扩展）
@@ -352,33 +405,42 @@ async def apply_scope_filter(
     query,
     model: type,
     module: str,
-    scope: FactoryScope,
-    effective_factory_id: UUID | None,  # 由 resolve_effective_factory_id 计算
+    factory_scope: FactoryScope,
+    effective_factory_id: UUID | None,
+    pl_scope: ProductLineScope,
     user: User,
     db: AsyncSession,
     request: Request,
 ):
-    """统一范围过滤：先工厂，再产品线。effective_factory_id 由调用方通过
-    resolve_effective_factory_id(scope, request.query_params.get('factory_id')) 获得。"""
+    """统一范围过滤：先工厂，再产品线。不再调用旧的 apply_product_line_filter。"""
 
     # 1. 工厂过滤
     if hasattr(model, "factory_id") and effective_factory_id is not None:
         query = query.where(model.factory_id == effective_factory_id)
-    elif hasattr(model, "factory_id") and scope.accessible_factory_ids is not None:
-        if not scope.accessible_factory_ids:
-            return query.where(False)  # 无权限
-        query = query.where(model.factory_id.in_(scope.accessible_factory_ids))
+    elif hasattr(model, "factory_id") and factory_scope.accessible_factory_ids is not None:
+        if not factory_scope.accessible_factory_ids:
+            return query.where(False)
+        query = query.where(model.factory_id.in_(factory_scope.accessible_factory_ids))
 
-    # 2. 产品线过滤（复用现有逻辑）
-    query = await apply_product_line_filter(query, user, model, module, db, request)
+    # 2. 产品线过滤（使用解析后的 ProductLineScope，非旧函数）
+    field_name = PRODUCT_LINE_FIELD_MAP.get(module)
+    if field_name and hasattr(model, field_name):
+        if pl_scope.mode == "NONE":
+            return query.where(False)
+        elif pl_scope.mode == "EXPLICIT":
+            query = query.where(getattr(model, field_name).in_(pl_scope.codes))
+        # mode == "ALL" → 不过滤产品线
 
     return query
 ```
 
+**与旧代码的关系：** `apply_product_line_filter` 和 `enforce_product_line_access` 保留不删除，但新代码统一走 `apply_scope_filter`。旧函数仅在尚未迁移的 API 中继续使用，逐步替换。
+
 **关键特性：**
 - **所有查询** 都通过 `apply_scope_filter` 过滤，禁止各 service 手写 factory where
-- **detail / update / delete** 同样需要通过 `enforce_factory_access` 校验（类似现有 `enforce_product_line_access`）
+- **detail / update / delete** 同样需要通过 `enforce_factory_access` 校验
 - **`?factory_id=` 参数的解析** 通过 `resolve_effective_factory_id` 完成：集团用户传入的 `factory_id` 必须在 `scope.accessible_factory_ids` 内，越权则 403；工厂用户忽略此参数（锁定为本厂）
+- **产品线过滤完全解耦**：工厂管理员（bypass_row_level_security 但无 GROUP 权限）只能看本厂全部产品线，不能跨厂
 
 ### 4.3 创建/更新时的 factory_id 填充与校验
 
@@ -583,7 +645,7 @@ CREATE TABLE group_kpi_snapshots (
 - `accessible_factory_ids.length === 1` → 工厂用户，锁定本厂
 - `accessible_factory_ids.length === 0` → 无数据访问
 
-集团专属菜单（汇总仪表盘、工厂对比、跨厂审核、共享供应商）通过 `require_permission(Module.GROUP, VIEW)` 后端守护，前端根据 `accessible_factory_ids.length > 1` 显示/隐藏。
+集团专属菜单（汇总仪表盘、工厂对比、跨厂审核、共享供应商）通过 `require_permission(Module.GROUP, VIEW)` 后端守护，前端根据 `accessible_factory_ids.length > 1 || accessible_factory_ids === null` 显示/隐藏。
 
 ### 6.3 新增页面
 
@@ -739,10 +801,10 @@ UPDATE audit_plans SET factory_id = (
 ### 8.1 需要修改的模型
 
 完整清单见 §3.5 所有权派生矩阵。按派生来源分类：
-- **产品线派生**（~40 表）：含 `product_line_code` 的表，从产品线获取 `factory_id`
-- **父对象派生**（~8 表）：供应商子表、审核子表、连接子表等
-- **显式工厂范围**（1 表）：Supplier 从用户上下文获取
-- **不加 factory_id**（5 表）：UserDashboardLayout、AuditLog、RecommendationCache、RoleDefinition、RolePermission
+- **产品线派生**（~35 表）：含 `product_line_code` 的表（包括 RecommendationCache），从产品线获取 `factory_id`
+- **父对象派生**（~12 表）：FMEAVersion、ControlPlanVersion、供应商子表、审核子表、连接子表等，从父记录获取 `factory_id`
+- **显式工厂范围**（2 表）：Supplier、AuditChecklistTemplate，从用户上下文获取
+- **不加 factory_id**（5 表）：UserDashboardLayout、AuditLog、RoleDefinition、RolePermission、UserProductLine
 
 ### 8.2 需要修改的 API
 
@@ -759,10 +821,10 @@ UPDATE audit_plans SET factory_id = (
 
 | 文件 | 变更 |
 |------|------|
-| `core/factory_scope.py` | **新增** — 统一范围解析、过滤、factory_id 派生 |
-| `core/deps.py` | 新增 `get_factory_scope` 依赖 |
+| `core/factory_scope.py` | **新增** — FactoryScope、ProductLineScope、resolve_*、apply_scope_filter |
+| `core/deps.py` | 新增 `get_factory_scope`、`get_product_line_scope` 依赖 |
 | `core/permissions.py` | `Module` 枚举新增 `GROUP` |
-| `core/product_line_filter.py` | 整合工厂过滤逻辑 |
+| `core/product_line_filter.py` | 保留不删除，新代码不走此函数，逐步替换 |
 | `models/factory.py` | **新增** — Factory 模型 |
 | `models/product_line.py` | 加 `factory_id` |
 | `models/user.py` | 加 `factory_id` |
@@ -771,7 +833,7 @@ UPDATE audit_plans SET factory_id = (
 | `models/audit_program.py` | 加 `factory_id` |
 | `models/group_kpi_snapshot.py` | **新增** |
 | `models/supplier_shared_profile.py` | **新增** |
-| `api/auth.py` | `/auth/me` 返回 `FactoryScope` |
+| `api/auth.py` | `/auth/me` 返回 `FactoryScope` + `ProductLineScope` |
 | `api/group.py` | **新增** — 集团路由组 |
 | 所有 list API | 通过 `apply_scope_filter` 加过滤 |
 
@@ -796,13 +858,24 @@ UPDATE audit_plans SET factory_id = (
 - **集团用户可以指定 factory_id 过滤** — 断言返回正确工厂的数据
 - **集团用户指定不属于自己的 factory_id 返回 403** — 断言越权被拦截
 
-### 10.2 不变量测试
+### 10.2 bypass 与 GROUP 权限解耦测试
 
-- **factory_id 一致性** — 创建记录后，断言 `record.factory_id == record.product_line.factory_id`
-- **迁移回填完整性** — 断言所有业务表的 `factory_id` 非空且与 `product_line_code` 对应的工厂一致
+- **工厂管理员（bypass_row_level_security=True 但无 GROUP 权限）** 只能看本厂数据，不能看其他工厂
+- **集团管理员（有 GROUP ADMIN 权限）** 可以看所有工厂的数据
+- **系统管理员（bypass + GROUP ADMIN）** 可以看所有工厂 + 所有产品线
+- **产品线层：bypass 用户** 在本厂范围内看所有产品线，不跨厂
 
-### 10.3 边界测试
+### 10.3 不变量测试
+
+- **factory_id 一致性** — 创建记录后，断言 `record.factory_id` 按派生来源正确：
+  - 产品线派生：`record.factory_id == ProductLine[record.product_line_code].factory_id`
+  - 父对象派生：`record.factory_id == parent.factory_id`
+  - 供应商派生：`record.factory_id == Supplier[record.supplier_id].factory_id`
+- **迁移回填完整性** — 断言所有业务表的 `factory_id` 非空且与派生来源一致
+
+### 10.4 边界测试
 
 - 用户无 `user_factories` 且无 `factory_id` → 无数据访问
 - 用户有 `user_factories` 但 `factory_id` 为 NULL → 可访问指定工厂
 - 产品线 `code` 全局唯一约束不被违反
+- `ProductLineScope` 为 NONE 时返回空结果（非 bypass 且无产品线分配）
