@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -292,7 +293,13 @@ async def finalize_report(
     if not review.generated_report:
         raise ValueError("no report content to finalize")
 
-    # Atomic version increment
+    # Lock review row to prevent concurrent finalization race
+    await db.execute(
+        select(ManagementReview)
+        .where(ManagementReview.review_id == review.review_id)
+        .with_for_update()
+    )
+
     result = await db.execute(
         select(func.coalesce(func.max(ReviewReport.version_no), 0))
         .where(ReviewReport.review_id == review.review_id)
@@ -312,7 +319,11 @@ async def finalize_report(
     await _write_audit(db, review.review_id, user.user_id, "REPORT_FINALIZE", {
         "version_no": next_version,
     })
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise ValueError("version conflict detected, please retry")
     await db.refresh(snapshot)
     return snapshot
 

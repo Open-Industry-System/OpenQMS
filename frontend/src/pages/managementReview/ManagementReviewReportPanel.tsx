@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Card, Button, Space, Tag, Collapse, Spin, message, Modal, Empty } from "antd";
+import { Card, Button, Space, Tag, Collapse, Spin, message, Modal, Empty, Alert } from "antd";
 import {
   generateReport, saveReportDraft, finalizeReport, reopenReport,
   listReportVersions, exportReport,
@@ -30,6 +30,7 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
   const [report, setReport] = useState<ManagementReviewReport | null>(review.generated_report);
   const [versions, setVersions] = useState<ReviewReportVersion[]>([]);
   const [loading, setLoading] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState<ReviewReportVersion | null>(null);
   const readOnly = review.status === "closed" || review.report_status === "final";
 
   // Only rehydrate report data when switching reviews, not on every parent re-render
@@ -144,6 +145,19 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
     ),
   })) || [];
 
+  const handleRestorePreview = () => {
+    if (!previewVersion) return;
+    Modal.confirm({
+      title: "恢复为草稿？",
+      content: `将历史版本 v${previewVersion.version_no} 的内容恢复为当前草稿，当前草稿内容将被覆盖。`,
+      onOk: () => {
+        setReport(previewVersion.content);
+        setPreviewVersion(null);
+        message.success("已恢复为草稿");
+      },
+    });
+  };
+
   return (
     <Card title="管理评审报告">
       <Space direction="vertical" style={{ width: "100%" }}>
@@ -168,7 +182,35 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
 
         <div style={{ display: "flex", gap: 16 }}>
           <div style={{ flex: 1 }}>
-            {report ? (
+            {previewVersion ? (
+              <Spin spinning={loading}>
+                <Alert
+                  message={`正在预览历史版本 v${previewVersion.version_no}`}
+                  type="info"
+                  showIcon
+                  action={
+                    <Space>
+                      {!readOnly && canCreate("management_review") && (
+                        <Button size="small" onClick={handleRestorePreview}>恢复为草稿</Button>
+                      )}
+                      <Button size="small" onClick={() => setPreviewVersion(null)}>取消预览</Button>
+                    </Space>
+                  }
+                  style={{ marginBottom: 12 }}
+                />
+                <Collapse items={previewVersion.content.sections.map((section, index) => ({
+                  key: section.key,
+                  label: section.title,
+                  children: (
+                    <ReportSectionEditor
+                      section={section}
+                      readOnly={true}
+                      onChange={() => {}}
+                    />
+                  ),
+                }))} />
+              </Spin>
+            ) : report ? (
               <Spin spinning={loading}>
                 <Collapse items={collapseItems} />
               </Spin>
@@ -181,7 +223,7 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
               <Card title="历史版本" size="small">
                 <ReportVersionList
                   versions={versions}
-                  onSelect={(v) => setReport(v.content)}
+                  onSelect={(v) => setPreviewVersion(v)}
                 />
               </Card>
             </div>

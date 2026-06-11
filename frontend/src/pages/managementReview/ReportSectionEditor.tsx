@@ -23,6 +23,26 @@ export default function ReportSectionEditor({ section, readOnly, onChange }: Pro
           <div>{section.ai_analysis}</div>
         </div>
       )}
+      {section.findings.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <strong>关键发现：</strong>
+          <ul style={{ margin: "4px 0", paddingLeft: 20 }}>
+            {section.findings.map((f, i) => (
+              <li key={i}>{f}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {section.recommendations.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <strong>改进建议：</strong>
+          <ul style={{ margin: "4px 0", paddingLeft: 20 }}>
+            {section.recommendations.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <TextArea
         rows={4}
         value={section.manual_text}
