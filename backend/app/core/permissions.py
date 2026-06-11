@@ -47,6 +47,7 @@ class Module(StrEnum):
     PLM = "plm"
     ERP = "erp"
     SUPPLIER_RISK = "supplier_risk"
+    GROUP = "group"
 
 
 async def get_current_user(

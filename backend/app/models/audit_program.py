@@ -27,6 +27,9 @@ class AuditProgram(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     product_line_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
 
 
 class AuditChecklistTemplate(Base):
@@ -39,6 +42,9 @@ class AuditChecklistTemplate(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
