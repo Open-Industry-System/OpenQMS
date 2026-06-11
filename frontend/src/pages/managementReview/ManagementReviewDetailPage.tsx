@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { ManagementReview, ReviewOutput } from "../../types";
+import ManagementReviewReportPanel from "./ManagementReviewReportPanel";
 
 const { TextArea } = Input;
 
@@ -309,6 +310,9 @@ export default function ManagementReviewDetailPage() {
           <Table rowKey="output_id" columns={outputColumns} dataSource={outputs} pagination={false} size="small" />
         </Card>
       )}
+
+      {/* Management Review Report */}
+      <ManagementReviewReportPanel review={review} onReviewChange={setReview} />
 
       {/* Add output modal */}
       <Modal
