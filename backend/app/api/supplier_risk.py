@@ -31,7 +31,7 @@ from app.services.supplier_risk.service import (
     create_capa_from_alert,
 )
 from app.services.supplier_risk.config import list_configs, update_config
-from app.services.supplier_risk.notifier import send_notifications
+from app.services.supplier_risk.notifier import send_notifications, sanitize_channel_config
 
 
 router = APIRouter(prefix="/api/supplier-risk", tags=["supplier-risk"])
@@ -61,6 +61,14 @@ async def list_alerts(
         query = query.where(SupplierRiskAlert.product_line_code == product_line_code)
 
     count_query = select(func.count()).select_from(SupplierRiskAlert)
+    if risk_level:
+        count_query = count_query.where(SupplierRiskAlert.risk_level == risk_level)
+    if status:
+        count_query = count_query.where(SupplierRiskAlert.status == status)
+    if supplier_id:
+        count_query = count_query.where(SupplierRiskAlert.supplier_id == supplier_id)
+    if product_line_code:
+        count_query = count_query.where(SupplierRiskAlert.product_line_code == product_line_code)
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
@@ -111,6 +119,12 @@ async def handle_alert_route(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_permission(Module.SUPPLIER_RISK, PermissionLevel.EDIT)),
 ):
+    # close requires APPROVE level (manager or admin)
+    if req.action == "close":
+        from app.core.permissions import get_user_permission
+        level = await get_user_permission(user, Module.SUPPLIER_RISK, db)
+        if level < PermissionLevel.APPROVE:
+            raise HTTPException(status_code=403, detail="关闭预警需要审批权限")
     try:
         alert = await handle_alert(db, alert_id, req.action, req.note, user.user_id)
     except ValueError as e:
@@ -247,13 +261,27 @@ async def update_rule_config(
 
 # ─── Notification Channels ─────────────────────────────────────────────────────
 
-@router.get("/channels", response_model=list[ChannelResponse])
+@router.get("/channels")
 async def list_channels(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_permission(Module.SUPPLIER_RISK, PermissionLevel.VIEW)),
 ):
     result = await db.execute(select(SupplierRiskNotificationChannel).order_by(SupplierRiskNotificationChannel.created_at.desc()))
-    return result.scalars().all()
+    rows = result.scalars().all()
+    return [
+        {
+            "channel_id": str(c.channel_id),
+            "channel_type": c.channel_type,
+            "config": sanitize_channel_config(c.config),
+            "min_risk_level": c.min_risk_level,
+            "enabled": c.enabled,
+            "supplier_id": str(c.supplier_id) if c.supplier_id else None,
+            "product_line_code": c.product_line_code,
+            "created_by": str(c.created_by),
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in rows
+    ]
 
 
 @router.post("/channels", response_model=ChannelResponse)
@@ -279,6 +307,8 @@ async def create_channel(
     db.add(channel)
     await db.commit()
     await db.refresh(channel)
+    # Sanitize before returning so secret_encrypted is redacted
+    channel.config = sanitize_channel_config(channel.config)
     return channel
 
 
@@ -308,6 +338,7 @@ async def update_channel(
 
     await db.commit()
     await db.refresh(channel)
+    channel.config = sanitize_channel_config(channel.config)
     return channel
 
 

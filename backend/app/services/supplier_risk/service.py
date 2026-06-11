@@ -56,6 +56,20 @@ async def evaluate_supplier_risk(
         db, supplier_id, product_line_code, risk_score, results, failed_ids
     )
 
+    # 7. Commit so the alert is persisted before returning / notifying
+    await db.commit()
+    if alert:
+        await db.refresh(alert)
+
+    # 8. Send notifications for new/escalated high-risk alerts (non-blocking)
+    if alert and alert.risk_level in ("high", "critical"):
+        from app.services.supplier_risk.notifier import send_notifications
+        try:
+            await send_notifications(db, alert, product_line_code)
+        except Exception:
+            logger = __import__("logging").getLogger(__name__)
+            logger.exception("Notification failed for alert %s", alert.alert_id)
+
     return {
         "supplier_id": supplier_id,
         "risk_level": risk_score.risk_level,
@@ -76,7 +90,11 @@ async def evaluate_all_suppliers(
     db: AsyncSession,
     product_line_code: Optional[str] = None,
 ) -> list[dict]:
-    """Evaluate all active suppliers. Uses batch aggregate query, not N+1."""
+    """Evaluate all active suppliers. Iterates per supplier; data is gathered per supplier.
+
+    TODO: For large supplier counts, refactor to batch aggregate queries
+    (single SQL per data type grouped by supplier_id) to avoid N+1.
+    """
     # Get all active suppliers
     result = await db.execute(
         select(Supplier).where(Supplier.status == "approved")

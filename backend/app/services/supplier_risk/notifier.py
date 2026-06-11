@@ -54,10 +54,10 @@ def _get_fernet() -> Optional[Fernet]:
 
 
 def encrypt_secret(secret: str) -> str:
-    """Encrypt a webhook secret before storage."""
+    """Encrypt a webhook secret before storage. Raises if encryption unavailable."""
     fernet = _get_fernet()
     if fernet is None:
-        return secret
+        raise RuntimeError("RISK_ENCRYPTION_KEY not configured: cannot store webhook secret")
     return fernet.encrypt(secret.encode()).decode()
 
 
@@ -189,6 +189,16 @@ async def _send_webhook(channel: SupplierRiskNotificationChannel, alert: Supplie
 
     if last_error:
         logger.error("Webhook notification failed for alert %s after retries: %s", alert.alert_id, last_error)
+
+
+def sanitize_channel_config(config: dict) -> dict:
+    """Return a copy of channel config with secrets redacted for API responses."""
+    safe = dict(config)
+    if "secret_encrypted" in safe:
+        safe["secret_encrypted"] = "***"
+    if "secret" in safe:
+        safe["secret"] = "***"
+    return safe
 
 
 async def send_notifications(
