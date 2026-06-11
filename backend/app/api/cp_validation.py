@@ -66,6 +66,7 @@ async def batch_validation_summaries(
     )
 
     # Status counts per cp
+    # Join latest subquery to scope occurrences to the most recent run only
     counts_result = await db.execute(
         select(
             CPValidationFinding.cp_id,
@@ -73,10 +74,15 @@ async def batch_validation_summaries(
             sql_func.count(),
         )
         .join(
+            latest,
+            latest.c.cp_id == CPValidationFinding.cp_id,
+        )
+        .join(
             CPValidationOccurrence,
             and_(
                 CPValidationOccurrence.finding_id == CPValidationFinding.finding_id,
                 CPValidationOccurrence.present == True,
+                CPValidationOccurrence.run_id == latest.c.run_id,
             ),
         )
         .where(CPValidationFinding.cp_id.in_(req.cp_ids))
@@ -91,17 +97,21 @@ async def batch_validation_summaries(
             status_map[cp_key] = {}
         status_map[cp_key][status_val] = cnt
 
-    # Fetch run rows
-    run_result = await db.execute(select(CPValidationRun).where(CPValidationRun.cp_id.in_(req.cp_ids)))
+    # Fetch latest run rows via the subquery (already joined above)
+    run_result = await db.execute(
+        select(CPValidationRun).join(
+            subq,
+            and_(
+                CPValidationRun.cp_id == subq.c.cp_id,
+                CPValidationRun.started_at == subq.c.max_started,
+            ),
+        )
+    )
     run_rows = run_result.scalars().all()
 
-    # Pick latest run per cp_id manually (in case subquery approach is complex)
     latest_by_cp: dict[str, CPValidationRun] = {}
     for r in run_rows:
-        cp_key = str(r.cp_id)
-        existing = latest_by_cp.get(cp_key)
-        if existing is None or r.started_at > existing.started_at:
-            latest_by_cp[cp_key] = r
+        latest_by_cp[str(r.cp_id)] = r
 
     summaries: dict[str, ValidationSummaryResponse] = {}
     for cp_key, run in latest_by_cp.items():
