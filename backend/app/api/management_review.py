@@ -369,7 +369,7 @@ async def reopen_report(
     if review is None:
         raise HTTPException(status_code=404, detail="review not found")
     try:
-        await report_service.reopen_report_to_draft(db, review, user)
+        review = await report_service.reopen_report_to_draft(db, review, user)
         return schemas.management_review.ManagementReviewResponse.model_validate(review)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

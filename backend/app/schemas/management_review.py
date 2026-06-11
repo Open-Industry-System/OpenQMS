@@ -74,12 +74,12 @@ class ReportSection(BaseModel):
 
 
 class ReportContent(BaseModel):
-    generated_at: str
-    generation_model: str
-    llm_enriched: bool
-    sections: list[ReportSection]
-    executive_summary: str
-    overall_recommendations: list[str]
+    generated_at: str | None = None
+    generation_model: str | None = None
+    llm_enriched: bool = False
+    sections: list[ReportSection] = []
+    executive_summary: str | None = None
+    overall_recommendations: list[str] = []
     updated_at: str | None = None
 
     model_config = {"extra": "ignore"}

@@ -321,7 +321,7 @@ async def reopen_report_to_draft(
     db: AsyncSession,
     review: ManagementReview,
     user: "User",
-) -> None:
+) -> ManagementReview:
     if review.report_status != "final":
         raise ValueError("only finalized report can be reopened")
     if review.status == "closed":
@@ -329,6 +329,8 @@ async def reopen_report_to_draft(
     review.report_status = "draft"
     await _write_audit(db, review.review_id, user.user_id, "REPORT_REOPEN", {})
     await db.commit()
+    await db.refresh(review)
+    return review
 
 
 async def list_report_versions(
