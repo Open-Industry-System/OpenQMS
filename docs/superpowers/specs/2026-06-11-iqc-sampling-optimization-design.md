@@ -33,29 +33,37 @@
 
 按**"物料 + 供应商"**维度计算，不只按物料或供应商单独计算。
 
-| 规则 | 条件 | 方向 | 审批级别 |
-|---|---|---|---|
-| 安全缺陷 | 发现严重缺陷、法规/安全相关缺陷 | 冻结（加严锁定） | 经理 |
-| 客诉关联 | 客户投诉关联来料问题 | 加严一级 | 经理 |
-| 连续2批不合格 | 连续2批拒收 | 加严两级 | 经理 |
-| 本批拒收 | 任意1批拒收 | 加严一级 | 经理 |
-| 未关闭SCAR | 有未关闭SCAR | 加严一级 | 经理 |
-| 高PPM | 近90天PPM > 阈值(默认5000) | 加严一级 | 经理 |
-| SCAR冻结 | SCAR未关闭期间，当前已放宽 | 冻结（不允许放宽） | 经理 |
-| 放宽二级 | 连续10批合格 + 供应商评级A/B + PPM<阈值(默认1000) + 无SCAR + 无安全缺陷 | 放宽两级 | 经理 |
-| 放宽一级 | 连续5批合格 + 无SCAR + 无安全缺陷 | 放宽一级 | 经理 |
+**状态机核心原则**：AQL 调整基于**基准 AQL（base_aql，即物料默认 AQL）**进行绝对档位映射，而非基于当前 AQL 累加微调。这避免了 ISO 2859-1 状态转移中的漂移问题。
+
+| 规则ID | 条件 | 目标状态 | 审批级别 | 说明 |
+|---|---|---|---|---|
+| FREEZE_SAFETY_DEFECT | 发现安全/法规相关缺陷 | frozen | 经理 | 冻结90天，期间禁止任何放宽 |
+| FREEZE_SCAR_UNRESOLVED | SCAR未关闭且当前已放宽 | frozen | 经理 | 冻结至SCAR关闭 |
+| TIGHTEN_CUSTOMER_COMPLAINT | 关联客户投诉 | tightened | 经理 | 基准AQL左移1档 |
+| TIGHTEN_2_REJECTS | 连续2批拒收 | tightened | 经理 | 基准AQL左移2档 |
+| TIGHTEN_1_REJECT | 任意1批拒收 | tightened | 经理 | 基准AQL左移1档 |
+| TIGHTEN_OPEN_SCAR | 有未关闭SCAR | tightened | 经理 | 基准AQL左移1档 |
+| TIGHTEN_HIGH_PPM | 近90天PPM > 阈值(默认5000ppm) | tightened | 经理 | 基准AQL左移1档 |
+| RETURN_TO_NORMAL | 加严状态下连续5批合格 | normal | 工程师 | **必须先恢复正常，才能申请放宽** |
+| REDUCE_LEVEL_2 | 正常状态下连续10批合格 + 评级A/B + PPM<阈值 + 无SCAR | reduced | 经理 | 基准AQL右移2档 |
+| REDUCE_LEVEL_1 | 正常状态下连续5批合格 + 无SCAR | reduced | 经理 | 基准AQL右移1档 |
+
+**关键约束**：
+- `RETURN_TO_NORMAL` 优先级（30）高于所有放宽规则（20/10），确保加严后必须先恢复正常，不能直接跳级到放宽
+- `frozen` 状态在创建检验单时**继续使用** `profile.current_aql`（最严档位），冻结仅表示暂停规则评估，不降低检验标准
+- 所有加严/放宽/冻结的 AQL 计算均基于 `base_aql`，而非 `current_aql`
 
 ### 2.2 AQL 调整方向
 
 **注意语义**：AQL 数值越小，检验越严格；AQL 数值越大，检验越宽松。
 
-系统内部使用有序 AQL 阶梯：
+系统直接使用底层 AQL 引擎的全量支持列表（[aql_engine.py](file:///Users/sam/Documents/Code/OpenQMS/backend/app/services/aql_engine.py) 中的 `AQL_VALUES`）作为阶梯：
 
 ```
-0.40 → 0.65 → 1.0 → 1.5 → 2.5 → 4.0
+0.010, 0.015, 0.025, 0.040, 0.065, 0.10, 0.15, 0.25, 0.40, 0.65, 1.0, 1.5, 2.5, 4.0, 6.5, 10.0
 ```
 
-默认不建议超过 2.5，除非物料风险等级很低。
+动态调整通过 `min_aql` 和 `max_aql` 字段限制边界，确保高要求物料（如默认 AQL=0.15 的安全件）不会被错误地映射到 0.40。`min_aql` 默认为 `base_aql` 左侧第1档或 `base_aql` 本身（取更严者），`max_aql` 默认为 `base_aql` 右侧第2档或 2.5（取更宽者）。
 
 ---
 
@@ -68,10 +76,9 @@
 | `profile_id` | UUID | PK | |
 | `supplier_id` | UUID | FK → suppliers, 非空, UNIQUE(supplier_id, material_id) | |
 | `material_id` | UUID | FK → iqc_materials, 非空 | |
-| `base_aql` | Float | 非空, CHECK > 0 | 物料默认 AQL（基准） |
-| `current_aql` | Float | 非空, CHECK > 0 | 当前生效 AQL |
-| `min_aql` | Float | 默认 0.40 | 允许的最严格 AQL |
-| `max_aql` | Float | 默认 2.5 | 允许的最宽松 AQL |
+| `current_aql` | Float | 非空, CHECK > 0 | 当前生效 AQL（初始值=material.default_aql） |
+| `min_aql` | Float | 默认 NULL | 允许的最严格 AQL（NULL=取 material.default_aql 左侧1档） |
+| `max_aql` | Float | 默认 NULL | 允许的最宽松 AQL（NULL=取 material.default_aql 右侧2档，上限2.5） |
 | `inspection_level` | String(10) | 默认 "II" | 检验水平 |
 | `state` | String(20) | CHECK IN ('normal','tightened','reduced','frozen') | 当前状态 |
 | `frozen_until` | Date | 可空 | 冻结到期日 |
@@ -158,8 +165,8 @@
 | `consecutive_accepted_for_reduce_2` | 10 | int | 放宽两级所需连续合格批次 |
 | `consecutive_rejected_for_tighten_1` | 1 | int | 加严一级所需连续不合格批次 |
 | `consecutive_rejected_for_tighten_2` | 2 | int | 加严两级所需连续不合格批次 |
-| `ppm_threshold_high` | 5000 | float | PPM加严阈值 (‰) |
-| `ppm_threshold_low` | 1000 | float | PPM放宽阈值 (‰) |
+| `ppm_threshold_high` | 5000 | float | PPM加严阈值 (parts per million) |
+| `ppm_threshold_low` | 1000 | float | PPM放宽阈值 (parts per million) |
 | `recommendation_expiry_days` | 7 | int | 建议过期天数 |
 | `max_aql_default` | 2.5 | float | 默认最大AQL |
 | `min_aql_default` | 0.40 | float | 默认最小AQL |
@@ -173,19 +180,41 @@
 ### 4.1 AQL 阶梯映射
 
 ```python
-AQL_LADDER = [0.40, 0.65, 1.0, 1.5, 2.5, 4.0]
+from app.services.aql_engine import AQL_VALUES
 
-def adjust_aql(current_aql: float, direction: str, steps: int = 1,
-               min_aql: float = 0.40, max_aql: float = 2.5) -> float:
-    idx = min(range(len(AQL_LADDER)), key=lambda i: abs(AQL_LADDER[i] - current_aql))
-    if direction == "tighten":
-        new_idx = max(0, idx - steps)
-    elif direction == "reduce":
-        new_idx = min(len(AQL_LADDER) - 1, idx + steps)
+def get_aql_by_state(base_aql: float, state: str, min_aql: float | None = None, max_aql: float | None = None) -> float:
+    """基于基准 AQL 和状态计算目标 AQL。
+    
+    状态映射规则（基于 ISO 2859-1 转移规则）：
+    - normal:    基准 AQL（不变）
+    - tightened: 基准 AQL 左移 1 档（加严）
+    - reduced:   基准 AQL 右移 1 档（放宽一级）或右移 2 档（放宽二级）
+    - frozen:    保持当前 AQL（冻结不改变 AQL，仅阻塞放宽建议）
+    """
+    base_idx = min(range(len(AQL_VALUES)), key=lambda i: abs(AQL_VALUES[i] - base_aql))
+    
+    if state == "normal":
+        target_idx = base_idx
+    elif state == "tightened":
+        target_idx = max(0, base_idx - 1)
+    elif state == "reduced":
+        # 放宽由规则引擎通过 steps 控制
+        target_idx = min(len(AQL_VALUES) - 1, base_idx + 1)
+    elif state == "frozen":
+        # 冻结不改变 AQL，保持当前值
+        return base_aql
     else:
-        return current_aql
-    new_aql = AQL_LADDER[new_idx]
-    return max(min_aql, min(max_aql, new_aql))
+        return base_aql
+    
+    target_aql = AQL_VALUES[target_idx]
+    
+    # 应用边界约束
+    if min_aql is not None:
+        target_aql = max(min_aql, target_aql)
+    if max_aql is not None:
+        target_aql = min(max_aql, target_aql)
+    
+    return target_aql
 ```
 
 ### 4.2 规则定义
@@ -226,7 +255,6 @@ AQL_RULES = [
         "target_state": "tightened",
         "reason_cn": "关联客户投诉",
         "approval_level": "manager",
-        "aql_steps": 1,
     },
     {
         "id": "TIGHTEN_2_REJECTS",
@@ -236,7 +264,6 @@ AQL_RULES = [
         "target_state": "tightened",
         "reason_cn": "连续2批不合格",
         "approval_level": "manager",
-        "aql_steps": 2,
     },
     {
         "id": "TIGHTEN_1_REJECT",
@@ -246,7 +273,6 @@ AQL_RULES = [
         "target_state": "tightened",
         "reason_cn": "本批拒收",
         "approval_level": "manager",
-        "aql_steps": 1,
     },
     {
         "id": "TIGHTEN_OPEN_SCAR",
@@ -254,9 +280,8 @@ AQL_RULES = [
         "priority": 60,
         "condition": lambda ctx: ctx.open_scar_count > 0,
         "target_state": "tightened",
-        "reason_cn": f"有未关闭SCAR",
+        "reason_cn": "有未关闭SCAR",
         "approval_level": "manager",
-        "aql_steps": 1,
     },
     {
         "id": "TIGHTEN_HIGH_PPM",
@@ -266,38 +291,47 @@ AQL_RULES = [
         "target_state": "tightened",
         "reason_cn": "近90天PPM超过阈值",
         "approval_level": "manager",
-        "aql_steps": 1,
     },
-    # ── 放宽规则（最低优先级）──
+    # ── 恢复正常规则（加严后必须先恢复）──
+    {
+        "id": "RETURN_TO_NORMAL",
+        "category": "normal",
+        "priority": 30,
+        "condition": lambda ctx: ctx.profile_state == "tightened" and ctx.consecutive_accepted >= 5,
+        "target_state": "normal",
+        "reason_cn": "加严状态下连续5批合格，恢复正常检验",
+        "approval_level": "engineer",
+    },
+    # ── 放宽规则（最低优先级，仅在 normal 状态下可触发）──
     {
         "id": "REDUCE_LEVEL_2",
         "category": "reduce",
         "priority": 20,
         "condition": lambda ctx: (
-            ctx.consecutive_accepted >= 10
+            ctx.profile_state == "normal"
+            and ctx.consecutive_accepted >= 10
             and ctx.supplier_rating in ("A", "B")
             and (ctx.last_90d_ppm is None or ctx.last_90d_ppm < ctx.ppm_threshold_low)
             and ctx.open_scar_count == 0
             and not ctx.has_safety_defect
         ),
         "target_state": "reduced",
-        "reason_cn": "连续10批合格，供应商评级A/B，PPM达标",
+        "reason_cn": "正常状态下连续10批合格，供应商评级A/B，PPM达标",
         "approval_level": "manager",
-        "aql_steps": 2,
     },
     {
         "id": "REDUCE_LEVEL_1",
         "category": "reduce",
         "priority": 10,
         "condition": lambda ctx: (
-            ctx.consecutive_accepted >= 5
+            ctx.profile_state == "normal"
+            and ctx.consecutive_accepted >= 5
             and ctx.open_scar_count == 0
             and not ctx.has_safety_defect
         ),
         "target_state": "reduced",
-        "reason_cn": "连续5批合格，无未关闭SCAR",
+        "reason_cn": "正常状态下连续5批合格，无未关闭SCAR",
         "approval_level": "manager",
-        "aql_steps": 1,
     },
 ]
 ```
@@ -308,20 +342,22 @@ AQL_RULES = [
 每次检验判定完成(judge)后：
   1. 计算质量画像（QualitySnapshot）
   2. 加载当前 profile 状态
-  3. 按 priority 降序遍历规则
-  4. 第一个匹配的规则决定 target_state
-  5. 根据 target_state vs current_state 计算 direction
-  6. 计算 recommended_aql（使用 AQL_LADDER + steps）
-  7. 检查 min_aql / max_aql 边界
+  3. 检查是否有未处理的重复建议（同一 profile + 同一 target_state + status in (pending, forwarded)）
+     → 如有，跳过生成（幂等抑制）
+  4. 按 priority 降序遍历规则
+  5. 第一个匹配的规则决定 target_state
+  6. 如果 target_state == current_state，不生成建议（direction == "keep"）
+  7. 使用 base_aql + target_state + min/max 边界计算 recommended_aql
   8. 生成 recommendation 记录（pending）
-  9. 如果 direction == "keep"，不生成建议
 ```
 
-### 4.4 冲突解决
+### 4.4 冲突解决与幂等抑制
 
 - **高优先级规则优先**：安全缺陷（priority=100）永远覆盖放宽规则（priority=10）
 - **同类别取最严**：如果多个加严规则同时触发，取 AQL 最严格（数值最小）的结果
 - **放宽被阻塞时自动转为 keep**：如果放宽规则匹配但有 SCAR 未关闭，冻结规则优先触发
+- **重复建议抑制**：同一 profile 在已有 pending/forwarded 建议且 target_state 相同时，不生成新建议，避免每次检验判定都重复创建
+- **建议更新策略**：如果已有 pending 建议但 target_state 不同（如从 pending 的"加严"变为新的"冻结"），撤销旧建议，生成新建议
 
 ---
 
@@ -331,8 +367,8 @@ AQL_RULES = [
 
 | 状态 | 说明 | 可执行操作 |
 |---|---|---|
-| `pending` | 待审批 | engineer: approve / forward / reject |
-| `forwarded` | 已提交经理（仅放宽类建议） | manager: approve / reject |
+| `pending` | 待审批（工程师可操作） | engineer: engineer-approve / forward / engineer-reject |
+| `forwarded` | 已提交经理（仅放宽类建议） | manager: manager-approve / manager-reject |
 | `approved` | 已批准（未写入 profile） | 系统: → effective |
 | `effective` | 已生效（profile.current_aql 已更新） | 只读 |
 | `rejected` | 已拒绝 | 只读 |
@@ -341,20 +377,20 @@ AQL_RULES = [
 ### 5.2 状态流转
 
 ```
-pending ──engineer reject──► rejected
+pending ──engineer-reject──► rejected
     │
-    ├─[非放宽建议]──engineer approve──► approved ──系统生效──► effective
+    ├─[非放宽建议]──engineer-approve──► approved ──系统生效──► effective
     │
-    └─[放宽建议]──engineer forward──► forwarded ──manager approve──► approved ──► effective
-                                              ──manager reject──► rejected
+    └─[放宽建议]──forward──► forwarded ──manager-approve──► approved ──► effective
+                                   ──manager-reject──► rejected
 ```
 
 ### 5.3 审批权限矩阵
 
 | 角色 | pending | forwarded | 说明 |
 |---|---|---|---|
-| quality_engineer | ✅ approve（非放宽）<br>✅ forward（放宽）<br>✅ reject | ❌ | 加严/冻结可直接批准；放宽必须提交经理 |
-| manager | ✅ approve（所有）<br>✅ reject（所有） | ✅ approve<br>✅ reject | 经理有最终审批权 |
+| quality_engineer | ✅ engineer-approve（加严/恢复正常/冻结）<br>✅ forward（放宽）<br>✅ engineer-reject | ❌ | 加严/冻结/恢复正常可直接批准；放宽必须提交经理 |
+| manager | ✅ manager-approve / manager-reject（所有建议） | ✅ manager-approve<br>✅ manager-reject | 经理有最终审批权（含放宽和加严） |
 | admin | 所有操作 | 所有操作 | 超级权限 |
 | viewer | ❌ | ❌ | 只读 |
 
@@ -395,9 +431,11 @@ approved → effective 的自动转换：
 |---|---|---|---|
 | `/api/iqc/aql-recommendations` | GET | 待审批建议列表（按权限过滤） | viewer |
 | `/api/iqc/aql-recommendations/{id}` | GET | 建议详情（含完整证据） | viewer |
-| `/api/iqc/aql-recommendations/{id}/approve` | POST | 批准建议 | manager |
-| `/api/iqc/aql-recommendations/{id}/reject` | POST | 拒绝建议 | manager |
-| `/api/iqc/aql-recommendations/{id}/forward` | POST | 工程师提交给经理 | engineer |
+| `/api/iqc/aql-recommendations/{id}/engineer-approve` | POST | 工程师批准（加严/恢复正常/冻结） | engineer |
+| `/api/iqc/aql-recommendations/{id}/engineer-reject` | POST | 工程师拒绝 | engineer |
+| `/api/iqc/aql-recommendations/{id}/forward` | POST | 工程师提交经理（放宽类） | engineer |
+| `/api/iqc/aql-recommendations/{id}/manager-approve` | POST | 经理批准 | manager |
+| `/api/iqc/aql-recommendations/{id}/manager-reject` | POST | 经理拒绝 | manager |
 | `/api/iqc/aql-recommendations/{id}/expired` | POST | 标记过期 | engineer |
 | `/api/iqc/aql-recommendations/trigger` | POST | 手动触发规则评估 | engineer |
 | `/api/iqc/aql-recommendations/preview` | POST | 预览建议（不写入数据库） | engineer |
@@ -424,14 +462,16 @@ approved → effective 的自动转换：
 ```python
 # 在 create_inspection 中：
 if not aql_level and material_id:
-    # 1. 查询动态 AQL profile
+    # 1. 查询动态 AQL profile（frozen 状态也使用 profile.current_aql，不降级）
     profile = await aql_service.get_profile(db, supplier_id, material_id)
-    if profile and profile.state != "frozen":
+    if profile:
         aql_level = profile.current_aql
     # 2. 回退物料默认 AQL
     elif material:
         aql_level = material.default_aql
 ```
+
+**关键修正**：`frozen` 状态在创建检验单时**继续使用** `profile.current_aql`（最严档位），冻结仅表示暂停规则评估（不生成放宽建议），绝不降低检验标准。这是防止严重缺陷后检验反而变宽松的安全底线。
 
 ---
 
@@ -599,13 +639,15 @@ RuleEngine.evaluate(ctx) ──► 目标状态 + 方向
 
 | 操作 | action | changed_fields |
 |---|---|---|
-| 生成建议 | AQL_RECOMMENDATION_CREATED | 建议详情 |
-| 工程师批准 | AQL_RECOMMENDATION_APPROVED | 决定详情 |
-| 经理批准 | AQL_RECOMMENDATION_APPROVED | 决定详情 |
-| 拒绝 | AQL_RECOMMENDATION_REJECTED | 原因 |
-| AQL 生效 | AQL_ADJUSTMENT | before/after AQL + 原因 |
-| 冻结 | AQL_FROZEN | frozen_until + reason |
-| 参数修改 | AQL_CONFIG_CHANGED | key + before/after |
+| 生成建议 | AQL_REC_CREATE | 建议详情 |
+| 工程师批准 | AQL_REC_ENG_APPR | 决定详情 |
+| 经理批准 | AQL_REC_MGR_APPR | 决定详情 |
+| 拒绝 | AQL_REC_REJECT | 原因 |
+| AQL 生效 | AQL_ADJUST | before/after AQL + 原因 |
+| 冻结 | AQL_FREEZE | frozen_until + reason |
+| 参数修改 | AQL_CONFIG | key + before/after |
+
+> **注意**：审计日志 `AuditLog.action` 字段当前为 `String(20)`。所有 action 代码均控制在 20 字符以内。如需更长描述，使用 `changed_fields` 存储详情。
 
 ---
 
