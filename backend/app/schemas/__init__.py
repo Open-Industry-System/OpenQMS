@@ -18,3 +18,4 @@ from app.schemas import apqp
 from app.schemas import ppap
 from app.schemas import quality_trend
 from app.schemas import iqc_aql
+from app.schemas import supplier_risk
