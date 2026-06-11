@@ -380,3 +380,105 @@ class TestRunAllRules:
         results, failed = run_all_rules(data, configs)
         assert len(results) == 0
         assert "R99" in failed
+
+
+# ── Scorer tests ────────────────────────────────────────────────────────
+
+from app.services.supplier_risk.scorer import calculate_risk_score, RiskScore
+
+
+def _make_default_configs():
+    """All 10 rules enabled with default weights."""
+    configs = [
+        SimpleNamespace(rule_id="R01", weight=15.0, category="quality", enabled=True),
+        SimpleNamespace(rule_id="R02", weight=12.0, category="quality", enabled=True),
+        SimpleNamespace(rule_id="R03", weight=18.0, category="quality", enabled=True),
+        SimpleNamespace(rule_id="R04", weight=10.0, category="quality", enabled=True),
+        SimpleNamespace(rule_id="R05", weight=12.0, category="quality", enabled=True),
+        SimpleNamespace(rule_id="R06", weight=12.0, category="delivery", enabled=True),
+        SimpleNamespace(rule_id="R07", weight=10.0, category="delivery", enabled=True),
+        SimpleNamespace(rule_id="R08", weight=8.0, category="compliance", enabled=True),
+        SimpleNamespace(rule_id="R09", weight=8.0, category="compliance", enabled=True),
+        SimpleNamespace(rule_id="R10", weight=15.0, category="compliance", enabled=True),
+    ]
+    return configs
+
+
+def test_scorer_all_low_risk():
+    """No rules triggered → score 0, level low."""
+    configs = _make_default_configs()
+    results = [RuleResult(rule_id=f"R{i:02d}", triggered=False, score=0, detail="", category=cat)
+               for i, cat in [(1, "quality"), (2, "quality"), (3, "quality"), (4, "quality"), (5, "quality"),
+                              (6, "delivery"), (7, "delivery"), (8, "compliance"), (9, "compliance"), (10, "compliance")]]
+    score = calculate_risk_score(results, configs)
+    assert score.risk_score == 0.0
+    assert score.risk_level == "low"
+
+
+def test_scorer_quality_triggered():
+    """Only quality rules triggered → moderate score."""
+    configs = _make_default_configs()
+    results = [
+        RuleResult(rule_id="R01", triggered=True, score=50, detail="", category="quality"),
+        RuleResult(rule_id="R02", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R03", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R04", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R05", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R06", triggered=False, score=0, detail="", category="delivery"),
+        RuleResult(rule_id="R07", triggered=False, score=0, detail="", category="delivery"),
+        RuleResult(rule_id="R08", triggered=False, score=0, detail="", category="compliance"),
+        RuleResult(rule_id="R09", triggered=False, score=0, detail="", category="compliance"),
+        RuleResult(rule_id="R10", triggered=False, score=0, detail="", category="compliance"),
+    ]
+    score = calculate_risk_score(results, configs)
+    # Quality: 50*15 / (15+12+18+10+12) = 750/67 = 11.19
+    # Overall: 11.19 * 0.50 = 5.60
+    assert score.risk_score > 0
+    assert score.quality_score > 0
+    assert score.delivery_score == 0
+    assert score.compliance_score == 0
+    assert score.risk_level == "low"  # 5.6 is still low
+
+
+def test_scorer_multiple_categories():
+    """Multiple categories triggered → higher score."""
+    configs = _make_default_configs()
+    results = [
+        RuleResult(rule_id="R01", triggered=True, score=80, detail="", category="quality"),
+        RuleResult(rule_id="R02", triggered=True, score=60, detail="", category="quality"),
+        RuleResult(rule_id="R03", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R04", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R05", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R06", triggered=True, score=70, detail="", category="delivery"),
+        RuleResult(rule_id="R07", triggered=False, score=0, detail="", category="delivery"),
+        RuleResult(rule_id="R08", triggered=True, score=60, detail="", category="compliance"),
+        RuleResult(rule_id="R09", triggered=False, score=0, detail="", category="compliance"),
+        RuleResult(rule_id="R10", triggered=False, score=0, detail="", category="compliance", critical=False),
+    ]
+    score = calculate_risk_score(results, configs)
+    assert score.risk_score > 25  # Multiple categories push score up
+    assert score.quality_score > 0
+    assert score.delivery_score > 0
+    assert score.compliance_score > 0
+
+
+def test_scorer_critical_bypass():
+    """R10 critical bypass → score >= 61 even if math says lower."""
+    configs = _make_default_configs()
+    results = [
+        RuleResult(rule_id="R01", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R02", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R03", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R04", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R05", triggered=False, score=0, detail="", category="quality"),
+        RuleResult(rule_id="R06", triggered=False, score=0, detail="", category="delivery"),
+        RuleResult(rule_id="R07", triggered=False, score=0, detail="", category="delivery"),
+        RuleResult(rule_id="R08", triggered=False, score=0, detail="", category="compliance"),
+        RuleResult(rule_id="R09", triggered=False, score=0, detail="", category="compliance"),
+        RuleResult(rule_id="R10", triggered=True, score=100, detail="安全缺陷", category="compliance", critical=True),
+    ]
+    score = calculate_risk_score(results, configs)
+    # Without bypass: compliance = 100*15/31 * 0.20 = ~9.68
+    # With bypass: max(9.68, 61) = 61
+    assert score.risk_score >= 61.0
+    assert score.risk_level in ("medium", "high", "critical")
