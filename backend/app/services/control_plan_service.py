@@ -280,10 +280,11 @@ async def update_control_plan(
     await db.commit()
     await db.refresh(cp)
 
-    # Trigger background validation after successful update
-    asyncio.create_task(
-        _run_validation_background(cp.cp_id, user_id, trigger="auto_on_save")
-    )
+    # Trigger background validation only when fields actually changed
+    if changed_fields:
+        asyncio.create_task(
+            _run_validation_background(cp.cp_id, user_id, trigger="auto_on_save")
+        )
 
     return cp
 
