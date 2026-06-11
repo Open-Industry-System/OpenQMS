@@ -172,8 +172,9 @@ class CPValidationOccurrence(Base):
 def compute_finding_hash(rule_id: str, stable_key: str, key_content: str) -> str:
     """Generate SHA256 hash using stable business keys (NOT volatile item UUIDs).
 
-    stable_key: source_fmea_node_id if available, else step_no.
-    This ensures the same business issue survives item UUID regeneration on CP save.
+    stable_key: fmea_node_id|characteristic if available, else step_no|characteristic.
+    This ensures the same business issue survives item UUID regeneration on CP save,
+    and distinguishes different CP items that share the same FMEA ProcessStep.
     """
     payload = f"{rule_id}|{stable_key}|{key_content}"
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -204,7 +205,7 @@ git commit -m "feat(cp-validation): add two-table model with CHECK constraints a
 ### Task 2: Alembic Migration
 
 **Files:**
-- Create: `backend/alembic/versions/20250610_add_cp_validation_tables.py`
+- Create: `backend/alembic/versions/20260610_add_cp_validation_tables.py`
 
 - [ ] **Step 1: Find current head**
 
@@ -219,7 +220,7 @@ Set the `down_revision` variable to the current head revision ID.
 ```python
 """Add cp validation tables.
 
-Revision ID: 20250610_add_cp_validation
+Revision ID: 20260610_add_cp_validation
 Revises: <SET_FROM_HEAD>
 Create Date: 2026-06-10
 """
@@ -227,7 +228,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "20250610_add_cp_validation"
+revision = "20260610_add_cp_validation"
 down_revision = None  # SET THIS to current head
 branch_labels = None
 depends_on = None
@@ -334,7 +335,7 @@ Expected: No errors in either direction.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/alembic/versions/20250610_add_cp_validation_tables.py
+git add backend/alembic/versions/20260610_add_cp_validation_tables.py
 git commit -m "feat(cp-validation): add alembic migration with CHECK constraints"
 ```
 
@@ -461,7 +462,7 @@ git commit -m "feat(cp-validation): add Pydantic schemas for two-table model"
 
 **Key design decisions:**
 - `key_content` encodes the specific field/condition (e.g. "control_method_empty"), not item identity
-- `stable_key` is `source_fmea_node_id` if available, else `step_no` — never `item_id`
+- `stable_key` is `fmea_node_id|characteristic` if available, else `step_no|characteristic|sort_order` — never `item_id`
 - Rule failures are collected in `failed_rules` list alongside returned findings
 
 - [ ] **Step 1: Write the rule engine**
@@ -507,8 +508,15 @@ def _is_placeholder(val: str | None, placeholders: set[str]) -> bool:
 
 
 def _stable_key(item: Any) -> str:
-    """Business-stable identifier: source_fmea_node_id if available, else step_no."""
-    return (item.source_fmea_node_id or item.step_no or "")
+    """Business-stable identifier: FMEA node id + characteristic, else step_no + characteristic."""
+    base = item.source_fmea_node_id or item.step_no or ""
+    char = item.product_characteristic or item.process_characteristic or ""
+    if char:
+        return f"{base}|{char}"
+    # Fallback for items without characteristic text
+    order = str(getattr(item, "sort_order", 0))
+    return f"{base}|#{order}"
+
 
 
 # ─── Rule R001: Control method coverage ────────────────────────────────────
@@ -572,7 +580,7 @@ def rule_r003_fmea_consistency(items: list[Any], fmea_graph: dict | None) -> tup
                 category="consistency",
                 title="FMEA源工序已删除",
                 description=f"工序 {item.step_no or '?'} 关联的FMEA节点已不存在",
-                stable_key=item.source_fmea_node_id,
+                stable_key=_stable_key(item),
                 key_content="node_deleted",
                 item_id=str(item.item_id),
             ))
@@ -590,7 +598,7 @@ def rule_r003_fmea_consistency(items: list[Any], fmea_graph: dict | None) -> tup
                 category="consistency",
                 title="工序与FMEA不一致",
                 description=f"工序号/名称与FMEA源不同: CP=({cp_step_no}/{cp_name}) vs FMEA=({fmea_step_no}/{fmea_name})",
-                stable_key=item.source_fmea_node_id,
+                stable_key=_stable_key(item),
                 key_content="mismatch",
                 item_id=str(item.item_id),
             ))
@@ -687,18 +695,35 @@ class FakeItem:
         self.special_class = kwargs.get("special_class", "")
         self.evaluation_method = kwargs.get("evaluation_method", "")
         self.source_fmea_node_id = kwargs.get("source_fmea_node_id", None)
+        self.product_characteristic = kwargs.get("product_characteristic", "")
+        self.process_characteristic = kwargs.get("process_characteristic", "")
+        self.sort_order = kwargs.get("sort_order", 0)
 
 
 # ─── stable_key ─────────────────────────────────────────────────────────────
 
-def test_stable_key_uses_fmea_node_id_first():
-    item = FakeItem(source_fmea_node_id="node-1", step_no="10")
-    assert _stable_key(item) == "node-1"
+def test_stable_key_uses_fmea_node_id_and_characteristic():
+    item = FakeItem(source_fmea_node_id="node-1", step_no="10", product_characteristic="尺寸A")
+    assert _stable_key(item) == "node-1|尺寸A"
 
 
-def test_stable_key_falls_back_to_step_no():
-    item = FakeItem(source_fmea_node_id=None, step_no="20")
-    assert _stable_key(item) == "20"
+def test_stable_key_falls_back_to_step_no_and_sort_order():
+    item = FakeItem(source_fmea_node_id=None, step_no="20", sort_order=3)
+    assert _stable_key(item) == "20|#3"
+
+
+def test_stable_key_distinguishes_same_fmea_node_different_characteristic():
+    """Two CP items sharing the same FMEA ProcessStep but different characteristics
+    must produce different stable_key (and thus different findings)."""
+    item_a = FakeItem(source_fmea_node_id="node-1", product_characteristic="尺寸A", control_method="")
+    item_b = FakeItem(source_fmea_node_id="node-1", product_characteristic="尺寸B", control_method="")
+    assert _stable_key(item_a) != _stable_key(item_b)
+
+    findings_a, _ = rule_r001_control_method([item_a])
+    findings_b, _ = rule_r001_control_method([item_b])
+    assert len(findings_a) == 1
+    assert len(findings_b) == 1
+    assert findings_a[0].stable_key != findings_b[0].stable_key
 
 
 # ─── R001 ───────────────────────────────────────────────────────────────────
@@ -709,7 +734,7 @@ def test_r001_detects_empty_control_method():
     assert len(findings) == 1
     assert findings[0].rule_id == "R001"
     assert findings[0].severity == "error"
-    assert findings[0].stable_key == "n1"
+    assert findings[0].stable_key == "n1|"
 
 
 def test_r001_ignores_valid_control_method():
@@ -1671,26 +1696,83 @@ async def test_summary_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_validate_returns_200(override_dependencies):
-    """POST /validate with auth and mock DB returns 200."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.post(f"/api/control-plans/{uuid.uuid4()}/validate")
-    # With mock DB, engine will fail — but auth check passes first.
-    # We verify the endpoint is reachable (not 401/403).
-    assert resp.status_code != status.HTTP_401_UNAUTHORIZED
-    assert resp.status_code != status.HTTP_403_FORBIDDEN
+    """POST /validate with auth — mock engine to assert 200 response structure."""
+    from unittest.mock import patch as mock_patch
+    mock_run = MagicMock()
+    mock_run.run_id = uuid.uuid4()
+    mock_run.status = "completed"
+    mock_run.error_count = 1
+    mock_run.warning_count = 0
+    mock_run.info_count = 0
+
+    with mock_patch(
+        "app.services.cp_validation.engine.CPValidationEngine.validate",
+        new=AsyncMock(return_value=mock_run),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.post(f"/api/control-plans/{uuid.uuid4()}/validate")
+
+    assert resp.status_code == status.HTTP_200_OK
+    body = resp.json()
+    assert body["status"] == "completed"
+    assert body["error_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_validate_returns_409_when_already_running(override_dependencies):
+    """POST /validate when a run is already in progress → 409."""
+    from unittest.mock import patch as mock_patch
+    from app.services.cp_validation.engine import ValidationAlreadyRunning
+
+    with mock_patch(
+        "app.services.cp_validation.engine.CPValidationEngine.validate",
+        new=AsyncMock(side_effect=ValidationAlreadyRunning()),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.post(f"/api/control-plans/{uuid.uuid4()}/validate")
+
+    assert resp.status_code == status.HTTP_409_CONFLICT
 
 
 @pytest.mark.asyncio
 async def test_results_returns_200(override_dependencies):
-    """GET /validation-results with auth returns 200 (empty list from mock DB)."""
-    # Patch the DB execute to return empty list
+    """GET /validation-results with auth — mock DB to assert response structure."""
     from unittest.mock import patch as mock_patch
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.get(f"/api/control-plans/{uuid.uuid4()}/validation-results")
-    assert resp.status_code != status.HTTP_401_UNAUTHORIZED
-    assert resp.status_code != status.HTTP_403_FORBIDDEN
+
+    mock_row = MagicMock()
+    mock_row.finding_id = uuid.uuid4()
+    mock_row.occurrence_id = uuid.uuid4()
+    mock_row.rule_id = "R001"
+    mock_row.severity = "error"
+    mock_row.status = "open"
+    mock_row.title = "控制方法缺失"
+    mock_row.description = "test"
+    mock_row.present = True
+    mock_row.fmea_node_ids = []
+
+    mock_result = MagicMock()
+    mock_result.mappings.return_value = [mock_row]
+
+    with mock_patch(
+        "app.api.cp_validation.get_db",
+        return_value=MagicMock(
+            execute=AsyncMock(return_value=mock_result),
+            commit=AsyncMock(),
+            rollback=AsyncMock(),
+            close=AsyncMock(),
+        ),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.get(f"/api/control-plans/{uuid.uuid4()}/validation-results")
+
+    assert resp.status_code == status.HTTP_200_OK
+    body = resp.json()
+    assert isinstance(body, list)
+    if body:
+        assert body[0]["rule_id"] == "R001"
 
 
 @pytest.mark.asyncio
@@ -1708,7 +1790,7 @@ async def test_viewer_cannot_validate(override_dependencies_view):
 cd backend && SECRET_KEY=test python -m pytest tests/test_cp_validation_api.py -v
 ```
 
-Expected: 6 tests PASS.
+Expected: 8 tests PASS.
 
 - [ ] **Step 3: Commit**
 
@@ -2281,15 +2363,15 @@ const [validationMap, setValidationMap] = useState<Record<string, ValidationSumm
 
 - [ ] **Step 3: Fetch summaries when control plans load**
 
-Add a `useEffect` that fetches summaries after `controlPlans` data is available:
+Add a `useEffect` that fetches summaries after `data` is available:
 
 ```tsx
 useEffect(() => {
-  if (!controlPlans?.items?.length) return;
+  if (!data?.length) return;
   const fetchSummaries = async () => {
     const map: Record<string, ValidationSummary> = {};
     await Promise.all(
-      controlPlans.items.map(async (cp: ControlPlan) => {
+      data.map(async (cp: ControlPlan) => {
         try {
           const summary = await getValidationSummary(cp.cp_id);
           map[cp.cp_id] = summary;
@@ -2301,7 +2383,7 @@ useEffect(() => {
     setValidationMap(map);
   };
   fetchSummaries();
-}, [controlPlans]);
+}, [data]);
 ```
 
 - [ ] **Step 4: Add column to Table**
@@ -2352,7 +2434,7 @@ git commit -m "feat(cp-validation): add validation status badge to ControlPlanLi
 cd backend && SECRET_KEY=test python -m pytest tests/test_cp_validation_rules.py tests/test_cp_validation_engine.py tests/test_cp_validation_api.py -v
 ```
 
-Expected: All tests PASS (14 + 4 + 6 = 24 total).
+Expected: All tests PASS (15 + 4 + 8 = 27 total).
 
 - [ ] **Step 2: Run frontend build**
 
