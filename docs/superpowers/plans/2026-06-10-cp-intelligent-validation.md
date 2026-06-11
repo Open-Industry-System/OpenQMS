@@ -832,7 +832,7 @@ def test_run_all_rules_returns_all_findings():
 cd backend && SECRET_KEY=test python -m pytest tests/test_cp_validation_rules.py -v
 ```
 
-Expected: 14 tests PASS.
+Expected: 15 tests PASS.
 
 - [ ] **Step 4: Commit**
 
@@ -1669,10 +1669,46 @@ def override_dependencies_view():
 
 @pytest.fixture
 def override_dependencies_results():
-    """Mock DB that returns one validation result row for /validation-results."""
+    """Mock DB returning rows for list-results + finding + occurrence (reject/resolve)."""
+    from datetime import datetime, timezone
+
+    fake_finding_id = uuid.uuid4()
+    fake_occ_id = uuid.uuid4()
+    fake_run_id = uuid.uuid4()
+    fake_cp_id = uuid.uuid4()
+
+    # Fake ORM objects (reject/resolve need these, not just row dicts)
+    fake_finding = MagicMock()
+    fake_finding.finding_id = fake_finding_id
+    fake_finding.cp_id = fake_cp_id
+    fake_finding.finding_hash = "abc123"
+    fake_finding.rule_id = "R001"
+    fake_finding.severity = "error"
+    fake_finding.category = "completeness"
+    fake_finding.status = "open"
+    fake_finding.resolved_by = None
+    fake_finding.resolved_at = None
+    fake_finding.created_at = datetime.now(timezone.utc)
+
+    fake_occ = MagicMock()
+    fake_occ.occurrence_id = fake_occ_id
+    fake_occ.run_id = fake_run_id
+    fake_occ.finding_id = fake_finding_id
+    fake_occ.cp_id = fake_cp_id
+    fake_occ.validation_type = "rule"
+    fake_occ.title = "控制方法缺失"
+    fake_occ.description = "test"
+    fake_occ.affected_items = []
+    fake_occ.fmea_node_ids = []
+    fake_occ.suggestion = None
+    fake_occ.suggestion_data = None
+    fake_occ.present = True
+    fake_occ.created_at = datetime.now(timezone.utc)
+
+    # Row for list-results join query (mappings)
     mock_row = MagicMock()
-    mock_row.finding_id = uuid.uuid4()
-    mock_row.occurrence_id = uuid.uuid4()
+    mock_row.finding_id = fake_finding_id
+    mock_row.occurrence_id = fake_occ_id
     mock_row.rule_id = "R001"
     mock_row.severity = "error"
     mock_row.status = "open"
@@ -1681,14 +1717,37 @@ def override_dependencies_results():
     mock_row.present = True
     mock_row.fmea_node_ids = []
 
-    mock_result = MagicMock()
-    mock_result.mappings.return_value = [mock_row]
+    # Different result objects per call type
+    list_result = MagicMock()
+    list_result.mappings.return_value = [mock_row]
+
+    finding_result = MagicMock()
+    finding_result.scalar_one_or_none.return_value = fake_finding
+
+    occ_result = MagicMock()
+    occ_result.scalar_one.return_value = fake_occ
+
+    call_count = 0
+
+    async def mock_execute(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        # Call 1 (list-results): join query -> mappings
+        # Call 2+ (reject/resolve): finding select -> scalar_one_or_none
+        # Call 3+ (reject/resolve): occurrence select -> scalar_one
+        # We distinguish by checking if the SQL contains CPValidationFinding vs CPValidationOccurrence
+        sql_str = str(args[0]) if args else ""
+        if "cp_validation_findings" in sql_str and "cp_validation_occurrences" not in sql_str:
+            return finding_result
+        if "cp_validation_occurrences" in sql_str and "ORDER BY" in sql_str:
+            return occ_result
+        return list_result
 
     async def mock_get_db():
         db = MagicMock()
         db.commit = AsyncMock()
         db.rollback = AsyncMock()
-        db.execute = AsyncMock(return_value=mock_result)
+        db.execute = AsyncMock(side_effect=mock_execute)
         db.get = AsyncMock(return_value=None)
         return db
 
