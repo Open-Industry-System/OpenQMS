@@ -354,37 +354,40 @@ git commit -m "test(multi-factory): scope resolution unit tests — factory, pro
 
 ---
 
-### Task 6: Alembic Migration — All Schema Changes
+### Task 6: Alembic Migration Part 1 — Schema + Nullable Columns + Backfill
 
 **Files:**
-- Create: `backend/alembic/versions/035_add_factory_tables.py`
+- Create: `backend/alembic/versions/035_add_factory_tables_nullable.py`
 
-This is the big migration task. The migration must:
+This migration adds all schema changes with `factory_id` columns as **NULLABLE** and backfills data. It does NOT set columns to NOT NULL — that happens in Part 2 after all API/service code writes `factory_id` correctly.
+
+The migration must:
 1. Create `factories` table
 2. Insert seed factory (code='DEFAULT')
-3. Add `factory_id` to `product_lines` (nullable → backfill → not null)
-4. Add `factory_id` to `users` (nullable)
-5. Create `user_factories` table
-6. Backfill `user_factories` for all existing users
-7. Add `factory_id` to all ~50 business tables (nullable → backfill → not null)
-8. Create `supplier_shared_profiles` table
-9. Add `factory_id` + `shared_profile_id` to `suppliers`
-10. Change `supplier_no` unique constraint to composite `(factory_id, supplier_no)`
-11. Create `audit_program_target_factories` table
-12. Create `group_kpi_snapshots` table
-13. Add `factory_id` to `audit_programs` and `audit_checklist_templates`
+3. Add `factory_id` to `product_lines` as **NULLABLE** → backfill with seed factory UUID
+4. Add `factory_id` to `users` as **NULLABLE** → backfill all users with seed factory UUID
+5. Create `user_factories` table → backfill for all existing users
+6. Add `factory_id` to all ~50 business tables as **NULLABLE** → backfill per §3.5 derivation matrix
+7. Create `supplier_shared_profiles` table
+8. Add `factory_id` + `shared_profile_id` to `suppliers` as **NULLABLE** → backfill
+9. Drop `supplier_no` unique constraint, add composite `(factory_id, supplier_no)` unique constraint
+10. Create `audit_program_target_factories` table
+11. Create `group_kpi_snapshots` table
+12. Add `factory_id` to `audit_programs` and `audit_checklist_templates` as **NULLABLE** → backfill
 
-The backfill logic must follow §3.5 derivation matrix (product-line-derived, parent-derived, supplier-derived, explicit). For background sync (ERP/MES ingestion), `factory_id` must come from `ERPConnection.factory_id` / `MESConnection.factory_id` — this is handled in the service layer, not the migration.
+**Why NULLABLE first:** Between this migration and Task 17 (NOT NULL enforcement), the existing create/update APIs will still work because `factory_id` is nullable. Once Tasks 4-12 add `populate_factory_id` to all services, we can safely enforce NOT NULL.
+
+The backfill logic must follow §3.5 derivation matrix. For background sync (ERP/MES ingestion), `factory_id` must come from `ERPConnection.factory_id` / `MESConnection.factory_id` — handled in the service layer, not the migration.
 
 - [ ] **Step 1: Generate migration**
 
-Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && alembic revision -m "add_factory_tables"`
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && alembic revision -m "add_factory_tables_nullable"`
 
 Note: Use `--rev-id` prefix if you need to control the revision ID. Alembic does not support `-o` for output filename.
 
 - [ ] **Step 2: Write the full upgrade/downgrade migration**
 
-Write all CREATE TABLE, ALTER TABLE ADD COLUMN, UPDATE backfill, ALTER COLUMN SET NOT NULL, and constraint changes. Follow the spec §7.1-7.2 exactly. Use `op.execute()` for data backfills.
+Write all CREATE TABLE, ALTER TABLE ADD COLUMN (NULLABLE), UPDATE backfill, DROP/ADD constraint changes. **Do NOT** add ALTER COLUMN SET NOT NULL in this migration — that comes in Task 17.
 
 For each backfill category, use the correct derivation path:
 - Product-line-derived tables: `UPDATE ... SET factory_id = (SELECT factory_id FROM product_lines WHERE product_lines.code = table.product_line_code)`
@@ -410,18 +413,20 @@ async def check():
         print('factories:', r.scalar())
         r = await s.execute(text('SELECT count(*) FROM user_factories'))
         print('user_factories:', r.scalar())
+        r = await s.execute(text("SELECT count(*) FROM fmea_documents WHERE factory_id IS NOT NULL"))
+        print('fmea_documents with factory_id:', r.scalar())
 
 asyncio.run(check())
 ```
-Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python scripts/verify_migration.py`
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python scripts/verify_migration.py && rm scripts/verify_migration.py`
 
-Expected: `factories: 1` (seed), `user_factories: N` (one per existing user)
+Expected: `factories: 1` (seed), `user_factories: N` (one per existing user), `fmea_documents with factory_id: N` (all backfilled)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/alembic/versions/035_add_factory_tables.py
-git commit -m "feat(multi-factory): alembic migration — factories table, factory_id on all tables, backfill"
+git add backend/alembic/versions/035_add_factory_tables_nullable.py
+git commit -m "feat(multi-factory): migration part 1 — nullable factory_id columns + backfill"
 ```
 
 ---
@@ -573,11 +578,12 @@ git commit -m "feat(multi-factory): add AuditProgramTargetFactory association mo
 For each API file, add `scope: RequestScope = Depends(get_request_scope)` to list endpoints, then use `scope.effective_factory_id` and `scope.pl_scope` with `apply_scope_filter`.
 
 This is the most labor-intensive task. Each API needs:
-1. Import `RequestScope`, `get_request_scope`, `apply_scope_filter`
-2. Add `scope: RequestScope = Depends(get_request_scope)` to list endpoint signatures (replaces any manual `factory_id` query param + resolve logic)
-3. Replace `apply_product_line_filter` calls with `apply_scope_filter(query, Model, "module", scope.factory_scope, scope.effective_factory_id, scope.pl_scope, scope.user, db, request)`
-4. Add `populate_factory_id` on create endpoints
-5. Add `validate_factory_invariant` on create/update endpoints
+1. Import `RequestScope` from `app.core.deps` and `get_request_scope` from `app.core.deps`
+2. Import `apply_scope_filter`, `populate_factory_id`, `validate_factory_invariant` from `app.core.factory_scope`
+3. Add `scope: RequestScope = Depends(get_request_scope)` to list endpoint signatures (replaces any manual `factory_id` query param + resolve logic)
+4. Replace `apply_product_line_filter` calls with `apply_scope_filter(query, Model, "module", scope.factory_scope, scope.effective_factory_id, scope.pl_scope, scope.user, db, request)`
+5. Add `populate_factory_id` on create endpoints (using `scope` for default factory)
+6. Add `validate_factory_invariant` on create/update endpoints
 
 - [ ] **Step 1: Migrate FMEA list + create endpoints**
 
@@ -624,6 +630,75 @@ Same pattern as Task 11, applied to the remaining ~15 API modules.
 ```bash
 git add backend/app/api/
 git commit -m "feat(multi-factory): apply scope filter to all remaining APIs + background sync factory_id"
+```
+
+### Task 17: Alembic Migration Part 2 — NOT NULL Enforcement
+
+**Files:**
+- Create: `backend/alembic/versions/036_factory_id_not_null_enforcement.py`
+
+This migration runs **after** Tasks 4-12 have added `populate_factory_id` to all services. It converts all `factory_id` columns from NULLABLE to NOT NULL.
+
+**Why two migrations:** Between Part 1 (nullable + backfill) and this migration, existing create/update APIs work because `factory_id` is nullable. Once all services populate `factory_id` via `populate_factory_id()`, we can safely enforce NOT NULL without breaking inserts.
+
+- [ ] **Step 1: Generate migration**
+
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && alembic revision -m "factory_id_not_null_enforcement"`
+
+- [ ] **Step 2: Write ALTER COLUMN SET NOT NULL for all factory_id columns**
+
+For each table that has `factory_id`:
+```python
+op.alter_column('fmea_documents', 'factory_id', nullable=False)
+op.alter_column('capa_eightd', 'factory_id', nullable=False)
+# ... all ~50 business tables
+op.alter_column('suppliers', 'factory_id', nullable=False)
+op.alter_column('product_lines', 'factory_id', nullable=False)
+```
+
+Also add any missing indexes:
+```python
+op.create_index('ix_fmea_documents_factory_id', 'fmea_documents', ['factory_id'])
+# ... one index per table with factory_id
+```
+
+- [ ] **Step 3: Run migration**
+
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && alembic upgrade head`
+
+- [ ] **Step 4: Verify all factory_id columns are NOT NULL**
+
+```python
+# scripts/verify_not_null.py
+import asyncio
+from sqlalchemy import text, inspect
+from app.database import engine
+
+async def check():
+    async with engine.connect() as conn:
+        # Check that no factory_id column allows NULL
+        result = await conn.execute(text("""
+            SELECT table_name, column_name, is_nullable
+            FROM information_schema.columns
+            WHERE column_name = 'factory_id' AND is_nullable = 'YES'
+            AND table_schema = 'public'
+        """))
+        nullable = result.fetchall()
+        if nullable:
+            print("WARNING: These factory_id columns are still nullable:")
+            for row in nullable:
+                print(f"  {row[0]}.{row[1]}")
+        else:
+            print("All factory_id columns are NOT NULL ✓")
+
+asyncio.run(check())
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add backend/alembic/versions/036_factory_id_not_null_enforcement.py
+git commit -m "feat(multi-factory): migration part 2 — enforce NOT NULL on factory_id columns"
 ```
 
 ---
@@ -885,13 +960,15 @@ cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.main import 
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null' EXIT
 sleep 3
 # Login as admin
 TOKEN=$(curl -s http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"Admin@2026"}' | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 # Check /auth/me returns factory_scope
 curl -s http://localhost:8000/api/auth/me -H "Authorization: Bearer $TOKEN" | python -m json.tool
 # Stop server
-kill %1
+kill "$SERVER_PID" 2>/dev/null
 ```
 
 - [ ] **Step 3: Login as factory user, verify data is filtered to their factory**
