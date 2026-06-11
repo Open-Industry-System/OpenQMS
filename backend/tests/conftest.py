@@ -5,6 +5,10 @@ Provides:
 - admin_user: a persisted User with admin role
 - plm_connection: a persisted PLMConnection linked to admin_user
 """
+import os
+
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only")
+
 import uuid
 
 import pytest_asyncio
@@ -35,13 +39,20 @@ async def db():
     works without actually persisting data past the test boundary.
     """
     async with _test_session_factory() as session:
-        async with session.begin():
+        # Start an outer transaction and roll it back after the test.
+        # session.begin() would commit on context exit, so we manage the
+        # transaction manually to guarantee rollback.
+        tx = await session.begin()
+        try:
             # Make session.commit() a flush-only no-op inside the test
             async def _flush_only():
                 await session.flush()
 
             session.commit = _flush_only
             yield session
+        finally:
+            if tx.is_active:
+                await tx.rollback()
 
 
 @pytest_asyncio.fixture

@@ -39,9 +39,9 @@ def calculate_risk_score(results: list, configs: list) -> RiskScore:
 
     overall = sum(category_scores[cat] * w for cat, w in CATEGORY_WEIGHTS.items())
 
-    # Critical bypass
+    # Critical bypass: any critical rule triggered pushes score to at least "high"
     if any(r.triggered and r.critical for r in results):
-        overall = max(overall, 61.0)
+        overall = max(overall, 80.0)
 
     level = "low"
     for threshold, label in RISK_THRESHOLDS:
