@@ -119,6 +119,8 @@ class ReportSection(BaseModel):
     manual_text: str
     data_snapshot: dict | str | list | int | float | bool | None
 
+    model_config = {"extra": "ignore"}
+
 
 class ReportContent(BaseModel):
     generated_at: str
@@ -128,6 +130,8 @@ class ReportContent(BaseModel):
     executive_summary: str
     overall_recommendations: list[str]
     updated_at: str | None = None
+
+    model_config = {"extra": "ignore"}
 
 
 class ReportGenerateRequest(BaseModel):
