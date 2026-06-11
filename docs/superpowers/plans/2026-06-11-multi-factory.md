@@ -39,7 +39,7 @@
 - `backend/app/models/supplier.py` — Add `factory_id`, `shared_profile_id`, change unique constraint
 - `backend/app/models/audit_program.py` — Add `factory_id` to AuditProgram, AuditChecklistTemplate
 - `backend/app/core/permissions.py` — Add `Module.GROUP`
-- `backend/app/core/deps.py` — Add `get_factory_scope`, `get_product_line_scope` dependencies
+- `backend/app/core/deps.py` — Add `RequestScope` dataclass, `get_request_scope` dependency
 - `backend/app/api/auth.py` — Return FactoryScope + permissions.group in /auth/me
 - `backend/app/services/erp_ingestion.py` — Use connection.factory_id for background sync
 - `backend/app/services/mes_ingestion.py` — Use connection.factory_id for background sync
@@ -253,43 +253,48 @@ In `backend/app/models/supplier.py`:
 
 Implement `FactoryScope`, `ProductLineScope`, `resolve_factory_scope`, `resolve_product_line_scope`, `resolve_effective_factory_id`, `apply_scope_filter`, `populate_factory_id`, and `validate_factory_invariant`. Reference spec §4.1-4.3.
 
-- [ ] **Step 7: Add dependency functions to `backend/app/core/deps.py`**
+- [ ] **Step 7: Add a unified `RequestScope` dependency to `backend/app/core/deps.py`**
+
+Create a single dependency that resolves factory scope, effective factory ID, and product line scope in one call. This avoids multiple `Depends` that redundantly query the user, and ensures endpoints don't need to manually resolve `effective_factory_id` or call `resolve_product_line_scope`.
 
 ```python
-from app.core.factory_scope import (
-    FactoryScope, ProductLineScope,
-    resolve_factory_scope, resolve_product_line_scope, resolve_effective_factory_id,
-)
-from app.models.factory import UserFactory
+from dataclasses import dataclass
+from uuid import UUID
 
-async def get_user_factory_ids(user: User, db: AsyncSession) -> list[UUID]:
-    result = await db.execute(
-        select(UserFactory.factory_id).where(UserFactory.user_id == user.user_id)
-    )
-    return [row[0] for row in result.all()]
+@dataclass
+class RequestScope:
+    """Pre-resolved scope for the current request. One object, one Depends."""
+    factory_scope: FactoryScope
+    effective_factory_id: UUID | None
+    pl_scope: ProductLineScope
+    user: User
 
-async def get_factory_scope(
+async def get_request_scope(
     request: Request,
     factory_id: UUID | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> tuple[FactoryScope, UUID | None]:
+) -> RequestScope:
+    # 1. Factory scope
     user_factory_ids = await get_user_factory_ids(user, db)
     group_level = await get_user_permission(user, Module.GROUP, db)
     has_group_admin = group_level >= PermissionLevel.ADMIN
     factory_scope = resolve_factory_scope(user, user_factory_ids, has_group_admin)
     effective_factory_id = resolve_effective_factory_id(factory_scope, factory_id)
-    return factory_scope, effective_factory_id
 
-async def get_product_line_scope(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> ProductLineScope:
+    # 2. Product line scope
     user_pl_codes = await get_user_product_line_codes(user, db)
-    # factory_scope needed for context but not directly used in PL scope resolution
-    # (bypass check is on user.role_definition, not factory scope)
-    return resolve_product_line_scope(user, user_pl_codes, None, db)
+    pl_scope = resolve_product_line_scope(user, user_pl_codes, factory_scope, db)
+
+    return RequestScope(
+        factory_scope=factory_scope,
+        effective_factory_id=effective_factory_id,
+        pl_scope=pl_scope,
+        user=user,
+    )
 ```
+
+API endpoints then receive a single `scope: RequestScope = Depends(get_request_scope)` and use `scope.effective_factory_id`, `scope.pl_scope`, etc.
 
 - [ ] **Step 8: Verify all imports work**
 
@@ -471,6 +476,8 @@ In the `/auth/me` endpoint response, add:
 }
 ```
 
+**Note on field naming:** The backend uses snake_case (`accessible_factory_ids`). The frontend should use camelCase (`accessibleFactoryIds`) as per existing project conventions. The auth response schema should use `alias` in Pydantic v2 (`Field(alias="accessibleFactoryIds")`) OR the frontend should do the conversion in `authStore.ts`. Pick one approach and be consistent — the recommended approach is: keep the backend as snake_case, add `model_config = ConfigDict(populate_by_name=True)` to the schema, and convert to camelCase in the frontend store.
+
 - [ ] **Step 2: Update frontend auth types**
 
 In `frontend/src/types/index.ts`, add `Factory` interface and update the auth response type.
@@ -513,9 +520,7 @@ FMEAVersion (from fmea_id), ControlPlanVersion (from cp_id), SupplierCertificati
 
 MES/PLM/ERP sub-tables (SyncJob, PushOutbox from connection_id).
 
-- [ ] **Step 4: Add factory_id to AuditChecklistTemplate** (explicit scope)
-
-- [ ] **Step 5: Verify all models import**
+- [ ] **Step 4: Verify all models import**
 
 Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.models import *; print('OK')"`
 
@@ -565,15 +570,14 @@ git commit -m "feat(multi-factory): add AuditProgramTargetFactory association mo
 - Modify: `backend/app/api/dashboard.py`
 - Modify: `backend/app/api/supplier.py`
 
-For each API file, add `factory_scope, effective_factory_id = Depends(get_factory_scope)` and `pl_scope: ProductLineScope = Depends(get_product_line_scope)` to list endpoints, then wrap queries with `apply_scope_filter`.
+For each API file, add `scope: RequestScope = Depends(get_request_scope)` to list endpoints, then use `scope.effective_factory_id` and `scope.pl_scope` with `apply_scope_filter`.
 
 This is the most labor-intensive task. Each API needs:
-1. Import `apply_scope_filter`, `resolve_effective_factory_id`, etc.
-2. Add dependencies to list endpoints
-3. Replace `apply_product_line_filter` calls with `apply_scope_filter`
-4. Add `factory_id` query parameter and `resolve_effective_factory_id` call
-5. Add `populate_factory_id` on create endpoints
-6. Add `validate_factory_invariant` on create/update endpoints
+1. Import `RequestScope`, `get_request_scope`, `apply_scope_filter`
+2. Add `scope: RequestScope = Depends(get_request_scope)` to list endpoint signatures (replaces any manual `factory_id` query param + resolve logic)
+3. Replace `apply_product_line_filter` calls with `apply_scope_filter(query, Model, "module", scope.factory_scope, scope.effective_factory_id, scope.pl_scope, scope.user, db, request)`
+4. Add `populate_factory_id` on create endpoints
+5. Add `validate_factory_invariant` on create/update endpoints
 
 - [ ] **Step 1: Migrate FMEA list + create endpoints**
 
@@ -713,18 +717,24 @@ git commit -m "feat(multi-factory): factory switcher and group menu in sidebar"
 **Files:**
 - Modify: `frontend/src/api/client.ts` (or equivalent Axios instance file)
 
-Instead of modifying 30+ frontend list pages individually, inject `factory_id` automatically via Axios request interceptor:
+Instead of modifying 30+ frontend list pages individually, inject `factory_id` automatically via Axios request interceptor — but only on business list APIs, not on auth/group/factory management endpoints:
 
-- When `currentFactoryId` is set in authStore, automatically append `factory_id=<value>` to all GET request query params.
+- When `currentFactoryId` is set in authStore, automatically append `factory_id=<value>` to GET request query params.
 - POST/PUT/PATCH requests do NOT inject `factory_id` — the backend derives it from `product_line_code` or `scope.default_factory_id`.
+- Exclude `/api/auth/`, `/api/group/`, `/api/product-lines`, and `/api/factories` from injection.
 
 - [ ] **Step 1: Add Axios request interceptor**
 
 ```typescript
 // In the Axios instance setup
+const FACTORY_ID_EXCLUDE_PREFIXES = ['/api/auth/', '/api/group/', '/api/product-lines', '/api/factories'];
+
 apiClient.interceptors.request.use((config) => {
   const currentFactoryId = useAuthStore.getState().currentFactoryId;
-  if (currentFactoryId && config.method === 'get') {
+  const isGetRequest = config.method === 'get';
+  const isExcluded = FACTORY_ID_EXCLUDE_PREFIXES.some(prefix => config.url?.startsWith(prefix));
+
+  if (currentFactoryId && isGetRequest && !isExcluded) {
     config.params = config.params || {};
     config.params.factory_id = currentFactoryId;
   }
@@ -865,16 +875,23 @@ git commit -m "test(multi-factory): factory isolation, bypass/GROUP decoupling, 
 
 ### Task 22: Integration Verification
 
-- [ ] **Step 1: Start backend and verify no import/startup errors**
+- [ ] **Step 1: Verify no import/startup errors**
 
 ```bash
 cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.main import app; print('App loaded OK')"
 ```
 
-- [ ] **Step 2: Login as admin, verify /auth/me returns factory_scope and permissions.group**
+- [ ] **Step 2: Start backend in background and verify endpoints**
 
 ```bash
-curl -s http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"Admin@2026"}' | python -m json.tool
+cd /Users/sam/Documents/Code/OpenQMS/backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+sleep 3
+# Login as admin
+TOKEN=$(curl -s http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"Admin@2026"}' | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+# Check /auth/me returns factory_scope
+curl -s http://localhost:8000/api/auth/me -H "Authorization: Bearer $TOKEN" | python -m json.tool
+# Stop server
+kill %1
 ```
 
 - [ ] **Step 3: Login as factory user, verify data is filtered to their factory**
