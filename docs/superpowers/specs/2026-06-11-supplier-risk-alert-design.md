@@ -74,10 +74,13 @@ class RuleResult:
 
 ### 3.3 风险评分计算
 
+每个维度只计算有触发规则的加权均值。若某维度无规则触发，该维度得 0 分。
+
 ```
-quality_score   = Σ(R01..R05 triggered scores × weights) / Σ(R01..R05 weights) × 100
-delivery_score  = Σ(R06..R07 triggered scores × weights) / Σ(R06..R07 weights) × 100
-compliance_score = Σ(R08..R10 triggered scores × weights) / Σ(R08..R10 weights) × 100
+# 仅对触发规则求加权均值；若无触发则维度分=0
+quality_score   = Σ(triggered R01..R05 scores × weights) / Σ(triggered R01..R05 weights)  (if any triggered, else 0)
+delivery_score  = Σ(triggered R06..R07 scores × weights) / Σ(triggered R06..R07 weights)  (if any triggered, else 0)
+compliance_score = Σ(triggered R08..R10 scores × weights) / Σ(triggered R08..R10 weights) (if any triggered, else 0)
 
 综合分 = quality_score × 0.50 + delivery_score × 0.30 + compliance_score × 0.20
 ```
@@ -109,11 +112,10 @@ compliance_score = Σ(R08..R10 triggered scores × weights) / Σ(R08..R10 weight
 | delivery_score | FLOAT | 交付维度分 |
 | compliance_score | FLOAT | 合规维度分 |
 | rule_results | JSONB | 各规则执行结果快照 |
-| alert_type | VARCHAR(30) | 首次/升级/定期复查 |
+| alert_type | VARCHAR(20) | initial/escalated/routine |
 | status | VARCHAR(20) | open/acknowledged/action_taken/ignored/closed |
 | handled_by | UUID FK → users | 处置人 |
 | handled_at | TIMESTAMP | 处置时间 |
-| handle_action | VARCHAR(20) | acknowledge/ignore/create_scar/create_capa |
 | handle_note | TEXT | 处置备注 |
 | linked_scar_id | UUID FK → supplier_scars | 关联 SCAR |
 | linked_capa_id | UUID FK → capa_eightd | 关联 CAPA |
@@ -213,7 +215,7 @@ async def send_notifications(db, alert, product_line_code) -> None
 ### 5.4 预警去重与升级
 
 - 同一供应商同一天仅生成一条预警（唯一约束）
-- 如果供应商风险等级升级（中→高、高→极高），更新已有预警的 `alert_type` 为 `escalated`，保留历史 `rule_results` 快照
+- 如果供应商风险等级升级（中→高、高→极高），更新已有预警的 `alert_type` 为 `escalated`
 - 降级不自动关闭预警，需人工确认
 
 ### 5.5 通知渠道
