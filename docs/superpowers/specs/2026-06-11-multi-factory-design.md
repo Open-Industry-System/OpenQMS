@@ -222,7 +222,7 @@ CREATE TABLE user_factories (
 | **协作** | CollaborationSession | 产品线派生 | `product_line_code` (nullable) |
 | **控制计划校验** | CPValidationRun, CPValidationFinding, CPValidationOccurrence | 产品线派生 | `product_line_code → factory_id` |
 | **用户偏好** | UserDashboardLayout | **不加 factory_id** | 用户偏好，跨工厂通用 |
-| **系统表** | AuditLog, RecommendationCache | **不加 factory_id** | 系统级日志，按 `user_id` 归属 |
+| **系统表** | AuditLog | **不加 factory_id** | 系统级日志，按 `user_id` 归属 |
 | **角色权限** | RoleDefinition, RolePermission, UserProductLine | **不加 factory_id** | 系统级配置 |
 
 #### 关键决策
@@ -542,16 +542,26 @@ async def list_documents(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. 解析工厂范围
+    # 1. 解析工厂范围（需要 GROUP ADMIN 权限判断）
     user_factory_ids = await get_user_factory_ids(user, db)
-    scope = resolve_factory_scope(user, user_factory_ids)
-    effective_factory_id = resolve_effective_factory_id(scope, factory_id)
+    group_level = await get_user_permission(user, Module.GROUP, db)
+    has_group_admin = group_level >= PermissionLevel.ADMIN
+    factory_scope = resolve_factory_scope(user, user_factory_ids, has_group_admin)
+    effective_factory_id = resolve_effective_factory_id(factory_scope, factory_id)
 
-    # 2. 统一过滤
+    # 2. 解析产品线范围
+    user_pl_codes = await get_user_product_line_codes(user, db)
+    pl_scope = resolve_product_line_scope(user, user_pl_codes, factory_scope, db)
+
+    # 3. 统一过滤
     query = select(FMEADocument)
-    query = await apply_scope_filter(query, FMEADocument, "fmea", scope, effective_factory_id, user, db, request)
+    query = await apply_scope_filter(
+        query, FMEADocument, "fmea",
+        factory_scope, effective_factory_id, pl_scope,
+        user, db, request,
+    )
 
-    # 3. 执行查询...
+    # 4. 执行查询...
 ```
 
 - 所有已有 list API 通过 `apply_scope_filter` 自动加工厂 + 产品线过滤
@@ -630,22 +640,31 @@ CREATE TABLE group_kpi_snapshots (
 
 ```json
 {
-  "accessible_factory_ids": ["uuid-1", "uuid-2"] | null,
-  "default_factory_id": "uuid-1" | null,
+  "factory_scope": {
+    "accessible_factory_ids": ["uuid-1", "uuid-2"] | null,
+    "default_factory_id": "uuid-1" | null
+  },
   "factories": [
     {"id": "uuid-1", "code": "BJ-01", "name": "北京工厂"},
     {"id": "uuid-2", "code": "SH-02", "name": "上海工厂"}
-  ]
+  ],
+  "permissions": {
+    "group": 1
+  }
 }
 ```
 
-前端判断逻辑：
-- `accessible_factory_ids === null` → 超级管理员，显示全部
-- `accessible_factory_ids.length > 1` → 集团用户，显示工厂切换器
-- `accessible_factory_ids.length === 1` → 工厂用户，锁定本厂
-- `accessible_factory_ids.length === 0` → 无数据访问
+前端判断逻辑（基于 `/auth/me` 返回值，不重建权限逻辑）：
+- `factory_scope.accessible_factory_ids === null` → GROUP ADMIN，显示全部
+- `factory_scope.accessible_factory_ids.length > 1` → 集团用户，显示工厂切换器
+- `factory_scope.accessible_factory_ids.length === 1` → 工厂用户，锁定本厂
+- `factory_scope.accessible_factory_ids.length === 0` → 无数据访问
 
-集团专属菜单（汇总仪表盘、工厂对比、跨厂审核、共享供应商）通过 `require_permission(Module.GROUP, VIEW)` 后端守护，前端根据 `accessible_factory_ids.length > 1 || accessible_factory_ids === null` 显示/隐藏。
+集团专属菜单（汇总仪表盘、工厂对比、跨厂审核、共享供应商）同时满足两个条件才显示：
+- **后端**：`require_permission(Module.GROUP, VIEW)` 守护
+- **前端**：`permissions.group >= PermissionLevel.VIEW && (accessible_factory_ids === null || accessible_factory_ids.length > 1)`
+
+这样"多工厂但无 GROUP VIEW 权限"的用户不会看到菜单，避免前端显示后 403。
 
 ### 6.3 新增页面
 
@@ -781,7 +800,7 @@ UPDATE audit_plans SET factory_id = (
 # 从 connection_id → Connection.factory_id 派生
 
 # ── 10. 系统表（不加 factory_id）──
-# UserDashboardLayout, AuditLog, RecommendationCache, RoleDefinition, RolePermission
+# UserDashboardLayout, AuditLog, RoleDefinition, RolePermission, UserProductLine
 ```
 
 ### 7.3 向后兼容
