@@ -298,14 +298,16 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 6. ~~API 端点~~ ✅ POST /dashboard/quality-trend/interpret（手动解读）
 7. ~~Dashboard 集成~~ ✅ Widget 注册 + 布局持久化 + 前端类型定义
 
-**Phase 4 已完成汇总 (截至 2026-06-10)**:
+**Phase 4 已完成汇总 (截至 2026-06-11)**:
 - [x] MES 集成连接器 — 9 张表 + Mock/REST 双连接器 + Outbox 推送 + 33 并发测试
 - [x] PLM 集成连接器 — BOM 查询/导入 FMEA + Part→SC 特殊特性确认；9 张表；4 页前端；46 + 11 测试
+- [x] ERP 集成连接器 — 商务与供应链事实源；12 张表；4 阶段 DAG 同步；6 页前端；30 测试
 - [x] 8D 报告 AI 草拟 — LLM 辅助填充 D2-D8；结构化/段落双格式；限流 + 审计日志
 - [x] 质量趋势 AI 解读 — SPC/CAPA/FMEA 三源聚合 + 规则摘要 + 按需 LLM 深度解读 + Widget 集成
 - [x] 自定义看板（拖拽式）— react-grid-layout + 18 种 widget + 用户级 layout 存储 + 产品线过滤
 - [x] 经验教训智能推送 — 5 源适配器 + 融合排序 + 权限隔离缓存 + 前端 Modal；14 单元测试
 - [x] 控制计划智能校验 — 4 规则引擎 + 两表模型（findings/occurrences）+ 批量汇总 API + 前端面板/徽章 + 自动触发；30 测试
+- [x] IQC 抽样方案智能优化 — 规则引擎（10 条规则）+ 多级审批 + 质量画像 + PPM/SCAR/安全缺陷触发；4 张新表；4 页前端；18 单元测试
 
 **Phase 4 IQC 抽样方案智能优化已完成 (2026-06-11)**:
 1. ~~Alembic merge + 数据库迁移~~ ✅ 4 张新表 + 2 新列 + 配置种子
