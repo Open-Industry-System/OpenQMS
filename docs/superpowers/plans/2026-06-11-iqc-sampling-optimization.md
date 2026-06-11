@@ -30,7 +30,7 @@
 |---|---|
 | `backend/app/models/__init__.py` | Import + export new models |
 | `backend/app/models/iqc_inspection.py` | Add `has_safety_defect`, `linked_customer_complaint_id` fields |
-| `backend/app/api/iqc.py` | Add ~15 new AQL optimization endpoints |
+| `backend/app/api/iqc.py` | Add ~19 new AQL optimization endpoints |
 | `backend/app/services/iqc_inspection_service.py` | Trigger rule eval after judge; inject dynamic AQL on create |
 | `backend/app/main.py` | Register AQL expiry cleanup coroutine |
 
@@ -78,9 +78,16 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 revision = "033_add_iqc_aql_optimization"
-down_revision = "032_add_erp_tables"
+down_revision = None  # Will be set after merge; see note below
 branch_labels = None
 depends_on = None
+
+# NOTE: This repo has two heads at 032 (032_add_erp_tables and
+# 032_lessons_learned_cache). Before running this migration, create a
+# merge migration first:
+#   alembic merge -m "merge_032_heads" 032_add_erp_tables 032_lessons_learned_cache
+# Then set down_revision to that merge revision ID.
+# Alternatively, set down_revision to whichever head is current after merging.
 
 
 def upgrade() -> None:
@@ -313,7 +320,7 @@ import uuid
 from datetime import datetime, date
 from typing import Optional
 
-from sqlalchemy import String, Float, DateTime, ForeignKey, Date
+from sqlalchemy import String, Float, DateTime, ForeignKey, Date, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -387,7 +394,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, DateTime, Boolean, func
+from sqlalchemy import String, DateTime, Boolean, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -397,7 +404,7 @@ from app.database import Base
 class IqcAqlConfig(Base):
     __tablename__ = "iqc_aql_configs"
     __table_args__ = (
-        sa.UniqueConstraint("config_key", "product_line_code", name="uq_config_key_product_line"),
+        UniqueConstraint("config_key", "product_line_code", name="uq_config_key_product_line"),
         # Note: partial indexes for NULL product_line_code created in migration
     )
 
@@ -445,6 +452,7 @@ git commit -m "feat(iqc-aql): add ORM models for AQL optimization"
 
 **Files:**
 - Create: `backend/app/schemas/iqc_aql.py`
+- Modify: `backend/app/schemas/__init__.py`
 
 - [ ] **Step 1: Write all schemas**
 
@@ -458,15 +466,19 @@ Create `backend/app/schemas/iqc_aql.py` with request/response schemas for:
 
 All schemas use `model_config = {"from_attributes": True}`. Fields match the spec exactly (Section 3 & 6).
 
-- [ ] **Step 2: Verify schemas load**
+- [ ] **Step 2: Update `backend/app/schemas/__init__.py`**
+
+Add `from app.schemas import iqc_aql` at end of file (after `from app.schemas import quality_trend`).
+
+- [ ] **Step 3: Verify schemas load**
 
 Run: `cd backend && python -c "from app.schemas.iqc_aql import AqlProfileResponse; print('OK')"`
 Expected: `OK`
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add backend/app/schemas/iqc_aql.py
+git add backend/app/schemas/iqc_aql.py backend/app/schemas/__init__.py
 git commit -m "feat(iqc-aql): add Pydantic schemas for AQL optimization"
 ```
 
@@ -488,13 +500,13 @@ Implement in this file:
 6. `ProfileManager` class with `get_profile()`, `get_or_create_profile()`, `apply_recommendation()` methods
 7. `RecommendationManager` class with `generate_recommendation()`, `approve()`, `reject()`, `forward()`, `expire_stale()` methods
 8. `AqlConfigManager` class with `get()`, `get_int()`, `get_float()`, `set()` methods
-9. `AqlService` facade class with `on_inspection_judged()` method
+9. `AqlService` facade class with `on_inspection_judged()`, `get_profile()`, and `expire_stale_recommendations()` methods (delegates to `RecommendationManager.expire_stale()`)
 
 All methods follow the spec's execution flow (Section 4.3), approval state machine (Section 5), and data flow (Section 7.4).
 
 - [ ] **Step 2: Verify service loads**
 
-Run: `cd backend && python -c "from app.services.iqc_aql_service import AqlService, RuleEngine; print('OK')"`
+Run: `cd backend && python -c "from app.services.iqc_aql_service import AqlService, RuleEngine, RecommendationManager; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 3: Commit**
@@ -522,14 +534,15 @@ Add the following route groups (all under existing `router = APIRouter(prefix="/
 - `PUT /aql-profiles/{id}` — update profile params
 - `GET /aql-profiles/{id}/history` — quality snapshot trend
 
-**Recommendation routes** (8 endpoints):
+**Recommendation routes** (9 endpoints):
 - `GET /aql-recommendations` — list recommendations (paginated, filterable by status/direction)
 - `GET /aql-recommendations/{id}` — recommendation detail
-- `POST /aql-recommendations/{id}/engineer-approve` — engineer approve (non-放宽 only)
+- `POST /aql-recommendations/{id}/engineer-approve` — engineer approve (非放宽 only)
 - `POST /aql-recommendations/{id}/engineer-reject` — engineer reject
 - `POST /aql-recommendations/{id}/forward` — forward to manager (放宽 only)
 - `POST /aql-recommendations/{id}/manager-approve` — manager approve
 - `POST /aql-recommendations/{id}/manager-reject` — manager reject
+- `POST /aql-recommendations/{id}/expired` — mark as expired (engineer)
 - `POST /aql-recommendations/trigger` — manual trigger rule evaluation
 - `POST /aql-recommendations/preview` — preview recommendation (no DB write)
 
@@ -547,7 +560,7 @@ Permission guards use `require_permission(Module.IQC, ...)` with appropriate lev
 - [ ] **Step 2: Verify routes register**
 
 Run: `cd backend && python -c "from app.api.iqc import router; print(len(router.routes), 'routes')"`
-Expected: Route count increased by ~18
+Expected: Route count increased by ~19
 
 - [ ] **Step 3: Commit**
 
@@ -566,7 +579,7 @@ git commit -m "feat(iqc-aql): add API endpoints for AQL optimization"
 
 - [ ] **Step 1: Add dynamic AQL injection to `create_inspection`**
 
-In `iqc_inspection_service.create_inspection()`, before the AQL auto-calculate block, add:
+In `iqc_inspection_service.create_inspection()`, replace the AQL auto-calculate block with:
 
 ```python
     # Dynamic AQL injection from optimization profile
@@ -576,9 +589,14 @@ In `iqc_inspection_service.create_inspection()`, before the AQL auto-calculate b
         try:
             profile = await aql_svc.get_profile(db, supplier_id, material_id)
             if profile:
+                # frozen 状态继续使用 profile.current_aql，不降级
                 aql_level = profile.current_aql
         except Exception:
             pass  # Fall through to material default
+
+    # Fallback: use material default AQL if no profile set AQL
+    if not aql_level and material:
+        aql_level = material.default_aql
 ```
 
 - [ ] **Step 2: Add rule evaluation trigger to `judge_inspection`**
@@ -617,6 +635,15 @@ Add after the ERP sync loop, before `yield`:
                 logger.error("[aql_optimization] expiry error: %s", e)
 
     aql_expiry_task = asyncio.create_task(_aql_expiry_loop())
+```
+
+Where `AqlService.expire_stale_recommendations()` is a `@staticmethod` that delegates to `RecommendationManager.expire_stale()`:
+
+```python
+class AqlService:
+    @staticmethod
+    async def expire_stale_recommendations(db) -> int:
+        return await RecommendationManager.expire_stale(db)
 ```
 
 Add `aql_expiry_task` to the cancellation block at the end of lifespan.
@@ -755,7 +782,7 @@ export interface AqlConfig {
 
 API client with functions for all endpoints:
 - `listAqlProfiles`, `createAqlProfile`, `getAqlProfile`, `updateAqlProfile`, `getAqlProfileHistory`
-- `listAqlRecommendations`, `getAqlRecommendation`, `engineerApproveRecommendation`, `engineerRejectRecommendation`, `forwardRecommendation`, `managerApproveRecommendation`, `managerRejectRecommendation`, `triggerAqlEvaluation`, `previewAqlRecommendation`
+- `listAqlRecommendations`, `getAqlRecommendation`, `engineerApproveRecommendation`, `engineerRejectRecommendation`, `forwardRecommendation`, `managerApproveRecommendation`, `managerRejectRecommendation`, `markRecommendationExpired`, `triggerAqlEvaluation`, `previewAqlRecommendation`
 - `getAqlQualitySnapshot`, `getAqlQualitySnapshotTrend`
 - `listAqlConfigs`, `updateAqlConfig`, `resetAqlConfigs`
 
