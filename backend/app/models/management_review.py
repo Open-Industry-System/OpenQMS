@@ -21,6 +21,10 @@ class ManagementReview(Base):
     status: Mapped[str] = mapped_column(
         String(20), default="draft", nullable=False
     )
+    report_status: Mapped[str] = mapped_column(
+        String(20), default="none", nullable=False
+    )
+    generated_report: Mapped[dict | None] = mapped_column(JSONB, nullable=True, deferred=True)
     product_line_code: Mapped[str | None] = mapped_column(
         String(20),
         ForeignKey("product_lines.code", ondelete="SET NULL"),
@@ -52,6 +56,13 @@ class ManagementReview(Base):
     creator = relationship("User", foreign_keys=[created_by])
     outputs = relationship(
         "ReviewOutput", back_populates="review", cascade="all, delete-orphan"
+    )
+    reports = relationship(
+        "ReviewReport",
+        back_populates="review",
+        cascade="all, delete-orphan",
+        order_by="ReviewReport.version_no.desc()",
+        lazy="select",
     )
 
 
