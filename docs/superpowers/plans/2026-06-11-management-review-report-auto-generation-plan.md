@@ -113,6 +113,18 @@ reports = relationship(
 )
 ```
 
+- [ ] **Step 2b: 在模型 registry 中注册 ReviewReport**
+
+修改 `backend/app/models/__init__.py`：
+
+在 `from app.models.management_review import ManagementReview, ReviewOutput` 行后添加：
+
+```python
+from app.models.management_review_report import ReviewReport
+```
+
+在 `__all__` 数组中 `"ManagementReview", "ReviewOutput"` 后添加 `"ReviewReport"`。
+
 - [ ] **Step 3: 编写 Alembic 迁移**
 
 创建 `backend/alembic/versions/20260611_add_review_reports.py`：
@@ -132,7 +144,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision: str = "20260611_add_review_reports"
-down_revision: Union[str, None] = "97d677a35bd0"
+down_revision: Union[str, None] = "034_add_supplier_risk_tables"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -187,6 +199,8 @@ Expected: `INFO  [alembic.runtime.migration] Context impl PostgresqlImpl. ... Ru
 git add backend/app/models/management_review.py
 
 git add backend/app/models/management_review_report.py
+
+git add backend/app/models/__init__.py
 
 git add backend/alembic/versions/20260611_add_review_reports.py
 
@@ -358,7 +372,10 @@ async def _enrich_with_llm(
     for section in sections:
         try:
             prompt = _build_section_prompt(section, review)
-            response = await llm_provider.complete(prompt, LLM_SECTION_SCHEMA)
+            response = await asyncio.wait_for(
+                llm_provider.complete(prompt, LLM_SECTION_SCHEMA),
+                timeout=settings.REPORT_LLM_TIMEOUT,
+            )
             section["ai_analysis"] = str(response.get("analysis", "")).strip()
             section["findings"] = [str(x) for x in response.get("findings", []) if x]
             section["recommendations"] = [str(x) for x in response.get("recommendations", []) if x]
@@ -390,18 +407,21 @@ async def _generate_executive_summary(
     llm_provider: "LLMProvider | None",
 ) -> tuple[str, list[str]]:
     if llm_provider is None:
-        return "（未配置 AI 服务，未生成执行摘要）", []
+        return _fallback_executive_summary(review), []
     try:
-        response = await llm_provider.complete(
-            _build_executive_prompt(sections, review),
-            {
-                "type": "object",
-                "properties": {
-                    "executive_summary": {"type": "string"},
-                    "overall_recommendations": {"type": "array", "items": {"type": "string"}},
+        response = await asyncio.wait_for(
+            llm_provider.complete(
+                _build_executive_prompt(sections, review),
+                {
+                    "type": "object",
+                    "properties": {
+                        "executive_summary": {"type": "string"},
+                        "overall_recommendations": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["executive_summary", "overall_recommendations"],
                 },
-                "required": ["executive_summary", "overall_recommendations"],
-            },
+            ),
+            timeout=settings.REPORT_LLM_TIMEOUT,
         )
         return (
             str(response.get("executive_summary", "")).strip(),
@@ -409,7 +429,13 @@ async def _generate_executive_summary(
         )
     except Exception as e:
         logger.warning("LLM executive summary failed: %s", e)
-        return "（AI 执行摘要生成失败，已回退）", []
+        return _fallback_executive_summary(review), []
+
+
+def _fallback_executive_summary(review: ManagementReview) -> str:
+    if not review.data_package:
+        return "【提示】当前尚未汇总数据，报告内容基于现有手工输入生成。建议在「汇总数据」后重新生成以获得完整报告。"
+    return "（未配置 AI 服务或 AI 生成失败，已回退到规则生成的章节内容。）"
 ```
 
 - [ ] **Step 4: 实现 `generate_report`**
@@ -422,6 +448,8 @@ async def generate_report(
     llm_provider: "LLMProvider | None" = None,
     use_llm: bool = True,
 ) -> dict:
+    # Explicitly load deferred JSONB columns to avoid MissingGreenlet in async mode
+    await db.refresh(review, ["data_package", "manual_inputs", "generated_report"])
     sections = _build_sections(review.data_package, review.manual_inputs)
     llm_enriched = False
     if use_llm and llm_provider is not None:
@@ -461,6 +489,7 @@ async def save_report_draft(
     content: dict,
     user: "User",
 ) -> dict:
+    await db.refresh(review, ["generated_report"])
     if review.report_status == "final":
         raise ValueError("report is finalized, reopen before editing")
     if review.status == "closed":
@@ -481,6 +510,7 @@ async def finalize_report(
     review: ManagementReview,
     user: "User",
 ) -> ReviewReport:
+    await db.refresh(review, ["generated_report"])
     if review.report_status != "draft":
         raise ValueError("only draft report can be finalized")
     if review.status == "closed":
@@ -591,7 +621,8 @@ class ReportSection(BaseModel):
     findings: list[str]
     recommendations: list[str]
     manual_text: str
-    data_snapshot: dict | None
+    # data_snapshot mirrors the raw source value; it can be a scalar from manual_inputs
+    data_snapshot: dict | str | list | int | float | bool | None
 
 
 class ReportContent(BaseModel):
@@ -689,6 +720,7 @@ async def generate_report(
         content = await report_service.generate_report(
             db, review, user, llm_provider=llm_provider, use_llm=req.use_llm
         )
+        await db.commit()
         return {"report_status": review.report_status, "generated_report": content}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -706,6 +738,7 @@ async def save_report_draft(
         raise HTTPException(status_code=404, detail="review not found")
     try:
         content = await report_service.save_report_draft(db, review, req.generated_report.model_dump(), user)
+        await db.commit()
         return {"report_status": review.report_status, "generated_report": content}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1019,52 +1052,107 @@ git commit -m "test(management-review-report): add service tests"
 
 - [ ] **Step 1: 创建 API 测试文件**
 
+创建 `backend/tests/test_management_review_report_api.py`：
+
 ```python
+import uuid
 import pytest
 from fastapi import status
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.main import app
-from app.models.management_review import ManagementReview
-from app.models.role import RoleDefinition
+from app.database import get_db
+from app.core.permissions import get_current_user, Module, PermissionLevel
+from app.models.user import User
 
 
-async def _auth_client(role_key: str):
-    # Use existing test auth helpers or create token via /api/auth/login
-    # Simplified: assume a fixture provides AsyncClient with auth
-    pass
+@pytest.fixture
+def override_dependencies():
+    async def mock_get_db():
+        db = MagicMock()
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+        db.execute = AsyncMock(return_value=MagicMock())
+        db.get = AsyncMock(return_value=None)
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        return db
+
+    async def mock_get_current_user():
+        user = MagicMock(spec=User)
+        user.user_id = uuid.uuid4()
+        user.username = "manager"
+        user.role = "manager"
+        user.role_id = uuid.uuid4()
+        user.is_active = True
+        user.role_definition = MagicMock()
+        user.role_definition.bypass_row_level_security = True
+        return user
+
+    app.dependency_overrides[get_db] = mock_get_db
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.CREATE)):
+        yield
+    app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
-async def test_viewer_cannot_generate_report(db, admin_user):
-    # Create review
+async def test_generate_report_unauthenticated():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/management-reviews/{uuid.uuid4()}/report/generate", json={"use_llm": False})
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_generate_report_authenticated(override_dependencies):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/management-reviews/{uuid.uuid4()}/report/generate", json={"use_llm": False})
+    assert resp.status_code == status.HTTP_404_NOT_FOUND
+```
+
+- [ ] **Step 2: 补全权限与状态测试**
+
+按照 `test_capa_draft_api.py` 模式，使用 `patch("app.core.permissions.get_user_permission")` 分别返回 VIEW / CREATE / APPROVE 级别，验证：
+- viewer (VIEW) 调用 generate → 403
+- engineer (CREATE) 调用 generate / save-draft → 200（配合 mock db 返回 review）
+- engineer (CREATE) 调用 finalize → 403
+- manager (APPROVE) 调用 finalize / reopen → 200
+
+Mock `db.get` 返回不同状态的 `ManagementReview` 对象以验证：
+- `closed` 状态调用 save-draft → 400
+- `report_status=final` 调用 generate → 400
+
+- [ ] **Step 3: 编写版本号递增测试**
+
+使用真实数据库 fixture `db` + `admin_user`，创建 ManagementReview，调用 service 生成报告、定稿两次，验证 `review_reports.version_no` 依次为 1、2。
+
+```python
+@pytest.mark.asyncio
+async def test_finalize_increments_version(db, admin_user):
+    from app.services import management_review_report_service as report_service
     review = ManagementReview(
-        doc_no="MR-API-001",
-        title="API Test",
+        doc_no="MR-API-V001",
+        title="Version Test",
         review_date="2026-06-11",
         chair_person_id=admin_user.user_id,
         created_by=admin_user.user_id,
         status="data_collected",
+        report_status="none",
     )
     db.add(review)
     await db.flush()
-    # TODO: implement with actual auth fixture
+
+    await report_service.generate_report(db, review, admin_user, llm_provider=None)
+    snap1 = await report_service.finalize_report(db, review, admin_user)
+    assert snap1.version_no == 1
+
+    await report_service.reopen_report_to_draft(db, review, admin_user)
+    snap2 = await report_service.finalize_report(db, review, admin_user)
+    assert snap2.version_no == 2
 ```
-
-- [ ] **Step 2: 实现测试辅助函数**
-
-参考 `backend/tests/test_capa_draft_api.py` 的认证模式，使用 `AsyncClient(app=app, base_url="http://test")` 和测试用户登录获取 token。
-
-- [ ] **Step 3: 编写完整测试用例**
-
-完整覆盖：
-- `data_collected` 前可生成但带提示
-- `closed` 状态不能保存草稿
-- viewer 不能调用 generate / save-draft / finalize
-- engineer 可 generate / save-draft，不可 finalize
-- manager/admin 可 finalize / reopen
-- finalize 后 `review_reports.version_no` 递增
-- LLM 失败仍返回规则生成内容
 
 - [ ] **Step 4: 运行测试**
 
@@ -1298,7 +1386,12 @@ import {
   listReportVersions, exportReport,
 } from "../../api/managementReview";
 import { usePermission } from "../../hooks/usePermission";
-import type { ManagementReview, ManagementReviewReport, ReviewReportVersion } from "../../types";
+import type {
+  ManagementReview,
+  ManagementReviewReport,
+  ManagementReviewReportSection,
+  ReviewReportVersion,
+} from "../../types";
 import ReportSectionEditor from "./ReportSectionEditor";
 import ReportVersionList from "./ReportVersionList";
 
@@ -1320,12 +1413,17 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
   const [loading, setLoading] = useState(false);
   const readOnly = review.status === "closed" || review.report_status === "final";
 
+  // Only rehydrate report data when switching reviews, not on every parent re-render
   useEffect(() => {
     setReport(review.generated_report);
+  }, [review.review_id]);
+
+  // Load finalized versions when status becomes final or review changes
+  useEffect(() => {
     if (review.report_status === "final") {
       loadVersions();
     }
-  }, [review.review_id, review.report_status, review.generated_report]);
+  }, [review.review_id, review.report_status]);
 
   const loadVersions = async () => {
     const data = await listReportVersions(review.review_id);
@@ -1583,10 +1681,15 @@ git commit -m "feat(management-review-report): complete auto report generation m
 ## Self-Review Checklist
 
 - [x] **Spec coverage**: 所有设计文档中的章节（数据模型、13 章节、服务方法、API、前端、测试）都有对应任务
-- [x] **Placeholder scan**: 没有 TBD/TODO；API 测试中的 TODO 已在 Step 2 说明参考文件
+- [x] **Placeholder scan**: 没有 TBD/TODO；所有测试代码已给出完整模板
 - [x] **Type consistency**: `ManagementReviewReport` / `ReportSection` 类型在后端 schema、前端 types、服务 JSONB 结构中一致
 - [x] **State preconditions**: 主状态和报告状态的限制在服务层和 API 层都有体现
 - [x] **Version semantics**: 只有 `finalize` 创建 `review_reports` 记录，保存草稿不创建
+- [x] **Transaction safety**: `generate` / `save-draft` API 已添加 `await db.commit()`
+- [x] **Async deferred loading**: 服务方法已添加 `await db.refresh(...)` 加载 deferred JSONB 列
+- [x] **Migration head**: `down_revision` 指向当前实际 head `034_add_supplier_risk_tables`
+- [x] **Model registry**: 已在 `app/models/__init__.py` 中注册 `ReviewReport`
+- [x] **Frontend state loss**: `useEffect` 依赖已修正，避免编辑其他卡片时重置报告草稿
 
 ---
 
