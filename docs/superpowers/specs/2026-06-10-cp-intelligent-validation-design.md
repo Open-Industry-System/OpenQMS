@@ -41,11 +41,14 @@ CREATE TABLE cp_validation_runs (
     info_count INT DEFAULT 0,
     started_at TIMESTAMPTZ DEFAULT now(),
     completed_at TIMESTAMPTZ,
+    failed_rules JSONB DEFAULT '[]',
     created_by UUID REFERENCES users(user_id) ON DELETE SET NULL
 );
 
 CREATE INDEX idx_cpvrn_cp_id ON cp_validation_runs(cp_id);
 CREATE INDEX idx_cpvrn_status ON cp_validation_runs(status);
+-- 防止同一 CP 同时有多个 running 的 run（数据库级并发控制）
+CREATE UNIQUE INDEX idx_cpvrn_running ON cp_validation_runs(cp_id) WHERE status = 'running';
 ```
 
 ### 2.2 `cp_validation_results` 表（校验结果明细）
@@ -66,7 +69,7 @@ CREATE TABLE cp_validation_results (
     finding_hash VARCHAR(64) NOT NULL,
     suggestion TEXT,
     suggestion_data JSONB DEFAULT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open','accepted','rejected','resolved')),
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open','accepted','rejected','resolved','superseded')),
     resolved_by UUID REFERENCES users(user_id) ON DELETE SET NULL,
     resolved_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now()
@@ -76,7 +79,7 @@ CREATE INDEX idx_cpvr_run_id ON cp_validation_results(run_id);
 CREATE INDEX idx_cpvr_cp_id ON cp_validation_results(cp_id);
 CREATE INDEX idx_cpvr_type_status ON cp_validation_results(validation_type, status);
 CREATE INDEX idx_cpvr_severity ON cp_validation_results(severity);
-CREATE UNIQUE INDEX idx_cpvr_hash ON cp_validation_results(cp_id, finding_hash);
+CREATE UNIQUE INDEX idx_cpvr_hash ON cp_validation_results(cp_id, finding_hash) WHERE status != 'superseded';
 ```
 
 **指纹生成算法**：
@@ -126,12 +129,14 @@ class CPValidationEngine:
 2. 加载 CP 及其 items + 关联的 FMEA graph
 3. 执行规则引擎，每条规则返回 `ValidationFinding` 列表
 4. 计算每条 `finding_hash`，与历史结果比对：
-   - 哈希已存在且状态为 `accepted`/`rejected`/`resolved` → 保留原状态
-   - 哈希已存在且状态为 `open` → 保留（不要重复创建）
-   - 哈希不存在 → 插入新记录（status=`open`）
+   - 哈希已存在且状态为 `accepted`/`rejected`/`resolved` → **更新 `run_id` 为当前 run，保留原状态**
+   - 哈希已存在且状态为 `open` → **更新 `run_id` 为当前 run**，不要重复创建
+   - 哈希不存在 → 插入新记录（status=`open`，`run_id`=当前 run）
    - 旧 run 中 `open` 但在新 run 中不存在的 → 标记为 `superseded`
 5. 更新 run 记录（status=`completed`，统计计数）
 6. 返回 run 结果
+
+**注意**：保留的历史记录必须更新 `run_id`，否则查询最新 run 时会遗漏已处理项。
 
 ### 3.3 规则引擎（`rule_engine.py`）— v1: 4 条规则
 
@@ -165,6 +170,7 @@ class CPValidationEngine:
 | GET | `/api/control-plans/{cp_id}/validation-summary` | Module.PLANNING + VIEW | 最新 run 的摘要统计 |
 | POST | `/api/validation-results/{id}/reject` | Module.PLANNING + EDIT | 拒绝建议（状态 → `rejected`） |
 | POST | `/api/validation-results/{id}/resolve` | Module.PLANNING + EDIT | 标记已解决（状态 → `resolved`，记录 `resolved_by`） |
+| POST | `/api/validation-results/{id}/reopen` | Module.PLANNING + EDIT | 将 `rejected` 或 `resolved` 状态恢复为 `open` |
 
 **v2 将新增**：
 - `POST /api/validation-results/{id}/accept` — 接受建议（需要 suggestion_data 协议和乐观锁）
@@ -173,9 +179,26 @@ class CPValidationEngine:
 ### 3.5 自动触发机制（v1）
 
 **触发点**：
-1. **CP 保存/更新后**：在 `control_plan_service.update_control_plan()` 末尾调用 `engine.validate(..., trigger="auto_on_save")`
+1. **CP 保存/更新后**：在 `control_plan_service.update_control_plan()` 末尾触发后台校验
    - 使用 `asyncio.create_task()` 在 FastAPI 请求生命周期外执行（不阻塞响应）
-2. **手动触发**：用户点击"智能校验"按钮
+   - **关键**：后台 task 必须创建**新的独立数据库 session**，不能复用请求注入的 `db: AsyncSession`（主请求返回后该 session 会被销毁）
+   ```python
+   # 在 control_plan_service.update_control_plan() 末尾
+   task = asyncio.create_task(
+       run_validation_in_background(
+           cp_id=cp.cp_id,
+           user_id=user_id,
+           trigger="auto_on_save",
+       )
+   )
+
+   # 后台 task 内部新开 session
+   async def run_validation_in_background(cp_id, user_id, trigger):
+       async with async_session() as db:
+           engine = CPValidationEngine()
+           await engine.validate(db, cp_id, user_id, trigger)
+   ```
+2. **手动触发**：用户点击"智能校验"按钮（直接使用请求 session，同步等待）
 
 **v2 将新增**：
 - FMEA 版本更新后通过 outbox + worker 异步触发
@@ -230,13 +253,16 @@ frontend/src/api/cpValidation.ts    # API 客户端
 ### 4.4 API 客户端
 
 ```typescript
-// api/cpValidation.ts
+// api/cpValidation.ts (v1)
 export async function getValidationResults(cpId: string, filters?: {...})
 export async function triggerValidation(cpId: string)
-export async function acceptSuggestion(validationId: string)
 export async function rejectSuggestion(validationId: string)
 export async function resolveValidation(validationId: string)
+export async function reopenValidation(validationId: string)
 export async function getValidationSummary(cpId: string)
+
+// v2 将新增:
+// export async function acceptSuggestion(validationId: string)
 ```
 
 ---
