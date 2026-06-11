@@ -38,12 +38,10 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
     setReport(review.generated_report);
   }, [review.review_id]);
 
-  // Load finalized versions when status becomes final or review changes
+  // Load versions on review change (history may exist even after reopen to draft)
   useEffect(() => {
-    if (review.report_status === "final") {
-      loadVersions();
-    }
-  }, [review.review_id, review.report_status]);
+    loadVersions();
+  }, [review.review_id]);
 
   const loadVersions = async () => {
     const data = await listReportVersions(review.review_id);

@@ -285,6 +285,12 @@ async def finalize_report(
     review: ManagementReview,
     user: "User",
 ) -> ReviewReport:
+    # Lock review row first, then re-read state under lock to prevent stale checks
+    await db.execute(
+        select(ManagementReview)
+        .where(ManagementReview.review_id == review.review_id)
+        .with_for_update()
+    )
     await db.refresh(review, ["generated_report"])
     if review.report_status != "draft":
         raise ValueError("only draft report can be finalized")
@@ -292,13 +298,6 @@ async def finalize_report(
         raise ValueError("cannot finalize report of a closed review")
     if not review.generated_report:
         raise ValueError("no report content to finalize")
-
-    # Lock review row to prevent concurrent finalization race
-    await db.execute(
-        select(ManagementReview)
-        .where(ManagementReview.review_id == review.review_id)
-        .with_for_update()
-    )
 
     result = await db.execute(
         select(func.coalesce(func.max(ReviewReport.version_no), 0))
