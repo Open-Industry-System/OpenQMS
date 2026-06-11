@@ -86,7 +86,11 @@ depends_on = None
 def upgrade() -> None:
     # ── Extend iqc_inspections ──
     op.add_column("iqc_inspections", sa.Column("has_safety_defect", sa.Boolean(), server_default="false", nullable=False))
-    op.add_column("iqc_inspections", sa.Column("linked_customer_complaint_id", UUID(as_uuid=True), nullable=True))
+    op.add_column("iqc_inspections", sa.Column(
+        "linked_customer_complaint_id", UUID(as_uuid=True),
+        sa.ForeignKey("customer_complaints.complaint_id", ondelete="SET NULL"),
+        nullable=True,
+    ))
 
     # ── iqc_aql_profiles ──
     op.create_table(
@@ -177,10 +181,30 @@ def upgrade() -> None:
         sa.Column("is_editable", sa.Boolean(), server_default="true", nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.UniqueConstraint("config_key", "product_line_code"),
+    )
+    # Partial unique indexes: NULL in product_line_code breaks standard unique constraint
+    op.create_index(
+        "uq_config_key_product_line", "iqc_aql_configs",
+        ["config_key", "product_line_code"], unique=True,
+        postgresql_where=sa.text("product_line_code IS NOT NULL"),
+    )
+    op.create_index(
+        "uq_config_key_global", "iqc_aql_configs",
+        ["config_key"], unique=True,
+        postgresql_where=sa.text("product_line_code IS NULL"),
     )
 
     # ── Seed default config parameters ──
+    import uuid as _uuid
+    config_table = sa.table(
+        "iqc_aql_configs",
+        sa.column("config_id", UUID(as_uuid=True)),
+        sa.column("config_key", sa.String()),
+        sa.column("config_value", sa.String()),
+        sa.column("value_type", sa.String()),
+        sa.column("description", sa.String()),
+        sa.column("is_editable", sa.Boolean()),
+    )
     configs = [
         ("consecutive_accepted_for_reduce_1", "5", "int", "放宽一级所需连续合格批次"),
         ("consecutive_accepted_for_reduce_2", "10", "int", "放宽两级所需连续合格批次"),
@@ -195,10 +219,20 @@ def upgrade() -> None:
         ("default_inspection_level", "II", "string", "默认检验水平"),
         ("default_aql_fallback", "1.0", "float", "物料默认AQL为NULL时的回退值"),
     ]
-    op.execute(
-        "INSERT INTO iqc_aql_configs (config_id, config_key, config_value, value_type, description, is_editable) "
-        "VALUES (gen_random_uuid(), :key, :val, :typ, :desc, true)",
-    )  # Note: use bulk insert in production; this is illustrative
+    op.bulk_insert(
+        config_table,
+        [
+            {
+                "config_id": _uuid.uuid4(),
+                "config_key": key,
+                "config_value": val,
+                "value_type": typ,
+                "description": desc,
+                "is_editable": True,
+            }
+            for key, val, typ, desc in configs
+        ],
+    )
 
 
 def downgrade() -> None:
@@ -362,6 +396,10 @@ from app.database import Base
 
 class IqcAqlConfig(Base):
     __tablename__ = "iqc_aql_configs"
+    __table_args__ = (
+        sa.UniqueConstraint("config_key", "product_line_code", name="uq_config_key_product_line"),
+        # Note: partial indexes for NULL product_line_code created in migration
+    )
 
     config_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     config_key: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -447,7 +485,7 @@ Implement in this file:
 3. `get_aql_by_state()` function (spec Section 4.1, with `current_aql` param for frozen)
 4. `RuleEngine` class with `evaluate()` method (spec Section 4.3 execution flow)
 5. `QualitySnapshotCalculator` class with `calculate()` method
-6. `ProfileManager` class with `get_or_create_profile()`, `apply_recommendation()` methods
+6. `ProfileManager` class with `get_profile()`, `get_or_create_profile()`, `apply_recommendation()` methods
 7. `RecommendationManager` class with `generate_recommendation()`, `approve()`, `reject()`, `forward()`, `expire_stale()` methods
 8. `AqlConfigManager` class with `get()`, `get_int()`, `get_float()`, `set()` methods
 9. `AqlService` facade class with `on_inspection_judged()` method
@@ -536,7 +574,7 @@ In `iqc_inspection_service.create_inspection()`, before the AQL auto-calculate b
         from app.services.iqc_aql_service import AqlService
         aql_svc = AqlService()
         try:
-            profile = await aql_svc.get_active_profile(db, supplier_id, material_id)
+            profile = await aql_svc.get_profile(db, supplier_id, material_id)
             if profile:
                 aql_level = profile.current_aql
         except Exception:
