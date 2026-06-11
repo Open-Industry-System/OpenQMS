@@ -15,7 +15,7 @@
 ### Backend (new files)
 ```
 backend/app/
-├── alembic/versions/033_add_supplier_risk_tables.py   # 3 tables + partial unique indexes + permission seed
+├── alembic/versions/034_add_supplier_risk_tables.py   # 3 tables + partial unique indexes + permission seed
 ├── models/supplier_risk.py                            # 3 ORM models
 ├── schemas/supplier_risk.py                           # Pydantic request/response schemas
 ├── services/supplier_risk/
@@ -79,8 +79,8 @@ backend/tests/test_supplier_risk_integration.py         # 11 integration/boundar
 ```python
 """add supplier risk tables
 
-Revision ID: 033_add_supplier_risk_tables
-Revises: bfd90bb593fc
+Revision ID: 034_add_supplier_risk_tables
+Revises: 033_add_iqc_aql_optimization
 Create Date: 2026-06-11
 """
 from typing import Sequence, Union
@@ -242,23 +242,11 @@ def upgrade() -> None:
             ON CONFLICT DO NOTHING;
         """)
 
-    # ---- 5. Default rule configs ------------------------------------------------
-    # updated_by: COALESCE ensures a valid user_id even if 'admin' doesn't exist yet
-    # (falls back to earliest created user). Required because updated_by is NOT NULL.
-    for cfg in DEFAULT_CONFIGS:
-        op.execute(f"""
-            INSERT INTO supplier_risk_configs (rule_id, enabled, category, weight, thresholds, updated_by)
-            SELECT '{cfg['rule_id']}', {cfg['enabled']}, '{cfg['category']}', {cfg['weight']},
-                   '{__import__('json').dumps(cfg['thresholds'])}'::jsonb,
-                   COALESCE(
-                       (SELECT user_id FROM users WHERE username = 'admin' LIMIT 1),
-                       (SELECT user_id FROM users ORDER BY created_at LIMIT 1)
-                   )
-            WHERE NOT EXISTS (
-                SELECT 1 FROM supplier_risk_configs
-                WHERE rule_id = '{cfg['rule_id']}' AND supplier_id IS NULL AND product_line_code IS NULL
-            );
-        """)
+    # ---- 5. Default rule configs are NOT seeded in migration ----
+    # Default configs require a valid updated_by user_id. The users table may be
+    # empty during fresh migration (admin user is created at app startup, not migration).
+    # Therefore, default configs are seeded by the application seed command
+    # (python -m app.seed) which runs after users exist. See Task 1 Step 3.
 
 
 def downgrade() -> None:
@@ -281,7 +269,50 @@ In `backend/app/core/permissions.py`, add after the `ERP` line:
 Run: `cd backend && alembic upgrade head`
 Expected: No errors. 3 tables created.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Add default config seed to application seed**
+
+In `backend/app/seed.py`, add a function that seeds default rule configs (using the `DEFAULT_CONFIGS` list). This runs after admin user exists, so `updated_by` is always valid. Call it from the main seed entry point.
+
+```python
+async def seed_supplier_risk_configs(db: AsyncSession):
+    """Seed default supplier risk rule configs if not present."""
+    from app.models.supplier_risk import SupplierRiskConfig
+    from app.models.user import User
+    from sqlalchemy import select
+
+    admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one_or_none()
+    if not admin:
+        return
+
+    DEFAULT_CONFIGS = [
+        {"rule_id": "R01", "enabled": True, "category": "quality", "weight": 15.0,
+         "thresholds": {"ppm_limit": 1000, "window_days": 90}},
+        # ... (same list as in migration file)
+        {"rule_id": "R10", "enabled": True, "category": "compliance", "weight": 15.0,
+         "thresholds": {"keywords": ["安全", "安全特性", "safety"]}},
+    ]
+
+    for cfg in DEFAULT_CONFIGS:
+        existing = (await db.execute(
+            select(SupplierRiskConfig).where(
+                SupplierRiskConfig.rule_id == cfg["rule_id"],
+                SupplierRiskConfig.supplier_id.is_(None),
+                SupplierRiskConfig.product_line_code.is_(None),
+            )
+        )).scalar_one_or_none()
+        if not existing:
+            db.add(SupplierRiskConfig(
+                rule_id=cfg["rule_id"],
+                enabled=cfg["enabled"],
+                category=cfg["category"],
+                weight=cfg["weight"],
+                thresholds=cfg["thresholds"],
+                updated_by=admin.user_id,
+            ))
+    await db.commit()
+```
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(supplier-risk): add migration, models, permission seed"
@@ -825,7 +856,31 @@ git add -A && git commit -m "feat(supplier-risk): config service with 4-layer pr
 
 - [ ] **Step 1: Write failing test for evaluate_supplier_risk**
 
-Test: given a supplier with high PPM IQC data, evaluation returns risk_level="high" and creates an alert record.
+```python
+# tests/test_supplier_risk_service.py
+import pytest
+from datetime import date
+from app.services.supplier_risk.service import evaluate_supplier_risk
+
+@pytest.mark.asyncio
+async def test_evaluate_high_ppm_supplier(db_session, seed_supplier):
+    """Supplier with PPM > 1000 should produce high-risk alert."""
+    # seed_supplier creates a supplier + IQC inspections with high defect rate
+    result = await evaluate_supplier_risk(db_session, seed_supplier.supplier_id, product_line_code=None)
+    assert result.risk_level in ("high", "critical")
+    assert result.risk_score > 60
+    # Verify alert was created in DB
+    from app.models.supplier_risk import SupplierRiskAlert
+    from sqlalchemy import select
+    alert = (await db_session.execute(
+        select(SupplierRiskAlert).where(SupplierRiskAlert.supplier_id == seed_supplier.supplier_id)
+    )).scalar_one_or_none()
+    assert alert is not None
+    assert alert.risk_level in ("high", "critical")
+```
+
+Run: `cd backend && python -m pytest tests/test_supplier_risk_service.py::test_evaluate_high_ppm_supplier -v`
+Expected: FAIL (ImportError: cannot import name 'evaluate_supplier_risk')
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -843,7 +898,19 @@ Alert upsert logic:
 
 - [ ] **Step 5: Write failing test for evaluate_all_suppliers (batch, no N+1)**
 
-Test: given 3 suppliers, evaluate_all returns 3 results using a single batch aggregate query (not 3 separate per-supplier queries).
+```python
+@pytest.mark.asyncio
+async def test_evaluate_all_suppliers_batch(db_session, seed_three_suppliers):
+    """evaluate_all should use batch query, not per-supplier N+1."""
+    results = await evaluate_all_suppliers(db_session, product_line_code=None)
+    assert len(results) == 3
+    # All results have valid risk_level
+    for r in results:
+        assert r.risk_level in ("low", "medium", "high", "critical")
+```
+
+Run: `cd backend && python -m pytest tests/test_supplier_risk_service.py::test_evaluate_all_suppliers_batch -v`
+Expected: FAIL
 
 - [ ] **Step 6: Implement evaluate_all_suppliers with batch aggregate query**
 
@@ -866,7 +933,24 @@ git add -A && git commit -m "feat(supplier-risk): evaluate_supplier_risk and eva
 
 - [ ] **Step 1: Write failing test for handle_alert**
 
-Test: alert in "open" status, action="acknowledge" → status becomes "acknowledged". Test: action="ignore" without note → raises ValueError.
+```python
+@pytest.mark.asyncio
+async def test_handle_alert_acknowledge(db_session, seed_open_alert):
+    """Acknowledging an open alert should change status to acknowledged."""
+    from app.services.supplier_risk.service import handle_alert
+    alert = await handle_alert(db_session, seed_open_alert.alert_id, "acknowledge", None, seed_open_alert.supplier_id)
+    assert alert.status == "acknowledged"
+
+@pytest.mark.asyncio
+async def test_handle_alert_ignore_requires_note(db_session, seed_open_alert):
+    """Ignoring without a note should raise ValueError."""
+    from app.services.supplier_risk.service import handle_alert
+    with pytest.raises(ValueError, match="理由"):
+        await handle_alert(db_session, seed_open_alert.alert_id, "ignore", None, seed_open_alert.supplier_id)
+```
+
+Run: `cd backend && python -m pytest tests/test_supplier_risk_service.py::test_handle_alert_acknowledge tests/test_supplier_risk_service.py::test_handle_alert_ignore_requires_note -v`
+Expected: FAIL
 
 - [ ] **Step 2: Implement handle_alert**
 
@@ -890,7 +974,22 @@ git add -A && git commit -m "feat(supplier-risk): handle_alert with state machin
 
 - [ ] **Step 1: Write failing test for create_scar_from_alert**
 
-Test: calls `_create_scar_without_commit`, links alert.linked_scar_id, sets alert.status="action_taken", all in one transaction. On SCAR creation failure, alert unchanged.
+```python
+@pytest.mark.asyncio
+async def test_create_scar_from_alert_atomic(db_session, seed_open_alert, seed_user):
+    """Creating SCAR from alert should link them and set status=action_taken."""
+    from app.services.supplier_risk.service import create_scar_from_alert
+    scar = await create_scar_from_alert(db_session, seed_open_alert.alert_id, seed_user.user_id)
+    assert scar is not None
+    assert scar.supplier_id == seed_open_alert.supplier_id
+    # Alert should be updated
+    await db_session.refresh(seed_open_alert)
+    assert seed_open_alert.status == "action_taken"
+    assert seed_open_alert.linked_scar_id == scar.scar_id
+```
+
+Run: `cd backend && python -m pytest tests/test_supplier_risk_service.py::test_create_scar_from_alert_atomic -v`
+Expected: FAIL
 
 - [ ] **Step 2: Add `_create_capa_without_commit` to capa_service.py**
 
@@ -902,7 +1001,26 @@ Both use the same pattern: `begin → _create_without_commit → update alert �
 
 - [ ] **Step 4: Write failing test for transaction rollback**
 
-Test: mock `_create_scar_without_commit` to raise ValueError → alert status remains unchanged.
+```python
+@pytest.mark.asyncio
+async def test_create_scar_rollback_on_failure(db_session, seed_open_alert, seed_user, monkeypatch):
+    """If SCAR creation fails, alert status should remain unchanged."""
+    from app.services.supplier_risk import service as risk_service
+    from app.services import scar_service
+    original = scar_service._create_scar_without_commit
+    async def failing_create(*args, **kwargs):
+        raise ValueError("模拟SCAR创建失败")
+    monkeypatch.setattr(scar_service, "_create_scar_without_commit", failing_create)
+    with pytest.raises(ValueError, match="模拟"):
+        await risk_service.create_scar_from_alert(db_session, seed_open_alert.alert_id, seed_user.user_id)
+    # Alert unchanged
+    await db_session.refresh(seed_open_alert)
+    assert seed_open_alert.status == "open"
+    assert seed_open_alert.linked_scar_id is None
+```
+
+Run: `cd backend && python -m pytest tests/test_supplier_risk_service.py::test_create_scar_rollback_on_failure -v`
+Expected: FAIL
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -921,7 +1039,31 @@ git add -A && git commit -m "feat(supplier-risk): create_scar/capa_from_alert wi
 
 - [ ] **Step 1: Write failing test for send_notifications**
 
-Test: email channel configured → sends email (mock aiosmtplib). Test: webhook channel → POSTs with HMAC signature. Test: webhook to private IP → raises ValueError (SSRF). Test: email send failure → alert still exists (non-blocking).
+```python
+@pytest.mark.asyncio
+async def test_notification_email_sent(db_session, seed_high_alert, seed_email_channel, mock_smtp):
+    """Email channel should trigger send via aiosmtplib."""
+    from app.services.supplier_risk.notifier import send_notifications
+    await send_notifications(db_session, seed_high_alert, product_line_code=None)
+    assert mock_smtp.call_count == 1
+
+@pytest.mark.asyncio
+async def test_notification_webhook_ssrf_blocked(db_session, seed_high_alert, seed_webhook_channel_private_ip):
+    """Webhook to private IP should be rejected."""
+    from app.services.supplier_risk.notifier import send_notifications, SSRFError
+    with pytest.raises(SSRFError):
+        await send_notifications(db_session, seed_high_alert, product_line_code=None)
+
+@pytest.mark.asyncio
+async def test_notification_failure_non_blocking(db_session, seed_high_alert, seed_broken_channel):
+    """Notification failure should not prevent alert creation."""
+    from app.services.supplier_risk.notifier import send_notifications
+    # Should not raise — errors are caught and logged
+    await send_notifications(db_session, seed_high_alert, product_line_code=None)
+```
+
+Run: `cd backend && python -m pytest tests/test_supplier_risk_service.py::test_notification_email_sent -v`
+Expected: FAIL
 
 - [ ] **Step 2: Implement notifier.py**
 
@@ -949,7 +1091,19 @@ git add -A && git commit -m "feat(supplier-risk): notifier with email, webhook, 
 
 - [ ] **Step 1: Write failing test for CAPA close → alert close**
 
-Test: CAPA with linked_capa_id pointing to an open alert. CAPA status transitions to D8_CLOSURE → alert.status becomes "closed".
+```python
+@pytest.mark.asyncio
+async def test_capa_close_closes_linked_alert(db_session, seed_open_alert_with_capa, seed_manager):
+    """When CAPA transitions to D8_CLOSURE, linked alert should auto-close."""
+    from app.services.capa_service import update_capa
+    capa = seed_open_alert_with_capa.linked_capa
+    await update_capa(db_session, capa.report_id, {"status": "D8_CLOSURE"}, seed_manager.user_id)
+    await db_session.refresh(seed_open_alert_with_capa)
+    assert seed_open_alert_with_capa.status == "closed"
+```
+
+Run: `cd backend && python -m pytest tests/test_supplier_risk_service.py::test_capa_close_closes_linked_alert -v`
+Expected: FAIL
 
 - [ ] **Step 2: Add hook in capa_service.update_capa**
 
@@ -981,7 +1135,20 @@ git add -A && git commit -m "feat(supplier-risk): CAPA/SCAR close hooks and IQC 
 
 - [ ] **Step 1: Write failing test for GET /api/supplier-risk/alerts**
 
-Test: returns paginated alert list with correct schema.
+```python
+@pytest.mark.asyncio
+async def test_alerts_list_authenticated(client, auth_headers):
+    """GET /api/supplier-risk/alerts should return paginated list."""
+    resp = await client.get("/api/supplier-risk/alerts", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "items" in body
+    assert "total" in body
+    assert "page" in body
+```
+
+Run: `cd backend && python -m pytest tests/test_supplier_risk_service.py::test_alerts_list_authenticated -v`
+Expected: FAIL (404 — route not registered)
 
 - [ ] **Step 2: Create API routes file with 14 endpoints**
 
@@ -1049,6 +1216,8 @@ git add -A && git commit -m "feat(supplier-risk): API routes with /api/supplier-
 **Files:**
 - Create: `backend/tests/test_supplier_risk_service.py`
 - Create: `backend/tests/test_supplier_risk_integration.py`
+
+**Test DB requirement**: All tests use the project's PostgreSQL test database (same as existing pytest fixtures). In-memory/mock sessions are NOT sufficient for verifying partial unique indexes, concurrent dedup, or transaction rollback. The `db_session` fixture should use `async_session()` with a test database, wrapping each test in a transaction that rolls back on teardown.
 
 - [ ] **Step 1: Write service tests (6 tests)**
 
