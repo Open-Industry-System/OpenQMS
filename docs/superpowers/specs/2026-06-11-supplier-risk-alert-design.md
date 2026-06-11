@@ -16,6 +16,14 @@
 - **综合评估**：多维指标加权评分，而非单一阈值判断
 - **闭环处置**：预警可直接创建 SCAR/CAPA，跟踪到底
 
+### 产品线语义
+
+供应商本身是全局实体（`suppliers` 表无 `product_line_code` 字段），但其下游数据（IQC 检验、SCAR、PPAP）按产品线隔离。因此：
+
+- **风险计算粒度**：按 `(supplier_id, product_line_code)` 组合。同一供应商在不同产品线下有独立的风险评分和预警。
+- **数据采集范围**：R01/R02/R03/R10 仅统计该产品线下的 IQC 检验；R04/R05 仅统计该产品线下的 SCAR；R06/R07/R09 读取供应商评价（全局，评价本身无产品线）；R08 读取证书（全局）。
+- **无产品线场景**：`product_line_code = NULL` 表示全局评估，采集该供应商所有产品线数据。
+
 ---
 
 ## 2. 架构
@@ -75,6 +83,7 @@ class RuleResult:
     score: float          # 0-100，未触发为 0
     detail: str           # 人类可读的触发原因描述
     category: str         # "quality" | "delivery" | "compliance"
+    critical: bool = False  # True 时触发严重度直通，综合分至少为 61
 ```
 
 - 每条规则独立执行，互不影响
@@ -92,6 +101,15 @@ delivery_score  = Σ(triggered R06..R07 scores × weights) / Σ(active R06..R07 
 compliance_score = Σ(triggered R08..R10 scores × weights) / Σ(active R08..R10 weights) (if any active, else 0)
 
 综合分 = quality_score × 0.50 + delivery_score × 0.30 + compliance_score × 0.20
+
+**严重度直通机制**：如果任一规则标记为 `critical: True` 且触发，综合分取 `max(加权综合分, 61)`，即直接提升为高风险（橙色）以上。这确保 R10（安全缺陷）等单条严重规则不会因维度加权被压低。
+
+规则严重度标记：
+
+| 规则 | critical |
+|------|----------|
+| R01-R09 | False |
+| R10 安全缺陷检测 | True |
 ```
 
 映射到四级风险：
@@ -170,7 +188,7 @@ WHERE supplier_id IS NOT NULL;
 |------|------|------|
 | channel_id | UUID PK | 渠道 ID |
 | channel_type | VARCHAR(20) | email/webhook |
-| config | JSONB | 渠道配置（email: addresses[]; webhook: url, secret） |
+| config | JSONB | 渠道配置（email: addresses[]; webhook: url, secret_encrypted） |
 | min_risk_level | VARCHAR(10) | 最低触发风险等级（high/critical） |
 | enabled | BOOLEAN | 是否启用 |
 | supplier_id | UUID FK → suppliers NULL | 供应商级覆盖 |
@@ -223,11 +241,13 @@ async def update_rule_config(db, config_id, updates, user_id) -> RuleConfig
 async def send_notifications(db, alert, product_line_code) -> None
 ```
 
+**批量聚合查询**：`evaluate_all_suppliers` 不复用现有 `supplier_quality_service` 的 per-supplier 循环。需实现批量 SQL 聚合，一次查询出所有供应商的 PPM、合格率、SCAR 数量、证书过期情况等，再按供应商分组传入规则引擎。避免 N+1。
+
 ### 5.3 触发机制
 
 | 触发方式 | 时机 | 说明 |
 |----------|------|------|
-| 定时全量扫描 | 每日凌晨 2:00 | 后台协程遍历所有活跃供应商 |
+| 定时全量扫描 | 每 24 小时 | 后台协程遍历所有活跃供应商 |
 | 事件增量评估 | IQC 判定完成、SCAR 状态变更 | 仅评估相关供应商 |
 | 手动触发 | 用户点击"立即评估" | 单个供应商 |
 
@@ -241,9 +261,11 @@ async def _incremental_evaluate(supplier_id: UUID, product_line_code: str):
 
 手动触发的评估直接使用请求注入的 Session，无需特殊处理。
 
+**调度模式**：定时全量扫描使用与 MES lifecycle 一致的 `asyncio.sleep(86400)` 循环（参见 `backend/app/main.py:141`），不计算下次凌晨 2 点时间。全量评估在服务启动后首次执行，之后每 24 小时重复。
+
 ### 5.4 预警去重与升级
 
-- 同一供应商同一天仅生成一条预警（唯一约束）
+- 同一供应商同一产品线同一天仅生成一条预警（唯一约束 `(supplier_id, product_line_code, snapshot_date)`）
 - 如果供应商风险等级升级（中→高、高→极高），更新已有预警的 `alert_type` 为 `escalated`
 - 降级不自动关闭预警，需人工确认
 
@@ -258,6 +280,8 @@ async def _incremental_evaluate(supplier_id: UUID, product_line_code: str):
 - HTTP POST JSON payload 到用户配置的 URL
 - 包含 `X-Signature` HMAC 签名（用配置的 secret）
 - 超时 5 秒，重试 1 次
+- **Secret 加密存储**：Webhook secret 使用 Fernet 对称加密后存入 `config.secret_encrypted`（与 MES/ERP 凭据加密模式一致，`RISK_ENCRYPTION_KEY` 环境变量），API 响应中脱敏不返回
+- **SSRF 防护**：禁止 Webhook URL 指向内网地址（`127.0.0.0/8`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`[::1]`、`localhost`）
 
 **系统内**：
 - 预警列表页自动展示
@@ -281,10 +305,18 @@ open ──→ acknowledged ──→ action_taken ──→ closed
 - `closed`：SCAR/CAPA 关闭后自动关闭预警（或人工关闭）
 - `ignored`：误报或不需处置，需填理由
 
+**CAPA/SCAR 关闭联动触发点**：在 `capa_service.update_capa()` 和 `scar_service` 状态流转逻辑中，当状态变为终态（CAPA: `D8_CLOSURE`，SCAR: `closed`）时，检查是否有 `linked_capa_id` 或 `linked_scar_id` 指向该记录的 `supplier_risk_alerts`，如有则将 alert 状态更新为 `closed`。此逻辑放在状态流转之后、同一事务内。
+
 权限要求：
 - 确认/忽略：engineer 及以上
 - 创建 SCAR/CAPA：engineer 及以上
 - 关闭预警：manager 及以上
+
+**SCAR/CAPA 创建必须复用现有服务**：
+
+- 创建 SCAR 时调用 `scar_service.create_scar()`（`backend/app/services/scar_service.py:86`），该服务负责：编号生成、供应商校验、审计日志、事务提交、嵌入队列入队。不可绕过直接写表。
+- 创建 CAPA 时调用 `capa_service.create_capa()`（`backend/app/services/capa_service.py:87`），该服务负责：产品线校验、编号唯一性、审计日志、事务提交、嵌入队列入队。
+- **事务边界**：alert 状态更新和 SCAR/CAPA 创建在同一事务内。先调用 service 创建 SCAR/CAPA（service 内部 commit），再更新 alert 状态并 commit。如 alert 更新失败，SCAR/CAPA 已提交但 alert 未关联——可接受（SCAR/CAPA 本身有效，alert 下次扫描会重新关联）。
 
 ---
 
@@ -409,6 +441,20 @@ Alembic 迁移文件：`033_add_supplier_risk_tables.py`
 
 总计：28 个测试
 
+集成与边界测试（10 个）：
+- 迁移约束测试：部分唯一索引 idx_risk_config_global / idx_risk_config_supplier 正确阻止重复
+- 权限 API 测试：viewer 调用 EDIT/APPROVE 端点返回 403
+- 产品线隔离测试：不同 product_line_code 的预警/配置互不干扰
+- 去重并发测试：同一天同供应商并发评估仅产生一条预警
+- 升级并发测试：风险等级升级时 alert_type 正确更新为 escalated
+- 通知失败不阻塞测试：邮件/Webhook 发送失败不影响预警记录生成
+- SCAR 服务复用测试：create_scar_from_alert 调用 scar_service.create_scar 并正确关联
+- CAPA 服务复用测试：create_capa_from_alert 调用 capa_service.create_capa 并正确关联
+- CAPA 关闭联动测试：CAPA 状态流转到 D8_CLOSURE 时关联预警自动关闭
+- Webhook SSRF 拦截测试：内网 URL 被拒绝
+
+总计：38 个测试
+
 ### 前端
 
 无测试框架（项目现状），手动验证页面功能。
@@ -424,7 +470,7 @@ Alembic 迁移文件：`033_add_supplier_risk_tables.py`
 | 供应商评价 | 评价完成后触发增量评估；R06/R07/R09 读取评价数据 |
 | 供应商证书 | R08 读取证书过期数据 |
 | CAPA | 预警可创建 CAPA；CAPA 关闭后可自动关闭关联预警 |
-| 供货质量看板 | 风险看板复用部分 PPM/合格率查询逻辑 |
+| 供货质量看板 | 风险看板**不复用**现有 `get_quality_dashboard` 的 per-supplier 循环查询（存在 N+1 问题）。风险全量扫描需先提供批量聚合查询接口（一次 SQL 查出所有供应商的 PPM/合格率/SCAR 数量），再传入规则引擎 |
 | 权限系统 | 新增 SUPPLIER_RISK 模块，复用 require_permission 机制 |
 
 ---
