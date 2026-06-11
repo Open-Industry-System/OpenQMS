@@ -127,6 +127,7 @@ class ReportContent(BaseModel):
     sections: list[ReportSection]
     executive_summary: str
     overall_recommendations: list[str]
+    updated_at: str | None = None
 
 
 class ReportGenerateRequest(BaseModel):
