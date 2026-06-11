@@ -45,7 +45,7 @@
 | TIGHTEN_OPEN_SCAR | 有未关闭SCAR | tightened | 经理 | 基准AQL左移1档 |
 | TIGHTEN_HIGH_PPM | 近90天PPM > 阈值(默认5000ppm) | tightened | 经理 | 基准AQL左移1档 |
 | RETURN_TO_NORMAL | 加严状态下连续5批合格 | normal | 工程师 | **必须先恢复正常，才能申请放宽** |
-| REDUCE_LEVEL_2 | 正常状态下连续10批合格 + 评级A/B + PPM<阈值 + 无SCAR | reduced | 经理 | 基准AQL右移2档 |
+| REDUCE_LEVEL_2 | 正常或已放宽状态下连续10批合格 + 评级A/B + PPM<阈值 + 无SCAR | reduced | 经理 | 基准AQL右移2档 |
 | REDUCE_LEVEL_1 | 正常状态下连续5批合格 + 无SCAR | reduced | 经理 | 基准AQL右移1档 |
 
 **关键约束**：
@@ -327,7 +327,7 @@ AQL_RULES = [
         "category": "reduce",
         "priority": 20,
         "condition": lambda ctx: (
-            ctx.profile_state == "normal"
+            ctx.profile_state in ("normal", "reduced")
             and ctx.consecutive_accepted >= 10
             and ctx.supplier_rating in ("A", "B")
             and (ctx.last_90d_ppm is None or ctx.last_90d_ppm < ctx.ppm_threshold_low)
@@ -335,7 +335,7 @@ AQL_RULES = [
             and not ctx.has_safety_defect
         ),
         "target_state": "reduced",
-        "reason_cn": "正常状态下连续10批合格，供应商评级A/B，PPM达标",
+        "reason_cn": "正常或已放宽状态下连续10批合格，供应商评级A/B，PPM达标",
         "approval_level": "manager",
         "aql_steps": 2,
     },
@@ -363,13 +363,16 @@ AQL_RULES = [
 每次检验判定完成(judge)后：
   1. 计算质量画像（QualitySnapshot）
   2. 加载当前 profile 状态
-  3. 检查是否有未处理的重复建议（同一 profile + 同一 recommended_aql + status in (pending, forwarded)）
+  3. 按 priority 降序遍历规则，第一个匹配的规则决定 target_state、aql_steps、frozen_aql_policy
+  4. 计算 recommended_aql：
+     - 若 target_state == "frozen" 且 frozen_aql_policy == "tighten"：
+       先按 tightened + aql_steps 计算 AQL，再标记 state 为 frozen
+     - 否则：base_aql + target_state + aql_steps + min/max 边界
+  5. 如果 recommended_aql == profile.current_aql，不生成建议（direction == "keep"），结束
+     → 这处理了 already-reduced(aql_steps=1) → reduced(aql_steps=2) 的进一步放宽
+  6. 检查是否有未处理的重复建议（同一 profile + 同一 recommended_aql + status in (pending, forwarded)）
      → 如有，跳过生成（幂等抑制）
-  4. 按 priority 降序遍历规则
-  5. 第一个匹配的规则决定 target_state 和 aql_steps
-  6. 如果 target_state == current_state，不生成建议（direction == "keep"）
-  7. 使用 base_aql + target_state + aql_steps + min/max 边界计算 recommended_aql
-  8. 生成 recommendation 记录（pending）
+  7. 生成 recommendation 记录（pending）
 ```
 
 ### 4.4 冲突解决与幂等抑制
@@ -377,8 +380,8 @@ AQL_RULES = [
 - **高优先级规则优先**：安全缺陷（priority=100）永远覆盖放宽规则（priority=10）
 - **同类别取最严**：如果多个加严规则同时触发，取 AQL 最严格（数值最小）的结果
 - **放宽被阻塞时自动转为 keep**：如果放宽规则匹配但有 SCAR 未关闭，冻结规则优先触发
-- **重复建议抑制**：同一 profile 在已有 pending/forwarded 建议且 target_state 相同时，不生成新建议，避免每次检验判定都重复创建
-- **建议更新策略**：如果已有 pending 建议但 target_state 不同（如从 pending 的"加严"变为新的"冻结"），撤销旧建议，生成新建议
+- **重复建议抑制**：同一 profile 在已有 pending/forwarded 建议且 recommended_aql 相同时，不生成新建议，避免每次检验判定都重复创建
+- **建议更新策略**：如果已有 pending 建议但 recommended_aql 不同（如从 pending 的"加严到0.65"变为新的"冻结保持0.65"），撤销旧建议，生成新建议
 
 ---
 
