@@ -155,7 +155,13 @@ compliance_score = Σ(triggered R08..R10 scores × weights) / Σ(active R08..R10
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
 
-唯一约束：`(supplier_id, product_line_code, snapshot_date)` — 每个供应商每个产品线每天最多一条预警。
+唯一约束使用 `NULLS NOT DISTINCT`（PostgreSQL 15+），确保 `product_line_code=NULL` 时同一供应商同天也只能有一条全局预警：
+
+```sql
+CREATE UNIQUE INDEX idx_risk_alert_unique
+ON supplier_risk_alerts (supplier_id, product_line_code, snapshot_date)
+NULLS NOT DISTINCT;
+```
 
 #### `supplier_risk_configs` — 规则配置
 
@@ -172,15 +178,25 @@ compliance_score = Σ(triggered R08..R10 scores × weights) / Σ(active R08..R10
 | updated_by | UUID FK → users | 更新人 |
 | updated_at | TIMESTAMP | 更新时间 |
 
-唯一约束使用 PostgreSQL 部分唯一索引，避免 NULL 不参与唯一约束的问题：
+唯一约束使用 PostgreSQL 部分唯一索引，避免 NULL 不参与唯一约束的问题。
+
+**配置查找优先级**（从高到低）：
+1. **供应商+产品线覆盖**：`supplier_id = 某值, product_line_code = 某值`
+2. **产品线默认**：`supplier_id IS NULL, product_line_code = 某值`
+3. **全局默认**：`supplier_id IS NULL, product_line_code IS NULL`
 
 ```sql
--- 全局默认配置：每个 rule_id 仅一条
+-- 全局默认：每个 rule_id 仅一条
 CREATE UNIQUE INDEX idx_risk_config_global
 ON supplier_risk_configs (rule_id)
 WHERE supplier_id IS NULL AND product_line_code IS NULL;
 
--- 供应商级覆盖：每个 rule_id + supplier_id + product_line_code 仅一条
+-- 产品线默认：每个 rule_id + product_line_code 仅一条
+CREATE UNIQUE INDEX idx_risk_config_product_line
+ON supplier_risk_configs (rule_id, product_line_code)
+WHERE supplier_id IS NULL AND product_line_code IS NOT NULL;
+
+-- 供应商+产品线覆盖：每个 rule_id + supplier_id + product_line_code 仅一条
 CREATE UNIQUE INDEX idx_risk_config_supplier
 ON supplier_risk_configs (rule_id, supplier_id, product_line_code)
 WHERE supplier_id IS NOT NULL;
@@ -269,7 +285,7 @@ async def _incremental_evaluate(supplier_id: UUID, product_line_code: str):
 
 ### 5.4 预警去重与升级
 
-- 同一供应商同一产品线同一天仅生成一条预警（唯一约束 `(supplier_id, product_line_code, snapshot_date)`）
+- 同一供应商同一产品线同一天仅生成一条预警（`NULLS NOT DISTINCT` 唯一约束）
 - 如果供应商风险等级升级（中→高、高→极高），更新已有预警的 `alert_type` 为 `escalated`
 - 降级不自动关闭预警，需人工确认
 
@@ -318,9 +334,9 @@ open ──→ acknowledged ──→ action_taken ──→ closed
 
 **SCAR/CAPA 创建必须复用现有服务**：
 
-- 创建 SCAR 时调用 `scar_service.create_scar()`（`backend/app/services/scar_service.py:86`），该服务负责：编号生成、供应商校验、审计日志、事务提交、嵌入队列入队。不可绕过直接写表。
-- 创建 CAPA 时调用 `capa_service.create_capa()`（`backend/app/services/capa_service.py:87`），该服务负责：产品线校验、编号唯一性、审计日志、事务提交、嵌入队列入队。
-- **事务边界**：alert 状态更新和 SCAR/CAPA 创建在同一事务内。先调用 service 创建 SCAR/CAPA（service 内部 commit），再更新 alert 状态并 commit。如 alert 更新失败，SCAR/CAPA 已提交但 alert 未关联——可接受（SCAR/CAPA 本身有效，alert 下次扫描会重新关联）。
+- 创建 SCAR 时调用 `scar_service._create_scar_without_commit()`（`backend/app/services/scar_service.py:144`），该函数不 commit，仅 flush。调用方在同一事务内更新 alert 关联字段后统一 commit。这确保 SCAR 创建和 alert 关联的原子性。
+- 创建 CAPA 时需要新增类似的 `_create_capa_without_commit()` 内部函数（当前 `create_capa` 内部 commit），复用其编号生成、产品线校验、审计日志写入逻辑，但延迟 commit。调用方在同一事务内更新 alert 后统一 commit。
+- 事务模式：`begin → _create_scar/capa_without_commit → 更新 alert 状态和关联 → commit`。任一步骤失败整体回滚。
 
 ---
 
@@ -481,7 +497,7 @@ Alembic 迁移文件：`033_add_supplier_risk_tables.py`
 
 ## 12. 安全与性能
 
-- **数据隔离**：带产品线的业务表（`iqc_inspections`、`supplier_scars`）严格按 `product_line_code` 过滤；全局共享基础表（`suppliers`、`supplier_certifications`、`supplier_evaluations`）全量读取后传入规则引擎，生成的 `supplier_risk_alerts` 打上当前评估的 `product_line_code`
+- **数据隔离**：有 `product_line_code` 字段的业务表（`iqc_inspections`、`supplier_scars`）严格按 `product_line_code` 过滤；全局共享基础表（`suppliers`、`supplier_certifications`、`supplier_evaluations`）按 `supplier_id` 过滤后全量读取，生成的 `supplier_risk_alerts` 打上当前评估的 `product_line_code`
 - **权限控制**：API 路由使用 `require_permission(Module.SUPPLIER_RISK, ...)`
 - **Webhook 签名**：HMAC-SHA256 签名验证 payload 完整性
 - **邮件配置**：通过环境变量配置 SMTP，不硬编码
