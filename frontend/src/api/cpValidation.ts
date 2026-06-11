@@ -45,3 +45,8 @@ export async function reopenValidationResult(findingId: string): Promise<Validat
   const resp = await client.post(`/validation-results/${findingId}/reopen`);
   return resp.data;
 }
+
+export async function batchValidationSummaries(cpIds: string[]): Promise<Record<string, ValidationSummary>> {
+  const resp = await client.post("/control-plans/validation-summaries", { cp_ids: cpIds });
+  return resp.data.summaries;
+}

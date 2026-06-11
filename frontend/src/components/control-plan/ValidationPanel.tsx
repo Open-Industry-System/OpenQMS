@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, Button, Spin, Empty, Alert, Badge, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import ValidationCard from "./ValidationCard";
@@ -26,8 +26,10 @@ export default function ValidationPanel({ cpId }: Props) {
   const [summary, setSummary] = useState<ValidationSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
-  const [pollCount, setPollCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const pollCountRef = useRef(0);
+  const pollingRef = useRef(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -50,8 +52,9 @@ export default function ValidationPanel({ cpId }: Props) {
     setError(null);
     try {
       await triggerValidation(cpId);
+      pollCountRef.current = 0;
+      pollingRef.current = true;
       setPolling(true);
-      setPollCount(0);
     } catch (e) {
       setError("触发校验失败");
     } finally {
@@ -60,19 +63,36 @@ export default function ValidationPanel({ cpId }: Props) {
   };
 
   useEffect(() => {
+    pollingRef.current = polling;
+  }, [polling]);
+
+  useEffect(() => {
     if (!polling) return;
 
-    const timer = setInterval(async () => {
+    const tick = async () => {
       const status = await fetchData();
-      setPollCount((c) => c + 1);
+      pollCountRef.current += 1;
 
-      if (status === "completed" || status === "failed" || pollCount >= MAX_POLLS) {
+      if (
+        status === "completed" ||
+        status === "failed" ||
+        pollCountRef.current >= MAX_POLLS
+      ) {
+        pollingRef.current = false;
         setPolling(false);
       }
-    }, POLL_INTERVAL);
 
-    return () => clearInterval(timer);
-  }, [polling, cpId, pollCount, fetchData]);
+      if (pollingRef.current) {
+        timeoutRef.current = setTimeout(tick, POLL_INTERVAL);
+      }
+    };
+
+    let timeoutRef = { current: setTimeout(tick, POLL_INTERVAL) } as { current: ReturnType<typeof setTimeout> };
+
+    return () => {
+      clearTimeout(timeoutRef.current);
+    };
+  }, [polling, cpId, fetchData]);
 
   useEffect(() => {
     fetchData();

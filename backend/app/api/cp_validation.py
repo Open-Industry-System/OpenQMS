@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,102 @@ from app.schemas.cp_validation import (
 from app.services.cp_validation import CPValidationEngine, ValidationAlreadyRunning
 
 router = APIRouter(prefix="/api", tags=["cp-validation"])
+
+
+class ValidationSummariesRequest(BaseModel):
+    cp_ids: list[uuid.UUID]
+
+
+class ValidationSummariesResponse(BaseModel):
+    summaries: dict[str, ValidationSummaryResponse]
+
+
+@router.post("/control-plans/validation-summaries", response_model=ValidationSummariesResponse)
+async def batch_validation_summaries(
+    req: ValidationSummariesRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.VIEW)),
+):
+    """Batch fetch validation summaries for multiple control plans (list page N+1 fix)."""
+    from sqlalchemy import func as sql_func
+
+    # Latest run per cp_id
+    subq = (
+        select(
+            CPValidationRun.cp_id,
+            sql_func.max(CPValidationRun.started_at).label("max_started"),
+        )
+        .where(CPValidationRun.cp_id.in_(req.cp_ids))
+        .group_by(CPValidationRun.cp_id)
+        .subquery("latest_runs")
+    )
+
+    latest = (
+        select(CPValidationRun)
+        .join(
+            subq,
+            and_(
+                CPValidationRun.cp_id == subq.c.cp_id,
+                CPValidationRun.started_at == subq.c.max_started,
+            ),
+        )
+        .subquery("latest")
+    )
+
+    # Status counts per cp
+    counts_result = await db.execute(
+        select(
+            CPValidationFinding.cp_id,
+            CPValidationFinding.status,
+            sql_func.count(),
+        )
+        .join(
+            CPValidationOccurrence,
+            and_(
+                CPValidationOccurrence.finding_id == CPValidationFinding.finding_id,
+                CPValidationOccurrence.present == True,
+            ),
+        )
+        .where(CPValidationFinding.cp_id.in_(req.cp_ids))
+        .group_by(CPValidationFinding.cp_id, CPValidationFinding.status)
+    )
+
+    # Organize: cp_id -> {status -> count}
+    status_map: dict[str, dict[str, int]] = {}
+    for cp_id_val, status_val, cnt in counts_result.all():
+        cp_key = str(cp_id_val)
+        if cp_key not in status_map:
+            status_map[cp_key] = {}
+        status_map[cp_key][status_val] = cnt
+
+    # Fetch run rows
+    run_result = await db.execute(select(CPValidationRun).where(CPValidationRun.cp_id.in_(req.cp_ids)))
+    run_rows = run_result.scalars().all()
+
+    # Pick latest run per cp_id manually (in case subquery approach is complex)
+    latest_by_cp: dict[str, CPValidationRun] = {}
+    for r in run_rows:
+        cp_key = str(r.cp_id)
+        existing = latest_by_cp.get(cp_key)
+        if existing is None or r.started_at > existing.started_at:
+            latest_by_cp[cp_key] = r
+
+    summaries: dict[str, ValidationSummaryResponse] = {}
+    for cp_key, run in latest_by_cp.items():
+        sc = status_map.get(cp_key, {})
+        summaries[cp_key] = ValidationSummaryResponse(
+            run_id=run.run_id,
+            status=run.status,
+            total=run.rule_count,
+            error_count=run.error_count,
+            warning_count=run.warning_count,
+            info_count=run.info_count,
+            open_count=sc.get("open", 0),
+            resolved_count=sc.get("resolved", 0),
+            rejected_count=sc.get("rejected", 0),
+        )
+
+    return ValidationSummariesResponse(summaries=summaries)
 
 
 def _row_to_result_item(occ: CPValidationOccurrence, finding: CPValidationFinding) -> ValidationResultItem:

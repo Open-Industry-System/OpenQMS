@@ -30,7 +30,7 @@ export default function ValidationCard({ result, onReject, onResolve, onReopen, 
     <Card
       size="small"
       style={{ marginBottom: 8, borderLeft: `3px solid ${config.color}` }}
-      bodyStyle={{ padding: 12 }}
+      styles={{ body: { padding: 12 } }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
         <span style={{ color: config.color, fontSize: 16, marginTop: 2 }}>{config.icon}</span>

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Table, Button, Tag, Typography, Modal, Form, Input, Popconfirm, App } from "antd";
 import { PlusOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icons";
 import { listControlPlans, createControlPlan, deleteControlPlan } from "../../../api/controlPlan";
-import { getValidationSummary } from "../../../api/cpValidation";
+import { batchValidationSummaries } from "../../../api/cpValidation";
 import ValidationBadge from "../../../components/control-plan/ValidationBadge";
 import type { ControlPlan } from "../../../types";
 import type { ValidationSummary } from "../../../types/cpValidation";
@@ -60,18 +60,13 @@ export default function ControlPlanListPage() {
   useEffect(() => {
     if (!data?.length) return;
     const fetchSummaries = async () => {
-      const map: Record<string, ValidationSummary> = {};
-      await Promise.all(
-        data.map(async (cp: ControlPlan) => {
-          try {
-            const summary = await getValidationSummary(cp.cp_id);
-            map[cp.cp_id] = summary;
-          } catch {
-            // ignore fetch errors for individual CPs
-          }
-        })
-      );
-      setValidationMap(map);
+      try {
+        const cpIds = data.map((cp) => cp.cp_id);
+        const summaries = await batchValidationSummaries(cpIds);
+        setValidationMap(summaries);
+      } catch {
+        // ignore fetch errors
+      }
     };
     fetchSummaries();
   }, [data]);
