@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import uuid
 from datetime import datetime, date
 from typing import Literal
@@ -86,6 +88,7 @@ class ManagementReviewResponse(BaseModel):
     review_date: date
     actual_date: date | None
     status: str
+    report_status: str
     product_line_code: str | None
     location: str | None
     chair_person_id: uuid.UUID
@@ -93,6 +96,7 @@ class ManagementReviewResponse(BaseModel):
     meeting_minutes: str | None
     data_package: dict | None
     manual_inputs: dict | None
+    generated_report: ReportContent | None
     attachments: list[dict] | None
     created_by: uuid.UUID
     updated_by: uuid.UUID | None
