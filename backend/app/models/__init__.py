@@ -72,6 +72,7 @@ from app.models.iqc_aql_config import IqcAqlConfig
 from app.models.supplier_risk import SupplierRiskAlert, SupplierRiskConfig, SupplierRiskNotificationChannel
 from app.models.factory import Factory, UserFactory
 from app.models.group_kpi_snapshot import GroupKPISnapshot
+from app.models.supplier_shared_profile import SupplierSharedProfile
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -144,4 +145,5 @@ __all__ = [
     "Factory",
     "UserFactory",
     "GroupKPISnapshot",
+    "SupplierSharedProfile",
 ]
