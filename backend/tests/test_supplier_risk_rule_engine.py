@@ -463,7 +463,7 @@ def test_scorer_multiple_categories():
 
 
 def test_scorer_critical_bypass():
-    """R10 critical bypass → score >= 80 (high) even if math says lower."""
+    """R10 critical bypass → score >= 61 (high) even if math says lower."""
     configs = _make_default_configs()
     results = [
         RuleResult(rule_id="R01", triggered=False, score=0, detail="", category="quality"),
@@ -479,6 +479,6 @@ def test_scorer_critical_bypass():
     ]
     score = calculate_risk_score(results, configs)
     # Without bypass: compliance = 100*15/31 * 0.20 = ~9.68
-    # With bypass: max(9.68, 80) = 80
-    assert score.risk_score >= 80.0
+    # With bypass: max(9.68, 61) = 61
+    assert score.risk_score >= 61.0
     assert score.risk_level in ("high", "critical")

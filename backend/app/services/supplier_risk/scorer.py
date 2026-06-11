@@ -6,7 +6,6 @@ Critical bypass: if any critical rule triggered, risk_score = max(calculated, 61
 from dataclasses import dataclass
 
 CATEGORY_WEIGHTS = {"quality": 0.50, "delivery": 0.30, "compliance": 0.20}
-RISK_THRESHOLDS = [(30, "low"), (60, "medium"), (80, "high"), (101, "critical")]
 
 
 @dataclass
@@ -41,13 +40,16 @@ def calculate_risk_score(results: list, configs: list) -> RiskScore:
 
     # Critical bypass: any critical rule triggered pushes score to at least "high"
     if any(r.triggered and r.critical for r in results):
-        overall = max(overall, 80.0)
+        overall = max(overall, 61.0)
 
-    level = "low"
-    for threshold, label in RISK_THRESHOLDS:
-        if overall < threshold:
-            break
-        level = label
+    if overall <= 30:
+        level = "low"
+    elif overall <= 60:
+        level = "medium"
+    elif overall <= 80:
+        level = "high"
+    else:
+        level = "critical"
 
     return RiskScore(
         risk_score=round(overall, 2),
