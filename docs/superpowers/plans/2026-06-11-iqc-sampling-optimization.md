@@ -30,7 +30,8 @@
 |---|---|
 | `backend/app/models/__init__.py` | Import + export new models |
 | `backend/app/models/iqc_inspection.py` | Add `has_safety_defect`, `linked_customer_complaint_id` fields |
-| `backend/app/api/iqc.py` | Add ~19 new AQL optimization endpoints |
+| `backend/app/schemas/iqc.py` | Extend `IqcInspectionJudge` with `has_safety_defect`, `linked_customer_complaint_id` |
+| `backend/app/api/iqc.py` | Add ~20 new AQL optimization endpoints |
 | `backend/app/services/iqc_inspection_service.py` | Trigger rule eval after judge; inject dynamic AQL on create |
 | `backend/app/main.py` | Register AQL expiry cleanup coroutine |
 
@@ -55,7 +56,35 @@
 ### Database
 | File | Change |
 |---|---|
+| `backend/alembic/versions/*merge*` | Merge two 032 heads into single head |
 | `backend/alembic/versions/033_add_iqc_aql_optimization.py` | 4 new tables + 2 new columns on iqc_inspections + config seed data |
+
+---
+
+## Task 0: Alembic Merge — Resolve Two Heads at 032
+
+**Files:**
+- Create: `backend/alembic/versions/032_merge_heads.py`
+
+The repo currently has two heads: `032_add_erp_tables` and `032_lessons_learned_cache`. Before the 033 migration can run, these must be merged into a single head.
+
+- [ ] **Step 1: Create merge migration**
+
+Run: `cd backend && alembic merge -m "merge_032_heads" 032_add_erp_tables 032_lessons_learned_cache`
+
+This generates a file like `032_merge_heads.py` with a unique revision ID. Note the generated revision ID — it will be used as `down_revision` in Task 1.
+
+- [ ] **Step 2: Verify heads are merged**
+
+Run: `cd backend && alembic heads`
+Expected: Single head (the merge revision)
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/alembic/versions/*merge*
+git commit -m "chore(alembic): merge 032 heads"
+```
 
 ---
 
@@ -78,16 +107,9 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 revision = "033_add_iqc_aql_optimization"
-down_revision = None  # Will be set after merge; see note below
+down_revision = "<MERGE_REVISION_ID>"  # Set to revision ID from Task 0 merge
 branch_labels = None
 depends_on = None
-
-# NOTE: This repo has two heads at 032 (032_add_erp_tables and
-# 032_lessons_learned_cache). Before running this migration, create a
-# merge migration first:
-#   alembic merge -m "merge_032_heads" 032_add_erp_tables 032_lessons_learned_cache
-# Then set down_revision to that merge revision ID.
-# Alternatively, set down_revision to whichever head is current after merging.
 
 
 def upgrade() -> None:
@@ -151,7 +173,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.create_index("ix_aql_rec_profile_status", "iqc_aql_recommendations", ["profile_id", "status"])
-    op.create_index("ix_aql_rec_sm_created", "iqc_aql_recommendations", ["supplier_id", "material_id", sa.text("created_at DESC")])
+    op.create_index("ix_aql_rec_sm_created", "iqc_aql_recommendations", ["supplier_id", "material_id", "created_at"])
     op.create_index("ix_aql_rec_status_expires", "iqc_aql_recommendations", ["status", "expires_at"])
 
     # ── iqc_aql_quality_snapshots ──
@@ -174,7 +196,7 @@ def upgrade() -> None:
         sa.Column("linked_customer_complaint", sa.Boolean(), nullable=False),
         sa.Column("calculated_state", sa.String(20), nullable=True),
     )
-    op.create_index("ix_aql_snap_sm_time", "iqc_aql_quality_snapshots", ["supplier_id", "material_id", sa.text("snapshot_at DESC")])
+    op.create_index("ix_aql_snap_sm_time", "iqc_aql_quality_snapshots", ["supplier_id", "material_id", "snapshot_at"])
 
     # ── iqc_aql_configs ──
     op.create_table(
@@ -453,6 +475,7 @@ git commit -m "feat(iqc-aql): add ORM models for AQL optimization"
 **Files:**
 - Create: `backend/app/schemas/iqc_aql.py`
 - Modify: `backend/app/schemas/__init__.py`
+- Modify: `backend/app/schemas/iqc.py` — extend `IqcInspectionJudge` with safety/complaint fields
 
 - [ ] **Step 1: Write all schemas**
 
@@ -466,19 +489,35 @@ Create `backend/app/schemas/iqc_aql.py` with request/response schemas for:
 
 All schemas use `model_config = {"from_attributes": True}`. Fields match the spec exactly (Section 3 & 6).
 
-- [ ] **Step 2: Update `backend/app/schemas/__init__.py`**
+- [ ] **Step 2: Extend `IqcInspectionJudge` in `backend/app/schemas/iqc.py`**
+
+Add two optional fields to `IqcInspectionJudge` (after `sample_qty`):
+
+```python
+class IqcInspectionJudge(BaseModel):
+    inspection_result: str
+    defect_qty: int = 0
+    defect_description: str | None = None
+    sample_qty: int | None = None
+    has_safety_defect: bool = False
+    linked_customer_complaint_id: uuid.UUID | None = None
+```
+
+This allows the judge endpoint to receive safety defect and customer complaint linkage data, which the rule engine needs to trigger FREEZE_SAFETY_DEFECT and TIGHTEN_CUSTOMER_COMPLAINT rules.
+
+- [ ] **Step 3: Update `backend/app/schemas/__init__.py`**
 
 Add `from app.schemas import iqc_aql` at end of file (after `from app.schemas import quality_trend`).
 
-- [ ] **Step 3: Verify schemas load**
+- [ ] **Step 4: Verify schemas load**
 
 Run: `cd backend && python -c "from app.schemas.iqc_aql import AqlProfileResponse; print('OK')"`
 Expected: `OK`
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/schemas/iqc_aql.py backend/app/schemas/__init__.py
+git add backend/app/schemas/iqc_aql.py backend/app/schemas/iqc.py backend/app/schemas/__init__.py
 git commit -m "feat(iqc-aql): add Pydantic schemas for AQL optimization"
 ```
 
@@ -522,8 +561,48 @@ git commit -m "feat(iqc-aql): add core service with rule engine and AQL calculat
 
 **Files:**
 - Modify: `backend/app/api/iqc.py`
+- Modify: `backend/app/services/iqc_inspection_service.py`
 
-- [ ] **Step 1: Add AQL optimization endpoints to `iqc.py`**
+- [ ] **Step 1: Update `judge_inspection` service to accept and persist new fields**
+
+In `backend/app/services/iqc_inspection_service.py`, add parameters to `judge_inspection()`:
+
+```python
+async def judge_inspection(
+    db: AsyncSession,
+    inspection_id: uuid.UUID,
+    inspection_result: str,
+    defect_qty: int,
+    defect_description: str | None,
+    sample_qty: int | None,
+    user_id: uuid.UUID,
+    has_safety_defect: bool = False,
+    linked_customer_complaint_id: uuid.UUID | None = None,
+) -> IqcInspection:
+```
+
+After the existing `inspection.judged_at = datetime.now(timezone.utc)` line, add:
+
+```python
+    inspection.has_safety_defect = has_safety_defect
+    if linked_customer_complaint_id:
+        inspection.linked_customer_complaint_id = linked_customer_complaint_id
+```
+
+- [ ] **Step 2: Update `judge_inspection` API route to pass new fields**
+
+In `backend/app/api/iqc.py`, update the judge endpoint call:
+
+```python
+    inspection = await iqc_inspection_service.judge_inspection(
+        db, inspection_id, req.inspection_result, req.defect_qty,
+        req.defect_description, req.sample_qty, user.user_id,
+        has_safety_defect=req.has_safety_defect,
+        linked_customer_complaint_id=req.linked_customer_complaint_id,
+    )
+```
+
+- [ ] **Step 3: Add AQL optimization endpoints to `iqc.py`**
 
 Add the following route groups (all under existing `router = APIRouter(prefix="/api/iqc")`):
 
@@ -534,7 +613,7 @@ Add the following route groups (all under existing `router = APIRouter(prefix="/
 - `PUT /aql-profiles/{id}` — update profile params
 - `GET /aql-profiles/{id}/history` — quality snapshot trend
 
-**Recommendation routes** (9 endpoints):
+**Recommendation routes** (10 endpoints):
 - `GET /aql-recommendations` — list recommendations (paginated, filterable by status/direction)
 - `GET /aql-recommendations/{id}` — recommendation detail
 - `POST /aql-recommendations/{id}/engineer-approve` — engineer approve (非放宽 only)
@@ -557,16 +636,16 @@ Add the following route groups (all under existing `router = APIRouter(prefix="/
 
 Permission guards use `require_permission(Module.IQC, ...)` with appropriate levels.
 
-- [ ] **Step 2: Verify routes register**
+- [ ] **Step 4: Verify routes register**
 
 Run: `cd backend && python -c "from app.api.iqc import router; print(len(router.routes), 'routes')"`
-Expected: Route count increased by ~19
+Expected: Route count increased by ~20
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/api/iqc.py
-git commit -m "feat(iqc-aql): add API endpoints for AQL optimization"
+git add backend/app/api/iqc.py backend/app/services/iqc_inspection_service.py
+git commit -m "feat(iqc-aql): add API endpoints for AQL optimization and judge field passthrough"
 ```
 
 ---
@@ -594,9 +673,12 @@ In `iqc_inspection_service.create_inspection()`, replace the AQL auto-calculate 
         except Exception:
             pass  # Fall through to material default
 
-    # Fallback: use material default AQL if no profile set AQL
-    if not aql_level and material:
-        aql_level = material.default_aql
+    # Fallback: load material and use default_aql if no profile set AQL
+    if not aql_level and material_id:
+        from app.models.iqc_material import IqcMaterial
+        material = await db.get(IqcMaterial, material_id)
+        if material and material.default_aql:
+            aql_level = material.default_aql
 ```
 
 - [ ] **Step 2: Add rule evaluation trigger to `judge_inspection`**
