@@ -26,6 +26,7 @@ import {
   RadarChartOutlined,
   BuildOutlined,
   SettingOutlined,
+  WarningOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -41,7 +42,7 @@ const MENU_KEYS = [
   "/spc", "/msa/gauges", "/msa/studies", "/quality-goals",
   "/internal-audits", "/management-reviews",
   "/customer-quality", "/customer-audits", "/capa",
-  "/suppliers", "/suppliers/quality",
+  "/suppliers", "/suppliers/quality", "/supplier-risk", "/supplier-risk/config",
   "/iqc/inspections", "/iqc/materials", "/iqc/aql-optimization", "/scars",
   "/knowledge-graph",
   "/change-impact",
@@ -70,6 +71,8 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/capa": ["grp:customer"],
   "/suppliers": ["grp:supplier"],
   "/suppliers/quality": ["grp:supplier"],
+  "/supplier-risk": ["grp:supplier"],
+  "/supplier-risk/config": ["grp:supplier"],
   "/iqc/inspections": ["grp:supplier", "grp:iqc"],
   "/iqc/materials": ["grp:supplier", "grp:iqc"],
   "/iqc/aql-optimization": ["grp:supplier", "grp:iqc"],
@@ -152,6 +155,7 @@ const menuItems = [
     children: [
       { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
       { key: "/suppliers/quality", icon: <BarChartOutlined />, label: "供货质量看板" },
+      { key: "/supplier-risk", icon: <WarningOutlined />, label: "供应商风险预警" },
       { key: "/scars", icon: <AlertOutlined />, label: "SCAR 管理" },
       {
         key: "grp:iqc",

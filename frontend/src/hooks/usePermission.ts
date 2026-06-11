@@ -6,7 +6,7 @@ export type ModuleKey =
   | "customer_audit" | "supplier" | "iqc" | "ppap" | "spc"
   | "msa" | "planning" | "management_review" | "user_mgmt"
   | "permission_mgmt" | "special_characteristic" | "quality_goal" | "scar"
-  | "knowledge_graph" | "plm" | "mes" | "erp";
+  | "knowledge_graph" | "plm" | "mes" | "erp" | "supplier_risk";
 
 export enum PermissionLevel {
   NONE = 0, VIEW = 1, CREATE = 2, EDIT = 3, APPROVE = 4, ADMIN = 5,

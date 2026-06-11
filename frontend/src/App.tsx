@@ -43,6 +43,8 @@ import CustomerQualityPage from "./pages/customerQuality/CustomerQualityPage";
 import ComplaintDetailPage from "./pages/customerQuality/ComplaintDetailPage";
 import RMADetailPage from "./pages/customerQuality/RMADetailPage";
 import SupplierQualityPage from "./pages/supplier/SupplierQualityPage";
+import SupplierRiskPage from "./pages/supplierRisk/SupplierRiskPage";
+import RiskConfigPage from "./pages/supplierRisk/RiskConfigPage";
 import SCARListPage from "./pages/scar/SCARListPage";
 import SCARDetailPage from "./pages/scar/SCARDetailPage";
 import APQPListPage from "./pages/planning/apqp/APQPListPage";
@@ -122,6 +124,17 @@ export default function App() {
         <Route path="/suppliers/:id" element={<ProtectedRoute requiredModule="supplier"><SupplierDetailPage /></ProtectedRoute>} />
         <Route path="/suppliers/quality" element={<ProtectedRoute requiredModule="supplier"><SupplierQualityPage /></ProtectedRoute>} />
         <Route path="/suppliers/quality/:supplierId" element={<ProtectedRoute requiredModule="supplier"><SupplierQualityPage /></ProtectedRoute>} />
+        <Route
+          path="/supplier-risk"
+          element={
+            <ProtectedRoute requiredModule="supplier_risk">
+              <AppLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<SupplierRiskPage />} />
+          <Route path="config" element={<RiskConfigPage />} />
+        </Route>
         <Route path="/msa" element={<ProtectedRoute requiredModule="msa"><Navigate to="/msa/gauges" replace /></ProtectedRoute>} />
         <Route path="/msa/gauges" element={<ProtectedRoute requiredModule="msa"><GaugeListPage /></ProtectedRoute>} />
         <Route path="/msa/gauges/:id" element={<ProtectedRoute requiredModule="msa"><GaugeDetailPage /></ProtectedRoute>} />

@@ -1496,3 +1496,79 @@ export interface AqlPreviewResult {
   trigger_rules: { rule_id: string; reason: string }[];
   evidence: Record<string, unknown>;
 }
+
+// ─── Supplier Risk Alert ──────────────────────────────────────────────────────
+export interface RuleResultDetail {
+  rule_id: string;
+  triggered: boolean;
+  score: number;
+  detail: string;
+  category: string;
+  critical: boolean;
+}
+
+export interface SupplierRiskAlert {
+  alert_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_no: string;
+  risk_level: "low" | "medium" | "high" | "critical";
+  risk_score: number;
+  quality_score: number;
+  delivery_score: number;
+  compliance_score: number;
+  rule_results: Record<string, RuleResultDetail>;
+  alert_type: "initial" | "escalated" | "routine";
+  status: "open" | "acknowledged" | "action_taken" | "ignored" | "closed";
+  handled_by: string | null;
+  handled_at: string | null;
+  handle_note: string | null;
+  linked_scar_id: string | null;
+  linked_capa_id: string | null;
+  snapshot_date: string;
+  product_line_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RiskDashboard {
+  high_risk_count: number;
+  critical_risk_count: number;
+  open_alert_count: number;
+  avg_risk_score: number;
+  risk_distribution: Record<string, number>;
+  supplier_risk_points: Array<{
+    supplier_id: string;
+    supplier_name: string;
+    quality_score: number;
+    delivery_score: number;
+    compliance_score: number;
+    risk_level: string;
+    risk_score: number;
+  }>;
+}
+
+export interface SupplierRiskConfig {
+  config_id: string;
+  rule_id: string;
+  enabled: boolean;
+  thresholds: Record<string, unknown>;
+  weight: number;
+  supplier_id: string | null;
+  category: string;
+  product_line_code: string | null;
+  updated_by: string;
+  updated_at: string;
+}
+
+export interface NotificationChannel {
+  channel_id: string;
+  channel_type: "email" | "webhook";
+  config: Record<string, unknown>;
+  min_risk_level: string;
+  enabled: boolean;
+  supplier_id: string | null;
+  product_line_code: string | null;
+  created_by: string;
+  created_at: string;
+}
