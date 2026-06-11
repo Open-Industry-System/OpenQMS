@@ -71,7 +71,7 @@ backend/tests/test_supplier_risk_integration.py         # 11 integration/boundar
 ### Task 1: Database Migration
 
 **Files:**
-- Create: `backend/alembic/versions/033_add_supplier_risk_tables.py`
+- Create: `backend/alembic/versions/034_add_supplier_risk_tables.py`
 - Modify: `backend/app/core/permissions.py` (add `SUPPLIER_RISK` to Module enum)
 
 - [ ] **Step 1: Create migration file with 3 tables, partial unique indexes, and permission seed**
@@ -287,7 +287,22 @@ async def seed_supplier_risk_configs(db: AsyncSession):
     DEFAULT_CONFIGS = [
         {"rule_id": "R01", "enabled": True, "category": "quality", "weight": 15.0,
          "thresholds": {"ppm_limit": 1000, "window_days": 90}},
-        # ... (same list as in migration file)
+        {"rule_id": "R02", "enabled": True, "category": "quality", "weight": 12.0,
+         "thresholds": {"acceptance_rate_min": 0.9, "decline_ratio": 0.1, "window_days": 90, "compare_window_days": 180}},
+        {"rule_id": "R03", "enabled": True, "category": "quality", "weight": 18.0,
+         "thresholds": {"consecutive_batches": 3, "batch_limit": 10}},
+        {"rule_id": "R04", "enabled": True, "category": "quality", "weight": 10.0,
+         "thresholds": {"open_days_limit": 30}},
+        {"rule_id": "R05", "enabled": True, "category": "quality", "weight": 12.0,
+         "thresholds": {"scar_count_limit": 3, "window_days": 90}},
+        {"rule_id": "R06", "enabled": True, "category": "delivery", "weight": 12.0,
+         "thresholds": {"delivery_score_min": 70, "decline_ratio": 0.15}},
+        {"rule_id": "R07", "enabled": True, "category": "delivery", "weight": 10.0,
+         "thresholds": {"from_grades": ["A", "B"], "to_grades": ["C", "D"]}},
+        {"rule_id": "R08", "enabled": True, "category": "compliance", "weight": 8.0,
+         "thresholds": {"warning_days": [90, 60, 30]}},
+        {"rule_id": "R09", "enabled": True, "category": "compliance", "weight": 8.0,
+         "thresholds": {"score_decline_limit": 15}},
         {"rule_id": "R10", "enabled": True, "category": "compliance", "weight": 15.0,
          "thresholds": {"keywords": ["安全", "安全特性", "safety"]}},
     ]
@@ -1095,9 +1110,9 @@ git add -A && git commit -m "feat(supplier-risk): notifier with email, webhook, 
 @pytest.mark.asyncio
 async def test_capa_close_closes_linked_alert(db_session, seed_open_alert_with_capa, seed_manager):
     """When CAPA transitions to D8_CLOSURE, linked alert should auto-close."""
-    from app.services.capa_service import update_capa
-    capa = seed_open_alert_with_capa.linked_capa
-    await update_capa(db_session, capa.report_id, {"status": "D8_CLOSURE"}, seed_manager.user_id)
+    from app.services.capa_service import update_capa, get_capa
+    capa = await get_capa(db_session, seed_open_alert_with_capa.linked_capa_id)
+    await update_capa(db_session, capa, {"status": "D8_CLOSURE"}, seed_manager.user_id)
     await db_session.refresh(seed_open_alert_with_capa)
     assert seed_open_alert_with_capa.status == "closed"
 ```
@@ -1221,7 +1236,7 @@ git add -A && git commit -m "feat(supplier-risk): API routes with /api/supplier-
 
 - [ ] **Step 1: Write service tests (6 tests)**
 
-`test_supplier_risk_service.py`:
+`test_supplier_risk_service.py` (all using PostgreSQL test database, same `db_session` fixture):
 - Test acknowledge alert (open → acknowledged)
 - Test ignore alert (open → ignored, requires note)
 - Test close alert (acknowledged → closed, manager only)
