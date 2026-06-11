@@ -254,6 +254,18 @@ async def transition_scar(
         new_values={"status": to_status},
         operated_by=user_id,
     ))
+
+    # Close linked risk alerts
+    if to_status == "closed":
+        from sqlalchemy import update
+        from app.models.supplier_risk import SupplierRiskAlert
+        await db.execute(
+            update(SupplierRiskAlert)
+            .where(SupplierRiskAlert.linked_scar_id == scar.scar_id)
+            .where(SupplierRiskAlert.status != "closed")
+            .values(status="closed", handled_at=func.now())
+        )
+
     await db.commit()
     return await get_scar(db, scar.scar_id)
 
