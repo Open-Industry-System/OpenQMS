@@ -4,6 +4,19 @@ export interface AuditorInfo {
   last_qualification_date: string | null;
 }
 
+export interface Factory {
+  id: string;
+  code: string;
+  name: string;
+  location?: string;
+  is_active: boolean;
+}
+
+export interface FactoryScope {
+  accessible_factory_ids: string[] | null;  // null = all factories
+  default_factory_id: string | null;
+}
+
 export interface User {
   user_id: string;
   username: string;
@@ -16,6 +29,8 @@ export interface User {
   bypass_row_level_security: boolean;
   is_active: boolean;
   auditor_info?: AuditorInfo;
+  factory_scope?: FactoryScope | null;
+  factories?: Factory[];
 }
 
 export interface LoginRequest {

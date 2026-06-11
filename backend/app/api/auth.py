@@ -26,6 +26,36 @@ async def build_user_response(user: User, db: AsyncSession) -> UserResponse:
     else:
         codes = await get_user_product_line_codes(user, db)
         product_lines = [{"product_line_code": code} for code in codes]
+
+    # Factory scope
+    from app.core.factory_scope import get_user_factory_ids, resolve_factory_scope
+    from app.core.permissions import Module, get_user_permission, PermissionLevel
+    from app.models.factory import Factory
+
+    user_factory_ids = await get_user_factory_ids(user, db)
+    group_level = await get_user_permission(user, Module.GROUP, db)
+    factory_scope = resolve_factory_scope(user, user_factory_ids, group_level >= PermissionLevel.ADMIN)
+
+    # Fetch accessible factories
+    if factory_scope.accessible_factory_ids is None:
+        fresult = await db.execute(
+            select(Factory).where(Factory.is_active == True).order_by(Factory.code)
+        )
+    else:
+        fresult = await db.execute(
+            select(Factory).where(Factory.id.in_(factory_scope.accessible_factory_ids), Factory.is_active == True).order_by(Factory.code)
+        )
+    factory_records = fresult.scalars().all()
+
+    factory_scope_dict = {
+        "accessible_factory_ids": [str(fid) for fid in factory_scope.accessible_factory_ids] if factory_scope.accessible_factory_ids is not None else None,
+        "default_factory_id": str(factory_scope.default_factory_id) if factory_scope.default_factory_id else None,
+    }
+    factories_list = [
+        {"id": str(f.id), "code": f.code, "name": f.name, "location": f.location, "is_active": f.is_active}
+        for f in factory_records
+    ]
+
     return UserResponse(
         user_id=user.user_id, username=user.username,
         display_name=user.display_name, email=user.email,
@@ -33,6 +63,7 @@ async def build_user_response(user: User, db: AsyncSession) -> UserResponse:
         permissions=permissions, product_lines=product_lines,
         bypass_row_level_security=user.role_definition.bypass_row_level_security,
         is_active=user.is_active, auditor_info=user.auditor_info,
+        factory_scope=factory_scope_dict, factories=factories_list,
     )
 
 
