@@ -215,6 +215,22 @@ async def lifespan(app: FastAPI):
 
     erp_sync_task = asyncio.create_task(_erp_sync_loop())
 
+    # Start AQL recommendation expiry cleanup loop (daily)
+    from app.services.iqc_aql_service import AqlService
+
+    async def _aql_expiry_loop():
+        while True:
+            await asyncio.sleep(86400)
+            try:
+                async with async_session() as db:
+                    expired = await AqlService.expire_stale_recommendations(db)
+                    if expired > 0:
+                        logger.info("[aql_optimization] expired %d stale recommendations", expired)
+            except Exception as e:
+                logger.error("[aql_optimization] expiry error: %s", e)
+
+    aql_expiry_task = asyncio.create_task(_aql_expiry_loop())
+
     yield
 
     # Cancel cleanup coroutine
@@ -242,6 +258,10 @@ async def lifespan(app: FastAPI):
 
     # Cancel ERP background tasks
     for task in (erp_sync_task,):
+        task.cancel()
+
+    # Cancel AQL background tasks
+    for task in (aql_expiry_task,):
         task.cancel()
 
     # Cleanup: close LLM provider httpx client if applicable

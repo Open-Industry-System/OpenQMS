@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, date, timezone
 from sqlalchemy import select, func, or_
@@ -142,6 +143,24 @@ async def create_inspection(
         status="pending",
         inspection_result="pending",
     )
+
+    # Dynamic AQL injection from optimization profile
+    if not aql_level and material_id and supplier_id:
+        from app.services.iqc_aql_service import AqlService
+        try:
+            profile = await AqlService.get_profile(db, supplier_id, material_id)
+            if profile:
+                # frozen 状态继续使用 profile.current_aql，不降级
+                aql_level = profile.current_aql
+        except Exception:
+            pass  # Fall through to material default
+
+    # Fallback: load material and use default_aql if no profile set AQL
+    if not aql_level and material_id:
+        from app.models.iqc_material import IqcMaterial
+        material = await db.get(IqcMaterial, material_id)
+        if material and material.default_aql:
+            aql_level = material.default_aql
 
     # AQL auto-calculate
     if lot_qty and aql_level:
@@ -363,6 +382,15 @@ async def judge_inspection(
         operated_by=user_id,
     ))
     await db.commit()
+
+    # Trigger AQL rule evaluation after judgment
+    if inspection.material_id:
+        try:
+            from app.services.iqc_aql_service import AqlService
+            await AqlService.on_inspection_judged(db, inspection.supplier_id, inspection.material_id, inspection_id)
+        except Exception as e:
+            logging.getLogger(__name__).warning("AQL rule evaluation failed: %s", e)
+
     return inspection
 
 
