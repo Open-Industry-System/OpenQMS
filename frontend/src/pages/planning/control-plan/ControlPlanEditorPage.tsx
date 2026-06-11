@@ -30,6 +30,7 @@ import CreateVersionModal from "../../../components/version/CreateVersionModal";
 import RollbackConfirmModal from "../../../components/version/RollbackConfirmModal";
 import VersionCompareView from "../../../components/version/VersionCompareView";
 import SyncPreviewDrawer from "../../../components/version/SyncPreviewDrawer";
+import ValidationPanel from "../../../components/control-plan/ValidationPanel";
 
 const { Title, Text } = Typography;
 
@@ -911,6 +912,12 @@ export default function ControlPlanEditorPage() {
           />
         </Tabs.TabPane>
       </Tabs>
+
+      {!isNew && id && (
+        <div style={{ marginTop: 16 }}>
+          <ValidationPanel cpId={id} />
+        </div>
+      )}
 
       {!isNew && id && (
         <>
