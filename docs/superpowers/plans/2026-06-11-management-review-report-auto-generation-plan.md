@@ -1143,9 +1143,51 @@ def _mock_review(status="data_collected", report_status="none"):
     return review
 
 
+def _sample_report_content() -> dict:
+    return {
+        "generated_at": "2026-06-11T10:00:00+00:00",
+        "generation_model": "rule-only",
+        "llm_enriched": False,
+        "sections": [
+            {
+                "key": "quality_goals",
+                "title": "2. 质量目标实现程度",
+                "source": "data_package",
+                "base_text": "total: 1",
+                "ai_analysis": "",
+                "findings": [],
+                "recommendations": [],
+                "manual_text": "",
+                "data_snapshot": {"total": 1},
+            }
+        ],
+        "executive_summary": "test summary",
+        "overall_recommendations": [],
+    }
+
+
 @pytest.mark.asyncio
 async def test_viewer_cannot_generate_report():
-    app.dependency_overrides[get_current_user] = override_dependencies.__wrapped__ if False else None
+    async def mock_user():
+        user = MagicMock(spec=User)
+        user.user_id = uuid.uuid4()
+        user.is_active = True
+        return user
+
+    app.dependency_overrides[get_current_user] = mock_user
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.VIEW)):
+        review = _mock_review(status="data_collected", report_status="none")
+        mock_db = MagicMock()
+        mock_db.get = AsyncMock(return_value=review)
+        app.dependency_overrides[get_db] = lambda: mock_db
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.post(
+                f"/api/management-reviews/{review.review_id}/report/generate",
+                json={"use_llm": False},
+            )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+    app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
@@ -1153,7 +1195,7 @@ async def test_permission_levels(monkeypatch):
     """PATCH app.core.permissions.get_user_permission 到指定级别后调用 API。"""
     from httpx import AsyncClient, ASGITransport
 
-    async def run_with_permission(level: PermissionLevel, expected_status: int):
+    async def run_with_permission(level: PermissionLevel):
         async def mock_user():
             user = MagicMock(spec=User)
             user.user_id = uuid.uuid4()
@@ -1176,12 +1218,12 @@ async def test_permission_levels(monkeypatch):
                 )
 
     # VIEW level should be forbidden
-    resp = await run_with_permission(PermissionLevel.VIEW, 403)
+    resp = await run_with_permission(PermissionLevel.VIEW)
     assert resp.status_code == status.HTTP_403_FORBIDDEN
 
-    # CREATE level should succeed (mock service returns content)
-    with patch.object(report_service, "generate_report", new=AsyncMock(return_value={"sections": []})):
-        resp = await run_with_permission(PermissionLevel.CREATE, 200)
+    # CREATE level should succeed (mock service returns valid ReportContent)
+    with patch.object(report_service, "generate_report", new=AsyncMock(return_value=_sample_report_content())):
+        resp = await run_with_permission(PermissionLevel.CREATE)
     assert resp.status_code == status.HTTP_200_OK
 
     app.dependency_overrides.clear()
@@ -1206,7 +1248,7 @@ async def test_closed_review_rejects_save_draft():
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             resp = await ac.post(
                 f"/api/management-reviews/{review.review_id}/report/save-draft",
-                json={"generated_report": {"sections": []}},
+                json={"generated_report": _sample_report_content()},
             )
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
     app.dependency_overrides.clear()
@@ -1331,18 +1373,12 @@ export interface ReviewReportVersion {
 
 更新 `ManagementReview` 接口：
 
+在现有 `ManagementReview` 接口的 `status` 字段后新增以下两行，不要删除或替换其他字段：
+
 ```typescript
-export interface ManagementReview {
-  review_id: string;
-  doc_no: string;
-  title: string;
-  review_date: string;
-  actual_date: string | null;
   status: "draft" | "data_collected" | "in_review" | "closed";
   report_status: "none" | "draft" | "final";
   generated_report: ManagementReviewReport | null;
-  // ... 其余字段保持不变
-}
 ```
 
 - [ ] **Step 2: 新增 API 函数**
