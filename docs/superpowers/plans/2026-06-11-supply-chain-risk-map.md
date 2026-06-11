@@ -119,24 +119,21 @@ def upgrade() -> None:
         sa.Column("delivery_delay_days", sa.Float(), nullable=True),
         sa.Column("open_scar_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("ppm_value", sa.Float(), nullable=True),
-        sa.Column("dimensions", JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("dimensions", sa.JSON(), nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
 
     # 3. Unique constraint — dialect branch for NULLS NOT DISTINCT
-    bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
-        op.execute(
-            "ALTER TABLE supply_chain_risk_snapshots "
-            "ADD CONSTRAINT uq_supplier_pl_period "
-            "UNIQUE NULLS NOT DISTINCT (supplier_id, product_line_code, snapshot_period)"
-        )
-    else:
-        # SQLite fallback: standard unique (NULLs not unique in SQLite)
-        op.create_unique_constraint(
-            "uq_supplier_pl_period", "supply_chain_risk_snapshots",
-            ["supplier_id", "product_line_code", "snapshot_period"],
-        )
+    # NOTE: This migration is PostgreSQL-only in practice. The JSONB column type
+    # and NULLS NOT DISTINCT constraint both require PG. SQLite tests must use
+    # separate model definitions with sa.JSON and standard unique constraint,
+    # and must test NULL dedup at the application layer since SQLite unique
+    # constraints don't enforce uniqueness on NULL columns.
+    op.execute(
+        "ALTER TABLE supply_chain_risk_snapshots "
+        "ADD CONSTRAINT uq_supplier_pl_period "
+        "UNIQUE NULLS NOT DISTINCT (supplier_id, product_line_code, snapshot_period)"
+    )
 
     # 4. Indexes
     op.create_index("idx_scrs_period", "supply_chain_risk_snapshots", ["snapshot_period"])
@@ -164,13 +161,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("idx_scrs_supplier", table_name="supply_chain_risk_snapshots")
     op.drop_index("idx_scrs_period", table_name="supply_chain_risk_snapshots")
-
-    bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
-        op.execute("ALTER TABLE supply_chain_risk_snapshots DROP CONSTRAINT uq_supplier_pl_period")
-    else:
-        op.drop_constraint("uq_supplier_pl_period", "supply_chain_risk_snapshots")
-
+    op.execute("ALTER TABLE supply_chain_risk_snapshots DROP CONSTRAINT uq_supplier_pl_period")
     op.drop_table("supply_chain_risk_snapshots")
     op.drop_column("erp_purchase_orders", "actual_delivery_date")
 
@@ -187,8 +178,8 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Float, Integer, DateTime, Date, text
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import String, Float, Integer, DateTime, Date, ForeignKey, func, text, JSON
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -212,7 +203,7 @@ class SupplyChainRiskSnapshot(Base):
     delivery_delay_days: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     open_scar_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     ppm_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    dimensions: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    dimensions: Mapped[dict] = mapped_column(JSON, nullable=False, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 ```
 
@@ -264,7 +255,8 @@ Create a minimal test in `backend/tests/test_supplier_risk_service.py` that veri
 
 ```python
 import pytest
-from unittest.mock import AsyncMock, patch
+from uuid import uuid4
+from sqlalchemy import select, func
 from app.services.supplier_risk.service import calculate_all_supplier_scores
 
 
@@ -273,21 +265,38 @@ async def test_calculate_all_supplier_scores_returns_scores_without_side_effects
     """calculate_all_supplier_scores should return scores for all suppliers
     including low-risk ones, without creating alerts or committing."""
     from app.models.supplier import Supplier
-    from app.models.supplier_risk import SupplierRiskConfig
+    from app.models.supplier_risk import SupplierRiskConfig, SupplierRiskAlert
 
     # Create an approved supplier
+    user_id = uuid4()
     supplier = Supplier(
         supplier_id=uuid4(),
-        supplier_no="TEST-S001",
-        name="Test Supplier",
-        short_name="Test",
+        supplier_no="TEST-SCRM-001",
+        name="Test Supplier SCRM",
+        short_name="Test SCRM",
         status="approved",
-        created_by=uuid4(),
+        created_by=user_id,
     )
     db_session.add(supplier)
 
+    # Seed global default configs for all 10 rules so the supplier gets scored.
+    # Without configs, calculate_all_supplier_scores skips the supplier entirely.
+    from app.services.supplier_risk.config import DEFAULT_CONFIGS
+    for cfg in DEFAULT_CONFIGS:
+        db_session.add(SupplierRiskConfig(
+            config_id=uuid4(),
+            rule_id=cfg["rule_id"],
+            enabled=True,
+            thresholds=cfg["thresholds"],
+            weight=cfg["weight"],
+            supplier_id=None,
+            category=cfg["category"],
+            product_line_code=None,
+            updated_by=user_id,
+        ))
+    await db_session.commit()
+
     # Verify no alerts exist before calling
-    from app.models.supplier_risk import SupplierRiskAlert
     count_before = (await db_session.execute(
         select(func.count()).select_from(SupplierRiskAlert)
     )).scalar()
@@ -302,6 +311,7 @@ async def test_calculate_all_supplier_scores_returns_scores_without_side_effects
 
     # Verify result includes the supplier (even if low risk)
     assert any(r["supplier_id"] == supplier.supplier_id for r in result)
+```
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -550,9 +560,34 @@ SUPPLY_CHAIN_RISK_MAP = "supply_chain_risk_map"
 
 - [ ] **Step 4: Register router and scheduler in main.py**
 
-In `backend/app/main.py`:
-- Import and register `supply_chain_risk_map_router`
-- Add scheduler startup in the lifespan alongside existing `start_supplier_risk_evaluation`
+In `backend/app/main.py`, make these exact changes:
+
+1. Add import at top of file with other router imports:
+```python
+from app.api.supply_chain_risk_map import router as supply_chain_risk_map_router
+```
+
+2. Add to the router registration section (after `supplier_risk_router`):
+```python
+app.include_router(supply_chain_risk_map_router, prefix="/api")
+```
+
+3. Add scheduler startup in the `lifespan` function, after `risk_eval_task` creation (around line 256). The existing pattern creates an `asyncio.create_task` for the loop, and cancels it in the shutdown section:
+```python
+from app.services.supply_chain_risk_map.scheduler import snapshot_loop
+
+risk_map_snapshot_task = asyncio.create_task(snapshot_loop())
+```
+
+4. Add shutdown cancellation in the cleanup section (after `risk_eval_task` cancellation, around line 296):
+```python
+# Cancel risk map snapshot task
+risk_map_snapshot_task.cancel()
+try:
+    await risk_map_snapshot_task
+except asyncio.CancelledError:
+    pass
+```
 
 - [ ] **Step 5: Add ERP field to schema and ingestion**
 
@@ -596,7 +631,7 @@ Create `backend/tests/test_supply_chain_risk_integration.py` with tests for:
 3. Viewer gets 403 on snapshot generate endpoint
 4. Product line permission enforcement (`enforce_product_line_access`)
 5. `field_qe` / `supplier_qe` roles have EDIT permission
-6. `UNIQUE NULLS NOT DISTINCT` constraint prevents duplicate snapshots (PG test)
+6. `UNIQUE NULLS NOT DISTINCT` constraint prevents duplicate snapshots (PG-only migration; SQLite tests must dedup at application layer before UPSERT)
 7. `calculate_all_supplier_scores` called by generate_snapshot (integration)
 8. `actual_delivery_date` correctly mapped in ERP ingestion
 
@@ -858,17 +893,45 @@ Ant Design `Dropdown` button with CSV and Excel options. Calls `riskMapApi.expor
 
 - [ ] **Step 2: Add menu item in `AppLayout.tsx`**
 
-Under the "供应商质量" menu group, add:
+Three changes required in `frontend/src/components/layout/AppLayout.tsx`:
 
+**2a. Add `HeatMapOutlined` to the icon imports** (line ~29):
 ```tsx
-{
-  key: '/supply-chain-risk-map',
-  icon: <HeatMapOutlined />,
-  label: '供应链风险地图',
-}
+import {
+  // ... existing icons ...
+  HeatMapOutlined,
+} from "@ant-design/icons";
 ```
 
-- [ ] **Step 3: Add route in `App.tsx`**
+**2b. Add menu item** inside the `grp:supplier` children array (after `/supplier-risk`, around line 158):
+```tsx
+{ key: "/supply-chain-risk-map", icon: <HeatMapOutlined />, label: "供应链风险地图" },
+```
+
+**2c. Update `MENU_KEYS` array** (line ~38) to include the new paths:
+```tsx
+"/supply-chain-risk-map",
+```
+
+**2d. Update `MENU_KEY_TO_OPEN_KEYS`** (line ~55) to map both paths:
+```tsx
+"/supply-chain-risk-map": ["grp:supplier"],
+```
+
+- [ ] **Step 3: Add `supply_chain_risk_map` to `ModuleKey` type**
+
+In `frontend/src/hooks/usePermission.ts`, add to the `ModuleKey` union type (line ~9):
+```ts
+| "supply_chain_risk_map"
+```
+
+- [ ] **Step 4: Add route in `App.tsx`**
+
+In `frontend/src/App.tsx`, add the route after the existing `/supplier-risk` route block (around line 137). Also add the import at the top:
+
+```tsx
+import SupplyChainRiskMapPage from "./pages/supplyChainRiskMap/SupplyChainRiskMapPage";
+```
 
 ```tsx
 <Route
