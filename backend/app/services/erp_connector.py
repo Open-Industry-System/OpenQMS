@@ -472,19 +472,21 @@ def get_erp_connector_by_config(
 async def test_erp_connection(
     connector_type: str, config: dict
 ) -> dict:
-    """Lightweight connectivity test: fetch one supplier."""
+    """Lightweight connectivity test: fetch one supplier.
+
+    Returns ``{success, message}`` to match frontend contract.
+    """
     connector = get_erp_connector_by_config(connector_type, config)
     try:
         suppliers = await connector.fetch_suppliers(
             datetime(2000, 1, 1, tzinfo=timezone.utc)
         )
         return {
-            "ok": True,
-            "error": None,
-            "message": f"Connected. Fetched {len(suppliers)} suppliers.",
+            "success": True,
+            "message": f"已连接，获取到 {len(suppliers)} 条供应商数据。",
         }
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"success": False, "message": str(e)}
     finally:
         if isinstance(connector, RESTERPConnector):
             await connector.close()
