@@ -50,7 +50,9 @@
 
 **关键约束**：
 - `RETURN_TO_NORMAL` 优先级（30）高于所有放宽规则（20/10），确保加严后必须先恢复正常，不能直接跳级到放宽
-- `frozen` 状态在创建检验单时**继续使用** `profile.current_aql`（最严档位），冻结仅表示暂停规则评估，不降低检验标准
+- `frozen` 状态在创建检验单时**继续使用** `profile.current_aql`。冻结的 AQL 由 `frozen_aql_policy` 决定：
+  - `tighten`：冻结前先将 AQL 调整为 tightened 档位（如安全缺陷）
+  - `current`：冻结时保持当前 AQL 不变（如 SCAR 未关闭时的冻结）
 - 所有加严/放宽/冻结的 AQL 计算均基于 `base_aql`，而非 `current_aql`
 
 ### 2.2 AQL 调整方向
@@ -63,7 +65,7 @@
 0.010, 0.015, 0.025, 0.040, 0.065, 0.10, 0.15, 0.25, 0.40, 0.65, 1.0, 1.5, 2.5, 4.0, 6.5, 10.0
 ```
 
-动态调整通过 `min_aql` 和 `max_aql` 字段限制边界，确保高要求物料（如默认 AQL=0.15 的安全件）不会被错误地映射到 0.40。`min_aql` 默认为 `base_aql` 左侧第1档或 `base_aql` 本身（取更严者），`max_aql` 默认为 `base_aql` 右侧第2档或 2.5（取更宽者）。
+动态调整通过 `min_aql` 和 `max_aql` 字段限制边界，确保高要求物料（如默认 AQL=0.15 的安全件）不会被错误地映射到 0.40。`min_aql` 默认为 `base_aql` 左侧第1档或 `base_aql` 本身（取更严者），`max_aql` 默认为 `base_aql` 右侧第2档和 2.5 的较小者（即限制在较严格一侧）。
 
 ---
 
@@ -76,7 +78,7 @@
 | `profile_id` | UUID | PK | |
 | `supplier_id` | UUID | FK → suppliers, 非空, UNIQUE(supplier_id, material_id) | |
 | `material_id` | UUID | FK → iqc_materials, 非空 | |
-| `base_aql` | Float | 非空, CHECK > 0 | **快照**物料默认 AQL（创建时从 material.default_aql 复制，后续不随物料修改而变） |
+| `base_aql` | Float | 非空, CHECK > 0 | **快照**物料默认 AQL（创建时从 material.default_aql 复制；若 material.default_aql 为 NULL，使用配置 `default_aql_fallback`） |
 | `current_aql` | Float | 非空, CHECK > 0 | 当前生效 AQL |
 | `min_aql` | Float | 默认 NULL | 允许的最严格 AQL（NULL=取 base_aql 左侧1档或 base_aql 本身，取更严者） |
 | `max_aql` | Float | 默认 NULL | 允许的最宽松 AQL（NULL=取 base_aql 右侧2档和 2.5 的较小者） |
@@ -87,6 +89,8 @@
 | `effective_from` | Date | 非空 | 生效日期 |
 | `approved_by` | UUID | FK → users, 可空 | 最终批准人 |
 | `approved_at` | DateTime | 可空 | 批准时间 |
+| `state_changed_at` | DateTime | 可空 | **状态变更时间点**，用于连续计数重置 |
+| `baseline_inspection_id` | UUID | FK → iqc_inspections, 可空 | **状态变更基准检验单**，连续计数从此单之后开始计算 |
 | `product_line_code` | String(20) | 非空 | 产品线 |
 | `created_at` | DateTime | server_default=func.now() | |
 | `updated_at` | DateTime | server_default=func.now(), onupdate | |
@@ -174,6 +178,7 @@
 | `min_aql_default` | 0.40 | float | 默认最小AQL |
 | `safety_defect_freeze_days` | 90 | int | 安全缺陷冻结天数 |
 | `default_inspection_level` | "II" | string | 默认检验水平 |
+| `default_aql_fallback` | 1.0 | float | 物料默认 AQL 为 NULL 时的回退值（创建 profile 时使用） |
 
 ---
 
@@ -240,7 +245,7 @@ AQL_RULES = [
         "reason_cn": "发现安全/法规相关缺陷",
         "approval_level": "manager",
         "frozen_days": 90,
-        "aql_steps": 0,
+        "frozen_aql_policy": "tighten",  # 冻结时先加严到 tightened 档位
     },
     {
         "id": "FREEZE_SCAR_UNRESOLVED",
@@ -252,7 +257,7 @@ AQL_RULES = [
         "reason_cn": "SCAR未关闭期间不允许放宽",
         "approval_level": "manager",
         "frozen_days": 30,
-        "aql_steps": 0,
+        "frozen_aql_policy": "current",  # 冻结时保持当前 AQL 不变
     },
     # ── 加严规则 ──
     {
@@ -358,7 +363,7 @@ AQL_RULES = [
 每次检验判定完成(judge)后：
   1. 计算质量画像（QualitySnapshot）
   2. 加载当前 profile 状态
-  3. 检查是否有未处理的重复建议（同一 profile + 同一 target_state + status in (pending, forwarded)）
+  3. 检查是否有未处理的重复建议（同一 profile + 同一 recommended_aql + status in (pending, forwarded)）
      → 如有，跳过生成（幂等抑制）
   4. 按 priority 降序遍历规则
   5. 第一个匹配的规则决定 target_state 和 aql_steps
@@ -417,9 +422,10 @@ approved → effective 的自动转换：
   1. 记录 old_state = profile.state
   2. 更新 iqc_aql_profiles.current_aql = recommended_aql
   3. 更新 iqc_aql_profiles.state = target_state
-  4. **如果 state 发生变化（old_state != target_state），在 quality_snapshot 中重置
-     consecutive_accepted = 0 和 consecutive_rejected = 0**。
-     这是防止加严→正常后立刻触发放宽的关键约束。
+  4. **如果 state 发生变化（old_state != target_state）**：
+     - 更新 iqc_aql_profiles.state_changed_at = now()
+     - 更新 iqc_aql_profiles.baseline_inspection_id = 当前触发的 inspection_id
+     这是防止加严→正常后立刻触发放宽的关键约束：连续计数从 state_changed_at 之后开始计算。
   5. 更新 iqc_aql_profiles.approved_by / approved_at / effective_from
   6. 写入 AuditLog（action="AQL_ADJUST"）
   7. 标记 recommendation.status = "effective"
@@ -712,8 +718,10 @@ RuleEngine.evaluate(ctx) ──► 目标状态 + 方向
 
 ## 12. 迁移计划
 
-1. **Alembic 迁移**：创建 4 张新表 + 插入默认配置参数
-   - 可选：扩展 `iqc_inspections` 表增加 `has_safety_defect` 和 `linked_customer_complaint_id`
+1. **Alembic 迁移**：
+   - 创建 4 张新表（`iqc_aql_profiles`, `iqc_aql_recommendations`, `iqc_aql_quality_snapshots`, `iqc_aql_configs`）
+   - **必做**：扩展 `iqc_inspections` 表增加 `has_safety_defect: bool` 和 `linked_customer_complaint_id: uuid`（为 `FREEZE_SAFETY_DEFECT` 和 `TIGHTEN_CUSTOMER_COMPLAINT` 规则提供数据源）
+   - 插入默认配置参数（含 `default_aql_fallback`）
 2. **后端实现**：模型 → Schema → 服务层 → API 路由
 3. **前端实现**：API 客户端 → 类型定义 → 页面组件 → 路由注册
 4. **集成测试**：端到端验证
