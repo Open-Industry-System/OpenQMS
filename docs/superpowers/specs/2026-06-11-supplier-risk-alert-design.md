@@ -473,8 +473,8 @@ Alembic 迁移文件：`033_add_supplier_risk_tables.py`
 
 总计：28 个测试
 
-集成与边界测试（10 个）：
-- 迁移约束测试：部分唯一索引 idx_risk_config_global / idx_risk_config_supplier 正确阻止重复
+集成与边界测试（11 个）：
+- 迁移约束测试：部分唯一索引 idx_risk_config_global / idx_risk_config_product_line / idx_risk_config_supplier_pl / idx_risk_config_supplier_global 正确阻止重复
 - 权限 API 测试：viewer 调用 EDIT/APPROVE 端点返回 403
 - 产品线隔离测试：不同 product_line_code 的预警/配置互不干扰
 - 去重并发测试：同一天同供应商并发评估仅产生一条预警
