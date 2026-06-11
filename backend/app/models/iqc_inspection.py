@@ -73,6 +73,10 @@ class IqcInspection(Base):
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
     )
     judged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    has_safety_defect: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    linked_customer_complaint_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("customer_complaints.complaint_id", ondelete="SET NULL"), nullable=True
+    )
 
     items: Mapped[List["IqcInspectionItem"]] = relationship(
         back_populates="inspection", lazy="selectin", cascade="all, delete-orphan"

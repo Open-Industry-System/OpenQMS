@@ -64,6 +64,10 @@ from app.models.erp import (
     ERPShipment,
     ERPCostRecord,
 )
+from app.models.iqc_aql_profile import IqcAqlProfile
+from app.models.iqc_aql_recommendation import IqcAqlRecommendation
+from app.models.iqc_aql_quality_snapshot import IqcAqlQualitySnapshot
+from app.models.iqc_aql_config import IqcAqlConfig
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -126,4 +130,8 @@ __all__ = [
     "ERPInventoryBalance",
     "ERPShipment",
     "ERPCostRecord",
+    "IqcAqlProfile",
+    "IqcAqlRecommendation",
+    "IqcAqlQualitySnapshot",
+    "IqcAqlConfig",
 ]
