@@ -1,8 +1,8 @@
-# 多工厂部署支持 — 设计文档 v2
+# 多工厂部署支持 — 设计文档 v3
 
 **日期:** 2026-06-11  
 **模块:** 多工厂部署支持 (P3)  
-**状态:** 待审核（v2 — 修订版，解决审查反馈）
+**状态:** 待审核（v3 — 解决第二轮审查反馈）
 
 ## 1. 概述
 
@@ -69,7 +69,7 @@ PermissionScope   → 用户对模块有什么操作权限（来自 role_permiss
 | 集团用户 | NULL | 有记录 | bypass 或指定 | `user_factories` 中所有工厂 |
 | 集团管理员 | NULL | 有记录 | bypass | 全部工厂 + 全部产品线 |
 
-**关键变更：** 集团访问权限不再由 `factory_id IS NULL` 推断，而是由 `role_permissions` 中的跨模块 `ADMIN` 级别权限 + `user_factories` 关联共同决定。`user.factory_id` 只表示用户的**默认归属工厂**（影响创建记录时的默认值），不表示授权范围。
+**关键变更：** 集团访问权限由 `role_permissions` 中的 `Module.GROUP` 模块权限 + `user_factories` 关联共同决定（见 §4.1）。`user.factory_id` 只表示用户的**默认归属工厂**（影响创建记录时的默认值），不表示授权范围。现有 `Module` 枚举新增 `GROUP = "group"` 模块，集团路由组使用 `require_permission(Module.GROUP, PermissionLevel.VIEW)` 守护。`bypass_row_level_security` 仍用于 admin 超级权限，但**不再作为判断集团可见性的唯一依据**。
 
 ---
 
@@ -135,25 +135,76 @@ CREATE TABLE user_factories (
 - **集团用户**：由管理员手动分配可访问的工厂
 - **数据过滤逻辑**：若 `user_factories` 为空且 `user.factory_id IS NOT NULL`，则回退到 `user.factory_id`
 
-### 3.5 业务表加 `factory_id`
+### 3.5 业务表加 `factory_id` — 所有权派生矩阵
 
-所有含 `product_line_code` 的业务表新增 `factory_id UUID NOT NULL FK → factories.id ON DELETE RESTRICT`。
+不是所有业务表都能通过 `product_line_code` 派生 `factory_id`。按所有权来源分为五类：
 
-**不变量：业务表 `factory_id` 必须等于其产品线所属工厂。** 这是数据完整性的核心约束。
+#### 派生规则
 
-```
-record.factory_id == record.product_line.product_line.factory_id
-```
+| 派生来源 | 规则 | 创建时填充逻辑 |
+|---------|------|--------------|
+| **产品线派生** | `record.factory_id = ProductLine[record.product_line_code].factory_id` | 先填 `product_line_code`，再查 `factory_id` |
+| **父对象派生** | `record.factory_id = parent.factory_id` | 从父记录获取 |
+| **供应商派生** | `record.factory_id = Supplier[record.supplier_id].factory_id` | 从供应商获取 |
+| **审核计划派生** | `record.factory_id = AuditProgram[record.program_id].factory_id` | 从审核计划获取 |
+| **显式工厂范围** | `record.factory_id = scope.default_factory_id` | 无产品线/父对象时，从用户上下文获取 |
 
-**防漂移机制**（见 §4.3）：
-- 创建/更新时自动从 `product_line_code → factory_id` 派生并校验
-- 不允许前端直接传入 `factory_id`（派生字段，非用户输入）
-- 可选：数据库 CHECK 约束或触发器兜底
+#### 按表族的 factory_id 派生分类
 
-迁移策略（见 §7）：
-1. 先加 `factory_id` 为 `NULLABLE`
-2. 根据 `product_line_code → product_lines.factory_id` 回填
-3. 改为 `NOT NULL`
+| 表族 | 表 | 派生来源 | 说明 |
+|------|---|---------|------|
+| **FMEA** | FMEADocument, FMEAVersion | 产品线派生 | `product_line_code → factory_id` |
+| **CAPA** | CAPAEightD | 产品线派生 | `product_line_code → factory_id` |
+| **控制计划** | ControlPlan, ControlPlanItem, ControlPlanVersion | 产品线派生 | `product_line_code → factory_id` |
+| **SPC** | InspectionCharacteristic, SampleBatch, SampleValue, SPCAlarm, ControlLimitSnapshot | 产品线派生 | `product_line_code` (或 `product_line`) |
+| **MSA** | GrrStudy, GrrMeasurement, GrrResult, BiasStudy, BiasMeasurement, BiasResult, LinearityStudy, LinearityMeasurement, LinearityResult, StabilityStudy, StabilityMeasurement, StabilityResult, AttributeStudy, AttributeMeasurement, AttributeResult | 产品线派生 | `product_line_code → factory_id` |
+| **IQC** | IqcInspection, IqcInspectionItem, IqcItemMeasurement | 产品线派生 | `product_line_code` (nullable) → 回填后 NOT NULL |
+| **IQC** | IqcMaterial | 产品线派生 | `product_line_code` NOT NULL |
+| **IQC** | IqcInspectionTemplate, IqcTemplateItem | 产品线派生 | `product_line_code` (nullable) |
+| **IQC** | IqcAqlProfile | 产品线派生 | `product_line_code NOT NULL` |
+| **IQC** | IqcAqlConfig | 产品线派生 | `product_line_code NOT NULL` |
+| **IQC** | IqcAqlRecommendation, IqcAqlQualitySnapshot | 产品线派生 | `product_line_code` (nullable) |
+| **供应商** | Supplier | 显式工厂范围 | 创建时从 `scope.default_factory_id` 填充 |
+| **供应商子表** | SupplierCertification, SupplierEvaluation | 供应商派生 | `supplier_id → Supplier.factory_id` |
+| **供应商子表** | SupplierPPAPSubmission | 供应商派生 | `supplier_id → Supplier.factory_id`；另有 `product_line_code` 可双校验 |
+| **供应商子表** | SupplierSCAR | 供应商派生 | `supplier_id → Supplier.factory_id`；另有 `product_line_code` (nullable) |
+| **供应商风险** | SupplierRiskAlert | 供应商派生 | `supplier_id → Supplier.factory_id` |
+| **供应商风险** | SupplierRiskConfig | 产品线派生 | `product_line_code → factory_id` |
+| **供应商风险** | SupplierRiskNotificationChannel | 产品线派生 | `product_line_code → factory_id` |
+| **审核** | AuditProgram | 产品线派生 | `product_line_code (nullable) → factory_id` |
+| **审核子表** | AuditPlan, AuditFinding | 审核计划派生 | `program_id → AuditProgram.factory_id` |
+| **审核** | AuditChecklistTemplate | 产品线派生 | `product_line_code (nullable)` |
+| **特殊特性** | SpecialCharacteristic | 产品线派生 | `product_line_code (nullable)` |
+| **质量目标** | QualityGoal | 产品线派生 | `product_line_code → factory_id` |
+| **客户质量** | Customer, CustomerComplaint, RMARecord | 产品线派生 | `product_line_code → factory_id` |
+| **APQP** | APQPProject | 产品线派生 | `product_line_code → factory_id` |
+| **变更影响** | ChangeImpactAnalysis | 产品线派生 | `product_line_code NOT NULL` |
+| **MES** | MESConnection | 产品线派生 | `product_line_code NOT NULL` |
+| **MES 子表** | MESProductionOrder, MESEquipmentStatus, MESScrapRecord, MESMeasurementIngestion | 产品线派生 | `product_line_code` (nullable) |
+| **MES** | MESScrapMonthlySummary, MESProductionOrderArchive | 产品线派生 | `product_line_code NOT NULL` |
+| **MES** | MESSyncJob, MESPushOutbox | MES连接派生 | `connection_id → MESConnection.factory_id` |
+| **PLM** | PLMConnection | 产品线派生 | `product_line_code` (nullable) |
+| **PLM 子表** | PLMPart, PLMBOM, PLMChangeOrder, ... | PLM连接派生 | `connection_id → PLMConnection.factory_id` |
+| **PLM** | PLMSyncJob, PLMPushOutbox | PLM连接派生 | `connection_id → PLMConnection.factory_id` |
+| **PLM** | PLMChangeImpactTask | 产品线派生 | `product_line_code` (nullable) |
+| **PLM** | PLMPartFMEALink, PLMPartSCLink | 产品线派生 | 通过 FMEA/SC 关联 |
+| **ERP** | ERPConnection | 产品线派生 | `product_line_code` (nullable) |
+| **ERP 子表** | ERPSupplier, ERPCustomer, ERPMaterial, ERPLocation, ERPPurchaseOrder, ERPSalesOrder, ERPInventoryBalance, ERPShipment, ERPCostRecord | ERP连接派生 | `connection_id → ERPConnection.factory_id`；部分另有 `product_line_code` 可双校验 |
+| **ERP** | ERPSyncJob, ERPPushOutbox | ERP连接派生 | `connection_id → ERPConnection.factory_id` |
+| **量具** | Gauge, GaugeCalibration | 产品线派生 | `product_line_code` (nullable) |
+| **知识** | DocumentEmbedding, EmbeddingSyncOutbox | 产品线派生 | `product_line_code` (nullable) |
+| **协作** | CollaborationSession | 产品线派生 | `product_line_code` (nullable) |
+| **控制计划校验** | CPValidationRun, CPValidationFinding, CPValidationOccurrence | 产品线派生 | `product_line_code → factory_id` |
+| **用户偏好** | UserDashboardLayout | **不加 factory_id** | 用户偏好，跨工厂通用 |
+| **系统表** | AuditLog, RecommendationCache | **不加 factory_id** | 系统级日志，按 `user_id` 归属 |
+| **角色权限** | RoleDefinition, RolePermission, UserProductLine | **不加 factory_id** | 系统级配置 |
+
+#### 关键决策
+
+1. **nullable `product_line_code` 的表**：回填时若 `product_line_code` 为 NULL，使用 `scope.default_factory_id`（即种子工厂 UUID）。后续新记录必有 `product_line_code` 或从父对象派生。
+2. **供应商子表**不从 `product_line_code` 派生，而从 `Supplier.factory_id` 派生。创建时自动从父对象获取，不做 `product_line_code` 校验。
+3. **连接子表**（MES/PLM/ERP 的 SyncJob、PushOutbox 等）从 `connection_id → Connection.factory_id` 派生。
+4. **UserDashboardLayout、AuditLog、RecommendationCache、RoleDefinition、RolePermission** 不加 `factory_id`，因为它们是用户级或系统级数据，不按工厂隔离。
 
 ### 3.6 新增 `supplier_shared_profiles` 表
 
@@ -222,6 +273,7 @@ CREATE TABLE audit_program_target_factories (
 # core/factory_scope.py
 from dataclasses import dataclass
 from uuid import UUID
+from fastapi import HTTPException
 
 @dataclass
 class FactoryScope:
@@ -234,6 +286,7 @@ def resolve_factory_scope(
     user_factory_ids: list[UUID],   # 预查询 user_factories
 ) -> FactoryScope:
     if user.role_definition.bypass_row_level_security:
+        # admin 超级权限：可访问所有工厂
         return FactoryScope(accessible_factory_ids=None, default_factory_id=user.factory_id)
 
     if user_factory_ids:
@@ -251,7 +304,42 @@ def resolve_factory_scope(
 
     # 无任何工厂关联 → 无数据访问
     return FactoryScope(accessible_factory_ids=[], default_factory_id=None)
+
+def resolve_effective_factory_id(
+    scope: FactoryScope,
+    requested_factory_id: UUID | None,  # 来自 ?factory_id= 查询参数
+) -> UUID | None:
+    """
+    解析本次请求的有效工厂 ID。
+    - requested_factory_id=None → 返回 None（集团用户看全部）或 scope.default_factory_id（工厂用户看本厂）
+    - requested_factory_id=UUID → 校验是否在 scope 内，越权则 403
+    返回 None 表示"不过滤工厂"（仅 bypass 用户或集团用户未指定工厂时）。
+    """
+    # bypass 用户：允许指定任意工厂，或不过滤
+    if scope.accessible_factory_ids is None:
+        return requested_factory_id  # None = 看全部，UUID = 看指定工厂
+
+    # 非指定工厂：返回默认（工厂用户）或全部可访问
+    if requested_factory_id is None:
+        if len(scope.accessible_factory_ids) == 1:
+            return scope.accessible_factory_ids[0]  # 单工厂用户直接锁定
+        return None  # 多工厂用户未指定 → 看所有可访问工厂
+
+    # 指定了工厂：必须在自己可访问范围内
+    if requested_factory_id not in scope.accessible_factory_ids:
+        raise HTTPException(status_code=403, detail=f"无权访问工厂 '{requested_factory_id}'")
+    return requested_factory_id
 ```
+
+`Module` 枚举新增 `GROUP` 模块（在 `permissions.py` 中）：
+
+```python
+class Module(StrEnum):
+    # ... 现有模块 ...
+    GROUP = "group"  # 新增：集团管理模块
+```
+
+集团路由组使用 `require_permission(Module.GROUP, PermissionLevel.VIEW)` 守护，取代 `bypass_row_level_security` 判断。
 
 ### 4.2 统一过滤层（与现有 product_line_filter 整合）
 
@@ -265,20 +353,21 @@ async def apply_scope_filter(
     model: type,
     module: str,
     scope: FactoryScope,
+    effective_factory_id: UUID | None,  # 由 resolve_effective_factory_id 计算
     user: User,
     db: AsyncSession,
     request: Request,
 ):
-    """统一范围过滤：先工厂，再产品线。"""
+    """统一范围过滤：先工厂，再产品线。effective_factory_id 由调用方通过
+    resolve_effective_factory_id(scope, request.query_params.get('factory_id')) 获得。"""
 
     # 1. 工厂过滤
-    if hasattr(model, "factory_id") and scope.accessible_factory_ids is not None:
+    if hasattr(model, "factory_id") and effective_factory_id is not None:
+        query = query.where(model.factory_id == effective_factory_id)
+    elif hasattr(model, "factory_id") and scope.accessible_factory_ids is not None:
         if not scope.accessible_factory_ids:
             return query.where(False)  # 无权限
-        if len(scope.accessible_factory_ids) == 1:
-            query = query.where(model.factory_id == scope.accessible_factory_ids[0])
-        else:
-            query = query.where(model.factory_id.in_(scope.accessible_factory_ids))
+        query = query.where(model.factory_id.in_(scope.accessible_factory_ids))
 
     # 2. 产品线过滤（复用现有逻辑）
     query = await apply_product_line_filter(query, user, model, module, db, request)
@@ -289,55 +378,123 @@ async def apply_scope_filter(
 **关键特性：**
 - **所有查询** 都通过 `apply_scope_filter` 过滤，禁止各 service 手写 factory where
 - **detail / update / delete** 同样需要通过 `enforce_factory_access` 校验（类似现有 `enforce_product_line_access`）
-- **集团用户传入 `?factory_id=` 参数时**，`apply_scope_filter` 会校验该 factory 是否在 `scope.accessible_factory_ids` 中，越权则 403
+- **`?factory_id=` 参数的解析** 通过 `resolve_effective_factory_id` 完成：集团用户传入的 `factory_id` 必须在 `scope.accessible_factory_ids` 内，越权则 403；工厂用户忽略此参数（锁定为本厂）
 
-### 4.3 创建/更新时的不变量校验
+### 4.3 创建/更新时的 factory_id 填充与校验
+
+根据 §3.5 的派生矩阵，`factory_id` 的填充逻辑按派生来源不同：
 
 ```python
-async def validate_factory_invariant(
+async def populate_factory_id(
     db: AsyncSession,
-    model_instance,  # 带 factory_id 和 product_line_code 的业务记录
+    model_instance,
+    scope: FactoryScope,
 ) -> None:
-    """确保 record.factory_id == record.product_line.factory_id"""
-    if hasattr(model_instance, "product_line_code") and hasattr(model_instance, "factory_id"):
+    """根据所有权派生规则自动填充 factory_id。"""
+    if not hasattr(model_instance, "factory_id") or model_instance.factory_id is not None:
+        return  # 已有值或模型无此字段
+
+    # 1. 产品线派生：从 product_line_code 获取
+    if hasattr(model_instance, "product_line_code") and model_instance.product_line_code:
         result = await db.execute(
             select(ProductLine.factory_id)
             .where(ProductLine.code == model_instance.product_line_code)
         )
-        expected_factory_id = result.scalar_one_or_none()
-        if expected_factory_id and model_instance.factory_id != expected_factory_id:
+        factory_id = result.scalar_one_or_none()
+        if factory_id:
+            model_instance.factory_id = factory_id
+            return
+
+    # 2. 父对象派生：从 supplier_id, program_id, connection_id 等获取
+    parent_fields = {
+        "supplier_id": (Supplier, "supplier_id"),
+        "program_id": (AuditProgram, "program_id"),
+        "connection_id": None,  # 多种连接类型，需按模型判断
+    }
+    for field, (parent_model, pk_field) in parent_fields.items():
+        if hasattr(model_instance, field) and parent_model is not None:
+            parent_id = getattr(model_instance, field)
+            if parent_id:
+                result = await db.execute(
+                    select(parent_model.factory_id)
+                    .where(getattr(parent_model, pk_field) == parent_id)
+                )
+                factory_id = result.scalar_one_or_none()
+                if factory_id:
+                    model_instance.factory_id = factory_id
+                    return
+
+    # 3. 显式工厂范围：从用户上下文获取
+    if scope.default_factory_id:
+        model_instance.factory_id = scope.default_factory_id
+        return
+
+    raise ValueError(f"无法确定 {type(model_instance).__name__} 的 factory_id："
+                     f"无 product_line_code、无父对象关联、无默认工厂")
+
+
+async def validate_factory_invariant(
+    db: AsyncSession,
+    model_instance,
+) -> None:
+    """校验 factory_id 与所有权来源的一致性。"""
+    if not hasattr(model_instance, "factory_id") or model_instance.factory_id is None:
+        return
+
+    # 产品线派生类：factory_id 必须等于产品线所属工厂
+    if hasattr(model_instance, "product_line_code") and model_instance.product_line_code:
+        result = await db.execute(
+            select(ProductLine.factory_id)
+            .where(ProductLine.code == model_instance.product_line_code)
+        )
+        expected = result.scalar_one_or_none()
+        if expected and model_instance.factory_id != expected:
             raise ValueError(
                 f"工厂归属不一致: 记录 factory_id={model_instance.factory_id}, "
-                f"产品线 {model_instance.product_line_code} 属于工厂 {expected_factory_id}"
+                f"产品线 {model_instance.product_line_code} 属于工厂 {expected}"
+            )
+
+    # 供应商派生类：factory_id 必须等于供应商所属工厂
+    if hasattr(model_instance, "supplier_id") and model_instance.supplier_id:
+        result = await db.execute(
+            select(Supplier.factory_id)
+            .where(Supplier.supplier_id == model_instance.supplier_id)
+        )
+        expected = result.scalar_one_or_none()
+        if expected and model_instance.factory_id != expected:
+            raise ValueError(
+                f"工厂归属不一致: 记录 factory_id={model_instance.factory_id}, "
+                f"供应商属于工厂 {expected}"
             )
 ```
 
-**创建流程：**
-1. 前端不传 `factory_id`（派生字段）
-2. 后端从 `product_line_code` 查询 `product_lines.factory_id` 自动填充
-3. 若无 `product_line_code`，从 `scope.default_factory_id` 填充
+### 4.4 API 层变更
 
-**SQLAlchemy 事件监听器（可选兜底）：**
+典型 API 路由的处理流程：
 
 ```python
-@event.listens_for(Base, "before_insert", propagate=True)
-@event.listens_for(Base, "before_update", propagate=True)
-def auto_populate_factory_id(mapper, connection, target):
-    if hasattr(target, "factory_id") and target.factory_id is None:
-        if hasattr(target, "product_line_code") and target.product_line_code:
-            # 从 session identity map 或缓存中查找
-            pl = identity_map_lookup(target.product_line_code)
-            if pl:
-                target.factory_id = pl.factory_id
+@router.get("")
+async def list_documents(
+    request: Request,
+    factory_id: UUID | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. 解析工厂范围
+    user_factory_ids = await get_user_factory_ids(user, db)
+    scope = resolve_factory_scope(user, user_factory_ids)
+    effective_factory_id = resolve_effective_factory_id(scope, factory_id)
+
+    # 2. 统一过滤
+    query = select(FMEADocument)
+    query = await apply_scope_filter(query, FMEADocument, "fmea", scope, effective_factory_id, user, db, request)
+
+    # 3. 执行查询...
 ```
-
-此监听器是**兜底**，不替代 service 层的显式填充。主要防止遗漏。
-
-### 4.4 API 层变更
 
 - 所有已有 list API 通过 `apply_scope_filter` 自动加工厂 + 产品线过滤
 - detail / update / delete API 通过 `enforce_factory_access` 校验
-- 工厂用户无法指定其他工厂的 `factory_id`（`apply_scope_filter` 拦截越权）
+- 工厂用户无法指定其他工厂的 `factory_id`（`resolve_effective_factory_id` 拦截越权）
 - 集团用户可指定 `?factory_id=` 参数，但必须在 `scope.accessible_factory_ids` 内
 
 ---
@@ -407,10 +564,26 @@ CREATE TABLE group_kpi_snapshots (
 
 ### 6.2 权限控制
 
-- 新增 `isGroupUser` 判断（`user.role_definition.bypass_row_level_security` 或 `user_factories.length > 1`）
-- 集团专属菜单：汇总仪表盘、工厂对比、跨厂审核、共享供应商
-- 工厂用户：隐藏集团菜单项
-- **不再使用 `user.factory_id === null` 判断集团权限**
+**后端负责范围解析，前端只消费结果。** `/auth/me` 接口返回解析后的 `FactoryScope`：
+
+```json
+{
+  "accessible_factory_ids": ["uuid-1", "uuid-2"] | null,
+  "default_factory_id": "uuid-1" | null,
+  "factories": [
+    {"id": "uuid-1", "code": "BJ-01", "name": "北京工厂"},
+    {"id": "uuid-2", "code": "SH-02", "name": "上海工厂"}
+  ]
+}
+```
+
+前端判断逻辑：
+- `accessible_factory_ids === null` → 超级管理员，显示全部
+- `accessible_factory_ids.length > 1` → 集团用户，显示工厂切换器
+- `accessible_factory_ids.length === 1` → 工厂用户，锁定本厂
+- `accessible_factory_ids.length === 0` → 无数据访问
+
+集团专属菜单（汇总仪表盘、工厂对比、跨厂审核、共享供应商）通过 `require_permission(Module.GROUP, VIEW)` 后端守护，前端根据 `accessible_factory_ids.length > 1` 显示/隐藏。
 
 ### 6.3 新增页面
 
@@ -436,9 +609,11 @@ interface Factory {
   updated_at: string;
 }
 
+// 后端 /auth/me 返回的解析结果，前端不重建逻辑
 interface FactoryScope {
   accessible_factory_ids: string[] | null;  // null = 全部（bypass）
   default_factory_id: string | null;
+  factories: Factory[];  // 可访问工厂的完整信息（用于下拉框）
 }
 
 interface GroupDashboard {
@@ -488,35 +663,63 @@ interface KPI {
 
 ### 7.2 回填逻辑
 
+> 按 §3.5 所有权派生矩阵分类回填，而非假设所有表都能通过 `product_line_code` 回填。
+
 ```python
 # 迁移脚本中
 default_factory_id = "<种子工厂 UUID>"
 
-# 1. product_lines
+# ── 1. 产品线表 ──
 UPDATE product_lines SET factory_id = default_factory_id
 WHERE factory_id IS NULL;
 
-# 2. users — 全部设为种子工厂，后续管理员可调整
+# ── 2. 用户 ──
+# 全部设为种子工厂，后续管理员可调整。admin 后续可改为 NULL
 UPDATE users SET factory_id = default_factory_id
 WHERE factory_id IS NULL;
 
-# 3. user_factories — 为每个用户插入一条记录
+# ── 3. user_factories ──
 INSERT INTO user_factories (id, user_id, factory_id)
 SELECT gen_random_uuid(), user_id, default_factory_id
 FROM users;
 
-# 4. 业务表 — 通过 product_line_code → product_lines.factory_id 回填
+# ── 4. 产品线派生表（有 product_line_code NOT NULL）──
+# FMEA, CAPA, ControlPlan, IqcMaterial, IqcAqlProfile, IqcAqlConfig,
+# QualityGoal, ChangeImpactAnalysis, MESConnection, MESScrapMonthlySummary, etc.
 UPDATE fmea_documents SET factory_id = (
     SELECT factory_id FROM product_lines
     WHERE product_lines.code = fmea_documents.product_line_code
-)
-WHERE factory_id IS NULL;
+) WHERE factory_id IS NULL;
 
-# ... 对所有 61+ 业务表重复此模式
+# ── 5. 产品线派生表（product_line_code NULLABLE）──
+# 有值则回填，NULL 则用种子工厂
+UPDATE iqc_inspections SET factory_id = COALESCE(
+    (SELECT factory_id FROM product_lines WHERE product_lines.code = iqc_inspections.product_line_code),
+    default_factory_id
+) WHERE factory_id IS NULL;
 
-# 5. suppliers
+# ── 6. 供应商 ──
+# 无 product_line_code，直接用种子工厂
 UPDATE suppliers SET factory_id = default_factory_id
 WHERE factory_id IS NULL;
+
+# ── 7. 供应商子表（从 supplier_id → Supplier.factory_id 派生）──
+UPDATE supplier_certifications SET factory_id = (
+    SELECT factory_id FROM suppliers
+    WHERE suppliers.supplier_id = supplier_certifications.supplier_id
+) WHERE factory_id IS NULL;
+
+# ── 8. 审核子表（从 program_id → AuditProgram.factory_id 派生）──
+UPDATE audit_plans SET factory_id = (
+    SELECT factory_id FROM audit_programs
+    WHERE audit_programs.program_id = audit_plans.program_id
+) WHERE factory_id IS NULL;
+
+# ── 9. 连接子表（MES/PLM/ERP SyncJob, PushOutbox）──
+# 从 connection_id → Connection.factory_id 派生
+
+# ── 10. 系统表（不加 factory_id）──
+# UserDashboardLayout, AuditLog, RecommendationCache, RoleDefinition, RolePermission
 ```
 
 ### 7.3 向后兼容
@@ -535,9 +738,11 @@ WHERE factory_id IS NULL;
 
 ### 8.1 需要修改的模型
 
-所有含 `product_line_code` 的模型都需要新增 `factory_id` 列。完整清单（基于代码扫描）：
-
-FMEADocument, CAPAEightD, ControlPlan, ControlPlanItem, InspectionCharacteristic, SampleBatch, SampleValue, SPCAlarm, ControlLimitSnapshot, Supplier, SupplierCertification, SupplierEvaluation, SupplierPPAPSubmission, SupplierSCAR, Gauge, GaugeCalibration, GrrStudy, BiasStudy, LinearityStudy, StabilityStudy, AttributeStudy, SpecialCharacteristic, QualityGoal, AuditProgram, AuditPlan, AuditFinding, IqcInspection, IqcMaterial, IqcInspectionTemplate, IqcAqlProfile, IqcAqlConfig, Customer, CustomerComplaint, RMARecord, APQPProject, ChangeImpactAnalysis, MESConnection, MESProductionOrder, MESEquipmentStatus, MESScrapRecord, ERPConnection, ERPSupplier, ERPCustomer, ERPMaterial, ERPLocation, ERPPurchaseOrder, ERPSalesOrder, ERPInventoryBalance, ERPShipment, ERPCostRecord, IqcAqlRecommendation, IqcAqlQualitySnapshot, DocumentEmbedding, SupplierRiskAlert, SupplierRiskConfig, SupplierRiskNotificationChannel, CPValidationRun, PLMConnection 等。
+完整清单见 §3.5 所有权派生矩阵。按派生来源分类：
+- **产品线派生**（~40 表）：含 `product_line_code` 的表，从产品线获取 `factory_id`
+- **父对象派生**（~8 表）：供应商子表、审核子表、连接子表等
+- **显式工厂范围**（1 表）：Supplier 从用户上下文获取
+- **不加 factory_id**（5 表）：UserDashboardLayout、AuditLog、RecommendationCache、RoleDefinition、RolePermission
 
 ### 8.2 需要修改的 API
 
@@ -554,16 +759,20 @@ FMEADocument, CAPAEightD, ControlPlan, ControlPlanItem, InspectionCharacteristic
 
 | 文件 | 变更 |
 |------|------|
-| `core/factory_scope.py` | **新增** — 统一范围解析与过滤 |
+| `core/factory_scope.py` | **新增** — 统一范围解析、过滤、factory_id 派生 |
 | `core/deps.py` | 新增 `get_factory_scope` 依赖 |
+| `core/permissions.py` | `Module` 枚举新增 `GROUP` |
 | `core/product_line_filter.py` | 整合工厂过滤逻辑 |
+| `models/factory.py` | **新增** — Factory 模型 |
 | `models/product_line.py` | 加 `factory_id` |
 | `models/user.py` | 加 `factory_id` |
 | `models/role.py` | 新增 `UserFactory` 模型 |
-| `models/factory.py` | **新增** |
 | `models/supplier.py` | 加 `factory_id` + `shared_profile_id`，改唯一约束 |
 | `models/audit_program.py` | 加 `factory_id` |
-| `api/product_line.py` | 加工厂过滤 |
+| `models/group_kpi_snapshot.py` | **新增** |
+| `models/supplier_shared_profile.py` | **新增** |
+| `api/auth.py` | `/auth/me` 返回 `FactoryScope` |
+| `api/group.py` | **新增** — 集团路由组 |
 | 所有 list API | 通过 `apply_scope_filter` 加过滤 |
 
 ---
