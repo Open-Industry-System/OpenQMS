@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, date
+from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
@@ -111,7 +112,7 @@ class ManagementReviewListResponse(BaseModel):
 class ReportSection(BaseModel):
     key: str
     title: str
-    source: str
+    source: Literal["data_package", "manual_input"]
     base_text: str
     ai_analysis: str
     findings: list[str]
@@ -139,7 +140,7 @@ class ReportGenerateRequest(BaseModel):
 
 
 class ReportGenerateResponse(BaseModel):
-    report_status: str
+    report_status: Literal["none", "draft", "final"]
     generated_report: ReportContent
 
 
