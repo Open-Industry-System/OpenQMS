@@ -76,9 +76,10 @@
 | `profile_id` | UUID | PK | |
 | `supplier_id` | UUID | FK → suppliers, 非空, UNIQUE(supplier_id, material_id) | |
 | `material_id` | UUID | FK → iqc_materials, 非空 | |
-| `current_aql` | Float | 非空, CHECK > 0 | 当前生效 AQL（初始值=material.default_aql） |
-| `min_aql` | Float | 默认 NULL | 允许的最严格 AQL（NULL=取 material.default_aql 左侧1档） |
-| `max_aql` | Float | 默认 NULL | 允许的最宽松 AQL（NULL=取 material.default_aql 右侧2档，上限2.5） |
+| `base_aql` | Float | 非空, CHECK > 0 | **快照**物料默认 AQL（创建时从 material.default_aql 复制，后续不随物料修改而变） |
+| `current_aql` | Float | 非空, CHECK > 0 | 当前生效 AQL |
+| `min_aql` | Float | 默认 NULL | 允许的最严格 AQL（NULL=取 base_aql 左侧1档或 base_aql 本身，取更严者） |
+| `max_aql` | Float | 默认 NULL | 允许的最宽松 AQL（NULL=取 base_aql 右侧2档和 2.5 的较小者） |
 | `inspection_level` | String(10) | 默认 "II" | 检验水平 |
 | `state` | String(20) | CHECK IN ('normal','tightened','reduced','frozen') | 当前状态 |
 | `frozen_until` | Date | 可空 | 冻结到期日 |
@@ -137,6 +138,7 @@
 | `open_scar_count` | Int | 未关闭SCAR数 |
 | `supplier_rating` | String(1) | A/B/C/D |
 | `has_safety_defect` | Bool | 是否含安全缺陷 |
+| `linked_customer_complaint` | Bool | 是否关联客户投诉 |
 | `calculated_state` | String(20) | 规则计算出的目标状态 |
 
 **索引**: (supplier_id, material_id, snapshot_at DESC)
@@ -182,38 +184,42 @@
 ```python
 from app.services.aql_engine import AQL_VALUES
 
-def get_aql_by_state(base_aql: float, state: str, min_aql: float | None = None, max_aql: float | None = None) -> float:
-    """基于基准 AQL 和状态计算目标 AQL。
-    
+def get_aql_by_state(
+    base_aql: float,
+    state: str,
+    aql_steps: int = 0,
+    min_aql: float | None = None,
+    max_aql: float | None = None,
+) -> float:
+    """基于基准 AQL、状态和偏移档数计算目标 AQL。
+
     状态映射规则（基于 ISO 2859-1 转移规则）：
-    - normal:    基准 AQL（不变）
-    - tightened: 基准 AQL 左移 1 档（加严）
-    - reduced:   基准 AQL 右移 1 档（放宽一级）或右移 2 档（放宽二级）
-    - frozen:    保持当前 AQL（冻结不改变 AQL，仅阻塞放宽建议）
+    - normal:    基准 AQL（不变，aql_steps 忽略）
+    - tightened: 基准 AQL 左移（减小）aql_steps 档
+    - reduced:   基准 AQL 右移（增大）aql_steps 档
+    - frozen:    冻结不改变 AQL，调用方应直接传入 current_aql 作为 base_aql
     """
     base_idx = min(range(len(AQL_VALUES)), key=lambda i: abs(AQL_VALUES[i] - base_aql))
-    
+
     if state == "normal":
         target_idx = base_idx
     elif state == "tightened":
-        target_idx = max(0, base_idx - 1)
+        target_idx = max(0, base_idx - aql_steps)
     elif state == "reduced":
-        # 放宽由规则引擎通过 steps 控制
-        target_idx = min(len(AQL_VALUES) - 1, base_idx + 1)
+        target_idx = min(len(AQL_VALUES) - 1, base_idx + aql_steps)
     elif state == "frozen":
-        # 冻结不改变 AQL，保持当前值
-        return base_aql
+        return base_aql  # 冻结状态：调用方应传入 current_aql 作为 base_aql
     else:
         return base_aql
-    
+
     target_aql = AQL_VALUES[target_idx]
-    
+
     # 应用边界约束
     if min_aql is not None:
         target_aql = max(min_aql, target_aql)
     if max_aql is not None:
         target_aql = min(max_aql, target_aql)
-    
+
     return target_aql
 ```
 
@@ -234,6 +240,7 @@ AQL_RULES = [
         "reason_cn": "发现安全/法规相关缺陷",
         "approval_level": "manager",
         "frozen_days": 90,
+        "aql_steps": 0,
     },
     {
         "id": "FREEZE_SCAR_UNRESOLVED",
@@ -245,6 +252,7 @@ AQL_RULES = [
         "reason_cn": "SCAR未关闭期间不允许放宽",
         "approval_level": "manager",
         "frozen_days": 30,
+        "aql_steps": 0,
     },
     # ── 加严规则 ──
     {
@@ -255,6 +263,7 @@ AQL_RULES = [
         "target_state": "tightened",
         "reason_cn": "关联客户投诉",
         "approval_level": "manager",
+        "aql_steps": 1,
     },
     {
         "id": "TIGHTEN_2_REJECTS",
@@ -264,6 +273,7 @@ AQL_RULES = [
         "target_state": "tightened",
         "reason_cn": "连续2批不合格",
         "approval_level": "manager",
+        "aql_steps": 2,
     },
     {
         "id": "TIGHTEN_1_REJECT",
@@ -273,6 +283,7 @@ AQL_RULES = [
         "target_state": "tightened",
         "reason_cn": "本批拒收",
         "approval_level": "manager",
+        "aql_steps": 1,
     },
     {
         "id": "TIGHTEN_OPEN_SCAR",
@@ -282,6 +293,7 @@ AQL_RULES = [
         "target_state": "tightened",
         "reason_cn": "有未关闭SCAR",
         "approval_level": "manager",
+        "aql_steps": 1,
     },
     {
         "id": "TIGHTEN_HIGH_PPM",
@@ -291,6 +303,7 @@ AQL_RULES = [
         "target_state": "tightened",
         "reason_cn": "近90天PPM超过阈值",
         "approval_level": "manager",
+        "aql_steps": 1,
     },
     # ── 恢复正常规则（加严后必须先恢复）──
     {
@@ -301,6 +314,7 @@ AQL_RULES = [
         "target_state": "normal",
         "reason_cn": "加严状态下连续5批合格，恢复正常检验",
         "approval_level": "engineer",
+        "aql_steps": 0,
     },
     # ── 放宽规则（最低优先级，仅在 normal 状态下可触发）──
     {
@@ -318,6 +332,7 @@ AQL_RULES = [
         "target_state": "reduced",
         "reason_cn": "正常状态下连续10批合格，供应商评级A/B，PPM达标",
         "approval_level": "manager",
+        "aql_steps": 2,
     },
     {
         "id": "REDUCE_LEVEL_1",
@@ -332,6 +347,7 @@ AQL_RULES = [
         "target_state": "reduced",
         "reason_cn": "正常状态下连续5批合格，无未关闭SCAR",
         "approval_level": "manager",
+        "aql_steps": 1,
     },
 ]
 ```
@@ -345,9 +361,9 @@ AQL_RULES = [
   3. 检查是否有未处理的重复建议（同一 profile + 同一 target_state + status in (pending, forwarded)）
      → 如有，跳过生成（幂等抑制）
   4. 按 priority 降序遍历规则
-  5. 第一个匹配的规则决定 target_state
+  5. 第一个匹配的规则决定 target_state 和 aql_steps
   6. 如果 target_state == current_state，不生成建议（direction == "keep"）
-  7. 使用 base_aql + target_state + min/max 边界计算 recommended_aql
+  7. 使用 base_aql + target_state + aql_steps + min/max 边界计算 recommended_aql
   8. 生成 recommendation 记录（pending）
 ```
 
@@ -398,11 +414,15 @@ pending ──engineer-reject──► rejected
 
 ```
 approved → effective 的自动转换：
-  1. 更新 iqc_aql_profiles.current_aql = recommended_aql
-  2. 更新 iqc_aql_profiles.state = target_state
-  3. 更新 iqc_aql_profiles.approved_by / approved_at / effective_from
-  4. 写入 AuditLog（action="AQL_ADJUSTMENT"）
-  5. 标记 recommendation.status = "effective"
+  1. 记录 old_state = profile.state
+  2. 更新 iqc_aql_profiles.current_aql = recommended_aql
+  3. 更新 iqc_aql_profiles.state = target_state
+  4. **如果 state 发生变化（old_state != target_state），在 quality_snapshot 中重置
+     consecutive_accepted = 0 和 consecutive_rejected = 0**。
+     这是防止加严→正常后立刻触发放宽的关键约束。
+  5. 更新 iqc_aql_profiles.approved_by / approved_at / effective_from
+  6. 写入 AuditLog（action="AQL_ADJUST"）
+  7. 标记 recommendation.status = "effective"
 ```
 
 ### 5.5 过期清理
@@ -668,9 +688,32 @@ RuleEngine.evaluate(ctx) ──► 目标状态 + 方向
 
 ---
 
-## 11. 迁移计划
+## 11. 已知限制与数据依赖
+
+### 11.1 安全缺陷 (`has_safety_defect`)
+
+- **当前状态**：`IqcInspection` / `IqcInspectionItem` 模型**无缺陷等级字段**，只有 `defect_qty` 和 `defect_description`（纯文本）。
+- **第一版方案**：在 `IqcInspection` 中新增 `has_safety_defect: Mapped[bool]` 字段，判定人员在判定不合格时勾选。规则引擎检查此字段。
+- **后续扩展**：可在 `IqcInspectionItem` 中引入 `defect_class`（Critical / Major / Minor）做更细粒度的分类。
+
+### 11.2 客诉关联 (`linked_customer_complaint`)
+
+- **当前状态**：客诉表与物料的关联不稳定，无法可靠映射到 (supplier, material)。
+- **第一版方案**：在 `IqcInspection` 中新增 `linked_customer_complaint_id` 字段（可空 FK），判定人员手动关联客诉。规则引擎检查此字段。
+- **后续扩展**：建立客诉 ↔ 来料批次的自动关联机制（通过 lot_no / part_no 匹配）。
+
+### 11.3 SCAR 物料级关联
+
+- **当前状态**：`supplier_scars` 表仅有 `supplier_id`，无 `material_id`。
+- **第一版方案**：SCAR 判定在**供应商级**生效（供应商任一个 SCAR 未关闭，其所有物料均受影响）。这是最保守的策略。
+- **后续扩展**：在 `supplier_scars` 中扩展 `material_id` 字段，支持精确到"物料+供应商"维度的 SCAR 排除。
+
+---
+
+## 12. 迁移计划
 
 1. **Alembic 迁移**：创建 4 张新表 + 插入默认配置参数
+   - 可选：扩展 `iqc_inspections` 表增加 `has_safety_defect` 和 `linked_customer_complaint_id`
 2. **后端实现**：模型 → Schema → 服务层 → API 路由
 3. **前端实现**：API 客户端 → 类型定义 → 页面组件 → 路由注册
 4. **集成测试**：端到端验证
