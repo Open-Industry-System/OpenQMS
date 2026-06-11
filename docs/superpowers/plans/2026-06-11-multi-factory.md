@@ -23,10 +23,9 @@
 - `backend/app/services/factory_service.py` — Factory CRUD service
 - `backend/app/services/group_service.py` — Group dashboard/comparison service
 - `backend/app/core/factory_scope.py` — FactoryScope, ProductLineScope, resolve_*, apply_scope_filter, populate_factory_id, validate_factory_invariant
-- `backend/app/api/group.py` — Group route endpoints
+- `backend/app/api/group.py` — Group route endpoints (including factory CRUD under /api/group/factories)
 - `backend/alembic/versions/035_add_factory_tables.py` — Alembic migration
-- `frontend/src/api/factory.ts` — Factory API client
-- `frontend/src/api/group.ts` — Group API client
+- `frontend/src/api/group.ts` — Group + Factory API client (combined)
 - `frontend/src/pages/group/GroupDashboard.tsx` — Group dashboard page
 - `frontend/src/pages/group/FactoryManagement.tsx` — Factory CRUD page
 - `frontend/src/pages/group/FactoryComparison.tsx` — Factory comparison page
@@ -37,35 +36,36 @@
 - `backend/app/models/__init__.py` — Import new models
 - `backend/app/models/product_line.py` — Add `factory_id` column
 - `backend/app/models/user.py` — Add `factory_id` column
-- `backend/app/models/role.py` — Add `UserFactory` model
 - `backend/app/models/supplier.py` — Add `factory_id`, `shared_profile_id`, change unique constraint
 - `backend/app/models/audit_program.py` — Add `factory_id` to AuditProgram, AuditChecklistTemplate
 - `backend/app/core/permissions.py` — Add `Module.GROUP`
 - `backend/app/core/deps.py` — Add `get_factory_scope`, `get_product_line_scope` dependencies
 - `backend/app/api/auth.py` — Return FactoryScope + permissions.group in /auth/me
-- `backend/app/api/product_line.py` — Add factory_id filtering
+- `backend/app/services/erp_ingestion.py` — Use connection.factory_id for background sync
+- `backend/app/services/mes_ingestion.py` — Use connection.factory_id for background sync
 - `frontend/src/types/index.ts` — Add Factory, FactoryScope, GroupDashboard types
 - `frontend/src/store/authStore.ts` — Store factory scope from /auth/me
 - `frontend/src/components/layout/AppLayout.tsx` — Factory switcher in header, group menu items
+- `frontend/src/api/client.ts` — Axios interceptor for factory_id auto-injection
 
 ---
 
 ## Phase 1: Foundation (Models + Migration + Scope Layer)
 
-### Task 1: Factory Model + UserFactory + GroupKPISnapshot
+### Task 1: Factory + UserFactory Models
 
 **Files:**
 - Create: `backend/app/models/factory.py`
 - Modify: `backend/app/models/__init__.py`
 
-- [ ] **Step 1: Write Factory, UserFactory, GroupKPISnapshot models**
+- [ ] **Step 1: Write Factory and UserFactory models**
 
 ```python
 # backend/app/models/factory.py
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, Date, func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -85,39 +85,21 @@ class Factory(Base):
 class UserFactory(Base):
     __tablename__ = "user_factories"
     __table_args__ = (
-        # UniqueConstraint added inline below
+        UniqueConstraint("user_id", "factory_id", name="uq_user_factory"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="CASCADE"), nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint("user_id", "factory_id", name="uq_user_factory"),
-    )
-
-
-class GroupKPISnapshot(Base):
-    __tablename__ = "group_kpi_snapshots"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
-    snapshot_date: Mapped[datetime] = mapped_column(Date, nullable=False)
-    kpi_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint("factory_id", "snapshot_date", name="uq_factory_snapshot_date"),
-    )
 ```
 
 - [ ] **Step 2: Add imports to `backend/app/models/__init__.py`**
 
-Add `Factory`, `UserFactory`, `GroupKPISnapshot` to the imports and `__all__` list.
+Add `Factory`, `UserFactory` to the imports and `__all__` list.
 
 - [ ] **Step 3: Verify models import correctly**
 
-Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.models import Factory, UserFactory, GroupKPISnapshot; print('OK')"`
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.models import Factory, UserFactory; print('OK')"`
 
 Expected: `OK`
 
@@ -125,12 +107,58 @@ Expected: `OK`
 
 ```bash
 git add backend/app/models/factory.py backend/app/models/__init__.py
-git commit -m "feat(multi-factory): add Factory, UserFactory, GroupKPISnapshot models"
+git commit -m "feat(multi-factory): add Factory and UserFactory models"
 ```
 
 ---
 
-### Task 2: SupplierSharedProfile Model
+### Task 2: GroupKPISnapshot Model
+
+**Files:**
+- Create: `backend/app/models/group_kpi_snapshot.py`
+- Modify: `backend/app/models/__init__.py`
+
+- [ ] **Step 1: Write GroupKPISnapshot model**
+
+```python
+# backend/app/models/group_kpi_snapshot.py
+import uuid
+from datetime import date, datetime
+from sqlalchemy import Date, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+from app.database import Base
+
+
+class GroupKPISnapshot(Base):
+    __tablename__ = "group_kpi_snapshots"
+    __table_args__ = (
+        UniqueConstraint("factory_id", "snapshot_date", name="uq_factory_snapshot_date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    kpi_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+```
+
+- [ ] **Step 2: Add import to `__init__.py` and `__all__`**
+
+- [ ] **Step 3: Verify import**
+
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.models import GroupKPISnapshot; print('OK')"`
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add backend/app/models/group_kpi_snapshot.py backend/app/models/__init__.py
+git commit -m "feat(multi-factory): add GroupKPISnapshot model"
+```
+
+---
+
+### Task 3: SupplierSharedProfile Model
 
 **Files:**
 - Create: `backend/app/models/supplier_shared_profile.py`
@@ -175,15 +203,18 @@ git commit -m "feat(multi-factory): add SupplierSharedProfile model"
 
 ---
 
-### Task 3: Add factory_id to Existing Models
+### Task 4: Add factory_id to Anchor Models + Core Scope Layer
+
+This task combines model changes with the core scope layer so that scope resolution and populate/validate functions are available before any API migration.
 
 **Files:**
 - Modify: `backend/app/models/product_line.py` — add `factory_id`
 - Modify: `backend/app/models/user.py` — add `factory_id`
-- Modify: `backend/app/models/role.py` — add `UserFactory` model (already in factory.py, reference here)
 - Modify: `backend/app/models/supplier.py` — add `factory_id`, `shared_profile_id`, change unique constraint
-
-This task adds `factory_id` to the **anchor models** that other models reference. The full ~50-model migration will be in Task 5 (Alembic migration). For now, add the column definitions.
+- Modify: `backend/app/models/audit_program.py` — add `factory_id` to AuditProgram, AuditChecklistTemplate
+- Create: `backend/app/core/factory_scope.py`
+- Modify: `backend/app/core/permissions.py` — add `Module.GROUP`
+- Modify: `backend/app/core/deps.py` — add dependency functions
 
 - [ ] **Step 1: Add `factory_id` to ProductLine**
 
@@ -211,50 +242,26 @@ factory_id: Mapped[uuid.UUID | None] = mapped_column(
 In `backend/app/models/supplier.py`:
 - Add `factory_id: Mapped[uuid.UUID]` with `ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True`
 - Add `shared_profile_id: Mapped[uuid.UUID | None]` with `ForeignKey("supplier_shared_profiles.id", ondelete="SET NULL"), nullable=True`
-- Change `supplier_no` unique constraint: remove `unique=True` from column, add `__table_args__` with `UniqueConstraint("factory_id", "supplier_no", name="uq_supplier_no_per_factory")`
+- Remove `unique=True` from `supplier_no` column
+- Add `__table_args__` with `UniqueConstraint("factory_id", "supplier_no", name="uq_supplier_no_per_factory")`
 
 - [ ] **Step 4: Add `factory_id` to AuditProgram and AuditChecklistTemplate**
 
-In `backend/app/models/audit_program.py`, add `factory_id` to both models.
+- [ ] **Step 5: Add `Module.GROUP` to permissions.py**
 
-- [ ] **Step 5: Verify all models import correctly**
+- [ ] **Step 6: Write `backend/app/core/factory_scope.py`**
 
-Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.models import *; print('OK')"`
+Implement `FactoryScope`, `ProductLineScope`, `resolve_factory_scope`, `resolve_product_line_scope`, `resolve_effective_factory_id`, `apply_scope_filter`, `populate_factory_id`, and `validate_factory_invariant`. Reference spec §4.1-4.3.
 
-- [ ] **Step 6: Commit**
-
-```bash
-git add backend/app/models/
-git commit -m "feat(multi-factory): add factory_id to anchor models (ProductLine, User, Supplier, AuditProgram)"
-```
-
----
-
-### Task 4: Core Scope Layer — factory_scope.py
-
-**Files:**
-- Create: `backend/app/core/factory_scope.py`
-- Modify: `backend/app/core/permissions.py` — add `Module.GROUP`
-- Modify: `backend/app/core/deps.py` — add dependency functions
-
-- [ ] **Step 1: Add `Module.GROUP` to permissions.py**
-
-In `backend/app/core/permissions.py`, add to the `Module` enum:
-```python
-GROUP = "group"
-```
-
-- [ ] **Step 2: Write `backend/app/core/factory_scope.py`**
-
-This is the core file implementing `FactoryScope`, `ProductLineScope`, `resolve_factory_scope`, `resolve_product_line_scope`, `resolve_effective_factory_id`, `apply_scope_filter`, `populate_factory_id`, and `validate_factory_invariant`. Reference the spec §4.1-4.3 for the full implementation. Key points:
-- Import `PRODUCT_LINE_FIELD_MAP` from `product_line_filter.py`
-- `resolve_factory_scope` takes `has_group_admin: bool` parameter
-- `resolve_product_line_scope` returns `ProductLineScope(mode="ALL"|"EXPLICIT"|"NONE", codes=...)`
-- `apply_scope_filter` takes both `FactoryScope` and `ProductLineScope`, does NOT call old `apply_product_line_filter`
-
-- [ ] **Step 3: Add dependency functions to `backend/app/core/deps.py`**
+- [ ] **Step 7: Add dependency functions to `backend/app/core/deps.py`**
 
 ```python
+from app.core.factory_scope import (
+    FactoryScope, ProductLineScope,
+    resolve_factory_scope, resolve_product_line_scope, resolve_effective_factory_id,
+)
+from app.models.factory import UserFactory
+
 async def get_user_factory_ids(user: User, db: AsyncSession) -> list[UUID]:
     result = await db.execute(
         select(UserFactory.factory_id).where(UserFactory.user_id == user.user_id)
@@ -263,35 +270,86 @@ async def get_user_factory_ids(user: User, db: AsyncSession) -> list[UUID]:
 
 async def get_factory_scope(
     request: Request,
+    factory_id: UUID | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> FactoryScope:
+) -> tuple[FactoryScope, UUID | None]:
     user_factory_ids = await get_user_factory_ids(user, db)
     group_level = await get_user_permission(user, Module.GROUP, db)
     has_group_admin = group_level >= PermissionLevel.ADMIN
-    return resolve_factory_scope(user, user_factory_ids, has_group_admin)
+    factory_scope = resolve_factory_scope(user, user_factory_ids, has_group_admin)
+    effective_factory_id = resolve_effective_factory_id(factory_scope, factory_id)
+    return factory_scope, effective_factory_id
 
 async def get_product_line_scope(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[str]:
-    return await get_user_product_line_codes(user, db)
+) -> ProductLineScope:
+    user_pl_codes = await get_user_product_line_codes(user, db)
+    # factory_scope needed for context but not directly used in PL scope resolution
+    # (bypass check is on user.role_definition, not factory scope)
+    return resolve_product_line_scope(user, user_pl_codes, None, db)
 ```
 
-- [ ] **Step 4: Verify imports work**
+- [ ] **Step 8: Verify all imports work**
 
-Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.core.factory_scope import FactoryScope, ProductLineScope, resolve_factory_scope, resolve_product_line_scope, apply_scope_filter; print('OK')"`
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.core.factory_scope import FactoryScope, ProductLineScope, resolve_factory_scope, resolve_product_line_scope, apply_scope_filter, populate_factory_id, validate_factory_invariant; print('OK')"`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add backend/app/core/factory_scope.py backend/app/core/permissions.py backend/app/core/deps.py
-git commit -m "feat(multi-factory): add core scope layer with FactoryScope, ProductLineScope, Module.GROUP"
+git add backend/app/models/ backend/app/core/factory_scope.py backend/app/core/permissions.py backend/app/core/deps.py
+git commit -m "feat(multi-factory): anchor model factory_id + core scope layer + Module.GROUP"
 ```
 
 ---
 
-### Task 5: Alembic Migration — All Schema Changes
+### Task 5: Scope Unit Tests
+
+**Files:**
+- Create: `backend/tests/test_factory_scope.py`
+
+Write tests for the scope resolution logic BEFORE any API migration. This ensures the foundation is correct before building on it.
+
+- [ ] **Step 1: Test `resolve_factory_scope`**
+
+Test all 5 user types from spec §2:
+- Factory operator → `accessible_factory_ids=[user.factory_id]`
+- Factory admin (bypass) → `accessible_factory_ids=[user.factory_id]` (NOT None — bypass doesn't grant cross-factory)
+- Group viewer → `accessible_factory_ids=user_factories`
+- Group admin (GROUP ADMIN) → `accessible_factory_ids=None`
+- No factory → `accessible_factory_ids=[]`
+
+- [ ] **Step 2: Test `resolve_product_line_scope`**
+
+Test bypass vs non-bypass, empty user_product_lines vs populated.
+
+- [ ] **Step 3: Test `resolve_effective_factory_id`**
+
+Test: single factory user locked, multi-factory user with/without query param, GROUP ADMIN with/without query param, unauthorized factory_id raises 403.
+
+- [ ] **Step 4: Test `apply_scope_filter`**
+
+Test factory filtering + product line filtering composition on a sample model.
+
+- [ ] **Step 5: Test `populate_factory_id` and `validate_factory_invariant`**
+
+Test product-line-derived, parent-derived, and explicit scope derivation paths.
+
+- [ ] **Step 6: Run tests**
+
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -m pytest tests/test_factory_scope.py -v`
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/tests/test_factory_scope.py
+git commit -m "test(multi-factory): scope resolution unit tests — factory, product line, effective ID, filter, invariant"
+```
+
+---
+
+### Task 6: Alembic Migration — All Schema Changes
 
 **Files:**
 - Create: `backend/alembic/versions/035_add_factory_tables.py`
@@ -311,15 +369,23 @@ This is the big migration task. The migration must:
 12. Create `group_kpi_snapshots` table
 13. Add `factory_id` to `audit_programs` and `audit_checklist_templates`
 
-The backfill logic must follow §3.5 derivation matrix (product-line-derived, parent-derived, supplier-derived, explicit).
+The backfill logic must follow §3.5 derivation matrix (product-line-derived, parent-derived, supplier-derived, explicit). For background sync (ERP/MES ingestion), `factory_id` must come from `ERPConnection.factory_id` / `MESConnection.factory_id` — this is handled in the service layer, not the migration.
 
-- [ ] **Step 1: Generate migration skeleton**
+- [ ] **Step 1: Generate migration**
 
-Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && alembic revision -m "add_factory_tables" -o 035_add_factory_tables.py`
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && alembic revision -m "add_factory_tables"`
+
+Note: Use `--rev-id` prefix if you need to control the revision ID. Alembic does not support `-o` for output filename.
 
 - [ ] **Step 2: Write the full upgrade/downgrade migration**
 
-Write all CREATE TABLE, ALTER TABLE ADD COLUMN, UPDATE backfill, ALTER COLUMN SET NOT NULL, and constraint changes. Follow the spec §7.1-7.2 exactly. Use `op.execute()` for data backfills with parameterized SQL.
+Write all CREATE TABLE, ALTER TABLE ADD COLUMN, UPDATE backfill, ALTER COLUMN SET NOT NULL, and constraint changes. Follow the spec §7.1-7.2 exactly. Use `op.execute()` for data backfills.
+
+For each backfill category, use the correct derivation path:
+- Product-line-derived tables: `UPDATE ... SET factory_id = (SELECT factory_id FROM product_lines WHERE product_lines.code = table.product_line_code)`
+- Parent-derived tables: `UPDATE ... SET factory_id = (SELECT factory_id FROM parent_table WHERE parent_table.pk = table.fk)`
+- Explicit scope tables (Supplier, AuditChecklistTemplate): `UPDATE ... SET factory_id = default_factory_id`
+- Nullable product_line_code: `UPDATE ... SET factory_id = COALESCE((SELECT ...), default_factory_id)`
 
 - [ ] **Step 3: Run migration on dev database**
 
@@ -327,7 +393,22 @@ Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && alembic upgrade head`
 
 - [ ] **Step 4: Verify seed data**
 
-Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.database import async_session; from sqlalchemy import text; import asyncio; async def check(): async with async_session() as s: r = await s.execute(text('SELECT count(*) FROM factories')); print('factories:', r.scalar()); r = await s.execute(text('SELECT count(*) FROM user_factories')); print('user_factories:', r.scalar()); asyncio.run(check())"`
+Create a temporary script `scripts/verify_migration.py`:
+```python
+import asyncio
+from sqlalchemy import text
+from app.database import async_session
+
+async def check():
+    async with async_session() as s:
+        r = await s.execute(text('SELECT count(*) FROM factories'))
+        print('factories:', r.scalar())
+        r = await s.execute(text('SELECT count(*) FROM user_factories'))
+        print('user_factories:', r.scalar())
+
+asyncio.run(check())
+```
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python scripts/verify_migration.py`
 
 Expected: `factories: 1` (seed), `user_factories: N` (one per existing user)
 
@@ -340,13 +421,13 @@ git commit -m "feat(multi-factory): alembic migration — factories table, facto
 
 ---
 
-### Task 6: Factory CRUD — Service + Schema + API
+### Task 7: Factory CRUD — Service + Schema (under /api/group/)
 
 **Files:**
 - Create: `backend/app/schemas/factory.py`
 - Create: `backend/app/services/factory_service.py`
-- Create: `backend/app/api/factory.py`
-- Modify: `backend/app/main.py` — register factory router
+
+Note: Factory CRUD API routes will be in `backend/app/api/group.py` (Task 13), not a separate `api/factory.py`. This avoids route duplication.
 
 - [ ] **Step 1: Write factory schemas**
 
@@ -358,28 +439,18 @@ git commit -m "feat(multi-factory): alembic migration — factories table, facto
 
 - [ ] **Step 2: Write factory service**
 
-`backend/app/services/factory_service.py`: CRUD operations (list, get, create, update, soft_delete). Follow `product_line_service.py` patterns exactly (including reference check before soft delete).
+`backend/app/services/factory_service.py`: CRUD operations (list, get, create, update, soft_delete). Follow `product_line_service.py` patterns exactly (including reference check before soft delete — check if any product_lines reference this factory before deactivating).
 
-- [ ] **Step 3: Write factory API routes**
-
-`backend/app/api/factory.py`: Follow `product_line.py` patterns. All routes require admin. Add `?factory_id=` query parameter support.
-
-- [ ] **Step 4: Register router in main.py**
-
-- [ ] **Step 5: Verify endpoint works**
-
-Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &` then `curl http://localhost:8000/api/factories`
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add backend/app/schemas/factory.py backend/app/services/factory_service.py backend/app/api/factory.py backend/app/main.py
-git commit -m "feat(multi-factory): Factory CRUD service, schema, and API routes"
+git add backend/app/schemas/factory.py backend/app/services/factory_service.py
+git commit -m "feat(multi-factory): Factory CRUD service and schemas (API routes in group.py)"
 ```
 
 ---
 
-### Task 7: Auth Endpoint — Return FactoryScope + permissions.group
+### Task 8: Auth Endpoint — Return FactoryScope + permissions.group
 
 **Files:**
 - Modify: `backend/app/api/auth.py` — add factory scope to /auth/me response
@@ -421,12 +492,14 @@ git commit -m "feat(multi-factory): return FactoryScope and permissions.group fr
 
 ## Phase 2: Scope Filtering Rollout
 
-### Task 8: Add factory_id to All Business Models (Bulk)
+### Task 9: Add factory_id to All Business Models (Bulk)
 
 **Files:**
 - Modify: ~50 model files to add `factory_id` column
 
 Add `factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True)` to each model per §3.5 derivation matrix. All nullable for now — the migration already backfills and sets NOT NULL at the DB level.
+
+**Important for background sync services:** ERP/MES ingestion services must read `factory_id` from their parent `ERPConnection`/`MESConnection` record, not from request context. The `populate_factory_id` function handles this via parent-object derivation.
 
 - [ ] **Step 1: Add factory_id to product-line-derived models**
 
@@ -455,7 +528,7 @@ git commit -m "feat(multi-factory): add factory_id to all business models per de
 
 ---
 
-### Task 9: AuditProgramTargetFactories Model
+### Task 10: AuditProgramTargetFactories Model
 
 **Files:**
 - Modify: `backend/app/models/audit_program.py` — add `AuditProgramTargetFactory` association model
@@ -484,30 +557,31 @@ git commit -m "feat(multi-factory): add AuditProgramTargetFactory association mo
 
 ---
 
-### Task 10: Apply Scope Filter to Key APIs (First Wave)
+### Task 11: Apply Scope Filter to Key APIs (First Wave)
 
 **Files:**
 - Modify: `backend/app/api/fmea.py`
 - Modify: `backend/app/api/capa.py`
 - Modify: `backend/app/api/dashboard.py`
 - Modify: `backend/app/api/supplier.py`
-- Modify: other high-traffic APIs
 
-For each API file, add `factory_scope: FactoryScope = Depends(get_factory_scope)` and `pl_scope: ProductLineScope = Depends(get_product_line_scope)` to list endpoints, then wrap queries with `apply_scope_filter`.
+For each API file, add `factory_scope, effective_factory_id = Depends(get_factory_scope)` and `pl_scope: ProductLineScope = Depends(get_product_line_scope)` to list endpoints, then wrap queries with `apply_scope_filter`.
 
 This is the most labor-intensive task. Each API needs:
 1. Import `apply_scope_filter`, `resolve_effective_factory_id`, etc.
 2. Add dependencies to list endpoints
 3. Replace `apply_product_line_filter` calls with `apply_scope_filter`
 4. Add `factory_id` query parameter and `resolve_effective_factory_id` call
+5. Add `populate_factory_id` on create endpoints
+6. Add `validate_factory_invariant` on create/update endpoints
 
-- [ ] **Step 1: Migrate FMEA list endpoint**
+- [ ] **Step 1: Migrate FMEA list + create endpoints**
 
-- [ ] **Step 2: Migrate CAPA list endpoint**
+- [ ] **Step 2: Migrate CAPA list + create endpoints**
 
 - [ ] **Step 3: Migrate dashboard endpoint**
 
-- [ ] **Step 4: Migrate supplier list endpoint**
+- [ ] **Step 4: Migrate supplier list + create endpoints**
 
 - [ ] **Step 5: Verify each endpoint returns correct filtered data**
 
@@ -520,12 +594,14 @@ git commit -m "feat(multi-factory): apply scope filter to FMEA, CAPA, dashboard,
 
 ---
 
-### Task 11: Apply Scope Filter to Remaining APIs (Second Wave)
+### Task 12: Apply Scope Filter to Remaining APIs (Second Wave)
 
 **Files:**
 - Modify: all remaining API files that have list endpoints
 
-Same pattern as Task 10, applied to the remaining ~15 API modules.
+Same pattern as Task 11, applied to the remaining ~15 API modules.
+
+**For ERP/MES background sync services specifically:** These run without HTTP request context. The `factory_id` must be derived from the parent connection record (`ERPConnection.factory_id` / `MESConnection.factory_id`), not from `get_factory_scope`. Update `erp_service.py` and `mes_ingestion_service.py` (or equivalent) to set `factory_id` from the connection before writing business entities.
 
 - [ ] **Step 1: Migrate SPC, MSA, Gauge APIs**
 
@@ -535,7 +611,7 @@ Same pattern as Task 10, applied to the remaining ~15 API modules.
 
 - [ ] **Step 4: Migrate CustomerQuality, APQP, ChangeImpact APIs**
 
-- [ ] **Step 5: Migrate MES, PLM, ERP APIs**
+- [ ] **Step 5: Migrate MES, PLM, ERP APIs + fix background sync factory_id derivation**
 
 - [ ] **Step 6: Migrate IQC AQL, SupplierRisk, CPValidation APIs**
 
@@ -543,39 +619,14 @@ Same pattern as Task 10, applied to the remaining ~15 API modules.
 
 ```bash
 git add backend/app/api/
-git commit -m "feat(multi-factory): apply scope filter to all remaining APIs"
-```
-
----
-
-### Task 12: populate_factory_id + validate_factory_invariant in Services
-
-**Files:**
-- Modify: `backend/app/core/factory_scope.py` — add `populate_factory_id` and `validate_factory_invariant`
-- Modify: key service files to call these functions on create/update
-
-- [ ] **Step 1: Implement `populate_factory_id` and `validate_factory_invariant`** (spec §4.3)
-
-- [ ] **Step 2: Add calls to FMEA service create/update**
-
-- [ ] **Step 3: Add calls to CAPA service create/update**
-
-- [ ] **Step 4: Add calls to Supplier service create/update**
-
-- [ ] **Step 5: Add calls to remaining services (IQC, SPC, Audit, etc.)**
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add backend/app/core/factory_scope.py backend/app/services/
-git commit -m "feat(multi-factory): add factory_id population and validation to services"
+git commit -m "feat(multi-factory): apply scope filter to all remaining APIs + background sync factory_id"
 ```
 
 ---
 
 ## Phase 3: Group APIs
 
-### Task 13: Group Dashboard + Factory Comparison API
+### Task 13: Group API — Dashboard, Comparison, Factory CRUD
 
 **Files:**
 - Create: `backend/app/schemas/group.py`
@@ -583,19 +634,21 @@ git commit -m "feat(multi-factory): add factory_id population and validation to 
 - Create: `backend/app/api/group.py`
 - Modify: `backend/app/main.py` — register group router
 
+Note: Factory CRUD is under `/api/group/factories` (not a separate `/api/factories`), guarded by `require_permission(Module.GROUP, VIEW)` for read and `require_permission(Module.GROUP, ADMIN)` for write.
+
 - [ ] **Step 1: Write group schemas** (FactoryKPI, GroupDashboard, etc.)
 
 - [ ] **Step 2: Write group_service.py** — KPI snapshot aggregation, factory comparison
 
-- [ ] **Step 3: Write group API routes** — all protected by `require_permission(Module.GROUP, PermissionLevel.VIEW)`
+- [ ] **Step 3: Write group API routes**
 
-- [ ] **Step 4: Write factory CRUD routes** — list, create, update, soft_delete factories
+All routes protected by `require_permission(Module.GROUP, PermissionLevel.VIEW)`. Factory CRUD routes under `/api/group/factories` with ADMIN for write operations.
 
-- [ ] **Step 5: Register group router**
+- [ ] **Step 4: Register group router in main.py**
 
-- [ ] **Step 6: Verify endpoints**
+- [ ] **Step 5: Verify endpoints**
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/app/schemas/group.py backend/app/services/group_service.py backend/app/api/group.py backend/app/main.py
@@ -640,11 +693,11 @@ git commit -m "feat(multi-factory): Group supplier and audit endpoints"
 
 - [ ] **Step 3: Add factory switcher dropdown to AppLayout header**
 
-Only visible when `factoryScope.accessibleFactoryIds === null || factoryScope.accessibleFactoryIds.length > 1`. Uses `factories` list for options. Changing factory updates a global `currentFactoryId` state.
+Visible when `factoryScope.accessibleFactoryIds === null || factoryScope.accessibleFactoryIds.length > 1`. Uses `factories` list for options. Changing factory updates a global `currentFactoryId` state.
 
 - [ ] **Step 4: Add group menu items to sidebar**
 
-Visible when `permissions.group >= 1 && (factoryScope.accessibleFactoryIds === null || factoryScope.accessibleFactoryIds.length > 1)`.
+Visible when `permissions.group >= PermissionLevel.VIEW` — regardless of factory count. A group user with only 1 factory still needs access to the group dashboard.
 
 - [ ] **Step 5: Commit**
 
@@ -655,26 +708,60 @@ git commit -m "feat(multi-factory): factory switcher and group menu in sidebar"
 
 ---
 
-### Task 16: Frontend API Clients
+### Task 16: Axios Interceptor for factory_id Auto-Injection
 
 **Files:**
-- Create: `frontend/src/api/factory.ts`
-- Create: `frontend/src/api/group.ts`
+- Modify: `frontend/src/api/client.ts` (or equivalent Axios instance file)
 
-- [ ] **Step 1: Write factory API client** (listFactories, createFactory, updateFactory, deactivateFactory)
+Instead of modifying 30+ frontend list pages individually, inject `factory_id` automatically via Axios request interceptor:
 
-- [ ] **Step 2: Write group API client** (getDashboard, getComparison, getSharedSuppliers, getCrossFactoryAudits)
+- When `currentFactoryId` is set in authStore, automatically append `factory_id=<value>` to all GET request query params.
+- POST/PUT/PATCH requests do NOT inject `factory_id` — the backend derives it from `product_line_code` or `scope.default_factory_id`.
+
+- [ ] **Step 1: Add Axios request interceptor**
+
+```typescript
+// In the Axios instance setup
+apiClient.interceptors.request.use((config) => {
+  const currentFactoryId = useAuthStore.getState().currentFactoryId;
+  if (currentFactoryId && config.method === 'get') {
+    config.params = config.params || {};
+    config.params.factory_id = currentFactoryId;
+  }
+  return config;
+});
+```
+
+- [ ] **Step 2: Verify GET requests include factory_id in query params**
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/src/api/factory.ts frontend/src/api/group.ts
-git commit -m "feat(multi-factory): frontend API clients for factory and group"
+git add frontend/src/api/client.ts
+git commit -m "feat(multi-factory): Axios interceptor auto-injects factory_id on GET requests"
 ```
 
 ---
 
-### Task 17: Group Dashboard + Factory Management Pages
+### Task 17: Frontend API Clients
+
+**Files:**
+- Create: `frontend/src/api/group.ts` (includes factory CRUD + group endpoints)
+
+- [ ] **Step 1: Write group API client** — includes:
+  - `listFactories()`, `createFactory()`, `updateFactory()`, `deactivateFactory()`
+  - `getDashboard()`, `getComparison()`, `getSharedSuppliers()`, `getCrossFactoryAudits()`
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add frontend/src/api/group.ts
+git commit -m "feat(multi-factory): frontend API client for group endpoints"
+```
+
+---
+
+### Task 18: Group Dashboard + Factory Management Pages
 
 **Files:**
 - Create: `frontend/src/pages/group/GroupDashboard.tsx`
@@ -696,7 +783,7 @@ git commit -m "feat(multi-factory): Group dashboard and factory management pages
 
 ---
 
-### Task 18: Factory Comparison + Shared Suppliers + Cross-Factory Audits Pages
+### Task 19: Factory Comparison + Shared Suppliers + Cross-Factory Audits Pages
 
 **Files:**
 - Create: `frontend/src/pages/group/FactoryComparison.tsx`
@@ -720,28 +807,6 @@ git commit -m "feat(multi-factory): comparison, shared suppliers, cross-factory 
 
 ---
 
-### Task 19: Pass factory_id Query Parameter on All Frontend List Pages
-
-**Files:**
-- Modify: all frontend list page components that call list APIs
-
-When `currentFactoryId` is set (from factory switcher), append `?factory_id=` to all API calls.
-
-- [ ] **Step 1: Create a shared hook `useFactoryScope`** that returns currentFactoryId from authStore
-
-- [ ] **Step 2: Update API client functions to accept optional `factoryId` parameter**
-
-- [ ] **Step 3: Update list page components to pass factoryId**
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add frontend/src/
-git commit -m "feat(multi-factory): pass factory_id query parameter on all frontend list pages"
-```
-
----
-
 ## Phase 5: Testing + Seed Data
 
 ### Task 20: Seed Data — Second Factory
@@ -749,7 +814,7 @@ git commit -m "feat(multi-factory): pass factory_id query parameter on all front
 **Files:**
 - Modify: `backend/app/seed.py`
 
-Add a second factory (e.g., code='SH-02', name='上海工厂') and assign some product lines and users to it.
+Add a second factory (e.g., code='SH-02', name='上海工厂') and assign some product lines and users to it. Also create a group admin user with GROUP ADMIN permission.
 
 - [ ] **Step 1: Add second factory to seed.py**
 
@@ -758,6 +823,8 @@ Add a second factory (e.g., code='SH-02', name='上海工厂') and assign some p
 - [ ] **Step 3: Create a group admin user with GROUP ADMIN permission**
 
 - [ ] **Step 4: Run seed and verify**
+
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -m app.seed`
 
 - [ ] **Step 5: Commit**
 
@@ -768,7 +835,7 @@ git commit -m "feat(multi-factory): add second factory and group admin to seed d
 
 ---
 
-### Task 21: Isolation Tests
+### Task 21: Integration + Isolation Tests
 
 **Files:**
 - Create: `backend/tests/test_factory_isolation.py`
@@ -785,6 +852,8 @@ Test that factory A users cannot see factory B data, GROUP ADMIN can see all, by
 
 - [ ] **Step 5: Run tests and verify all pass**
 
+Run: `cd /Users/sam/Documents/Code/OpenQMS/backend && python -m pytest tests/test_factory_isolation.py -v`
+
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -796,13 +865,17 @@ git commit -m "test(multi-factory): factory isolation, bypass/GROUP decoupling, 
 
 ### Task 22: Integration Verification
 
-- [ ] **Step 1: Run full backend startup**
+- [ ] **Step 1: Start backend and verify no import/startup errors**
 
 ```bash
-cd /Users/sam/Documents/Code/OpenQMS/backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+cd /Users/sam/Documents/Code/OpenQMS/backend && python -c "from app.main import app; print('App loaded OK')"
 ```
 
 - [ ] **Step 2: Login as admin, verify /auth/me returns factory_scope and permissions.group**
+
+```bash
+curl -s http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"Admin@2026"}' | python -m json.tool
+```
 
 - [ ] **Step 3: Login as factory user, verify data is filtered to their factory**
 
@@ -826,7 +899,7 @@ git commit -m "feat(multi-factory): integration verification and fixes"
 **Files:**
 - Modify: `docs/ROADMAP.md`
 
-Mark the multi-factory deployment row as complete.
+Mark the multi-factory deployment row as complete. Only execute after Task 22 passes.
 
 - [ ] **Step 1: Update ROADMAP.md status**
 
