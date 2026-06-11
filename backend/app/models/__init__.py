@@ -4,7 +4,7 @@ from app.models.capa import CAPAEightD
 from app.models.audit import AuditLog
 from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.quality_goal import QualityGoal
-from app.models.audit_program import AuditProgram, AuditChecklistTemplate
+from app.models.audit_program import AuditProgram, AuditChecklistTemplate, AuditProgramTargetFactory
 from app.models.audit_plan import AuditPlan
 from app.models.audit_finding import AuditFinding
 from app.models.spc import InspectionCharacteristic, SampleBatch, SampleValue, SPCAlarm, ControlLimitSnapshot
@@ -77,7 +77,7 @@ from app.models.supplier_shared_profile import SupplierSharedProfile
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
-    "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate",
+    "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",
     "InspectionCharacteristic", "SampleBatch", "SampleValue", "SPCAlarm", "ControlLimitSnapshot",
     "Supplier", "SupplierCertification", "SupplierEvaluation",
     "SupplierPPAPSubmission", "SupplierPPAPElement", "SupplierSCAR",
