@@ -801,6 +801,9 @@ class RecommendationManager:
         if target_state == profile.state and recommended_aql == profile.current_aql:
             return None
 
+        # Resolve direction early (needed for dedup check)
+        direction = rule_result["direction"]
+
         # 3. Dedup check: existing pending/forwarded with same profile+direction+recommended_aql
         # direction encodes target_state (tighten≠freeze), so "tighten→0.65" won't block "freeze→0.65"
         existing = await db.execute(
@@ -815,9 +818,6 @@ class RecommendationManager:
             return None
 
         # 4. Create recommendation record
-        direction = rule_result["direction"]
-        if direction == "normal":
-            direction = "normal"  # RETURN_TO_NORMAL direction
 
         expiry_days = await AqlConfigManager.get_int(
             db, "recommendation_expiry_days", profile.product_line_code
@@ -1054,16 +1054,19 @@ class AqlService:
         db: AsyncSession,
         supplier_id: uuid.UUID,
         material_id: uuid.UUID,
-        inspection_id: uuid.UUID,
+        inspection_id: uuid.UUID | None = None,
     ) -> IqcAqlRecommendation | None:
         """Trigger rule evaluation after inspection judgment."""
         # 1. Get or create profile
-        # Need product_line_code — get from inspection
-        insp_result = await db.execute(
-            select(IqcInspection).where(IqcInspection.inspection_id == inspection_id)
-        )
-        inspection = insp_result.scalar_one_or_none()
-        product_line_code = inspection.product_line_code if inspection else "DC-DC-100"
+        # Need product_line_code — get from inspection if available
+        product_line_code = "DC-DC-100"  # fallback
+        if inspection_id:
+            insp_result = await db.execute(
+                select(IqcInspection).where(IqcInspection.inspection_id == inspection_id)
+            )
+            inspection = insp_result.scalar_one_or_none()
+            if inspection:
+                product_line_code = inspection.product_line_code
 
         profile = await ProfileManager.get_or_create_profile(
             db, supplier_id, material_id, product_line_code
@@ -1079,7 +1082,7 @@ class AqlService:
         snapshot = IqcAqlQualitySnapshot(
             supplier_id=supplier_id,
             material_id=material_id,
-            inspection_id=inspection_id,
+            inspection_id=inspection_id if inspection_id else None,
             snapshot_at=now,
             total_batches=ctx.last_30d_batch_count,
             consecutive_accepted=ctx.consecutive_accepted,

@@ -734,7 +734,7 @@ async def trigger_aql_evaluation(
 ):
     try:
         recommendation = await AqlService.on_inspection_judged(
-            db, req.supplier_id, req.material_id, uuid.UUID("00000000-0000-0000-0000-000000000000"),
+            db, req.supplier_id, req.material_id,
         )
         await db.commit()
         if recommendation:
