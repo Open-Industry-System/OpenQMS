@@ -269,7 +269,7 @@ async def save_report_draft(
     if review.status == "closed":
         raise ValueError("cannot edit report of a closed review")
 
-    content["updated_at"] = datetime.now(timezone.utc).isoformat()
+    content = {**content, "updated_at": datetime.now(timezone.utc).isoformat()}
     review.generated_report = content
     review.report_status = "draft"
     await _write_audit(db, review.review_id, user.user_id, "REPORT_SAVE_DRAFT", {
