@@ -30,7 +30,7 @@ async def test_build_sections_maps_data_package():
 @pytest.mark.asyncio
 async def test_generate_report_creates_draft(db, admin_user):
     review = ManagementReview(
-        doc_no="MR-TEST-001",
+        doc_no=f"MR-TEST-{uuid.uuid4().hex[:8]}",
         title="Test Review",
         review_date=date(2026, 6, 11),
         chair_person_id=admin_user.user_id,
@@ -50,7 +50,7 @@ async def test_generate_report_creates_draft(db, admin_user):
 @pytest.mark.asyncio
 async def test_save_draft_does_not_create_version(db, admin_user):
     review = ManagementReview(
-        doc_no="MR-TEST-002",
+        doc_no=f"MR-TEST-{uuid.uuid4().hex[:8]}",
         title="Test Review",
         review_date=date(2026, 6, 11),
         chair_person_id=admin_user.user_id,
@@ -70,7 +70,7 @@ async def test_save_draft_does_not_create_version(db, admin_user):
 @pytest.mark.asyncio
 async def test_finalize_creates_version_snapshot(db, admin_user):
     review = ManagementReview(
-        doc_no="MR-TEST-003",
+        doc_no=f"MR-TEST-{uuid.uuid4().hex[:8]}",
         title="Test Review",
         review_date=date(2026, 6, 11),
         chair_person_id=admin_user.user_id,
@@ -96,7 +96,7 @@ async def test_finalize_creates_version_snapshot(db, admin_user):
 @pytest.mark.asyncio
 async def test_finalize_requires_draft(db, admin_user):
     review = ManagementReview(
-        doc_no="MR-TEST-004",
+        doc_no=f"MR-TEST-{uuid.uuid4().hex[:8]}",
         title="Test Review",
         review_date=date(2026, 6, 11),
         chair_person_id=admin_user.user_id,
@@ -114,7 +114,7 @@ async def test_finalize_requires_draft(db, admin_user):
 @pytest.mark.asyncio
 async def test_closed_review_cannot_edit_report(db, admin_user):
     review = ManagementReview(
-        doc_no="MR-TEST-005",
+        doc_no=f"MR-TEST-{uuid.uuid4().hex[:8]}",
         title="Test Review",
         review_date=date(2026, 6, 11),
         chair_person_id=admin_user.user_id,
