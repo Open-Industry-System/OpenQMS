@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.supplier_risk import SupplierRiskAlert
 from app.models.supplier import Supplier, SupplierSCAR, SupplierCertification, SupplierEvaluation
+from app.models.capa import CAPAEightD
 from app.models.iqc_inspection import IqcInspection
 from app.services.supplier_risk.rule_engine import SupplierRiskInput, run_all_rules
 from app.services.supplier_risk.scorer import calculate_risk_score
@@ -244,3 +245,86 @@ async def handle_alert(
     await db.commit()
     await db.refresh(alert)
     return alert
+
+
+async def create_scar_from_alert(
+    db: AsyncSession,
+    alert_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> SupplierSCAR:
+    """Create a SCAR from an alert atomically."""
+    alert = await db.get(SupplierRiskAlert, alert_id)
+    if not alert:
+        raise ValueError("预警不存在")
+
+    from app.services.scar_service import _create_scar_without_commit
+    from app.services.embedding_outbox import enqueue_embedding
+
+    # Create SCAR without commit
+    scar = await _create_scar_without_commit(
+        db,
+        supplier_id=alert.supplier_id,
+        source_type="risk_alert",
+        source_id=alert.alert_id,
+        description=f"由风险预警 {alert.alert_id} 自动创建",
+        issued_by=user_id,
+        product_line_code=alert.product_line_code,
+    )
+
+    # Link alert to SCAR and update status
+    alert.linked_scar_id = scar.scar_id
+    alert.status = "action_taken"
+
+    # Commit everything atomically
+    await db.commit()
+    await db.refresh(scar)
+    await db.refresh(alert)
+
+    # Enqueue embedding after commit
+    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
+
+    return scar
+
+
+async def create_capa_from_alert(
+    db: AsyncSession,
+    alert_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> CAPAEightD:
+    """Create a CAPA from an alert atomically."""
+    alert = await db.get(SupplierRiskAlert, alert_id)
+    if not alert:
+        raise ValueError("预警不存在")
+
+    from app.services.capa_service import _create_capa_without_commit
+    from app.services.embedding_outbox import enqueue_embedding
+    from app.models.capa import CAPAEightD
+    import uuid as _uuid
+
+    # Generate document number
+    doc_no = f"8D-{date.today().year}-{str(alert.alert_id)[:8].upper()}"
+
+    # Create CAPA without commit
+    capa = await _create_capa_without_commit(
+        db,
+        title=f"供应商风险预警处置 — {alert.alert_id}",
+        document_no=doc_no,
+        severity="严重" if alert.risk_level in ("high", "critical") else "一般",
+        due_date=date.today(),
+        user_id=user_id,
+        product_line_code=alert.product_line_code or "DC-DC-100",
+    )
+
+    # Link alert to CAPA and update status
+    alert.linked_capa_id = capa.report_id
+    alert.status = "action_taken"
+
+    # Commit everything atomically
+    await db.commit()
+    await db.refresh(capa)
+    await db.refresh(alert)
+
+    # Enqueue embedding after commit
+    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
+
+    return capa
