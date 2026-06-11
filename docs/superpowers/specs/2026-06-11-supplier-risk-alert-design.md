@@ -54,11 +54,11 @@
 | R01 | PPM 超标 | 质量 | IQC 检验记录 | 供应商 PPM > 阈值 | `{"ppm_limit": 1000, "window_days": 90}` | 15 |
 | R02 | 批次合格率下降 | 质量 | IQC 检验记录 | 合格率 < 阈值 或环比下降 > 比例 | `{"acceptance_rate_min": 0.9, "decline_ratio": 0.1, "window_days": 90, "compare_window_days": 180}` | 12 |
 | R03 | 连续拒收 | 质量 | IQC 检验记录 | 连续 N 批已判定拒收 | `{"consecutive_batches": 3, "batch_limit": 10}` | 18 |
-| R04 | SCAR 超期未关闭 | 质量 | SCAR 记录 | 开放 SCAR 超过 N 天 | `{"overdue_days": 30}` | 10 |
+| R04 | SCAR 超期未关闭 | 质量 | SCAR 记录 | 开放 SCAR 发布超过 N 天仍未关闭 | `{"open_days_limit": 30}` | 10 |
 | R05 | SCAR 频发 | 质量 | SCAR 记录 | 时间窗口内 SCAR 数量 > 阈值 | `{"scar_count_limit": 3, "window_days": 90}` | 12 |
 | R06 | 交付准时率下降 | 交付 | 供应商评价 | delivery_score < 阈值 或环比下降 > 比例 | `{"delivery_score_min": 70, "decline_ratio": 0.15}` | 12 |
-| R07 | 评级降级 | 交付 | 供应商评价 | 最近评级从 A/B 降为 C/D | `{}` | 10 |
-| R08 | 证书即将过期 | 合规 | 资质证书 | 证书在 N 天内过期 | `{"warning_days": [90, 60, 30]}` | 8 |
+| R07 | 评级降级 | 交付 | 供应商评价 | 最近评级从 from_grades 降为 to_grades | `{"from_grades": ["A", "B"], "to_grades": ["C", "D"]}` | 10 |
+| R08 | 证书即将过期 | 合规 | 资质证书 | 证书在 N 天内过期，阶梯评分 | `{"warning_days": [90, 60, 30]}` | 8 |
 | R09 | 评价分数下滑 | 合规 | 供应商评价 | 总评分环比下降 > 阈值 | `{"score_decline_limit": 15}` | 8 |
 | R10 | 安全缺陷检测 | 合规 | IQC 检验记录 | 缺陷描述包含安全关键词 | `{"keywords": ["安全", "安全特性", "safety"]}` | 15 |
 
@@ -89,6 +89,10 @@ class RuleResult:
 - 每条规则独立执行，互不影响
 - 规则异常不中断其他规则（catch + 记录 failed_rule_id）
 - 触发的规则贡献评分，未触发的贡献 0 分
+
+**R08 评分阶梯**：距离过期 60~90 天 → score=30；30~60 天 → score=60；<30 天 → score=100。取最紧迫的证书对应分数。
+
+**R04 日期基准**：基于 `issued_date`（SCAR 发布日期）计算开放天数，`当前日期 - issued_date > open_days_limit` 即触发。不依赖 `due_date`。
 
 ### 3.3 风险评分计算
 
@@ -477,7 +481,7 @@ Alembic 迁移文件：`033_add_supplier_risk_tables.py`
 
 ## 12. 安全与性能
 
-- **数据隔离**：所有查询加 `product_line_code` 过滤
+- **数据隔离**：带产品线的业务表（`iqc_inspections`、`supplier_scars`）严格按 `product_line_code` 过滤；全局共享基础表（`suppliers`、`supplier_certifications`、`supplier_evaluations`）全量读取后传入规则引擎，生成的 `supplier_risk_alerts` 打上当前评估的 `product_line_code`
 - **权限控制**：API 路由使用 `require_permission(Module.SUPPLIER_RISK, ...)`
 - **Webhook 签名**：HMAC-SHA256 签名验证 payload 完整性
 - **邮件配置**：通过环境变量配置 SMTP，不硬编码
