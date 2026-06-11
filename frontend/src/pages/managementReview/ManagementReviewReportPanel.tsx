@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Card, Button, Space, Tag, Collapse, Spin, message, Modal } from "antd";
+import { Card, Button, Space, Tag, Collapse, Spin, message, Modal, Empty } from "antd";
 import {
   generateReport, saveReportDraft, finalizeReport, reopenReport,
   listReportVersions, exportReport,
@@ -117,7 +117,7 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${review.doc_no}-report.md`;
+      a.download = `${review.doc_no}-${review.title}-报告.md`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
@@ -173,9 +173,7 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
                 <Collapse items={collapseItems} />
               </Spin>
             ) : (
-              <div style={{ color: "#999", padding: 24, textAlign: "center" }}>
-                点击「AI 生成报告」开始生成
-              </div>
+              <Empty description="暂无报告数据，请点击「AI 生成报告」开始初始化" />
             )}
           </div>
           {versions.length > 0 && (
