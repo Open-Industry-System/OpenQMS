@@ -155,12 +155,18 @@ compliance_score = Σ(triggered R08..R10 scores × weights) / Σ(active R08..R10
 | created_at | TIMESTAMP | 创建时间 |
 | updated_at | TIMESTAMP | 更新时间 |
 
-唯一约束使用 `NULLS NOT DISTINCT`（PostgreSQL 15+），确保 `product_line_code=NULL` 时同一供应商同天也只能有一条全局预警：
+唯一约束使用两个部分唯一索引（兼容 PostgreSQL 14+），确保同一供应商同天同产品线只能有一条预警：
 
 ```sql
-CREATE UNIQUE INDEX idx_risk_alert_unique
+-- 有产品线时的唯一约束
+CREATE UNIQUE INDEX idx_risk_alert_unique_pl
 ON supplier_risk_alerts (supplier_id, product_line_code, snapshot_date)
-NULLS NOT DISTINCT;
+WHERE product_line_code IS NOT NULL;
+
+-- 全局评估（product_line_code=NULL）的唯一约束
+CREATE UNIQUE INDEX idx_risk_alert_unique_global
+ON supplier_risk_alerts (supplier_id, snapshot_date)
+WHERE product_line_code IS NULL;
 ```
 
 #### `supplier_risk_configs` — 规则配置
@@ -182,8 +188,9 @@ NULLS NOT DISTINCT;
 
 **配置查找优先级**（从高到低）：
 1. **供应商+产品线覆盖**：`supplier_id = 某值, product_line_code = 某值`
-2. **产品线默认**：`supplier_id IS NULL, product_line_code = 某值`
-3. **全局默认**：`supplier_id IS NULL, product_line_code IS NULL`
+2. **供应商全局覆盖**：`supplier_id = 某值, product_line_code IS NULL`
+3. **产品线默认**：`supplier_id IS NULL, product_line_code = 某值`
+4. **全局默认**：`supplier_id IS NULL, product_line_code IS NULL`
 
 ```sql
 -- 全局默认：每个 rule_id 仅一条
@@ -196,10 +203,15 @@ CREATE UNIQUE INDEX idx_risk_config_product_line
 ON supplier_risk_configs (rule_id, product_line_code)
 WHERE supplier_id IS NULL AND product_line_code IS NOT NULL;
 
--- 供应商+产品线覆盖：每个 rule_id + supplier_id + product_line_code 仅一条
-CREATE UNIQUE INDEX idx_risk_config_supplier
+-- 供应商+产品线覆盖：每个 rule_id + supplier_id + product_line_code 仅一条（product_line_code 非 NULL）
+CREATE UNIQUE INDEX idx_risk_config_supplier_pl
 ON supplier_risk_configs (rule_id, supplier_id, product_line_code)
-WHERE supplier_id IS NOT NULL;
+WHERE supplier_id IS NOT NULL AND product_line_code IS NOT NULL;
+
+-- 供应商全局覆盖：每个 rule_id + supplier_id 仅一条（product_line_code 为 NULL）
+CREATE UNIQUE INDEX idx_risk_config_supplier_global
+ON supplier_risk_configs (rule_id, supplier_id)
+WHERE supplier_id IS NOT NULL AND product_line_code IS NULL;
 ```
 
 #### `supplier_risk_notification_channels` — 通知渠道配置
@@ -285,7 +297,7 @@ async def _incremental_evaluate(supplier_id: UUID, product_line_code: str):
 
 ### 5.4 预警去重与升级
 
-- 同一供应商同一产品线同一天仅生成一条预警（`NULLS NOT DISTINCT` 唯一约束）
+- 同一供应商同一产品线同一天仅生成一条预警（两个部分唯一索引，兼容 PG14+）
 - 如果供应商风险等级升级（中→高、高→极高），更新已有预警的 `alert_type` 为 `escalated`
 - 降级不自动关闭预警，需人工确认
 
@@ -468,12 +480,13 @@ Alembic 迁移文件：`033_add_supplier_risk_tables.py`
 - 去重并发测试：同一天同供应商并发评估仅产生一条预警
 - 升级并发测试：风险等级升级时 alert_type 正确更新为 escalated
 - 通知失败不阻塞测试：邮件/Webhook 发送失败不影响预警记录生成
-- SCAR 服务复用测试：create_scar_from_alert 调用 scar_service.create_scar 并正确关联
-- CAPA 服务复用测试：create_capa_from_alert 调用 capa_service.create_capa 并正确关联
+- SCAR 服务复用测试：create_scar_from_alert 调用 scar_service._create_scar_without_commit，同一事务内关联 alert 并统一 commit
+- CAPA 服务复用测试：create_capa_from_alert 调用 capa_service._create_capa_without_commit，同一事务内关联 alert 并统一 commit
+- 事务回滚测试：SCAR/CAPA 创建失败时 alert 状态不变（整体回滚）
 - CAPA 关闭联动测试：CAPA 状态流转到 D8_CLOSURE 时关联预警自动关闭
 - Webhook SSRF 拦截测试：内网 URL 被拒绝
 
-总计：38 个测试
+总计：39 个测试
 
 ### 前端
 
