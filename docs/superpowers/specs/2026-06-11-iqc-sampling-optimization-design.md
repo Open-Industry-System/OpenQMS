@@ -193,6 +193,7 @@ def get_aql_by_state(
     base_aql: float,
     state: str,
     aql_steps: int = 0,
+    current_aql: float | None = None,
     min_aql: float | None = None,
     max_aql: float | None = None,
 ) -> float:
@@ -202,8 +203,12 @@ def get_aql_by_state(
     - normal:    基准 AQL（不变，aql_steps 忽略）
     - tightened: 基准 AQL 左移（减小）aql_steps 档
     - reduced:   基准 AQL 右移（增大）aql_steps 档
-    - frozen:    冻结不改变 AQL，调用方应直接传入 current_aql 作为 base_aql
+    - frozen:    保持 current_aql 不变（必须传入 current_aql）
     """
+    if state == "frozen":
+        # 冻结不改变 AQL，保持当前生效值
+        return current_aql if current_aql is not None else base_aql
+
     base_idx = min(range(len(AQL_VALUES)), key=lambda i: abs(AQL_VALUES[i] - base_aql))
 
     if state == "normal":
@@ -212,8 +217,6 @@ def get_aql_by_state(
         target_idx = max(0, base_idx - aql_steps)
     elif state == "reduced":
         target_idx = min(len(AQL_VALUES) - 1, base_idx + aql_steps)
-    elif state == "frozen":
-        return base_aql  # 冻结状态：调用方应传入 current_aql 作为 base_aql
     else:
         return base_aql
 
@@ -246,6 +249,7 @@ AQL_RULES = [
         "approval_level": "manager",
         "frozen_days": 90,
         "frozen_aql_policy": "tighten",  # 冻结时先加严到 tightened 档位
+        "aql_steps": 1,
     },
     {
         "id": "FREEZE_SCAR_UNRESOLVED",
@@ -321,7 +325,7 @@ AQL_RULES = [
         "approval_level": "engineer",
         "aql_steps": 0,
     },
-    # ── 放宽规则（最低优先级，仅在 normal 状态下可触发）──
+    # ── 放宽规则（最低优先级，在 normal 或已放宽状态下可触发）──
     {
         "id": "REDUCE_LEVEL_2",
         "category": "reduce",
@@ -367,11 +371,15 @@ AQL_RULES = [
   4. 计算 recommended_aql：
      - 若 target_state == "frozen" 且 frozen_aql_policy == "tighten"：
        先按 tightened + aql_steps 计算 AQL，再标记 state 为 frozen
+     - 若 target_state == "frozen" 且 frozen_aql_policy == "current"：
+       直接使用 profile.current_aql（状态改为 frozen，AQL 不变）
      - 否则：base_aql + target_state + aql_steps + min/max 边界
-  5. 如果 recommended_aql == profile.current_aql，不生成建议（direction == "keep"），结束
+  5. 如果 target_state == profile.state 且 recommended_aql == profile.current_aql：
+     不生成建议（direction == "keep"），结束
      → 这处理了 already-reduced(aql_steps=1) → reduced(aql_steps=2) 的进一步放宽
-  6. 检查是否有未处理的重复建议（同一 profile + 同一 recommended_aql + status in (pending, forwarded)）
+  6. 检查是否有未处理的重复建议（同一 profile + 同一 target_state + 同一 recommended_aql + status in (pending, forwarded)）
      → 如有，跳过生成（幂等抑制）
+     → tightened→0.65 和 frozen→0.65 不会互相抑制
   7. 生成 recommendation 记录（pending）
 ```
 
@@ -380,8 +388,8 @@ AQL_RULES = [
 - **高优先级规则优先**：安全缺陷（priority=100）永远覆盖放宽规则（priority=10）
 - **同类别取最严**：如果多个加严规则同时触发，取 AQL 最严格（数值最小）的结果
 - **放宽被阻塞时自动转为 keep**：如果放宽规则匹配但有 SCAR 未关闭，冻结规则优先触发
-- **重复建议抑制**：同一 profile 在已有 pending/forwarded 建议且 recommended_aql 相同时，不生成新建议，避免每次检验判定都重复创建
-- **建议更新策略**：如果已有 pending 建议但 recommended_aql 不同（如从 pending 的"加严到0.65"变为新的"冻结保持0.65"），撤销旧建议，生成新建议
+- **重复建议抑制**：同一 profile 在已有 pending/forwarded 建议且 (target_state, recommended_aql) 完全相同时，不生成新建议
+- **建议更新策略**：如果已有 pending 建议但 (target_state, recommended_aql) 不同（如从 pending 的"tightened→0.65"变为新的"frozen→0.65"），撤销旧建议，生成新建议
 
 ---
 
