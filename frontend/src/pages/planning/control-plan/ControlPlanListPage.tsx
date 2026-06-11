@@ -108,6 +108,7 @@ export default function ControlPlanListPage() {
             errorCount={summary?.error_count || 0}
             warningCount={summary?.warning_count || 0}
             total={summary?.total || 0}
+            validated={Boolean(summary?.run_id)}
           />
         );
       },

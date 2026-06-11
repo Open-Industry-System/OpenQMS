@@ -9,27 +9,39 @@ import uuid
 
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from app.database import async_session
+from app.config import settings
 from app.models.plm import PLMConnection
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
 from app.models.user import User
 
+from sqlalchemy.pool import NullPool
+
+# Test-scoped engine with NullPool so every session gets a fresh connection
+# (avoids "another operation is in progress" cross-test contamination)
+_test_engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+_test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
+
 
 @pytest_asyncio.fixture
 async def db():
-    """Yield an async session wrapped in nested transactions (savepoints).
+    """Yield an async session whose commit() only flushes (test isolation).
 
-    Tests may call ``await db.commit()`` which commits only the inner
-    savepoint; the outer transaction is always rolled back on teardown,
-    giving each test a clean slate.
+    A real outer transaction wraps the session so all writes are visible
+    within the test but rolled back on teardown.  We patch ``commit()``
+    to flush-only so service code that calls ``await db.commit()`` still
+    works without actually persisting data past the test boundary.
     """
-    async with async_session() as session:
+    async with _test_session_factory() as session:
         async with session.begin():
-            async with session.begin_nested():
-                yield session
+            # Make session.commit() a flush-only no-op inside the test
+            async def _flush_only():
+                await session.flush()
+
+            session.commit = _flush_only
+            yield session
 
 
 @pytest_asyncio.fixture

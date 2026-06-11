@@ -4,10 +4,11 @@ interface Props {
   errorCount: number;
   warningCount: number;
   total: number;
+  validated?: boolean;
 }
 
-export default function ValidationBadge({ errorCount, warningCount, total }: Props) {
-  if (total === 0) {
+export default function ValidationBadge({ errorCount, warningCount, total, validated }: Props) {
+  if (!validated) {
     return <Tooltip title="未校验"><Badge status="default" /></Tooltip>;
   }
   if (errorCount > 0) {

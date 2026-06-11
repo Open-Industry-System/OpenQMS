@@ -17,7 +17,7 @@
 ### v1 成功标准
 - 规则引擎校验覆盖率 ≥ 4 条规则
 - 校验结果持久化，支持历史追溯和审计
-- 每次校验生成独立的 run，旧结果标记为 `superseded` 而非删除
+- 每次校验生成独立的 run，当前 run 未出现的历史 finding 记录 `present=false` occurrence，不删除不覆盖
 - 操作者拥有接受/拒绝/解决的完整控制权
 - pytest 覆盖核心规则逻辑
 
@@ -27,7 +27,7 @@
 
 ### 2.1 `cp_validation_runs` 表（校验运行记录）
 
-每次校验生成一个 run，旧 run 的结果标记为 `superseded`，实现完整历史追溯。
+每次校验生成一个 run，当前 run 未出现的历史 finding 通过 `present=false` occurrence 记录，实现完整历史追溯。
 
 ```sql
 CREATE TABLE cp_validation_runs (
@@ -339,7 +339,7 @@ export async function getValidationSummary(cpId: string)
 
 ## 8. v1 实现顺序
 
-1. 数据模型（`cp_validation_runs` + `cp_validation_results`）+ Alembic 迁移
+1. 数据模型（`cp_validation_runs` + `cp_validation_findings` + `cp_validation_occurrences`）+ Alembic 迁移
 2. 规则引擎（4 条规则）+ 指纹去重逻辑
 3. Schemas + API 路由（不含 accept）
 4. pytest 单元测试

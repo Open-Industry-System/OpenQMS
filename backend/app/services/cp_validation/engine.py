@@ -29,12 +29,6 @@ logger = logging.getLogger(__name__)
 STALE_RUN_TIMEOUT = timedelta(minutes=5)
 
 
-async def _maybe_commit(db: AsyncSession) -> None:
-    """Commit if no outer transaction is active (production), else flush (nested test)."""
-    if db.in_transaction():
-        await db.flush()
-    else:
-        await db.commit()
 
 
 class ValidationAlreadyRunning(Exception):
@@ -76,7 +70,7 @@ class CPValidationEngine:
             logger.exception("Validation run %s failed", run.run_id)
             run.status = "failed"
             run.completed_at = datetime.now(timezone.utc)
-            await _maybe_commit(db)
+            await db.commit()
             raise
 
         return run
@@ -178,4 +172,4 @@ class CPValidationEngine:
         run.info_count = info_count
         run.failed_rules = failed_rules
         run.completed_at = datetime.now(timezone.utc)
-        await _maybe_commit(db)
+        await db.commit()

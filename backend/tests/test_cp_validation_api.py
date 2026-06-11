@@ -103,44 +103,68 @@ def override_dependencies_results():
     fake_occ.cp_id = fake_cp_id
     fake_occ.validation_type = "rule"
     fake_occ.title = "控制方法缺失"
-    fake_occ.description = "test"
+    fake_occ.description = "该控制计划项缺少控制方法"
     fake_occ.affected_items = []
     fake_occ.fmea_node_ids = []
-    fake_occ.suggestion = None
+    fake_occ.suggestion = "请添加控制方法"
     fake_occ.suggestion_data = None
     fake_occ.present = True
     fake_occ.created_at = datetime.now(timezone.utc)
 
-    mock_row = MagicMock()
-    mock_row.finding_id = fake_finding_id
-    mock_row.occurrence_id = fake_occ_id
-    mock_row.rule_id = "R001"
-    mock_row.severity = "error"
-    mock_row.status = "open"
-    mock_row.title = "控制方法缺失"
-    mock_row.description = "test"
-    mock_row.present = True
-    mock_row.fmea_node_ids = []
+    # Mock run for _get_latest_run
+    fake_run = MagicMock()
+    fake_run.run_id = fake_run_id
+    fake_run.cp_id = fake_cp_id
+    fake_run.status = "completed"
+    fake_run.rule_count = 1
+    fake_run.error_count = 1
+    fake_run.warning_count = 0
+    fake_run.info_count = 0
+    fake_run.started_at = datetime.now(timezone.utc)
+    fake_run.completed_at = datetime.now(timezone.utc)
+    fake_run.failed_rules = []
+    fake_run.trigger = "manual"
+    fake_run.created_by = None
 
+    # result.all() returns list of (occ, finding) tuples — matches real code
     list_result = MagicMock()
-    list_result.mappings.return_value = [mock_row]
+    list_result.all.return_value = [(fake_occ, fake_finding)]
+    list_result.scalars.return_value.all.return_value = [fake_occ]
 
+    # _get_latest_run result
+    run_result = MagicMock()
+    run_result.scalar_one_or_none.return_value = fake_run
+
+    # finding result for _get_finding
     finding_result = MagicMock()
     finding_result.scalar_one_or_none.return_value = fake_finding
 
+    # occ result for _get_latest_occurrence
     occ_result = MagicMock()
     occ_result.scalar_one.return_value = fake_occ
+    occ_scalars = MagicMock()
+    occ_scalars.one.return_value = fake_occ
+    occ_result.scalars.return_value = occ_scalars
 
-    call_count = 0
+    # count result for summary
+    count_result = MagicMock()
+    count_result.all.return_value = [("open", 1)]
 
     async def mock_execute(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
         sql_str = str(args[0]) if args else ""
+        # _get_latest_run query (ORDER BY + LIMIT on runs)
+        if "cp_validation_runs" in sql_str and "ORDER BY" in sql_str:
+            return run_result
+        # _get_latest_occurrence query (occurrences + ORDER BY + LIMIT)
+        if "cp_validation_occurrences" in sql_str and "ORDER BY" in sql_str and "LIMIT" in sql_str:
+            return occ_result
+        # count query (for summary)
+        if "count(" in sql_str.lower() or "func.count" in sql_str:
+            return count_result
+        # finding-only query
         if "cp_validation_findings" in sql_str and "cp_validation_occurrences" not in sql_str:
             return finding_result
-        if "cp_validation_occurrences" in sql_str and "ORDER BY" in sql_str:
-            return occ_result
+        # joined query (list results)
         return list_result
 
     async def mock_get_db():
@@ -165,7 +189,12 @@ def override_dependencies_results():
     app.dependency_overrides[get_db] = mock_get_db
     app.dependency_overrides[get_current_user] = mock_get_current_user
     with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
-        yield
+        yield {
+            "finding_id": fake_finding_id,
+            "occ_id": fake_occ_id,
+            "run_id": fake_run_id,
+            "cp_id": fake_cp_id,
+        }
     app.dependency_overrides.clear()
 
 
@@ -242,33 +271,51 @@ async def test_validate_returns_409_when_already_running(override_dependencies):
 
 @pytest.mark.asyncio
 async def test_results_returns_200(override_dependencies_results):
+    ids = override_dependencies_results
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.get(f"/api/control-plans/{uuid.uuid4()}/validation-results")
+        resp = await ac.get(f"/api/control-plans/{ids['cp_id']}/validation-results")
 
     assert resp.status_code == status.HTTP_200_OK
     body = resp.json()
     assert "items" in body
     assert "total" in body
-    assert body["total"] >= 0
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+
+    item = body["items"][0]
+    assert item["rule_id"] == "R001"
+    assert item["severity"] == "error"
+    assert item["status"] == "open"
+    assert item["title"] == "控制方法缺失"
+    assert item["description"] == "该控制计划项缺少控制方法"
+    assert item["suggestion"] == "请添加控制方法"
 
 
 @pytest.mark.asyncio
 async def test_reject_finding_returns_200(override_dependencies_results):
-    finding_id = uuid.uuid4()
+    ids = override_dependencies_results
+    finding_id = ids["finding_id"]
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.post(f"/api/validation-results/{finding_id}/reject")
     assert resp.status_code == status.HTTP_200_OK
+    body = resp.json()
+    assert body["status"] == "rejected"
+    assert body["finding_id"] == str(finding_id)
 
 
 @pytest.mark.asyncio
 async def test_resolve_finding_returns_200(override_dependencies_results):
-    finding_id = uuid.uuid4()
+    ids = override_dependencies_results
+    finding_id = ids["finding_id"]
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.post(f"/api/validation-results/{finding_id}/resolve")
     assert resp.status_code == status.HTTP_200_OK
+    body = resp.json()
+    assert body["status"] == "resolved"
+    assert body["finding_id"] == str(finding_id)
 
 
 @pytest.mark.asyncio
