@@ -110,7 +110,7 @@ export async function verifyOutput(
 export async function generateReport(
   id: string,
   use_llm: boolean = true,
-): Promise<{ report_status: string; generated_report: ManagementReviewReport }> {
+): Promise<{ report_status: "none" | "draft" | "final"; generated_report: ManagementReviewReport }> {
   const resp = await client.post(`/management-reviews/${id}/report/generate`, { use_llm });
   return resp.data;
 }
@@ -118,7 +118,7 @@ export async function generateReport(
 export async function saveReportDraft(
   id: string,
   report: ManagementReviewReport,
-): Promise<{ report_status: string; generated_report: ManagementReviewReport }> {
+): Promise<{ report_status: "none" | "draft" | "final"; generated_report: ManagementReviewReport }> {
   const resp = await client.post(`/management-reviews/${id}/report/save-draft`, { generated_report: report });
   return resp.data;
 }
@@ -128,7 +128,7 @@ export async function finalizeReport(id: string): Promise<ReviewReportVersion> {
   return resp.data;
 }
 
-export async function reopenReport(id: string): Promise<{ report_status: string }> {
+export async function reopenReport(id: string): Promise<{ report_status: "none" | "draft" | "final" }> {
   const resp = await client.post(`/management-reviews/${id}/report/reopen`);
   return resp.data;
 }
