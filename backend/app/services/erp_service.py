@@ -327,7 +327,7 @@ class ERPIngestionService:
 
         customer_id = erp_customer.openqms_customer_id
         lot_no = item.get("lot_no")
-        shipment_date = item.get("shipment_date")
+        shipment_date = ERPIngestionService._coerce_date(item.get("shipment_date"))
 
         if not lot_no or not shipment_date:
             return
@@ -482,7 +482,7 @@ class ERPSyncService:
                     UPDATE erp_sync_jobs
                     SET next_run_at = NOW() + INTERVAL '30 seconds'
                     WHERE job_id = :job_id
-                """).bindparams(job_id=str(job_id)))
+                """).bindparams(job_id=job_id))
                 return {"data_type": data_type, "status": "deferred", "reason": "upstream_pending"}
 
         # Mark as running
