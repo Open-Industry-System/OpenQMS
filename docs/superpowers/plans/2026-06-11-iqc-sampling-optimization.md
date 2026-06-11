@@ -95,11 +95,13 @@ git commit -m "chore(alembic): merge 032 heads"
 
 - [ ] **Step 1: Write migration file**
 
+> **Important:** After completing Task 0, copy the generated merge revision ID and replace **both** `<MERGE_REVISION_ID>` below (line 110) and the `Revises:` docstring (line 102) with that actual ID before saving the file. Do not save the file with the placeholder still present.
+
 ```python
 """Add IQC AQL optimization tables
 
 Revision ID: 033_add_iqc_aql_optimization
-Revises: 032_add_erp_tables
+Revises: <MERGE_REVISION_ID>
 Create Date: 2026-06-11
 """
 from alembic import op
@@ -107,7 +109,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 revision = "033_add_iqc_aql_optimization"
-down_revision = "<MERGE_REVISION_ID>"  # Set to revision ID from Task 0 merge
+down_revision = "<MERGE_REVISION_ID>"  # ← Replace with actual merge revision ID from Task 0
 branch_labels = None
 depends_on = None
 
@@ -658,7 +660,7 @@ git commit -m "feat(iqc-aql): add API endpoints for AQL optimization and judge f
 
 - [ ] **Step 1: Add dynamic AQL injection to `create_inspection`**
 
-In `iqc_inspection_service.create_inspection()`, replace the AQL auto-calculate block with:
+In `iqc_inspection_service.create_inspection()`, **insert the following block before the existing `# AQL auto-calculate` block** (the one that calls `calculate_aql_plan()`). The existing auto-calculate block must remain — it uses the resolved `aql_level` to populate `code_letter`, `sample_qty`, `accept_number`, and `reject_number`.
 
 ```python
     # Dynamic AQL injection from optimization profile
