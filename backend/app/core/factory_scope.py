@@ -250,6 +250,11 @@ async def populate_factory_id(
 
     if factory_id:
         record.factory_id = factory_id
+    else:
+        raise ValueError(
+            f"无法确定 {record.__class__.__name__} 的 factory_id："
+            "缺少 product_line_code、父对象关联或默认工厂"
+        )
 
 
 async def _get_parent_factory_id(record, db: AsyncSession) -> UUID | None:
@@ -357,5 +362,18 @@ async def validate_factory_invariant(
         if expected and record.factory_id != expected:
             raise ValueError(
                 f"factory_id 不一致：产品线 '{record.product_line}' 属于工厂 {expected}，"
+                f"但记录的 factory_id 为 {record.factory_id}"
+            )
+
+    # Supplier-derived: factory_id must match Supplier.factory_id
+    if hasattr(record, "supplier_id") and record.supplier_id:
+        from app.models.supplier import Supplier
+        result = await db.execute(
+            select(Supplier.factory_id).where(Supplier.supplier_id == record.supplier_id)
+        )
+        expected = result.scalar_one_or_none()
+        if expected and record.factory_id != expected:
+            raise ValueError(
+                f"factory_id 不一致：供应商属于工厂 {expected}，"
                 f"但记录的 factory_id 为 {record.factory_id}"
             )
