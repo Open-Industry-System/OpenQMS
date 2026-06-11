@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
@@ -7,7 +7,6 @@ from app.models.user import User
 from app import schemas
 from app.services import management_review_service
 from app.services import management_review_report_service as report_service
-from app.services.llm_provider import create_llm_provider
 
 router = APIRouter(prefix="/api/management-reviews", tags=["management-reviews"])
 
@@ -302,6 +301,7 @@ async def verify_output(
 async def generate_report(
     review_id: uuid.UUID,
     req: schemas.management_review.ReportGenerateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
 ):
@@ -309,11 +309,10 @@ async def generate_report(
     if review is None:
         raise HTTPException(status_code=404, detail="review not found")
     try:
-        llm_provider = create_llm_provider() if req.use_llm else None
+        llm_provider = getattr(request.app.state, "llm_provider", None)
         content = await report_service.generate_report(
             db, review, user, llm_provider=llm_provider, use_llm=req.use_llm,
         )
-        await db.commit()
         return schemas.management_review.ReportGenerateResponse(
             report_status=review.report_status,
             generated_report=schemas.management_review.ReportContent.model_validate(content),
@@ -336,7 +335,6 @@ async def save_report_draft(
         content = await report_service.save_report_draft(
             db, review, req.generated_report.model_dump(), user,
         )
-        await db.commit()
         return schemas.management_review.ReportGenerateResponse(
             report_status=review.report_status,
             generated_report=schemas.management_review.ReportContent.model_validate(content),
@@ -356,7 +354,6 @@ async def finalize_report(
         raise HTTPException(status_code=404, detail="review not found")
     try:
         snapshot = await report_service.finalize_report(db, review, user)
-        await db.commit()
         return schemas.management_review.ReportVersionResponse.model_validate(snapshot)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -373,7 +370,6 @@ async def reopen_report(
         raise HTTPException(status_code=404, detail="review not found")
     try:
         await report_service.reopen_report_to_draft(db, review, user)
-        await db.commit()
         return schemas.management_review.ManagementReviewResponse.model_validate(review)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

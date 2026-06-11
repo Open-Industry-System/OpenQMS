@@ -253,7 +253,7 @@ async def generate_report(
     await _write_audit(db, review.review_id, user.user_id, "REPORT_GENERATE", {
         "model": model_name, "llm_enriched": llm_enriched,
     })
-    await db.flush()
+    await db.commit()
     return content
 
 
@@ -275,7 +275,7 @@ async def save_report_draft(
     await _write_audit(db, review.review_id, user.user_id, "REPORT_SAVE_DRAFT", {
         "sections_count": len(content.get("sections", [])),
     })
-    await db.flush()
+    await db.commit()
     return content
 
 
@@ -312,7 +312,7 @@ async def finalize_report(
     await _write_audit(db, review.review_id, user.user_id, "REPORT_FINALIZE", {
         "version_no": next_version,
     })
-    await db.flush()
+    await db.commit()
     await db.refresh(snapshot)
     return snapshot
 
@@ -328,7 +328,7 @@ async def reopen_report_to_draft(
         raise ValueError("cannot reopen report of a closed review")
     review.report_status = "draft"
     await _write_audit(db, review.review_id, user.user_id, "REPORT_REOPEN", {})
-    await db.flush()
+    await db.commit()
 
 
 async def list_report_versions(
