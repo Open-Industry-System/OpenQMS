@@ -7,7 +7,7 @@ Priority (highest first):
 4. Global default (both NULL)
 """
 import uuid
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.supplier_risk import SupplierRiskConfig
@@ -25,6 +25,93 @@ async def get_effective_configs(
         if config:
             results.append(config)
     return results
+
+
+async def get_effective_configs_batch(
+    db: AsyncSession,
+    supplier_ids: list[uuid.UUID],
+    product_line_code: str | None = None,
+) -> dict[uuid.UUID, list[SupplierRiskConfig]]:
+    """Batch load effective configs for many suppliers in one query.
+
+    Returns a dict mapping supplier_id → list of effective configs.
+    Pure-Python priority resolution avoids per-supplier-per-rule DB round-trips.
+    """
+    if not supplier_ids:
+        return {}
+
+    # Fetch all relevant configs in a single query.
+    # We need configs where:
+    #   (supplier_id IN supplier_ids AND (PL matches OR NULL)) OR
+    #   (supplier_id IS NULL AND (PL matches OR NULL))
+    cond = or_(
+        and_(
+            SupplierRiskConfig.supplier_id.in_(supplier_ids),
+            SupplierRiskConfig.product_line_code == product_line_code,
+        ),
+        and_(
+            SupplierRiskConfig.supplier_id.in_(supplier_ids),
+            SupplierRiskConfig.product_line_code.is_(None),
+        ),
+        and_(
+            SupplierRiskConfig.supplier_id.is_(None),
+            SupplierRiskConfig.product_line_code == product_line_code,
+        ),
+        and_(
+            SupplierRiskConfig.supplier_id.is_(None),
+            SupplierRiskConfig.product_line_code.is_(None),
+        ),
+    )
+    result = await db.execute(select(SupplierRiskConfig).where(cond))
+    all_configs = list(result.scalars().all())
+
+    # Group by (rule_id, scope) for O(1) lookup
+    # scope_key: "s:pl", "s", "pl", "g"
+    by_rule_scope: dict[tuple[str, str], list[SupplierRiskConfig]] = {}
+    for cfg in all_configs:
+        has_s = cfg.supplier_id is not None
+        has_pl = cfg.product_line_code is not None
+        if has_s and has_pl:
+            scope = "s:pl"
+        elif has_s:
+            scope = "s"
+        elif has_pl:
+            scope = "pl"
+        else:
+            scope = "g"
+        key = (cfg.rule_id, scope)
+        by_rule_scope.setdefault(key, []).append(cfg)
+
+    # Index by (rule_id, supplier_id, scope) for O(1) lookup
+    def _get(rule_id: str, scope: str, supplier_id: uuid.UUID | None = None) -> SupplierRiskConfig | None:
+        candidates = by_rule_scope.get((rule_id, scope), [])
+        if scope == "s:pl" or scope == "s":
+            for c in candidates:
+                if c.supplier_id == supplier_id:
+                    return c
+            return None
+        # global or pl-only: only one candidate each
+        return candidates[0] if candidates else None
+
+    output: dict[uuid.UUID, list[SupplierRiskConfig]] = {}
+    rule_ids = [f"R{i:02d}" for i in range(1, 11)]
+    for sid in supplier_ids:
+        configs: list[SupplierRiskConfig] = []
+        for rid in rule_ids:
+            cfg = None
+            if product_line_code:
+                cfg = _get(rid, "s:pl", sid)
+            if cfg is None:
+                cfg = _get(rid, "s", sid)
+            if cfg is None and product_line_code:
+                cfg = _get(rid, "pl")
+            if cfg is None:
+                cfg = _get(rid, "g")
+            if cfg:
+                configs.append(cfg)
+        output[sid] = configs
+
+    return output
 
 
 async def _resolve_config(

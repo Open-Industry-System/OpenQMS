@@ -12,7 +12,7 @@ from app.models.capa import CAPAEightD
 from app.models.iqc_inspection import IqcInspection
 from app.services.supplier_risk.rule_engine import SupplierRiskInput, run_all_rules
 from app.services.supplier_risk.scorer import calculate_risk_score
-from app.services.supplier_risk.config import get_effective_configs
+from app.services.supplier_risk.config import get_effective_configs, get_effective_configs_batch
 
 
 async def evaluate_supplier_risk(
@@ -112,10 +112,13 @@ async def evaluate_all_suppliers(
     evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
     certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
 
+    # Batch load effective configs for all suppliers in a single query
+    configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
+
     results = []
     for supplier in suppliers:
         try:
-            configs = await get_effective_configs(db, product_line_code, supplier.supplier_id)
+            configs = configs_by_supplier.get(supplier.supplier_id)
             if not configs:
                 continue
 

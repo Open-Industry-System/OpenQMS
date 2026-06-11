@@ -420,6 +420,21 @@ async def test_notification_failure_non_blocking(db, seed_open_alert, admin_user
         await send_notifications(db, seed_open_alert, product_line_code=None)
 
 
+# ─── 6a. Unchanged alert must NOT trigger notifications ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_unchanged_alert_no_notification(
+    db, seed_supplier, seed_open_alert, seed_global_configs
+):
+    """Re-evaluating an existing high alert with same-or-lower risk must NOT call send_notifications."""
+    with patch("app.services.supplier_risk.notifier.send_notifications", new=AsyncMock()) as mock_send:
+        await evaluate_supplier_risk(
+            db, seed_supplier.supplier_id, product_line_code=None
+        )
+        mock_send.assert_not_called()
+
+
 # ─── 7/8. _create_scar_without_commit / _create_capa_without_commit flush only ─
 
 
