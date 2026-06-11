@@ -27,9 +27,7 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = ""       # 仅 local 模式
     LLM_TIMEOUT: int = 5         # 超时秒数
     CAPA_DRAFT_LLM_TIMEOUT: int = Field(default=15, ge=1, le=60)  # CAPA 8D AI 起草超时
-
-    # CAPA 8D AI 草拟超时
-    CAPA_DRAFT_LLM_TIMEOUT: int = Field(default=15, ge=1, le=60)
+    REPORT_LLM_TIMEOUT: int = Field(default=10, ge=1, le=120)  # 管理评审报告 AI 生成超时
 
     # Embedding & semantic search
     EMBEDDING_PROVIDER: str = ""        # "openai" | "ollama" | "" (follows LLM_PROVIDER)

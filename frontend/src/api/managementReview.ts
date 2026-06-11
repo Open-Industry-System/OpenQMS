@@ -1,5 +1,5 @@
 import client from "./client";
-import type { ManagementReview, ManagementReviewListResponse, ReviewOutput } from "../types";
+import type { ManagementReview, ManagementReviewListResponse, ReviewOutput, ManagementReviewReport, ReviewReportVersion } from "../types";
 
 export async function listManagementReviews(params: {
   page?: number;
@@ -104,5 +104,46 @@ export async function verifyOutput(
   const resp = await client.post(`/management-reviews/${reviewId}/outputs/${outputId}/verify`, {
     verification_notes,
   });
+  return resp.data;
+}
+
+export async function generateReport(
+  id: string,
+  use_llm: boolean = true,
+): Promise<{ report_status: "none" | "draft" | "final"; generated_report: ManagementReviewReport }> {
+  const resp = await client.post(`/management-reviews/${id}/report/generate`, { use_llm });
+  return resp.data;
+}
+
+export async function saveReportDraft(
+  id: string,
+  report: ManagementReviewReport,
+): Promise<{ report_status: "none" | "draft" | "final"; generated_report: ManagementReviewReport }> {
+  const resp = await client.post(`/management-reviews/${id}/report/save-draft`, { generated_report: report });
+  return resp.data;
+}
+
+export async function finalizeReport(id: string): Promise<ReviewReportVersion> {
+  const resp = await client.post(`/management-reviews/${id}/report/finalize`);
+  return resp.data;
+}
+
+export async function reopenReport(id: string): Promise<{ report_status: "none" | "draft" | "final" }> {
+  const resp = await client.post(`/management-reviews/${id}/report/reopen`);
+  return resp.data;
+}
+
+export async function listReportVersions(id: string): Promise<ReviewReportVersion[]> {
+  const resp = await client.get(`/management-reviews/${id}/report/versions`);
+  return resp.data;
+}
+
+export async function getReportVersion(reviewId: string, reportId: string): Promise<ReviewReportVersion> {
+  const resp = await client.get(`/management-reviews/${reviewId}/report/versions/${reportId}`);
+  return resp.data;
+}
+
+export async function exportReport(id: string, format: string = "markdown"): Promise<{ markdown: string }> {
+  const resp = await client.get(`/management-reviews/${id}/report/export`, { params: { format } });
   return resp.data;
 }

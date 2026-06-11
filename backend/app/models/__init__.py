@@ -18,6 +18,7 @@ from app.models.attribute import AttributeStudy, AttributeMeasurement, Attribute
 from app.models.special_characteristic import SpecialCharacteristic
 from app.models.product_line import ProductLine
 from app.models.management_review import ManagementReview, ReviewOutput
+from app.models.management_review_report import ReviewReport
 from app.models.fmea_version import FMEAVersion
 from app.models.control_plan_version import ControlPlanVersion
 from app.models.iqc_inspection import IqcInspection
@@ -85,7 +86,7 @@ __all__ = [
     "AttributeStudy", "AttributeMeasurement", "AttributeResult",
     "SpecialCharacteristic",
     "ProductLine",
-    "ManagementReview", "ReviewOutput",
+    "ManagementReview", "ReviewOutput", "ReviewReport",
     "FMEAVersion", "ControlPlanVersion", "IqcInspection", "IqcMaterial",
     "IqcInspectionTemplate", "IqcTemplateItem", "IqcInspectionItem", "IqcItemMeasurement",
     "Customer", "CustomerComplaint", "RMARecord",

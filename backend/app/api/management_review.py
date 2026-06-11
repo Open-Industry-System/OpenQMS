@@ -1,11 +1,12 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
 from app.models.user import User
 from app import schemas
 from app.services import management_review_service
+from app.services import management_review_report_service as report_service
 
 router = APIRouter(prefix="/api/management-reviews", tags=["management-reviews"])
 
@@ -292,3 +293,128 @@ async def verify_output(
         return schemas.management_review.ReviewOutputResponse.model_validate(output)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# Report endpoints
+
+@router.post("/{review_id}/report/generate", response_model=schemas.management_review.ReportGenerateResponse)
+async def generate_report(
+    review_id: uuid.UUID,
+    req: schemas.management_review.ReportGenerateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
+):
+    review = await management_review_service.get_review(db, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="review not found")
+    try:
+        llm_provider = getattr(request.app.state, "llm_provider", None)
+        content = await report_service.generate_report(
+            db, review, user, llm_provider=llm_provider, use_llm=req.use_llm,
+        )
+        return schemas.management_review.ReportGenerateResponse(
+            report_status=review.report_status,
+            generated_report=schemas.management_review.ReportContent.model_validate(content),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{review_id}/report/save-draft", response_model=schemas.management_review.ReportGenerateResponse)
+async def save_report_draft(
+    review_id: uuid.UUID,
+    req: schemas.management_review.ReportSaveDraftRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.CREATE)),
+):
+    review = await management_review_service.get_review(db, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="review not found")
+    try:
+        content = await report_service.save_report_draft(
+            db, review, req.generated_report.model_dump(), user,
+        )
+        return schemas.management_review.ReportGenerateResponse(
+            report_status=review.report_status,
+            generated_report=schemas.management_review.ReportContent.model_validate(content),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{review_id}/report/finalize", response_model=schemas.management_review.ReportVersionResponse)
+async def finalize_report(
+    review_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.APPROVE)),
+):
+    review = await management_review_service.get_review(db, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="review not found")
+    try:
+        snapshot = await report_service.finalize_report(db, review, user)
+        return schemas.management_review.ReportVersionResponse.model_validate(snapshot)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{review_id}/report/reopen", response_model=schemas.management_review.ManagementReviewResponse)
+async def reopen_report(
+    review_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission(Module.MANAGEMENT_REVIEW, PermissionLevel.APPROVE)),
+):
+    review = await management_review_service.get_review(db, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="review not found")
+    try:
+        review = await report_service.reopen_report_to_draft(db, review, user)
+        return schemas.management_review.ManagementReviewResponse.model_validate(review)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{review_id}/report/versions", response_model=list[schemas.management_review.ReportVersionResponse])
+async def list_report_versions(
+    review_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    review = await management_review_service.get_review(db, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="review not found")
+    versions = await report_service.list_report_versions(db, review_id)
+    return [schemas.management_review.ReportVersionResponse.model_validate(v) for v in versions]
+
+
+@router.get("/{review_id}/report/versions/{report_id}", response_model=schemas.management_review.ReportVersionResponse)
+async def get_report_version(
+    review_id: uuid.UUID,
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    review = await management_review_service.get_review(db, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="review not found")
+    version = await report_service.get_report_version(db, report_id)
+    if version is None or version.review_id != review_id:
+        raise HTTPException(status_code=404, detail="report version not found")
+    return schemas.management_review.ReportVersionResponse.model_validate(version)
+
+
+@router.get("/{review_id}/report/export", response_model=schemas.management_review.ReportExportResponse)
+async def export_report(
+    review_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    review = await management_review_service.get_review(db, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="review not found")
+    await db.refresh(review, ["generated_report"])
+    if not review.generated_report:
+        raise HTTPException(status_code=404, detail="report not generated")
+    markdown = report_service.export_report_markdown(review.generated_report)
+    return schemas.management_review.ReportExportResponse(markdown=markdown)

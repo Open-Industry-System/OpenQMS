@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import uuid
 from datetime import datetime, date
+from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
@@ -56,6 +59,32 @@ class ReviewOutputResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ReportSection(BaseModel):
+    key: str
+    title: str
+    source: Literal["data_package", "manual_input"]
+    base_text: str
+    ai_analysis: str
+    findings: list[str]
+    recommendations: list[str]
+    manual_text: str
+    data_snapshot: dict | str | list | int | float | bool | None
+
+    model_config = {"extra": "ignore"}
+
+
+class ReportContent(BaseModel):
+    generated_at: str | None = None
+    generation_model: str | None = None
+    llm_enriched: bool = False
+    sections: list[ReportSection] = []
+    executive_summary: str | None = None
+    overall_recommendations: list[str] = []
+    updated_at: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+
 class ManagementReviewCreate(BaseModel):
     title: str
     review_date: date
@@ -85,6 +114,7 @@ class ManagementReviewResponse(BaseModel):
     review_date: date
     actual_date: date | None
     status: str
+    report_status: str
     product_line_code: str | None
     location: str | None
     chair_person_id: uuid.UUID
@@ -92,6 +122,7 @@ class ManagementReviewResponse(BaseModel):
     meeting_minutes: str | None
     data_package: dict | None
     manual_inputs: dict | None
+    generated_report: ReportContent | None
     attachments: list[dict] | None
     created_by: uuid.UUID
     updated_by: uuid.UUID | None
@@ -106,3 +137,34 @@ class ManagementReviewListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ReportGenerateRequest(BaseModel):
+    use_llm: bool = True
+
+
+class ReportGenerateResponse(BaseModel):
+    report_status: Literal["none", "draft", "final"]
+    generated_report: ReportContent
+
+
+class ReportSaveDraftRequest(BaseModel):
+    generated_report: ReportContent
+
+
+class ReportVersionResponse(BaseModel):
+    report_id: uuid.UUID
+    review_id: uuid.UUID
+    version_no: int
+    content: ReportContent
+    created_by: uuid.UUID
+    finalized_by: uuid.UUID | None
+    finalized_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ReportExportResponse(BaseModel):
+    markdown: str
