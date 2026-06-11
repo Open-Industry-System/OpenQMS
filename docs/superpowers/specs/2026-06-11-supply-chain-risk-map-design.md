@@ -164,7 +164,7 @@ actual_delivery_date: Optional[date] = None
 
 | source | 含义 |
 |--------|------|
-| `risk_evaluation` | 来自供应商风险评估引擎（`evaluate_all_suppliers`） |
+| `risk_evaluation` | 来自纯评分函数 `calculate_all_supplier_scores`（无副作用） |
 | `erp_po` | 来自 ERP 采购订单聚合 |
 | `supplier_evaluation_fallback` | ERP 无数据，从供应商评价 delivery_score fallback |
 | `iqc_inspection` | 来自 IQC 检验聚合 |
@@ -384,19 +384,24 @@ async def _release_snapshot_lock(db: AsyncSession):
 async def snapshot_loop():
     """服务启动后每 24h 生成一次当前月份的快照。"""
     while True:
-        async with async_session() as db:
-            if not await _acquire_snapshot_lock(db):
-                logger.info("快照生成被其他 worker 持有，跳过")
-                await asyncio.sleep(86400)
-                continue
-            try:
+        acquired = False
+        try:
+            async with async_session() as db:
+                if not await _acquire_snapshot_lock(db):
+                    logger.info("快照生成被其他 worker 持有，跳过")
+                    await asyncio.sleep(86400)
+                    continue
+                acquired = True
                 await generate_snapshot(db, None, current_period())
+                # 遍历所有活跃 product_line_code
                 await db.commit()
-            except Exception as e:
-                logger.error(...)
-                await db.rollback()
-            finally:
-                await _release_snapshot_lock(db)
+        except Exception as e:
+            logger.error(...)
+        finally:
+            if acquired:
+                async with async_session() as db:
+                    await _release_snapshot_lock(db)
+        # 在 async with 外部 sleep，不占 DB 连接
         await asyncio.sleep(86400)
 ```
 
@@ -603,19 +608,24 @@ dataZoom: [
 2. 创建 `supply_chain_risk_snapshots` 表（详见 3.2 节 DDL），唯一约束使用 `UNIQUE NULLS NOT DISTINCT`
 3. 权限种子：为 `SUPPLY_CHAIN_RISK_MAP` 模块注册角色权限（admin/manager=5, field_qe/supplier_qe/customer_qe/planning_qe=3, viewer=1）
 
-**`NULLS NOT DISTINCT` 迁移兼容性**：使用 `op.execute()` 执行原生 SQL 创建约束，并做 fallback 处理：
+**`NULLS NOT DISTINCT` 迁移兼容性**：按数据库方言分支，不用 try/except（PostgreSQL 事务内 DDL 失败会 abort 事务，无法可靠 fallback）：
 
 ```python
 # alembic version 035 核心片段
-try:
+from sqlalchemy import Inspector
+from sqlalchemy.dialects.postgresql.base import PGDialect
+
+bind = op.get_bind()
+if isinstance(bind.dialect, PGDialect):
+    # PostgreSQL 15+ 支持 NULLS NOT DISTINCT，直接用原生 SQL
     op.execute(
         "ALTER TABLE supply_chain_risk_snapshots "
         "ADD CONSTRAINT uq_supplier_pl_period "
         "UNIQUE NULLS NOT DISTINCT (supplier_id, product_line_code, snapshot_period)"
     )
-except Exception:
-    # Fallback: 标准 unique constraint（NULL 值不参与唯一性检查）
-    # 适用于不支持 NULLS NOT DISTINCT 的引擎（如测试用 SQLite）
+else:
+    # SQLite 等其他引擎：标准 unique constraint
+    # 注意：SQLite 的 UNIQUE 不阻止 NULL 重复，测试中需显式验证去重逻辑
     op.create_unique_constraint(
         "uq_supplier_pl_period", "supply_chain_risk_snapshots",
         ["supplier_id", "product_line_code", "snapshot_period"]
@@ -653,7 +663,7 @@ except Exception:
 | 权限 | viewer 无法手动生成快照（403） | 1 |
 | 权限 | 产品线权限校验（`enforce_product_line_access`） | 1 |
 | 权限 | 角色 field_qe/supplier_qe/customer_qe/planning_qe 拥有 EDIT 权限 | 1 |
-| 迁移 | `UNIQUE NULLS NOT DISTINCT` 约束阻止重复快照（fallback 测试：SQLite 用标准约束） | 1 |
+| 迁移 | `UNIQUE NULLS NOT DISTINCT` 约束阻止重复快照（按方言分支：PG 用原生 SQL，SQLite 用标准约束；SQLite 下 NULL 重复需应用层去重） | 1 |
 | 调度 | `pg_try_advisory_lock` 防止并发（两个 worker 同时触发，只有一个执行） | 1 |
 | 调度 | 手动触发时 advisory lock 被持有返回 409 Conflict | 1 |
 | ERP 字段 | `actual_delivery_date` 正确映射到 ORM / schema / ingestion / mock | 1 |
