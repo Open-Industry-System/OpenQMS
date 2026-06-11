@@ -3,7 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { Table, Button, Tag, Typography, Modal, Form, Input, Popconfirm, App } from "antd";
 import { PlusOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icons";
 import { listControlPlans, createControlPlan, deleteControlPlan } from "../../../api/controlPlan";
+import { batchValidationSummaries } from "../../../api/cpValidation";
+import ValidationBadge from "../../../components/control-plan/ValidationBadge";
 import type { ControlPlan } from "../../../types";
+import type { ValidationSummary } from "../../../types/cpValidation";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
@@ -38,6 +41,7 @@ export default function ControlPlanListPage() {
   const user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
+  const [validationMap, setValidationMap] = useState<Record<string, ValidationSummary>>({});
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -52,6 +56,20 @@ export default function ControlPlanListPage() {
   useEffect(() => {
     fetchData(1);
   }, [productLine]);
+
+  useEffect(() => {
+    if (!data?.length) return;
+    const fetchSummaries = async () => {
+      try {
+        const cpIds = data.map((cp) => cp.cp_id);
+        const summaries = await batchValidationSummaries(cpIds);
+        setValidationMap(summaries);
+      } catch {
+        // ignore fetch errors
+      }
+    };
+    fetchSummaries();
+  }, [data]);
 
   const handleCreate = async (values: { title: string; document_no: string }) => {
     try {
@@ -78,6 +96,23 @@ export default function ControlPlanListPage() {
   const columns = [
     { title: "编号", dataIndex: "document_no", key: "document_no", width: 150 },
     { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
+    {
+      title: "校验状态",
+      key: "validation",
+      width: 80,
+      align: "center" as const,
+      render: (_: unknown, record: ControlPlan) => {
+        const summary = validationMap[record.cp_id];
+        return (
+          <ValidationBadge
+            errorCount={summary?.error_count || 0}
+            warningCount={summary?.warning_count || 0}
+            total={summary?.total || 0}
+            validated={Boolean(summary?.run_id)}
+          />
+        );
+      },
+    },
     {
       title: "阶段",
       dataIndex: "phase",

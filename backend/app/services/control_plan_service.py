@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -11,6 +12,19 @@ from app.models.audit import AuditLog
 from app.schemas.control_plan import ControlPlanCreate, ControlPlanUpdate, ImportFromFMEARequest
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import create_cp_version
+from app.services.cp_validation.engine import CPValidationEngine
+from app.database import async_session
+
+
+async def _run_validation_background(cp_id: uuid.UUID, user_id: uuid.UUID, trigger: str) -> None:
+    """Run CP validation in a background task with an isolated DB session."""
+    async with async_session() as db:
+        try:
+            engine = CPValidationEngine()
+            await engine.validate(db, cp_id, user_id, trigger=trigger)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Background CP validation failed for %s", cp_id)
 
 
 async def create_audit_log(
@@ -265,6 +279,13 @@ async def update_control_plan(
 
     await db.commit()
     await db.refresh(cp)
+
+    # Trigger background validation only when fields actually changed
+    if changed_fields:
+        asyncio.create_task(
+            _run_validation_background(cp.cp_id, user_id, trigger="auto_on_save")
+        )
+
     return cp
 
 

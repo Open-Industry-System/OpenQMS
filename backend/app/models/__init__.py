@@ -33,6 +33,7 @@ from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
 from app.models.user_dashboard_layout import UserDashboardLayout
+from app.models.cp_validation import CPValidationRun, CPValidationFinding, CPValidationOccurrence
 from .plm import (
     PLMConnection, PLMPart, PLMBOM, PLMChangeOrder,
     PLMSyncJob, PLMPushOutbox, PLMChangeImpactTask,
@@ -92,6 +93,9 @@ __all__ = [
     "ChangeImpactAnalysis",
     "CollaborationSession",
     "UserDashboardLayout",
+    "CPValidationRun",
+    "CPValidationFinding",
+    "CPValidationOccurrence",
     "PLMConnection",
     "PLMPart",
     "PLMBOM",
