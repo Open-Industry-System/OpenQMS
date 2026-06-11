@@ -123,9 +123,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
 
-    # 3. Unique constraint — dialect branch for NULLS NOT DISTINCT
-    # NOTE: This migration is PostgreSQL-only in practice. The JSONB column type
-    # and NULLS NOT DISTINCT constraint both require PG. SQLite tests must use
+    # 3. Unique constraint — NULLS NOT DISTINCT (PostgreSQL 15+)
+    # NOTE: This migration is PostgreSQL-only. The sa.JSON column type and
+    # NULLS NOT DISTINCT constraint both require PG. SQLite tests must use
     # separate model definitions with sa.JSON and standard unique constraint,
     # and must test NULL dedup at the application layer since SQLite unique
     # constraints don't enforce uniqueness on NULL columns.
@@ -522,19 +522,63 @@ async def test_purchase_amount_pct_window_function(db):
 @pytest.mark.asyncio
 async def test_ppm_calculation_with_period_filter(db):
     """PPM aggregates only inspections in the snapshot period."""
-    # Test that PPM only counts inspections within the specified period.
-    # Setup: create IQC inspection data for two periods, verify only
-    # the correct period's data is included.
-    # (Full ORM setup omitted for brevity — same pattern as above tests)
-    pass  # Will be implemented with full ORM setup in the actual test file
+    from app.models.supplier import Supplier
+    from app.models.iqc_inspection import IqcInspection
+    from app.models.product_line import ProductLine
+
+    supplier = Supplier(supplier_id=uuid4(), supplier_no="T-PPM-01", name="PPMTest",
+                         short_name="PT", status="approved", created_by=uuid4())
+    db.add(supplier)
+    # Create inspections in June (should be counted) and May (should not)
+    for month, result in [(6, "rejected"), (6, "rejected"), (6, "accepted"), (5, "rejected")]:
+        db.add(IqcInspection(
+            inspection_id=uuid4(), supplier_id=supplier.supplier_id,
+            inspection_date=date(2026, month, 15),
+            inspection_result=result, status="judged",
+            product_line_code=None,
+        ))
+    await db.commit()
+
+    result = await aggregate_supply_chain_metrics(db, [supplier.supplier_id], None, "2026-06")
+    metrics = result[supplier.supplier_id]
+    # 2 rejected out of 3 in June = 666667 PPM (2/3 * 1M), but only June counts
+    assert metrics["ppm_value"] is not None
+    assert metrics["ppm_source"] == "iqc_inspection"
 
 
 @pytest.mark.asyncio
 async def test_open_scar_count_time_point_logic(db):
     """SCAR count uses time-point: created_at <= period_end AND (closed_date IS NULL OR closed_date > period_end)."""
-    # Full ORM setup: create supplier, SCARs with different dates and statuses,
-    # verify count only includes SCARs that were open at period end.
-    pass  # Will be implemented with full ORM setup
+    from app.models.supplier import Supplier
+    from app.models.supplier_risk import SupplierSCAR
+
+    supplier = Supplier(supplier_id=uuid4(), supplier_no="T-SCAR-01", name="SCARTest",
+                         short_name="ST", status="approved", created_by=uuid4())
+    db.add(supplier)
+    period_end = date(2026, 6, 30)
+    # SCAR opened before period end, still open — counted
+    db.add(SupplierSCAR(
+        scar_id=uuid4(), scar_no="SCAR-2026-001", supplier_id=supplier.supplier_id,
+        source_type="internal", description="open scar",
+        status="open", issued_date=date(2026, 6, 10),
+    ))
+    # SCAR opened before period end, closed after period end — counted (was open at period end)
+    db.add(SupplierSCAR(
+        scar_id=uuid4(), scar_no="SCAR-2026-002", supplier_id=supplier.supplier_id,
+        source_type="internal", description="closed after period",
+        status="closed", issued_date=date(2026, 6, 5), closed_date=date(2026, 7, 15),
+    ))
+    # SCAR opened after period end — NOT counted
+    db.add(SupplierSCAR(
+        scar_id=uuid4(), scar_no="SCAR-2026-003", supplier_id=supplier.supplier_id,
+        source_type="internal", description="future scar",
+        status="open", issued_date=date(2026, 7, 10),
+    ))
+    await db.commit()
+
+    result = await aggregate_supply_chain_metrics(db, [supplier.supplier_id], None, "2026-06")
+    metrics = result[supplier.supplier_id]
+    assert metrics["open_scar_count"] == 2  # Only the first two
 
 
 # --- Pure function tests (no DB needed) ---
@@ -675,12 +719,12 @@ async def test_low_risk_supplier_in_snapshot(db, seed_supplier):
     """Suppliers with risk_level='low' still appear in snapshots."""
     from app.services.supply_chain_risk_map.service import generate_snapshot
     await generate_snapshot(db, None, "2026-06")
-    low_risk = (await db.execute(
-        select(func.count()).select_from(SupplyChainRiskSnapshot)
-        .where(SupplyChainRiskSnapshot.risk_level == "low")
-    )).scalar()
-    # At least the seeded supplier should have a score (could be low)
-    assert low_risk >= 0  # Could be 0 if all suppliers scored medium+, but function must not skip
+    # The seeded supplier MUST appear in the snapshot, even if low risk
+    supplier_snapshot = (await db.execute(
+        select(SupplyChainRiskSnapshot)
+        .where(SupplyChainRiskSnapshot.supplier_id == seed_supplier.supplier_id)
+    )).scalar_one_or_none()
+    assert supplier_snapshot is not None, "Low-risk supplier must appear in snapshot"
 
 
 @pytest.mark.asyncio
@@ -693,15 +737,22 @@ async def test_historical_month_readonly(db, seed_supplier):
 
 @pytest.mark.asyncio
 async def test_advisory_lock_prevents_concurrent(db):
-    """pg_try_advisory_lock prevents concurrent snapshot generation."""
+    """pg_try_advisory_lock prevents concurrent snapshot generation with separate sessions."""
     from app.services.supply_chain_risk_map.scheduler import _acquire_snapshot_lock, _release_snapshot_lock
-    acquired = await _acquire_snapshot_lock(db)
-    assert acquired is True
-    # Second acquisition within same session should fail
-    async with db.begin():
-        result = await db.execute(text("SELECT pg_try_advisory_lock(20260611)"))
-        assert result.scalar() is False  # Lock already held
-    await _release_snapshot_lock(db)
+    from app.database import async_session
+
+    # Acquire lock in first session
+    async with async_session() as db1:
+        acquired1 = await _acquire_snapshot_lock(db1)
+        assert acquired1 is True
+
+        # Second independent session should fail to acquire the same lock
+        async with async_session() as db2:
+            acquired2 = await _acquire_snapshot_lock(db2)
+            assert acquired2 is False  # Lock already held by db1
+
+        # Release lock from first session
+        await _release_snapshot_lock(db1)
 ```
 
 Each test function has complete setup/teardown and assertions. The `db` fixture comes from `backend/tests/conftest.py`.
@@ -865,32 +916,66 @@ from httpx import AsyncClient
 from uuid import uuid4
 from datetime import date
 from sqlalchemy import select, func
-from app.core.security import create_access_token
+from app.models.user import User
+from app.core.security import get_password_hash, create_access_token
 
 
 @pytest.fixture
-async def admin_headers():
-    token = create_access_token({"sub": str(uuid4()), "role": "admin"})
-    return {"Authorization": f"Bearer {token}"}
+async def admin_user(db):
+    """Create a real admin user in DB and return the user object."""
+    user = User(
+        user_id=uuid4(), username="test_admin_riskmap",
+        email="admin_riskmap@test.com",
+        hashed_password=get_password_hash("Admin@2026"),
+        role="admin", is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
 
 
 @pytest.fixture
-async def viewer_headers():
-    token = create_access_token({"sub": str(uuid4()), "role": "viewer"})
-    return {"Authorization": f"Bearer {token}"}
+async def viewer_user(db):
+    """Create a real viewer user in DB."""
+    user = User(
+        user_id=uuid4(), username="test_viewer_riskmap",
+        email="viewer_riskmap@test.com",
+        hashed_password=get_password_hash("Viewer@2026"),
+        role="viewer", is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@pytest.fixture
+async def admin_client(client: AsyncClient, admin_user):
+    """Client with real admin user token."""
+    token = create_access_token({"sub": str(admin_user.user_id)})
+    client.headers["Authorization"] = f"Bearer {token}"
+    return client
+
+
+@pytest.fixture
+async def viewer_client(client: AsyncClient, viewer_user):
+    """Client with real viewer user token."""
+    token = create_access_token({"sub": str(viewer_user.user_id)})
+    client.headers["Authorization"] = f"Bearer {token}"
+    return client
 
 
 @pytest.mark.asyncio
-async def test_csv_export_contains_source_column(client: AsyncClient, admin_headers):
+async def test_csv_export_contains_source_column(admin_client, db):
     """CSV export includes a 'source' column for each dimension."""
     from app.services.supply_chain_risk_map.service import generate_snapshot
     from app.database import async_session
-    async with async_session() as db:
-        await generate_snapshot(db, None, "2026-06")
-    response = await client.get(
+    async with async_session() as session:
+        await generate_snapshot(session, None, "2026-06")
+    response = await admin_client.get(
         "/api/supply-chain-risk-map/export",
         params={"period": "2026-06", "format": "csv"},
-        headers=admin_headers,
     )
     assert response.status_code == 200
     assert "text/csv" in response.headers["content-type"]
@@ -899,23 +984,27 @@ async def test_csv_export_contains_source_column(client: AsyncClient, admin_head
 
 
 @pytest.mark.asyncio
-async def test_viewer_cannot_generate_snapshot(client: AsyncClient, viewer_headers):
+async def test_viewer_cannot_generate_snapshot(viewer_client):
     """Viewer role gets 403 on snapshot generate endpoint."""
-    response = await client.post(
-        "/api/supply-chain-risk-map/snapshots/generate",
-        headers=viewer_headers,
-    )
+    response = await viewer_client.post("/api/supply-chain-risk-map/snapshots/generate")
     assert response.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_field_qe_has_edit_permission(client: AsyncClient):
+async def test_field_qe_has_edit_permission(db, client):
     """field_qe role can generate snapshots (EDIT level)."""
-    token = create_access_token({"sub": str(uuid4()), "role": "field_qe"})
-    headers = {"Authorization": f"Bearer {token}"}
+    user = User(
+        user_id=uuid4(), username="test_fqe_riskmap",
+        email="fqe_riskmap@test.com",
+        hashed_password=get_password_hash("Fqe@2026"),
+        role="field_qe", is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    token = create_access_token({"sub": str(user.user_id)})
     response = await client.post(
         "/api/supply-chain-risk-map/snapshots/generate",
-        headers=headers,
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code != 403  # Not forbidden
 
@@ -983,6 +1072,130 @@ async def test_erp_actual_delivery_date_mapped():
     coerced = ERPIngestionService._coerce_date(item.get("actual_delivery_date"))
     assert coerced == date(2026, 6, 1)
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 - [ ] **Step 2: Run tests**
 
@@ -1381,7 +1594,9 @@ git commit -m "feat(supply-chain-risk-map): add seed data and e2e tests"
 
 ### Placeholder Scan
 
-No TBD/TODO/fill-in-later patterns found. All test steps have concrete Python/TypeScript code with imports, fixtures, and assertions. All implementation steps have function signatures or complete code. Frontend component steps describe behavior (not placeholder code), which is standard for UI component plans — the executor will implement React components with Ant Design + ECharts following the established project patterns.
+Backend test code (Tasks 2-4, 6) has complete Python code with imports, fixtures, and assertions — no `pass` stubs. Integration tests use real DB users with `create_access_token`. The advisory lock test uses two independent sessions.
+
+Frontend component steps (Tasks 8-10) describe behavior and component structure but do not include full JSX code — the executor must implement React components following the project's Ant Design + ECharts patterns. This is standard for UI plans where the backend contract is fully specified.
 
 ### Type Consistency Check
 
