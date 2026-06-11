@@ -734,7 +734,7 @@ def test_r001_detects_empty_control_method():
     assert len(findings) == 1
     assert findings[0].rule_id == "R001"
     assert findings[0].severity == "error"
-    assert findings[0].stable_key == "n1|"
+    assert findings[0].stable_key == "n1|#0"
 
 
 def test_r001_ignores_valid_control_method():
@@ -1667,6 +1667,49 @@ def override_dependencies_view():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture
+def override_dependencies_results():
+    """Mock DB that returns one validation result row for /validation-results."""
+    mock_row = MagicMock()
+    mock_row.finding_id = uuid.uuid4()
+    mock_row.occurrence_id = uuid.uuid4()
+    mock_row.rule_id = "R001"
+    mock_row.severity = "error"
+    mock_row.status = "open"
+    mock_row.title = "控制方法缺失"
+    mock_row.description = "test"
+    mock_row.present = True
+    mock_row.fmea_node_ids = []
+
+    mock_result = MagicMock()
+    mock_result.mappings.return_value = [mock_row]
+
+    async def mock_get_db():
+        db = MagicMock()
+        db.commit = AsyncMock()
+        db.rollback = AsyncMock()
+        db.execute = AsyncMock(return_value=mock_result)
+        db.get = AsyncMock(return_value=None)
+        return db
+
+    async def mock_get_current_user():
+        user = MagicMock(spec=User)
+        user.user_id = uuid.uuid4()
+        user.username = "engineer"
+        user.role = "quality_engineer"
+        user.role_id = uuid.uuid4()
+        user.is_active = True
+        user.role_definition = MagicMock()
+        user.role_definition.bypass_row_level_security = True
+        return user
+
+    app.dependency_overrides[get_db] = mock_get_db
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
+        yield
+    app.dependency_overrides.clear()
+
+
 @pytest.mark.asyncio
 async def test_validate_unauthenticated():
     """POST /control-plans/{id}/validate without auth → 401."""
@@ -1700,10 +1743,17 @@ async def test_validate_returns_200(override_dependencies):
     from unittest.mock import patch as mock_patch
     mock_run = MagicMock()
     mock_run.run_id = uuid.uuid4()
+    mock_run.cp_id = uuid.uuid4()
+    mock_run.trigger = "manual"
     mock_run.status = "completed"
+    mock_run.rule_count = 4
     mock_run.error_count = 1
     mock_run.warning_count = 0
     mock_run.info_count = 0
+    mock_run.started_at = "2026-06-10T12:00:00"
+    mock_run.completed_at = "2026-06-10T12:00:01"
+    mock_run.failed_rules = []
+    mock_run.created_by = None
 
     with mock_patch(
         "app.services.cp_validation.engine.CPValidationEngine.validate",
@@ -1737,42 +1787,37 @@ async def test_validate_returns_409_when_already_running(override_dependencies):
 
 
 @pytest.mark.asyncio
-async def test_results_returns_200(override_dependencies):
-    """GET /validation-results with auth — mock DB to assert response structure."""
-    from unittest.mock import patch as mock_patch
-
-    mock_row = MagicMock()
-    mock_row.finding_id = uuid.uuid4()
-    mock_row.occurrence_id = uuid.uuid4()
-    mock_row.rule_id = "R001"
-    mock_row.severity = "error"
-    mock_row.status = "open"
-    mock_row.title = "控制方法缺失"
-    mock_row.description = "test"
-    mock_row.present = True
-    mock_row.fmea_node_ids = []
-
-    mock_result = MagicMock()
-    mock_result.mappings.return_value = [mock_row]
-
-    with mock_patch(
-        "app.api.cp_validation.get_db",
-        return_value=MagicMock(
-            execute=AsyncMock(return_value=mock_result),
-            commit=AsyncMock(),
-            rollback=AsyncMock(),
-            close=AsyncMock(),
-        ),
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            resp = await ac.get(f"/api/control-plans/{uuid.uuid4()}/validation-results")
+async def test_results_returns_200(override_dependencies_results):
+    """GET /validation-results with auth — assert response is { items, total }."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get(f"/api/control-plans/{uuid.uuid4()}/validation-results")
 
     assert resp.status_code == status.HTTP_200_OK
     body = resp.json()
-    assert isinstance(body, list)
-    if body:
-        assert body[0]["rule_id"] == "R001"
+    assert "items" in body
+    assert "total" in body
+    assert body["total"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_reject_finding_returns_200(override_dependencies_results):
+    """POST /validation-results/{id}/reject → 200."""
+    finding_id = uuid.uuid4()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/validation-results/{finding_id}/reject")
+    assert resp.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.asyncio
+async def test_resolve_finding_returns_200(override_dependencies_results):
+    """POST /validation-results/{id}/resolve → 200."""
+    finding_id = uuid.uuid4()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(f"/api/validation-results/{finding_id}/resolve")
+    assert resp.status_code == status.HTTP_200_OK
 
 
 @pytest.mark.asyncio
@@ -1790,7 +1835,7 @@ async def test_viewer_cannot_validate(override_dependencies_view):
 cd backend && SECRET_KEY=test python -m pytest tests/test_cp_validation_api.py -v
 ```
 
-Expected: 8 tests PASS.
+Expected: 9 tests PASS.
 
 - [ ] **Step 3: Commit**
 
@@ -2434,7 +2479,7 @@ git commit -m "feat(cp-validation): add validation status badge to ControlPlanLi
 cd backend && SECRET_KEY=test python -m pytest tests/test_cp_validation_rules.py tests/test_cp_validation_engine.py tests/test_cp_validation_api.py -v
 ```
 
-Expected: All tests PASS (15 + 4 + 8 = 27 total).
+Expected: All tests PASS (15 + 4 + 9 = 28 total).
 
 - [ ] **Step 2: Run frontend build**
 
