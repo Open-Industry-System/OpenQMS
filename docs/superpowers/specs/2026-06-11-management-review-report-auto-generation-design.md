@@ -13,7 +13,7 @@
 
 ### 1.2 范围
 - 后端：新增报告生成服务、API 路由、数据模型扩展、Alembic 迁移
-- 前端：在管理评审详情页新增「报告」标签页
+- 前端：在管理评审详情页新增「管理评审报告」Card
 - 不改动现有管理评审主状态机（`draft → data_collected → in_review → closed`）
 - 报告生命周期独立管理：`report_status = none | draft | final`
 
@@ -290,7 +290,7 @@ final → draft（admin/manager 点击重新打开）
 1. **LLM 超时**：复用现有 `settings.LLM_TIMEOUT` 和 `CAPA_DRAFT_LLM_TIMEOUT`，新增 `REPORT_LLM_TIMEOUT`（默认 10 秒）。
 2. **LLM 响应大小**：现有 provider 限制 10KB，因此采用逐章节调用策略。
 3. **数据隐私**：LLM prompt 中不发送用户敏感信息，只发送统计数据和摘要。
-4. **并发编辑**：报告编辑复用现有管理评审的更新机制，不引入新的并发锁。
+4. **并发编辑**：报告编辑通过独立的 report service 更新 `generated_report`，不调用受 `draft/data_collected` 限制的 `update_review()`；暂不引入并发锁。
 5. **降级体验**：LLM 不可用时，规则生成仍然可用；单个章节失败不影响整体报告。
 
 ---
