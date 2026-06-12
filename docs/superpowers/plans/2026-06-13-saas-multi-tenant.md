@@ -358,6 +358,8 @@ git commit -m "feat(multi-tenant): add platform models — Tenant, PlatformAdmin
 **Files:**
 - Create: `backend/app/core/tenant_context.py`
 - Create: `backend/app/core/tenant_utils.py`
+- Modify: `backend/app/config.py` — add `TENANT_MODE` field
+- Modify: `backend/app/core/security.py` — add JWT constants and `decode_token_without_verification`
 - Create: `backend/tests/test_multitenancy/test_tenant_context.py`
 
 - [ ] **Step 1: Write failing test for tenant resolution**
@@ -595,16 +597,55 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             return result.scalar_one_or_none()
 ```
 
-- [ ] **Step 5: Run tests**
+- [ ] **Step 5: Add `TENANT_MODE` to `backend/app/config.py`**
+
+Add the `TENANT_MODE` field to the `Settings` class. This controls whether the `X-Tenant-ID` header is honored and whether the middleware is active:
+
+```python
+# In backend/app/config.py, add to the Settings class:
+
+TENANT_MODE: str = "single"  # "single" (default, no multi-tenant), "dev" (X-Tenant-ID enabled), "production" (subdomain + JWT only)
+```
+
+Valid values:
+- `"single"` — multi-tenant disabled, original single-tenant behavior
+- `"dev"` — `X-Tenant-ID` header is trusted (for local development)
+- `"production"` — `X-Tenant-ID` header is ignored, tenant resolution via subdomain + JWT only
+
+- [ ] **Step 6: Add JWT constants and `decode_token_without_verification` to `backend/app/core/security.py`**
+
+The middleware needs these in Task 3, before Task 6 creates the full platform auth system. Add them to the existing `security.py`:
+
+```python
+# In backend/app/core/security.py, add after existing JWT functions:
+
+# JWT issuer/audience constants for cross-domain prevention
+TENANT_ISSUER = "openqms-tenant"
+PLATFORM_ISSUER = "openqms-platform"
+TENANT_AUDIENCE = "openqms-tenant"
+PLATFORM_AUDIENCE = "openqms-platform"
+
+
+def decode_token_without_verification(token: str) -> dict:
+    """Decode JWT payload without verifying signature.
+
+    Used by TenantContextMiddleware to extract tenant_id from Bearer tokens
+    for tenant resolution BEFORE full auth verification (which happens in deps.py).
+    MUST NOT be used for authorization decisions — only for tenant lookup.
+    """
+    return jwt.get_unverified_claims(token)
+```
+
+- [ ] **Step 7: Run tests**
 
 Run: `cd backend && python -m pytest tests/test_multitenancy/test_tenant_context.py -v`
 Expected: PASS (all utility function tests pass)
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add backend/app/core/tenant_utils.py backend/app/core/tenant_context.py backend/tests/test_multitenancy/test_tenant_context.py
-git commit -m "feat(multi-tenant): add TenantContextMiddleware and tenant utility functions"
+git add backend/app/core/tenant_utils.py backend/app/core/tenant_context.py backend/app/config.py backend/app/core/security.py backend/tests/test_multitenancy/test_tenant_context.py
+git commit -m "feat(multi-tenant): add TenantContextMiddleware, tenant utilities, TENANT_MODE config, JWT constants"
 ```
 
 ---
@@ -1260,18 +1301,12 @@ git commit -m "feat(multi-tenant): add Alembic dual-base config, platform/tenant
 
 - [ ] **Step 1: Add platform admin JWT functions to `security.py`**
 
-Add two new functions alongside existing `create_access_token` / `verify_token`:
+Add two new token creation functions. The JWT constants (`TENANT_ISSUER`, `PLATFORM_ISSUER`, etc.) and `decode_token_without_verification` were already added in Task 3.
 
 ```python
-# In app/core/security.py — add after existing JWT functions
+# In app/core/security.py — add after existing JWT functions and constants
 
 from app.config import settings
-
-# JWT issuer/audience constants for cross-domain prevention
-TENANT_ISSUER = "openqms-tenant"
-PLATFORM_ISSUER = "openqms-platform"
-TENANT_AUDIENCE = "openqms-tenant"
-PLATFORM_AUDIENCE = "openqms-platform"
 
 
 def create_platform_admin_token(admin_id: str, role: str = "superadmin") -> str:
@@ -1303,16 +1338,6 @@ def create_tenant_user_token(user_id: str, tenant_id: str, role_id: str, factory
         "type": "access",
     }
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
-
-
-def decode_token_without_verification(token: str) -> dict:
-    """Decode JWT payload without verifying signature.
-
-    Used by TenantContextMiddleware to extract tenant_id from Bearer tokens
-    for tenant resolution BEFORE full auth verification (which happens in deps.py).
-    MUST NOT be used for authorization decisions — only for tenant lookup.
-    """
-    return jwt.get_unverified_claims(token)
 ```
 
 - [ ] **Step 2: Create `require_platform_admin` dependency in `deps.py`**
@@ -1400,29 +1425,23 @@ async def test_platform_route_ignores_x_tenant_id_header():
     X-Tenant-ID header. The header is simply ignored, not treated as an error."""
     from app.core.tenant_context import TenantContextMiddleware
 
-    # Build ASGI scope for a platform route with X-Tenant-ID header
-    scope = {
-        "type": "http",
-        "path": "/api/platform/tenants",
-        "headers": [(b"x-tenant-id", b"acme")],
-        "state": {},
-    }
-    receive = AsyncMock()
-    send = AsyncMock()
+    mock_inner = AsyncMock()
+    middleware = TenantContextMiddleware(mock_inner)
+    # Platform route with X-Tenant-ID header — must be ignored
+    request = MagicMock()
+    request.url.path = "/api/platform/tenants"
+    request.headers.get = lambda k, default="": {
+        "host": "",
+        "X-Tenant-ID": "acme",
+        "authorization": "",
+    }.get(k, default)
+    request.app = MagicMock()
+    request.app.state.tenant_domain = None
+    request.state = MagicMock()
 
-    # The inner ASGI app captures what the middleware set on scope["state"]
-    captured_state = {}
-
-    async def inner_app(inner_scope, receive, send):
-        # TenantContextMiddleware sets scope["state"]["tenant"] for downstream
-        captured_state.update(inner_scope.get("state", {}))
-
-    middleware = TenantContextMiddleware(inner_app)
-    await middleware(scope, receive, send)
-
-    # Middleware must not raise and must set tenant to None for platform routes
-    # (X-Tenant-ID header is ignored on platform routes)
-    assert captured_state.get("tenant") is None
+    await middleware.dispatch(request, mock_inner)
+    # For platform routes, tenant must be None regardless of X-Tenant-ID
+    assert request.state.tenant is None
 
 
 @pytest.mark.asyncio
@@ -1506,26 +1525,22 @@ async def test_x_tenant_id_ignored_in_production():
     try:
         mock_inner = AsyncMock()
         middleware = TenantContextMiddleware(mock_inner)
-        scope = {
-            "type": "http",
-            "path": "/api/fmea",
-            "headers": [(b"x-tenant-id", b"acme")],
-            "state": {},
-        }
-        receive = AsyncMock()
-        send = AsyncMock()
+        # Request with X-Tenant-ID header but no auth — in production
+        # the header should be ignored, leaving tenant unresolved
+        request = MagicMock()
+        request.url.path = "/api/fmea"
+        request.headers.get = lambda k, default="": {
+            "host": "",
+            "X-Tenant-ID": "acme",  # Should be ignored in production
+            "authorization": "",
+        }.get(k, default)
+        request.app = MagicMock()
+        request.app.state.tenant_domain = None
+        request.state = MagicMock()
 
-        # Even with X-Tenant-ID header, tenant should be None
-        # because production mode ignores it
-        captured_state = {}
-
-        async def inner_app(inner_scope, inner_receive, inner_send):
-            captured_state.update(inner_scope.get("state", {}))
-
-        middleware_prod = TenantContextMiddleware(inner_app)
-        await middleware_prod(scope, receive, send)
+        await middleware.dispatch(request, mock_inner)
         # X-Tenant-ID is ignored in production — tenant remains None
-        assert captured_state.get("tenant") is None
+        assert request.state.tenant is None
     finally:
         settings.TENANT_MODE = original
 
@@ -1534,39 +1549,35 @@ async def test_x_tenant_id_ignored_in_production():
 async def test_jwt_fallback_resolves_tenant():
     """When no subdomain or X-Tenant-ID is present, JWT tenant_id resolves the tenant."""
     from app.core.tenant_context import TenantContextMiddleware
-    from app.core.security import decode_token_without_verification
 
     mock_tenant = MagicMock()
     mock_tenant.id = "tenant-acme-uuid"
     mock_tenant.status = "active"
 
     mock_inner = AsyncMock()
-    captured_state = {}
+    middleware = TenantContextMiddleware(mock_inner)
 
-    async def inner_app(inner_scope, inner_receive, inner_send):
-        captured_state.update(inner_scope.get("state", {}))
-
-    # Create a JWT payload with tenant_id
-    fake_token = "fake.bearer.token"
+    # No subdomain, no X-Tenant-ID (TENANT_MODE=production), but Bearer token present
     fake_payload = {"sub": "user-1", "tenant_id": "tenant-acme-uuid", "iss": "openqms-tenant"}
 
-    scope = {
-        "type": "http",
-        "path": "/api/fmea",
-        "headers": [(b"authorization", b"Bearer fake.bearer.token")],
-        "state": {},
-    }
-    receive = AsyncMock()
-    send = AsyncMock()
+    request = MagicMock()
+    request.url.path = "/api/fmea"
+    request.headers.get = lambda k, default="": {
+        "host": "",
+        "X-Tenant-ID": "",
+        "authorization": "Bearer fake.bearer.token",
+    }.get(k, default)
+    request.app = MagicMock()
+    request.app.state.tenant_domain = None
+    request.state = MagicMock()
 
-    middleware = TenantContextMiddleware(inner_app)
     with patch.object(middleware, "_resolve_by_id", return_value=mock_tenant), \
          patch("app.core.tenant_context.decode_token_without_verification", return_value=fake_payload), \
          patch("app.core.tenant_context.settings", TENANT_MODE="production"):
-        await middleware(scope, receive, send)
+        await middleware.dispatch(request, mock_inner)
 
     # JWT fallback should have resolved the tenant
-    assert captured_state.get("tenant") is not None
+    assert request.state.tenant is not None
 
 
 @pytest.mark.asyncio
@@ -1579,12 +1590,22 @@ async def test_suspended_tenant_returns_503():
 
     mock_inner = AsyncMock()
     middleware = TenantContextMiddleware(mock_inner)
+    # Set up request with X-Tenant-ID header and TENANT_MODE=dev
+    # so the slug resolver is triggered
     request = MagicMock()
     request.url.path = "/api/fmea"
-    request.headers.get.return_value = ""
+    # headers.get returns values for: host (empty), X-Tenant-ID (acme), authorization (empty)
+    request.headers.get = lambda k, default="": {
+        "host": "",
+        "X-Tenant-ID": "acme",
+        "authorization": "",
+    }.get(k, default)
+    request.app = MagicMock()
+    request.app.state.tenant_domain = None
     request.state = MagicMock()
 
-    with patch.object(middleware, "_resolve_by_subdomain", return_value=mock_tenant):
+    with patch.object(middleware, "_resolve_by_slug", return_value=mock_tenant), \
+         patch("app.core.tenant_context.settings", TENANT_MODE="dev"):
         with pytest.raises(HTTPException) as exc_info:
             await middleware.dispatch(request, mock_inner)
         assert exc_info.value.status_code == 503
@@ -1603,10 +1624,17 @@ async def test_deactivated_tenant_returns_410():
     middleware = TenantContextMiddleware(mock_inner)
     request = MagicMock()
     request.url.path = "/api/fmea"
-    request.headers.get.return_value = ""
+    request.headers.get = lambda k, default="": {
+        "host": "",
+        "X-Tenant-ID": "deact-corp",
+        "authorization": "",
+    }.get(k, default)
+    request.app = MagicMock()
+    request.app.state.tenant_domain = None
     request.state = MagicMock()
 
-    with patch.object(middleware, "_resolve_by_subdomain", return_value=mock_tenant):
+    with patch.object(middleware, "_resolve_by_slug", return_value=mock_tenant), \
+         patch("app.core.tenant_context.settings", TENANT_MODE="dev"):
         with pytest.raises(HTTPException) as exc_info:
             await middleware.dispatch(request, mock_inner)
         assert exc_info.value.status_code == 410
@@ -2474,9 +2502,16 @@ async def test_tenant_suspend_and_reactivate():
         middleware = TenantContextMiddleware(mock_inner)
         request = MagicMock()
         request.url.path = "/api/fmea"
-        request.headers.get.return_value = ""  # no auth, no X-Tenant-ID
+        request.headers.get = lambda k, default="": {
+            "host": "",
+            "X-Tenant-ID": "suspend-test",
+            "authorization": "",
+        }.get(k, default)
+        request.app = MagicMock()
+        request.app.state.tenant_domain = None
         request.state = MagicMock()
-        with patch.object(middleware, "_resolve_by_subdomain", return_value=tenant):
+        with patch.object(middleware, "_resolve_by_slug", return_value=tenant), \
+             patch("app.core.tenant_context.settings", TENANT_MODE="dev"):
             with pytest.raises(HTTPException) as exc_info:
                 await middleware.dispatch(request, mock_inner)
             assert exc_info.value.status_code == 503
@@ -2517,9 +2552,16 @@ async def test_tenant_deactivation():
         middleware = TenantContextMiddleware(mock_inner)
         request = MagicMock()
         request.url.path = "/api/fmea"
-        request.headers.get.return_value = ""
+        request.headers.get = lambda k, default="": {
+            "host": "",
+            "X-Tenant-ID": "deact-test",
+            "authorization": "",
+        }.get(k, default)
+        request.app = MagicMock()
+        request.app.state.tenant_domain = None
         request.state = MagicMock()
-        with patch.object(middleware, "_resolve_by_subdomain", return_value=tenant):
+        with patch.object(middleware, "_resolve_by_slug", return_value=tenant), \
+             patch("app.core.tenant_context.settings", TENANT_MODE="dev"):
             with pytest.raises(HTTPException) as exc_info:
                 await middleware.dispatch(request, mock_inner)
             assert exc_info.value.status_code == 410
@@ -2552,7 +2594,7 @@ Steps (per design spec §9.1):
 5. Clear public.alembic_version
 6. alembic upgrade platform@head
 7. INSERT INTO public.tenants (...) VALUES (...)
-8. Enable TENANT_MODE=true
+8. Set TENANT_MODE=production
 
 IMPORTANT: Steps 4-6 must be in this exact order. Clearing alembic_version (step 5)
 before running platform upgrade (step 6) prevents Alembic revision graph mismatch.
@@ -2669,7 +2711,7 @@ async def migrate():
     print("Inserted default tenant record")
 
     # Step 8: Enable TENANT_MODE
-    print("Set TENANT_MODE=true in your .env file")
+    print("Set TENANT_MODE=production in your .env file")
     print("Migration complete!")
 
 
