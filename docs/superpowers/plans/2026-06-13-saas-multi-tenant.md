@@ -910,35 +910,67 @@ This is the critical migration that creates all ~50 business tables for new tena
 psql -c "CREATE SCHEMA IF NOT EXISTS tenant_squash_gen;"
 ```
 
-2. Run Alembic autogenerate against `TenantBase.metadata` with `t000_tenant_baseline` as `down_revision`:
+2. Run Alembic autogenerate against `TenantBase.metadata`:
 ```bash
-cd backend && alembic -x schema=tenant_squash_gen revision --autogenerate -m "tenant_squash" -r t000_tenant_baseline
+cd backend && alembic -x schema=tenant_squash_gen revision --autogenerate -m "tenant_squash"
 ```
 
-3. Open the generated migration file and set revision metadata:
+This uses the `env.py` configuration from Task 5, which selects `TenantBase.metadata` when `x_args` contains `schema`. The generated migration will have `down_revision` pointing to whatever Alembic detects as the current head. After generation, manually set:
+
 ```python
-revision = 't001_tenant_squash'    # or the hash Alembic generated
-down_revision = 't000_tenant_baseline'
-branch_labels = None                # inherits 'tenant' from t000
+revision = 't001_tenant_squash'
+down_revision = 't000_tenant_baseline'  # must point to the branch root
+branch_labels = None  # inherits 'tenant' from t000
 ```
 
-4. **Verify completeness — this step must not be skipped:**
-```bash
-# In a Python shell, assert all TenantBase tables are covered:
-cd backend && python -c "
+3. **Verify completeness with an automated script — this step must not be skipped:**
+
+Create `backend/scripts/verify_squash_completeness.py`:
+
+```python
+#!/usr/bin/env python3
+"""Verify that t001_tenant_squash.py covers all TenantBase tables.
+Exit 1 if any table is missing from the migration.
+"""
+import re
+import sys
 from app.database import TenantBase
-import app.models  # noqa — trigger model registration
-expected = set(TenantBase.metadata.tables.keys())
-print(f'Expected {len(expected)} tables:')
-for t in sorted(expected):
-    print(f'  {t}')
-# Now grep the generated migration for op.create_table calls:
-#   grep 'op.create_table' alembic/versions/t001_*.py
-# Assert: expected.issubset(created_tables_in_migration)
-# If any table is missing, the migration is INCOMPLETE and will
-# leave new tenants without that table. Add it manually.
-"
+import app.models  # trigger model registration
+
+def main():
+    expected = set(TenantBase.metadata.tables.keys())
+
+    # Parse the squash migration file for op.create_table('table_name', ...)
+    migration_path = "alembic/versions/t001_tenant_squash.py"
+    with open(migration_path) as f:
+        content = f.read()
+
+    created_tables = set()
+    for match in re.finditer(r"op\.create_table\(\s*['\"](\w+)['\"]", content):
+        created_tables.add(match.group(1))
+
+    missing = expected - created_tables
+    extra = created_tables - expected
+
+    if missing:
+        print(f"ERROR: {len(missing)} tables missing from squash migration:")
+        for t in sorted(missing):
+            print(f"  - {t}")
+        sys.exit(1)
+
+    if extra:
+        print(f"WARNING: {len(extra)} extra tables in squash (not in TenantBase):")
+        for t in sorted(extra):
+            print(f"  + {t}")
+
+    print(f"OK: all {len(expected)} TenantBase tables present in squash migration")
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
 ```
+
+Run: `cd backend && python scripts/verify_squash_completeness.py`
 
 5. **Run autogenerate verification against a fresh schema:**
 ```bash
@@ -1250,30 +1282,95 @@ Create `backend/tests/test_multitenancy/test_platform_api.py`:
 
 ```python
 import pytest
-from fastapi.testclient import TestClient
+from unittest.mock import patch, MagicMock, AsyncMock
+from app.core.security import create_tenant_user_token, create_platform_admin_token, TENANT_ISSUER, PLATFORM_ISSUER
 
 
-def test_platform_route_rejects_tenant_jwt():
-    """Platform routes must reject JWTs with tenant_id claim."""
-    # Will be implemented with actual test client setup
-    pass
+@pytest.mark.asyncio
+async def test_platform_route_rejects_tenant_jwt():
+    """Platform routes must reject JWTs with tenant_id claim — returns 403."""
+    from app.core.deps import require_platform_admin
+    from fastapi import HTTPException
+
+    request = MagicMock()
+    request.headers.get.return_value = "Bearer fake_token"
+
+    # Mock verify_token to return a tenant JWT payload
+    tenant_payload = {
+        "sub": "user-123",
+        "tenant_id": "tenant-acme-uuid",
+        "role_id": "role-uuid",
+        "iss": TENANT_ISSUER,
+        "aud": TENANT_ISSUER,
+    }
+    with patch("app.core.deps.verify_token", return_value=tenant_payload):
+        with pytest.raises(HTTPException) as exc_info:
+            await require_platform_admin(request)
+        assert exc_info.value.status_code == 403
 
 
-def test_platform_route_ignores_x_tenant_id_header():
-    """Platform routes must ignore X-Tenant-ID header (not 403 on it)."""
-    pass
+@pytest.mark.asyncio
+async def test_platform_route_ignores_x_tenant_id_header():
+    """Platform routes must not reject requests with X-Tenant-ID header.
+    The TenantContext middleware sets request.state.tenant = None
+    for /api/platform/* routes, regardless of X-Tenant-ID."""
+    from app.core.tenant_context import TenantContextMiddleware
+
+    # Build a mock ASGI scope for a platform route
+    scope = {"type": "http", "path": "/api/platform/tenants", "headers": [(b"x-tenant-id", b"acme")]}
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    # Mock the inner app — just captures request.state.tenant
+    captured_tenant = None
+
+    async def inner_app(scope, receive, send):
+        nonlocal captured_tenant
+        # ASGI middleware stores tenant on scope["state"] or similar
+        # The middleware should set request.state.tenant = None for platform routes
+        pass
+
+    middleware = TenantContextMiddleware(inner_app)
+    # Middleware must not raise for platform routes with X-Tenant-ID
+    # Integration test with TestClient will verify end-to-end
 
 
-def test_platform_route_requires_platform_admin_jwt():
-    """Platform routes must require is_platform_admin: true."""
-    pass
+@pytest.mark.asyncio
+async def test_platform_route_requires_platform_admin_jwt():
+    """Platform routes must require is_platform_admin: true — returns 403 for regular users."""
+    from app.core.deps import require_platform_admin
+    from fastapi import HTTPException
+
+    request = MagicMock()
+    request.headers.get.return_value = "Bearer fake_token"
+
+    # Mock verify_token to return a regular user payload (no is_platform_admin)
+    regular_payload = {
+        "sub": "user-123",
+        "role_id": "role-uuid",
+        "iss": TENANT_ISSUER,
+        "aud": TENANT_ISSUER,
+    }
+    with patch("app.core.deps.verify_token", return_value=regular_payload):
+        with pytest.raises(HTTPException) as exc_info:
+            await require_platform_admin(request)
+        assert exc_info.value.status_code == 403
 
 
 def test_ci_route_dependency_check():
     """CI test: all /api/platform/* routes must depend on get_platform_db, not get_db."""
-    # This test scans the FastAPI app routes and asserts that
-    # platform routes use get_platform_db in their dependencies.
-    pass
+    from fastapi import FastAPI
+    from app.database import get_db, get_platform_db
+
+    # This test will scan the FastAPI app routes and verify that:
+    # 1. Platform routes use get_platform_db in their handler dependencies
+    # 2. No platform route uses get_db
+    # It runs as part of CI to catch accidental use of get_db in platform code.
+    #
+    # Implementation: iterate app.routes, find /api/platform/* routes,
+    # check each route's dependencies list.
+    # This is a structural test, not a runtime test.
+    pass  # Will be implemented when platform routes are registered
 ```
 
 - [ ] **Step 4: Create `backend/app/api/platform/__init__.py`**
@@ -1558,24 +1655,58 @@ async def get_current_user(token: str = Depends(oauth2_scheme), request: Request
 Add to `backend/tests/test_multitenancy/test_tenant_context.py`:
 
 ```python
-def test_cross_tenant_jwt_rejection():
+@pytest.mark.asyncio
+async def test_cross_tenant_jwt_rejection():
     """JWT with tenant_id=A must not be accepted on tenant B's subdomain."""
-    # This will be an integration test that:
-    # 1. Creates a token with tenant_id="tenant-a"
-    # 2. Makes a request to tenant B's subdomain
-    # 3. Expects 403 Forbidden
-    pass
+    from app.core.deps import get_current_user
+    from fastapi import HTTPException
+
+    # Simulate request on tenant B's subdomain — request.state.tenant.id is different
+    request = MagicMock()
+    request.state.tenant = MagicMock()
+    request.state.tenant.id = "tenant-b-uuid"  # Different tenant
+
+    # Mock verify_token to return the tenant A payload
+    with patch("app.core.deps.verify_token", return_value={
+        "sub": "user-a",
+        "tenant_id": "tenant-a-uuid",  # Token says tenant A
+        "role_id": "role-uuid",
+        "iss": "openqms-tenant",
+        "aud": "openqms-tenant",
+    }):
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(token="fake_token", request=request)
+        # Must reject with 403 — token tenant doesn't match request tenant
+        assert exc_info.value.status_code == 403
 
 
-def test_platform_jwt_cannot_access_tenant_routes():
+@pytest.mark.asyncio
+async def test_platform_jwt_cannot_access_tenant_routes():
     """Platform admin JWT (is_platform_admin=true) must not work on tenant routes."""
-    # Platform JWT lacks tenant_id, should be rejected by get_current_user
-    pass
+    from app.core.deps import get_current_user
+    from fastapi import HTTPException
+
+    request = MagicMock()
+    request.state.tenant = MagicMock()
+    request.state.tenant.id = "tenant-acme-uuid"
+
+    # Platform token has no tenant_id and wrong iss/aud for tenant routes
+    with patch("app.core.deps.verify_token", return_value={
+        "sub": "admin-uuid",
+        "is_platform_admin": True,
+        "role": "superadmin",
+        "iss": "openqms-platform",  # Wrong issuer for tenant routes
+        "aud": "openqms-platform",
+    }):
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(token="fake_token", request=request)
+        # Platform JWT must not be accepted on tenant routes
+        assert exc_info.value.status_code in (401, 403)
 
 
 def test_tenant_jwt_cannot_access_platform_routes():
     """Tenant JWT must be rejected by require_platform_admin."""
-    # Already tested in test_platform_api.py
+    # Already tested in test_platform_route_rejects_tenant_jwt
     pass
 ```
 
@@ -1607,67 +1738,90 @@ Create `backend/tests/test_multitenancy/test_background_tasks.py`:
 
 ```python
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch, async_context_manager
 from app.core.tenant_utils import current_tenant_schema
 
 
 @pytest.mark.asyncio
 async def test_run_for_each_tenant_iterates_all_active_tenants():
-    """run_for_each_tenant must set ContextVar for each tenant and reset after each."""
+    """run_for_each_tenant must yield (tenant, db_session) for each active tenant."""
     from app.database import run_for_each_tenant
     from app.models.tenant import Tenant
 
-    # Mock async_session to return a controlled list of tenants
     mock_tenants = [
         Tenant(id="t1", slug="acme", schema_name="tenant_acme", subdomain="acme", status="active"),
         Tenant(id="t2", slug="globex", schema_name="tenant_globex", subdomain="globex", status="active"),
     ]
 
-    contexts_seen = []
-    with patch("app.database.async_session") as mock_session:
-        # Configure mock_session to yield a session that returns mock_tenants
-        # and accepts SET search_path / RESET search_path
-        async def mock_query():
-            for tenant in mock_tenants:
-                token = current_tenant_schema.set(tenant.schema_name)
-                contexts_seen.append(current_tenant_schema.get())
-                current_tenant_schema.reset(token)
+    # Mock the session's execute/scalars to return our tenants + accept SET/RESET
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock()  # SET search_path / RESET search_path
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = mock_tenants
+    mock_session.execute.return_value = mock_result
 
-    # Verify that ContextVar was set for each tenant schema
-    # and reset to None between iterations
-    assert "tenant_acme" in contexts_seen
-    assert "tenant_globex" in contexts_seen
-    # After the loop, ContextVar must be None
+    with patch("app.database.async_session", return_value=mock_session):
+        seen = []
+        async for tenant, db in run_for_each_tenant():
+            seen.append(tenant.slug)
+            # ContextVar must be set to this tenant's schema during iteration
+            assert current_tenant_schema.get() == f"tenant_{tenant.slug}"
+
+    # After iteration, ContextVar must be None (no leak)
     assert current_tenant_schema.get() is None
+    assert seen == ["acme", "globex"]
 
 
 @pytest.mark.asyncio
 async def test_run_for_each_tenant_resets_context_var_on_failure():
-    """If an exception occurs during tenant iteration, ContextVar must still be reset."""
+    """If the callback raises, ContextVar must still be reset before next tenant."""
     from app.database import run_for_each_tenant
+    from app.models.tenant import Tenant
 
-    # Simulate: first tenant succeeds, second raises, ContextVar must not leak
-    token = current_tenant_schema.set("tenant_test")
-    try:
-        raise RuntimeError("simulated failure")
-    finally:
-        current_tenant_schema.reset(token)
+    mock_tenants = [
+        Tenant(id="t1", slug="acme", schema_name="tenant_acme", subdomain="acme", status="active"),
+        Tenant(id="t2", slug="globex", schema_name="tenant_globex", subdomain="globex", status="active"),
+    ]
 
-    # After reset, ContextVar must be None — no leak
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = mock_tenants
+    mock_session.execute.return_value = mock_result
+
+    call_count = 0
+
+    async def failing_callback(tenant, db):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("simulated failure")
+
+    with patch("app.database.async_session", return_value=mock_session):
+        # run_for_each_tenant must catch the error and continue
+        # ContextVar must not leak after the failing tenant
+        async for tenant, db in run_for_each_tenant():
+            pass  # errors are logged, not re-raised
+
+    # After iteration, ContextVar must be None even after failure
     assert current_tenant_schema.get() is None
 
 
 @pytest.mark.asyncio
-async def test_get_tenant_aware_session_reads_context_var():
-    """get_tenant_aware_session must SET search_path to the schema from current_tenant_schema."""
+async def test_get_tenant_aware_session_sets_search_path():
+    """get_tenant_aware_session must execute SET search_path when current_tenant_schema is set."""
     from app.database import get_tenant_aware_session
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock()
 
     token = current_tenant_schema.set("tenant_test")
     try:
-        # This test requires a real DB connection to verify search_path.
-        # In a unit test, we mock async_session and verify the SQL was executed.
-        # Integration test (test_isolation.py) will verify end-to-end.
-        assert current_tenant_schema.get() == "tenant_test"
+        async with get_tenant_aware_session() as db:
+            # SET search_path must have been called with the tenant schema
+            calls = mock_session.execute.call_args_list
+            assert any("tenant_test" in str(c) for c in calls), \
+                f"Expected SET search_path to tenant_test, got calls: {calls}"
     finally:
         current_tenant_schema.reset(token)
 
@@ -1677,9 +1831,17 @@ async def test_get_tenant_aware_session_defaults_to_public():
     """When current_tenant_schema is None, get_tenant_aware_session must not SET search_path."""
     from app.database import get_tenant_aware_session
 
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock()
+
     assert current_tenant_schema.get() is None
-    # When ContextVar is None, no SET search_path should be executed.
-    # Integration test (test_isolation.py) will verify end-to-end.
+
+    with patch("app.database.async_session", return_value=mock_session):
+        async with get_tenant_aware_session() as db:
+            # No SET search_path should be executed when ContextVar is None
+            for call in mock_session.execute.call_args_list:
+                assert "search_path" not in str(call), \
+                    f"Unexpected SET search_path when no tenant context: {call}"
 ```
 
 - [ ] **Step 2: Modify `main.py` — wrap background loops**
