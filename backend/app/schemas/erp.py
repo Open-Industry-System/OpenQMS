@@ -205,6 +205,7 @@ class PurchaseOrderOut(BaseModel):
     unit_price: Optional[float]
     currency: Optional[str]
     delivery_date: Optional[date]
+    actual_delivery_date: Optional[date] = None
     received_quantity: Optional[float]
     status: str
     lot_no: Optional[str]

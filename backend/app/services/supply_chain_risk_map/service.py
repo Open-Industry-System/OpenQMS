@@ -15,97 +15,12 @@ from app.services.supply_chain_risk_map.aggregator import (
     aggregate_supply_chain_metrics,
     normalize_to_risk_index,
 )
-
-# TODO: Replace with proper Pydantic schemas from app.schemas.supply_chain_risk_map (Task 5)
-from dataclasses import dataclass, field
-from typing import Any
-
-
-@dataclass
-class HeatmapColumn:
-    key: str
-    label: str
-    type: str
-    polarity: str
-
-
-@dataclass
-class HeatmapCell:
-    key: str
-    value: Any = None
-    risk_index: Any = None
-    level: str | None = None
-    diff: float | None = None
-    source: str = "missing"
-
-
-@dataclass
-class HeatmapRow:
-    supplier_id: UUID
-    supplier_name: str
-    cells: list = field(default_factory=list)
-
-
-@dataclass
-class HeatmapResponse:
-    period: str
-    prev_period: str
-    product_line_code: str | None
-    columns: list
-    rows: list
-
-
-@dataclass
-class TimelineResponse:
-    periods: list
-    current_period: str
-    supplier_count: int
-
-
-@dataclass
-class DimensionDetail:
-    raw_value: Any = None
-    risk_index: Any = None
-    polarity: str = "higher_is_risk"
-    source: str = "missing"
-
-
-@dataclass
-class SupplierDimensionTrend:
-    period: str
-    risk_score: float
-    quality_score: float
-    delivery_score: float
-    compliance_score: float
-
-
-@dataclass
-class SupplierDetailResponse:
-    supplier_id: UUID
-    supplier_name: str
-    product_line_code: str | None
-    period: str
-    dimensions: dict
-    trend: list
-
-
-@dataclass
-class ComparisonSupplier:
-    supplier_id: UUID
-    supplier_name: str
-    dimensions: dict
-
-
-@dataclass
-class ComparisonResponse:
-    period: str
-    suppliers: list
-
-
-@dataclass
-class SnapshotGenerateResponse:
-    period: str
-    count: int
+from app.schemas.supply_chain_risk_map import (
+    HeatmapCell, HeatmapColumn, HeatmapRow, HeatmapResponse,
+    TimelineResponse, SupplierDetailResponse, DimensionDetail,
+    SupplierDimensionTrend, ComparisonSupplier, ComparisonResponse,
+    SnapshotGenerateResponse,
+)
 
 
 def current_period() -> str:

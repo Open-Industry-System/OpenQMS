@@ -189,6 +189,9 @@ class MockERPConnector(ERPConnector):
                 "delivery_date": (
                     now + timedelta(days=self._rng.randint(7, 30))
                 ).strftime("%Y-%m-%d"),
+                "actual_delivery_date": (
+                    now + timedelta(days=self._rng.randint(7, 35))
+                ).strftime("%Y-%m-%d"),
                 "received_quantity": 0,
                 "status": "approved",
                 "lot_no": f"LOT-{i + 1:03d}",
