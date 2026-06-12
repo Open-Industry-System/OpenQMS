@@ -304,3 +304,7 @@ async def test_calculate_all_supplier_scores_returns_scores_without_side_effects
 
     # Verify result includes the supplier (even if low risk)
     assert any(r["supplier_id"] == supplier.supplier_id for r in result)
+    # Verify output shape has expected keys
+    supplier_result = next(r for r in result if r["supplier_id"] == supplier.supplier_id)
+    for key in ("risk_level", "risk_score", "quality_score", "delivery_score", "compliance_score", "rule_results"):
+        assert key in supplier_result, f"Missing key {key} in result"

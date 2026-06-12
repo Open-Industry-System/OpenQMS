@@ -175,13 +175,14 @@ async def calculate_all_supplier_scores(
     db: AsyncSession,
     product_line_code: Optional[str] = None,
 ) -> list[dict]:
-    """Pure scoring — returns risk scores for all active suppliers without side effects.
+    """Pure scoring — returns risk scores for all approved suppliers without side effects.
 
     Unlike evaluate_all_suppliers, this function:
     - Does NOT write alerts
     - Does NOT commit
     - Does NOT send notifications
-    - Includes LOW-RISK suppliers (which evaluate_all_suppliers skips)
+    - Returns scores for every approved supplier (evaluate_all_suppliers scores
+      the same set but only upserts alerts for those above threshold)
     """
     result = await db.execute(
         select(Supplier).where(Supplier.status == "approved")
@@ -210,7 +211,7 @@ async def calculate_all_supplier_scores(
             evaluations=evaluations_by_supplier.get(supplier.supplier_id, []),
             certifications=certifications_by_supplier.get(supplier.supplier_id, []),
         )
-        rule_results, failed_ids = run_all_rules(input_data, configs)
+        rule_results, _ = run_all_rules(input_data, configs)
         risk_score = calculate_risk_score(rule_results, configs)
 
         results.append({
