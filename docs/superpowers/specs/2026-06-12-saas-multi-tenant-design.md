@@ -86,8 +86,9 @@ CREATE TABLE public.tenants (
   slug VARCHAR(50) UNIQUE NOT NULL
     CHECK (slug ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'),   -- URL 标识：[a-z0-9-]，DNS 兼容
   schema_name VARCHAR(63) UNIQUE NOT NULL
-    CHECK (schema_name ~ '^tenant_[a-z0-9_]+$'),          -- PostgreSQL schema：tenant_ 前缀 + [a-z0-9_]
-  subdomain VARCHAR(100) UNIQUE NOT NULL,                 -- acme.openqms.com
+    CHECK (schema_name ~ '^tenant_[a-z0-9_]{1,56}$'),    -- PostgreSQL schema：tenant_ 前缀 + [a-z0-9_]，总长 ≤63
+  subdomain VARCHAR(63) UNIQUE NOT NULL
+    CHECK (subdomain ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'),  -- DNS label：acme（运行时拼接为 acme.openqms.com）
   plan VARCHAR(20) DEFAULT 'free',            -- free/pro/enterprise
   status VARCHAR(20) DEFAULT 'pending',       -- pending/provisioning/active/suspended/deactivated/failed
   provisioning_step VARCHAR(50) DEFAULT NULL,  -- 当前开通步骤（如 'create_schema', 'run_migrations', 'seed_data'）
@@ -288,11 +289,12 @@ from fastapi import Request
 import re
 
 def set_search_path_sql(schema_name: str) -> str:
-    """校验 schema 名：必须以 tenant_ 开头，后续只含 [a-z0-9_]，总长 8-69 字符。
+    """校验 schema 名：必须以 tenant_ 开头，后续只含 [a-z0-9_]，总长 8-63 字符
+    （tenant_ 占 7 字符，后缀 1-56 字符，合计不超过 PostgreSQL 63 字符标识符限制）。
     生成安全的 SET search_path 语句。禁止直接 f-string 拼接 schema 名到 SQL 中。
     """
-    if not re.match(r'^tenant_[a-z0-9_]{1,62}$', schema_name):
-        raise ValueError(f"Invalid schema name: {schema_name} (must match tenant_[a-z0-9_]+)")
+    if not re.match(r'^tenant_[a-z0-9_]{1,56}$', schema_name):
+        raise ValueError(f"Invalid schema name: {schema_name} (must match tenant_[a-z0-9_]+, max 63 chars)")
     # PostgreSQL quoted identifier（双引号包裹，内部双引号双写）
     quoted = '"' + schema_name.replace('"', '""') + '"'
     return f'SET search_path TO {quoted}, "public"'
@@ -503,7 +505,7 @@ pending → provisioning → active
 
 ### 6.3 Alembic env.py 多租户配置
 
-当前 `alembic/env.py` 在单一 `public` schema 上运行 `target_metadata.create_all()`。多租户需要分离公共迁移和租户迁移：
+当前 `alembic/env.py` 在单一 `public` schema 上运行迁移（使用同一份 `target_metadata`，无分支区分）。多租户需要分离公共迁移和租户迁移：
 
 **公共迁移**（Alembic 迁移文件前缀 `p`，如 `p001_platform_tables.py`）：
 - 操作 `public` schema 的平台表（`tenants`、`tenant_migrations`、`platform_admin_users`、`reference_templates` 等）
@@ -558,7 +560,7 @@ def run_migrations_online():
         context.run_migrations()
 ```
 
-> **分支过滤**：`alembic upgrade platform@head` 时，Alembic 只追踪 `platform` 分支的 revision 链；`alembic upgrade tenant@head --x schema=tenant_acme` 时，只追踪 `tenant` 分支。`env.py` 通过 `x_args` 中是否有 `schema` 来区分：无 `schema` → 运行平台迁移（`platform_metadata`）；有 `schema` → 运行租户迁移（`target_metadata`，search_path 切换到对应租户 schema）。两个分支的迁移文件存放在同一 `alembic/versions/` 目录，但通过 `branch_labels` 互不干扰。
+> **分支过滤**：`alembic upgrade platform@head` 时，Alembic 只追踪 `platform` 分支的 revision 链；`alembic -x schema=tenant_acme upgrade tenant@head` 时，只追踪 `tenant` 分支。`env.py` 通过 `x_args` 中是否有 `schema` 来区分：无 `schema` → 运行平台迁移（`platform_metadata`）；有 `schema` → 运行租户迁移（`target_metadata`，search_path 切换到对应租户 schema）。两个分支的迁移文件存放在同一 `alembic/versions/` 目录，但通过 `branch_labels` 互不干扰。
 
 ### 6.4 并发安全
 
@@ -805,7 +807,7 @@ async def run_for_each_tenant():
 - Per-tenant 存储配额
 - 自动扩缩容
 - **数据库分片（Database Sharding）**：当单一 PostgreSQL 实例的 schema 数量达到上限（约 500-1000 个），`pg_class` 等系统表膨胀会导致元数据查询变慢、`pg_dump`/`pg_restore` 显著减速。此时需要将新租户路由到新的物理 PostgreSQL 实例。设计时预留 `tenants.db_instance` 字段（默认为 NULL 表示主实例），`TenantContext` 中间件根据 `db_instance` 选择对应的数据库引擎和连接池。
-- **并发迁移**：`alembic upgrade tenant --all` 串行迁移在租户数量达到数千时可能需要数小时。长期需要并发迁移脚本（如 `asyncio.gather` 按批次并发执行不同 schema 的 DDL 变更）。
+- **并发迁移**：`python -m app.cli.tenant_migrate --all` 串行迁移在租户数量达到数千时可能需要数小时。长期需要并发迁移脚本（如 `asyncio.gather` 按批次并发执行不同 schema 的 DDL 变更）。
 
 设计时预留 hooks：TenantContext 中间件和 `get_db()` 函数可以扩展为 per-tenant 路由。
 
