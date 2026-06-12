@@ -84,6 +84,8 @@ CREATE TABLE public.tenants (
   subdomain VARCHAR(100) UNIQUE NOT NULL,     -- acme.openqms.com
   plan VARCHAR(20) DEFAULT 'free',            -- free/pro/enterprise
   status VARCHAR(20) DEFAULT 'pending',       -- pending/provisioning/active/suspended/deactivated/failed
+  provisioning_step VARCHAR(50) DEFAULT NULL,  -- 当前开通步骤（如 'create_schema', 'run_migrations', 'seed_data'）
+  provisioning_error TEXT DEFAULT NULL,        -- 开通失败时的错误信息
   db_instance VARCHAR(100) DEFAULT NULL,      -- 数据库实例标识（NULL = 主实例，分片时指向其他实例）
   db_size_bytes BIGINT DEFAULT 0,
   user_count INT DEFAULT 0,
@@ -98,7 +100,10 @@ CREATE TABLE public.tenant_migrations (
   version VARCHAR(100) NOT NULL,              -- Alembic 版本号
   status VARCHAR(20) DEFAULT 'pending',        -- pending/running/completed/failed
   error_message TEXT,                         -- 失败时的错误信息
-  applied_at TIMESTAMPTZ DEFAULT NOW()
+  started_at TIMESTAMPTZ,                    -- 迁移开始时间
+  completed_at TIMESTAMPTZ,                   -- 迁移完成时间
+  applied_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tenant_id, version)                -- 防止同一租户重复迁移同一版本
 );
 
 CREATE TABLE public.platform_admin_users (
@@ -192,6 +197,31 @@ def _reset_search_path_on_checkout(dbapi_conn, connection_record, connection_pro
 
 3. **中间件只解析租户，不设置 search_path**：TenantContext 中间件只负责解析租户身份并注入 `request.state.tenant`，不直接操作数据库会话。实际 search_path 设置在 `get_tenant_db()` 依赖中，确保每个 API 路由使用的数据库会话都正确设置。
 
+4. **租户感知会话工厂 — 禁止裸 `async_session()`**：现有代码中多个 Service 方法（如 `MESSyncService.run_sync_round`、`PLMChangeImpactWorker.process_task`）直接调用 `async_session()` 创建独立数据库会话。这些内部会话不会继承外层的 `search_path`，导致它们查询 `public` schema 而非租户 schema。解决方案：引入 `get_tenant_aware_session()` 工厂函数，从上下文变量（`ContextVar[Optional[str]]`）读取当前租户 schema 并自动设置 `search_path`。所有业务代码必须使用此工厂而非裸 `async_session()`。`get_tenant_db()` 和 `run_for_each_tenant()` 在创建会话前设置上下文变量，内部服务调用 `get_tenant_aware_session()` 即可自动获得正确的 schema。
+
+```python
+from contextvars import ContextVar
+
+# 上下文变量：当前请求的租户 schema 名
+current_tenant_schema: ContextVar[str | None] = ContextVar('current_tenant_schema', default=None)
+
+async def get_tenant_aware_session() -> AsyncGenerator[AsyncSession, None]:
+    """租户感知的数据库会话工厂。替代裸 async_session()。
+    从上下文变量读取当前租户 schema 并设置 search_path。
+    """
+    schema = current_tenant_schema.get()
+    async with async_session() as session:
+        if schema:
+            await session.execute(text(set_search_path_sql(schema)))
+        try:
+            yield session
+        finally:
+            await session.rollback()
+            if schema:
+                await session.execute(text('RESET search_path'))
+            await session.close()
+```
+
 ---
 
 ## 3. 请求路由
@@ -226,11 +256,13 @@ async def tenant_context_middleware(request: Request, call_next):
     return await call_next(request)
 ```
 
-### 3.2 租户解析优先级
+### 3.2 租户解析优先级与一致性校验
 
 1. **子域名**（生产）：从 `Host` header 提取，`acme.openqms.com` → `acme`
-2. **X-Tenant-ID 请求头**（开发）：`X-Tenant-ID: acme`
+2. **X-Tenant-ID 请求头**（仅限开发/内部网络）：`X-Tenant-ID: acme`。**生产环境必须禁用此头**（中间件检查 `settings.TENANT_MODE == "dev"` 或请求来源为内部网络），否则攻击者可伪造租户身份
 3. **JWT tenant_id claim**（回退）：从 token payload 中提取
+
+**一致性校验**：当请求同时携带子域名和 JWT（所有已认证请求都是如此），中间件必须验证两者解析出的 `tenant_id` 一致。不一致时返回 403 Forbidden。这防止攻击者使用 A 租户的 JWT 访问 B 租户的数据。
 
 ### 3.3 数据库依赖注入
 
@@ -269,13 +301,15 @@ async def get_tenant_db(request: Request):
                 await session.execute(text('RESET search_path'))
             await session.close()
 
-# 平台管理用 — 显式强制 public schema
+# 平台管理用 — 显式强制 public schema，同样 rollback + RESET
 async def get_platform_db():
     async with async_session() as session:
         await session.execute(text('SET search_path TO "public"'))
         try:
             yield session
         finally:
+            await session.rollback()
+            await session.execute(text('RESET search_path'))
             await session.close()
 ```
 
@@ -318,6 +352,13 @@ async def get_platform_db():
 }
 ```
 
+**Refresh Token 绑定**：当前 refresh token 只编码 `sub`（user_id），查询时在 `users` 表中查找。多租户后，refresh token 必须也包含 `tenant_id`，且查找时在对应租户 schema 的 `users` 表中进行。此外，租户 token 和平台 admin token 的 `iss`（签发者）和 `aud`（受众）必须不同，防止跨域使用：
+
+- 租户 token：`iss: "openqms-tenant"`, `aud: "openqms-tenant"`
+- 平台 admin token：`iss: "openqms-platform"`, `aud: "openqms-platform"`
+
+使用错误的 `iss`/`aud` 组合的 token 必须被拒绝。
+
 **平台管理员 Token**：
 
 ```json
@@ -345,10 +386,17 @@ async def get_platform_db():
 
 | 能做 | 不能做 |
 |---|---|
-| 创建/暂停/恢复/停用租户 | ❌ 访问租户业务数据 |
-| 查看租户健康状态 | ❌ 登录租户应用 |
+| 创建/暂停/恢复/停用租户 | ❌ 读取租户业务数据（FMEA、CAPA、供应商等） |
+| 查看租户健康状态（存储量、用户数、活跃度） | ❌ 登录租户应用 |
 | 触发租户 schema 迁移 | ❌ 修改租户内用户/角色 |
-| 管理参考数据模板 | ❌ 查看租户内 FMEA/CAPA 等数据 |
+| 管理参考数据模板 | ❌ 查看/导出租户业务数据 |
+
+**运营例外与 break-glass**：平台管理员可以执行 DDL 操作（创建 schema、运行迁移、清理 failed 租户的 schema），这些操作访问的是 schema 元数据而非业务数据行。如遇紧急情况需要查看租户数据（如安全审计、法律合规），必须通过 break-glass 流程：
+
+1. 平台管理员提交 break-glass 请求（含原因、审批人、时间范围）
+2. 系统记录完整审计日志（谁、何时、访问了哪个租户的哪些数据）
+3. 时间范围到期后自动撤销访问权限
+4. 租户管理员收到通知
 
 ---
 
@@ -431,7 +479,47 @@ pending → provisioning → active
 3. `alembic_version` 表自动记录最终版本号
 4. `public.tenant_migrations` 记录状态为 `completed`
 
-### 6.3 并发安全
+### 6.3 Alembic env.py 多租户配置
+
+当前 `alembic/env.py` 在单一 `public` schema 上运行 `target_metadata.create_all()`。多租户需要分离公共迁移和租户迁移：
+
+**公共迁移**（`alembic/versions/` 前缀 `p`）：
+- 操作 `public` schema 的平台表（`tenants`、`tenant_migrations`、`platform_admin_users`、`reference_templates` 等）
+- 使用标准 `alembic upgrade head`，`version_table_schema = "public"`
+
+**租户迁移**（`alembic/versions/` 前缀 `t`）：
+- 操作租户 schema 的业务表（`users`、`factories`、`fmea_documents` 等 ~50 张表）
+- `run_migrations_online()` 中根据命令行参数切换 `search_path`
+- `version_table_schema` 设为当前租户的 `schema_name`（而非默认 `public`），确保每个租户有独立的 `alembic_version` 表
+
+**env.py 关键配置**：
+
+```python
+# alembic/env.py 关键改动
+def run_migrations_online():
+    connectable = engine
+    schema_name = context.get_x_argument(as_dictionary=True).get("schema")
+
+    with connectable.connect() as connection:
+        if schema_name:
+            # 租户迁移：设置 search_path 和 version_table_schema
+            connection.execute(text(f'SET search_path TO "{schema_name}", "public"'))
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                version_table_schema=schema_name,  # 每个租户独立版本表
+            )
+        else:
+            # 公共迁移：默认 public schema
+            context.configure(
+                connection=connection,
+                target_metadata=platform_metadata,  # 只有平台表
+                version_table_schema="public",
+            )
+        context.run_migrations()
+```
+
+### 6.4 并发安全
 
 使用 `pg_advisory_lock(tenant_id)` 防止同一租户的并发迁移。迁移完成后释放锁。
 
@@ -457,17 +545,18 @@ pending → provisioning → active
 
 ### 7.2 访问机制
 
-`search_path` 天然支持回退查询：
+`search_path` 天然支持回退查询，但**平台参考数据服务应使用显式 schema 限定而非依赖回退**：
 
 ```sql
-SET search_path TO "tenant_acme", "public";
+-- ✅ 推荐：显式 schema 限定，不依赖 search_path 回退
+SELECT * FROM public.reference_templates;
 
--- 查询租户自己的 FMEA → 命中 tenant_acme.fmea_documents
-SELECT * FROM fmea_documents;
-
--- 查询平台参考模板 → 先找 tenant_acme（不存在），回退到 public
+-- ⚠️ 可用但不推荐：依赖 search_path 回退
+-- 如果租户 schema 后来创建了同名表，会遮蔽 public 版本
 SELECT * FROM reference_templates;
 ```
+
+**原因**：如果未来租户 fork 了参考模板到自己的 schema（表名 `reference_templates`），`search_path` 回退会先命中租户版本而非 public 版本。使用显式 `public.reference_templates` 可避免名称遮蔽问题。平台管理的参考数据 API 路由（`/api/reference/templates`）应始终查询 `public.reference_templates`。
 
 ### 7.3 Fork API
 
@@ -552,7 +641,12 @@ DEV_TENANT_SLUG=acme            # 本地开发默认租户
 
 1. **创建平台表** — 在 `public` schema 新建 `tenants`、`tenant_migrations`、`platform_admin_users`、`reference_templates` 等
 2. **创建租户 schema** — `CREATE SCHEMA tenant_default`
-3. **移动业务表** — `ALTER TABLE ... SET SCHEMA tenant_default` 移动所有 50+ 业务表（序列和索引自动跟随）
+3. **移动业务对象** — `ALTER TABLE ... SET SCHEMA tenant_default` 移动所有 50+ 业务表（序列和索引自动跟随）。此外还需迁移：
+   - **枚举类型（ENUM）**：`ALTER TYPE ... SET SCHEMA tenant_default`（PostgreSQL 枚举是 schema-level 对象）
+   - **序列（SEQUENCE）**：`ALTER SEQUENCE ... SET SCHEMA tenant_default`（大部分随表自动迁移，但需验证无遗漏）
+   - **视图（VIEW）**：如果有依赖业务表的视图，需 `ALTER VIEW ... SET SCHEMA tenant_default`
+   - **触发器函数（FUNCTION）**：如有 PostgreSQL 函数引用业务表，需迁移函数并更新表名引用
+   - **`regclass` 和 `::regtype` 引用**：迁移后 OID 变化，需验证无硬编码 OID 依赖
 4. **注册第一个租户** — 插入 `public.tenants` 和 `public.tenant_migrations` 记录
 5. **应用层切换** — 启用 `TENANT_MODE=true`，注册 TenantContext 中间件
 
@@ -617,15 +711,17 @@ async def run_for_each_tenant():
 - AQL 过期清理 (`_aql_expiry_loop`)
 - 协同会话清理 (`_cleanup_loop`)
 
-### 10.3 HTTP 路由改造（约 5 个文件）
+### 10.3 HTTP 路由改造
+
+**核心策略**：将 `database.py` 中的 `get_db()` 直接改为租户感知版本，而非新增 `get_tenant_db()`。这样所有通过 `Depends(get_db)` 注入会话的路由自动获得租户隔离，无需逐文件修改导入。现有路由文件（约 35 个 API 模块）**零修改**。
 
 | 文件 | 改动 |
 |---|---|
-| `database.py` | 增加 search_path 管理 |
+| `database.py` | `get_db()` 改为从 `request.state.tenant` 读取 schema 并设置 `search_path`；新增 `get_tenant_aware_session()` 上下文工厂 |
 | `main.py` | 注册 TenantContext 中间件 |
-| `deps.py` | `get_tenant_db()` 替换 `get_db()` |
-| `security.py` | JWT 编解码增加 tenant_id |
-| `auth.py` API | 登录时增加租户解析 |
+| `security.py` | JWT 编解码增加 tenant_id，签发时写入 tenant_id claim |
+| `auth.py` API | 登录时从子域名/JWT 解析 tenant，验证 Host 与 JWT tenant_id 一致 |
+| 所有 Service 内部 `async_session()` | 替换为 `get_tenant_aware_session()`（约 10+ 处） |
 
 ### 10.4 新增
 
@@ -665,7 +761,9 @@ async def run_for_each_tenant():
 | 单元测试 | pytest fixture 自动创建/清理测试租户 schema |
 | 隔离测试 | 创建两个租户，写入数据 A，验证租户 B 无法读取 |
 | 连接池安全测试 | 模拟请求异常中断，验证下一个请求不会继承错误的 search_path |
+| 嵌套会话测试 | 验证 Service 内部通过 `get_tenant_aware_session()` 打开的会话仍命中正确租户 schema，而非回退到 public |
 | 后台任务测试 | 验证 `run_for_each_tenant()` 正确遍历所有活跃租户并设置 schema |
+| 租户身份一致性测试 | 验证子域名与 JWT tenant_id 不一致时返回 403 |
 | 迁移测试 | 模拟现有部署 → 执行迁移 → 验证表分布 → 验证回滚 |
 | 生命周期测试 | 创建 → 活跃 → 暂停 → 恢复 → 停用，验证每个状态 |
 | 性能测试 | search_path 切换开销测量，多租户并发查询 |
