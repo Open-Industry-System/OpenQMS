@@ -743,8 +743,12 @@ async def test_get_db_sets_search_path_for_tenant():
     mock_session.__aexit__ = AsyncMock(return_value=False)
     mock_session.execute = AsyncMock()
     mock_session.rollback = AsyncMock()
-    mock_session.begin = AsyncMock(return_value=AsyncMock())
     mock_session.close = AsyncMock()
+    # session.begin() returns an async context manager, not a coroutine
+    begin_cm = AsyncMock()
+    begin_cm.__aenter__ = AsyncMock(return_value=None)
+    begin_cm.__aexit__ = AsyncMock(return_value=False)
+    mock_session.begin = MagicMock(return_value=begin_cm)
 
     mock_sessionmaker = MagicMock(return_value=mock_session)
 
@@ -2362,6 +2366,51 @@ async for tenant, db in run_for_each_tenant():
     await evaluate_all_suppliers(db, product_line_code=None)
 ```
 
+**10. Supply chain risk map snapshot** (`snapshot_loop`) — this loop is started directly as `asyncio.create_task(snapshot_loop())`. Unlike the other loops, it uses advisory locks internally. Wrap the session creation with `run_for_each_tenant`:
+
+```python
+# Before:
+async def snapshot_loop():
+    while True:
+        try:
+            acquired = False
+            async with async_session() as db:
+                acquired = await _acquire_snapshot_lock(db)
+                if acquired:
+                    try:
+                        period = current_period()
+                        count = await generate_snapshot(db, None, period)
+                        logger.info(f"Generated {count} snapshots for {period}")
+                    finally:
+                        await _release_snapshot_lock(db)
+                else:
+                    logger.debug("Snapshot lock not acquired, skipping")
+        except Exception:
+            logger.exception("Error in snapshot loop")
+        await asyncio.sleep(SLEEP_SECONDS)
+
+# After:
+async def snapshot_loop():
+    while True:
+        try:
+            async for tenant, db in run_for_each_tenant():
+                acquired = await _acquire_snapshot_lock(db)
+                if acquired:
+                    try:
+                        period = current_period()
+                        count = await generate_snapshot(db, None, period)
+                        logger.info(f"Generated {count} snapshots for {period}")
+                    finally:
+                        await _release_snapshot_lock(db)
+                else:
+                    logger.debug("Snapshot lock not acquired, skipping")
+        except Exception:
+            logger.exception("Error in snapshot loop")
+        await asyncio.sleep(SLEEP_SECONDS)
+```
+
+Note: The `async with async_session() as db:` inside `snapshot_loop` is replaced by `async for tenant, db in run_for_each_tenant():` which handles session creation. The internal `acquired` flag and lock handling remain the same.
+
 - [ ] **Step 3: Replace bare `async_session()` in service code**
 
 Replace all direct `async with async_session() as db:` calls in service files with `async with get_tenant_aware_session() as db:`. This ensures background tasks that use their own sessions (not routed through `get_db()`) also get the tenant search_path.
@@ -2397,10 +2446,9 @@ Files and line references (as of the current codebase):
 | `app/services/mes_connector.py` | 171 | `async with async_session() as session:` | `async with get_tenant_aware_session() as session:` |
 | `app/services/iqc_inspection_service.py` | 24 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
 | `app/services/capa_draft_service.py` | 272 | `async with async_session() as audit_db:` | `async with get_tenant_aware_session() as audit_db:` |
+| `app/services/supply_chain_risk_map/scheduler.py` | 41 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
 
-Note: `app/services/supply_chain_risk_map/scheduler.py` is not listed above because it's already wrapped via `run_for_each_tenant()` in the `main.py` lifespan — the `snapshot_loop` receives a `db` parameter from the outer loop.
-
-Note: `app/services/collaboration_service.py` does not have a bare `async_session()` call — it receives `db` from the lifespan loop.
+Note: `app/services/collaboration_service.py` does not have a bare `async_session()` call — it receives `db` from the lifespan loop (which will be wrapped with `run_for_each_tenant()` in Step 2).
 
 - [ ] **Step 4: Run tests**
 
