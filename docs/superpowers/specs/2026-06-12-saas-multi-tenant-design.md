@@ -16,7 +16,7 @@ OpenQMS 从单租户应用升级为 SaaS 多租户平台。每个租户是一家
 | 决策 | 选择 | 理由 |
 |---|---|---|
 | 租户模型 | 独立组织（B2B SaaS） | 每个租户是一家公司 |
-| 隔离方式 | Schema-per-tenant | 结构性隔离，零泄露风险 |
+| 隔离方式 | Schema-per-tenant | 强隔离边界，显著降低跨租户查询风险 |
 | 弹性资源 | 共享应用实例，容器隔离后续 | 先做 schema 隔离，容器化升级路径 |
 | 租户开通 | 管理员创建（企业模式） | 无自助注册 |
 | 数据共享 | 业务数据隔离 + 只读参考数据 | 平台提供模板/标准库，租户不可跨租户共享业务数据 |
@@ -31,7 +31,7 @@ OpenQMS 从单租户应用升级为 SaaS 多租户平台。每个租户是一家
 
 | 层 | 机制 | 作用 | 实现 |
 |---|---|---|---|
-| 租户隔离 | Schema 级 | 公司间零泄露 | PostgreSQL schema + search_path |
+| 租户隔离 | Schema 级 | 公司间强隔离边界 | PostgreSQL schema + search_path |
 | 工厂隔离 | 行级 | 公司内工厂间隔离 | 现有 factory_id + FactoryScope |
 
 ---
@@ -232,7 +232,8 @@ async def get_tenant_aware_session() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.rollback()
             if schema:
-                await session.execute(text('RESET search_path'))
+                async with session.begin():
+                    await session.execute(text('RESET search_path'))
             await session.close()
 ```
 
@@ -312,16 +313,22 @@ async def get_db(request: Request):
             try:
                 yield session
             finally:
-                # 先 rollback 清理可能的事务错误状态，再 RESET search_path
+                # RESET search_path 必须在 autocommit 模式下执行：
+                # rollback() 后 session 处于无事务状态，此时 SET/RESET
+                # 会被 SQLAlchemy 隐式开启新事务包裹。如果后续 close() 触发
+                # rollback，RESET 可能被撤销。因此使用
+                # session.begin() + commit() 确保 RESET 持久化。
+                # 最终安全兜底：连接池 checkout reset（见下方说明）。
                 await session.rollback()
                 if tenant:
-                    await session.execute(text('RESET search_path'))
+                    async with session.begin():
+                        await session.execute(text('RESET search_path'))
                 await session.close()
     finally:
         # 清除上下文变量，防止泄漏到下一个请求
         current_tenant_schema.reset(token)
 
-# 平台管理用 — 显式强制 public schema，同样 rollback + RESET
+# 平台管理用 — 显式强制 public schema，同样 rollback + autocommit RESET
 async def get_platform_db():
     async with async_session() as session:
         await session.execute(text('SET search_path TO "public"'))
@@ -329,11 +336,14 @@ async def get_platform_db():
             yield session
         finally:
             await session.rollback()
-            await session.execute(text('RESET search_path'))
+            async with session.begin():
+                await session.execute(text('RESET search_path'))
             await session.close()
 ```
 
 **为什么用 `SET` 而非 `SET LOCAL`**：现有代码中多个 endpoint/service 会在请求内调用 `commit()` 后继续查询（例如 `auth.py` 登录在 commit refresh token 后查询用户响应）。`SET LOCAL` 在 `COMMIT` 后自动失效，后续查询会回到默认 `public` schema，造成读错 schema 或隔离失效。使用普通 `SET` + dependency finally 中的 `rollback()` + `RESET search_path`，配合连接池 checkout reset 兜底，确保整个请求周期内 search_path 始终正确。
+
+**为什么 RESET 必须在 `session.begin()` + `commit()` 中执行**：`rollback()` 后 session 处于无事务状态。此时直接 `await session.execute(text('RESET search_path'))` 会被 SQLAlchemy 隐式开启事务，但 `close()` 或连接池回收时的隐式 `rollback()` 可能撤销这个 RESET，导致 search_path 残留到连接池中的下一个请求。将 RESET 包裹在显式 `async with session.begin(): ... commit()` 中确保 RESET 持久化。即使 RESET 失败（极端情况），连接池的 checkout reset（配置 `pool_pre_ping=True` + `pool_reset_on_return="rollback"`）会作为最终兜底将连接重置到默认状态。
 
 ---
 
@@ -690,8 +700,12 @@ DEV_TENANT_SLUG=acme            # 本地开发默认租户
    - **视图（VIEW）**：如果有依赖业务表的视图，需 `ALTER VIEW ... SET SCHEMA tenant_default`
    - **触发器函数（FUNCTION）**：如有 PostgreSQL 函数引用业务表，需迁移函数并更新表名引用
    - **`regclass` 和 `::regtype` 引用**：迁移后 OID 变化，需验证无硬编码 OID 依赖
-4. **注册第一个租户** — 插入 `public.tenants` 和 `public.tenant_migrations` 记录
-5. **应用层切换** — 启用 `TENANT_MODE=true`，注册 TenantContext 中间件
+4. **迁移 alembic_version 表** — 现有 `public.alembic_version` 记录了当前业务表的迁移历史。迁移后需要：
+   - 将现有 `public.alembic_version` 的数据复制到 `tenant_default.alembic_version`（作为 tenant 分支的起点），确保租户 schema 的迁移状态连续
+   - 清空 `public.alembic_version` 并插入 platform 分支的初始 revision（`p001` 或等效），使后续 `alembic upgrade platform@head` 正确追踪平台表迁移
+   - 如果不执行此步骤，后续 `platform@head` 和 `tenant@head` 的版本追踪会互相冲突，导致迁移状态混乱
+5. **注册第一个租户** — 插入 `public.tenants` 和 `public.tenant_migrations` 记录
+6. **应用层切换** — 启用 `TENANT_MODE=true`，注册 TenantContext 中间件
 
 ### 9.2 迁移关键约束
 
@@ -747,7 +761,8 @@ async def run_for_each_tenant():
                     yield tenant, db
                 finally:
                     await db.rollback()
-                    await db.execute(text('RESET search_path'))
+                    async with db.begin():
+                        await db.execute(text('RESET search_path'))
                     await db.close()
         finally:
             current_tenant_schema.reset(token)
@@ -771,7 +786,7 @@ async def run_for_each_tenant():
 3. **要求** 平台管理员 JWT（`is_platform_admin: true`）才可访问。
 
 **强制机制**：仅靠开发者纪律不够，必须通过代码层面强制：
-- `platform_router = APIRouter(prefix="/api/platform", dependencies=[Depends(require_platform_admin), Depends(get_platform_db)])` — 平台路由的 `APIRouter` 在创建时即注入这两个依赖，确保所有子路由自动继承。开发者无需（也不应）在每个路由函数中手动注入 `get_platform_db()`。
+- `platform_router = APIRouter(prefix="/api/platform", dependencies=[Depends(require_platform_admin)])` — 路由级依赖只放 `require_platform_admin`（鉴权，不涉及 DB 会话）。平台路由的 handler 函数必须显式声明 `db: Annotated[AsyncSession, Depends(get_platform_db)]`，与租户路由的 `db: Annotated[AsyncSession, Depends(get_db)]` 对称。注意：`APIRouter(dependencies=[...])` 不会将依赖的返回值注入到 endpoint 参数中，所以 `get_platform_db` 不能放在 router-level dependencies 里——否则每个 handler 还得再 `Depends(get_platform_db)` 导致重复开 session。
 - **测试断言**：CI 中运行路由依赖检查脚本，遍历 `/api/platform/*` 下所有路由，断言其依赖列表包含 `get_platform_db`（而非 `get_db`）。如果有平台路由使用 `Depends(get_db)`，测试失败。
 
 | 文件 | 改动 |
