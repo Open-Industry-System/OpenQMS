@@ -21,13 +21,13 @@ OpenQMS 从单租户应用升级为 SaaS 多租户平台。每个租户是一家
 | 租户开通 | 管理员创建（企业模式） | 无自助注册 |
 | 数据共享 | 业务数据隔离 + 只读参考数据 | 平台提供模板/标准库，租户不可跨租户共享业务数据 |
 | 迁移方式 | 现有部署成为第一个租户 | 不维护双版本 |
-
-### 1.3 设计原则
-
-- **不支持长期双模式运行**：`TENANT_MODE` 仅为短期开发兼容开关，用于渐进式开发和测试。生产环境迁移完成后，该开关将被移除。目标运行态统一为多租户模式。
 | 平台管理 | 独立超管面板 | 管理员与租户完全分离 |
 
-### 1.2 双层隔离模型
+### 1.2 设计原则
+
+- **不支持长期双模式运行**：`TENANT_MODE` 仅为短期开发兼容开关，用于渐进式开发和测试。生产环境迁移完成后，该开关将被移除。目标运行态统一为多租户模式。
+
+### 1.3 双层隔离模型
 
 | 层 | 机制 | 作用 | 实现 |
 |---|---|---|---|
@@ -82,7 +82,8 @@ CREATE TABLE public.tenants (
   schema_name VARCHAR(63) UNIQUE NOT NULL,    -- "tenant_<slug>"
   subdomain VARCHAR(100) UNIQUE NOT NULL,     -- acme.openqms.com
   plan VARCHAR(20) DEFAULT 'free',            -- free/pro/enterprise
-  status VARCHAR(20) DEFAULT 'pending',       -- pending/active/suspended/deactivated
+  status VARCHAR(20) DEFAULT 'pending',       -- pending/provisioning/active/suspended/deactivated/failed
+  db_instance VARCHAR(100) DEFAULT NULL,      -- 数据库实例标识（NULL = 主实例，分片时指向其他实例）
   db_size_bytes BIGINT DEFAULT 0,
   user_count INT DEFAULT 0,
   last_active_at TIMESTAMPTZ,
@@ -155,19 +156,19 @@ CREATE INDEX idx_industry_standards_code ON public.industry_standards(standard_c
 
 ```python
 # 租户请求开始（在 get_tenant_db 依赖中，不是中间件中）
-SET LOCAL search_path TO "tenant_acme", "public";
+SET search_path TO "tenant_acme", "public";
 
-# 请求结束 — LOCAL 确保事务结束时自动重置
-# 即使 finally 未执行，LOCAL 也不会泄漏到下一个事务
+# 请求结束 — dependency finally 强制 RESET search_path
+# 即使 finally 未执行，连接池 reset_on_return 也会兜底重置
 ```
 
 **关键安全设计**：
 
-1. **`SET LOCAL` 而非 `SET`**：`SET LOCAL` 只在当前事务内生效，事务结束（COMMIT/ROLLBACK）后自动恢复。即使应用崩溃或连接池强制回收，不会影响下一个请求。
+1. **使用普通 `SET`（非 `SET LOCAL`）+ dependency finally RESET**：`SET LOCAL` 只在当前事务内生效，`COMMIT` 后自动恢复——但现有代码中多个 endpoint/service 在请求内会调用 `commit()`（例如登录在 commit refresh token 后继续查询），`SET LOCAL` 在 commit 后会失效，导致后续查询回到默认 schema。使用普通 `SET` 并在 dependency 的 `finally` 中显式 `RESET search_path`，配合连接池兜底，确保整个请求周期内 search_path 始终正确。
 
 2. **双层安全保障**：
-   - 第一层：`get_tenant_db()` 在 yield session 前执行 `SET LOCAL search_path`
-   - 第二层：asyncpg 连接池 `reset_on_return` 配置 `SET search_path TO "public"`，确保归还时强制重置
+   - 第一层：`get_tenant_db()` 在 yield session 前执行 `SET search_path`，在 finally 中 `RESET search_path`
+   - 第二层：asyncpg 连接池 `reset_on_return` 配置 `SET search_path TO "public"`，确保归还时强制重置——即使 finally 未执行（应用崩溃、连接池强制回收），也不会影响下一个请求
 
 3. **中间件只解析租户，不设置 search_path**：TenantContext 中间件只负责解析租户身份并注入 `request.state.tenant`，不直接操作数据库会话。实际 search_path 设置在 `get_tenant_db()` 依赖中，确保每个 API 路由使用的数据库会话都正确设置。
 
@@ -232,27 +233,30 @@ async def get_tenant_db(request: Request):
     tenant = getattr(request.state, "tenant", None)
     async with async_session() as session:
         if tenant:
-            # SET LOCAL 只在当前事务内生效，事务结束自动恢复
+            # 使用普通 SET（非 SET LOCAL），确保 commit 后仍然有效
             await session.execute(
-                text(f'SET LOCAL search_path TO "{tenant.schema_name}", "public"')
+                text(f'SET search_path TO "{tenant.schema_name}", "public"')
             )
         # 无 tenant → 平台管理路由，search_path 保持默认 public
         try:
             yield session
         finally:
+            # 请求结束时显式 RESET，确保连接归还池时是干净的
+            if tenant:
+                await session.execute(text('RESET search_path'))
             await session.close()
 
 # 平台管理用 — 显式强制 public schema
 async def get_platform_db():
     async with async_session() as session:
-        await session.execute(text('SET LOCAL search_path TO "public"'))
+        await session.execute(text('SET search_path TO "public"'))
         try:
             yield session
         finally:
             await session.close()
 ```
 
-**为什么不把 search_path 设置放在中间件**：中间件无法保证路由依赖注入的 `get_db()` 使用的是同一个数据库会话。FastAPI 的 `Depends(get_db)` 每次调用会新建 `AsyncSession`，中间件设置的 search_path 不会传递到路由的会话。将设置放在 `get_tenant_db()` 依赖中确保每个路由使用的会话都正确隔离。
+**为什么用 `SET` 而非 `SET LOCAL`**：现有代码中多个 endpoint/service 会在请求内调用 `commit()` 后继续查询（例如 `auth.py` 登录在 commit refresh token 后查询用户响应）。`SET LOCAL` 在 `COMMIT` 后自动失效，后续查询会回到默认 `public` schema，造成读错 schema 或隔离失效。使用普通 `SET` + dependency finally 中的 `RESET search_path`，配合连接池 `reset_on_return` 兜底，确保整个请求周期内 search_path 始终正确。
 
 ---
 
@@ -263,10 +267,10 @@ async def get_platform_db():
 **租户用户认证**（现有流程改造）：
 
 1. 用户访问 `acme.openqms.com`
-2. TenantContext 中间件解析子域名 → `SET search_path TO "tenant_acme", "public"`
-3. 用户 `POST /api/auth/login` → 在 `tenant_acme.users` 中认证
-4. JWT payload 新增 `tenant_id` 字段
-5. 后续请求：JWT 中提取 `tenant_id`，验证与子域名一致，设置 `search_path`
+2. TenantContext 中间件解析子域名并注入 `request.state.tenant`
+3. `get_tenant_db()` 依赖在数据库会话中执行 `SET search_path TO "tenant_acme", "public"`
+4. 用户 `POST /api/auth/login` → 在 `tenant_acme.users` 中认证
+5. JWT payload 新增 `tenant_id` 字段
 
 **平台管理员认证**（全新）：
 
@@ -412,8 +416,9 @@ pending → provisioning → active
 
 新租户开通时：
 1. `CREATE SCHEMA tenant_<slug>`
-2. 运行全部迁移（从 `tenant_migrations` 最新版本开始）
-3. 运行种子数据
+2. 运行完整 tenant migration chain（从空 schema 到最新版本，与 §6.2 一致）
+3. `alembic_version` 表自动记录最终版本号
+4. 运行种子数据
 
 ---
 
@@ -563,7 +568,7 @@ async def run_for_each_tenant():
     """
     async with async_session() as session:
         # 查询 public schema 的 tenants 表
-        await session.execute(text('SET LOCAL search_path TO "public"'))
+        await session.execute(text('SET search_path TO "public"'))
         result = await session.execute(
             select(Tenant).where(Tenant.status == "active")
         )
@@ -572,9 +577,11 @@ async def run_for_each_tenant():
     for tenant in tenants:
         async with async_session() as db:
             await db.execute(
-                text(f'SET LOCAL search_path TO "{tenant.schema_name}", "public"')
+                text(f'SET search_path TO "{tenant.schema_name}", "public"')
             )
             yield tenant, db
+            # 请求结束时 RESET，配合连接池 reset_on_return 兜底
+            await db.execute(text('RESET search_path'))
             await db.close()
 ```
 
@@ -620,9 +627,8 @@ async def run_for_each_tenant():
 - Per-tenant Redis namespace
 - Per-tenant 存储配额
 - 自动扩缩容
-- **数据库分片（Database Sharding）**：当单一 PostgreSQL 实例的 schema 数量达到上限（约 500-1000 个），`pg_class` 等系统表膨胀会导致元数据查询变慢、`pg_dump`/`pg_restore` 显著减速。此时需要将新租户路由到新的物理 PostgreSQL 实例。设计时预留 `tenants.db_instance` 字段（默认为空，表示主实例），`TenantContext` 中间件根据 `db_instance` 选择对应的数据库引擎和连接池。
+- **数据库分片（Database Sharding）**：当单一 PostgreSQL 实例的 schema 数量达到上限（约 500-1000 个），`pg_class` 等系统表膨胀会导致元数据查询变慢、`pg_dump`/`pg_restore` 显著减速。此时需要将新租户路由到新的物理 PostgreSQL 实例。设计时预留 `tenants.db_instance` 字段（默认为 NULL 表示主实例），`TenantContext` 中间件根据 `db_instance` 选择对应的数据库引擎和连接池。
 - **并发迁移**：`alembic upgrade tenant --all` 串行迁移在租户数量达到数千时可能需要数小时。长期需要并发迁移脚本（如 `asyncio.gather` 按批次并发执行不同 schema 的 DDL 变更）。
-- **数据库分片（Database Sharding）**：当单一 PostgreSQL 实例的 schema 数量达到上限（约 500-1000 个），`pg_class` 等系统表膨胀会导致元数据查询变慢、`pg_dump`/`pg_restore` 显著减速。此时需要将新租户路由到新的物理 PostgreSQL 实例。设计时预留 `tenants.db_instance` 字段（默认为空，表示主实例），`TenantContext` 中间件根据 `db_instance` 选择对应的数据库引擎和连接池。
 
 设计时预留 hooks：TenantContext 中间件和 `get_tenant_db()` 函数可以扩展为 per-tenant 路由。
 
