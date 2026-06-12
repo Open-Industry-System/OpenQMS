@@ -28,9 +28,11 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def create_refresh_token(user_id: str) -> tuple[str, datetime]:
+def create_refresh_token(user_id: str, tenant_id: str | None = None) -> tuple[str, datetime]:
     expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode = {"sub": user_id, "exp": expire, "type": "refresh"}
+    if tenant_id:
+        to_encode["tenant_id"] = tenant_id
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM), expire
 
 
@@ -44,12 +46,12 @@ def decode_access_token(token: str) -> str | None:
         return None
 
 
-def decode_refresh_token(token: str) -> str | None:
+def decode_refresh_token(token: str) -> dict | None:
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_aud": False})
         if payload.get("type") != "refresh":
             return None
-        return payload.get("sub")
+        return payload
     except JWTError:
         return None
 
@@ -88,13 +90,16 @@ def create_tenant_user_token(user_id: str, tenant_id: str, role_id: str, factory
 def verify_token(token: str, issuer: str | None = None, audience: str | None = None) -> dict:
     """Verify and decode a JWT token. Returns the payload dict.
     Raises JWTError on invalid/expired tokens.
-    Optionally verifies issuer and audience claims for defense-in-depth."""
+    Optionally verifies issuer and audience claims for defense-in-depth.
+    When audience is not provided, audience verification is disabled so the
+    caller can inspect the payload first (e.g., middleware tenant resolution)."""
+    options = {"verify_aud": audience is not None}
     kwargs = {}
     if issuer:
         kwargs["issuer"] = issuer
     if audience:
         kwargs["audience"] = audience
-    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_aud": audience is not None}, **kwargs)
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options=options, **kwargs)
 
 
 # JWT issuer/audience constants for cross-domain prevention

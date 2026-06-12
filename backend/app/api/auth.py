@@ -85,7 +85,10 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     if tenant:
         token_data["tenant_id"] = str(tenant.id)
     token = create_access_token(data=token_data)
-    refresh_token, refresh_expires = create_refresh_token(str(user.user_id))
+    refresh_token, refresh_expires = create_refresh_token(
+        str(user.user_id),
+        tenant_id=str(tenant.id) if tenant else None,
+    )
     user.refresh_token = refresh_token
     user.refresh_token_expires = refresh_expires
     await db.commit()
@@ -133,7 +136,10 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
 
 @router.post("/refresh", response_model=RefreshTokenResponse)
 async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    user_id = decode_refresh_token(req.refresh_token)
+    payload = decode_refresh_token(req.refresh_token)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    user_id = payload.get("sub")
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     result = await db.execute(select(User).where(User.user_id == user_id))
@@ -144,17 +150,23 @@ async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSes
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
-    # Preserve multi-tenant claims in refreshed token
+    # Preserve multi-tenant claims in refreshed token.
+    # Prefer tenant_id from the refresh token payload; fall back to the
+    # request-resolved tenant for backward compatibility.
     token_data = {
         "sub": str(user.user_id),
         "role_id": str(user.role_id),
         "factory_id": str(user.factory_id) if user.factory_id else None,
     }
     tenant = getattr(request.state, "tenant", None)
-    if tenant:
-        token_data["tenant_id"] = str(tenant.id)
+    tenant_id = payload.get("tenant_id") or (str(tenant.id) if tenant else None)
+    if tenant_id:
+        token_data["tenant_id"] = tenant_id
     new_access = create_access_token(data=token_data)
-    new_refresh, new_expires = create_refresh_token(str(user.user_id))
+    new_refresh, new_expires = create_refresh_token(
+        str(user.user_id),
+        tenant_id=tenant_id,
+    )
     user.refresh_token = new_refresh
     user.refresh_token_expires = new_expires
     await db.commit()

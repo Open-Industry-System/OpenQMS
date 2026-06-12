@@ -9,6 +9,7 @@ from app.database import async_session, run_for_each_tenant, get_tenant_aware_se
 from app.models.user import User
 from app.models.role import RoleDefinition
 from app.core.security import hash_password
+from app.config import settings
 from app.api.auth import router as auth_router
 from app.api.fmea import router as fmea_router
 from app.api.capa import router as capa_router
@@ -347,6 +348,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="OpenQMS API", version="0.1.0", lifespan=lifespan)
+
+# Expose tenant domain for subdomain-based tenant resolution
+app.state.tenant_domain = settings.TENANT_DOMAIN
 
 app.add_middleware(TenantContextMiddleware)
 

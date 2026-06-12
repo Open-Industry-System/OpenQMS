@@ -1,5 +1,6 @@
 """Test tenant lifecycle: create → active → suspended → reactivated → deactivated."""
 import pytest
+from sqlalchemy import text
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.database import async_session

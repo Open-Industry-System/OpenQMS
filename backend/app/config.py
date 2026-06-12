@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     # Multi-tenant mode: "single" (default, no tenant resolution),
     # "dev" (X-Tenant-ID header enabled), "production" (subdomain + JWT only)
     TENANT_MODE: str = "single"
+    TENANT_DOMAIN: str = ""  # e.g., "openqms.com" — used for subdomain tenant resolution
 
     model_config = {"env_file": ".env"}
 

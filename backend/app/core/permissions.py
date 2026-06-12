@@ -59,7 +59,12 @@ async def get_current_user(
 ) -> User:
     token = credentials.credentials
     try:
-        payload = verify_token(token)
+        if request and hasattr(request.state, "tenant") and request.state.tenant:
+            # Tenant route: cryptographically verify tenant issuer/audience
+            payload = verify_token(token, issuer=TENANT_ISSUER, audience=TENANT_AUDIENCE)
+        else:
+            # Single-tenant mode: token has no issuer/audience claims
+            payload = verify_token(token)
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 

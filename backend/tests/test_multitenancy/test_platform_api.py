@@ -1,4 +1,5 @@
 import pytest
+from fastapi import HTTPException
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.core.security import (
@@ -24,6 +25,7 @@ async def test_platform_route_rejects_tenant_jwt():
         "role_id": "role-uuid",
         "iss": TENANT_ISSUER,
         "aud": TENANT_ISSUER,
+        "type": "access",
     }
     with patch("app.core.deps.verify_token", return_value=tenant_payload):
         with pytest.raises(HTTPException) as exc_info:
@@ -70,6 +72,7 @@ async def test_platform_route_requires_platform_admin_jwt():
         "role_id": "role-uuid",
         "iss": TENANT_ISSUER,
         "aud": TENANT_ISSUER,
+        "type": "access",
     }
     with patch("app.core.deps.verify_token", return_value=regular_payload):
         with pytest.raises(HTTPException) as exc_info:

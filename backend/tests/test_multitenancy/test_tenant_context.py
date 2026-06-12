@@ -210,6 +210,7 @@ async def test_cross_tenant_jwt_rejection():
         "role_id": "role-uuid",
         "iss": "openqms-tenant",
         "aud": "openqms-tenant",
+        "type": "access",
     }):
         with pytest.raises(HTTPException) as exc_info:
             await get_current_user(request=request, credentials=mock_credentials, db=mock_db)

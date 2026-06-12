@@ -1,4 +1,6 @@
 import logging
+import subprocess
+import sys
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -8,6 +10,22 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 
 logger = logging.getLogger(__name__)
+
+
+def _run_alembic_upgrade(schema_name: str) -> bool:
+    """Run alembic upgrade tenant@head for a specific tenant schema."""
+    cmd = [
+        sys.executable, "-m", "alembic",
+        "-x", f"schema={schema_name}",
+        "upgrade", "tenant@head",
+    ]
+    logger.info("Running: %s", " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error("Alembic failed for %s:\n%s", schema_name, result.stderr)
+        return False
+    logger.info("Successfully migrated %s", schema_name)
+    return True
 
 
 class TenantService:
@@ -34,11 +52,15 @@ class TenantService:
             await db.commit()
             tenant.provisioning_step = "run_migrations"
 
-            # Step 2: Run migrations (delegated to CLI)
-            # In production, this calls: python -m app.cli.tenant_migrate --slug <slug>
+            # Step 2: Run tenant migrations to create business tables
+            migrations_ok = _run_alembic_upgrade(schema_name)
+            if not migrations_ok:
+                raise RuntimeError(f"Alembic migration failed for schema {schema_name}")
             tenant.provisioning_step = "seed_data"
 
             # Step 3: Seed data (delegated to seed script with schema param)
+            # TODO: implement per-tenant seed script; for now the tenant is
+            # created with empty tables and the platform admin can invite users.
             tenant.status = "active"
             tenant.provisioning_step = None
             await db.commit()
