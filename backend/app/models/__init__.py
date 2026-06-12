@@ -1,3 +1,5 @@
+from app.database import TenantBase  # noqa: F401 — ensures models register with TenantBase
+
 from app.models.user import User
 from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
