@@ -156,7 +156,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | 管理评审报告自动生成 | P3 | ✅ 完成 (2026-06-12) | 汇总输入数据 → 生成报告初稿，支持 AI 生成、人工编辑、定稿归档与版本历史 |
 | 供应链风险地图 | P3 | 🔲 待开发 | 多维度供应风险热力图 |
 | 自定义看板（拖拽式）| P3 | ✅ 完成 | react-grid-layout 拖拽布局，widget 库面板（18 种 widget），用户级 layout 存储，产品线过滤，权限控制 |
-| 多工厂部署支持 | P3 | 🔲 待开发 | 每工厂独立实例 + 集团汇总 |
+| 多工厂部署支持 | P3 | ✅ 完成 (2026-06-12) | 三层范围模型（FactoryScope/ProductLineScope/PermissionScope）+ 应用层行级隔离 + 集团汇总仪表盘 + 工厂对比 + 共享供应商 + 跨厂审核 |
 | SaaS 多租户架构 | P3 | 🔲 待开发 | Schema 级别隔离 + 弹性资源 |
 
 **Phase 4 MES 集成已完成 (2026-06-05)**:
@@ -333,7 +333,10 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 8. ~~前端类型 + API~~ ✅ 5 接口 + 17 API 函数
 9. ~~前端页面~~ ✅ 4 页 + 2 组件 + 路由 + 侧边栏
 
-**Phase 4 剩余 (待开发)**:
-- [ ] 管理评审报告自动生成
+**Phase 4 多工厂部署支持已完成 (2026-06-12)**:
+1. ~~数据库迁移~~ ✅ Factory/UserFactory/GroupKPISnapshot/SupplierSharedProfile/AuditProgramTargetFactories 5 张新表 + factory_id nullable 列 + backfill + NOT NULL enforcement
+2. ~~三层范围模型~~ ✅ FactoryScope / ProductLineScope / RequestScope + Module.GROUP 权限 + 50+ API 端点迁移到 RequestScope
+3. ~~集团 API~~ ✅ 仪表盘 + 工厂对比 + 共享供应商 + 跨厂审核 + 工厂 CRUD
+4. ~~前端~~ ✅ Factory Switcher + Axios factory_id 自动注入 + Group Dashboard + Factory Management + Comparison + Suppliers + Audits
 - [ ] 供应链风险地图
 - [ ] SaaS 多租户架构 — Schema 级别隔离 + 弹性资源
