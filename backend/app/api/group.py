@@ -132,17 +132,19 @@ async def add_audit_factory(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.delete("/audits/{program_id}/factories/{factory_id}", response_model=AuditProgramFactoriesResponse)
+@router.delete("/audits/{program_id}/factories/{fid}", response_model=AuditProgramFactoriesResponse)
 async def remove_audit_factory(
     program_id: uuid.UUID = Path(...),
-    factory_id: uuid.UUID = Path(...),
-    scope: RequestScope = Depends(get_request_scope),
+    fid: uuid.UUID = Path(...),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a factory from an audit program."""
-    await _require_group_admin(scope.user, db)
+    level = await get_user_permission(user, Module.GROUP, db)
+    if level < PermissionLevel.ADMIN:
+        raise HTTPException(status_code=403, detail="需要 group 模块的 ADMIN 权限")
     try:
-        return await group_service.remove_factory_from_audit_program(db, program_id, factory_id)
+        return await group_service.remove_factory_from_audit_program(db, program_id, fid)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
