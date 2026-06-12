@@ -742,7 +742,7 @@ async def run_for_each_tenant():
 
 ### 10.3 HTTP 路由改造
 
-**核心策略**：将 `database.py` 中的 `get_db()` 直接改为租户感知版本，而非新增 `get_tenant_db()`。这样所有通过 `Depends(get_db)` 注入会话的路由自动获得租户隔离，无需逐文件修改导入。现有路由文件（约 35 个 API 模块）**零修改**。
+**核心策略**：将 `database.py` 中的 `get_db()` 直接改为租户感知版本，而非新增 `get_tenant_db()`。这样所有通过 `Depends(get_db)` 注入会话的路由自动获得租户隔离，无需逐文件修改导入。现有路由文件（约 35 个 API 模块）**零修改**。> **命名约定**：本文档代码示例中使用 `get_tenant_db()` 作为函数名以突出其租户感知语义，但最终实现时该函数将**直接替换**现有 `get_db()`，保留 `get_db` 这个名称，避免全局重命名。
 
 **平台路由安全隔离**：`/api/platform/*` 路由必须使用 `get_platform_db()`（显式强制 `SET search_path TO "public"`），不得使用 `get_db()`。中间件应验证平台路由不接受租户身份（无 `request.state.tenant` 或 `X-Tenant-ID` 头），否则返回 403。测试应覆盖：平台路由携带 `X-Tenant-ID` 头时被拒绝。
 
