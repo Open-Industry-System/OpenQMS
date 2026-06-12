@@ -101,8 +101,8 @@ CREATE TABLE public.tenant_migrations (
   status VARCHAR(20) DEFAULT 'pending',        -- pending/running/completed/failed
   error_message TEXT,                         -- 失败时的错误信息
   started_at TIMESTAMPTZ,                    -- 迁移开始时间
-  completed_at TIMESTAMPTZ,                   -- 迁移完成时间
-  applied_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ,                   -- 迁移完成时间（null 表示进行中或失败）
+  applied_at TIMESTAMPTZ,                    -- 向后兼容：等于 completed_at
   UNIQUE(tenant_id, version)                -- 防止同一租户重复迁移同一版本
 );
 
@@ -197,14 +197,16 @@ def _reset_search_path_on_checkout(dbapi_conn, connection_record, connection_pro
 
 3. **中间件只解析租户，不设置 search_path**：TenantContext 中间件只负责解析租户身份并注入 `request.state.tenant`，不直接操作数据库会话。实际 search_path 设置在 `get_tenant_db()` 依赖中，确保每个 API 路由使用的数据库会话都正确设置。
 
-4. **租户感知会话工厂 — 禁止裸 `async_session()`**：现有代码中多个 Service 方法（如 `MESSyncService.run_sync_round`、`PLMChangeImpactWorker.process_task`）直接调用 `async_session()` 创建独立数据库会话。这些内部会话不会继承外层的 `search_path`，导致它们查询 `public` schema 而非租户 schema。解决方案：引入 `get_tenant_aware_session()` 工厂函数，从上下文变量（`ContextVar[Optional[str]]`）读取当前租户 schema 并自动设置 `search_path`。所有业务代码必须使用此工厂而非裸 `async_session()`。`get_tenant_db()` 和 `run_for_each_tenant()` 在创建会话前设置上下文变量，内部服务调用 `get_tenant_aware_session()` 即可自动获得正确的 schema。
+4. **租户感知会话工厂 — 禁止裸 `async_session()`**：现有代码中多个 Service 方法（如 `MESSyncService.run_sync_round`、`PLMChangeImpactWorker.process_task`）直接调用 `async_session()` 创建独立数据库会话。这些内部会话不会继承外层的 `search_path`，导致它们查询 `public` schema 而非租户 schema。解决方案：引入 `ContextVar` + `get_tenant_aware_session()` 工厂函数。**关键**：`get_tenant_db()` 在创建会话前必须 `current_tenant_schema.set(tenant.schema_name)`，`run_for_each_tenant()` 在 yield 前也必须 set，确保内部服务通过 `get_tenant_aware_session()` 自动获得正确的 schema。finally 中必须 `current_tenant_schema.reset(token)` 清除上下文。
 
 ```python
 from contextvars import ContextVar
+from contextlib import asynccontextmanager
 
-# 上下文变量：当前请求的租户 schema 名
+# 上下文变量：当前请求/任务的租户 schema 名
 current_tenant_schema: ContextVar[str | None] = ContextVar('current_tenant_schema', default=None)
 
+@asynccontextmanager
 async def get_tenant_aware_session() -> AsyncGenerator[AsyncSession, None]:
     """租户感知的数据库会话工厂。替代裸 async_session()。
     从上下文变量读取当前租户 schema 并设置 search_path。
@@ -287,19 +289,24 @@ def set_search_path_sql(schema_name: str) -> str:
 # 租户请求用 — 从 request.state.tenant 获取 schema 并设置 search_path
 async def get_tenant_db(request: Request):
     tenant = getattr(request.state, "tenant", None)
-    async with async_session() as session:
-        if tenant:
-            # 使用白名单校验的 helper，禁止 f-string 拼接
-            await session.execute(text(set_search_path_sql(tenant.schema_name)))
-        # 无 tenant → 平台管理路由，search_path 保持默认 public
-        try:
-            yield session
-        finally:
-            # 先 rollback 清理可能的事务错误状态，再 RESET search_path
-            await session.rollback()
+    # 设置上下文变量，供内部 Service 调用 get_tenant_aware_session() 时读取
+    token = current_tenant_schema.set(tenant.schema_name if tenant else None)
+    try:
+        async with async_session() as session:
             if tenant:
-                await session.execute(text('RESET search_path'))
-            await session.close()
+                await session.execute(text(set_search_path_sql(tenant.schema_name)))
+            # 无 tenant → 平台管理路由，search_path 保持默认 public
+            try:
+                yield session
+            finally:
+                # 先 rollback 清理可能的事务错误状态，再 RESET search_path
+                await session.rollback()
+                if tenant:
+                    await session.execute(text('RESET search_path'))
+                await session.close()
+    finally:
+        # 清除上下文变量，防止泄漏到下一个请求
+        current_tenant_schema.reset(token)
 
 # 平台管理用 — 显式强制 public schema，同样 rollback + RESET
 async def get_platform_db():
@@ -483,37 +490,54 @@ pending → provisioning → active
 
 当前 `alembic/env.py` 在单一 `public` schema 上运行 `target_metadata.create_all()`。多租户需要分离公共迁移和租户迁移：
 
-**公共迁移**（`alembic/versions/` 前缀 `p`）：
+**公共迁移**（Alembic 迁移文件前缀 `p`，如 `p001_platform_tables.py`）：
 - 操作 `public` schema 的平台表（`tenants`、`tenant_migrations`、`platform_admin_users`、`reference_templates` 等）
 - 使用标准 `alembic upgrade head`，`version_table_schema = "public"`
+- 迁移文件通过 `branch_labels = ["platform"]` 标记
 
-**租户迁移**（`alembic/versions/` 前缀 `t`）：
+**租户迁移**（Alembic 迁移文件前缀 `t`，如 `t001_tenant_business_tables.py`）：
 - 操作租户 schema 的业务表（`users`、`factories`、`fmea_documents` 等 ~50 张表）
-- `run_migrations_online()` 中根据命令行参数切换 `search_path`
+- 通过 `alembic upgrade tenant --all` 或 `--slug acme` 触发，`env.py` 读取 `--schema` 参数并设置 `search_path`
 - `version_table_schema` 设为当前租户的 `schema_name`（而非默认 `public`），确保每个租户有独立的 `alembic_version` 表
+- 迁移文件通过 `branch_labels = ["tenant"]` 标记
+- **使用 `set_search_path_sql()` helper 生成安全的 schema 名**（与运行时代码共享同一 helper），禁止 f-string 拼接
+
+**迁移文件分离**：
+
+```
+alembic/versions/
+  p001_platform_tables.py          # branch_labels=["platform"]
+  p002_platform_reference_data.py  # branch_labels=["platform"]
+  t001_tenant_business_tables.py   # branch_labels=["tenant"]
+  t002_tenant_iqc_tables.py       # branch_labels=["tenant"]
+  ...
+```
 
 **env.py 关键配置**：
 
 ```python
 # alembic/env.py 关键改动
+from app.core.tenant_utils import set_search_path_sql  # 与运行时代码共享
+
 def run_migrations_online():
     connectable = engine
-    schema_name = context.get_x_argument(as_dictionary=True).get("schema")
+    x_args = context.get_x_argument(as_dictionary=True)
+    schema_name = x_args.get("schema")
 
     with connectable.connect() as connection:
         if schema_name:
-            # 租户迁移：设置 search_path 和 version_table_schema
-            connection.execute(text(f'SET search_path TO "{schema_name}", "public"'))
+            # 租户迁移：使用 set_search_path_sql helper（白名单校验 + 引号转义）
+            connection.execute(text(set_search_path_sql(schema_name)))
             context.configure(
                 connection=connection,
                 target_metadata=target_metadata,
-                version_table_schema=schema_name,  # 每个租户独立版本表
+                version_table_schema=schema_name,
             )
         else:
             # 公共迁移：默认 public schema
             context.configure(
                 connection=connection,
-                target_metadata=platform_metadata,  # 只有平台表
+                target_metadata=platform_metadata,
                 version_table_schema="public",
             )
         context.run_migrations()
@@ -523,7 +547,7 @@ def run_migrations_online():
 
 使用 `pg_advisory_lock(tenant_id)` 防止同一租户的并发迁移。迁移完成后释放锁。
 
-### 6.4 新租户 Schema 创建
+### 6.5 新租户 Schema 创建
 
 新租户开通时：
 1. `CREATE SCHEMA tenant_<slug>`
@@ -678,6 +702,7 @@ DEV_TENANT_SLUG=acme            # 本地开发默认租户
 ```python
 async def run_for_each_tenant():
     """遍历所有 active 租户，为每个租户设置 search_path 并执行任务。
+    同时设置 ContextVar，供内部 Service 通过 get_tenant_aware_session() 读取。
 
     用法：
         async for tenant, db in run_for_each_tenant():
@@ -692,15 +717,19 @@ async def run_for_each_tenant():
         tenants = result.scalars().all()
 
     for tenant in tenants:
+        # 设置上下文变量，供内部 Service 的 get_tenant_aware_session() 读取
+        token = current_tenant_schema.set(tenant.schema_name)
         async with async_session() as db:
             await db.execute(text(set_search_path_sql(tenant.schema_name)))
             try:
                 yield tenant, db
             finally:
                 # 无论任务成功还是异常，都确保 RESET search_path
-                await db.rollback()  # 回滚未提交的事务
+                await db.rollback()
                 await db.execute(text('RESET search_path'))
                 await db.close()
+        # 清除上下文变量，防止泄漏到下一个租户迭代
+        current_tenant_schema.reset(token)
 ```
 
 **受影响的后台任务**（必须改造）：
@@ -714,6 +743,8 @@ async def run_for_each_tenant():
 ### 10.3 HTTP 路由改造
 
 **核心策略**：将 `database.py` 中的 `get_db()` 直接改为租户感知版本，而非新增 `get_tenant_db()`。这样所有通过 `Depends(get_db)` 注入会话的路由自动获得租户隔离，无需逐文件修改导入。现有路由文件（约 35 个 API 模块）**零修改**。
+
+**平台路由安全隔离**：`/api/platform/*` 路由必须使用 `get_platform_db()`（显式强制 `SET search_path TO "public"`），不得使用 `get_db()`。中间件应验证平台路由不接受租户身份（无 `request.state.tenant` 或 `X-Tenant-ID` 头），否则返回 403。测试应覆盖：平台路由携带 `X-Tenant-ID` 头时被拒绝。
 
 | 文件 | 改动 |
 |---|---|
