@@ -2130,10 +2130,18 @@ def _make_mock_session():
     async_session() returns an async_sessionmaker instance. Calling it
     produces an object used as `async with async_session() as session:`.
     We mock this by returning an AsyncMock whose __aenter__ returns itself.
+    session.begin() is also mocked as an async context manager since
+    get_tenant_aware_session() and run_for_each_tenant() cleanup use
+    `async with session.begin():`.
     """
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
+    # session.begin() returns an async context manager, not a coroutine
+    begin_cm = AsyncMock()
+    begin_cm.__aenter__ = AsyncMock(return_value=None)
+    begin_cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin = MagicMock(return_value=begin_cm)
     return session
 
 
@@ -2209,10 +2217,14 @@ async def test_get_tenant_aware_session_sets_search_path():
         mock_sessionmaker = MagicMock(return_value=mock_session)
         with patch("app.database.async_session", mock_sessionmaker):
             async with get_tenant_aware_session() as db:
-                # SET search_path must have been called with the tenant schema
-                calls = mock_session.execute.call_args_list
-                assert any("tenant_test" in str(c) for c in calls), \
-                    f"Expected SET search_path to tenant_test, got calls: {calls}"
+                # SET search_path must have been called with the tenant schema.
+                # SQLAlchemy text() objects don't stringify to their SQL content;
+                # inspect the .text attribute instead of str(call).
+                executed_sql = [
+                    getattr(c.args[0], "text", "") for c in mock_session.execute.call_args_list
+                ]
+                assert any("tenant_test" in sql for sql in executed_sql), \
+                    f"Expected SET search_path to tenant_test, got SQL: {executed_sql}"
     finally:
         current_tenant_schema.reset(token)
 
@@ -2229,10 +2241,14 @@ async def test_get_tenant_aware_session_defaults_to_public():
     mock_sessionmaker = MagicMock(return_value=mock_session)
     with patch("app.database.async_session", mock_sessionmaker):
         async with get_tenant_aware_session() as db:
-            # No SET search_path should be executed when ContextVar is None
-            for call in mock_session.execute.call_args_list:
-                assert "search_path" not in str(call), \
-                    f"Unexpected SET search_path when no tenant context: {call}"
+            # No SET search_path should be executed when ContextVar is None.
+            # SQLAlchemy text() objects don't stringify to their SQL content;
+            # inspect the .text attribute instead of str(call).
+            executed_sql = [
+                getattr(c.args[0], "text", "") for c in mock_session.execute.call_args_list
+            ]
+            assert not any("search_path" in sql for sql in executed_sql), \
+                f"Unexpected SET search_path when no tenant context: {executed_sql}"
 ```
 
 - [ ] **Step 2: Modify `main.py` — wrap background loops**
