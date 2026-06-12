@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import Depends, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import (
@@ -23,6 +23,7 @@ from app.core.factory_scope import (
     get_user_factory_ids,
     get_user_product_line_codes,
 )
+from app.core.security import verify_token, PLATFORM_ISSUER, PLATFORM_AUDIENCE
 from app.database import get_db
 from app.models.user import User
 
@@ -61,6 +62,32 @@ async def get_request_scope(
     )
 
 
+async def require_platform_admin(request: Request):
+    """Dependency for /api/platform/* routes.
+    Rejects tenant JWTs (tenant_id claim present) with 403.
+    Requires platform admin JWT (is_platform_admin: true) with correct iss/aud.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    token = auth_header[7:]
+    payload = verify_token(token)
+
+    if payload.get("tenant_id"):
+        raise HTTPException(status_code=403, detail="Tenant JWT cannot access platform routes")
+
+    if not payload.get("is_platform_admin"):
+        raise HTTPException(status_code=403, detail="Platform admin access required")
+
+    if payload.get("iss") != PLATFORM_ISSUER:
+        raise HTTPException(status_code=403, detail="Invalid token issuer")
+    if payload.get("aud") != PLATFORM_AUDIENCE:
+        raise HTTPException(status_code=403, detail="Invalid token audience")
+
+    return payload
+
+
 __all__ = [
     "get_current_user",
     "require_permission",
@@ -70,4 +97,5 @@ __all__ = [
     "Module",
     "RequestScope",
     "get_request_scope",
+    "require_platform_admin",
 ]

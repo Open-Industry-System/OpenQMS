@@ -52,6 +52,7 @@ from app.api.erp import router as erp_router
 from app.api.supplier_risk import router as supplier_risk_router
 from app.api.supply_chain_risk_map import router as supply_chain_risk_map_router
 from app.api.group import router as group_router
+from app.api.platform import router as platform_router
 from app.core.tenant_context import TenantContextMiddleware
 
 logger = logging.getLogger(__name__)
@@ -372,6 +373,7 @@ app.include_router(erp_router)
 app.include_router(supplier_risk_router)
 app.include_router(supply_chain_risk_map_router)
 app.include_router(group_router)
+app.include_router(platform_router)
 
 
 @app.get("/api/health")

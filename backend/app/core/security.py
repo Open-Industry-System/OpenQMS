@@ -46,6 +46,43 @@ def decode_refresh_token(token: str) -> str | None:
         return None
 
 
+def create_platform_admin_token(admin_id: str, role: str = "superadmin") -> str:
+    """Create JWT for platform admin. Uses separate iss/aud to prevent cross-domain use."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode = {
+        "sub": str(admin_id),
+        "is_platform_admin": True,
+        "role": role,
+        "iss": PLATFORM_ISSUER,
+        "aud": PLATFORM_AUDIENCE,
+        "exp": expire,
+        "type": "access",
+    }
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
+
+
+def create_tenant_user_token(user_id: str, tenant_id: str, role_id: str, factory_id: str | None = None) -> str:
+    """Create JWT for tenant user. Includes tenant_id claim with separate iss/aud."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode = {
+        "sub": str(user_id),
+        "tenant_id": str(tenant_id),
+        "role_id": str(role_id),
+        "factory_id": str(factory_id) if factory_id else None,
+        "iss": TENANT_ISSUER,
+        "aud": TENANT_AUDIENCE,
+        "exp": expire,
+        "type": "access",
+    }
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_token(token: str) -> dict:
+    """Verify and decode a JWT token. Returns the payload dict.
+    Raises JWTError on invalid/expired tokens."""
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+
+
 # JWT issuer/audience constants for cross-domain prevention
 TENANT_ISSUER = "openqms-tenant"
 PLATFORM_ISSUER = "openqms-platform"
