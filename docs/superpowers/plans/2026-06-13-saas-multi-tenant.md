@@ -733,19 +733,49 @@ from contextvars import ContextVar
 
 @pytest.mark.asyncio
 async def test_get_db_sets_search_path_for_tenant():
-    """get_db() must SET search_path when tenant is present."""
+    """get_db() must execute SET search_path when a tenant is present on the request."""
     from app.database import get_db
+    from app.core.tenant_utils import current_tenant_schema
 
-    # Mock request with tenant
+    # Build a mock session that records execute calls
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.execute = AsyncMock()
+    mock_session.rollback = AsyncMock()
+    mock_session.begin = AsyncMock(return_value=AsyncMock())
+    mock_session.close = AsyncMock()
+
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+
+    # Mock request with a tenant
     mock_request = MagicMock()
     mock_tenant = MagicMock()
     mock_tenant.schema_name = "tenant_acme"
     mock_request.state.tenant = mock_tenant
 
-    # get_db is an async generator — we need to test the yielded session
-    # This test verifies the setup logic; integration tests will verify end-to-end
-    # The key assertion: when tenant is set, search_path must be set
-    assert mock_request.state.tenant.schema_name == "tenant_acme"
+    with patch("app.database.async_session", mock_sessionmaker):
+        # Drive the async generator to get the session
+        gen = get_db(mock_request)
+        db = await gen.__anext__()
+        try:
+            # SET search_path must have been called with the tenant schema
+            calls = mock_session.execute.call_args_list
+            set_calls = [c for c in calls if "search_path" in str(c)]
+            assert len(set_calls) >= 1, f"Expected SET search_path, got calls: {calls}"
+            assert "tenant_acme" in str(set_calls[0]), \
+                f"Expected SET search_path TO 'tenant_acme', got: {set_calls[0]}"
+            # ContextVar must be set to the tenant schema
+            assert current_tenant_schema.get() == "tenant_acme"
+        finally:
+            # Clean up the generator
+            try:
+                await gen.__anext__()
+            except StopAsyncIteration:
+                pass
+
+    # After generator cleanup, ContextVar must be reset
+    assert current_tenant_schema.get() is None
 
 
 def test_context_var_default_is_none():
@@ -2200,85 +2230,188 @@ async def test_get_tenant_aware_session_defaults_to_public():
 
 - [ ] **Step 2: Modify `main.py` — wrap background loops**
 
-Replace each `async with async_session() as db:` in the lifespan with `async for tenant, db in run_for_each_tenant():` and move the body inside the loop.
-
-Example for MES sync:
+In `backend/app/main.py`, add the import and replace each background loop. The lifespan startup seed (lines 61-81) stays unchanged — it uses `async_session()` directly against `public` schema.
 
 ```python
-# Before:
-async def _mes_sync_loop():
-    while True:
-        await asyncio.sleep(30)
-        try:
-            async with async_session() as db:
-                await MESSyncService.run_sync_round(db)
-        except Exception as e:
-            logger.error("[mes_sync] error: %s", e)
-
-# After:
-async def _mes_sync_loop():
-    while True:
-        await asyncio.sleep(30)
-        try:
-            async for tenant, db in run_for_each_tenant():
-                await MESSyncService.run_sync_round(db)
-        except Exception as e:
-            logger.error("[mes_sync] error: %s", e)
+# Add to imports at top of main.py:
+from app.database import run_for_each_tenant
 ```
 
-Apply this pattern to all 7 background task groups listed above.
+Each background task loop is converted from `async with async_session() as db:` to `async for tenant, db in run_for_each_tenant():`. Here is every loop with its before/after:
+
+**1. Collaboration cleanup** (`_cleanup_loop`):
+```python
+# Before:
+async with async_session() as db:
+    deleted = await delete_expired_sessions(db)
+
+# After:
+async for tenant, db in run_for_each_tenant():
+    deleted = await delete_expired_sessions(db)
+```
+
+**2. MES sync** (`_mes_sync_loop`):
+```python
+# Before:
+async with async_session() as db:
+    await MESSyncService.run_sync_round(db)
+
+# After:
+async for tenant, db in run_for_each_tenant():
+    await MESSyncService.run_sync_round(db)
+```
+
+**3. MES outbox** (`_mes_outbox_loop`):
+```python
+# Before:
+async with async_session() as db:
+    await MESPushService.process_outbox(db)
+
+# After:
+async for tenant, db in run_for_each_tenant():
+    await MESPushService.process_outbox(db)
+```
+
+**4. MES lifecycle cleanup** (`_mes_cleanup_loop`):
+```python
+# Before:
+async with async_session() as db:
+    stats = await MESLifecycleService.cleanup(db)
+
+# After:
+async for tenant, db in run_for_each_tenant():
+    stats = await MESLifecycleService.cleanup(db)
+```
+
+**5. PLM sync** (`_plm_sync_loop`):
+```python
+# Before:
+async with async_session() as db:
+    await PLMSyncService.run_sync_round(db)
+
+# After:
+async for tenant, db in run_for_each_tenant():
+    await PLMSyncService.run_sync_round(db)
+```
+
+**6. PLM impact worker** (`_plm_impact_loop`) — has nested sessions, each wrapped separately:
+```python
+# Before:
+async with async_session() as db:
+    await PLMChangeImpactWorker.recover_stuck_tasks(db)
+    await db.commit()
+async with async_session() as db:
+    claimed = await PLMChangeImpactWorker.claim_tasks(db)
+    await db.commit()
+# ...
+async with async_session() as proc_db:
+    await PLMChangeImpactWorker.process_task(proc_db, task)
+
+# After:
+async for tenant, db in run_for_each_tenant():
+    await PLMChangeImpactWorker.recover_stuck_tasks(db)
+    await db.commit()
+async for tenant, db in run_for_each_tenant():
+    claimed = await PLMChangeImpactWorker.claim_tasks(db)
+    await db.commit()
+# ...
+async with get_tenant_aware_session() as proc_db:
+    await PLMChangeImpactWorker.process_task(proc_db, task)
+```
+
+Note: The PLM impact worker's inner `process_task` loop iterates claimed tasks within a single tenant context, so it uses `get_tenant_aware_session()` (which reads the ContextVar set by the outer `run_for_each_tenant` loop) rather than `run_for_each_tenant()` again.
+
+**7. ERP sync** (`_erp_sync_loop`):
+```python
+# Before:
+async with async_session() as db:
+    await ERPSyncService.sync_all(db)
+
+# After:
+async for tenant, db in run_for_each_tenant():
+    await ERPSyncService.sync_all(db)
+```
+
+**8. AQL expiry** (`_aql_expiry_loop`):
+```python
+# Before:
+async with async_session() as db:
+    expired = await AqlService.expire_stale_recommendations(db)
+
+# After:
+async for tenant, db in run_for_each_tenant():
+    expired = await AqlService.expire_stale_recommendations(db)
+```
+
+**9. Supplier risk evaluation** (`_risk_eval_loop`) — has initial eval + loop:
+```python
+# Before (initial):
+async with async_session() as db:
+    await evaluate_all_suppliers(db, product_line_code=None)
+
+# After (initial):
+async for tenant, db in run_for_each_tenant():
+    await evaluate_all_suppliers(db, product_line_code=None)
+
+# Before (loop body):
+async with async_session() as db:
+    await evaluate_all_suppliers(db, product_line_code=None)
+
+# After (loop body):
+async for tenant, db in run_for_each_tenant():
+    await evaluate_all_suppliers(db, product_line_code=None)
+```
 
 - [ ] **Step 3: Replace bare `async_session()` in service code**
 
-Find all service methods that use `async_session()` directly (not via `get_db()` or `get_tenant_aware_session()`). Replace each with:
+Replace all direct `async with async_session() as db:` calls in service files with `async with get_tenant_aware_session() as db:`. This ensures background tasks that use their own sessions (not routed through `get_db()`) also get the tenant search_path.
 
+Add to each service file:
 ```python
 from app.database import get_tenant_aware_session
-
-# Before:
-async with async_session() as db:
-    # ... query ...
-
-# After:
-async with get_tenant_aware_session() as db:
-    # ... query ...
 ```
 
-Key services to modify (based on spec §10.2):
-- `app/services/mes_service.py` — `MESSyncService.run_sync_round`, `MESPushService.process_outbox`
-- `app/services/plm_service.py` — `PLMSyncService.run_sync_round`, `PLMChangeImpactWorker.process_task`
-- `app/services/erp_service.py` — `ERPSyncService.sync_all`
-- `app/services/supplier_risk/service.py` — `evaluate_all_suppliers`
-- `app/services/iqc_aql_service.py` — `AqlService.expire_stale_recommendations`
-- `app/services/collaboration_service.py` — `delete_expired_sessions`
-- `app/services/supply_chain_risk_map/scheduler.py` — `snapshot_loop`
+Files and line references (as of the current codebase):
 
-- [ ] **Step 4: Add checkout event listener to engine for search_path reset safety net**
+| File | Line | Before | After |
+|------|------|--------|-------|
+| `app/services/mes_service.py` | 532 | `async with async_session() as read_session:` | `async with get_tenant_aware_session() as read_session:` |
+| `app/services/mes_service.py` | 628 | `async with async_session() as job_session:` | `async with get_tenant_aware_session() as job_session:` |
+| `app/services/mes_service.py` | 633 | `async with async_session() as fail_session:` | `async with get_tenant_aware_session() as fail_session:` |
+| `app/services/mes_service.py` | 830 | `async with async_session() as fail_session:` | `async with get_tenant_aware_session() as fail_session:` |
+| `app/services/mes_service.py` | 863 | `async with async_session() as read_session:` | `async with get_tenant_aware_session() as read_session:` |
+| `app/services/mes_service.py` | 903 | `async with async_session() as write_session:` | `async with get_tenant_aware_session() as write_session:` |
+| `app/services/plm_service.py` | 654 | `async with async_session() as ingest_db:` | `async with get_tenant_aware_session() as ingest_db:` |
+| `app/services/plm_service.py` | 673 | `async with async_session() as update_db:` | `async with get_tenant_aware_session() as update_db:` |
+| `app/services/plm_service.py` | 853 | `async with async_session() as analysis_db:` | `async with get_tenant_aware_session() as analysis_db:` |
+| `app/services/embedding_sync_worker.py` | 285 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/embedding_sync_worker.py` | 314 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/embedding_sync_worker.py` | 342 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/graph_sync_worker.py` | 114 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/graph_sync_worker.py` | 188 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/graph_sync_worker.py` | 211 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/graph_sync_worker.py` | 220 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/graph_sync_worker.py` | 225 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/embedding_backfill.py` | 70 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/control_plan_service.py` | 21 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/mes_connector.py` | 171 | `async with async_session() as session:` | `async with get_tenant_aware_session() as session:` |
+| `app/services/iqc_inspection_service.py` | 24 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/capa_draft_service.py` | 272 | `async with async_session() as audit_db:` | `async with get_tenant_aware_session() as audit_db:` |
 
-In `backend/app/database.py`, add after the `engine` creation:
+Note: `app/services/supply_chain_risk_map/scheduler.py` is not listed above because it's already wrapped via `run_for_each_tenant()` in the `main.py` lifespan — the `snapshot_loop` receives a `db` parameter from the outer loop.
 
-```python
-from sqlalchemy import event
+Note: `app/services/collaboration_service.py` does not have a bare `async_session()` call — it receives `db` from the lifespan loop.
 
-@event.listens_for(engine.sync_engine, "checkout")
-def _reset_search_path_on_checkout(dbapi_connection, connection_record):
-    """Safety net: ensure search_path is reset to default on every connection pool checkout.
-    This catches any leaked search_path from previous requests."""
-    cursor = dbapi_connection.cursor()
-    cursor.execute("RESET search_path")
-    cursor.close()
-```
-
-- [ ] **Step 5: Run tests**
+- [ ] **Step 4: Run tests**
 
 Run: `cd backend && python -m pytest tests/test_multitenancy/test_background_tasks.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/main.py backend/app/database.py backend/app/services/ backend/tests/test_multitenancy/test_background_tasks.py
-git commit -m "feat(multi-tenant): wrap background tasks with run_for_each_tenant(), replace bare async_session(), add checkout event safety net"
+git add backend/app/main.py backend/app/services/ backend/tests/test_multitenancy/test_background_tasks.py
+git commit -m "feat(multi-tenant): wrap background tasks with run_for_each_tenant(), replace bare async_session() in services"
 ```
 
 ---
