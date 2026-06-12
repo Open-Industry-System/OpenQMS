@@ -8,13 +8,9 @@ from sqlalchemy import select, func, and_, text, bindparam
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, Module, PermissionLevel
-from app.core.product_line_filter import (
-    apply_product_line_filter,
-    enforce_product_line_access,
-    get_user_product_line_codes,
-)
-from app.models.user import User
+from app.core.permissions import get_user_permission, Module, PermissionLevel
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import populate_factory_id, validate_factory_invariant
 from app.models.mes import (
     MESConnection,
     MESSyncJob,
@@ -31,6 +27,21 @@ from app.services.mes_crypto import hash_api_key, encrypt_credential, sanitize_c
 from app.api.mes_deps import require_mes_api_key
 
 router = APIRouter(prefix="/api/mes", tags=["mes"])
+
+
+# ---------------------------------------------------------------------------
+# Helper: factory access check
+# ---------------------------------------------------------------------------
+
+def _check_factory_access(entity, scope: RequestScope):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="Connection not found")
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +105,21 @@ def _strip_placeholder_credentials(config: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Helper: apply factory + product-line scope filters to a query
+# ---------------------------------------------------------------------------
+
+def _apply_scope_filters(query, model, scope: RequestScope):
+    """Apply factory_id and product_line_code filters based on RequestScope."""
+    if scope.effective_factory_id:
+        query = query.where(model.factory_id == scope.effective_factory_id)
+    if scope.factory_scope.accessible_factory_ids is not None:
+        query = query.where(model.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        query = query.where(model.product_line_code.in_(scope.pl_scope.codes))
+    return query
+
+
+# ---------------------------------------------------------------------------
 # Connections
 # ---------------------------------------------------------------------------
 
@@ -103,13 +129,23 @@ async def list_connections(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 APPROVE 权限")
+
+    # Product line filtering
+    if scope.pl_scope.mode == "NONE":
+        return schemas.MESConnectionListResponse(
+            items=[], total=0, page=page, page_size=page_size,
+        )
+
     query = select(MESConnection).where(MESConnection.is_active == True)
-    query = await apply_product_line_filter(query, user, MESConnection, "mes", db, request)
+    query = _apply_scope_filters(query, MESConnection, scope)
 
     count_query = select(func.count()).select_from(MESConnection).where(MESConnection.is_active == True)
-    count_query = await apply_product_line_filter(count_query, user, MESConnection, "mes", db, request)
+    count_query = _apply_scope_filters(count_query, MESConnection, scope)
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -136,8 +172,12 @@ async def list_connections(
 async def create_connection(
     req: schemas.MESConnectionCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 APPROVE 权限")
+
     # Validate REST config first
     config = _validate_rest_config(req.connector_type, req.config)
 
@@ -145,18 +185,26 @@ async def create_connection(
     config = _process_credentials(config)
 
     # Enforce product line access
-    await enforce_product_line_access(user, req.product_line_code, db)
+    if scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=403, detail="无权访问该产线")
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        if req.product_line_code not in scope.pl_scope.codes:
+            raise HTTPException(status_code=403, detail="无权访问该产线")
 
     connection = MESConnection(
         name=req.name,
         connector_type=req.connector_type,
         config=config,
         product_line_code=req.product_line_code,
-        created_by=user.user_id,
+        created_by=scope.user.user_id,
         is_active=True,
     )
     db.add(connection)
     await db.flush()
+
+    # Populate and validate factory_id
+    await populate_factory_id(connection, MESConnection, db, scope=scope)
+    await validate_factory_invariant(connection, db)
 
     # Create 4 sync jobs
     await MESSyncService.create_sync_jobs_for_connection(db, connection.connection_id)
@@ -174,13 +222,24 @@ async def create_connection(
 async def get_connection(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 APPROVE 权限")
+
     conn = await db.get(MESConnection, connection_id)
     if not conn or not conn.is_active:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope)
+
+    # Product line access check
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        if conn.product_line_code not in scope.pl_scope.codes:
+            raise HTTPException(status_code=404, detail="Connection not found")
+    elif scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=404, detail="Connection not found")
 
     return schemas.MESConnectionResponse.model_validate({
         **{k: getattr(conn, k) for k in conn.__mapper__.columns.keys()},
@@ -193,13 +252,24 @@ async def update_connection(
     connection_id: uuid.UUID,
     req: schemas.MESConnectionUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 APPROVE 权限")
+
     conn = await db.get(MESConnection, connection_id)
     if not conn or not conn.is_active:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope)
+
+    # Product line access check for existing connection
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        if conn.product_line_code not in scope.pl_scope.codes:
+            raise HTTPException(status_code=404, detail="Connection not found")
+    elif scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=404, detail="Connection not found")
 
     # Merge config
     if req.config is not None:
@@ -228,7 +298,12 @@ async def update_connection(
         conn.is_active = req.is_active
 
     if req.product_line_code is not None:
-        await enforce_product_line_access(user, req.product_line_code, db)
+        # Verify user has access to the new product line
+        if scope.pl_scope.mode == "NONE":
+            raise HTTPException(status_code=403, detail="无权访问该产线")
+        if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+            if req.product_line_code not in scope.pl_scope.codes:
+                raise HTTPException(status_code=403, detail="无权访问该产线")
         conn.product_line_code = req.product_line_code
 
     await db.commit()
@@ -244,13 +319,24 @@ async def update_connection(
 async def delete_connection(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 APPROVE 权限")
+
     conn = await db.get(MESConnection, connection_id)
     if not conn or not conn.is_active:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope)
+
+    # Product line access check
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        if conn.product_line_code not in scope.pl_scope.codes:
+            raise HTTPException(status_code=404, detail="Connection not found")
+    elif scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=404, detail="Connection not found")
 
     # Soft delete
     conn.is_active = False
@@ -286,13 +372,24 @@ async def delete_connection(
 async def test_connection(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 APPROVE 权限")
+
     conn = await db.get(MESConnection, connection_id)
     if not conn or not conn.is_active:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope)
+
+    # Product line access check
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        if conn.product_line_code not in scope.pl_scope.codes:
+            raise HTTPException(status_code=404, detail="Connection not found")
+    elif scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=404, detail="Connection not found")
 
     # Validate config completeness
     config = conn.config or {}
@@ -328,6 +425,9 @@ async def ingest_data(
     body["connection_id"] = str(conn.connection_id)
     if conn.product_line_code:
         body["product_line_code"] = conn.product_line_code
+    # Pass factory_id from connection for ingestion
+    if conn.factory_id:
+        body["factory_id"] = str(conn.factory_id)
 
     # Manual validation with TypeAdapter
     adapter = TypeAdapter(schemas.MESIngestRequest)
@@ -356,13 +456,24 @@ async def ingest_data(
 async def manual_sync(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 APPROVE 权限")
+
     conn = await db.get(MESConnection, connection_id)
     if not conn or not conn.is_active:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope)
+
+    # Product line access check
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        if conn.product_line_code not in scope.pl_scope.codes:
+            raise HTTPException(status_code=404, detail="Connection not found")
+    elif scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=404, detail="Connection not found")
 
     try:
         result = await MESSyncService.manual_sync(db, connection_id)
@@ -383,12 +494,22 @@ async def list_production_orders(
     page_size: int = Query(20, ge=1, le=1000),
     status: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 VIEW 权限")
+
+    # Product line filtering
+    if scope.pl_scope.mode == "NONE":
+        return schemas.MESProductionOrderListResponse(
+            items=[], total=0, page=page, page_size=page_size,
+        )
+
     query = select(MESProductionOrder)
     if status:
         query = query.where(MESProductionOrder.status == status)
-    query = await apply_product_line_filter(query, user, MESProductionOrder, "mes", db, request)
+    query = _apply_scope_filters(query, MESProductionOrder, scope)
     query = query.order_by(MESProductionOrder.created_at.desc())
 
     # Count query
@@ -412,13 +533,25 @@ async def list_production_orders(
 async def get_production_order(
     order_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 VIEW 权限")
+
     order = await db.get(MESProductionOrder, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Production order not found")
 
-    await enforce_product_line_access(user, order.product_line_code, db)
+    _check_factory_access(order, scope)
+
+    # Product line access check
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        if order.product_line_code not in scope.pl_scope.codes:
+            raise HTTPException(status_code=404, detail="Production order not found")
+    elif scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=404, detail="Production order not found")
+
     return schemas.MESProductionOrderResponse.model_validate(order)
 
 
@@ -432,10 +565,18 @@ async def list_equipment_status(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 VIEW 权限")
+
+    # Product line filtering
+    if scope.pl_scope.mode == "NONE":
+        return []
+
     query = select(MESEquipmentStatus)
-    query = await apply_product_line_filter(query, user, MESEquipmentStatus, "mes", db, request)
+    query = _apply_scope_filters(query, MESEquipmentStatus, scope)
     query = query.order_by(MESEquipmentStatus.recorded_at.desc())
 
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -456,12 +597,22 @@ async def list_scrap_records(
     page_size: int = Query(20, ge=1, le=1000),
     defect_type: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 VIEW 权限")
+
+    # Product line filtering
+    if scope.pl_scope.mode == "NONE":
+        return schemas.MESScrapRecordListResponse(
+            items=[], total=0, page=page, page_size=page_size,
+        )
+
     query = select(MESScrapRecord)
     if defect_type:
         query = query.where(MESScrapRecord.defect_type == defect_type)
-    query = await apply_product_line_filter(query, user, MESScrapRecord, "mes", db, request)
+    query = _apply_scope_filters(query, MESScrapRecord, scope)
     query = query.order_by(MESScrapRecord.recorded_at.desc())
 
     # Count query
@@ -490,30 +641,39 @@ async def get_dashboard(
     request: Request,
     product_line_code: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.MES, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    # Product line isolation
-    user_codes: list[str] | None = None
-    if not user.role_definition.bypass_row_level_security:
-        user_codes = await get_user_product_line_codes(user, db)
-        if not user_codes:
-            return schemas.MESDashboardResponse(
-                equipment_summary=[],
-                running_count=0,
-                down_count=0,
-                total_planned=0,
-                total_actual=0,
-                scrap_by_category={},
-                scrap_trend_7d=[],
-            )
+    level = await get_user_permission(scope.user, Module.MES, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 mes 模块的 VIEW 权限")
 
-    # If a specific product line is requested, enforce access and restrict to it
+    # Product line isolation via scope
+    if scope.pl_scope.mode == "NONE":
+        return schemas.MESDashboardResponse(
+            equipment_summary=[],
+            running_count=0,
+            down_count=0,
+            total_planned=0,
+            total_actual=0,
+            scrap_by_category={},
+            scrap_trend_7d=[],
+        )
+
+    # Determine effective product line codes
     if product_line_code:
-        if user_codes is not None and product_line_code not in user_codes:
-            raise HTTPException(status_code=403, detail="无权访问该产线")
+        # If a specific product line is requested, enforce access
+        if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+            if product_line_code not in scope.pl_scope.codes:
+                raise HTTPException(status_code=403, detail="无权访问该产线")
         effective_codes = [product_line_code]
+    elif scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        effective_codes = scope.pl_scope.codes
     else:
-        effective_codes = user_codes
+        effective_codes = None  # ALL mode — no PL filter
+
+    # Factory filter helpers
+    effective_factory_id = scope.effective_factory_id
+    accessible_factory_ids = scope.factory_scope.accessible_factory_ids
 
     # Equipment summary: latest per equipment via ROW_NUMBER
     from sqlalchemy.orm import aliased
@@ -530,6 +690,11 @@ async def get_dashboard(
     )
     if effective_codes:
         eq_sub = eq_sub.where(MESEquipmentStatus.product_line_code.in_(effective_codes))
+    # Factory filtering
+    if effective_factory_id:
+        eq_sub = eq_sub.where(MESEquipmentStatus.factory_id == effective_factory_id)
+    if accessible_factory_ids is not None:
+        eq_sub = eq_sub.where(MESEquipmentStatus.factory_id.in_(accessible_factory_ids))
     eq_subq = eq_sub.subquery()
     eq_alias = aliased(MESEquipmentStatus, eq_subq)
     eq_query = select(eq_alias).where(eq_subq.c.rn == 1)
@@ -563,6 +728,10 @@ async def get_dashboard(
     ).where(func.date(MESProductionOrder.started_at) == today)
     if effective_codes:
         prod_query = prod_query.where(MESProductionOrder.product_line_code.in_(effective_codes))
+    if effective_factory_id:
+        prod_query = prod_query.where(MESProductionOrder.factory_id == effective_factory_id)
+    if accessible_factory_ids is not None:
+        prod_query = prod_query.where(MESProductionOrder.factory_id.in_(accessible_factory_ids))
     prod_result = await db.execute(prod_query)
     prod_row = prod_result.one_or_none()
     total_planned = int(prod_row.total_planned) if prod_row else 0
@@ -579,6 +748,10 @@ async def get_dashboard(
     )
     if effective_codes:
         scrap_cat_query = scrap_cat_query.where(MESScrapRecord.product_line_code.in_(effective_codes))
+    if effective_factory_id:
+        scrap_cat_query = scrap_cat_query.where(MESScrapRecord.factory_id == effective_factory_id)
+    if accessible_factory_ids is not None:
+        scrap_cat_query = scrap_cat_query.where(MESScrapRecord.factory_id.in_(accessible_factory_ids))
     scrap_cat_result = await db.execute(scrap_cat_query)
     scrap_by_category = {
         row.defect_category or "未分类": int(row.total_defect_qty)
@@ -598,6 +771,10 @@ async def get_dashboard(
     )
     if effective_codes:
         trend_query = trend_query.where(MESScrapRecord.product_line_code.in_(effective_codes))
+    if effective_factory_id:
+        trend_query = trend_query.where(MESScrapRecord.factory_id == effective_factory_id)
+    if accessible_factory_ids is not None:
+        trend_query = trend_query.where(MESScrapRecord.factory_id.in_(accessible_factory_ids))
     trend_result = await db.execute(trend_query)
     scrap_trend_7d = [
         {"date": str(row.day), "defect_qty": int(row.total_defect_qty)}

@@ -13,6 +13,8 @@ async def list_materials(
     page_size: int = 20,
     search: str | None = None,
     product_line_code: str | None = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> tuple[list[IqcMaterial], int]:
     query = select(IqcMaterial)
     count_q = select(func.count(IqcMaterial.material_id))
@@ -27,6 +29,12 @@ async def list_materials(
     if product_line_code:
         query = query.where(IqcMaterial.product_line_code == product_line_code)
         count_q = count_q.where(IqcMaterial.product_line_code == product_line_code)
+    if factory_id:
+        query = query.where(IqcMaterial.factory_id == factory_id)
+        count_q = count_q.where(IqcMaterial.factory_id == factory_id)
+    if allowed_product_line_codes is not None:
+        query = query.where(IqcMaterial.product_line_code.in_(allowed_product_line_codes))
+        count_q = count_q.where(IqcMaterial.product_line_code.in_(allowed_product_line_codes))
 
     total = (await db.execute(count_q)).scalar() or 0
     items = (await db.execute(

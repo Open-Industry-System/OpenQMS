@@ -52,9 +52,18 @@ async def list_scars(
     statuses: list[str] | None = None,
     supplier_id: uuid.UUID | None = None,
     source_type: str | None = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> tuple[list[SupplierSCAR], int]:
     query = select(SupplierSCAR).options(selectinload(SupplierSCAR.supplier))
     count_query = select(func.count()).select_from(SupplierSCAR)
+
+    if factory_id:
+        query = query.where(SupplierSCAR.factory_id == factory_id)
+        count_query = count_query.where(SupplierSCAR.factory_id == factory_id)
+    if allowed_product_line_codes is not None:
+        query = query.where(SupplierSCAR.product_line_code.in_(allowed_product_line_codes))
+        count_query = count_query.where(SupplierSCAR.product_line_code.in_(allowed_product_line_codes))
 
     if statuses:
         query = query.where(SupplierSCAR.status.in_(statuses))

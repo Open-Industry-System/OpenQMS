@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, get_user_permission, PermissionLevel, Module
-from app.models.user import User
+from app.core.permissions import get_user_permission, Module, PermissionLevel
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.models.apqp import APQPProject
 from app.schemas import apqp as apqp_schemas
 from app.services import apqp_service
 
@@ -18,6 +20,17 @@ PHASE_NAMES = {
     4: "产品与过程确认",
     5: "量产启动与反馈",
 }
+
+
+def _check_factory_access(entity, scope: RequestScope):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="APQP project not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="APQP project not found")
 
 
 def _to_response(p) -> apqp_schemas.APQPProjectResponse:
@@ -68,10 +81,14 @@ async def list_projects(
     project_status: str | None = Query(None),
     current_phase: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 VIEW 权限")
     items, total = await apqp_service.list_projects(
         db, page, page_size, project_status, current_phase,
+        factory_id=scope.effective_factory_id,
     )
     return apqp_schemas.APQPProjectListResponse(
         items=[_to_response(p) for p in items],
@@ -82,20 +99,27 @@ async def list_projects(
 @router.get("/stats", response_model=apqp_schemas.APQPProjectStatsResponse)
 async def get_stats(
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    return await apqp_service.get_stats(db)
+    level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 VIEW 权限")
+    return await apqp_service.get_stats(db, factory_id=scope.effective_factory_id)
 
 
 @router.get("/{project_id}", response_model=apqp_schemas.APQPProjectResponse)
 async def get_project(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 VIEW 权限")
     project = await apqp_service.get_project(db, project_id)
     if not project:
         raise HTTPException(404, "APQP project not found")
+    _check_factory_access(project, scope)
     return _to_response(project)
 
 
@@ -103,15 +127,18 @@ async def get_project(
 async def create_project(
     req: apqp_schemas.APQPProjectCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 CREATE 权限")
     try:
         project = await apqp_service.create_project(
             db,
             project_name=req.project_name,
             product_name=req.product_name,
             product_line_code=req.product_line_code,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
             customer_name=req.customer_name,
             description=req.description,
             target_sop_date=req.target_sop_date,
@@ -121,6 +148,9 @@ async def create_project(
             control_plan_id=req.control_plan_id,
             ppap_submission_id=req.ppap_submission_id,
         )
+        await populate_factory_id(project, APQPProject, db, scope=scope)
+        await validate_factory_invariant(project, db)
+        await db.commit()
         return _to_response(project)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -131,16 +161,20 @@ async def update_project(
     project_id: uuid.UUID,
     req: apqp_schemas.APQPProjectUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 CREATE 权限")
     project = await apqp_service.get_project(db, project_id)
     if not project:
         raise HTTPException(404, "APQP project not found")
+    _check_factory_access(project, scope)
     if project.project_status != "active":
         raise HTTPException(400, "只能编辑进行中的项目")
     try:
         update_data = req.model_dump(exclude_unset=True)
-        project = await apqp_service.update_project(db, project, user_id=user.user_id, **update_data)
+        project = await apqp_service.update_project(db, project, user_id=scope.user.user_id, **update_data)
         return _to_response(project)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -151,10 +185,10 @@ async def transition_project(
     project_id: uuid.UUID,
     req: apqp_schemas.APQPGateTransitionRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     # Route-level permission check
-    perm_level = await get_user_permission(user, Module.PLANNING, db)
+    perm_level = await get_user_permission(scope.user, Module.PLANNING, db)
     if req.action in ("approve_gate", "reject_gate"):
         if perm_level < PermissionLevel.APPROVE:
             raise HTTPException(403, "需要经理或管理员权限")
@@ -168,9 +202,10 @@ async def transition_project(
     project = await apqp_service.get_project(db, project_id)
     if not project:
         raise HTTPException(404, "APQP project not found")
+    _check_factory_access(project, scope)
     try:
         project = await apqp_service.transition_project(
-            db, project, req.action, user.user_id, user.display_name, req.comments,
+            db, project, req.action, scope.user.user_id, scope.user.display_name, req.comments,
         )
         return _to_response(project)
     except ValueError as e:

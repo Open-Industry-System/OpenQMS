@@ -66,6 +66,13 @@ class ERPIngestionService:
         if not connection_id:
             raise ValueError("connection_id is required")
 
+        # Load connection to get factory_id (background sync has no request context)
+        conn_result = await db.execute(
+            select(ERPConnection).where(ERPConnection.connection_id == uuid.UUID(connection_id))
+        )
+        connection = conn_result.scalar_one_or_none()
+        factory_id = connection.factory_id if connection else None
+
         handlers = {
             "suppliers": ERPIngestionService._ingest_suppliers,
             "customers": ERPIngestionService._ingest_customers,
@@ -85,14 +92,14 @@ class ERPIngestionService:
         results = []
         for item in items:
             try:
-                result = await handler(db, uuid.UUID(connection_id), item)
+                result = await handler(db, uuid.UUID(connection_id), item, factory_id=factory_id)
                 results.append({"status": "success", "external_id": item.get("external_id")})
             except Exception as e:
                 results.append({"status": "error", "external_id": item.get("external_id"), "error": str(e)})
         return {"processed": len(items), "results": results}
 
     @staticmethod
-    async def _ingest_suppliers(db: AsyncSession, connection_id: uuid.UUID, item: dict) -> dict:
+    async def _ingest_suppliers(db: AsyncSession, connection_id: uuid.UUID, item: dict, factory_id: uuid.UUID | None = None) -> dict:
         values = {
             "connection_id": connection_id,
             "external_id": item["external_id"],
@@ -106,6 +113,8 @@ class ERPIngestionService:
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
         # Try to auto-link
         supplier_result = await db.execute(
             select(Supplier).where(Supplier.supplier_no == item["supplier_code"])
@@ -125,7 +134,7 @@ class ERPIngestionService:
         return {"external_id": item["external_id"]}
 
     @staticmethod
-    async def _ingest_customers(db: AsyncSession, connection_id: uuid.UUID, item: dict) -> dict:
+    async def _ingest_customers(db: AsyncSession, connection_id: uuid.UUID, item: dict, factory_id: uuid.UUID | None = None) -> dict:
         values = {
             "connection_id": connection_id,
             "external_id": item["external_id"],
@@ -138,6 +147,8 @@ class ERPIngestionService:
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
         customer_result = await db.execute(
             select(Customer).where(Customer.customer_code == item["customer_code"])
         )
@@ -156,7 +167,7 @@ class ERPIngestionService:
         return {"external_id": item["external_id"]}
 
     @staticmethod
-    async def _ingest_materials(db: AsyncSession, connection_id: uuid.UUID, item: dict) -> dict:
+    async def _ingest_materials(db: AsyncSession, connection_id: uuid.UUID, item: dict, factory_id: uuid.UUID | None = None) -> dict:
         values = {
             "connection_id": connection_id,
             "external_id": item["external_id"],
@@ -172,6 +183,8 @@ class ERPIngestionService:
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
         stmt = pg_insert(ERPMaterial).values(**values).on_conflict_do_update(
             index_elements=["connection_id", "material_code"],
             set_={k: v for k, v in values.items() if k not in ("connection_id", "material_code")}
@@ -180,7 +193,7 @@ class ERPIngestionService:
         return {"external_id": item["external_id"]}
 
     @staticmethod
-    async def _ingest_locations(db: AsyncSession, connection_id: uuid.UUID, item: dict) -> dict:
+    async def _ingest_locations(db: AsyncSession, connection_id: uuid.UUID, item: dict, factory_id: uuid.UUID | None = None) -> dict:
         values = {
             "connection_id": connection_id,
             "external_id": item["external_id"],
@@ -192,6 +205,8 @@ class ERPIngestionService:
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
         stmt = pg_insert(ERPLocation).values(**values).on_conflict_do_update(
             index_elements=["connection_id", "location_code"],
             set_={k: v for k, v in values.items() if k not in ("connection_id", "location_code")}
@@ -200,7 +215,7 @@ class ERPIngestionService:
         return {"external_id": item["external_id"]}
 
     @staticmethod
-    async def _ingest_purchase_orders(db: AsyncSession, connection_id: uuid.UUID, item: dict) -> dict:
+    async def _ingest_purchase_orders(db: AsyncSession, connection_id: uuid.UUID, item: dict, factory_id: uuid.UUID | None = None) -> dict:
         values = {
             "connection_id": connection_id,
             "external_id": item["external_id"],
@@ -218,6 +233,8 @@ class ERPIngestionService:
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
         # Check reference
         if item.get("supplier_code"):
             sup = await db.execute(select(ERPSupplier).where(
@@ -237,7 +254,7 @@ class ERPIngestionService:
         return {"external_id": item["external_id"]}
 
     @staticmethod
-    async def _ingest_sales_orders(db: AsyncSession, connection_id: uuid.UUID, item: dict) -> dict:
+    async def _ingest_sales_orders(db: AsyncSession, connection_id: uuid.UUID, item: dict, factory_id: uuid.UUID | None = None) -> dict:
         values = {
             "connection_id": connection_id,
             "external_id": item["external_id"],
@@ -252,6 +269,8 @@ class ERPIngestionService:
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
         stmt = pg_insert(ERPSalesOrder).values(**values).on_conflict_do_update(
             index_elements=["connection_id", "so_number", "line_number"],
             set_={k: v for k, v in values.items() if k not in ("connection_id", "so_number", "line_number")}
@@ -260,7 +279,7 @@ class ERPIngestionService:
         return {"external_id": item["external_id"]}
 
     @staticmethod
-    async def _ingest_inventory_balances(db: AsyncSession, connection_id: uuid.UUID, item: dict) -> dict:
+    async def _ingest_inventory_balances(db: AsyncSession, connection_id: uuid.UUID, item: dict, factory_id: uuid.UUID | None = None) -> dict:
         values = {
             "connection_id": connection_id,
             "external_id": item["external_id"],
@@ -276,6 +295,8 @@ class ERPIngestionService:
             "snapshot_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
         stmt = pg_insert(ERPInventoryBalance).values(**values).on_conflict_do_update(
             index_elements=["connection_id", "material_code", "location_code", "lot_no"],
             set_={k: v for k, v in values.items() if k not in ("connection_id", "material_code", "location_code", "lot_no")}
@@ -284,7 +305,7 @@ class ERPIngestionService:
         return {"external_id": item["external_id"]}
 
     @staticmethod
-    async def _ingest_shipments(db: AsyncSession, connection_id: uuid.UUID, item: dict) -> dict:
+    async def _ingest_shipments(db: AsyncSession, connection_id: uuid.UUID, item: dict, factory_id: uuid.UUID | None = None) -> dict:
         values = {
             "connection_id": connection_id,
             "external_id": item["external_id"],
@@ -300,6 +321,8 @@ class ERPIngestionService:
             "link_status": "pending",
             "erp_raw_data": item,
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
         stmt = pg_insert(ERPShipment).values(**values).on_conflict_do_update(
             index_elements=["connection_id", "shipment_number", "line_number"],
             set_={k: v for k, v in values.items() if k not in ("connection_id", "shipment_number", "line_number")}
@@ -375,7 +398,7 @@ class ERPIngestionService:
                 line.link_status = "linked"
 
     @staticmethod
-    async def _ingest_cost_records(db: AsyncSession, connection_id: uuid.UUID, item: dict) -> dict:
+    async def _ingest_cost_records(db: AsyncSession, connection_id: uuid.UUID, item: dict, factory_id: uuid.UUID | None = None) -> dict:
         values = {
             "connection_id": connection_id,
             "external_id": item["external_id"],
@@ -394,6 +417,8 @@ class ERPIngestionService:
             "source_updated_at": datetime.now(timezone.utc),
             "erp_raw_data": item,
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
         stmt = pg_insert(ERPCostRecord).values(**values).on_conflict_do_update(
             index_elements=["connection_id", "external_id"],
             set_={k: v for k, v in values.items() if k not in ("connection_id", "external_id")}
@@ -500,6 +525,8 @@ class ERPSyncService:
             if not connection.is_active:
                 raise ValueError("Connection is inactive")
 
+            factory_id = connection.factory_id
+
             connector = get_erp_connector(connection)
             since = checkpoint or datetime(2000, 1, 1, tzinfo=timezone.utc)
 
@@ -508,7 +535,7 @@ class ERPSyncService:
 
             # Ingest items
             for item in items:
-                await getattr(ERPIngestionService, f"_ingest_{data_type}")(db, connection_id, item)
+                await getattr(ERPIngestionService, f"_ingest_{data_type}")(db, connection_id, item, factory_id=factory_id)
 
             # Mark completed
             await db.execute(sa_text("""

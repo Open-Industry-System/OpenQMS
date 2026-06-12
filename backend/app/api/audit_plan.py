@@ -5,8 +5,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
-from app.models.user import User
+from app.core.permissions import get_user_permission, PermissionLevel, Module
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.models.audit_plan import AuditPlan
 from app.models.audit import AuditLog
 from app import schemas
 from app.services import audit_service, customer_audit_service
@@ -17,10 +19,31 @@ _TEMPLATES_PATH = Path(__file__).parent.parent / "data" / "checklist_templates.j
 CHECKLIST_TEMPLATES: list[dict] = json.loads(_TEMPLATES_PATH.read_text(encoding="utf-8"))
 
 
+async def _check_factory_access(entity, scope: RequestScope, db: AsyncSession):
+    """Raise 404 if entity's factory_id (or parent program's) is not in the user's accessible factories."""
+    fid = getattr(entity, "factory_id", None)
+    # AuditPlan doesn't have factory_id; derive from parent AuditProgram
+    if fid is None and hasattr(entity, "program_id") and entity.program_id:
+        program = await audit_service.get_audit_program(db, entity.program_id)
+        if program and program.factory_id:
+            fid = program.factory_id
+    if fid is None:
+        return
+    if scope.effective_factory_id and fid != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="audit plan not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if fid not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="audit plan not found")
+
+
 @router.get("/checklist-templates")
 async def get_checklist_templates(
-    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 VIEW 权限")
     return CHECKLIST_TEMPLATES
 
 
@@ -28,9 +51,14 @@ async def get_checklist_templates(
 async def get_customer_audit_stats(
     product_line_code: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    stats = await customer_audit_service.get_customer_audit_stats(db, product_line_code=product_line_code)
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 VIEW 权限")
+    stats = await customer_audit_service.get_customer_audit_stats(
+        db, product_line_code=product_line_code, factory_id=scope.effective_factory_id,
+    )
     return schemas.audit.CustomerAuditStatsResponse(**stats)
 
 
@@ -48,11 +76,22 @@ async def list_audit_plans(
     customer_name: str | None = Query(None),
     product_line_code: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 VIEW 权限")
+    # Apply product line scope
+    allowed_pls = None
+    if scope.pl_scope.mode == "NONE":
+        return schemas.audit.AuditPlanListResponse(items=[], total=0, page=page, page_size=page_size)
+    elif scope.pl_scope.mode == "EXPLICIT":
+        allowed_pls = scope.pl_scope.codes
     items, total = await audit_service.list_audit_plans(
         db, page, page_size, program_id, status, date_from, date_to,
         audit_category, customer_type, audit_mode, customer_name, product_line_code,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=allowed_pls,
     )
     return schemas.audit.AuditPlanListResponse(
         items=[schemas.audit.AuditPlanResponse.model_validate(p) for p in items],
@@ -66,8 +105,11 @@ async def list_audit_plans(
 async def create_audit_plan(
     req: schemas.audit.AuditPlanCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     try:
         if req.audit_category == "customer":
             plan = await customer_audit_service.create_customer_audit(
@@ -82,7 +124,7 @@ async def create_audit_plan(
                 team_members=req.team_members,
                 checklist=req.checklist,
                 product_line_code=req.product_line_code,
-                user_id=user.user_id,
+                user_id=scope.user.user_id,
             )
         else:
             plan = await audit_service.create_audit_plan(
@@ -94,9 +136,12 @@ async def create_audit_plan(
                 lead_auditor=req.lead_auditor,
                 team_members=req.team_members,
                 checklist=req.checklist,
-                user_id=user.user_id,
+                user_id=scope.user.user_id,
                 product_line_code=req.product_line_code,
             )
+        await populate_factory_id(plan, AuditPlan, db, scope=scope)
+        await validate_factory_invariant(plan, db)
+        await db.commit()
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -106,11 +151,15 @@ async def create_audit_plan(
 async def get_audit_plan(
     audit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 VIEW 权限")
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="audit plan not found")
+    await _check_factory_access(plan, scope, db)
     return schemas.audit.AuditPlanResponse.model_validate(plan)
 
 
@@ -119,17 +168,21 @@ async def update_audit_plan(
     audit_id: uuid.UUID,
     req: schemas.audit.AuditPlanUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="audit plan not found")
+    await _check_factory_access(plan, scope, db)
     try:
         if plan.audit_category == "customer":
             plan = await customer_audit_service.update_customer_audit(
                 db,
                 plan,
-                user_id=user.user_id,
+                user_id=scope.user.user_id,
                 customer_name=req.customer_name,
                 customer_type=req.customer_type,
                 audit_mode=req.audit_mode,
@@ -153,7 +206,7 @@ async def update_audit_plan(
                 lead_auditor=req.lead_auditor,
                 team_members=req.team_members,
                 checklist=req.checklist,
-                user_id=user.user_id,
+                user_id=scope.user.user_id,
                 product_line_code=req.product_line_code,
             )
         return schemas.audit.AuditPlanResponse.model_validate(plan)
@@ -165,13 +218,17 @@ async def update_audit_plan(
 async def delete_audit_plan(
     audit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="audit plan not found")
+    await _check_factory_access(plan, scope, db)
     try:
-        await audit_service.delete_audit_plan(db, plan, user.user_id)
+        await audit_service.delete_audit_plan(db, plan, scope.user.user_id)
         return {"message": "audit plan deleted"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -181,13 +238,17 @@ async def delete_audit_plan(
 async def start_audit_plan(
     audit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="audit plan not found")
+    await _check_factory_access(plan, scope, db)
     try:
-        plan = await audit_service.start_audit_plan(db, plan, user.user_id)
+        plan = await audit_service.start_audit_plan(db, plan, scope.user.user_id)
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -197,16 +258,20 @@ async def start_audit_plan(
 async def complete_audit_plan(
     audit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="audit plan not found")
+    await _check_factory_access(plan, scope, db)
     try:
         if plan.audit_category == "customer":
-            plan = await customer_audit_service.complete_customer_audit(db, plan, user.user_id)
+            plan = await customer_audit_service.complete_customer_audit(db, plan, scope.user.user_id)
         else:
-            plan = await audit_service.complete_audit_plan(db, plan, user.user_id)
+            plan = await audit_service.complete_audit_plan(db, plan, scope.user.user_id)
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -216,13 +281,17 @@ async def complete_audit_plan(
 async def cancel_audit_plan(
     audit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="audit plan not found")
+    await _check_factory_access(plan, scope, db)
     try:
-        plan = await audit_service.cancel_audit_plan(db, plan, user.user_id)
+        plan = await audit_service.cancel_audit_plan(db, plan, scope.user.user_id)
         return schemas.audit.AuditPlanResponse.model_validate(plan)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -233,11 +302,15 @@ async def confirm_customer_audit(
     audit_id: uuid.UUID,
     req: schemas.audit.CustomerConfirmationRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     plan = await audit_service.get_audit_plan(db, audit_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="audit plan not found")
+    await _check_factory_access(plan, scope, db)
     if plan.audit_category != "customer":
         raise HTTPException(status_code=400, detail="not a customer audit")
 
@@ -250,7 +323,7 @@ async def confirm_customer_audit(
         record_id=audit_id,
         action="CUSTOMER_CONFIRM",
         changed_fields={"customer_confirmation_date": req.confirmation_date.isoformat()},
-        operated_by=user.user_id,
+        operated_by=scope.user.user_id,
     )
     db.add(audit_log)
     await db.commit()
@@ -264,10 +337,14 @@ async def get_plan_findings(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 VIEW 权限")
     items, total = await audit_service.list_audit_findings(
-        db, page, page_size, audit_id=audit_id
+        db, page, page_size, audit_id=audit_id,
+        factory_id=scope.effective_factory_id,
     )
     return schemas.audit.AuditFindingListResponse(
         items=[schemas.audit.AuditFindingResponse.model_validate(f) for f in items],

@@ -2,12 +2,25 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
-from app.models.user import User
+from app.core.permissions import get_user_permission, PermissionLevel, Module
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.models.audit_finding import AuditFinding
 from app import schemas
 from app.services import audit_service, customer_audit_service
 
 router = APIRouter(prefix="/api/audit-findings", tags=["audit-findings"])
+
+
+def _check_factory_access(entity, scope: RequestScope):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="audit finding not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="audit finding not found")
 
 
 @router.get("", response_model=schemas.audit.AuditFindingListResponse)
@@ -18,10 +31,14 @@ async def list_audit_findings(
     finding_type: str | None = Query(None),
     status: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 VIEW 权限")
     items, total = await audit_service.list_audit_findings(
-        db, page, page_size, audit_id, finding_type, status
+        db, page, page_size, audit_id, finding_type, status,
+        factory_id=scope.effective_factory_id,
     )
     return schemas.audit.AuditFindingListResponse(
         items=[schemas.audit.AuditFindingResponse.model_validate(f) for f in items],
@@ -35,8 +52,11 @@ async def list_audit_findings(
 async def create_audit_finding(
     req: schemas.audit.AuditFindingCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     try:
         finding = await audit_service.create_audit_finding(
             db,
@@ -48,8 +68,11 @@ async def create_audit_finding(
             correction=req.correction,
             corrective_action=req.corrective_action,
             due_date=req.due_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
         )
+        await populate_factory_id(finding, AuditFinding, db, scope=scope)
+        await validate_factory_invariant(finding, db)
+        await db.commit()
         return schemas.audit.AuditFindingResponse.model_validate(finding)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -59,11 +82,15 @@ async def create_audit_finding(
 async def get_audit_finding(
     finding_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 VIEW 权限")
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="audit finding not found")
+    _check_factory_access(finding, scope)
     return schemas.audit.AuditFindingResponse.model_validate(finding)
 
 
@@ -72,11 +99,15 @@ async def update_audit_finding(
     finding_id: uuid.UUID,
     req: schemas.audit.AuditFindingUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="audit finding not found")
+    _check_factory_access(finding, scope)
     try:
         finding = await audit_service.update_audit_finding(
             db,
@@ -88,7 +119,7 @@ async def update_audit_finding(
             correction=req.correction,
             corrective_action=req.corrective_action,
             due_date=req.due_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
         )
         return schemas.audit.AuditFindingResponse.model_validate(finding)
     except ValueError as e:
@@ -100,17 +131,21 @@ async def transition_audit_finding(
     finding_id: uuid.UUID,
     req: schemas.audit.FindingTransitionRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="audit finding not found")
+    _check_factory_access(finding, scope)
     try:
         finding = await customer_audit_service.transition_finding(
             db,
             finding,
             action=req.action,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
             customer_confirmed=req.customer_confirmed,
             customer_confirmation_date=req.customer_confirmation_date,
             customer_confirmation_attachments=req.customer_confirmation_attachments,
@@ -125,18 +160,22 @@ async def confirm_customer_finding(
     finding_id: uuid.UUID,
     req: schemas.audit.CustomerConfirmationRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="audit finding not found")
+    _check_factory_access(finding, scope)
     try:
         finding = await customer_audit_service.customer_confirm_finding(
             db,
             finding,
             confirmation_date=req.confirmation_date,
             attachments=[a.model_dump() for a in req.attachments] if req.attachments else [],
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
         )
         return schemas.audit.AuditFindingResponse.model_validate(finding)
     except ValueError as e:
@@ -147,19 +186,23 @@ async def confirm_customer_finding(
 async def close_audit_finding(
     finding_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="audit finding not found")
+    _check_factory_access(finding, scope)
     try:
         plan = await audit_service.get_audit_plan(db, finding.audit_id)
         if plan and plan.audit_category == "customer":
             finding = await customer_audit_service.transition_finding(
-                db, finding, action="close", user_id=user.user_id
+                db, finding, action="close", user_id=scope.user.user_id
             )
         else:
-            finding = await audit_service.close_audit_finding(db, finding, user.user_id)
+            finding = await audit_service.close_audit_finding(db, finding, scope.user.user_id)
         return schemas.audit.AuditFindingResponse.model_validate(finding)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -169,13 +212,17 @@ async def close_audit_finding(
 async def create_capa_from_finding(
     finding_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.AUDIT, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.AUDIT, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     finding = await audit_service.get_audit_finding(db, finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="audit finding not found")
+    _check_factory_access(finding, scope)
     try:
-        capa = await audit_service.create_capa_from_finding(db, finding, user.user_id)
+        capa = await audit_service.create_capa_from_finding(db, finding, scope.user.user_id)
         return {
             "message": "CAPA created",
             "capa_id": str(capa.report_id),

@@ -6,11 +6,11 @@ from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import populate_factory_id, validate_factory_invariant
 from app.core.permissions import (
-    get_current_user, require_permission,
-    PermissionLevel, Module,
+    get_user_permission, PermissionLevel, Module,
 )
-from app.models.user import User
 from app.models.cp_validation import (
     CPValidationRun, CPValidationFinding, CPValidationOccurrence,
 )
@@ -25,6 +25,24 @@ from app.services.cp_validation import CPValidationEngine, ValidationAlreadyRunn
 router = APIRouter(prefix="/api", tags=["cp-validation"])
 
 
+def _check_factory_access(entity, scope: RequestScope):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="Control plan not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="Control plan not found")
+
+
+async def _get_control_plan(db: AsyncSession, cp_id: uuid.UUID):
+    """Fetch a control plan and return it, or None."""
+    from app.models.control_plan import ControlPlan
+    result = await db.execute(select(ControlPlan).where(ControlPlan.id == cp_id))
+    return result.scalar_one_or_none()
+
+
 class ValidationSummariesRequest(BaseModel):
     cp_ids: list[uuid.UUID]
 
@@ -37,9 +55,33 @@ class ValidationSummariesResponse(BaseModel):
 async def batch_validation_summaries(
     req: ValidationSummariesRequest,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Batch fetch validation summaries for multiple control plans (list page N+1 fix)."""
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 VIEW 权限")
+
+    # Filter cp_ids to those in accessible factories
+    if scope.effective_factory_id:
+        accessible_cp_ids = []
+        for cid in req.cp_ids:
+            cp = await _get_control_plan(db, cid)
+            if cp and cp.factory_id == scope.effective_factory_id:
+                accessible_cp_ids.append(cid)
+        req_cp_ids = accessible_cp_ids
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        if not scope.factory_scope.accessible_factory_ids:
+            return ValidationSummariesResponse(summaries={})
+        accessible_cp_ids = []
+        for cid in req.cp_ids:
+            cp = await _get_control_plan(db, cid)
+            if cp and cp.factory_id in scope.factory_scope.accessible_factory_ids:
+                accessible_cp_ids.append(cid)
+        req_cp_ids = accessible_cp_ids
+    else:
+        req_cp_ids = req.cp_ids
     from sqlalchemy import func as sql_func
 
     # Latest run per cp_id
@@ -48,7 +90,7 @@ async def batch_validation_summaries(
             CPValidationRun.cp_id,
             sql_func.max(CPValidationRun.started_at).label("max_started"),
         )
-        .where(CPValidationRun.cp_id.in_(req.cp_ids))
+        .where(CPValidationRun.cp_id.in_(req_cp_ids))
         .group_by(CPValidationRun.cp_id)
         .subquery("latest_runs")
     )
@@ -85,7 +127,7 @@ async def batch_validation_summaries(
                 CPValidationOccurrence.run_id == latest.c.run_id,
             ),
         )
-        .where(CPValidationFinding.cp_id.in_(req.cp_ids))
+        .where(CPValidationFinding.cp_id.in_(req_cp_ids))
         .group_by(CPValidationFinding.cp_id, CPValidationFinding.status)
     )
 
@@ -171,9 +213,18 @@ async def list_validation_results(
     status_filter: str | None = Query(None, alias="status"),
     severity: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """List validation results for latest run (join occurrences + findings)."""
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 VIEW 权限")
+
+    # Factory access check on the control plan
+    cp = await _get_control_plan(db, cp_id)
+    if cp:
+        _check_factory_access(cp, scope)
     latest_run = await _get_latest_run(db, cp_id)
     if latest_run is None:
         return ValidationResultsListResponse(items=[], total=0)
@@ -201,12 +252,22 @@ async def list_validation_results(
 async def trigger_validation(
     cp_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Manually trigger a validation run. Synchronous — waits for completion."""
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if perm_level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 EDIT 权限")
+
+    # Factory access check on the control plan
+    cp = await _get_control_plan(db, cp_id)
+    if cp:
+        _check_factory_access(cp, scope)
+
     engine = CPValidationEngine()
     try:
-        run = await engine.validate(db, cp_id, user.user_id, trigger="manual")
+        run = await engine.validate(db, cp_id, scope.user.user_id, trigger="manual")
     except ValidationAlreadyRunning:
         raise HTTPException(status_code=409, detail="该控制计划的校验正在运行中")
     except ValueError as e:
@@ -222,9 +283,18 @@ async def list_validation_runs(
     cp_id: uuid.UUID,
     limit: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """List validation run history for a control plan."""
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 VIEW 权限")
+
+    # Factory access check on the control plan
+    cp = await _get_control_plan(db, cp_id)
+    if cp:
+        _check_factory_access(cp, scope)
     result = await db.execute(
         select(CPValidationRun)
         .where(CPValidationRun.cp_id == cp_id)
@@ -239,9 +309,18 @@ async def list_validation_runs(
 async def get_validation_summary(
     cp_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Get summary of the latest validation run."""
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 VIEW 权限")
+
+    # Factory access check on the control plan
+    cp = await _get_control_plan(db, cp_id)
+    if cp:
+        _check_factory_access(cp, scope)
     latest_run = await _get_latest_run(db, cp_id)
     if latest_run is None:
         return ValidationSummaryResponse()
@@ -305,12 +384,18 @@ async def _find_and_respond(db: AsyncSession, finding_id: uuid.UUID) -> Validati
 async def reject_validation_result(
     finding_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Reject a validation finding."""
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if perm_level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 EDIT 权限")
+
     finding = await _get_finding(db, finding_id)
+    _check_factory_access(finding, scope)
     finding.status = "rejected"
-    finding.resolved_by = user.user_id
+    finding.resolved_by = scope.user.user_id
     finding.resolved_at = datetime.now(timezone.utc)
     await db.commit()
     return await _find_and_respond(db, finding_id)
@@ -320,12 +405,18 @@ async def reject_validation_result(
 async def resolve_validation_result(
     finding_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Mark a validation finding as resolved."""
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if perm_level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 EDIT 权限")
+
     finding = await _get_finding(db, finding_id)
+    _check_factory_access(finding, scope)
     finding.status = "resolved"
-    finding.resolved_by = user.user_id
+    finding.resolved_by = scope.user.user_id
     finding.resolved_at = datetime.now(timezone.utc)
     await db.commit()
     return await _find_and_respond(db, finding_id)
@@ -335,10 +426,16 @@ async def resolve_validation_result(
 async def reopen_validation_result(
     finding_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Reopen a rejected or resolved validation finding."""
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.PLANNING, db)
+    if perm_level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 planning 模块的 EDIT 权限")
+
     finding = await _get_finding(db, finding_id)
+    _check_factory_access(finding, scope)
     if finding.status not in ("rejected", "resolved"):
         raise HTTPException(status_code=400, detail="只能重新打开已拒绝或已解决的项目")
     finding.status = "open"

@@ -3,21 +3,41 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.permissions import get_user_permission, PermissionLevel, Module
+from app.models.gauge import Gauge
 from app import schemas
 from app.services import gauge_service
 
 router = APIRouter(prefix="/api/gauges", tags=["gauges"])
 
 
+def _check_factory_access(entity, scope: RequestScope):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="Gauge not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="Gauge not found")
+
+
 @router.get("/expiring", response_model=schemas.gauge.GaugeListResponse)
 async def get_expiring_gauges(
     days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.MSA, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+
     items, total = await gauge_service.list_gauges(
-        db, page=1, page_size=100, expiring_days=days
+        db, page=1, page_size=100, expiring_days=days,
+        factory_id=scope.effective_factory_id,
     )
     return schemas.gauge.GaugeListResponse(
         items=[schemas.gauge.GaugeResponse.model_validate(g) for g in items],
@@ -35,10 +55,16 @@ async def list_gauges(
     department: str | None = Query(None),
     search: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.MSA, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+
     items, total = await gauge_service.list_gauges(
-        db, page, page_size, status, department, search
+        db, page, page_size, status, department, search,
+        factory_id=scope.effective_factory_id,
     )
     return schemas.gauge.GaugeListResponse(
         items=[schemas.gauge.GaugeResponse.model_validate(g) for g in items],
@@ -52,8 +78,13 @@ async def list_gauges(
 async def create_gauge(
     req: schemas.gauge.GaugeCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.MSA, db)
+    if perm_level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
+
     try:
         gauge = await gauge_service.create_gauge(
             db,
@@ -67,8 +98,12 @@ async def create_gauge(
             location=req.location,
             calibration_cycle_days=req.calibration_cycle_days,
             next_calibration_date=req.next_calibration_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
         )
+        await populate_factory_id(gauge, Gauge, db, scope=scope)
+        await validate_factory_invariant(gauge, db)
+        await db.commit()
+        await db.refresh(gauge)
         return schemas.gauge.GaugeResponse.model_validate(gauge)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -78,11 +113,17 @@ async def create_gauge(
 async def get_gauge(
     gauge_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.MSA, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+
     gauge = await gauge_service.get_gauge(db, gauge_id)
     if gauge is None:
         raise HTTPException(status_code=404, detail="gauge not found")
+    _check_factory_access(gauge, scope)
     return schemas.gauge.GaugeResponse.model_validate(gauge)
 
 
@@ -91,16 +132,22 @@ async def update_gauge(
     gauge_id: uuid.UUID,
     req: schemas.gauge.GaugeUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.MSA, db)
+    if perm_level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
+
     gauge = await gauge_service.get_gauge(db, gauge_id)
     if gauge is None:
         raise HTTPException(status_code=404, detail="gauge not found")
+    _check_factory_access(gauge, scope)
     try:
         gauge = await gauge_service.update_gauge(
             db,
             gauge,
-            user.user_id,
+            scope.user.user_id,
             gauge_no=req.gauge_no,
             name=req.name,
             model=req.model,
@@ -122,13 +169,19 @@ async def update_gauge(
 async def delete_gauge(
     gauge_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.MSA, db)
+    if perm_level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
+
     gauge = await gauge_service.get_gauge(db, gauge_id)
     if gauge is None:
         raise HTTPException(status_code=404, detail="gauge not found")
+    _check_factory_access(gauge, scope)
     try:
-        await gauge_service.delete_gauge(db, gauge, user.user_id)
+        await gauge_service.delete_gauge(db, gauge, scope.user.user_id)
         return {"message": "gauge deleted"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -141,8 +194,17 @@ async def delete_gauge(
 async def list_calibrations(
     gauge_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.MSA, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+
+    gauge = await gauge_service.get_gauge(db, gauge_id)
+    if gauge is None:
+        raise HTTPException(status_code=404, detail="gauge not found")
+    _check_factory_access(gauge, scope)
     items = await gauge_service.list_calibrations(db, gauge_id)
     return schemas.gauge.GaugeCalibrationListResponse(
         items=[
@@ -160,8 +222,17 @@ async def create_calibration(
     gauge_id: uuid.UUID,
     req: schemas.gauge.GaugeCalibrationCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.MSA, db)
+    if perm_level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
+
+    gauge = await gauge_service.get_gauge(db, gauge_id)
+    if gauge is None:
+        raise HTTPException(status_code=404, detail="gauge not found")
+    _check_factory_access(gauge, scope)
     try:
         cal = await gauge_service.create_calibration(
             db,
@@ -172,7 +243,7 @@ async def create_calibration(
             calibrated_by=req.calibrated_by,
             notes=req.notes,
             next_calibration_date=req.next_calibration_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
         )
         return schemas.gauge.GaugeCalibrationResponse.model_validate(cal)
     except ValueError as e:

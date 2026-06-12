@@ -99,6 +99,8 @@ async def list_ppaps(
     page_size: int = 20,
     statuses: list[str] | None = None,
     supplier_id: uuid.UUID | None = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> tuple[list[SupplierPPAPSubmission], int]:
     query = select(SupplierPPAPSubmission).options(
         selectinload(SupplierPPAPSubmission.supplier),
@@ -112,6 +114,12 @@ async def list_ppaps(
     if supplier_id:
         query = query.where(SupplierPPAPSubmission.supplier_id == supplier_id)
         count_query = count_query.where(SupplierPPAPSubmission.supplier_id == supplier_id)
+    if factory_id:
+        query = query.where(SupplierPPAPSubmission.factory_id == factory_id)
+        count_query = count_query.where(SupplierPPAPSubmission.factory_id == factory_id)
+    if allowed_product_line_codes is not None:
+        query = query.where(SupplierPPAPSubmission.product_line_code.in_(allowed_product_line_codes))
+        count_query = count_query.where(SupplierPPAPSubmission.product_line_code.in_(allowed_product_line_codes))
 
     total = (await db.execute(count_query)).scalar() or 0
     query = query.order_by(SupplierPPAPSubmission.created_at.desc())

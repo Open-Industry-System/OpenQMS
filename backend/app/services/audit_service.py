@@ -76,6 +76,7 @@ async def list_audit_programs(
     year: int | None = None,
     audit_type: str | None = None,
     status: str | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[AuditProgram], int]:
     query = select(AuditProgram)
     count_query = select(func.count()).select_from(AuditProgram)
@@ -89,6 +90,9 @@ async def list_audit_programs(
     if status:
         query = query.where(AuditProgram.status == status)
         count_query = count_query.where(AuditProgram.status == status)
+    if factory_id is not None:
+        query = query.where(AuditProgram.factory_id == factory_id)
+        count_query = count_query.where(AuditProgram.factory_id == factory_id)
 
     query = query.order_by(AuditProgram.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -248,6 +252,8 @@ async def list_audit_plans(
     audit_mode: str | None = None,
     customer_name: str | None = None,
     product_line_code: str | None = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> tuple[list[AuditPlan], int]:
     query = select(AuditPlan)
     count_query = select(func.count()).select_from(AuditPlan)
@@ -279,6 +285,12 @@ async def list_audit_plans(
     if product_line_code:
         query = query.where(AuditPlan.product_line_code == product_line_code)
         count_query = count_query.where(AuditPlan.product_line_code == product_line_code)
+    if factory_id is not None:
+        query = query.join(AuditProgram, AuditPlan.program_id == AuditProgram.program_id).where(AuditProgram.factory_id == factory_id)
+        count_query = count_query.join(AuditProgram, AuditPlan.program_id == AuditProgram.program_id).where(AuditProgram.factory_id == factory_id)
+    if allowed_product_line_codes is not None:
+        query = query.where(AuditPlan.product_line_code.in_(allowed_product_line_codes))
+        count_query = count_query.where(AuditPlan.product_line_code.in_(allowed_product_line_codes))
 
     query = query.order_by(AuditPlan.planned_date.asc())
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -578,6 +590,7 @@ async def list_audit_findings(
     audit_id: uuid.UUID | None = None,
     finding_type: str | None = None,
     status: str | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[AuditFinding], int]:
     query = select(AuditFinding)
     count_query = select(func.count()).select_from(AuditFinding)
@@ -591,6 +604,9 @@ async def list_audit_findings(
     if status:
         query = query.where(AuditFinding.status == status)
         count_query = count_query.where(AuditFinding.status == status)
+    if factory_id is not None:
+        query = query.where(AuditFinding.factory_id == factory_id)
+        count_query = count_query.where(AuditFinding.factory_id == factory_id)
 
     query = query.order_by(AuditFinding.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -803,34 +819,47 @@ async def create_capa_from_finding(
 # Stats
 # ───────────────────────────────────────────────
 
-async def get_audit_stats(db: AsyncSession) -> dict:
-    program_result = await db.execute(select(func.count()).select_from(AuditProgram))
+async def get_audit_stats(db: AsyncSession, factory_id: uuid.UUID | None = None) -> dict:
+    program_query = select(func.count()).select_from(AuditProgram)
+    if factory_id is not None:
+        program_query = program_query.where(AuditProgram.factory_id == factory_id)
+    program_result = await db.execute(program_query)
     program_count = program_result.scalar() or 0
 
+    # AuditPlan doesn't have factory_id; join through AuditProgram
+    plan_base = select(func.count()).select_from(AuditPlan).join(
+        AuditProgram, AuditPlan.program_id == AuditProgram.program_id
+    )
+    if factory_id is not None:
+        plan_base = plan_base.where(AuditProgram.factory_id == factory_id)
+
     planned_result = await db.execute(
-        select(func.count()).select_from(AuditPlan).where(AuditPlan.status == "planned")
+        plan_base.where(AuditPlan.status == "planned")
     )
     planned_count = planned_result.scalar() or 0
 
     in_progress_result = await db.execute(
-        select(func.count()).select_from(AuditPlan).where(AuditPlan.status == "in_progress")
+        plan_base.where(AuditPlan.status == "in_progress")
     )
     in_progress_count = in_progress_result.scalar() or 0
 
     completed_result = await db.execute(
-        select(func.count()).select_from(AuditPlan).where(AuditPlan.status == "completed")
+        plan_base.where(AuditPlan.status == "completed")
     )
     completed_count = completed_result.scalar() or 0
 
+    finding_factory_filter = [AuditFinding.factory_id == factory_id] if factory_id else []
     open_findings_result = await db.execute(
-        select(func.count()).select_from(AuditFinding).where(AuditFinding.status == "open")
+        select(func.count()).select_from(AuditFinding).where(AuditFinding.status == "open",
+        *finding_factory_filter)
     )
     open_findings = open_findings_result.scalar() or 0
 
     major_nc_result = await db.execute(
         select(func.count())
         .select_from(AuditFinding)
-        .where(AuditFinding.finding_type == "major_nc", AuditFinding.status == "open")
+        .where(AuditFinding.finding_type == "major_nc", AuditFinding.status == "open",
+        *finding_factory_filter)
     )
     major_nc_count = major_nc_result.scalar() or 0
 

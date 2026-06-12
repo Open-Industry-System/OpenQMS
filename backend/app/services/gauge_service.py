@@ -24,9 +24,14 @@ async def list_gauges(
     department: str | None = None,
     search: str | None = None,
     expiring_days: int | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[Gauge], int]:
     query = select(Gauge)
     count_query = select(func.count()).select_from(Gauge)
+
+    if factory_id:
+        query = query.where(Gauge.factory_id == factory_id)
+        count_query = count_query.where(Gauge.factory_id == factory_id)
 
     if status:
         query = query.where(Gauge.status == status)
