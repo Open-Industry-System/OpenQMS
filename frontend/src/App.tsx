@@ -67,6 +67,7 @@ import ERPMasterDataPage from "./pages/erp/ERPMasterDataPage";
 import ERPSupplyChainPage from "./pages/erp/ERPSupplyChainPage";
 import ERPSalesAndCostPage from "./pages/erp/ERPSalesAndCostPage";
 import ERPTraceabilityPage from "./pages/erp/ERPTraceabilityPage";
+import SupplyChainRiskMapPage from "./pages/supplyChainRiskMap/SupplyChainRiskMapPage";
 
 function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
@@ -135,6 +136,7 @@ export default function App() {
           <Route index element={<SupplierRiskPage />} />
           <Route path="config" element={<RiskConfigPage />} />
         </Route>
+        <Route path="/supply-chain-risk-map" element={<ProtectedRoute requiredModule="supply_chain_risk_map"><SupplyChainRiskMapPage /></ProtectedRoute>} />
         <Route path="/msa" element={<ProtectedRoute requiredModule="msa"><Navigate to="/msa/gauges" replace /></ProtectedRoute>} />
         <Route path="/msa/gauges" element={<ProtectedRoute requiredModule="msa"><GaugeListPage /></ProtectedRoute>} />
         <Route path="/msa/gauges/:id" element={<ProtectedRoute requiredModule="msa"><GaugeDetailPage /></ProtectedRoute>} />
