@@ -154,9 +154,9 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | IQC 抽样方案智能优化 | P3 | ✅ 完成 | 基于历史质量动态调整 AQL；组合规则引擎（10 条规则）+ 多级审批（engineer/manager）+ 质量画像 + PPM/SCAR/安全缺陷触发；4 张新表 + 配置化参数；4 页前端；18 条单元测试 |
 | 供应商风险智能预警 | P3 | ✅ 完成 (2026-06-11) | 10 规则引擎（质量/交付/合规）+ 加权评分 + 4 级风险（低/中/高/严重）+ 批量评估 + 每日定时触发 + IQC 判决增量触发 + SCAR/CAPA 闭环（一键创建 + 关闭联动）+ 邮件/钉钉 Webhook 通知（SSRF 保护 + Fernet 加密）+ 风险矩阵散点图 + 规则配置页 + 通知渠道管理 + 45 测试全绿 |
 | 管理评审报告自动生成 | P3 | ✅ 完成 (2026-06-12) | 汇总输入数据 → 生成报告初稿，支持 AI 生成、人工编辑、定稿归档与版本历史 |
-| 供应链风险地图 | P3 | 🔲 待开发 | 多维度供应风险热力图 |
+| 供应链风险地图 | P3 | ✅ 完成 (2026-06-12) | 多维度供应风险热力图 + 产品线隔离 + 环比差异 + 供应商详情/对比 + 6 月趋势 + 定时快照(pg_try_advisory_lock) + CSV/Excel 导出 + 830 测试 |
 | 自定义看板（拖拽式）| P3 | ✅ 完成 | react-grid-layout 拖拽布局，widget 库面板（18 种 widget），用户级 layout 存储，产品线过滤，权限控制 |
-| 多工厂部署支持 | P3 | 🔲 待开发 | 每工厂独立实例 + 集团汇总 |
+| 多工厂部署支持 | P3 | ✅ 完成 (2026-06-12) | 单数据库 + factory_id 行级隔离 + 三层 Scope 模型 + 集团汇总 |
 | SaaS 多租户架构 | P3 | 🔲 待开发 | Schema 级别隔离 + 弹性资源 |
 
 **Phase 4 MES 集成已完成 (2026-06-05)**:
@@ -213,18 +213,18 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 ---
 
-## 项目统计 (截至 2026-06-10)
+## 项目统计 (截至 2026-06-12)
 
 | 指标 | 数量 |
 |------|------|
-| Git 提交 | 1,021 次 |
-| 后端 Python 文件 | 198 个 |
-| 前端 TS/TSX 文件 | 181 个 |
-| API 路由模块 | 34 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/...) |
-| 前端页面 | 64 个 TSX 页面 |
-| 数据库表 | 98 张 (含 ERP 12 张 + 多对多关联表) |
+| Git 提交 | 1,050+ 次 |
+| 后端 Python 文件 | 210+ 个 |
+| 前端 TS/TSX 文件 | 190+ 个 |
+| API 路由模块 | 36 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/supply_chain_risk_map/...) |
+| 前端页面 | 70+ 个 TSX 页面 |
+| 数据库表 | 105+ 张 (含 ERP 12 张 + Factory/Group 关联表 + Supply Chain Risk Snapshot) |
 | 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
-| 种子数据 | 4 用户 + 多模块演示数据 |
+| 种子数据 | 5 用户 + 2 工厂 + 多模块演示数据 |
 
 ---
 
@@ -247,14 +247,14 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 | 类别 | 内容 |
 |------|------|
-| 提交数 | 1,021 次 |
-| 后端文件 | 198 个 Python 文件 |
-| 前端文件 | 181 个 TS/TSX 文件 |
-| API 端点 | 33 个路由模块 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/...) |
-| 前端页面 | 58 个 TSX 页面 |
-| 数据库表 | 86 张 (含多对多关联表) |
+| 提交数 | 1,050+ 次 |
+| 后端文件 | 210+ 个 Python 文件 |
+| 前端文件 | 190+ 个 TS/TSX 文件 |
+| API 端点 | 36 个路由模块 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/supply_chain_risk_map/...) |
+| 前端页面 | 70+ 个 TSX 页面 |
+| 数据库表 | 105+ 张 (含多对多关联表 + Factory/Group) |
 | 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
-| 种子数据 | 4 用户 + 3 FMEA + 6 CAPA + 多模块演示数据 |
+| 种子数据 | 5 用户 + 2 工厂 + 3 FMEA + 6 CAPA + 多模块演示数据 |
 
 ---
 
@@ -334,6 +334,27 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 9. ~~前端页面~~ ✅ 4 页 + 2 组件 + 路由 + 侧边栏
 
 **Phase 4 剩余 (待开发)**:
-- [ ] 管理评审报告自动生成
-- [ ] 供应链风险地图
 - [ ] SaaS 多租户架构 — Schema 级别隔离 + 弹性资源
+
+**Phase 4 供应链风险地图已完成 (2026-06-12)**:
+1. ~~数据库迁移~~ ✅ supply_chain_risk_snapshots 表 + UNIQUE NULLS NOT DISTINCT + 权限种子 + erp_purchase_orders.actual_delivery_date
+2. ~~ORM 模型~~ ✅ SupplyChainRiskSnapshot（risk_score/risk_level/quality_score/delivery_score/compliance_score + 8 维 JSONB dimensions）
+3. ~~聚合引擎~~ ✅ aggregate_supply_chain_metrics（ERP 准时率 + 采购占比 + SCAR 时间点 + IQC PPM）+ normalize_to_risk_index + ppm_to_risk_index
+4. ~~快照服务~~ ✅ generate_snapshot（仅当前月 UPSERT）+ heatmap/timeline/detail/comparison/export 5 端点 + pg_try_advisory_lock 调度
+5. ~~API 路由~~ ✅ 6 端点（heatmap/timeline/supplier-detail/compare/snapshot-generate/export）
+6. ~~前端页面~~ ✅ RiskHeatmap + HeatmapToolbar + TimelineSlider + DetailPanel + SupplierDetail + SupplierComparison + DiffIndicator + DataSourceBadge + ExportButton
+7. ~~产品线隔离~~ ✅ 快照/热力图/时间线/详情/趋势查询均按 product_line_code 过滤，NULL = 全局
+8. ~~权限控制~~ ✅ Module.SUPPLY_CHAIN_RISK_MAP + VIEW/EDIT 分级 + 前端按需显示
+9. ~~测试覆盖~~ ✅ 6 服务测试 + 5 聚合测试 + 6 集成测试 + 4 e2e 测试
+10. ~~代码审查修复~~ ✅ timeline 路由递归 → import alias；PPM risk_index 超限 → ppm_to_risk_index；硬编码产品线 → useProductLineStore；权限按钮 → usePermission；ERP JOIN 缺失 connection_id；delivery_delay_days 类型处理；趋势 product_line/period 过滤
+
+**Phase 4 多工厂部署支持已完成 (2026-06-12)**:
+1. ~~数据库迁移~~ ✅ Factory/UserFactory/SupplierSharedProfile 表 + factory_id 列 + 回填 + NOT NULL 强制
+2. ~~ORM 模型~~ ✅ Factory + UserFactory + AuditProgramTargetFactory + SupplierSharedProfile + ~50 业务表 factory_id
+3. ~~Scope 层~~ ✅ FactoryScope / ProductLineScope / PermissionScope 三层模型 + resolve_* + apply_scope_filter + populate_factory_id + validate_factory_invariant
+4. ~~权限系统~~ ✅ Module.GROUP 枚举 + GROUP ADMIN/VIEW 独立于 bypass_row_level_security + RequestScope 依赖注入
+5. ~~API 层~~ ✅ /api/group/* 集团路由（dashboard / comparison / factories CRUD / shared-suppliers / cross-factory-audits）+ 全模块 factory_id 过滤
+6. ~~前端~~ ✅ Axios factory_id 自动注入 + 工厂切换器 + 侧边栏集团菜单 + Group API 客户端 + 集团仪表盘/对比/工厂管理页
+7. ~~种子数据~~ ✅ 第二工厂 + GROUP ADMIN 用户
+8. ~~测试~~ ✅ Factory isolation (14) + scope resolution (41) + 管理评审 API (5) + 权限解耦边界测试
+9. ~~代码审查修复~~ ✅ GROUP VIEW 明细响应工厂范围过滤 + product_line 列表过滤 + shipment 重复校验 + 管理评审 API 测试修复
