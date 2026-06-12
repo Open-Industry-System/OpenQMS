@@ -6,10 +6,10 @@
 
 ## 文档范围
 
-- **README.md**（项目根目录）：项目简介、核心能力、技术栈、快速启动、默认账号、目录指引。
-- **docs/user-guide.md**：全局使用指南，包括登录、工厂/产品线切换、列表页通用操作、审批流程。
+- **README.md**（项目根目录）：项目简介、核心能力、技术栈、快速启动、默认账号、目录指引，顶部附简短英文介绍，并包含模块支持状态矩阵（已完善 / 开发中 / 规划中）。
+- **docs/user-guide.md**：全局使用指南，包括登录、工厂/产品线切换、列表页通用操作、审批流程；重申模块状态矩阵。
 - **docs/deployment.md**：Docker 与本地开发环境部署、数据库迁移、环境变量说明。
-- **docs/architecture.md**：前后端架构、权限模型、数据模型概览、模块间数据流。
+- **docs/architecture.md**：前后端架构、权限模型、数据模型概览、模块间数据流；补充如何访问 FastAPI 自动生成的交互式 API 文档（`/docs`、`/redoc`）。
 - **docs/permissions.md**：更新现有权限说明，补充新模块权限点。
 - **docs/modules/*.md**：按功能域划分的模块用户手册：
   - `fmea-capq.md`：FMEA / 控制计划 / 特殊特性
@@ -46,9 +46,15 @@
 3. 权限矩阵覆盖 admin / manager / quality_engineer / viewer 四个角色在各模块的能力。
 4. 文档结构清晰，README 中提供到各文档的链接。
 
+## 文档维护机制
+
+- 新增数据库迁移、API 路由或前端页面时，开发者应同步更新对应模块文档与模块状态矩阵。
+- 权限变更需同步更新 `docs/permissions.md` 与 `docs/architecture.md` 中的权限矩阵。
+- 每季度由维护者检查一次文档与代码的一致性，重点核对模块状态矩阵和默认账号信息。
+
 ## 实现计划
 
-1. 使用 Workflow 并行分析后端 API、服务、模型、前端页面与现有文档。
-2. 汇总模块清单与功能要点。
-3. 按上述结构撰写 README.md 与 docs/ 下各文档。
+1. 优先完成 **README.md、docs/deployment.md、docs/architecture.md** 与 **1-2 个核心模块手册**（建议 `iqc-supplier.md` 与 `customer-quality.md`）作为样板。
+2. 评审样板风格与深度，确认后使用 Workflow 并行分析其余模块，批量生成剩余模块文档。
+3. 汇总模块清单与功能要点，补充模块状态矩阵。
 4. 本地验证 Markdown 链接与结构，提交变更。
