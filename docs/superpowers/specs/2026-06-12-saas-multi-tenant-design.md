@@ -517,10 +517,60 @@ pending → provisioning → active
 
 当前 `alembic/env.py` 在单一 `public` schema 上运行迁移（使用同一份 `target_metadata`，无分支区分）。多租户需要分离公共迁移和租户迁移：
 
+#### 6.3.1 双 DeclarativeBase
+
+当前代码只有 `database.py` 中的单一 `Base = DeclarativeBase`，所有 50+ 模型都继承自它。多租户后需要拆分为两个 Base：
+
+```python
+# app/database.py
+
+class PlatformBase(DeclarativeBase):
+    """平台表的 Base — 只含 tenants、tenant_migrations、platform_admin_users、
+    reference_templates 等平台级模型。Alembic 平台迁移使用此 metadata。"""
+    pass
+
+class TenantBase(DeclarativeBase):
+    """租户业务表的 Base — 含 users、factories、fmea_documents 等所有业务模型。
+    Alembic 租户迁移使用此 metadata。"""
+    pass
+```
+
+**模型归属规则**：
+- 平台模型（`Tenant`、`TenantMigration`、`PlatformAdminUser`、`ReferenceTemplate` 等）继承 `PlatformBase`
+- 所有现有业务模型（`User`、`FMEADocument`、`CAPAEightD` 等 ~50 个）改为继承 `TenantBase`
+- `alembic/env.py` 通过 `x_args` 中是否有 `schema` 来选择 `PlatformBase.metadata` 或 `TenantBase.metadata`
+
+**为什么不用 `include_object` 过滤**：单一 Base + `include_object` 过滤在 autogenerate 时容易遗漏——autogenerate 比较的是整个 metadata 与数据库的差异，如果模型和表不在同一个 Base 中，autogenerate 无法正确检测差异。两个独立 Base 让每个分支的 autogenerate 只看到属于自己的模型，从根本上避免平台表和租户表混入同一个 migration。
+
+#### 6.3.2 现有迁移链的分支归属
+
+当前仓库有 56 个迁移文件，全部 `branch_labels = None`（无分支标记）。这些迁移创建了所有现有业务表。多租户分支化后，这些迁移必须归属于 `tenant` 分支，否则新建的空租户执行 `alembic upgrade tenant@head` 时不会重放这些历史迁移。
+
+**策略：创建 tenant baseline（squash）migration**
+
+直接给 56 个旧迁移逐个添加 `branch_labels = ["tenant"]` 不现实（会改变已有 revision 的 hash，破坏现有 `alembic_version` 记录）。正确做法是：
+
+1. **创建一个 tenant baseline migration** `t000_tenant_baseline.py`，内容为 `branch_labels = ["tenant"]`，`down_revision` 指向现有迁移链的最后一个 revision（当前 head），`depends_on = None`。这个 baseline 自身为空操作（`upgrade()` / `downgrade()` 都是 `pass`），它的作用是**建立 tenant 分支起点**。
+
+2. **在 `tenant_default.alembic_version` 中**（迁移步骤 §9.1 第 4 步），baseline revision 记录为现有最后一个旧 revision。这意味着 `tenant_default` 已经处于"旧迁移链已全部执行"的状态，不需要重放旧迁移。
+
+3. **后续所有新增的租户业务表迁移**（`t001_`、`t002_`、...）以 `t000_tenant_baseline` 为 `down_revision`，挂到 tenant 分支上。
+
+4. **平台分支起点**：`p001_platform_tables.py` 作为 platform 分支的第一个迁移（`down_revision = None`，`branch_labels = ["platform"]`），创建 `tenants`、`tenant_migrations`、`platform_admin_users` 等平台表。
+
+5. **新租户开通**时，执行 `alembic -x schema=tenant_new upgrade tenant@head`。Alembic 从空 schema 开始，依次执行 t000 baseline（空操作）→ t001 → t002 → ... 直到 head。baseline 本身是空操作，但后续 t001+ 迁移会创建业务表。**注意**：baseline 是空操作，新租户的业务表由 t001+ 迁移创建。因此 t001 必须包含所有当前业务表的 CREATE TABLE 语句（或采用 squash migration 策略），确保新租户从空 schema 到最新版本只需执行少量迁移。
+
+**Squash 策略选择**：推荐方案 A——创建 `t001_tenant_squash.py` 作为首个实质性 tenant 迁移，包含当前所有业务表的 CREATE TABLE 语句（由 `TenantBase.metadata.create_all()` 生成），加上 `t000_baseline` 作为 tenant 分支起点。这样新租户只需执行 2 个迁移（baseline + squash）即可获得完整的业务表结构，而现有 `tenant_default` 从旧迁移链无缝过渡到新分支。
+
+**现有迁移文件保持不变**：56 个旧迁移文件不做任何修改，保留 `branch_labels = None`。它们在现有 `tenant_default` 的 `alembic_version` 中已有记录，不会再次执行。
+
+#### 6.3.3 公共迁移与租户迁移
+
 **公共迁移**（Alembic 迁移文件前缀 `p`，如 `p001_platform_tables.py`）：
 - 操作 `public` schema 的平台表（`tenants`、`tenant_migrations`、`platform_admin_users`、`reference_templates` 等）
 - 使用 `alembic upgrade platform@head`，`version_table_schema = "public"`
 - 迁移文件通过 `branch_labels = ["platform"]` 标记
+- `down_revision = None`（platform 分支独立起点）
 
 **租户迁移**（Alembic 迁移文件前缀 `t`，如 `t001_tenant_business_tables.py`）：
 - 操作租户 schema 的业务表（`users`、`factories`、`fmea_documents` 等 ~50 张表）
@@ -529,22 +579,33 @@ pending → provisioning → active
 - 迁移文件通过 `branch_labels = ["tenant"]` 标记
 - **使用 `set_search_path_sql()` helper 生成安全的 schema 名**（与运行时代码共享同一 helper），禁止 f-string 拼接
 
-**迁移文件分离**：
+**迁移文件布局**：
 
 ```
 alembic/versions/
-  p001_platform_tables.py          # branch_labels=["platform"]
-  p002_platform_reference_data.py  # branch_labels=["platform"]
-  t001_tenant_business_tables.py   # branch_labels=["tenant"]
-  t002_tenant_iqc_tables.py       # branch_labels=["tenant"]
+  # 旧迁移（保持不变，branch_labels = None，已执行过）
+  003_control_plan.py
+  004_add_quality_goals.py
+  ...（56 个旧文件，不修改）
+  97d677a35bd0_merge_032_heads.py   # 当前 head
+
+  # 新增分支迁移
+  p001_platform_tables.py              # branch_labels=["platform"], down_revision=None
+  p002_platform_reference_data.py     # branch_labels=["platform"], down_revision=p001
+  t000_tenant_baseline.py             # branch_labels=["tenant"], down_revision=<current_head>, 空操作
+  t001_tenant_squash.py               # branch_labels=["tenant"], down_revision=t000, 所有业务表 CREATE
+  t002_tenant_iqc_tables.py           # branch_labels=["tenant"], down_revision=t001
   ...
 ```
+
+> **旧文件不修改**：56 个旧迁移文件保留 `branch_labels = None`。它们在 `tenant_default.alembic_version` 中已有记录（通过 §9.1 第 4 步从 `public.alembic_version` 复制过来），不会再次执行。
 
 **env.py 关键配置**：
 
 ```python
 # alembic/env.py 关键改动
 from app.core.tenant_utils import set_search_path_sql  # 与运行时代码共享
+from app.database import PlatformBase, TenantBase       # 双 Base
 
 def run_migrations_online():
     connectable = engine
@@ -553,24 +614,24 @@ def run_migrations_online():
 
     with connectable.connect() as connection:
         if schema_name:
-            # 租户迁移：使用 set_search_path_sql helper（白名单校验 + 引号转义）
+            # 租户迁移：使用 TenantBase.metadata（只含业务模型）
             connection.execute(text(set_search_path_sql(schema_name)))
             context.configure(
                 connection=connection,
-                target_metadata=target_metadata,
+                target_metadata=TenantBase.metadata,
                 version_table_schema=schema_name,
             )
         else:
-            # 公共迁移：默认 public schema
+            # 公共迁移：使用 PlatformBase.metadata（只含平台模型）
             context.configure(
                 connection=connection,
-                target_metadata=platform_metadata,
+                target_metadata=PlatformBase.metadata,
                 version_table_schema="public",
             )
         context.run_migrations()
 ```
 
-> **分支过滤**：`alembic upgrade platform@head` 时，Alembic 只追踪 `platform` 分支的 revision 链；`alembic -x schema=tenant_acme upgrade tenant@head` 时，只追踪 `tenant` 分支。`env.py` 通过 `x_args` 中是否有 `schema` 来区分：无 `schema` → 运行平台迁移（`platform_metadata`）；有 `schema` → 运行租户迁移（`target_metadata`，search_path 切换到对应租户 schema）。两个分支的迁移文件存放在同一 `alembic/versions/` 目录，但通过 `branch_labels` 互不干扰。
+> **分支过滤**：`alembic upgrade platform@head` 时，Alembic 只追踪 `platform` 分支的 revision 链；`alembic -x schema=tenant_acme upgrade tenant@head` 时，只追踪 `tenant` 分支。`env.py` 通过 `x_args` 中是否有 `schema` 来区分：无 `schema` → 运行平台迁移（`PlatformBase.metadata`）；有 `schema` → 运行租户迁移（`TenantBase.metadata`，search_path 切换到对应租户 schema）。两个分支的迁移文件存放在同一 `alembic/versions/` 目录，但通过 `branch_labels` 互不干扰。
 
 ### 6.4 并发安全
 
@@ -700,9 +761,10 @@ DEV_TENANT_SLUG=acme            # 本地开发默认租户
    - **视图（VIEW）**：如果有依赖业务表的视图，需 `ALTER VIEW ... SET SCHEMA tenant_default`
    - **触发器函数（FUNCTION）**：如有 PostgreSQL 函数引用业务表，需迁移函数并更新表名引用
    - **`regclass` 和 `::regtype` 引用**：迁移后 OID 变化，需验证无硬编码 OID 依赖
-4. **迁移 alembic_version 表** — 现有 `public.alembic_version` 记录了当前业务表的迁移历史。迁移后需要：
+4. **迁移 alembic_version 表** — 现有 `public.alembic_version` 记录了当前业务表的迁移历史（56 个旧 revision）。迁移后需要：
    - 将现有 `public.alembic_version` 的数据复制到 `tenant_default.alembic_version`（作为 tenant 分支的起点），确保租户 schema 的迁移状态连续
    - 清空 `public.alembic_version` 并插入 platform 分支的初始 revision（`p001` 或等效），使后续 `alembic upgrade platform@head` 正确追踪平台表迁移
+   - `tenant_default.alembic_version` 中记录的版本号指向旧迁移链的最后一个 revision（即当前 head），这样 `t000_tenant_baseline`（空操作，`down_revision` 指向旧链末尾）成为新 tenant 分支的起点，现有租户不会重放旧迁移
    - 如果不执行此步骤，后续 `platform@head` 和 `tenant@head` 的版本追踪会互相冲突，导致迁移状态混乱
 5. **注册第一个租户** — 插入 `public.tenants` 和 `public.tenant_migrations` 记录
 6. **应用层切换** — 启用 `TENANT_MODE=true`，注册 TenantContext 中间件
@@ -791,22 +853,28 @@ async def run_for_each_tenant():
 
 | 文件 | 改动 |
 |---|---|
-| `database.py` | `get_db()` 改为从 `request.state.tenant` 读取 schema 并设置 `search_path`；新增 `get_tenant_aware_session()` 上下文工厂 |
+| `database.py` | `get_db()` 改为从 `request.state.tenant` 读取 schema 并设置 `search_path`；新增 `get_tenant_aware_session()` 上下文工厂；拆分 `Base` 为 `PlatformBase` + `TenantBase` |
 | `main.py` | 注册 TenantContext 中间件 |
 | `security.py` | JWT 编解码增加 tenant_id，签发时写入 tenant_id claim |
 | `auth.py` API | 登录时从子域名/JWT 解析 tenant，验证 Host 与 JWT tenant_id 一致 |
+| `alembic/env.py` | 导入 `PlatformBase` / `TenantBase`，根据 `x_args` 选择 metadata |
 | 所有 Service 内部 `async_session()` | 替换为 `get_tenant_aware_session()`（约 10+ 处） |
+| 所有业务模型 | 改为继承 `TenantBase`（而非 `Base`） |
 
 ### 10.4 新增
 
 | 文件 | 说明 |
 |---|---|
-| `models/tenant.py` | Tenant 模型 |
-| `models/platform_admin.py` | PlatformAdminUser 模型 |
+| `models/tenant.py` | Tenant 模型（继承 `PlatformBase`） |
+| `models/platform_admin.py` | PlatformAdminUser 模型（继承 `PlatformBase`） |
+| `models/reference_template.py` | ReferenceTemplate 模型（继承 `PlatformBase`） |
 | `core/tenant_context.py` | TenantContext 中间件 |
 | `api/platform/` | 平台管理路由 |
 | `services/tenant_service.py` | 租户生命周期 |
-| `alembic/versions/0xx_multitenancy.py` | 多租户迁移 |
+| `alembic/versions/p001_platform_tables.py` | 平台分支首迁移（`branch_labels=["platform"]`） |
+| `alembic/versions/t000_tenant_baseline.py` | 租户分支起点（空操作，`branch_labels=["tenant"]`） |
+| `alembic/versions/t001_tenant_squash.py` | 租户业务表 squash 迁移（所有业务表 CREATE TABLE） |
+| `app/cli/tenant_migrate.py` | 租户批量迁移编排脚本（`--all` / `--slug`） |
 
 ---
 
