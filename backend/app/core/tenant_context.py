@@ -95,8 +95,16 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                     status_code=503,
                     content={"message": "租户尚未就绪"},
                 )
+        elif settings.TENANT_MODE != "single":
+            # Multi-tenant mode but tenant could not be resolved — reject the
+            # request with 400 instead of letting it fall through to a 500 when
+            # queries hit the public schema (which lacks tenant tables).
+            return JSONResponse(
+                status_code=400,
+                content={"message": "无法解析租户，请使用正确的访问地址", "tenant_unresolved": True},
+            )
 
-        # Store resolved tenant (or None) in request state
+        # Store resolved tenant in request state
         request.state.tenant = tenant
         response = await call_next(request)
         return response

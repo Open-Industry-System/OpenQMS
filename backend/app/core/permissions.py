@@ -63,6 +63,10 @@ async def get_current_user(
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
+    # Reject refresh tokens — they must not be used as access tokens
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+
     # --- Tenant JWT validation ---
     # If request has a resolved tenant, enforce tenant JWT requirements:
     # - Platform tokens (is_platform_admin) are forbidden on tenant routes

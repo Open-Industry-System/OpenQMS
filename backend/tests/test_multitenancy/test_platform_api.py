@@ -125,7 +125,9 @@ def test_ci_route_dependency_check():
 
 @pytest.mark.asyncio
 async def test_x_tenant_id_ignored_in_production():
-    """X-Tenant-ID header must be ignored when TENANT_MODE != 'dev'."""
+    """X-Tenant-ID header must be ignored when TENANT_MODE != 'dev'.
+    In production mode, if no tenant can be resolved (no subdomain, no JWT),
+    the middleware must return 400 instead of proceeding with tenant=None."""
     from app.core.tenant_context import TenantContextMiddleware
     from app.config import settings
 
@@ -138,7 +140,7 @@ async def test_x_tenant_id_ignored_in_production():
         mock_inner = AsyncMock()
         middleware = TenantContextMiddleware(mock_inner)
         # Request with X-Tenant-ID header but no auth — in production
-        # the header should be ignored, leaving tenant unresolved
+        # the header should be ignored, and with no tenant resolved, return 400
         request = MagicMock()
         request.url.path = "/api/fmea"
         request.headers.get = lambda k, default="": {
@@ -150,9 +152,9 @@ async def test_x_tenant_id_ignored_in_production():
         request.app.state.tenant_domain = None
         request.state = MagicMock()
 
-        await middleware.dispatch(request, mock_inner)
-        # X-Tenant-ID is ignored in production — tenant remains None
-        assert request.state.tenant is None
+        response = await middleware.dispatch(request, mock_inner)
+        # X-Tenant-ID is ignored in production — no tenant resolved → 400
+        assert response.status_code == 400
     finally:
         settings.TENANT_MODE = original
 
