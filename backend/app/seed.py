@@ -178,6 +178,56 @@ async def seed_supplier_risk_configs(db):
     await db.commit()
 
 
+async def seed_supply_chain_risk_snapshots(db):
+    """Seed sample risk map snapshots for 3 suppliers across 3 months."""
+    from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
+    from app.models.supplier import Supplier
+
+    # Check if already seeded
+    existing = await db.execute(
+        select(SupplyChainRiskSnapshot).limit(1)
+    )
+    if existing.scalar_one_or_none():
+        return
+
+    # Fetch existing suppliers (already seeded by main seed function)
+    supplier_result = await db.execute(select(Supplier).limit(3))
+    suppliers = supplier_result.scalars().all()
+    if len(suppliers) < 3:
+        print("Not enough suppliers to seed risk map snapshots, skipping.")
+        return
+
+    periods = ["2026-01", "2026-02", "2026-03"]
+    profiles = [
+        {"quality": 12, "delivery": 18, "compliance": 8, "erp_ontime": 95, "scar": 0, "ppm": 500, "risk": 15, "level": "low"},
+        {"quality": 45, "delivery": 55, "compliance": 30, "erp_ontime": 78, "scar": 2, "ppm": 8000, "risk": 48, "level": "medium"},
+        {"quality": 72, "delivery": 80, "compliance": 65, "erp_ontime": 55, "scar": 5, "ppm": 35000, "risk": 76, "level": "high"},
+    ]
+
+    for supplier, profile in zip(suppliers[:3], profiles):
+        for i, period in enumerate(periods):
+            factor = 1 + i * 0.08
+            snap = SupplyChainRiskSnapshot(
+                supplier_id=supplier.supplier_id,
+                product_line_code=None,
+                snapshot_period=period,
+                risk_score=round(profile["risk"] * factor, 1),
+                risk_level="high" if profile["risk"] * factor > 60 else "medium" if profile["risk"] * factor > 30 else "low",
+                quality_score=round(profile["quality"] * factor, 1),
+                delivery_score=round(profile["delivery"] * factor, 1),
+                compliance_score=round(profile["compliance"] * factor, 1),
+                erp_on_time_rate=round(max(profile["erp_ontime"] - i * 3, 0), 1),
+                purchase_amount_pct=round(33.3, 1),
+                open_scar_count=profile["scar"] + i,
+                ppm_value=round(profile["ppm"] * factor),
+                dimensions={},
+            )
+            db.add(snap)
+
+    await db.flush()
+    print("Seeded supply chain risk map snapshots.")
+
+
 async def seed_erp_permissions(db):
     from app.models.role import RolePermission
     from sqlalchemy import select
@@ -805,6 +855,9 @@ async def seed():
 
         # ─── Supplier risk default configs ───
         await seed_supplier_risk_configs(db)
+
+        # ─── Supply chain risk map snapshots ───
+        await seed_supply_chain_risk_snapshots(db)
 
         await db.commit()
 
