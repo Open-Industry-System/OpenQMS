@@ -161,7 +161,7 @@ CREATE INDEX idx_industry_standards_code ON public.industry_standards(standard_c
 **核心思路**：同一个连接池，每次请求在数据库会话中切换 `search_path`。
 
 ```python
-# 租户请求开始（在 get_tenant_db 依赖中，不是中间件中）
+# 租户请求开始（在 get_db() 依赖中，不是中间件中）
 # 使用 set_search_path_sql() helper，禁止 f-string 拼接
 SET search_path TO "tenant_acme", "public";
 
@@ -174,7 +174,7 @@ SET search_path TO "tenant_acme", "public";
 1. **使用普通 `SET`（非 `SET LOCAL`）+ dependency finally RESET**：`SET LOCAL` 只在当前事务内生效，`COMMIT` 后自动恢复——但现有代码中多个 endpoint/service 在请求内会调用 `commit()`（例如登录在 commit refresh token 后继续查询），`SET LOCAL` 在 commit 后会失效，导致后续查询回到默认 schema。使用普通 `SET` 并在 dependency 的 `finally` 中显式 `RESET search_path`，配合连接池兜底，确保整个请求周期内 search_path 始终正确。
 
 2. **双层安全保障**：
-   - 第一层：`get_tenant_db()` 在 yield session 前执行 `SET search_path`，在 finally 中先 `rollback()` 再 `RESET search_path`
+   - 第一层：`get_db()` 在 yield session 前执行 `SET search_path`，在 finally 中先 `rollback()` 再 `RESET search_path`
    - 第二层：SQLAlchemy `PoolEvents.checkout` 事件在每次从池中取出连接时执行 `RESET search_path`。这确保无论应用层 finally 是否执行（崩溃、强制回收），从池中取出的连接始终处于干净的 `public` 状态
 
 ```python
@@ -195,9 +195,14 @@ def _reset_search_path_on_checkout(dbapi_conn, connection_record, connection_pro
     cursor.close()
 ```
 
-3. **中间件只解析租户，不设置 search_path**：TenantContext 中间件只负责解析租户身份并注入 `request.state.tenant`，不直接操作数据库会话。实际 search_path 设置在 `get_tenant_db()` 依赖中，确保每个 API 路由使用的数据库会话都正确设置。
+3. **中间件只解析租户，不设置 search_path**：TenantContext 中间件只负责解析租户身份并注入 `request.state.tenant`，不直接操作数据库会话。实际 search_path 设置在 `get_db()` 依赖中，确保每个 API 路由使用的数据库会话都正确设置。
 
-4. **租户感知会话工厂 — 禁止裸 `async_session()`**：现有代码中多个 Service 方法（如 `MESSyncService.run_sync_round`、`PLMChangeImpactWorker.process_task`）直接调用 `async_session()` 创建独立数据库会话。这些内部会话不会继承外层的 `search_path`，导致它们查询 `public` schema 而非租户 schema。解决方案：引入 `ContextVar` + `get_tenant_aware_session()` 工厂函数。**关键**：`get_tenant_db()` 在创建会话前必须 `current_tenant_schema.set(tenant.schema_name)`，`run_for_each_tenant()` 在 yield 前也必须 set，确保内部服务通过 `get_tenant_aware_session()` 自动获得正确的 schema。finally 中必须 `current_tenant_schema.reset(token)` 清除上下文。
+4. **租户感知会话工厂 — 禁止裸 `async_session()`**：现有代码中多个 Service 方法（如 `MESSyncService.run_sync_round`、`PLMChangeImpactWorker.process_task`）直接调用 `async_session()` 创建独立数据库会话。这些内部会话不会继承外层的 `search_path`，导致它们查询 `public` schema 而非租户 schema。解决方案：引入 `ContextVar` + `get_tenant_aware_session()` 工厂函数。**关键**：`get_db()` 在创建会话前必须 `current_tenant_schema.set(tenant.schema_name)`，`run_for_each_tenant()` 在 yield 前也必须 set，确保内部服务通过 `get_tenant_aware_session()` 自动获得正确的 schema。finally 中必须 `current_tenant_schema.reset(token)` 清除上下文。
+
+5. **非 HTTP 入口点的租户上下文约束**：所有非 HTTP 入口（CLI 命令、worker、seed 脚本、embedding 计算等）必须遵循以下规则之一：
+   - **租户感知入口**：通过 `run_for_each_tenant()` 遍历所有 active 租户执行，确保 ContextVar 在每轮迭代中正确 set/reset；
+   - **平台级入口**：显式使用 `get_platform_db()`（`SET search_path TO "public"`），仅操作平台表；
+   - **启动时 fail-fast**：如果裸 `async_session()` 被调用且 `current_tenant_schema.get()` 为 `None`，开发模式下应发出 `RuntimeWarning`（而非静默操作 public schema），帮助开发者尽早发现遗漏的租户上下文设置。生产环境可降级为 `logger.warning`。
 
 ```python
 from contextvars import ContextVar
@@ -230,7 +235,7 @@ async def get_tenant_aware_session() -> AsyncGenerator[AsyncSession, None]:
 
 ### 3.1 TenantContext 中间件
 
-**中间件只解析租户身份，不操作数据库会话。** 数据库 search_path 的设置由 `get_tenant_db()` 依赖负责，确保每个路由使用的会话都正确隔离。
+**中间件只解析租户身份，不操作数据库会话。** 数据库 search_path 的设置由 `get_db()` 依赖负责，确保每个路由使用的会话都正确隔离。
 
 ```python
 async def tenant_context_middleware(request: Request, call_next):
@@ -254,7 +259,7 @@ async def tenant_context_middleware(request: Request, call_next):
     # 3. 注入租户信息到 request.state（不操作 search_path）
     request.state.tenant = tenant
 
-    # 4. 处理请求（search_path 由 get_tenant_db() 在路由依赖中设置）
+    # 4. 处理请求（search_path 由 get_db() 在路由依赖中设置）
     return await call_next(request)
 ```
 
@@ -268,7 +273,7 @@ async def tenant_context_middleware(request: Request, call_next):
 
 ### 3.3 数据库依赖注入
 
-**search_path 在数据库依赖中设置，而非中间件。** 这是确保隔离的关键：中间件只解析租户身份，实际的 search_path 切换在 `get_tenant_db()` 中执行，保证路由处理函数使用的每个数据库会话都正确隔离。
+**search_path 在数据库依赖中设置，而非中间件。** 这是确保隔离的关键：中间件只解析租户身份，实际的 search_path 切换在 `get_db()` 中执行，保证路由处理函数使用的每个数据库会话都正确隔离。
 
 ```python
 from fastapi import Request
@@ -286,8 +291,8 @@ def set_search_path_sql(schema_name: str) -> str:
     quoted = '"' + schema_name.replace('"', '""') + '"'
     return f'SET search_path TO {quoted}, "public"'
 
-# 租户请求用 — 从 request.state.tenant 获取 schema 并设置 search_path
-async def get_tenant_db(request: Request):
+# 所有租户请求用 — 直接替代现有 get_db()，函数名保持 get_db 不变
+async def get_db(request: Request):
     tenant = getattr(request.state, "tenant", None)
     # 设置上下文变量，供内部 Service 调用 get_tenant_aware_session() 时读取
     token = current_tenant_schema.set(tenant.schema_name if tenant else None)
@@ -332,7 +337,7 @@ async def get_platform_db():
 
 1. 用户访问 `acme.openqms.com`
 2. TenantContext 中间件解析子域名并注入 `request.state.tenant`
-3. `get_tenant_db()` 依赖在数据库会话中执行 `SET search_path TO "tenant_acme", "public"`
+3. `get_db()` 依赖在数据库会话中执行 `SET search_path TO "tenant_acme", "public"`
 4. 用户 `POST /api/auth/login` → 在 `tenant_acme.users` 中认证
 5. JWT payload 新增 `tenant_id` 字段
 
@@ -468,9 +473,11 @@ pending → provisioning → active
 
 | 命令 | 作用 |
 |---|---|
-| `alembic upgrade head` | 迁移 `public` schema（平台表） |
-| `alembic upgrade tenant --all` | 遍历所有 `active` 租户，逐个迁移 |
-| `alembic upgrade tenant --slug acme` | 只迁移指定租户 |
+| `alembic upgrade platform@head` | 迁移 `public` schema（平台表） |
+| `alembic upgrade tenant@head --all` | 遍历所有 `active` 租户，逐个迁移 |
+| `alembic upgrade tenant@head --slug acme` | 只迁移指定租户 |
+
+> **注意**：必须使用带分支标签的 `platform@head` / `tenant@head`，而非裸 `head`。裸 `head` 在存在分支时行为不确定，可能同时触发两个分支或选择错误的分支。`alembic.ini` 中 `version_locations` 应设为 `alembic/versions`（两个分支文件共存于同一目录），`env.py` 通过 `x_args` 的 `schema` 参数决定执行哪个分支的迁移。
 
 ### 6.2 迁移记录
 
@@ -542,6 +549,8 @@ def run_migrations_online():
             )
         context.run_migrations()
 ```
+
+> **分支过滤**：`alembic upgrade platform@head` 时，Alembic 只追踪 `platform` 分支的 revision 链；`alembic upgrade tenant@head --x schema=tenant_acme` 时，只追踪 `tenant` 分支。`env.py` 通过 `x_args` 中是否有 `schema` 来区分：无 `schema` → 运行平台迁移（`platform_metadata`）；有 `schema` → 运行租户迁移（`target_metadata`，search_path 切换到对应租户 schema）。两个分支的迁移文件存放在同一 `alembic/versions/` 目录，但通过 `branch_labels` 互不干扰。
 
 ### 6.4 并发安全
 
@@ -695,7 +704,7 @@ DEV_TENANT_SLUG=acme            # 本地开发默认租户
 
 ### 10.2 后台任务租户上下文（关键改造）
 
-**问题**：现有后台任务（MES 同步、PLM 同步、ERP 同步、供应商风险评估、AQL 过期清理、协同会话清理等）直接使用 `async_session()` 创建数据库会话，不经过 `get_tenant_db()` 依赖。多租户后，这些任务必须遍历所有 active 租户并为每个租户设置 schema，否则只会操作 public schema（无业务数据）或只处理默认租户。
+**问题**：现有后台任务（MES 同步、PLM 同步、ERP 同步、供应商风险评估、AQL 过期清理、协同会话清理等）直接使用 `async_session()` 创建数据库会话，不经过 `get_db()` 依赖。多租户后，这些任务必须遍历所有 active 租户并为每个租户设置 schema，否则只会操作 public schema（无业务数据）或只处理默认租户。
 
 **解决方案**：新增 `run_for_each_tenant()` 上下文管理器，后台任务必须使用：
 
@@ -718,18 +727,20 @@ async def run_for_each_tenant():
 
     for tenant in tenants:
         # 设置上下文变量，供内部 Service 的 get_tenant_aware_session() 读取
+        # try/finally 确保 async_session() 创建/SET search_path 失败时
+        # 也不会泄漏 ContextVar 到下一轮迭代
         token = current_tenant_schema.set(tenant.schema_name)
-        async with async_session() as db:
-            await db.execute(text(set_search_path_sql(tenant.schema_name)))
-            try:
-                yield tenant, db
-            finally:
-                # 无论任务成功还是异常，都确保 RESET search_path
-                await db.rollback()
-                await db.execute(text('RESET search_path'))
-                await db.close()
-        # 清除上下文变量，防止泄漏到下一个租户迭代
-        current_tenant_schema.reset(token)
+        try:
+            async with async_session() as db:
+                await db.execute(text(set_search_path_sql(tenant.schema_name)))
+                try:
+                    yield tenant, db
+                finally:
+                    await db.rollback()
+                    await db.execute(text('RESET search_path'))
+                    await db.close()
+        finally:
+            current_tenant_schema.reset(token)
 ```
 
 **受影响的后台任务**（必须改造）：
@@ -742,9 +753,13 @@ async def run_for_each_tenant():
 
 ### 10.3 HTTP 路由改造
 
-**核心策略**：将 `database.py` 中的 `get_db()` 直接改为租户感知版本，而非新增 `get_tenant_db()`。这样所有通过 `Depends(get_db)` 注入会话的路由自动获得租户隔离，无需逐文件修改导入。现有路由文件（约 35 个 API 模块）**零修改**。> **命名约定**：本文档代码示例中使用 `get_tenant_db()` 作为函数名以突出其租户感知语义，但最终实现时该函数将**直接替换**现有 `get_db()`，保留 `get_db` 这个名称，避免全局重命名。
+**核心策略**：在 `database.py` 中就地改造 `get_db()` 为租户感知版本，而非新增一个 `get_tenant_db()` 函数。改造后的 `get_db(request: Request)` 签名新增 `request` 参数，所有通过 `Depends(get_db)` 注入会话的路由自动获得租户隔离，无需逐文件修改导入。现有路由文件（约 35 个 API 模块）**零修改**。
 
-**平台路由安全隔离**：`/api/platform/*` 路由必须使用 `get_platform_db()`（显式强制 `SET search_path TO "public"`），不得使用 `get_db()`。中间件应验证平台路由不接受租户身份（无 `request.state.tenant` 或 `X-Tenant-ID` 头），否则返回 403。测试应覆盖：平台路由携带 `X-Tenant-ID` 头时被拒绝。
+**平台路由安全隔离**：`/api/platform/*` 路由必须使用 `get_platform_db()`（显式强制 `SET search_path TO "public"`），不得使用 `get_db()`。平台路由的安全策略：
+1. **忽略** `X-Tenant-ID` 请求头（不因携带该头而拒绝，避免开发环境或统一代理注入的头部造成误伤）；
+2. **拒绝** 携带租户 JWT（`tenant_id` claim 存在）的请求，返回 403；
+3. **要求** 平台管理员 JWT（`is_platform_admin: true`）才可访问。
+测试应覆盖：租户 JWT 访问平台路由返回 403；平台 JWT 不携带 `X-Tenant-ID` 时正常工作；平台 JWT 携带 `X-Tenant-ID` 时忽略该头并正常工作。
 
 | 文件 | 改动 |
 |---|---|
@@ -781,7 +796,7 @@ async def run_for_each_tenant():
 - **数据库分片（Database Sharding）**：当单一 PostgreSQL 实例的 schema 数量达到上限（约 500-1000 个），`pg_class` 等系统表膨胀会导致元数据查询变慢、`pg_dump`/`pg_restore` 显著减速。此时需要将新租户路由到新的物理 PostgreSQL 实例。设计时预留 `tenants.db_instance` 字段（默认为 NULL 表示主实例），`TenantContext` 中间件根据 `db_instance` 选择对应的数据库引擎和连接池。
 - **并发迁移**：`alembic upgrade tenant --all` 串行迁移在租户数量达到数千时可能需要数小时。长期需要并发迁移脚本（如 `asyncio.gather` 按批次并发执行不同 schema 的 DDL 变更）。
 
-设计时预留 hooks：TenantContext 中间件和 `get_tenant_db()` 函数可以扩展为 per-tenant 路由。
+设计时预留 hooks：TenantContext 中间件和 `get_db()` 函数可以扩展为 per-tenant 路由。
 
 ---
 
