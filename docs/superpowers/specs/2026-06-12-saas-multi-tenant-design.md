@@ -596,7 +596,7 @@ alembic/versions/
   ...
 ```
 
-> **旧文件与 tenant 分支完全无关**：56 个旧迁移文件保留 `branch_labels = None`，它们不属于 tenant 或 platform 分支。新租户执行 `alembic upgrade tenant@head` 时 Alembic 只追踪 `branch_labels = ["tenant"]` 的 revision 链（t000 → t001 → ...），不会触及旧文件。`tenant_default` 通过 `alembic stamp` 跳过旧链，直接标记到 squash 后的版本。
+> **旧文件与 tenant 分支完全无关**：56 个旧迁移文件保留 `branch_labels = None`，它们不属于 tenant 或 platform 分支。新租户执行 `alembic upgrade tenant@head` 时 Alembic 只追踪 `branch_labels = ("tenant",)` 的 revision 链（t000 → t001 → ...），不会触及旧文件。`tenant_default` 通过 `alembic stamp` 跳过旧链，直接标记到 squash 后的版本。
 
 **env.py 关键配置**：
 
@@ -751,7 +751,9 @@ DEV_TENANT_SLUG=acme            # 本地开发默认租户
 
 ### 9.1 迁移步骤
 
-1. **创建平台表** — 在 `public` schema 新建 `tenants`、`tenant_migrations`、`platform_admin_users`、`reference_templates` 等
+迁移必须按以下顺序执行，确保 Alembic 的 `alembic_version` 状态在每个步骤都一致：
+
+1. **备份 `public.alembic_version`** — 记录当前旧业务链的 revision ID，用于回滚参考
 2. **创建租户 schema** — `CREATE SCHEMA tenant_default`
 3. **移动业务对象** — `ALTER TABLE ... SET SCHEMA tenant_default` 移动所有 50+ 业务表（序列和索引自动跟随）。此外还需迁移：
    - **枚举类型（ENUM）**：`ALTER TYPE ... SET SCHEMA tenant_default`（PostgreSQL 枚举是 schema-level 对象）
@@ -759,13 +761,18 @@ DEV_TENANT_SLUG=acme            # 本地开发默认租户
    - **视图（VIEW）**：如果有依赖业务表的视图，需 `ALTER VIEW ... SET SCHEMA tenant_default`
    - **触发器函数（FUNCTION）**：如有 PostgreSQL 函数引用业务表，需迁移函数并更新表名引用
    - **`regclass` 和 `::regtype` 引用**：迁移后 OID 变化，需验证无硬编码 OID 依赖
-4. **标记 alembic_version** — 现有 `public.alembic_version` 记录了 56 个旧 revision，这些旧迁移不再属于 tenant 分支。迁移后需要：
-   - 在 `tenant_default` schema 中执行 `alembic -x schema=tenant_default stamp <t001_revision_id>`（或 `alembic -x schema=tenant_default stamp tenant@head`），告诉 Alembic 这个 schema 已经具备 squash 后的完整业务表结构，无需重放旧迁移链或 squash。`stamp` 命令只写入 `alembic_version` 表，不执行任何 SQL
-   - 清空 `public.alembic_version` 并插入 platform 分支的初始 revision（`p001` 的 revision ID），使后续 `alembic upgrade platform@head` 正确追踪平台表迁移
-   - **不要复制旧 `alembic_version` 数据到 `tenant_default`**——旧 revision 与 tenant 分支无关，复制它们会导致 Alembic 尝试从旧链计算迁移路径，与独立 squash 分支冲突
-   - 如果不执行此步骤，后续 `platform@head` 和 `tenant@head` 的版本追踪会互相冲突，导致迁移状态混乱
-5. **注册第一个租户** — 插入 `public.tenants` 和 `public.tenant_migrations` 记录
-6. **应用层切换** — 启用 `TENANT_MODE=true`，注册 TenantContext 中间件
+4. **标记 tenant_default 的 alembic_version** — 业务对象已物理移动到 `tenant_default` schema，但 `tenant_default` 中还没有 `alembic_version` 表。执行：
+   - `alembic -x schema=tenant_default stamp tenant@head` — Alembic 在 `tenant_default` schema 中创建 `alembic_version` 表并写入 tenant 分支的最新 revision，表示此 schema 已具备完整的业务表结构，无需重放 squash 或旧迁移
+5. **清空 `public.alembic_version`** — 删除旧业务链的 revision 记录（这些 revision 与 platform/tenant 分支无关，会干扰分支迁移）
+6. **创建平台表并标记 platform alembic_version** — 执行 `alembic upgrade platform@head`：
+   - Alembic 在 `public` schema 中创建平台表（`tenants`、`tenant_migrations`、`platform_admin_users`、`reference_templates` 等）
+   - 同时在 `public.alembic_version` 中写入 platform 分支的最新 revision
+   - 此时 `public.alembic_version` 是干净的，只包含 platform 分支记录，不会与旧业务链冲突
+   - 如果平台表需要通过手写 SQL 创建（而非 Alembic 迁移），则使用 `alembic stamp platform@head` 代替 `upgrade`
+7. **注册第一个租户** — 插入 `public.tenants` 和 `public.tenant_migrations` 记录
+8. **应用层切换** — 启用 `TENANT_MODE=true`，注册 TenantContext 中间件
+
+> **步骤顺序不可调换**：必须先清空 `public.alembic_version`（步骤 5），再执行 `alembic upgrade platform@head`（步骤 6）。如果先执行 upgrade 再清空，旧业务链的 revision 记录会与 platform 分支产生冲突，导致 Alembic 报 revision graph 不匹配。
 
 ### 9.2 迁移关键约束
 
@@ -869,8 +876,8 @@ async def run_for_each_tenant():
 | `core/tenant_context.py` | TenantContext 中间件 |
 | `api/platform/` | 平台管理路由 |
 | `services/tenant_service.py` | 租户生命周期 |
-| `alembic/versions/p001_platform_tables.py` | 平台分支首迁移（`branch_labels=["platform"]`） |
-| `alembic/versions/t000_tenant_baseline.py` | 租户分支起点（空操作，`branch_labels=["tenant"]`） |
+| `alembic/versions/p001_platform_tables.py` | 平台分支首迁移（`branch_labels=("platform",)`） |
+| `alembic/versions/t000_tenant_baseline.py` | 租户分支起点（空操作，`branch_labels=("tenant",)`） |
 | `alembic/versions/t001_tenant_squash.py` | 租户业务表 squash 迁移（所有业务表 CREATE TABLE） |
 | `app/cli/tenant_migrate.py` | 租户批量迁移编排脚本（`--all` / `--slug`） |
 
