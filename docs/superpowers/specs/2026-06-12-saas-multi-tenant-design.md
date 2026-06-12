@@ -69,6 +69,7 @@ tenant_<slug> (租户 schema) × N
 - 平台参考数据在 `public` schema，只读访问或显式复制到租户空间后自定义
 - `factory_id` 列保留在租户 schema 内，作为租户内部的工厂间隔离
 - 跨 schema 引用策略：租户 schema 内的业务表不得通过外键引用 `public` 表或其他租户 schema 的表。原因不是为了 PostgreSQL 兼容性（PostgreSQL 支持 schema-qualified FK），而是为了保持租户 schema 的**可迁移性**（备份/恢复/删除必须能独立操作，不依赖跨 schema 约束）。需要引用公共参考数据时，使用应用层逻辑（如 `reference_template_id` 列存储 UUID 引用，但不加 FK 约束），并在 Service 层处理软失效
+- **schema 名安全规则**：`tenants.slug` 和 `tenants.schema_name` 必须只包含 `[a-z0-9_]`，在创建时强制校验。所有 `SET search_path` 语句必须通过统一 helper `set_search_path_sql(schema_name)` 生成，该 helper 对 schema_name 做正则校验后使用 `quote_ident()` 生成安全的 quoted identifier。禁止在代码中手写 f-string 拼接 schema 名到 SQL 语句中
 
 ### 2.2 新增平台表
 
@@ -156,10 +157,11 @@ CREATE INDEX idx_industry_standards_code ON public.industry_standards(standard_c
 
 ```python
 # 租户请求开始（在 get_tenant_db 依赖中，不是中间件中）
+# 使用 set_search_path_sql() helper，禁止 f-string 拼接
 SET search_path TO "tenant_acme", "public";
 
 # 请求结束 — dependency finally 强制 RESET search_path
-# 即使 finally 未执行，连接池 reset_on_return 也会兜底重置
+# 连接池 checkout 事件也会兜底 RESET search_path
 ```
 
 **关键安全设计**：
@@ -168,17 +170,44 @@ SET search_path TO "tenant_acme", "public";
 
 2. **双层安全保障**：
    - 第一层：`get_tenant_db()` 在 yield session 前执行 `SET search_path`，在 finally 中 `RESET search_path`
-   - 第二层：asyncpg 连接池 `reset_on_return` 配置 `SET search_path TO "public"`，确保归还时强制重置——即使 finally 未执行（应用崩溃、连接池强制回收），也不会影响下一个请求
+   - 第二层：SQLAlchemy `PoolEvents.connect` 事件在每个连接首次创建时执行 `RESET search_path`，`PoolEvents.checkout` 事件在每次从池中取出连接时执行 `RESET search_path`。这确保无论应用层 finally 是否执行（崩溃、强制回收），从池中取出的连接始终处于干净的 `public` 状态
+
+```python
+# 连接池安全配置 — checkout 时强制重置 search_path
+from sqlalchemy import event
+
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    pool_pre_ping=True,           # 连接健康检查
+    pool_reset_on_return="rollback",  # 归还时 ROLLBACK（不重置 search_path，由 checkout 兜底）
+)
+
+# 关键：checkout 事件确保每个从池中取出的连接都是干净的
+@event.listens_for(engine.sync_engine, "checkout")
+def _reset_search_path_on_checkout(dbapi_conn, connection_record, connection_proxy):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("RESET search_path")
+    cursor.close()
+```
 
 3. **中间件只解析租户，不设置 search_path**：TenantContext 中间件只负责解析租户身份并注入 `request.state.tenant`，不直接操作数据库会话。实际 search_path 设置在 `get_tenant_db()` 依赖中，确保每个 API 路由使用的数据库会话都正确设置。
 
 ```python
-# 连接池安全配置
+# 连接池安全配置 — checkout 时强制重置 search_path
+from sqlalchemy import event
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,           # 连接健康检查
-    pool_reset_on_return="rollback",  # 归还时 ROLLBACK + 重置
+    pool_reset_on_return="rollback",  # 归还时 ROLLBACK（不重置 search_path，由 checkout 兜底）
 )
+
+# 关键：checkout 事件确保每个从池中取出的连接都是干净的
+@event.listens_for(engine.sync_engine, "checkout")
+def _reset_search_path_on_checkout(dbapi_conn, connection_record, connection_proxy):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("RESET search_path")
+    cursor.close()
 ```
 
 ---
@@ -227,16 +256,28 @@ async def tenant_context_middleware(request: Request, call_next):
 
 ```python
 from fastapi import Request
+from sqlalchemy.sql import quoted_ident  # 或使用 psycopg2.sql.Identifier
+
+# 统一 helper：校验 schema 名并生成安全的 SET search_path 语句
+import re
+
+def set_search_path_sql(schema_name: str) -> str:
+    """校验 schema 名只含 [a-z0-9_] 并生成安全的 SET search_path 语句。
+    禁止直接 f-string 拼接 schema 名到 SQL 中。
+    """
+    if not re.match(r'^[a-z][a-z0-9_]{0,62}$', schema_name):
+        raise ValueError(f"Invalid schema name: {schema_name}")
+    # PostgreSQL quoted identifier（双引号包裹，内部双引号双写）
+    quoted = '"' + schema_name.replace('"', '""') + '"'
+    return f'SET search_path TO {quoted}, "public"'
 
 # 租户请求用 — 从 request.state.tenant 获取 schema 并设置 search_path
 async def get_tenant_db(request: Request):
     tenant = getattr(request.state, "tenant", None)
     async with async_session() as session:
         if tenant:
-            # 使用普通 SET（非 SET LOCAL），确保 commit 后仍然有效
-            await session.execute(
-                text(f'SET search_path TO "{tenant.schema_name}", "public"')
-            )
+            # 使用白名单校验的 helper，禁止 f-string 拼接
+            await session.execute(text(set_search_path_sql(tenant.schema_name)))
         # 无 tenant → 平台管理路由，search_path 保持默认 public
         try:
             yield session
@@ -577,12 +618,15 @@ async def run_for_each_tenant():
     for tenant in tenants:
         async with async_session() as db:
             await db.execute(
-                text(f'SET search_path TO "{tenant.schema_name}", "public"')
+                set_search_path_sql(tenant.schema_name)  # 使用白名单校验的 helper
             )
-            yield tenant, db
-            # 请求结束时 RESET，配合连接池 reset_on_return 兜底
-            await db.execute(text('RESET search_path'))
-            await db.close()
+            try:
+                yield tenant, db
+            finally:
+                # 无论任务成功还是异常，都确保 RESET search_path
+                await db.rollback()  # 回滚未提交的事务
+                await db.execute(text('RESET search_path'))
+                await db.close()
 ```
 
 **受影响的后台任务**（必须改造）：
@@ -603,7 +647,7 @@ async def run_for_each_tenant():
 | `security.py` | JWT 编解码增加 tenant_id |
 | `auth.py` API | 登录时增加租户解析 |
 
-### 10.3 新增
+### 10.4 新增
 
 | 文件 | 说明 |
 |---|---|
