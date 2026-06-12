@@ -215,6 +215,7 @@ class ERPPurchaseOrder(Base):
     currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     received_quantity: Mapped[Optional[float]] = mapped_column(Numeric(18, 4), nullable=True)
+    actual_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     lot_no: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
