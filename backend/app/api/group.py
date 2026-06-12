@@ -13,6 +13,8 @@ from app.schemas.factory import FactoryCreate, FactoryUpdate, FactoryResponse, F
 from app.schemas.group import (
     GroupDashboardResponse, FactoryComparisonResponse,
     SharedSupplierResponse, CrossFactoryAuditResponse,
+    SupplierMergeRequest, MergedSupplierResponse,
+    AuditFactoryAssignment, AuditProgramFactoriesResponse,
 )
 from app.services.factory_service import (
     list_factories,
@@ -85,6 +87,64 @@ async def cross_factory_audits(
     """Get audit programs that span multiple factories."""
     await _require_group_view(scope.user, db)
     return await group_service.get_cross_factory_audits(db)
+
+
+@router.post("/suppliers/merge", response_model=MergedSupplierResponse)
+async def merge_suppliers(
+    data: SupplierMergeRequest,
+    scope: RequestScope = Depends(get_request_scope),
+    db: AsyncSession = Depends(get_db),
+):
+    """Merge supplier records from different factories into a shared profile."""
+    await _require_group_admin(scope.user, db)
+    try:
+        return await group_service.merge_suppliers(db, data.supplier_ids, data.shared_profile_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/audits/{program_id}/factories", response_model=AuditProgramFactoriesResponse)
+async def get_audit_factories(
+    program_id: uuid.UUID = Path(...),
+    scope: RequestScope = Depends(get_request_scope),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get target factories for an audit program."""
+    await _require_group_view(scope.user, db)
+    try:
+        return await group_service.get_audit_program_factories(db, program_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/audits/{program_id}/factories", response_model=AuditProgramFactoriesResponse)
+async def add_audit_factory(
+    program_id: uuid.UUID = Path(...),
+    data: AuditFactoryAssignment = ...,
+    scope: RequestScope = Depends(get_request_scope),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a factory to an audit program."""
+    await _require_group_admin(scope.user, db)
+    try:
+        return await group_service.add_factory_to_audit_program(db, program_id, data.factory_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/audits/{program_id}/factories/{factory_id}", response_model=AuditProgramFactoriesResponse)
+async def remove_audit_factory(
+    program_id: uuid.UUID = Path(...),
+    factory_id: uuid.UUID = Path(...),
+    scope: RequestScope = Depends(get_request_scope),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a factory from an audit program."""
+    await _require_group_admin(scope.user, db)
+    try:
+        return await group_service.remove_factory_from_audit_program(db, program_id, factory_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # --- Factory CRUD (group-level) ---

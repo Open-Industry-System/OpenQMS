@@ -24,6 +24,8 @@ from app.schemas.group import (
     FactoryComparisonResponse,
     SharedSupplierResponse,
     CrossFactoryAuditResponse,
+    MergedSupplierResponse,
+    AuditProgramFactoriesResponse,
 )
 
 
@@ -305,3 +307,135 @@ async def get_cross_factory_audits(db: AsyncSession) -> list[CrossFactoryAuditRe
         ))
 
     return results
+
+
+async def merge_suppliers(
+    db: AsyncSession,
+    supplier_ids: list[uuid.UUID],
+    shared_profile_id: uuid.UUID | None = None,
+) -> MergedSupplierResponse:
+    """Merge two+ supplier records from different factories into a shared profile."""
+    if len(supplier_ids) < 2:
+        raise ValueError("至少需要两个供应商记录才能合并")
+
+    rows = await db.execute(
+        select(Supplier).where(Supplier.supplier_id.in_(supplier_ids))
+    )
+    suppliers = list(rows.scalars().all())
+
+    if len(suppliers) != len(supplier_ids):
+        raise ValueError("部分供应商 ID 不存在")
+
+    # Verify they're from different factories
+    factory_ids = list({s.factory_id for s in suppliers})
+    if len(factory_ids) < 2:
+        raise ValueError("合并的供应商必须来自不同工厂")
+
+    # Get or create shared profile
+    if shared_profile_id:
+        profile = await db.get(SupplierSharedProfile, shared_profile_id)
+        if not profile:
+            raise ValueError("指定的共享档案不存在")
+    else:
+        # Use first supplier's name as default for new profile
+        first = suppliers[0]
+        profile = SupplierSharedProfile(
+            unified_credit_code=None,
+            name=first.name,
+            short_name=first.short_name,
+            industry=None,
+        )
+        db.add(profile)
+        await db.flush()
+        shared_profile_id = profile.id
+
+    # Link all suppliers to the shared profile
+    for s in suppliers:
+        s.shared_profile_id = shared_profile_id
+
+    await db.flush()
+
+    return MergedSupplierResponse(
+        shared_profile_id=shared_profile_id,
+        unified_credit_code=profile.unified_credit_code,
+        name=profile.name,
+        short_name=profile.short_name,
+        industry=profile.industry,
+        supplier_ids=[s.supplier_id for s in suppliers],
+        factory_ids=factory_ids,
+    )
+
+
+async def get_audit_program_factories(
+    db: AsyncSession,
+    program_id: uuid.UUID,
+) -> AuditProgramFactoriesResponse:
+    """Get target factories for an audit program."""
+    program = await db.get(AuditProgram, program_id)
+    if not program:
+        raise ValueError("审核项目不存在")
+
+    rows = await db.execute(
+        select(AuditProgramTargetFactory.factory_id)
+        .where(AuditProgramTargetFactory.program_id == program_id)
+    )
+    factory_ids = [row[0] for row in rows.all()]
+
+    f_rows = await db.execute(
+        select(Factory.id, Factory.code).where(Factory.id.in_(factory_ids))
+    )
+    id_to_code = {row[0]: row[1] for row in f_rows.all()}
+
+    return AuditProgramFactoriesResponse(
+        program_id=program_id,
+        factory_ids=factory_ids,
+        factory_codes=[id_to_code.get(fid, "") for fid in factory_ids],
+    )
+
+
+async def add_factory_to_audit_program(
+    db: AsyncSession,
+    program_id: uuid.UUID,
+    factory_id: uuid.UUID,
+) -> AuditProgramFactoriesResponse:
+    """Add a factory to an audit program."""
+    program = await db.get(AuditProgram, program_id)
+    if not program:
+        raise ValueError("审核项目不存在")
+
+    factory = await db.get(Factory, factory_id)
+    if not factory:
+        raise ValueError("工厂不存在")
+
+    existing = await db.scalar(
+        select(AuditProgramTargetFactory)
+        .where(AuditProgramTargetFactory.program_id == program_id)
+        .where(AuditProgramTargetFactory.factory_id == factory_id)
+    )
+    if existing:
+        raise ValueError("该工厂已分配到此审核项目")
+
+    db.add(AuditProgramTargetFactory(program_id=program_id, factory_id=factory_id))
+    await db.flush()
+
+    return await get_audit_program_factories(db, program_id)
+
+
+async def remove_factory_from_audit_program(
+    db: AsyncSession,
+    program_id: uuid.UUID,
+    factory_id: uuid.UUID,
+) -> AuditProgramFactoriesResponse:
+    """Remove a factory from an audit program."""
+    link = await db.scalar(
+        select(AuditProgramTargetFactory)
+        .where(AuditProgramTargetFactory.program_id == program_id)
+        .where(AuditProgramTargetFactory.factory_id == factory_id)
+    )
+    if not link:
+        raise ValueError("该工厂未分配到此审核项目")
+
+    await db.delete(link)
+    await db.flush()
+
+    return await get_audit_program_factories(db, program_id)

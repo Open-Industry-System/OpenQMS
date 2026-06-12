@@ -59,3 +59,32 @@ class CrossFactoryAuditResponse(BaseModel):
     target_factory_ids: list[uuid.UUID]
     target_factory_codes: list[str] = Field(default_factory=list)
     finding_count: int = 0
+
+
+class SupplierMergeRequest(BaseModel):
+    """Merge two+ supplier records from different factories into a shared profile."""
+    supplier_ids: list[uuid.UUID]  # 2+ supplier IDs to merge
+    shared_profile_id: uuid.UUID | None = None  # optional, create if None
+
+
+class MergedSupplierResponse(BaseModel):
+    """Result of a supplier merge."""
+    shared_profile_id: uuid.UUID
+    unified_credit_code: str | None
+    name: str
+    short_name: str | None
+    industry: str | None
+    supplier_ids: list[uuid.UUID]
+    factory_ids: list[uuid.UUID]
+
+
+class AuditFactoryAssignment(BaseModel):
+    """Assign a factory to an audit program."""
+    factory_id: uuid.UUID
+
+
+class AuditProgramFactoriesResponse(BaseModel):
+    """Target factories for an audit program."""
+    program_id: uuid.UUID
+    factory_ids: list[uuid.UUID]
+    factory_codes: list[str] = Field(default_factory=list)
