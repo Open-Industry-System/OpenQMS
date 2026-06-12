@@ -925,7 +925,7 @@ down_revision = 't000_tenant_baseline'  # must point to the branch root
 branch_labels = None  # inherits 'tenant' from t000
 ```
 
-If `down_revision` is not `t000_tenant_baseline`, manually correct it — this is critical for branch integrity.
+The verification script (step 3) asserts `down_revision == 't000_tenant_baseline'` and will fail CI if it's wrong.
 
 3. **Verify completeness with an automated script — this step must not be skipped:**
 
@@ -961,6 +961,18 @@ def main():
     print(f"Verifying: {migration_path}")
     with open(migration_path) as f:
         content = f.read()
+
+    # Verify revision metadata — down_revision must point to the branch root
+    down_rev_match = re.search(r"down_revision\s*=\s*['\"](\w+)['\"]", content)
+    if not down_rev_match:
+        print("ERROR: could not find down_revision in migration file")
+        sys.exit(1)
+    down_revision = down_rev_match.group(1)
+    if down_revision != "t000_tenant_baseline":
+        print(f"ERROR: down_revision is '{down_revision}', expected 't000_tenant_baseline'")
+        print("The squash migration must chain from the tenant branch root.")
+        print("Manually set down_revision = 't000_tenant_baseline' and re-run this script.")
+        sys.exit(1)
 
     created_tables = set()
     for match in re.finditer(r"op\.create_table\(\s*['\"](\w+)['\"]", content):
@@ -1374,12 +1386,24 @@ async def test_platform_route_requires_platform_admin_jwt():
         assert exc_info.value.status_code == 403
 
 
+def _collect_dependencies(dependant):
+    """Recursively collect all dependency functions from a FastAPI dependant tree."""
+    deps = set()
+    for dep in dependant.dependencies:
+        deps.add(dep.dependency)
+        deps.update(_collect_dependencies(dep))
+    return deps
+
+
+# Routes that are explicitly DB-free (no database access needed).
+PLATFORM_DB_FREE_ALLOWLIST = {"/api/platform/health"}
+
+
 def test_ci_route_dependency_check():
     """CI test: all /api/platform/* routes must depend on get_platform_db, not get_db.
 
-    Every platform route that accesses the database MUST include get_platform_db
-    in its dependency tree. Missing the dependency entirely (no DB access at all)
-    is also a violation unless the route is read-only and deliberately DB-free.
+    Every platform route (except allowlisted DB-free routes) MUST include
+    get_platform_db in its dependency tree. No platform route may use get_db.
     """
     from app.main import app
     from app.database import get_db, get_platform_db
@@ -1390,18 +1414,18 @@ def test_ci_route_dependency_check():
             continue
         if not route.path.startswith("/api/platform"):
             continue
-        route_deps = [d.dependency for d in route.dependant.dependencies]
-        # NEGATIVE: platform routes must NOT use get_db
-        if get_db in route_deps:
+        # Recursively walk the dependency tree to catch nested sub-dependencies
+        all_deps = _collect_dependencies(route.dependant)
+        # NEGATIVE: platform routes must NOT use get_db (at any depth)
+        if get_db in all_deps:
             violations.append(
                 f"{route.path} [{route.methods}] uses get_db instead of get_platform_db"
             )
-        # POSITIVE: platform routes that have any DB dependency must include get_platform_db
-        # (A route with no DB dependency at all is allowed — e.g. a health check)
-        has_any_db = get_db in route_deps or get_platform_db in route_deps
-        if has_any_db and get_platform_db not in route_deps:
+        # POSITIVE: all platform routes must use get_platform_db unless allowlisted
+        if route.path not in PLATFORM_DB_FREE_ALLOWLIST and get_platform_db not in all_deps:
             violations.append(
-                f"{route.path} [{route.methods}] has DB dependency but missing get_platform_db"
+                f"{route.path} [{route.methods}] missing get_platform_db "
+                f"(add to PLATFORM_DB_FREE_ALLOWLIST if DB-free)"
             )
 
     assert violations == [], "Platform route dependency violations:\n" + "\n".join(violations)
