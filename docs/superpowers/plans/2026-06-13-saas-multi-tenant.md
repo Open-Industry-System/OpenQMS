@@ -1697,7 +1697,14 @@ access_token = create_access_token(data=token_data)
 
 - [ ] **Step 3: Modify `deps.py` — add tenant JWT validation in `get_current_user`**
 
-In `backend/app/core/deps.py`, modify `get_current_user` to validate `tenant_id` claim. **Insert only the tenant validation block** — do not replace the existing user lookup logic:
+Add `TENANT_ISSUER, TENANT_AUDIENCE` to the existing import line in `backend/app/core/deps.py`:
+
+```python
+# Existing import (add TENANT_ISSUER, TENANT_AUDIENCE):
+from app.core.security import verify_token, PLATFORM_ISSUER, PLATFORM_AUDIENCE, TENANT_ISSUER, TENANT_AUDIENCE
+```
+
+Then modify `get_current_user` to validate tenant JWT claims. **Insert only the tenant validation block** — do not replace the existing user lookup logic:
 
 ```python
 async def get_current_user(token: str = Depends(oauth2_scheme), request: Request = None):
@@ -1705,10 +1712,19 @@ async def get_current_user(token: str = Depends(oauth2_scheme), request: Request
     user_id = payload.get("sub")
 
     # --- INSERT THIS BLOCK (tenant validation) ---
-    # If request has a resolved tenant, verify JWT tenant_id matches
+    # If request has a resolved tenant, enforce tenant JWT requirements:
+    # - Platform tokens (is_platform_admin) are forbidden on tenant routes
+    # - Only tokens issued by the tenant issuer are accepted
+    # - tenant_id must be present and must match the resolved tenant
     if request and hasattr(request.state, "tenant") and request.state.tenant:
+        if payload.get("is_platform_admin"):
+            raise HTTPException(status_code=403, detail="Platform token cannot access tenant routes")
+        if payload.get("iss") != TENANT_ISSUER or payload.get("aud") != TENANT_AUDIENCE:
+            raise HTTPException(status_code=403, detail="Invalid tenant token")
         jwt_tenant_id = payload.get("tenant_id")
-        if jwt_tenant_id and jwt_tenant_id != str(request.state.tenant.id):
+        if not jwt_tenant_id:
+            raise HTTPException(status_code=403, detail="Missing tenant_id")
+        if jwt_tenant_id != str(request.state.tenant.id):
             raise HTTPException(status_code=403, detail="Token tenant mismatch")
     # --- END INSERTED BLOCK ---
 
