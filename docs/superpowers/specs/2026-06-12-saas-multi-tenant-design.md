@@ -69,7 +69,11 @@ tenant_<slug> (租户 schema) × N
 - 平台参考数据在 `public` schema，只读访问或显式复制到租户空间后自定义
 - `factory_id` 列保留在租户 schema 内，作为租户内部的工厂间隔离
 - 跨 schema 引用策略：租户 schema 内的业务表不得通过外键引用 `public` 表或其他租户 schema 的表。原因不是为了 PostgreSQL 兼容性（PostgreSQL 支持 schema-qualified FK），而是为了保持租户 schema 的**可迁移性**（备份/恢复/删除必须能独立操作，不依赖跨 schema 约束）。需要引用公共参考数据时，使用应用层逻辑（如 `reference_template_id` 列存储 UUID 引用，但不加 FK 约束），并在 Service 层处理软失效
-- **schema 名安全规则**：`tenants.slug` 和 `tenants.schema_name` 必须只包含 `[a-z0-9_]`，在创建时强制校验。所有 `SET search_path` 语句必须通过统一 helper `set_search_path_sql(schema_name)` 生成，该 helper 对 schema_name 做正则校验后使用双引号转义（`'"' + name.replace('"', '""') + '"'`）生成安全的 quoted identifier。禁止在代码中手写 f-string 拼接 schema 名到 SQL 语句中
+- **schema 名安全规则**：`slug`（URL/子域名用）和 `schema_name`（PostgreSQL schema 用）使用不同的校验规则：
+  - `slug` / `subdomain`：只允许 `[a-z0-9-]`（连字符而非下划线），符合 DNS 子域名和 URL 路径规范
+  - `schema_name`：前缀 `tenant_` + 只允许 `[a-z0-9_]`（下划线而非连字符），符合 PostgreSQL 标识符规范
+  - 创建租户时，`slug` 自动转换为 `schema_name`：`tenant_` + slug 中 `-` 替换为 `_`。例如 `slug="acme-corp"` → `schema_name="tenant_acme_corp"`
+  - 所有 `SET search_path` 语句必须通过统一 helper `set_search_path_sql(schema_name)` 生成，该 helper 对 schema_name 做正则校验后使用双引号转义（`'"' + name.replace('"', '""') + '"'`）生成安全的 quoted identifier。禁止在代码中手写 f-string 拼接 schema 名到 SQL 语句中
 
 ### 2.2 新增平台表
 
@@ -79,9 +83,11 @@ tenant_<slug> (租户 schema) × N
 CREATE TABLE public.tenants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(100) NOT NULL,
-  slug VARCHAR(50) UNIQUE NOT NULL,          -- URL 标识，加 tenant_ 前缀后不超过 PostgreSQL 63 字符限制
-  schema_name VARCHAR(63) UNIQUE NOT NULL,    -- "tenant_<slug>"
-  subdomain VARCHAR(100) UNIQUE NOT NULL,     -- acme.openqms.com
+  slug VARCHAR(50) UNIQUE NOT NULL
+    CHECK (slug ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'),   -- URL 标识：[a-z0-9-]，DNS 兼容
+  schema_name VARCHAR(63) UNIQUE NOT NULL
+    CHECK (schema_name ~ '^tenant_[a-z0-9_]+$'),          -- PostgreSQL schema：tenant_ 前缀 + [a-z0-9_]
+  subdomain VARCHAR(100) UNIQUE NOT NULL,                 -- acme.openqms.com
   plan VARCHAR(20) DEFAULT 'free',            -- free/pro/enterprise
   status VARCHAR(20) DEFAULT 'pending',       -- pending/provisioning/active/suspended/deactivated/failed
   provisioning_step VARCHAR(50) DEFAULT NULL,  -- 当前开通步骤（如 'create_schema', 'run_migrations', 'seed_data'）
@@ -282,11 +288,11 @@ from fastapi import Request
 import re
 
 def set_search_path_sql(schema_name: str) -> str:
-    """校验 schema 名只含 [a-z0-9_] 并生成安全的 SET search_path 语句。
-    禁止直接 f-string 拼接 schema 名到 SQL 中。
+    """校验 schema 名：必须以 tenant_ 开头，后续只含 [a-z0-9_]，总长 8-69 字符。
+    生成安全的 SET search_path 语句。禁止直接 f-string 拼接 schema 名到 SQL 中。
     """
-    if not re.match(r'^[a-z][a-z0-9_]{0,62}$', schema_name):
-        raise ValueError(f"Invalid schema name: {schema_name}")
+    if not re.match(r'^tenant_[a-z0-9_]{1,62}$', schema_name):
+        raise ValueError(f"Invalid schema name: {schema_name} (must match tenant_[a-z0-9_]+)")
     # PostgreSQL quoted identifier（双引号包裹，内部双引号双写）
     quoted = '"' + schema_name.replace('"', '""') + '"'
     return f'SET search_path TO {quoted}, "public"'
@@ -474,10 +480,12 @@ pending → provisioning → active
 | 命令 | 作用 |
 |---|---|
 | `alembic upgrade platform@head` | 迁移 `public` schema（平台表） |
-| `alembic upgrade tenant@head --all` | 遍历所有 `active` 租户，逐个迁移 |
-| `alembic upgrade tenant@head --slug acme` | 只迁移指定租户 |
+| `python -m app.cli.tenant_migrate --all` | 遍历所有 `active` 租户，逐个运行 `alembic -x schema=<name> upgrade tenant@head` |
+| `python -m app.cli.tenant_migrate --slug acme` | 只迁移指定租户 |
 
 > **注意**：必须使用带分支标签的 `platform@head` / `tenant@head`，而非裸 `head`。裸 `head` 在存在分支时行为不确定，可能同时触发两个分支或选择错误的分支。`alembic.ini` 中 `version_locations` 应设为 `alembic/versions`（两个分支文件共存于同一目录），`env.py` 通过 `x_args` 的 `schema` 参数决定执行哪个分支的迁移。
+>
+> **关于 `--all` / `--slug`**：这些不是 Alembic 原生参数。租户批量迁移通过自定义 CLI 编排脚本 `app.cli.tenant_migrate` 实现，该脚本查询 `public.tenants` 获取 active 租户列表，逐个执行 `alembic -x schema=tenant_acme upgrade tenant@head`。直接使用 Alembic CLI 时，需手动指定 `-x schema=<name>` 参数。
 
 ### 6.2 迁移记录
 
@@ -499,12 +507,12 @@ pending → provisioning → active
 
 **公共迁移**（Alembic 迁移文件前缀 `p`，如 `p001_platform_tables.py`）：
 - 操作 `public` schema 的平台表（`tenants`、`tenant_migrations`、`platform_admin_users`、`reference_templates` 等）
-- 使用标准 `alembic upgrade head`，`version_table_schema = "public"`
+- 使用 `alembic upgrade platform@head`，`version_table_schema = "public"`
 - 迁移文件通过 `branch_labels = ["platform"]` 标记
 
 **租户迁移**（Alembic 迁移文件前缀 `t`，如 `t001_tenant_business_tables.py`）：
 - 操作租户 schema 的业务表（`users`、`factories`、`fmea_documents` 等 ~50 张表）
-- 通过 `alembic upgrade tenant --all` 或 `--slug acme` 触发，`env.py` 读取 `--schema` 参数并设置 `search_path`
+- 通过 `python -m app.cli.tenant_migrate --all`（批量）或 `--slug acme`（单租户）触发，底层执行 `alembic -x schema=<name> upgrade tenant@head`
 - `version_table_schema` 设为当前租户的 `schema_name`（而非默认 `public`），确保每个租户有独立的 `alembic_version` 表
 - 迁移文件通过 `branch_labels = ["tenant"]` 标记
 - **使用 `set_search_path_sql()` helper 生成安全的 schema 名**（与运行时代码共享同一 helper），禁止 f-string 拼接
@@ -759,7 +767,10 @@ async def run_for_each_tenant():
 1. **忽略** `X-Tenant-ID` 请求头（不因携带该头而拒绝，避免开发环境或统一代理注入的头部造成误伤）；
 2. **拒绝** 携带租户 JWT（`tenant_id` claim 存在）的请求，返回 403；
 3. **要求** 平台管理员 JWT（`is_platform_admin: true`）才可访问。
-测试应覆盖：租户 JWT 访问平台路由返回 403；平台 JWT 不携带 `X-Tenant-ID` 时正常工作；平台 JWT 携带 `X-Tenant-ID` 时忽略该头并正常工作。
+
+**强制机制**：仅靠开发者纪律不够，必须通过代码层面强制：
+- `platform_router = APIRouter(prefix="/api/platform", dependencies=[Depends(require_platform_admin), Depends(get_platform_db)])` — 平台路由的 `APIRouter` 在创建时即注入这两个依赖，确保所有子路由自动继承。开发者无需（也不应）在每个路由函数中手动注入 `get_platform_db()`。
+- **测试断言**：CI 中运行路由依赖检查脚本，遍历 `/api/platform/*` 下所有路由，断言其依赖列表包含 `get_platform_db`（而非 `get_db`）。如果有平台路由使用 `Depends(get_db)`，测试失败。
 
 | 文件 | 改动 |
 |---|---|
