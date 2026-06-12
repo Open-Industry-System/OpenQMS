@@ -2446,7 +2446,7 @@ Files and line references (as of the current codebase):
 | `app/services/mes_connector.py` | 171 | `async with async_session() as session:` | `async with get_tenant_aware_session() as session:` |
 | `app/services/iqc_inspection_service.py` | 24 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
 | `app/services/capa_draft_service.py` | 272 | `async with async_session() as audit_db:` | `async with get_tenant_aware_session() as audit_db:` |
-| `app/services/supply_chain_risk_map/scheduler.py` | 41 | `async with async_session() as db:` | `async with get_tenant_aware_session() as db:` |
+| `app/services/supply_chain_risk_map/scheduler.py` | — | — | Handled in Step 2 via `run_for_each_tenant()` — see item 10 |
 
 Note: `app/services/collaboration_service.py` does not have a bare `async_session()` call — it receives `db` from the lifespan loop (which will be wrapped with `run_for_each_tenant()` in Step 2).
 
