@@ -52,6 +52,7 @@ from app.api.erp import router as erp_router
 from app.api.supplier_risk import router as supplier_risk_router
 from app.api.supply_chain_risk_map import router as supply_chain_risk_map_router
 from app.api.group import router as group_router
+from app.core.tenant_context import TenantContextMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -319,6 +320,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="OpenQMS API", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(TenantContextMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

@@ -44,3 +44,18 @@ def decode_refresh_token(token: str) -> str | None:
         return payload.get("sub")
     except JWTError:
         return None
+
+
+# JWT issuer/audience constants for cross-domain prevention
+TENANT_ISSUER = "openqms-tenant"
+PLATFORM_ISSUER = "openqms-platform"
+TENANT_AUDIENCE = "openqms-tenant"
+PLATFORM_AUDIENCE = "openqms-platform"
+
+
+def decode_token_without_verification(token: str) -> dict:
+    """Decode JWT payload without verifying signature.
+    Used by TenantContextMiddleware for tenant resolution BEFORE full auth verification.
+    MUST NOT be used for authorization decisions — only for tenant lookup.
+    """
+    return jwt.get_unverified_claims(token)
