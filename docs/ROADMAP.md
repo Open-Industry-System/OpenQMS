@@ -1,6 +1,6 @@
 # OpenQMS 开发路线图
 
-**更新日期**: 2026-06-11
+**更新日期**: 2026-06-12
 **当前版本**: v0.1.0 (MVP)
 **目标版本**: v3.0 (全功能发布)
 
@@ -156,7 +156,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | 管理评审报告自动生成 | P3 | ✅ 完成 (2026-06-12) | 汇总输入数据 → 生成报告初稿，支持 AI 生成、人工编辑、定稿归档与版本历史 |
 | 供应链风险地图 | P3 | 🔲 待开发 | 多维度供应风险热力图 |
 | 自定义看板（拖拽式）| P3 | ✅ 完成 | react-grid-layout 拖拽布局，widget 库面板（18 种 widget），用户级 layout 存储，产品线过滤，权限控制 |
-| 多工厂部署支持 | P3 | 🔲 待开发 | 每工厂独立实例 + 集团汇总 |
+| 多工厂部署支持 | P3 | ✅ 完成 (2026-06-12) | 单数据库 + factory_id 行级隔离 + 三层 Scope 模型 + 集团汇总 |
 | SaaS 多租户架构 | P3 | 🔲 待开发 | Schema 级别隔离 + 弹性资源 |
 
 **Phase 4 MES 集成已完成 (2026-06-05)**:
@@ -213,18 +213,18 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 ---
 
-## 项目统计 (截至 2026-06-10)
+## 项目统计 (截至 2026-06-12)
 
 | 指标 | 数量 |
 |------|------|
-| Git 提交 | 1,021 次 |
-| 后端 Python 文件 | 198 个 |
-| 前端 TS/TSX 文件 | 181 个 |
-| API 路由模块 | 34 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/...) |
-| 前端页面 | 64 个 TSX 页面 |
-| 数据库表 | 98 张 (含 ERP 12 张 + 多对多关联表) |
+| Git 提交 | 1,030+ 次 |
+| 后端 Python 文件 | 200+ 个 |
+| 前端 TS/TSX 文件 | 185+ 个 |
+| API 路由模块 | 35 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/...) |
+| 前端页面 | 67+ 个 TSX 页面 |
+| 数据库表 | 100+ 张 (含 ERP 12 张 + Factory/Group 关联表) |
 | 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
-| 种子数据 | 4 用户 + 多模块演示数据 |
+| 种子数据 | 5 用户 + 多模块演示数据 |
 
 ---
 
@@ -247,14 +247,14 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 | 类别 | 内容 |
 |------|------|
-| 提交数 | 1,021 次 |
-| 后端文件 | 198 个 Python 文件 |
-| 前端文件 | 181 个 TS/TSX 文件 |
-| API 端点 | 33 个路由模块 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/...) |
-| 前端页面 | 58 个 TSX 页面 |
-| 数据库表 | 86 张 (含多对多关联表) |
+| 提交数 | 1,030+ 次 |
+| 后端文件 | 200+ 个 Python 文件 |
+| 前端文件 | 185+ 个 TS/TSX 文件 |
+| API 端点 | 35 个路由模块 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/...) |
+| 前端页面 | 67+ 个 TSX 页面 |
+| 数据库表 | 100+ 张 (含多对多关联表 + Factory/Group) |
 | 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
-| 种子数据 | 4 用户 + 3 FMEA + 6 CAPA + 多模块演示数据 |
+| 种子数据 | 5 用户 + 2 工厂 + 3 FMEA + 6 CAPA + 多模块演示数据 |
 
 ---
 
@@ -334,6 +334,16 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 9. ~~前端页面~~ ✅ 4 页 + 2 组件 + 路由 + 侧边栏
 
 **Phase 4 剩余 (待开发)**:
-- [ ] 管理评审报告自动生成
 - [ ] 供应链风险地图
 - [ ] SaaS 多租户架构 — Schema 级别隔离 + 弹性资源
+
+**Phase 4 多工厂部署支持已完成 (2026-06-12)**:
+1. ~~数据库迁移~~ ✅ Factory/UserFactory/SupplierSharedProfile 表 + factory_id 列 + 回填 + NOT NULL 强制
+2. ~~ORM 模型~~ ✅ Factory + UserFactory + AuditProgramTargetFactory + SupplierSharedProfile + ~50 业务表 factory_id
+3. ~~Scope 层~~ ✅ FactoryScope / ProductLineScope / PermissionScope 三层模型 + resolve_* + apply_scope_filter + populate_factory_id + validate_factory_invariant
+4. ~~权限系统~~ ✅ Module.GROUP 枚举 + GROUP ADMIN/VIEW 独立于 bypass_row_level_security + RequestScope 依赖注入
+5. ~~API 层~~ ✅ /api/group/* 集团路由（dashboard / comparison / factories CRUD / shared-suppliers / cross-factory-audits）+ 全模块 factory_id 过滤
+6. ~~前端~~ ✅ Axios factory_id 自动注入 + 工厂切换器 + 侧边栏集团菜单 + Group API 客户端 + 集团仪表盘/对比/工厂管理页
+7. ~~种子数据~~ ✅ 第二工厂 + GROUP ADMIN 用户
+8. ~~测试~~ ✅ Factory isolation (14) + scope resolution (41) + 管理评审 API (5) + 权限解耦边界测试
+9. ~~代码审查修复~~ ✅ GROUP VIEW 明细响应工厂范围过滤 + product_line 列表过滤 + shipment 重复校验 + 管理评审 API 测试修复
