@@ -1608,3 +1608,72 @@ export interface NotificationChannel {
   created_by: string;
   created_at: string;
 }
+
+// --- Supply Chain Risk Map ---
+
+export interface HeatmapCell {
+  key: string;
+  value: number | null;
+  risk_index: number | null;
+  level: string | null;
+  diff: number | null;
+  source: "risk_evaluation" | "erp_po" | "supplier_evaluation_fallback" | "iqc_inspection" | "missing";
+}
+
+export interface HeatmapColumn {
+  key: string;
+  label: string;
+  type: "score" | "percent" | "number" | "count" | "risk";
+  polarity: "higher_is_risk" | "lower_is_risk" | "neutral_exposure";
+}
+
+export interface HeatmapRow {
+  supplier_id: string;
+  supplier_name: string;
+  cells: HeatmapCell[];
+}
+
+export interface HeatmapResponse {
+  period: string;
+  prev_period: string | null;
+  product_line_code: string | null;
+  columns: HeatmapColumn[];
+  rows: HeatmapRow[];
+}
+
+export interface TimelineResponse {
+  periods: string[];
+  current_period: string;
+  supplier_count: number;
+}
+
+export interface SupplierDimensionTrend {
+  period: string;
+  risk_score: number;
+  quality_score: number;
+  delivery_score: number;
+  compliance_score: number;
+}
+
+export interface SupplierDetailResponse {
+  supplier_id: string;
+  supplier_name: string;
+  product_line_code: string | null;
+  period: string;
+  dimensions: Record<string, { raw_value: number | null; risk_index: number | null; polarity: string; source: string }>;
+  trend: SupplierDimensionTrend[];
+}
+
+export interface ComparisonResponse {
+  period: string;
+  suppliers: Array<{
+    supplier_id: string;
+    supplier_name: string;
+    dimensions: Record<string, { raw_value: number | null; risk_index: number | null; polarity: string; source: string }>;
+  }>;
+}
+
+export interface SnapshotGenerateResponse {
+  snapshot_count: number;
+  period: string;
+}
