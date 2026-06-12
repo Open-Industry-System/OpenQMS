@@ -73,6 +73,8 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     user = result.scalar_one_or_none()
     if user is None or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
     # Build JWT payload — include tenant_id when request has a resolved tenant
     tenant = getattr(request.state, "tenant", None)
     token_data = {
@@ -140,6 +142,8 @@ async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSes
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     if user.refresh_token_expires and user.refresh_token_expires < datetime.now(timezone.utc):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
     # Preserve multi-tenant claims in refreshed token
     token_data = {
         "sub": str(user.user_id),

@@ -74,7 +74,7 @@ async def require_platform_admin(request: Request):
 
     token = auth_header[7:]
     try:
-        payload = verify_token(token)
+        payload = verify_token(token, issuer=PLATFORM_ISSUER, audience=PLATFORM_AUDIENCE)
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 

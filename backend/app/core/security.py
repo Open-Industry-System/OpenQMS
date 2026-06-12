@@ -85,10 +85,16 @@ def create_tenant_user_token(user_id: str, tenant_id: str, role_id: str, factory
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def verify_token(token: str) -> dict:
+def verify_token(token: str, issuer: str | None = None, audience: str | None = None) -> dict:
     """Verify and decode a JWT token. Returns the payload dict.
-    Raises JWTError on invalid/expired tokens."""
-    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    Raises JWTError on invalid/expired tokens.
+    Optionally verifies issuer and audience claims for defense-in-depth."""
+    kwargs = {}
+    if issuer:
+        kwargs["issuer"] = issuer
+    if audience:
+        kwargs["audience"] = audience
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_aud": audience is not None}, **kwargs)
 
 
 # JWT issuer/audience constants for cross-domain prevention
@@ -96,11 +102,3 @@ TENANT_ISSUER = "openqms-tenant"
 PLATFORM_ISSUER = "openqms-platform"
 TENANT_AUDIENCE = "openqms-tenant"
 PLATFORM_AUDIENCE = "openqms-platform"
-
-
-def decode_token_without_verification(token: str) -> dict:
-    """Decode JWT payload without verifying signature.
-    Used by TenantContextMiddleware for tenant resolution BEFORE full auth verification.
-    MUST NOT be used for authorization decisions — only for tenant lookup.
-    """
-    return jwt.get_unverified_claims(token)
