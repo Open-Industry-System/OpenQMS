@@ -154,7 +154,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | IQC 抽样方案智能优化 | P3 | ✅ 完成 | 基于历史质量动态调整 AQL；组合规则引擎（10 条规则）+ 多级审批（engineer/manager）+ 质量画像 + PPM/SCAR/安全缺陷触发；4 张新表 + 配置化参数；4 页前端；18 条单元测试 |
 | 供应商风险智能预警 | P3 | ✅ 完成 (2026-06-11) | 10 规则引擎（质量/交付/合规）+ 加权评分 + 4 级风险（低/中/高/严重）+ 批量评估 + 每日定时触发 + IQC 判决增量触发 + SCAR/CAPA 闭环（一键创建 + 关闭联动）+ 邮件/钉钉 Webhook 通知（SSRF 保护 + Fernet 加密）+ 风险矩阵散点图 + 规则配置页 + 通知渠道管理 + 45 测试全绿 |
 | 管理评审报告自动生成 | P3 | ✅ 完成 (2026-06-12) | 汇总输入数据 → 生成报告初稿，支持 AI 生成、人工编辑、定稿归档与版本历史 |
-| 供应链风险地图 | P3 | 🔲 待开发 | 多维度供应风险热力图 |
+| 供应链风险地图 | P3 | ✅ 完成 (2026-06-12) | 多维度供应风险热力图 + 产品线隔离 + 环比差异 + 供应商详情/对比 + 6 月趋势 + 定时快照(pg_try_advisory_lock) + CSV/Excel 导出 + 830 测试 |
 | 自定义看板（拖拽式）| P3 | ✅ 完成 | react-grid-layout 拖拽布局，widget 库面板（18 种 widget），用户级 layout 存储，产品线过滤，权限控制 |
 | 多工厂部署支持 | P3 | ✅ 完成 (2026-06-12) | 单数据库 + factory_id 行级隔离 + 三层 Scope 模型 + 集团汇总 |
 | SaaS 多租户架构 | P3 | 🔲 待开发 | Schema 级别隔离 + 弹性资源 |
@@ -217,14 +217,14 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 | 指标 | 数量 |
 |------|------|
-| Git 提交 | 1,030+ 次 |
-| 后端 Python 文件 | 200+ 个 |
-| 前端 TS/TSX 文件 | 185+ 个 |
-| API 路由模块 | 35 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/...) |
-| 前端页面 | 67+ 个 TSX 页面 |
-| 数据库表 | 100+ 张 (含 ERP 12 张 + Factory/Group 关联表) |
+| Git 提交 | 1,050+ 次 |
+| 后端 Python 文件 | 210+ 个 |
+| 前端 TS/TSX 文件 | 195+ 个 |
+| API 路由模块 | 36 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/supply_chain_risk_map/...) |
+| 前端页面 | 75+ 个 TSX 页面 |
+| 数据库表 | 105+ 张 (含 ERP 12 张 + Factory/Group 关联表 + Supply Chain Risk Snapshot) |
 | 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
-| 种子数据 | 5 用户 + 多模块演示数据 |
+| 种子数据 | 5 用户 + 2 工厂 + 多模块演示数据 |
 
 ---
 
@@ -236,7 +236,8 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 2026 M5  ──── ✅ 供应商/客户模块完成 (含增强功能)
 2026 M5  ──── ✅ 知识图谱基础设施 + 可视化上线
 2026 M6  ──── ✅ Phase 3 AI + 知识图谱增强全部完成
-2026 M6  ──── 🔲 Phase 4 高级分析 + 生态集成启动
+2026 M6  ──── ✅ Phase 4 高级分析 + 生态集成启动
+2026 M6.5 ── ✅ 供应链风险地图上线
 2026 M12 ──── 🔲 GA v2.0 发布
 2027 M4  ──── 🔲 全功能发布 (GA v3.0)
 ```
@@ -247,12 +248,12 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 | 类别 | 内容 |
 |------|------|
-| 提交数 | 1,030+ 次 |
-| 后端文件 | 200+ 个 Python 文件 |
-| 前端文件 | 185+ 个 TS/TSX 文件 |
-| API 端点 | 35 个路由模块 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/...) |
-| 前端页面 | 67+ 个 TSX 页面 |
-| 数据库表 | 100+ 张 (含多对多关联表 + Factory/Group) |
+| 提交数 | 1,050+ 次 |
+| 后端文件 | 210+ 个 Python 文件 |
+| 前端文件 | 195+ 个 TS/TSX 文件 |
+| API 端点 | 36 个路由模块 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/supply_chain_risk_map/...) |
+| 前端页面 | 75+ 个 TSX 页面 |
+| 数据库表 | 105+ 张 (含多对多关联表 + Factory/Group) |
 | 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
 | 种子数据 | 5 用户 + 2 工厂 + 3 FMEA + 6 CAPA + 多模块演示数据 |
 
@@ -334,8 +335,19 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 9. ~~前端页面~~ ✅ 4 页 + 2 组件 + 路由 + 侧边栏
 
 **Phase 4 剩余 (待开发)**:
-- [ ] 供应链风险地图
 - [ ] SaaS 多租户架构 — Schema 级别隔离 + 弹性资源
+
+**Phase 4 供应链风险地图已完成 (2026-06-12)**:
+1. ~~数据库迁移~~ ✅ supply_chain_risk_snapshots 表 + UNIQUE NULLS NOT DISTINCT + 权限种子 + erp_purchase_orders.actual_delivery_date
+2. ~~ORM 模型~~ ✅ SupplyChainRiskSnapshot（risk_score/risk_level/quality_score/delivery_score/compliance_score + 8 维 JSONB dimensions）
+3. ~~聚合引擎~~ ✅ aggregate_supply_chain_metrics（ERP 准时率 + 采购占比 + SCAR 时间点 + IQC PPM）+ normalize_to_risk_index + ppm_to_risk_index
+4. ~~快照服务~~ ✅ generate_snapshot（仅当前月 UPSERT）+ heatmap/timeline/detail/comparison/export 5 端点 + pg_try_advisory_lock 调度
+5. ~~API 路由~~ ✅ 6 端点（heatmap/timeline/supplier-detail/compare/snapshot-generate/export）
+6. ~~前端页面~~ ✅ RiskHeatmap + HeatmapToolbar + TimelineSlider + DetailPanel + SupplierDetail + SupplierComparison + DiffIndicator + DataSourceBadge + ExportButton
+7. ~~产品线隔离~~ ✅ 快照/热力图/时间线/详情/趋势查询均按 product_line_code 过滤，NULL = 全局
+8. ~~权限控制~~ ✅ Module.SUPPLY_CHAIN_RISK_MAP + VIEW/EDIT 分级 + 前端按需显示
+9. ~~测试覆盖~~ ✅ 6 服务测试 + 5 聚合测试 + 6 集成测试 + 4 e2e 测试
+10. ~~代码审查修复~~ ✅ timeline 路由递归 → import alias；PPM risk_index 超限 → ppm_to_risk_index；硬编码产品线 → useProductLineStore；权限按钮 → usePermission；ERP JOIN 缺失 connection_id；delivery_delay_days 类型处理；趋势 product_line/period 过滤
 
 **Phase 4 多工厂部署支持已完成 (2026-06-12)**:
 1. ~~数据库迁移~~ ✅ Factory/UserFactory/SupplierSharedProfile 表 + factory_id 列 + 回填 + NOT NULL 强制

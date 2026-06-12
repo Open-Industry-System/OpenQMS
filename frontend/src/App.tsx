@@ -72,6 +72,7 @@ import FactoryManagementPage from "./pages/group/FactoryManagement";
 import FactoryComparisonPage from "./pages/group/FactoryComparison";
 import GroupSuppliersPage from "./pages/group/GroupSuppliers";
 import GroupAuditsPage from "./pages/group/GroupAudits";
+import SupplyChainRiskMapPage from "./pages/supplyChainRiskMap/SupplyChainRiskMapPage";
 
 function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
@@ -140,6 +141,7 @@ export default function App() {
           <Route index element={<SupplierRiskPage />} />
           <Route path="config" element={<RiskConfigPage />} />
         </Route>
+        <Route path="/supply-chain-risk-map" element={<ProtectedRoute requiredModule="supply_chain_risk_map"><SupplyChainRiskMapPage /></ProtectedRoute>} />
         <Route path="/msa" element={<ProtectedRoute requiredModule="msa"><Navigate to="/msa/gauges" replace /></ProtectedRoute>} />
         <Route path="/msa/gauges" element={<ProtectedRoute requiredModule="msa"><GaugeListPage /></ProtectedRoute>} />
         <Route path="/msa/gauges/:id" element={<ProtectedRoute requiredModule="msa"><GaugeDetailPage /></ProtectedRoute>} />
