@@ -104,6 +104,7 @@ async def _query_erp_on_time(
             ) AS avg_delay_days
         FROM erp_purchase_orders po
         JOIN erp_suppliers es ON po.supplier_code = es.supplier_code
+                             AND po.connection_id = es.connection_id
         JOIN suppliers s ON es.openqms_supplier_id = s.supplier_id
         WHERE s.supplier_id = ANY(:sids)
           AND po.delivery_date BETWEEN :period_start AND :period_end
@@ -122,9 +123,9 @@ async def _query_erp_on_time(
         on_time = row["on_time"]
         result[sid]["erp_on_time_rate"] = round(on_time / total * 100, 2) if total else None
         result[sid]["erp_on_time_rate_source"] = "erp_po"
-        # avg_delay_days is an interval; extract days
+        # PG date - date returns integer; AVG returns Decimal
         delay = row["avg_delay_days"]
-        result[sid]["delivery_delay_days"] = float(delay.days) if delay is not None and hasattr(delay, "days") else (float(delay) if delay is not None else None)
+        result[sid]["delivery_delay_days"] = float(delay) if delay is not None else None
         erp_hit.add(sid)
 
     # --- Fallback: supplier_evaluations.delivery_score ---
@@ -175,6 +176,7 @@ async def _query_purchase_amount_pct(
             SUM(SUM(po.quantity * po.unit_price)) OVER () AS total_amount
         FROM erp_purchase_orders po
         JOIN erp_suppliers es ON po.supplier_code = es.supplier_code
+                             AND po.connection_id = es.connection_id
         JOIN suppliers s ON es.openqms_supplier_id = s.supplier_id
         WHERE s.supplier_id = ANY(:sids)
           AND po.delivery_date BETWEEN :period_start AND :period_end
