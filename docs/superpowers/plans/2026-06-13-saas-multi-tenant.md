@@ -474,7 +474,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.tenant_utils import slug_to_schema_name
 from app.database import async_session
 from app.models.tenant import Tenant
+from app.config import settings
+from app.core.security import decode_token_without_verification
 
+from fastapi import HTTPException
 from sqlalchemy import select, text
 
 logger = logging.getLogger(__name__)
@@ -513,17 +516,48 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 if subdomain and subdomain != "admin":
                     tenant = await self._resolve_by_subdomain(subdomain)
 
-        # 2. Try X-Tenant-ID header (development)
-        if tenant is None:
+        # 2. Try X-Tenant-ID header (development/internal only)
+        # Production must not trust this header — an attacker could forge tenant identity.
+        if tenant is None and settings.TENANT_MODE == "dev":
             tenant_slug = request.headers.get("X-Tenant-ID")
             if tenant_slug:
                 tenant = await self._resolve_by_slug(tenant_slug)
 
-        # 3. Try JWT tenant_id claim (fallback)
+        # 3. Try JWT tenant_id claim (fallback for authenticated requests)
+        # This is a secondary resolution — the JWT is verified later in deps.py,
+        # but we can use its tenant_id to resolve the tenant when no subdomain
+        # or X-Tenant-ID is available (e.g. API clients using Bearer tokens).
         if tenant is None:
-            # Will be populated by auth dependency after login
-            # This is a secondary resolution — JWT is verified in auth.py
-            pass
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.startswith("Bearer "):
+                try:
+                    token = auth_header[7:]
+                    # Decode without full verification — just extract tenant_id claim.
+                    # Full verification happens in get_current_user / require_platform_admin.
+                    payload = decode_token_without_verification(token)
+                    jwt_tenant_id = payload.get("tenant_id")
+                    if jwt_tenant_id:
+                        tenant = await self._resolve_by_id(jwt_tenant_id)
+                except Exception:
+                    pass  # Invalid token — will be caught by auth dependency
+
+        # Handle non-active tenant statuses
+        if tenant is not None:
+            if tenant.status == "suspended":
+                raise HTTPException(
+                    status_code=503,
+                    detail={"message": "租户已暂停", "tenant_suspended": True},
+                )
+            if tenant.status == "deactivated":
+                raise HTTPException(
+                    status_code=410,
+                    detail={"message": "租户已停用"},
+                )
+            if tenant.status != "active":
+                raise HTTPException(
+                    status_code=503,
+                    detail={"message": "租户尚未就绪"},
+                )
 
         # Store resolved tenant (or None) in request state
         request.state.tenant = tenant
@@ -531,20 +565,32 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         return response
 
     async def _resolve_by_subdomain(self, subdomain: str):
-        """Look up tenant by subdomain."""
+        """Look up tenant by subdomain. Returns tenant regardless of status
+        (suspended/deactivated handling is done by the caller)."""
         async with async_session() as session:
             await session.execute(text('SET search_path TO "public"'))
             result = await session.execute(
-                select(Tenant).where(Tenant.subdomain == subdomain, Tenant.status == "active")
+                select(Tenant).where(Tenant.subdomain == subdomain)
             )
             return result.scalar_one_or_none()
 
     async def _resolve_by_slug(self, slug: str):
-        """Look up tenant by slug."""
+        """Look up tenant by slug. Returns tenant regardless of status
+        (suspended/deactivated handling is done by the caller)."""
         async with async_session() as session:
             await session.execute(text('SET search_path TO "public"'))
             result = await session.execute(
-                select(Tenant).where(Tenant.slug == slug, Tenant.status == "active")
+                select(Tenant).where(Tenant.slug == slug)
+            )
+            return result.scalar_one_or_none()
+
+    async def _resolve_by_id(self, tenant_id: str):
+        """Look up tenant by UUID. Returns tenant regardless of status
+        (suspended/deactivated handling is done by the caller)."""
+        async with async_session() as session:
+            await session.execute(text('SET search_path TO "public"'))
+            result = await session.execute(
+                select(Tenant).where(Tenant.id == tenant_id)
             )
             return result.scalar_one_or_none()
 ```
@@ -1257,6 +1303,16 @@ def create_tenant_user_token(user_id: str, tenant_id: str, role_id: str, factory
         "type": "access",
     }
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_token_without_verification(token: str) -> dict:
+    """Decode JWT payload without verifying signature.
+
+    Used by TenantContextMiddleware to extract tenant_id from Bearer tokens
+    for tenant resolution BEFORE full auth verification (which happens in deps.py).
+    MUST NOT be used for authorization decisions — only for tenant lookup.
+    """
+    return jwt.get_unverified_claims(token)
 ```
 
 - [ ] **Step 2: Create `require_platform_admin` dependency in `deps.py`**
@@ -1434,6 +1490,126 @@ def test_ci_route_dependency_check():
             )
 
     assert violations == [], "Platform route dependency violations:\n" + "\n".join(violations)
+
+
+@pytest.mark.asyncio
+async def test_x_tenant_id_ignored_in_production():
+    """X-Tenant-ID header must be ignored when TENANT_MODE != 'dev'."""
+    from app.core.tenant_context import TenantContextMiddleware
+    from app.config import settings
+
+    # Save original TENANT_MODE and restore after test
+    original = getattr(settings, 'TENANT_MODE', None)
+
+    # Simulate production: TENANT_MODE is not "dev"
+    settings.TENANT_MODE = "production"
+    try:
+        mock_inner = AsyncMock()
+        middleware = TenantContextMiddleware(mock_inner)
+        scope = {
+            "type": "http",
+            "path": "/api/fmea",
+            "headers": [(b"x-tenant-id", b"acme")],
+            "state": {},
+        }
+        receive = AsyncMock()
+        send = AsyncMock()
+
+        # Even with X-Tenant-ID header, tenant should be None
+        # because production mode ignores it
+        captured_state = {}
+
+        async def inner_app(inner_scope, inner_receive, inner_send):
+            captured_state.update(inner_scope.get("state", {}))
+
+        middleware_prod = TenantContextMiddleware(inner_app)
+        await middleware_prod(scope, receive, send)
+        # X-Tenant-ID is ignored in production — tenant remains None
+        assert captured_state.get("tenant") is None
+    finally:
+        settings.TENANT_MODE = original
+
+
+@pytest.mark.asyncio
+async def test_jwt_fallback_resolves_tenant():
+    """When no subdomain or X-Tenant-ID is present, JWT tenant_id resolves the tenant."""
+    from app.core.tenant_context import TenantContextMiddleware
+    from app.core.security import decode_token_without_verification
+
+    mock_tenant = MagicMock()
+    mock_tenant.id = "tenant-acme-uuid"
+    mock_tenant.status = "active"
+
+    mock_inner = AsyncMock()
+    captured_state = {}
+
+    async def inner_app(inner_scope, inner_receive, inner_send):
+        captured_state.update(inner_scope.get("state", {}))
+
+    # Create a JWT payload with tenant_id
+    fake_token = "fake.bearer.token"
+    fake_payload = {"sub": "user-1", "tenant_id": "tenant-acme-uuid", "iss": "openqms-tenant"}
+
+    scope = {
+        "type": "http",
+        "path": "/api/fmea",
+        "headers": [(b"authorization", b"Bearer fake.bearer.token")],
+        "state": {},
+    }
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    middleware = TenantContextMiddleware(inner_app)
+    with patch.object(middleware, "_resolve_by_id", return_value=mock_tenant), \
+         patch("app.core.tenant_context.decode_token_without_verification", return_value=fake_payload), \
+         patch("app.core.tenant_context.settings", TENANT_MODE="production"):
+        await middleware(scope, receive, send)
+
+    # JWT fallback should have resolved the tenant
+    assert captured_state.get("tenant") is not None
+
+
+@pytest.mark.asyncio
+async def test_suspended_tenant_returns_503():
+    """Middleware must raise 503 for suspended tenants."""
+    from app.core.tenant_context import TenantContextMiddleware
+
+    mock_tenant = MagicMock()
+    mock_tenant.status = "suspended"
+
+    mock_inner = AsyncMock()
+    middleware = TenantContextMiddleware(mock_inner)
+    request = MagicMock()
+    request.url.path = "/api/fmea"
+    request.headers.get.return_value = ""
+    request.state = MagicMock()
+
+    with patch.object(middleware, "_resolve_by_subdomain", return_value=mock_tenant):
+        with pytest.raises(HTTPException) as exc_info:
+            await middleware.dispatch(request, mock_inner)
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.detail.get("tenant_suspended") is True
+
+
+@pytest.mark.asyncio
+async def test_deactivated_tenant_returns_410():
+    """Middleware must raise 410 for deactivated tenants."""
+    from app.core.tenant_context import TenantContextMiddleware
+
+    mock_tenant = MagicMock()
+    mock_tenant.status = "deactivated"
+
+    mock_inner = AsyncMock()
+    middleware = TenantContextMiddleware(mock_inner)
+    request = MagicMock()
+    request.url.path = "/api/fmea"
+    request.headers.get.return_value = ""
+    request.state = MagicMock()
+
+    with patch.object(middleware, "_resolve_by_subdomain", return_value=mock_tenant):
+        with pytest.raises(HTTPException) as exc_info:
+            await middleware.dispatch(request, mock_inner)
+        assert exc_info.value.status_code == 410
 ```
 
 - [ ] **Step 4: Create `backend/app/api/platform/__init__.py`**
@@ -2240,6 +2416,8 @@ Create `backend/tests/test_multitenancy/test_tenant_lifecycle.py`:
 ```python
 """Test tenant lifecycle: create → active → suspended → reactivated → deactivated."""
 import pytest
+from fastapi import HTTPException
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.services.tenant_service import TenantService
 
 
@@ -2290,8 +2468,19 @@ async def test_tenant_suspend_and_reactivate():
         await db.commit()
         assert tenant.status == "suspended"
 
-        # Verify TenantContext middleware returns 503 for suspended tenants
-        # (tested in integration test with test client)
+        # Verify TenantContextMiddleware raises 503 for suspended tenants
+        from app.core.tenant_context import TenantContextMiddleware
+        mock_inner = AsyncMock()
+        middleware = TenantContextMiddleware(mock_inner)
+        request = MagicMock()
+        request.url.path = "/api/fmea"
+        request.headers.get.return_value = ""  # no auth, no X-Tenant-ID
+        request.state = MagicMock()
+        with patch.object(middleware, "_resolve_by_subdomain", return_value=tenant):
+            with pytest.raises(HTTPException) as exc_info:
+                await middleware.dispatch(request, mock_inner)
+            assert exc_info.value.status_code == 503
+            assert exc_info.value.detail.get("tenant_suspended") is True
 
         # Reactivate
         tenant.status = "active"
@@ -2322,8 +2511,18 @@ async def test_tenant_deactivation():
         await db.commit()
         assert tenant.status == "deactivated"
 
-        # Verify TenantContext middleware returns 410 for deactivated tenants
-        # (tested in integration test with test client)
+        # Verify TenantContextMiddleware raises 410 for deactivated tenants
+        from app.core.tenant_context import TenantContextMiddleware
+        mock_inner = AsyncMock()
+        middleware = TenantContextMiddleware(mock_inner)
+        request = MagicMock()
+        request.url.path = "/api/fmea"
+        request.headers.get.return_value = ""
+        request.state = MagicMock()
+        with patch.object(middleware, "_resolve_by_subdomain", return_value=tenant):
+            with pytest.raises(HTTPException) as exc_info:
+                await middleware.dispatch(request, mock_inner)
+            assert exc_info.value.status_code == 410
 
         # Verify schema still exists (data preserved)
         await db.execute(text('SET search_path TO "public"'))
