@@ -493,6 +493,12 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
+        # In single-tenant mode, skip all tenant resolution
+        if settings.TENANT_MODE == "single":
+            request.state.tenant = None
+            response = await call_next(request)
+            return response
+
         # Skip tenant resolution for platform admin routes
         if request.url.path.startswith("/api/platform/"):
             request.state.tenant = None
@@ -636,16 +642,73 @@ def decode_token_without_verification(token: str) -> dict:
     return jwt.get_unverified_claims(token)
 ```
 
-- [ ] **Step 7: Run tests**
+- [ ] **Step 7: Register TenantContextMiddleware in `backend/app/main.py`**
+
+Add the middleware to the FastAPI app. This must be registered for `request.state.tenant` to be set on real requests:
+
+```python
+# In backend/app/main.py, add import:
+from app.core.tenant_context import TenantContextMiddleware
+
+# After app = FastAPI(...), add:
+app.add_middleware(TenantContextMiddleware)
+```
+
+- [ ] **Step 8: Add tests for single-tenant bypass and middleware registration**
+
+Add to `backend/tests/test_multitenancy/test_tenant_context.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_single_tenant_mode_skips_resolution():
+    """When TENANT_MODE='single', middleware skips all tenant resolution
+    and sets request.state.tenant = None, preserving original behavior."""
+    from app.core.tenant_context import TenantContextMiddleware
+
+    mock_inner = AsyncMock()
+    middleware = TenantContextMiddleware(mock_inner)
+    request = MagicMock()
+    request.url.path = "/api/fmea"
+    request.headers.get = lambda k, default="": ""
+    request.app = MagicMock()
+    request.app.state.tenant_domain = None
+    request.state = MagicMock()
+
+    with patch("app.core.tenant_context.settings", TENANT_MODE="single"):
+        await middleware.dispatch(request, mock_inner)
+        # In single mode, tenant must be None — no tenant resolution happens
+        assert request.state.tenant is None
+
+
+def test_middleware_is_registered_in_app():
+    """TenantContextMiddleware must be registered in the FastAPI app."""
+    from app.main import app
+    from app.core.tenant_context import TenantContextMiddleware
+
+    middleware_classes = [cls for cls in _get_middleware_classes(app)]
+    assert TenantContextMiddleware in middleware_classes, (
+        f"TenantContextMiddleware not found in app middleware. "
+        f"Found: {middleware_classes}"
+    )
+
+
+def _get_middleware_classes(app):
+    """Extract middleware classes from a FastAPI app."""
+    # Starlette stores middleware as a list of Middleware instances
+    for mw in app.user_middleware:
+        yield mw.cls
+```
+
+- [ ] **Step 9: Run tests**
 
 Run: `cd backend && python -m pytest tests/test_multitenancy/test_tenant_context.py -v`
 Expected: PASS (all utility function tests pass)
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add backend/app/core/tenant_utils.py backend/app/core/tenant_context.py backend/app/config.py backend/app/core/security.py backend/tests/test_multitenancy/test_tenant_context.py
-git commit -m "feat(multi-tenant): add TenantContextMiddleware, tenant utilities, TENANT_MODE config, JWT constants"
+git add backend/app/core/tenant_utils.py backend/app/core/tenant_context.py backend/app/config.py backend/app/core/security.py backend/app/main.py backend/tests/test_multitenancy/test_tenant_context.py
+git commit -m "feat(multi-tenant): add TenantContextMiddleware, tenant utilities, TENANT_MODE config, JWT constants, middleware registration"
 ```
 
 ---
