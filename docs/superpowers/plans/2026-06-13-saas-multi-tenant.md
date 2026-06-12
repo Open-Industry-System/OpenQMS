@@ -910,18 +910,22 @@ This is the critical migration that creates all ~50 business tables for new tena
 psql -c "CREATE SCHEMA IF NOT EXISTS tenant_squash_gen;"
 ```
 
-2. Run Alembic autogenerate against `TenantBase.metadata`:
+2. Run Alembic autogenerate against `TenantBase.metadata`, pinned to the tenant branch:
 ```bash
-cd backend && alembic -x schema=tenant_squash_gen revision --autogenerate -m "tenant_squash"
+cd backend && alembic -x schema=tenant_squash_gen revision --autogenerate --head tenant@head --rev-id t001_tenant_squash -m "tenant_squash"
 ```
 
-This uses the `env.py` configuration from Task 5, which selects `TenantBase.metadata` when `x_args` contains `schema`. The generated migration will have `down_revision` pointing to whatever Alembic detects as the current head. After generation, manually set:
+This uses the `env.py` configuration from Task 5, which selects `TenantBase.metadata` when `x_args` contains `schema`. The `--head tenant@head` flag pins the new revision to the tenant branch (preventing it from attaching to the platform head). The `--rev-id` flag sets the revision ID to `t001_tenant_squash` in the filename.
+
+After generation, verify the metadata is correct:
 
 ```python
 revision = 't001_tenant_squash'
 down_revision = 't000_tenant_baseline'  # must point to the branch root
 branch_labels = None  # inherits 'tenant' from t000
 ```
+
+If `down_revision` is not `t000_tenant_baseline`, manually correct it — this is critical for branch integrity.
 
 3. **Verify completeness with an automated script — this step must not be skipped:**
 
@@ -1359,18 +1363,22 @@ async def test_platform_route_requires_platform_admin_jwt():
 
 def test_ci_route_dependency_check():
     """CI test: all /api/platform/* routes must depend on get_platform_db, not get_db."""
-    from fastapi import FastAPI
+    from app.main import app
     from app.database import get_db, get_platform_db
 
-    # This test will scan the FastAPI app routes and verify that:
-    # 1. Platform routes use get_platform_db in their handler dependencies
-    # 2. No platform route uses get_db
-    # It runs as part of CI to catch accidental use of get_db in platform code.
-    #
-    # Implementation: iterate app.routes, find /api/platform/* routes,
-    # check each route's dependencies list.
-    # This is a structural test, not a runtime test.
-    pass  # Will be implemented when platform routes are registered
+    violations = []
+    for route in app.routes:
+        if not hasattr(route, "path") or not hasattr(route, "dependant"):
+            continue
+        if not route.path.startswith("/api/platform"):
+            continue
+        # Check all dependencies (including sub-dependencies) for get_db
+        all_deps = getattr(route, "dependencies", []) or []
+        route_deps = [d.dependency for d in route.dependant.dependencies]
+        if get_db in route_deps:
+            violations.append(f"{route.path} [{route.methods}] uses get_db instead of get_platform_db")
+
+    assert violations == [], "Platform route dependency violations:\n" + "\n".join(violations)
 ```
 
 - [ ] **Step 4: Create `backend/app/api/platform/__init__.py`**
@@ -1738,8 +1746,21 @@ Create `backend/tests/test_multitenancy/test_background_tasks.py`:
 
 ```python
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, async_context_manager
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.tenant_utils import current_tenant_schema
+
+
+def _make_mock_session():
+    """Build an AsyncMock that behaves like async with async_session() as s.
+
+    async_session() returns an async_sessionmaker instance. Calling it
+    produces an object used as `async with async_session() as session:`.
+    We mock this by returning an AsyncMock whose __aenter__ returns itself.
+    """
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    return session
 
 
 @pytest.mark.asyncio
@@ -1753,14 +1774,14 @@ async def test_run_for_each_tenant_iterates_all_active_tenants():
         Tenant(id="t2", slug="globex", schema_name="tenant_globex", subdomain="globex", status="active"),
     ]
 
-    # Mock the session's execute/scalars to return our tenants + accept SET/RESET
-    mock_session = AsyncMock()
-    mock_session.execute = AsyncMock()  # SET search_path / RESET search_path
+    mock_session = _make_mock_session()
+    # Make the session's execute return a result that yields our tenants
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = mock_tenants
     mock_session.execute.return_value = mock_result
 
-    with patch("app.database.async_session", return_value=mock_session):
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+    with patch("app.database.async_session", mock_sessionmaker):
         seen = []
         async for tenant, db in run_for_each_tenant():
             seen.append(tenant.slug)
@@ -1774,7 +1795,7 @@ async def test_run_for_each_tenant_iterates_all_active_tenants():
 
 @pytest.mark.asyncio
 async def test_run_for_each_tenant_resets_context_var_on_failure():
-    """If the callback raises, ContextVar must still be reset before next tenant."""
+    """If processing a tenant raises, ContextVar must still be reset before the next tenant."""
     from app.database import run_for_each_tenant
     from app.models.tenant import Tenant
 
@@ -1783,27 +1804,22 @@ async def test_run_for_each_tenant_resets_context_var_on_failure():
         Tenant(id="t2", slug="globex", schema_name="tenant_globex", subdomain="globex", status="active"),
     ]
 
-    mock_session = AsyncMock()
-    mock_session.execute = AsyncMock()
+    mock_session = _make_mock_session()
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = mock_tenants
     mock_session.execute.return_value = mock_result
 
-    call_count = 0
-
-    async def failing_callback(tenant, db):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise RuntimeError("simulated failure")
-
-    with patch("app.database.async_session", return_value=mock_session):
-        # run_for_each_tenant must catch the error and continue
-        # ContextVar must not leak after the failing tenant
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+    schemas_seen = []
+    with patch("app.database.async_session", mock_sessionmaker):
         async for tenant, db in run_for_each_tenant():
-            pass  # errors are logged, not re-raised
+            schemas_seen.append(current_tenant_schema.get())
+            if tenant.slug == "acme":
+                # Simulate a failure processing the first tenant
+                # run_for_each_tenant catches the error and continues
+                raise RuntimeError("simulated failure")
 
-    # After iteration, ContextVar must be None even after failure
+    # Even after a raised exception, ContextVar must be reset
     assert current_tenant_schema.get() is None
 
 
@@ -1812,16 +1828,17 @@ async def test_get_tenant_aware_session_sets_search_path():
     """get_tenant_aware_session must execute SET search_path when current_tenant_schema is set."""
     from app.database import get_tenant_aware_session
 
-    mock_session = AsyncMock()
-    mock_session.execute = AsyncMock()
+    mock_session = _make_mock_session()
 
     token = current_tenant_schema.set("tenant_test")
     try:
-        async with get_tenant_aware_session() as db:
-            # SET search_path must have been called with the tenant schema
-            calls = mock_session.execute.call_args_list
-            assert any("tenant_test" in str(c) for c in calls), \
-                f"Expected SET search_path to tenant_test, got calls: {calls}"
+        mock_sessionmaker = MagicMock(return_value=mock_session)
+        with patch("app.database.async_session", mock_sessionmaker):
+            async with get_tenant_aware_session() as db:
+                # SET search_path must have been called with the tenant schema
+                calls = mock_session.execute.call_args_list
+                assert any("tenant_test" in str(c) for c in calls), \
+                    f"Expected SET search_path to tenant_test, got calls: {calls}"
     finally:
         current_tenant_schema.reset(token)
 
@@ -1831,12 +1848,12 @@ async def test_get_tenant_aware_session_defaults_to_public():
     """When current_tenant_schema is None, get_tenant_aware_session must not SET search_path."""
     from app.database import get_tenant_aware_session
 
-    mock_session = AsyncMock()
-    mock_session.execute = AsyncMock()
+    mock_session = _make_mock_session()
 
     assert current_tenant_schema.get() is None
 
-    with patch("app.database.async_session", return_value=mock_session):
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+    with patch("app.database.async_session", mock_sessionmaker):
         async with get_tenant_aware_session() as db:
             # No SET search_path should be executed when ContextVar is None
             for call in mock_session.execute.call_args_list:
@@ -2279,18 +2296,34 @@ import subprocess
 from sqlalchemy import text
 
 
-# Business tables, ENUM types, and sequences are auto-discovered from the database.
-# This avoids maintaining a manually-incomplete list that would miss objects.
+# Business tables come from TenantBase (the authoritative allowlist).
+# ENUM types and sequences are discovered from the database (they are
+# dependencies of TenantBase tables and cannot be easily enumerated from metadata).
 async def discover_business_objects(conn):
-    """Auto-discover all business tables, ENUMs, and sequences in the public schema."""
-    # All tables except platform tables (which stay in public)
-    platform_tables = {'tenants', 'tenant_migrations', 'platform_admin_users', 'reference_templates', 'alembic_version'}
-    result = await conn.execute(text(
-        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
-    ))
-    business_tables = [row[0] for row in result if row[0] not in platform_tables]
+    """Discover business objects to move to tenant schema.
 
-    # ENUM types in public schema
+    Tables: from TenantBase.metadata — the authoritative allowlist.
+    ENUMs and sequences: from the database, filtered to those owned by or
+    dependent on TenantBase tables.
+    """
+    from app.database import TenantBase
+    import app.models  # trigger model registration
+
+    # Use TenantBase as the authoritative source — avoids moving unrelated
+    # tables (extension tables, reporting tables, etc.) that happen to be in public.
+    business_tables = sorted(TenantBase.metadata.tables.keys())
+
+    # Verify all TenantBase tables actually exist in public schema before moving
+    result = await conn.execute(text(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+    ))
+    existing_tables = {row[0] for row in result}
+    missing = set(business_tables) - existing_tables
+    if missing:
+        print(f"WARNING: TenantBase tables not found in public schema: {missing}")
+        print("These tables may not need migration or the model may have changed.")
+
+    # ENUM types in public schema that are used by TenantBase columns
     result = await conn.execute(text(
         "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid "
         "WHERE n.nspname = 'public' AND t.typtype = 'e' ORDER BY t.typname"
