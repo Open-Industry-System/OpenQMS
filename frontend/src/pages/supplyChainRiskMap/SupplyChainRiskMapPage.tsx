@@ -2,20 +2,17 @@ import React, { useEffect, useState, useCallback } from "react";
 import { Card, Row, Col, Spin, Empty } from "antd";
 import { riskMapApi } from "../../api/supplyChainRiskMap";
 import type { HeatmapResponse, TimelineResponse } from "../../types";
+import { useProductLineStore } from "../../store/productLineStore";
 import HeatmapToolbar from "./components/HeatmapToolbar";
 import TimelineSlider from "./components/TimelineSlider";
 import RiskHeatmap from "./components/RiskHeatmap";
 import DetailPanel from "./components/DetailPanel";
 
-const PRODUCT_LINES = [
-  { code: "DC-DC-100", name: "DC-DC-100" },
-];
-
 const SupplyChainRiskMapPage: React.FC = () => {
+  const { productLines, selected: selectedProductLine, setSelected: setSelectedProductLine } = useProductLineStore();
   const [heatmap, setHeatmap] = useState<HeatmapResponse | null>(null);
   const [timeline, setTimeline] = useState<TimelineResponse | null>(null);
   const [period, setPeriod] = useState<string>("");
-  const [productLineCode, setProductLineCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
 
@@ -23,7 +20,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
     setLoading(true);
     try {
       const res = await riskMapApi.heatmap({
-        product_line_code: productLineCode ?? undefined,
+        product_line_code: selectedProductLine ?? undefined,
         period: period || undefined,
       });
       setHeatmap(res.data);
@@ -35,12 +32,12 @@ const SupplyChainRiskMapPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [productLineCode, period]);
+  }, [selectedProductLine, period]);
 
   const fetchTimeline = useCallback(async () => {
     try {
       const res = await riskMapApi.timeline({
-        product_line_code: productLineCode ?? undefined,
+        product_line_code: selectedProductLine ?? undefined,
       });
       setTimeline(res.data);
       if (!period && res.data.current_period) {
@@ -49,7 +46,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
     } catch {
       // ignore
     }
-  }, [productLineCode, period]);
+  }, [selectedProductLine, period]);
 
   useEffect(() => {
     fetchTimeline();
@@ -59,16 +56,14 @@ const SupplyChainRiskMapPage: React.FC = () => {
     if (period) {
       fetchHeatmap();
     }
-  }, [period, productLineCode, fetchHeatmap]);
+  }, [period, selectedProductLine, fetchHeatmap]);
 
   const handleSupplierClick = (supplierId: string) => {
     setSelectedSupplierIds((prev) => {
       const idx = prev.indexOf(supplierId);
       if (idx >= 0) {
-        // Deselect if already selected
         return prev.filter((id) => id !== supplierId);
       }
-      // Add to selection (max 5 for comparison)
       if (prev.length >= 5) return prev;
       return [...prev, supplierId];
     });
@@ -81,13 +76,13 @@ const SupplyChainRiskMapPage: React.FC = () => {
       <h2>供应链风险地图</h2>
       <HeatmapToolbar
         period={period}
-        productLineCode={productLineCode}
+        productLineCode={selectedProductLine}
         onPeriodChange={setPeriod}
-        onProductLineChange={setProductLineCode}
+        onProductLineChange={setSelectedProductLine}
         onRefresh={fetchHeatmap}
         refreshing={loading}
         periods={timeline?.periods ?? []}
-        productLines={PRODUCT_LINES}
+        productLines={productLines}
       />
       {timeline && timeline.periods.length > 1 && (
         <TimelineSlider
@@ -112,7 +107,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
           <Col span={8}>
             <DetailPanel
               selectedSupplierIds={selectedSupplierIds}
-              productLineCode={productLineCode}
+              productLineCode={selectedProductLine}
               period={period}
             />
           </Col>

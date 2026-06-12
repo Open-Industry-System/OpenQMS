@@ -2,6 +2,7 @@ import React from "react";
 import { Select, Button, Space, Dropdown, message } from "antd";
 import { ReloadOutlined, DownloadOutlined } from "@ant-design/icons";
 import { riskMapApi } from "../../../api/supplyChainRiskMap";
+import { usePermission } from "../../../hooks/usePermission";
 
 interface HeatmapToolbarProps {
   period: string;
@@ -24,6 +25,9 @@ const HeatmapToolbar: React.FC<HeatmapToolbarProps> = ({
   periods,
   productLines,
 }) => {
+  const { canEdit } = usePermission();
+  const canGenerate = canEdit("supply_chain_risk_map");
+
   const handleGenerateSnapshot = async () => {
     try {
       const params = productLineCode ? { product_line_code: productLineCode } : undefined;
@@ -79,13 +83,15 @@ const HeatmapToolbar: React.FC<HeatmapToolbarProps> = ({
         onChange={onPeriodChange}
         options={periods.map((p) => ({ value: p, label: p }))}
       />
-      <Button
-        icon={<ReloadOutlined />}
-        onClick={handleGenerateSnapshot}
-        loading={refreshing}
-      >
-        刷新数据
-      </Button>
+      {canGenerate && (
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={handleGenerateSnapshot}
+          loading={refreshing}
+        >
+          刷新数据
+        </Button>
+      )}
       <Dropdown menu={exportMenu}>
         <Button icon={<DownloadOutlined />}>导出</Button>
       </Dropdown>

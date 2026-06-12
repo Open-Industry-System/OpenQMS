@@ -10,7 +10,7 @@ from app.schemas.supply_chain_risk_map import (
     ComparisonResponse, SnapshotGenerateResponse, SupplierCompareRequest,
 )
 from app.services.supply_chain_risk_map.service import (
-    get_heatmap_data, get_timeline, get_supplier_detail, get_comparison,
+    get_heatmap_data, get_timeline as get_timeline_service, get_supplier_detail, get_comparison,
     generate_snapshot, current_period, export_heatmap,
 )
 
@@ -33,7 +33,7 @@ async def get_timeline(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_permission(Module.SUPPLY_CHAIN_RISK_MAP, PermissionLevel.VIEW)),
 ):
-    return await get_timeline(db, product_line_code)
+    return await get_timeline_service(db, product_line_code)
 
 
 @router.get("/suppliers/{supplier_id}", response_model=SupplierDetailResponse)

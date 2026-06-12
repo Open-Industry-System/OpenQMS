@@ -14,6 +14,7 @@ from app.services.supplier_risk.service import calculate_all_supplier_scores
 from app.services.supply_chain_risk_map.aggregator import (
     aggregate_supply_chain_metrics,
     normalize_to_risk_index,
+    ppm_to_risk_index,
 )
 from app.schemas.supply_chain_risk_map import (
     HeatmapCell, HeatmapColumn, HeatmapRow, HeatmapResponse,
@@ -93,6 +94,10 @@ async def generate_snapshot(
 
         # Normalize all dimensions to risk_index
         dimensions = normalize_to_risk_index(dimensions)
+
+        # PPM uses a dedicated normalization (min(ppm/50, 100)) instead of raw value
+        if dimensions.get("ppm_value", {}).get("raw_value") is not None:
+            dimensions["ppm_value"]["risk_index"] = ppm_to_risk_index(dimensions["ppm_value"]["raw_value"])
 
         # UPSERT using the named constraint (covers both NULL and non-NULL product_line_code)
         await db.execute(
