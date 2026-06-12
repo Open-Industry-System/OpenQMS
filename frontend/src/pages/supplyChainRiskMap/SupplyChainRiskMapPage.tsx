@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Card, Spin, Empty } from "antd";
+import { Card, Row, Col, Spin, Empty } from "antd";
 import { riskMapApi } from "../../api/supplyChainRiskMap";
 import type { HeatmapResponse, TimelineResponse } from "../../types";
 import HeatmapToolbar from "./components/HeatmapToolbar";
 import TimelineSlider from "./components/TimelineSlider";
 import RiskHeatmap from "./components/RiskHeatmap";
+import DetailPanel from "./components/DetailPanel";
 
 const PRODUCT_LINES = [
   { code: "DC-DC-100", name: "DC-DC-100" },
@@ -16,6 +17,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
   const [period, setPeriod] = useState<string>("");
   const [productLineCode, setProductLineCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
 
   const fetchHeatmap = useCallback(async () => {
     setLoading(true);
@@ -60,9 +62,19 @@ const SupplyChainRiskMapPage: React.FC = () => {
   }, [period, productLineCode, fetchHeatmap]);
 
   const handleSupplierClick = (supplierId: string) => {
-    // Navigate to detail panel (Task 9 will implement this)
-    console.log("Supplier clicked:", supplierId);
+    setSelectedSupplierIds((prev) => {
+      const idx = prev.indexOf(supplierId);
+      if (idx >= 0) {
+        // Deselect if already selected
+        return prev.filter((id) => id !== supplierId);
+      }
+      // Add to selection (max 5 for comparison)
+      if (prev.length >= 5) return prev;
+      return [...prev, supplierId];
+    });
   };
+
+  const showDetail = selectedSupplierIds.length > 0;
 
   return (
     <div style={{ padding: 24 }}>
@@ -84,15 +96,28 @@ const SupplyChainRiskMapPage: React.FC = () => {
           onChange={setPeriod}
         />
       )}
-      <Card>
-        {loading ? (
-          <Spin />
-        ) : heatmap && heatmap.rows.length > 0 ? (
-          <RiskHeatmap data={heatmap} onSupplierClick={handleSupplierClick} />
-        ) : (
-          <Empty description="暂无数据，请先生成快照" />
+      <Row gutter={16}>
+        <Col span={showDetail ? 16 : 24}>
+          <Card>
+            {loading ? (
+              <Spin />
+            ) : heatmap && heatmap.rows.length > 0 ? (
+              <RiskHeatmap data={heatmap} onSupplierClick={handleSupplierClick} />
+            ) : (
+              <Empty description="暂无数据，请先生成快照" />
+            )}
+          </Card>
+        </Col>
+        {showDetail && (
+          <Col span={8}>
+            <DetailPanel
+              selectedSupplierIds={selectedSupplierIds}
+              productLineCode={productLineCode}
+              period={period}
+            />
+          </Col>
         )}
-      </Card>
+      </Row>
     </div>
   );
 };
