@@ -211,9 +211,17 @@ async def get_factory_comparison(
     return FactoryComparisonResponse(factories=items, metric_names=metrics)
 
 
-async def get_shared_suppliers(db: AsyncSession) -> list[SharedSupplierResponse]:
-    """Get suppliers with shared profiles across factories."""
-    rows = await db.execute(
+async def get_shared_suppliers(
+    db: AsyncSession,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
+) -> list[SharedSupplierResponse]:
+    """Get suppliers with shared profiles across accessible factories.
+
+    Args:
+        accessible_factory_ids: None means all factories (GROUP ADMIN), otherwise filter.
+    """
+    # Base query: shared profiles that have suppliers in >1 factory
+    stmt = (
         select(
             SupplierSharedProfile.id,
             SupplierSharedProfile.unified_credit_code,
@@ -231,11 +239,15 @@ async def get_shared_suppliers(db: AsyncSession) -> list[SharedSupplierResponse]
         )
         .having(func.count(Supplier.supplier_id) > 1)
     )
+    if accessible_factory_ids is not None:
+        stmt = stmt.where(Supplier.factory_id.in_(accessible_factory_ids))
+
+    rows = await db.execute(stmt)
     profiles = rows.all()
 
     results = []
     for pid, credit_code, name, short_name, industry in profiles:
-        supp_rows = await db.execute(
+        supp_stmt = (
             select(
                 Supplier.factory_id,
                 Factory.code,
@@ -244,6 +256,9 @@ async def get_shared_suppliers(db: AsyncSession) -> list[SharedSupplierResponse]
             .join(Factory, Supplier.factory_id == Factory.id)
             .where(Supplier.shared_profile_id == pid)
         )
+        if accessible_factory_ids is not None:
+            supp_stmt = supp_stmt.where(Supplier.factory_id.in_(accessible_factory_ids))
+        supp_rows = await db.execute(supp_stmt)
         evaluations = []
         for fid, fcode, status in supp_rows.all():
             evaluations.append({
@@ -264,9 +279,16 @@ async def get_shared_suppliers(db: AsyncSession) -> list[SharedSupplierResponse]
     return results
 
 
-async def get_cross_factory_audits(db: AsyncSession) -> list[CrossFactoryAuditResponse]:
-    """Get audit programs that span multiple factories."""
-    rows = await db.execute(
+async def get_cross_factory_audits(
+    db: AsyncSession,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
+) -> list[CrossFactoryAuditResponse]:
+    """Get audit programs that span multiple factories.
+
+    Args:
+        accessible_factory_ids: None means all factories (GROUP ADMIN), otherwise filter.
+    """
+    stmt = (
         select(
             AuditProgram.program_id,
             AuditProgram.program_no,
@@ -282,14 +304,21 @@ async def get_cross_factory_audits(db: AsyncSession) -> list[CrossFactoryAuditRe
         )
         .having(func.count(AuditProgramTargetFactory.factory_id) > 1)
     )
+    if accessible_factory_ids is not None:
+        stmt = stmt.where(AuditProgramTargetFactory.factory_id.in_(accessible_factory_ids))
+
+    rows = await db.execute(stmt)
     programs = rows.all()
 
     results = []
     for pid, pno, atype, status in programs:
-        tf_rows = await db.execute(
+        tf_stmt = (
             select(AuditProgramTargetFactory.factory_id)
             .where(AuditProgramTargetFactory.program_id == pid)
         )
+        if accessible_factory_ids is not None:
+            tf_stmt = tf_stmt.where(AuditProgramTargetFactory.factory_id.in_(accessible_factory_ids))
+        tf_rows = await db.execute(tf_stmt)
         target_ids = [row[0] for row in tf_rows.all()]
 
         f_rows = await db.execute(
@@ -378,16 +407,24 @@ async def merge_suppliers(
 async def get_audit_program_factories(
     db: AsyncSession,
     program_id: uuid.UUID,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
 ) -> AuditProgramFactoriesResponse:
-    """Get target factories for an audit program."""
+    """Get target factories for an audit program.
+
+    Args:
+        accessible_factory_ids: None means all factories (GROUP ADMIN), otherwise filter.
+    """
     program = await db.get(AuditProgram, program_id)
     if not program:
         raise ValueError("审核项目不存在")
 
-    rows = await db.execute(
+    stmt = (
         select(AuditProgramTargetFactory.factory_id)
         .where(AuditProgramTargetFactory.program_id == program_id)
     )
+    if accessible_factory_ids is not None:
+        stmt = stmt.where(AuditProgramTargetFactory.factory_id.in_(accessible_factory_ids))
+    rows = await db.execute(stmt)
     factory_ids = [row[0] for row in rows.all()]
 
     f_rows = await db.execute(
@@ -406,6 +443,7 @@ async def add_factory_to_audit_program(
     db: AsyncSession,
     program_id: uuid.UUID,
     factory_id: uuid.UUID,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
 ) -> AuditProgramFactoriesResponse:
     """Add a factory to an audit program."""
     program = await db.get(AuditProgram, program_id)
@@ -427,13 +465,14 @@ async def add_factory_to_audit_program(
     db.add(AuditProgramTargetFactory(program_id=program_id, factory_id=factory_id))
     await db.flush()
 
-    return await get_audit_program_factories(db, program_id)
+    return await get_audit_program_factories(db, program_id, accessible_factory_ids=accessible_factory_ids)
 
 
 async def remove_factory_from_audit_program(
     db: AsyncSession,
     program_id: uuid.UUID,
     factory_id: uuid.UUID,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
 ) -> AuditProgramFactoriesResponse:
     """Remove a factory from an audit program."""
     link = await db.scalar(
@@ -447,4 +486,4 @@ async def remove_factory_from_audit_program(
     await db.delete(link)
     await db.flush()
 
-    return await get_audit_program_factories(db, program_id)
+    return await get_audit_program_factories(db, program_id, accessible_factory_ids=accessible_factory_ids)

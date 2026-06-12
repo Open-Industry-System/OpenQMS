@@ -74,9 +74,9 @@ async def shared_suppliers(
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get suppliers with shared profiles across factories."""
+    """Get suppliers with shared profiles across accessible factories."""
     await _require_group_view(scope.user, db)
-    return await group_service.get_shared_suppliers(db)
+    return await group_service.get_shared_suppliers(db, accessible_factory_ids=scope.factory_scope.accessible_factory_ids)
 
 
 @router.get("/audits", response_model=list[CrossFactoryAuditResponse])
@@ -86,7 +86,7 @@ async def cross_factory_audits(
 ):
     """Get audit programs that span multiple factories."""
     await _require_group_view(scope.user, db)
-    return await group_service.get_cross_factory_audits(db)
+    return await group_service.get_cross_factory_audits(db, accessible_factory_ids=scope.factory_scope.accessible_factory_ids)
 
 
 @router.post("/suppliers/merge", response_model=MergedSupplierResponse)
@@ -112,7 +112,7 @@ async def get_audit_factories(
     """Get target factories for an audit program."""
     await _require_group_view(scope.user, db)
     try:
-        return await group_service.get_audit_program_factories(db, program_id)
+        return await group_service.get_audit_program_factories(db, program_id, accessible_factory_ids=scope.factory_scope.accessible_factory_ids)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -127,7 +127,7 @@ async def add_audit_factory(
     """Add a factory to an audit program."""
     await _require_group_admin(scope.user, db)
     try:
-        return await group_service.add_factory_to_audit_program(db, program_id, data.factory_id)
+        return await group_service.add_factory_to_audit_program(db, program_id, data.factory_id, accessible_factory_ids=scope.factory_scope.accessible_factory_ids)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -136,15 +136,15 @@ async def add_audit_factory(
 async def remove_audit_factory(
     program_id: uuid.UUID = Path(...),
     fid: uuid.UUID = Path(...),
-    user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a factory from an audit program."""
-    level = await get_user_permission(user, Module.GROUP, db)
+    level = await get_user_permission(scope.user, Module.GROUP, db)
     if level < PermissionLevel.ADMIN:
         raise HTTPException(status_code=403, detail="需要 group 模块的 ADMIN 权限")
     try:
-        return await group_service.remove_factory_from_audit_program(db, program_id, fid)
+        return await group_service.remove_factory_from_audit_program(db, program_id, fid, accessible_factory_ids=scope.factory_scope.accessible_factory_ids)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -158,9 +158,9 @@ async def list_all_factories(
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all factories (group-level view)."""
+    """List factories accessible to the current user (group-level view)."""
     await _require_group_view(scope.user, db)
-    factories = await list_factories(db, is_active=is_active)
+    factories = await list_factories(db, is_active=is_active, accessible_factory_ids=scope.factory_scope.accessible_factory_ids)
     items = [FactoryResponse.model_validate(f) for f in factories]
     return FactoryListResponse(items=items, total=len(items))
 

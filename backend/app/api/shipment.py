@@ -70,7 +70,6 @@ async def create_shipment(
     try:
         factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
         check_factory_access(factory_id, scope)
-        check_factory_access(factory_id, scope)
         shipment = await customer_quality_service.create_shipment(db, customer_id, req.model_dump(), scope.user.user_id, factory_id=factory_id)
         await validate_factory_invariant(shipment, db)
         await db.refresh(shipment)

@@ -4,10 +4,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.product_line import ProductLine
 
 
-async def list_product_lines(db: AsyncSession, is_active: bool | None = None) -> list[ProductLine]:
+async def list_product_lines(
+    db: AsyncSession,
+    is_active: bool | None = None,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
+) -> list[ProductLine]:
     query = select(ProductLine).order_by(ProductLine.code)
     if is_active is not None:
         query = query.where(ProductLine.is_active == is_active)
+    if accessible_factory_ids is not None:
+        query = query.where(ProductLine.factory_id.in_(accessible_factory_ids))
     result = await db.execute(query)
     return list(result.scalars().all())
 

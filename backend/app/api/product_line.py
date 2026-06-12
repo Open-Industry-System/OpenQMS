@@ -15,9 +15,11 @@ router = APIRouter(prefix="/api/product-lines", tags=["product-lines"])
 async def list_product_lines(
     is_active: bool | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    items = await product_line_service.list_product_lines(db, is_active)
+    # Filter product lines by accessible factories; GROUP ADMIN sees all
+    accessible = scope.factory_scope.accessible_factory_ids
+    items = await product_line_service.list_product_lines(db, is_active, accessible_factory_ids=accessible)
     return schemas.ProductLineListResponse(
         items=[schemas.ProductLineResponse.model_validate(i) for i in items]
     )

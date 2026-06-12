@@ -8,10 +8,16 @@ from app.models.audit import AuditLog
 from app.schemas.factory import FactoryCreate, FactoryUpdate
 
 
-async def list_factories(db: AsyncSession, is_active: bool | None = None) -> list[Factory]:
+async def list_factories(
+    db: AsyncSession,
+    is_active: bool | None = None,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
+) -> list[Factory]:
     query = select(Factory).order_by(Factory.code)
     if is_active is not None:
         query = query.where(Factory.is_active == is_active)
+    if accessible_factory_ids is not None:
+        query = query.where(Factory.id.in_(accessible_factory_ids))
     result = await db.execute(query)
     return list(result.scalars().all())
 
