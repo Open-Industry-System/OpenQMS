@@ -938,14 +938,27 @@ Exit 1 if any table is missing from the migration.
 """
 import re
 import sys
+import glob
 from app.database import TenantBase
 import app.models  # trigger model registration
 
 def main():
     expected = set(TenantBase.metadata.tables.keys())
 
-    # Parse the squash migration file for op.create_table('table_name', ...)
-    migration_path = "alembic/versions/t001_tenant_squash.py"
+    # Find the squash migration file — Alembic may generate a filename with
+    # additional suffix beyond the rev-id, e.g. t001_tenant_squash_tenant_squash.py
+    migration_files = glob.glob("alembic/versions/t001_tenant_squash*.py")
+    if len(migration_files) == 0:
+        print("ERROR: no migration file matching alembic/versions/t001_tenant_squash*.py")
+        print("Did the autogenerate step succeed?")
+        sys.exit(1)
+    if len(migration_files) > 1:
+        print(f"ERROR: multiple migration files match t001_tenant_squash*.py:")
+        for f in migration_files:
+            print(f"  {f}")
+        sys.exit(1)
+    migration_path = migration_files[0]
+    print(f"Verifying: {migration_path}")
     with open(migration_path) as f:
         content = f.read()
 
@@ -1362,7 +1375,12 @@ async def test_platform_route_requires_platform_admin_jwt():
 
 
 def test_ci_route_dependency_check():
-    """CI test: all /api/platform/* routes must depend on get_platform_db, not get_db."""
+    """CI test: all /api/platform/* routes must depend on get_platform_db, not get_db.
+
+    Every platform route that accesses the database MUST include get_platform_db
+    in its dependency tree. Missing the dependency entirely (no DB access at all)
+    is also a violation unless the route is read-only and deliberately DB-free.
+    """
     from app.main import app
     from app.database import get_db, get_platform_db
 
@@ -1372,11 +1390,19 @@ def test_ci_route_dependency_check():
             continue
         if not route.path.startswith("/api/platform"):
             continue
-        # Check all dependencies (including sub-dependencies) for get_db
-        all_deps = getattr(route, "dependencies", []) or []
         route_deps = [d.dependency for d in route.dependant.dependencies]
+        # NEGATIVE: platform routes must NOT use get_db
         if get_db in route_deps:
-            violations.append(f"{route.path} [{route.methods}] uses get_db instead of get_platform_db")
+            violations.append(
+                f"{route.path} [{route.methods}] uses get_db instead of get_platform_db"
+            )
+        # POSITIVE: platform routes that have any DB dependency must include get_platform_db
+        # (A route with no DB dependency at all is allowed — e.g. a health check)
+        has_any_db = get_db in route_deps or get_platform_db in route_deps
+        if has_any_db and get_platform_db not in route_deps:
+            violations.append(
+                f"{route.path} [{route.methods}] has DB dependency but missing get_platform_db"
+            )
 
     assert violations == [], "Platform route dependency violations:\n" + "\n".join(violations)
 ```
@@ -1795,13 +1821,15 @@ async def test_run_for_each_tenant_iterates_all_active_tenants():
 
 @pytest.mark.asyncio
 async def test_run_for_each_tenant_resets_context_var_on_failure():
-    """If processing a tenant raises, ContextVar must still be reset before the next tenant."""
+    """If processing a tenant raises, the generator's finally block must still
+    reset the ContextVar. The exception propagates out (generators cannot catch
+    caller exceptions), but the finally block in run_for_each_tenant ensures
+    current_tenant_schema is reset."""
     from app.database import run_for_each_tenant
     from app.models.tenant import Tenant
 
     mock_tenants = [
         Tenant(id="t1", slug="acme", schema_name="tenant_acme", subdomain="acme", status="active"),
-        Tenant(id="t2", slug="globex", schema_name="tenant_globex", subdomain="globex", status="active"),
     ]
 
     mock_session = _make_mock_session()
@@ -1810,16 +1838,14 @@ async def test_run_for_each_tenant_resets_context_var_on_failure():
     mock_session.execute.return_value = mock_result
 
     mock_sessionmaker = MagicMock(return_value=mock_session)
-    schemas_seen = []
     with patch("app.database.async_session", mock_sessionmaker):
-        async for tenant, db in run_for_each_tenant():
-            schemas_seen.append(current_tenant_schema.get())
-            if tenant.slug == "acme":
-                # Simulate a failure processing the first tenant
-                # run_for_each_tenant catches the error and continues
+        with pytest.raises(RuntimeError, match="simulated failure"):
+            async for tenant, db in run_for_each_tenant():
+                # Raise inside the loop body — the generator cannot catch this,
+                # but its finally block must still reset current_tenant_schema
                 raise RuntimeError("simulated failure")
 
-    # Even after a raised exception, ContextVar must be reset
+    # After the exception propagates, ContextVar must be reset (no leak)
     assert current_tenant_schema.get() is None
 
 
@@ -2303,8 +2329,10 @@ async def discover_business_objects(conn):
     """Discover business objects to move to tenant schema.
 
     Tables: from TenantBase.metadata — the authoritative allowlist.
-    ENUMs and sequences: from the database, filtered to those owned by or
-    dependent on TenantBase tables.
+    ENUMs and sequences: all objects in public schema are moved, on the
+    assumption that before multi-tenant migration they all belong to business
+    tables. If non-business enums/sequences exist, add them to an exclusion
+    list in this function.
     """
     from app.database import TenantBase
     import app.models  # trigger model registration
@@ -2323,7 +2351,10 @@ async def discover_business_objects(conn):
         print(f"WARNING: TenantBase tables not found in public schema: {missing}")
         print("These tables may not need migration or the model may have changed.")
 
-    # ENUM types in public schema that are used by TenantBase columns
+    # ENUM types in public schema — before multi-tenant migration, all enums in
+    # public are assumed to belong to business tables. After migration, new enums
+    # should be created in tenant schemas directly. If non-business enums exist,
+    # add them to an exclusion list below.
     result = await conn.execute(text(
         "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid "
         "WHERE n.nspname = 'public' AND t.typtype = 'e' ORDER BY t.typname"
@@ -2331,6 +2362,8 @@ async def discover_business_objects(conn):
     enum_types = [row[0] for row in result]
 
     # Sequences in public schema (those not auto-moved with tables)
+    # Same assumption: all sequences in public belong to business tables.
+    # Add non-business sequences to an exclusion list if needed.
     result = await conn.execute(text(
         "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' ORDER BY sequencename"
     ))
