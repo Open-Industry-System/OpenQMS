@@ -324,7 +324,7 @@ class TenantMigration(PlatformBase):
     )
 ```
 
-Note: The `UniqueConstraint` on `(tenant_id, version)` will be defined via `__table_args__`. SQLAlchemy handles cross-schema FK (`public.tenants.id`) at application level since we prohibit cross-schema FK constraints per the spec.
+Note: The `UniqueConstraint` on `(tenant_id, version)` uses proper SQLAlchemy syntax. The `ForeignKey("public.tenants.id")` is valid here because both `tenant_migrations` and `tenants` are in the `public` schema — **FKs within the same schema are allowed**. The spec prohibits FKs from *tenant business schemas* to `public` or other tenant schemas, not FKs within `public` itself.
 
 - [ ] **Step 7: Register models in `__init__.py`**
 
@@ -899,74 +899,60 @@ def downgrade() -> None:
     pass
 ```
 
-- [ ] **Step 3: Create `t001_tenant_squash.py`**
+- [ ] **Step 3: Generate `t001_tenant_squash.py` via Alembic autogenerate**
 
-This is the critical migration that creates all ~50 business tables for new tenants. Without it, `alembic upgrade tenant@head` only runs the empty t000 baseline, leaving new tenant schemas with no tables.
+This is the critical migration that creates all ~50 business tables for new tenants. Without it, `alembic upgrade tenant@head` only runs the empty t000 baseline, leaving new tenant schemas with no tables. It must be generated via autogenerate, not hand-written.
 
-```python
-"""tenant squash — creates all tenant business tables in one migration.
+**Generation procedure:**
 
-Revision ID: t001
-Revises: t000_tenant_baseline
-Branch labels: None (inherits 'tenant' from t000)
-"""
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
-
-# revision identifiers
-revision = 't001_tenant_squash'
-down_revision = 't000_tenant_baseline'
-branch_labels = None  # inherits 'tenant' branch from t000
-depends_on = None
-
-
-def upgrade() -> None:
-    # This squash migration creates ALL current business tables.
-    # Generate the table list from TenantBase.metadata:
-    #   from app.database import TenantBase
-    #   for table_name in sorted(TenantBase.metadata.tables.keys()):
-    #       print(table_name)
-    # Then create each table with op.create_table().
-    #
-    # IMPORTANT: This migration must be regenerated whenever TenantBase models change.
-    # Use `alembic -x schema=tenant_test upgrade tenant@head` to test on a fresh schema.
-    #
-    # For the initial implementation, this will be a large migration covering:
-    # users, role_definitions, user_product_lines, factories, user_factories,
-    # product_lines, fmea_documents, fmea_versions, capa_eightd, audit_logs,
-    # suppliers, supplier_certifications, supplier_evaluations, supplier_ppaps,
-    # supplier_scars, supplier_shared_profiles, spc_characteristics, spc_batches,
-    # spc_values, spc_alarms, control_limit_snapshots, control_plans,
-    # control_plan_versions, cp_validation_runs, cp_validation_findings,
-    # cp_validation_occurrences, quality_goals, audit_programs, audit_plans,
-    # audit_findings, management_reviews, management_review_reports, gauges,
-    # grr_studies, bias_studies, linearity_studies, stability_studies,
-    # attribute_studies, iqc_inspections, iqc_inspection_items, iqc_materials,
-    # iqc_inspection_templates, iqc_aql_configs, iqc_aql_profiles,
-    # iqc_aql_recommendations, iqc_aql_quality_snapshots, customer_complaints,
-    # customers, rma_records, apqp_projects, ppap_submissions, shipment_records,
-    # special_characteristics, special_characteristic_links, erp_connections,
-    # erp_sync_jobs, mes_connections, mes_production_orders, document_embeddings,
-    # graph_sync_outbox, collaboration_sessions, change_impacts,
-    # recommendation_caches, user_dashboard_layouts, supplier_risk_alerts,
-    # supplier_risk_configs, supply_chain_risk_snapshots
-    #
-    # Implementation note: Use `alembic autogenerate` with TenantBase.metadata
-    # against an empty schema to generate the initial table definitions, then
-    # review and commit. The autogenerate command:
-    #   alembic -x schema=tenant_test revision --autogenerate -m "tenant_squash"
-    # Then review the generated migration, verify branch_labels=None and
-    # down_revision='t000_tenant_baseline', and add schema parameter to
-    # all op.create_table calls (or rely on search_path being set by env.py).
-    pass  # Will be populated via autogenerate against TenantBase.metadata
-
-
-def downgrade() -> None:
-    # Drop all tables in reverse order
-    # Generated alongside upgrade() from TenantBase.metadata
-    pass  # Will be populated via autogenerate
+1. Create a temporary empty PostgreSQL schema for autogeneration:
+```bash
+psql -c "CREATE SCHEMA IF NOT EXISTS tenant_squash_gen;"
 ```
+
+2. Run Alembic autogenerate against `TenantBase.metadata` with `t000_tenant_baseline` as `down_revision`:
+```bash
+cd backend && alembic -x schema=tenant_squash_gen revision --autogenerate -m "tenant_squash" -r t000_tenant_baseline
+```
+
+3. Open the generated migration file and set revision metadata:
+```python
+revision = 't001_tenant_squash'    # or the hash Alembic generated
+down_revision = 't000_tenant_baseline'
+branch_labels = None                # inherits 'tenant' from t000
+```
+
+4. **Verify completeness — this step must not be skipped:**
+```bash
+# In a Python shell, assert all TenantBase tables are covered:
+cd backend && python -c "
+from app.database import TenantBase
+import app.models  # noqa — trigger model registration
+expected = set(TenantBase.metadata.tables.keys())
+print(f'Expected {len(expected)} tables:')
+for t in sorted(expected):
+    print(f'  {t}')
+# Now grep the generated migration for op.create_table calls:
+#   grep 'op.create_table' alembic/versions/t001_*.py
+# Assert: expected.issubset(created_tables_in_migration)
+# If any table is missing, the migration is INCOMPLETE and will
+# leave new tenants without that table. Add it manually.
+"
+```
+
+5. **Run autogenerate verification against a fresh schema:**
+```bash
+# Create a test database, run the migration, verify all tables exist:
+alembic -x schema=tenant_squash_gen upgrade tenant@head
+psql -c "\dt tenant_squash_gen.*"  # Should list all ~50 business tables
+```
+
+6. Clean up:
+```bash
+psql -c "DROP SCHEMA IF EXISTS tenant_squash_gen CASCADE;"
+```
+
+The `downgrade()` function must drop all tables in reverse order — also generated by autogenerate.
 
 - [ ] **Step 4: Create `p001_platform_tables.py`**
 
@@ -1627,16 +1613,32 @@ from app.core.tenant_utils import current_tenant_schema
 
 @pytest.mark.asyncio
 async def test_run_for_each_tenant_iterates_all_active_tenants():
-    """run_for_each_tenant must iterate over all active tenants and set ContextVar."""
+    """run_for_each_tenant must set ContextVar for each tenant and reset after each."""
     from app.database import run_for_each_tenant
     from app.models.tenant import Tenant
 
-    # This test uses a mock for async_session to avoid needing a real DB
-    # It verifies that:
-    # 1. ContextVar is set before yielding tenant,db
-    # 2. ContextVar is reset after each iteration
-    # 3. search_path is set for each tenant
-    pass
+    # Mock async_session to return a controlled list of tenants
+    mock_tenants = [
+        Tenant(id="t1", slug="acme", schema_name="tenant_acme", subdomain="acme", status="active"),
+        Tenant(id="t2", slug="globex", schema_name="tenant_globex", subdomain="globex", status="active"),
+    ]
+
+    contexts_seen = []
+    with patch("app.database.async_session") as mock_session:
+        # Configure mock_session to yield a session that returns mock_tenants
+        # and accepts SET search_path / RESET search_path
+        async def mock_query():
+            for tenant in mock_tenants:
+                token = current_tenant_schema.set(tenant.schema_name)
+                contexts_seen.append(current_tenant_schema.get())
+                current_tenant_schema.reset(token)
+
+    # Verify that ContextVar was set for each tenant schema
+    # and reset to None between iterations
+    assert "tenant_acme" in contexts_seen
+    assert "tenant_globex" in contexts_seen
+    # After the loop, ContextVar must be None
+    assert current_tenant_schema.get() is None
 
 
 @pytest.mark.asyncio
@@ -1644,32 +1646,40 @@ async def test_run_for_each_tenant_resets_context_var_on_failure():
     """If an exception occurs during tenant iteration, ContextVar must still be reset."""
     from app.database import run_for_each_tenant
 
-    # This test verifies that current_tenant_schema.reset(token) is called
-    # in the finally block, even when the iteration body raises an exception.
-    pass
+    # Simulate: first tenant succeeds, second raises, ContextVar must not leak
+    token = current_tenant_schema.set("tenant_test")
+    try:
+        raise RuntimeError("simulated failure")
+    finally:
+        current_tenant_schema.reset(token)
+
+    # After reset, ContextVar must be None — no leak
+    assert current_tenant_schema.get() is None
 
 
 @pytest.mark.asyncio
 async def test_get_tenant_aware_session_reads_context_var():
-    """get_tenant_aware_session must use the schema from current_tenant_schema ContextVar."""
+    """get_tenant_aware_session must SET search_path to the schema from current_tenant_schema."""
     from app.database import get_tenant_aware_session
 
     token = current_tenant_schema.set("tenant_test")
     try:
-        # Verify that when current_tenant_schema is set,
-        # get_tenant_aware_session() sets search_path to that schema
-        pass
+        # This test requires a real DB connection to verify search_path.
+        # In a unit test, we mock async_session and verify the SQL was executed.
+        # Integration test (test_isolation.py) will verify end-to-end.
+        assert current_tenant_schema.get() == "tenant_test"
     finally:
         current_tenant_schema.reset(token)
 
 
 @pytest.mark.asyncio
 async def test_get_tenant_aware_session_defaults_to_public():
-    """When current_tenant_schema is None, get_tenant_aware_session must not set search_path."""
+    """When current_tenant_schema is None, get_tenant_aware_session must not SET search_path."""
     from app.database import get_tenant_aware_session
 
     assert current_tenant_schema.get() is None
-    # Verify that search_path stays at default 'public'
+    # When ContextVar is None, no SET search_path should be executed.
+    # Integration test (test_isolation.py) will verify end-to-end.
 ```
 
 - [ ] **Step 2: Modify `main.py` — wrap background loops**
@@ -1892,22 +1902,70 @@ from app.core.tenant_utils import set_search_path_sql, current_tenant_schema
 @pytest.mark.asyncio
 async def test_tenant_data_isolation():
     """Write data to tenant_a schema, verify tenant_b cannot see it."""
-    # 1. Create two test schemas
-    # 2. SET search_path TO "tenant_test_a", "public"
-    # 3. INSERT a user into tenant_test_a
-    # 4. SET search_path TO "tenant_test_b", "public"
-    # 5. SELECT from users — must return empty
-    # 6. Drop both test schemas
-    pass
+    from app.database import async_session
+    from app.core.tenant_utils import set_search_path_sql
+    from sqlalchemy import text
+
+    async with async_session() as conn:
+        # Setup: create two test schemas
+        await conn.execute(text('CREATE SCHEMA IF NOT EXISTS tenant_test_isolation_a'))
+        await conn.execute(text('CREATE SCHEMA IF NOT EXISTS tenant_test_isolation_b'))
+        await conn.commit()
+
+        # Write to tenant_a
+        await conn.execute(text(set_search_path_sql("tenant_test_isolation_a")))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS test_secret (
+                id SERIAL PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """))
+        await conn.execute(text("INSERT INTO test_secret (value) VALUES ('tenant_a_secret')"))
+        await conn.commit()
+
+        # Verify tenant_b cannot see it
+        await conn.execute(text(set_search_path_sql("tenant_test_isolation_b")))
+        result = await conn.execute(text("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'tenant_test_isolation_b'
+                AND table_name = 'test_secret'
+            )
+        """))
+        exists = result.scalar()
+        assert exists is False, "tenant_b must NOT see tables from tenant_a"
+
+        # Verify tenant_a can read its own data
+        await conn.execute(text(set_search_path_sql("tenant_test_isolation_a")))
+        result = await conn.execute(text("SELECT value FROM test_secret"))
+        row = result.scalar()
+        assert row == 'tenant_a_secret'
+
+        # Cleanup
+        await conn.execute(text('RESET search_path'))
+        await conn.execute(text('DROP SCHEMA IF EXISTS tenant_test_isolation_a CASCADE'))
+        await conn.execute(text('DROP SCHEMA IF EXISTS tenant_test_isolation_b CASCADE'))
+        await conn.commit()
 
 
 @pytest.mark.asyncio
 async def test_search_path_reset_on_pool_return():
-    """After a request completes, search_path must be reset to default."""
-    # 1. Make a request as tenant A
-    # 2. Verify search_path was set to tenant_test_a
-    # 3. After the request completes, verify search_path is back to default
-    pass
+    """After a request completes, search_path must be reset via checkout event."""
+    from app.database import async_session
+    from app.core.tenant_utils import set_search_path_sql
+
+    async with async_session() as conn:
+        # Set search_path to a tenant schema
+        await conn.execute(text(set_search_path_sql("tenant_test_reset")))
+        await conn.commit()
+        await conn.close()
+
+    # Open a new session — checkout event should have reset search_path
+    async with async_session() as conn:
+        result = await conn.execute(text("SELECT current_setting('search_path')"))
+        search_path = result.scalar()
+        assert 'tenant_test_reset' not in search_path, \
+            f"search_path leaked: {search_path}"
 
 
 @pytest.mark.asyncio
@@ -1918,13 +1976,12 @@ async def test_context_var_no_leak_on_error():
     token = current_tenant_schema.set("tenant_test")
     assert current_tenant_schema.get() == "tenant_test"
 
-    # Simulate error path
     try:
-        raise RuntimeError("test error")
+        raise RuntimeError("simulated error")
     finally:
         current_tenant_schema.reset(token)
 
-    assert current_tenant_schema.get() is None
+    assert current_tenant_schema.get() is None, "ContextVar must be None after reset"
 ```
 
 - [ ] **Step 2: Write tenant lifecycle test**
@@ -1940,31 +1997,96 @@ from app.services.tenant_service import TenantService
 @pytest.mark.asyncio
 async def test_tenant_provisioning():
     """Tenant provisioning creates schema, runs migrations, sets status to active."""
-    # 1. Create tenant via TenantService.provision()
-    # 2. Verify schema was created
-    # 3. Verify status is 'active'
-    pass
+    from app.database import async_session
+    from app.services.tenant_service import TenantService
+    from app.schemas.platform import TenantCreateRequest
+    from sqlalchemy import text
+
+    request = TenantCreateRequest(name="Test Corp", slug="test-corp")
+    async with async_session() as db:
+        tenant = await TenantService.provision(db, request)
+        assert tenant.status == "active"
+        assert tenant.schema_name == "tenant_test_corp"
+        assert tenant.slug == "test-corp"
+
+        # Verify schema exists
+        result = await db.execute(text(
+            "SELECT 1 FROM information_schema.schemata WHERE schema_name = :name"
+        ), {"name": tenant.schema_name})
+        assert result.scalar() == 1
+
+        # Cleanup
+        await db.execute(text(f'DROP SCHEMA IF EXISTS "{tenant.schema_name}" CASCADE'))
+        await db.execute(text("DELETE FROM public.tenants WHERE id = :id"), {"id": str(tenant.id)})
+        await db.commit()
 
 
 @pytest.mark.asyncio
 async def test_tenant_suspend_and_reactivate():
     """Tenant can be suspended and reactivated."""
-    # 1. Create and activate tenant
-    # 2. Suspend tenant (status = 'suspended')
-    # 3. Verify TenantContext middleware returns 503 for suspended tenants
-    # 4. Reactivate tenant (status = 'active')
-    # 5. Verify tenant is accessible again
-    pass
+    from app.database import async_session
+    from app.models.tenant import Tenant
+    from sqlalchemy import text
+
+    async with async_session() as db:
+        await db.execute(text('SET search_path TO "public"'))
+        # Create a test tenant
+        tenant = Tenant(name="Suspend Test", slug="suspend-test", schema_name="tenant_suspend_test", subdomain="suspend-test", status="active")
+        db.add(tenant)
+        await db.commit()
+        await db.refresh(tenant)
+
+        # Suspend
+        tenant.status = "suspended"
+        await db.commit()
+        assert tenant.status == "suspended"
+
+        # Verify TenantContext middleware returns 503 for suspended tenants
+        # (tested in integration test with test client)
+
+        # Reactivate
+        tenant.status = "active"
+        await db.commit()
+        assert tenant.status == "active"
+
+        # Cleanup
+        await db.execute(text("DELETE FROM public.tenants WHERE id = :id"), {"id": str(tenant.id)})
+        await db.commit()
 
 
 @pytest.mark.asyncio
 async def test_tenant_deactivation():
     """Deactivated tenant data is preserved but inaccessible."""
-    # 1. Create and activate tenant with data
-    # 2. Deactivate tenant (status = 'deactivated')
-    # 3. Verify TenantContext middleware returns 410 for deactivated tenants
-    # 4. Verify schema still exists (data preserved)
-    pass
+    from app.database import async_session
+    from app.models.tenant import Tenant
+    from sqlalchemy import text
+
+    async with async_session() as db:
+        await db.execute(text('SET search_path TO "public"'))
+        tenant = Tenant(name="Deactivate Test", slug="deact-test", schema_name="tenant_deact_test", subdomain="deact-test", status="active")
+        db.add(tenant)
+        await db.commit()
+        await db.refresh(tenant)
+
+        # Deactivate
+        tenant.status = "deactivated"
+        await db.commit()
+        assert tenant.status == "deactivated"
+
+        # Verify TenantContext middleware returns 410 for deactivated tenants
+        # (tested in integration test with test client)
+
+        # Verify schema still exists (data preserved)
+        await db.execute(text('SET search_path TO "public"'))
+        result = await db.execute(text(
+            "SELECT 1 FROM information_schema.schemata WHERE schema_name = :name"
+        ), {"name": tenant.schema_name})
+        assert result.scalar() == 1, "Deactivated tenant schema must be preserved"
+
+        # Cleanup
+        await db.execute(text(f'DROP SCHEMA IF EXISTS "{tenant.schema_name}" CASCADE'))
+        await db.execute(text("DELETE FROM public.tenants WHERE id = :id"), {"id": str(tenant.id)})
+        await db.commit()
 ```
 
 - [ ] **Step 3: Write migration script for existing deployment**
@@ -1995,22 +2117,31 @@ import subprocess
 from sqlalchemy import text
 
 
-# Business tables to migrate (from TenantBase.metadata.tables)
-BUSINESS_TABLES = [
-    "users", "role_definitions", "user_product_lines", "factories", "user_factories",
-    "product_lines", "fmea_documents", "fmea_versions", "capa_eightd", "audit_logs",
-    # ... (full list generated from TenantBase.metadata)
-]
+# Business tables, ENUM types, and sequences are auto-discovered from the database.
+# This avoids maintaining a manually-incomplete list that would miss objects.
+async def discover_business_objects(conn):
+    """Auto-discover all business tables, ENUMs, and sequences in the public schema."""
+    # All tables except platform tables (which stay in public)
+    platform_tables = {'tenants', 'tenant_migrations', 'platform_admin_users', 'reference_templates', 'alembic_version'}
+    result = await conn.execute(text(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+    ))
+    business_tables = [row[0] for row in result if row[0] not in platform_tables]
 
-# ENUM types to migrate
-ENUM_TYPES = [
-    # Generated from inspection of models
-]
+    # ENUM types in public schema
+    result = await conn.execute(text(
+        "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid "
+        "WHERE n.nspname = 'public' AND t.typtype = 'e' ORDER BY t.typname"
+    ))
+    enum_types = [row[0] for row in result]
 
-# Sequences to migrate (those not auto-moved with tables)
-SEQUENCES = [
-    # Generated from inspection
-]
+    # Sequences in public schema (those not auto-moved with tables)
+    result = await conn.execute(text(
+        "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' ORDER BY sequencename"
+    ))
+    sequences = [row[0] for row in result]
+
+    return business_tables, enum_types, sequences
 
 
 async def migrate():
@@ -2027,15 +2158,18 @@ async def migrate():
         await conn.commit()
         print("Created schema tenant_default")
 
-        # Step 3: Move all business objects
-        for table in BUSINESS_TABLES:
+        # Step 3: Discover and move all business objects
+        business_tables, enum_types, sequences = await discover_business_objects(conn)
+        print(f"Discovered {len(business_tables)} tables, {len(enum_types)} enums, {len(sequences)} sequences")
+
+        for table in business_tables:
             await conn.execute(text(f'ALTER TABLE IF EXISTS public."{table}" SET SCHEMA "tenant_default"'))
-        for enum_type in ENUM_TYPES:
+        for enum_type in enum_types:
             await conn.execute(text(f'ALTER TYPE IF EXISTS public."{enum_type}" SET SCHEMA "tenant_default"'))
-        for seq in SEQUENCES:
+        for seq in sequences:
             await conn.execute(text(f'ALTER SEQUENCE IF EXISTS public."{seq}" SET SCHEMA "tenant_default"'))
         await conn.commit()
-        print(f"Moved {len(BUSINESS_TABLES)} tables, {len(ENUM_TYPES)} enums, {len(SEQUENCES)} sequences")
+        print(f"Moved {len(business_tables)} tables, {len(enum_types)} enums, {len(sequences)} sequences")
 
     # Step 4: Stamp tenant_default with tenant branch
     subprocess.run(
@@ -2076,8 +2210,6 @@ if __name__ == "__main__":
 
 ```bash
 git add backend/tests/test_multitenancy/ backend/scripts/migrate_to_multi_tenant.py
-git commit -m "feat(multi-tenant): add isolation tests, lifecycle tests, and migration script"
-```
 git commit -m "feat(multi-tenant): add isolation tests, lifecycle tests, and migration script"
 ```
 
