@@ -69,7 +69,7 @@ tenant_<slug> (租户 schema) × N
 - 平台参考数据在 `public` schema，只读访问或显式复制到租户空间后自定义
 - `factory_id` 列保留在租户 schema 内，作为租户内部的工厂间隔离
 - 跨 schema 引用策略：租户 schema 内的业务表不得通过外键引用 `public` 表或其他租户 schema 的表。原因不是为了 PostgreSQL 兼容性（PostgreSQL 支持 schema-qualified FK），而是为了保持租户 schema 的**可迁移性**（备份/恢复/删除必须能独立操作，不依赖跨 schema 约束）。需要引用公共参考数据时，使用应用层逻辑（如 `reference_template_id` 列存储 UUID 引用，但不加 FK 约束），并在 Service 层处理软失效
-- **schema 名安全规则**：`tenants.slug` 和 `tenants.schema_name` 必须只包含 `[a-z0-9_]`，在创建时强制校验。所有 `SET search_path` 语句必须通过统一 helper `set_search_path_sql(schema_name)` 生成，该 helper 对 schema_name 做正则校验后使用 `quote_ident()` 生成安全的 quoted identifier。禁止在代码中手写 f-string 拼接 schema 名到 SQL 语句中
+- **schema 名安全规则**：`tenants.slug` 和 `tenants.schema_name` 必须只包含 `[a-z0-9_]`，在创建时强制校验。所有 `SET search_path` 语句必须通过统一 helper `set_search_path_sql(schema_name)` 生成，该 helper 对 schema_name 做正则校验后使用双引号转义（`'"' + name.replace('"', '""') + '"'`）生成安全的 quoted identifier。禁止在代码中手写 f-string 拼接 schema 名到 SQL 语句中
 
 ### 2.2 新增平台表
 
@@ -169,8 +169,8 @@ SET search_path TO "tenant_acme", "public";
 1. **使用普通 `SET`（非 `SET LOCAL`）+ dependency finally RESET**：`SET LOCAL` 只在当前事务内生效，`COMMIT` 后自动恢复——但现有代码中多个 endpoint/service 在请求内会调用 `commit()`（例如登录在 commit refresh token 后继续查询），`SET LOCAL` 在 commit 后会失效，导致后续查询回到默认 schema。使用普通 `SET` 并在 dependency 的 `finally` 中显式 `RESET search_path`，配合连接池兜底，确保整个请求周期内 search_path 始终正确。
 
 2. **双层安全保障**：
-   - 第一层：`get_tenant_db()` 在 yield session 前执行 `SET search_path`，在 finally 中 `RESET search_path`
-   - 第二层：SQLAlchemy `PoolEvents.connect` 事件在每个连接首次创建时执行 `RESET search_path`，`PoolEvents.checkout` 事件在每次从池中取出连接时执行 `RESET search_path`。这确保无论应用层 finally 是否执行（崩溃、强制回收），从池中取出的连接始终处于干净的 `public` 状态
+   - 第一层：`get_tenant_db()` 在 yield session 前执行 `SET search_path`，在 finally 中先 `rollback()` 再 `RESET search_path`
+   - 第二层：SQLAlchemy `PoolEvents.checkout` 事件在每次从池中取出连接时执行 `RESET search_path`。这确保无论应用层 finally 是否执行（崩溃、强制回收），从池中取出的连接始终处于干净的 `public` 状态
 
 ```python
 # 连接池安全配置 — checkout 时强制重置 search_path
@@ -191,24 +191,6 @@ def _reset_search_path_on_checkout(dbapi_conn, connection_record, connection_pro
 ```
 
 3. **中间件只解析租户，不设置 search_path**：TenantContext 中间件只负责解析租户身份并注入 `request.state.tenant`，不直接操作数据库会话。实际 search_path 设置在 `get_tenant_db()` 依赖中，确保每个 API 路由使用的数据库会话都正确设置。
-
-```python
-# 连接池安全配置 — checkout 时强制重置 search_path
-from sqlalchemy import event
-
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,           # 连接健康检查
-    pool_reset_on_return="rollback",  # 归还时 ROLLBACK（不重置 search_path，由 checkout 兜底）
-)
-
-# 关键：checkout 事件确保每个从池中取出的连接都是干净的
-@event.listens_for(engine.sync_engine, "checkout")
-def _reset_search_path_on_checkout(dbapi_conn, connection_record, connection_proxy):
-    cursor = dbapi_conn.cursor()
-    cursor.execute("RESET search_path")
-    cursor.close()
-```
 
 ---
 
@@ -256,9 +238,8 @@ async def tenant_context_middleware(request: Request, call_next):
 
 ```python
 from fastapi import Request
-from sqlalchemy.sql import quoted_ident  # 或使用 psycopg2.sql.Identifier
 
-# 统一 helper：校验 schema 名并生成安全的 SET search_path 语句
+# 统一 helper：白名单校验 + 双引号转义，禁止直接 f-string 拼接 schema 名到 SQL
 import re
 
 def set_search_path_sql(schema_name: str) -> str:
@@ -282,7 +263,8 @@ async def get_tenant_db(request: Request):
         try:
             yield session
         finally:
-            # 请求结束时显式 RESET，确保连接归还池时是干净的
+            # 先 rollback 清理可能的事务错误状态，再 RESET search_path
+            await session.rollback()
             if tenant:
                 await session.execute(text('RESET search_path'))
             await session.close()
@@ -297,7 +279,7 @@ async def get_platform_db():
             await session.close()
 ```
 
-**为什么用 `SET` 而非 `SET LOCAL`**：现有代码中多个 endpoint/service 会在请求内调用 `commit()` 后继续查询（例如 `auth.py` 登录在 commit refresh token 后查询用户响应）。`SET LOCAL` 在 `COMMIT` 后自动失效，后续查询会回到默认 `public` schema，造成读错 schema 或隔离失效。使用普通 `SET` + dependency finally 中的 `RESET search_path`，配合连接池 `reset_on_return` 兜底，确保整个请求周期内 search_path 始终正确。
+**为什么用 `SET` 而非 `SET LOCAL`**：现有代码中多个 endpoint/service 会在请求内调用 `commit()` 后继续查询（例如 `auth.py` 登录在 commit refresh token 后查询用户响应）。`SET LOCAL` 在 `COMMIT` 后自动失效，后续查询会回到默认 `public` schema，造成读错 schema 或隔离失效。使用普通 `SET` + dependency finally 中的 `rollback()` + `RESET search_path`，配合连接池 checkout reset 兜底，确保整个请求周期内 search_path 始终正确。
 
 ---
 
@@ -617,9 +599,7 @@ async def run_for_each_tenant():
 
     for tenant in tenants:
         async with async_session() as db:
-            await db.execute(
-                set_search_path_sql(tenant.schema_name)  # 使用白名单校验的 helper
-            )
+            await db.execute(text(set_search_path_sql(tenant.schema_name)))
             try:
                 yield tenant, db
             finally:
