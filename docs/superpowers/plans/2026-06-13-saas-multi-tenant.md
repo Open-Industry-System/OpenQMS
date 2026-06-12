@@ -764,11 +764,14 @@ async def test_get_db_sets_search_path_for_tenant():
         db = await gen.__anext__()
         try:
             # SET search_path must have been called with the tenant schema
-            calls = mock_session.execute.call_args_list
-            set_calls = [c for c in calls if "search_path" in str(c)]
-            assert len(set_calls) >= 1, f"Expected SET search_path, got calls: {calls}"
-            assert "tenant_acme" in str(set_calls[0]), \
-                f"Expected SET search_path TO 'tenant_acme', got: {set_calls[0]}"
+            # SQLAlchemy text() objects don't stringify to their SQL content;
+            # inspect the .text attribute instead of str(call).
+            executed_sql = [
+                getattr(c.args[0], "text", "") for c in mock_session.execute.call_args_list
+            ]
+            assert any(
+                'SET search_path TO "tenant_acme", "public"' in sql for sql in executed_sql
+            ), f"Expected SET search_path TO tenant_acme, got SQL: {executed_sql}"
             # ContextVar must be set to the tenant schema
             assert current_tenant_schema.get() == "tenant_acme"
         finally:
@@ -2108,7 +2111,7 @@ git commit -m "feat(multi-tenant): add tenant_id to JWT with iss/aud domain isol
 - Modify: `backend/app/services/supplier_risk/service.py` — replace `async_session()` with `get_tenant_aware_session()`
 - Modify: `backend/app/services/iqc_aql_service.py` — replace `async_session()` with `get_tenant_aware_session()`
 - Modify: `backend/app/services/collaboration_service.py` — replace `async_session()` with `get_tenant_aware_session()`
-- Modify: `backend/app/services/supply_chain_risk_map/scheduler.py` — replace `async_session()` with `get_tenant_aware_session()`
+- Modify: `backend/app/services/supply_chain_risk_map/scheduler.py` — wrap `snapshot_loop()` with `run_for_each_tenant()`
 - Create: `backend/tests/test_multitenancy/test_background_tasks.py`
 
 - [ ] **Step 1: Write failing test for `run_for_each_tenant()`**
