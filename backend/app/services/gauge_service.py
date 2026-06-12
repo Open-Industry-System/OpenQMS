@@ -85,6 +85,7 @@ async def create_gauge(
     calibration_cycle_days: int | None,
     next_calibration_date: date | None,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> Gauge:
     if not gauge_no:
         gauge_no = await _generate_gauge_no(db)
@@ -102,6 +103,7 @@ async def create_gauge(
         calibration_cycle_days=calibration_cycle_days,
         next_calibration_date=next_calibration_date,
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(gauge)
     db.add(

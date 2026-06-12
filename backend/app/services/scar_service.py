@@ -103,6 +103,7 @@ async def create_scar(
     product_line_code: str | None = None,
     requested_action: str | None = None,
     due_date: date | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> SupplierSCAR:
     # Validate supplier exists
     supplier = await db.get(Supplier, supplier_id)
@@ -121,6 +122,7 @@ async def create_scar(
             product_line_code=product_line_code,
             requested_action=requested_action,
             due_date=due_date,
+            factory_id=factory_id,
             issued_by=user_id,
             issued_date=date.today(),
         )

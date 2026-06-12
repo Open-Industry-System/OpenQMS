@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_user_permission, PermissionLevel, Module
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app import schemas
 from app.services import iqc_material_service, iqc_template_service, iqc_inspection_service
 from app.services.aql_engine import calculate_aql_plan
@@ -88,6 +88,8 @@ async def create_material(
         raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
 
     try:
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         material = await iqc_material_service.create_material(
             db,
             part_no=req.part_no,
@@ -99,10 +101,9 @@ async def create_material(
             unit=req.unit,
             product_line_code=req.product_line_code,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(material, type(material), db, scope=scope)
         await validate_factory_invariant(material, db)
-        await db.commit()
         return schemas.iqc.IqcMaterialResponse.model_validate(material)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -394,6 +395,8 @@ async def create_inspection(
         raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
 
     try:
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         inspection = await iqc_inspection_service.create_inspection(
             db,
             supplier_id=req.supplier_id,
@@ -409,10 +412,9 @@ async def create_inspection(
             inspection_date=req.inspection_date,
             product_line_code=req.product_line_code,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(inspection, type(inspection), db, scope=scope)
         await validate_factory_invariant(inspection, db)
-        await db.commit()
         return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -793,12 +795,13 @@ async def create_aql_profile(
         raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
 
     try:
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         profile = await ProfileManager.get_or_create_profile(
             db, req.supplier_id, req.material_id, req.product_line_code, scope.user.user_id,
         )
-        await populate_factory_id(profile, IqcAqlProfile, db, scope=scope)
+        profile.factory_id = factory_id
         await validate_factory_invariant(profile, db)
-        await db.commit()
         return AqlProfileResponse.model_validate(profile)
     except ValueError as e:
         raise HTTPException(400, str(e))

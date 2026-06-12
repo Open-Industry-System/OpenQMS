@@ -153,6 +153,7 @@ async def create_ppap(
     customer_name: str | None = None,
     product_line_code: str | None = None,
     notes: str | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> SupplierPPAPSubmission:
     supplier = await db.get(Supplier, supplier_id)
     if not supplier:
@@ -171,6 +172,7 @@ async def create_ppap(
             product_line_code=product_line_code,
             notes=notes,
             created_by=user_id,
+            factory_id=factory_id,
         )
         db.add(ppap)
         try:

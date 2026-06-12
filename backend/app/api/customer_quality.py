@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas
 from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.database import get_db
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.services import customer_quality_service
@@ -69,10 +69,10 @@ async def create_customer(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 customer_quality 模块的 CREATE 权限")
     try:
-        customer = await customer_quality_service.create_customer(db, req, scope.user.user_id)
-        await populate_factory_id(customer, Customer, db, scope=scope)
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
+        customer = await customer_quality_service.create_customer(db, req, scope.user.user_id, factory_id=factory_id)
         await validate_factory_invariant(customer, db)
-        await db.commit()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return schemas.customer_quality.CustomerResponse.model_validate(customer)
@@ -211,10 +211,10 @@ async def create_complaint(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 customer_quality 模块的 CREATE 权限")
     try:
-        complaint = await customer_quality_service.create_complaint(db, req, scope.user.user_id)
-        await populate_factory_id(complaint, CustomerComplaint, db, scope=scope)
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
+        complaint = await customer_quality_service.create_complaint(db, req, scope.user.user_id, factory_id=factory_id)
         await validate_factory_invariant(complaint, db)
-        await db.commit()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return schemas.customer_quality.ComplaintResponse.model_validate(complaint)
@@ -493,10 +493,10 @@ async def create_rma_record(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 customer_quality 模块的 CREATE 权限")
     try:
-        rma = await customer_quality_service.create_rma_record(db, req, scope.user.user_id)
-        await populate_factory_id(rma, RMARecord, db, scope=scope)
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
+        rma = await customer_quality_service.create_rma_record(db, req, scope.user.user_id, factory_id=factory_id)
         await validate_factory_invariant(rma, db)
-        await db.commit()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return schemas.customer_quality.RMARecordResponse.model_validate(rma)

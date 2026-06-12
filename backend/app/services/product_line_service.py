@@ -1,3 +1,4 @@
+import uuid
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.product_line import ProductLine
@@ -16,11 +17,11 @@ async def get_product_line(db: AsyncSession, code: str) -> ProductLine | None:
     return result.scalar_one_or_none()
 
 
-async def create_product_line(db: AsyncSession, code: str, name: str) -> ProductLine:
+async def create_product_line(db: AsyncSession, code: str, name: str, factory_id: uuid.UUID | None = None) -> ProductLine:
     existing = await get_product_line(db, code)
     if existing:
         raise ValueError(f"产品线 '{code}' 已存在")
-    pl = ProductLine(code=code, name=name)
+    pl = ProductLine(code=code, name=name, factory_id=factory_id)
     db.add(pl)
     await db.commit()
     await db.refresh(pl)

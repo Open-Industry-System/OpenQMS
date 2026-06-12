@@ -82,6 +82,7 @@ async def get_fmea(db: AsyncSession, fmea_id: uuid.UUID) -> FMEADocument | None:
 async def create_fmea(
     db: AsyncSession, title: str, document_no: str, fmea_type: str, user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
+    factory_id: uuid.UUID | None = None,
 ) -> FMEADocument:
     await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
@@ -123,6 +124,7 @@ async def create_fmea(
         created_by=user_id,
         updated_by=user_id,
         graph_data=graph_data,  # Inject template graph
+        factory_id=factory_id,
     )
     db.add(fmea)
 

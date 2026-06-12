@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.mes import (
     MESConnection,
     MESSyncJob,
@@ -191,6 +191,8 @@ async def create_connection(
         if req.product_line_code not in scope.pl_scope.codes:
             raise HTTPException(status_code=403, detail="无权访问该产线")
 
+    factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+    check_factory_access(factory_id, scope)
     connection = MESConnection(
         name=req.name,
         connector_type=req.connector_type,
@@ -198,12 +200,12 @@ async def create_connection(
         product_line_code=req.product_line_code,
         created_by=scope.user.user_id,
         is_active=True,
+        factory_id=factory_id,
     )
     db.add(connection)
     await db.flush()
 
-    # Populate and validate factory_id
-    await populate_factory_id(connection, MESConnection, db, scope=scope)
+    # Validate factory_id consistency
     await validate_factory_invariant(connection, db)
 
     # Create 4 sync jobs

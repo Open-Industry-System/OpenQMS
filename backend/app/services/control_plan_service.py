@@ -57,7 +57,7 @@ async def generate_document_no(db: AsyncSession) -> str:
 
 
 async def create_control_plan(
-    db: AsyncSession, data: ControlPlanCreate, user_id: uuid.UUID
+    db: AsyncSession, data: ControlPlanCreate, user_id: uuid.UUID, *, factory_id: uuid.UUID | None = None
 ) -> ControlPlan:
     """Create a new ControlPlan. Use provided document_no if given, else auto-generate."""
     await validate_product_line(db, data.product_line_code)
@@ -78,6 +78,7 @@ async def create_control_plan(
         core_group=data.core_group,
         created_by=user_id,
         updated_by=user_id,
+        factory_id=factory_id,
     )
     db.add(cp)
 

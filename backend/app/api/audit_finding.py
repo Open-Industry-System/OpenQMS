@@ -4,8 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_user_permission, PermissionLevel, Module
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
-from app.models.audit_finding import AuditFinding
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app import schemas
 from app.services import audit_service, customer_audit_service
 
@@ -58,6 +57,14 @@ async def create_audit_finding(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     try:
+        # Derive factory_id from parent AuditPlan
+        from app.models.audit_program import AuditPlan
+        parent_plan = await db.get(AuditPlan, req.audit_id)
+        if parent_plan is None:
+            raise HTTPException(status_code=404, detail="审核计划不存在")
+        _check_factory_access(parent_plan, scope)
+        factory_id = parent_plan.factory_id or await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         finding = await audit_service.create_audit_finding(
             db,
             audit_id=req.audit_id,
@@ -69,10 +76,9 @@ async def create_audit_finding(
             corrective_action=req.corrective_action,
             due_date=req.due_date,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(finding, AuditFinding, db, scope=scope)
         await validate_factory_invariant(finding, db)
-        await db.commit()
         return schemas.audit.AuditFindingResponse.model_validate(finding)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.core.permissions import get_user_permission, PermissionLevel, Module
 from app.models.supplier import SupplierSCAR
 from app.schemas import scar as scar_schemas
@@ -120,6 +120,8 @@ async def create_scar(
         raise HTTPException(status_code=403, detail="需要 scar 模块的 CREATE 权限")
 
     try:
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         scar = await scar_service.create_scar(
             db,
             supplier_id=req.supplier_id,
@@ -130,10 +132,9 @@ async def create_scar(
             requested_action=req.requested_action,
             due_date=req.due_date,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(scar, SupplierSCAR, db, scope=scope)
         await validate_factory_invariant(scar, db)
-        await db.commit()
         await db.refresh(scar)
         return _to_response(scar)
     except ValueError as e:

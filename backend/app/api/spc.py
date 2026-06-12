@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_user_permission, PermissionLevel, Module
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant, apply_scope_filter
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access, apply_scope_filter
 from app.models.user import User
 from app.models.spc import SampleValue, SPCAlarm, InspectionCharacteristic
 from app import schemas
@@ -41,10 +41,10 @@ async def create_ic(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 spc 模块的 CREATE 权限")
     try:
-        ic = await spc_service.create_inspection_characteristic(db, scope.user.user_id, data.model_dump())
-        await populate_factory_id(ic, InspectionCharacteristic, db, scope=scope)
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=data.product_line if hasattr(data, 'product_line') else None)
+        check_factory_access(factory_id, scope)
+        ic = await spc_service.create_inspection_characteristic(db, scope.user.user_id, data.model_dump(), factory_id=factory_id)
         await validate_factory_invariant(ic, db)
-        await db.commit()
         await db.refresh(ic)
         return ic
     except ValueError as e:

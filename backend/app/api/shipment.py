@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.core.permissions import get_user_permission, PermissionLevel, Module
 from app.models.customer_quality import ShipmentRecord
 from app.schemas.customer_quality import (
@@ -68,10 +68,11 @@ async def create_shipment(
         raise HTTPException(status_code=403, detail="需要 customer_quality 模块的 CREATE 权限")
 
     try:
-        shipment = await customer_quality_service.create_shipment(db, customer_id, req.model_dump(), scope.user.user_id)
-        await populate_factory_id(shipment, ShipmentRecord, db, scope=scope)
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
+        check_factory_access(factory_id, scope)
+        shipment = await customer_quality_service.create_shipment(db, customer_id, req.model_dump(), scope.user.user_id, factory_id=factory_id)
         await validate_factory_invariant(shipment, db)
-        await db.commit()
         await db.refresh(shipment)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

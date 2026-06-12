@@ -94,7 +94,7 @@ async def get_special_characteristic(db: AsyncSession, sc_id: uuid.UUID) -> SCRe
     return _to_response(item) if item else None
 
 
-async def create_special_characteristic(db: AsyncSession, data: SCCreate, user_id: uuid.UUID) -> SCResponse:
+async def create_special_characteristic(db: AsyncSession, data: SCCreate, user_id: uuid.UUID, *, factory_id: uuid.UUID | None = None) -> SCResponse:
     sc_code = await generate_sc_code(db)
     item = SpecialCharacteristic(
         sc_code=sc_code, sc_name=data.sc_name, sc_type=data.sc_type,
@@ -102,6 +102,7 @@ async def create_special_characteristic(db: AsyncSession, data: SCCreate, user_i
         spec_requirement=data.spec_requirement, source_fmea_id=data.source_fmea_id,
         source_node_id=data.source_node_id or "", source_type=data.source_type or "PFMEA",
         sop_ref=data.sop_ref, product_line_code=data.product_line_code, created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(item)
     await _create_audit(db, "CREATE", item.sc_id, user_id, {"sc_code": sc_code, "sc_name": data.sc_name})

@@ -17,7 +17,7 @@ from app.core.permissions import (
     get_user_permission,
 )
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.fmea import FMEADocument
 from app.models.plm import (
     PLMBOM,
@@ -142,16 +142,18 @@ async def create_connection(
     if scope.pl_scope.mode == "EXPLICIT" and req.product_line_code not in scope.pl_scope.codes:
         raise HTTPException(status_code=403, detail="无权访问该产品线")
 
+    factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+    check_factory_access(factory_id, scope)
     conn = PLMConnection(
         name=req.name,
         connector_type=req.connector_type,
         config=req.config,
         product_line_code=req.product_line_code,
         created_by=scope.user.user_id,
+        factory_id=factory_id,
     )
     db.add(conn)
     await db.flush()
-    await populate_factory_id(conn, PLMConnection, db, scope=scope)
     await validate_factory_invariant(conn, db)
     await PLMSyncService.create_sync_jobs_for_connection(db, conn.connection_id)
     await db.commit()

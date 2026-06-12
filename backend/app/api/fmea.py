@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_user_permission, Module, PermissionLevel, get_current_user
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.user import User
 from app.models.fmea import FMEADocument
 
@@ -66,10 +66,13 @@ async def create_fmea(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 CREATE 权限")
     try:
-        fmea = await fmea_service.create_fmea(db, req.title, req.document_no, req.fmea_type, scope.user.user_id, req.product_line_code)
-        await populate_factory_id(fmea, FMEADocument, db, scope=scope)
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
+        fmea = await fmea_service.create_fmea(
+            db, req.title, req.document_no, req.fmea_type,
+            scope.user.user_id, req.product_line_code, factory_id=factory_id,
+        )
         await validate_factory_invariant(fmea, db)
-        await db.commit()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return FMEAResponse.model_validate(fmea)

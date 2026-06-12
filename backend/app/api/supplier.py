@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_user_permission, Module, PermissionLevel, get_current_user
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.user import User
 from app.models.supplier import Supplier
 from app import schemas
@@ -257,15 +257,16 @@ async def create_supplier(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 supplier 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         supplier = await supplier_service.create_supplier(
             db, name=req.name, short_name=req.short_name,
             contact_name=req.contact_name, contact_phone=req.contact_phone,
             contact_email=req.contact_email, address=req.address,
             product_scope=req.product_scope, user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(supplier, Supplier, db, scope=scope)
         await validate_factory_invariant(supplier, db)
-        await db.commit()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return schemas.supplier.SupplierResponse.model_validate(supplier)

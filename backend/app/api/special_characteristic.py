@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.deps import RequestScope, get_request_scope
 from app.core.permissions import get_user_permission, PermissionLevel, Module
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.special_characteristic import SpecialCharacteristic as SCModel
 from app.schemas.special_characteristic import (
     SCCreate, SCUpdate, SCResponse, SCListResponse,
@@ -120,14 +120,14 @@ async def create_sc(
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
-    result = await sc_svc.create_special_characteristic(db, data, scope.user.user_id)
-    # Re-fetch ORM model to populate factory_id
+    factory_id = await resolve_create_factory_id(db, scope, product_line_code=data.product_line_code)
+    check_factory_access(factory_id, scope)
+    result = await sc_svc.create_special_characteristic(db, data, scope.user.user_id, factory_id=factory_id)
+    # Re-fetch ORM model to validate factory_id
     orm_result = await db.execute(select(SCModel).where(SCModel.sc_id == result.sc_id))
     orm_sc = orm_result.scalar_one_or_none()
     if orm_sc:
-        await populate_factory_id(orm_sc, SCModel, db, scope=scope)
         await validate_factory_invariant(orm_sc, db)
-        await db.commit()
         await db.refresh(orm_sc)
         result = sc_svc._to_response(orm_sc)
     return result

@@ -91,6 +91,7 @@ async def create_quality_goal(
     owner_id: uuid.UUID,
     description: str | None,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> QualityGoal:
     await _validate_hierarchy(db, parent_id, level)
     doc_no = await _generate_doc_no(db)
@@ -107,6 +108,7 @@ async def create_quality_goal(
         owner_id=owner_id,
         description=description,
         status="draft",
+        factory_id=factory_id,
     )
     db.add(goal)
 

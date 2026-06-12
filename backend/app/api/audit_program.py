@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_user_permission, PermissionLevel, Module
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.audit_program import AuditProgram
 from app import schemas
 from app.services import audit_service
@@ -70,6 +70,8 @@ async def create_audit_program(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 audit 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         program = await audit_service.create_audit_program(
             db,
             program_year=req.program_year,
@@ -77,10 +79,9 @@ async def create_audit_program(
             scope=req.scope,
             criteria=req.criteria,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(program, AuditProgram, db, scope=scope)
         await validate_factory_invariant(program, db)
-        await db.commit()
         return schemas.audit.AuditProgramResponse.model_validate(program)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

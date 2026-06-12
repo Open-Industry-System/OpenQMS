@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.erp import (
     ERPConnection, ERPSyncJob, ERPSupplier, ERPCustomer,
     ERPMaterial, ERPLocation, ERPPurchaseOrder, ERPSalesOrder,
@@ -120,17 +120,19 @@ async def create_connection(
     config = _validate_rest_config(data.connector_type, data.config)
     config = _process_credentials(config)
 
+    factory_id = await resolve_create_factory_id(db, scope, product_line_code=data.product_line_code)
+    check_factory_access(factory_id, scope)
     conn = ERPConnection(
         name=data.name,
         connector_type=data.connector_type,
         config=config,
         product_line_code=data.product_line_code,
         created_by=scope.user.user_id,
+        factory_id=factory_id,
     )
     db.add(conn)
     await db.flush()
 
-    await populate_factory_id(conn, ERPConnection, db, scope=scope)
     await validate_factory_invariant(conn, db)
 
     # Create sync jobs for all 9 data types

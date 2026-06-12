@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.models.supplier import Supplier
 from app.models.supplier_risk import SupplierRiskAlert, SupplierRiskConfig, SupplierRiskNotificationChannel
@@ -466,6 +466,8 @@ async def create_channel(
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
+    factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+    check_factory_access(factory_id, scope)
     channel = SupplierRiskNotificationChannel(
         channel_type=req.channel_type,
         config=config,
@@ -474,9 +476,9 @@ async def create_channel(
         supplier_id=req.supplier_id,
         product_line_code=req.product_line_code,
         created_by=scope.user.user_id,
+        factory_id=factory_id,
     )
     db.add(channel)
-    await populate_factory_id(channel, SupplierRiskNotificationChannel, db, scope=scope)
     await validate_factory_invariant(channel, db)
     await db.commit()
     await db.refresh(channel)

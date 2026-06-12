@@ -89,6 +89,7 @@ async def create_capa(
     due_date,
     user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
+    factory_id: uuid.UUID | None = None,
 ) -> CAPAEightD:
     await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
@@ -107,6 +108,7 @@ async def create_capa(
         due_date=due_date,
         product_line_code=product_line_code,
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(capa)
 
@@ -146,6 +148,7 @@ async def _create_capa_without_commit(
     due_date,
     user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
+    factory_id: uuid.UUID | None = None,
 ) -> CAPAEightD:
     """Create CAPA without committing — caller must commit."""
     await validate_product_line(db, product_line_code)
@@ -165,6 +168,7 @@ async def _create_capa_without_commit(
         due_date=due_date,
         product_line_code=product_line_code,
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(capa)
 

@@ -377,3 +377,59 @@ async def validate_factory_invariant(
                 f"factory_id 不一致：供应商属于工厂 {expected}，"
                 f"但记录的 factory_id 为 {record.factory_id}"
             )
+
+
+async def resolve_create_factory_id(
+    db: AsyncSession,
+    scope: "RequestScope",
+    product_line_code: str | None = None,
+) -> UUID:
+    """Pre-derive factory_id for a new record BEFORE calling the service.
+
+    This avoids the commit-order bug where services commit internally before
+    populate_factory_id runs.  Call this in the API layer, pass the result
+    to the service's ``factory_id`` parameter.
+
+    Priority:
+    1. product_line_code -> ProductLine.factory_id
+    2. scope.effective_factory_id
+    3. scope.factory_scope.default_factory_id
+
+    Raises ValueError if none can be determined.
+    """
+    # 1. Product-line-derived (covers most record types)
+    if product_line_code:
+        from app.models.product_line import ProductLine
+        result = await db.execute(
+            select(ProductLine.factory_id).where(ProductLine.code == product_line_code)
+        )
+        fid = result.scalar_one_or_none()
+        if fid:
+            return fid
+
+    # 2. Scope-based fallback
+    if scope.effective_factory_id:
+        return scope.effective_factory_id
+    if scope.factory_scope.default_factory_id:
+        return scope.factory_scope.default_factory_id
+
+    raise ValueError(
+        "无法确定 factory_id：缺少 product_line_code 或默认工厂"
+    )
+
+
+def check_factory_access(factory_id: UUID, scope: "RequestScope"):
+    """Verify the given factory_id is accessible to the current user.
+
+    Raises HTTPException(403) if not accessible.
+    Must be called AFTER factory_id is resolved.
+    """
+    # GROUP ADMIN (accessible_factory_ids=None) can access any factory
+    if scope.factory_scope.accessible_factory_ids is None:
+        return
+
+    if factory_id not in scope.factory_scope.accessible_factory_ids:
+        raise HTTPException(
+            status_code=403,
+            detail=f"无权在工厂 '{factory_id}' 下创建记录",
+        )

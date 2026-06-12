@@ -103,6 +103,7 @@ async def create_review(
     chair_person_id: uuid.UUID,
     participants: list[dict] | None,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> ManagementReview:
     doc_no = await _generate_doc_no(db)
     review = ManagementReview(
@@ -115,6 +116,7 @@ async def create_review(
         participants=participants,
         status="draft",
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(review)
     await _audit(db, "CREATE", review.review_id, user_id, {

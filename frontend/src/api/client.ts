@@ -7,7 +7,8 @@ const client = axios.create({
 
 // Factory ID auto-injection for GET requests on business APIs
 // Excluded: auth, group, product-lines, factories (management endpoints)
-const FACTORY_ID_EXCLUDE_PREFIXES = ["/api/auth/", "/api/group/", "/api/product-lines", "/api/factories"];
+// NOTE: baseURL is "/api", so config.url is relative (e.g. "/auth/login", "/group/dashboard")
+const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories"];
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem("access_token");

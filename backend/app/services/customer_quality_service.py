@@ -1534,8 +1534,8 @@ async def list_shipments(db: AsyncSession, customer_id: uuid.UUID, page: int = 1
     count_result = await db.execute(count_query)
     return result.scalars().all(), count_result.scalar_one()
 
-async def create_shipment(db: AsyncSession, customer_id: uuid.UUID, data: dict, user_id: uuid.UUID):
-    shipment = ShipmentRecord(shipment_id=uuid.uuid4(), customer_id=customer_id, **data, created_by=user_id)
+async def create_shipment(db: AsyncSession, customer_id: uuid.UUID, data: dict, user_id: uuid.UUID, *, factory_id: uuid.UUID | None = None):
+    shipment = ShipmentRecord(shipment_id=uuid.uuid4(), customer_id=customer_id, **data, created_by=user_id, factory_id=factory_id)
     db.add(shipment)
     audit = AuditLog(table_name="shipment_records", record_id=shipment.shipment_id, action="CREATE", changed_fields=data, operated_by=user_id)
     db.add(audit)

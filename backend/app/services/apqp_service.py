@@ -125,6 +125,7 @@ async def create_project(
     pfmea_id: uuid.UUID | None = None,
     control_plan_id: uuid.UUID | None = None,
     ppap_submission_id: uuid.UUID | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> APQPProject:
     # Validate linked IDs if provided
     if product_line_code:
@@ -159,6 +160,7 @@ async def create_project(
             control_plan_id=control_plan_id,
             ppap_submission_id=ppap_submission_id,
             created_by=user_id,
+            factory_id=factory_id,
         )
         db.add(project)
         try:

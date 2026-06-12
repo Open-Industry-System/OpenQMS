@@ -117,6 +117,7 @@ async def create_audit_program(
     scope: str,
     criteria: str,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> AuditProgram:
     program_no = await _generate_program_no(db, audit_type, program_year)
 
@@ -128,6 +129,7 @@ async def create_audit_program(
         criteria=criteria,
         status="planned",
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(program)
 
@@ -319,6 +321,7 @@ async def create_audit_plan(
     checklist: list,
     user_id: uuid.UUID,
     product_line_code: str | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> AuditPlan:
     program = await db.get(AuditProgram, program_id)
     if program and program.audit_type == "customer":
@@ -343,6 +346,7 @@ async def create_audit_plan(
         status="planned",
         created_by=user_id,
         product_line_code=product_line_code,
+        factory_id=factory_id,
     )
     db.add(plan)
 
@@ -635,6 +639,7 @@ async def create_audit_finding(
     corrective_action: str | None,
     due_date: date | None,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> AuditFinding:
     finding = AuditFinding(
         audit_id=audit_id,
@@ -647,6 +652,7 @@ async def create_audit_finding(
         due_date=due_date,
         status="open",
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(finding)
 

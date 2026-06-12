@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.core.permissions import get_user_permission, PermissionLevel, Module
 from app.models.gauge import Gauge
 from app import schemas
@@ -86,6 +86,8 @@ async def create_gauge(
         raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
 
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         gauge = await gauge_service.create_gauge(
             db,
             gauge_no=req.gauge_no,
@@ -99,10 +101,9 @@ async def create_gauge(
             calibration_cycle_days=req.calibration_cycle_days,
             next_calibration_date=req.next_calibration_date,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(gauge, Gauge, db, scope=scope)
         await validate_factory_invariant(gauge, db)
-        await db.commit()
         await db.refresh(gauge)
         return schemas.gauge.GaugeResponse.model_validate(gauge)
     except ValueError as e:

@@ -29,11 +29,19 @@ from app.schemas.group import (
 )
 
 
-async def get_group_dashboard(db: AsyncSession) -> GroupDashboardResponse:
-    """Aggregate KPIs across all active factories."""
-    result = await db.execute(
-        select(Factory).where(Factory.is_active == True).order_by(Factory.code)
-    )
+async def get_group_dashboard(
+    db: AsyncSession,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
+) -> GroupDashboardResponse:
+    """Aggregate KPIs across all active factories.
+
+    Args:
+        accessible_factory_ids: None means all factories (GROUP ADMIN), otherwise filter.
+    """
+    query = select(Factory).where(Factory.is_active == True).order_by(Factory.code)
+    if accessible_factory_ids is not None:
+        query = query.where(Factory.id.in_(accessible_factory_ids))
+    result = await db.execute(query)
     factories = list(result.scalars().all())
 
     if not factories:
@@ -172,6 +180,7 @@ async def get_group_dashboard(db: AsyncSession) -> GroupDashboardResponse:
 async def get_factory_comparison(
     db: AsyncSession,
     metric_names: list[str] | None = None,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
 ) -> FactoryComparisonResponse:
     """Compare factories side by side on standardized metrics."""
     default_metrics = [
@@ -181,8 +190,8 @@ async def get_factory_comparison(
     ]
     metrics = metric_names if metric_names else default_metrics
 
-    # Reuse dashboard data
-    dashboard = await get_group_dashboard(db)
+    # Reuse dashboard data (pass filter through)
+    dashboard = await get_group_dashboard(db, accessible_factory_ids=accessible_factory_ids)
 
     items = []
     for kpi in dashboard.factories:

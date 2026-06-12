@@ -72,6 +72,8 @@ def upgrade() -> None:
 
     op.create_table(
         "audit_program_target_factories",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("gen_random_uuid()")),
         sa.Column("program_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("audit_programs.program_id", ondelete="CASCADE"),
                   nullable=False),

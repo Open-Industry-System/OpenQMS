@@ -77,6 +77,7 @@ async def create_customer_audit(
     checklist: list | None,
     product_line_code: str | None,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> AuditPlan:
     if not customer_name or not customer_name.strip():
         raise ValueError("customer_name is required")
@@ -104,6 +105,7 @@ async def create_customer_audit(
         audit_mode=audit_mode,
         created_by=user_id,
         product_line_code=product_line_code,
+        factory_id=factory_id,
     )
     db.add(plan)
     await db.flush()  # populate plan.audit_id

@@ -559,7 +559,7 @@ async def _get_active_control_limits(
 
 
 async def create_inspection_characteristic(
-    db: AsyncSession, user_id: uuid.UUID, data: dict
+    db: AsyncSession, user_id: uuid.UUID, data: dict, *, factory_id: uuid.UUID | None = None
 ) -> InspectionCharacteristic:
     product_line = data.get("product_line", "DC-DC-100")
     process_name = data["process_name"]
@@ -593,6 +593,7 @@ async def create_inspection_characteristic(
         subgroup_size=data.get("subgroup_size", 5),
         rules_config=rules_config,
         created_by_id=user_id,
+        factory_id=factory_id,
     )
     db.add(ic)
     await db.commit()

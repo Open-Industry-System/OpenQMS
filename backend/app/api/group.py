@@ -49,9 +49,9 @@ async def dashboard(
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ):
-    """Group-level dashboard with KPIs aggregated across all factories."""
+    """Group-level dashboard with KPIs aggregated across accessible factories."""
     await _require_group_view(scope.user, db)
-    return await group_service.get_group_dashboard(db)
+    return await group_service.get_group_dashboard(db, accessible_factory_ids=scope.factory_scope.accessible_factory_ids)
 
 
 @router.get("/comparison", response_model=FactoryComparisonResponse)
@@ -63,7 +63,7 @@ async def comparison(
     """Compare factories side by side on standardized metrics."""
     await _require_group_view(scope.user, db)
     names = [m.strip() for m in metric_names.split(",") if m.strip()] if metric_names else None
-    return await group_service.get_factory_comparison(db, metric_names=names)
+    return await group_service.get_factory_comparison(db, metric_names=names, accessible_factory_ids=scope.factory_scope.accessible_factory_ids)
 
 
 # --- Shared Suppliers & Cross-Factory Audits ---

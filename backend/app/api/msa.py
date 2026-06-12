@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.core.permissions import get_user_permission, PermissionLevel, Module
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.user import User
 from app.models.spc import InspectionCharacteristic
 from app.models.gauge import Gauge
@@ -89,6 +89,8 @@ async def create_grr(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await grr_service.create_study(
             db,
             title=req.title,
@@ -105,10 +107,9 @@ async def create_grr(
             trial_count=req.trial_count,
             study_date=req.study_date,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(study, GrrStudy, db, scope=scope)
         await validate_factory_invariant(study, db)
-        await db.commit()
         await db.refresh(study)
         return schemas.grr.GrrStudyResponse.model_validate(study)
     except ValueError as e:
@@ -344,6 +345,8 @@ async def create_bias(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await bias_service.create_study(
             db,
             title=req.title,
@@ -355,10 +358,9 @@ async def create_bias(
             sample_size=req.sample_size,
             study_date=req.study_date,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(study, BiasStudy, db, scope=scope)
         await validate_factory_invariant(study, db)
-        await db.commit()
         await db.refresh(study)
         return schemas.bias.BiasStudyResponse.model_validate(study)
     except ValueError as e:
@@ -587,6 +589,8 @@ async def create_linearity(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await linearity_service.create_study(
             db,
             title=req.title,
@@ -599,10 +603,9 @@ async def create_linearity(
             sample_size_per_reference=req.sample_size_per_reference,
             study_date=req.study_date,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(study, LinearityStudy, db, scope=scope)
         await validate_factory_invariant(study, db)
-        await db.commit()
         await db.refresh(study)
         return schemas.linearity.LinearityStudyResponse.model_validate(study)
     except ValueError as e:
@@ -833,6 +836,8 @@ async def create_stability(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await stability_service.create_study(
             db,
             title=req.title,
@@ -844,10 +849,9 @@ async def create_stability(
             subgroup_size=req.subgroup_size,
             study_date=req.study_date,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(study, StabilityStudy, db, scope=scope)
         await validate_factory_invariant(study, db)
-        await db.commit()
         await db.refresh(study)
         return schemas.stability.StabilityStudyResponse.model_validate(study)
     except ValueError as e:
@@ -1078,6 +1082,8 @@ async def create_attribute(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await attribute_service.create_study(
             db,
             title=req.title,
@@ -1089,10 +1095,9 @@ async def create_attribute(
             known_standard_count=req.known_standard_count,
             study_date=req.study_date,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(study, AttributeStudy, db, scope=scope)
         await validate_factory_invariant(study, db)
-        await db.commit()
         await db.refresh(study)
         return schemas.attribute.AttributeStudyResponse.model_validate(study)
     except ValueError as e:

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.permissions import get_user_permission, PermissionLevel, Module
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import populate_factory_id, validate_factory_invariant
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.supplier import SupplierPPAPElement
 from app.schemas import ppap as ppap_schemas
 from app.services import ppap_service
@@ -125,6 +125,8 @@ async def create_ppap(
         raise HTTPException(status_code=403, detail="需要 PPAP 模块的 CREATE 权限")
 
     try:
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         ppap = await ppap_service.create_ppap(
             db,
             supplier_id=req.supplier_id,
@@ -136,10 +138,9 @@ async def create_ppap(
             product_line_code=req.product_line_code,
             notes=req.notes,
             user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
-        await populate_factory_id(ppap, SupplierPPAPSubmission, db, scope=scope)
         await validate_factory_invariant(ppap, db)
-        await db.commit()
         return _to_response(ppap)
     except ValueError as e:
         raise HTTPException(400, str(e))
