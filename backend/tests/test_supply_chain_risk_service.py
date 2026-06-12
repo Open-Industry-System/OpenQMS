@@ -131,25 +131,45 @@ async def test_advisory_lock_prevents_concurrent(db):
 
 @pytest.mark.asyncio
 async def test_supplier_detail_trend_filters_by_product_line_and_period(db, seed_supplier):
-    """Supplier detail trend filters by product_line_code and truncates at the selected period."""
-    from app.services.supply_chain_risk_map.service import generate_snapshot, get_supplier_detail, current_period
+    """Supplier detail trend filters by product_line_code and truncates at the selected period.
 
-    # Generate 3 months of snapshots for both global and product-line
-    this_month = current_period()
-    # We only have 1 period of data in this test, so verify:
-    # 1) product_line_code filter isolates trend data
-    # 2) trend periods are <= the selected period
-    await generate_snapshot(db, None, this_month)
-    await generate_snapshot(db, "DC-DC-100", this_month)
+    Seeds 3 months of global + product-line snapshots, then requests period="2026-02".
+    Asserts that trend for 2026-02 does NOT include 2026-03 (future month),
+    and that global vs product-line trends are isolated.
+    """
+    from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
+    from app.services.supply_chain_risk_map.service import get_supplier_detail
 
-    # Global detail should only see global snapshots in trend
-    detail_global = await get_supplier_detail(db, seed_supplier.supplier_id, None, this_month)
-    assert detail_global.period == this_month
-    for t in detail_global.trend:
-        assert t.period <= this_month
+    # Seed 3 months of global + DC-DC-100 snapshots manually (can't call generate_snapshot for past months)
+    for period in ["2026-01", "2026-02", "2026-03"]:
+        for plc in [None, "DC-DC-100"]:
+            db.add(SupplyChainRiskSnapshot(
+                snapshot_id=uuid4(),
+                supplier_id=seed_supplier.supplier_id,
+                product_line_code=plc,
+                snapshot_period=period,
+                risk_score=20.0,
+                risk_level="low",
+                quality_score=10.0,
+                delivery_score=5.0,
+                compliance_score=5.0,
+                erp_on_time_rate=90.0,
+                purchase_amount_pct=50.0,
+                open_scar_count=0,
+                ppm_value=500,
+                dimensions={},
+            ))
+    await db.commit()
 
-    # Product-line detail should only see DC-DC-100 snapshots in trend
-    detail_pl = await get_supplier_detail(db, seed_supplier.supplier_id, "DC-DC-100", this_month)
-    assert detail_pl.period == this_month
-    for t in detail_pl.trend:
-        assert t.period <= this_month
+    # Request detail for period 2026-02 — trend must NOT include 2026-03
+    detail_global = await get_supplier_detail(db, seed_supplier.supplier_id, None, "2026-02")
+    global_periods = [t.period for t in detail_global.trend]
+    assert "2026-03" not in global_periods, "Trend should not include months after the selected period"
+    assert "2026-02" in global_periods, "Trend should include the selected period"
+    assert "2026-01" in global_periods, "Trend should include prior periods"
+
+    # Product-line detail should also cap at 2026-02
+    detail_pl = await get_supplier_detail(db, seed_supplier.supplier_id, "DC-DC-100", "2026-02")
+    pl_periods = [t.period for t in detail_pl.trend]
+    assert "2026-03" not in pl_periods, "Product-line trend should not include months after the selected period"
+    assert "2026-02" in pl_periods
