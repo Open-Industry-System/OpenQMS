@@ -14,9 +14,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
-def create_access_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode = {"sub": user_id, "exp": expire, "type": "access"}
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire, "type": "access"})
+    # Add iss/aud for tenant tokens
+    if "tenant_id" in data:
+        to_encode["iss"] = TENANT_ISSUER
+        to_encode["aud"] = TENANT_AUDIENCE
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
@@ -58,7 +66,7 @@ def create_platform_admin_token(admin_id: str, role: str = "superadmin") -> str:
         "exp": expire,
         "type": "access",
     }
-    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def create_tenant_user_token(user_id: str, tenant_id: str, role_id: str, factory_id: str | None = None) -> str:
@@ -74,13 +82,13 @@ def create_tenant_user_token(user_id: str, tenant_id: str, role_id: str, factory
         "exp": expire,
         "type": "access",
     }
-    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def verify_token(token: str) -> dict:
     """Verify and decode a JWT token. Returns the payload dict.
     Raises JWTError on invalid/expired tokens."""
-    return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
 
 
 # JWT issuer/audience constants for cross-domain prevention

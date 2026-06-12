@@ -1,13 +1,13 @@
 """Permission checking utilities."""
 import uuid
 from enum import IntEnum, StrEnum
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, verify_token, TENANT_ISSUER, TENANT_AUDIENCE
 from app.models.user import User
 from app.models.role import RolePermission
 
@@ -52,10 +52,30 @@ class Module(StrEnum):
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    user_id = decode_access_token(credentials.credentials)
+    token = credentials.credentials
+    payload = verify_token(token)
+
+    # --- Tenant JWT validation ---
+    # If request has a resolved tenant, enforce tenant JWT requirements:
+    # - Platform tokens (is_platform_admin) are forbidden on tenant routes
+    # - Only tokens issued by the tenant issuer are accepted
+    # - tenant_id must be present and must match the resolved tenant
+    if request and hasattr(request.state, "tenant") and request.state.tenant:
+        if payload.get("is_platform_admin"):
+            raise HTTPException(status_code=403, detail="Platform token cannot access tenant routes")
+        if payload.get("iss") != TENANT_ISSUER or payload.get("aud") != TENANT_AUDIENCE:
+            raise HTTPException(status_code=403, detail="Invalid tenant token")
+        jwt_tenant_id = payload.get("tenant_id")
+        if not jwt_tenant_id:
+            raise HTTPException(status_code=403, detail="Missing tenant_id")
+        if jwt_tenant_id != str(request.state.tenant.id):
+            raise HTTPException(status_code=403, detail="Token tenant mismatch")
+
+    user_id = payload.get("sub")
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     result = await db.execute(select(User).where(User.user_id == uuid.UUID(user_id)))

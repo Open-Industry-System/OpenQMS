@@ -23,7 +23,7 @@ from app.core.factory_scope import (
     get_user_factory_ids,
     get_user_product_line_codes,
 )
-from app.core.security import verify_token, PLATFORM_ISSUER, PLATFORM_AUDIENCE
+from app.core.security import verify_token, PLATFORM_ISSUER, PLATFORM_AUDIENCE, TENANT_ISSUER, TENANT_AUDIENCE
 from app.database import get_db
 from app.models.user import User
 

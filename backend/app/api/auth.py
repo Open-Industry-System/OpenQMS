@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,12 +68,21 @@ async def build_user_response(user: User, db: AsyncSession) -> UserResponse:
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.username == req.username))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    token = create_access_token(str(user.user_id))
+    # Build JWT payload — include tenant_id when request has a resolved tenant
+    tenant = getattr(request.state, "tenant", None)
+    token_data = {
+        "sub": str(user.user_id),
+        "role_id": str(user.role_id),
+        "factory_id": str(user.factory_id) if user.factory_id else None,
+    }
+    if tenant:
+        token_data["tenant_id"] = str(tenant.id)
+    token = create_access_token(data=token_data)
     refresh_token, refresh_expires = create_refresh_token(str(user.user_id))
     user.refresh_token = refresh_token
     user.refresh_token_expires = refresh_expires
@@ -131,7 +140,7 @@ async def refresh_token(req: RefreshTokenRequest, db: AsyncSession = Depends(get
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     if user.refresh_token_expires and user.refresh_token_expires < datetime.now(timezone.utc):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
-    new_access = create_access_token(str(user.user_id))
+    new_access = create_access_token(data={"sub": str(user.user_id)})
     new_refresh, new_expires = create_refresh_token(str(user.user_id))
     user.refresh_token = new_refresh
     user.refresh_token_expires = new_expires
