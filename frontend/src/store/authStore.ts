@@ -27,17 +27,21 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (username, password) => {
     const resp = await apiLogin({ username, password });
     localStorage.setItem("access_token", resp.access_token);
+    const factoryId = resp.user.factory_scope?.default_factory_id || null;
+    if (factoryId) localStorage.setItem("current_factory_id", factoryId);
+    else localStorage.removeItem("current_factory_id");
     set({
       user: resp.user,
       token: resp.access_token,
       factoryScope: resp.user.factory_scope ?? null,
       factories: resp.user.factories ?? [],
-      currentFactoryId: resp.user.factory_scope?.default_factory_id || null,
+      currentFactoryId: factoryId,
     });
   },
 
   logout: () => {
     localStorage.removeItem("access_token");
+    localStorage.removeItem("current_factory_id");
     set({ user: null, token: null, factoryScope: null, factories: [], currentFactoryId: null });
   },
 
@@ -47,15 +51,19 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       set({ loading: true });
       const user = await getMe();
+      const factoryId = user.factory_scope?.default_factory_id || null;
+      if (factoryId) localStorage.setItem("current_factory_id", factoryId);
+      else localStorage.removeItem("current_factory_id");
       set({
         user,
         loading: false,
         factoryScope: user.factory_scope ?? null,
         factories: user.factories ?? [],
-        currentFactoryId: user.factory_scope?.default_factory_id || null,
+        currentFactoryId: factoryId,
       });
     } catch {
       localStorage.removeItem("access_token");
+      localStorage.removeItem("current_factory_id");
       set({ user: null, token: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
     }
   },
@@ -65,6 +73,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   setCurrentFactoryId: (factoryId) => {
+    if (factoryId) localStorage.setItem("current_factory_id", factoryId);
+    else localStorage.removeItem("current_factory_id");
     set({ currentFactoryId: factoryId });
   },
 }));
