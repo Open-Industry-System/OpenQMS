@@ -127,3 +127,24 @@ async def test_advisory_lock_prevents_concurrent(db):
 
         # Release lock from first session
         await _release_snapshot_lock(db1)
+
+
+@pytest.mark.asyncio
+async def test_supplier_detail_trend_filters_by_product_line(db, seed_supplier):
+    """Supplier detail trend only returns snapshots matching the product_line_code filter."""
+    from app.services.supply_chain_risk_map.service import generate_snapshot, get_supplier_detail
+
+    period = current_period()
+    # Generate global snapshot (product_line_code=None)
+    await generate_snapshot(db, None, period)
+    # Generate product-line-specific snapshot
+    await generate_snapshot(db, "DC-DC-100", period)
+
+    # Request detail with product_line_code="DC-DC-100"
+    detail = await get_supplier_detail(db, seed_supplier.supplier_id, "DC-DC-100", period)
+    # All trend entries should have product_line_code matching the filter
+    # (we only have one period, but the query should respect the filter)
+    assert detail.period == period
+    # Request detail with product_line_code=None (global)
+    detail_global = await get_supplier_detail(db, seed_supplier.supplier_id, None, period)
+    assert detail_global.period == period

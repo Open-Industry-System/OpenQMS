@@ -288,13 +288,19 @@ async def get_supplier_detail(
         for key, val in (snap.dimensions or {}).items()
     }
 
-    # 6-month trend
-    trend_rows = (await db.execute(
+    # 6-month trend (filtered by product_line_code for isolation)
+    trend_query = (
         select(SupplyChainRiskSnapshot)
         .where(SupplyChainRiskSnapshot.supplier_id == supplier_id)
+        .where(
+            SupplyChainRiskSnapshot.product_line_code == product_line_code
+            if product_line_code else
+            SupplyChainRiskSnapshot.product_line_code.is_(None)
+        )
         .order_by(SupplyChainRiskSnapshot.snapshot_period.desc())
         .limit(6)
-    )).scalars().all()
+    )
+    trend_rows = (await db.execute(trend_query)).scalars().all()
     trend = [
         SupplierDimensionTrend(
             period=t.snapshot_period,
