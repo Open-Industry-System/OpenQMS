@@ -8,7 +8,7 @@ from datetime import date
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.models.supplier import Supplier
 from app.models.supplier_risk import SupplierRiskAlert, SupplierRiskConfig
@@ -16,6 +16,7 @@ from app.services.supplier_risk.service import (
     handle_alert,
     create_scar_from_alert,
     create_capa_from_alert,
+    calculate_all_supplier_scores,
 )
 from app.services.supplier_risk.config import get_effective_configs
 
@@ -227,3 +228,79 @@ async def test_create_capa_from_alert_atomic(db, seed_open_alert, admin_user):
     alert = result.scalar_one()
     assert alert.status == "action_taken"
     assert alert.linked_capa_id == capa.report_id
+
+
+# ─── Pure scoring function tests ─────────────────────────────────────────────
+
+
+# Default rule configs matching seed.py's DEFAULT_CONFIGS (10 rules).
+# Inlined here rather than imported because supplier_risk.config does not
+# export DEFAULT_CONFIGS; touching config.py is out of scope for this task.
+_DEFAULT_RULE_CONFIGS = [
+    {"rule_id": "R01", "category": "quality", "weight": 15.0,
+     "thresholds": {"ppm_limit": 1000, "window_days": 90}},
+    {"rule_id": "R02", "category": "quality", "weight": 12.0,
+     "thresholds": {"acceptance_rate_min": 0.9, "decline_ratio": 0.1, "window_days": 90, "compare_window_days": 180}},
+    {"rule_id": "R03", "category": "quality", "weight": 18.0,
+     "thresholds": {"consecutive_batches": 3, "batch_limit": 10}},
+    {"rule_id": "R04", "category": "quality", "weight": 10.0,
+     "thresholds": {"open_days_limit": 30}},
+    {"rule_id": "R05", "category": "quality", "weight": 12.0,
+     "thresholds": {"scar_count_limit": 3, "window_days": 90}},
+    {"rule_id": "R06", "category": "delivery", "weight": 12.0,
+     "thresholds": {"delivery_score_min": 70, "decline_ratio": 0.15}},
+    {"rule_id": "R07", "category": "delivery", "weight": 10.0,
+     "thresholds": {"from_grades": ["A", "B"], "to_grades": ["C", "D"]}},
+    {"rule_id": "R08", "category": "compliance", "weight": 8.0,
+     "thresholds": {"warning_days": [90, 60, 30]}},
+    {"rule_id": "R09", "category": "compliance", "weight": 8.0,
+     "thresholds": {"score_decline_limit": 15}},
+    {"rule_id": "R10", "category": "compliance", "weight": 15.0,
+     "thresholds": {"keywords": ["安全", "安全特性", "safety"]}},
+]
+
+
+@pytest.mark.asyncio
+async def test_calculate_all_supplier_scores_returns_scores_without_side_effects(db, admin_user):
+    """calculate_all_supplier_scores should return scores for all suppliers
+    including low-risk ones, without creating alerts or committing."""
+    # Create an approved supplier
+    supplier = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no="TEST-SCRM-001",
+        name="Test Supplier SCRM",
+        short_name="Test SCRM",
+        status="approved",
+        created_by=admin_user.user_id,
+    )
+    db.add(supplier)
+
+    # Seed global default configs for all 10 rules so the supplier gets scored.
+    for cfg in _DEFAULT_RULE_CONFIGS:
+        db.add(SupplierRiskConfig(
+            rule_id=cfg["rule_id"],
+            enabled=True,
+            thresholds=cfg["thresholds"],
+            weight=cfg["weight"],
+            category=cfg["category"],
+            supplier_id=None,
+            product_line_code=None,
+            updated_by=admin_user.user_id,
+        ))
+    await db.flush()
+
+    # Verify no alerts exist before calling
+    count_before = (await db.execute(
+        select(func.count()).select_from(SupplierRiskAlert)
+    )).scalar()
+
+    result = await calculate_all_supplier_scores(db, product_line_code=None)
+
+    # Verify no alerts were created
+    count_after = (await db.execute(
+        select(func.count()).select_from(SupplierRiskAlert)
+    )).scalar()
+    assert count_after == count_before, "calculate_all_supplier_scores should not create alerts"
+
+    # Verify result includes the supplier (even if low risk)
+    assert any(r["supplier_id"] == supplier.supplier_id for r in result)
