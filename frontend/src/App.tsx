@@ -67,6 +67,11 @@ import ERPMasterDataPage from "./pages/erp/ERPMasterDataPage";
 import ERPSupplyChainPage from "./pages/erp/ERPSupplyChainPage";
 import ERPSalesAndCostPage from "./pages/erp/ERPSalesAndCostPage";
 import ERPTraceabilityPage from "./pages/erp/ERPTraceabilityPage";
+import GroupDashboardPage from "./pages/group/GroupDashboard";
+import FactoryManagementPage from "./pages/group/FactoryManagement";
+import FactoryComparisonPage from "./pages/group/FactoryComparison";
+import GroupSuppliersPage from "./pages/group/GroupSuppliers";
+import GroupAuditsPage from "./pages/group/GroupAudits";
 
 function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
@@ -179,6 +184,12 @@ export default function App() {
         <Route path="/erp/supply-chain" element={<ProtectedRoute requiredModule="erp"><ERPSupplyChainPage /></ProtectedRoute>} />
         <Route path="/erp/commercial" element={<ProtectedRoute requiredModule="erp"><ERPSalesAndCostPage /></ProtectedRoute>} />
         <Route path="/erp/traceability" element={<ProtectedRoute requiredModule="erp"><ERPTraceabilityPage /></ProtectedRoute>} />
+        {/* Group Management */}
+        <Route path="/group/dashboard" element={<ProtectedRoute requiredModule="group"><GroupDashboardPage /></ProtectedRoute>} />
+        <Route path="/group/factories" element={<ProtectedRoute requiredModule="group"><FactoryManagementPage /></ProtectedRoute>} />
+        <Route path="/group/comparison" element={<ProtectedRoute requiredModule="group"><FactoryComparisonPage /></ProtectedRoute>} />
+        <Route path="/group/suppliers" element={<ProtectedRoute requiredModule="group"><GroupSuppliersPage /></ProtectedRoute>} />
+        <Route path="/group/audits" element={<ProtectedRoute requiredModule="group"><GroupAuditsPage /></ProtectedRoute>} />
       </Route>
     </Routes>
   );
