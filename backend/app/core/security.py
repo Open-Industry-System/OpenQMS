@@ -33,6 +33,8 @@ def create_refresh_token(user_id: str, tenant_id: str | None = None) -> tuple[st
     to_encode = {"sub": user_id, "exp": expire, "type": "refresh"}
     if tenant_id:
         to_encode["tenant_id"] = tenant_id
+        to_encode["iss"] = TENANT_ISSUER
+        to_encode["aud"] = TENANT_AUDIENCE
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM), expire
 
 

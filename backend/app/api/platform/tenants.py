@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, func
 
 from app.core.deps import require_platform_admin
@@ -39,5 +39,8 @@ async def create_tenant(
     db=Depends(get_platform_db),
 ):
     """Provision a new tenant (platform admin only)."""
-    tenant = await TenantService.provision(db, request)
+    try:
+        tenant = await TenantService.provision(db, request)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return tenant

@@ -17,6 +17,9 @@ class TenantCreateRequest(BaseModel):
     slug: str = Field(..., pattern=r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
     subdomain: str | None = Field(None, pattern=r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
     plan: str | None = "free"
+    admin_email: str = Field(..., min_length=1, max_length=50)
+    admin_password: str = Field(..., min_length=8, max_length=100)
+    admin_display_name: str | None = Field(None, max_length=100)
 
 
 class TenantResponse(BaseModel):

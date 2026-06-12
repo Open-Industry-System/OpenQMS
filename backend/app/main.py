@@ -61,27 +61,32 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with async_session() as db:
-        result = await db.execute(select(User).where(User.username == "admin"))
-        if not result.scalar_one_or_none():
-            try:
-                admin_role_result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
-                admin_role = admin_role_result.scalar_one_or_none()
-                if admin_role:
-                    db.add(User(
-                        username="admin",
-                        password_hash=hash_password("Admin@2026"),
-                        display_name="系统管理员",
-                        role_id=admin_role.id,
-                    ))
-                    await db.commit()
-                else:
-                    print("WARNING: admin role not found in role_definitions. Run migrations and seed.")
-            except Exception:
-                # role_definitions table may not exist yet (migration not run)
-                # Rollback failed transaction and skip admin creation
-                await db.rollback()
-                print("WARNING: role_definitions table not found. Run 'alembic upgrade head' and seed before using the permission system.")
+    # Legacy single-tenant bootstrap: create default admin user.
+    # In multi-tenant mode, users/role_definitions live in tenant schemas,
+    # so running this against the public schema would fail after platform-only
+    # migrations. Tenant seeding happens during provisioning instead.
+    if settings.TENANT_MODE == "single":
+        async with async_session() as db:
+            result = await db.execute(select(User).where(User.username == "admin"))
+            if not result.scalar_one_or_none():
+                try:
+                    admin_role_result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
+                    admin_role = admin_role_result.scalar_one_or_none()
+                    if admin_role:
+                        db.add(User(
+                            username="admin",
+                            password_hash=hash_password("Admin@2026"),
+                            display_name="系统管理员",
+                            role_id=admin_role.id,
+                        ))
+                        await db.commit()
+                    else:
+                        print("WARNING: admin role not found in role_definitions. Run migrations and seed.")
+                except Exception:
+                    # role_definitions table may not exist yet (migration not run)
+                    # Rollback failed transaction and skip admin creation
+                    await db.rollback()
+                    print("WARNING: role_definitions table not found. Run 'alembic upgrade head' and seed before using the permission system.")
 
     # Initialize LLM provider (non-fatal)
     from app.services.llm_provider import create_llm_provider
@@ -319,10 +324,18 @@ async def lifespan(app: FastAPI):
     # Cancel ERP background tasks
     for task in (erp_sync_task,):
         task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Cancel AQL background tasks
     for task in (aql_expiry_task,):
         task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Cancel risk eval task
     risk_eval_task.cancel()

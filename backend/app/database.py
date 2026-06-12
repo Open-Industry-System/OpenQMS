@@ -52,8 +52,7 @@ async def get_db(request: Request):
             finally:
                 await session.rollback()
                 if tenant:
-                    async with session.begin():
-                        await session.execute(text('RESET search_path'))
+                    await session.execute(text('RESET search_path'))
                 await session.close()
     finally:
         current_tenant_schema.reset(token)
@@ -69,8 +68,7 @@ async def get_platform_db():
             yield session
         finally:
             await session.rollback()
-            async with session.begin():
-                await session.execute(text('RESET search_path'))
+            await session.execute(text('RESET search_path'))
             await session.close()
 
 
@@ -89,8 +87,7 @@ async def get_tenant_aware_session():
         finally:
             await session.rollback()
             if schema:
-                async with session.begin():
-                    await session.execute(text('RESET search_path'))
+                await session.execute(text('RESET search_path'))
             await session.close()
 
 
@@ -118,8 +115,7 @@ async def run_for_each_tenant():
                     yield tenant, db
                 finally:
                     await db.rollback()
-                    async with db.begin():
-                        await db.execute(text('RESET search_path'))
+                    await db.execute(text('RESET search_path'))
                     await db.close()
         finally:
             # reset() can raise ValueError if the token was created in a
