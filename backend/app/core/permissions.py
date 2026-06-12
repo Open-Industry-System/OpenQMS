@@ -47,6 +47,7 @@ class Module(StrEnum):
     PLM = "plm"
     ERP = "erp"
     SUPPLIER_RISK = "supplier_risk"
+    SUPPLY_CHAIN_RISK_MAP = "supply_chain_risk_map"
     GROUP = "group"
 
 

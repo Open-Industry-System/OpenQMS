@@ -73,6 +73,7 @@ from app.models.supplier_risk import SupplierRiskAlert, SupplierRiskConfig, Supp
 from app.models.factory import Factory, UserFactory
 from app.models.group_kpi_snapshot import GroupKPISnapshot
 from app.models.supplier_shared_profile import SupplierSharedProfile
+from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
@@ -146,4 +147,5 @@ __all__ = [
     "UserFactory",
     "GroupKPISnapshot",
     "SupplierSharedProfile",
+    "SupplyChainRiskSnapshot",
 ]

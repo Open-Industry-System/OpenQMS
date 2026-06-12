@@ -50,6 +50,7 @@ from app.api.mes import router as mes_router
 from app.api.plm import router as plm_router
 from app.api.erp import router as erp_router
 from app.api.supplier_risk import router as supplier_risk_router
+from app.api.supply_chain_risk_map import router as supply_chain_risk_map_router
 from app.api.group import router as group_router
 
 logger = logging.getLogger(__name__)
@@ -256,6 +257,11 @@ async def lifespan(app: FastAPI):
 
     risk_eval_task = asyncio.create_task(_risk_eval_loop())
 
+    # Start supply chain risk map snapshot scheduler (hourly)
+    from app.services.supply_chain_risk_map.scheduler import snapshot_loop
+
+    risk_map_snapshot_task = asyncio.create_task(snapshot_loop())
+
     yield
 
     # Cancel cleanup coroutine
@@ -293,6 +299,13 @@ async def lifespan(app: FastAPI):
     risk_eval_task.cancel()
     try:
         await risk_eval_task
+    except asyncio.CancelledError:
+        pass
+
+    # Cancel supply chain risk map snapshot task
+    risk_map_snapshot_task.cancel()
+    try:
+        await risk_map_snapshot_task
     except asyncio.CancelledError:
         pass
 
@@ -354,6 +367,7 @@ app.include_router(mes_router)
 app.include_router(plm_router)
 app.include_router(erp_router)
 app.include_router(supplier_risk_router)
+app.include_router(supply_chain_risk_map_router)
 app.include_router(group_router)
 
 
