@@ -171,6 +171,66 @@ async def evaluate_all_suppliers(
     return results
 
 
+async def calculate_all_supplier_scores(
+    db: AsyncSession,
+    product_line_code: Optional[str] = None,
+) -> list[dict]:
+    """Pure scoring — returns risk scores for all approved suppliers without side effects.
+
+    Unlike evaluate_all_suppliers, this function:
+    - Does NOT write alerts
+    - Does NOT commit
+    - Does NOT send notifications
+    - Returns scores for every approved supplier (evaluate_all_suppliers scores
+      the same set but only upserts alerts for those above threshold)
+    """
+    result = await db.execute(
+        select(Supplier).where(Supplier.status == "approved")
+    )
+    suppliers = list(result.scalars().all())
+    if not suppliers:
+        return []
+
+    supplier_ids = [s.supplier_id for s in suppliers]
+
+    inspections_by_supplier = await _batch_gather_inspections(db, supplier_ids, product_line_code)
+    scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
+    evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
+    certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
+    configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
+
+    results = []
+    for supplier in suppliers:
+        configs = configs_by_supplier.get(supplier.supplier_id)
+        if not configs:
+            continue
+        input_data = SupplierRiskInput(
+            supplier=supplier,
+            inspections=inspections_by_supplier.get(supplier.supplier_id, []),
+            scars=scars_by_supplier.get(supplier.supplier_id, []),
+            evaluations=evaluations_by_supplier.get(supplier.supplier_id, []),
+            certifications=certifications_by_supplier.get(supplier.supplier_id, []),
+        )
+        rule_results, _ = run_all_rules(input_data, configs)
+        risk_score = calculate_risk_score(rule_results, configs)
+
+        results.append({
+            "supplier_id": supplier.supplier_id,
+            "supplier_name": supplier.name,
+            "risk_level": risk_score.risk_level,
+            "risk_score": risk_score.risk_score,
+            "quality_score": risk_score.quality_score,
+            "delivery_score": risk_score.delivery_score,
+            "compliance_score": risk_score.compliance_score,
+            "rule_results": [
+                {"rule_id": r.rule_id, "triggered": r.triggered, "score": r.score,
+                 "detail": r.detail, "category": r.category, "critical": r.critical}
+                for r in rule_results
+            ],
+        })
+    return results
+
+
 # ── Per-supplier gatherers (used by single-supplier evaluation) ────────────────
 
 async def _gather_inspections(db, supplier_id, product_line_code):

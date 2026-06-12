@@ -227,6 +227,7 @@ class ERPIngestionService:
             "unit_price": item.get("unit_price"),
             "currency": item.get("currency"),
             "delivery_date": ERPIngestionService._coerce_date(item.get("delivery_date")),
+            "actual_delivery_date": ERPIngestionService._coerce_date(item.get("actual_delivery_date")),
             "received_quantity": item.get("received_quantity"),
             "status": item.get("status", "draft"),
             "lot_no": item.get("lot_no") or "",
