@@ -7,7 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.security import decode_access_token, verify_token, TENANT_ISSUER, TENANT_AUDIENCE
+from app.core.security import verify_token, TENANT_ISSUER, TENANT_AUDIENCE
+from jose import JWTError
 from app.models.user import User
 from app.models.role import RolePermission
 
@@ -57,7 +58,10 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     token = credentials.credentials
-    payload = verify_token(token)
+    try:
+        payload = verify_token(token)
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     # --- Tenant JWT validation ---
     # If request has a resolved tenant, enforce tenant JWT requirements:

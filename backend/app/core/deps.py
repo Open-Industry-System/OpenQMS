@@ -24,6 +24,7 @@ from app.core.factory_scope import (
     get_user_product_line_codes,
 )
 from app.core.security import verify_token, PLATFORM_ISSUER, PLATFORM_AUDIENCE, TENANT_ISSUER, TENANT_AUDIENCE
+from jose import JWTError
 from app.database import get_db
 from app.models.user import User
 
@@ -72,7 +73,10 @@ async def require_platform_admin(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     token = auth_header[7:]
-    payload = verify_token(token)
+    try:
+        payload = verify_token(token)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     if payload.get("tenant_id"):
         raise HTTPException(status_code=403, detail="Tenant JWT cannot access platform routes")

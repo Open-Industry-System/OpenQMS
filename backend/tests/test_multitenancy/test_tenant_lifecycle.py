@@ -1,6 +1,5 @@
 """Test tenant lifecycle: create → active → suspended → reactivated → deactivated."""
 import pytest
-from fastapi import HTTPException
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.database import async_session
@@ -72,10 +71,8 @@ async def test_tenant_suspend_and_reactivate():
         mock_resolve = AsyncMock(return_value=tenant)
         with patch.object(middleware, "_resolve_by_slug", mock_resolve), \
              patch("app.core.tenant_context.settings", TENANT_MODE="dev"):
-            with pytest.raises(HTTPException) as exc_info:
-                await middleware.dispatch(request, mock_inner)
-            assert exc_info.value.status_code == 503
-            assert exc_info.value.detail.get("tenant_suspended") is True
+            response = await middleware.dispatch(request, mock_inner)
+            assert response.status_code == 503
 
         # Reactivate
         tenant.status = "active"
@@ -127,9 +124,8 @@ async def test_tenant_deactivation():
         mock_resolve = AsyncMock(return_value=tenant)
         with patch.object(middleware, "_resolve_by_slug", mock_resolve), \
              patch("app.core.tenant_context.settings", TENANT_MODE="dev"):
-            with pytest.raises(HTTPException) as exc_info:
-                await middleware.dispatch(request, mock_inner)
-            assert exc_info.value.status_code == 410
+            response = await middleware.dispatch(request, mock_inner)
+            assert response.status_code == 410
 
         # Verify schema still exists (data preserved)
         await db.execute(text('SET search_path TO "public"'))

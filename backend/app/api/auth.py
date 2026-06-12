@@ -130,7 +130,7 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
 
 
 @router.post("/refresh", response_model=RefreshTokenResponse)
-async def refresh_token(req: RefreshTokenRequest, db: AsyncSession = Depends(get_db)):
+async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSession = Depends(get_db)):
     user_id = decode_refresh_token(req.refresh_token)
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
@@ -140,7 +140,16 @@ async def refresh_token(req: RefreshTokenRequest, db: AsyncSession = Depends(get
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     if user.refresh_token_expires and user.refresh_token_expires < datetime.now(timezone.utc):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
-    new_access = create_access_token(data={"sub": str(user.user_id)})
+    # Preserve multi-tenant claims in refreshed token
+    token_data = {
+        "sub": str(user.user_id),
+        "role_id": str(user.role_id),
+        "factory_id": str(user.factory_id) if user.factory_id else None,
+    }
+    tenant = getattr(request.state, "tenant", None)
+    if tenant:
+        token_data["tenant_id"] = str(tenant.id)
+    new_access = create_access_token(data=token_data)
     new_refresh, new_expires = create_refresh_token(str(user.user_id))
     user.refresh_token = new_refresh
     user.refresh_token_expires = new_expires

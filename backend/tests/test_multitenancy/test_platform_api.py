@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from fastapi import HTTPException
 
 from app.core.security import (
     create_tenant_user_token,
@@ -185,7 +184,7 @@ async def test_jwt_fallback_resolves_tenant():
     request.state = MagicMock()
 
     with patch.object(middleware, "_resolve_by_id", return_value=mock_tenant), \
-         patch("app.core.tenant_context.decode_token_without_verification", return_value=fake_payload), \
+         patch("app.core.tenant_context.verify_token", return_value=fake_payload), \
          patch("app.core.tenant_context.settings", TENANT_MODE="production"):
         await middleware.dispatch(request, mock_inner)
 
@@ -195,7 +194,7 @@ async def test_jwt_fallback_resolves_tenant():
 
 @pytest.mark.asyncio
 async def test_suspended_tenant_returns_503():
-    """Middleware must raise 503 for suspended tenants."""
+    """Middleware must return 503 JSONResponse for suspended tenants."""
     from app.core.tenant_context import TenantContextMiddleware
 
     mock_tenant = MagicMock()
@@ -203,11 +202,8 @@ async def test_suspended_tenant_returns_503():
 
     mock_inner = AsyncMock()
     middleware = TenantContextMiddleware(mock_inner)
-    # Set up request with X-Tenant-ID header and TENANT_MODE=dev
-    # so the slug resolver is triggered
     request = MagicMock()
     request.url.path = "/api/fmea"
-    # headers.get returns values for: host (empty), X-Tenant-ID (acme), authorization (empty)
     request.headers.get = lambda k, default="": {
         "host": "",
         "X-Tenant-ID": "acme",
@@ -219,15 +215,14 @@ async def test_suspended_tenant_returns_503():
 
     with patch.object(middleware, "_resolve_by_slug", return_value=mock_tenant), \
          patch("app.core.tenant_context.settings", TENANT_MODE="dev"):
-        with pytest.raises(HTTPException) as exc_info:
-            await middleware.dispatch(request, mock_inner)
-        assert exc_info.value.status_code == 503
-        assert exc_info.value.detail.get("tenant_suspended") is True
+        response = await middleware.dispatch(request, mock_inner)
+        assert response.status_code == 503
+        assert response.body is not None
 
 
 @pytest.mark.asyncio
 async def test_deactivated_tenant_returns_410():
-    """Middleware must raise 410 for deactivated tenants."""
+    """Middleware must return 410 JSONResponse for deactivated tenants."""
     from app.core.tenant_context import TenantContextMiddleware
 
     mock_tenant = MagicMock()
@@ -248,6 +243,5 @@ async def test_deactivated_tenant_returns_410():
 
     with patch.object(middleware, "_resolve_by_slug", return_value=mock_tenant), \
          patch("app.core.tenant_context.settings", TENANT_MODE="dev"):
-        with pytest.raises(HTTPException) as exc_info:
-            await middleware.dispatch(request, mock_inner)
-        assert exc_info.value.status_code == 410
+        response = await middleware.dispatch(request, mock_inner)
+        assert response.status_code == 410

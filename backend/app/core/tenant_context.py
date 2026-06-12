@@ -2,15 +2,16 @@
 import logging
 
 from fastapi import Request, Response
-from fastapi import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 from sqlalchemy import select, text
 
 from app.core.tenant_utils import slug_to_schema_name
 from app.database import async_session
 from app.models.tenant import Tenant
 from app.config import settings
-from app.core.security import decode_token_without_verification
+from app.core.security import verify_token
+from jose import JWTError
 
 logger = logging.getLogger(__name__)
 
@@ -62,39 +63,37 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 tenant = await self._resolve_by_slug(tenant_slug)
 
         # 3. Try JWT tenant_id claim (fallback for authenticated requests)
-        # This is a secondary resolution — the JWT is verified later in deps.py,
-        # but we can use its tenant_id to resolve the tenant when no subdomain
-        # or X-Tenant-ID is available (e.g. API clients using Bearer tokens).
+        # Verify the JWT fully to prevent tenant enumeration attacks — an
+        # unverified token would allow attackers to probe tenant statuses.
         if tenant is None:
             auth_header = request.headers.get("authorization", "")
             if auth_header.startswith("Bearer "):
                 try:
                     token = auth_header[7:]
-                    # Decode without full verification — just extract tenant_id claim.
-                    # Full verification happens in get_current_user / require_platform_admin.
-                    payload = decode_token_without_verification(token)
+                    payload = verify_token(token)
                     jwt_tenant_id = payload.get("tenant_id")
                     if jwt_tenant_id:
                         tenant = await self._resolve_by_id(jwt_tenant_id)
                 except Exception:
                     pass  # Invalid token — will be caught by auth dependency
 
-        # Handle non-active tenant statuses
+        # Handle non-active tenant statuses — use JSONResponse instead of
+        # HTTPException to ensure CORS headers are properly added by outer middleware.
         if tenant is not None:
             if tenant.status == "suspended":
-                raise HTTPException(
+                return JSONResponse(
                     status_code=503,
-                    detail={"message": "租户已暂停", "tenant_suspended": True},
+                    content={"message": "租户已暂停", "tenant_suspended": True},
                 )
             if tenant.status == "deactivated":
-                raise HTTPException(
+                return JSONResponse(
                     status_code=410,
-                    detail={"message": "租户已停用"},
+                    content={"message": "租户已停用"},
                 )
             if tenant.status != "active":
-                raise HTTPException(
+                return JSONResponse(
                     status_code=503,
-                    detail={"message": "租户尚未就绪"},
+                    content={"message": "租户尚未就绪"},
                 )
 
         # Store resolved tenant (or None) in request state
