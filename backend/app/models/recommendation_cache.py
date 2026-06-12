@@ -21,6 +21,9 @@ class RecommendationCache(Base):
     trigger_type: Mapped[str] = mapped_column(String(20), nullable=False)
     context_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     product_line_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     doc_type: Mapped[str] = mapped_column(String(20), nullable=False, default="fmea")
     fmea_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     suggestions: Mapped[list[dict]] = mapped_column(JSONB, nullable=False)

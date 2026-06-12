@@ -317,6 +317,7 @@ async def list_customers(
     page_size: int = 20,
     q: str | None = None,
     segment: str | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[Customer], int]:
     conditions = []
     if q:
@@ -324,6 +325,8 @@ async def list_customers(
         conditions.append(or_(Customer.customer_code.ilike(pattern), Customer.name.ilike(pattern)))
     if segment:
         conditions.append(Customer.segment == segment)
+    if factory_id is not None:
+        conditions.append(Customer.factory_id == factory_id)
 
     query = select(Customer)
     count_query = select(func.count()).select_from(Customer)
@@ -521,10 +524,18 @@ async def list_complaints(
     severity: str | None = None,
     overdue: bool | None = None,
     assignee_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[CustomerComplaint], int]:
     conditions = []
     if product_line:
         conditions.append(CustomerComplaint.product_line_code == product_line)
+    if allowed_product_line_codes is not None:
+        if product_line:
+            # User filter already applied above; verify it's in allowed set
+            pass
+        else:
+            conditions.append(CustomerComplaint.product_line_code.in_(allowed_product_line_codes))
     if customer_id:
         conditions.append(CustomerComplaint.customer_id == customer_id)
     if status:
@@ -550,6 +561,8 @@ async def list_complaints(
                 ),
             )
         )
+    if factory_id is not None:
+        conditions.append(CustomerComplaint.factory_id == factory_id)
 
     query = select(CustomerComplaint)
     count_query = select(func.count()).select_from(CustomerComplaint)
@@ -886,10 +899,15 @@ async def list_rma_records(
     status: str | None = None,
     responsibility: str | None = None,
     assignee_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[RMARecord], int]:
     conditions = []
     if product_line:
         conditions.append(RMARecord.product_line_code == product_line)
+    if allowed_product_line_codes is not None:
+        if not product_line:
+            conditions.append(RMARecord.product_line_code.in_(allowed_product_line_codes))
     if customer_id:
         conditions.append(RMARecord.customer_id == customer_id)
     if complaint_id:
@@ -900,6 +918,8 @@ async def list_rma_records(
         conditions.append(RMARecord.responsibility == responsibility)
     if assignee_id:
         conditions.append(RMARecord.assignee_id == assignee_id)
+    if factory_id is not None:
+        conditions.append(RMARecord.factory_id == factory_id)
 
     query = select(RMARecord)
     count_query = select(func.count()).select_from(RMARecord)
@@ -1355,6 +1375,7 @@ async def dashboard(
     date_from: date | None = None,
     date_to: date | None = None,
     shipment_qty: int | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> dict:
     window_start, window_end = _normalize_window(date_from, date_to)
     complaint_conditions = []
@@ -1365,6 +1386,9 @@ async def dashboard(
     if customer_id:
         complaint_conditions.append(CustomerComplaint.customer_id == customer_id)
         rma_conditions.append(RMARecord.customer_id == customer_id)
+    if factory_id is not None:
+        complaint_conditions.append(CustomerComplaint.factory_id == factory_id)
+        rma_conditions.append(RMARecord.factory_id == factory_id)
     complaint_conditions.append(CustomerComplaint.received_date >= window_start)
     complaint_conditions.append(CustomerComplaint.received_date <= window_end)
     rma_conditions.append(RMARecord.received_date >= window_start)
@@ -1427,6 +1451,8 @@ async def dashboard(
     customer_conditions = []
     if customer_id:
         customer_conditions.append(Customer.customer_id == customer_id)
+    if factory_id is not None:
+        customer_conditions.append(Customer.factory_id == factory_id)
     customers_result = await db.execute(
         select(Customer).where(*customer_conditions).order_by(Customer.name)
     )
@@ -1498,15 +1524,18 @@ async def get_complaints_by_supplier(
 
 # ─── Shipment Records CRUD ───
 
-async def list_shipments(db: AsyncSession, customer_id: uuid.UUID, page: int = 1, page_size: int = 20):
+async def list_shipments(db: AsyncSession, customer_id: uuid.UUID, page: int = 1, page_size: int = 20, factory_id: uuid.UUID | None = None):
     query = select(ShipmentRecord).where(ShipmentRecord.customer_id == customer_id).order_by(ShipmentRecord.shipment_date.desc())
     count_query = select(func.count()).select_from(ShipmentRecord).where(ShipmentRecord.customer_id == customer_id)
+    if factory_id:
+        query = query.where(ShipmentRecord.factory_id == factory_id)
+        count_query = count_query.where(ShipmentRecord.factory_id == factory_id)
     result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
     count_result = await db.execute(count_query)
     return result.scalars().all(), count_result.scalar_one()
 
-async def create_shipment(db: AsyncSession, customer_id: uuid.UUID, data: dict, user_id: uuid.UUID):
-    shipment = ShipmentRecord(shipment_id=uuid.uuid4(), customer_id=customer_id, **data, created_by=user_id)
+async def create_shipment(db: AsyncSession, customer_id: uuid.UUID, data: dict, user_id: uuid.UUID, *, factory_id: uuid.UUID | None = None):
+    shipment = ShipmentRecord(shipment_id=uuid.uuid4(), customer_id=customer_id, **data, created_by=user_id, factory_id=factory_id)
     db.add(shipment)
     audit = AuditLog(table_name="shipment_records", record_id=shipment.shipment_id, action="CREATE", changed_fields=data, operated_by=user_id)
     db.add(audit)

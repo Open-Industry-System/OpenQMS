@@ -61,6 +61,8 @@ async def list_special_characteristics(
     safety_related_only: bool = False,
     approval_status: str | None = None,
     suggested_only: bool = False,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_lines: list[str] | None = None,
 ) -> SCListResponse:
     query = select(SpecialCharacteristic).order_by(SpecialCharacteristic.created_at.desc())
     if sc_type:
@@ -75,6 +77,10 @@ async def list_special_characteristics(
         query = query.where(SpecialCharacteristic.safety_approval_status == approval_status)
     if suggested_only:
         query = query.where(SpecialCharacteristic.is_safety_suggested == True)
+    if factory_id:
+        query = query.where(SpecialCharacteristic.factory_id == factory_id)
+    if allowed_product_lines is not None:
+        query = query.where(SpecialCharacteristic.product_line_code.in_(allowed_product_lines))
     total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar() or 0
     result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
@@ -88,7 +94,7 @@ async def get_special_characteristic(db: AsyncSession, sc_id: uuid.UUID) -> SCRe
     return _to_response(item) if item else None
 
 
-async def create_special_characteristic(db: AsyncSession, data: SCCreate, user_id: uuid.UUID) -> SCResponse:
+async def create_special_characteristic(db: AsyncSession, data: SCCreate, user_id: uuid.UUID, *, factory_id: uuid.UUID | None = None) -> SCResponse:
     sc_code = await generate_sc_code(db)
     item = SpecialCharacteristic(
         sc_code=sc_code, sc_name=data.sc_name, sc_type=data.sc_type,
@@ -96,6 +102,7 @@ async def create_special_characteristic(db: AsyncSession, data: SCCreate, user_i
         spec_requirement=data.spec_requirement, source_fmea_id=data.source_fmea_id,
         source_node_id=data.source_node_id or "", source_type=data.source_type or "PFMEA",
         sop_ref=data.sop_ref, product_line_code=data.product_line_code, created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(item)
     await _create_audit(db, "CREATE", item.sc_id, user_id, {"sc_code": sc_code, "sc_name": data.sc_name})
@@ -339,10 +346,12 @@ async def sync_to_cp(db: AsyncSession, cp_id: uuid.UUID, user_id: uuid.UUID) -> 
     return updated
 
 
-async def get_matrix(db: AsyncSession, product_line: str | None = None) -> MatrixResponse:
+async def get_matrix(db: AsyncSession, product_line: str | None = None, factory_id: uuid.UUID | None = None) -> MatrixResponse:
     query = select(SpecialCharacteristic).order_by(SpecialCharacteristic.created_at)
     if product_line:
         query = query.where(SpecialCharacteristic.product_line_code == product_line)
+    if factory_id:
+        query = query.where(SpecialCharacteristic.factory_id == factory_id)
     result = await db.execute(query)
     all_scs = result.scalars().all()
     roots = [sc for sc in all_scs if sc.parent_sc_id is None]
@@ -587,6 +596,7 @@ def _to_response(sc: SpecialCharacteristic) -> SCResponse:
         cp_item_id=sc.cp_item_id, msa_study_id=sc.msa_study_id,
         msa_status=sc.msa_status or "PENDING", sop_ref=sc.sop_ref,
         product_line_code=sc.product_line_code,
+        factory_id=sc.factory_id,
         is_supplier_shared=sc.is_supplier_shared or False,
         supplier_code=sc.supplier_code, created_by=sc.created_by,
         created_at=sc.created_at,

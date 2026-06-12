@@ -61,6 +61,8 @@ async def list_reviews(
     page_size: int = 20,
     status: str | None = None,
     product_line_code: str | None = None,
+    allowed_product_line_codes: list[str] | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[ManagementReview], int]:
     query = select(ManagementReview)
     count_q = select(func.count()).select_from(ManagementReview)
@@ -71,6 +73,12 @@ async def list_reviews(
     if product_line_code:
         query = query.where(ManagementReview.product_line_code == product_line_code)
         count_q = count_q.where(ManagementReview.product_line_code == product_line_code)
+    elif allowed_product_line_codes is not None:
+        query = query.where(ManagementReview.product_line_code.in_(allowed_product_line_codes))
+        count_q = count_q.where(ManagementReview.product_line_code.in_(allowed_product_line_codes))
+    if factory_id is not None:
+        query = query.where(ManagementReview.factory_id == factory_id)
+        count_q = count_q.where(ManagementReview.factory_id == factory_id)
 
     query = query.order_by(ManagementReview.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -95,6 +103,7 @@ async def create_review(
     chair_person_id: uuid.UUID,
     participants: list[dict] | None,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> ManagementReview:
     doc_no = await _generate_doc_no(db)
     review = ManagementReview(
@@ -107,6 +116,7 @@ async def create_review(
         participants=participants,
         status="draft",
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(review)
     await _audit(db, "CREATE", review.review_id, user_id, {

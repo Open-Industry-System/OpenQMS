@@ -7,9 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.schemas.recommendation import SimilarNodesRequest, SimilarNodesResponse, SimilarNodeMatch
 from app.core.permissions import get_user_permission, Module, PermissionLevel
-from app.core.product_line_filter import enforce_product_line_access
-from app.core.deps import get_current_user, require_admin
-from app.models.user import User
+from app.core.deps import RequestScope, get_request_scope
 from app.graph.repository import FMEAGraphRepository
 from app.graph.deps import get_graph_repository
 
@@ -104,12 +102,23 @@ def _sanitize_global_stats(raw: dict) -> dict:
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
 
+def _check_factory_access(entity, scope: RequestScope):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="FMEA not found")
+
+
 @router.get("/fmea/{fmea_id}/impact/{node_id}")
 async def impact_chain(
     fmea_id: uuid.UUID,
     node_id: str,
     repo: FMEAGraphRepository = Depends(get_graph_repository),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """下游影响链：从指定节点出发追踪失效效应和控制措施。"""
     return await repo.get_impact_chain(fmea_id, node_id)
@@ -120,7 +129,7 @@ async def cause_chain(
     fmea_id: uuid.UUID,
     node_id: str,
     repo: FMEAGraphRepository = Depends(get_graph_repository),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """上游原因链：从指定节点出发追踪失效原因。"""
     return await repo.get_cause_chain(fmea_id, node_id)
@@ -133,7 +142,7 @@ async def similar_nodes(
     product_line_code: str = Query(..., min_length=1, description="产品线代码（必填，租户隔离）"),
     limit: int = Query(20, ge=1, le=100),
     repo: FMEAGraphRepository = Depends(get_graph_repository),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """跨 FMEA 搜索相似节点。product_line_code 必填且不能为空字符串。返回白名单字段。"""
     product_line_code = product_line_code.strip()
@@ -149,7 +158,7 @@ async def similar_nodes(
 async def cross_fmea_stats(
     product_line_code: str = Query(..., min_length=1, description="产品线代码（必填，租户隔离）"),
     repo: FMEAGraphRepository = Depends(get_graph_repository),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """跨 FMEA 聚合统计。product_line_code 必填且不能为空字符串。返回白名单字段。"""
     product_line_code = product_line_code.strip()
@@ -161,12 +170,16 @@ async def cross_fmea_stats(
 @router.get("/global-stats", response_model=GlobalStatsOut, response_model_exclude_none=True)
 async def global_stats(
     request: Request,
+    db: AsyncSession = Depends(get_db),
     repo: FMEAGraphRepository = Depends(get_graph_repository),
-    _user: User = Depends(require_admin),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """跨产品线全局知识库统计（Admin Only）。返回数据已脱敏。
     不接受 product_line_code 参数，传入则返回 400。
     """
+    level = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db)
+    if level < PermissionLevel.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
     if "product_line_code" in request.query_params:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -179,19 +192,21 @@ async def global_stats(
 @router.post("/similar-nodes", response_model=SimilarNodesResponse)
 async def similar_nodes_advanced(
     req: SimilarNodesRequest,
-    repo: FMEAGraphRepository = Depends(get_graph_repository),
-    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    repo: FMEAGraphRepository = Depends(get_graph_repository),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """跨 FMEA 相似节点搜索（增强版，用于调试和预览）。
     无 KNOWLEDGE_GRAPH 权限时，global scope 强制降级为 current_product_line。
     """
 
     # 产品线访问校验
-    await enforce_product_line_access(user, req.product_line_code, db)
+    if scope.pl_scope.mode == "EXPLICIT":
+        if req.product_line_code not in (scope.pl_scope.codes or []):
+            raise HTTPException(status_code=403, detail="No access to this product line")
 
     # scope 强制降级
-    has_kg = await get_user_permission(user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
+    has_kg = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
     effective_scope = "current_product_line" if (not has_kg and req.scope == "global") else req.scope
 
     matches = await repo.find_similar_nodes_advanced(
@@ -232,9 +247,14 @@ async def similar_nodes_advanced(
 @router.post("/rebuild")
 async def trigger_rebuild(
     background_tasks: BackgroundTasks,
-    _user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """触发全量重建 (admin only)。异步执行，秒回防超时。"""
+    level = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db)
+    if level < PermissionLevel.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     async def _do_rebuild():
         from app.services.graph_projection_service import GraphProjectionService
         from app.graph.neo4j_driver import get_neo4j_driver

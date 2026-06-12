@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.core.permissions import require_permission, Module, PermissionLevel
-from app.core.product_line_filter import get_user_product_line_codes
+from app.core.permissions import get_user_permission, Module, PermissionLevel
+from app.core.deps import RequestScope, get_request_scope
 from app.models.user import User
 from app.models.user_dashboard_layout import UserDashboardLayout
 from app.schemas import dashboard_layout as layout_schemas
@@ -14,46 +14,55 @@ from app.services import dashboard_service
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
+def _resolve_filter_codes(scope: RequestScope, product_line: str | None = None) -> tuple[list[str] | None, bool]:
+    """Resolve product line filter codes from scope + optional product_line query param.
+
+    Returns (filter_codes, should_return_empty):
+      - filter_codes: list of codes to filter on, or None for no filter
+      - should_return_empty: True if the user has no access at all
+    """
+    if scope.pl_scope.mode == "NONE":
+        return None, True
+    elif scope.pl_scope.mode == "ALL":
+        if product_line:
+            return [product_line], False
+        return None, False
+    else:  # EXPLICIT
+        if product_line:
+            if product_line not in (scope.pl_scope.codes or []):
+                raise HTTPException(403, f"无权访问产品线 '{product_line}'")
+            return [product_line], False
+        return scope.pl_scope.codes, False
+
+
 @router.get("")
 async def get_dashboard(
     product_line: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    if user.role_definition.bypass_row_level_security:
-        filter_codes = [product_line] if product_line else None
-    else:
-        user_codes = await get_user_product_line_codes(user, db)
-        if not user_codes:
-            return {"kpi": {}, "trends": {}, "alerts": []}
-        if product_line:
-            if product_line not in user_codes:
-                raise HTTPException(403, f"无权访问产品线 '{product_line}'")
-            filter_codes = [product_line]
-        else:
-            filter_codes = user_codes
-    return await dashboard_service.get_dashboard(db, product_line_codes=filter_codes)
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 VIEW 权限")
+    filter_codes, empty = _resolve_filter_codes(scope, product_line)
+    if empty:
+        return {"kpi": {}, "trends": {}, "alerts": []}
+    return await dashboard_service.get_dashboard(db, product_line_codes=filter_codes, factory_id=scope.effective_factory_id)
 
 
 @router.get("/kpi")
 async def get_kpi(
     product_line: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    if user.role_definition.bypass_row_level_security:
-        filter_codes = [product_line] if product_line else None
-    else:
-        user_codes = await get_user_product_line_codes(user, db)
-        if not user_codes:
-            return {}
-        if product_line:
-            if product_line not in user_codes:
-                raise HTTPException(403, f"无权访问产品线 '{product_line}'")
-            filter_codes = [product_line]
-        else:
-            filter_codes = user_codes
-    data = await dashboard_service.get_dashboard(db, product_line_codes=filter_codes)
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 VIEW 权限")
+    filter_codes, empty = _resolve_filter_codes(scope, product_line)
+    if empty:
+        return {}
+    data = await dashboard_service.get_dashboard(db, product_line_codes=filter_codes, factory_id=scope.effective_factory_id)
     return data["kpi"]
 
 
@@ -61,21 +70,15 @@ async def get_kpi(
 async def get_trends(
     product_line: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    if user.role_definition.bypass_row_level_security:
-        filter_codes = [product_line] if product_line else None
-    else:
-        user_codes = await get_user_product_line_codes(user, db)
-        if not user_codes:
-            return {}
-        if product_line:
-            if product_line not in user_codes:
-                raise HTTPException(403, f"无权访问产品线 '{product_line}'")
-            filter_codes = [product_line]
-        else:
-            filter_codes = user_codes
-    data = await dashboard_service.get_dashboard(db, product_line_codes=filter_codes)
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 VIEW 权限")
+    filter_codes, empty = _resolve_filter_codes(scope, product_line)
+    if empty:
+        return {}
+    data = await dashboard_service.get_dashboard(db, product_line_codes=filter_codes, factory_id=scope.effective_factory_id)
     return data["trends"]
 
 
@@ -83,68 +86,62 @@ async def get_trends(
 async def get_alerts(
     product_line: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    if user.role_definition.bypass_row_level_security:
-        filter_codes = [product_line] if product_line else None
-    else:
-        user_codes = await get_user_product_line_codes(user, db)
-        if not user_codes:
-            return {}
-        if product_line:
-            if product_line not in user_codes:
-                raise HTTPException(403, f"无权访问产品线 '{product_line}'")
-            filter_codes = [product_line]
-        else:
-            filter_codes = user_codes
-    return await dashboard_service.get_alerts(db, product_line_codes=filter_codes)
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 VIEW 权限")
+    filter_codes, empty = _resolve_filter_codes(scope, product_line)
+    if empty:
+        return {}
+    return await dashboard_service.get_alerts(db, product_line_codes=filter_codes, factory_id=scope.effective_factory_id)
 
 
 @router.get("/summary")
 async def get_summary(
     product_line: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    if user.role_definition.bypass_row_level_security:
-        filter_codes = [product_line] if product_line else None
-    else:
-        user_codes = await get_user_product_line_codes(user, db)
-        if not user_codes:
-            return {}
-        if product_line:
-            if product_line not in user_codes:
-                raise HTTPException(403, f"无权访问产品线 '{product_line}'")
-            filter_codes = [product_line]
-        else:
-            filter_codes = user_codes
-    return await dashboard_service.get_summary(db, product_line_codes=filter_codes)
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 VIEW 权限")
+    filter_codes, empty = _resolve_filter_codes(scope, product_line)
+    if empty:
+        return {}
+    return await dashboard_service.get_summary(db, product_line_codes=filter_codes, factory_id=scope.effective_factory_id)
 
 
 @router.get("/recent-actions")
 async def get_recent_actions(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    return await dashboard_service.get_recent_actions(db, user.user_id)
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 VIEW 权限")
+    return await dashboard_service.get_recent_actions(db, scope.user.user_id)
 
 @router.get("/layout")
 async def get_layout(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 VIEW 权限")
     result = await db.execute(
-        select(UserDashboardLayout).where(UserDashboardLayout.user_id == user.user_id)
+        select(UserDashboardLayout).where(UserDashboardLayout.user_id == scope.user.user_id)
     )
     layout = result.scalar_one_or_none()
 
     if layout is None:
         from app.services.dashboard_service import get_default_layout
 
-        default_config = await get_default_layout(db, user)
+        default_config = await get_default_layout(db, scope.user)
         return layout_schemas.DashboardLayoutResponse(
             layout_id=None,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
             layout_config=layout_schemas.LayoutConfig.model_validate(default_config),
             created_at=None,
             updated_at=None,
@@ -152,7 +149,7 @@ async def get_layout(
 
     from app.services.dashboard_service import filter_layout_by_permissions
 
-    filtered_config = await filter_layout_by_permissions(layout.layout_config, user, db)
+    filtered_config = await filter_layout_by_permissions(layout.layout_config, scope.user, db)
     return layout_schemas.DashboardLayoutResponse(
         layout_id=layout.layout_id,
         user_id=layout.user_id,
@@ -166,8 +163,11 @@ async def get_layout(
 async def save_layout(
     req: layout_schemas.DashboardLayoutUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 EDIT 权限")
     from app.services.dashboard_service import (
         WIDGET_MIN_SIZES,
         WIDGET_MODULE_MAP,
@@ -190,7 +190,7 @@ async def save_layout(
             raise HTTPException(status_code=400, detail=f"invalid widget type: {widget.type}")
 
         module = WIDGET_MODULE_MAP[widget.type]
-        if not await _user_can_view_module(user, module, db):
+        if not await _user_can_view_module(scope.user, module, db):
             raise HTTPException(status_code=403, detail=f"no permission for widget type: {widget.type}")
 
         min_size = WIDGET_MIN_SIZES.get(widget.type, {"w": 1, "h": 1})
@@ -198,13 +198,13 @@ async def save_layout(
             raise HTTPException(status_code=400, detail=f"widget {widget.type} size below minimum")
 
     result = await db.execute(
-        select(UserDashboardLayout).where(UserDashboardLayout.user_id == user.user_id)
+        select(UserDashboardLayout).where(UserDashboardLayout.user_id == scope.user.user_id)
     )
     layout = result.scalar_one_or_none()
 
     if layout is None:
         layout = UserDashboardLayout(
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
             layout_config=req.layout_config.model_dump(),
         )
         db.add(layout)
@@ -213,7 +213,7 @@ async def save_layout(
         except IntegrityError:
             await db.rollback()
             result = await db.execute(
-                select(UserDashboardLayout).where(UserDashboardLayout.user_id == user.user_id)
+                select(UserDashboardLayout).where(UserDashboardLayout.user_id == scope.user.user_id)
             )
             layout = result.scalar_one_or_none()
             if layout is None:
@@ -240,8 +240,11 @@ async def get_widgets(
     types: str = Query("", description="Comma-separated widget types"),
     product_line: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 VIEW 权限")
     type_list = list(dict.fromkeys(t.strip() for t in (types or "").split(",") if t.strip()))
     if not type_list:
         return layout_schemas.DashboardWidgetsResponse()
@@ -255,31 +258,23 @@ async def get_widgets(
     allowed_types = []
     for widget_type in type_list:
         module = WIDGET_MODULE_MAP[widget_type]
-        if await _user_can_view_module(user, module, db):
+        if await _user_can_view_module(scope.user, module, db):
             allowed_types.append(widget_type)
 
     quality_trend_allowed_modules = set()
     if "quality_trend_ai_summary" in allowed_types:
         for module in ("spc", "capa", "fmea"):
-            if await dashboard_service._user_can_view_module(user, module, db):
+            if await dashboard_service._user_can_view_module(scope.user, module, db):
                 quality_trend_allowed_modules.add(module)
 
-    if user.role_definition.bypass_row_level_security:
-        filter_codes = [product_line] if product_line else None
-    else:
-        user_codes = await get_user_product_line_codes(user, db)
-        if not user_codes:
-            return layout_schemas.DashboardWidgetsResponse()
-        if product_line:
-            if product_line not in user_codes:
-                raise HTTPException(403, f"无权访问产品线 '{product_line}'")
-            filter_codes = [product_line]
-        else:
-            filter_codes = user_codes
+    filter_codes, empty = _resolve_filter_codes(scope, product_line)
+    if empty:
+        return layout_schemas.DashboardWidgetsResponse()
 
     data = await dashboard_service.get_widgets_data(
-        db, allowed_types, filter_codes, user.user_id,
+        db, allowed_types, filter_codes, scope.user.user_id,
         quality_trend_allowed_modules=quality_trend_allowed_modules,
+        factory_id=scope.effective_factory_id,
     )
     return layout_schemas.DashboardWidgetsResponse(**data)
 
@@ -306,24 +301,19 @@ async def interpret_quality_trend(
     req: QualityTrendInterpretRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.DASHBOARD, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    if user.role_definition.bypass_row_level_security:
-        filter_codes = [req.product_line] if req.product_line else []
-    else:
-        user_codes = await get_user_product_line_codes(user, db)
-        if not user_codes:
-            raise HTTPException(status_code=403, detail="无可访问产品线")
-        if req.product_line:
-            if req.product_line not in user_codes:
-                raise HTTPException(status_code=403, detail=f"无权访问产品线 '{req.product_line}'")
-            filter_codes = [req.product_line]
-        else:
-            filter_codes = user_codes
+    level = await get_user_permission(scope.user, Module.DASHBOARD, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 dashboard 模块的 VIEW 权限")
+
+    filter_codes, empty = _resolve_filter_codes(scope, req.product_line)
+    if empty:
+        raise HTTPException(status_code=403, detail="无可访问产品线")
 
     quality_trend_allowed_modules = set()
     for module in ("spc", "capa", "fmea"):
-        if await dashboard_service._user_can_view_module(user, module, db):
+        if await dashboard_service._user_can_view_module(scope.user, module, db):
             quality_trend_allowed_modules.add(module)
 
     scope_description = build_scope_description(filter_codes or None)
@@ -333,12 +323,12 @@ async def interpret_quality_trend(
     try:
         return await interpret_quality_trend_service(
             db=db,
-            user_id=str(user.user_id),
+            user_id=str(scope.user.user_id),
             llm_provider=llm_provider,
             filter_codes=filter_codes,
             allowed_modules=quality_trend_allowed_modules,
             scope_description=scope_description,
-            selected_product_line=filter_codes[0] if len(filter_codes) == 1 else None,
+            selected_product_line=filter_codes[0] if filter_codes and len(filter_codes) == 1 else None,
             scope_hash=scope_hash,
         )
     except RateLimitError as exc:

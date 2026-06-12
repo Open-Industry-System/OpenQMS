@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,7 +79,7 @@ async def get_default_layout(db: AsyncSession, user) -> dict:
     return await filter_layout_by_permissions(DEFAULT_LAYOUT, user, db)
 
 
-async def get_dashboard(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None) -> dict:
+async def get_dashboard(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None, factory_id: uuid.UUID | None = None) -> dict:
     now = datetime.now(timezone.utc)
 
     # Resolve effective product line codes
@@ -95,6 +96,10 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None, produ
     if codes:
         fmea_base = fmea_base.where(FMEADocument.product_line_code.in_(codes))
         capa_base = capa_base.where(CAPAEightD.product_line_code.in_(codes))
+
+    if factory_id is not None:
+        fmea_base = fmea_base.where(FMEADocument.factory_id == factory_id)
+        capa_base = capa_base.where(CAPAEightD.factory_id == factory_id)
 
     total_fmea = await db.scalar(fmea_base)
     approved_fmea = await db.scalar(
@@ -119,6 +124,8 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None, produ
     fmea_query = select(FMEADocument.fmea_id, FMEADocument.graph_data)
     if codes:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(codes))
+    if factory_id is not None:
+        fmea_query = fmea_query.where(FMEADocument.factory_id == factory_id)
     result = await db.execute(fmea_query)
     all_docs = result.all()
 
@@ -151,6 +158,8 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None, produ
     sc_base = select(func.count(SpecialCharacteristic.sc_id))
     if codes:
         sc_base = sc_base.where(SpecialCharacteristic.product_line_code.in_(codes))
+    if factory_id is not None and hasattr(SpecialCharacteristic, "factory_id"):
+        sc_base = sc_base.where(SpecialCharacteristic.factory_id == factory_id)
 
     total_safety = await db.scalar(
         sc_base.where(SpecialCharacteristic.is_safety_related == True)
@@ -166,6 +175,8 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None, produ
     mr_base = select(func.count(ManagementReview.review_id))
     if codes:
         mr_base = mr_base.where(ManagementReview.product_line_code.in_(codes))
+    if factory_id is not None and hasattr(ManagementReview, "factory_id"):
+        mr_base = mr_base.where(ManagementReview.factory_id == factory_id)
 
     total_reviews = await db.scalar(mr_base) or 0
     closed_reviews = await db.scalar(
@@ -220,7 +231,7 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None, produ
     }
 
 
-async def get_summary(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None) -> dict:
+async def get_summary(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None, factory_id: uuid.UUID | None = None) -> dict:
     now = datetime.now(timezone.utc)
 
     # Resolve effective product line codes
@@ -236,6 +247,8 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
     )
     if codes:
         fmea_pending = fmea_pending.where(FMEADocument.product_line_code.in_(codes))
+    if factory_id is not None:
+        fmea_pending = fmea_pending.where(FMEADocument.factory_id == factory_id)
     fmea_pending_count = await db.scalar(fmea_pending) or 0
 
     capa_pending = select(func.count(CAPAEightD.report_id)).where(
@@ -243,6 +256,8 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
     )
     if codes:
         capa_pending = capa_pending.where(CAPAEightD.product_line_code.in_(codes))
+    if factory_id is not None:
+        capa_pending = capa_pending.where(CAPAEightD.factory_id == factory_id)
     capa_pending_count = await db.scalar(capa_pending) or 0
 
     from app.models.customer_quality import CustomerComplaint
@@ -254,6 +269,8 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
         complaint_pending = complaint_pending.where(
             CustomerComplaint.product_line_code.in_(codes)
         )
+    if factory_id is not None and hasattr(CustomerComplaint, "factory_id"):
+        complaint_pending = complaint_pending.where(CustomerComplaint.factory_id == factory_id)
     complaint_pending_count = await db.scalar(complaint_pending) or 0
 
     pending_actions = fmea_pending_count + capa_pending_count + complaint_pending_count
@@ -264,6 +281,8 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
     )
     if codes:
         overdue_capa_q = overdue_capa_q.where(CAPAEightD.product_line_code.in_(codes))
+    if factory_id is not None:
+        overdue_capa_q = overdue_capa_q.where(CAPAEightD.factory_id == factory_id)
     overdue_tasks = await db.scalar(overdue_capa_q) or 0
 
     from app.utils.fmea_graph import build_rpn_rows
@@ -271,6 +290,8 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
     fmea_query = select(FMEADocument.fmea_id, FMEADocument.graph_data)
     if codes:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(codes))
+    if factory_id is not None:
+        fmea_query = fmea_query.where(FMEADocument.factory_id == factory_id)
     result = await db.execute(fmea_query)
     all_docs = result.all()
 
@@ -303,6 +324,9 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
     if codes:
         this_month = this_month.where(FMEADocument.product_line_code.in_(codes))
         last_month = last_month.where(FMEADocument.product_line_code.in_(codes))
+    if factory_id is not None:
+        this_month = this_month.where(FMEADocument.factory_id == factory_id)
+        last_month = last_month.where(FMEADocument.factory_id == factory_id)
 
     this_count = await db.scalar(this_month) or 0
     last_count = await db.scalar(last_month) or 0
@@ -315,7 +339,7 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
     }
 
 
-async def get_alerts(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None) -> dict:
+async def get_alerts(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None, factory_id: uuid.UUID | None = None) -> dict:
     from app.utils.fmea_graph import build_rpn_rows
     from app.models.supplier import Supplier
 
@@ -332,6 +356,8 @@ async def get_alerts(db: AsyncSession, product_line: str | None = None, product_
     fmea_query = select(FMEADocument.fmea_id, FMEADocument.document_no, FMEADocument.graph_data)
     if codes:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(codes))
+    if factory_id is not None:
+        fmea_query = fmea_query.where(FMEADocument.factory_id == factory_id)
     result = await db.execute(fmea_query)
     all_docs = result.all()
 
@@ -370,6 +396,8 @@ async def get_alerts(db: AsyncSession, product_line: str | None = None, product_
     )
     if codes:
         capa_query = capa_query.where(CAPAEightD.product_line_code.in_(codes))
+    if factory_id is not None:
+        capa_query = capa_query.where(CAPAEightD.factory_id == factory_id)
     capa_result = await db.execute(capa_query)
     overdue_capas = [
         {
@@ -399,6 +427,8 @@ async def get_alerts(db: AsyncSession, product_line: str | None = None, product_
     )
     if codes:
         ppm_query = ppm_query.where(IqcInspection.product_line_code.in_(codes))
+    if factory_id is not None and hasattr(IqcInspection, "factory_id"):
+        ppm_query = ppm_query.where(IqcInspection.factory_id == factory_id)
     ppm_result = await db.execute(ppm_query)
 
     high_ppm_suppliers = []
@@ -465,6 +495,7 @@ async def get_widgets_data(
     product_line_codes: list[str] | None,
     user_id: str,
     quality_trend_allowed_modules: set[str] | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> dict:
     result = {
         "kpi": {},
@@ -490,7 +521,7 @@ async def get_widgets_data(
 
     if needs_kpi:
         try:
-            summary = await get_summary(db, product_line_codes=product_line_codes)
+            summary = await get_summary(db, product_line_codes=product_line_codes, factory_id=factory_id)
             result["kpi"] = {
                 "pending_actions": summary.get("pending_actions", 0),
                 "overdue_tasks": summary.get("overdue_tasks", 0),
@@ -502,7 +533,7 @@ async def get_widgets_data(
 
     if needs_alerts:
         try:
-            alerts = await get_alerts(db, product_line_codes=product_line_codes)
+            alerts = await get_alerts(db, product_line_codes=product_line_codes, factory_id=factory_id)
             alert_payload_map = {
                 "alert_high_rpn_fmea": "high_rpn_fmeas",
                 "alert_overdue_capa": "overdue_capas",

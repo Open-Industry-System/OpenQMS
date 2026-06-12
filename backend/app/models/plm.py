@@ -35,6 +35,9 @@ class PLMConnection(Base):
     product_line_code: Mapped[str] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=False
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
@@ -79,6 +82,9 @@ class PLMPart(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )  # Nullable because source may omit; services should fill or filter via connection product line.
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     connection: Mapped["PLMConnection"] = relationship(back_populates="parts")
@@ -120,6 +126,9 @@ class PLMBOM(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )  # Nullable because source may omit; services should fill or filter via connection product line.
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     connection: Mapped["PLMConnection"] = relationship(back_populates="boms")
@@ -156,6 +165,9 @@ class PLMChangeOrder(Base):
     product_line_code: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=True
     )  # Nullable because source may omit; services should fill or filter via connection product line.
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     plm_raw_data: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     connection: Mapped["PLMConnection"] = relationship(back_populates="change_orders")
@@ -178,6 +190,9 @@ class PLMSyncJob(Base):
         UUID(as_uuid=True),
         ForeignKey("plm_connections.connection_id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     data_type: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default=text("'pending'"))
@@ -211,6 +226,9 @@ class PLMPushOutbox(Base):
         UUID(as_uuid=True),
         ForeignKey("plm_connections.connection_id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'"))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default=text("'pending'"))
@@ -259,6 +277,9 @@ class PLMChangeImpactTask(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
 
     change_order: Mapped["PLMChangeOrder"] = relationship(back_populates="impact_task", uselist=False)
 
@@ -284,6 +305,9 @@ class PLMPartFMEALink(Base):
     )
     node_id: Mapped[str] = mapped_column(String(128), nullable=False)
     link_type: Mapped[str] = mapped_column(String(20), nullable=False, default="auto_import", server_default=text("'auto_import'"))
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -319,6 +343,9 @@ class PLMPartSCLink(Base):
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     product_line_code: Mapped[str] = mapped_column(
         String(50), ForeignKey("product_lines.code"), nullable=False
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

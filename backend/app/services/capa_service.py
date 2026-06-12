@@ -22,6 +22,7 @@ async def list_capas(
     overdue: bool = False,
     pending_action: bool = False,
     allowed_product_line_codes: list[str] | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[CAPAEightD], int]:
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
@@ -40,6 +41,10 @@ async def list_capas(
     if allowed_product_line_codes is not None:
         query = query.where(CAPAEightD.product_line_code.in_(allowed_product_line_codes))
         count_query = count_query.where(CAPAEightD.product_line_code.in_(allowed_product_line_codes))
+
+    if factory_id is not None:
+        query = query.where(CAPAEightD.factory_id == factory_id)
+        count_query = count_query.where(CAPAEightD.factory_id == factory_id)
 
     if overdue:
         query = query.where(
@@ -84,6 +89,7 @@ async def create_capa(
     due_date,
     user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
+    factory_id: uuid.UUID | None = None,
 ) -> CAPAEightD:
     await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
@@ -102,6 +108,7 @@ async def create_capa(
         due_date=due_date,
         product_line_code=product_line_code,
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(capa)
 
@@ -141,6 +148,7 @@ async def _create_capa_without_commit(
     due_date,
     user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
+    factory_id: uuid.UUID | None = None,
 ) -> CAPAEightD:
     """Create CAPA without committing — caller must commit."""
     await validate_product_line(db, product_line_code)
@@ -160,6 +168,7 @@ async def _create_capa_without_commit(
         due_date=due_date,
         product_line_code=product_line_code,
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(capa)
 

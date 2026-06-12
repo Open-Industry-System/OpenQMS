@@ -21,6 +21,7 @@ async def list_fmeas(
     product_line: str | None = None,
     high_rpn: bool = False,
     allowed_product_line_codes: list[str] | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[FMEADocument], int]:
     query = select(FMEADocument)
     count_query = select(func.count(FMEADocument.fmea_id))
@@ -36,6 +37,10 @@ async def list_fmeas(
     if allowed_product_line_codes is not None:
         query = query.where(FMEADocument.product_line_code.in_(allowed_product_line_codes))
         count_query = count_query.where(FMEADocument.product_line_code.in_(allowed_product_line_codes))
+
+    if factory_id is not None:
+        query = query.where(FMEADocument.factory_id == factory_id)
+        count_query = count_query.where(FMEADocument.factory_id == factory_id)
 
     if high_rpn:
         from app.utils.fmea_graph import build_rpn_rows
@@ -77,6 +82,7 @@ async def get_fmea(db: AsyncSession, fmea_id: uuid.UUID) -> FMEADocument | None:
 async def create_fmea(
     db: AsyncSession, title: str, document_no: str, fmea_type: str, user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
+    factory_id: uuid.UUID | None = None,
 ) -> FMEADocument:
     await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
@@ -118,6 +124,7 @@ async def create_fmea(
         created_by=user_id,
         updated_by=user_id,
         graph_data=graph_data,  # Inject template graph
+        factory_id=factory_id,
     )
     db.add(fmea)
 

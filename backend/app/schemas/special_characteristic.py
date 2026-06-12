@@ -50,6 +50,7 @@ class SCResponse(BaseModel):
     msa_status: str | None = "PENDING"
     sop_ref: str | None = None
     product_line_code: str
+    factory_id: uuid.UUID | None = None
     is_supplier_shared: bool = False
     supplier_code: str | None = None
     created_by: uuid.UUID | None = None

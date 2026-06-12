@@ -43,6 +43,8 @@ class UserResponse(BaseModel):
     bypass_row_level_security: bool = False
     auditor_info: dict | None = None
     is_active: bool
+    factory_scope: dict | None = None   # {"accessible_factory_ids": [...]|null, "default_factory_id": "..."}
+    factories: list[dict] = Field(default_factory=list)  # [{"id": ..., "code": ..., "name": ..., ...}]
 
     model_config = {"from_attributes": True}
 

@@ -38,6 +38,8 @@ async def list_quality_goals(
     product_line_code: str | None = None,
     status: str | None = None,
     period: str | None = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_lines: list[str] | None = None,
 ) -> tuple[list[QualityGoal], int]:
     query = select(QualityGoal)
     count_query = select(func.count()).select_from(QualityGoal)
@@ -54,6 +56,12 @@ async def list_quality_goals(
     if period:
         query = query.where(QualityGoal.period == period)
         count_query = count_query.where(QualityGoal.period == period)
+    if factory_id:
+        query = query.where(QualityGoal.factory_id == factory_id)
+        count_query = count_query.where(QualityGoal.factory_id == factory_id)
+    if allowed_product_lines is not None:
+        query = query.where(QualityGoal.product_line_code.in_(allowed_product_lines))
+        count_query = count_query.where(QualityGoal.product_line_code.in_(allowed_product_lines))
 
     query = query.order_by(QualityGoal.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -83,6 +91,7 @@ async def create_quality_goal(
     owner_id: uuid.UUID,
     description: str | None,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> QualityGoal:
     await _validate_hierarchy(db, parent_id, level)
     doc_no = await _generate_doc_no(db)
@@ -99,6 +108,7 @@ async def create_quality_goal(
         owner_id=owner_id,
         description=description,
         status="draft",
+        factory_id=factory_id,
     )
     db.add(goal)
 
@@ -338,23 +348,30 @@ async def update_actual_value(
     return goal
 
 
-async def get_quality_goal_stats(db: AsyncSession) -> dict:
-    total_result = await db.execute(select(func.count()).select_from(QualityGoal))
+async def get_quality_goal_stats(db: AsyncSession, factory_id: uuid.UUID | None = None) -> dict:
+    base_q = select(func.count()).select_from(QualityGoal)
+    if factory_id:
+        base_q = base_q.where(QualityGoal.factory_id == factory_id)
+
+    total_result = await db.execute(base_q)
     total = total_result.scalar() or 0
 
-    active_result = await db.execute(
-        select(func.count()).select_from(QualityGoal).where(QualityGoal.status == "active")
-    )
+    active_q = select(func.count()).select_from(QualityGoal).where(QualityGoal.status == "active")
+    if factory_id:
+        active_q = active_q.where(QualityGoal.factory_id == factory_id)
+    active_result = await db.execute(active_q)
     active = active_result.scalar() or 0
 
-    pending_result = await db.execute(
-        select(func.count()).select_from(QualityGoal).where(QualityGoal.status == "pending")
-    )
+    pending_q = select(func.count()).select_from(QualityGoal).where(QualityGoal.status == "pending")
+    if factory_id:
+        pending_q = pending_q.where(QualityGoal.factory_id == factory_id)
+    pending_result = await db.execute(pending_q)
     pending = pending_result.scalar() or 0
 
-    active_goals_result = await db.execute(
-        select(QualityGoal).where(QualityGoal.status == "active")
-    )
+    active_goals_q = select(QualityGoal).where(QualityGoal.status == "active")
+    if factory_id:
+        active_goals_q = active_goals_q.where(QualityGoal.factory_id == factory_id)
+    active_goals_result = await db.execute(active_goals_q)
     active_goals = active_goals_result.scalars().all()
 
     achieved = 0

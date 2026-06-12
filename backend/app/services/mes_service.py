@@ -39,14 +39,21 @@ class MESIngestionService:
         if not connection_id:
             raise ValueError("connection_id is required")
 
+        # Load connection to get factory_id (background sync has no request context)
+        conn_result = await db.execute(
+            select(MESConnection).where(MESConnection.connection_id == uuid.UUID(connection_id))
+        )
+        connection = conn_result.scalar_one_or_none()
+        factory_id = connection.factory_id if connection else None
+
         if data_type == "measurement":
-            return await MESIngestionService._ingest_measurement(db, data)
+            return await MESIngestionService._ingest_measurement(db, data, factory_id=factory_id)
         if data_type == "production_order":
-            return await MESIngestionService._ingest_production_order(db, data)
+            return await MESIngestionService._ingest_production_order(db, data, factory_id=factory_id)
         if data_type == "equipment_status":
-            return await MESIngestionService._ingest_equipment_status(db, data)
+            return await MESIngestionService._ingest_equipment_status(db, data, factory_id=factory_id)
         if data_type == "scrap_record":
-            return await MESIngestionService._ingest_scrap_record(db, data)
+            return await MESIngestionService._ingest_scrap_record(db, data, factory_id=factory_id)
 
         raise ValueError(f"Unsupported data_type: {data_type}")
 
@@ -55,7 +62,7 @@ class MESIngestionService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _ingest_measurement(db: AsyncSession, data: dict) -> dict:
+    async def _ingest_measurement(db: AsyncSession, data: dict, factory_id: uuid.UUID | None = None) -> dict:
         """Atomic measurement ingestion:
         1. INSERT mes_measurement_ingestions ON CONFLICT DO NOTHING
         2. If duplicate -> skip
@@ -85,18 +92,22 @@ class MESIngestionService:
             )
 
         # 2. Deduplication insert
+        ingest_values = {
+                "connection_id": connection_id,
+                "external_id": external_id,
+                "order_no": data.get("order_no"),
+                "ic_code": ic_code,
+                "mes_raw_data": data.get("raw_data"),
+                "source_sampled_at": data["sampled_at"],
+                "source_updated_at": data.get("source_updated_at"),
+                "product_line_code": product_line_code,
+        }
+        if factory_id is not None:
+            ingest_values["factory_id"] = factory_id
+
         ingest_stmt = (
             pg_insert(MESMeasurementIngestion)
-            .values(
-                connection_id=connection_id,
-                external_id=external_id,
-                order_no=data.get("order_no"),
-                ic_code=ic_code,
-                mes_raw_data=data.get("raw_data"),
-                source_sampled_at=data["sampled_at"],
-                source_updated_at=data.get("source_updated_at"),
-                product_line_code=product_line_code,
-            )
+            .values(**ingest_values)
             .on_conflict_do_nothing(
                 index_elements=["connection_id", "external_id"]
             )
@@ -185,7 +196,7 @@ class MESIngestionService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _ingest_production_order(db: AsyncSession, data: dict) -> dict:
+    async def _ingest_production_order(db: AsyncSession, data: dict, factory_id: uuid.UUID | None = None) -> dict:
         """UPSERT production order with ON CONFLICT (connection_id, order_no) DO UPDATE.
         Backfills scrap records' order_id via (connection_id, order_no)."""
         connection_id = uuid.UUID(data["connection_id"]) if isinstance(data["connection_id"], str) else data["connection_id"]
@@ -205,24 +216,31 @@ class MESIngestionService:
             "product_line_code": data.get("product_line_code"),
             "mes_raw_data": data.get("raw_data"),
         }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
+
+        # Build set_ from values excluding index elements
+        update_set = {
+            "product_model": pg_insert(MESProductionOrder).excluded.product_model,
+            "process_route": pg_insert(MESProductionOrder).excluded.process_route,
+            "planned_qty": pg_insert(MESProductionOrder).excluded.planned_qty,
+            "actual_qty": pg_insert(MESProductionOrder).excluded.actual_qty,
+            "status": pg_insert(MESProductionOrder).excluded.status,
+            "started_at": pg_insert(MESProductionOrder).excluded.started_at,
+            "completed_at": pg_insert(MESProductionOrder).excluded.completed_at,
+            "source_updated_at": pg_insert(MESProductionOrder).excluded.source_updated_at,
+            "product_line_code": pg_insert(MESProductionOrder).excluded.product_line_code,
+            "mes_raw_data": pg_insert(MESProductionOrder).excluded.mes_raw_data,
+        }
+        if factory_id is not None:
+            update_set["factory_id"] = pg_insert(MESProductionOrder).excluded.factory_id
 
         stmt = (
             pg_insert(MESProductionOrder)
             .values(**values)
             .on_conflict_do_update(
                 index_elements=["connection_id", "order_no"],
-                set_={
-                    "product_model": pg_insert(MESProductionOrder).excluded.product_model,
-                    "process_route": pg_insert(MESProductionOrder).excluded.process_route,
-                    "planned_qty": pg_insert(MESProductionOrder).excluded.planned_qty,
-                    "actual_qty": pg_insert(MESProductionOrder).excluded.actual_qty,
-                    "status": pg_insert(MESProductionOrder).excluded.status,
-                    "started_at": pg_insert(MESProductionOrder).excluded.started_at,
-                    "completed_at": pg_insert(MESProductionOrder).excluded.completed_at,
-                    "source_updated_at": pg_insert(MESProductionOrder).excluded.source_updated_at,
-                    "product_line_code": pg_insert(MESProductionOrder).excluded.product_line_code,
-                    "mes_raw_data": pg_insert(MESProductionOrder).excluded.mes_raw_data,
-                },
+                set_=update_set,
             )
             .returning(MESProductionOrder.order_id)
         )
@@ -247,28 +265,32 @@ class MESIngestionService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _ingest_equipment_status(db: AsyncSession, data: dict) -> dict:
+    async def _ingest_equipment_status(db: AsyncSession, data: dict, factory_id: uuid.UUID | None = None) -> dict:
         """INSERT equipment status ON CONFLICT DO NOTHING."""
         connection_id = uuid.UUID(data["connection_id"]) if isinstance(data["connection_id"], str) else data["connection_id"]
         external_id = data["external_id"]
 
+        values = {
+            "connection_id": connection_id,
+            "external_id": external_id,
+            "equipment_code": data["equipment_code"],
+            "equipment_name": data.get("equipment_name"),
+            "status": data["status"],
+            "availability": data.get("availability"),
+            "performance": data.get("performance"),
+            "quality": data.get("quality"),
+            "oee": data.get("oee"),
+            "downtime_reason": data.get("downtime_reason"),
+            "recorded_at": data["recorded_at"],
+            "product_line_code": data.get("product_line_code"),
+            "mes_raw_data": data.get("raw_data"),
+        }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
+
         stmt = (
             pg_insert(MESEquipmentStatus)
-            .values(
-                connection_id=connection_id,
-                external_id=external_id,
-                equipment_code=data["equipment_code"],
-                equipment_name=data.get("equipment_name"),
-                status=data["status"],
-                availability=data.get("availability"),
-                performance=data.get("performance"),
-                quality=data.get("quality"),
-                oee=data.get("oee"),
-                downtime_reason=data.get("downtime_reason"),
-                recorded_at=data["recorded_at"],
-                product_line_code=data.get("product_line_code"),
-                mes_raw_data=data.get("raw_data"),
-            )
+            .values(**values)
             .on_conflict_do_nothing(
                 index_elements=["connection_id", "external_id"]
             )
@@ -287,7 +309,7 @@ class MESIngestionService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _ingest_scrap_record(db: AsyncSession, data: dict) -> dict:
+    async def _ingest_scrap_record(db: AsyncSession, data: dict, factory_id: uuid.UUID | None = None) -> dict:
         """UPSERT scrap record. Resolves order_no -> order_id if possible.
         ON CONFLICT only backfills order_id/order_no via COALESCE."""
         connection_id = uuid.UUID(data["connection_id"]) if isinstance(data["connection_id"], str) else data["connection_id"]
@@ -305,36 +327,44 @@ class MESIngestionService:
             )
             order_id = order_result.scalar_one_or_none()
 
+        values = {
+            "connection_id": connection_id,
+            "external_id": external_id,
+            "order_no": order_no,
+            "order_id": order_id,
+            "equipment_code": data.get("equipment_code"),
+            "defect_type": data["defect_type"],
+            "defect_category": data.get("defect_category"),
+            "defect_qty": data["defect_qty"],
+            "total_qty": data["total_qty"],
+            "defect_description": data.get("defect_description"),
+            "recorded_at": data["recorded_at"],
+            "source_updated_at": data.get("source_updated_at"),
+            "product_line_code": data.get("product_line_code"),
+            "mes_raw_data": data.get("raw_data"),
+        }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
+
+        update_set = {
+            "order_id": func.coalesce(
+                MESScrapRecord.order_id,
+                pg_insert(MESScrapRecord).excluded.order_id,
+            ),
+            "order_no": func.coalesce(
+                MESScrapRecord.order_no,
+                pg_insert(MESScrapRecord).excluded.order_no,
+            ),
+        }
+        if factory_id is not None:
+            update_set["factory_id"] = pg_insert(MESScrapRecord).excluded.factory_id
+
         stmt = (
             pg_insert(MESScrapRecord)
-            .values(
-                connection_id=connection_id,
-                external_id=external_id,
-                order_no=order_no,
-                order_id=order_id,
-                equipment_code=data.get("equipment_code"),
-                defect_type=data["defect_type"],
-                defect_category=data.get("defect_category"),
-                defect_qty=data["defect_qty"],
-                total_qty=data["total_qty"],
-                defect_description=data.get("defect_description"),
-                recorded_at=data["recorded_at"],
-                source_updated_at=data.get("source_updated_at"),
-                product_line_code=data.get("product_line_code"),
-                mes_raw_data=data.get("raw_data"),
-            )
+            .values(**values)
             .on_conflict_do_update(
                 index_elements=["connection_id", "external_id"],
-                set_={
-                    "order_id": func.coalesce(
-                        MESScrapRecord.order_id,
-                        pg_insert(MESScrapRecord).excluded.order_id,
-                    ),
-                    "order_no": func.coalesce(
-                        MESScrapRecord.order_no,
-                        pg_insert(MESScrapRecord).excluded.order_no,
-                    ),
-                },
+                set_=update_set,
             )
             .returning(MESScrapRecord.scrap_id)
         )
@@ -507,6 +537,7 @@ class MESSyncService:
             connector_type = connection.connector_type
             config = connection.config
             product_line_code = connection.product_line_code
+            factory_id = connection.factory_id
 
         # Phase 2b: External fetch (NO transaction)
         connector = get_mes_connector_by_config(connector_type, config)
@@ -545,13 +576,13 @@ class MESSyncService:
 
             # Route to appropriate ingestion method
             if job.data_type == "production_orders":
-                await MESIngestionService._ingest_production_order(db, item)
+                await MESIngestionService._ingest_production_order(db, item, factory_id=factory_id)
             elif job.data_type == "equipment_status":
-                await MESIngestionService._ingest_equipment_status(db, item)
+                await MESIngestionService._ingest_equipment_status(db, item, factory_id=factory_id)
             elif job.data_type == "scrap_records":
-                await MESIngestionService._ingest_scrap_record(db, item)
+                await MESIngestionService._ingest_scrap_record(db, item, factory_id=factory_id)
             elif job.data_type == "measurements":
-                await MESIngestionService._ingest_measurement(db, item)
+                await MESIngestionService._ingest_measurement(db, item, factory_id=factory_id)
 
             # Track max timestamp for checkpoint
             ts = MESSyncService._get_checkpoint_value(job.data_type, item)

@@ -16,6 +16,9 @@ class IqcInspectionItem(Base):
         UUID(as_uuid=True), ForeignKey("iqc_inspections.inspection_id", ondelete="CASCADE"),
         nullable=False,
     )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     template_item_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("iqc_template_items.item_id", ondelete="SET NULL"),
         nullable=True,
@@ -49,6 +52,9 @@ class IqcItemMeasurement(Base):
     item_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("iqc_inspection_items.item_id", ondelete="CASCADE"),
         nullable=False,
+    )
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     sequence_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     measured_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

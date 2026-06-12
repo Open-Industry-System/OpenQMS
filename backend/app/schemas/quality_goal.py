@@ -66,6 +66,7 @@ class QualityGoalResponse(BaseModel):
     reject_reason: str | None
     description: str | None
     data_source_formula: str | None = None
+    factory_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 

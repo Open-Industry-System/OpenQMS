@@ -64,6 +64,7 @@ async def list_projects(
     page_size: int = 20,
     project_status: str | None = None,
     current_phase: int | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[APQPProject], int]:
     query = select(APQPProject).options(
         selectinload(APQPProject.creator),
@@ -81,6 +82,9 @@ async def list_projects(
     if current_phase is not None:
         query = query.where(APQPProject.current_phase == current_phase)
         count_query = count_query.where(APQPProject.current_phase == current_phase)
+    if factory_id is not None:
+        query = query.where(APQPProject.factory_id == factory_id)
+        count_query = count_query.where(APQPProject.factory_id == factory_id)
 
     total = (await db.execute(count_query)).scalar() or 0
     query = query.order_by(APQPProject.created_at.desc())
@@ -121,6 +125,7 @@ async def create_project(
     pfmea_id: uuid.UUID | None = None,
     control_plan_id: uuid.UUID | None = None,
     ppap_submission_id: uuid.UUID | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> APQPProject:
     # Validate linked IDs if provided
     if product_line_code:
@@ -155,6 +160,7 @@ async def create_project(
             control_plan_id=control_plan_id,
             ppap_submission_id=ppap_submission_id,
             created_by=user_id,
+            factory_id=factory_id,
         )
         db.add(project)
         try:
@@ -236,29 +242,35 @@ async def update_project(
     return await get_project(db, project.project_id)
 
 
-async def get_stats(db: AsyncSession) -> dict:
+async def get_stats(db: AsyncSession, factory_id: uuid.UUID | None = None) -> dict:
     today = date.today()
 
-    total = (await db.execute(select(func.count()).select_from(APQPProject))).scalar() or 0
-    active = (await db.execute(select(func.count()).where(APQPProject.project_status == "active"))).scalar() or 0
+    base_filter = []
+    if factory_id is not None:
+        base_filter.append(APQPProject.factory_id == factory_id)
+
+    total = (await db.execute(select(func.count()).select_from(APQPProject).where(*base_filter))).scalar() or 0
+    active = (await db.execute(select(func.count()).where(APQPProject.project_status == "active", *base_filter))).scalar() or 0
     pending = (await db.execute(
         select(func.count()).where(
             APQPProject.phase_status == "pending_approval",
             APQPProject.project_status == "active",
+            *base_filter,
         )
     )).scalar() or 0
-    completed = (await db.execute(select(func.count()).where(APQPProject.project_status == "completed"))).scalar() or 0
-    cancelled = (await db.execute(select(func.count()).where(APQPProject.project_status == "cancelled"))).scalar() or 0
+    completed = (await db.execute(select(func.count()).where(APQPProject.project_status == "completed", *base_filter))).scalar() or 0
+    cancelled = (await db.execute(select(func.count()).where(APQPProject.project_status == "cancelled", *base_filter))).scalar() or 0
     overdue = (await db.execute(
         select(func.count()).where(
             APQPProject.target_sop_date < today,
             APQPProject.project_status == "active",
+            *base_filter,
         )
     )).scalar() or 0
 
     phase_rows = (await db.execute(
         select(APQPProject.current_phase, func.count())
-        .where(APQPProject.project_status == "active")
+        .where(APQPProject.project_status == "active", *base_filter)
         .group_by(APQPProject.current_phase)
     )).all()
     phase_dist = {row[0]: row[1] for row in phase_rows}

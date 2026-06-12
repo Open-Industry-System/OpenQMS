@@ -27,6 +27,10 @@ import {
   BuildOutlined,
   SettingOutlined,
   WarningOutlined,
+  GlobalOutlined,
+  ApartmentOutlined,
+  BankOutlined,
+  SwapOutlined,
 } from "@ant-design/icons";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -49,6 +53,7 @@ const MENU_KEYS = [
   "/mes/dashboard", "/mes/orders", "/mes/scrap", "/mes/connections",
   "/plm/dashboard", "/plm/connections", "/plm/parts", "/plm/change-orders",
   "/erp", "/erp/connections", "/erp/master-data", "/erp/supply-chain", "/erp/commercial", "/erp/traceability",
+  "/group/dashboard", "/group/comparison", "/group/suppliers", "/group/audits", "/group/factories",
 ];
 
 // 菜单 key → 需要展开的所有 SubMenu key 列表
@@ -93,6 +98,11 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/erp/supply-chain": ["grp:erp"],
   "/erp/commercial": ["grp:erp"],
   "/erp/traceability": ["grp:erp"],
+  "/group/dashboard": ["grp:group"],
+  "/group/comparison": ["grp:group"],
+  "/group/suppliers": ["grp:group"],
+  "/group/audits": ["grp:group"],
+  "/group/factories": ["grp:group"],
 };
 
 function getSelectedMenuKey(pathname: string): string {
@@ -204,6 +214,18 @@ const menuItems = [
       { key: "/erp/traceability", label: "批次追溯" },
     ],
   },
+  {
+    key: "grp:group",
+    icon: <GlobalOutlined />,
+    label: "集团管理",
+    children: [
+      { key: "/group/dashboard", icon: <DashboardOutlined />, label: "集团仪表盘" },
+      { key: "/group/comparison", icon: <RadarChartOutlined />, label: "工厂对比" },
+      { key: "/group/suppliers", icon: <ShareAltOutlined />, label: "共享供应商" },
+      { key: "/group/audits", icon: <AuditOutlined />, label: "跨厂审核" },
+      { key: "/group/factories", icon: <BankOutlined />, label: "工厂管理" },
+    ],
+  },
 ];
 
 export default function AppLayout() {
@@ -212,6 +234,10 @@ export default function AppLayout() {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const factoryScope = useAuthStore((s) => s.factoryScope);
+  const factories = useAuthStore((s) => s.factories);
+  const currentFactoryId = useAuthStore((s) => s.currentFactoryId);
+  const setCurrentFactoryId = useAuthStore((s) => s.setCurrentFactoryId);
   const { token: themeToken } = theme.useToken();
   const { productLines, selected, setSelected, load } = useProductLineStore();
   const { canView } = usePermission();
@@ -234,7 +260,13 @@ export default function AppLayout() {
     (item) => item.key !== "grp:plm" || canView("plm"),
   ).filter(
     (item) => item.key !== "grp:erp" || canView("erp"),
+  ).filter(
+    (item) => item.key !== "grp:group" || canView("group"),
   );
+
+  // Factory switcher visible when user has access to multiple factories (or all)
+  const showFactorySwitcher = factoryScope?.accessible_factory_ids === null
+    || (factoryScope?.accessible_factory_ids?.length ?? 0) > 1;
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
@@ -285,6 +317,21 @@ export default function AppLayout() {
             onClick={() => setCollapsed(!collapsed)}
           />
           <Space>
+            {showFactorySwitcher && (
+              <Select
+                style={{ width: 200 }}
+                value={currentFactoryId || undefined}
+                placeholder="选择工厂"
+                onChange={(v) => setCurrentFactoryId(v)}
+                suffixIcon={<SwapOutlined />}
+              >
+                {factories.map((f) => (
+                  <Select.Option key={f.id} value={f.id}>
+                    {f.code} - {f.name}
+                  </Select.Option>
+                ))}
+              </Select>
+            )}
             <Select
               allowClear
               placeholder="全部产品线"

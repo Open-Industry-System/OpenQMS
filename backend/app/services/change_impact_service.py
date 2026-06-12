@@ -161,8 +161,9 @@ class ChangeImpactService:
         product_line_codes: list[str] | None = None,
         page: int = 1,
         page_size: int = 20,
+        factory_id: uuid.UUID | None = None,
     ) -> tuple[list[ChangeImpactAnalysisResponse], int]:
-        """查询所有分析记录，支持按产品线过滤（None = 不过滤）。"""
+        """查询所有分析记录，支持按产品线和工厂过滤（None = 不过滤）。"""
         count_stmt = select(func.count()).select_from(ChangeImpactAnalysis)
         query = select(ChangeImpactAnalysis)
 
@@ -172,6 +173,14 @@ class ChangeImpactService:
             )
             query = query.where(
                 ChangeImpactAnalysis.product_line_code.in_(product_line_codes)
+            )
+
+        if factory_id is not None:
+            count_stmt = count_stmt.where(
+                ChangeImpactAnalysis.factory_id == factory_id
+            )
+            query = query.where(
+                ChangeImpactAnalysis.factory_id == factory_id
             )
 
         count_result = await self._db.execute(count_stmt)

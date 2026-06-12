@@ -4,8 +4,9 @@ Run: docker compose exec backend python -m app.seed
 """
 import asyncio
 import secrets
+import uuid
 from datetime import date, datetime, timezone, timedelta
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.database import async_session
 from app.models.user import User
@@ -13,7 +14,8 @@ from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
 from app.models.management_review import ManagementReview, ReviewOutput
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord, ShipmentRecord, WarrantyRecord
-from app.models.role import RoleDefinition, UserProductLine
+from app.models.role import RoleDefinition, RolePermission, UserProductLine
+from app.models.factory import Factory, UserFactory
 from app.core.security import hash_password
 from app.config import SYSTEM_USER_ID
 
@@ -806,10 +808,109 @@ async def seed():
         # ─── Supplier risk default configs ───
         await seed_supplier_risk_configs(db)
 
+        # ─── Multi-factory seed data ───
+        from app.models.product_line import ProductLine
+
+        # Second factory
+        shanghai_factory = Factory(
+            code="SH-02",
+            name="上海工厂",
+            location="上海市浦东新区",
+            is_active=True,
+        )
+        db.add(shanghai_factory)
+        await db.flush()
+
+        # Get the DEFAULT factory (created in migration)
+        default_factory = (await db.execute(
+            select(Factory).where(Factory.code == "DEFAULT")
+        )).scalar_one()
+
+        # Assign DC-DC-100 product line to default factory
+        await db.execute(
+            text("UPDATE product_lines SET factory_id = :factory_id WHERE code = 'DC-DC-100'"),
+            {"factory_id": default_factory.id}
+        )
+        # Assign PCB-SMT-200 product line to default factory
+        await db.execute(
+            text("UPDATE product_lines SET factory_id = :factory_id WHERE code = 'PCB-SMT-200'"),
+            {"factory_id": default_factory.id}
+        )
+
+        # New product line for Shanghai factory
+        sh_product_line = ProductLine(
+            code="SH-DC-200",
+            name="上海DC-DC 200W",
+            is_active=True,
+            factory_id=shanghai_factory.id,
+        )
+        db.add(sh_product_line)
+
+        # Assign existing users to factories
+        admin_user = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
+        manager_user = (await db.execute(select(User).where(User.username == "manager"))).scalar_one()
+        engineer_user = (await db.execute(select(User).where(User.username == "engineer"))).scalar_one()
+        viewer_user = (await db.execute(select(User).where(User.username == "viewer"))).scalar_one()
+
+        db.add(UserFactory(user_id=admin_user.user_id, factory_id=default_factory.id))
+        db.add(UserFactory(user_id=admin_user.user_id, factory_id=shanghai_factory.id))
+        db.add(UserFactory(user_id=manager_user.user_id, factory_id=default_factory.id))
+        db.add(UserFactory(user_id=manager_user.user_id, factory_id=shanghai_factory.id))
+        db.add(UserFactory(user_id=engineer_user.user_id, factory_id=default_factory.id))
+        db.add(UserFactory(user_id=viewer_user.user_id, factory_id=default_factory.id))
+
+        # Set default factory for existing users
+        admin_user.factory_id = default_factory.id
+        manager_user.factory_id = default_factory.id
+        engineer_user.factory_id = default_factory.id
+        viewer_user.factory_id = default_factory.id
+
+        # Group admin user
+        group_admin = User(
+            username="groupadmin",
+            display_name="集团管理员",
+            email="groupadmin@qms.example.com",
+            password_hash=hash_password("GroupAdmin@2026"),
+            role_id=admin_user.role_id,  # same role as admin
+            is_active=True,
+        )
+        db.add(group_admin)
+        await db.flush()
+
+        # Assign group admin to both factories (no default factory = group user)
+        db.add(UserFactory(user_id=group_admin.user_id, factory_id=default_factory.id))
+        db.add(UserFactory(user_id=group_admin.user_id, factory_id=shanghai_factory.id))
+
+        # Ensure admin role has GROUP ADMIN permission
+        admin_role = (await db.execute(
+            select(RoleDefinition).where(RoleDefinition.role_key == "admin")
+        )).scalar_one()
+        manager_role = (await db.execute(
+            select(RoleDefinition).where(RoleDefinition.role_key == "manager")
+        )).scalar_one()
+
+        existing_group_admin = (await db.execute(
+            select(RolePermission).where(
+                RolePermission.role_id == admin_role.id,
+                RolePermission.module == "group"
+            )
+        )).scalar_one_or_none()
+        if not existing_group_admin:
+            db.add(RolePermission(role_id=admin_role.id, module="group", permission_level=5))
+
+        existing_group_manager = (await db.execute(
+            select(RolePermission).where(
+                RolePermission.role_id == manager_role.id,
+                RolePermission.module == "group"
+            )
+        )).scalar_one_or_none()
+        if not existing_group_manager:
+            db.add(RolePermission(role_id=manager_role.id, module="group", permission_level=3))
+
         await db.commit()
 
     print("Seed data created successfully!")
-    print("Users: admin/Admin@2026, engineer/Engineer@2026, manager/Manager@2026, viewer/Viewer@2026")
+    print("Users: admin/Admin@2026, engineer/Engineer@2026, manager/Manager@2026, viewer/Viewer@2026, groupadmin/GroupAdmin@2026")
 
 
 if __name__ == "__main__":

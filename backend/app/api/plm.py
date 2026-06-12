@@ -4,7 +4,7 @@ import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,12 +14,10 @@ from app.database import get_db
 from app.core.permissions import (
     Module,
     PermissionLevel,
-    require_permission,
+    get_user_permission,
 )
-from app.core.product_line_filter import (
-    apply_product_line_filter,
-    enforce_product_line_access,
-)
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.models.fmea import FMEADocument
 from app.models.plm import (
     PLMBOM,
@@ -30,7 +28,6 @@ from app.models.plm import (
     PLMPartFMEALink,
     PLMPartSCLink,
 )
-from app.models.user import User
 from app.schemas import plm as schemas
 from app.schemas import special_characteristic as schemas_special_characteristic
 from app.services.fmea_service import get_fmea
@@ -67,6 +64,32 @@ async def _resolve_change_order_product_line(
         )
     )
     return conn_result.scalar_one_or_none()
+
+
+def _check_factory_access(entity, scope: RequestScope, detail: str = "PLM connection not found"):
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail=detail)
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail=detail)
+
+
+def _apply_scope_filter(query, scope: RequestScope, model, pl_column: str = "product_line_code"):
+    """Apply factory + product line filtering to a query based on scope."""
+    if scope.pl_scope.mode == "NONE":
+        return query.where(False)
+    if scope.effective_factory_id:
+        query = query.where(model.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        if scope.factory_scope.accessible_factory_ids:
+            query = query.where(model.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+        else:
+            query = query.where(False)
+    if scope.pl_scope.mode == "EXPLICIT":
+        query = query.where(getattr(model, pl_column).in_(scope.pl_scope.codes))
+    return query
 
 
 def _plm_part_response(
@@ -106,21 +129,32 @@ def _plm_part_response(
 async def create_connection(
     req: schemas.PLMConnectionCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Create a PLM connection. User must have access to the target product line."""
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 CREATE 权限")
     _ensure_connector_type_implemented(req.connector_type)
-    await enforce_product_line_access(user, req.product_line_code, db)
+    # Enforce product line access
+    if scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=403, detail="无权访问该产品线")
+    if scope.pl_scope.mode == "EXPLICIT" and req.product_line_code not in scope.pl_scope.codes:
+        raise HTTPException(status_code=403, detail="无权访问该产品线")
 
+    factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+    check_factory_access(factory_id, scope)
     conn = PLMConnection(
         name=req.name,
         connector_type=req.connector_type,
         config=req.config,
         product_line_code=req.product_line_code,
-        created_by=user.user_id,
+        created_by=scope.user.user_id,
+        factory_id=factory_id,
     )
     db.add(conn)
     await db.flush()
+    await validate_factory_invariant(conn, db)
     await PLMSyncService.create_sync_jobs_for_connection(db, conn.connection_id)
     await db.commit()
     await db.refresh(conn)
@@ -129,17 +163,20 @@ async def create_connection(
 
 @router.get("/connections", response_model=schemas.PLMConnectionListResponse)
 async def list_connections(
-    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 VIEW 权限")
+
     query = select(PLMConnection)
-    query = await apply_product_line_filter(query, user, PLMConnection, "plm", db, request)
+    query = _apply_scope_filter(query, scope, PLMConnection)
 
     count_query = select(func.count()).select_from(PLMConnection)
-    count_query = await apply_product_line_filter(count_query, user, PLMConnection, "plm", db, request)
+    count_query = _apply_scope_filter(count_query, scope, PLMConnection)
 
     total = (await db.execute(count_query)).scalar() or 0
     query = query.order_by(PLMConnection.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
@@ -157,15 +194,18 @@ async def list_connections(
 async def get_connection(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 VIEW 权限")
     result = await db.execute(
         select(PLMConnection).where(PLMConnection.connection_id == connection_id)
     )
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope, detail="PLM connection not found")
     return schemas.PLMConnectionResponse.model_validate(conn)
 
 
@@ -174,15 +214,18 @@ async def update_connection(
     connection_id: uuid.UUID,
     req: schemas.PLMConnectionUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 EDIT 权限")
     result = await db.execute(
         select(PLMConnection).where(PLMConnection.connection_id == connection_id)
     )
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope, detail="PLM connection not found")
 
     data = req.model_dump(exclude_unset=True)
     if "connector_type" in data:
@@ -191,7 +234,10 @@ async def update_connection(
     # If changing product_line_code, verify access to new value
     new_plc = data.get("product_line_code")
     if new_plc and new_plc != conn.product_line_code:
-        await enforce_product_line_access(user, new_plc, db)
+        if scope.pl_scope.mode == "NONE":
+            raise HTTPException(status_code=403, detail="无权访问该产品线")
+        if scope.pl_scope.mode == "EXPLICIT" and new_plc not in scope.pl_scope.codes:
+            raise HTTPException(status_code=403, detail="无权访问该产品线")
 
     for field, value in data.items():
         setattr(conn, field, value)
@@ -205,15 +251,18 @@ async def update_connection(
 async def delete_connection(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.ADMIN)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.ADMIN:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 ADMIN 权限")
     result = await db.execute(
         select(PLMConnection).where(PLMConnection.connection_id == connection_id)
     )
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope, detail="PLM connection not found")
 
     await db.delete(conn)
     await db.commit()
@@ -223,15 +272,18 @@ async def delete_connection(
 async def test_connection(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 EDIT 权限")
     result = await db.execute(
         select(PLMConnection).where(PLMConnection.connection_id == connection_id)
     )
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope, detail="PLM connection not found")
 
     return await test_plm_connection(conn, db)
 
@@ -240,15 +292,18 @@ async def test_connection(
 async def manual_sync(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 EDIT 权限")
     result = await db.execute(
         select(PLMConnection).where(PLMConnection.connection_id == connection_id)
     )
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope, detail="PLM connection not found")
 
     count = await PLMSyncService.manual_sync(db, connection_id)
     return {"synced_jobs": count}
@@ -261,14 +316,25 @@ async def manual_sync(
 
 @router.get("/parts")
 async def list_parts(
-    request: Request,
     connection_id: uuid.UUID | None = Query(None),
     search: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 VIEW 权限")
+
+    if scope.pl_scope.mode == "NONE":
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+        }
+
     query = select(PLMPart)
     if connection_id:
         query = query.where(PLMPart.connection_id == connection_id)
@@ -278,7 +344,7 @@ async def list_parts(
             PLMPart.part_number.ilike(pattern) | PLMPart.name.ilike(pattern)
         )
 
-    query = await apply_product_line_filter(query, user, PLMPart, "plm", db, request)
+    query = _apply_scope_filter(query, scope, PLMPart)
 
     count_query = select(func.count()).select_from(PLMPart)
     if connection_id:
@@ -288,7 +354,7 @@ async def list_parts(
         count_query = count_query.where(
             PLMPart.part_number.ilike(pattern) | PLMPart.name.ilike(pattern)
         )
-    count_query = await apply_product_line_filter(count_query, user, PLMPart, "plm", db, request)
+    count_query = _apply_scope_filter(count_query, scope, PLMPart)
 
     total = (await db.execute(count_query)).scalar() or 0
     query = query.order_by(PLMPart.part_number).offset((page - 1) * page_size).limit(page_size)
@@ -329,22 +395,16 @@ async def list_parts(
 async def get_part(
     part_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 VIEW 权限")
     result = await db.execute(select(PLMPart).where(PLMPart.part_id == part_id))
     part = result.scalar_one_or_none()
     if part is None:
         raise HTTPException(status_code=404, detail="Part not found")
-    # Part product_line_code may be null; fall back to connection's
-    plc = part.product_line_code
-    if plc is None:
-        conn_result = await db.execute(
-            select(PLMConnection.product_line_code).where(
-                PLMConnection.connection_id == part.connection_id
-            )
-        )
-        plc = conn_result.scalar_one_or_none()
-    await enforce_product_line_access(user, plc, db)
+    _check_factory_access(part, scope, detail="Part not found")
     links_result = await db.execute(
         select(PLMPartSCLink).where(PLMPartSCLink.part_id == part.part_id)
     )
@@ -359,23 +419,34 @@ async def get_part(
 
 @router.get("/boms")
 async def list_boms(
-    request: Request,
     connection_id: uuid.UUID | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 VIEW 权限")
+
+    if scope.pl_scope.mode == "NONE":
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+        }
+
     query = select(PLMBOM)
     if connection_id:
         query = query.where(PLMBOM.connection_id == connection_id)
 
-    query = await apply_product_line_filter(query, user, PLMBOM, "plm", db, request)
+    query = _apply_scope_filter(query, scope, PLMBOM)
 
     count_query = select(func.count()).select_from(PLMBOM)
     if connection_id:
         count_query = count_query.where(PLMBOM.connection_id == connection_id)
-    count_query = await apply_product_line_filter(count_query, user, PLMBOM, "plm", db, request)
+    count_query = _apply_scope_filter(count_query, scope, PLMBOM)
 
     total = (await db.execute(count_query)).scalar() or 0
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -393,13 +464,16 @@ async def list_boms(
 async def get_bom_tree(
     connection_id: uuid.UUID,
     part_number: str,
-    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
     revision: str = Query("A"),
     bom_revision: str = Query("A"),
 ):
     """Multi-level BOM tree via BFS starting from part_number."""
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 VIEW 权限")
+
     # Verify connection exists and user has access
     conn_result = await db.execute(
         select(PLMConnection).where(PLMConnection.connection_id == connection_id)
@@ -407,7 +481,7 @@ async def get_bom_tree(
     conn = conn_result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope, detail="PLM connection not found")
 
     # Fetch all BOM rows for this connection
     bom_result = await db.execute(
@@ -483,23 +557,34 @@ async def get_bom_tree(
 
 @router.get("/change-orders")
 async def list_change_orders(
-    request: Request,
     connection_id: uuid.UUID | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 VIEW 权限")
+
+    if scope.pl_scope.mode == "NONE":
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+        }
+
     query = select(PLMChangeOrder)
     if connection_id:
         query = query.where(PLMChangeOrder.connection_id == connection_id)
 
-    query = await apply_product_line_filter(query, user, PLMChangeOrder, "plm", db, request)
+    query = _apply_scope_filter(query, scope, PLMChangeOrder)
 
     count_query = select(func.count()).select_from(PLMChangeOrder)
     if connection_id:
         count_query = count_query.where(PLMChangeOrder.connection_id == connection_id)
-    count_query = await apply_product_line_filter(count_query, user, PLMChangeOrder, "plm", db, request)
+    count_query = _apply_scope_filter(count_query, scope, PLMChangeOrder)
 
     total = (await db.execute(count_query)).scalar() or 0
     query = query.order_by(PLMChangeOrder.change_number.desc()).offset((page - 1) * page_size).limit(page_size)
@@ -517,16 +602,18 @@ async def list_change_orders(
 async def get_change_order(
     change_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 VIEW 权限")
     result = await db.execute(
         select(PLMChangeOrder).where(PLMChangeOrder.change_id == change_id)
     )
     co = result.scalar_one_or_none()
     if co is None:
         raise HTTPException(status_code=404, detail="Change order not found")
-    co_plc = await _resolve_change_order_product_line(db, co)
-    await enforce_product_line_access(user, co_plc, db)
+    _check_factory_access(co, scope, detail="Change order not found")
     return schemas.PLMChangeOrderResponse.model_validate(co)
 
 
@@ -537,56 +624,62 @@ async def get_change_order(
 
 @router.get("/dashboard", response_model=schemas.PLMDashboardResponse)
 async def get_dashboard(
-    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    """Dashboard with product-line-filtered counts."""
+    """Dashboard with factory + product-line-filtered counts."""
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 VIEW 权限")
+
+    if scope.pl_scope.mode == "NONE":
+        return schemas.PLMDashboardResponse(
+            part_count=0,
+            bom_count=0,
+            pending_ecn_count=0,
+            pending_sc_count=0,
+            recent_changes=[],
+        )
+
     # Parts count
     parts_q = select(func.count()).select_from(PLMPart)
-    parts_q = await apply_product_line_filter(parts_q, user, PLMPart, "plm", db, request)
+    parts_q = _apply_scope_filter(parts_q, scope, PLMPart)
     part_count = (await db.execute(parts_q)).scalar() or 0
 
     # BOM count
     boms_q = select(func.count()).select_from(PLMBOM)
-    boms_q = await apply_product_line_filter(boms_q, user, PLMBOM, "plm", db, request)
+    boms_q = _apply_scope_filter(boms_q, scope, PLMBOM)
     bom_count = (await db.execute(boms_q)).scalar() or 0
 
     # Pending ECN count
     ecn_q = select(func.count()).select_from(PLMChangeOrder).where(
         PLMChangeOrder.status.in_(["draft", "pending", "approved"])
     )
-    ecn_q = await apply_product_line_filter(ecn_q, user, PLMChangeOrder, "plm", db, request)
+    ecn_q = _apply_scope_filter(ecn_q, scope, PLMChangeOrder)
     pending_ecn_count = (await db.execute(ecn_q)).scalar() or 0
 
     # Pending SC count (from PLMPartSCLink)
-    from app.models.plm import PLMPartSCLink
-
     sc_q = select(func.count()).select_from(PLMPartSCLink).where(
         PLMPartSCLink.status == "pending"
     )
-    if not user.role_definition.bypass_row_level_security:
-        from app.models.role import UserProductLine
-
-        user_plc_result = await db.execute(
-            select(UserProductLine.product_line_code).where(
-                UserProductLine.user_id == user.user_id
-            )
-        )
-        user_codes = [r[0] for r in user_plc_result.all()]
-        if not user_codes:
-            pending_sc_count = 0
+    # Factory filter on SC links
+    if scope.effective_factory_id:
+        sc_q = sc_q.where(PLMPartSCLink.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        if scope.factory_scope.accessible_factory_ids:
+            sc_q = sc_q.where(PLMPartSCLink.factory_id.in_(scope.factory_scope.accessible_factory_ids))
         else:
-            sc_q = sc_q.where(PLMPartSCLink.product_line_code.in_(user_codes))
-            pending_sc_count = (await db.execute(sc_q)).scalar() or 0
-    else:
-        pending_sc_count = (await db.execute(sc_q)).scalar() or 0
+            sc_q = sc_q.where(False)
+    # Product line filter on SC links
+    if scope.pl_scope.mode == "EXPLICIT":
+        sc_q = sc_q.where(PLMPartSCLink.product_line_code.in_(scope.pl_scope.codes))
+    pending_sc_count = (await db.execute(sc_q)).scalar() or 0
 
     # Recent changes (last 10)
     recent_q = select(PLMChangeOrder).order_by(
         PLMChangeOrder.change_number.desc()
     ).limit(10)
-    recent_q = await apply_product_line_filter(recent_q, user, PLMChangeOrder, "plm", db, request)
+    recent_q = _apply_scope_filter(recent_q, scope, PLMChangeOrder)
     recent_items = (await db.execute(recent_q)).scalars().all()
 
     return schemas.PLMDashboardResponse(
@@ -608,9 +701,13 @@ async def link_part_to_fmea(
     part_id: uuid.UUID,
     req: schemas.PLMPartLinkFMEARequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Link a PLM part to an FMEA node. Both must share the same product line."""
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 EDIT 权限")
+
     if len(req.node_id) > _MAX_NODE_ID_LENGTH:
         raise HTTPException(
             status_code=400,
@@ -622,6 +719,7 @@ async def link_part_to_fmea(
     part = part_result.scalar_one_or_none()
     if part is None:
         raise HTTPException(status_code=404, detail="Part not found")
+    _check_factory_access(part, scope, detail="Part not found")
 
     # Resolve part product line
     part_plc = part.product_line_code
@@ -632,13 +730,21 @@ async def link_part_to_fmea(
             )
         )
         part_plc = conn_r.scalar_one_or_none()
-    await enforce_product_line_access(user, part_plc, db)
+    # Enforce PL access on part
+    if scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=403, detail="无权访问该产品线")
+    if scope.pl_scope.mode == "EXPLICIT" and part_plc and part_plc not in scope.pl_scope.codes:
+        raise HTTPException(status_code=403, detail="无权访问该产品线")
 
     # Fetch FMEA
     fmea = await get_fmea(db, req.fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea.product_line_code, db)
+    _check_factory_access(fmea, scope, detail="FMEA not found")
+
+    # Enforce PL access on FMEA
+    if scope.pl_scope.mode == "EXPLICIT" and fmea.product_line_code and fmea.product_line_code not in scope.pl_scope.codes:
+        raise HTTPException(status_code=403, detail="无权访问该产品线")
 
     # Product line match check
     if part_plc and fmea.product_line_code and part_plc != fmea.product_line_code:
@@ -683,11 +789,15 @@ async def confirm_part_sc(
     part_id: uuid.UUID,
     req: schemas.PLMPartConfirmSCRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
-    _sc_user: User = Depends(
-        require_permission(Module.SPECIAL_CHARACTERISTIC, PermissionLevel.CREATE)
-    ),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 EDIT 权限")
+    sc_level = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
+    if sc_level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 special_characteristic 模块的 CREATE 权限")
+
     if len(req.node_id) > _MAX_NODE_ID_LENGTH:
         raise HTTPException(
             status_code=400,
@@ -698,6 +808,7 @@ async def confirm_part_sc(
     part = part_result.scalar_one_or_none()
     if part is None:
         raise HTTPException(status_code=404, detail="Part not found")
+    _check_factory_access(part, scope, detail="Part not found")
 
     part_plc = part.product_line_code
     if part_plc is None:
@@ -707,12 +818,20 @@ async def confirm_part_sc(
             )
         )
         part_plc = conn_result.scalar_one_or_none()
-    await enforce_product_line_access(user, part_plc, db)
+    # Enforce PL access on part
+    if scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=403, detail="无权访问该产品线")
+    if scope.pl_scope.mode == "EXPLICIT" and part_plc and part_plc not in scope.pl_scope.codes:
+        raise HTTPException(status_code=403, detail="无权访问该产品线")
 
     fmea = await get_fmea(db, req.fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea.product_line_code, db)
+    _check_factory_access(fmea, scope, detail="FMEA not found")
+
+    # Enforce PL access on FMEA
+    if scope.pl_scope.mode == "EXPLICIT" and fmea.product_line_code and fmea.product_line_code not in scope.pl_scope.codes:
+        raise HTTPException(status_code=403, detail="无权访问该产品线")
 
     if fmea.fmea_type not in _VALID_FMEA_TYPES:
         raise HTTPException(status_code=400, detail="FMEA 类型必须是 DFMEA 或 PFMEA")
@@ -774,14 +893,14 @@ async def confirm_part_sc(
         product_line_code=product_line_code,
     )
 
-    sc = await prepare_special_characteristic(db, sc_create, user.user_id)
+    sc = await prepare_special_characteristic(db, sc_create, scope.user.user_id)
     if req.characteristic_type == "safety":
         sc.is_safety_related = True
         sc.safety_approval_status = SafetyApprovalStatus.PENDING.value
 
     link.sc_id = sc.sc_id
     link.status = "confirmed"
-    link.confirmed_by = user.user_id
+    link.confirmed_by = scope.user.user_id
     link.confirmed_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -802,9 +921,13 @@ async def confirm_part_sc(
 async def trigger_impact_analysis(
     change_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Upsert an impact analysis task for a change order."""
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 EDIT 权限")
+
     # Fetch change order
     co_result = await db.execute(
         select(PLMChangeOrder).where(PLMChangeOrder.change_id == change_id)
@@ -812,8 +935,7 @@ async def trigger_impact_analysis(
     co = co_result.scalar_one_or_none()
     if co is None:
         raise HTTPException(status_code=404, detail="Change order not found")
-    co_plc = await _resolve_change_order_product_line(db, co)
-    await enforce_product_line_access(user, co_plc, db)
+    _check_factory_access(co, scope, detail="Change order not found")
 
     # Upsert impact task
     from datetime import datetime, timezone
@@ -867,7 +989,7 @@ async def import_bom_to_fmea(
     part_number: str,
     req: schemas.BOMImportRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.PLM, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
     revision: str = Query("A"),
     bom_revision: str = Query("A"),
 ):
@@ -877,6 +999,10 @@ async def import_bom_to_fmea(
     verifies the root part exists in the BOM tree, then performs multi-level BFS
     to build real parent-child HAS_CHILD edges in the FMEA graph.
     """
+    level = await get_user_permission(scope.user, Module.PLM, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 plm 模块的 EDIT 权限")
+
     # Verify connection
     conn_result = await db.execute(
         select(PLMConnection).where(PLMConnection.connection_id == connection_id)
@@ -884,13 +1010,13 @@ async def import_bom_to_fmea(
     conn = conn_result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    await enforce_product_line_access(user, conn.product_line_code, db)
+    _check_factory_access(conn, scope, detail="PLM connection not found")
 
     # Verify FMEA
     fmea = await get_fmea(db, req.fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    await enforce_product_line_access(user, fmea.product_line_code, db)
+    _check_factory_access(fmea, scope, detail="FMEA not found")
 
     # Product line match: connection vs FMEA
     if conn.product_line_code != fmea.product_line_code:

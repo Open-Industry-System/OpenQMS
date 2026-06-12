@@ -559,7 +559,7 @@ async def _get_active_control_limits(
 
 
 async def create_inspection_characteristic(
-    db: AsyncSession, user_id: uuid.UUID, data: dict
+    db: AsyncSession, user_id: uuid.UUID, data: dict, *, factory_id: uuid.UUID | None = None
 ) -> InspectionCharacteristic:
     product_line = data.get("product_line", "DC-DC-100")
     process_name = data["process_name"]
@@ -593,6 +593,7 @@ async def create_inspection_characteristic(
         subgroup_size=data.get("subgroup_size", 5),
         rules_config=rules_config,
         created_by_id=user_id,
+        factory_id=factory_id,
     )
     db.add(ic)
     await db.commit()
@@ -608,6 +609,8 @@ async def create_inspection_characteristic(
 async def list_inspection_characteristics(
     db: AsyncSession, page: int = 1, page_size: int = 20,
     product_line: Optional[str] = None, process_name: Optional[str] = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> Tuple[List[InspectionCharacteristic], int]:
     query = select(InspectionCharacteristic)
     count_query = select(func.count(InspectionCharacteristic.ic_id))
@@ -617,6 +620,10 @@ async def list_inspection_characteristics(
         filters.append(InspectionCharacteristic.product_line == product_line)
     if process_name:
         filters.append(InspectionCharacteristic.process_name.ilike(f"%{process_name}%"))
+    if factory_id:
+        filters.append(InspectionCharacteristic.factory_id == factory_id)
+    if allowed_product_line_codes:
+        filters.append(InspectionCharacteristic.product_line.in_(allowed_product_line_codes))
 
     if filters:
         query = query.where(and_(*filters))

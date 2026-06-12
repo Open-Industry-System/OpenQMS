@@ -25,6 +25,8 @@ async def list_studies(
     page_size: int = 20,
     status: str | None = None,
     gauge_id: uuid.UUID | None = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> tuple[list[GrrStudy], int]:
     query = select(GrrStudy)
     count_query = select(func.count()).select_from(GrrStudy)
@@ -34,6 +36,12 @@ async def list_studies(
     if gauge_id:
         query = query.where(GrrStudy.gauge_id == gauge_id)
         count_query = count_query.where(GrrStudy.gauge_id == gauge_id)
+    if factory_id:
+        query = query.where(GrrStudy.factory_id == factory_id)
+        count_query = count_query.where(GrrStudy.factory_id == factory_id)
+    if allowed_product_line_codes:
+        query = query.where(GrrStudy.product_line_code.in_(allowed_product_line_codes))
+        count_query = count_query.where(GrrStudy.product_line_code.in_(allowed_product_line_codes))
     query = query.order_by(GrrStudy.created_at.desc()).offset(
         (page - 1) * page_size
     ).limit(page_size)

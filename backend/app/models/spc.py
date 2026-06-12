@@ -22,6 +22,9 @@ class InspectionCharacteristic(Base):
     ic_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     ic_code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     product_line: Mapped[str] = mapped_column(String(50), nullable=False, default="DC-DC-100")
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     process_name: Mapped[str] = mapped_column(String(100), nullable=False)
     characteristic_name: Mapped[str] = mapped_column(String(100), nullable=False)
     spec_upper: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
@@ -46,6 +49,9 @@ class SampleBatch(Base):
     batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     ic_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("inspection_characteristics.ic_id", ondelete="CASCADE"), nullable=False)
     batch_no: Mapped[str] = mapped_column(String(50), nullable=False)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     sampled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     subgroup_size: Mapped[int] = mapped_column(Integer, nullable=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -62,6 +68,9 @@ class SampleValue(Base):
 
     value_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     batch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sample_batches.batch_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
     value: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
     alarm_flags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
@@ -74,6 +83,9 @@ class SPCAlarm(Base):
 
     alarm_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     ic_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("inspection_characteristics.ic_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("sample_batches.batch_id", ondelete="SET NULL"), nullable=True)
     rule_no: Mapped[int] = mapped_column(Integer, nullable=False)
     triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -115,6 +127,9 @@ class ControlLimitSnapshot(Base):
 
     snapshot_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     ic_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("inspection_characteristics.ic_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    )
     ucl: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
     lcl: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
     cl: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)

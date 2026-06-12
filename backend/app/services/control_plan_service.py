@@ -57,7 +57,7 @@ async def generate_document_no(db: AsyncSession) -> str:
 
 
 async def create_control_plan(
-    db: AsyncSession, data: ControlPlanCreate, user_id: uuid.UUID
+    db: AsyncSession, data: ControlPlanCreate, user_id: uuid.UUID, *, factory_id: uuid.UUID | None = None
 ) -> ControlPlan:
     """Create a new ControlPlan. Use provided document_no if given, else auto-generate."""
     await validate_product_line(db, data.product_line_code)
@@ -78,6 +78,7 @@ async def create_control_plan(
         core_group=data.core_group,
         created_by=user_id,
         updated_by=user_id,
+        factory_id=factory_id,
     )
     db.add(cp)
 
@@ -111,6 +112,7 @@ async def get_control_plan(db: AsyncSession, cp_id: uuid.UUID) -> ControlPlan | 
 
 async def list_control_plans(
     db: AsyncSession, page: int = 1, page_size: int = 20, product_line: str | None = None,
+    factory_id: uuid.UUID | None = None, allowed_product_lines: list[str] | None = None,
 ) -> dict:
     """Return paginated list of control plans."""
     query = (
@@ -123,6 +125,12 @@ async def list_control_plans(
     if product_line:
         query = query.where(ControlPlan.product_line_code == product_line)
         count_query = count_query.where(ControlPlan.product_line_code == product_line)
+    if factory_id:
+        query = query.where(ControlPlan.factory_id == factory_id)
+        count_query = count_query.where(ControlPlan.factory_id == factory_id)
+    if allowed_product_lines is not None:
+        query = query.where(ControlPlan.product_line_code.in_(allowed_product_lines))
+        count_query = count_query.where(ControlPlan.product_line_code.in_(allowed_product_lines))
 
     query = query.offset((page - 1) * page_size).limit(page_size)
 

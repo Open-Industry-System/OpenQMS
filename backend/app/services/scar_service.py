@@ -52,9 +52,18 @@ async def list_scars(
     statuses: list[str] | None = None,
     supplier_id: uuid.UUID | None = None,
     source_type: str | None = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> tuple[list[SupplierSCAR], int]:
     query = select(SupplierSCAR).options(selectinload(SupplierSCAR.supplier))
     count_query = select(func.count()).select_from(SupplierSCAR)
+
+    if factory_id:
+        query = query.where(SupplierSCAR.factory_id == factory_id)
+        count_query = count_query.where(SupplierSCAR.factory_id == factory_id)
+    if allowed_product_line_codes is not None:
+        query = query.where(SupplierSCAR.product_line_code.in_(allowed_product_line_codes))
+        count_query = count_query.where(SupplierSCAR.product_line_code.in_(allowed_product_line_codes))
 
     if statuses:
         query = query.where(SupplierSCAR.status.in_(statuses))
@@ -94,6 +103,7 @@ async def create_scar(
     product_line_code: str | None = None,
     requested_action: str | None = None,
     due_date: date | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> SupplierSCAR:
     # Validate supplier exists
     supplier = await db.get(Supplier, supplier_id)
@@ -112,6 +122,7 @@ async def create_scar(
             product_line_code=product_line_code,
             requested_action=requested_action,
             due_date=due_date,
+            factory_id=factory_id,
             issued_by=user_id,
             issued_date=date.today(),
         )

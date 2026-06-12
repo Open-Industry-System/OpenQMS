@@ -77,6 +77,7 @@ async def create_customer_audit(
     checklist: list | None,
     product_line_code: str | None,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> AuditPlan:
     if not customer_name or not customer_name.strip():
         raise ValueError("customer_name is required")
@@ -104,6 +105,7 @@ async def create_customer_audit(
         audit_mode=audit_mode,
         created_by=user_id,
         product_line_code=product_line_code,
+        factory_id=factory_id,
     )
     db.add(plan)
     await db.flush()  # populate plan.audit_id
@@ -391,12 +393,16 @@ async def customer_confirm_finding(
 async def get_customer_audit_stats(
     db: AsyncSession,
     product_line_code: str | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> dict:
     plan_conditions = [AuditPlan.audit_category == "customer"]
     finding_join_conditions = [AuditPlan.audit_category == "customer"]
     if product_line_code:
         plan_conditions.append(AuditPlan.product_line_code == product_line_code)
         finding_join_conditions.append(AuditPlan.product_line_code == product_line_code)
+    if factory_id is not None:
+        plan_conditions.append(AuditPlan.factory_id == factory_id)
+        finding_join_conditions.append(AuditPlan.factory_id == factory_id)
 
     total_result = await db.execute(
         select(func.count()).select_from(AuditPlan).where(*plan_conditions)

@@ -50,6 +50,7 @@ from app.api.mes import router as mes_router
 from app.api.plm import router as plm_router
 from app.api.erp import router as erp_router
 from app.api.supplier_risk import router as supplier_risk_router
+from app.api.group import router as group_router
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +354,7 @@ app.include_router(mes_router)
 app.include_router(plm_router)
 app.include_router(erp_router)
 app.include_router(supplier_risk_router)
+app.include_router(group_router)
 
 
 @app.get("/api/health")

@@ -63,12 +63,19 @@ class PLMIngestionService:
         data_type = data["data_type"]
         connection_id = _to_uuid(data["connection_id"])
 
+        # Load connection to get factory_id (background sync has no request context)
+        conn_result = await self._db.execute(
+            select(PLMConnection).where(PLMConnection.connection_id == connection_id)
+        )
+        connection = conn_result.scalar_one_or_none()
+        factory_id = connection.factory_id if connection else None
+
         if data_type == "part":
-            await self._ingest_part(connection_id, data)
+            await self._ingest_part(connection_id, data, factory_id=factory_id)
         elif data_type == "bom":
-            await self._ingest_bom(connection_id, data)
+            await self._ingest_bom(connection_id, data, factory_id=factory_id)
         elif data_type == "change_order":
-            await self._ingest_change_order(connection_id, data)
+            await self._ingest_change_order(connection_id, data, factory_id=factory_id)
         else:
             logger.warning("Unknown PLM data_type: %s", data_type)
 
@@ -78,40 +85,48 @@ class PLMIngestionService:
     # Parts
     # ------------------------------------------------------------------
 
-    async def _ingest_part(self, connection_id: uuid.UUID, data: dict) -> None:
+    async def _ingest_part(self, connection_id: uuid.UUID, data: dict, factory_id: uuid.UUID | None = None) -> None:
         raw_fields = _extract_raw(data, _PART_COLUMNS)
+        values = {
+            "part_id": uuid.uuid4(),
+            "connection_id": connection_id,
+            "external_id": data.get("external_id", ""),
+            "part_number": data["part_number"],
+            "name": data.get("name", data["part_number"]),
+            "revision": data.get("revision", "A"),
+            "material": data.get("material"),
+            "specification": data.get("specification"),
+            "status": data.get("status", "active"),
+            "is_safety_related": data.get("is_safety_related", False),
+            "is_key_characteristic": data.get("is_key_characteristic", False),
+            "source_updated_at": _parse_dt(data.get("source_updated_at")),
+            "product_line_code": data.get("product_line_code"),
+            "plm_raw_data": raw_fields or None,
+        }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
+
+        update_set = {
+            "external_id": data.get("external_id", ""),
+            "name": data.get("name", data["part_number"]),
+            "material": data.get("material"),
+            "specification": data.get("specification"),
+            "status": data.get("status", "active"),
+            "is_safety_related": data.get("is_safety_related", False),
+            "is_key_characteristic": data.get("is_key_characteristic", False),
+            "source_updated_at": _parse_dt(data.get("source_updated_at")),
+            "product_line_code": data.get("product_line_code"),
+            "plm_raw_data": raw_fields or None,
+        }
+        if factory_id is not None:
+            update_set["factory_id"] = factory_id
+
         stmt = (
             pg_insert(PLMPart)
-            .values(
-                part_id=uuid.uuid4(),
-                connection_id=connection_id,
-                external_id=data.get("external_id", ""),
-                part_number=data["part_number"],
-                name=data.get("name", data["part_number"]),
-                revision=data.get("revision", "A"),
-                material=data.get("material"),
-                specification=data.get("specification"),
-                status=data.get("status", "active"),
-                is_safety_related=data.get("is_safety_related", False),
-                is_key_characteristic=data.get("is_key_characteristic", False),
-                source_updated_at=_parse_dt(data.get("source_updated_at")),
-                product_line_code=data.get("product_line_code"),
-                plm_raw_data=raw_fields or None,
-            )
+            .values(**values)
             .on_conflict_do_update(
                 index_elements=["connection_id", "part_number", "revision"],
-                set_={
-                    "external_id": data.get("external_id", ""),
-                    "name": data.get("name", data["part_number"]),
-                    "material": data.get("material"),
-                    "specification": data.get("specification"),
-                    "status": data.get("status", "active"),
-                    "is_safety_related": data.get("is_safety_related", False),
-                    "is_key_characteristic": data.get("is_key_characteristic", False),
-                    "source_updated_at": _parse_dt(data.get("source_updated_at")),
-                    "product_line_code": data.get("product_line_code"),
-                    "plm_raw_data": raw_fields or None,
-                },
+                set_=update_set,
             )
         )
         await self._db.execute(stmt)
@@ -213,25 +228,40 @@ class PLMIngestionService:
     # BOMs
     # ------------------------------------------------------------------
 
-    async def _ingest_bom(self, connection_id: uuid.UUID, data: dict) -> None:
+    async def _ingest_bom(self, connection_id: uuid.UUID, data: dict, factory_id: uuid.UUID | None = None) -> None:
         raw_fields = _extract_raw(data, _BOM_COLUMNS)
+        values = {
+            "bom_id": uuid.uuid4(),
+            "connection_id": connection_id,
+            "external_id": data.get("external_id", ""),
+            "parent_part_number": data["parent_part_number"],
+            "parent_revision": data.get("parent_revision", "A"),
+            "child_part_number": data["child_part_number"],
+            "child_revision": data.get("child_revision", "A"),
+            "quantity": data.get("quantity", 1),
+            "bom_revision": data.get("bom_revision", "A"),
+            "level": data.get("level", 1),
+            "source_updated_at": _parse_dt(data.get("source_updated_at")),
+            "product_line_code": data.get("product_line_code"),
+            "plm_raw_data": raw_fields or None,
+        }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
+
+        update_set = {
+            "external_id": data.get("external_id", ""),
+            "quantity": data.get("quantity", 1),
+            "level": data.get("level", 1),
+            "source_updated_at": _parse_dt(data.get("source_updated_at")),
+            "product_line_code": data.get("product_line_code"),
+            "plm_raw_data": raw_fields or None,
+        }
+        if factory_id is not None:
+            update_set["factory_id"] = factory_id
+
         stmt = (
             pg_insert(PLMBOM)
-            .values(
-                bom_id=uuid.uuid4(),
-                connection_id=connection_id,
-                external_id=data.get("external_id", ""),
-                parent_part_number=data["parent_part_number"],
-                parent_revision=data.get("parent_revision", "A"),
-                child_part_number=data["child_part_number"],
-                child_revision=data.get("child_revision", "A"),
-                quantity=data.get("quantity", 1),
-                bom_revision=data.get("bom_revision", "A"),
-                level=data.get("level", 1),
-                source_updated_at=_parse_dt(data.get("source_updated_at")),
-                product_line_code=data.get("product_line_code"),
-                plm_raw_data=raw_fields or None,
-            )
+            .values(**values)
             .on_conflict_do_update(
                 index_elements=[
                     "connection_id",
@@ -241,14 +271,7 @@ class PLMIngestionService:
                     "child_revision",
                     "bom_revision",
                 ],
-                set_={
-                    "external_id": data.get("external_id", ""),
-                    "quantity": data.get("quantity", 1),
-                    "level": data.get("level", 1),
-                    "source_updated_at": _parse_dt(data.get("source_updated_at")),
-                    "product_line_code": data.get("product_line_code"),
-                    "plm_raw_data": raw_fields or None,
-                },
+                set_=update_set,
             )
         )
         await self._db.execute(stmt)
@@ -258,7 +281,7 @@ class PLMIngestionService:
     # ------------------------------------------------------------------
 
     async def _ingest_change_order(
-        self, connection_id: uuid.UUID, data: dict
+        self, connection_id: uuid.UUID, data: dict, factory_id: uuid.UUID | None = None
     ) -> None:
         raw_fields = _extract_raw(data, _CO_COLUMNS)
 
@@ -279,59 +302,67 @@ class PLMIngestionService:
             # Create/reset task only when transitioning TO approved
             create_impact_task = current_status != "approved"
 
+        values = {
+            "change_id": uuid.uuid4(),
+            "connection_id": connection_id,
+            "external_id": data.get("external_id", ""),
+            "change_number": data["change_number"],
+            "title": data.get("title", ""),
+            "description": data.get("description"),
+            "change_type": data.get("change_type", ""),
+            "status": new_status,
+            "priority": data.get("priority", "normal"),
+            "affected_part_numbers": data.get("affected_part_numbers", []),
+            "proposed_changes": data.get("proposed_changes"),
+            "requested_by": data.get("requested_by"),
+            "approved_by": data.get("approved_by"),
+            "planned_implementation_date": _parse_dt(
+                data.get("planned_implementation_date")
+            ),
+            "actual_implementation_date": _parse_dt(
+                data.get("actual_implementation_date")
+            ),
+            "source_updated_at": _parse_dt(data.get("source_updated_at")),
+            "product_line_code": data.get("product_line_code"),
+            "plm_raw_data": raw_fields or None,
+        }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
+
+        update_set = {
+            "external_id": data.get("external_id", ""),
+            "title": data.get("title", ""),
+            "description": data.get("description"),
+            "change_type": data.get("change_type", ""),
+            "status": new_status,
+            "priority": data.get("priority", "normal"),
+            "affected_part_numbers": data.get(
+                "affected_part_numbers", []
+            ),
+            "proposed_changes": data.get("proposed_changes"),
+            "requested_by": data.get("requested_by"),
+            "approved_by": data.get("approved_by"),
+            "planned_implementation_date": _parse_dt(
+                data.get("planned_implementation_date")
+            ),
+            "actual_implementation_date": _parse_dt(
+                data.get("actual_implementation_date")
+            ),
+            "source_updated_at": _parse_dt(
+                data.get("source_updated_at")
+            ),
+            "product_line_code": data.get("product_line_code"),
+            "plm_raw_data": raw_fields or None,
+        }
+        if factory_id is not None:
+            update_set["factory_id"] = factory_id
+
         stmt = (
             pg_insert(PLMChangeOrder)
-            .values(
-                change_id=uuid.uuid4(),
-                connection_id=connection_id,
-                external_id=data.get("external_id", ""),
-                change_number=data["change_number"],
-                title=data.get("title", ""),
-                description=data.get("description"),
-                change_type=data.get("change_type", ""),
-                status=new_status,
-                priority=data.get("priority", "normal"),
-                affected_part_numbers=data.get("affected_part_numbers", []),
-                proposed_changes=data.get("proposed_changes"),
-                requested_by=data.get("requested_by"),
-                approved_by=data.get("approved_by"),
-                planned_implementation_date=_parse_dt(
-                    data.get("planned_implementation_date")
-                ),
-                actual_implementation_date=_parse_dt(
-                    data.get("actual_implementation_date")
-                ),
-                source_updated_at=_parse_dt(data.get("source_updated_at")),
-                product_line_code=data.get("product_line_code"),
-                plm_raw_data=raw_fields or None,
-            )
+            .values(**values)
             .on_conflict_do_update(
                 index_elements=["connection_id", "change_number"],
-                set_={
-                    "external_id": data.get("external_id", ""),
-                    "title": data.get("title", ""),
-                    "description": data.get("description"),
-                    "change_type": data.get("change_type", ""),
-                    "status": new_status,
-                    "priority": data.get("priority", "normal"),
-                    "affected_part_numbers": data.get(
-                        "affected_part_numbers", []
-                    ),
-                    "proposed_changes": data.get("proposed_changes"),
-                    "requested_by": data.get("requested_by"),
-                    "approved_by": data.get("approved_by"),
-                    "planned_implementation_date": _parse_dt(
-                        data.get("planned_implementation_date")
-                    ),
-                    "actual_implementation_date": _parse_dt(
-                        data.get("actual_implementation_date")
-                    ),
-                    "source_updated_at": _parse_dt(
-                        data.get("source_updated_at")
-                    ),
-                    "product_line_code": data.get("product_line_code"),
-                    "plm_raw_data": raw_fields or None,
-                },
+                set_=update_set,
             )
         )
         await self._db.execute(stmt)
@@ -391,19 +422,20 @@ _PART_COLUMNS = {
     "external_id", "part_number", "name", "revision", "material",
     "specification", "status", "is_safety_related", "is_key_characteristic",
     "source_updated_at", "product_line_code", "connection_id", "data_type",
+    "factory_id",
 }
 _BOM_COLUMNS = {
     "external_id", "parent_part_number", "parent_revision",
     "child_part_number", "child_revision", "quantity", "bom_revision",
     "level", "source_updated_at", "product_line_code", "connection_id",
-    "data_type",
+    "data_type", "factory_id",
 }
 _CO_COLUMNS = {
     "external_id", "change_number", "title", "description", "change_type",
     "status", "priority", "affected_part_numbers", "proposed_changes",
     "requested_by", "approved_by", "planned_implementation_date",
     "actual_implementation_date", "source_updated_at", "product_line_code",
-    "connection_id", "data_type",
+    "connection_id", "data_type", "factory_id",
 }
 
 

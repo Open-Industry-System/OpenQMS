@@ -6,10 +6,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import require_permission, Module, PermissionLevel, get_user_permission, get_current_user
-from app.core.product_line_filter import get_user_product_line_codes, enforce_product_line_access
+from app.core.permissions import get_user_permission, Module, PermissionLevel, get_current_user
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from typing import Any
 from app.models.user import User
+from app.models.capa import CAPAEightD
+from app.models.fmea import FMEADocument
 
 from app.config import settings
 from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse, AdvanceRequest, D4RecommendationResponse, D5RecommendationResponse
@@ -31,17 +34,25 @@ async def list_capas(
     overdue: bool = Query(False),
     pending_action: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+
+    # Product line filtering
     allowed_pls = None
-    if not user.role_definition.bypass_row_level_security:
-        allowed_pls = await get_user_product_line_codes(user, db)
-        if not allowed_pls:
-            return CAPAListResponse(items=[], total=0, page=page, page_size=page_size)
+    if scope.pl_scope.mode == "NONE":
+        return CAPAListResponse(items=[], total=0, page=page, page_size=page_size)
+    elif scope.pl_scope.mode == "EXPLICIT":
+        allowed_pls = scope.pl_scope.codes
+
     items, total = await capa_service.list_capas(
         db, page, page_size, status, product_line,
         overdue=overdue, pending_action=pending_action,
         allowed_product_line_codes=allowed_pls,
+        factory_id=scope.effective_factory_id,
     )
     return CAPAListResponse(
         items=[CAPAResponse.model_validate(c) for c in items],
@@ -55,13 +66,19 @@ async def list_capas(
 async def create_capa(
     req: CAPACreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 CREATE 权限")
     try:
-        await enforce_product_line_access(user, req.product_line_code, db)
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         capa = await capa_service.create_capa(
-            db, req.title, req.document_no, req.severity, req.due_date, user.user_id, req.product_line_code
+            db, req.title, req.document_no, req.severity, req.due_date,
+            scope.user.user_id, req.product_line_code, factory_id=factory_id,
         )
+        await validate_factory_invariant(capa, db)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CAPAResponse.model_validate(capa)
@@ -72,22 +89,30 @@ async def get_capas_by_fmea_node(
     fmea_id: str,
     fmea_node_id: str | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
     capas = await capa_service.get_capas_by_fmea_node(db, fmea_id, fmea_node_id)
     # Filter by product line access
-    if not user.role_definition.bypass_row_level_security:
-        user_codes = await get_user_product_line_codes(user, db)
-        capas = [c for c in capas if c.get("product_line_code") in user_codes]
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        capas = [c for c in capas if c.get("product_line_code") in scope.pl_scope.codes]
+    elif scope.pl_scope.mode == "NONE":
+        capas = []
     return capas
 
 
 @router.get("/capabilities")
 async def capa_capabilities(
     request: Request,
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """获取 AI 草拟功能是否可用及当前 LLM Provider"""
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
     llm_provider = getattr(request.app.state, "llm_provider", None)
     return {
         "ai_draft_enabled": llm_provider is not None,
@@ -95,16 +120,30 @@ async def capa_capabilities(
     }
 
 
+def _check_factory_access(entity, scope: RequestScope):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="8D report not found")
+
+
 @router.get("/{report_id}", response_model=CAPAResponse)
 async def get_capa(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    await enforce_product_line_access(user, capa.product_line_code, db)
+    _check_factory_access(capa, scope)
     return CAPAResponse.model_validate(capa)
 
 
@@ -113,29 +152,28 @@ async def update_capa(
     report_id: uuid.UUID,
     req: CAPAUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    await enforce_product_line_access(user, capa.product_line_code, db)
+    _check_factory_access(capa, scope)
     update_data = req.model_dump(exclude_unset=True)
-    new_pl = update_data.get("product_line_code")
-    if new_pl is not None and new_pl != capa.product_line_code:
-        await enforce_product_line_access(user, new_pl, db)
-    capa = await capa_service.update_capa(db, capa, update_data, user.user_id)
+    capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     return CAPAResponse.model_validate(capa)
 
 
 async def require_close_permission(
     report_id: uuid.UUID,
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> tuple[User, Any]:
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    await enforce_product_line_access(user, capa.product_line_code, db)
     if capa.status in ["D7_PREVENTION", "D8_CLOSURE"]:
         level = await get_user_permission(user, Module.CAPA, db)
         if level < PermissionLevel.APPROVE:
@@ -165,23 +203,25 @@ async def link_fmea(
     fmea_id: uuid.UUID,
     fmea_node_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    from app.models.fmea import FMEADocument
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
 
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    await enforce_product_line_access(user, capa.product_line_code, db)
+    _check_factory_access(capa, scope)
 
-    # Validate target FMEA exists and user can access its product line
+    # Validate target FMEA exists and user can access its factory
     target_fmea = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id))
     target_fmea = target_fmea.scalar_one_or_none()
     if target_fmea is None:
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
-    await enforce_product_line_access(user, target_fmea.product_line_code, db)
+    _check_factory_access(target_fmea, scope)
 
-    capa = await capa_service.link_fmea(db, capa, fmea_id, user.user_id, fmea_node_id)
+    capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
     return CAPAResponse.model_validate(capa)
 
 
@@ -189,10 +229,11 @@ async def link_fmea(
 async def get_related_fmea(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    from app.models.capa import CAPAEightD
-    from app.models.fmea import FMEADocument
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
 
     capa = (
         await db.execute(
@@ -201,7 +242,7 @@ async def get_related_fmea(
     ).scalar_one_or_none()
     if not capa:
         raise HTTPException(status_code=404, detail="CAPA not found")
-    await enforce_product_line_access(user, capa.product_line_code, db)
+    _check_factory_access(capa, scope)
     if not capa.fmea_ref_id:
         return {"fmea_id": None, "document_no": None, "fmea_node_id": None}
 
@@ -218,35 +259,48 @@ async def get_related_fmea(
     }
 
 
+def _resolve_allowed_pls(scope: RequestScope) -> list[str] | None:
+    """Resolve allowed product line codes from scope. Returns None for ALL mode."""
+    if scope.pl_scope.mode == "NONE":
+        return []
+    elif scope.pl_scope.mode == "EXPLICIT":
+        return scope.pl_scope.codes
+    return None  # ALL mode — no restriction
+
+
 @router.get("/{report_id}/d7-fmea-recommendations")
 async def get_d7_fmea_recommendations(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    from app.models.fmea import FMEADocument
-    from app.services.capa_service import get_d7_recommendations
-
     # Require both CAPA VIEW and FMEA VIEW
-    fmea_level = await get_user_permission(user, Module.FMEA, db)
+    capa_level = await get_user_permission(scope.user, Module.CAPA, db)
+    if capa_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 CAPA 模块的 VIEW 权限")
+    fmea_level = await get_user_permission(scope.user, Module.FMEA, db)
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    await enforce_product_line_access(user, capa.product_line_code, db)
+    _check_factory_access(capa, scope)
 
-    # Get user's accessible product lines (bypass for admins)
-    if user.role_definition.bypass_row_level_security:
-        allowed_pls = None  # no restriction
-    else:
-        allowed_pls = await get_user_product_line_codes(user, db)
-        if not allowed_pls:
-            return {"recommendations": []}
+    # Resolve product line scope
+    allowed_pls = _resolve_allowed_pls(scope)
+    if allowed_pls is not None and not allowed_pls:
+        return {"recommendations": []}
 
     # Fetch FMEA documents — always same product line as CAPA, plus RLS filter
     fmea_query = select(FMEADocument).where(FMEADocument.product_line_code == capa.product_line_code)
+    if scope.effective_factory_id:
+        fmea_query = fmea_query.where(FMEADocument.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        if scope.factory_scope.accessible_factory_ids:
+            fmea_query = fmea_query.where(FMEADocument.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+        else:
+            fmea_query = fmea_query.where(False)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
     fmea_result = await db.execute(fmea_query)
@@ -267,6 +321,7 @@ async def get_d7_fmea_recommendations(
         "product_line_code": capa.product_line_code,
     }
 
+    from app.services.capa_service import get_d7_recommendations
     recs = get_d7_recommendations(capa_data, fmea_docs, allowed_pls)
     return {"recommendations": recs}
 
@@ -276,30 +331,34 @@ async def get_d4_fmea_recommendations(
     report_id: uuid.UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    from app.models.fmea import FMEADocument
-    from app.services.capa_service import get_capa
-
-    fmea_level = await get_user_permission(user, Module.FMEA, db)
+    capa_level = await get_user_permission(scope.user, Module.CAPA, db)
+    if capa_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 CAPA 模块的 VIEW 权限")
+    fmea_level = await get_user_permission(scope.user, Module.FMEA, db)
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
-    capa = await get_capa(db, report_id)
+    capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    await enforce_product_line_access(user, capa.product_line_code, db)
+    _check_factory_access(capa, scope)
 
-    if user.role_definition.bypass_row_level_security:
-        allowed_pls = None
-    else:
-        allowed_pls = await get_user_product_line_codes(user, db)
-        if not allowed_pls:
-            return {"items": []}
+    allowed_pls = _resolve_allowed_pls(scope)
+    if allowed_pls is not None and not allowed_pls:
+        return {"items": []}
 
     # Preload FMEA docs for all allowed product lines (not just current CAPA's PL)
     # SemanticSearchSource may retrieve cross-PL matches; doc_map must cover them
     fmea_query = select(FMEADocument)
+    if scope.effective_factory_id:
+        fmea_query = fmea_query.where(FMEADocument.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        if scope.factory_scope.accessible_factory_ids:
+            fmea_query = fmea_query.where(FMEADocument.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+        else:
+            fmea_query = fmea_query.where(False)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
     # admin (allowed_pls=None): load all FMEA docs
@@ -343,30 +402,34 @@ async def get_d5_fmea_recommendations(
     report_id: uuid.UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    from app.models.fmea import FMEADocument
-    from app.services.capa_service import get_capa
-
-    fmea_level = await get_user_permission(user, Module.FMEA, db)
+    capa_level = await get_user_permission(scope.user, Module.CAPA, db)
+    if capa_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 CAPA 模块的 VIEW 权限")
+    fmea_level = await get_user_permission(scope.user, Module.FMEA, db)
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
-    capa = await get_capa(db, report_id)
+    capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    await enforce_product_line_access(user, capa.product_line_code, db)
+    _check_factory_access(capa, scope)
 
-    if user.role_definition.bypass_row_level_security:
-        allowed_pls = None
-    else:
-        allowed_pls = await get_user_product_line_codes(user, db)
-        if not allowed_pls:
-            return {"existing_controls": [], "general_suggestions": []}
+    allowed_pls = _resolve_allowed_pls(scope)
+    if allowed_pls is not None and not allowed_pls:
+        return {"existing_controls": [], "general_suggestions": []}
 
     # Preload FMEA docs for all allowed product lines (not just current CAPA's PL)
     # SemanticSearchSource may retrieve cross-PL matches; doc_map must cover them
     fmea_query = select(FMEADocument)
+    if scope.effective_factory_id:
+        fmea_query = fmea_query.where(FMEADocument.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        if scope.factory_scope.accessible_factory_ids:
+            fmea_query = fmea_query.where(FMEADocument.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+        else:
+            fmea_query = fmea_query.where(False)
     if allowed_pls is not None:
         fmea_query = fmea_query.where(FMEADocument.product_line_code.in_(allowed_pls))
     # admin (allowed_pls=None): load all FMEA docs
@@ -422,13 +485,16 @@ async def get_d5_fmea_recommendations(
 async def draft_capabilities(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """获取当前 CAPA 报告可生成 AI 草稿的步骤列表"""
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     capa = await capa_service.get_capa(db, report_id)
     if not capa:
         raise HTTPException(status_code=404, detail="CAPA 报告不存在")
-    await enforce_product_line_access(user, capa.product_line_code, db)
+    _check_factory_access(capa, scope)
 
     current_status = capa.status
     if current_status in ("ARCHIVED", "CLOSED", "D1_TEAM"):
@@ -458,12 +524,15 @@ async def draft_capa_step(
     req: DraftRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.EDIT)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """为指定步骤生成 AI 草稿"""
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     if step not in {"d2", "d3", "d4", "d5", "d6", "d7", "d8"}:
         raise HTTPException(status_code=400, detail="无效的步骤")
-    result = await generate_draft(db, report_id, step, req, user, request)
+    result = await generate_draft(db, report_id, step, req, scope.user, request)
     return DraftResponse(**result)
 
 
@@ -473,24 +542,25 @@ async def get_capa_lessons(
     request: Request,
     req: LessonsLearnedRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.CAPA, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """Get lessons learned recommendations for a newly created CAPA."""
-    from app.services.capa_service import get_capa
-    capa_doc = await get_capa(db, report_id)
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa_doc = await capa_service.get_capa(db, report_id)
     if capa_doc is None:
         raise HTTPException(status_code=404, detail="CAPA not found")
-    await enforce_product_line_access(user, capa_doc.product_line_code, db)
+    _check_factory_access(capa_doc, scope)
 
     # Check FMEA VIEW permission since service may query FMEA sources
-    from app.core.permissions import get_user_permission, Module as _Module, PermissionLevel as _PL
-    fmea_level = await get_user_permission(user, _Module.FMEA, db)
-    has_fmea_view = fmea_level >= _PL.VIEW
+    fmea_level = await get_user_permission(scope.user, Module.FMEA, db)
+    has_fmea_view = fmea_level >= PermissionLevel.VIEW
 
     embedding = getattr(request.app.state, "embedding_provider", None)
     service = LessonsLearnedService(db, embedding)
     result = await service.recommend(
-        report_id, "capa", req.problem_description if req else None, user,
+        report_id, "capa", req.problem_description if req else None, scope.user,
         skip_fmea_sources=not has_fmea_view,
     )
     await db.commit()

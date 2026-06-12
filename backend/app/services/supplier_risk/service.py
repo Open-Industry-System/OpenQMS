@@ -448,6 +448,7 @@ async def create_capa_from_alert(
         due_date=date.today(),
         user_id=user_id,
         product_line_code=alert.product_line_code or "DC-DC-100",
+        factory_id=alert.factory_id,
     )
 
     # Link alert to CAPA and update status

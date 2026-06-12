@@ -24,9 +24,14 @@ async def list_gauges(
     department: str | None = None,
     search: str | None = None,
     expiring_days: int | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> tuple[list[Gauge], int]:
     query = select(Gauge)
     count_query = select(func.count()).select_from(Gauge)
+
+    if factory_id:
+        query = query.where(Gauge.factory_id == factory_id)
+        count_query = count_query.where(Gauge.factory_id == factory_id)
 
     if status:
         query = query.where(Gauge.status == status)
@@ -80,6 +85,7 @@ async def create_gauge(
     calibration_cycle_days: int | None,
     next_calibration_date: date | None,
     user_id: uuid.UUID,
+    factory_id: uuid.UUID | None = None,
 ) -> Gauge:
     if not gauge_no:
         gauge_no = await _generate_gauge_no(db)
@@ -97,6 +103,7 @@ async def create_gauge(
         calibration_cycle_days=calibration_cycle_days,
         next_calibration_date=next_calibration_date,
         created_by=user_id,
+        factory_id=factory_id,
     )
     db.add(gauge)
     db.add(

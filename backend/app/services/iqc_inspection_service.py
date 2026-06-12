@@ -69,6 +69,8 @@ async def list_inspections(
     date_from: date | None = None,
     date_to: date | None = None,
     product_line_code: str | None = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
 ) -> tuple[list[IqcInspection], int]:
     query = select(IqcInspection).options(
         selectinload(IqcInspection.items).selectinload(IqcInspectionItem.measurements)
@@ -104,6 +106,12 @@ async def list_inspections(
     if product_line_code:
         query = query.where(IqcInspection.product_line_code == product_line_code)
         count_q = count_q.where(IqcInspection.product_line_code == product_line_code)
+    if factory_id:
+        query = query.where(IqcInspection.factory_id == factory_id)
+        count_q = count_q.where(IqcInspection.factory_id == factory_id)
+    if allowed_product_line_codes is not None:
+        query = query.where(IqcInspection.product_line_code.in_(allowed_product_line_codes))
+        count_q = count_q.where(IqcInspection.product_line_code.in_(allowed_product_line_codes))
 
     total = (await db.execute(count_q)).scalar() or 0
     items = (await db.execute(
@@ -595,10 +603,19 @@ async def trigger_scar(
 
 # ─── Stats ───
 
-async def get_stats(db: AsyncSession, product_line_code: str | None = None) -> dict:
+async def get_stats(
+    db: AsyncSession,
+    product_line_code: str | None = None,
+    factory_id: uuid.UUID | None = None,
+    allowed_product_line_codes: list[str] | None = None,
+) -> dict:
     base = select(func.count(IqcInspection.inspection_id))
     if product_line_code:
         base = base.where(IqcInspection.product_line_code == product_line_code)
+    if factory_id:
+        base = base.where(IqcInspection.factory_id == factory_id)
+    if allowed_product_line_codes is not None:
+        base = base.where(IqcInspection.product_line_code.in_(allowed_product_line_codes))
 
     total = (await db.execute(base)).scalar() or 0
 

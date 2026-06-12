@@ -4,9 +4,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
+from app.core.permissions import get_user_permission, PermissionLevel, Module
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
+from app.models.user import User
 from app.models.spc import InspectionCharacteristic
 from app.models.gauge import Gauge
+from app.models.grr import GrrStudy
+from app.models.bias import BiasStudy
+from app.models.linearity import LinearityStudy
+from app.models.stability import StabilityStudy
+from app.models.attribute import AttributeStudy
 from app import schemas
 from app.services import (
     grr_service,
@@ -29,6 +37,17 @@ attribute_router = APIRouter(prefix="/api/msa/attribute", tags=["msa-attribute"]
 overview_router = APIRouter(prefix="/api/msa", tags=["msa-overview"])
 
 
+def _check_factory_access(entity, scope: RequestScope, entity_label: str = "MSA study"):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail=f"{entity_label} not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail=f"{entity_label} not found")
+
+
 # ─── GRR routes ───
 
 @grr_router.get("", response_model=schemas.grr.GrrStudyListResponse)
@@ -38,9 +57,20 @@ async def list_grr(
     status: str | None = Query(None),
     gauge_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    items, total = await grr_service.list_studies(db, page, page_size, status, gauge_id)
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+
+    if scope.pl_scope.mode == "NONE":
+        return schemas.grr.GrrStudyListResponse(items=[], total=0, page=page, page_size=page_size)
+
+    items, total = await grr_service.list_studies(
+        db, page, page_size, status, gauge_id,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None,
+    )
     return schemas.grr.GrrStudyListResponse(
         items=[schemas.grr.GrrStudyResponse.model_validate(s) for s in items],
         total=total,
@@ -53,9 +83,14 @@ async def list_grr(
 async def create_grr(
     req: schemas.grr.GrrStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await grr_service.create_study(
             db,
             title=req.title,
@@ -71,8 +106,11 @@ async def create_grr(
             part_count=req.part_count,
             trial_count=req.trial_count,
             study_date=req.study_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
+        await validate_factory_invariant(study, db)
+        await db.refresh(study)
         return schemas.grr.GrrStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -82,11 +120,15 @@ async def create_grr(
 async def get_grr(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
     study = await grr_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="GRR study not found")
+    _check_factory_access(study, scope, "GRR study")
     return schemas.grr.GrrStudyResponse.model_validate(study)
 
 
@@ -95,16 +137,20 @@ async def update_grr(
     study_id: uuid.UUID,
     req: schemas.grr.GrrStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await grr_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="GRR study not found")
+    _check_factory_access(study, scope, "GRR study")
     try:
         study = await grr_service.update_study(
             db,
             study,
-            user.user_id,
+            scope.user.user_id,
             title=req.title,
             method=req.method,
             gauge_id=req.gauge_id,
@@ -128,13 +174,17 @@ async def update_grr(
 async def delete_grr(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await grr_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="GRR study not found")
+    _check_factory_access(study, scope, "GRR study")
     try:
-        await grr_service.delete_study(db, study, user.user_id)
+        await grr_service.delete_study(db, study, scope.user.user_id)
         return {"message": "GRR study deleted"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -145,8 +195,15 @@ async def upsert_grr_measurements(
     study_id: uuid.UUID,
     req: schemas.grr.GrrMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
+    study = await grr_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="GRR study not found")
+    _check_factory_access(study, scope, "GRR study")
     try:
         await grr_service.upsert_measurements(
             db, study_id, [m.model_dump() for m in req.measurements]
@@ -160,8 +217,15 @@ async def upsert_grr_measurements(
 async def get_grr_measurements(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await grr_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="GRR study not found")
+    _check_factory_access(study, scope, "GRR study")
     measurements = await grr_service.get_measurements(db, study_id)
     return [
         {
@@ -180,11 +244,15 @@ async def get_grr_measurements(
 async def compute_grr(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await grr_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="GRR study not found")
+    _check_factory_access(study, scope, "GRR study")
     try:
         measurements = await grr_service.get_measurements(db, study_id)
         if not measurements:
@@ -200,8 +268,15 @@ async def compute_grr(
 async def get_grr_result(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await grr_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="GRR study not found")
+    _check_factory_access(study, scope, "GRR study")
     result = await grr_service.get_result(db, study_id)
     if not result:
         raise HTTPException(status_code=404, detail="result not computed yet")
@@ -213,13 +288,17 @@ async def complete_grr(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await grr_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="GRR study not found")
+    _check_factory_access(study, scope, "GRR study")
     try:
-        study = await grr_service.complete_study(db, study, user.user_id, accepted)
+        study = await grr_service.complete_study(db, study, scope.user.user_id, accepted)
         return schemas.grr.GrrStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -234,9 +313,20 @@ async def list_bias(
     status: str | None = Query(None),
     gauge_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    items, total = await bias_service.list_studies(db, page, page_size, status, gauge_id)
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+
+    if scope.pl_scope.mode == "NONE":
+        return schemas.bias.BiasStudyListResponse(items=[], total=0, page=page, page_size=page_size)
+
+    items, total = await bias_service.list_studies(
+        db, page, page_size, status, gauge_id,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None,
+    )
     return schemas.bias.BiasStudyListResponse(
         items=[schemas.bias.BiasStudyResponse.model_validate(s) for s in items],
         total=total,
@@ -249,9 +339,14 @@ async def list_bias(
 async def create_bias(
     req: schemas.bias.BiasStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await bias_service.create_study(
             db,
             title=req.title,
@@ -262,8 +357,11 @@ async def create_bias(
             reference_value=req.reference_value,
             sample_size=req.sample_size,
             study_date=req.study_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
+        await validate_factory_invariant(study, db)
+        await db.refresh(study)
         return schemas.bias.BiasStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -273,11 +371,15 @@ async def create_bias(
 async def get_bias(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
     study = await bias_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="bias study not found")
+    _check_factory_access(study, scope, "Bias study")
     return schemas.bias.BiasStudyResponse.model_validate(study)
 
 
@@ -286,16 +388,20 @@ async def update_bias(
     study_id: uuid.UUID,
     req: schemas.bias.BiasStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await bias_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="bias study not found")
+    _check_factory_access(study, scope, "Bias study")
     try:
         study = await bias_service.update_study(
             db,
             study,
-            user.user_id,
+            scope.user.user_id,
             title=req.title,
             gauge_id=req.gauge_id,
             characteristic_name=req.characteristic_name,
@@ -314,13 +420,17 @@ async def update_bias(
 async def delete_bias(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await bias_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="bias study not found")
+    _check_factory_access(study, scope, "Bias study")
     try:
-        await bias_service.delete_study(db, study, user.user_id)
+        await bias_service.delete_study(db, study, scope.user.user_id)
         return {"message": "bias study deleted"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -331,8 +441,15 @@ async def upsert_bias_measurements(
     study_id: uuid.UUID,
     req: schemas.bias.BiasMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
+    study = await bias_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="bias study not found")
+    _check_factory_access(study, scope, "Bias study")
     try:
         await bias_service.upsert_measurements(
             db, study_id, [m.model_dump() for m in req.measurements]
@@ -346,8 +463,15 @@ async def upsert_bias_measurements(
 async def get_bias_measurements(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await bias_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="bias study not found")
+    _check_factory_access(study, scope, "Bias study")
     measurements = await bias_service.get_measurements(db, study_id)
     return [
         {
@@ -364,11 +488,15 @@ async def get_bias_measurements(
 async def compute_bias(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await bias_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="bias study not found")
+    _check_factory_access(study, scope, "Bias study")
     try:
         measurements = await bias_service.get_measurements(db, study_id)
         if not measurements:
@@ -384,8 +512,15 @@ async def compute_bias(
 async def get_bias_result(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await bias_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="bias study not found")
+    _check_factory_access(study, scope, "Bias study")
     result = await bias_service.get_result(db, study_id)
     if not result:
         raise HTTPException(status_code=404, detail="result not computed yet")
@@ -397,13 +532,17 @@ async def complete_bias(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await bias_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="bias study not found")
+    _check_factory_access(study, scope, "Bias study")
     try:
-        study = await bias_service.complete_study(db, study, user.user_id, accepted)
+        study = await bias_service.complete_study(db, study, scope.user.user_id, accepted)
         return schemas.bias.BiasStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -418,9 +557,20 @@ async def list_linearity(
     status: str | None = Query(None),
     gauge_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    items, total = await linearity_service.list_studies(db, page, page_size, status, gauge_id)
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+
+    if scope.pl_scope.mode == "NONE":
+        return schemas.linearity.LinearityStudyListResponse(items=[], total=0, page=page, page_size=page_size)
+
+    items, total = await linearity_service.list_studies(
+        db, page, page_size, status, gauge_id,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None,
+    )
     return schemas.linearity.LinearityStudyListResponse(
         items=[schemas.linearity.LinearityStudyResponse.model_validate(s) for s in items],
         total=total,
@@ -433,9 +583,14 @@ async def list_linearity(
 async def create_linearity(
     req: schemas.linearity.LinearityStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await linearity_service.create_study(
             db,
             title=req.title,
@@ -447,8 +602,11 @@ async def create_linearity(
             tolerance_lower=req.tolerance_lower,
             sample_size_per_reference=req.sample_size_per_reference,
             study_date=req.study_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
+        await validate_factory_invariant(study, db)
+        await db.refresh(study)
         return schemas.linearity.LinearityStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -458,11 +616,15 @@ async def create_linearity(
 async def get_linearity(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
     study = await linearity_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="linearity study not found")
+    _check_factory_access(study, scope, "Linearity study")
     return schemas.linearity.LinearityStudyResponse.model_validate(study)
 
 
@@ -471,16 +633,20 @@ async def update_linearity(
     study_id: uuid.UUID,
     req: schemas.linearity.LinearityStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await linearity_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="linearity study not found")
+    _check_factory_access(study, scope, "Linearity study")
     try:
         study = await linearity_service.update_study(
             db,
             study,
-            user.user_id,
+            scope.user.user_id,
             title=req.title,
             gauge_id=req.gauge_id,
             characteristic_name=req.characteristic_name,
@@ -500,13 +666,17 @@ async def update_linearity(
 async def delete_linearity(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await linearity_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="linearity study not found")
+    _check_factory_access(study, scope, "Linearity study")
     try:
-        await linearity_service.delete_study(db, study, user.user_id)
+        await linearity_service.delete_study(db, study, scope.user.user_id)
         return {"message": "linearity study deleted"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -517,8 +687,15 @@ async def upsert_linearity_measurements(
     study_id: uuid.UUID,
     req: schemas.linearity.LinearityMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
+    study = await linearity_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="linearity study not found")
+    _check_factory_access(study, scope, "Linearity study")
     try:
         await linearity_service.upsert_measurements(
             db, study_id, [m.model_dump() for m in req.measurements]
@@ -532,8 +709,15 @@ async def upsert_linearity_measurements(
 async def get_linearity_measurements(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await linearity_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="linearity study not found")
+    _check_factory_access(study, scope, "Linearity study")
     measurements = await linearity_service.get_measurements(db, study_id)
     return [
         {
@@ -551,11 +735,15 @@ async def get_linearity_measurements(
 async def compute_linearity(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await linearity_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="linearity study not found")
+    _check_factory_access(study, scope, "Linearity study")
     try:
         measurements = await linearity_service.get_measurements(db, study_id)
         if not measurements:
@@ -571,8 +759,15 @@ async def compute_linearity(
 async def get_linearity_result(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await linearity_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="linearity study not found")
+    _check_factory_access(study, scope, "Linearity study")
     result = await linearity_service.get_result(db, study_id)
     if not result:
         raise HTTPException(status_code=404, detail="result not computed yet")
@@ -584,13 +779,17 @@ async def complete_linearity(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await linearity_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="linearity study not found")
+    _check_factory_access(study, scope, "Linearity study")
     try:
-        study = await linearity_service.complete_study(db, study, user.user_id, accepted)
+        study = await linearity_service.complete_study(db, study, scope.user.user_id, accepted)
         return schemas.linearity.LinearityStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -605,9 +804,20 @@ async def list_stability(
     status: str | None = Query(None),
     gauge_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    items, total = await stability_service.list_studies(db, page, page_size, status, gauge_id)
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+
+    if scope.pl_scope.mode == "NONE":
+        return schemas.stability.StabilityStudyListResponse(items=[], total=0, page=page, page_size=page_size)
+
+    items, total = await stability_service.list_studies(
+        db, page, page_size, status, gauge_id,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None,
+    )
     return schemas.stability.StabilityStudyListResponse(
         items=[schemas.stability.StabilityStudyResponse.model_validate(s) for s in items],
         total=total,
@@ -620,9 +830,14 @@ async def list_stability(
 async def create_stability(
     req: schemas.stability.StabilityStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await stability_service.create_study(
             db,
             title=req.title,
@@ -633,8 +848,11 @@ async def create_stability(
             reference_value=req.reference_value,
             subgroup_size=req.subgroup_size,
             study_date=req.study_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
+        await validate_factory_invariant(study, db)
+        await db.refresh(study)
         return schemas.stability.StabilityStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -644,11 +862,15 @@ async def create_stability(
 async def get_stability(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
     study = await stability_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="stability study not found")
+    _check_factory_access(study, scope, "Stability study")
     return schemas.stability.StabilityStudyResponse.model_validate(study)
 
 
@@ -657,16 +879,20 @@ async def update_stability(
     study_id: uuid.UUID,
     req: schemas.stability.StabilityStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await stability_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="stability study not found")
+    _check_factory_access(study, scope, "Stability study")
     try:
         study = await stability_service.update_study(
             db,
             study,
-            user.user_id,
+            scope.user.user_id,
             title=req.title,
             gauge_id=req.gauge_id,
             characteristic_name=req.characteristic_name,
@@ -685,13 +911,17 @@ async def update_stability(
 async def delete_stability(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await stability_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="stability study not found")
+    _check_factory_access(study, scope, "Stability study")
     try:
-        await stability_service.delete_study(db, study, user.user_id)
+        await stability_service.delete_study(db, study, scope.user.user_id)
         return {"message": "stability study deleted"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -702,8 +932,15 @@ async def upsert_stability_measurements(
     study_id: uuid.UUID,
     req: schemas.stability.StabilityMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
+    study = await stability_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="stability study not found")
+    _check_factory_access(study, scope, "Stability study")
     try:
         await stability_service.upsert_measurements(
             db, study_id, [m.model_dump() for m in req.measurements]
@@ -717,8 +954,15 @@ async def upsert_stability_measurements(
 async def get_stability_measurements(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await stability_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="stability study not found")
+    _check_factory_access(study, scope, "Stability study")
     measurements = await stability_service.get_measurements(db, study_id)
     return [
         {
@@ -737,11 +981,15 @@ async def get_stability_measurements(
 async def compute_stability(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await stability_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="stability study not found")
+    _check_factory_access(study, scope, "Stability study")
     try:
         measurements = await stability_service.get_measurements(db, study_id)
         if not measurements:
@@ -757,8 +1005,15 @@ async def compute_stability(
 async def get_stability_result(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await stability_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="stability study not found")
+    _check_factory_access(study, scope, "Stability study")
     result = await stability_service.get_result(db, study_id)
     if not result:
         raise HTTPException(status_code=404, detail="result not computed yet")
@@ -770,13 +1025,17 @@ async def complete_stability(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await stability_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="stability study not found")
+    _check_factory_access(study, scope, "Stability study")
     try:
-        study = await stability_service.complete_study(db, study, user.user_id, accepted)
+        study = await stability_service.complete_study(db, study, scope.user.user_id, accepted)
         return schemas.stability.StabilityStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -791,9 +1050,20 @@ async def list_attribute(
     status: str | None = Query(None),
     gauge_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    items, total = await attribute_service.list_studies(db, page, page_size, status, gauge_id)
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+
+    if scope.pl_scope.mode == "NONE":
+        return schemas.attribute.AttributeStudyListResponse(items=[], total=0, page=page, page_size=page_size)
+
+    items, total = await attribute_service.list_studies(
+        db, page, page_size, status, gauge_id,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None,
+    )
     return schemas.attribute.AttributeStudyListResponse(
         items=[schemas.attribute.AttributeStudyResponse.model_validate(s) for s in items],
         total=total,
@@ -806,9 +1076,14 @@ async def list_attribute(
 async def create_attribute(
     req: schemas.attribute.AttributeStudyCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     try:
+        factory_id = await resolve_create_factory_id(db, scope)
+        check_factory_access(factory_id, scope)
         study = await attribute_service.create_study(
             db,
             title=req.title,
@@ -819,8 +1094,11 @@ async def create_attribute(
             sample_size=req.sample_size,
             known_standard_count=req.known_standard_count,
             study_date=req.study_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
+        await validate_factory_invariant(study, db)
+        await db.refresh(study)
         return schemas.attribute.AttributeStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -830,11 +1108,15 @@ async def create_attribute(
 async def get_attribute(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
     study = await attribute_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="attribute study not found")
+    _check_factory_access(study, scope, "Attribute study")
     return schemas.attribute.AttributeStudyResponse.model_validate(study)
 
 
@@ -843,16 +1125,20 @@ async def update_attribute(
     study_id: uuid.UUID,
     req: schemas.attribute.AttributeStudyUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await attribute_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="attribute study not found")
+    _check_factory_access(study, scope, "Attribute study")
     try:
         study = await attribute_service.update_study(
             db,
             study,
-            user.user_id,
+            scope.user.user_id,
             title=req.title,
             gauge_id=req.gauge_id,
             characteristic_name=req.characteristic_name,
@@ -871,13 +1157,17 @@ async def update_attribute(
 async def delete_attribute(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await attribute_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="attribute study not found")
+    _check_factory_access(study, scope, "Attribute study")
     try:
-        await attribute_service.delete_study(db, study, user.user_id)
+        await attribute_service.delete_study(db, study, scope.user.user_id)
         return {"message": "attribute study deleted"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -888,8 +1178,15 @@ async def upsert_attribute_measurements(
     study_id: uuid.UUID,
     req: schemas.attribute.AttributeMeasurementBulkUpsert,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
+    study = await attribute_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="attribute study not found")
+    _check_factory_access(study, scope, "Attribute study")
     try:
         await attribute_service.upsert_measurements(
             db, study_id, [m.model_dump() for m in req.measurements]
@@ -903,8 +1200,15 @@ async def upsert_attribute_measurements(
 async def get_attribute_measurements(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await attribute_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="attribute study not found")
+    _check_factory_access(study, scope, "Attribute study")
     measurements = await attribute_service.get_measurements(db, study_id)
     return [
         {
@@ -924,11 +1228,15 @@ async def get_attribute_measurements(
 async def compute_attribute(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await attribute_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="attribute study not found")
+    _check_factory_access(study, scope, "Attribute study")
     try:
         measurements = await attribute_service.get_measurements(db, study_id)
         if not measurements:
@@ -944,8 +1252,15 @@ async def compute_attribute(
 async def get_attribute_result(
     study_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
+    study = await attribute_service.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="attribute study not found")
+    _check_factory_access(study, scope, "Attribute study")
     result = await attribute_service.get_result(db, study_id)
     if not result:
         raise HTTPException(status_code=404, detail="result not computed yet")
@@ -957,13 +1272,17 @@ async def complete_attribute(
     study_id: uuid.UUID,
     accepted: bool = Query(True),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_permission(Module.MSA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 CREATE 权限")
     study = await attribute_service.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="attribute study not found")
+    _check_factory_access(study, scope, "Attribute study")
     try:
-        study = await attribute_service.complete_study(db, study, user.user_id, accepted)
+        study = await attribute_service.complete_study(db, study, scope.user.user_id, accepted)
         return schemas.attribute.AttributeStudyResponse.model_validate(study)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -978,15 +1297,16 @@ async def list_all_msa_studies(
     type: str | None = Query(None),
     status: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    from app.models.grr import GrrStudy
-    from app.models.bias import BiasStudy
-    from app.models.linearity import LinearityStudy
-    from app.models.stability import StabilityStudy
-    from app.models.attribute import AttributeStudy
+    level = await get_user_permission(scope.user, Module.MSA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 msa 模块的 VIEW 权限")
 
-    results = []
+    # Product line scope early return
+    if scope.pl_scope.mode == "NONE":
+        return schemas.msa.MsaStudyOverviewListResponse(items=[], total=0, page=page, page_size=page_size)
+
     type_map = {
         "grr": (GrrStudy, "GRR"),
         "bias": (BiasStudy, "偏倚"),
@@ -995,12 +1315,24 @@ async def list_all_msa_studies(
         "attribute": (AttributeStudy, "计数型"),
     }
 
+    results = []
     for study_type, (model, type_label) in type_map.items():
         if type and type != study_type:
             continue
         query = select(model)
         if status:
             query = query.where(model.status == status)
+        # Factory scope filtering
+        if scope.effective_factory_id and hasattr(model, "factory_id"):
+            query = query.where(model.factory_id == scope.effective_factory_id)
+        elif scope.factory_scope.accessible_factory_ids is not None and hasattr(model, "factory_id"):
+            if scope.factory_scope.accessible_factory_ids:
+                query = query.where(model.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+            else:
+                continue  # No accessible factories, skip
+        # Product line scope filtering
+        if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes and hasattr(model, "product_line_code"):
+            query = query.where(model.product_line_code.in_(scope.pl_scope.codes))
         items = (await db.execute(query)).scalars().all()
         for s in items:
             gauge_name = None
@@ -1034,9 +1366,30 @@ async def list_all_msa_studies(
 @overview_router.get("/spc-characteristics", response_model=list[schemas.msa.MsaSpcCharacteristic])
 async def list_spc_characteristics(
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    result = await db.execute(select(InspectionCharacteristic))
+    level = await get_user_permission(scope.user, Module.SPC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 spc 模块的 VIEW 权限")
+
+    # Product line scope early return
+    if scope.pl_scope.mode == "NONE":
+        return []
+
+    query = select(InspectionCharacteristic)
+    # Factory scope filtering
+    if scope.effective_factory_id:
+        query = query.where(InspectionCharacteristic.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        if scope.factory_scope.accessible_factory_ids:
+            query = query.where(InspectionCharacteristic.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+        else:
+            return []  # No accessible factories
+    # Product line scope filtering
+    if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
+        query = query.where(InspectionCharacteristic.product_line.in_(scope.pl_scope.codes))
+
+    result = await db.execute(query)
     chars = result.scalars().all()
     return [
         schemas.msa.MsaSpcCharacteristic(

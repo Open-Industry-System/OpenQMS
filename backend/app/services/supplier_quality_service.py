@@ -1,3 +1,5 @@
+import uuid
+import uuid
 from datetime import date, timedelta
 from typing import List, Optional
 from sqlalchemy import select, func, case, and_
@@ -12,6 +14,7 @@ async def get_quality_dashboard(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     product_line_code: Optional[str] = None,
+    factory_id: uuid.UUID | None = None,
 ) -> dict:
     if not end_date:
         end_date = date.today()
@@ -24,6 +27,8 @@ async def get_quality_dashboard(
     ]
     if product_line_code:
         iqc_filter.append(IqcInspection.product_line_code == product_line_code)
+    if factory_id is not None and hasattr(IqcInspection, "factory_id"):
+        iqc_filter.append(IqcInspection.factory_id == factory_id)
 
     # Overall PPM
     ppm_result = await db.execute(
@@ -196,6 +201,7 @@ async def get_supplier_quality_detail(
     supplier_id: str,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    factory_id: uuid.UUID | None = None,
 ) -> dict:
     from app.services.supplier_service import get_supplier
 
@@ -324,6 +330,7 @@ async def get_supplier_compare(
     supplier_ids: List[str],
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    factory_id: uuid.UUID | None = None,
 ) -> dict:
     if not start_date:
         start_date = date.today() - timedelta(days=180)
@@ -358,10 +365,11 @@ async def export_quality_dashboard_excel(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     product_line_code: Optional[str] = None,
+    factory_id: uuid.UUID | None = None,
 ) -> bytes:
     from app.utils.excel import create_workbook, append_row, workbook_to_bytes
 
-    dashboard_data = await get_quality_dashboard(db, start_date, end_date, product_line_code)
+    dashboard_data = await get_quality_dashboard(db, start_date, end_date, product_line_code, factory_id=factory_id)
 
     headers = ["排名", "供应商编号", "供应商名称", "评级", "PPM", "批次合格率", "交付准时率", "开放SCAR"]
     wb, ws = create_workbook("供应商质量排名", headers)

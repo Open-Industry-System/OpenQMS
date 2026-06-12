@@ -3,12 +3,34 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, get_user_permission, PermissionLevel, Module
-from app.models.user import User
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
+from app.core.permissions import get_user_permission, PermissionLevel, Module
+from app.models.supplier import SupplierSCAR
 from app.schemas import scar as scar_schemas
 from app.services import scar_service
 
 router = APIRouter(prefix="/api/scars", tags=["scars"])
+
+
+def _check_factory_access(entity, scope: RequestScope):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="SCAR not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="SCAR not found")
+
+
+def _resolve_allowed_pls(scope: RequestScope) -> list[str] | None:
+    """Resolve allowed product line codes from scope. Returns None for ALL mode, empty list for NONE."""
+    if scope.pl_scope.mode == "NONE":
+        return []
+    elif scope.pl_scope.mode == "EXPLICIT":
+        return scope.pl_scope.codes
+    return None  # ALL
 
 
 def _to_response(s) -> dict:
@@ -45,11 +67,22 @@ async def list_scars(
     supplier_id: uuid.UUID | None = Query(None),
     source_type: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.SCAR, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 scar 模块的 VIEW 权限")
+
     statuses = status.split(",") if status else None
+    allowed_pls = _resolve_allowed_pls(scope)
+    if allowed_pls is not None and not allowed_pls:
+        return scar_schemas.SCARListResponse(items=[], total=0, page=page, page_size=page_size)
+
     items, total = await scar_service.list_scars(
-        db, page, page_size, statuses, supplier_id, source_type
+        db, page, page_size, statuses, supplier_id, source_type,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=allowed_pls,
     )
     return scar_schemas.SCARListResponse(
         items=[_to_response(s) for s in items],
@@ -61,11 +94,17 @@ async def list_scars(
 async def get_scar(
     scar_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.SCAR, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 scar 模块的 VIEW 权限")
+
     scar = await scar_service.get_scar(db, scar_id)
     if not scar:
         raise HTTPException(404, "SCAR not found")
+    _check_factory_access(scar, scope)
     return _to_response(scar)
 
 
@@ -73,9 +112,16 @@ async def get_scar(
 async def create_scar(
     req: scar_schemas.SCARCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.SCAR, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.SCAR, db)
+    if perm_level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 scar 模块的 CREATE 权限")
+
     try:
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         scar = await scar_service.create_scar(
             db,
             supplier_id=req.supplier_id,
@@ -85,8 +131,11 @@ async def create_scar(
             product_line_code=req.product_line_code,
             requested_action=req.requested_action,
             due_date=req.due_date,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
+        await validate_factory_invariant(scar, db)
+        await db.refresh(scar)
         return _to_response(scar)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -97,15 +146,21 @@ async def update_scar(
     scar_id: uuid.UUID,
     req: scar_schemas.SCARUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.SCAR, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.SCAR, db)
+    if perm_level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 scar 模块的 CREATE 权限")
+
     scar = await scar_service.get_scar(db, scar_id)
     if not scar:
         raise HTTPException(404, "SCAR not found")
+    _check_factory_access(scar, scope)
     try:
         scar = await scar_service.update_scar(
             db, scar,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
             description=req.description,
             requested_action=req.requested_action,
             due_date=req.due_date,
@@ -120,10 +175,13 @@ async def transition_scar(
     scar_id: uuid.UUID,
     req: scar_schemas.SCARTransitionRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    # Route-level permission check
-    perm_level = await get_user_permission(user, Module.SCAR, db)
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.SCAR, db)
+    if perm_level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 scar 模块的 VIEW 权限")
+
     if req.action in ("verify", "reject", "close", "reopen"):
         if perm_level < PermissionLevel.APPROVE:
             raise HTTPException(403, "需要 manager 或 admin 权限")
@@ -134,9 +192,10 @@ async def transition_scar(
     scar = await scar_service.get_scar(db, scar_id)
     if not scar:
         raise HTTPException(404, "SCAR not found")
+    _check_factory_access(scar, scope)
     try:
         scar = await scar_service.transition_scar(
-            db, scar, req.action, user_id=user.user_id,
+            db, scar, req.action, user_id=scope.user.user_id,
             supplier_response=req.supplier_response,
             resolution_summary=req.resolution_summary,
         )
@@ -150,13 +209,19 @@ async def link_capa(
     scar_id: uuid.UUID,
     req: scar_schemas.SCARLinkCAPARequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.SCAR, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Permission check
+    perm_level = await get_user_permission(scope.user, Module.SCAR, db)
+    if perm_level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 scar 模块的 CREATE 权限")
+
     scar = await scar_service.get_scar(db, scar_id)
     if not scar:
         raise HTTPException(404, "SCAR not found")
+    _check_factory_access(scar, scope)
     try:
-        scar = await scar_service.link_capa(db, scar, req.capa_ref_id, user.user_id)
+        scar = await scar_service.link_capa(db, scar, req.capa_ref_id, scope.user.user_id)
         return _to_response(scar)
     except ValueError as e:
         raise HTTPException(400, str(e))

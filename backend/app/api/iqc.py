@@ -2,8 +2,9 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, require_admin, PermissionLevel, Module
-from app.models.user import User
+from app.core.permissions import get_user_permission, PermissionLevel, Module
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app import schemas
 from app.services import iqc_material_service, iqc_template_service, iqc_inspection_service
 from app.services.aql_engine import calculate_aql_plan
@@ -24,6 +25,17 @@ from app.models.iqc_aql_config import IqcAqlConfig
 router = APIRouter(prefix="/api/iqc", tags=["iqc"])
 
 
+def _check_factory_access(entity, scope: RequestScope):
+    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    if not hasattr(entity, "factory_id") or entity.factory_id is None:
+        return
+    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="记录不存在")
+
+
 # ─── Material routes ───
 
 @router.get("/materials", response_model=schemas.iqc.IqcMaterialListResponse)
@@ -33,10 +45,31 @@ async def list_materials(
     search: str | None = Query(None),
     product_line_code: str | None = Query(None),
     db=Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
+    # Product line filtering via RequestScope
+    if scope.pl_scope.mode == "NONE":
+        return schemas.iqc.IqcMaterialListResponse(
+            items=[], total=0, page=page, page_size=page_size,
+        )
+    allowed_pls = scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None
+
+    # Merge query param with scope: if user specified product_line_code, validate it's in their scope
+    if product_line_code:
+        if allowed_pls is not None and product_line_code not in allowed_pls:
+            raise HTTPException(status_code=403, detail=f"无权访问产品线 '{product_line_code}'")
+        filter_codes = [product_line_code]
+    else:
+        filter_codes = allowed_pls
+
     items, total = await iqc_material_service.list_materials(
-        db, page, page_size, search, product_line_code
+        db, page, page_size, search, product_line_code,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=filter_codes,
     )
     return schemas.iqc.IqcMaterialListResponse(
         items=[schemas.iqc.IqcMaterialResponse.model_validate(m) for m in items],
@@ -48,9 +81,15 @@ async def list_materials(
 async def create_material(
     req: schemas.iqc.IqcMaterialCreate,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
     try:
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         material = await iqc_material_service.create_material(
             db,
             part_no=req.part_no,
@@ -61,8 +100,10 @@ async def create_material(
             default_inspection_level=req.default_inspection_level,
             unit=req.unit,
             product_line_code=req.product_line_code,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
+        await validate_factory_invariant(material, db)
         return schemas.iqc.IqcMaterialResponse.model_validate(material)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -73,8 +114,12 @@ async def import_materials(
     file: UploadFile = File(...),
     product_line_code: str = Query("DC-DC-100"),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
     from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
     from dataclasses import asdict
     from fastapi.responses import JSONResponse
@@ -93,7 +138,7 @@ async def import_materials(
     except ExcelParseError as e:
         return JSONResponse(status_code=422, content={"imported_count": 0, "errors": [{"row": 0, "field": "", "message": str(e)}]})
 
-    result = await iqc_material_service.bulk_import_materials(db, rows, product_line_code, user.user_id)
+    result = await iqc_material_service.bulk_import_materials(db, rows, product_line_code, scope.user.user_id)
     if result.errors:
         return JSONResponse(status_code=422, content={"imported_count": 0, "errors": [asdict(e) for e in result.errors]})
     return {"imported_count": result.imported_count, "errors": []}
@@ -112,11 +157,16 @@ async def download_material_import_template():
 async def get_material(
     material_id: uuid.UUID,
     db=Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     material = await iqc_material_service.get_material(db, material_id)
     if not material:
         raise HTTPException(404, "物料不存在")
+    _check_factory_access(material, scope)
     return schemas.iqc.IqcMaterialResponse.model_validate(material)
 
 
@@ -125,11 +175,21 @@ async def update_material(
     material_id: uuid.UUID,
     req: schemas.iqc.IqcMaterialUpdate,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    material = await iqc_material_service.get_material(db, material_id)
+    if not material:
+        raise HTTPException(404, "物料不存在")
+    _check_factory_access(material, scope)
+
     try:
         material = await iqc_material_service.update_material(
-            db, material_id, user.user_id,
+            db, material_id, scope.user.user_id,
             **req.model_dump(exclude_none=True),
         )
         return schemas.iqc.IqcMaterialResponse.model_validate(material)
@@ -141,10 +201,20 @@ async def update_material(
 async def delete_material(
     material_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.ADMIN)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.ADMIN:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 ADMIN 权限")
+
+    # Fetch to check factory access
+    material = await iqc_material_service.get_material(db, material_id)
+    if not material:
+        raise HTTPException(404, "物料不存在")
+    _check_factory_access(material, scope)
+
     try:
-        await iqc_material_service.delete_material(db, material_id, user.user_id)
+        await iqc_material_service.delete_material(db, material_id, scope.user.user_id)
         return {"ok": True}
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -158,8 +228,12 @@ async def list_templates(
     page_size: int = Query(20, ge=1, le=1000),
     material_id: uuid.UUID | None = Query(None),
     db=Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     items, total = await iqc_template_service.list_templates(db, page, page_size, material_id)
     return schemas.iqc.IqcTemplateListResponse(
         items=[schemas.iqc.IqcTemplateResponse.model_validate(t) for t in items],
@@ -171,15 +245,19 @@ async def list_templates(
 async def create_template(
     req: schemas.iqc.IqcTemplateCreate,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
     try:
         template = await iqc_template_service.create_template(
             db,
             template_name=req.template_name,
             material_id=req.material_id,
             items=[i.model_dump() for i in req.items],
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
         )
         return schemas.iqc.IqcTemplateResponse.model_validate(template)
     except ValueError as e:
@@ -190,11 +268,16 @@ async def create_template(
 async def get_template(
     template_id: uuid.UUID,
     db=Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     template = await iqc_template_service.get_template(db, template_id)
     if not template:
         raise HTTPException(404, "模板不存在")
+    _check_factory_access(template, scope)
     return schemas.iqc.IqcTemplateResponse.model_validate(template)
 
 
@@ -203,13 +286,23 @@ async def update_template(
     template_id: uuid.UUID,
     req: schemas.iqc.IqcTemplateCreate,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    template = await iqc_template_service.get_template(db, template_id)
+    if not template:
+        raise HTTPException(404, "模板不存在")
+    _check_factory_access(template, scope)
+
     try:
         template = await iqc_template_service.update_template(
             db, template_id, req.template_name,
             items=[i.model_dump() for i in req.items],
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
         )
         return schemas.iqc.IqcTemplateResponse.model_validate(template)
     except ValueError as e:
@@ -220,10 +313,20 @@ async def update_template(
 async def delete_template(
     template_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.ADMIN)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.ADMIN:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 ADMIN 权限")
+
+    # Fetch to check factory access
+    template = await iqc_template_service.get_template(db, template_id)
+    if not template:
+        raise HTTPException(404, "模板不存在")
+    _check_factory_access(template, scope)
+
     try:
-        await iqc_template_service.delete_template(db, template_id, user.user_id)
+        await iqc_template_service.delete_template(db, template_id, scope.user.user_id)
         return {"ok": True}
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -244,8 +347,27 @@ async def list_inspections(
     date_to: str | None = Query(None),
     product_line_code: str | None = Query(None),
     db=Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
+    # Product line filtering via RequestScope
+    if scope.pl_scope.mode == "NONE":
+        return schemas.iqc.IqcInspectionListResponse(
+            items=[], total=0, page=page, page_size=page_size,
+        )
+    allowed_pls = scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None
+
+    # Merge query param with scope
+    if product_line_code:
+        if allowed_pls is not None and product_line_code not in allowed_pls:
+            raise HTTPException(status_code=403, detail=f"无权访问产品线 '{product_line_code}'")
+        filter_codes = [product_line_code]
+    else:
+        filter_codes = allowed_pls
+
     from datetime import date as date_type
     d_from = date_type.fromisoformat(date_from) if date_from else None
     d_to = date_type.fromisoformat(date_to) if date_to else None
@@ -253,6 +375,8 @@ async def list_inspections(
     items, total = await iqc_inspection_service.list_inspections(
         db, page, page_size, status, inspection_result,
         supplier_id, material_id, keyword, d_from, d_to, product_line_code,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=filter_codes,
     )
     return schemas.iqc.IqcInspectionListResponse(
         items=[schemas.iqc.IqcInspectionResponse.model_validate(i) for i in items],
@@ -264,9 +388,15 @@ async def list_inspections(
 async def create_inspection(
     req: schemas.iqc.IqcInspectionCreate,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
     try:
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         inspection = await iqc_inspection_service.create_inspection(
             db,
             supplier_id=req.supplier_id,
@@ -281,8 +411,10 @@ async def create_inspection(
             inspection_level=req.inspection_level,
             inspection_date=req.inspection_date,
             product_line_code=req.product_line_code,
-            user_id=user.user_id,
+            user_id=scope.user.user_id,
+            factory_id=factory_id,
         )
+        await validate_factory_invariant(inspection, db)
         return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -293,8 +425,9 @@ async def create_inspection(
 @router.post("/calculate-aql", response_model=schemas.iqc.AqlCalculateResponse)
 async def calculate_aql(
     req: schemas.iqc.AqlCalculateRequest,
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    # Stateless calculation — basic auth check only
     try:
         plan = calculate_aql_plan(req.lot_qty, req.aql_level, req.inspection_level)
         return schemas.iqc.AqlCalculateResponse(**plan)
@@ -308,9 +441,32 @@ async def calculate_aql(
 async def get_stats(
     product_line_code: str | None = Query(None),
     db=Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    stats = await iqc_inspection_service.get_stats(db, product_line_code)
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
+    # Product line filtering via RequestScope
+    if scope.pl_scope.mode == "NONE":
+        return schemas.iqc.IqcStatsResponse(
+            total_inspections=0, accepted_count=0, rejected_count=0,
+            concession_count=0, acceptance_rate=0, rejection_rate=0,
+        )
+    allowed_pls = scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None
+
+    if product_line_code:
+        if allowed_pls is not None and product_line_code not in allowed_pls:
+            raise HTTPException(status_code=403, detail=f"无权访问产品线 '{product_line_code}'")
+        filter_codes = [product_line_code]
+    else:
+        filter_codes = allowed_pls
+
+    stats = await iqc_inspection_service.get_stats(
+        db, product_line_code,
+        factory_id=scope.effective_factory_id,
+        allowed_product_line_codes=filter_codes,
+    )
     return schemas.iqc.IqcStatsResponse(**stats)
 
 
@@ -320,11 +476,16 @@ async def get_stats(
 async def get_inspection(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    _user=Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
     if not inspection:
         raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
     return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
 
 
@@ -333,11 +494,21 @@ async def update_inspection(
     inspection_id: uuid.UUID,
     req: schemas.iqc.IqcInspectionUpdate,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
+
     try:
         inspection = await iqc_inspection_service.update_inspection(
-            db, inspection_id, user.user_id,
+            db, inspection_id, scope.user.user_id,
             **req.model_dump(exclude_none=True),
         )
         return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
@@ -349,10 +520,20 @@ async def update_inspection(
 async def delete_inspection(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.ADMIN)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.ADMIN:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 ADMIN 权限")
+
+    # Fetch to check factory access
+    inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
+
     try:
-        await iqc_inspection_service.delete_inspection(db, inspection_id, user.user_id)
+        await iqc_inspection_service.delete_inspection(db, inspection_id, scope.user.user_id)
         return {"ok": True}
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -362,10 +543,20 @@ async def delete_inspection(
 async def start_inspection(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
+
     try:
-        inspection = await iqc_inspection_service.start_inspection(db, inspection_id, user.user_id)
+        inspection = await iqc_inspection_service.start_inspection(db, inspection_id, scope.user.user_id)
         return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -376,13 +567,23 @@ async def update_items(
     inspection_id: uuid.UUID,
     req: schemas.iqc.IqcBatchItemUpdate,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
+
     try:
         inspection = await iqc_inspection_service.update_items(
             db, inspection_id,
             [i.model_dump(exclude_none=True) for i in req.items],
-            user.user_id,
+            scope.user.user_id,
         )
         return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
     except ValueError as e:
@@ -394,12 +595,22 @@ async def judge_inspection(
     inspection_id: uuid.UUID,
     req: schemas.iqc.IqcInspectionJudge,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
+
     try:
         inspection = await iqc_inspection_service.judge_inspection(
             db, inspection_id, req.inspection_result, req.defect_qty,
-            req.defect_description, req.sample_qty, user.user_id,
+            req.defect_description, req.sample_qty, scope.user.user_id,
             has_safety_defect=req.has_safety_defect,
             linked_customer_complaint_id=req.linked_customer_complaint_id,
         )
@@ -412,10 +623,20 @@ async def judge_inspection(
 async def request_reinspect(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
+
     try:
-        inspection = await iqc_inspection_service.request_reinspect(db, inspection_id, user.user_id)
+        inspection = await iqc_inspection_service.request_reinspect(db, inspection_id, scope.user.user_id)
         return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -426,11 +647,21 @@ async def approve_concession(
     inspection_id: uuid.UUID,
     req: schemas.iqc.IqcInspectionConcession,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 APPROVE 权限")
+
+    # Fetch to check factory access
+    inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
+
     try:
         inspection = await iqc_inspection_service.approve_concession(
-            db, inspection_id, req.reason, user.user_id,
+            db, inspection_id, req.reason, scope.user.user_id,
         )
         return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
     except ValueError as e:
@@ -441,10 +672,20 @@ async def approve_concession(
 async def close_inspection(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 APPROVE 权限")
+
+    # Fetch to check factory access
+    inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
+
     try:
-        inspection = await iqc_inspection_service.close_inspection(db, inspection_id, user.user_id)
+        inspection = await iqc_inspection_service.close_inspection(db, inspection_id, scope.user.user_id)
         return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -454,10 +695,20 @@ async def close_inspection(
 async def trigger_scar(
     inspection_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    inspection = await iqc_inspection_service.get_inspection(db, inspection_id)
+    if not inspection:
+        raise HTTPException(404, "检验单不存在")
+    _check_factory_access(inspection, scope)
+
     try:
-        inspection = await iqc_inspection_service.trigger_scar(db, inspection_id, user.user_id)
+        inspection = await iqc_inspection_service.trigger_scar(db, inspection_id, scope.user.user_id)
         return schemas.iqc.IqcInspectionResponse.model_validate(inspection)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -473,20 +724,55 @@ async def list_aql_profiles(
     supplier_id: uuid.UUID | None = Query(None),
     product_line_code: str | None = Query(None),
     db=Depends(get_db),
-    _user=Depends(require_permission(Module.IQC, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
+    # Product line filtering via RequestScope
+    if scope.pl_scope.mode == "NONE":
+        return AqlProfileListResponse(items=[], total=0, page=page, page_size=page_size)
+    allowed_pls = scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None
+
+    # Merge query param with scope
+    if product_line_code:
+        if allowed_pls is not None and product_line_code not in allowed_pls:
+            raise HTTPException(status_code=403, detail=f"无权访问产品线 '{product_line_code}'")
+        effective_pl = product_line_code
+    else:
+        # When no explicit filter, use scope codes
+        effective_pl = None  # will be handled via allowed_pls below
+
     from sqlalchemy import select, func
     q = select(IqcAqlProfile)
     count_q = select(func.count(IqcAqlProfile.profile_id))
+
+    # Factory filter
+    if scope.effective_factory_id:
+        q = q.where(IqcAqlProfile.factory_id == scope.effective_factory_id)
+        count_q = count_q.where(IqcAqlProfile.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        if scope.factory_scope.accessible_factory_ids:
+            q = q.where(IqcAqlProfile.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+            count_q = count_q.where(IqcAqlProfile.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+        else:
+            return AqlProfileListResponse(items=[], total=0, page=page, page_size=page_size)
+
+    # Product line filter from scope
+    if allowed_pls is not None:
+        q = q.where(IqcAqlProfile.product_line_code.in_(allowed_pls))
+        count_q = count_q.where(IqcAqlProfile.product_line_code.in_(allowed_pls))
+
     if state:
         q = q.where(IqcAqlProfile.state == state)
         count_q = count_q.where(IqcAqlProfile.state == state)
     if supplier_id:
         q = q.where(IqcAqlProfile.supplier_id == supplier_id)
         count_q = count_q.where(IqcAqlProfile.supplier_id == supplier_id)
-    if product_line_code:
-        q = q.where(IqcAqlProfile.product_line_code == product_line_code)
-        count_q = count_q.where(IqcAqlProfile.product_line_code == product_line_code)
+    if effective_pl:
+        q = q.where(IqcAqlProfile.product_line_code == effective_pl)
+        count_q = count_q.where(IqcAqlProfile.product_line_code == effective_pl)
     total = (await db.execute(count_q)).scalar() or 0
     items = (await db.execute(
         q.order_by(IqcAqlProfile.updated_at.desc())
@@ -502,12 +788,20 @@ async def list_aql_profiles(
 async def create_aql_profile(
     req: AqlProfileCreate,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
     try:
+        factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
+        check_factory_access(factory_id, scope)
         profile = await ProfileManager.get_or_create_profile(
-            db, req.supplier_id, req.material_id, req.product_line_code, user.user_id,
+            db, req.supplier_id, req.material_id, req.product_line_code, scope.user.user_id,
         )
+        profile.factory_id = factory_id
+        await validate_factory_invariant(profile, db)
         return AqlProfileResponse.model_validate(profile)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -517,13 +811,18 @@ async def create_aql_profile(
 async def get_aql_profile(
     profile_id: uuid.UUID,
     db=Depends(get_db),
-    _user=Depends(require_permission(Module.IQC, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     from sqlalchemy import select
     result = await db.execute(select(IqcAqlProfile).where(IqcAqlProfile.profile_id == profile_id))
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(404, "AQL档案不存在")
+    _check_factory_access(profile, scope)
     return AqlProfileResponse.model_validate(profile)
 
 
@@ -532,13 +831,18 @@ async def update_aql_profile(
     profile_id: uuid.UUID,
     req: AqlProfileUpdate,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
     from sqlalchemy import select
     result = await db.execute(select(IqcAqlProfile).where(IqcAqlProfile.profile_id == profile_id))
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(404, "AQL档案不存在")
+    _check_factory_access(profile, scope)
     changed = {}
     for key, val in req.model_dump(exclude_none=True).items():
         old = getattr(profile, key)
@@ -552,7 +856,7 @@ async def update_aql_profile(
             record_id=profile_id,
             action="UPDATE",
             changed_fields=changed,
-            operated_by=user.user_id,
+            operated_by=scope.user.user_id,
         ))
         await db.commit()
     return AqlProfileResponse.model_validate(profile)
@@ -562,14 +866,19 @@ async def update_aql_profile(
 async def get_aql_profile_history(
     profile_id: uuid.UUID,
     db=Depends(get_db),
-    _user=Depends(require_permission(Module.IQC, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     from sqlalchemy import select
     # Get profile to find supplier_id/material_id
     result = await db.execute(select(IqcAqlProfile).where(IqcAqlProfile.profile_id == profile_id))
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(404, "AQL档案不存在")
+    _check_factory_access(profile, scope)
     snapshots = (await db.execute(
         select(IqcAqlQualitySnapshot)
         .where(
@@ -594,14 +903,40 @@ async def list_aql_recommendations(
     supplier_id: uuid.UUID | None = Query(None),
     material_id: uuid.UUID | None = Query(None),
     db=Depends(get_db),
-    _user=Depends(require_permission(Module.IQC, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
+    # Product line filtering via RequestScope
+    if scope.pl_scope.mode == "NONE":
+        return AqlRecommendationListResponse(items=[], total=0, page=page, page_size=page_size)
+    allowed_pls = scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None
+
     from sqlalchemy import select, func
     q = select(IqcAqlRecommendation)
     count_q = select(func.count(IqcAqlRecommendation.recommendation_id))
-    if status:
-        q = q.where(IqcAqlRecommendation.status == status)
-        count_q = count_q.where(IqcAqlRecommendation.status == status)
+
+    # Factory filter
+    if scope.effective_factory_id:
+        q = q.where(IqcAqlRecommendation.factory_id == scope.effective_factory_id)
+        count_q = count_q.where(IqcAqlRecommendation.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        if scope.factory_scope.accessible_factory_ids:
+            q = q.where(IqcAqlRecommendation.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+            count_q = count_q.where(IqcAqlRecommendation.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+        else:
+            return AqlRecommendationListResponse(items=[], total=0, page=page, page_size=page_size)
+
+    # Product line filter from scope
+    if allowed_pls is not None:
+        q = q.where(IqcAqlRecommendation.product_line_code.in_(allowed_pls))
+        count_q = count_q.where(IqcAqlRecommendation.product_line_code.in_(allowed_pls))
+
+    if status_filter := status:
+        q = q.where(IqcAqlRecommendation.status == status_filter)
+        count_q = count_q.where(IqcAqlRecommendation.status == status_filter)
     if direction:
         q = q.where(IqcAqlRecommendation.direction == direction)
         count_q = count_q.where(IqcAqlRecommendation.direction == direction)
@@ -626,8 +961,12 @@ async def list_aql_recommendations(
 async def get_aql_recommendation(
     recommendation_id: uuid.UUID,
     db=Depends(get_db),
-    _user=Depends(require_permission(Module.IQC, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     from sqlalchemy import select
     result = await db.execute(
         select(IqcAqlRecommendation).where(IqcAqlRecommendation.recommendation_id == recommendation_id)
@@ -635,6 +974,7 @@ async def get_aql_recommendation(
     rec = result.scalar_one_or_none()
     if not rec:
         raise HTTPException(404, "建议记录不存在")
+    _check_factory_access(rec, scope)
     return AqlRecommendationResponse.model_validate(rec)
 
 
@@ -643,10 +983,24 @@ async def engineer_approve_recommendation(
     recommendation_id: uuid.UUID,
     req: AqlRecommendationApproveRequest,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    from sqlalchemy import select
+    result = await db.execute(
+        select(IqcAqlRecommendation).where(IqcAqlRecommendation.recommendation_id == recommendation_id)
+    )
+    rec = result.scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "建议记录不存在")
+    _check_factory_access(rec, scope)
+
     try:
-        rec = await RecommendationManager.approve(db, recommendation_id, user.user_id, is_engineer=True)
+        rec = await RecommendationManager.approve(db, recommendation_id, scope.user.user_id, is_engineer=True)
         await db.commit()
         return AqlRecommendationResponse.model_validate(rec)
     except ValueError as e:
@@ -658,10 +1012,24 @@ async def engineer_reject_recommendation(
     recommendation_id: uuid.UUID,
     req: AqlRecommendationRejectRequest,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    from sqlalchemy import select
+    result = await db.execute(
+        select(IqcAqlRecommendation).where(IqcAqlRecommendation.recommendation_id == recommendation_id)
+    )
+    rec = result.scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "建议记录不存在")
+    _check_factory_access(rec, scope)
+
     try:
-        rec = await RecommendationManager.reject(db, recommendation_id, user.user_id, reason=req.reason, is_engineer=True)
+        rec = await RecommendationManager.reject(db, recommendation_id, scope.user.user_id, reason=req.reason, is_engineer=True)
         await db.commit()
         return AqlRecommendationResponse.model_validate(rec)
     except ValueError as e:
@@ -672,10 +1040,24 @@ async def engineer_reject_recommendation(
 async def forward_recommendation(
     recommendation_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    from sqlalchemy import select
+    result = await db.execute(
+        select(IqcAqlRecommendation).where(IqcAqlRecommendation.recommendation_id == recommendation_id)
+    )
+    rec = result.scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "建议记录不存在")
+    _check_factory_access(rec, scope)
+
     try:
-        rec = await RecommendationManager.forward(db, recommendation_id, user.user_id)
+        rec = await RecommendationManager.forward(db, recommendation_id, scope.user.user_id)
         await db.commit()
         return AqlRecommendationResponse.model_validate(rec)
     except ValueError as e:
@@ -687,10 +1069,24 @@ async def manager_approve_recommendation(
     recommendation_id: uuid.UUID,
     req: AqlRecommendationApproveRequest,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 APPROVE 权限")
+
+    # Fetch to check factory access
+    from sqlalchemy import select
+    result = await db.execute(
+        select(IqcAqlRecommendation).where(IqcAqlRecommendation.recommendation_id == recommendation_id)
+    )
+    rec = result.scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "建议记录不存在")
+    _check_factory_access(rec, scope)
+
     try:
-        rec = await RecommendationManager.approve(db, recommendation_id, user.user_id, is_engineer=False)
+        rec = await RecommendationManager.approve(db, recommendation_id, scope.user.user_id, is_engineer=False)
         await db.commit()
         return AqlRecommendationResponse.model_validate(rec)
     except ValueError as e:
@@ -702,10 +1098,24 @@ async def manager_reject_recommendation(
     recommendation_id: uuid.UUID,
     req: AqlRecommendationRejectRequest,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 APPROVE 权限")
+
+    # Fetch to check factory access
+    from sqlalchemy import select
+    result = await db.execute(
+        select(IqcAqlRecommendation).where(IqcAqlRecommendation.recommendation_id == recommendation_id)
+    )
+    rec = result.scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "建议记录不存在")
+    _check_factory_access(rec, scope)
+
     try:
-        rec = await RecommendationManager.reject(db, recommendation_id, user.user_id, reason=req.reason, is_engineer=False)
+        rec = await RecommendationManager.reject(db, recommendation_id, scope.user.user_id, reason=req.reason, is_engineer=False)
         await db.commit()
         return AqlRecommendationResponse.model_validate(rec)
     except ValueError as e:
@@ -716,8 +1126,22 @@ async def manager_reject_recommendation(
 async def mark_recommendation_expired(
     recommendation_id: uuid.UUID,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
+    # Fetch to check factory access
+    from sqlalchemy import select
+    result = await db.execute(
+        select(IqcAqlRecommendation).where(IqcAqlRecommendation.recommendation_id == recommendation_id)
+    )
+    rec = result.scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "建议记录不存在")
+    _check_factory_access(rec, scope)
+
     try:
         rec = await RecommendationManager.mark_expired(db, recommendation_id)
         await db.commit()
@@ -730,8 +1154,12 @@ async def mark_recommendation_expired(
 async def trigger_aql_evaluation(
     req: AqlTriggerRequest,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
     try:
         recommendation = await AqlService.on_inspection_judged(
             db, req.supplier_id, req.material_id,
@@ -748,8 +1176,12 @@ async def trigger_aql_evaluation(
 async def preview_aql_recommendation(
     req: AqlPreviewRequest,
     db=Depends(get_db),
-    user=Depends(require_permission(Module.IQC, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
+
     try:
         ctx = await QualitySnapshotCalculator.calculate(db, req.supplier_id, req.material_id)
         engine = RuleEngine()
@@ -782,8 +1214,12 @@ async def get_quality_snapshot(
     supplier_id: uuid.UUID,
     material_id: uuid.UUID,
     db=Depends(get_db),
-    _user=Depends(require_permission(Module.IQC, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     from sqlalchemy import select
     result = await db.execute(
         select(IqcAqlQualitySnapshot)
@@ -797,6 +1233,7 @@ async def get_quality_snapshot(
     snapshot = result.scalar_one_or_none()
     if not snapshot:
         raise HTTPException(404, "质量快照不存在")
+    _check_factory_access(snapshot, scope)
     return AqlQualitySnapshotResponse.model_validate(snapshot)
 
 
@@ -805,8 +1242,12 @@ async def get_quality_snapshot_trend(
     supplier_id: uuid.UUID,
     material_id: uuid.UUID,
     db=Depends(get_db),
-    _user=Depends(require_permission(Module.IQC, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     from sqlalchemy import select
     snapshots = (await db.execute(
         select(IqcAqlQualitySnapshot)
@@ -827,8 +1268,12 @@ async def get_quality_snapshot_trend(
 async def list_aql_configs(
     product_line_code: str | None = Query(None),
     db=Depends(get_db),
-    _user=Depends(require_permission(Module.IQC, PermissionLevel.VIEW)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 VIEW 权限")
+
     configs = await AqlConfigManager.list_all(db, product_line_code)
     return [AqlConfigResponse.model_validate(c) for c in configs]
 
@@ -839,8 +1284,12 @@ async def update_aql_config(
     req: AqlConfigUpdate,
     product_line_code: str | None = Query(None),
     db=Depends(get_db),
-    _user=Depends(require_admin),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.ADMIN:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 ADMIN 权限")
+
     try:
         cfg = await AqlConfigManager.set(db, config_key, req.config_value, product_line_code)
         await db.commit()
@@ -852,8 +1301,12 @@ async def update_aql_config(
 @router.post("/aql-config/reset")
 async def reset_aql_configs(
     db=Depends(get_db),
-    _user=Depends(require_admin),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.IQC, db)
+    if level < PermissionLevel.ADMIN:
+        raise HTTPException(status_code=403, detail="需要 IQC 模块的 ADMIN 权限")
+
     configs = await AqlConfigManager.reset_defaults(db)
     await db.commit()
     return [AqlConfigResponse.model_validate(c) for c in configs]

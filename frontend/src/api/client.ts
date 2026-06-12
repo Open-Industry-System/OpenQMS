@@ -5,11 +5,28 @@ const client = axios.create({
   timeout: 10000,
 });
 
+// Factory ID auto-injection for GET requests on business APIs
+// Excluded: auth, group, product-lines, factories (management endpoints)
+// NOTE: baseURL is "/api", so config.url is relative (e.g. "/auth/login", "/group/dashboard")
+const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories"];
+
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem("access_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Auto-inject factory_id on GET requests for business APIs
+  const currentFactoryId = localStorage.getItem("current_factory_id");
+  const isGetRequest = config.method === "get";
+  const isExcluded = FACTORY_ID_EXCLUDE_PREFIXES.some(
+    (prefix) => config.url?.startsWith(prefix)
+  );
+  if (currentFactoryId && isGetRequest && !isExcluded) {
+    config.params = config.params || {};
+    config.params.factory_id = currentFactoryId;
+  }
+
   return config;
 });
 

@@ -93,6 +93,7 @@ class ControlPlanResponse(ControlPlanBase):
     status: str
     version: int
     items: list[ControlPlanItemResponse] = []
+    factory_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None
     updated_by: uuid.UUID | None = None
     approved_by: uuid.UUID | None = None
