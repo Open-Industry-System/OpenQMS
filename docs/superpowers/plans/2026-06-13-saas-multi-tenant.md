@@ -2110,7 +2110,13 @@ git commit -m "feat(multi-tenant): add tenant_id to JWT with iss/aud domain isol
 - Modify: `backend/app/services/erp_service.py` — replace `async_session()` with `get_tenant_aware_session()`
 - Modify: `backend/app/services/supplier_risk/service.py` — replace `async_session()` with `get_tenant_aware_session()`
 - Modify: `backend/app/services/iqc_aql_service.py` — replace `async_session()` with `get_tenant_aware_session()`
-- Modify: `backend/app/services/collaboration_service.py` — replace `async_session()` with `get_tenant_aware_session()`
+- Modify: `backend/app/services/embedding_sync_worker.py` — replace `async_session()` with `get_tenant_aware_session()`
+- Modify: `backend/app/services/graph_sync_worker.py` — replace `async_session()` with `get_tenant_aware_session()`
+- Modify: `backend/app/services/embedding_backfill.py` — replace `async_session()` with `get_tenant_aware_session()`
+- Modify: `backend/app/services/control_plan_service.py` — replace `async_session()` with `get_tenant_aware_session()`
+- Modify: `backend/app/services/mes_connector.py` — replace `async_session()` with `get_tenant_aware_session()`
+- Modify: `backend/app/services/iqc_inspection_service.py` — replace `async_session()` with `get_tenant_aware_session()`
+- Modify: `backend/app/services/capa_draft_service.py` — replace `async_session()` with `get_tenant_aware_session()`
 - Modify: `backend/app/services/supply_chain_risk_map/scheduler.py` — wrap `snapshot_loop()` with `run_for_each_tenant()`
 - Create: `backend/tests/test_multitenancy/test_background_tasks.py`
 
