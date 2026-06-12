@@ -861,9 +861,6 @@ async def seed():
         # ─── Supply chain risk map snapshots ───
         await seed_supply_chain_risk_snapshots(db)
 
-        # ─── Supply chain risk map snapshots ───
-        await seed_supply_chain_risk_snapshots(db)
-
         # ─── Multi-factory seed data ───
         from app.models.product_line import ProductLine
 
