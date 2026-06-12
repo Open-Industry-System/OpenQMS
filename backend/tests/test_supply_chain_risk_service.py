@@ -140,36 +140,62 @@ async def test_supplier_detail_trend_filters_by_product_line_and_period(db, seed
     from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
     from app.services.supply_chain_risk_map.service import get_supplier_detail
 
-    # Seed 3 months of global + DC-DC-100 snapshots manually (can't call generate_snapshot for past months)
+    # Seed 3 months of global + DC-DC-100 snapshots with DIFFERENT risk_scores per product line
+    # so that if the product_line filter is removed, the assertion catches it.
     for period in ["2026-01", "2026-02", "2026-03"]:
-        for plc in [None, "DC-DC-100"]:
-            db.add(SupplyChainRiskSnapshot(
-                snapshot_id=uuid4(),
-                supplier_id=seed_supplier.supplier_id,
-                product_line_code=plc,
-                snapshot_period=period,
-                risk_score=20.0,
-                risk_level="low",
-                quality_score=10.0,
-                delivery_score=5.0,
-                compliance_score=5.0,
-                erp_on_time_rate=90.0,
-                purchase_amount_pct=50.0,
-                open_scar_count=0,
-                ppm_value=500,
-                dimensions={},
-            ))
+        # Global snapshots: risk_score increments with month (10, 20, 30)
+        db.add(SupplyChainRiskSnapshot(
+            snapshot_id=uuid4(),
+            supplier_id=seed_supplier.supplier_id,
+            product_line_code=None,
+            snapshot_period=period,
+            risk_score=10.0 * (int(period.split("-")[1])),
+            risk_level="low",
+            quality_score=5.0,
+            delivery_score=3.0,
+            compliance_score=2.0,
+            erp_on_time_rate=95.0,
+            purchase_amount_pct=33.0,
+            open_scar_count=0,
+            ppm_value=100,
+            dimensions={},
+        ))
+        # DC-DC-100 snapshots: risk_score is 100 + month (110, 120, 130)
+        db.add(SupplyChainRiskSnapshot(
+            snapshot_id=uuid4(),
+            supplier_id=seed_supplier.supplier_id,
+            product_line_code="DC-DC-100",
+            snapshot_period=period,
+            risk_score=100.0 + 10.0 * (int(period.split("-")[1])),
+            risk_level="high",
+            quality_score=50.0,
+            delivery_score=40.0,
+            compliance_score=30.0,
+            erp_on_time_rate=60.0,
+            purchase_amount_pct=67.0,
+            open_scar_count=3,
+            ppm_value=5000,
+            dimensions={},
+        ))
     await db.commit()
 
     # Request detail for period 2026-02 — trend must NOT include 2026-03
     detail_global = await get_supplier_detail(db, seed_supplier.supplier_id, None, "2026-02")
     global_periods = [t.period for t in detail_global.trend]
+    global_risk_scores = [t.risk_score for t in detail_global.trend]
     assert "2026-03" not in global_periods, "Trend should not include months after the selected period"
     assert "2026-02" in global_periods, "Trend should include the selected period"
     assert "2026-01" in global_periods, "Trend should include prior periods"
+    # Verify global trend has global risk_scores (10, 20), not product-line scores (110, 120)
+    for score in global_risk_scores:
+        assert score < 100, f"Global trend should have global risk_scores (<100), got {score}"
 
-    # Product-line detail should also cap at 2026-02
+    # Product-line detail should also cap at 2026-02 and have product-line risk_scores
     detail_pl = await get_supplier_detail(db, seed_supplier.supplier_id, "DC-DC-100", "2026-02")
     pl_periods = [t.period for t in detail_pl.trend]
+    pl_risk_scores = [t.risk_score for t in detail_pl.trend]
     assert "2026-03" not in pl_periods, "Product-line trend should not include months after the selected period"
     assert "2026-02" in pl_periods
+    # Verify product-line trend has product-line risk_scores (110, 120), not global (10, 20)
+    for score in pl_risk_scores:
+        assert score >= 100, f"Product-line trend should have product-line risk_scores (>=100), got {score}"
