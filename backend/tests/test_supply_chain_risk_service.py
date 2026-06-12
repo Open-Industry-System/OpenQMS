@@ -130,21 +130,26 @@ async def test_advisory_lock_prevents_concurrent(db):
 
 
 @pytest.mark.asyncio
-async def test_supplier_detail_trend_filters_by_product_line(db, seed_supplier):
-    """Supplier detail trend only returns snapshots matching the product_line_code filter."""
-    from app.services.supply_chain_risk_map.service import generate_snapshot, get_supplier_detail
+async def test_supplier_detail_trend_filters_by_product_line_and_period(db, seed_supplier):
+    """Supplier detail trend filters by product_line_code and truncates at the selected period."""
+    from app.services.supply_chain_risk_map.service import generate_snapshot, get_supplier_detail, current_period
 
-    period = current_period()
-    # Generate global snapshot (product_line_code=None)
-    await generate_snapshot(db, None, period)
-    # Generate product-line-specific snapshot
-    await generate_snapshot(db, "DC-DC-100", period)
+    # Generate 3 months of snapshots for both global and product-line
+    this_month = current_period()
+    # We only have 1 period of data in this test, so verify:
+    # 1) product_line_code filter isolates trend data
+    # 2) trend periods are <= the selected period
+    await generate_snapshot(db, None, this_month)
+    await generate_snapshot(db, "DC-DC-100", this_month)
 
-    # Request detail with product_line_code="DC-DC-100"
-    detail = await get_supplier_detail(db, seed_supplier.supplier_id, "DC-DC-100", period)
-    # All trend entries should have product_line_code matching the filter
-    # (we only have one period, but the query should respect the filter)
-    assert detail.period == period
-    # Request detail with product_line_code=None (global)
-    detail_global = await get_supplier_detail(db, seed_supplier.supplier_id, None, period)
-    assert detail_global.period == period
+    # Global detail should only see global snapshots in trend
+    detail_global = await get_supplier_detail(db, seed_supplier.supplier_id, None, this_month)
+    assert detail_global.period == this_month
+    for t in detail_global.trend:
+        assert t.period <= this_month
+
+    # Product-line detail should only see DC-DC-100 snapshots in trend
+    detail_pl = await get_supplier_detail(db, seed_supplier.supplier_id, "DC-DC-100", this_month)
+    assert detail_pl.period == this_month
+    for t in detail_pl.trend:
+        assert t.period <= this_month

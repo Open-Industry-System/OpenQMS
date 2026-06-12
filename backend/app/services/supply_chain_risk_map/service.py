@@ -288,7 +288,7 @@ async def get_supplier_detail(
         for key, val in (snap.dimensions or {}).items()
     }
 
-    # 6-month trend (filtered by product_line_code for isolation)
+    # 6-month trend (filtered by product_line_code and up to the selected period)
     trend_query = (
         select(SupplyChainRiskSnapshot)
         .where(SupplyChainRiskSnapshot.supplier_id == supplier_id)
@@ -297,6 +297,7 @@ async def get_supplier_detail(
             if product_line_code else
             SupplyChainRiskSnapshot.product_line_code.is_(None)
         )
+        .where(SupplyChainRiskSnapshot.snapshot_period <= period)
         .order_by(SupplyChainRiskSnapshot.snapshot_period.desc())
         .limit(6)
     )
