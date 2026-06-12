@@ -548,33 +548,33 @@ class TenantBase(DeclarativeBase):
 
 **策略：独立 squash tenant 分支（不继承旧链）**
 
-1. **`t000_tenant_baseline.py`**：`down_revision = None`，`branch_labels = ["tenant"]`，空操作（`upgrade()` / `downgrade()` 都是 `pass`）。这是 tenant 分支的独立起点，不指向任何旧 revision。
+1. **`t000_tenant_baseline.py`**：`down_revision = None`，`branch_labels = ("tenant",)`，空操作（`upgrade()` / `downgrade()` 都是 `pass`）。这是 tenant 分支的独立起点，不指向任何旧 revision。**`branch_labels` 只在分支起点设置**，后续 revision 通过 `down_revision` 链自动继承分支归属，不需要也不得重复设置 `branch_labels = ("tenant",)`（Alembic 不允许同一分支标签出现在多个 revision 上）。
 
-2. **`t001_tenant_squash.py`**：`down_revision = t000`，包含当前所有业务表的 CREATE TABLE 语句（由 `TenantBase.metadata.create_all()` 生成）。新租户从空 schema 开始只需执行 t000（空操作）+ t001（squash）即可获得完整业务表结构。
+2. **`t001_tenant_squash.py`**：`down_revision = "t000..."`，`branch_labels = None`，包含当前所有业务表的 CREATE TABLE 语句（由 `TenantBase.metadata.create_all()` 生成）。新租户从空 schema 开始只需执行 t000（空操作）+ t001（squash）即可获得完整业务表结构。
 
-3. **后续租户业务表迁移**（`t002_`、`t003_`、...）以 `t001` 为 `down_revision`，挂到 tenant 分支上。
+3. **后续租户业务表迁移**（`t002_`、`t003_`、...）以 `t001` 为 `down_revision`，`branch_labels = None`，通过 `down_revision` 链继承 tenant 分支归属。
 
-4. **平台分支起点**：`p001_platform_tables.py` 作为 platform 分支的第一个迁移（`down_revision = None`，`branch_labels = ["platform"]`），创建 `tenants`、`tenant_migrations`、`platform_admin_users` 等平台表。
+4. **平台分支起点**：`p001_platform_tables.py` 作为 platform 分支的第一个迁移（`down_revision = None`，`branch_labels = ("platform",)`），创建 `tenants`、`tenant_migrations`、`platform_admin_users` 等平台表。后续 platform 迁移同样 `branch_labels = None`，通过 `down_revision` 继承。
 
 5. **旧 56 个迁移文件保持不变**：`branch_labels = None`，它们不再属于任何分支。它们只对 `tenant_default` 有意义——通过 `alembic stamp` 标记而非重放。
 
 **新租户开通**：执行 `alembic -x schema=tenant_new upgrade tenant@head`，Alembic 只追踪 tenant 分支链：t000 → t001 → t002 → ...，不会触及旧迁移链。
 
-**现有部署迁移**：§9.1 第 4 步中，`tenant_default.alembic_version` 不再复制旧 revision 记录，而是直接 `alembic -x schema=tenant_default stamp t001_tenant_squash`（或 tenant@head），告诉 Alembic 这个 schema 已经具备 squash 后的完整结构，无需重放任何迁移。旧迁移文件对 tenant_default 不再有意义。
+**现有部署迁移**：§9.1 第 4 步中，`tenant_default.alembic_version` 不再复制旧 revision 记录，而是直接 `alembic -x schema=tenant_default stamp <t001_revision_id>`（或 `alembic -x schema=tenant_default stamp tenant@head`），告诉 Alembic 这个 schema 已经具备 squash 后的完整业务表结构，无需重放旧迁移链或 squash。`stamp` 命令只写入 `alembic_version` 表，不执行任何 SQL。
 
 #### 6.3.3 公共迁移与租户迁移
 
 **公共迁移**（Alembic 迁移文件前缀 `p`，如 `p001_platform_tables.py`）：
 - 操作 `public` schema 的平台表（`tenants`、`tenant_migrations`、`platform_admin_users`、`reference_templates` 等）
 - 使用 `alembic upgrade platform@head`，`version_table_schema = "public"`
-- 迁移文件通过 `branch_labels = ["platform"]` 标记
+- 仅 `p001` 设置 `branch_labels = ("platform",)`；后续 p002+ 通过 `down_revision` 继承分支归属，`branch_labels = None`
 - `down_revision = None`（platform 分支独立起点）
 
 **租户迁移**（Alembic 迁移文件前缀 `t`，如 `t001_tenant_business_tables.py`）：
 - 操作租户 schema 的业务表（`users`、`factories`、`fmea_documents` 等 ~50 张表）
 - 通过 `python -m app.cli.tenant_migrate --all`（批量）或 `--slug acme`（单租户）触发，底层执行 `alembic -x schema=<name> upgrade tenant@head`
 - `version_table_schema` 设为当前租户的 `schema_name`（而非默认 `public`），确保每个租户有独立的 `alembic_version` 表
-- 迁移文件通过 `branch_labels = ["tenant"]` 标记
+- 仅 `t000` 设置 `branch_labels = ("tenant",)`；后续 t001+ 通过 `down_revision` 继承分支归属，`branch_labels = None`
 - **使用 `set_search_path_sql()` helper 生成安全的 schema 名**（与运行时代码共享同一 helper），禁止 f-string 拼接
 
 **迁移文件布局**：
@@ -587,12 +587,12 @@ alembic/versions/
   ...（56 个旧文件，不修改）
   97d677a35bd0_merge_032_heads.py   # 当前 head（仅对 tenant_default 有历史意义）
 
-  # 新增分支迁移
-  p001_platform_tables.py              # branch_labels=["platform"], down_revision=None
-  p002_platform_reference_data.py     # branch_labels=["platform"], down_revision=p001
-  t000_tenant_baseline.py             # branch_labels=["tenant"], down_revision=None, 空操作
-  t001_tenant_squash.py               # branch_labels=["tenant"], down_revision=t000, 所有业务表 CREATE
-  t002_tenant_iqc_tables.py           # branch_labels=["tenant"], down_revision=t001
+  # 新增分支迁移（branch_labels 只在分支起点设置，后续通过 down_revision 继承）
+  p001_platform_tables.py              # branch_labels=("platform",), down_revision=None
+  p002_platform_reference_data.py     # branch_labels=None, down_revision=p001
+  t000_tenant_baseline.py             # branch_labels=("tenant",), down_revision=None, 空操作
+  t001_tenant_squash.py               # branch_labels=None, down_revision=t000, 所有业务表 CREATE
+  t002_tenant_iqc_tables.py           # branch_labels=None, down_revision=t001
   ...
 ```
 
@@ -760,8 +760,8 @@ DEV_TENANT_SLUG=acme            # 本地开发默认租户
    - **触发器函数（FUNCTION）**：如有 PostgreSQL 函数引用业务表，需迁移函数并更新表名引用
    - **`regclass` 和 `::regtype` 引用**：迁移后 OID 变化，需验证无硬编码 OID 依赖
 4. **标记 alembic_version** — 现有 `public.alembic_version` 记录了 56 个旧 revision，这些旧迁移不再属于 tenant 分支。迁移后需要：
-   - 在 `tenant_default` schema 中执行 `alembic -x schema=tenant_default stamp t001_tenant_squash`（或 `tenant@head`），告诉 Alembic 这个 schema 已经具备 squash 后的完整业务表结构，无需重放旧迁移链或 squash。`stamp` 命令只写入 `alembic_version` 表，不执行任何 SQL
-   - 清空 `public.alembic_version` 并插入 platform 分支的初始 revision（`p001` 或等效），使后续 `alembic upgrade platform@head` 正确追踪平台表迁移
+   - 在 `tenant_default` schema 中执行 `alembic -x schema=tenant_default stamp <t001_revision_id>`（或 `alembic -x schema=tenant_default stamp tenant@head`），告诉 Alembic 这个 schema 已经具备 squash 后的完整业务表结构，无需重放旧迁移链或 squash。`stamp` 命令只写入 `alembic_version` 表，不执行任何 SQL
+   - 清空 `public.alembic_version` 并插入 platform 分支的初始 revision（`p001` 的 revision ID），使后续 `alembic upgrade platform@head` 正确追踪平台表迁移
    - **不要复制旧 `alembic_version` 数据到 `tenant_default`**——旧 revision 与 tenant 分支无关，复制它们会导致 Alembic 尝试从旧链计算迁移路径，与独立 squash 分支冲突
    - 如果不执行此步骤，后续 `platform@head` 和 `tenant@head` 的版本追踪会互相冲突，导致迁移状态混乱
 5. **注册第一个租户** — 插入 `public.tenants` 和 `public.tenant_migrations` 记录
