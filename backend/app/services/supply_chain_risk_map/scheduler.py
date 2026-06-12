@@ -7,7 +7,7 @@ avoid holding connections idle.
 import asyncio
 import logging
 from sqlalchemy import text
-from app.database import async_session
+from app.database import async_session, run_for_each_tenant
 from app.services.supply_chain_risk_map.service import generate_snapshot, current_period
 
 logger = logging.getLogger(__name__)
@@ -37,8 +37,7 @@ async def snapshot_loop():
     """
     while True:
         try:
-            acquired = False
-            async with async_session() as db:
+            async for tenant, db in run_for_each_tenant():
                 acquired = await _acquire_snapshot_lock(db)
                 if acquired:
                     try:
@@ -49,7 +48,6 @@ async def snapshot_loop():
                         await _release_snapshot_lock(db)
                 else:
                     logger.debug("Snapshot lock not acquired, skipping")
-            # Session is released before sleep — connections not held idle
         except Exception:
             logger.exception("Error in snapshot loop")
         await asyncio.sleep(SLEEP_SECONDS)

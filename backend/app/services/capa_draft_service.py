@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 
 from app.config import settings
 from app.core.product_line_filter import enforce_product_line_access
-from app.database import async_session
+from app.database import async_session, get_tenant_aware_session
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
@@ -269,7 +269,7 @@ async def generate_draft(
             operated_by=user.user_id,
         )
         try:
-            async with async_session() as audit_db:
+            async with get_tenant_aware_session() as audit_db:
                 audit_db.add(audit_log)
                 await audit_db.commit()
         except Exception:

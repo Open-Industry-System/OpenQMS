@@ -12,7 +12,7 @@ from sqlalchemy import select, func, update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session
+from app.database import async_session, get_tenant_aware_session
 from app.models.mes import (
     MESConnection,
     MESMeasurementIngestion,
@@ -529,7 +529,7 @@ class MESSyncService:
         """
         # Phase 2a: Read connection config in short read-only session
         connection_id = job.connection_id
-        async with async_session() as read_session:
+        async with get_tenant_aware_session() as read_session:
             result = await read_session.execute(
                 select(MESConnection).where(MESConnection.connection_id == connection_id)
             )
@@ -625,12 +625,12 @@ class MESSyncService:
         for job in jobs:
             try:
                 # Each job gets its own short write session
-                async with async_session() as job_session:
+                async with get_tenant_aware_session() as job_session:
                     await MESSyncService._sync_single_job(job_session, job)
                     await job_session.commit()
             except Exception as e:
                 # On exception: update job to failed in separate session, verify claim_token
-                async with async_session() as fail_session:
+                async with get_tenant_aware_session() as fail_session:
                     result = await fail_session.execute(
                         select(MESSyncJob)
                         .where(MESSyncJob.job_id == job.job_id)
@@ -827,7 +827,7 @@ class MESPushService:
                 await MESPushService._process_single_item(item)
             except Exception as e:
                 # On exception: mark as failed in separate session, verify claim_token
-                async with async_session() as fail_session:
+                async with get_tenant_aware_session() as fail_session:
                     result = await fail_session.execute(
                         select(MESPushOutbox)
                         .where(MESPushOutbox.outbox_id == item.outbox_id)
@@ -860,7 +860,7 @@ class MESPushService:
     async def _process_single_item(item: MESPushOutbox) -> None:
         """3a: Read config. 3b: HTTP push. 3c: Write result."""
         # 3a: Copy data to memory (short read tx)
-        async with async_session() as read_session:
+        async with get_tenant_aware_session() as read_session:
             result = await read_session.execute(
                 select(MESPushOutbox).where(
                     MESPushOutbox.outbox_id == item.outbox_id,
@@ -900,7 +900,7 @@ class MESPushService:
                 await connector.close()
 
         # 3c: Write result (short tx)
-        async with async_session() as write_session:
+        async with get_tenant_aware_session() as write_session:
             result = await write_session.execute(
                 select(MESPushOutbox)
                 .where(MESPushOutbox.outbox_id == item.outbox_id)

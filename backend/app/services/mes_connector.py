@@ -17,7 +17,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session
+from app.database import async_session, get_tenant_aware_session
 from app.models.spc import InspectionCharacteristic
 from app.schemas.mes import (
     MESIngestEquipmentStatus,
@@ -168,7 +168,7 @@ class MockMESConnector(MESConnector):
     async def fetch_measurements(self, since: datetime) -> list[dict]:
         """Query InspectionCharacteristic from DB and generate simulated measurements."""
         now = datetime.now(timezone.utc)
-        async with async_session() as session:
+        async with get_tenant_aware_session() as session:
             result = await session.execute(
                 select(InspectionCharacteristic).where(
                     InspectionCharacteristic.product_line == "DC-DC-100"

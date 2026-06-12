@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
-from app.database import async_session
+from app.database import async_session, run_for_each_tenant, get_tenant_aware_session
 from app.models.user import User
 from app.models.role import RoleDefinition
 from app.core.security import hash_password
@@ -106,7 +106,7 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(60)
             try:
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     deleted = await delete_expired_sessions(db)
                     if deleted > 0:
                         logger.info("[collaboration] cleaned up %d expired sessions", deleted)
@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(30)
             try:
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     await MESSyncService.run_sync_round(db)
             except Exception as e:
                 logger.error("[mes_sync] error: %s", e)
@@ -136,7 +136,7 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(30)
             try:
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     await MESPushService.process_outbox(db)
             except Exception as e:
                 logger.error("[mes_outbox] error: %s", e)
@@ -150,7 +150,7 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(86400)
             try:
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     stats = await MESLifecycleService.cleanup(db)
                     if any(v > 0 for v in stats.values()):
                         logger.info("[mes_lifecycle] cleanup: %s", stats)
@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(30)
             try:
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     await PLMSyncService.run_sync_round(db)
             except Exception as e:
                 logger.error("[plm_sync] error: %s", e)
@@ -185,10 +185,10 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(30)
             try:
                 # Phase 1: recover stuck + claim in separate sessions
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     await PLMChangeImpactWorker.recover_stuck_tasks(db)
                     await db.commit()
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     claimed = await PLMChangeImpactWorker.claim_tasks(db)
                     await db.commit()
 
@@ -196,7 +196,7 @@ async def lifespan(app: FastAPI):
                 # re-verifies the claim token in its own session.
                 for task in claimed:
                     try:
-                        async with async_session() as proc_db:
+                        async with get_tenant_aware_session() as proc_db:
                             await PLMChangeImpactWorker.process_task(proc_db, task)
                             await proc_db.commit()
                     except Exception as e:
@@ -212,7 +212,7 @@ async def lifespan(app: FastAPI):
     async def _erp_sync_loop():
         while True:
             try:
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     await ERPSyncService.sync_all(db)
             except Exception as e:
                 logger.error("[erp_sync] error: %s", e)
@@ -227,7 +227,7 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(86400)
             try:
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     expired = await AqlService.expire_stale_recommendations(db)
                     if expired > 0:
                         logger.info("[aql_optimization] expired %d stale recommendations", expired)
@@ -243,7 +243,7 @@ async def lifespan(app: FastAPI):
         # Initial evaluation 10 seconds after startup (avoids startup peak)
         await asyncio.sleep(10)
         try:
-            async with async_session() as db:
+            async for tenant, db in run_for_each_tenant():
                 await evaluate_all_suppliers(db, product_line_code=None)
         except Exception as e:
             logger.error("[risk_eval_init] error: %s", e)
@@ -252,7 +252,7 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(86400)
             try:
-                async with async_session() as db:
+                async for tenant, db in run_for_each_tenant():
                     await evaluate_all_suppliers(db, product_line_code=None)
             except Exception as e:
                 logger.error("[risk_eval] error: %s", e)
