@@ -1340,28 +1340,33 @@ async def test_platform_route_rejects_tenant_jwt():
 
 @pytest.mark.asyncio
 async def test_platform_route_ignores_x_tenant_id_header():
-    """Platform routes must not reject requests with X-Tenant-ID header.
-    The TenantContext middleware sets request.state.tenant = None
-    for /api/platform/* routes, regardless of X-Tenant-ID."""
+    """Platform routes must set request.state.tenant = None regardless of
+    X-Tenant-ID header. The header is simply ignored, not treated as an error."""
     from app.core.tenant_context import TenantContextMiddleware
 
-    # Build a mock ASGI scope for a platform route
-    scope = {"type": "http", "path": "/api/platform/tenants", "headers": [(b"x-tenant-id", b"acme")]}
+    # Build ASGI scope for a platform route with X-Tenant-ID header
+    scope = {
+        "type": "http",
+        "path": "/api/platform/tenants",
+        "headers": [(b"x-tenant-id", b"acme")],
+        "state": {},
+    }
     receive = AsyncMock()
     send = AsyncMock()
 
-    # Mock the inner app — just captures request.state.tenant
-    captured_tenant = None
+    # The inner ASGI app captures what the middleware set on scope["state"]
+    captured_state = {}
 
-    async def inner_app(scope, receive, send):
-        nonlocal captured_tenant
-        # ASGI middleware stores tenant on scope["state"] or similar
-        # The middleware should set request.state.tenant = None for platform routes
-        pass
+    async def inner_app(inner_scope, receive, send):
+        # TenantContextMiddleware sets scope["state"]["tenant"] for downstream
+        captured_state.update(inner_scope.get("state", {}))
 
     middleware = TenantContextMiddleware(inner_app)
-    # Middleware must not raise for platform routes with X-Tenant-ID
-    # Integration test with TestClient will verify end-to-end
+    await middleware(scope, receive, send)
+
+    # Middleware must not raise and must set tenant to None for platform routes
+    # (X-Tenant-ID header is ignored on platform routes)
+    assert captured_state.get("tenant") is None
 
 
 @pytest.mark.asyncio
@@ -1692,20 +1697,25 @@ access_token = create_access_token(data=token_data)
 
 - [ ] **Step 3: Modify `deps.py` — add tenant JWT validation in `get_current_user`**
 
-In `backend/app/core/deps.py`, modify `get_current_user` to validate `tenant_id` claim:
+In `backend/app/core/deps.py`, modify `get_current_user` to validate `tenant_id` claim. **Insert only the tenant validation block** — do not replace the existing user lookup logic:
 
 ```python
 async def get_current_user(token: str = Depends(oauth2_scheme), request: Request = None):
     payload = verify_token(token)
     user_id = payload.get("sub")
 
+    # --- INSERT THIS BLOCK (tenant validation) ---
     # If request has a resolved tenant, verify JWT tenant_id matches
     if request and hasattr(request.state, "tenant") and request.state.tenant:
         jwt_tenant_id = payload.get("tenant_id")
         if jwt_tenant_id and jwt_tenant_id != str(request.state.tenant.id):
             raise HTTPException(status_code=403, detail="Token tenant mismatch")
+    # --- END INSERTED BLOCK ---
 
-    # ... rest of existing user lookup logic
+    # Existing user lookup logic continues unchanged below:
+    # user = await session.get(User, uuid.UUID(user_id))
+    # if not user: raise HTTPException(...)
+    # return user
 ```
 
 - [ ] **Step 4: Write test for cross-tenant JWT rejection**
@@ -1760,12 +1770,6 @@ async def test_platform_jwt_cannot_access_tenant_routes():
             await get_current_user(token="fake_token", request=request)
         # Platform JWT must not be accepted on tenant routes
         assert exc_info.value.status_code in (401, 403)
-
-
-def test_tenant_jwt_cannot_access_platform_routes():
-    """Tenant JWT must be rejected by require_platform_admin."""
-    # Already tested in test_platform_route_rejects_tenant_jwt
-    pass
 ```
 
 - [ ] **Step 5: Commit**
