@@ -23,15 +23,15 @@ depends_on = None
 
 def upgrade() -> None:
     op.execute(
-        "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_risk_config_scope "
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_risk_config_scope "
         "ON supplier_risk_configs (rule_id, supplier_id, product_line_code) NULLS NOT DISTINCT"
     )
     op.execute(
-        "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_supplier_pl_period "
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_supplier_pl_period "
         "ON supply_chain_risk_snapshots (supplier_id, product_line_code, snapshot_period) NULLS NOT DISTINCT"
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS uq_risk_config_scope")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS uq_supplier_pl_period")
+    op.execute("DROP INDEX IF EXISTS uq_risk_config_scope")
+    op.execute("DROP INDEX IF EXISTS uq_supplier_pl_period")
