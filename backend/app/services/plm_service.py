@@ -133,11 +133,11 @@ class PLMIngestionService:
 
         # Side-effect: keep pending SC links aligned with current PLM flags.
         if data.get("is_safety_related"):
-            await self._upsert_sc_link(connection_id, data, "safety")
+            await self._upsert_sc_link(connection_id, data, "safety", factory_id=factory_id)
         else:
             await self._delete_pending_sc_link(connection_id, data, "safety")
         if data.get("is_key_characteristic"):
-            await self._upsert_sc_link(connection_id, data, "key_characteristic")
+            await self._upsert_sc_link(connection_id, data, "key_characteristic", factory_id=factory_id)
         else:
             await self._delete_pending_sc_link(connection_id, data, "key_characteristic")
 
@@ -146,6 +146,7 @@ class PLMIngestionService:
         connection_id: uuid.UUID,
         data: dict,
         characteristic_type: str,
+        factory_id: uuid.UUID | None = None,
     ) -> None:
         """Upsert PLMPartSCLink for a safety-related or key-characteristic part."""
         # Resolve the part_id via RETURNING on the part upsert, or fall back to
@@ -177,16 +178,20 @@ class PLMIngestionService:
             if not product_line_code:
                 return
 
+        values = {
+            "link_id": uuid.uuid4(),
+            "part_id": part_id,
+            "sc_id": None,
+            "characteristic_type": characteristic_type,
+            "status": "pending",
+            "product_line_code": product_line_code,
+        }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
+
         stmt = (
             pg_insert(PLMPartSCLink)
-            .values(
-                link_id=uuid.uuid4(),
-                part_id=part_id,
-                sc_id=None,
-                characteristic_type=characteristic_type,
-                status="pending",
-                product_line_code=product_line_code,
-            )
+            .values(**values)
             .on_conflict_do_update(
                 index_elements=["part_id", "characteristic_type"],
                 set_={
@@ -369,10 +374,10 @@ class PLMIngestionService:
 
         # Side-effect: create/reset impact task when transitioning to approved
         if create_impact_task:
-            await self._upsert_impact_task(connection_id, data)
+            await self._upsert_impact_task(connection_id, data, factory_id=factory_id)
 
     async def _upsert_impact_task(
-        self, connection_id: uuid.UUID, data: dict
+        self, connection_id: uuid.UUID, data: dict, factory_id: uuid.UUID | None = None
     ) -> None:
         """Upsert PLMChangeImpactTask for an approved change order."""
         co_result = await self._db.execute(
@@ -386,20 +391,24 @@ class PLMIngestionService:
             return
 
         now = datetime.now(UTC)
+        values = {
+            "task_id": uuid.uuid4(),
+            "change_id": change_id,
+            "status": "pending",
+            "claim_token": None,
+            "retry_count": 0,
+            "next_retry_at": now,
+            "started_at": None,
+            "completed_at": None,
+            "error_message": None,
+            "result": None,
+        }
+        if factory_id is not None:
+            values["factory_id"] = factory_id
+
         stmt = (
             pg_insert(PLMChangeImpactTask)
-            .values(
-                task_id=uuid.uuid4(),
-                change_id=change_id,
-                status="pending",
-                claim_token=None,
-                retry_count=0,
-                next_retry_at=now,
-                started_at=None,
-                completed_at=None,
-                error_message=None,
-                result=None,
-            )
+            .values(**values)
             .on_conflict_do_update(
                 index_elements=["change_id"],
                 set_={

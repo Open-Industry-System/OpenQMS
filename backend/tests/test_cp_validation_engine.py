@@ -16,18 +16,19 @@ from app.models.cp_validation import (
 from app.models.control_plan import ControlPlan, ControlPlanItem
 
 
-def _make_cp():
+def _make_cp(factory_id: uuid.UUID | None = None):
     return ControlPlan(
         cp_id=uuid.uuid4(),
         document_no=f"CP-TEST-{uuid.uuid4().hex[:8]}",
         title="Test CP",
         product_line_code="DC-DC-100",
+        factory_id=factory_id,
     )
 
 
 @pytest.mark.asyncio
 async def test_validate_creates_run_and_occurrences(db, admin_user):
-    cp = _make_cp()
+    cp = _make_cp(factory_id=admin_user.factory_id)
     db.add(cp)
     await db.flush()
 
@@ -68,7 +69,7 @@ async def test_validate_creates_run_and_occurrences(db, admin_user):
 @pytest.mark.asyncio
 async def test_finding_reused_across_runs(db, admin_user):
     """Same finding_hash (from stable business key) creates one finding, two occurrences."""
-    cp = _make_cp()
+    cp = _make_cp(factory_id=admin_user.factory_id)
     db.add(cp)
     await db.flush()
 
@@ -105,7 +106,7 @@ async def test_finding_reused_across_runs(db, admin_user):
 async def test_finding_survives_item_uuid_change(db, admin_user):
     """When update_control_plan deletes+recreates items with new UUIDs,
     the finding_hash (based on source_fmea_node_id) remains stable."""
-    cp = _make_cp()
+    cp = _make_cp(factory_id=admin_user.factory_id)
     db.add(cp)
     await db.flush()
 
@@ -152,13 +153,14 @@ async def test_stale_run_auto_failed(db, admin_user):
     """A run stuck in 'running' for >5 min should be auto-failed on next validate."""
     from datetime import datetime, timedelta, timezone
 
-    cp = _make_cp()
+    cp = _make_cp(factory_id=admin_user.factory_id)
     db.add(cp)
     await db.flush()
 
     # Manually create a stale running run
     stale_run = CPValidationRun(
         cp_id=cp.cp_id, trigger="auto_on_save", status="running",
+        factory_id=admin_user.factory_id,
         created_by=admin_user.user_id,
         started_at=datetime.now(timezone.utc) - timedelta(minutes=10),
     )

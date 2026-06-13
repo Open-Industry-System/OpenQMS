@@ -19,12 +19,16 @@ from app.models.fmea import FMEADocument
 from app.models.user import User
 from app.models.role import RoleDefinition
 from app.models.product_line import ProductLine
+from app.models.factory import Factory
 from app.database import Base
 
 import app.models  # noqa: F401 — ensure all FK-referenced tables are registered in Base.metadata
 
 
 # ─── Fixtures ───
+
+_DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 
 @pytest_asyncio.fixture(scope="function")
 async def db():
@@ -40,7 +44,10 @@ async def db():
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(
-            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W")
+            Factory.__table__.insert().values(id=_DEFAULT_FACTORY_ID, code="TEST", name="Test Factory")
+        )
+        await conn.execute(
+            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=_DEFAULT_FACTORY_ID)
         )
         await conn.commit()
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -67,6 +74,7 @@ async def user_id(db: AsyncSession):
         display_name="Test User",
         role_id=role.id,
         password_hash="hash",
+        factory_id=_DEFAULT_FACTORY_ID,
     )
     db.add(user)
     await db.commit()
@@ -86,6 +94,7 @@ async def ic_with_cp_binding(db, user_id):
         target_value=0.0,
         chart_type="xbar_r",
         subgroup_size=5,
+        factory_id=_DEFAULT_FACTORY_ID,
         created_by_id=user_id,
     )
     db.add(ic)
@@ -100,6 +109,7 @@ async def fmea_document(db):
         fmea_id=uuid.uuid4(),
         document_no="PFMEA-2026-TEST-001",
         product_line_code="DC-DC-100",
+        factory_id=_DEFAULT_FACTORY_ID,
         title="测试 PFMEA",
         status="draft",
         graph_data={
@@ -131,6 +141,7 @@ async def control_plan_with_binding(db, ic_with_cp_binding, fmea_document):
         title="测试控制计划",
         fmea_ref_id=fmea_document.fmea_id,
         product_line_code="DC-DC-100",
+        factory_id=_DEFAULT_FACTORY_ID,
     )
     db.add(cp)
     await db.flush()

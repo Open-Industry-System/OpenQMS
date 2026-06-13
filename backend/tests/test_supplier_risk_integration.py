@@ -49,12 +49,13 @@ from app.services.scar_service import _create_scar_without_commit
 
 
 @pytest_asyncio.fixture
-async def seed_supplier(db, admin_user):
+async def seed_supplier(db, admin_user, default_factory):
     supplier = Supplier(
         supplier_id=uuid.uuid4(),
         supplier_no=f"SUP-{uuid.uuid4().hex[:8]}",
         name="Test Supplier",
         short_name="Test",
+        factory_id=default_factory.id,
         status="approved",
         created_by=admin_user.user_id,
     )
@@ -65,7 +66,7 @@ async def seed_supplier(db, admin_user):
 
 
 @pytest_asyncio.fixture
-async def seed_global_configs(db, admin_user):
+async def seed_global_configs(db, admin_user, default_factory):
     """Seed one global default config per rule so evaluation can run (idempotent)."""
     defaults = [
         ("R01", "quality", 15.0, {"ppm_limit": 1000, "window_days": 90}),
@@ -96,15 +97,17 @@ async def seed_global_configs(db, admin_user):
             category=category,
             weight=weight,
             thresholds=thresholds,
+            factory_id=default_factory.id,
             updated_by=admin_user.user_id,
         ))
     await db.flush()
 
 
 @pytest_asyncio.fixture
-async def seed_open_alert(db, seed_supplier):
+async def seed_open_alert(db, seed_supplier, default_factory):
     alert = SupplierRiskAlert(
         supplier_id=seed_supplier.supplier_id,
+        factory_id=default_factory.id,
         risk_level="high",
         risk_score=75.0,
         quality_score=80.0,
@@ -122,9 +125,10 @@ async def seed_open_alert(db, seed_supplier):
 
 
 @pytest_asyncio.fixture
-async def seed_medium_alert(db, seed_supplier):
+async def seed_medium_alert(db, seed_supplier, default_factory):
     alert = SupplierRiskAlert(
         supplier_id=seed_supplier.supplier_id,
+        factory_id=default_factory.id,
         risk_level="medium",
         risk_score=55.0,
         quality_score=70.0,
@@ -143,7 +147,7 @@ async def seed_medium_alert(db, seed_supplier):
 
 
 @pytest_asyncio.fixture
-async def seed_alert_with_capa(db, seed_supplier, admin_user):
+async def seed_alert_with_capa(db, seed_supplier, admin_user, default_factory):
     """Create an alert already linked to a CAPA in D7 status."""
     capa = CAPAEightD(
         report_id=uuid.uuid4(),
@@ -152,6 +156,7 @@ async def seed_alert_with_capa(db, seed_supplier, admin_user):
         severity="严重",
         due_date=date.today(),
         product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
         status="D7_PREVENTION",
         created_by=admin_user.user_id,
     )
@@ -161,6 +166,7 @@ async def seed_alert_with_capa(db, seed_supplier, admin_user):
 
     alert = SupplierRiskAlert(
         supplier_id=seed_supplier.supplier_id,
+        factory_id=default_factory.id,
         risk_level="high",
         risk_score=75.0,
         quality_score=80.0,
@@ -179,7 +185,7 @@ async def seed_alert_with_capa(db, seed_supplier, admin_user):
 
 
 @pytest_asyncio.fixture
-async def seed_inspections_for_high_risk(db, seed_supplier, admin_user):
+async def seed_inspections_for_high_risk(db, seed_supplier, admin_user, default_factory):
     """Create rejected IQC inspections that will trigger high/critical risk."""
     suffix = uuid.uuid4().hex[:8]
     for i in range(5):
@@ -193,6 +199,7 @@ async def seed_inspections_for_high_risk(db, seed_supplier, admin_user):
             inspection_date=date.today() - timedelta(days=i),
             status="judged",
             product_line_code="DC-DC-100",
+            factory_id=default_factory.id,
             defect_description="发现安全特性不合格",
         ))
     await db.flush()
@@ -288,7 +295,7 @@ async def client_view(override_dependencies_view):
 
 
 @pytest.mark.asyncio
-async def test_migration_unique_indexes_prevent_duplicate_configs(db, admin_user):
+async def test_migration_unique_indexes_prevent_duplicate_configs(db, admin_user, default_factory):
     """The partial unique index blocks two global-default configs for the same rule."""
     unique_rule = f"R{uuid.uuid4().hex[:6].upper()}"
     db.add(SupplierRiskConfig(
@@ -297,6 +304,7 @@ async def test_migration_unique_indexes_prevent_duplicate_configs(db, admin_user
         category="quality",
         weight=10.0,
         thresholds={},
+        factory_id=default_factory.id,
         updated_by=admin_user.user_id,
     ))
     await db.flush()
@@ -307,6 +315,7 @@ async def test_migration_unique_indexes_prevent_duplicate_configs(db, admin_user
         category="quality",
         weight=12.0,
         thresholds={},
+        factory_id=default_factory.id,
         updated_by=admin_user.user_id,
     ))
     try:
@@ -335,10 +344,11 @@ async def test_viewer_cannot_edit_alert(client_view, seed_open_alert):
 
 
 @pytest.mark.asyncio
-async def test_product_line_isolation(db, seed_supplier):
+async def test_product_line_isolation(db, seed_supplier, default_factory):
     """List endpoint filters alerts by product_line_code."""
     alert_pl = SupplierRiskAlert(
         supplier_id=seed_supplier.supplier_id,
+        factory_id=default_factory.id,
         risk_level="high",
         risk_score=70.0,
         quality_score=60.0,
@@ -352,6 +362,7 @@ async def test_product_line_isolation(db, seed_supplier):
     )
     alert_other = SupplierRiskAlert(
         supplier_id=seed_supplier.supplier_id,
+        factory_id=default_factory.id,
         risk_level="medium",
         risk_score=50.0,
         quality_score=60.0,
@@ -431,7 +442,7 @@ async def test_alert_escalated_on_risk_upgrade(
 
 
 @pytest.mark.asyncio
-async def test_notification_failure_non_blocking(db, seed_open_alert, admin_user):
+async def test_notification_failure_non_blocking(db, seed_open_alert, admin_user, default_factory):
     """An exception inside _send_email is swallowed by send_notifications."""
     channel = SupplierRiskNotificationChannel(
         channel_id=uuid.uuid4(),
@@ -439,6 +450,7 @@ async def test_notification_failure_non_blocking(db, seed_open_alert, admin_user
         config={"addresses": ["test@openqms.local"]},
         min_risk_level="high",
         enabled=True,
+        factory_id=default_factory.id,
         created_by=admin_user.user_id,
     )
     db.add(channel)
@@ -576,7 +588,7 @@ def test_webhook_ssrf_blocked_private_url():
 
 
 @pytest.mark.asyncio
-async def test_webhook_ssrf_blocked_send_notifications(db, seed_open_alert, admin_user):
+async def test_webhook_ssrf_blocked_send_notifications(db, seed_open_alert, admin_user, default_factory):
     """_send_webhook raises SSRFError for a private webhook URL."""
     channel = SupplierRiskNotificationChannel(
         channel_id=uuid.uuid4(),
@@ -584,6 +596,7 @@ async def test_webhook_ssrf_blocked_send_notifications(db, seed_open_alert, admi
         config={"url": "http://127.0.0.1:8080/webhook"},
         min_risk_level="low",
         enabled=True,
+        factory_id=default_factory.id,
         created_by=admin_user.user_id,
     )
     db.add(channel)

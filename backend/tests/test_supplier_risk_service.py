@@ -86,6 +86,7 @@ async def seed_acknowledged_alert(db, seed_supplier):
 @pytest_asyncio.fixture
 async def seed_config_priority(db, admin_user, seed_supplier):
     """Create 4 configs with increasing specificity for priority testing."""
+    fid = seed_supplier.factory_id
     configs = [
         # Layer 4: global default
         SupplierRiskConfig(
@@ -94,6 +95,7 @@ async def seed_config_priority(db, admin_user, seed_supplier):
             category="quality",
             weight=10.0,
             thresholds={"ppm_limit": 1000, "window_days": 90},
+            factory_id=fid,
             updated_by=admin_user.user_id,
         ),
         # Layer 3: product line default
@@ -103,6 +105,7 @@ async def seed_config_priority(db, admin_user, seed_supplier):
             category="quality",
             weight=12.0,
             thresholds={"ppm_limit": 800, "window_days": 90},
+            factory_id=fid,
             product_line_code="DC-DC-100",
             updated_by=admin_user.user_id,
         ),
@@ -113,6 +116,7 @@ async def seed_config_priority(db, admin_user, seed_supplier):
             category="quality",
             weight=14.0,
             thresholds={"ppm_limit": 600, "window_days": 90},
+            factory_id=fid,
             supplier_id=seed_supplier.supplier_id,
             updated_by=admin_user.user_id,
         ),
@@ -123,6 +127,7 @@ async def seed_config_priority(db, admin_user, seed_supplier):
             category="quality",
             weight=16.0,
             thresholds={"ppm_limit": 400, "window_days": 90},
+            factory_id=fid,
             supplier_id=seed_supplier.supplier_id,
             product_line_code="DC-DC-100",
             updated_by=admin_user.user_id,
@@ -308,6 +313,7 @@ async def test_calculate_all_supplier_scores_returns_scores_without_side_effects
                 thresholds=cfg["thresholds"],
                 weight=cfg["weight"],
                 category=cfg["category"],
+                factory_id=admin_user.factory_id,
                 supplier_id=None,
                 product_line_code=None,
                 updated_by=admin_user.user_id,

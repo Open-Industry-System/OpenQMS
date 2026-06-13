@@ -86,7 +86,9 @@ class CustomerComplaint(Base):
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
     )
     supplier_responsibility: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    scar_ref_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    scar_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("supplier_scars.scar_id", ondelete="SET NULL"), nullable=True
+    )
     supplier_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.supplier_id"), nullable=True
     )
@@ -140,7 +142,9 @@ class RMARecord(Base):
     capa_ref_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("capa_eightd.report_id"), nullable=True
     )
-    scar_ref_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    scar_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("supplier_scars.scar_id", ondelete="SET NULL"), nullable=True
+    )
     attachments: Mapped[list | None] = mapped_column(JSONB, default=list, nullable=True)
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True

@@ -47,11 +47,18 @@ class CPValidationEngine:
         # 1. Handle stale running runs (crashed worker, OOM, etc.)
         await self._fail_stale_runs(db, cp_id)
 
+        # 1b. Resolve factory_id from the ControlPlan
+        cp_fid_result = await db.execute(
+            select(ControlPlan.factory_id).where(ControlPlan.cp_id == cp_id)
+        )
+        factory_id = cp_fid_result.scalar_one_or_none()
+
         # 2. Create run (may raise IntegrityError if concurrent)
         run = CPValidationRun(
             cp_id=cp_id,
             trigger=trigger,
             status="running",
+            factory_id=factory_id,
             created_by=user_id,
         )
         db.add(run)
@@ -134,6 +141,7 @@ class CPValidationEngine:
             if existing is None:
                 existing = CPValidationFinding(
                     cp_id=cp_id,
+                    factory_id=cp.factory_id,
                     finding_hash=h,
                     rule_id=finding.rule_id,
                     severity=finding.severity,
@@ -150,6 +158,7 @@ class CPValidationEngine:
                 run_id=run.run_id,
                 finding_id=existing.finding_id,
                 cp_id=cp_id,
+                factory_id=cp.factory_id,
                 validation_type="rule",
                 title=finding.title,
                 description=finding.description,

@@ -172,6 +172,7 @@ async def admin_user(db: AsyncSession):
             role_id=admin_role.id,
             legacy_role="admin",
             is_active=True,
+            factory_id=uuid.uuid4(),
         )
         db.add(user)
         await db.flush()
@@ -180,7 +181,7 @@ async def admin_user(db: AsyncSession):
     result = await db.execute(select(ProductLine).where(ProductLine.code == "DC-DC-100"))
     pl = result.scalar_one_or_none()
     if pl is None:
-        pl = ProductLine(code="DC-DC-100", name="DC-DC Convert 100W")
+        pl = ProductLine(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=user.factory_id)
         db.add(pl)
         await db.flush()
 
@@ -223,6 +224,7 @@ async def test_connection(db: AsyncSession, admin_user: User):
         config=config,
         is_active=True,
         product_line_code="DC-DC-100",
+        factory_id=admin_user.factory_id,
         created_by=admin_user.user_id,
     )
     db.add(conn)
@@ -271,6 +273,7 @@ async def test_ic(db: AsyncSession, admin_user: User):
         target_value=5.0,
         chart_type="xbar_r",
         subgroup_size=5,
+        factory_id=admin_user.factory_id,
         created_by_id=admin_user.user_id,
     )
     db.add(ic)
@@ -428,6 +431,7 @@ class TestSyncJobConcurrency:
             config={},
             is_active=False,
             product_line_code="DC-DC-100",
+            factory_id=admin_user.factory_id,
             created_by=admin_user.user_id,
         )
         db.add(conn)
@@ -837,6 +841,7 @@ class TestConnectionLifecycle:
             config={},
             is_active=True,
             product_line_code="DC-DC-100",
+            factory_id=admin_user.factory_id,
             created_by=admin_user.user_id,
         )
         db.add(conn)
@@ -874,6 +879,7 @@ class TestConnectionLifecycle:
             config={},
             is_active=True,
             product_line_code="DC-DC-100",
+            factory_id=admin_user.factory_id,
             created_by=admin_user.user_id,
         )
         conn2 = MESConnection(
@@ -882,6 +888,7 @@ class TestConnectionLifecycle:
             config={},
             is_active=True,
             product_line_code="DC-DC-100",
+            factory_id=admin_user.factory_id,
             created_by=admin_user.user_id,
         )
         db.add(conn1)
@@ -1198,6 +1205,7 @@ class TestConfigNormalization:
             config=config,
             is_active=True,
             product_line_code="DC-DC-100",
+            factory_id=admin_user.factory_id,
             created_by=admin_user.user_id,
         )
         db.add(conn)
@@ -1220,6 +1228,7 @@ class TestConfigNormalization:
             config=config,
             is_active=True,
             product_line_code="DC-DC-100",
+            factory_id=admin_user.factory_id,
             created_by=admin_user.user_id,
         )
         db.add(conn)
@@ -1243,6 +1252,7 @@ class TestConfigNormalization:
             config=config,
             is_active=True,
             product_line_code="DC-DC-100",
+            factory_id=admin_user.factory_id,
             created_by=admin_user.user_id,
         )
         db.add(conn)
@@ -1266,6 +1276,7 @@ class TestConfigNormalization:
             config=config,
             is_active=True,
             product_line_code="DC-DC-100",
+            factory_id=admin_user.factory_id,
             created_by=admin_user.user_id,
         )
         db.add(conn)
@@ -1294,6 +1305,7 @@ class TestConfigNormalization:
             config=config,
             is_active=True,
             product_line_code="DC-DC-100",
+            factory_id=admin_user.factory_id,
             created_by=admin_user.user_id,
         )
         db.add(conn)

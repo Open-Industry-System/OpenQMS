@@ -186,18 +186,21 @@ async def test_open_scar_count_time_point_logic(db, test_user):
     db.add(SupplierSCAR(
         scar_id=uuid4(), scar_no="SCAR-2026-001", supplier_id=supplier.supplier_id,
         source_type="internal", description="open scar",
+        factory_id=test_user.factory_id,
         status="open", issued_date=date(2026, 6, 10),
     ))
     # SCAR issued before period end, closed after period end — counted (was open at period end)
     db.add(SupplierSCAR(
         scar_id=uuid4(), scar_no="SCAR-2026-002", supplier_id=supplier.supplier_id,
         source_type="internal", description="closed after period",
+        factory_id=test_user.factory_id,
         status="closed", issued_date=date(2026, 6, 5), closed_date=date(2026, 7, 15),
     ))
     # SCAR issued after period end — NOT counted
     db.add(SupplierSCAR(
         scar_id=uuid4(), scar_no="SCAR-2026-003", supplier_id=supplier.supplier_id,
         source_type="internal", description="future scar",
+        factory_id=test_user.factory_id,
         status="open", issued_date=date(2026, 7, 10),
     ))
     await db.commit()

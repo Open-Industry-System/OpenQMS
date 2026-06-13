@@ -12,12 +12,16 @@ from app.models.fmea import FMEADocument
 from app.models.control_plan import ControlPlan
 from app.models.supplier import Supplier, SupplierPPAPSubmission
 from app.models.product_line import ProductLine
+from app.models.factory import Factory
 from app.database import Base
 from app.services import apqp_service
 
 import app.models  # noqa: F401 — ensure all FK-referenced tables are registered in Base.metadata
 import os
 from urllib.parse import urlparse
+
+
+_DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -34,7 +38,10 @@ async def db():
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(
-            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W")
+            Factory.__table__.insert().values(id=_DEFAULT_FACTORY_ID, code="TEST", name="Test Factory")
+        )
+        await conn.execute(
+            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=_DEFAULT_FACTORY_ID)
         )
         await conn.commit()
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -47,6 +54,7 @@ async def _make_user(db: AsyncSession, username: str, role: str) -> User:
     user = User(
         user_id=uuid.uuid4(), username=username, display_name=username,
         role=role, password_hash="hash",
+        factory_id=_DEFAULT_FACTORY_ID,
     )
     db.add(user)
     await db.commit()
@@ -58,6 +66,7 @@ async def _make_project(db: AsyncSession, user: User, current_phase: int = 1, **
     proj = APQPProject(
         project_id=uuid.uuid4(), project_code=code,
         project_name="Test", product_name="TestProduct", product_line_code="DC-DC-100",
+        factory_id=_DEFAULT_FACTORY_ID,
         created_by=user.user_id, current_phase=current_phase, **kwargs,
     )
     db.add(proj)
@@ -150,6 +159,7 @@ class TestDeliverableChecks:
         fmea = FMEADocument(
             fmea_id=uuid.uuid4(), document_no=f"FMEA-TEST-{uuid.uuid4().hex[:6]}",
             title=f"Test {fmea_type}", fmea_type=fmea_type,
+            factory_id=_DEFAULT_FACTORY_ID,
             graph_data={"nodes": [], "edges": []},
         )
         db.add(fmea)
@@ -182,7 +192,7 @@ class TestDeliverableChecks:
     async def test_phase_3_missing_pfmea(self, db: AsyncSession):
         manager = await _make_user(db, "mgr_p3_check", "manager")
         cp = ControlPlan(cp_id=uuid.uuid4(), document_no=f"CP-TEST-{uuid.uuid4().hex[:6]}",
-                         title="Test CP", phase="production")
+                         title="Test CP", phase="production", factory_id=_DEFAULT_FACTORY_ID)
         db.add(cp)
         await db.commit()
         proj = await _make_project(db, manager, current_phase=3, pfmea_id=None, control_plan_id=cp.cp_id)

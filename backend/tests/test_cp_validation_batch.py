@@ -37,6 +37,7 @@ def _make_cp(suffix: str = "", factory_id: uuid.UUID | None = None) -> ControlPl
 
 
 def _make_run(cp_id: uuid.UUID, user_id: uuid.UUID, started_at: datetime,
+              factory_id: uuid.UUID | None = None,
               status: str = "completed", rule_count: int = 0,
               error_count: int = 0, warning_count: int = 0, info_count: int = 0,
               trigger: str = "manual") -> CPValidationRun:
@@ -50,28 +51,33 @@ def _make_run(cp_id: uuid.UUID, user_id: uuid.UUID, started_at: datetime,
         info_count=info_count,
         started_at=started_at,
         completed_at=started_at + timedelta(seconds=1),
+        factory_id=factory_id,
         created_by=user_id,
     )
 
 
 def _make_finding(cp_id: uuid.UUID, rule_id: str, severity: str,
-                  category: str, status: str = "open") -> CPValidationFinding:
+                  category: str, factory_id: uuid.UUID | None = None,
+                  status: str = "open") -> CPValidationFinding:
     return CPValidationFinding(
         cp_id=cp_id,
         finding_hash=f"hash-{rule_id}-{uuid.uuid4().hex[:6]}",
         rule_id=rule_id,
         severity=severity,
         category=category,
+        factory_id=factory_id,
         status=status,
     )
 
 
 def _make_occurrence(run_id: uuid.UUID, finding_id: uuid.UUID, cp_id: uuid.UUID,
-                     title: str, present: bool = True) -> CPValidationOccurrence:
+                     title: str, factory_id: uuid.UUID | None = None,
+                     present: bool = True) -> CPValidationOccurrence:
     return CPValidationOccurrence(
         run_id=run_id,
         finding_id=finding_id,
         cp_id=cp_id,
+        factory_id=factory_id,
         validation_type="rule",
         title=title,
         description="test",
@@ -96,6 +102,7 @@ async def test_batch_summaries_no_runs_clean_and_history(db, admin_user):
     await db.flush()
 
     run_b1 = _make_run(cp_b.cp_id, uid, now - timedelta(minutes=30),
+                        factory_id=admin_user.factory_id,
                         rule_count=0, error_count=0, warning_count=0, info_count=0)
     db.add(run_b1)
     await db.flush()
@@ -120,21 +127,24 @@ async def test_batch_summaries_no_runs_clean_and_history(db, admin_user):
 
     # Run 1 (older)
     run_c1 = _make_run(cp_c.cp_id, uid, now - timedelta(hours=2),
+                        factory_id=admin_user.factory_id,
                         rule_count=1, error_count=1)
     db.add(run_c1)
     await db.flush()
 
-    finding_c1 = _make_finding(cp_c.cp_id, "R001", "error", "completeness", status="open")
+    finding_c1 = _make_finding(cp_c.cp_id, "R001", "error", "completeness",
+                               factory_id=admin_user.factory_id, status="open")
     db.add(finding_c1)
     await db.flush()
 
     occ_c1_run1 = _make_occurrence(run_c1.run_id, finding_c1.finding_id, cp_c.cp_id,
-                                    title="控制方法缺失")
+                                    title="控制方法缺失", factory_id=admin_user.factory_id)
     db.add(occ_c1_run1)
     await db.flush()
 
     # Run 2 (latest) — F1 is resolved, new finding F2 is open
     run_c2 = _make_run(cp_c.cp_id, uid, now - timedelta(hours=1),
+                        factory_id=admin_user.factory_id,
                         rule_count=2, error_count=0, warning_count=1)
     db.add(run_c2)
     await db.flush()
@@ -146,16 +156,17 @@ async def test_batch_summaries_no_runs_clean_and_history(db, admin_user):
     # Occurrence for F1 in run 2 (present=True because it was detected —
     # but the finding is now resolved, so it contributes to resolved_count)
     occ_c1_run2 = _make_occurrence(run_c2.run_id, finding_c1.finding_id, cp_c.cp_id,
-                                    title="控制方法缺失")
+                                    title="控制方法缺失", factory_id=admin_user.factory_id)
     db.add(occ_c1_run2)
 
     # New finding F2 (warning) in run 2
-    finding_c2 = _make_finding(cp_c.cp_id, "R002", "warning", "completeness", status="open")
+    finding_c2 = _make_finding(cp_c.cp_id, "R002", "warning", "completeness",
+                               factory_id=admin_user.factory_id, status="open")
     db.add(finding_c2)
     await db.flush()
 
     occ_c2_run2 = _make_occurrence(run_c2.run_id, finding_c2.finding_id, cp_c.cp_id,
-                                    title="反应计划缺失")
+                                    title="反应计划缺失", factory_id=admin_user.factory_id)
     db.add(occ_c2_run2)
     await db.flush()
 
@@ -203,27 +214,32 @@ async def test_batch_summaries_rejected_finding_not_leaked(db, admin_user):
 
     # Run 1: finding F1 open
     run1 = _make_run(cp.cp_id, uid, now - timedelta(hours=1),
+                     factory_id=admin_user.factory_id,
                      rule_count=1, error_count=1)
     db.add(run1)
     await db.flush()
 
-    f1 = _make_finding(cp.cp_id, "R001", "error", "completeness", status="open")
+    f1 = _make_finding(cp.cp_id, "R001", "error", "completeness",
+                       factory_id=admin_user.factory_id, status="open")
     db.add(f1)
     await db.flush()
 
-    occ1 = _make_occurrence(run1.run_id, f1.finding_id, cp.cp_id, title="控制方法缺失")
+    occ1 = _make_occurrence(run1.run_id, f1.finding_id, cp.cp_id,
+                            title="控制方法缺失", factory_id=admin_user.factory_id)
     db.add(occ1)
     await db.flush()
 
     # Run 2: F1 rejected
-    run2 = _make_run(cp.cp_id, uid, now, rule_count=1, error_count=0)
+    run2 = _make_run(cp.cp_id, uid, now, factory_id=admin_user.factory_id,
+                     rule_count=1, error_count=0)
     db.add(run2)
     await db.flush()
 
     f1.status = "rejected"
     await db.flush()
 
-    occ2 = _make_occurrence(run2.run_id, f1.finding_id, cp.cp_id, title="控制方法缺失")
+    occ2 = _make_occurrence(run2.run_id, f1.finding_id, cp.cp_id,
+                            title="控制方法缺失", factory_id=admin_user.factory_id)
     db.add(occ2)
     await db.flush()
 

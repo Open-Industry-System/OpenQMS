@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 # Ensure SECRET_KEY is set so app config doesn't throw
 os.environ["SECRET_KEY"] = "test-secret-key-for-spc-service-integration-tests"
 
+from tests.conftest import DEFAULT_FACTORY_ID
 from app.database import Base
 from app.config import settings
 from app.models.user import User
@@ -31,6 +32,7 @@ async def db_session():
     if not await _check_db_available():
         pytest.skip("Database not available")
     from sqlalchemy.pool import NullPool
+    from app.models.factory import Factory
     engine = create_async_engine(
         os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL),
         echo=False, poolclass=NullPool,
@@ -38,6 +40,14 @@ async def db_session():
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with session_factory() as session:
+        # Ensure the default test factory exists (FK requirement)
+        from sqlalchemy import select as _sel
+        existing = (await session.execute(
+            _sel(Factory).where(Factory.id == DEFAULT_FACTORY_ID)
+        )).scalar_one_or_none()
+        if existing is None:
+            session.add(Factory(id=DEFAULT_FACTORY_ID, code="TEST", name="Test Factory"))
+            await session.commit()
         yield session
 
     await engine.dispose()
@@ -70,7 +80,7 @@ async def test_spc_v1_1_lifecycle(db_session: AsyncSession):
                 "rule_2": False,
             }
         }
-        ic = await create_inspection_characteristic(db_session, user_id, ic_data)
+        ic = await create_inspection_characteristic(db_session, user_id, ic_data, factory_id=DEFAULT_FACTORY_ID)
         assert ic.ic_id is not None
         created_ic_ids.append(ic.ic_id)
         assert ic.chart_type == "p"

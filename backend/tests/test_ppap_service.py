@@ -9,12 +9,16 @@ from app.models.supplier import Supplier, SupplierPPAPSubmission, SupplierPPAPEl
 from app.models.user import User
 from app.models.audit import AuditLog
 from app.models.product_line import ProductLine
+from app.models.factory import Factory
 from app.database import Base
 from app.services import ppap_service
 
 import app.models  # noqa: F401 — ensure all FK-referenced tables are registered
 import os
 from urllib.parse import urlparse
+
+
+_DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -31,7 +35,10 @@ async def db():
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(
-            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W")
+            Factory.__table__.insert().values(id=_DEFAULT_FACTORY_ID, code="TEST", name="Test Factory")
+        )
+        await conn.execute(
+            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=_DEFAULT_FACTORY_ID)
         )
         await conn.commit()
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -44,6 +51,7 @@ async def _make_user(db: AsyncSession, username: str, role: str) -> User:
     user = User(
         user_id=uuid.uuid4(), username=username, display_name=username,
         role=role, password_hash="hash",
+        factory_id=_DEFAULT_FACTORY_ID,
     )
     db.add(user)
     await db.commit()
@@ -56,6 +64,7 @@ async def _make_supplier(db: AsyncSession, user: User, supplier_no: str = "SUP-T
         supplier_no=supplier_no,
         name=f"Test Supplier {supplier_no}",
         short_name=supplier_no,
+        factory_id=_DEFAULT_FACTORY_ID,
         created_by=user.user_id,
     )
     db.add(supplier)
