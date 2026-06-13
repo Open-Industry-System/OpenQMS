@@ -4,6 +4,8 @@
 
 开箱即用的质量管理体系平台，面向中国制造业，覆盖 AIAG-VDA PFMEA/DFMEA、8D/CAPA、SPC、MSA、IQC、供应商管理等核心模块，助力 IATF 16949 合规。
 
+**[English documentation →](README_EN.md)**
+
 ---
 
 ## 功能概览
