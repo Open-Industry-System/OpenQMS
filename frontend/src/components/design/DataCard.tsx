@@ -5,6 +5,8 @@ interface DataCardProps {
   extra?: ReactNode;
   children: ReactNode;
   className?: string;
+  style?: React.CSSProperties;
+  onClick?: () => void;
   noPadding?: boolean;
   elevated?: boolean;
 }
@@ -18,11 +20,13 @@ export default function DataCard({
   extra,
   children,
   className,
+  style,
+  onClick,
   noPadding,
   elevated,
 }: DataCardProps) {
   return (
-    <div className={`qf-card ${elevated ? "qf-card-elevated" : ""} ${className || ""}`}>
+    <div className={`qf-card ${elevated ? "qf-card-elevated" : ""} ${className || ""}`} style={style} onClick={onClick}>
       <div className="qf-card__header">
         <h3 className="qf-card__title">{title}</h3>
         {extra ? <div>{extra}</div> : null}

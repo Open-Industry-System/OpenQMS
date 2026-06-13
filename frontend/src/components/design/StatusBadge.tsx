@@ -2,13 +2,14 @@ interface StatusBadgeProps {
   status: string;
   children?: React.ReactNode;
   className?: string;
+  style?: React.CSSProperties;
 }
 
 /**
  * 工业风 LED 状态徽章。
  * 映射常见业务状态到视觉语义：草稿、进行中、成功/批准、警告/返工、错误/高风险、信息/普通。
  */
-export default function StatusBadge({ status, children, className }: StatusBadgeProps) {
+export default function StatusBadge({ status, children, className, style }: StatusBadgeProps) {
   const normalized = (status || "").toLowerCase();
 
   let variant = "draft";
@@ -46,7 +47,7 @@ export default function StatusBadge({ status, children, className }: StatusBadge
   }
 
   return (
-    <span className={`qf-status qf-status--${variant} ${className || ""}`}>
+    <span className={`qf-status qf-status--${variant} ${className || ""}`} style={style}>
       {children || status}
     </span>
   );

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Card,
   Button,
-  Tag,
   Space,
   Form,
   Input,
@@ -33,15 +32,16 @@ import {
   createCalibration,
 } from "../../api/msa";
 import dayjs from "dayjs";
+import { PageShell, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 const { Text } = Typography;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  active: { label: "在用", color: "green" },
-  inactive: { label: "闲置", color: "default" },
-  calibrating: { label: "校准中", color: "blue" },
-  scrapped: { label: "报废", color: "red" },
+const STATUS_MAP: Record<string, { label: string; status: string }> = {
+  active: { label: "在用", status: "success" },
+  inactive: { label: "闲置", status: "draft" },
+  calibrating: { label: "校准中", status: "info" },
+  scrapped: { label: "报废", status: "error" },
 };
 
 export default function GaugeDetailPage() {
@@ -178,7 +178,7 @@ export default function GaugeDetailPage() {
     return <div style={{ padding: 24 }}>量具不存在</div>;
   }
 
-  const statusInfo = STATUS_MAP[gauge.status] ?? { label: gauge.status, color: "default" };
+  const statusInfo = STATUS_MAP[gauge.status] ?? { label: gauge.status, status: "draft" };
 
   const calColumns = [
     {
@@ -190,7 +190,7 @@ export default function GaugeDetailPage() {
       title: "结果",
       dataIndex: "result",
       render: (v: string) => (
-        <Tag color={v === "pass" ? "green" : "red"}>{v === "pass" ? "合格" : "不合格"}</Tag>
+        <StatusBadge status={v === "pass" ? "success" : "error"}>{v === "pass" ? "合格" : "不合格"}</StatusBadge>
       ),
     },
     { title: "证书编号", dataIndex: "certificate_no", render: (v: string | null) => v || "—" },
@@ -347,7 +347,7 @@ export default function GaugeDetailPage() {
               <Col span={12}>
                 <Text type="secondary">状态</Text>
                 <div>
-                  <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
+                  <StatusBadge status={statusInfo.status}>{statusInfo.label}</StatusBadge>
                 </div>
               </Col>
               <Col span={12}>
@@ -377,6 +377,7 @@ export default function GaugeDetailPage() {
           }
         >
           <Table
+            className="qf-table"
             loading={calsLoading}
             dataSource={cals}
             rowKey="calibration_id"
@@ -390,15 +391,15 @@ export default function GaugeDetailPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/gauges")}>
-          返回
-        </Button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>{gauge.name}</h2>
-        <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
-      </div>
-
+    <PageShell
+      title={
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/gauges")}>返回</Button>
+          <span style={{ fontSize: 20, fontWeight: 600, color: "var(--qf-text-primary)" }}>{gauge.name}</span>
+        </Space>
+      }
+      subtitle={<StatusBadge status={statusInfo.status}>{statusInfo.label}</StatusBadge>}
+    >
       <Tabs items={tabItems} />
 
       <Modal
@@ -447,6 +448,6 @@ export default function GaugeDetailPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

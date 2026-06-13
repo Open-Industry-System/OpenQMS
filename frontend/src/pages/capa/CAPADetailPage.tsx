@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
-  Button, Space, Tag, Typography, Steps, Card, Form, Input,
+  Button, Space, Tag, Typography, Steps, Form, Input,
   Select, App, Spin, Empty, Row, Col, Table, Divider, Modal,
 } from "antd";
 import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from "@ant-design/icons";
@@ -21,7 +21,7 @@ import { getCAPALessons } from "../../api/lessonsLearned";
 import axios from "axios";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
-
+import { PageShell, StatusBadge, DataCard } from "../../components/design";
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -38,6 +38,13 @@ const stepIndex: Record<string, number> = {
   D5_CORRECTION: 4, D6_VERIFICATION: 5, D7_PREVENTION: 6, D8_CLOSURE: 7, ARCHIVED: 8,
 };
 
+const severityMap: Record<string, string> = {
+  致命: "fatal",
+  严重: "error",
+  一般: "warning",
+  轻微: "info",
+};
+
 export default function CAPADetailPage() {
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
@@ -48,18 +55,13 @@ export default function CAPADetailPage() {
   const [fmeas, setFmeas] = useState<FMEADocument[]>([]);
   const [linkModal, setLinkModal] = useState(false);
 
-  // User Role Controls
   const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
 
-  // Local Form Buffers (for input debouncing/onBlur saves)
   const [localData, setLocalData] = useState<Record<string, any>>({});
-  
-  // D1 Team Adding UI State
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberRole, setNewMemberRole] = useState("质量工程师");
 
-  // Lessons learned modal
   const location = useLocation();
   const [lessonsModalOpen, setLessonsModalOpen] = useState(false);
   const [lessonsLoading, setLessonsLoading] = useState(false);
@@ -107,16 +109,13 @@ export default function CAPADetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, id]);
 
-  // D7 soft gate state
   const [allD7Confirmed, setAllD7Confirmed] = useState(true);
   const [d7UnconfirmedItems, setD7UnconfirmedItems] = useState<D7UnconfirmedItem[]>([]);
   const [d7SkipDialogOpen, setD7SkipDialogOpen] = useState(false);
   const [d7SkipReasons, setD7SkipReasons] = useState<Record<string, string>>({});
 
-  // AI Draft capabilities
   const [aiDraftEnabled, setAiDraftEnabled] = useState(false);
 
-  // AI Draft state
   const {
     loading: draftLoading,
     draft,
@@ -137,7 +136,6 @@ export default function CAPADetailPage() {
     }
   }, [draft, draftLoading]);
 
-  // 全局 Toast：error 用 message.error，warning 用 message.warning
   useEffect(() => {
     if (!draftError || draftLoading) return;
     if (errorLevel === "error") {
@@ -175,12 +173,9 @@ export default function CAPADetailPage() {
 
   const handleUpdate = async (field: string, value: unknown, throwOnError = false) => {
     if (!id || !canEdit('capa')) return;
-
-    // Check if value actually changed to prevent redundant network hits
     if (capa && JSON.stringify(capa[field as keyof CAPAReport]) === JSON.stringify(value)) {
       return;
     }
-
     setSaving(true);
     try {
       const updated = await updateCAPA(id, { [field]: value });
@@ -254,7 +249,7 @@ export default function CAPADetailPage() {
     const showAIButton = aiDraftEnabled && canEdit('capa');
     return (
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span>{label}</span>
+        <span style={{ color: "var(--qf-text-secondary)", fontWeight: 500 }}>{label}</span>
         <Space size="small">
           {hasHistory && (
             <Button
@@ -281,13 +276,10 @@ export default function CAPADetailPage() {
 
   const handleAdvance = async () => {
     if (!id) return;
-
-    // D7 soft gate: check for unconfirmed recommendations
     if (capa?.status === "D7_PREVENTION" && !allD7Confirmed) {
       setD7SkipDialogOpen(true);
       return;
     }
-
     try {
       const updated = await advanceCAPA(id);
       setCapa(updated);
@@ -336,45 +328,49 @@ export default function CAPADetailPage() {
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
   if (!capa) return <Empty description="8D 报告未找到" />;
 
+  const actions = (
+    <Space>
+      {capa.fmea_ref_id && (
+        <Tag style={{ background: "var(--qf-green-dim)", color: "var(--qf-green)", borderColor: "var(--qf-green)" }} icon={<LinkOutlined />}>
+          已关联 FMEA
+        </Tag>
+      )}
+      <RelatedFMEALink fmeaRefId={capa.fmea_ref_id ?? null} fmeaNodeId={capa.fmea_node_id ?? null} />
+      {canEdit('capa') && (
+        <Button icon={<LinkOutlined />} onClick={() => setLinkModal(true)}>
+          {capa.fmea_ref_id ? "更换FMEA关联" : "关联FMEA"}
+        </Button>
+      )}
+      {capa.status !== "ARCHIVED" && capa.status !== "D8_CLOSURE" && (!["D7_PREVENTION", "D8_CLOSURE"].includes(capa.status) || canApprove('capa')) && canEdit('capa') && (
+        <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance}>
+          推进下一步
+        </Button>
+      )}
+    </Space>
+  );
+
+  const subtitle = (
+    <Space size="middle">
+      <span style={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-secondary)" }}>{capa.document_no}</span>
+      <StatusBadge status={severityMap[capa.severity] || "warning"}>{capa.severity}</StatusBadge>
+    </Space>
+  );
+
   return (
-    <>
-      <div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-          <Space>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/capa")}>返回</Button>
-            <Title level={4} style={{ margin: 0 }}>{capa.title}</Title>
-            <Tag color="blue">{capa.document_no}</Tag>
-            <Tag color="red">{capa.severity}</Tag>
-          </Space>
-          <Space>
-            {capa.fmea_ref_id && (
-              <Tag icon={<LinkOutlined />} color="green">已关联 FMEA</Tag>
-            )}
-            <RelatedFMEALink
-              fmeaRefId={capa.fmea_ref_id ?? null}
-              fmeaNodeId={capa.fmea_node_id ?? null}
-            />
-            {canEdit('capa') && (
-              <Button icon={<LinkOutlined />} onClick={() => setLinkModal(true)}>
-                {capa.fmea_ref_id ? "更换FMEA关联" : "关联FMEA"}
-              </Button>
-            )}
-            {capa.status !== "ARCHIVED" && capa.status !== "D8_CLOSURE" && (!["D7_PREVENTION", "D8_CLOSURE"].includes(capa.status) || canApprove('capa')) && canEdit('capa') && (
-              <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance}>
-                推进下一步
-              </Button>
-            )}
-          </Space>
-        </div>
+    <PageShell
+      title={<Space><Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/capa")}>返回</Button><Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{capa.title}</Title></Space>}
+      subtitle={subtitle}
+      actions={actions}
+    >
+      <Steps current={currentStep} items={stepItems} style={{ marginBottom: 24 }} />
 
-        <Steps current={currentStep} items={stepItems} style={{ marginBottom: 24 }} />
-
-        <Row gutter={16}>
-          <Col span={16}>
-            <Card title="当前步骤详情">
+      <Row gutter={16}>
+        <Col span={16}>
+          <DataCard title="当前步骤详情">
             {capa.status === "D1_TEAM" && (
               <div>
                 <Table
+                  className="qf-table"
                   dataSource={localData.d1_team || []}
                   rowKey="name"
                   size="small"
@@ -588,20 +584,20 @@ export default function CAPADetailPage() {
             )}
 
             {capa.status === "ARCHIVED" && <Empty description="报告已归档" />}
-          </Card>
+          </DataCard>
         </Col>
 
         <Col span={8}>
-          <Card title="报告信息" size="small">
-            <p><Text strong>编号:</Text> {capa.document_no}</p>
-            <p><Text strong>严重等级:</Text> <Tag color="red">{capa.severity}</Tag></p>
-            <p><Text strong>期限:</Text> {capa.due_date || "未设定"}</p>
-            <p><Text strong>关联 FMEA:</Text> {capa.fmea_ref_id || "未关联"}</p>
-            <p><Text strong>创建时间:</Text> {new Date(capa.created_at).toLocaleString("zh-CN")}</p>
-          </Card>
+          <DataCard title="报告信息">
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>编号:</Text> <span style={{ fontFamily: "var(--qf-font-mono)" }}>{capa.document_no}</span></p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>严重等级:</Text> <StatusBadge status={severityMap[capa.severity] || "warning"}>{capa.severity}</StatusBadge></p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>期限:</Text> {capa.due_date || "未设定"}</p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>关联 FMEA:</Text> {capa.fmea_ref_id || "未关联"}</p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>创建时间:</Text> {new Date(capa.created_at).toLocaleString("zh-CN")}</p>
+          </DataCard>
 
           {linkModal && canEdit('capa') && (
-            <Card title="选择关联的 FMEA" size="small" style={{ marginTop: 16 }}>
+            <DataCard title="选择关联的 FMEA" style={{ marginTop: 16 }}>
               <Select
                 showSearch
                 style={{ width: "100%" }}
@@ -616,11 +612,10 @@ export default function CAPADetailPage() {
                 onChange={(val) => handleLinkFMEA(val)}
               />
               <Button style={{ marginTop: 8 }} onClick={() => setLinkModal(false)}>取消</Button>
-            </Card>
+            </DataCard>
           )}
         </Col>
       </Row>
-      </div>
 
       <Modal
         title="⚠️ 以下 FMEA 节点尚未确认"
@@ -681,6 +676,6 @@ export default function CAPADetailPage() {
           }
         }}
       />
-    </>
+    </PageShell>
   );
 }

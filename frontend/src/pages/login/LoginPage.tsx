@@ -1,25 +1,42 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Form, Input, Button, Typography, App } from "antd";
+import { Form, Input, Button, Typography, App, Segmented } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
+import i18n from "../../i18n";
 import { useAuthStore } from "../../store/authStore";
 
 const { Title, Text } = Typography;
+
+function LanguageSwitcher() {
+  return (
+    <Segmented
+      value={i18n.language}
+      onChange={(value) => i18n.changeLanguage(value as string)}
+      options={[
+        { label: "中文", value: "zh-CN" },
+        { label: "English", value: "en-US" },
+      ]}
+      style={{ background: "var(--qf-bg-elevated)", color: "var(--qf-text-secondary)" }}
+    />
+  );
+}
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
   const { message } = App.useApp();
+  const { t } = useTranslation("login");
 
   const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true);
     try {
       await login(values.username, values.password);
-      message.success("登录成功");
+      message.success(t("loginSuccess"));
       navigate("/dashboard", { replace: true });
     } catch {
-      message.error("用户名或密码错误");
+      message.error(t("loginError"));
     } finally {
       setLoading(false);
     }
@@ -38,7 +55,7 @@ export default function LoginPage() {
         padding: 24,
       }}
     >
-      {/* 背景网格 */}
+      {/* Background grid */}
       <div
         style={{
           position: "absolute",
@@ -52,7 +69,7 @@ export default function LoginPage() {
         }}
       />
 
-      {/* 浮动光晕 */}
+      {/* Floating glow */}
       <div
         style={{
           position: "absolute",
@@ -132,22 +149,26 @@ export default function LoginPage() {
                 color: "var(--qf-text-primary)",
               }}
             >
-              OpenQMS
+              {t("title")}
             </Title>
             <Text style={{ color: "var(--qf-text-secondary)", fontSize: 13 }}>
-              智能质量管理平台 · 精密熔炉
+              {t("subtitle")}
             </Text>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+            <LanguageSwitcher />
           </div>
 
           <Form onFinish={onFinish} size="large" layout="vertical">
             <Form.Item
               name="username"
-              rules={[{ required: true, message: "请输入用户名" }]}
+              rules={[{ required: true, message: t("usernameRequired") }]}
               style={{ marginBottom: 20 }}
             >
               <Input
                 prefix={<UserOutlined style={{ color: "var(--qf-cyan)", marginRight: 8 }} />}
-                placeholder="用户名"
+                placeholder={t("usernamePlaceholder")}
                 style={{
                   background: "var(--qf-bg-input)",
                   borderColor: "var(--qf-border)",
@@ -158,12 +179,12 @@ export default function LoginPage() {
             </Form.Item>
             <Form.Item
               name="password"
-              rules={[{ required: true, message: "请输入密码" }]}
+              rules={[{ required: true, message: t("passwordRequired") }]}
               style={{ marginBottom: 28 }}
             >
               <Input.Password
                 prefix={<LockOutlined style={{ color: "var(--qf-cyan)", marginRight: 8 }} />}
-                placeholder="密码"
+                placeholder={t("passwordPlaceholder")}
                 style={{
                   background: "var(--qf-bg-input)",
                   borderColor: "var(--qf-border)",
@@ -187,7 +208,7 @@ export default function LoginPage() {
                 }}
                 className="qf-btn-primary"
               >
-                登录
+                {t("login")}
               </Button>
             </Form.Item>
           </Form>
@@ -202,7 +223,7 @@ export default function LoginPage() {
               fontFamily: "var(--qf-font-mono)",
             }}
           >
-            默认账号 admin / Admin@2026
+            {t("defaultAccount")}
           </Text>
         </div>
 
@@ -215,7 +236,7 @@ export default function LoginPage() {
             marginTop: 16,
           }}
         >
-          © OpenQMS · 中国制造质量操作系统
+          {t("footer")}
         </Text>
       </div>
     </div>

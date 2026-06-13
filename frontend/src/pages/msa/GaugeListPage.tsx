@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Card,
   Table,
   Button,
-  Tag,
   Space,
   Input,
   Select,
@@ -28,14 +26,15 @@ import { usePermission } from "../../hooks/usePermission";
 import type { Gauge } from "../../types";
 import { listGauges, getExpiringGauges, createGauge, deleteGauge } from "../../api/msa";
 import dayjs from "dayjs";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  active: { label: "在用", color: "green" },
-  inactive: { label: "闲置", color: "default" },
-  calibrating: { label: "校准中", color: "blue" },
-  scrapped: { label: "报废", color: "red" },
+const STATUS_MAP: Record<string, { label: string; status: string }> = {
+  active: { label: "在用", status: "success" },
+  inactive: { label: "闲置", status: "draft" },
+  calibrating: { label: "校准中", status: "info" },
+  scrapped: { label: "报废", status: "error" },
 };
 
 export default function GaugeListPage() {
@@ -139,7 +138,7 @@ export default function GaugeListPage() {
       title: "量具编号",
       dataIndex: "gauge_no",
       width: 160,
-      render: (no: string) => <span style={{ fontFamily: "monospace" }}>{no}</span>,
+      render: (no: string) => <span className="qf-mono">{no}</span>,
     },
     { title: "名称", dataIndex: "name", width: 180 },
     { title: "型号", dataIndex: "model", render: (v: string | null) => v || "—" },
@@ -150,22 +149,22 @@ export default function GaugeListPage() {
       width: 100,
       render: (status: string) => {
         const cfg = STATUS_MAP[status];
-        return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
+        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label || status}</StatusBadge>;
       },
     },
     {
       title: "下次校准",
       dataIndex: "next_calibration_date",
-      width: 120,
+      width: 140,
       render: (v: string | null) => {
         if (!v) return "—";
         const days = dayjs(v).diff(dayjs(), "day");
         const isExpiringSoon = days <= 30;
         return (
-          <span style={isExpiringSoon ? { color: "#ff4d4f", fontWeight: 500 } : {}}>
+          <span style={isExpiringSoon ? { color: "var(--qf-red)", fontWeight: 500 } : {}}>
             {dayjs(v).format("YYYY-MM-DD")}
             {isExpiringSoon && days >= 0 && <span style={{ marginLeft: 4, fontSize: 12 }}>({days}天)</span>}
-            {days < 0 && <span style={{ marginLeft: 4, fontSize: 12 }}>(已过期)</span>}
+            {days < 0 && <span style={{ marginLeft: 4, fontSize: 12, color: "var(--qf-red)" }}>(已过期)</span>}
           </span>
         );
       },
@@ -207,36 +206,50 @@ export default function GaugeListPage() {
   ];
 
   return (
-    <div>
+    <PageShell title="量具管理" subtitle="MSA 测量系统分析 · 量具台账与校准跟踪">
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card>
-            <Statistic title="量具总数" value={total} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic title="在用" value={activeCount} valueStyle={{ color: "#52c41a" }} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic title="闲置/其他" value={total - activeCount} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card style={{ cursor: "pointer" }} onClick={handleOpenExpiryDrawer} hoverable>
+          <DataCard title="量具总数" noPadding>
             <Statistic
-              title="30天内到期"
-              value={expiringCount}
-              valueStyle={expiringCount > 0 ? { color: "#ff4d4f" } : undefined}
+              value={total}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-primary)" }}
             />
-          </Card>
+          </DataCard>
+        </Col>
+        <Col span={6}>
+          <DataCard title="在用" noPadding>
+            <Statistic
+              value={activeCount}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
+            />
+          </DataCard>
+        </Col>
+        <Col span={6}>
+          <DataCard title="闲置/其他" noPadding>
+            <Statistic
+              value={total - activeCount}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-secondary)" }}
+            />
+          </DataCard>
+        </Col>
+        <Col span={6}>
+          <DataCard
+            title="30天内到期"
+            noPadding
+            elevated={expiringCount > 0}
+            style={{ cursor: "pointer" }}
+            onClick={handleOpenExpiryDrawer}
+          >
+            <Statistic
+              value={expiringCount}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: expiringCount > 0 ? "var(--qf-red)" : "var(--qf-text-primary)" }}
+            />
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
-        title="量具管理"
+      <DataCard
+        title="量具台账"
         extra={
           <Space>
             {canEdit('msa') && (
@@ -295,6 +308,7 @@ export default function GaugeListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="gauge_id"
           columns={columns}
           dataSource={gauges}
@@ -310,7 +324,7 @@ export default function GaugeListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Drawer
         title="量具校准到期提醒（30天内）"
@@ -319,12 +333,13 @@ export default function GaugeListPage() {
         width={640}
       >
         <Table
+          className="qf-table"
           rowKey="gauge_id"
           dataSource={expiryGauges}
           loading={expiryLoading}
           pagination={false}
           columns={[
-            { title: "编号", dataIndex: "gauge_no", width: 140 },
+            { title: "编号", dataIndex: "gauge_no", width: 140, render: (v: string) => <span className="qf-mono">{v}</span> },
             { title: "名称", dataIndex: "name" },
             {
               title: "到期日",
@@ -336,7 +351,7 @@ export default function GaugeListPage() {
               render: (_: unknown, record: Gauge) => {
                 const days = dayjs(record.next_calibration_date).diff(dayjs(), "day");
                 return (
-                  <span style={{ color: days <= 7 ? "#ff4d4f" : undefined, fontWeight: days <= 7 ? 600 : undefined }}>
+                  <span style={{ color: days <= 7 ? "var(--qf-red)" : undefined, fontWeight: days <= 7 ? 600 : undefined }}>
                     {days}天
                   </span>
                 );
@@ -358,6 +373,7 @@ export default function GaugeListPage() {
         okText="保存"
         cancelText="取消"
         destroyOnHidden
+        okButtonProps={{ className: "qf-btn-primary" }}
       >
         <Form form={modalForm} layout="vertical">
           <Form.Item label="量具编号" name="gauge_no" rules={[{ required: true, message: "请输入编号" }]}>
@@ -397,6 +413,6 @@ export default function GaugeListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Card,
   Table,
   Button,
-  Tag,
   Space,
   Input,
   Select,
@@ -21,21 +19,22 @@ import { useNavigate } from "react-router-dom";
 import { usePermission } from "../../hooks/usePermission";
 import type { IqcInspection, IqcStats } from "../../types";
 import { listInspections, getIqcStats } from "../../api/iqc";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: "待检验", color: "orange" },
-  inspecting: { label: "检验中", color: "blue" },
-  judged: { label: "已判定", color: "cyan" },
-  closed: { label: "已关闭", color: "default" },
+const STATUS_MAP: Record<string, { label: string; status: string }> = {
+  pending: { label: "待检验", status: "warning" },
+  inspecting: { label: "检验中", status: "info" },
+  judged: { label: "已判定", status: "normal" },
+  closed: { label: "已关闭", status: "closed" },
 };
 
-const RESULT_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: "待定", color: "default" },
-  accepted: { label: "合格", color: "green" },
-  rejected: { label: "拒收", color: "red" },
-  concession: { label: "让步接收", color: "gold" },
+const RESULT_MAP: Record<string, { label: string; status: string }> = {
+  pending: { label: "待定", status: "draft" },
+  accepted: { label: "合格", status: "success" },
+  rejected: { label: "拒收", status: "error" },
+  concession: { label: "让步接收", status: "warning" },
 };
 
 export default function IqcInspectionListPage() {
@@ -86,7 +85,7 @@ export default function IqcInspectionListPage() {
     } finally {
       setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, filterStatus, filterResult, keyword]);
 
   useEffect(() => {
@@ -108,7 +107,7 @@ export default function IqcInspectionListPage() {
       title: "检验单号",
       dataIndex: "inspection_no",
       width: 160,
-      render: (no: string) => <span style={{ fontFamily: "monospace" }}>{no}</span>,
+      render: (no: string) => <span className="qf-mono">{no}</span>,
     },
     {
       title: "物料号",
@@ -146,7 +145,7 @@ export default function IqcInspectionListPage() {
       width: 100,
       render: (status: string) => {
         const cfg = STATUS_MAP[status];
-        return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
+        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label || status}</StatusBadge>;
       },
     },
     {
@@ -155,7 +154,7 @@ export default function IqcInspectionListPage() {
       width: 100,
       render: (result: string) => {
         const cfg = RESULT_MAP[result];
-        return <Tag color={cfg?.color}>{cfg?.label || result}</Tag>;
+        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label || result}</StatusBadge>;
       },
     },
     {
@@ -180,45 +179,46 @@ export default function IqcInspectionListPage() {
   ];
 
   return (
-    <div>
+    <PageShell title="来料检验" subtitle="IQC 检验单管理 · 合格 / 拒收 / 让步接收">
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card>
-            <Statistic title="检验单总数" value={stats.total_inspections} />
-          </Card>
+          <DataCard title="检验单总数" noPadding>
+            <Statistic
+              value={stats.total_inspections}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-primary)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title="合格数" noPadding>
             <Statistic
-              title="合格数"
               value={stats.accepted_count}
-              valueStyle={{ color: "#52c41a" }}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title="拒收数" noPadding>
             <Statistic
-              title="拒收数"
               value={stats.rejected_count}
-              valueStyle={{ color: "#ff4d4f" }}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-red)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title="合格率" noPadding>
             <Statistic
-              title="合格率"
               value={stats.acceptance_rate}
               suffix="%"
               precision={1}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-cyan)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
-        title="来料检验"
+      <DataCard
+        title="检验单列表"
         extra={
           <Space>
             {canEdit('iqc') && (
@@ -274,6 +274,7 @@ export default function IqcInspectionListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="inspection_id"
           columns={columns}
           dataSource={inspections}
@@ -289,7 +290,7 @@ export default function IqcInspectionListPage() {
             },
           }}
         />
-      </Card>
-    </div>
+      </DataCard>
+    </PageShell>
   );
 }

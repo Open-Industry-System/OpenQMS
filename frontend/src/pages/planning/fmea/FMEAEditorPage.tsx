@@ -41,6 +41,7 @@ import { CollaborationBar, ActiveUserIndicator, ConflictResolutionModal } from "
 import { diffGraphs } from "../../../utils/graphDiff";
 import type { ConflictInfo } from "../../../types/collaboration";
 import type { GraphDiff } from "../../../utils/graphDiff";
+import { StatusBadge } from "../../../components/design";
 
 const { Title, Text } = Typography;
 
@@ -806,10 +807,21 @@ export default function FMEAEditorPage() {
         const d = detectionNode?.detection || 0;
         const rpn = s * o * d;
 
-        const _bgColor = rpn >= 100 ? "#ff4d4f" : rpn >= 50 ? "#fa8c16" : rpn > 0 ? "#52c41a" : "#d9d9d9";
+        const rpnColor = rpn >= 100 ? "var(--qf-red)" : rpn >= 50 ? "var(--qf-amber)" : rpn > 0 ? "var(--qf-green)" : "var(--qf-text-tertiary)";
+        const rpnBg = rpn >= 100 ? "var(--qf-red-dim)" : rpn >= 50 ? "var(--qf-amber-dim)" : rpn > 0 ? "var(--qf-green-dim)" : "rgba(139, 147, 167, 0.1)";
         return (
-          <Tag color={rpn >= 100 ? "red" : rpn >= 50 ? "orange" : rpn > 0 ? "green" : "default"}
-            style={{ fontWeight: 700, fontSize: 13, minWidth: 48, textAlign: "center" }}>
+          <Tag
+            style={{
+              background: rpnBg,
+              color: rpnColor,
+              borderColor: rpnColor,
+              fontWeight: 700,
+              fontSize: 13,
+              minWidth: 48,
+              textAlign: "center",
+              fontFamily: "var(--qf-font-mono)",
+            }}
+          >
             {rpn || 0}
           </Tag>
         );
@@ -832,13 +844,13 @@ export default function FMEAEditorPage() {
 
         if (!ap) return <Text type="secondary">-</Text>;
         const apColors: Record<string, { bg: string; text: string }> = {
-          H: { bg: "#fff1f0", text: "#cf1322" },
-          M: { bg: "#fff7e6", text: "#d46b08" },
-          L: { bg: "#f6ffed", text: "#389e0d" },
+          H: { bg: "var(--qf-red-dim)", text: "var(--qf-red)" },
+          M: { bg: "var(--qf-amber-dim)", text: "var(--qf-amber)" },
+          L: { bg: "var(--qf-green-dim)", text: "var(--qf-green)" },
         };
         const c = apColors[ap];
         return (
-          <Tag style={{ background: c.bg, color: c.text, borderColor: c.text, fontWeight: 700, fontSize: 13, minWidth: 36, textAlign: "center" }}>
+          <Tag style={{ background: c.bg, color: c.text, borderColor: c.text, fontWeight: 700, fontSize: 13, minWidth: 36, textAlign: "center", fontFamily: "var(--qf-font-mono)" }}>
             {ap}
           </Tag>
         );
@@ -1020,10 +1032,21 @@ export default function FMEAEditorPage() {
         const o = node?.revised_occurrence || 0;
         const d = node?.revised_detection || 0;
         const rpn = s * o * d;
-        const _bgColor = rpn >= 100 ? "#ff4d4f" : rpn >= 50 ? "#fa8c16" : rpn > 0 ? "#52c41a" : "#d9d9d9";
+        const rpnColor = rpn >= 100 ? "var(--qf-red)" : rpn >= 50 ? "var(--qf-amber)" : rpn > 0 ? "var(--qf-green)" : "var(--qf-text-tertiary)";
+        const rpnBg = rpn >= 100 ? "var(--qf-red-dim)" : rpn >= 50 ? "var(--qf-amber-dim)" : rpn > 0 ? "var(--qf-green-dim)" : "rgba(139, 147, 167, 0.1)";
         return (
-          <Tag color={rpn >= 100 ? "red" : rpn >= 50 ? "orange" : rpn > 0 ? "green" : "default"}
-            style={{ fontWeight: 700, fontSize: 13, minWidth: 48, textAlign: "center" }}>
+          <Tag
+            style={{
+              background: rpnBg,
+              color: rpnColor,
+              borderColor: rpnColor,
+              fontWeight: 700,
+              fontSize: 13,
+              minWidth: 48,
+              textAlign: "center",
+              fontFamily: "var(--qf-font-mono)",
+            }}
+          >
             {rpn || 0}
           </Tag>
         );
@@ -1047,13 +1070,26 @@ export default function FMEAEditorPage() {
       <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
 
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <Space>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+          padding: "16px 20px",
+          background: "var(--qf-bg-panel)",
+          border: "1px solid var(--qf-border)",
+          borderRadius: "var(--qf-radius-lg)",
+        }}
+      >
+        <Space size="middle">
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/fmea")}>返回</Button>
-          <Title level={4} style={{ margin: 0 }}>{fmea.title}</Title>
-          <Tag color={isDFMEA ? "green" : "blue"}>{isDFMEA ? "DFMEA" : "PFMEA"}</Tag>
-          <Tag>{statusLabels[fmea.status] || fmea.status}</Tag>
-          <Text type="secondary">{fmea.document_no} v{fmea.version}</Text>
+          <Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{fmea.title}</Title>
+          <StatusBadge status={isDFMEA ? "normal" : "info"}>{isDFMEA ? "DFMEA" : "PFMEA"}</StatusBadge>
+          <StatusBadge status={fmea.status}>{statusLabels[fmea.status] || fmea.status}</StatusBadge>
+          <Text style={{ color: "var(--qf-text-secondary)", fontFamily: "var(--qf-font-mono)" }}>
+            {fmea.document_no} · v{fmea.version}
+          </Text>
         </Space>
         <Space>
           {nextTransitions[fmea.status]
@@ -1074,20 +1110,30 @@ export default function FMEAEditorPage() {
       </div>
 
       {/* FMEA Header Info */}
-      <Card size="small" style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          marginBottom: 16,
+          padding: "14px 18px",
+          background: "var(--qf-bg-panel)",
+          border: "1px solid var(--qf-border)",
+          borderRadius: "var(--qf-radius-lg)",
+        }}
+      >
         <Descriptions size="small" column={4}>
-          <Descriptions.Item label={isDFMEA ? "系统" : "过程项"}>
+          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{isDFMEA ? "系统" : "过程项"}</span>}>
             {structureNodes.find((n) => n.type === (isDFMEA ? "System" : "ProcessItem"))?.name || "-"}
           </Descriptions.Item>
-          <Descriptions.Item label={isDFMEA ? "设计责任" : "过程责任"}>
+          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{isDFMEA ? "设计责任" : "过程责任"}</span>}>
             <Input size="small" placeholder="责任部门" style={{ width: 150 }} disabled={!canEdit('fmea')} />
           </Descriptions.Item>
-          <Descriptions.Item label="FMEA 编号">{fmea.document_no}</Descriptions.Item>
-          <Descriptions.Item label="关键日期">
+          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>FMEA 编号</span>}>
+            <span style={{ fontFamily: "var(--qf-font-mono)" }}>{fmea.document_no}</span>
+          </Descriptions.Item>
+          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>关键日期</span>}>
             <Input size="small" placeholder="YYYY-MM-DD" style={{ width: 100 }} disabled={!canEdit('fmea')} />
           </Descriptions.Item>
         </Descriptions>
-      </Card>
+      </div>
 
       <Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }} items={[
         { key: "editor", label: "编辑器", children: <>
@@ -1126,19 +1172,20 @@ export default function FMEAEditorPage() {
                     marginLeft: indent,
                     borderRadius: 6,
                     cursor: "pointer",
-                    background: isSelected ? "#1e3a5f" : isStructure ? "#1f2937" : "#111827",
-                    border: isSelected ? "1px solid #3b82f6" : "1px solid rgba(148, 163, 184, 0.2)",
+                    background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
+                    border: isSelected ? "1px solid var(--qf-cyan)" : "1px solid var(--qf-border)",
                     fontSize: 13,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
                     transition: "background 0.2s, border-color 0.2s",
+                    color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
                   }}
                   onMouseEnter={(e) => {
-                    if (!isSelected) e.currentTarget.style.background = "#27354f";
+                    if (!isSelected) e.currentTarget.style.background = "var(--qf-bg-hover)";
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.background = isSelected ? "#1e3a5f" : isStructure ? "#1f2937" : "#111827";
+                    e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)";
                   }}
                 >
                   <div style={{ minWidth: 0, flex: 1 }}>
@@ -1146,7 +1193,7 @@ export default function FMEAEditorPage() {
                     {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
                   </div>
                   {hasRows && (
-                    <Tag color="processing" style={{ fontSize: 10, marginLeft: 8, lineHeight: "16px", flexShrink: 0 }}>
+                    <Tag style={{ fontSize: 10, marginLeft: 8, lineHeight: "16px", flexShrink: 0, background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
                       {rowsByFunction[node.id].length}
                     </Tag>
                   )}
@@ -1240,23 +1287,23 @@ export default function FMEAEditorPage() {
           font-size: 12px;
         }
         .fmea-row-highlight td {
-          background-color: #1e3a5f !important;
+          background-color: rgba(0, 229, 255, 0.08) !important;
           transition: background-color 0.2s;
         }
         .fmea-row-highlight td:first-child {
-          border-left: 3px solid #3b82f6 !important;
+          border-left: 3px solid var(--qf-cyan) !important;
         }
         .severity-warning-row td {
-          background-color: #3d3018 !important;
+          background-color: rgba(255, 184, 0, 0.08) !important;
         }
         .severity-warning-row td:first-child {
-          border-left: 3px solid #f59e0b !important;
+          border-left: 3px solid var(--qf-amber) !important;
         }
         .highlighted-row td {
-          background-color: #3d3018 !important;
+          background-color: rgba(255, 184, 0, 0.12) !important;
         }
         .highlighted-row td:first-child {
-          border-left: 3px solid #f59e0b !important;
+          border-left: 3px solid var(--qf-amber) !important;
         }
       `}</style>
 

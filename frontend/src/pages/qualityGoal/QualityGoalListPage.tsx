@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Card,
   Table,
   Button,
   Tag,
@@ -31,6 +30,7 @@ import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { QualityGoal } from "../../types";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import {
   listQualityGoals,
   createQualityGoal,
@@ -55,11 +55,11 @@ const LEVEL_MAP: Record<number, { label: string; color: string; icon: string }> 
   3: { label: "过程级", color: "orange", icon: "🔧" },
 };
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  draft: { label: "草稿", color: "default" },
-  pending: { label: "待审批", color: "gold" },
-  active: { label: "生效中", color: "success" },
-  archived: { label: "已停用", color: "default" },
+const STATUS_MAP: Record<string, { label: string; status: string }> = {
+  draft: { label: "草稿", status: "draft" },
+  pending: { label: "待审批", status: "warning" },
+  active: { label: "生效中", status: "success" },
+  archived: { label: "已停用", status: "closed" },
 };
 
 function parseTargetValue(value: string): { operator: string; threshold: number } {
@@ -312,12 +312,12 @@ export default function QualityGoalListPage() {
       dataIndex: "name",
       render: (_: string, record: QualityGoal) => (
         <div>
-          <Tag color={LEVEL_MAP[record.level]?.color}>
+          <Tag style={{ background: "var(--qf-bg-elevated)", color: "var(--qf-text-secondary)", borderColor: "var(--qf-border)" }}>
             {LEVEL_MAP[record.level]?.icon} {LEVEL_MAP[record.level]?.label}
           </Tag>
-          <div style={{ marginTop: 4, fontWeight: 500 }}>{record.name}</div>
+          <div style={{ marginTop: 4, fontWeight: 500, color: "var(--qf-text-primary)" }}>{record.name}</div>
           {record.product_line_code && (
-            <div style={{ fontSize: 12, color: "#888" }}>{record.product_line_code}</div>
+            <div style={{ fontSize: 12, color: "var(--qf-text-tertiary)", fontFamily: "var(--qf-font-mono)" }}>{record.product_line_code}</div>
           )}
         </div>
       ),
@@ -329,7 +329,7 @@ export default function QualityGoalListPage() {
         const percent = getProgressPercent(record.target_value, record.actual_value);
         return (
           <div>
-            <div style={{ fontSize: 12, color: "#666" }}>
+            <div style={{ fontSize: 12, color: "var(--qf-text-secondary)" }}>
               目标: {record.target_value} | 实际: {record.actual_value || "—"}
             </div>
             {record.actual_value && (
@@ -338,7 +338,7 @@ export default function QualityGoalListPage() {
                   style={{
                     width: "100%",
                     height: 6,
-                    background: "#f0f0f0",
+                    background: "var(--qf-bg-hover)",
                     borderRadius: 3,
                     overflow: "hidden",
                   }}
@@ -349,10 +349,10 @@ export default function QualityGoalListPage() {
                       height: "100%",
                       background:
                         achievement === "achieved"
-                          ? "#52c41a"
+                          ? "var(--qf-green)"
                           : achievement === "not_achieved"
-                          ? "#ff4d4f"
-                          : "#bfbfbf",
+                          ? "var(--qf-red)"
+                          : "var(--qf-text-tertiary)",
                       borderRadius: 3,
                     }}
                   />
@@ -360,9 +360,9 @@ export default function QualityGoalListPage() {
               </div>
             )}
             <div style={{ marginTop: 4 }}>
-              {achievement === "achieved" && <Tag color="success">✅ 已达成</Tag>}
-              {achievement === "not_achieved" && <Tag color="error">🔴 未达成</Tag>}
-              {achievement === "pending" && <Tag>⏳ 待录入</Tag>}
+              {achievement === "achieved" && <StatusBadge status="success">已达成</StatusBadge>}
+              {achievement === "not_achieved" && <StatusBadge status="error">未达成</StatusBadge>}
+              {achievement === "pending" && <StatusBadge status="draft">待录入</StatusBadge>}
             </div>
           </div>
         );
@@ -388,7 +388,7 @@ export default function QualityGoalListPage() {
       width: 100,
       render: (status: string) => {
         const cfg = STATUS_MAP[status];
-        return <Tag color={cfg?.color}>{cfg?.label}</Tag>;
+        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label}</StatusBadge>;
       },
     },
     {
@@ -472,44 +472,57 @@ export default function QualityGoalListPage() {
   ];
 
   return (
-    <div>
+    <PageShell
+      title="质量目标"
+      subtitle="QMS 质量目标管理 · 目标设定 · 审批 · 达成跟踪"
+      actions={
+        canEdit('quality_goal') ? (
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+            新建目标
+          </Button>
+        ) : null
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card>
-            <Statistic title="目标总数" value={total} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic title="生效中" value={activeCount} valueStyle={{ color: "#52c41a" }} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic title="待审批" value={pendingCount} valueStyle={{ color: "#faad14" }} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
+          <DataCard title="目标总数" noPadding>
             <Statistic
-              title="达成率"
-              value={`${achievementRate}%`}
-              valueStyle={{ color: achievementRate >= 80 ? "#52c41a" : "#ff4d4f" }}
+              title="目标总数"
+              value={total}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-primary)" }}
             />
-          </Card>
+          </DataCard>
+        </Col>
+        <Col span={6}>
+          <DataCard title="生效中" noPadding>
+            <Statistic
+              value={activeCount}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
+            />
+          </DataCard>
+        </Col>
+        <Col span={6}>
+          <DataCard title="待审批" noPadding>
+            <Statistic
+              value={pendingCount}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-amber)" }}
+            />
+          </DataCard>
+        </Col>
+        <Col span={6}>
+          <DataCard title="达成率" noPadding>
+            <Statistic
+              value={`${achievementRate}%`}
+              valueStyle={{
+                fontFamily: "var(--qf-font-mono)",
+                color: achievementRate >= 80 ? "var(--qf-green)" : "var(--qf-red)",
+              }}
+            />
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
-        title="质量目标列表"
-        extra={
-          canEdit('quality_goal') && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-              新建目标
-            </Button>
-          )
-        }
-      >
+      <DataCard title="质量目标列表">
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
@@ -521,6 +534,7 @@ export default function QualityGoalListPage() {
           ]}
         />
         <Table
+          className="qf-table"
           rowKey="goal_id"
           columns={columns}
           dataSource={goals}
@@ -535,7 +549,7 @@ export default function QualityGoalListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Modal
         title={editingGoal ? "编辑质量目标" : "新建质量目标"}
@@ -616,6 +630,6 @@ export default function QualityGoalListPage() {
           onChange={(e) => setRejectReason(e.target.value)}
         />
       </Modal>
-    </div>
+    </PageShell>
   );
 }
