@@ -5,6 +5,7 @@ Provides:
 - default_factory: a persisted Factory for test isolation
 - admin_user: a persisted User with admin role (linked to default_factory)
 - plm_connection: a persisted PLMConnection linked to admin_user
+- requires_db: marker/fixture to skip tests when database is unavailable
 """
 import os
 
@@ -12,6 +13,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only")
 
 import uuid
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -24,6 +26,28 @@ from app.models.role import RoleDefinition
 from app.models.user import User
 
 from sqlalchemy.pool import NullPool
+
+
+# ── Database availability check ──────────────────────────────────────────────
+
+_db_available: bool | None = None
+
+
+async def _check_db_available() -> bool:
+    """Return True if the database is reachable, False otherwise."""
+    global _db_available
+    if _db_available is not None:
+        return _db_available
+    url = os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL)
+    try:
+        engine = create_async_engine(url, poolclass=NullPool)
+        async with engine.connect() as conn:
+            await conn.execute(select(1))
+        await engine.dispose()
+        _db_available = True
+    except Exception:
+        _db_available = False
+    return _db_available
 
 # ── Patch the production engine with NullPool to prevent event-loop attachment
 # issues across test functions.  Tests that use app.database.async_session or
@@ -42,6 +66,11 @@ _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, ex
 DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+def pytest_configure(config):
+    """Register the requires_db marker."""
+    config.addinivalue_line("markers", "requires_db: mark test as requiring a live database connection")
+
+
 @pytest_asyncio.fixture
 async def db():
     """Yield an async session whose commit() only flushes (test isolation).
@@ -50,7 +79,11 @@ async def db():
     within the test but rolled back on teardown.  We patch ``commit()``
     to flush-only so service code that calls ``await db.commit()`` still
     works without actually persisting data past the test boundary.
+
+    Skips the test if the database is not reachable.
     """
+    if not await _check_db_available():
+        pytest.skip("Database not available")
     async with _test_session_factory() as session:
         # Start an outer transaction and roll it back after the test.
         # session.begin() would commit on context exit, so we manage the

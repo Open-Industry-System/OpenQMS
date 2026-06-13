@@ -26,7 +26,10 @@ from app.services.spc_service import (
 
 @pytest_asyncio.fixture
 async def db_session():
-    # Connect using the standard DATABASE_URL with NullPool to avoid event-loop attachment issues
+    # Skip if database is not reachable
+    from tests.conftest import _check_db_available
+    if not await _check_db_available():
+        pytest.skip("Database not available")
     from sqlalchemy.pool import NullPool
     engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

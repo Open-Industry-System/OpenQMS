@@ -114,6 +114,10 @@ def _make_rest_config(**overrides: Any) -> dict:
 @pytest_asyncio.fixture
 async def db_engine():
     """Create a test database engine with NullPool to avoid event-loop attachment issues."""
+    # Skip entire module if database is not reachable
+    from tests.conftest import _check_db_available
+    if not await _check_db_available():
+        pytest.skip("Database not available")
     from sqlalchemy.pool import NullPool
     url = os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL)
     engine = create_async_engine(url, echo=False, poolclass=NullPool)
