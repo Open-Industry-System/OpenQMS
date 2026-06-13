@@ -1,8 +1,8 @@
 # OpenQMS
 
-> OpenQMS is a full-stack quality management platform for Chinese manufacturing, covering FMEA (AIAG-VDA 7-step), 8D/CAPA, SPC, MSA, IQC, supplier management, and more — built for IATF 16949 compliance.
+> OpenQMS is a full-stack quality management platform for manufacturing, covering FMEA (AIAG-VDA 7-step), 8D/CAPA, SPC, MSA, IQC, supplier management, and more — built for IATF 16949 compliance.
 
-An out-of-the-box quality management system platform for Chinese manufacturing, covering core modules including AIAG-VDA PFMEA/DFMEA, 8D/CAPA, SPC, MSA, IQC, and supplier management, empowering IATF 16949 compliance.
+An out-of-the-box quality management system platform for manufacturing, covering core modules including AIAG-VDA PFMEA/DFMEA, 8D/CAPA, SPC, MSA, IQC, and supplier management, empowering IATF 16949 compliance.
 
 **[中文文档 →](README.md)**
 

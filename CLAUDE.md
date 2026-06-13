@@ -26,7 +26,7 @@ Run the relevant command (build, lint, test, or start the app) before declaring 
 
 ## Project Overview
 
-OpenQMS is a full-stack quality management platform targeting Chinese manufacturing. Covers FMEA (AIAG-VDA 7-step PFMEA/DFMEA), 8D/CAPA, SPC, MSA, IQC, supplier quality, customer quality, APQP, PPAP, control plans, knowledge graph, and more. UI in Chinese (zh_CN).
+OpenQMS is a full-stack quality management platform for manufacturing. Covers FMEA (AIAG-VDA 7-step PFMEA/DFMEA), 8D/CAPA, SPC, MSA, IQC, supplier quality, customer quality, APQP, PPAP, control plans, knowledge graph, and more. UI in Chinese (zh_CN).
 
 **Stack:** Python 3.11+ + FastAPI 0.115 (async) | React 18 + TypeScript 5.6 + Vite 5.4 + Ant Design 5.29 | PostgreSQL 15 + SQLAlchemy 2.0 (async) | Redis 7 (configured, no logic yet)
 
