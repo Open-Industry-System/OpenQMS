@@ -1,10 +1,11 @@
 """Test tenant lifecycle: create → active → suspended → reactivated → deactivated."""
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.database import async_session
 from app.models.tenant import Tenant
+from app.core.permissions import Module
 from app.services.tenant_service import TenantService
 from app.schemas.platform import TenantCreateRequest
 
@@ -46,7 +47,7 @@ async def test_tenant_provisioning():
         admin_perms = (await db.execute(
             select(RolePermission).where(RolePermission.role_id == admin_role.id)
         )).scalars().all()
-        assert len(admin_perms) == 26  # all Module enum values
+        assert len(admin_perms) == len(Module)  # all Module enum values
         assert all(p.permission_level == 5 for p in admin_perms)
 
         admin_user = (await db.execute(
