@@ -34,7 +34,7 @@ export default function ComplaintDetailPage() {
   const { message } = App.useApp();
   const { id } = useParams();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const [form] = Form.useForm();
   const [linkForm] = Form.useForm();
   const [data, setData] = useState<CustomerComplaint | null>(null);
@@ -65,7 +65,8 @@ export default function ComplaintDetailPage() {
     }
   };
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const save = async (values: Record<string, unknown>) => {
     if (!id) return;

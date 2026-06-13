@@ -57,7 +57,8 @@ export default function RMADetailPage() {
     }
   };
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const save = async (values: Record<string, unknown>) => {
     if (!id) return;

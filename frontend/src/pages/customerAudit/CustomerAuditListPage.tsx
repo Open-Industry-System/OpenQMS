@@ -34,7 +34,7 @@ const auditModeLabel: Record<string, string> = {
 export default function CustomerAuditListPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user: _user } = useAuthStore();
   const { selected: currentProductLine } = useProductLineStore();
   const { canEdit, canApprove } = usePermission();
 
@@ -62,6 +62,7 @@ export default function CustomerAuditListPage() {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, currentProductLine]);
 
   useEffect(() => { fetchData(); }, [fetchData]);

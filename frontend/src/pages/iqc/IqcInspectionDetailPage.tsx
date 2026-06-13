@@ -8,7 +8,6 @@ import {
   Input,
   Select,
   App,
-  Tabs,
   Table,
   Row,
   Col,
@@ -21,12 +20,11 @@ import {
   ArrowLeftOutlined,
   PlayCircleOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
-import type { IqcInspection, IqcInspectionItem } from "../../types";
+import type { IqcInspection } from "../../types";
 import {
   getInspection,
   startInspection,
@@ -74,7 +72,7 @@ export default function IqcInspectionDetailPage() {
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
 
   const [inspection, setInspection] = useState<IqcInspection | null>(null);

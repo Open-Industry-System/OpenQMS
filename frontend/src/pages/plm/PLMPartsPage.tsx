@@ -65,11 +65,13 @@ export default function PLMPartsPage() {
       })
       .catch(() => message.error("加载零件列表失败"))
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     setPage(1);
     fetchData(1, search, productLine);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
   const handleSearch = (value: string) => {

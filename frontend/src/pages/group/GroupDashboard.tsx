@@ -6,7 +6,6 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
 } from "@ant-design/icons";
-import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import { getGroupDashboard, type GroupDashboardResponse } from "../../api/group";
 

@@ -40,7 +40,7 @@ const phaseOptions = [
   { value: "production", label: "生产" },
 ];
 
-const phaseLabels: Record<string, string> = {
+const _phaseLabels: Record<string, string> = {
   sample: "样件",
   trial: "试生产",
   production: "生产",
@@ -103,7 +103,7 @@ export default function ControlPlanEditorPage() {
   const [csrSyncing, setCsrSyncing] = useState(false);
   const [csrCustomers, setCsrCustomers] = useState<{ customer_id: string; name: string; csr_list: unknown[] | null }[]>([]);
 
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit: canEditPerm, canApprove } = usePermission();
   const isApproved = cp?.status === "approved";
   const canEdit = canEditPerm('planning') && !isApproved;
@@ -160,6 +160,7 @@ export default function ControlPlanEditorPage() {
         message.error("加载控制计划失败");
       })
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isNew]);
 
   const updateItem = useCallback((index: number, field: keyof ControlPlanItem, value: string) => {

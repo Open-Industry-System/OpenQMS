@@ -5,7 +5,7 @@ import { Card, Tag, Button, Space, Descriptions, Input, Modal, message, Spin, Ro
 import { getSCAR, transitionSCAR, linkCAPA } from "../../api/scar";
 import { createCAPA, getCAPA } from "../../api/capa";
 import { STATUS_COLORS, STATUS_LABELS, SOURCE_LABELS } from "./SCARListPage";
-import type { SupplierSCAR, CAPAReport } from "../../types";
+import type { SupplierSCAR } from "../../types";
 
 export default function SCARDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -38,7 +38,8 @@ export default function SCARDetailPage() {
     }
   };
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const doTransition = async (action: string, extra?: Record<string, string>) => {
     if (!id) return;

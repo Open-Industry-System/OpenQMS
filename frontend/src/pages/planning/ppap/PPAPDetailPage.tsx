@@ -44,7 +44,8 @@ export default function PPAPDetailPage() {
     }
   };
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const doTransition = async (action: string, extra?: Record<string, string>) => {
     if (!id) return;

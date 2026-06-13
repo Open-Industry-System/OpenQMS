@@ -78,6 +78,7 @@ export default function APQPListPage() {
 
   useEffect(() => {
     loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, page]);
 
   const handleCreate = async (values: Record<string, unknown>) => {

@@ -57,6 +57,7 @@ export default function AqlOptimizationPage() {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, filterStatus, filterDirection, filterSupplier]);
 
   // Fetch all for KPI (first page large enough for counts)

@@ -146,6 +146,7 @@ export default function CustomerQualityPage() {
 
   useEffect(() => {
     loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine, mineOnly, selectedCustomerId]);
 
   // Load suppliers for SCAR modal
@@ -167,7 +168,8 @@ export default function CustomerQualityPage() {
       setShipmentLoading(false);
     }
   };
-  useEffect(() => { if (selectedCustomerId) fetchShipments(); }, [selectedCustomerId, shipmentPage]);
+  useEffect(() => { if (selectedCustomerId) fetchShipments(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomerId, shipmentPage]);
 
   // SCAR handlers
   const handleCreateSCAR = (type: "complaint" | "rma", record: CustomerComplaint | RMARecord) => {

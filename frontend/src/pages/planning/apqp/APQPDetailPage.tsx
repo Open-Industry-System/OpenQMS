@@ -31,7 +31,7 @@ const PROJECT_STATUS_COLORS: Record<string, string> = {
 export default function APQPDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove, isAdmin } = usePermission();
   const [project, setProject] = useState<APQPProject | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,7 +50,8 @@ export default function APQPDetailPage() {
     }
   };
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const handleTransition = async (action: string, comments?: string) => {
     if (!id) return;

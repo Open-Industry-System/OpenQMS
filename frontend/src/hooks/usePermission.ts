@@ -14,7 +14,7 @@ export enum PermissionLevel {
 
 export function usePermission() {
   const user = useAuthStore((s) => s.user);
-  const permissions = user?.permissions ?? {};
+  const permissions = useMemo(() => user?.permissions ?? {}, [user]);
   const getLevel = useMemo(() => {
     return (module: ModuleKey): PermissionLevel => {
       return (permissions[module] ?? 0) as PermissionLevel;

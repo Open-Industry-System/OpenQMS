@@ -13,17 +13,14 @@ import {
   Table,
   Row,
   Col,
-  Typography,
   Spin,
   InputNumber,
-  Steps,
   Descriptions,
 } from "antd";
 import {
   ArrowLeftOutlined,
   EditOutlined,
   SaveOutlined,
-  PlayCircleOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   CalculatorOutlined,
@@ -92,7 +89,6 @@ import {
 import dayjs from "dayjs";
 
 const { Option } = Select;
-const { Text, Title } = Typography;
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft: { label: "草稿", color: "default" },
@@ -107,7 +103,7 @@ type Result = GrrResult | BiasResult | LinearityResult | StabilityResult | Attri
 export default function StudyDetailPage() {
   const { type, id } = useParams<{ type: StudyType; id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user: _user } = useAuthStore();
 
   const isNew = id === "new";
   const { canEdit } = usePermission();

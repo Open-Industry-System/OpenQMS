@@ -24,6 +24,7 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
       .then((res) => setRecommendations(res.items))
       .catch(() => message.error("加载 D4 推荐失败"))
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capaId]);
 
   if (loading) return <Spin size="small" />;

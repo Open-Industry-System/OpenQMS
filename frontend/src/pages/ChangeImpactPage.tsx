@@ -10,14 +10,15 @@ export default function ChangeImpactPage() {
   const [selected, setSelected] = useState<ChangeImpactAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { loadHistory(); }, []);
+  useEffect(() => { loadHistory(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadHistory = async () => {
     setLoading(true);
     try {
       const resp: PaginatedChangeImpactResponse = await listAllChangeImpacts();
       setHistory(resp.items);
-    } catch (err) {
+    } catch (_err) {
       message.error("加载历史失败");
     } finally {
       setLoading(false);
@@ -28,7 +29,7 @@ export default function ChangeImpactPage() {
     try {
       const detail = await getChangeImpact(record.id);
       setSelected(detail);
-    } catch (err) {
+    } catch (_err) {
       message.error("获取详情失败");
     }
   };

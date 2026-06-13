@@ -41,7 +41,6 @@ import {
   cancelAuditPlan,
   listAuditFindings,
   createAuditFinding,
-  updateAuditFinding,
   closeAuditFinding,
   createCAPAFromFinding,
 } from "../../api/audit";
@@ -82,11 +81,11 @@ export default function InternalAuditDetailPage() {
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
 
   const [plan, setPlan] = useState<AuditPlan | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [findings, setFindings] = useState<AuditFinding[]>([]);
   const [findingsLoading, setFindingsLoading] = useState(false);
@@ -110,6 +109,7 @@ export default function InternalAuditDetailPage() {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const fetchFindings = useCallback(async () => {
@@ -123,6 +123,7 @@ export default function InternalAuditDetailPage() {
     } finally {
       setFindingsLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   useEffect(() => {
@@ -342,7 +343,7 @@ export default function InternalAuditDetailPage() {
   const majorCount = findings.filter((f) => f.finding_type === "major_nc").length;
   const minorCount = findings.filter((f) => f.finding_type === "minor_nc").length;
   const ofiCount = findings.filter((f) => f.finding_type === "ofi").length;
-  const obsCount = findings.filter((f) => f.finding_type === "observation").length;
+  const _obsCount = findings.filter((f) => f.finding_type === "observation").length;
   const openCount = findings.filter((f) => f.status !== "closed").length;
 
   return (

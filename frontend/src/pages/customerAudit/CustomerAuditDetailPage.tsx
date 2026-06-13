@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Card, Button, Tag, Space, Form, Input, Select, DatePicker, App,
   Tabs, Table, Modal, Popconfirm, Row, Col, Statistic, Descriptions,
-  Upload, Typography,
+  Typography,
 } from "antd";
 import {
   ArrowLeftOutlined, PlayCircleOutlined, CheckCircleOutlined, StopOutlined,
-  PlusOutlined, DeleteOutlined, LinkOutlined, CheckOutlined, UploadOutlined,
+  PlusOutlined, LinkOutlined, CheckOutlined, UploadOutlined,
   MinusCircleOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
@@ -46,7 +46,7 @@ export default function CustomerAuditDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { message } = App.useApp();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user: _user } = useAuthStore();
   const { canEdit, canApprove } = usePermission();
 
   const [plan, setPlan] = useState<AuditPlan | null>(null);
@@ -58,7 +58,7 @@ export default function CustomerAuditDetailPage() {
   const [confirmFindingId, setConfirmFindingId] = useState<string | null>(null);
   const [confirmAttachments, setConfirmAttachments] = useState<{ file_name: string; file_url: string }[]>([]);
   const [planConfirmModalOpen, setPlanConfirmModalOpen] = useState(false);
-  const [users, setUsers] = useState<User[]>([]);
+  const [_users, setUsers] = useState<User[]>([]);
   const [findingForm] = Form.useForm();
   const [confirmForm] = Form.useForm();
   const [planConfirmForm] = Form.useForm();
@@ -78,6 +78,7 @@ export default function CustomerAuditDetailPage() {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   useEffect(() => { fetchPlan(); }, [fetchPlan]);

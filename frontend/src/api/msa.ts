@@ -3,7 +3,6 @@ import type {
   Gauge,
   GaugeListResponse,
   GaugeCalibration,
-  GaugeCalibrationListResponse,
   GrrStudy,
   GrrStudyListResponse,
   GrrResult,

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Button, Dropdown, Spin } from "antd";
+import { Dropdown, Spin } from "antd";
 import { OpenAIOutlined } from "@ant-design/icons";
 import type { DraftFormat } from "../../types";
 

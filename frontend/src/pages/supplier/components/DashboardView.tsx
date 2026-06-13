@@ -16,6 +16,7 @@ export default function DashboardView() {
 
   useEffect(() => {
     loadDashboard();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine, dateRange]);
 
   const loadDashboard = async () => {

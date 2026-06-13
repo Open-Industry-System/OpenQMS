@@ -43,6 +43,7 @@ export default function D7RecPanel({
       .then((res) => setRecommendations(res.recommendations))
       .catch(() => message.error("加载推荐失败"))
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capaId]);
 
   useEffect(() => {
@@ -59,6 +60,7 @@ export default function D7RecPanel({
         failure_cause_node_id: r.failure_cause_node_id,
       }));
     onConfirmationChange(unconfirmed.length === 0, unconfirmed);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [confirmedNodes, recommendations]);
 
   const linked = useMemo(

@@ -42,7 +42,7 @@ export default function SPCListPage() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
 
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
 
@@ -63,6 +63,7 @@ export default function SPCListPage() {
 
   useEffect(() => {
     fetchData(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
   const handleCreate = async (values: {

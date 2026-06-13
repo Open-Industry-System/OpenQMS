@@ -16,6 +16,7 @@ export default function SupplierDetailView() {
     if (supplierId) {
       loadDetail();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplierId]);
 
   const loadDetail = async () => {

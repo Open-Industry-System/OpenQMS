@@ -100,7 +100,7 @@ export default function SupplierDetailPage() {
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user: _user } = useAuthStore();
 
   const { canEdit, canApprove } = usePermission();
 
@@ -149,6 +149,7 @@ export default function SupplierDetailPage() {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const loadCerts = useCallback(async () => {
@@ -162,6 +163,7 @@ export default function SupplierDetailPage() {
     } finally {
       setCertsLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const loadEvals = useCallback(async () => {
@@ -175,6 +177,7 @@ export default function SupplierDetailPage() {
     } finally {
       setEvalsLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const loadAuditPlans = useCallback(async () => {

@@ -12,7 +12,7 @@ from jose import JWTError
 from app.models.user import User
 from app.models.role import RolePermission
 
-bearer_scheme = HTTPBearer()
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 class PermissionLevel(IntEnum):
@@ -54,9 +54,15 @@ class Module(StrEnum):
 
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     token = credentials.credentials
     try:
         if request and hasattr(request.state, "tenant") and request.state.tenant:
@@ -66,7 +72,11 @@ async def get_current_user(
             # Single-tenant mode: token has no issuer/audience claims
             payload = verify_token(token)
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     # Reject refresh tokens — they must not be used as access tokens
     if payload.get("type") != "access":

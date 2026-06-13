@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Modal, Steps, Button, Input, Card, Tag, Space, Table, Typography, Empty, InputNumber, Result, Divider, Popconfirm, Tooltip, Select } from 'antd';
-import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { useState, useCallback } from 'react';
+import { Modal, Steps, Button, Input, Card, Tag, Space, Table, Typography, Empty, InputNumber, Result } from 'antd';
+import { PlusOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import type { GraphNode, GraphEdge } from '../../types';
 import { generateFailureModes, suggestFailureChain, analyzeRisk, suggestMeasures } from '../../utils/dfmeaRules';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Paragraph } = Typography;
 
 interface GenerationWizardProps {
   open: boolean;
@@ -275,7 +275,7 @@ export default function GenerationWizard({ open, onCancel, onComplete }: Generat
                       </Space>
                     </div>
                   )}
-                  {funcFailures.map((failure, idx) => {
+                  {funcFailures.map((failure, _idx) => {
                     const globalIdx = data.failures.indexOf(failure);
                     return (
                       <div key={globalIdx} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
@@ -308,7 +308,7 @@ export default function GenerationWizard({ open, onCancel, onComplete }: Generat
                 { title: 'O', dataIndex: 'o', width: 60, render: (v: number, r: any) => <InputNumber size="small" min={1} max={10} value={v || undefined} style={{ width: 50 }} onChange={(val) => { const u = [...data.failures]; u[r.key] = { ...u[r.key], o: val || 0 }; updateData({ failures: u }); }} /> },
                 { title: 'D', dataIndex: 'd', width: 60, render: (v: number, r: any) => <InputNumber size="small" min={1} max={10} value={v || undefined} style={{ width: 50 }} onChange={(val) => { const u = [...data.failures]; u[r.key] = { ...u[r.key], d: val || 0 }; updateData({ failures: u }); }} /> },
                 { title: 'RPN', width: 60, render: (_: unknown, r: any) => { const rpn = r.s * r.o * r.d; return <Tag color={rpn >= 100 ? 'red' : rpn >= 50 ? 'orange' : 'green'}>{rpn || 0}</Tag>; } },
-                { title: 'AP', width: 80, render: (_: unknown, r: any) => { const { ap, hint } = analyzeRisk(r.s, r.o, r.d); return <div><Tag color={ap === 'H' ? 'red' : ap === 'M' ? 'orange' : 'green'}>{ap || '-'}</Tag>{ap === 'H' && <div style={{ fontSize: 11, color: '#cf1322' }}>必须优化</div>}</div>; } },
+                { title: 'AP', width: 80, render: (_: unknown, r: any) => { const { ap, hint: _hint } = analyzeRisk(r.s, r.o, r.d); return <div><Tag color={ap === 'H' ? 'red' : ap === 'M' ? 'orange' : 'green'}>{ap || '-'}</Tag>{ap === 'H' && <div style={{ fontSize: 11, color: '#cf1322' }}>必须优化</div>}</div>; } },
               ]}
               pagination={false}
             />

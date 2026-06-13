@@ -28,7 +28,6 @@ import {
   SettingOutlined,
   WarningOutlined,
   GlobalOutlined,
-  ApartmentOutlined,
   BankOutlined,
   SwapOutlined,
   HeatMapOutlined,
@@ -265,6 +264,7 @@ export default function AppLayout() {
       requiredOpenKeys.forEach((k) => merged.add(k));
       return Array.from(merged);
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
 
   // Filter menu groups by module permission; dashboard (no module) is always visible

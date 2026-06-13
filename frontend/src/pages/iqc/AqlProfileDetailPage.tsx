@@ -22,7 +22,7 @@ const REC_STATUS_MAP: Record<string, { label: string; color: string }> = {
 };
 
 export default function AqlProfileDetailPage() {
-  const { message } = App.useApp();
+  const { message: _message } = App.useApp();
   const { supplierId, materialId } = useParams<{ supplierId: string; materialId: string }>();
 
   const [profile, setProfile] = useState<AqlProfile | null>(null);

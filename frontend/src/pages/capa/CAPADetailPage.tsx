@@ -15,7 +15,7 @@ import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecP
 import AIDraftButton from "../../components/capa/AIDraftButton";
 import AIDraftPreview from "../../components/capa/AIDraftPreview";
 import { useAIDraft } from "../../components/capa/useAIDraft";
-import type { CAPAReport, FMEADocument, DraftFormat, LessonsLearnedResponse, LessonCard } from "../../types";
+import type { CAPAReport, FMEADocument, DraftFormat, LessonsLearnedResponse } from "../../types";
 import LessonsLearnedModal from "../../components/lessons/LessonsLearnedModal";
 import { getCAPALessons } from "../../api/lessonsLearned";
 import axios from "axios";
@@ -44,12 +44,12 @@ export default function CAPADetailPage() {
   const navigate = useNavigate();
   const [capa, setCapa] = useState<CAPAReport | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [_saving, setSaving] = useState(false);
   const [fmeas, setFmeas] = useState<FMEADocument[]>([]);
   const [linkModal, setLinkModal] = useState(false);
 
   // User Role Controls
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
 
   // Local Form Buffers (for input debouncing/onBlur saves)
@@ -104,6 +104,7 @@ export default function CAPADetailPage() {
         controller.abort();
       };
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, id]);
 
   // D7 soft gate state

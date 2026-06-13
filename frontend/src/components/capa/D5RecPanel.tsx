@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App, Collapse } from "antd";
+import { Card, List, Tag, Button, Space, Empty, Spin, App, Collapse } from "antd";
 import { CheckOutlined, CloseOutlined, SafetyOutlined } from "@ant-design/icons";
 import { getD5Recommendations } from "../../api/capa";
 import type { D5ExistingControl, D5GeneralSuggestion } from "../../types";
-
-const { Text } = Typography;
 
 interface D5RecPanelProps {
   capaId: string;
@@ -28,6 +26,7 @@ export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPa
       })
       .catch(() => message.error("加载 D5 推荐失败"))
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capaId]);
 
   if (loading) return <Spin size="small" />;

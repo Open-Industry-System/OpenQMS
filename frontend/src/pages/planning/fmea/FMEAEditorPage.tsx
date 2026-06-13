@@ -12,7 +12,7 @@ import {
 } from "@ant-design/icons";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
-import type { FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse, LessonCard } from "../../../types";
+import type { FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse } from "../../../types";
 import LessonsLearnedModal from "../../../components/lessons/LessonsLearnedModal";
 import { getFMEALessons } from "../../../api/lessonsLearned";
 import axios from "axios";
@@ -29,7 +29,6 @@ import RollbackConfirmModal from "../../../components/version/RollbackConfirmMod
 import VersionCompareView from "../../../components/version/VersionCompareView";
 import RelatedCAPAList from "../../../components/cross-links/RelatedCAPAList";
 import { Dropdown } from "antd";
-import type { MenuProps } from "antd";
 import { GraphCanvas, GraphToolbar, NodeDetailDrawer, GraphLegend } from "../../../components/graph";
 import type { GraphLayout, GraphCanvasRef } from "../../../components/graph";
 import type { GraphNode as APIGraphNode } from "../../../api/graph";
@@ -102,7 +101,7 @@ export default function FMEAEditorPage() {
   const highlightNodeId = searchParams.get("node");
   const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(null);
 
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
   const [activeTab, setActiveTab] = useState("failure");
   const [outerTab, setOuterTab] = useState("editor");
@@ -164,6 +163,7 @@ export default function FMEAEditorPage() {
         controller.abort();
       };
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, fmeaId]);
   const canvasRef = useRef<GraphCanvasRef>(null);
 
@@ -344,6 +344,7 @@ export default function FMEAEditorPage() {
     } finally {
       setSaving(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, fmea, nodes, edges]);
 
   const handleConflictRefresh = () => {
@@ -479,6 +480,7 @@ export default function FMEAEditorPage() {
     const { newNodes, newEdges } = createRowNodes(selectedFunctionId, fmea.fmea_type);
     setNodes((prev) => [...prev, ...newNodes]);
     setEdges((prev) => [...prev, ...newEdges]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFunctionId, fmea]);
 
   const deleteRow = useCallback((row: FMEARow) => {
@@ -804,7 +806,7 @@ export default function FMEAEditorPage() {
         const d = detectionNode?.detection || 0;
         const rpn = s * o * d;
 
-        const bgColor = rpn >= 100 ? "#ff4d4f" : rpn >= 50 ? "#fa8c16" : rpn > 0 ? "#52c41a" : "#d9d9d9";
+        const _bgColor = rpn >= 100 ? "#ff4d4f" : rpn >= 50 ? "#fa8c16" : rpn > 0 ? "#52c41a" : "#d9d9d9";
         return (
           <Tag color={rpn >= 100 ? "red" : rpn >= 50 ? "orange" : rpn > 0 ? "green" : "default"}
             style={{ fontWeight: 700, fontSize: 13, minWidth: 48, textAlign: "center" }}>
@@ -1018,7 +1020,7 @@ export default function FMEAEditorPage() {
         const o = node?.revised_occurrence || 0;
         const d = node?.revised_detection || 0;
         const rpn = s * o * d;
-        const bgColor = rpn >= 100 ? "#ff4d4f" : rpn >= 50 ? "#fa8c16" : rpn > 0 ? "#52c41a" : "#d9d9d9";
+        const _bgColor = rpn >= 100 ? "#ff4d4f" : rpn >= 50 ? "#fa8c16" : rpn > 0 ? "#52c41a" : "#d9d9d9";
         return (
           <Tag color={rpn >= 100 ? "red" : rpn >= 50 ? "orange" : rpn > 0 ? "green" : "default"}
             style={{ fontWeight: 700, fontSize: 13, minWidth: 48, textAlign: "center" }}>

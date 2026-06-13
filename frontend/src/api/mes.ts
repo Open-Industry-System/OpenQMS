@@ -1,7 +1,6 @@
 import client from "./client";
 import type {
-  MESConnection, MESConnectionCreate, MESProductionOrder,
-  MESEquipmentStatus, MESScrapRecord, MESDashboardData,
+  MESConnectionCreate,
 } from "../types/mes";
 
 export const listConnections = (page = 1, page_size = 20) =>

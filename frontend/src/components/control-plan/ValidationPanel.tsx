@@ -41,7 +41,7 @@ export default function ValidationPanel({ cpId }: Props) {
       setSummary(sum);
       setError(null);
       return sum.status;
-    } catch (e) {
+    } catch (_e) {
       setError("加载校验结果失败");
       return null;
     }
@@ -55,7 +55,7 @@ export default function ValidationPanel({ cpId }: Props) {
       pollCountRef.current = 0;
       pollingRef.current = true;
       setPolling(true);
-    } catch (e) {
+    } catch (_e) {
       setError("触发校验失败");
     } finally {
       setLoading(false);
@@ -103,7 +103,7 @@ export default function ValidationPanel({ cpId }: Props) {
     try {
       await action(id);
       await fetchData();
-    } catch (e) {
+    } catch (_e) {
       setError("操作失败");
     } finally {
       setLoading(false);

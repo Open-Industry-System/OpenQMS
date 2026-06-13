@@ -34,7 +34,7 @@ interface Props {
 }
 
 export default function AqlRecommendationDrawer({ open, recommendation, onClose, onAction }: Props) {
-  const { message, modal } = App.useApp();
+  const { message, modal: _modal } = App.useApp();
   const user = useAuthStore((s) => s.user);
   const [actionLoading, setActionLoading] = useState(false);
   const [rejectReason, setRejectReason] = useState('');

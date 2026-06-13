@@ -47,7 +47,8 @@ export default function CAPAListPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1); }, [productLine, searchParams]);
+  useEffect(() => { fetchData(1); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productLine, searchParams]);
 
   const handleCreate = async (values: { title: string; document_no: string; severity: string; due_date?: dayjs.Dayjs; problem_description?: string }) => {
     try {

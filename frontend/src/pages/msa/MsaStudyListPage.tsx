@@ -13,7 +13,6 @@ import {
   Statistic,
   Modal,
   Form,
-  DatePicker,
 } from "antd";
 import {
   PlusOutlined,
@@ -46,7 +45,7 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 
 export default function MsaStudyListPage() {
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
 
   const [studies, setStudies] = useState<MsaStudyOverview[]>([]);
@@ -61,7 +60,7 @@ export default function MsaStudyListPage() {
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createForm] = Form.useForm();
-  const [creating, setCreating] = useState(false);
+  const [_creating, _setCreating] = useState(false);
 
   const fetchStudies = useCallback(async () => {
     setLoading(true);

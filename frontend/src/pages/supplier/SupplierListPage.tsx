@@ -58,7 +58,7 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 export default function SupplierListPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -108,6 +108,7 @@ export default function SupplierListPage() {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, filterName, filterStatus]);
 
   useEffect(() => {

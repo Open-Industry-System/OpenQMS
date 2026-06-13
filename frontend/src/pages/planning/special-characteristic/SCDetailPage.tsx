@@ -33,7 +33,7 @@ export default function SCDetailPage() {
   const [approvalLoading, setApprovalLoading] = useState(false);
   const isNew = id === "new";
 
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
 
   useEffect(() => {
@@ -59,6 +59,7 @@ export default function SCDetailPage() {
       })
       .catch(() => message.error("加载特殊特性失败"))
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isNew]);
 
   const handleSave = async (values: Partial<SpecialCharacteristic>) => {

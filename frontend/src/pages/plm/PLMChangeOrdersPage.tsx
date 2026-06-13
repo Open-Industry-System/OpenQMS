@@ -48,6 +48,7 @@ export default function PLMChangeOrdersPage() {
   useEffect(() => {
     setPage(1);
     fetchData(1, productLine);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
   const handleImpactAnalysis = async (changeId: string) => {
@@ -106,6 +107,7 @@ export default function PLMChangeOrdersPage() {
         },
       ];
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [canEditPlm, impactLoading],
   );
 

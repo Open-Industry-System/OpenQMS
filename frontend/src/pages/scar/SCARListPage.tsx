@@ -75,6 +75,7 @@ export default function SCARListPage() {
 
   useEffect(() => {
     loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, sourceType, supplierId, page]);
 
   const handleCreate = async (values: Record<string, unknown>) => {

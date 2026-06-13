@@ -7,7 +7,7 @@ interface Props {
   validated?: boolean;
 }
 
-export default function ValidationBadge({ errorCount, warningCount, total, validated }: Props) {
+export default function ValidationBadge({ errorCount, warningCount, total: _total, validated }: Props) {
   if (!validated) {
     return <Tooltip title="未校验"><Badge status="default" /></Tooltip>;
   }

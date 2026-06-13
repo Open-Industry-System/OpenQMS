@@ -47,7 +47,7 @@ export default function FMEAListPage() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [form] = Form.useForm();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
   const [searchParams] = useSearchParams();
@@ -72,6 +72,7 @@ export default function FMEAListPage() {
 
   useEffect(() => {
     fetchData(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine, searchParams]);
 
   const handleCreate = async (values: { title: string; document_no: string; fmea_type: string; problem_description?: string }) => {

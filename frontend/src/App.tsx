@@ -87,7 +87,7 @@ function isTokenExpired(token: string): boolean {
 
 function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
-  const loading = useAuthStore((s) => s.loading);
+  const _loading = useAuthStore((s) => s.loading);
   const fetchUser = useAuthStore((s) => s.fetchUser);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);

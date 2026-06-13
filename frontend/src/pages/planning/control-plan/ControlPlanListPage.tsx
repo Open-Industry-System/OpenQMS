@@ -38,7 +38,7 @@ export default function ControlPlanListPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
   const [validationMap, setValidationMap] = useState<Record<string, ValidationSummary>>({});
@@ -55,6 +55,7 @@ export default function ControlPlanListPage() {
 
   useEffect(() => {
     fetchData(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
   useEffect(() => {

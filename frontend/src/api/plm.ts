@@ -7,7 +7,6 @@ import type {
   PLMConnectionTestResponse,
   PLMPart,
   PLMPartListResponse,
-  PLMBOM,
   PLMBOMListResponse,
   PLMBOMTreeResponse,
   PLMChangeOrder,

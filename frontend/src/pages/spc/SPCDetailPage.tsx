@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Button, Space, Tag, Typography, Tabs, Card, Form, Input,
-  DatePicker, Table, Popconfirm, App, Spin, Row, Col,
-  Switch, Upload, Divider, Badge, Statistic, Empty,
+  Button, Space, Tag, Typography, Tabs, Card, Input,
+  DatePicker, Table, App, Spin, Row, Col,
+  Switch, Divider, Badge, Statistic, Empty,
 } from "antd";
 import {
   ArrowLeftOutlined, LockOutlined, UnlockOutlined,
@@ -32,7 +32,6 @@ import type {
   ChartDataResponse,
   CapabilityResponse,
   SPCAlarm,
-  SampleBatch,
 } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
@@ -116,7 +115,7 @@ export default function SPCDetailPage() {
   const mainChartInstance = useRef<echarts.ECharts | null>(null);
   const subChartInstance = useRef<echarts.ECharts | null>(null);
 
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
 
   const fetchAll = async () => {
@@ -149,6 +148,7 @@ export default function SPCDetailPage() {
     if (!id) return;
     setLoading(true);
     fetchAll();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, alarmPage]);
 
   // Initialize/update charts
@@ -166,7 +166,7 @@ export default function SPCDetailPage() {
     const xData = points.map((p) => p.batch_no);
 
     // Main chart (X-bar or I)
-    const mainSeries = points.map((p, idx) => ({
+    const mainSeries = points.map((p, _idx) => ({
       value: p.x_value ?? 0,
       itemStyle: {
         color: p.alarm_flags.length > 0 ? "#ff4d4f" : "#1890ff",

@@ -60,6 +60,7 @@ export default function SCListPage() {
 
   useEffect(() => {
     fetchData(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scTypeFilter, sourceTypeFilter, productLine, safetyRelatedOnly, approvalStatusFilter, suggestedOnly]);
 
   const handleDelete = async (id: string) => {

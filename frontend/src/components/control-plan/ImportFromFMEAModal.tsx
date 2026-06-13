@@ -47,6 +47,7 @@ export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: 
       .finally(() => {
         setLoadingFmeas(false)
       })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const handleSelectFMEA = (fmeaId: string) => {

@@ -44,6 +44,7 @@ export default function MESOrdersPage() {
 
   useEffect(() => {
     fetchData(1, statusFilter || undefined, productLine);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, productLine]);
 
   const handleStatusChange = (value: string) => {

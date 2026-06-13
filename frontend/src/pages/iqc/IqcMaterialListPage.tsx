@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Card,
   Table,
@@ -30,7 +30,7 @@ const { Option } = Select;
 
 export default function IqcMaterialListPage() {
   const { message } = App.useApp();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit, isAdmin } = usePermission();
 
   const [materials, setMaterials] = useState<IqcMaterial[]>([]);

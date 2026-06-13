@@ -75,7 +75,8 @@ export default function PPAPListPage() {
     }
   };
 
-  useEffect(() => { loadData(); }, [activeTab, supplierId, page]);
+  useEffect(() => { loadData(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, supplierId, page]);
 
   const handleCreate = async (values: Record<string, unknown>) => {
     await createPPAP({

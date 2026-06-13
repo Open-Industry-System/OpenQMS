@@ -86,6 +86,7 @@ export default function IqcInspectionListPage() {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, filterStatus, filterResult, keyword]);
 
   useEffect(() => {

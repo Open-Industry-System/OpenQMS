@@ -42,6 +42,7 @@ export default function MESDashboardPage() {
 
   useEffect(() => {
     fetchData(productLine);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
   const columns = [

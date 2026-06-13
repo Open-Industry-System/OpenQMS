@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Table, Tag, Badge, Space, Select, Button, Modal, Form, Input, InputNumber, App,
+  Card, Table, Badge, Space, Select, Button, Modal, Form, Input, InputNumber, App,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -47,6 +47,7 @@ export default function AqlProfileListPage() {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, filterState, filterProductLine]);
 
   useEffect(() => {

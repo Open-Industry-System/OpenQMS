@@ -67,7 +67,8 @@ function SuppliersTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1, productLine); }, [productLine]);
+  useEffect(() => { fetchData(1, productLine); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productLine]);
 
   const openLinkModal = async (record: ERPSupplier) => {
     setLinkingRecord(record);
@@ -203,7 +204,8 @@ function CustomersTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1, productLine); }, [productLine]);
+  useEffect(() => { fetchData(1, productLine); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productLine]);
 
   const openLinkModal = async (record: ERPCustomer) => {
     setLinkingRecord(record);
@@ -345,7 +347,8 @@ function MaterialsTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1, "", productLine); }, [productLine]);
+  useEffect(() => { fetchData(1, "", productLine); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productLine]);
 
   const handleSearch = (value: string) => {
     setSearch(value);
@@ -429,7 +432,8 @@ function LocationsTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1, productLine); }, [productLine]);
+  useEffect(() => { fetchData(1, productLine); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productLine]);
 
   const columns = [
     { title: "库位编码", dataIndex: "location_code", key: "location_code", width: 140 },

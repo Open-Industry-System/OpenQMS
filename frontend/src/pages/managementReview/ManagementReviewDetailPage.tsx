@@ -61,7 +61,7 @@ const manualRichSources = [
 export default function ManagementReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
 
   const [review, setReview] = useState<ManagementReview | null>(null);
@@ -88,7 +88,8 @@ export default function ManagementReviewDetailPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, [id]);
+  useEffect(() => { fetchData(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   if (loading || !review) return <Spin style={{ display: "block", margin: "100px auto" }} />;
 

@@ -21,7 +21,6 @@ import {
   ArrowLeftOutlined,
   PlusOutlined,
   EditOutlined,
-  DeleteOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
@@ -48,7 +47,7 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 export default function GaugeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user: _user } = useAuthStore();
 
   const { canEdit } = usePermission();
 

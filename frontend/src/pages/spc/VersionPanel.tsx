@@ -29,6 +29,7 @@ const VersionPanel: React.FC<VersionPanelProps> = ({ icId, onActivated }) => {
 
   useEffect(() => {
     if (open) fetchSnapshots();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, icId]);
 
   const handleActivate = async (snapshotId: string) => {

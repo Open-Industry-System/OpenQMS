@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { Modal, Card, Button, Spin, Empty, Collapse, Tag, Typography, Tooltip } from "antd";
-import { EyeOutlined, ArrowRightOutlined } from "@ant-design/icons";
+import { Modal, Card, Button, Spin, Empty, Collapse, Tag, Typography } from "antd";
+import { EyeOutlined } from "@ant-design/icons";
 import type { LessonsLearnedResponse, LessonCard } from "../../types";
 
 const { Text } = Typography;
@@ -29,7 +29,7 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
     setActiveKeys(Array.isArray(keys) ? keys : [keys]);
   };
 
-  const renderCard = (card: LessonCard, index: number) => (
+  const renderCard = (card: LessonCard, _index: number) => (
     <Card
       key={card.id}
       size="small"

@@ -3,7 +3,6 @@ import { Card, Descriptions, Spin, Empty } from "antd";
 import { riskMapApi } from "../../../api/supplyChainRiskMap";
 import type { SupplierDetailResponse } from "../../../types";
 import DataSourceBadge from "./DataSourceBadge";
-import DiffIndicator from "./DiffIndicator";
 
 interface SupplierDetailProps {
   supplierId: string;

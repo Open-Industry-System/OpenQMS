@@ -53,6 +53,7 @@ export default function PLMConnectionsPage() {
 
   useEffect(() => {
     fetchData(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCreate = async (values: PLMConnectionCreate & { config_port?: number }) => {
@@ -238,6 +239,7 @@ export default function PLMConnectionsPage() {
         </Space>
       ),
     },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [canEditPlm, canAdminPlm, testLoading, syncLoading]);
 
   return (

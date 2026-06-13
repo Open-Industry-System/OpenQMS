@@ -57,7 +57,8 @@ function PurchaseOrdersTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1, statusFilter || undefined, productLine); }, [productLine]);
+  useEffect(() => { fetchData(1, statusFilter || undefined, productLine); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productLine]);
 
   const handleStatusChange = (value: string) => {
     setStatusFilter(value);
@@ -168,7 +169,8 @@ function InventoryBalancesTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(1, productLine); }, [productLine]);
+  useEffect(() => { fetchData(1, productLine); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productLine]);
 
   const columns = [
     { title: "物料编码", dataIndex: "material_code", key: "material_code", width: 140 },

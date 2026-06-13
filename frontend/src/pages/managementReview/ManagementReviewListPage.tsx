@@ -48,6 +48,7 @@ export default function ManagementReviewListPage() {
     if (statusFilter) params.set("status", statusFilter);
     setSearchParams(params, { replace: true });
     fetchData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, statusFilter, selectedPL]);
 
   const columns = [

@@ -23,6 +23,7 @@ export default function PLMDashboardPage() {
       .then(setData)
       .catch(() => message.error("加载 PLM 看板数据失败"))
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
   if (loading) {

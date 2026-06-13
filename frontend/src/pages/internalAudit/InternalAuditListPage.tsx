@@ -68,7 +68,7 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 export default function InternalAuditListPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
+  const _user = useAuthStore((s) => s.user);
   const { canEdit, isAdmin } = usePermission();
 
   const [plans, setPlans] = useState<AuditPlan[]>([]);
@@ -130,9 +130,10 @@ export default function InternalAuditListPage() {
     } finally {
       setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, activeTab, filterYear, filterType, filterDateRange]);
 
-  const fetchPrograms = useCallback(async () => {
+  const _fetchPrograms = useCallback(async () => {
     try {
       // We need to fetch programs for the plan creation dropdown.
       // listAuditPrograms is not exported from audit.ts, so we use listAuditPlans with a large page size to get programs indirectly,
@@ -146,6 +147,7 @@ export default function InternalAuditListPage() {
     } catch {
       // ignore
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -312,7 +314,7 @@ export default function InternalAuditListPage() {
       title: "发现项数",
       dataIndex: "finding_count",
       width: 100,
-      render: (_: unknown, record: AuditPlan) => {
+      render: (_: unknown, _record: AuditPlan) => {
         // finding_count is not in AuditPlan type, so we show placeholder or compute from something else.
         // Since the backend may not return it, we show "—" for now.
         return "—";
@@ -321,23 +323,23 @@ export default function InternalAuditListPage() {
     {
       title: "操作",
       width: 240,
-      render: (_: unknown, record: AuditPlan) => (
+      render: (_: unknown, _record: AuditPlan) => (
         <Space size="small" wrap>
-          <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/internal-audits/${record.audit_id}`)}>
+          <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/internal-audits/${_record.audit_id}`)}>
             查看详情
           </Button>
-          {record.status === "planned" && canEdit('audit') && (
-            <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleStart(record.audit_id)}>
+          {_record.status === "planned" && canEdit('audit') && (
+            <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleStart(_record.audit_id)}>
               开始
             </Button>
           )}
-          {record.status === "in_progress" && canEdit('audit') && (
-            <Button size="small" type="primary" icon={<CheckCircleOutlined />} onClick={() => handleComplete(record.audit_id)}>
+          {_record.status === "in_progress" && canEdit('audit') && (
+            <Button size="small" type="primary" icon={<CheckCircleOutlined />} onClick={() => handleComplete(_record.audit_id)}>
               完成
             </Button>
           )}
-          {record.status === "planned" && canEdit('audit') && (
-            <Popconfirm title="确认取消？" onConfirm={() => handleCancel(record.audit_id)}>
+          {_record.status === "planned" && canEdit('audit') && (
+            <Popconfirm title="确认取消？" onConfirm={() => handleCancel(_record.audit_id)}>
               <Button size="small" danger icon={<StopOutlined />}>
                 取消
               </Button>

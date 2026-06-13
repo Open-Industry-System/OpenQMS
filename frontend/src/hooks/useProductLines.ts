@@ -4,7 +4,7 @@ import { useProductLineStore } from "../store/productLineStore";
 
 export function useProductLines() {
   const user = useAuthStore((s) => s.user);
-  const productLines = user?.product_lines ?? [];
+  const productLines = useMemo(() => user?.product_lines ?? [], [user]);
   const bypass = user?.bypass_row_level_security ?? false;
   const currentProductLine = useProductLineStore((s) => s.selected);
   const setCurrentProductLine = useProductLineStore((s) => s.setSelected);

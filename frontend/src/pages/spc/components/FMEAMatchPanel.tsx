@@ -37,6 +37,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
     if (visible && alarmId) {
       fetchRecommendations();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, alarmId]);
 
   const fetchRecommendations = async (force = false) => {
@@ -48,7 +49,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
       if (res.confirmed_fmea_id && res.confirmed_fmea_node_id) {
         setSelectedKey(`${res.confirmed_fmea_id}:${res.confirmed_fmea_node_id}`);
       }
-    } catch (e) {
+    } catch (_e) {
       setError("获取推荐失败，请重试");
     } finally {
       setLoading(false);
@@ -61,7 +62,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
       await confirmFMEAAssociation(alarmId, rec.fmea_id, rec.node_id);
       setSelectedKey(`${rec.fmea_id}:${rec.node_id}`);
       onConfirmed?.();
-    } catch (e) {
+    } catch (_e) {
       setError("确认关联失败");
     } finally {
       setConfirming(false);

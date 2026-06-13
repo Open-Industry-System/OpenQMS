@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Form, Input, Select, Button, App, Modal, Row, Col, Space, Spin } from 'antd';
+import { Card, Form, Input, Select, Button, App, Row, Col, Space, Spin } from 'antd';
 import { RestOutlined, SaveOutlined } from '@ant-design/icons';
 import type { AqlConfig } from '../../types';
 import { listAqlConfigs, updateAqlConfig, resetAqlConfigs } from '../../api/iqcAql';
@@ -34,6 +34,7 @@ export default function AqlConfigPage() {
 
   useEffect(() => {
     fetchConfigs(productLine);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
   if (!isAdmin) {

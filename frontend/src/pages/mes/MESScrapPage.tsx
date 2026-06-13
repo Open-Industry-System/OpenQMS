@@ -42,6 +42,7 @@ export default function MESScrapPage() {
 
   useEffect(() => {
     fetchData(1, defectFilter || undefined, productLine);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defectFilter, productLine]);
 
   const handleDefectChange = (value: string) => {

@@ -36,11 +36,13 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
   // Only rehydrate report data when switching reviews, not on every parent re-render
   useEffect(() => {
     setReport(review.generated_report);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [review.review_id]);
 
   // Load versions on review change (history may exist even after reopen to draft)
   useEffect(() => {
     loadVersions();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [review.review_id]);
 
   const loadVersions = async () => {
@@ -196,7 +198,7 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
                   }
                   style={{ marginBottom: 12 }}
                 />
-                <Collapse items={previewVersion.content.sections.map((section, index) => ({
+                <Collapse items={previewVersion.content.sections.map((section, _index) => ({
                   key: section.key,
                   label: section.title,
                   children: (

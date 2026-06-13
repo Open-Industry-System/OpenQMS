@@ -55,6 +55,7 @@ export default function ERPConnectionsPage() {
 
   useEffect(() => {
     fetchData(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCreate = async (values: {
@@ -263,6 +264,7 @@ export default function ERPConnectionsPage() {
         </Space>
       ),
     },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [canEditErp, canAdminErp, testLoading, syncLoading]);
 
   return (
