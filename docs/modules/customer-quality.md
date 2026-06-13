@@ -245,7 +245,7 @@ RMA 的 `responsibility` 字段用于记录退货责任归属：
 
 ### 5.2 新建审核
 
-**API：** `POST /api/customer-audits`
+**API：** `POST /api/audit-plans`
 
 必填字段：
 
@@ -304,7 +304,7 @@ open ──start_progress──▶ in_progress ──close──▶ closed
 
 ### 5.5 客户确认
 
-**API：** `POST /api/customer-audits/findings/{id}/confirm`
+**API：** `POST /api/audit-findings/{finding_id}/customer-confirm`
 
 客户端可独立确认发现项（不改变工作流状态），传入：
 - `confirmation_date`：确认日期
@@ -578,12 +578,13 @@ verified ──reopen──▶ in_progress
 
 | 方法 | 端点 | 最低权限 |
 |------|------|----------|
-| GET | `/api/customer-audits` | VIEW |
-| POST | `/api/customer-audits` | CREATE |
-| GET | `/api/customer-audits/{id}` | VIEW |
-| PUT | `/api/customer-audits/{id}` | CREATE |
-| POST | `/api/customer-audits/{id}/complete` | APPROVE |
-| GET | `/api/customer-audits/stats` | VIEW |
+| GET | `/api/audit-plans` | VIEW |
+| POST | `/api/audit-plans` | CREATE |
+| GET | `/api/audit-plans/{id}` | VIEW |
+| PUT | `/api/audit-plans/{id}` | CREATE |
+| POST | `/api/audit-plans/{id}/complete` | APPROVE |
+| GET | `/api/audit-plans/customer-stats` | VIEW |
+| POST | `/api/audit-findings/{finding_id}/customer-confirm` | CREATE |
 
 ### 看板与统计
 

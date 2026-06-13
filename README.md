@@ -60,7 +60,7 @@ docker compose up -d
 等待所有容器健康（约 30 秒）：
 
 ```bash
-docker compose ps   # 确认 db/backend/frontend/redis/neo4j 均为 healthy/running
+docker compose ps   # 确认 db/redis/neo4j 为 healthy，backend/frontend 为 running
 ```
 
 ### 2. 初始化数据库
@@ -127,11 +127,11 @@ docker compose exec backend python -m app.seed
 | 供应商风险 | ✅ | 风险规则配置 + 风险看板 |
 | 供应链风险地图 | ✅ | 多维风险热力图 |
 | 集团管理 | ✅ | 多工厂看板 + 对比 + 集团供应商 |
-| ERP 集成 | 🔧 | 看板 + 连接配置，数据同步开发中 |
-| MES 集成 | 🔧 | 看板 + 连接配置，数据同步开发中 |
-| PLM 集成 | 🔧 | 零件/BOM/变更单，Mock 连接器 |
-| 知识图谱 | 🔧 | Neo4j 可视化，智能推荐开发中 |
-| 变更影响 | 🔧 | 影响分析，开发中 |
+| ERP 集成 | ✅ | 看板 + 连接配置 + 数据同步 |
+| MES 集成 | ✅ | 看板 + 连接配置 + 生产/报废数据 |
+| PLM 集成 | ✅ | 零件/BOM/变更单 + Mock 连接器 |
+| 知识图谱 | ✅ | Neo4j 可视化 + FMEA/CP 关联 |
+| 变更影响 | ✅ | 影响分析 + 风险评分 |
 
 ---
 

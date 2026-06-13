@@ -190,6 +190,6 @@ if target_status == "approved" and user.role_definition.role_key not in ("admin"
 | # | 严重度 | 问题 | 位置 |
 |---|:------:|------|------|
 | 1 | 高 | 前端路由无模块守卫（knowledge_graph、change_impact、MES） | `App.tsx` |
-| 2 | 中 | 无 Token 刷新机制，120 分钟硬过期 | `security.py` |
+| 2 | 中 | 前端未自动调用 refresh token，需确认刷新机制是否完整 | `authStore.ts` |
 | 3 | 中 | 无登录接口速率限制 | `api/auth.py` |
 | 4 | 低 | 无认证审计日志 | `api/auth.py` |
