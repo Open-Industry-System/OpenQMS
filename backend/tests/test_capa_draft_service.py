@@ -168,7 +168,7 @@ class TestGenerateDraftValidation:
         audit_cm.__aexit__ = AsyncMock(return_value=False)
         user = MagicMock()
         user.user_id = uuid.uuid4()
-        with patch.object(capa_draft_service, "async_session", return_value=audit_cm):
+        with patch("app.services.capa_draft_service.get_tenant_aware_session", return_value=audit_cm):
             with pytest.raises(HTTPException) as exc:
                 await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, user, MagicMock())
         assert exc.value.status_code == 400
@@ -188,7 +188,7 @@ class TestGenerateDraftValidation:
         audit_cm.__aexit__ = AsyncMock(return_value=False)
         user = MagicMock()
         user.user_id = uuid.uuid4()
-        with patch.object(capa_draft_service, "async_session", return_value=audit_cm):
+        with patch("app.services.capa_draft_service.get_tenant_aware_session", return_value=audit_cm):
             with pytest.raises(HTTPException) as exc:
                 await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, user, MagicMock())
         assert exc.value.status_code == 400
@@ -705,7 +705,7 @@ class TestProductLineEnforcement:
         })
         request.app.state.llm_provider = llm_provider
 
-        # Mock async_session for audit log isolation
+        # Mock get_tenant_aware_session for audit log isolation
         audit_session = MagicMock()
         audit_session.commit = AsyncMock()
         audit_session.rollback = AsyncMock()
@@ -713,10 +713,7 @@ class TestProductLineEnforcement:
         audit_cm = MagicMock()
         audit_cm.__aenter__ = AsyncMock(return_value=audit_session)
         audit_cm.__aexit__ = AsyncMock(return_value=False)
-        monkeypatch.setattr(
-            capa_draft_service, "async_session", MagicMock(return_value=audit_cm)
-        )
-
-        req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
-        await generate_draft(db, capa.report_id, "d2", req, user, request)
-        assert audit_session.commit.called
+        with patch("app.services.capa_draft_service.get_tenant_aware_session", return_value=audit_cm):
+            req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
+            await generate_draft(db, capa.report_id, "d2", req, user, request)
+            assert audit_session.commit.called

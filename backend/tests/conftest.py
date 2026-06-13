@@ -25,6 +25,14 @@ from app.models.user import User
 
 from sqlalchemy.pool import NullPool
 
+# ── Patch the production engine with NullPool to prevent event-loop attachment
+# issues across test functions.  Tests that use app.database.async_session or
+# get_tenant_aware_session (e.g. MES concurrency, PLM sync) must not hold
+# pooled connections that outlive the event loop of the test that created them.
+import app.database as _db_mod
+_db_mod.engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
+_db_mod.async_session = async_sessionmaker(_db_mod.engine, class_=AsyncSession, expire_on_commit=False)
+
 # Test-scoped engine with NullPool so every session gets a fresh connection
 # (avoids "another operation is in progress" cross-test contamination)
 _test_engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)

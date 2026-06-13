@@ -26,12 +26,13 @@ from app.models.cp_validation import (
 from app.models.control_plan import ControlPlan, ControlPlanItem
 
 
-def _make_cp(suffix: str = "") -> ControlPlan:
+def _make_cp(suffix: str = "", factory_id: uuid.UUID | None = None) -> ControlPlan:
     return ControlPlan(
         cp_id=uuid.uuid4(),
         document_no=f"CP-BATCH-{uuid.uuid4().hex[:8]}{suffix}",
         title=f"Batch test CP{suffix}",
         product_line_code="DC-DC-100",
+        factory_id=factory_id,
     )
 
 
@@ -85,12 +86,12 @@ async def test_batch_summaries_no_runs_clean_and_history(db, admin_user):
     uid = admin_user.user_id
 
     # ── CP-A: no validation runs at all ──
-    cp_a = _make_cp("-A")
+    cp_a = _make_cp("-A", factory_id=admin_user.factory_id)
     db.add(cp_a)
     await db.flush()
 
     # ── CP-B: one clean run (0 findings) ──
-    cp_b = _make_cp("-B")
+    cp_b = _make_cp("-B", factory_id=admin_user.factory_id)
     db.add(cp_b)
     await db.flush()
 
@@ -104,7 +105,7 @@ async def test_batch_summaries_no_runs_clean_and_history(db, admin_user):
     #   Run 2: F1 resolved + 1 new warning (R002) → finding F2 open
     #   Expected: latest run shows open_count=1, resolved_count=1
     #   (NOT open_count=2 from leaking run-1's occurrence)
-    cp_c = _make_cp("-C")
+    cp_c = _make_cp("-C", factory_id=admin_user.factory_id)
     db.add(cp_c)
     await db.flush()
 
@@ -196,7 +197,7 @@ async def test_batch_summaries_rejected_finding_not_leaked(db, admin_user):
     now = datetime.now(timezone.utc)
     uid = admin_user.user_id
 
-    cp = _make_cp("-R")
+    cp = _make_cp("-R", factory_id=admin_user.factory_id)
     db.add(cp)
     await db.flush()
 

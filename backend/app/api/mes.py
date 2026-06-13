@@ -286,7 +286,10 @@ async def update_connection(
         merged_config = _process_credentials(merged_config)
 
         # Final guard: validate resulting connector_type + config
-        get_mes_connector_by_config(connector_type, merged_config)
+        try:
+            get_mes_connector_by_config(connector_type, merged_config)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         conn.config = merged_config
 
@@ -416,7 +419,14 @@ async def ingest_data(
     db: AsyncSession = Depends(get_db),
     conn: MESConnection = Depends(require_mes_api_key),
 ):
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    # Validate body is a dict
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
 
     # Pre-check data_type
     data_type = body.get("data_type")

@@ -202,7 +202,7 @@ async def get_heatmap_data(
                 risk_index=ri,
                 level=_risk_level(raw) if col.key == "risk_score" else None,
                 diff=diff_val,
-                source=dim.get("source", "missing"),
+                source=dim.get("source") or "missing",
             ))
         rows.append(HeatmapRow(
             supplier_id=snap.supplier_id,
@@ -283,7 +283,7 @@ async def get_supplier_detail(
             raw_value=val.get("raw_value"),
             risk_index=val.get("risk_index"),
             polarity=val.get("polarity", "higher_is_risk"),
-            source=val.get("source", "missing"),
+            source=val.get("source") or "missing",
         )
         for key, val in (snap.dimensions or {}).items()
     }
@@ -358,7 +358,7 @@ async def get_comparison(
                 raw_value=val.get("raw_value"),
                 risk_index=val.get("risk_index"),
                 polarity=val.get("polarity", "higher_is_risk"),
-                source=val.get("source", "missing"),
+                source=val.get("source") or "missing",
             )
             for key, val in (snap.dimensions or {}).items()
         }

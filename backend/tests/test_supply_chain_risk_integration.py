@@ -19,13 +19,14 @@ import pytest
 from httpx import AsyncClient
 from uuid import uuid4
 from datetime import date
+from unittest.mock import AsyncMock
 from sqlalchemy import select, func
 from app.models.user import User
 from app.core.security import hash_password, create_access_token
 
 
 @pytest.fixture
-async def admin_user(db):
+async def admin_user(db, default_factory):
     """Create a real admin user in DB and return the user object.
     Also ensures role_permissions has supply_chain_risk_map permission."""
     from app.models.role import RoleDefinition, RolePermission
@@ -50,6 +51,7 @@ async def admin_user(db):
         display_name="Admin RiskMap",
         password_hash=hash_password("Admin@2026"),
         role_id=role.id, legacy_role="admin", is_active=True,
+        factory_id=default_factory.id,
     )
     db.add(user)
     await db.commit()
@@ -58,7 +60,7 @@ async def admin_user(db):
 
 
 @pytest.fixture
-async def viewer_user(db):
+async def viewer_user(db, default_factory):
     """Create a real viewer user in DB."""
     from app.models.role import RoleDefinition, RolePermission
     result = await db.execute(
@@ -83,6 +85,7 @@ async def viewer_user(db):
         display_name="Viewer RiskMap",
         password_hash=hash_password("Viewer@2026"),
         role_id=role.id, legacy_role="viewer", is_active=True,
+        factory_id=default_factory.id,
     )
     db.add(user)
     await db.commit()
@@ -96,11 +99,14 @@ async def client(db):
     from httpx import ASGITransport
     from app.main import app
     from app.database import get_db
+    from app.core.deps import get_request_scope
 
     async def _override_get_db():
         yield db
 
     app.dependency_overrides[get_db] = _override_get_db
+    # Remove get_request_scope override so real auth flow is used
+    app.dependency_overrides.pop(get_request_scope, None)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
@@ -110,7 +116,7 @@ async def client(db):
 @pytest.fixture
 async def admin_client(client, admin_user):
     """Client with real admin user token."""
-    token = create_access_token(str(admin_user.user_id))
+    token = create_access_token({"sub": str(admin_user.user_id)})
     client.headers["Authorization"] = f"Bearer {token}"
     return client
 
@@ -118,7 +124,7 @@ async def admin_client(client, admin_user):
 @pytest.fixture
 async def viewer_client(client, viewer_user):
     """Client with real viewer user token."""
-    token = create_access_token(str(viewer_user.user_id))
+    token = create_access_token({"sub": str(viewer_user.user_id)})
     client.headers["Authorization"] = f"Bearer {token}"
     return client
 
@@ -146,9 +152,14 @@ async def test_viewer_cannot_generate_snapshot(viewer_client):
 
 
 @pytest.mark.asyncio
-async def test_field_qe_has_edit_permission(db, client, admin_user):
+async def test_field_qe_has_edit_permission(db, client, admin_user, default_factory):
     """field_qe role can generate snapshots (EDIT level)."""
     from app.models.role import RoleDefinition, RolePermission
+    from app.core.deps import get_request_scope, RequestScope
+    from app.core.factory_scope import FactoryScope, ProductLineScope
+    from app.core.permissions import PermissionLevel
+    from unittest.mock import patch
+
     result = await db.execute(
         select(RoleDefinition).where(RoleDefinition.role_key == "field_qe")
     )
@@ -170,15 +181,32 @@ async def test_field_qe_has_edit_permission(db, client, admin_user):
         display_name="FQE RiskMap",
         password_hash=hash_password("Fqe@2026"),
         role_id=role.id, legacy_role="field_qe", is_active=True,
+        factory_id=default_factory.id,
     )
     db.add(user)
     await db.commit()
-    token = create_access_token({"sub": str(user.user_id)})
-    response = await client.post(
-        "/api/supply-chain-risk-map/snapshots/generate",
-        headers={"Authorization": f"Bearer {token}"},
+    await db.refresh(user)
+
+    # Override get_request_scope so the field_qe user gets proper factory/PL scope
+    mock_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=user.factory_id),
+        effective_factory_id=user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=user,
     )
-    assert response.status_code != 403  # Not forbidden
+
+    from app.main import app
+    async def _mock_scope():
+        return mock_scope
+    app.dependency_overrides[get_request_scope] = _mock_scope
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
+        token = create_access_token({"sub": str(user.user_id)})
+        response = await client.post(
+            "/api/supply-chain-risk-map/snapshots/generate",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code != 403  # Not forbidden
+    app.dependency_overrides.pop(get_request_scope, None)
 
 
 @pytest.mark.asyncio
@@ -190,7 +218,8 @@ async def test_nulls_not_distinct_prevents_duplicate_snapshot(db, admin_user):
     from sqlalchemy.exc import IntegrityError
 
     supplier = Supplier(supplier_id=uuid4(), supplier_no="T-DUP-01", name="DupeTest",
-                         short_name="DT", status="approved", created_by=admin_user.user_id)
+                         short_name="DT", status="approved", created_by=admin_user.user_id,
+                         factory_id=admin_user.factory_id)
     db.add(supplier)
     await db.commit()
 
@@ -224,6 +253,7 @@ async def test_calculate_all_supplier_scores_called_by_snapshot(db, admin_user):
     supplier = Supplier(
         supplier_id=uuid4(), supplier_no="T-MOCK-01", name="MockSupplier",
         short_name="MS", status="approved", created_by=admin_user.user_id,
+        factory_id=admin_user.factory_id,
     )
     db.add(supplier)
     await db.flush()

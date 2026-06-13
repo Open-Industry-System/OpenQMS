@@ -57,7 +57,8 @@ def override_dependencies():
     app.dependency_overrides[get_current_user] = mock_get_current_user
     app.dependency_overrides[get_request_scope] = mock_get_request_scope
     with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)), \
-         patch("app.api.cp_validation.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
+         patch("app.api.cp_validation.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)), \
+         patch("app.api.cp_validation._check_factory_access"):
         yield
     app.dependency_overrides.clear()
 
@@ -232,7 +233,8 @@ def override_dependencies_results():
     app.dependency_overrides[get_current_user] = mock_get_current_user
     app.dependency_overrides[get_request_scope] = mock_get_request_scope
     with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)), \
-         patch("app.api.cp_validation.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
+         patch("app.api.cp_validation.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)), \
+         patch("app.api.cp_validation._check_factory_access"):
         yield {
             "finding_id": fake_finding_id,
             "occ_id": fake_occ_id,

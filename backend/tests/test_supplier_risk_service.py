@@ -129,7 +129,21 @@ async def seed_config_priority(db, admin_user, seed_supplier):
         ),
     ]
     for cfg in configs:
-        db.add(cfg)
+        # Check if this exact config already exists (by rule_id + supplier_id + product_line_code)
+        q = select(func.count()).select_from(SupplierRiskConfig).where(
+            SupplierRiskConfig.rule_id == cfg.rule_id,
+        )
+        if cfg.supplier_id is None:
+            q = q.where(SupplierRiskConfig.supplier_id.is_(None))
+        else:
+            q = q.where(SupplierRiskConfig.supplier_id == cfg.supplier_id)
+        if cfg.product_line_code is None:
+            q = q.where(SupplierRiskConfig.product_line_code.is_(None))
+        else:
+            q = q.where(SupplierRiskConfig.product_line_code == cfg.product_line_code)
+        exists = (await db.execute(q)).scalar()
+        if exists == 0:
+            db.add(cfg)
     await db.flush()
     return configs
 
@@ -275,21 +289,29 @@ async def test_calculate_all_supplier_scores_returns_scores_without_side_effects
         short_name="Test SCRM",
         status="approved",
         created_by=admin_user.user_id,
+        factory_id=admin_user.factory_id,
     )
     db.add(supplier)
 
     # Seed global default configs for all 10 rules so the supplier gets scored.
     for cfg in _DEFAULT_RULE_CONFIGS:
-        db.add(SupplierRiskConfig(
-            rule_id=cfg["rule_id"],
-            enabled=True,
-            thresholds=cfg["thresholds"],
-            weight=cfg["weight"],
-            category=cfg["category"],
-            supplier_id=None,
-            product_line_code=None,
-            updated_by=admin_user.user_id,
-        ))
+        exists = (await db.execute(
+            select(func.count()).select_from(SupplierRiskConfig)
+            .where(SupplierRiskConfig.rule_id == cfg["rule_id"],
+                   SupplierRiskConfig.supplier_id.is_(None),
+                   SupplierRiskConfig.product_line_code.is_(None))
+        )).scalar()
+        if exists == 0:
+            db.add(SupplierRiskConfig(
+                rule_id=cfg["rule_id"],
+                enabled=True,
+                thresholds=cfg["thresholds"],
+                weight=cfg["weight"],
+                category=cfg["category"],
+                supplier_id=None,
+                product_line_code=None,
+                updated_by=admin_user.user_id,
+            ))
     await db.flush()
 
     # Verify no alerts exist before calling
