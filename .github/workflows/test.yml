@@ -38,6 +38,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run database migrations
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+          DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms_test
+        run: |
+          cd backend
+          PYTHONPATH=. alembic upgrade head
+
       - name: Run manual tests
         env:
           SECRET_KEY: test-secret-key-for-ci-only
