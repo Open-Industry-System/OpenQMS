@@ -16,7 +16,6 @@
 
 | 功能域 | 路由 | ModuleKey |
 |---|---|---|
-| 仪表盘 | `/dashboard` | （仅登录） |
 | FMEA | `/fmea`, `/fmea/:id` | fmea |
 | CAPA/8D | `/capa`, `/capa/:id` | capa |
 | 控制计划 | `/control-plans`, `/control-plans/:id` | planning |
@@ -51,6 +50,7 @@
 
 | 功能域 | 路由 | 说明 |
 |---|---|---|
+| 仪表盘 | `/dashboard` | 仅登录即可访问 |
 | 知识图谱 | `/knowledge-graph` | 未配置模块守卫，仅要求登录 |
 | 变更影响 | `/change-impact` | 未配置模块守卫，仅要求登录 |
 | MES | `/mes/dashboard`, `/mes/connections`, `/mes/orders`, `/mes/scrap` | 前端未设置 requiredModule（后端 mes 模块有权限检查） |
@@ -198,8 +198,7 @@
 - `backend/alembic/versions/032_add_erp_tables.py`：ERP 模块权限。
 - `backend/alembic/versions/034_add_supplier_risk_tables.py`：supplier_risk 模块权限。
 - `backend/alembic/versions/035_add_supply_chain_risk_snapshot_table.py`：supply_chain_risk_map 模块权限。
-- `backend/app/seed.py`：group 模块权限 + 默认账号 + 演示数据。
-- `backend/app/seed.py`：默认账号、角色、演示数据。
+- `backend/app/seed.py`：group 模块权限、默认账号、角色、演示数据。
 - `frontend/src/App.tsx`：前端路由与页面清单。
 - `frontend/src/hooks/usePermission.ts`：前端模块键与权限等级。
 - `backend/app/api/` 与 `backend/app/services/`：模块接口与业务能力。
