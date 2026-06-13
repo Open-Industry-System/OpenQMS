@@ -53,7 +53,8 @@ async def evaluate_supplier_risk(
 
     # 6. Upsert alert (returns alert + event type)
     alert, event_type = await _upsert_alert(
-        db, supplier_id, product_line_code, risk_score, results, failed_ids
+        db, supplier_id, product_line_code, risk_score, results, failed_ids,
+        factory_id=supplier.factory_id,
     )
 
     # 7. Commit so the alert is persisted before returning / notifying
@@ -133,7 +134,8 @@ async def evaluate_all_suppliers(
             risk_score = calculate_risk_score(rule_results, configs)
 
             alert, event_type = await _upsert_alert(
-                db, supplier.supplier_id, product_line_code, risk_score, rule_results, failed_ids
+                db, supplier.supplier_id, product_line_code, risk_score, rule_results, failed_ids,
+                factory_id=supplier.factory_id,
             )
 
             # Commit per supplier so partial failures don't lose all progress
@@ -325,7 +327,7 @@ async def _batch_gather_certifications(db, supplier_ids):
 
 # ── Alert upsert with event type ───────────────────────────────────────────────
 
-async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results, failed_ids):
+async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results, failed_ids, *, factory_id=None):
     """Upsert alert: dedup by (supplier_id, product_line_code, snapshot_date).
 
     Returns (alert, event_type) where event_type is:
@@ -379,6 +381,7 @@ async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results,
     # Create new alert
     alert = SupplierRiskAlert(
         supplier_id=supplier_id,
+        factory_id=factory_id,
         risk_level=risk_score.risk_level,
         risk_score=risk_score.risk_score,
         quality_score=risk_score.quality_score,

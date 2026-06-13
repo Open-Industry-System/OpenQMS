@@ -40,6 +40,7 @@ async def test_validate_creates_run_and_occurrences(db, admin_user):
         source_fmea_node_id="pfmea-step-1",
         control_method="",
         reaction_plan="",
+        factory_id=admin_user.factory_id,
     )
     db.add(item)
     await db.flush()
@@ -76,6 +77,7 @@ async def test_finding_reused_across_runs(db, admin_user):
     item = ControlPlanItem(
         item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
         source_fmea_node_id="pfmea-step-1", control_method="",
+        factory_id=admin_user.factory_id,
     )
     db.add(item)
     await db.flush()
@@ -114,6 +116,7 @@ async def test_finding_survives_item_uuid_change(db, admin_user):
     item1 = ControlPlanItem(
         item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
         source_fmea_node_id="pfmea-step-1", control_method="",
+        factory_id=admin_user.factory_id,
     )
     db.add(item1)
     await db.flush()
@@ -133,6 +136,7 @@ async def test_finding_survives_item_uuid_change(db, admin_user):
     item2 = ControlPlanItem(
         item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
         source_fmea_node_id="pfmea-step-1", control_method="",  # same business identity
+        factory_id=admin_user.factory_id,
     )
     db.add(item2)
     await db.flush()
@@ -170,6 +174,7 @@ async def test_stale_run_auto_failed(db, admin_user):
     item = ControlPlanItem(
         item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
         source_fmea_node_id="pfmea-step-1", control_method="",
+        factory_id=admin_user.factory_id,
     )
     db.add(item)
     await db.flush()

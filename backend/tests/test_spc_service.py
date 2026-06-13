@@ -42,11 +42,33 @@ async def db_session():
     async with session_factory() as session:
         # Ensure the default test factory exists (FK requirement)
         from sqlalchemy import select as _sel
+        from app.models.role import RoleDefinition
         existing = (await session.execute(
             _sel(Factory).where(Factory.id == DEFAULT_FACTORY_ID)
         )).scalar_one_or_none()
         if existing is None:
             session.add(Factory(id=DEFAULT_FACTORY_ID, code="TEST", name="Test Factory"))
+            await session.commit()
+        # Ensure a test user exists (FK requirement for created_by)
+        existing_user = (await session.execute(
+            _sel(User).where(User.factory_id == DEFAULT_FACTORY_ID).limit(1)
+        )).scalar_one_or_none()
+        if existing_user is None:
+            role_result = await session.execute(
+                _sel(RoleDefinition).where(RoleDefinition.role_key == "admin")
+            )
+            role = role_result.scalar_one_or_none()
+            if role is None:
+                role = RoleDefinition(role_key="admin", name_zh="管理员", name_en="Admin", is_system=True, is_active=True)
+                session.add(role)
+                await session.commit()
+            user = User(
+                user_id=uuid.uuid4(), username="spc_test_admin",
+                display_name="SPC Test Admin", password_hash="hash",
+                role_id=role.id, legacy_role="admin", is_active=True,
+                factory_id=DEFAULT_FACTORY_ID,
+            )
+            session.add(user)
             await session.commit()
         yield session
 

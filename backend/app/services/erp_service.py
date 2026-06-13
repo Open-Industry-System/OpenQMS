@@ -396,6 +396,7 @@ class ERPIngestionService:
                 product_line_code=lines[0].product_line_code if lines else None,
                 notes=f"ERP auto-import: {line_refs}",
                 created_by=SYSTEM_USER_ID,
+                factory_id=lines[0].factory_id if lines else None,
             )
             db.add(new_record)
             await db.flush()

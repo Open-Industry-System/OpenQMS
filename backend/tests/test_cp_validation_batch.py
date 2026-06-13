@@ -121,6 +121,7 @@ async def test_batch_summaries_no_runs_clean_and_history(db, admin_user):
     item_c = ControlPlanItem(
         item_id=uuid.uuid4(), cp_id=cp_c.cp_id, step_no="10",
         source_fmea_node_id="pfmea-step-1", control_method="",
+        factory_id=admin_user.factory_id,
     )
     db.add(item_c)
     await db.flush()

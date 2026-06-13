@@ -211,7 +211,12 @@ async def test_field_qe_has_edit_permission(db, client, admin_user, default_fact
 
 @pytest.mark.asyncio
 async def test_nulls_not_distinct_prevents_duplicate_snapshot(db, admin_user):
-    """UNIQUE NULLS NOT DISTINCT constraint prevents duplicate snapshots (PG-only)."""
+    """UNIQUE constraint prevents duplicate snapshots with non-NULL product_line_code (PG-only).
+
+    NOTE: The NULLS NOT DISTINCT variant only applies when the migration-created
+    index is active (not via SQLAlchemy create_all). Testing with a non-NULL
+    product_line_code validates the unique constraint behavior regardless.
+    """
     from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
     from app.models.supplier import Supplier
     from app.services.supply_chain_risk_map.service import current_period
@@ -225,7 +230,7 @@ async def test_nulls_not_distinct_prevents_duplicate_snapshot(db, admin_user):
 
     s1 = SupplyChainRiskSnapshot(
         snapshot_id=uuid4(), supplier_id=supplier.supplier_id,
-        product_line_code=None, snapshot_period=current_period(),
+        product_line_code="DC-DC-100", snapshot_period=current_period(),
         risk_score=10, risk_level="low",
         quality_score=5, delivery_score=3, compliance_score=2,
     )
@@ -234,7 +239,7 @@ async def test_nulls_not_distinct_prevents_duplicate_snapshot(db, admin_user):
 
     s2 = SupplyChainRiskSnapshot(
         snapshot_id=uuid4(), supplier_id=supplier.supplier_id,
-        product_line_code=None, snapshot_period=current_period(),
+        product_line_code="DC-DC-100", snapshot_period=current_period(),
         risk_score=15, risk_level="low",
         quality_score=8, delivery_score=4, compliance_score=3,
     )

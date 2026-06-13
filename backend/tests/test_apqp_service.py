@@ -94,6 +94,7 @@ class TestCreateProject:
         proj = await apqp_service.create_project(
             db, project_name="APQP Test", product_name="Product X",
             product_line_code="DC-DC-100", user_id=user.user_id,
+            factory_id=_DEFAULT_FACTORY_ID,
         )
         assert proj.project_code.startswith("APQP-2026-")
         assert proj.current_phase == 1
@@ -107,6 +108,7 @@ class TestCreateProject:
             await apqp_service.create_project(
                 db, project_name="X", product_name="Y", product_line_code="DC-DC-100",
                 user_id=user.user_id, dfmea_id=fake_id,
+                factory_id=_DEFAULT_FACTORY_ID,
             )
 
 

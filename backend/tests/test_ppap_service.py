@@ -93,6 +93,7 @@ async def _make_ppap(db: AsyncSession, user: User, supplier_id: uuid.UUID, **kwa
         part_no="TEST-PART",
         part_name="Test Part",
         user_id=user.user_id,
+        factory_id=_DEFAULT_FACTORY_ID,
         **kwargs,
     )
 

@@ -78,11 +78,21 @@ async def erp_db() -> AsyncSession:
 @pytest_asyncio.fixture
 async def erp_admin(erp_db: AsyncSession) -> User:
     """Create and return a test admin user with a random UUID."""
+    from tests.conftest import DEFAULT_FACTORY_ID
+    from app.models.factory import Factory
+    # Ensure factory exists
+    result = await erp_db.execute(
+        select(Factory).where(Factory.id == DEFAULT_FACTORY_ID)
+    )
+    if result.scalar_one_or_none() is None:
+        erp_db.add(Factory(id=DEFAULT_FACTORY_ID, code="TEST", name="Test Factory"))
+        await erp_db.flush()
+
     result = await erp_db.execute(
         select(ProductLine).where(ProductLine.code == "DC-DC-100")
     )
     if result.scalar_one_or_none() is None:
-        erp_db.add(ProductLine(code="DC-DC-100", name="DC-DC-100"))
+        erp_db.add(ProductLine(code="DC-DC-100", name="DC-DC-100", factory_id=DEFAULT_FACTORY_ID))
         await erp_db.flush()
 
     result = await erp_db.execute(
@@ -108,6 +118,7 @@ async def erp_admin(erp_db: AsyncSession) -> User:
         role_id=role.id,
         legacy_role="admin",
         is_active=True,
+        factory_id=DEFAULT_FACTORY_ID,
     )
     erp_db.add(user)
     await erp_db.flush()
@@ -124,12 +135,14 @@ async def _create_connection(
     session: AsyncSession, user: User, name: str = "test"
 ) -> ERPConnection:
     """Create a mock ERP connection and return it (flushed, not committed)."""
+    from tests.conftest import DEFAULT_FACTORY_ID
     conn = ERPConnection(
         name=name,
         connector_type="mock",
         config={},
         created_by=user.user_id,
         product_line_code="DC-DC-100",
+        factory_id=DEFAULT_FACTORY_ID,
     )
     session.add(conn)
     await session.flush()
@@ -198,6 +211,7 @@ class TestIngestion:
             short_name="TS",
             status="approved",
             created_by=erp_admin.user_id,
+            factory_id=erp_admin.factory_id,
         )
         erp_db.add(supplier)
         await erp_db.flush()
@@ -212,6 +226,7 @@ class TestIngestion:
                 "supplier_code": supplier_no,
                 "name": "Test Supplier",
             },
+            factory_id=erp_admin.factory_id,
         )
 
         result = await erp_db.execute(
@@ -241,6 +256,7 @@ class TestIngestion:
                 "supplier_code": "UNKNOWN-SUP",
                 "quantity": 100,
             },
+            factory_id=erp_admin.factory_id,
         )
 
         result = await erp_db.execute(
@@ -256,7 +272,7 @@ class TestIngestion:
     ):
         """Shipment ingestion should create ShipmentRecord and link erp_shipment."""
         # Create customer
-        customer = Customer(customer_code="CUST-TEST", name="Test Customer")
+        customer = Customer(customer_code="CUST-TEST", name="Test Customer", factory_id=erp_admin.factory_id)
         erp_db.add(customer)
         await erp_db.flush()
 
@@ -271,6 +287,7 @@ class TestIngestion:
                 "customer_code": "CUST-TEST",
                 "name": "Test Customer",
             },
+            factory_id=erp_admin.factory_id,
         )
 
         # Ingest shipment
@@ -286,6 +303,7 @@ class TestIngestion:
                 "quantity": 50,
                 "shipment_date": "2026-06-01",
             },
+            factory_id=erp_admin.factory_id,
         )
 
         # Verify ShipmentRecord created
@@ -325,6 +343,7 @@ class TestTraceability:
                 "supplier_code": "SUP-001",
                 "name": "Supplier A",
             },
+            factory_id=erp_admin.factory_id,
         )
         # Create PO
         await ERPIngestionService._ingest_purchase_orders(
@@ -338,6 +357,7 @@ class TestTraceability:
                 "lot_no": "LOT-001",
                 "quantity": 100,
             },
+            factory_id=erp_admin.factory_id,
         )
 
         result = await ERPTraceabilityService.query(

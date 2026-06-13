@@ -759,6 +759,7 @@ async def lock_unlock_control_limits(
             is_locked=True,
             version_no=next_version,
             is_active=True,
+            factory_id=ic.factory_id,
         )
         db.add(snapshot)
 
@@ -812,6 +813,7 @@ async def _create_sample_batch_inner(
         subgroup_size=len(values),
         inspected_count=inspected_count,
         defect_count=defect_count,
+        factory_id=ic.factory_id,
     )
     db.add(batch)
     await db.flush()
@@ -1011,6 +1013,7 @@ async def _reevaluate_alarms_no_commit(db: AsyncSession, ic: InspectionCharacter
             rule_no=alarm["rule_no"],
             severity=alarm["severity"],
             status="open",
+            factory_id=ic.factory_id,
         )
         db.add(spc_alarm)
         new_alarms.append(spc_alarm)
@@ -1191,6 +1194,7 @@ async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> 
             rule_no=alarm["rule_no"],
             severity=alarm["severity"],
             status="open",
+            factory_id=ic.factory_id,
         )
         db.add(spc_alarm)
         new_alarms.append(spc_alarm)
@@ -1205,6 +1209,7 @@ async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> 
                 status="D1_TEAM",
                 severity="严重",
                 created_by=ic.created_by_id,
+                factory_id=ic.factory_id,
             )
             db.add(capa)
             await db.flush()
@@ -1322,6 +1327,7 @@ async def create_capa_from_alarm(
         created_by=user_id,
         fmea_ref_id=alarm.confirmed_fmea_id,
         fmea_node_id=alarm.confirmed_fmea_node_id,
+        factory_id=ic.factory_id,
     )
     db.add(capa)
     await db.flush()

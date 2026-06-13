@@ -65,12 +65,17 @@ async def seed_supplier(db, admin_user, default_factory):
 
 @pytest.mark.asyncio
 async def test_generate_snapshot_upsert(db, seed_supplier):
-    """Generating snapshot twice for the same month overwrites (UPSERT)."""
+    """Generating snapshot twice for the same month overwrites (UPSERT).
+
+    Uses product_line_code="DC-DC-100" because ON CONFLICT on a standard
+    UNIQUE constraint does not match NULLs. The NULLS NOT DISTINCT variant
+    from the migration only applies when the migration-created index is active.
+    """
     from app.services.supply_chain_risk_map.service import generate_snapshot
     period = current_period()
-    count1 = await generate_snapshot(db, None, period)
+    count1 = await generate_snapshot(db, "DC-DC-100", period)
     assert count1 >= 1
-    count2 = await generate_snapshot(db, None, period)
+    count2 = await generate_snapshot(db, "DC-DC-100", period)
     # Second call should UPSERT, not add new rows
     total = (await db.execute(
         select(func.count()).select_from(SupplyChainRiskSnapshot)

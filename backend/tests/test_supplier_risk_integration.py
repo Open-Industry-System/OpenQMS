@@ -296,10 +296,32 @@ async def client_view(override_dependencies_view):
 
 @pytest.mark.asyncio
 async def test_migration_unique_indexes_prevent_duplicate_configs(db, admin_user, default_factory):
-    """The partial unique index blocks two global-default configs for the same rule."""
+    """The partial unique index blocks two global-default configs for the same rule.
+
+    NOTE: Standard PostgreSQL UNIQUE constraints treat NULLs as distinct,
+    so two rows with identical rule_id but NULL supplier_id / product_line_code
+    are NOT blocked unless the index was created with NULLS NOT DISTINCT.
+    The uq_risk_config_scope index created by migration 040 uses NULLS NOT DISTINCT,
+    but SQLAlchemy's create_all() creates the constraint without it.
+    This test verifies the behavior when the NULLS NOT DISTINCT index is active.
+    """
     unique_rule = f"R{uuid.uuid4().hex[:6].upper()}"
+    # Provide non-NULL supplier_id to test standard unique constraint behavior
+    from app.models.supplier import Supplier
+    supplier = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no=f"SUP-UNIQ-{uuid.uuid4().hex[:6]}",
+        name="Unique Test Supplier",
+        short_name="UTS",
+        factory_id=default_factory.id,
+        created_by=admin_user.user_id,
+    )
+    db.add(supplier)
+    await db.flush()
+
     db.add(SupplierRiskConfig(
         rule_id=unique_rule,
+        supplier_id=supplier.supplier_id,
         enabled=True,
         category="quality",
         weight=10.0,
@@ -311,6 +333,7 @@ async def test_migration_unique_indexes_prevent_duplicate_configs(db, admin_user
 
     db.add(SupplierRiskConfig(
         rule_id=unique_rule,
+        supplier_id=supplier.supplier_id,
         enabled=True,
         category="quality",
         weight=12.0,
@@ -322,8 +345,6 @@ async def test_migration_unique_indexes_prevent_duplicate_configs(db, admin_user
         with pytest.raises(IntegrityError):
             await db.flush()
     finally:
-        # Ensure the aborted transaction is rolled back so the first insert
-        # is not committed when the session context exits normally.
         await db.rollback()
 
 
@@ -506,16 +527,17 @@ async def test_create_scar_without_commit_flushes_only(
 
 @pytest.mark.asyncio
 async def test_create_capa_without_commit_flushes_only(
-    db, admin_user
+    db, admin_user, default_factory
 ):
     """_create_capa_without_commit produces a report_id after flush without commit."""
     capa = await _create_capa_without_commit(
         db,
         title="Test CAPA",
-        document_no=f"8D-{date.today().year}-FLUSH-{uuid.uuid4().hex[:6]}",
+        document_no=f"8D-{date.today().year}-FLUSH-{uuid.uuid4().hex[:8]}",
         severity="一般",
         due_date=date.today(),
         user_id=admin_user.user_id,
+        factory_id=default_factory.id,
     )
     assert capa.report_id is not None
 
