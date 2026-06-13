@@ -36,60 +36,37 @@ def upgrade() -> None:
         ),
     )
 
-    op.create_table(
-        "review_reports",
-        sa.Column(
-            "report_id",
-            postgresql.UUID(as_uuid=True),
-            primary_key=True,
-            server_default=sa.text("gen_random_uuid()"),
-        ),
-        sa.Column(
-            "review_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("management_reviews.review_id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column("version_no", sa.Integer, nullable=False),
-        sa.Column(
-            "content",
-            postgresql.JSONB(astext_type=sa.Text()),
-            nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
-        ),
-        sa.Column(
-            "created_by",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("users.user_id"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column(
-            "finalized_by",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("users.user_id"),
-            nullable=True,
-            index=True,
-        ),
-        sa.Column("finalized_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-        sa.UniqueConstraint("review_id", "version_no", name="uq_review_reports_review_version"),
-    )
+    # Guard: t001_tenant_squash may have already created review_reports via
+    # metadata.create_all(CHECKFIRST).  Use IF NOT EXISTS to avoid
+    # DuplicateTableError when running after t001.
+    conn = op.get_bind()
+    conn.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS review_reports (
+            report_id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+            review_id UUID NOT NULL REFERENCES management_reviews(review_id) ON DELETE CASCADE,
+            version_no INTEGER NOT NULL,
+            content JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_by UUID NOT NULL REFERENCES users(user_id),
+            finalized_by UUID REFERENCES users(user_id),
+            finalized_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+            UNIQUE (review_id, version_no)
+        )
+    """))
+    conn.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_review_reports_review_id ON review_reports (review_id)"
+    ))
+    conn.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_review_reports_created_by ON review_reports (created_by)"
+    ))
+    conn.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_review_reports_finalized_by ON review_reports (finalized_by)"
+    ))
 
 
 def downgrade() -> None:
-    op.drop_table("review_reports")
+    conn = op.get_bind()
+    conn.execute(sa.text("DROP TABLE IF EXISTS review_reports"))
     op.drop_column("management_reviews", "generated_report")
     op.drop_column("management_reviews", "report_status")
