@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, date
 from typing import Optional
 
-from sqlalchemy import String, Float, Date, DateTime, Text, Boolean, ForeignKey, func, text
+from sqlalchemy import String, Float, Date, DateTime, Text, Boolean, ForeignKey, func, text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,6 +38,9 @@ class SupplierRiskAlert(Base):
 
 class SupplierRiskConfig(Base):
     __tablename__ = "supplier_risk_configs"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "supplier_id", "product_line_code", name="uq_risk_config_scope"),
+    )
 
     config_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     rule_id: Mapped[str] = mapped_column(String(10), nullable=False)

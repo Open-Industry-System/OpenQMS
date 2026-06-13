@@ -39,7 +39,7 @@ def _check_factory_access(entity, scope: RequestScope):
 async def _get_control_plan(db: AsyncSession, cp_id: uuid.UUID):
     """Fetch a control plan and return it, or None."""
     from app.models.control_plan import ControlPlan
-    result = await db.execute(select(ControlPlan).where(ControlPlan.id == cp_id))
+    result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == cp_id))
     return result.scalar_one_or_none()
 
 

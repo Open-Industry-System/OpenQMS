@@ -62,6 +62,7 @@ class TestGenerateDraftSuccess:
 
         request = MagicMock()
         llm_provider = MagicMock()
+        llm_provider.model = "test-model"
         llm_provider.complete = AsyncMock(return_value={
             "structured_data": {
                 "problem_statement": "陈述", "affected_product": "DC-DC-100",
@@ -102,6 +103,7 @@ class TestGenerateDraftSuccess:
 
         request = MagicMock()
         llm_provider = MagicMock()
+        llm_provider.model = "test-model"
         llm_provider.complete = AsyncMock(return_value={"content": "这是一段描述"})
         request.app.state.llm_provider = llm_provider
 
@@ -136,6 +138,7 @@ class TestGenerateDraftSuccess:
 
         request = MagicMock()
         llm_provider = MagicMock()
+        llm_provider.model = "test-model"
         llm_provider.complete = AsyncMock(return_value={
             "structured_data": {"problem_statement": "缓存测试", "affected_product": "A", "defect_description": "B", "occurrence_context": "C", "impact_scope": "D"}
         })
@@ -163,9 +166,11 @@ class TestGenerateDraftValidation:
         audit_cm = MagicMock()
         audit_cm.__aenter__ = AsyncMock(return_value=audit_session)
         audit_cm.__aexit__ = AsyncMock(return_value=False)
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
         with patch.object(capa_draft_service, "async_session", return_value=audit_cm):
             with pytest.raises(HTTPException) as exc:
-                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, MagicMock(), MagicMock())
+                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, user, MagicMock())
         assert exc.value.status_code == 400
         assert "request_id" in exc.value.detail
         assert audit_session.commit.called  # audit written even on 400
@@ -181,9 +186,11 @@ class TestGenerateDraftValidation:
         audit_cm = MagicMock()
         audit_cm.__aenter__ = AsyncMock(return_value=audit_session)
         audit_cm.__aexit__ = AsyncMock(return_value=False)
+        user = MagicMock()
+        user.user_id = uuid.uuid4()
         with patch.object(capa_draft_service, "async_session", return_value=audit_cm):
             with pytest.raises(HTTPException) as exc:
-                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, MagicMock(), MagicMock())
+                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, user, MagicMock())
         assert exc.value.status_code == 400
         assert "request_id" in exc.value.detail
         assert audit_session.commit.called  # audit written even on 400
@@ -451,6 +458,7 @@ class TestRateLimitAndErrors:
 
         request = MagicMock()
         llm_provider = MagicMock()
+        llm_provider.model = "test-model"
         llm_provider.complete = AsyncMock(side_effect=Exception("JSON decode error"))
         request.app.state.llm_provider = llm_provider
 
@@ -592,6 +600,7 @@ class TestProductLineEnforcement:
 
         # Mock LLM provider
         llm_provider = MagicMock()
+        llm_provider.model = "test-model"
         llm_provider.complete = AsyncMock(return_value={
             "structured_data": {
                 "problem_statement": "问题描述",
@@ -687,6 +696,7 @@ class TestProductLineEnforcement:
 
         request = MagicMock()
         llm_provider = MagicMock()
+        llm_provider.model = "test-model"
         llm_provider.complete = AsyncMock(return_value={
             "structured_data": {
                 "problem_statement": "审计测试", "affected_product": "A",

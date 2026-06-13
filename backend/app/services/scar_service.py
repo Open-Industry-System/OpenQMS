@@ -145,7 +145,7 @@ async def create_scar(
         changed_fields={"scar_no": scar.scar_no, "supplier_id": str(supplier_id), "source_type": source_type, "description": description},
         operated_by=user_id,
     ))
-    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
+    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code, scar.factory_id)
     await db.commit()
     await db.refresh(scar)
     # Re-load with supplier relationship
@@ -163,17 +163,22 @@ async def _create_scar_without_commit(
     due_date: date | None = None,
     issued_by: uuid.UUID,
     product_line_code: str | None = None,
+    factory_id: uuid.UUID | None = None,
 ) -> SupplierSCAR:
     """Create SCAR without committing — caller must commit."""
     supplier = await db.get(Supplier, supplier_id)
     if not supplier:
         raise ValueError("供应商不存在")
 
+    # Inherit factory_id from supplier if not provided
+    scar_factory_id = factory_id or supplier.factory_id
+
     for attempt in range(3):
         scar_no = await _next_scar_no(db)
         scar = SupplierSCAR(
             scar_no=scar_no,
             supplier_id=supplier_id,
+            factory_id=scar_factory_id,
             source_type=source_type,
             source_id=source_id,
             description=description,
@@ -220,7 +225,7 @@ async def update_scar(
         changed_fields={k: v for k, v in {"description": description, "requested_action": requested_action, "due_date": str(due_date) if due_date else None}.items() if v is not None},
         operated_by=user_id,
     ))
-    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
+    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code, scar.factory_id)
     await db.commit()
     return await get_scar(db, scar.scar_id)
 

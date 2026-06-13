@@ -11,7 +11,7 @@ from alembic import op
 
 
 revision = '039'
-down_revision = '038_ensure_pgcrypto_extension'
+down_revision = '038'
 branch_labels = None
 depends_on = None
 

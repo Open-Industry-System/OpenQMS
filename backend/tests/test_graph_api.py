@@ -4,11 +4,14 @@ import os
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-graph-api-tests")
 
 import pytest
+from unittest.mock import patch, AsyncMock
 from httpx import AsyncClient, ASGITransport
 from fastapi import status
 
 from app.main import app
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_request_scope, RequestScope
+from app.core.factory_scope import FactoryScope, ProductLineScope
+from app.core.permissions import PermissionLevel
 from app.graph.deps import get_graph_repository
 
 
@@ -148,17 +151,34 @@ async def _override_repo():
 
 async def _override_get_user_permission(user, module, db):
     from app.core.permissions import PermissionLevel
-    # admin 返回 VIEW，viewer 返回 NONE（模拟 scope 降级）
-    return PermissionLevel.VIEW if user.role_definition.role_key == "admin" else PermissionLevel.NONE
+    # admin returns ADMIN for knowledge_graph, VIEW for others; viewer returns NONE
+    if user.role_definition.role_key == "admin":
+        if module.value == "knowledge_graph":
+            return PermissionLevel.ADMIN
+        return PermissionLevel.VIEW
+    return PermissionLevel.NONE
+
+
+async def _override_request_scope(request=None, factory_id=None):
+    """Build a mock RequestScope with full access for admin."""
+    user = await _override_get_current_user()
+    factory_scope = FactoryScope(accessible_factory_ids=None, default_factory_id=None)
+    pl_scope = ProductLineScope(mode="ALL", codes=None)
+    return RequestScope(
+        factory_scope=factory_scope,
+        effective_factory_id=None,
+        pl_scope=pl_scope,
+        user=user,
+    )
 
 
 @pytest.fixture
 async def client():
     """基于 ASGI transport 的测试客户端，注入 stub repo 和 mock user。"""
-    from app.core.permissions import get_user_permission
+    from app.core.deps import get_request_scope
     app.dependency_overrides[get_current_user] = _override_get_current_user
     app.dependency_overrides[get_graph_repository] = _override_repo
-    app.dependency_overrides[get_user_permission] = _override_get_user_permission
+    app.dependency_overrides[get_request_scope] = _override_request_scope
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -232,17 +252,48 @@ from app.api.graph import mask_name
 @pytest.mark.asyncio
 async def test_global_stats_admin_only(client: AsyncClient):
     """验证 /global-stats 仅 admin 可访问。"""
-    # 默认 client 使用 admin 角色，先验证 200
-    resp = await client.get("/api/graph/global-stats")
+    from app.core.deps import get_request_scope
+    from app.core.factory_scope import FactoryScope, ProductLineScope
+    from app.core.deps import RequestScope
+
+    # Admin user with ADMIN permission on knowledge_graph should get 200
+    admin_user = _make_user("admin")
+    admin_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=None),
+        effective_factory_id=None,
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=admin_user,
+    )
+
+    async def _admin_scope_override():
+        return admin_scope
+
+    app.dependency_overrides[get_request_scope] = _admin_scope_override
+
+    with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.ADMIN):
+        resp = await client.get("/api/graph/global-stats")
     assert resp.status_code == status.HTTP_200_OK
 
     # 切换为 non-admin 角色
-    app.dependency_overrides[get_current_user] = lambda: _make_user("viewer")
-    try:
+    viewer_user = _make_user("viewer")
+    viewer_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=[], default_factory_id=None),
+        effective_factory_id=None,
+        pl_scope=ProductLineScope(mode="NONE", codes=[]),
+        user=viewer_user,
+    )
+
+    async def _viewer_scope_override():
+        return viewer_scope
+
+    app.dependency_overrides[get_request_scope] = _viewer_scope_override
+
+    with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.NONE):
         resp = await client.get("/api/graph/global-stats")
-        assert resp.status_code == status.HTTP_403_FORBIDDEN
-    finally:
-        app.dependency_overrides[get_current_user] = _override_get_current_user
+    assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    # Restore admin scope
+    app.dependency_overrides[get_request_scope] = _override_request_scope
 
 
 # mask_name 边界测试（纯函数，不依赖 HTTP）
@@ -282,7 +333,8 @@ def test_mask_name_two_char_alphanumeric():
 @pytest.mark.asyncio
 async def test_global_stats_response_sanitized(client: AsyncClient):
     """验证 /global-stats 响应已脱敏，无敏感字段。"""
-    resp = await client.get("/api/graph/global-stats")
+    with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.ADMIN):
+        resp = await client.get("/api/graph/global-stats")
     assert resp.status_code == status.HTTP_200_OK
     data = resp.json()
 
@@ -334,7 +386,8 @@ async def test_global_stats_response_sanitized(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_global_stats_rejects_product_line_code_param(client: AsyncClient):
     """验证 /global-stats 传入 product_line_code 参数返回 400。"""
-    resp = await client.get("/api/graph/global-stats?product_line_code=DC-DC-100")
+    with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.ADMIN):
+        resp = await client.get("/api/graph/global-stats?product_line_code=DC-DC-100")
     assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
 
@@ -365,12 +418,23 @@ async def test_similar_nodes_advanced_success(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_similar_nodes_advanced_scope_downgrade(client: AsyncClient):
     """viewer 无 KNOWLEDGE_GRAPH 权限，global 被降级为 current_product_line。"""
-    from unittest.mock import patch, AsyncMock
     from app.core.permissions import PermissionLevel
 
-    app.dependency_overrides[get_current_user] = lambda: _make_user("viewer")
+    viewer_user = _make_user("viewer")
+    viewer_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=[], default_factory_id=None),
+        effective_factory_id=None,
+        pl_scope=ProductLineScope(mode="EXPLICIT", codes=["DC-DC-100"]),
+        user=viewer_user,
+    )
+
+    async def _viewer_scope_override():
+        return viewer_scope
+
+    app.dependency_overrides[get_current_user] = lambda: viewer_user
+    app.dependency_overrides[get_request_scope] = _viewer_scope_override
     try:
-        with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.NONE),              patch("app.api.graph.enforce_product_line_access", new_callable=AsyncMock):
+        with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.NONE):
             resp = await client.post("/api/graph/similar-nodes", json={
                 "node_type": "FailureMode",
                 "query_text": "焊接",
@@ -384,21 +448,29 @@ async def test_similar_nodes_advanced_scope_downgrade(client: AsyncClient):
         assert data["matches"][0]["product_line_code"] == "DC-DC-100"
     finally:
         app.dependency_overrides[get_current_user] = _override_get_current_user
+        app.dependency_overrides[get_request_scope] = _override_request_scope
 
 
 @pytest.mark.asyncio
 async def test_similar_nodes_advanced_rejects_unauthorized_product_line(client: AsyncClient):
     """无权产品线返回 403。"""
-    from unittest.mock import patch, AsyncMock
     from app.core.permissions import PermissionLevel
-    from fastapi import HTTPException
 
-    async def _raise_403(*a, **kw):
-        raise HTTPException(status_code=403, detail="无权访问产品线")
+    viewer_user = _make_user("viewer")
+    viewer_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=[], default_factory_id=None),
+        effective_factory_id=None,
+        pl_scope=ProductLineScope(mode="EXPLICIT", codes=["DC-DC-100"]),
+        user=viewer_user,
+    )
 
-    app.dependency_overrides[get_current_user] = lambda: _make_user("viewer")
+    async def _viewer_scope_override():
+        return viewer_scope
+
+    app.dependency_overrides[get_current_user] = lambda: viewer_user
+    app.dependency_overrides[get_request_scope] = _viewer_scope_override
     try:
-        with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.NONE),              patch("app.api.graph.enforce_product_line_access", side_effect=_raise_403):
+        with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.NONE):
             resp = await client.post("/api/graph/similar-nodes", json={
                 "node_type": "FailureMode",
                 "query_text": "焊接",
@@ -408,3 +480,4 @@ async def test_similar_nodes_advanced_rejects_unauthorized_product_line(client: 
         assert resp.status_code == 403
     finally:
         app.dependency_overrides[get_current_user] = _override_get_current_user
+        app.dependency_overrides[get_request_scope] = _override_request_scope

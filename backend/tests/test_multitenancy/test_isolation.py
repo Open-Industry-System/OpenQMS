@@ -1,15 +1,32 @@
 """Test that tenant schemas are properly isolated — data in tenant A is invisible to tenant B."""
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.pool import NullPool
 
-from app.database import async_session
+from app.config import settings
 from app.core.tenant_utils import set_search_path_sql, current_tenant_schema
 
 
+@pytest_asyncio.fixture
+async def engine():
+    """Create a fresh engine per test to avoid event-loop-attached connection pools."""
+    eng = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    yield eng
+    await eng.dispose()
+
+
+@pytest_asyncio.fixture
+async def session_factory(engine):
+    """Session factory bound to the test-scoped engine."""
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
 @pytest.mark.asyncio
-async def test_tenant_data_isolation():
+async def test_tenant_data_isolation(session_factory):
     """Write data to tenant_a schema, verify tenant_b cannot see it."""
-    async with async_session() as conn:
+    async with session_factory() as conn:
         # Setup: create two test schemas
         await conn.execute(text('CREATE SCHEMA IF NOT EXISTS tenant_test_isolation_a'))
         await conn.execute(text('CREATE SCHEMA IF NOT EXISTS tenant_test_isolation_b'))
@@ -52,16 +69,16 @@ async def test_tenant_data_isolation():
 
 
 @pytest.mark.asyncio
-async def test_search_path_reset_on_pool_return():
+async def test_search_path_reset_on_pool_return(session_factory):
     """After a request completes, search_path must be reset via checkout event."""
-    async with async_session() as conn:
+    async with session_factory() as conn:
         # Set search_path to a tenant schema
         await conn.execute(text(set_search_path_sql("tenant_test_reset")))
         await conn.commit()
         await conn.close()
 
     # Open a new session — checkout event should have reset search_path
-    async with async_session() as conn:
+    async with session_factory() as conn:
         result = await conn.execute(text("SELECT current_setting('search_path')"))
         search_path = result.scalar()
         assert 'tenant_test_reset' not in search_path, \
@@ -74,9 +91,10 @@ async def test_context_var_no_leak_on_error():
     token = current_tenant_schema.set("tenant_test")
     assert current_tenant_schema.get() == "tenant_test"
 
-    try:
-        raise RuntimeError("simulated error")
-    finally:
-        current_tenant_schema.reset(token)
+    with pytest.raises(RuntimeError, match="simulated error"):
+        try:
+            raise RuntimeError("simulated error")
+        finally:
+            current_tenant_schema.reset(token)
 
     assert current_tenant_schema.get() is None, "ContextVar must be None after reset"

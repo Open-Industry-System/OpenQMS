@@ -121,9 +121,10 @@ def _make_rest_config(**overrides: Any) -> dict:
 
 @pytest_asyncio.fixture(scope="module")
 async def db_engine():
-    """Create a test database engine."""
+    """Create a test database engine with NullPool to avoid event-loop attachment issues."""
+    from sqlalchemy.pool import NullPool
     url = os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL)
-    engine = create_async_engine(url, echo=False)
+    engine = create_async_engine(url, echo=False, poolclass=NullPool)
     yield engine
     await engine.dispose()
 

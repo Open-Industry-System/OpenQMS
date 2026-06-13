@@ -671,7 +671,7 @@ async def create_audit_finding(
     )
     db.add(audit_log)
 
-    await enqueue_embedding(db, "audit_finding", finding.finding_id, None)
+    await enqueue_embedding(db, "audit_finding", finding.finding_id, None, finding.factory_id)
     try:
         await db.commit()
     except IntegrityError as e:
@@ -733,7 +733,7 @@ async def update_audit_finding(
     )
     db.add(audit_log)
 
-    await enqueue_embedding(db, "audit_finding", finding.finding_id, None)
+    await enqueue_embedding(db, "audit_finding", finding.finding_id, None, finding.factory_id)
     try:
         await db.commit()
     except IntegrityError as e:

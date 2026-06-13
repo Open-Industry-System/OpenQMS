@@ -652,7 +652,7 @@ async def create_complaint(db: AsyncSession, data, user_id: uuid.UUID) -> Custom
         user_id,
         {key: _jsonable(getattr(complaint, key)) for key in allowed if hasattr(complaint, key)},
     )
-    await enqueue_embedding(db, "complaint", complaint.complaint_id, complaint.product_line_code)
+    await enqueue_embedding(db, "complaint", complaint.complaint_id, complaint.product_line_code, complaint.factory_id)
     try:
         await db.commit()
     except IntegrityError:
@@ -740,7 +740,7 @@ async def update_complaint(
     await _audit(
         db, "customer_complaints", complaint.complaint_id, "UPDATE", user_id, changed_fields
     )
-    await enqueue_embedding(db, "complaint", complaint.complaint_id, complaint.product_line_code)
+    await enqueue_embedding(db, "complaint", complaint.complaint_id, complaint.product_line_code, complaint.factory_id)
     try:
         await db.commit()
     except IntegrityError:
@@ -1019,7 +1019,7 @@ async def create_rma_record(db: AsyncSession, data, user_id: uuid.UUID) -> RMARe
             user_id,
             {"has_rma": {"before": old_has_rma, "after": True}, "rma_id": _jsonable(rma.rma_id)},
         )
-    await enqueue_embedding(db, "rma", rma.rma_id, rma.product_line_code)
+    await enqueue_embedding(db, "rma", rma.rma_id, rma.product_line_code, rma.factory_id)
     try:
         await db.commit()
     except IntegrityError:
@@ -1123,7 +1123,7 @@ async def update_rma_record(
         return rma
 
     await _audit(db, "rma_records", rma.rma_id, "UPDATE", user_id, changed_fields)
-    await enqueue_embedding(db, "rma", rma.rma_id, rma.product_line_code)
+    await enqueue_embedding(db, "rma", rma.rma_id, rma.product_line_code, rma.factory_id)
     try:
         await db.commit()
     except IntegrityError:

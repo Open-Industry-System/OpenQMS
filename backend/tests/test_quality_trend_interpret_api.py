@@ -6,6 +6,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
+from app.core.deps import get_request_scope, RequestScope
+from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.core.permissions import PermissionLevel, get_current_user
 from app.database import get_db
 from app.main import app
@@ -27,6 +29,7 @@ def _make_user():
     user.role_id = uuid.uuid4()
     user.role_definition = MagicMock()
     user.role_definition.bypass_row_level_security = True
+    user.factory_id = uuid.uuid4()
     return user
 
 
@@ -59,18 +62,32 @@ async def _call_interpret(llm_provider):
     async def mock_get_db():
         return db
 
+    user = _make_user()
+
     async def mock_get_current_user():
-        return _make_user()
+        return user
+
+    mock_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=user.factory_id),
+        effective_factory_id=user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=user,
+    )
+
+    async def mock_get_request_scope():
+        return mock_scope
 
     app.dependency_overrides[get_db] = mock_get_db
     app.dependency_overrides[get_current_user] = mock_get_current_user
+    app.dependency_overrides[get_request_scope] = mock_get_request_scope
     app.state.llm_provider = llm_provider
 
     async def mock_get_user_permission(user, module, db):
         return PermissionLevel.VIEW if module.value in {"dashboard", "spc", "capa", "fmea"} else PermissionLevel.NONE
 
     try:
-        with patch("app.core.permissions.get_user_permission", new=mock_get_user_permission):
+        with patch("app.core.permissions.get_user_permission", new=mock_get_user_permission), \
+             patch("app.api.dashboard.get_user_permission", new=mock_get_user_permission):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.post(

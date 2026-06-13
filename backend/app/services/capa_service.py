@@ -129,7 +129,7 @@ async def create_capa(
     )
     db.add(audit_log)
 
-    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
+    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
     try:
         await db.commit()
     except IntegrityError:
@@ -246,7 +246,7 @@ async def update_capa(
         )
 
     if embedding_changed:
-        await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
+        await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
     await db.commit()
     await db.refresh(capa)
     return capa

@@ -159,8 +159,16 @@ async def test_batch_summaries_no_runs_clean_and_history(db, admin_user):
     await db.flush()
 
     # ── Call the batch endpoint ──
+    from app.core.deps import RequestScope
+    from app.core.factory_scope import FactoryScope, ProductLineScope
+    scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=admin_user.factory_id),
+        effective_factory_id=admin_user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=admin_user,
+    )
     req = ValidationSummariesRequest(cp_ids=[cp_a.cp_id, cp_b.cp_id, cp_c.cp_id])
-    resp = await batch_validation_summaries(req, db, admin_user)
+    resp = await batch_validation_summaries(req, db, scope)
     summaries = resp.summaries
 
     # CP-A: no runs → absent from summaries
@@ -218,8 +226,16 @@ async def test_batch_summaries_rejected_finding_not_leaked(db, admin_user):
     db.add(occ2)
     await db.flush()
 
+    from app.core.deps import RequestScope
+    from app.core.factory_scope import FactoryScope, ProductLineScope
+    scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=admin_user.factory_id),
+        effective_factory_id=admin_user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=admin_user,
+    )
     req = ValidationSummariesRequest(cp_ids=[cp.cp_id])
-    resp = await batch_validation_summaries(req, db, admin_user)
+    resp = await batch_validation_summaries(req, db, scope)
     sum_cp = resp.summaries[str(cp.cp_id)]
 
     assert sum_cp.run_id == run2.run_id

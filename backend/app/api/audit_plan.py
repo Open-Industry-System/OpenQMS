@@ -127,7 +127,6 @@ async def create_audit_plan(
                 checklist=req.checklist,
                 product_line_code=req.product_line_code,
                 user_id=scope.user.user_id,
-                factory_id=factory_id,
             )
         else:
             plan = await audit_service.create_audit_plan(

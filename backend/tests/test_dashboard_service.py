@@ -66,7 +66,7 @@ class TestBuildRPNRows:
 async def test_get_widgets_data_returns_only_requested_alert_payloads(monkeypatch):
     from app.services import dashboard_service
 
-    async def fake_get_alerts(db, product_line_codes=None):
+    async def fake_get_alerts(db, product_line_codes=None, **kwargs):
         return {
             "high_rpn_fmeas": [{"document_no": "PFMEA-1"}],
             "overdue_capas": [{"document_no": "8D-1"}],

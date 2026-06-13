@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Float, Integer, DateTime, ForeignKey, func, text
+from sqlalchemy import String, Float, Integer, DateTime, ForeignKey, func, text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -11,6 +11,9 @@ from app.database import Base
 
 class SupplyChainRiskSnapshot(Base):
     __tablename__ = "supply_chain_risk_snapshots"
+    __table_args__ = (
+        UniqueConstraint("supplier_id", "product_line_code", "snapshot_period", name="uq_supplier_pl_period"),
+    )
 
     snapshot_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     supplier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="CASCADE"), nullable=False)

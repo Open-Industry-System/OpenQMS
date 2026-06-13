@@ -11,7 +11,7 @@ from alembic import op
 
 
 revision = '038'
-down_revision = '037_lock_version_not_null'
+down_revision = '037'
 branch_labels = None
 depends_on = None
 

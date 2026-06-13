@@ -17,17 +17,18 @@ logger = logging.getLogger(__name__)
 ENTITY_TYPES = ["fmea_node", "capa", "audit_finding", "complaint", "scar", "rma"]
 
 ENTITY_TABLE_MAP = {
-    # (from_clause, pk_expr, plc_expr)
-    "fmea_node": ("fmea_documents", "fmea_id", "product_line_code"),
-    "capa": ("capa_eightd", "report_id", "product_line_code"),
+    # (from_clause, pk_expr, plc_expr, factory_id_expr)
+    "fmea_node": ("fmea_documents", "fmea_id", "product_line_code", "factory_id"),
+    "capa": ("capa_eightd", "report_id", "product_line_code", "factory_id"),
     "audit_finding": (
-        "audit_findings af LEFT JOIN audit_plans ap ON af.audit_id = ap.audit_id",
-        "af.finding_id",
-        "ap.product_line_code",
+        "audit_findings",
+        "finding_id",
+        "NULL",
+        "factory_id",
     ),
-    "complaint": ("customer_complaints", "complaint_id", "product_line_code"),
-    "scar": ("supplier_scars", "scar_id", "product_line_code"),
-    "rma": ("rma_records", "rma_id", "product_line_code"),
+    "complaint": ("customer_complaints", "complaint_id", "product_line_code", "factory_id"),
+    "scar": ("supplier_scars", "scar_id", "product_line_code", "factory_id"),
+    "rma": ("rma_records", "rma_id", "product_line_code", "factory_id"),
 }
 
 
@@ -37,10 +38,13 @@ async def backfill_entity_type(
     batch_size: int,
 ) -> int:
     """Enqueue outbox events for all records of a given entity type."""
-    from_clause, pk_expr, plc_expr = ENTITY_TABLE_MAP[entity_type]
+    from_clause, pk_expr, plc_expr, fid_expr = ENTITY_TABLE_MAP[entity_type]
 
     result = await db.execute(
-        text(f"SELECT {pk_expr} AS entity_id, {plc_expr} AS product_line_code FROM {from_clause}")
+        text(
+            f"SELECT {pk_expr} AS entity_id, {plc_expr} AS product_line_code, "
+            f"{fid_expr} AS factory_id FROM {from_clause}"
+        )
     )
     rows = result.fetchall()
     total = 0
@@ -49,7 +53,10 @@ async def backfill_entity_type(
         batch = rows[i : i + batch_size]
         for row in batch:
             row = row._mapping
-            await enqueue_embedding(db, entity_type, row["entity_id"], row["product_line_code"])
+            await enqueue_embedding(
+                db, entity_type, row["entity_id"],
+                row["product_line_code"], row["factory_id"],
+            )
         await db.commit()
         total += len(batch)
         logger.info(f"  Enqueued {total}/{len(rows)} {entity_type} events")

@@ -22,13 +22,14 @@ from app.services.supplier_risk.config import get_effective_configs
 
 
 @pytest_asyncio.fixture
-async def seed_supplier(db, admin_user):
+async def seed_supplier(db, admin_user, default_factory):
     """Create a test supplier."""
     supplier = Supplier(
         supplier_id=uuid.uuid4(),
         supplier_no=f"SUP-{uuid.uuid4().hex[:8]}",
         name="Test Supplier",
         short_name="Test",
+        factory_id=default_factory.id,
         status="approved",
         created_by=admin_user.user_id,
     )
@@ -43,6 +44,7 @@ async def seed_open_alert(db, seed_supplier):
     """Create an open risk alert for the test supplier."""
     alert = SupplierRiskAlert(
         supplier_id=seed_supplier.supplier_id,
+        factory_id=seed_supplier.factory_id,
         risk_level="high",
         risk_score=75.0,
         quality_score=80.0,
@@ -64,6 +66,7 @@ async def seed_acknowledged_alert(db, seed_supplier):
     """Create an acknowledged risk alert for the test supplier."""
     alert = SupplierRiskAlert(
         supplier_id=seed_supplier.supplier_id,
+        factory_id=seed_supplier.factory_id,
         risk_level="medium",
         risk_score=55.0,
         quality_score=70.0,

@@ -87,7 +87,7 @@ export default function ValidationPanel({ cpId }: Props) {
       }
     };
 
-    let timeoutRef = { current: setTimeout(tick, POLL_INTERVAL) } as { current: ReturnType<typeof setTimeout> };
+    const timeoutRef = { current: setTimeout(tick, POLL_INTERVAL) } as { current: ReturnType<typeof setTimeout> };
 
     return () => {
       clearTimeout(timeoutRef.current);

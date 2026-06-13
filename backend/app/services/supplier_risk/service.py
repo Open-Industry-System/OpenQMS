@@ -464,6 +464,7 @@ async def create_scar_from_alert(
         description=f"由风险预警 {alert.alert_id} 自动创建",
         issued_by=user_id,
         product_line_code=alert.product_line_code,
+        factory_id=alert.factory_id,
     )
 
     # Link alert to SCAR and update status
@@ -471,7 +472,7 @@ async def create_scar_from_alert(
     alert.status = "action_taken"
 
     # Enqueue embedding before commit so outbox row is committed atomically
-    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
+    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code, scar.factory_id)
 
     # Commit everything atomically
     await db.commit()
@@ -516,7 +517,7 @@ async def create_capa_from_alert(
     alert.status = "action_taken"
 
     # Enqueue embedding before commit so outbox row is committed atomically
-    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
+    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
 
     # Commit everything atomically
     await db.commit()

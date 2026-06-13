@@ -20,6 +20,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.main import app
 from app.database import get_db
+from app.core.deps import get_request_scope, RequestScope
+from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.core.permissions import get_current_user, Module, PermissionLevel
 from app.models.supplier import Supplier, SupplierSCAR
 from app.models.capa import CAPAEightD
@@ -201,6 +203,7 @@ async def seed_inspections_for_high_risk(db, seed_supplier, admin_user):
 
 def _make_user(role_key: str = "admin"):
     role_id = uuid.uuid4()
+    factory_id = uuid.uuid4()
     user = User(
         user_id=uuid.uuid4(),
         username=role_key,
@@ -209,6 +212,7 @@ def _make_user(role_key: str = "admin"):
         password_hash="hashed",
         is_active=True,
         role_id=role_id,
+        factory_id=factory_id,
     )
     user.role_definition = MagicMock()
     user.role_definition.role_key = role_key
@@ -218,22 +222,50 @@ def _make_user(role_key: str = "admin"):
 
 @pytest.fixture
 def override_dependencies_edit():
+    user = _make_user("admin")
+
     async def mock_get_current_user():
-        return _make_user("admin")
+        return user
+
+    mock_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=user.factory_id),
+        effective_factory_id=user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=user,
+    )
+
+    async def mock_get_request_scope():
+        return mock_scope
 
     app.dependency_overrides[get_current_user] = mock_get_current_user
-    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
+    app.dependency_overrides[get_request_scope] = mock_get_request_scope
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)), \
+         patch("app.api.supplier_risk.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
         yield
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
 def override_dependencies_view():
+    user = _make_user("viewer")
+
     async def mock_get_current_user():
-        return _make_user("viewer")
+        return user
+
+    mock_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=[user.factory_id], default_factory_id=user.factory_id),
+        effective_factory_id=user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=user,
+    )
+
+    async def mock_get_request_scope():
+        return mock_scope
 
     app.dependency_overrides[get_current_user] = mock_get_current_user
-    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.VIEW)):
+    app.dependency_overrides[get_request_scope] = mock_get_request_scope
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.VIEW)), \
+         patch("app.api.supplier_risk.get_user_permission", new=AsyncMock(return_value=PermissionLevel.VIEW)):
         yield
     app.dependency_overrides.clear()
 

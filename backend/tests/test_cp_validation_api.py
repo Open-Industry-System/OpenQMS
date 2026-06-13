@@ -13,6 +13,8 @@ from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.database import get_db
+from app.core.deps import get_request_scope, RequestScope
+from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.core.permissions import get_current_user, Module, PermissionLevel
 from app.models.user import User
 
@@ -28,20 +30,34 @@ def override_dependencies():
         db.get = AsyncMock(return_value=None)
         return db
 
+    user = MagicMock(spec=User)
+    user.user_id = uuid.uuid4()
+    user.username = "engineer"
+    user.role = "quality_engineer"
+    user.role_id = uuid.uuid4()
+    user.is_active = True
+    user.role_definition = MagicMock()
+    user.role_definition.bypass_row_level_security = True
+    user.factory_id = uuid.uuid4()
+
     async def mock_get_current_user():
-        user = MagicMock(spec=User)
-        user.user_id = uuid.uuid4()
-        user.username = "engineer"
-        user.role = "quality_engineer"
-        user.role_id = uuid.uuid4()
-        user.is_active = True
-        user.role_definition = MagicMock()
-        user.role_definition.bypass_row_level_security = True
         return user
+
+    mock_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=user.factory_id),
+        effective_factory_id=user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=user,
+    )
+
+    async def mock_get_request_scope():
+        return mock_scope
 
     app.dependency_overrides[get_db] = mock_get_db
     app.dependency_overrides[get_current_user] = mock_get_current_user
-    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
+    app.dependency_overrides[get_request_scope] = mock_get_request_scope
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)), \
+         patch("app.api.cp_validation.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
         yield
     app.dependency_overrides.clear()
 
@@ -56,20 +72,34 @@ def override_dependencies_view():
         db.execute = AsyncMock(return_value=MagicMock())
         return db
 
+    user = MagicMock(spec=User)
+    user.user_id = uuid.uuid4()
+    user.username = "viewer"
+    user.role = "viewer"
+    user.role_id = uuid.uuid4()
+    user.is_active = True
+    user.role_definition = MagicMock()
+    user.role_definition.bypass_row_level_security = False
+    user.factory_id = uuid.uuid4()
+
     async def mock_get_current_user():
-        user = MagicMock(spec=User)
-        user.user_id = uuid.uuid4()
-        user.username = "viewer"
-        user.role = "viewer"
-        user.role_id = uuid.uuid4()
-        user.is_active = True
-        user.role_definition = MagicMock()
-        user.role_definition.bypass_row_level_security = False
         return user
+
+    mock_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=user.factory_id),
+        effective_factory_id=user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=user,
+    )
+
+    async def mock_get_request_scope():
+        return mock_scope
 
     app.dependency_overrides[get_db] = mock_get_db
     app.dependency_overrides[get_current_user] = mock_get_current_user
-    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.VIEW)):
+    app.dependency_overrides[get_request_scope] = mock_get_request_scope
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.VIEW)), \
+         patch("app.api.cp_validation.get_user_permission", new=AsyncMock(return_value=PermissionLevel.VIEW)):
         yield
     app.dependency_overrides.clear()
 
@@ -175,20 +205,34 @@ def override_dependencies_results():
         db.get = AsyncMock(return_value=None)
         return db
 
+    user = MagicMock(spec=User)
+    user.user_id = uuid.uuid4()
+    user.username = "engineer"
+    user.role = "quality_engineer"
+    user.role_id = uuid.uuid4()
+    user.is_active = True
+    user.role_definition = MagicMock()
+    user.role_definition.bypass_row_level_security = True
+    user.factory_id = uuid.uuid4()
+
     async def mock_get_current_user():
-        user = MagicMock(spec=User)
-        user.user_id = uuid.uuid4()
-        user.username = "engineer"
-        user.role = "quality_engineer"
-        user.role_id = uuid.uuid4()
-        user.is_active = True
-        user.role_definition = MagicMock()
-        user.role_definition.bypass_row_level_security = True
         return user
+
+    mock_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=user.factory_id),
+        effective_factory_id=user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=user,
+    )
+
+    async def mock_get_request_scope():
+        return mock_scope
 
     app.dependency_overrides[get_db] = mock_get_db
     app.dependency_overrides[get_current_user] = mock_get_current_user
-    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
+    app.dependency_overrides[get_request_scope] = mock_get_request_scope
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)), \
+         patch("app.api.cp_validation.get_user_permission", new=AsyncMock(return_value=PermissionLevel.EDIT)):
         yield {
             "finding_id": fake_finding_id,
             "occ_id": fake_occ_id,

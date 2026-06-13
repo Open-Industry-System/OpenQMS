@@ -5,6 +5,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
+from app.core.deps import get_request_scope, RequestScope
+from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.core.permissions import PermissionLevel, get_current_user
 from app.database import get_db
 from app.main import app
@@ -26,9 +28,27 @@ async def test_dashboard_widgets_passes_quality_trend_module_permissions(monkeyp
         user.role_id = uuid.uuid4()
         user.role_definition = MagicMock()
         user.role_definition.bypass_row_level_security = True
+        user.factory_id = uuid.uuid4()
         return user
 
-    async def fake_get_widgets_data(db, types, product_line_codes, user_id, quality_trend_allowed_modules=None):
+    mock_user = MagicMock(spec=User)
+    mock_user.user_id = uuid.uuid4()
+    mock_user.role_id = uuid.uuid4()
+    mock_user.role_definition = MagicMock()
+    mock_user.role_definition.bypass_row_level_security = True
+    mock_user.factory_id = uuid.uuid4()
+
+    mock_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=mock_user.factory_id),
+        effective_factory_id=mock_user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=mock_user,
+    )
+
+    async def mock_get_request_scope():
+        return mock_scope
+
+    async def fake_get_widgets_data(db, types, product_line_codes, user_id, quality_trend_allowed_modules=None, **kwargs):
         service_call["types"] = types
         service_call["product_line_codes"] = product_line_codes
         service_call["quality_trend_allowed_modules"] = quality_trend_allowed_modules
@@ -52,13 +72,15 @@ async def test_dashboard_widgets_passes_quality_trend_module_permissions(monkeyp
 
     app.dependency_overrides[get_db] = mock_get_db
     app.dependency_overrides[get_current_user] = mock_get_current_user
+    app.dependency_overrides[get_request_scope] = mock_get_request_scope
     monkeypatch.setattr("app.services.dashboard_service.get_widgets_data", fake_get_widgets_data)
 
     async def mock_get_user_permission(user, module, db):
         return PermissionLevel.VIEW if module.value in {"dashboard", "spc", "capa", "fmea"} else PermissionLevel.NONE
 
     try:
-        with patch("app.core.permissions.get_user_permission", new=mock_get_user_permission):
+        with patch("app.core.permissions.get_user_permission", new=mock_get_user_permission), \
+             patch("app.api.dashboard.get_user_permission", new=mock_get_user_permission):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
