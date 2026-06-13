@@ -548,8 +548,8 @@ def upgrade() -> None:
                           ["factory_id"], ["id"])
     op.execute(sa.text("""
         UPDATE cp_validation_findings SET factory_id = (
-            SELECT factory_id FROM cp_validation_runs
-            WHERE cp_validation_runs.run_id = cp_validation_findings.run_id
+            SELECT factory_id FROM control_plans
+            WHERE control_plans.cp_id = cp_validation_findings.cp_id
         )
     """))
 
