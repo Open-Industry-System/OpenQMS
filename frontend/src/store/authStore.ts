@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { User, FactoryScope, Factory } from "../types";
-import { login as apiLogin, getMe } from "../api/auth";
+import { login as apiLogin, getMe, refreshToken as apiRefreshToken } from "../api/auth";
 
 interface AuthState {
   user: User | null;
@@ -14,9 +14,10 @@ interface AuthState {
   fetchUser: () => Promise<void>;
   setUser: (user: User | null) => void;
   setCurrentFactoryId: (factoryId: string | null) => void;
+  tryRefreshToken: () => Promise<string | null>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: localStorage.getItem("access_token"),
   loading: false,
@@ -27,6 +28,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (username, password) => {
     const resp = await apiLogin({ username, password });
     localStorage.setItem("access_token", resp.access_token);
+    localStorage.setItem("refresh_token", resp.refresh_token);
     const factoryId = resp.user.factory_scope?.default_factory_id || null;
     if (factoryId) localStorage.setItem("current_factory_id", factoryId);
     else localStorage.removeItem("current_factory_id");
@@ -41,6 +43,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: () => {
     localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
     localStorage.removeItem("current_factory_id");
     set({ user: null, token: null, factoryScope: null, factories: [], currentFactoryId: null });
   },
@@ -63,6 +66,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
     } catch {
       localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
       localStorage.removeItem("current_factory_id");
       set({ user: null, token: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
     }
@@ -76,5 +80,21 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (factoryId) localStorage.setItem("current_factory_id", factoryId);
     else localStorage.removeItem("current_factory_id");
     set({ currentFactoryId: factoryId });
+  },
+
+  tryRefreshToken: async () => {
+    const refresh_token = localStorage.getItem("refresh_token");
+    if (!refresh_token) return null;
+    try {
+      const resp = await apiRefreshToken(refresh_token);
+      localStorage.setItem("access_token", resp.access_token);
+      localStorage.setItem("refresh_token", resp.refresh_token);
+      set({ token: resp.access_token });
+      return resp.access_token;
+    } catch {
+      // Refresh failed — clear tokens and let caller handle redirect
+      get().logout();
+      return null;
+    }
   },
 }));

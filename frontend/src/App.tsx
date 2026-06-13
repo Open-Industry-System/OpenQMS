@@ -129,7 +129,7 @@ export default function App() {
         }
       >
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/dashboard" element={<ProtectedRoute requiredModule="dashboard"><DashboardPage /></ProtectedRoute>} />
         <Route path="/fmea" element={<ProtectedRoute requiredModule="fmea"><FMEAListPage /></ProtectedRoute>} />
         <Route path="/fmea/:id" element={<ProtectedRoute requiredModule="fmea"><FMEAEditorPage /></ProtectedRoute>} />
         <Route path="/capa" element={<ProtectedRoute requiredModule="capa"><CAPAListPage /></ProtectedRoute>} />
@@ -188,11 +188,11 @@ export default function App() {
         <Route path="/customer-quality/complaints/:id" element={<ProtectedRoute requiredModule="customer_quality"><ComplaintDetailPage /></ProtectedRoute>} />
         <Route path="/customer-quality/rma/:id" element={<ProtectedRoute requiredModule="customer_quality"><RMADetailPage /></ProtectedRoute>} />
         <Route path="/knowledge-graph" element={<ProtectedRoute requiredModule="knowledge_graph"><KnowledgeGraphPage /></ProtectedRoute>} />
-        <Route path="/change-impact" element={<ProtectedRoute><ChangeImpactPage /></ProtectedRoute>} />
-        <Route path="/mes/dashboard" element={<ProtectedRoute><MESDashboardPage /></ProtectedRoute>} />
-        <Route path="/mes/connections" element={<ProtectedRoute><MESConnectionsPage /></ProtectedRoute>} />
-        <Route path="/mes/orders" element={<ProtectedRoute><MESOrdersPage /></ProtectedRoute>} />
-        <Route path="/mes/scrap" element={<ProtectedRoute><MESScrapPage /></ProtectedRoute>} />
+        <Route path="/change-impact" element={<ProtectedRoute requiredModule="fmea"><ChangeImpactPage /></ProtectedRoute>} />
+        <Route path="/mes/dashboard" element={<ProtectedRoute requiredModule="mes"><MESDashboardPage /></ProtectedRoute>} />
+        <Route path="/mes/connections" element={<ProtectedRoute requiredModule="mes"><MESConnectionsPage /></ProtectedRoute>} />
+        <Route path="/mes/orders" element={<ProtectedRoute requiredModule="mes"><MESOrdersPage /></ProtectedRoute>} />
+        <Route path="/mes/scrap" element={<ProtectedRoute requiredModule="mes"><MESScrapPage /></ProtectedRoute>} />
         <Route path="/plm/dashboard" element={<ProtectedRoute requiredModule="plm"><PLMDashboardPage /></ProtectedRoute>} />
         <Route path="/plm/connections" element={<ProtectedRoute requiredModule="plm"><PLMConnectionsPage /></ProtectedRoute>} />
         <Route path="/plm/parts" element={<ProtectedRoute requiredModule="plm"><PLMPartsPage /></ProtectedRoute>} />

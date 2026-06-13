@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, ReactNode } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { Layout, Menu, Button, Avatar, Dropdown, theme, Space, Select } from "antd";
+import type { MenuProps } from "antd";
 import {
   DashboardOutlined,
   FileTextOutlined,
@@ -107,6 +108,22 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/group/factories": ["grp:group"],
 };
 
+interface MenuItem {
+  key: string;
+  icon?: ReactNode;
+  label: string;
+  module?: ModuleKey;
+  children?: MenuItem[];
+}
+
+/** Strip the custom `module` field before passing to Ant Menu (which doesn't expect it). */
+function stripModuleField(items: MenuItem[]): MenuProps["items"] {
+  return items.map(({ module: _m, ...rest }) => ({
+    ...rest,
+    ...(rest.children ? { children: stripModuleField(rest.children) } : {}),
+  }));
+}
+
 function getSelectedMenuKey(pathname: string): string {
   const matched = MENU_KEYS
     .filter((key) => pathname === key || pathname.startsWith(key + "/"))
@@ -114,21 +131,21 @@ function getSelectedMenuKey(pathname: string): string {
   return matched[0] || "/dashboard";
 }
 
-const menuItems = [
-  { key: "/dashboard", icon: <DashboardOutlined />, label: "仪表盘", module: undefined as string | undefined },
+const menuItems: MenuItem[] = [
+  { key: "/dashboard", icon: <DashboardOutlined />, label: "仪表盘" },
   {
     key: "grp:planning",
     icon: <ExperimentOutlined />,
     label: "前期质量策划",
     module: "planning",
     children: [
-      { key: "/fmea", icon: <FileTextOutlined />, label: "FMEA 管理" },
-      { key: "/control-plans", icon: <FileTextOutlined />, label: "控制计划" },
-      { key: "/apqp", icon: <ProjectOutlined />, label: "APQP 质量策划" },
-      { key: "/ppap", icon: <FileProtectOutlined />, label: "PPAP" },
-      { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性" },
-      { key: "/knowledge-graph", icon: <ShareAltOutlined />, label: "知识图谱" },
-      { key: "/change-impact", icon: <RadarChartOutlined />, label: "变更影响分析" },
+      { key: "/fmea", icon: <FileTextOutlined />, label: "FMEA 管理", module: "fmea" },
+      { key: "/control-plans", icon: <FileTextOutlined />, label: "控制计划", module: "planning" },
+      { key: "/apqp", icon: <ProjectOutlined />, label: "APQP 质量策划", module: "planning" },
+      { key: "/ppap", icon: <FileProtectOutlined />, label: "PPAP", module: "ppap" },
+      { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性", module: "special_characteristic" },
+      { key: "/knowledge-graph", icon: <ShareAltOutlined />, label: "知识图谱", module: "knowledge_graph" },
+      { key: "/change-impact", icon: <RadarChartOutlined />, label: "变更影响分析", module: "fmea" },
     ],
   },
   {
@@ -137,19 +154,20 @@ const menuItems = [
     label: "现场质量管理",
     module: "spc",
     children: [
-      { key: "/spc", icon: <BarChartOutlined />, label: "SPC 控制图" },
+      { key: "/spc", icon: <BarChartOutlined />, label: "SPC 控制图", module: "spc" },
       {
         key: "grp:msa",
         icon: <ToolOutlined />,
         label: "MSA 分析",
+        module: "msa",
         children: [
-          { key: "/msa/gauges", label: "量具管理" },
-          { key: "/msa/studies", label: "研究管理" },
+          { key: "/msa/gauges", label: "量具管理", module: "msa" },
+          { key: "/msa/studies", label: "研究管理", module: "msa" },
         ],
       },
-      { key: "/quality-goals", icon: <AimOutlined />, label: "质量目标" },
-      { key: "/internal-audits", icon: <SafetyOutlined />, label: "内部审核" },
-      { key: "/management-reviews", icon: <TeamOutlined />, label: "管理评审" },
+      { key: "/quality-goals", icon: <AimOutlined />, label: "质量目标", module: "quality_goal" },
+      { key: "/internal-audits", icon: <SafetyOutlined />, label: "内部审核", module: "audit" },
+      { key: "/management-reviews", icon: <TeamOutlined />, label: "管理评审", module: "management_review" },
     ],
   },
   {
@@ -158,9 +176,9 @@ const menuItems = [
     label: "客户质量",
     module: "customer_quality",
     children: [
-      { key: "/customer-quality", icon: <CustomerServiceOutlined />, label: "客诉/RMA" },
-      { key: "/customer-audits", icon: <AuditOutlined />, label: "客户审核" },
-      { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA" },
+      { key: "/customer-quality", icon: <CustomerServiceOutlined />, label: "客诉/RMA", module: "customer_quality" },
+      { key: "/customer-audits", icon: <AuditOutlined />, label: "客户审核", module: "customer_audit" },
+      { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA", module: "capa" },
     ],
   },
   {
@@ -169,19 +187,20 @@ const menuItems = [
     label: "供应商质量",
     module: "supplier",
     children: [
-      { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
-      { key: "/suppliers/quality", icon: <BarChartOutlined />, label: "供货质量看板" },
-      { key: "/supplier-risk", icon: <WarningOutlined />, label: "供应商风险预警" },
-      { key: "/supply-chain-risk-map", icon: <HeatMapOutlined />, label: "供应链风险地图" },
-      { key: "/scars", icon: <AlertOutlined />, label: "SCAR 管理" },
+      { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理", module: "supplier" },
+      { key: "/suppliers/quality", icon: <BarChartOutlined />, label: "供货质量看板", module: "supplier" },
+      { key: "/supplier-risk", icon: <WarningOutlined />, label: "供应商风险预警", module: "supplier_risk" },
+      { key: "/supply-chain-risk-map", icon: <HeatMapOutlined />, label: "供应链风险地图", module: "supply_chain_risk_map" },
+      { key: "/scars", icon: <AlertOutlined />, label: "SCAR 管理", module: "scar" },
       {
         key: "grp:iqc",
         icon: <ExperimentOutlined />,
         label: "来料检验",
+        module: "iqc",
         children: [
-          { key: "/iqc/inspections", label: "检验单" },
-          { key: "/iqc/materials", label: "物料管理" },
-          { key: "/iqc/aql-optimization", icon: <SafetyCertificateOutlined />, label: "抽样方案优化" },
+          { key: "/iqc/inspections", label: "检验单", module: "iqc" },
+          { key: "/iqc/materials", label: "物料管理", module: "iqc" },
+          { key: "/iqc/aql-optimization", icon: <SafetyCertificateOutlined />, label: "抽样方案优化", module: "iqc" },
         ],
       },
     ],
@@ -192,10 +211,10 @@ const menuItems = [
     label: "MES 集成",
     module: "mes",
     children: [
-      { key: "/mes/dashboard", label: "MES 看板" },
-      { key: "/mes/orders", label: "工单列表" },
-      { key: "/mes/scrap", label: "报废/返工" },
-      { key: "/mes/connections", label: "连接管理" },
+      { key: "/mes/dashboard", label: "MES 看板", module: "mes" },
+      { key: "/mes/orders", label: "工单列表", module: "mes" },
+      { key: "/mes/scrap", label: "报废/返工", module: "mes" },
+      { key: "/mes/connections", label: "连接管理", module: "mes" },
     ],
   },
   {
@@ -204,10 +223,10 @@ const menuItems = [
     label: "PLM 集成",
     module: "plm",
     children: [
-      { key: "/plm/dashboard", label: "PLM 看板" },
-      { key: "/plm/parts", label: "零件列表" },
-      { key: "/plm/change-orders", label: "变更单管理" },
-      { key: "/plm/connections", label: "连接管理" },
+      { key: "/plm/dashboard", label: "PLM 看板", module: "plm" },
+      { key: "/plm/parts", label: "零件列表", module: "plm" },
+      { key: "/plm/change-orders", label: "变更单管理", module: "plm" },
+      { key: "/plm/connections", label: "连接管理", module: "plm" },
     ],
   },
   {
@@ -216,12 +235,12 @@ const menuItems = [
     label: "ERP 集成",
     module: "erp",
     children: [
-      { key: "/erp", label: "ERP 看板" },
-      { key: "/erp/connections", label: "连接管理" },
-      { key: "/erp/master-data", label: "主数据" },
-      { key: "/erp/supply-chain", label: "供应链" },
-      { key: "/erp/commercial", label: "销售与成本" },
-      { key: "/erp/traceability", label: "批次追溯" },
+      { key: "/erp", label: "ERP 看板", module: "erp" },
+      { key: "/erp/connections", label: "连接管理", module: "erp" },
+      { key: "/erp/master-data", label: "主数据", module: "erp" },
+      { key: "/erp/supply-chain", label: "供应链", module: "erp" },
+      { key: "/erp/commercial", label: "销售与成本", module: "erp" },
+      { key: "/erp/traceability", label: "批次追溯", module: "erp" },
     ],
   },
   {
@@ -230,14 +249,44 @@ const menuItems = [
     label: "集团管理",
     module: "group",
     children: [
-      { key: "/group/dashboard", icon: <DashboardOutlined />, label: "集团仪表盘" },
-      { key: "/group/comparison", icon: <RadarChartOutlined />, label: "工厂对比" },
-      { key: "/group/suppliers", icon: <ShareAltOutlined />, label: "共享供应商" },
-      { key: "/group/audits", icon: <AuditOutlined />, label: "跨厂审核" },
-      { key: "/group/factories", icon: <BankOutlined />, label: "工厂管理" },
+      { key: "/group/dashboard", icon: <DashboardOutlined />, label: "集团仪表盘", module: "group" },
+      { key: "/group/comparison", icon: <RadarChartOutlined />, label: "工厂对比", module: "group" },
+      { key: "/group/suppliers", icon: <ShareAltOutlined />, label: "共享供应商", module: "group" },
+      { key: "/group/audits", icon: <AuditOutlined />, label: "跨厂审核", module: "group" },
+      { key: "/group/factories", icon: <BankOutlined />, label: "工厂管理", module: "group" },
     ],
   },
 ];
+
+/** Recursively filter menu items by permission.
+ *  - Items with no module are always visible (e.g. dashboard).
+ *  - Items with a module are visible only if canView(module) is true.
+ *  - Groups with no visible children are hidden entirely.
+ */
+function filterMenuByPermission(
+  items: MenuItem[],
+  canViewFn: (m: ModuleKey) => boolean,
+): MenuItem[] {
+  return items
+    .map((item) => {
+      // No module = always visible (dashboard)
+      if (!item.module) return item;
+
+      // If the user can't see this item's own module, hide it
+      if (!canViewFn(item.module)) return null;
+
+      // If it has children, recursively filter them
+      if (item.children) {
+        const filteredChildren = filterMenuByPermission(item.children, canViewFn);
+        // If all children were filtered out, hide the group too
+        if (filteredChildren.length === 0) return null;
+        return { ...item, children: filteredChildren };
+      }
+
+      return item;
+    })
+    .filter((item): item is MenuItem => item !== null);
+}
 
 export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
@@ -267,10 +316,8 @@ export default function AppLayout() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
 
-  // Filter menu groups by module permission; dashboard (no module) is always visible
-  const visibleMenuItems = menuItems.filter(
-    (item) => !item.module || canView(item.module as ModuleKey),
-  );
+  // Filter menu items recursively by per-item module permission
+  const visibleMenuItems = filterMenuByPermission(menuItems, canView);
 
   // Factory switcher visible when user has access to multiple factories (or all)
   const showFactorySwitcher = factoryScope?.accessible_factory_ids === null
@@ -302,7 +349,7 @@ export default function AppLayout() {
           selectedKeys={[selectedKey]}
           openKeys={openKeys}
           onOpenChange={setOpenKeys}
-          items={visibleMenuItems}
+          items={stripModuleField(visibleMenuItems)}
           onClick={({ key }) => {
             if (key.startsWith("grp:")) return;
             navigate(key);

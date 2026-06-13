@@ -1,3 +1,4 @@
+import * as echarts from "echarts";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Card,
@@ -139,7 +140,6 @@ export default function InternalAuditDetailPage() {
     let isCancelled = false;
 
     const initChart = async () => {
-      const echarts = await import("echarts");
       if (isCancelled || !chartRef.current) return;
       chartInstance = echarts.init(chartRef.current);
       const data = [
