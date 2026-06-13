@@ -5,13 +5,13 @@ default=0, but the migration that added it used nullable=True. This
 migration enforces the NOT NULL constraint to match the model.
 
 Revision ID: 037
-Revises: 036_factory_id_not_null_enforcement
+Revises: 036_fid_not_null
 """
 from alembic import op
 
 
 revision = '037'
-down_revision = '036_factory_id_not_null_enforcement'
+down_revision = '036_fid_not_null'
 branch_labels = None
 depends_on = None
 

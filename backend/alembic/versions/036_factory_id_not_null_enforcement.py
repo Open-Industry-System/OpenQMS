@@ -1,6 +1,6 @@
 """enforce NOT NULL on business factory_id columns
 
-Revision ID: 036_factory_id_not_null_enforcement
+Revision ID: 036_fid_not_null
 Revises: 035_add_factory_tables_nullable
 Create Date: 2026-06-12
 """
@@ -9,7 +9,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "036_factory_id_not_null_enforcement"
+revision: str = "036_fid_not_null"
 down_revision: Union[str, None] = "035_add_factory_tables_nullable"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

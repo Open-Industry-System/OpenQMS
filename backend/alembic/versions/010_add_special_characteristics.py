@@ -1,6 +1,6 @@
 """add special_characteristics table
 
-Revision ID: 010_add_special_characteristics
+Revision ID: 010_special_chars
 Revises: 009_add_msa_tables
 Create Date: 2026-05-23
 """
@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 import uuid
 
-revision = "010_add_special_characteristics"
+revision = "010_special_chars"
 down_revision = "009_add_msa_tables"
 branch_labels = None
 depends_on = None
