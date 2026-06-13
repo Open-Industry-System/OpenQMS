@@ -243,7 +243,7 @@ FastAPI 自动生成交互式 API 文档：
 | 限制 | 说明 |
 |------|------|
 | 无测试框架 | 后端使用手动 `test_schema.py`，前端无测试 |
-| 无 Token 刷新 | 120 分钟硬过期，用户需重新登录 |
+| 前端未自动刷新 Token | 后端已有 `/api/auth/refresh`，但前端未自动调用，120 分钟后仍需重新登录 |
 | 无登录限速 | 登录接口无速率限制 |
 | Redis 未使用 | 已配置但未实现缓存逻辑 |
 | 前端权限守卫不全 | `/knowledge-graph`、`/change-impact`、MES 路由无 `requiredModule` 守卫 |

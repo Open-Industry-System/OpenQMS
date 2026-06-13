@@ -314,7 +314,7 @@ open ──start_progress──▶ in_progress ──close──▶ closed
 
 ### 5.6 审核统计
 
-**API：** `GET /api/customer-audits/stats`
+**API：** `GET /api/audit-plans/customer-stats`
 
 返回统计信息：
 
@@ -478,7 +478,7 @@ verified ──reopen──▶ in_progress
 **A：** 关闭客户审核发现项需要同时满足：
 1. 已填写 `root_cause`（根本原因）和 `corrective_action`（纠正措施）。
 2. 如关联了 CAPA，CAPA 状态必须为 `D8_CLOSURE`。
-3. `customer_confirmed` 必须为 `true`。可通过 `POST /api/customer-audits/findings/{id}/confirm` 单独完成客户确认。
+3. `customer_confirmed` 必须为 `true`。可通过 `POST /api/audit-findings/{finding_id}/customer-confirm` 单独完成客户确认。
 
 ### Q5：SCAR 编号冲突怎么办？
 
@@ -582,7 +582,7 @@ verified ──reopen──▶ in_progress
 | POST | `/api/audit-plans` | CREATE |
 | GET | `/api/audit-plans/{id}` | VIEW |
 | PUT | `/api/audit-plans/{id}` | CREATE |
-| POST | `/api/audit-plans/{id}/complete` | APPROVE |
+| POST | `/api/audit-plans/{id}/complete` | CREATE |
 | GET | `/api/audit-plans/customer-stats` | VIEW |
 | POST | `/api/audit-findings/{finding_id}/customer-confirm` | CREATE |
 
