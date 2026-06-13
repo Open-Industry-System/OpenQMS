@@ -858,6 +858,7 @@ async def add_sample_batch(
                         db,
                         event_type="spc_alarm",
                         connection_id=conn.connection_id,
+                        factory_id=conn.factory_id,
                         payload={
                             "ic_id": str(ic.ic_id),
                             "ic_code": ic.ic_code,

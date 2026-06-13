@@ -174,6 +174,7 @@ async def upsert_measurements(
                 sample_mean=d["sample_mean"],
                 sample_range=d["sample_range"],
                 sequence_no=d["sequence_no"],
+                factory_id=study.factory_id,
             )
         )
     for item in new_items:

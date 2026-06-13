@@ -329,6 +329,7 @@ async def advance_capa(
                 db,
                 event_type="capa_status_change",
                 connection_id=conn.connection_id,
+                factory_id=conn.factory_id,
                 payload={
                     "capa_id": str(capa.report_id),
                     "old_status": old_status,

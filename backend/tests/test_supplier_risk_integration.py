@@ -322,6 +322,7 @@ async def test_migration_unique_indexes_prevent_duplicate_configs(db, admin_user
     db.add(SupplierRiskConfig(
         rule_id=unique_rule,
         supplier_id=supplier.supplier_id,
+        product_line_code="DC-DC-100",
         enabled=True,
         category="quality",
         weight=10.0,
@@ -334,6 +335,7 @@ async def test_migration_unique_indexes_prevent_duplicate_configs(db, admin_user
     db.add(SupplierRiskConfig(
         rule_id=unique_rule,
         supplier_id=supplier.supplier_id,
+        product_line_code="DC-DC-100",
         enabled=True,
         category="quality",
         weight=12.0,

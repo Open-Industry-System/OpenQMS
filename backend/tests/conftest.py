@@ -180,6 +180,20 @@ async def admin_user(db: AsyncSession, default_factory: Factory) -> User:
     db.add(user)
     await db.flush()
     await db.refresh(user)
+
+    # Ensure admin role has planning module permission (required by CP validation API)
+    from app.models.role import RolePermission
+    from sqlalchemy import select as _sel
+    perm_result = await db.execute(
+        _sel(RolePermission).where(
+            RolePermission.role_id == role.id,
+            RolePermission.module == "planning",
+        )
+    )
+    if perm_result.scalar_one_or_none() is None:
+        db.add(RolePermission(role_id=role.id, module="planning", permission_level=5))
+        await db.flush()
+
     return user
 
 

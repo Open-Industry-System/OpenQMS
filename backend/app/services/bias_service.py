@@ -173,6 +173,7 @@ async def upsert_measurements(
                 study_id=study_id,
                 value=d["value"],
                 sequence_no=d["sequence_no"],
+                factory_id=study.factory_id,
             )
         )
     for item in new_items:

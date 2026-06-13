@@ -146,7 +146,7 @@ async def create_connection(
     for data_type in ["suppliers", "customers", "materials", "locations",
                       "purchase_orders", "sales_orders", "inventory_balances",
                       "shipments", "cost_records"]:
-        db.add(ERPSyncJob(connection_id=conn.connection_id, data_type=data_type))
+        db.add(ERPSyncJob(connection_id=conn.connection_id, data_type=data_type, factory_id=conn.factory_id))
 
     await db.commit()
     out = schemas.ERPConnectionOut.model_validate(conn)
