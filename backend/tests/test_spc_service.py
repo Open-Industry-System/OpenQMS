@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 import uuid
 import os
 import math
@@ -23,22 +24,19 @@ from app.services.spc_service import (
     activate_snapshot,
 )
 
-@pytest.fixture(scope="module")
-def anyio_backend():
-    return "asyncio"
-
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture
 async def db_session():
-    # Connect using the standard DATABASE_URL
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    
-    async with async_session() as session:
+    # Connect using the standard DATABASE_URL with NullPool to avoid event-loop attachment issues
+    from sqlalchemy.pool import NullPool
+    engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with session_factory() as session:
         yield session
-    
+
     await engine.dispose()
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_spc_v1_1_lifecycle(db_session: AsyncSession):
     # 1. Fetch a valid user_id from the database
     user_result = await db_session.execute(select(User).limit(1))

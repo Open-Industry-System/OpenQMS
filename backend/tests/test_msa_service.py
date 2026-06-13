@@ -2,6 +2,7 @@
 Unit and integration tests for MSA services and calculation engines.
 """
 import pytest
+import pytest_asyncio
 import uuid
 import os
 import math
@@ -35,19 +36,16 @@ from app.services import (
     attribute_service,
 )
 
-@pytest.fixture(scope="module")
-def anyio_backend():
-    return "asyncio"
-
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture
 async def db_session():
     # Connect using standard DATABASE_URL
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    
-    async with async_session() as session:
+    from sqlalchemy.pool import NullPool
+    engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with session_factory() as session:
         yield session
-    
+
     await engine.dispose()
 
 
@@ -221,7 +219,7 @@ def test_attribute_engine_math():
 
 # ─── 6. SERVICE INTEGRATION TESTS ───────────────────────────────────────────
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_msa_service_integration(db_session: AsyncSession):
     # Retrieve a seeded user for auditing/creation purposes
     user_result = await db_session.execute(select(User).limit(1))

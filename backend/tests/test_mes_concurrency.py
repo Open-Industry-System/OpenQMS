@@ -56,13 +56,9 @@ from app.services.mes_service import (
 )
 from app.services.mes_crypto import hash_api_key
 from app.schemas import mes as mes_schemas
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
 def _make_rest_config(**overrides: Any) -> dict:
     """Build a valid REST config dict for tests."""
     cfg = {
@@ -112,14 +108,10 @@ def _make_rest_config(**overrides: Any) -> dict:
     }
     cfg.update(overrides)
     return cfg
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def db_engine():
     """Create a test database engine with NullPool to avoid event-loop attachment issues."""
     from sqlalchemy.pool import NullPool
@@ -127,8 +119,6 @@ async def db_engine():
     engine = create_async_engine(url, echo=False, poolclass=NullPool)
     yield engine
     await engine.dispose()
-
-
 @pytest_asyncio.fixture(scope="function")
 async def db(db_engine):
     """Fresh transaction-scoped DB session with cleanup tracking."""
@@ -139,8 +129,6 @@ async def db(db_engine):
     session_factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     async with session_factory() as session:
         yield session
-
-
 @pytest_asyncio.fixture(scope="function")
 async def admin_user(db: AsyncSession):
     """Get or create an admin user for tests."""
@@ -208,8 +196,6 @@ async def admin_user(db: AsyncSession):
 
     await db.commit()
     return user
-
-
 @pytest_asyncio.fixture(scope="function")
 async def test_connection(db: AsyncSession, admin_user: User):
     """Create a mock MESConnection, yield it, then cleanup by PK."""
@@ -268,8 +254,6 @@ async def test_connection(db: AsyncSession, admin_user: User):
             delete(MESConnection).where(MESConnection.connection_id == conn.connection_id)
         )
         await cleanup_db.commit()
-
-
 @pytest_asyncio.fixture(scope="function")
 async def test_ic(db: AsyncSession, admin_user: User):
     """Create an InspectionCharacteristic with product_line='DC-DC-100'."""
@@ -297,8 +281,6 @@ async def test_ic(db: AsyncSession, admin_user: User):
             delete(InspectionCharacteristic).where(InspectionCharacteristic.ic_id == ic.ic_id)
         )
         await cleanup_db.commit()
-
-
 @pytest_asyncio.fixture(scope="function")
 async def auth_client(admin_user: User):
     """Return an httpx.AsyncClient with JWT auth header."""
@@ -308,8 +290,6 @@ async def auth_client(admin_user: User):
     client.headers["Authorization"] = f"Bearer {token}"
     yield client
     await client.aclose()
-
-
 @pytest_asyncio.fixture(scope="function")
 async def api_key_client(test_connection: MESConnection):
     """Return an httpx.AsyncClient with MES API Key auth."""
@@ -319,17 +299,13 @@ async def api_key_client(test_connection: MESConnection):
     client.headers["X-Connection-Id"] = str(test_connection.connection_id)
     yield client
     await client.aclose()
-
-
 # ---------------------------------------------------------------------------
 # TestSyncJobConcurrency
 # ---------------------------------------------------------------------------
-
-
 class TestSyncJobConcurrency:
     """Tests for MESSyncJob claim and recovery concurrency."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_dual_worker_claim_once(self, db: AsyncSession, test_connection: MESConnection):
         """Two workers claim same job via SELECT FOR UPDATE SKIP LOCKED;
         only one should succeed in claiming each job."""
@@ -373,7 +349,7 @@ class TestSyncJobConcurrency:
         # Total claimed should be <= 4 (at most all jobs)
         assert len(set1 | set2) <= 4
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_running_job_timeout_recovery(self, db: AsyncSession, test_connection: MESConnection):
         """A running job older than 10 minutes should be reset to failed."""
         # Create a single sync job
@@ -412,7 +388,7 @@ class TestSyncJobConcurrency:
         assert refreshed.consecutive_failures >= 1
         assert "timed out" in (refreshed.error_message or "").lower()
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_manual_sync_blocks_running(self, db: AsyncSession, test_connection: MESConnection):
         """Manual sync with a running job should raise ValueError (converted to 409 by API)."""
         # Ensure there's a running job
@@ -438,7 +414,7 @@ class TestSyncJobConcurrency:
         with pytest.raises(ValueError, match="already in progress"):
             await MESSyncService.manual_sync(db, test_connection.connection_id)
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_inactive_connection_not_synced(self, db: AsyncSession, admin_user: User):
         """Inactive connection jobs should not be claimed."""
         # Create inactive connection
@@ -472,17 +448,13 @@ class TestSyncJobConcurrency:
         await db.execute(delete(MESSyncJob).where(MESSyncJob.connection_id == conn.connection_id))
         await db.execute(delete(MESConnection).where(MESConnection.connection_id == conn.connection_id))
         await db.commit()
-
-
 # ---------------------------------------------------------------------------
 # TestOutboxConcurrency
 # ---------------------------------------------------------------------------
-
-
 class TestOutboxConcurrency:
     """Tests for MESPushOutbox claim and recovery concurrency."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_dual_worker_claim_once(self, db: AsyncSession, test_connection: MESConnection):
         """Two workers claim same outbox item; only one should succeed."""
         outbox = MESPushOutbox(
@@ -513,7 +485,7 @@ class TestOutboxConcurrency:
         if our_item_claimed:
             assert outbox.outbox_id not in set1 or outbox.outbox_id not in set2
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_processing_timeout_recovery(self, db: AsyncSession, test_connection: MESConnection):
         """Processing outbox item older than 10 minutes should reset to pending."""
         outbox = MESPushOutbox(
@@ -540,17 +512,13 @@ class TestOutboxConcurrency:
         assert refreshed.status == "pending"
         assert refreshed.started_at is None
         assert refreshed.claim_token is None
-
-
 # ---------------------------------------------------------------------------
 # TestMeasurementAtomicity
 # ---------------------------------------------------------------------------
-
-
 class TestMeasurementAtomicity:
     """Tests for measurement ingestion transaction atomicity."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     @pytest.mark.xfail(reason="Uses app_async_session() which doesn't see test transaction data; needs refactor to use test db fixture", strict=False)
     async def test_ingestion_atomic_rollback(
         self, db: AsyncSession, test_connection: MESConnection, test_ic: InspectionCharacteristic
@@ -602,7 +570,7 @@ class TestMeasurementAtomicity:
             # The key assertion is that the service methods don't call commit
             assert result.scalar_one_or_none() is None or True  # May or may not exist depending on isolation
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_duplicate_external_id_skipped(
         self, db: AsyncSession, test_connection: MESConnection, test_ic: InspectionCharacteristic
     ):
@@ -629,17 +597,13 @@ class TestMeasurementAtomicity:
             result2 = await MESIngestionService.ingest(db2, data)
             assert result2["status"] == "skipped"
             assert result2["reason"] == "duplicate"
-
-
 # ---------------------------------------------------------------------------
 # TestIdempotentRedelivery
 # ---------------------------------------------------------------------------
-
-
 class TestIdempotentRedelivery:
     """Tests for outbox idempotent redelivery."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     @pytest.mark.xfail(reason="SKIP LOCKED cannot see rows in uncommitted test transaction; needs refactor", strict=False)
     async def test_crash_redelivery_idempotent(self, db: AsyncSession, test_connection: MESConnection):
         """Simulate crash after push but before status update.
@@ -681,7 +645,7 @@ class TestIdempotentRedelivery:
         assert our_item[0].status == "processing"
         assert our_item[0].claim_token is not None
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     @pytest.mark.xfail(reason="SKIP LOCKED cannot see rows in uncommitted test transaction; needs refactor", strict=False)
     async def test_process_outbox_full_flow(self, db: AsyncSession, test_connection: MESConnection):
         """Test the full outbox flow: pending -> claim -> process -> sent."""
@@ -724,17 +688,13 @@ class TestIdempotentRedelivery:
             assert final.status == "sent"
             assert final.sent_at is not None
             assert final.claim_token is None
-
-
 # ---------------------------------------------------------------------------
 # TestIngestValidation
 # ---------------------------------------------------------------------------
-
-
 class TestIngestValidation:
     """Tests for ingestion request validation."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_ingest_missing_field_returns_400(self, api_key_client: httpx.AsyncClient):
         """Missing required fields should return 400."""
         # Missing data_type
@@ -744,7 +704,7 @@ class TestIngestValidation:
         })
         assert resp.status_code == 400
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_ingest_unknown_data_type_returns_400(self, api_key_client: httpx.AsyncClient):
         """Unknown data_type should return 400."""
         resp = await api_key_client.post("/api/mes/ingest", json={
@@ -752,17 +712,13 @@ class TestIngestValidation:
             "external_id": "test-1",
         })
         assert resp.status_code == 400
-
-
 # ---------------------------------------------------------------------------
 # TestScrapOrderBackfill
 # ---------------------------------------------------------------------------
-
-
 class TestScrapOrderBackfill:
     """Tests for scrap record order backfill behavior."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_scrap_before_order_then_backfill(
         self, db: AsyncSession, test_connection: MESConnection
     ):
@@ -809,7 +765,7 @@ class TestScrapOrderBackfill:
         scrap = result.scalar_one()
         assert scrap.order_id == order_id
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_duplicate_scrap_preserves_snapshot(
         self, db: AsyncSession, test_connection: MESConnection
     ):
@@ -862,17 +818,13 @@ class TestScrapOrderBackfill:
         assert scrap.defect_qty == 5
         assert scrap.total_qty == 100
         assert scrap.defect_description == "Original description"
-
-
 # ---------------------------------------------------------------------------
 # TestConnectionLifecycle
 # ---------------------------------------------------------------------------
-
-
 class TestConnectionLifecycle:
     """Tests for MESConnection lifecycle and sync job creation."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_connection_creates_four_sync_jobs(self, db: AsyncSession, admin_user: User):
         """Creating a new connection should create 4 pending sync jobs."""
         conn = MESConnection(
@@ -906,7 +858,7 @@ class TestConnectionLifecycle:
         await db.execute(delete(MESConnection).where(MESConnection.connection_id == conn.connection_id))
         await db.commit()
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_manual_sync_only_claims_target_connection(
         self, db: AsyncSession, admin_user: User
     ):
@@ -975,17 +927,13 @@ class TestConnectionLifecycle:
             await db.execute(delete(MESSyncJob).where(MESSyncJob.connection_id == conn.connection_id))
             await db.execute(delete(MESConnection).where(MESConnection.connection_id == conn.connection_id))
         await db.commit()
-
-
 # ---------------------------------------------------------------------------
 # TestIngestEdgeCases
 # ---------------------------------------------------------------------------
-
-
 class TestIngestEdgeCases:
     """Tests for ingestion edge cases."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_ingest_non_object_json_returns_400(self, api_key_client: httpx.AsyncClient):
         """Array, null, string, or number as request body should return 400 or 422."""
         test_cases = [
@@ -998,17 +946,13 @@ class TestIngestEdgeCases:
         for body, desc in test_cases:
             resp = await api_key_client.post("/api/mes/ingest", json=body)
             assert resp.status_code in (400, 422), f"Expected 400/422 for {desc}, got {resp.status_code}"
-
-
 # ---------------------------------------------------------------------------
 # TestRESTConnectorValidation
 # ---------------------------------------------------------------------------
-
-
 class TestRESTConnectorValidation:
     """Tests for REST connector data validation."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_rest_validate_converts_iso_datetime(self, db: AsyncSession):
         """REST connector should convert ISO datetime strings to datetime objects."""
         from app.services.mes_connector import RESTMESConnector
@@ -1028,7 +972,7 @@ class TestRESTConnectorValidation:
         assert isinstance(ts2, datetime)
         assert ts2.year == 2026
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_rest_validate_raises_on_invalid_item(self, db: AsyncSession):
         """Invalid item should raise ValidationError during REST connector validation."""
         from app.services.mes_connector import RESTMESConnector
@@ -1042,17 +986,13 @@ class TestRESTConnectorValidation:
 
         with pytest.raises((ValidationError, ValueError)):
             connector._validate_items("production_orders", invalid_items)
-
-
 # ---------------------------------------------------------------------------
 # TestSyncRoundValidationFailure
 # ---------------------------------------------------------------------------
-
-
 class TestSyncRoundValidationFailure:
     """Tests for sync round behavior when validation fails."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     @pytest.mark.xfail(reason="Uses app_async_session() which doesn't see test transaction data; needs refactor to use test db fixture", strict=False)
     async def test_sync_round_bad_data_fails_job_preserves_checkpoint(
         self, db: AsyncSession, test_connection: MESConnection
@@ -1105,17 +1045,13 @@ class TestSyncRoundValidationFailure:
         refreshed = result.scalar_one()
         assert refreshed.status == "failed"
         assert refreshed.checkpoint == existing_checkpoint
-
-
 # ---------------------------------------------------------------------------
 # TestRESTConfigValidation
 # ---------------------------------------------------------------------------
-
-
 class TestRESTConfigValidation:
     """Tests for REST config validation via API."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_create_rest_missing_source_updated_at_returns_400(
         self, auth_client: httpx.AsyncClient
     ):
@@ -1131,7 +1067,7 @@ class TestRESTConfigValidation:
         })
         assert resp.status_code == 400
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_update_rest_removes_mapping_returns_400(
         self, auth_client: httpx.AsyncClient, test_connection: MESConnection
     ):
@@ -1145,7 +1081,7 @@ class TestRESTConfigValidation:
         )
         assert resp.status_code == 400
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_create_rest_missing_endpoint_returns_400(
         self, auth_client: httpx.AsyncClient
     ):
@@ -1161,7 +1097,7 @@ class TestRESTConfigValidation:
         })
         assert resp.status_code == 400
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_create_rest_empty_base_url_returns_400(
         self, auth_client: httpx.AsyncClient
     ):
@@ -1177,7 +1113,7 @@ class TestRESTConfigValidation:
         })
         assert resp.status_code == 400
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_create_rest_malformed_endpoints_returns_400(
         self, auth_client: httpx.AsyncClient
     ):
@@ -1193,7 +1129,7 @@ class TestRESTConfigValidation:
         })
         assert resp.status_code == 400
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_create_rest_malformed_field_mapping_returns_400(
         self, auth_client: httpx.AsyncClient
     ):
@@ -1209,7 +1145,7 @@ class TestRESTConfigValidation:
         })
         assert resp.status_code == 400
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_update_connector_type_only_rejects_rest(
         self, auth_client: httpx.AsyncClient, test_connection: MESConnection
     ):
@@ -1222,7 +1158,7 @@ class TestRESTConfigValidation:
         )
         assert resp.status_code in (400, 422), f"Expected 400/422, got {resp.status_code}"
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_create_rest_credential_field_non_string_returns_400(
         self, auth_client: httpx.AsyncClient
     ):
@@ -1239,17 +1175,13 @@ class TestRESTConfigValidation:
         # The API processes credentials and hashes them; non-string might work or fail
         # depending on implementation. We expect it to not crash (200 or 400 is fine).
         assert resp.status_code in (200, 201, 400)
-
-
 # ---------------------------------------------------------------------------
 # TestConfigNormalization
 # ---------------------------------------------------------------------------
-
-
 class TestConfigNormalization:
     """Tests for config normalization and preservation."""
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_auth_type_preserved_after_normalize(self, db: AsyncSession, admin_user: User):
         """auth_type should be preserved after config processing."""
         config = _make_rest_config(auth_type="bearer", auth_config={
@@ -1272,7 +1204,7 @@ class TestConfigNormalization:
         await db.execute(delete(MESConnection).where(MESConnection.connection_id == conn.connection_id))
         await db.commit()
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_retry_null_normalized_safely(self, db: AsyncSession, admin_user: User):
         """retry=None should be handled safely."""
         config = _make_rest_config()
@@ -1295,7 +1227,7 @@ class TestConfigNormalization:
         await db.execute(delete(MESConnection).where(MESConnection.connection_id == conn.connection_id))
         await db.commit()
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_pagination_null_normalized_safely(self, db: AsyncSession, admin_user: User):
         """pagination=None should be handled safely."""
         config = _make_rest_config()
@@ -1317,7 +1249,7 @@ class TestConfigNormalization:
         await db.execute(delete(MESConnection).where(MESConnection.connection_id == conn.connection_id))
         await db.commit()
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_api_key_auth_type_preserved(self, db: AsyncSession, admin_user: User):
         """api_key auth_type should be preserved with proper credentials."""
         config = _make_rest_config(auth_type="api_key", auth_config={
@@ -1343,7 +1275,7 @@ class TestConfigNormalization:
         await db.execute(delete(MESConnection).where(MESConnection.connection_id == conn.connection_id))
         await db.commit()
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_retention_config_preserved(self, db: AsyncSession, admin_user: User):
         """retention config should be preserved."""
         config = _make_rest_config(retention={
