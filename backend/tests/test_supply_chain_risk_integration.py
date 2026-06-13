@@ -173,7 +173,7 @@ async def test_field_qe_has_edit_permission(db, client, admin_user):
     )
     db.add(user)
     await db.commit()
-    token = create_access_token(str(user.user_id))
+    token = create_access_token({"sub": str(user.user_id)})
     response = await client.post(
         "/api/supply-chain-risk-map/snapshots/generate",
         headers={"Authorization": f"Bearer {token}"},

@@ -4,6 +4,7 @@ from httpx import AsyncClient, ASGITransport
 from uuid import uuid4
 from datetime import date
 from sqlalchemy import select, func
+from unittest.mock import AsyncMock
 
 from app.models.user import User
 from app.models.role import RoleDefinition, RolePermission
@@ -11,6 +12,9 @@ from app.models.supplier import Supplier
 from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
 from app.models.supplier_risk import SupplierRiskConfig
 from app.core.security import hash_password, create_access_token
+from app.core.deps import get_request_scope, RequestScope
+from app.core.factory_scope import FactoryScope, ProductLineScope
+from app.core.permissions import PermissionLevel
 from app.main import app
 from app.database import get_db
 
@@ -30,7 +34,7 @@ _DEFAULT_RULE_CONFIGS = [
 
 
 @pytest.fixture
-async def test_user(db):
+async def test_user(db, default_factory):
     """Create a real admin user with supply_chain_risk_map permission."""
     result = await db.execute(
         select(RoleDefinition).where(RoleDefinition.role_key == "admin")
@@ -52,6 +56,7 @@ async def test_user(db):
         user_id=uuid4(), username=f"e2e_admin_{uuid4().hex[:8]}",
         display_name="E2E Admin", password_hash=hash_password("Admin@2026"),
         role_id=role.id, legacy_role="admin", is_active=True,
+        factory_id=default_factory.id,
     )
     db.add(user)
     await db.commit()
@@ -61,15 +66,29 @@ async def test_user(db):
 
 @pytest.fixture
 async def client(db, test_user):
-    """ASGI test client with get_db overridden."""
+    """ASGI test client with get_db and get_request_scope overridden."""
     async def _override_get_db():
         yield db
 
+    mock_scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=test_user.factory_id),
+        effective_factory_id=test_user.factory_id,
+        pl_scope=ProductLineScope(mode="ALL", codes=["DC-DC-100"]),
+        user=test_user,
+    )
+
+    async def _override_get_request_scope():
+        return mock_scope
+
     app.dependency_overrides[get_db] = _override_get_db
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        ac.headers["Authorization"] = f"Bearer {create_access_token(str(test_user.user_id))}"
-        yield ac
+    app.dependency_overrides[get_request_scope] = _override_get_request_scope
+    from app.core.permissions import get_user_permission
+    from unittest.mock import patch
+    with patch("app.core.permissions.get_user_permission", new=AsyncMock(return_value=PermissionLevel.ADMIN)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            ac.headers["Authorization"] = f"Bearer {create_access_token({'sub': str(test_user.user_id)})}"
+            yield ac
     app.dependency_overrides.clear()
 
 
@@ -79,6 +98,7 @@ async def seed_snapshots(db, test_user):
     supplier = Supplier(
         supplier_id=uuid4(), supplier_no="T-E2E-01", name="E2ETest",
         short_name="ET", status="approved", created_by=test_user.user_id,
+        factory_id=test_user.factory_id,
     )
     db.add(supplier)
     for cfg in _DEFAULT_RULE_CONFIGS:

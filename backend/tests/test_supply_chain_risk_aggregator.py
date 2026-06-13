@@ -40,18 +40,20 @@ async def test_erp_on_time_rate_with_filter(db, test_user):
     from app.models.supplier import Supplier
     from app.models.erp import ERPPurchaseOrder, ERPConnection, ERPSupplier
 
+    fid = test_user.factory_id
     conn_id = uuid4()
     supplier = Supplier(supplier_id=uuid4(), supplier_no="T-ONT-01", name="OntimeTest",
                          short_name="OT", status="approved", created_by=test_user.user_id,
-                         factory_id=test_user.factory_id)
+                         factory_id=fid)
     db.add(supplier)
     erp_conn = ERPConnection(connection_id=conn_id, name="test_conn", connector_type="mock",
-                               is_active=True, created_by=test_user.user_id, factory_id=test_user.factory_id)
+                               is_active=True, created_by=test_user.user_id, factory_id=fid)
     db.add(erp_conn)
+    await db.flush()
     db.add(ERPSupplier(
         connection_id=conn_id, supplier_code="T-ONT-01",
         external_id="ERP-SUP-ONT-01", name=supplier.name,
-        openqms_supplier_id=supplier.supplier_id,
+        openqms_supplier_id=supplier.supplier_id, factory_id=fid,
     ))
     for i, (ad, dd) in enumerate([
         (date(2026, 6, 1), date(2026, 6, 5)),
@@ -63,7 +65,7 @@ async def test_erp_on_time_rate_with_filter(db, test_user):
             po_number=f"PO-2026-{i:03d}", line_number="1",
             supplier_code="T-ONT-01", delivery_date=dd,
             actual_delivery_date=ad, quantity=100, unit_price=10,
-            status="completed", product_line_code=None,
+            status="completed", product_line_code=None, factory_id=fid,
         ))
     await db.commit()
 
@@ -91,7 +93,7 @@ async def test_erp_fallback_to_evaluation(db, test_user):
         customer_disruption_count=0, capa_penalty=0, finding_penalty=0,
         premium_freight_penalty=0, customer_disruption_penalty=0,
         total_score=75, grade="B", notes="fallback test",
-        evaluated_by=test_user.user_id,
+        evaluated_by=test_user.user_id, factory_id=test_user.factory_id,
     ))
     await db.commit()
 
@@ -107,24 +109,28 @@ async def test_purchase_amount_pct_window_function(db, test_user):
     from app.models.supplier import Supplier
     from app.models.erp import ERPPurchaseOrder, ERPConnection, ERPSupplier
 
+    fid = test_user.factory_id
     conn_id = uuid4()
     s1 = Supplier(supplier_id=uuid4(), supplier_no="T-PCT-01", name="PctTest1",
-                    short_name="P1", status="approved", created_by=test_user.user_id)
+                    short_name="P1", status="approved", created_by=test_user.user_id,
+                    factory_id=fid)
     s2 = Supplier(supplier_id=uuid4(), supplier_no="T-PCT-02", name="PctTest2",
-                    short_name="P2", status="approved", created_by=test_user.user_id)
+                    short_name="P2", status="approved", created_by=test_user.user_id,
+                    factory_id=fid)
     db.add_all([s1, s2])
     erp_conn = ERPConnection(connection_id=conn_id, name="test_conn", connector_type="mock",
-                               is_active=True, created_by=test_user.user_id, factory_id=test_user.factory_id)
+                               is_active=True, created_by=test_user.user_id, factory_id=fid)
     db.add(erp_conn)
-    db.add(ERPSupplier(connection_id=conn_id, supplier_code="T-PCT-01", external_id="ERP-SUP-PCT-01", name=s1.name, openqms_supplier_id=s1.supplier_id))
-    db.add(ERPSupplier(connection_id=conn_id, supplier_code="T-PCT-02", external_id="ERP-SUP-PCT-02", name=s2.name, openqms_supplier_id=s2.supplier_id))
+    await db.flush()
+    db.add(ERPSupplier(connection_id=conn_id, supplier_code="T-PCT-01", external_id="ERP-SUP-PCT-01", name=s1.name, openqms_supplier_id=s1.supplier_id, factory_id=fid))
+    db.add(ERPSupplier(connection_id=conn_id, supplier_code="T-PCT-02", external_id="ERP-SUP-PCT-02", name=s2.name, openqms_supplier_id=s2.supplier_id, factory_id=fid))
     for sup, qty, price in [(s1, 300, 20), (s1, 100, 20), (s2, 200, 10)]:
         db.add(ERPPurchaseOrder(
             po_id=uuid4(), connection_id=conn_id, external_id=f"PO-{uuid4().hex[:6]}",
             po_number=f"PO-2026-{uuid4().hex[:4]}", line_number="1",
             supplier_code=sup.supplier_no, delivery_date=date(2026, 6, 15),
             quantity=qty, unit_price=price,
-            status="completed", product_line_code=None,
+            status="completed", product_line_code=None, factory_id=fid,
         ))
     await db.commit()
 
@@ -140,8 +146,10 @@ async def test_ppm_calculation_with_period_filter(db, test_user):
     from app.models.iqc_inspection import IqcInspection
 
     supplier = Supplier(supplier_id=uuid4(), supplier_no="T-PPM-01", name="PPMTest",
-                         short_name="PT", status="approved", created_by=test_user.user_id)
+                         short_name="PT", status="approved", created_by=test_user.user_id,
+                         factory_id=test_user.factory_id)
     db.add(supplier)
+    await db.flush()
     for i, (month, lot_qty, defect_qty) in enumerate([
         (6, 500, 10),
         (6, 500, 5),
@@ -154,7 +162,7 @@ async def test_ppm_calculation_with_period_filter(db, test_user):
             inspection_date=date(2026, month, 15),
             inspection_result="accepted" if defect_qty == 0 else "rejected",
             status="judged", lot_qty=lot_qty, defect_qty=defect_qty,
-            product_line_code=None,
+            product_line_code=None, factory_id=test_user.factory_id,
         ))
     await db.commit()
 
@@ -170,8 +178,10 @@ async def test_open_scar_count_time_point_logic(db, test_user):
     from app.models.supplier import Supplier, SupplierSCAR
 
     supplier = Supplier(supplier_id=uuid4(), supplier_no="T-SCAR-01", name="SCARTest",
-                         short_name="ST", status="approved", created_by=test_user.user_id)
+                         short_name="ST", status="approved", created_by=test_user.user_id,
+                         factory_id=test_user.factory_id)
     db.add(supplier)
+    await db.flush()
     # SCAR issued before period end, still open — counted
     db.add(SupplierSCAR(
         scar_id=uuid4(), scar_no="SCAR-2026-001", supplier_id=supplier.supplier_id,
