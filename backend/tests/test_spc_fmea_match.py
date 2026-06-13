@@ -153,6 +153,7 @@ async def control_plan_with_binding(db, ic_with_cp_binding, fmea_document):
         source_fmea_node_id="ps_1",
         process_name="SMT元器件贴装",
         product_characteristic="贴装偏移度",
+        factory_id=_DEFAULT_FACTORY_ID,
     )
     db.add(item)
     await db.flush()
@@ -167,6 +168,7 @@ async def alarm(db, ic_with_cp_binding):
         rule_no=1,
         severity="major",
         status="open",
+        factory_id=_DEFAULT_FACTORY_ID,
     )
     db.add(alarm)
     await db.flush()
