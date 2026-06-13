@@ -12,9 +12,11 @@
 
 ### 已实现的前端路由（`frontend/src/App.tsx`）
 
-| 功能域 | 路由 | 依赖模块 |
+#### 模块守卫路由（`ProtectedRoute requiredModule="xxx"`）
+
+| 功能域 | 路由 | ModuleKey |
 |---|---|---|
-| 仪表盘 | `/dashboard` | dashboard |
+| 仪表盘 | `/dashboard` | （仅登录） |
 | FMEA | `/fmea`, `/fmea/:id` | fmea |
 | CAPA/8D | `/capa`, `/capa/:id` | capa |
 | 控制计划 | `/control-plans`, `/control-plans/:id` | planning |
@@ -22,23 +24,38 @@
 | 内部审核 | `/internal-audits`, `/internal-audits/:id` | audit |
 | 客户审核 | `/customer-audits`, `/customer-audits/:id` | customer_audit |
 | SPC | `/spc`, `/spc/:id` | spc |
-| 供应商 | `/suppliers`, `/suppliers/:id`, `/suppliers/quality` | supplier |
+| 供应商 | `/suppliers`, `/suppliers/:id` | supplier |
+| 供应商质量看板 | `/suppliers/quality`, `/suppliers/quality/:supplierId` | supplier |
 | 供应商风险 | `/supplier-risk`, `/supplier-risk/config` | supplier_risk |
 | 供应链风险地图 | `/supply-chain-risk-map` | supply_chain_risk_map |
-| MSA | `/msa/gauges`, `/msa/gauges/:id`, `/msa/studies` | msa |
-| 特殊特性 | `/special-characteristics`, `/special-characteristics/matrix`, `/special-characteristics/traceability`, `/special-characteristics/:id` | special_characteristic |
+| MSA 量具 | `/msa/gauges`, `/msa/gauges/:id` | msa |
+| MSA 研究 | `/msa/studies`, `/msa/studies/:type/:id` | msa |
+| 特殊特性 | `/special-characteristics`, `/special-characteristics/:id` | special_characteristic |
+| 特殊特性矩阵 | `/special-characteristics/matrix` | special_characteristic |
+| 特殊特性追溯 | `/special-characteristics/traceability` | special_characteristic |
 | 管理评审 | `/management-reviews`, `/management-reviews/:id` | management_review |
-| IQC | `/iqc/inspections`, `/iqc/inspections/:id`, `/iqc/materials`, `/iqc/aql-optimization`, `/iqc/aql-optimization/profiles`, `/iqc/aql-optimization/config` | iqc |
+| IQC 检验 | `/iqc/inspections`, `/iqc/inspections/:id` | iqc |
+| IQC 物料 | `/iqc/materials` | iqc |
+| IQC AQL 优化 | `/iqc/aql-optimization` | iqc |
+| IQC AQL 配置 | `/iqc/aql-optimization/config` | iqc |
+| IQC AQL Profile | `/iqc/aql-optimization/profiles`, `/iqc/aql-optimization/profiles/:supplierId/:materialId` | iqc |
 | SCAR | `/scars`, `/scars/:id` | scar |
 | APQP | `/apqp`, `/apqp/:id` | planning |
 | PPAP | `/ppap`, `/ppap/:id` | ppap |
 | 客户质量 | `/customer-quality`, `/customer-quality/complaints/:id`, `/customer-quality/rma/:id` | customer_quality |
-| 知识图谱 | `/knowledge-graph` | knowledge_graph |
-| 变更影响 | `/change-impact` | — |
-| MES | `/mes/dashboard`, `/mes/connections`, `/mes/orders`, `/mes/scrap` | mes |
 | PLM | `/plm/dashboard`, `/plm/connections`, `/plm/parts`, `/plm/change-orders` | plm |
 | ERP | `/erp`, `/erp/connections`, `/erp/master-data`, `/erp/supply-chain`, `/erp/commercial`, `/erp/traceability` | erp |
 | 集团管理 | `/group/dashboard`, `/group/factories`, `/group/comparison`, `/group/suppliers`, `/group/audits` | group |
+
+#### 仅登录守卫路由（`ProtectedRoute` 无 requiredModule）
+
+| 功能域 | 路由 | 说明 |
+|---|---|---|
+| 知识图谱 | `/knowledge-graph` | 未配置模块守卫，仅要求登录 |
+| 变更影响 | `/change-impact` | 未配置模块守卫，仅要求登录 |
+| MES | `/mes/dashboard`, `/mes/connections`, `/mes/orders`, `/mes/scrap` | 前端未设置 requiredModule（后端 mes 模块有权限检查） |
+
+> 注：MES 路由虽未在前端设置 `requiredModule`，但后端 API 端点使用 `require_permission(Module.MES, ...)` 做权限校验。
 
 ### 权限模型（`backend/app/core/permissions.py` + `frontend/src/hooks/usePermission.ts`）
 
@@ -59,18 +76,18 @@
   - `viewer` / `Viewer@2026`
   - `groupadmin` / `GroupAdmin@2026`
 
-### 默认权限矩阵（简化版）
+### 默认权限矩阵（全量，数据来源：028 迁移 + 029–035 迁移 + seed.py）
 
 | 模块 | admin | manager | field_qe | planning_qe | supplier_qe | customer_qe | viewer |
-|---|---|---|---|---|---|---|---|
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | fmea | ADMIN | APPROVE | EDIT | EDIT | VIEW | VIEW | VIEW |
 | capa | ADMIN | APPROVE | EDIT | VIEW | EDIT | EDIT | VIEW |
 | planning | ADMIN | APPROVE | VIEW | EDIT | VIEW | VIEW | VIEW |
 | ppap | ADMIN | APPROVE | NONE | EDIT | EDIT | NONE | VIEW |
 | iqc | ADMIN | APPROVE | VIEW | VIEW | EDIT | NONE | VIEW |
 | supplier | ADMIN | APPROVE | VIEW | VIEW | EDIT | VIEW | VIEW |
-| supplier_risk | ADMIN | APPROVE | — | — | — | — | — |
-| supply_chain_risk_map | ADMIN | APPROVE | — | — | — | — | — |
+| supplier_risk | ADMIN | APPROVE | EDIT | VIEW | EDIT | VIEW | VIEW |
+| supply_chain_risk_map | ADMIN | ADMIN | EDIT | EDIT | EDIT | EDIT | VIEW |
 | customer_quality | ADMIN | APPROVE | VIEW | VIEW | NONE | EDIT | VIEW |
 | customer_audit | ADMIN | APPROVE | VIEW | VIEW | NONE | EDIT | VIEW |
 | scar | ADMIN | APPROVE | VIEW | VIEW | EDIT | VIEW | VIEW |
@@ -80,16 +97,20 @@
 | quality_goal | ADMIN | APPROVE | NONE | NONE | NONE | NONE | VIEW |
 | audit | ADMIN | APPROVE | VIEW | VIEW | VIEW | VIEW | VIEW |
 | management_review | ADMIN | APPROVE | VIEW | VIEW | NONE | NONE | VIEW |
-| mes | ADMIN | APPROVE | — | — | — | — | — |
-| plm | ADMIN | APPROVE | — | — | — | — | — |
-| erp | ADMIN | APPROVE | — | — | — | — | — |
-| knowledge_graph | ADMIN | APPROVE | — | — | — | — | — |
-| group | ADMIN | EDIT | — | — | — | — | — |
+| dashboard | ADMIN | APPROVE | VIEW | VIEW | VIEW | VIEW | VIEW |
 | user_mgmt | ADMIN | VIEW | NONE | NONE | NONE | NONE | NONE |
 | permission_mgmt | ADMIN | NONE | NONE | NONE | NONE | NONE | NONE |
-| dashboard | ADMIN | APPROVE | VIEW | VIEW | VIEW | VIEW | VIEW |
+| knowledge_graph | VIEW | VIEW | — | — | — | — | — |
+| mes | ADMIN | APPROVE | CREATE | VIEW | VIEW | VIEW | VIEW |
+| plm | ADMIN | APPROVE | CREATE | VIEW | VIEW | VIEW | VIEW |
+| erp | ADMIN | APPROVE | CREATE | VIEW | VIEW | VIEW | VIEW |
+| group | ADMIN | EDIT | — | — | — | — | — |
 
-> 注：`—` 表示该角色在种子数据中未单独配置，实际以管理员在“权限管理”页面设定为准。
+> 注：
+> - `—` 表示该角色在种子/迁移数据中未配置此模块的权限行，实际访问时 PermissionLevel 回退为 NONE（0）。
+> - `knowledge_graph` 仅 admin 和 manager 有 VIEW 权限，其余角色无权限行。
+> - `group` 仅 admin（ADMIN）和 manager（EDIT）有权限行。
+> - MES 前端路由未设 `requiredModule`，但后端 API 有 `require_permission(Module.MES, ...)` 校验。
 
 ## 文档范围
 
@@ -170,7 +191,14 @@
 - `docs/ROADMAP.md`：已实现模块与路线图。
 - `docs/permissions.md`：现有权限模型说明。
 - `backend/app/core/permissions.py`：权限等级与模块枚举。
-- `backend/alembic/versions/028_permission_matrix.py`：默认角色与权限矩阵。
+- `backend/alembic/versions/028_permission_matrix.py`：基础权限矩阵（18 模块 × 7 角色）。
+- `backend/alembic/versions/029_knowledge_graph_permissions.py`：knowledge_graph 模块权限。
+- `backend/alembic/versions/030_add_mes_tables.py`：MES 模块权限。
+- `backend/alembic/versions/031_add_plm_tables.py`：PLM 模块权限。
+- `backend/alembic/versions/032_add_erp_tables.py`：ERP 模块权限。
+- `backend/alembic/versions/034_add_supplier_risk_tables.py`：supplier_risk 模块权限。
+- `backend/alembic/versions/035_add_supply_chain_risk_snapshot_table.py`：supply_chain_risk_map 模块权限。
+- `backend/app/seed.py`：group 模块权限 + 默认账号 + 演示数据。
 - `backend/app/seed.py`：默认账号、角色、演示数据。
 - `frontend/src/App.tsx`：前端路由与页面清单。
 - `frontend/src/hooks/usePermission.ts`：前端模块键与权限等级。
@@ -186,7 +214,7 @@
    - 浏览器访问 `http://localhost:5173` 显示登录页。
    - 使用 `admin` / `Admin@2026` 登录成功并进入 `/dashboard`。
 2. **每个已上线前端路由对应的模块在文档中有说明**：至少说明入口路径、查看权限、主要操作。
-3. **权限矩阵准确**：与 `backend/alembic/versions/028_permission_matrix.py` 中的 `PERMISSION_MATRIX` 一致。
+3. **权限矩阵准确**：与所有迁移文件（028–035）及 `seed.py` 中的权限数据一致，覆盖所有 25 个 ModuleKey。
 4. **默认账号信息准确**：与 `backend/app/seed.py` 第 966 行输出一致。
 5. **文档内部链接有效**：README 中指向 docs/ 各文件的相对链接可正常跳转。
 
@@ -203,7 +231,7 @@
 ## 实现计划
 
 1. **模块清单梳理（Workflow 并行分析）**
-   - 输入：`frontend/src/App.tsx`、`backend/app/api/*.py`、`backend/app/core/permissions.py`、`backend/alembic/versions/028_permission_matrix.py`。
+   - 输入：`frontend/src/App.tsx`、`backend/app/api/*.py`、`backend/app/core/permissions.py`、`backend/alembic/versions/028_permission_matrix.py` 及 029–035 迁移、`backend/app/seed.py`。
    - 输出：模块清单表，字段包括：功能域、路由、依赖 ModuleKey、后端 API 文件、Service 文件、前端页面文件、默认权限等级、文档文件归属、实现状态。
 2. **样板文档先行**
    - 优先完成 `README.md`、`docs/deployment.md`、`docs/architecture.md`。
