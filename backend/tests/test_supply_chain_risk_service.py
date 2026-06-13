@@ -73,15 +73,34 @@ async def test_generate_snapshot_upsert(db, seed_supplier):
     """
     from app.services.supply_chain_risk_map.service import generate_snapshot
     period = current_period()
+    # Count snapshots for the test supplier before and after — avoids
+    # interference from other suppliers that may exist in the DB.
+    count_before = (await db.execute(
+        select(func.count()).select_from(SupplyChainRiskSnapshot)
+        .where(SupplyChainRiskSnapshot.supplier_id == seed_supplier.supplier_id,
+               SupplyChainRiskSnapshot.product_line_code == "DC-DC-100",
+               SupplyChainRiskSnapshot.snapshot_period == period)
+    )).scalar()
+    assert count_before == 0
+
     count1 = await generate_snapshot(db, "DC-DC-100", period)
     assert count1 >= 1
-    count2 = await generate_snapshot(db, "DC-DC-100", period)
-    # Second call should UPSERT, not add new rows
-    total = (await db.execute(
+    count_after_first = (await db.execute(
         select(func.count()).select_from(SupplyChainRiskSnapshot)
-        .where(SupplyChainRiskSnapshot.snapshot_period == period)
+        .where(SupplyChainRiskSnapshot.supplier_id == seed_supplier.supplier_id,
+               SupplyChainRiskSnapshot.product_line_code == "DC-DC-100",
+               SupplyChainRiskSnapshot.snapshot_period == period)
     )).scalar()
-    assert total == count1  # No duplicate rows
+    assert count_after_first == 1
+
+    count2 = await generate_snapshot(db, "DC-DC-100", period)
+    count_after_second = (await db.execute(
+        select(func.count()).select_from(SupplyChainRiskSnapshot)
+        .where(SupplyChainRiskSnapshot.supplier_id == seed_supplier.supplier_id,
+               SupplyChainRiskSnapshot.product_line_code == "DC-DC-100",
+               SupplyChainRiskSnapshot.snapshot_period == period)
+    )).scalar()
+    assert count_after_second == 1  # UPSERT, not INSERT
 
 
 @pytest.mark.asyncio

@@ -73,6 +73,7 @@ async def user_id(db: AsyncSession):
         username="test_user",
         display_name="Test User",
         role_id=role.id,
+        legacy_role="quality_engineer",
         password_hash="hash",
         factory_id=_DEFAULT_FACTORY_ID,
     )

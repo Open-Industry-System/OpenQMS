@@ -819,7 +819,7 @@ async def _create_sample_batch_inner(
     await db.flush()
 
     for i, val in enumerate(values):
-        db.add(SampleValue(batch_id=batch.batch_id, sequence_no=i + 1, value=val))
+        db.add(SampleValue(batch_id=batch.batch_id, sequence_no=i + 1, value=val, factory_id=ic.factory_id))
 
     await _add_audit_log_no_commit(
         db, user_id, "CREATE", "sample_batches", batch.batch_id,
