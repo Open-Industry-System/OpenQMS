@@ -91,7 +91,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd frontend
-          npm ci
+          npm install
 
       - name: TypeScript check
         run: |
