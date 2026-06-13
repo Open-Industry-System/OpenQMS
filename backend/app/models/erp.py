@@ -1,13 +1,11 @@
 """ERP integration models."""
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import (
-    String, Boolean, Integer, Numeric, Text, ForeignKey, UniqueConstraint, DateTime, Date, func, text
-)
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 

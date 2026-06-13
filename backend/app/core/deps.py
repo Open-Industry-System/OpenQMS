@@ -3,32 +3,31 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Query, Request
+from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.permissions import (
-    get_current_user,
-    require_permission,
-    require_admin,
-    require_engineer_or_admin,
-    PermissionLevel,
-    Module,
-    get_user_permission,
-)
 from app.core.factory_scope import (
     FactoryScope,
     ProductLineScope,
-    resolve_factory_scope,
-    resolve_product_line_scope,
-    resolve_effective_factory_id,
     get_user_factory_ids,
     get_user_product_line_codes,
+    resolve_effective_factory_id,
+    resolve_factory_scope,
+    resolve_product_line_scope,
 )
-from app.core.security import verify_token, PLATFORM_ISSUER, PLATFORM_AUDIENCE, TENANT_ISSUER, TENANT_AUDIENCE
-from jose import JWTError
+from app.core.permissions import (
+    Module,
+    PermissionLevel,
+    get_current_user,
+    get_user_permission,
+    require_admin,
+    require_permission,
+)
+from app.core.security import PLATFORM_AUDIENCE, PLATFORM_ISSUER, verify_token
 from app.database import get_db, get_platform_db
-from app.models.user import User
 from app.models.platform_admin import PlatformAdminUser
+from app.models.user import User
 
 
 @dataclass
@@ -112,7 +111,6 @@ __all__ = [
     "get_current_user",
     "require_permission",
     "require_admin",
-    "require_engineer_or_admin",
     "PermissionLevel",
     "Module",
     "RequestScope",

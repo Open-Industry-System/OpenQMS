@@ -3,10 +3,17 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    String, Boolean, Integer, Text, Numeric,
-    ForeignKey, UniqueConstraint, DateTime, func,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base

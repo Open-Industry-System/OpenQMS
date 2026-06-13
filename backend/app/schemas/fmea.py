@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
 
+from pydantic import BaseModel, Field, field_validator
 
 # DFMEA 专用节点类型（语义标识，字段与现有 Function 节点相同）
 # SystemFunction = "SystemFunction"

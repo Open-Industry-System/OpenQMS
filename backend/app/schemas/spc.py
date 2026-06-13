@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Dict, List, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, field_validator
 
+from pydantic import BaseModel, Field, field_validator
 
 # ============ InspectionCharacteristic ============
 

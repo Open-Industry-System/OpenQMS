@@ -1,21 +1,29 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import select, func, and_, text
+from enum import Enum
+
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
-from app.models.special_characteristic import SpecialCharacteristic
-from app.models.fmea import FMEADocument
-from app.models.control_plan import ControlPlanItem, ControlPlan
-from app.models.spc import InspectionCharacteristic
+
 from app.models.audit import AuditLog
+from app.models.control_plan import ControlPlan, ControlPlanItem
+from app.models.fmea import FMEADocument
+from app.models.spc import InspectionCharacteristic
+from app.models.special_characteristic import SpecialCharacteristic
 from app.schemas.special_characteristic import (
-    SCCreate, SCUpdate, SCResponse, SCListResponse,
-    MatrixRow, MatrixResponse, SeverityWarning, CPSyncStatusItem, CPSyncStatusResponse,
-    SafetySubmitRequest, SafetyApprovalAction,
+    CPSyncStatusItem,
+    CPSyncStatusResponse,
+    MatrixResponse,
+    MatrixRow,
+    SafetyApprovalAction,
+    SafetySubmitRequest,
+    SCCreate,
+    SCListResponse,
+    SCResponse,
+    SCUpdate,
+    SeverityWarning,
 )
-
-
-from enum import Enum
 
 
 class SafetyApprovalStatus(str, Enum):
@@ -425,9 +433,7 @@ async def update_msa_status(db: AsyncSession, sc_id: uuid.UUID, grr_percent: flo
     sc = result.scalar_one_or_none()
     if not sc:
         return None
-    if grr_percent < 10:
-        sc.msa_status = "PASS"
-    elif grr_percent < 30:
+    if grr_percent < 10 or grr_percent < 30:
         sc.msa_status = "PASS"
     else:
         sc.msa_status = "FAIL"

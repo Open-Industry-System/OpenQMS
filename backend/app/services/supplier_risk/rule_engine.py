@@ -6,9 +6,8 @@ and returns a RuleResult. No DB access, no side effects.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
-
 
 # ── Data structures ──────────────────────────────────────────────────
 

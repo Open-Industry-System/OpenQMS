@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.core.deps import RequestScope, get_request_scope
-from app.models.user import User
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
 from app.models.user_dashboard_layout import UserDashboardLayout
 from app.schemas import dashboard_layout as layout_schemas
 from app.services import dashboard_service
@@ -281,6 +280,7 @@ async def get_widgets(
 
 from fastapi import Request
 from pydantic import BaseModel
+
 from app.services.quality_trend_service import (
     InsufficientTrendDataError,
     LLMNotConfiguredError,
@@ -288,6 +288,8 @@ from app.services.quality_trend_service import (
     RateLimitError,
     build_scope_description,
     build_scope_hash,
+)
+from app.services.quality_trend_service import (
     interpret_quality_trend as interpret_quality_trend_service,
 )
 

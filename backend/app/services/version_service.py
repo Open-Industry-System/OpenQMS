@@ -8,9 +8,8 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
@@ -19,7 +18,6 @@ from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.control_plan_version import ControlPlanVersion
 from app.models.fmea import FMEADocument
 from app.models.fmea_version import FMEAVersion
-
 
 # ---------------------------------------------------------------------------
 # SHA-256 helpers

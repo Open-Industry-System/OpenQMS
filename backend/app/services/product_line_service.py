@@ -1,6 +1,8 @@
 import uuid
+
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.product_line import ProductLine
 
 
@@ -58,6 +60,8 @@ async def delete_product_line(db: AsyncSession, pl: ProductLine) -> None:
         ('management_reviews', 'product_line_code', "status NOT IN ('closed', 'cancelled')"),
         ('gauges', 'product_line_code', "status = 'active'"),
     ]
+    # SECURITY: {table}, {col}, {active_filter} are interpolated from the
+    # hardcoded tables_to_check constant above — never user input.
     for table, col, active_filter in tables_to_check:
         result = await db.execute(
             text(f"SELECT COUNT(*) FROM {table} WHERE {col} = :code AND {active_filter}"),

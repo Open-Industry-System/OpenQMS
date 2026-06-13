@@ -12,6 +12,9 @@ from app.core.tenant_utils import set_search_path_sql, current_tenant_schema
 @pytest_asyncio.fixture
 async def engine():
     """Create a fresh engine per test to avoid event-loop-attached connection pools."""
+    from tests.conftest import _check_db_available
+    if not await _check_db_available():
+        pytest.skip("Database not available")
     eng = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
     yield eng
     await eng.dispose()

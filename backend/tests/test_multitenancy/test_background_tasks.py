@@ -18,6 +18,8 @@ def _make_mock_session():
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
+    # session.in_transaction() is synchronous — MagicMock, not AsyncMock
+    session.in_transaction = MagicMock(return_value=False)
     # session.begin() returns an async context manager, not a coroutine
     begin_cm = AsyncMock()
     begin_cm.__aenter__ = AsyncMock(return_value=None)

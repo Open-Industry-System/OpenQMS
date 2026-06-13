@@ -9,7 +9,7 @@ Provides:
 
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -235,7 +235,7 @@ class MockPLMConnector(PLMConnector):
         self._db = db
 
     async def fetch_parts(self, since: datetime) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [
             {
                 **part,
@@ -245,7 +245,7 @@ class MockPLMConnector(PLMConnector):
         ]
 
     async def fetch_boms(self, since: datetime) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [
             {
                 **bom,
@@ -256,7 +256,7 @@ class MockPLMConnector(PLMConnector):
         ]
 
     async def fetch_change_orders(self, since: datetime) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [
             {
                 **co,
@@ -351,7 +351,7 @@ async def test_plm_connection(
     """
     connector = get_plm_connector(conn, db)
     try:
-        epoch_start = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        epoch_start = datetime(2000, 1, 1, tzinfo=UTC)
         parts = await connector.fetch_parts(epoch_start)
         return {"status": "ok", "parts_count": len(parts)}
     except Exception as e:

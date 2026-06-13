@@ -3,13 +3,13 @@ import logging
 from app.services.fusion_engine import FusionEngine
 from app.services.llm_fusion_layer import LLMFusionLayer
 from app.services.recommendation_sources import (
-    FMEAGraphSource,
-    SemanticSearchSource,
-    HistoricalCAPASource,
-    HistoricalCAPAMeasureSource,
-    RuleEngineSource,
-    RuleEngineMeasureSource,
     FMEAControlExpander,
+    FMEAGraphSource,
+    HistoricalCAPAMeasureSource,
+    HistoricalCAPASource,
+    RuleEngineMeasureSource,
+    RuleEngineSource,
+    SemanticSearchSource,
 )
 from app.services.recommendation_types import (
     RecommendationContext,

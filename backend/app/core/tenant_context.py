@@ -1,17 +1,15 @@
 """TenantContext middleware — resolves tenant from request and injects into request.state."""
 import logging
 
-from fastapi import Request, Response
+from fastapi import Request
+from sqlalchemy import select, text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from sqlalchemy import select, text
 
-from app.core.tenant_utils import slug_to_schema_name
-from app.database import async_session
-from app.models.tenant import Tenant
 from app.config import settings
 from app.core.security import verify_token
-from jose import JWTError
+from app.database import async_session
+from app.models.tenant import Tenant
 
 logger = logging.getLogger(__name__)
 

@@ -1,24 +1,23 @@
 import hashlib
 import json
 import uuid as _uuid
-from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, func, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
+from app.models.fmea import FMEADocument
 from app.models.recommendation_cache import RecommendationCache
 from app.models.user import User
-from app.schemas.lessons_learned import LessonsLearnedResponse, LessonCard, LessonCategories
+from app.schemas.lessons_learned import LessonCard, LessonCategories, LessonsLearnedResponse
 from app.services.lessons_learned.context import LessonsLearnedContext
-from app.services.lessons_learned.sources.historical_fmea import HistoricalFMEASource
-from app.services.lessons_learned.sources.historical_capa import LessonsCAPASource
-from app.services.lessons_learned.sources.audit_finding import AuditFindingSource
-from app.services.lessons_learned.sources.semantic import LessonsSemanticSource
-from app.services.lessons_learned.sources.rule_engine import LessonsRuleSource
 from app.services.lessons_learned.fusion import LessonsFusionEngine
+from app.services.lessons_learned.sources.audit_finding import AuditFindingSource
+from app.services.lessons_learned.sources.historical_capa import LessonsCAPASource
+from app.services.lessons_learned.sources.historical_fmea import HistoricalFMEASource
+from app.services.lessons_learned.sources.rule_engine import LessonsRuleSource
+from app.services.lessons_learned.sources.semantic import LessonsSemanticSource
 from app.services.recommendation_types import RecommendationCandidate
 
 

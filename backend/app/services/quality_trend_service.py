@@ -1,19 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
-import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
-from app.models.spc import SPCAlarm, InspectionCharacteristic
-from app.schemas.quality_trend import QualityTrendSummary, QualityTrendMetadata
+from app.models.spc import InspectionCharacteristic, SPCAlarm
+from app.schemas.quality_trend import QualityTrendMetadata, QualityTrendSummary
 from app.utils.fmea_graph import build_rpn_rows
-
 
 WINDOW_DAYS = 30
 MIN_EFFECTIVE_MODULES = 2
@@ -29,7 +28,7 @@ async def build_quality_trend_summary(
     selected_product_line: str | None,
     scope_hash: str = "",
 ) -> QualityTrendSummary:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     current_start = now - timedelta(days=WINDOW_DAYS)
     previous_start = now - timedelta(days=WINDOW_DAYS * 2)
     omitted_modules = sorted({"spc", "capa", "fmea"} - allowed_modules)
@@ -106,7 +105,7 @@ async def build_quality_trend_summary(
     if not actions:
         actions.append({"priority": "low", "text": "继续监控关键指标"})
 
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
     metadata = QualityTrendMetadata(
         omitted_modules=omitted_modules,
         available_modules=sorted(effective_modules),
@@ -245,7 +244,7 @@ async def interpret_quality_trend(
             llm_provider.complete(prompt, _interpret_response_schema()),
             timeout=LLM_TIMEOUT,
         )
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         await _write_interpret_audit(db, user_id, "llm_failed", audit_context | {"error": f"LLM 调用超时（>{LLM_TIMEOUT}s）"})
         raise LLMNotConfiguredError("AI 解读服务响应超时，请稍后重试") from exc
     except Exception as exc:
@@ -274,7 +273,7 @@ def _parse_interpretation(raw: dict, summary, scope_hash: str) -> QualityTrendIn
         "model": raw.get("model", "unknown"),
         "evidence_hash": summary.evidence_hash,
         "scope_hash": scope_hash,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "cached": False,
     }
     return QualityTrendInterpretation(**payload)

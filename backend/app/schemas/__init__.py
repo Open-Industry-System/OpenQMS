@@ -1,21 +1,24 @@
-from app.schemas import quality_goal
-from app.schemas import audit
-from app.schemas import spc
-from app.schemas import supplier
-from app.schemas import gauge
-from app.schemas import grr
-from app.schemas import bias
-from app.schemas import linearity
-from app.schemas import stability
-from app.schemas import attribute
-from app.schemas import msa
-from app.schemas import product_line
-from app.schemas import management_review
-from app.schemas import iqc
-from app.schemas import customer_quality
-from app.schemas import scar
-from app.schemas import apqp
-from app.schemas import ppap
-from app.schemas import quality_trend
-from app.schemas import iqc_aql
-from app.schemas import supplier_risk
+"""Re-export all schema submodules for convenient imports."""
+from app.schemas import (  # noqa: F401 — intentional re-exports
+    apqp,
+    attribute,
+    audit,
+    bias,
+    customer_quality,
+    gauge,
+    grr,
+    iqc,
+    iqc_aql,
+    linearity,
+    management_review,
+    msa,
+    ppap,
+    product_line,
+    quality_goal,
+    quality_trend,
+    scar,
+    spc,
+    stability,
+    supplier,
+    supplier_risk,
+)

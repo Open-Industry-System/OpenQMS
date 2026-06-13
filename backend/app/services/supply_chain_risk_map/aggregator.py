@@ -12,9 +12,8 @@ from datetime import date
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import text, select, func
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
 
 # ---------------------------------------------------------------------------
 # Period helpers

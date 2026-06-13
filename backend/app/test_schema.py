@@ -1,6 +1,9 @@
 import sys
+
 from pydantic import ValidationError
-from app.schemas.fmea import GraphNodeSchema, GraphDataSchema
+
+from app.schemas.fmea import GraphNodeSchema
+
 
 def test_graph_node_schema_backward_compatibility():
     # 1. Test traditional node (backward compatibility)
@@ -57,7 +60,7 @@ def test_invalid_range_validation():
     try:
         GraphNodeSchema(**node_data)
         assert False, "Should have failed validation"
-    except ValidationError as e:
+    except ValidationError:
         print("Pass: Invalid range constraint caught successfully")
 
 if __name__ == "__main__":

@@ -1,13 +1,13 @@
 import uuid
 
-from sqlalchemy import select, desc, func
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.graph.repository import FMEAGraphRepository
+from app.models.audit import AuditLog
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.fmea import FMEADocument
-from app.models.audit import AuditLog
-from app.graph.repository import FMEAGraphRepository
-from app.schemas.change_impact import ChangeImpactResult, ChangeImpactAnalysisResponse
+from app.schemas.change_impact import ChangeImpactAnalysisResponse, ChangeImpactResult
 
 
 def _calculate_impact_score(result: ChangeImpactResult) -> int:

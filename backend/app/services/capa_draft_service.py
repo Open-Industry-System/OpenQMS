@@ -1,25 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 import uuid
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request
-from sqlalchemy import select, text
 
 from app.config import settings
 from app.core.product_line_filter import enforce_product_line_access
-from app.database import async_session, get_tenant_aware_session
+from app.database import get_tenant_aware_session
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
-from app.schemas.capa_draft import DraftRequest, STEP_SCHEMA_MAP
+from app.schemas.capa_draft import STEP_SCHEMA_MAP, DraftRequest
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
     from app.models.user import User
 
 # ---------- 常量 ----------
@@ -233,7 +231,7 @@ async def generate_draft(
     report_id: uuid.UUID,
     step: str,
     req: DraftRequest,
-    user: "User",
+    user: User,
     request: Request,
 ) -> dict:
     start_time = time.time()
@@ -322,7 +320,7 @@ async def generate_draft(
             raise HTTPException(status_code=400, detail="无效的步骤")
 
         precondition = _STEP_PRECONDITIONS[step]
-        min_status = precondition["min_status"]
+        _min_status = precondition["min_status"]  # noqa: F841
         required_field = precondition["required_field"]
 
         # 6. 状态精确匹配校验：仅允许草拟当前步骤
@@ -398,7 +396,7 @@ async def generate_draft(
                     llm_provider.complete(prompt, response_schema),
                     timeout=settings.CAPA_DRAFT_LLM_TIMEOUT,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise HTTPException(status_code=504, detail="AI 响应超时，请重试")
             except (ConnectionError, OSError) as e:
                 raise HTTPException(status_code=503, detail="AI 服务暂时不可用，请稍后重试") from e

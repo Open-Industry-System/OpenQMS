@@ -1,24 +1,28 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc, and_
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from app.core.permissions import (
-    get_user_permission, PermissionLevel, Module,
+    Module,
+    PermissionLevel,
+    get_user_permission,
 )
+from app.database import get_db
 from app.models.cp_validation import (
-    CPValidationRun, CPValidationFinding, CPValidationOccurrence,
+    CPValidationFinding,
+    CPValidationOccurrence,
+    CPValidationRun,
 )
 from app.schemas.cp_validation import (
-    ValidationRunResponse,
     ValidationResultItem,
-    ValidationSummaryResponse,
     ValidationResultsListResponse,
+    ValidationRunResponse,
+    ValidationSummaryResponse,
 )
 from app.services.cp_validation import CPValidationEngine, ValidationAlreadyRunning
 
@@ -396,7 +400,7 @@ async def reject_validation_result(
     _check_factory_access(finding, scope)
     finding.status = "rejected"
     finding.resolved_by = scope.user.user_id
-    finding.resolved_at = datetime.now(timezone.utc)
+    finding.resolved_at = datetime.now(UTC)
     await db.commit()
     return await _find_and_respond(db, finding_id)
 
@@ -417,7 +421,7 @@ async def resolve_validation_result(
     _check_factory_access(finding, scope)
     finding.status = "resolved"
     finding.resolved_by = scope.user.user_id
-    finding.resolved_at = datetime.now(timezone.utc)
+    finding.resolved_at = datetime.now(UTC)
     await db.commit()
     return await _find_and_respond(db, finding_id)
 

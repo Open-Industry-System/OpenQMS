@@ -1,14 +1,13 @@
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.supplier import Supplier, SupplierPPAPSubmission, SupplierPPAPElement
 from app.models.audit import AuditLog
-
+from app.models.supplier import Supplier, SupplierPPAPElement, SupplierPPAPSubmission
 
 _UNSET = object()  # sentinel: distinguish omitted args from explicit None
 
@@ -51,7 +50,7 @@ LEVEL_REQUIRED = {
 
 
 async def _next_ppap_no(db: AsyncSession) -> str:
-    today = datetime.now(timezone.utc).strftime("%y%m%d")
+    today = datetime.now(UTC).strftime("%y%m%d")
     prefix = f"PPAP-{today}"
     result = await db.execute(
         select(SupplierPPAPSubmission.ppap_no)
@@ -289,7 +288,7 @@ async def update_element(
             element.reviewed_at = None
         else:
             element.reviewed_by = user_id
-            element.reviewed_at = datetime.now(timezone.utc)
+            element.reviewed_at = datetime.now(UTC)
             changed["reviewed_by"] = str(user_id)
 
     if notes is not _UNSET:
@@ -352,7 +351,7 @@ async def transition_ppap(
             ppap.submission_date = date.today()
     elif action == "approve":
         ppap.approved_by = user_id
-        ppap.approved_at = datetime.now(timezone.utc)
+        ppap.approved_at = datetime.now(UTC)
     elif action == "reject":
         ppap.rejection_reason = rejection_reason
     elif action == "resubmit":

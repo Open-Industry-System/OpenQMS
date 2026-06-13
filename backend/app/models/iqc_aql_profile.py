@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import String, Float, Date, DateTime, ForeignKey, Boolean, func
+from sqlalchemy import Date, DateTime, Float, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 

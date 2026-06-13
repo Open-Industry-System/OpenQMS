@@ -1,32 +1,32 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from app.database import get_db
-from app.core.permissions import get_user_permission, PermissionLevel, Module
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app import schemas
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
-from app.models.user import User
-from app.models.spc import InspectionCharacteristic
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
+from app.models.attribute import AttributeStudy
+from app.models.bias import BiasStudy
 from app.models.gauge import Gauge
 from app.models.grr import GrrStudy
-from app.models.bias import BiasStudy
 from app.models.linearity import LinearityStudy
+from app.models.spc import InspectionCharacteristic
 from app.models.stability import StabilityStudy
-from app.models.attribute import AttributeStudy
-from app import schemas
 from app.services import (
-    grr_service,
-    grr_engine,
-    bias_service,
-    bias_engine,
-    linearity_service,
-    linearity_engine,
-    stability_service,
-    stability_engine,
-    attribute_service,
     attribute_engine,
+    attribute_service,
+    bias_engine,
+    bias_service,
+    grr_engine,
+    grr_service,
+    linearity_engine,
+    linearity_service,
+    stability_engine,
+    stability_service,
 )
 
 grr_router = APIRouter(prefix="/api/msa/grr", tags=["msa-grr"])

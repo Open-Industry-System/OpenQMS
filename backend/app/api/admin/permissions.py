@@ -1,13 +1,14 @@
 """Admin permission management API."""
 import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permissions import Module, PermissionLevel, require_permission
 from app.database import get_db
-from app.core.permissions import require_permission, Module, PermissionLevel
 from app.models.user import User
+from app.schemas.permission import AssignProductLineRequest, PermissionUpdateRequest
 from app.services import permission_service
-from app.schemas.permission import PermissionUpdateRequest, AssignProductLineRequest
 
 router = APIRouter(prefix="/api/admin", tags=["admin-permissions"])
 

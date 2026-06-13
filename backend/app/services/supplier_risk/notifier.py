@@ -9,7 +9,6 @@ import ipaddress
 import json
 import logging
 import os
-from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -32,7 +31,6 @@ except ImportError:
     Fernet = None
 
 from app.models.supplier_risk import SupplierRiskAlert, SupplierRiskNotificationChannel
-
 
 logger = logging.getLogger(__name__)
 

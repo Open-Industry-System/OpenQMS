@@ -8,7 +8,6 @@ Three-layer scope model:
 Key design: bypass_row_level_security ONLY bypasses product-line filtering, NOT factory scope.
 Only Module.GROUP ADMIN grants cross-factory visibility.
 """
-import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -17,8 +16,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
 from app.models.role import UserProductLine
+from app.models.user import User
 
 if TYPE_CHECKING:
     from app.core.deps import RequestScope

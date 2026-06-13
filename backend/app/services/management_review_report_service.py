@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
@@ -241,7 +241,7 @@ async def generate_report(
 
     model_name = getattr(llm_provider, "model", None) or "rule-only"
     content = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "generation_model": model_name,
         "llm_enriched": llm_enriched,
         "sections": sections,
@@ -270,7 +270,7 @@ async def save_report_draft(
     if review.status == "closed":
         raise ValueError("cannot edit report of a closed review")
 
-    content = {**content, "updated_at": datetime.now(timezone.utc).isoformat()}
+    content = {**content, "updated_at": datetime.now(UTC).isoformat()}
     review.generated_report = content
     review.report_status = "draft"
     await _write_audit(db, review.review_id, user.user_id, "REPORT_SAVE_DRAFT", {
@@ -311,7 +311,7 @@ async def finalize_report(
         content=review.generated_report,
         created_by=user.user_id,
         finalized_by=user.user_id,
-        finalized_at=datetime.now(timezone.utc),
+        finalized_at=datetime.now(UTC),
     )
     db.add(snapshot)
     review.report_status = "final"

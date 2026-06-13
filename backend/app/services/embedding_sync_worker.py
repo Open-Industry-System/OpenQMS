@@ -6,12 +6,12 @@ import asyncio
 import json
 import logging
 import signal
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session, get_tenant_aware_session
+from app.database import get_tenant_aware_session
 from app.models.document_embedding import EmbeddingSyncOutbox
 from app.services.embedding_provider import create_embedding_provider
 
@@ -140,6 +140,8 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
             if entity_type not in table_field_map:
                 continue
 
+            # SECURITY: all interpolated names come from the hardcoded
+            # table_field_map constant — never user input.
             table_from, pk_expr, plc_expr, doc_no_expr, fields = table_field_map[entity_type]
             field_names = [f[0] for f in fields]
             result = await db.execute(
@@ -178,7 +180,7 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
 
     Uses DELETE + INSERT because partial unique indexes can't be used in a single ON CONFLICT clause.
     """
-    for chunk, vector in zip(chunks, vectors):
+    for chunk, vector in zip(chunks, vectors, strict=False):
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
 
         # Delete existing embedding for this entity (if any)
@@ -242,7 +244,7 @@ async def mark_completed(db: AsyncSession, event_ids: list[str]):
     await db.execute(
         update(EmbeddingSyncOutbox)
         .where(EmbeddingSyncOutbox.id.in_(event_ids))
-        .values(status="completed", processed_at=datetime.now(timezone.utc))
+        .values(status="completed", processed_at=datetime.now(UTC))
     )
     await db.commit()
 
@@ -255,7 +257,7 @@ async def mark_failed(db: AsyncSession, event_id: str, error: str, retry_count: 
     else:
         new_status = "pending"
         backoff = min(BACKOFF_BASE * (2 ** retry_count), BACKOFF_MAX)
-        next_attempt = datetime.now(timezone.utc) + timedelta(seconds=backoff)
+        next_attempt = datetime.now(UTC) + timedelta(seconds=backoff)
 
     await db.execute(
         text("""

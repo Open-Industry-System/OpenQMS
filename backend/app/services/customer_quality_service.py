@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy import func, or_, select
@@ -761,7 +761,7 @@ async def transition_complaint(
     complaint.status = new_status
     changed_fields = {"action": action, "status": {"before": old_status, "after": new_status}}
     if new_status == ComplaintStatus.CLOSED.value:
-        complaint.closed_at = datetime.now(timezone.utc)
+        complaint.closed_at = datetime.now(UTC)
         changed_fields["closed_at"] = _jsonable(complaint.closed_at)
 
     await _audit(
@@ -1144,7 +1144,7 @@ async def transition_rma(
     rma.status = new_status
     changed_fields = {"action": action, "status": {"before": old_status, "after": new_status}}
     if new_status == RMAStatus.CLOSED.value:
-        rma.closed_at = datetime.now(timezone.utc)
+        rma.closed_at = datetime.now(UTC)
         changed_fields["closed_at"] = _jsonable(rma.closed_at)
 
     await _audit(db, "rma_records", rma.rma_id, "TRANSITION", user_id, changed_fields)
@@ -1333,8 +1333,8 @@ async def _get_customer_audit_summary(
     date_from: date,
     date_to: date,
 ) -> dict:
-    from app.models.audit_plan import AuditPlan
     from app.models.audit_finding import AuditFinding
+    from app.models.audit_plan import AuditPlan
 
     query = (
         select(AuditPlan)

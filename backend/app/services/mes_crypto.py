@@ -12,7 +12,6 @@ import os
 
 from cryptography.fernet import Fernet
 
-
 # ---- Fernet singleton ----
 _fernet: Fernet | None = None
 

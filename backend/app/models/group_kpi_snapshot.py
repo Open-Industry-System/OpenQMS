@@ -1,9 +1,11 @@
 # backend/app/models/group_kpi_snapshot.py
 import uuid
 from datetime import date, datetime
+
 from sqlalchemy import Date, DateTime, ForeignKey, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.database import Base
 
 

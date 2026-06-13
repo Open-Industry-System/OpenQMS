@@ -1,19 +1,19 @@
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database import get_tenant_aware_session
+from app.models.audit import AuditLog
 from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.fmea import FMEADocument
-from app.models.audit import AuditLog
 from app.schemas.control_plan import ControlPlanCreate, ControlPlanUpdate, ImportFromFMEARequest
+from app.services.cp_validation.engine import CPValidationEngine
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import create_cp_version
-from app.services.cp_validation.engine import CPValidationEngine
-from app.database import async_session, get_tenant_aware_session
 
 
 async def _run_validation_background(cp_id: uuid.UUID, user_id: uuid.UUID, trigger: str) -> None:
@@ -212,7 +212,7 @@ async def update_control_plan(
         items_changed = len(existing_items) != len(data.items)
         if not items_changed:
             import json
-            for old, new in zip(existing_items, data.items):
+            for old, new in zip(existing_items, data.items, strict=False):
                 old_dict = {
                     k: getattr(old, k) for k in [
                         "step_no", "process_name", "equipment", "characteristic_no",
@@ -330,7 +330,7 @@ async def approve_control_plan(
 
     cp.status = "approved"
     cp.approved_by = user_id
-    cp.approved_at = datetime.now(timezone.utc)
+    cp.approved_at = datetime.now(UTC)
     cp.updated_by = user_id
 
     # Create version snapshot on approve
@@ -675,8 +675,8 @@ async def sync_csr_to_control_plan(
     user_id: uuid.UUID,
 ):
     from app.models.audit import AuditLog
-    from app.models.customer_quality import Customer
     from app.models.control_plan import ControlPlan
+    from app.models.customer_quality import Customer
 
     # 1. Query control plan
     result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == plan_id))
@@ -698,7 +698,7 @@ async def sync_csr_to_control_plan(
                     "title": item.get("title", ""),
                     "description": item.get("description", ""),
                     "source_customer_id": str(customer.customer_id),
-                    "synced_at": datetime.now(timezone.utc).isoformat(),
+                    "synced_at": datetime.now(UTC).isoformat(),
                     "source": "csr",
                 }
 

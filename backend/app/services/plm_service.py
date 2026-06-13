@@ -9,14 +9,14 @@ Provides:
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import SYSTEM_USER_ID
-from app.database import async_session, get_tenant_aware_session
+from app.database import get_tenant_aware_session
 from app.models.plm import (
     PLMBOM,
     PLMChangeImpactTask,
@@ -385,7 +385,7 @@ class PLMIngestionService:
         if change_id is None:
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = (
             pg_insert(PLMChangeImpactTask)
             .values(
@@ -460,7 +460,7 @@ def _parse_dt(value) -> datetime | None:
         try:
             dt = datetime.fromisoformat(value)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return dt
         except ValueError:
             logger.warning("Failed to parse datetime: %s", value)
@@ -481,7 +481,7 @@ class PLMSyncService:
         db: AsyncSession, connection_id: uuid.UUID
     ) -> None:
         """Create sync job rows for each data type if they don't already exist."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for data_type in ("part", "bom", "change_order"):
             stmt = (
                 pg_insert(PLMSyncJob)
@@ -511,7 +511,7 @@ class PLMSyncService:
         - OR (status == "running" and started_at older than STALE_MINUTES)
         - OR (status == "failed" and next_run_at <= now)
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         claim_token = str(uuid.uuid4())
         stale_threshold = now - timedelta(minutes=STALE_MINUTES)
 
@@ -588,7 +588,7 @@ class PLMSyncService:
         # Ensure jobs exist
         await PLMSyncService.create_sync_jobs_for_connection(db, connection_id)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Reset eligible jobs to pending
         await db.execute(
             update(PLMSyncJob)
@@ -628,7 +628,7 @@ async def _run_single_sync_job(
     if connection is None:
         raise ValueError(f"PLM connection not found: {job.connection_id}")
 
-    since = job.checkpoint or datetime(2000, 1, 1, tzinfo=timezone.utc)
+    since = job.checkpoint or datetime(2000, 1, 1, tzinfo=UTC)
     data_type = job.data_type
 
     await db.commit()
@@ -649,7 +649,7 @@ async def _run_single_sync_job(
 
     # --- Phase 3: ingest results in short transaction(s) ---
     BATCH_SIZE = 50
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     async with get_tenant_aware_session() as ingest_db:
         ingestion = PLMIngestionService(ingest_db)
@@ -708,7 +708,7 @@ class PLMChangeImpactWorker:
         before or at commit time.
         """
         claim_token = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         stmt = (
             select(PLMChangeImpactTask)
@@ -740,7 +740,7 @@ class PLMChangeImpactWorker:
         the session for the recovery to take effect; this keeps the method
         composable with other transactional work in the same round.
         """
-        threshold = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
+        threshold = datetime.now(UTC) - timedelta(minutes=timeout_minutes)
 
         result = await db.execute(
             update(PLMChangeImpactTask)
@@ -791,7 +791,7 @@ class PLMChangeImpactWorker:
             owned_task.status = "failed"
             owned_task.error_message = "Change order not found"
             owned_task.claim_token = None
-            owned_task.completed_at = datetime.now(timezone.utc)
+            owned_task.completed_at = datetime.now(UTC)
             await db.flush()
             return
 
@@ -809,7 +809,7 @@ class PLMChangeImpactWorker:
                     "analysis_ids": analysis_ids,
                 }
                 owned_task.claim_token = None
-                owned_task.completed_at = datetime.now(timezone.utc)
+                owned_task.completed_at = datetime.now(UTC)
                 await db.flush()
                 return
 
@@ -898,7 +898,7 @@ class PLMChangeImpactWorker:
                 "analysis_ids": analysis_ids,
             }
             still_owned.claim_token = None
-            still_owned.completed_at = datetime.now(timezone.utc)
+            still_owned.completed_at = datetime.now(UTC)
             await db.flush()
 
         except Exception as exc:
@@ -920,11 +920,11 @@ class PLMChangeImpactWorker:
                     # Re-queue with exponential backoff (1 min * 2^retry_count)
                     still_owned.status = "pending"
                     backoff = min(60 * (2 ** still_owned.retry_count), 3600)
-                    still_owned.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=backoff)
+                    still_owned.next_retry_at = datetime.now(UTC) + timedelta(seconds=backoff)
                     still_owned.claim_token = None
                 else:
                     # Exhausted retries – mark permanently failed
                     still_owned.status = "failed"
                     still_owned.claim_token = None
-                    still_owned.completed_at = datetime.now(timezone.utc)
+                    still_owned.completed_at = datetime.now(UTC)
                 await db.flush()

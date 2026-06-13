@@ -1,12 +1,12 @@
 import uuid
-import uuid
 from datetime import date, timedelta
 from typing import List, Optional
-from sqlalchemy import select, func, case, and_
+
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.supplier import Supplier, SupplierEvaluation, SupplierSCAR
 from app.models.iqc_inspection import IqcInspection
+from app.models.supplier import Supplier, SupplierEvaluation, SupplierSCAR
 
 
 async def get_quality_dashboard(
@@ -367,7 +367,7 @@ async def export_quality_dashboard_excel(
     product_line_code: Optional[str] = None,
     factory_id: uuid.UUID | None = None,
 ) -> bytes:
-    from app.utils.excel import create_workbook, append_row, workbook_to_bytes
+    from app.utils.excel import append_row, create_workbook, workbook_to_bytes
 
     dashboard_data = await get_quality_dashboard(db, start_date, end_date, product_line_code, factory_id=factory_id)
 

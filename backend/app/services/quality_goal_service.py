@@ -1,10 +1,12 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, datetime
+
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from app.models.quality_goal import QualityGoal
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.audit import AuditLog
+from app.models.quality_goal import QualityGoal
 
 
 async def _generate_doc_no(db: AsyncSession) -> str:
@@ -261,7 +263,7 @@ async def approve_goal(db: AsyncSession, goal: QualityGoal, approver_id: uuid.UU
     if goal.status != "pending":
         raise ValueError("only pending goals can be approved")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     goal.status = "active"
     goal.approved_by = approver_id
     goal.approved_at = now

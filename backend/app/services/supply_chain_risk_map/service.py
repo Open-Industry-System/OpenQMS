@@ -5,22 +5,28 @@ from io import BytesIO
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, text, func
-from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
+from app.schemas.supply_chain_risk_map import (
+    ComparisonResponse,
+    ComparisonSupplier,
+    DimensionDetail,
+    HeatmapCell,
+    HeatmapColumn,
+    HeatmapResponse,
+    HeatmapRow,
+    SupplierDetailResponse,
+    SupplierDimensionTrend,
+    TimelineResponse,
+)
 from app.services.supplier_risk.service import calculate_all_supplier_scores
 from app.services.supply_chain_risk_map.aggregator import (
     aggregate_supply_chain_metrics,
     normalize_to_risk_index,
     ppm_to_risk_index,
-)
-from app.schemas.supply_chain_risk_map import (
-    HeatmapCell, HeatmapColumn, HeatmapRow, HeatmapResponse,
-    TimelineResponse, SupplierDetailResponse, DimensionDetail,
-    SupplierDimensionTrend, ComparisonSupplier, ComparisonResponse,
-    SnapshotGenerateResponse,
 )
 
 
@@ -382,7 +388,6 @@ async def export_heatmap(
 
     if format == "excel":
         from openpyxl import Workbook
-        from openpyxl.styles import PatternFill
 
         wb = Workbook()
         ws = wb.active

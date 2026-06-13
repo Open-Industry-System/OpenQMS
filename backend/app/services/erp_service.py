@@ -5,24 +5,29 @@ All ingestion methods receive an AsyncSession and do NOT commit.
 Caller controls transaction boundaries.
 """
 import uuid
-from datetime import datetime, date, timezone, timedelta
-from typing import Any
+from datetime import UTC, date, datetime
 
-from sqlalchemy import select, func, update as sa_update
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import SYSTEM_USER_ID
+from app.models.customer_quality import Customer, ShipmentRecord
 from app.models.erp import (
-    ERPConnection, ERPSyncJob, ERPPushOutbox,
-    ERPSupplier, ERPCustomer, ERPMaterial, ERPLocation,
-    ERPPurchaseOrder, ERPSalesOrder, ERPInventoryBalance,
-    ERPShipment, ERPCostRecord,
+    ERPConnection,
+    ERPCostRecord,
+    ERPCustomer,
+    ERPInventoryBalance,
+    ERPLocation,
+    ERPMaterial,
+    ERPPurchaseOrder,
+    ERPSalesOrder,
+    ERPShipment,
+    ERPSupplier,
+    ERPSyncJob,
 )
 from app.models.supplier import Supplier
-from app.models.customer_quality import Customer, ShipmentRecord
 from app.services.erp_connector import get_erp_connector
-
 
 # ---------------------------------------------------------------------------
 # Ingestion Service
@@ -92,7 +97,7 @@ class ERPIngestionService:
         results = []
         for item in items:
             try:
-                result = await handler(db, uuid.UUID(connection_id), item, factory_id=factory_id)
+                await handler(db, uuid.UUID(connection_id), item, factory_id=factory_id)
                 results.append({"status": "success", "external_id": item.get("external_id")})
             except Exception as e:
                 results.append({"status": "error", "external_id": item.get("external_id"), "error": str(e)})
@@ -110,7 +115,7 @@ class ERPIngestionService:
             "currency": item.get("currency"),
             "tax_id": item.get("tax_id"),
             "bank_info": item.get("bank_info"),
-            "source_updated_at": datetime.now(timezone.utc),
+            "source_updated_at": datetime.now(UTC),
             "erp_raw_data": item,
         }
         if factory_id is not None:
@@ -144,7 +149,7 @@ class ERPIngestionService:
             "region": item.get("region"),
             "customer_level": item.get("customer_level"),
             "tax_id": item.get("tax_id"),
-            "source_updated_at": datetime.now(timezone.utc),
+            "source_updated_at": datetime.now(UTC),
             "erp_raw_data": item,
         }
         if factory_id is not None:
@@ -180,7 +185,7 @@ class ERPIngestionService:
             "is_manufactured": item.get("is_manufactured", False),
             "default_supplier_code": item.get("default_supplier_code"),
             "status": item.get("status", "active"),
-            "source_updated_at": datetime.now(timezone.utc),
+            "source_updated_at": datetime.now(UTC),
             "erp_raw_data": item,
         }
         if factory_id is not None:
@@ -202,7 +207,7 @@ class ERPIngestionService:
             "zone_code": item.get("zone_code"),
             "location_type": item.get("location_type", "normal"),
             "is_enabled": item.get("is_enabled", True),
-            "source_updated_at": datetime.now(timezone.utc),
+            "source_updated_at": datetime.now(UTC),
             "erp_raw_data": item,
         }
         if factory_id is not None:
@@ -231,7 +236,7 @@ class ERPIngestionService:
             "received_quantity": item.get("received_quantity"),
             "status": item.get("status", "draft"),
             "lot_no": item.get("lot_no") or "",
-            "source_updated_at": datetime.now(timezone.utc),
+            "source_updated_at": datetime.now(UTC),
             "erp_raw_data": item,
         }
         if factory_id is not None:
@@ -267,7 +272,7 @@ class ERPIngestionService:
             "unit_price": item.get("unit_price"),
             "delivery_date": ERPIngestionService._coerce_date(item.get("delivery_date")),
             "status": item.get("status", "draft"),
-            "source_updated_at": datetime.now(timezone.utc),
+            "source_updated_at": datetime.now(UTC),
             "erp_raw_data": item,
         }
         if factory_id is not None:
@@ -293,7 +298,7 @@ class ERPIngestionService:
             "inventory_status": item.get("inventory_status", "available"),
             "manufacture_date": ERPIngestionService._coerce_date(item.get("manufacture_date")),
             "expiry_date": ERPIngestionService._coerce_date(item.get("expiry_date")),
-            "snapshot_at": datetime.now(timezone.utc),
+            "snapshot_at": datetime.now(UTC),
             "erp_raw_data": item,
         }
         if factory_id is not None:
@@ -318,7 +323,7 @@ class ERPIngestionService:
             "lot_no": item.get("lot_no"),
             "quantity": item.get("quantity"),
             "shipment_date": ERPIngestionService._coerce_date(item.get("shipment_date")),
-            "source_updated_at": datetime.now(timezone.utc),
+            "source_updated_at": datetime.now(UTC),
             "link_status": "pending",
             "erp_raw_data": item,
         }
@@ -415,7 +420,7 @@ class ERPIngestionService:
             "cost_center": item.get("cost_center"),
             "cost_date": ERPIngestionService._coerce_date(item.get("cost_date")),
             "description": item.get("description"),
-            "source_updated_at": datetime.now(timezone.utc),
+            "source_updated_at": datetime.now(UTC),
             "erp_raw_data": item,
         }
         if factory_id is not None:
@@ -529,7 +534,7 @@ class ERPSyncService:
             factory_id = connection.factory_id
 
             connector = get_erp_connector(connection)
-            since = checkpoint or datetime(2000, 1, 1, tzinfo=timezone.utc)
+            since = checkpoint or datetime(2000, 1, 1, tzinfo=UTC)
 
             fetch_method = getattr(connector, f"fetch_{data_type}")
             items = await fetch_method(since)

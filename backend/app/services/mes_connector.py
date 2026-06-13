@@ -8,16 +8,15 @@ Provides:
 
 import asyncio
 import random
-import uuid
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session, get_tenant_aware_session
+from app.database import get_tenant_aware_session
 from app.models.spc import InspectionCharacteristic
 from app.schemas.mes import (
     MESIngestEquipmentStatus,
@@ -26,7 +25,6 @@ from app.schemas.mes import (
     MESIngestScrapRecord,
 )
 from app.services.mes_crypto import decrypt_credential
-
 
 # ---------------------------------------------------------------------------
 # Schema mapping for validation
@@ -96,10 +94,10 @@ class MockMESConnector(MESConnector):
     _DEFECT_CATEGORIES = ["来料问题", "过程异常", "设备故障", "操作失误"]
 
     async def fetch_production_orders(self, since: datetime) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         count = random.randint(2, 5)
         orders = []
-        for i in range(count):
+        for _i in range(count):
             seq = random.randint(1, 999)
             status = random.choice(self._ORDER_STATUSES)
             orders.append(
@@ -118,7 +116,7 @@ class MockMESConnector(MESConnector):
         return orders
 
     async def fetch_equipment_status(self) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         results = []
         for eq in self._EQUIPMENT_DEFS:
             status = random.choice(self._EQUIPMENT_STATUSES)
@@ -143,7 +141,7 @@ class MockMESConnector(MESConnector):
         return results
 
     async def fetch_scrap_records(self, since: datetime) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         count = random.randint(0, 2)
         records = []
         for _ in range(count):
@@ -167,7 +165,7 @@ class MockMESConnector(MESConnector):
 
     async def fetch_measurements(self, since: datetime) -> list[dict]:
         """Query InspectionCharacteristic from DB and generate simulated measurements."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         async with get_tenant_aware_session() as session:
             result = await session.execute(
                 select(InspectionCharacteristic).where(
@@ -410,9 +408,7 @@ class RESTMESConnector(MESConnector):
         if page_count >= max_pages and pag_type != "none":
             # Only raise if we actually hit the cap and there's still more data
             has_more = False
-            if pag_type == "offset" and len(items) >= page_size:
-                has_more = True
-            elif pag_type == "cursor" and next_cursor:
+            if pag_type == "offset" and len(items) >= page_size or pag_type == "cursor" and next_cursor:
                 has_more = True
             if has_more:
                 raise ValueError(f"Pagination exceeded max {max_pages} pages for '{endpoint_name}'")
@@ -521,7 +517,7 @@ async def test_mes_connection(
                 pag["size"] = 1
                 po_ep["pagination"] = pag
                 connector._endpoints["production_orders"] = po_ep
-        await connector.fetch_production_orders(datetime.now(timezone.utc))
+        await connector.fetch_production_orders(datetime.now(UTC))
         return {"ok": True, "error": None}
     except Exception as e:
         return {"ok": False, "error": str(e)}

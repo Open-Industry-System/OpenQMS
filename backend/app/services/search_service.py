@@ -6,9 +6,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.permissions import get_user_permission, Module, PermissionLevel
+from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.models.user import User
-from app.schemas.search import SearchResultItem, SemanticSearchResponse, QAResponse, QASource
+from app.schemas.search import QAResponse, QASource, SearchResultItem, SemanticSearchResponse
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,9 @@ class SearchService:
 
     async def _get_user_product_lines(self, user: User) -> list[str] | None:
         """Get product lines the user has access to. Returns None for admin (all)."""
-        from app.models.role import UserProductLine
         from sqlalchemy import select
+
+        from app.models.role import UserProductLine
 
         if user.role_definition and user.role_definition.role_key == "admin":
             return None  # None means no filter (all)

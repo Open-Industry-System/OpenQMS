@@ -1,17 +1,17 @@
 import uuid
-from datetime import datetime, timezone, date
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, date, datetime
+
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.audit_program import AuditProgram
-from app.models.audit_plan import AuditPlan
-from app.models.audit_finding import AuditFinding
-from app.models.user import User
-from app.models.capa import CAPAEightD
 from app.models.audit import AuditLog
+from app.models.audit_finding import AuditFinding
+from app.models.audit_plan import AuditPlan
+from app.models.audit_program import AuditProgram
+from app.models.capa import CAPAEightD
+from app.models.user import User
 from app.services.embedding_outbox import enqueue_embedding
-
 
 # ───────────────────────────────────────────────
 # Numbering generators
@@ -747,7 +747,7 @@ async def close_audit_finding(db: AsyncSession, finding: AuditFinding, user_id: 
     if finding.status != "open":
         raise ValueError("only open findings can be closed")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     finding.status = "closed"
     finding.closed_at = now
 

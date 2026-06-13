@@ -1,31 +1,30 @@
 """Group dashboard, comparison, shared suppliers, and cross-factory audit service."""
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.audit_finding import AuditFinding
+from app.models.audit_plan import AuditPlan
+from app.models.audit_program import AuditProgram, AuditProgramTargetFactory
+from app.models.capa import CAPAEightD
 from app.models.factory import Factory
 from app.models.fmea import FMEADocument
-from app.models.capa import CAPAEightD
-from app.models.spc import SPCAlarm
 from app.models.iqc_inspection import IqcInspection
-from app.models.supplier import SupplierSCAR
+from app.models.spc import SPCAlarm
+from app.models.supplier import Supplier, SupplierSCAR
 from app.models.supplier_risk import SupplierRiskAlert
-from app.models.audit_finding import AuditFinding
-from app.models.audit_program import AuditProgram, AuditProgramTargetFactory
-from app.models.audit_plan import AuditPlan
-from app.models.supplier import Supplier
 from app.models.supplier_shared_profile import SupplierSharedProfile
 from app.schemas.group import (
-    FactoryKPI,
-    GroupDashboardResponse,
+    AuditProgramFactoriesResponse,
+    CrossFactoryAuditResponse,
     FactoryComparisonItem,
     FactoryComparisonResponse,
-    SharedSupplierResponse,
-    CrossFactoryAuditResponse,
+    FactoryKPI,
+    GroupDashboardResponse,
     MergedSupplierResponse,
-    AuditProgramFactoriesResponse,
+    SharedSupplierResponse,
 )
 
 
@@ -132,7 +131,7 @@ async def get_group_dashboard(
 
     # Recent audit findings per factory (last 90 days)
     finding_counts = dict.fromkeys(factory_ids, 0)
-    ninety_days_ago = datetime.now(timezone.utc) - timedelta(days=90)
+    ninety_days_ago = datetime.now(UTC) - timedelta(days=90)
     rows = await db.execute(
         select(AuditFinding.factory_id, func.count(AuditFinding.finding_id))
         .where(AuditFinding.factory_id.in_(factory_ids))

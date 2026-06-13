@@ -5,11 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
-from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.database import get_db
-from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.services import customer_quality_service
 
 router = APIRouter(tags=["customer-quality"])
@@ -174,7 +173,6 @@ async def list_complaints(
         )
 
     # If user passed product_line, intersect with allowed_pls
-    effective_pl = product_line
     if allowed_pls is not None:
         if product_line and product_line not in allowed_pls:
             return schemas.customer_quality.ComplaintListResponse(

@@ -3,8 +3,8 @@
 核心逻辑是 build_cypher_sync()：给定一个 FMEA 文档的完整数据，生成一组
 (Cypher, params) 元组，worker 逐条执行实现幂等投影。
 """
-import uuid
 import logging
+import uuid
 from typing import Any
 
 from app.config import settings
@@ -131,7 +131,7 @@ def build_cypher_sync(
         # Step 3b: CREATE (:FMEDocument)-[:HAS_NODE]->(:GraphNode)
         statements.append((
             "MATCH (d:FMEDocument {fmea_id: $fmea_id}), "
-            f"(n:GraphNode {{fmea_id: $fmea_id, node_id: $node_id}}) "
+            "(n:GraphNode {fmea_id: $fmea_id, node_id: $node_id}) "
             "CREATE (d)-[:HAS_NODE]->(n)",
             {"fmea_id": fmea_id, "node_id": node["id"]},
         ))
@@ -169,9 +169,10 @@ class GraphProjectionService:
 
     async def sync_fmea_to_neo4j(self, fmea_id: uuid.UUID) -> None:
         """从 PG 读取 FMEA → 生成 Cypher → 执行到 Neo4j。"""
+        from sqlalchemy import select
+
         from app.models.fmea import FMEADocument
         from app.models.product_line import ProductLine
-        from sqlalchemy import select
 
         async with self._session_factory() as db:
             result = await db.execute(
@@ -209,8 +210,9 @@ class GraphProjectionService:
 
     async def full_rebuild(self) -> dict:
         """全量重建：清空 Neo4j + 遍历所有 FMEA 逐个同步。"""
+        from sqlalchemy import func, select
+
         from app.models.fmea import FMEADocument
-        from sqlalchemy import select, func
 
         total = 0
         synced = 0

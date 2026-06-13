@@ -1,11 +1,12 @@
 import uuid
-from datetime import datetime, date, timedelta
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
+from datetime import date, timedelta
 
-from app.models.gauge import Gauge, GaugeCalibration
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.audit import AuditLog
+from app.models.gauge import Gauge, GaugeCalibration
 
 
 async def _generate_gauge_no(db: AsyncSession) -> str:

@@ -1,10 +1,11 @@
 import uuid
-from sqlalchemy import select, func, or_
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
-from app.models.iqc_material import IqcMaterial
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.audit import AuditLog
+from app.models.iqc_material import IqcMaterial
 
 
 async def list_materials(
@@ -95,7 +96,8 @@ async def bulk_import_materials(
     product_line_code: str,
     user_id: uuid.UUID,
 ) -> "ImportResult":  # noqa: F821
-    from app.utils.excel import ImportError as ExcelImportError, ImportResult, MAX_IMPORT_ROWS
+    from app.utils.excel import MAX_IMPORT_ROWS, ImportResult
+    from app.utils.excel import ImportError as ExcelImportError
 
     if len(rows) > MAX_IMPORT_ROWS:
         return ImportResult(0, [ExcelImportError(0, "", f"导入行数超过上限 {MAX_IMPORT_ROWS}")])
@@ -145,7 +147,7 @@ async def bulk_import_materials(
 
     created = []
     try:
-        for row_no, row in validated:
+        for _row_no, row in validated:
             material = await _create_material_inner(
                 db,
                 part_no=row["part_no"],

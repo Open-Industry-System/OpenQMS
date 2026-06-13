@@ -1,7 +1,7 @@
 from app.services.lessons_learned.context import LessonsLearnedContext
 from app.services.lessons_learned.sources.base import LessonsSource
-from app.services.recommendation_types import RecommendationCandidate
 from app.services.recommendation_service import RuleEngine
+from app.services.recommendation_types import RecommendationCandidate
 
 
 class LessonsRuleSource(LessonsSource):

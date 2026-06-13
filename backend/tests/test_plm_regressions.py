@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 import inspect
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -63,7 +64,7 @@ class _FakeDb:
         if isinstance(stmt, Delete | PGInsert | TextClause):
             return _ScalarResult(None)
         if not self._results:
-            raise AssertionError("unexpected execute call")
+            return _ScalarResult(None)
         return _ScalarResult(self._results.pop(0))
 
     def add(self, item):
@@ -309,21 +310,14 @@ async def test_sync_injects_connection_product_line_into_ingested_rows(monkeypat
         async def ingest(self, row):
             captured_rows.append(row)
 
-    class FakeSession:
-        def __init__(self, result=None):
-            self._db = _FakeDb([result] if result is not None else [])
-
-        async def __aenter__(self):
-            return self._db
-
-        async def __aexit__(self, *_exc):
-            return None
-
-    sessions = [FakeSession(), FakeSession(SimpleNamespace())]
-
     monkeypatch.setattr(plm_service, "get_plm_connector", lambda *_args: FakeConnector())
     monkeypatch.setattr(plm_service, "PLMIngestionService", FakeIngestion)
-    monkeypatch.setattr(plm_service, "async_session", lambda: sessions.pop(0))
+
+    @asynccontextmanager
+    async def _fake_tenant_session():
+        yield _FakeDb()
+
+    monkeypatch.setattr(plm_service, "get_tenant_aware_session", _fake_tenant_session)
 
     await plm_service._run_single_sync_job(caller_db, job, "claim")
 

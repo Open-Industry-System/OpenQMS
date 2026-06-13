@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime, date
-from typing import Optional, List, TYPE_CHECKING
+from datetime import date, datetime
+from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import String, Integer, Date, DateTime, Text, ForeignKey, Float, Boolean, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

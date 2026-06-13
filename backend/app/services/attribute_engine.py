@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 
-from app.models.attribute import AttributeStudy, AttributeMeasurement, AttributeResult
+from app.models.attribute import AttributeMeasurement, AttributeResult, AttributeStudy
 
 
 def compute_attribute(study: AttributeStudy, measurements: list[AttributeMeasurement]) -> AttributeResult:
@@ -25,7 +25,7 @@ def compute_attribute(study: AttributeStudy, measurements: list[AttributeMeasure
     standard_accept_count = 0
     standard_reject_count = 0
 
-    for appraiser, parts in appraiser_decisions.items():
+    for _appraiser, parts in appraiser_decisions.items():
         for part_no, decisions in parts.items():
             standard = part_standard[part_no]
             # Use majority decision for this appraiser×part
@@ -91,7 +91,7 @@ def _compute_kappa_vs_standard(appraiser_decisions: dict, part_standard: dict) -
     """Agreement between appraiser decisions and known standard."""
     agreements = 0
     total = 0
-    for appraiser, parts in appraiser_decisions.items():
+    for _appraiser, parts in appraiser_decisions.items():
         for part_no, decisions in parts.items():
             standard = part_standard[part_no]
             decision = max(set(decisions), key=decisions.count)

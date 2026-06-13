@@ -5,56 +5,56 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
-from app.database import async_session, run_for_each_tenant, get_tenant_aware_session
-from app.models.user import User
-from app.models.role import RoleDefinition
-from app.core.security import hash_password
-from app.config import settings
-from app.api.auth import router as auth_router
-from app.api.fmea import router as fmea_router
-from app.api.capa import router as capa_router
-from app.api.dashboard import router as dashboard_router
-from app.api.quality_goal import router as quality_goal_router
-from app.api.control_plan import router as control_plan_router
-from app.api.cp_validation import router as cp_validation_router
-from app.api.spc import router as spc_router
-from app.api.audit_program import router as audit_program_router
-from app.api.audit_plan import router as audit_plan_router
-from app.api.audit_finding import router as audit_finding_router
-from app.api.auditor import router as auditor_router
-from app.api.supplier import router as supplier_router
-from app.api.gauge import router as gauge_router
-from app.api.msa import (
-    grr_router,
-    bias_router,
-    linearity_router,
-    stability_router,
-    attribute_router,
-    overview_router,
-)
-from app.api.special_characteristic import router as sc_router
-from app.api.product_line import router as product_line_router
-from app.api.management_review import router as management_review_router
-from app.api.version import router as version_router
-from app.api.iqc import router as iqc_router
-from app.api.customer_quality import router as customer_quality_router
-from app.api.scar import router as scar_router
-from app.api.apqp import router as apqp_router
-from app.api.ppap import router as ppap_router
-from app.api.shipment import router as shipment_router
-from app.api.graph import router as graph_router
 from app.api.admin import permissions as admin_permissions_api
-from app.api.search import router as search_router
+from app.api.apqp import router as apqp_router
+from app.api.audit_finding import router as audit_finding_router
+from app.api.audit_plan import router as audit_plan_router
+from app.api.audit_program import router as audit_program_router
+from app.api.auditor import router as auditor_router
+from app.api.auth import router as auth_router
+from app.api.capa import router as capa_router
 from app.api.change_impact import router as change_impact_router
 from app.api.collaboration import router as collaboration_router
-from app.api.mes import router as mes_router
-from app.api.plm import router as plm_router
+from app.api.control_plan import router as control_plan_router
+from app.api.cp_validation import router as cp_validation_router
+from app.api.customer_quality import router as customer_quality_router
+from app.api.dashboard import router as dashboard_router
 from app.api.erp import router as erp_router
+from app.api.fmea import router as fmea_router
+from app.api.gauge import router as gauge_router
+from app.api.graph import router as graph_router
+from app.api.group import router as group_router
+from app.api.iqc import router as iqc_router
+from app.api.management_review import router as management_review_router
+from app.api.mes import router as mes_router
+from app.api.msa import (
+    attribute_router,
+    bias_router,
+    grr_router,
+    linearity_router,
+    overview_router,
+    stability_router,
+)
+from app.api.platform import router as platform_router
+from app.api.plm import router as plm_router
+from app.api.ppap import router as ppap_router
+from app.api.product_line import router as product_line_router
+from app.api.quality_goal import router as quality_goal_router
+from app.api.scar import router as scar_router
+from app.api.search import router as search_router
+from app.api.shipment import router as shipment_router
+from app.api.spc import router as spc_router
+from app.api.special_characteristic import router as sc_router
+from app.api.supplier import router as supplier_router
 from app.api.supplier_risk import router as supplier_risk_router
 from app.api.supply_chain_risk_map import router as supply_chain_risk_map_router
-from app.api.group import router as group_router
-from app.api.platform import router as platform_router
+from app.api.version import router as version_router
+from app.config import settings
+from app.core.security import hash_password
 from app.core.tenant_context import TenantContextMiddleware
+from app.database import async_session, get_tenant_aware_session, run_for_each_tenant
+from app.models.role import RoleDefinition
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +106,7 @@ async def lifespan(app: FastAPI):
 
     # Start collaboration session cleanup coroutine
     import asyncio
+
     from app.services.collaboration_service import delete_expired_sessions
 
     async def _cleanup_loop():
@@ -206,7 +207,7 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(30)
             try:
                 # Phase 1: recover stuck + claim + process, per tenant
-                async for tenant, db in run_for_each_tenant():
+                async for _tenant, db in run_for_each_tenant():
                     await PLMChangeImpactWorker.recover_stuck_tasks(db)
                     await db.commit()
                     claimed = await PLMChangeImpactWorker.claim_tasks(db)

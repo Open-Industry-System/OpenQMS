@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+
 from app.core.security import (
-    verify_password,
     create_platform_admin_token,
+    verify_password,
 )
 from app.database import get_platform_db
 from app.models.platform_admin import PlatformAdminUser

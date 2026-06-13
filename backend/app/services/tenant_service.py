@@ -4,13 +4,12 @@ import sys
 import uuid
 from contextlib import asynccontextmanager
 
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text, or_
 
-from app.config import settings
 from app.core.permissions import Module
 from app.core.security import hash_password
-from app.core.tenant_utils import slug_to_schema_name, set_search_path_sql
+from app.core.tenant_utils import set_search_path_sql, slug_to_schema_name
 from app.database import async_session
 from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
@@ -176,10 +175,9 @@ async def _seed_first_admin(
     product_line_code: str,
 ):
     """Create the first tenant admin user."""
-    from app.models.user import User
-    from app.models.role import RoleDefinition
     from app.models.factory import UserFactory
-    from app.models.role import UserProductLine
+    from app.models.role import RoleDefinition, UserProductLine
+    from app.models.user import User
 
     admin_role = (
         await tenant_db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))

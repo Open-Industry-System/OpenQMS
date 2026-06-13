@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_db
+
 from app.core.deps import RequestScope, get_request_scope
-from app.core.permissions import get_user_permission, Module, PermissionLevel, get_current_user, require_admin
-from app.core.factory_scope import resolve_create_factory_id, check_factory_access
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id
+from app.core.permissions import Module, PermissionLevel, get_user_permission, require_admin
+from app.database import get_db
 from app.models.user import User
 from app.schemas import product_line as schemas
 from app.services import product_line_service

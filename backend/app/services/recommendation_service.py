@@ -7,7 +7,7 @@ import uuid as _uuid
 from dataclasses import dataclass, field
 from typing import Literal
 
-from sqlalchemy import select, delete, func, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +17,10 @@ from app.models.fmea import FMEADocument
 from app.models.recommendation_cache import RecommendationCache
 from app.models.user import User
 from app.schemas.recommendation import (
-    RecommendRequest, RecommendResponse, SuggestionItem, SuggestionList,
+    RecommendRequest,
+    RecommendResponse,
+    SuggestionItem,
+    SuggestionList,
 )
 from app.services.llm_provider import LLMProvider
 
@@ -286,7 +289,7 @@ class RecommendationService:
         self.rules = RuleEngine()
 
     async def recommend(self, fmea_id: _uuid.UUID, request: RecommendRequest, user: User) -> RecommendResponse:
-        from app.core.permissions import get_user_permission, Module, PermissionLevel
+        from app.core.permissions import Module, PermissionLevel, get_user_permission
 
         fmea = await self._get_fmea_or_404(fmea_id)
 
@@ -531,11 +534,7 @@ class RecommendationService:
         for item in items_b:
             key = item.name.strip()
             existing = seen.get(key)
-            if existing is None:
-                seen[key] = item
-            elif item.confidence > existing.confidence:
-                seen[key] = item
-            elif item.confidence == existing.confidence and item.source == "graph" and existing.source != "graph":
+            if existing is None or item.confidence > existing.confidence or item.confidence == existing.confidence and item.source == "graph" and existing.source != "graph":
                 seen[key] = item
         return sorted(seen.values(), key=lambda x: x.confidence, reverse=True)
 

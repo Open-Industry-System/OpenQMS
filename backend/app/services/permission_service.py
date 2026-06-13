@@ -1,6 +1,7 @@
 """Permission management service."""
 import uuid
-from sqlalchemy import select, delete
+
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.role import RoleDefinition, RolePermission, UserProductLine

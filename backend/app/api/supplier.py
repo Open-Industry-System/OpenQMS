@@ -2,18 +2,16 @@ import uuid
 from datetime import date as date_type
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.core.permissions import get_user_permission, Module, PermissionLevel, get_current_user
-from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
-from app.models.user import User
-from app.models.supplier import Supplier
 from app import schemas
-from app.services import supplier_service, supplier_quality_service
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
+from app.services import supplier_quality_service, supplier_service
 from app.utils.excel import excel_response
 
 router = APIRouter(prefix="/api/suppliers", tags=["suppliers"])
@@ -70,9 +68,11 @@ async def import_suppliers(
     level = await get_user_permission(scope.user, Module.SUPPLIER, db)
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 supplier 模块的 CREATE 权限")
-    from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
     from dataclasses import asdict
+
     from fastapi.responses import JSONResponse
+
+    from app.utils.excel import MAX_UPLOAD_BYTES, ExcelParseError, parse_upload
 
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_BYTES:

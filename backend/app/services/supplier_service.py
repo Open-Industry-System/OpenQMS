@@ -1,13 +1,12 @@
 import uuid
 from datetime import date, datetime, timedelta
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.supplier import Supplier, SupplierCertification, SupplierEvaluation
 from app.models.audit import AuditLog
-from app.models.audit_plan import AuditPlan
-
+from app.models.supplier import Supplier, SupplierCertification, SupplierEvaluation
 
 # ─── Numbering generator ───
 
@@ -136,7 +135,7 @@ async def export_suppliers_excel(
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
 ) -> bytes:
-    from app.utils.excel import create_workbook, append_row, workbook_to_bytes, MAX_EXPORT_ROWS
+    from app.utils.excel import MAX_EXPORT_ROWS, append_row, create_workbook, workbook_to_bytes
     items, _ = await list_suppliers(
         db, page=1, page_size=MAX_EXPORT_ROWS, status=status, grade=grade, search=search,
         allowed_product_line_codes=allowed_product_line_codes, factory_id=factory_id,
@@ -158,7 +157,8 @@ async def bulk_import_suppliers(
     rows: list[dict],
     user_id: uuid.UUID,
 ) -> "ImportResult":  # noqa: F821
-    from app.utils.excel import ImportError as ExcelImportError, ImportResult, MAX_IMPORT_ROWS
+    from app.utils.excel import MAX_IMPORT_ROWS, ImportResult
+    from app.utils.excel import ImportError as ExcelImportError
 
     if len(rows) > MAX_IMPORT_ROWS:
         return ImportResult(0, [ExcelImportError(0, "", f"导入行数超过上限 {MAX_IMPORT_ROWS}")])
@@ -217,7 +217,7 @@ async def bulk_import_suppliers(
     created = []
     try:
         from datetime import datetime as dt
-        for row_no, row in validated:
+        for _row_no, row in validated:
             supplier_no = await _generate_supplier_no(db, dt.now().year)
             supplier = Supplier(
                 supplier_no=supplier_no, name=row["name"], short_name=row["short_name"],

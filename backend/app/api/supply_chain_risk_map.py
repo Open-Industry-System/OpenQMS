@@ -1,17 +1,29 @@
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.permissions import Module, PermissionLevel, require_permission
 from app.database import get_db
-from app.core.permissions import require_permission, Module, PermissionLevel
 from app.schemas.supply_chain_risk_map import (
-    HeatmapResponse, TimelineResponse, SupplierDetailResponse,
-    ComparisonResponse, SnapshotGenerateResponse, SupplierCompareRequest,
+    ComparisonResponse,
+    HeatmapResponse,
+    SnapshotGenerateResponse,
+    SupplierCompareRequest,
+    SupplierDetailResponse,
+    TimelineResponse,
 )
 from app.services.supply_chain_risk_map.service import (
-    get_heatmap_data, get_timeline as get_timeline_service, get_supplier_detail, get_comparison,
-    generate_snapshot, current_period, export_heatmap,
+    current_period,
+    export_heatmap,
+    generate_snapshot,
+    get_comparison,
+    get_heatmap_data,
+    get_supplier_detail,
+)
+from app.services.supply_chain_risk_map.service import (
+    get_timeline as get_timeline_service,
 )
 
 router = APIRouter(prefix="/api/supply-chain-risk-map", tags=["supply-chain-risk-map"])

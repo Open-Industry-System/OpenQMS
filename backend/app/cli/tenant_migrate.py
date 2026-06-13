@@ -15,7 +15,6 @@ from sqlalchemy import select, text
 from app.database import async_session
 from app.models.tenant import Tenant
 
-
 logger = logging.getLogger(__name__)
 
 

@@ -1,16 +1,17 @@
 """Permission checking utilities."""
 import uuid
 from enum import IntEnum, StrEnum
+
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import TENANT_AUDIENCE, TENANT_ISSUER, verify_token
 from app.database import get_db
-from app.core.security import verify_token, TENANT_ISSUER, TENANT_AUDIENCE
-from jose import JWTError
-from app.models.user import User
 from app.models.role import RolePermission
+from app.models.user import User
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -141,19 +142,7 @@ def require_permission(module: Module, min_level: PermissionLevel):
     return _check
 
 
-# Backward-compatible wrappers
 async def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role_definition.role_key != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-    return user
-
-
-async def require_engineer_or_admin(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """Deprecated: redirects to permission check."""
-    level = await get_user_permission(user, Module.FMEA, db)
-    if level < PermissionLevel.CREATE:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="编辑权限不足")
     return user

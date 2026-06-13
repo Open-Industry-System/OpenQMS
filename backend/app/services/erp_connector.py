@@ -9,13 +9,11 @@ Provides:
 import asyncio
 import random
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
 from app.services.erp_crypto import decrypt_credential
-
 
 # ---------------------------------------------------------------------------
 # Abstract base
@@ -175,7 +173,7 @@ class MockERPConnector(ERPConnector):
         ]
 
     async def fetch_purchase_orders(self, since: datetime) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [
             {
                 "external_id": f"ERP-PO-{i:03d}",
@@ -200,7 +198,7 @@ class MockERPConnector(ERPConnector):
         ]
 
     async def fetch_sales_orders(self, since: datetime) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [
             {
                 "external_id": f"ERP-SO-{i:03d}",
@@ -237,13 +235,13 @@ class MockERPConnector(ERPConnector):
                 "inventory_status": self._rng.choice(
                     ["available", "frozen", "quarantine", "inspection"]
                 ),
-                "snapshot_at": datetime.now(timezone.utc).isoformat(),
+                "snapshot_at": datetime.now(UTC).isoformat(),
             }
             for i in range(20)
         ]
 
     async def fetch_shipments(self, since: datetime) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [
             {
                 "external_id": f"ERP-SHIP-{i:03d}",
@@ -262,7 +260,7 @@ class MockERPConnector(ERPConnector):
         ]
 
     async def fetch_cost_records(self, since: datetime) -> list[dict]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         records = []
         # Detail records
         for i in range(25):
@@ -482,7 +480,7 @@ async def test_erp_connection(
     connector = get_erp_connector_by_config(connector_type, config)
     try:
         suppliers = await connector.fetch_suppliers(
-            datetime(2000, 1, 1, tzinfo=timezone.utc)
+            datetime(2000, 1, 1, tzinfo=UTC)
         )
         return {
             "success": True,

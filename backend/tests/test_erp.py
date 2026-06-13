@@ -52,7 +52,11 @@ from app.services.erp_service import (
 @pytest_asyncio.fixture
 async def erp_db() -> AsyncSession:
     """Yield a fresh async session inside a transaction that is always rolled back."""
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    from tests.conftest import _check_db_available
+    if not await _check_db_available():
+        pytest.skip("Database not available")
+    from sqlalchemy.pool import NullPool
+    engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
     async with engine.connect() as conn:
         async with conn.begin() as tx:
             _sf = async_sessionmaker(

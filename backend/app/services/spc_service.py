@@ -1,31 +1,42 @@
 import difflib
 import math
 import uuid
-from datetime import datetime, timezone
-from typing import List, Tuple, Optional, Dict, Any
+from datetime import UTC, datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select, func, and_, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.spc import (
-    InspectionCharacteristic, SampleBatch, SampleValue,
-    SPCAlarm, ControlLimitSnapshot, DEFAULT_RULES_CONFIG,
-)
+from app.config import settings
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.control_plan import ControlPlanItem
 from app.models.fmea import FMEADocument
-from app.config import settings
-from app.state_machines.fmea_state import compute_ap
-from app.services.spc_calculation_engine import (
-    calculate_xbar_r_limits, calculate_imr_limits,
-    calculate_histogram_data, evaluate_western_electric,
-    calculate_cp_cpk, calculate_pp_ppk, calculate_cm, calculate_ppm,
-    get_capability_grade, get_capability_advice,
-    calculate_p_limits, calculate_np_limits, calculate_c_limits, calculate_u_limits,
+from app.models.spc import (
+    DEFAULT_RULES_CONFIG,
+    ControlLimitSnapshot,
+    InspectionCharacteristic,
+    SampleBatch,
+    SampleValue,
+    SPCAlarm,
 )
-
+from app.services.spc_calculation_engine import (
+    calculate_c_limits,
+    calculate_cm,
+    calculate_cp_cpk,
+    calculate_imr_limits,
+    calculate_np_limits,
+    calculate_p_limits,
+    calculate_pp_ppk,
+    calculate_ppm,
+    calculate_u_limits,
+    calculate_xbar_r_limits,
+    evaluate_western_electric,
+    get_capability_advice,
+    get_capability_grade,
+)
+from app.state_machines.fmea_state import compute_ap
 
 # ─── FMEA Match Helpers ───
 
@@ -826,9 +837,10 @@ async def add_sample_batch(
             new_alarms = await _reevaluate_alarms_no_commit(db, ic)
             # Only write outbox if new alarms were actually created
             if new_alarms and ic.product_line:
-                from app.services.mes_service import MESPushService
-                from app.models.mes import MESConnection
                 from sqlalchemy import select
+
+                from app.models.mes import MESConnection
+                from app.services.mes_service import MESPushService
 
                 query = select(MESConnection).where(
                     MESConnection.is_active == True,
@@ -1013,8 +1025,8 @@ async def bulk_import_samples(
     rows: list[dict],
     user_id: uuid.UUID,
 ) -> "ImportResult":  # noqa: F821
-    from app.utils.excel import ImportError as ExcelImportError, ImportResult, MAX_IMPORT_ROWS
-    from app.utils.excel import coerce_datetime, coerce_int_strict
+    from app.utils.excel import MAX_IMPORT_ROWS, ImportResult, coerce_datetime, coerce_int_strict
+    from app.utils.excel import ImportError as ExcelImportError
 
     if len(rows) > MAX_IMPORT_ROWS:
         return ImportResult(0, [ExcelImportError(0, "", f"导入行数超过上限 {MAX_IMPORT_ROWS}")])
@@ -1185,7 +1197,7 @@ async def _reevaluate_alarms(db: AsyncSession, ic: InspectionCharacteristic) -> 
 
         # Auto-create CAPA for critical alarms
         if alarm["severity"] == "critical":
-            year = datetime.now(timezone.utc).year
+            year = datetime.now(UTC).year
             capa = CAPAEightD(
                 document_no=f"8D-{year}-{str(uuid.uuid4())[:4].upper()}",
                 title=f"SPC异常: {ic.ic_code} 触发规则{alarm['rule_no']}",
@@ -1275,7 +1287,7 @@ async def acknowledge_alarm(db: AsyncSession, user_id: uuid.UUID, alarm_id: uuid
 
     alarm.status = "acknowledged"
     alarm.acknowledged_by_id = user_id
-    alarm.acknowledged_at = datetime.now(timezone.utc)
+    alarm.acknowledged_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(alarm)
 
@@ -1300,7 +1312,7 @@ async def create_capa_from_alarm(
     if alarm.linked_capa_id:
         raise ValueError("Alarm already linked to a CAPA")
 
-    year = datetime.now(timezone.utc).year
+    year = datetime.now(UTC).year
     capa = CAPAEightD(
         document_no=f"8D-{year}-{str(uuid.uuid4())[:8].upper()}",
         title=f"SPC异常: {ic.ic_code} 触发规则{alarm.rule_no}",

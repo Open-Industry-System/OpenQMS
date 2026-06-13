@@ -5,22 +5,21 @@ occurrences = per-run snapshot of what was detected (only present=true records)
 """
 from __future__ import annotations
 
-import uuid
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any
+import uuid
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.cp_validation import (
-    CPValidationRun,
     CPValidationFinding,
     CPValidationOccurrence,
+    CPValidationRun,
     compute_finding_hash,
 )
-from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.fmea import FMEADocument
 from app.services.cp_validation.rule_engine import run_all_rules
 
@@ -69,7 +68,7 @@ class CPValidationEngine:
         except Exception:
             logger.exception("Validation run %s failed", run.run_id)
             run.status = "failed"
-            run.completed_at = datetime.now(timezone.utc)
+            run.completed_at = datetime.now(UTC)
             await db.commit()
             raise
 
@@ -77,7 +76,7 @@ class CPValidationEngine:
 
     async def _fail_stale_runs(self, db: AsyncSession, cp_id: uuid.UUID) -> None:
         """Mark runs that have been 'running' for >5 min as failed."""
-        cutoff = datetime.now(timezone.utc) - STALE_RUN_TIMEOUT
+        cutoff = datetime.now(UTC) - STALE_RUN_TIMEOUT
         result = await db.execute(
             select(CPValidationRun).where(
                 CPValidationRun.cp_id == cp_id,
@@ -88,7 +87,7 @@ class CPValidationEngine:
         stale = result.scalars().all()
         for run in stale:
             run.status = "failed"
-            run.completed_at = datetime.now(timezone.utc)
+            run.completed_at = datetime.now(UTC)
             run.failed_rules = (run.failed_rules or []) + ["timeout"]
             logger.warning("Marked stale run %s as failed", run.run_id)
 
@@ -171,5 +170,5 @@ class CPValidationEngine:
         run.warning_count = warning_count
         run.info_count = info_count
         run.failed_rules = failed_rules
-        run.completed_at = datetime.now(timezone.utc)
+        run.completed_at = datetime.now(UTC)
         await db.commit()

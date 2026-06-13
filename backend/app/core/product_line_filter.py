@@ -1,10 +1,10 @@
 """Product line filtering for data isolation."""
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
 from app.models.role import UserProductLine
+from app.models.user import User
 
 QUERY_PARAM_NAMES = ["product_line", "product_line_code"]
 

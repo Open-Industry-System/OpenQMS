@@ -1,14 +1,15 @@
 import logging
 import uuid
-from datetime import datetime, date, timezone
-from sqlalchemy import select, func, or_
+from datetime import UTC, date, datetime
+
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.audit import AuditLog
 from app.models.iqc_inspection import IqcInspection
 from app.models.iqc_inspection_item import IqcInspectionItem, IqcItemMeasurement
 from app.models.iqc_inspection_template import IqcInspectionTemplate
-from app.models.audit import AuditLog
 from app.models.supplier import SupplierSCAR
 from app.services.aql_engine import calculate_aql_plan
 
@@ -16,7 +17,8 @@ from app.services.aql_engine import calculate_aql_plan
 async def _trigger_risk_eval(supplier_id, product_line_code):
     """Trigger incremental risk evaluation in an independent session."""
     import asyncio
-    from app.database import async_session, get_tenant_aware_session
+
+    from app.database import get_tenant_aware_session
     from app.services.supplier_risk.service import evaluate_supplier_risk
 
     await asyncio.sleep(0.5)  # brief delay to let caller transaction settle
@@ -30,7 +32,7 @@ async def _trigger_risk_eval(supplier_id, product_line_code):
 # ─── Numbering ───
 
 async def _generate_inspection_no(db: AsyncSession) -> str:
-    today = datetime.now(timezone.utc).strftime("%y%m%d")
+    today = datetime.now(UTC).strftime("%y%m%d")
     prefix = f"IQC-{today}"
     result = await db.execute(
         select(func.count()).where(IqcInspection.inspection_no.like(f"{prefix}-%"))
@@ -391,7 +393,7 @@ async def judge_inspection(
     if sample_qty is not None:
         inspection.sample_qty = sample_qty
     inspection.judged_by = user_id
-    inspection.judged_at = datetime.now(timezone.utc)
+    inspection.judged_at = datetime.now(UTC)
     inspection.has_safety_defect = has_safety_defect
     if linked_customer_complaint_id:
         inspection.linked_customer_complaint_id = linked_customer_complaint_id
@@ -565,7 +567,7 @@ async def trigger_scar(
         raise ValueError("检验单不存在")
 
     # Generate SCAR number
-    today = datetime.now(timezone.utc).strftime("%y%m%d")
+    today = datetime.now(UTC).strftime("%y%m%d")
     prefix = f"SCAR-{today}"
     result = await db.execute(
         select(func.count()).where(SupplierSCAR.scar_no.like(f"{prefix}-%"))

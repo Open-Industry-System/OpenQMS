@@ -7,16 +7,14 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update, and_
+from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import async_session, get_tenant_aware_session
+from app.graph.neo4j_driver import ensure_constraints, get_neo4j_driver
 from app.models.graph_sync_outbox import GraphSyncOutbox
-from app.graph.neo4j_driver import get_neo4j_driver, ensure_constraints
 from app.services.graph_projection_service import GraphProjectionService
 
 logger = logging.getLogger(__name__)
@@ -62,7 +60,7 @@ async def _poll_and_lock(db: AsyncSession) -> list[GraphSyncOutbox]:
 
     同时回收超过 10 分钟仍在 processing 的任务（Worker 崩溃残留）。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stale_cutoff = now - timedelta(minutes=10)
 
     # 先回收 stale processing 任务
@@ -110,7 +108,7 @@ async def _cleanup_stale_processing() -> int:
 
     Worker 启动时调用，清理上次崩溃残留。
     """
-    stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    stale_cutoff = datetime.now(UTC) - timedelta(minutes=10)
     async with get_tenant_aware_session() as db:
         result = await db.execute(
             update(GraphSyncOutbox)
@@ -132,7 +130,7 @@ async def _mark_completed(db: AsyncSession, task_id: uuid.UUID) -> None:
     await db.execute(
         update(GraphSyncOutbox)
         .where(GraphSyncOutbox.id == task_id)
-        .values(status="completed", processed_at=datetime.now(timezone.utc))
+        .values(status="completed", processed_at=datetime.now(UTC))
     )
     await db.commit()
 
@@ -150,7 +148,7 @@ async def _mark_failed(db: AsyncSession, task: GraphSyncOutbox, error: str) -> N
                 status="dead",
                 attempt_count=new_attempt,
                 last_error=error,
-                processed_at=datetime.now(timezone.utc),
+                processed_at=datetime.now(UTC),
             )
         )
     else:
@@ -161,7 +159,7 @@ async def _mark_failed(db: AsyncSession, task: GraphSyncOutbox, error: str) -> N
                 status="pending",
                 attempt_count=new_attempt,
                 last_error=error,
-                next_attempt_at=datetime.now(timezone.utc) + timedelta(seconds=delay),
+                next_attempt_at=datetime.now(UTC) + timedelta(seconds=delay),
             )
         )
     await db.commit()

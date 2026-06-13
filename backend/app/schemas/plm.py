@@ -6,7 +6,6 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 CONNECTOR_TYPE_PATTERN = r"^(mock|rest|siemens_tc|dassault_enovia|ptc_windchill)$"
 
 

@@ -1,7 +1,7 @@
 """ERP dedicated dependency: API Key auth for /api/erp/ingest."""
 import uuid
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db

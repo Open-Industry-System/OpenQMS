@@ -9,7 +9,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session, get_tenant_aware_session
+from app.database import get_tenant_aware_session
 from app.services.embedding_outbox import enqueue_embedding
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,8 @@ async def backfill_entity_type(
     batch_size: int,
 ) -> int:
     """Enqueue outbox events for all records of a given entity type."""
+    # SECURITY: {pk_expr}, {plc_expr}, {fid_expr}, {from_clause} are interpolated
+    # from the hardcoded ENTITY_TABLE_MAP constant above — never user input.
     from_clause, pk_expr, plc_expr, fid_expr = ENTITY_TABLE_MAP[entity_type]
 
     result = await db.execute(

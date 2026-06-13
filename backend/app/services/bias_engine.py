@@ -2,7 +2,7 @@
 
 import math
 
-from app.models.bias import BiasStudy, BiasMeasurement, BiasResult
+from app.models.bias import BiasMeasurement, BiasResult, BiasStudy
 
 
 def _norm_cdf(x: float) -> float:

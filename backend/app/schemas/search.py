@@ -1,5 +1,6 @@
 """Pydantic schemas for semantic search and RAG Q&A."""
 import uuid
+
 from pydantic import BaseModel, Field
 
 

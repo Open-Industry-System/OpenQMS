@@ -1,17 +1,15 @@
 import uuid
-from datetime import date, datetime, timezone
-from typing import Optional
+from datetime import UTC, date, datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.supplier import Supplier, SupplierSCAR
-from app.models.capa import CAPAEightD
 from app.models.audit import AuditLog
+from app.models.capa import CAPAEightD
+from app.models.supplier import Supplier, SupplierSCAR
 from app.services.embedding_outbox import enqueue_embedding
-
 
 SCAR_TRANSITIONS = {
     "start":   ("open",         "in_progress"),
@@ -29,7 +27,7 @@ SCAR_REQUIRED_FIELDS = {
 
 
 async def _next_scar_no(db: AsyncSession) -> str:
-    today = datetime.now(timezone.utc).strftime("%y%m%d")
+    today = datetime.now(UTC).strftime("%y%m%d")
     prefix = f"SCAR-{today}"
     result = await db.execute(
         select(SupplierSCAR.scar_no)
@@ -274,6 +272,7 @@ async def transition_scar(
     # Close linked risk alerts
     if to_status == "closed":
         from sqlalchemy import update
+
         from app.models.supplier_risk import SupplierRiskAlert
         await db.execute(
             update(SupplierRiskAlert)

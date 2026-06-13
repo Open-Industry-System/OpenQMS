@@ -1,11 +1,11 @@
 import uuid
-from datetime import datetime, timedelta, timezone
-from sqlalchemy import select, func
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
-
+from app.models.fmea import FMEADocument
 
 DEFAULT_LAYOUT = {
     "lg": [
@@ -80,7 +80,7 @@ async def get_default_layout(db: AsyncSession, user) -> dict:
 
 
 async def get_dashboard(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None, factory_id: uuid.UUID | None = None) -> dict:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Resolve effective product line codes
     if product_line_codes is not None:
@@ -152,8 +152,8 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None, produ
 
     avg_rpn = round(total_rpn / rpn_count) if rpn_count > 0 else 0
 
-    from app.models.special_characteristic import SpecialCharacteristic
     from app.models.management_review import ManagementReview, ReviewOutput
+    from app.models.special_characteristic import SpecialCharacteristic
 
     sc_base = select(func.count(SpecialCharacteristic.sc_id))
     if codes:
@@ -232,7 +232,7 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None, produ
 
 
 async def get_summary(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None, factory_id: uuid.UUID | None = None) -> dict:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Resolve effective product line codes
     if product_line_codes is not None:
@@ -340,10 +340,10 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
 
 
 async def get_alerts(db: AsyncSession, product_line: str | None = None, product_line_codes: list[str] | None = None, factory_id: uuid.UUID | None = None) -> dict:
-    from app.utils.fmea_graph import build_rpn_rows
     from app.models.supplier import Supplier
+    from app.utils.fmea_graph import build_rpn_rows
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Resolve effective product line codes
     if product_line_codes is not None:
@@ -557,7 +557,7 @@ async def get_widgets_data(
         try:
             from app.models.spc import InspectionCharacteristic, SPCAlarm
 
-            week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            week_ago = datetime.now(UTC) - timedelta(days=7)
             abnormal_q = select(func.count(SPCAlarm.alarm_id)).where(
                 SPCAlarm.status == "open",
                 SPCAlarm.triggered_at >= week_ago,
@@ -585,7 +585,7 @@ async def get_widgets_data(
         try:
             from app.models.gauge import Gauge
 
-            expiry_date = datetime.now(timezone.utc).date() + timedelta(days=30)
+            expiry_date = datetime.now(UTC).date() + timedelta(days=30)
             expiry_q = select(func.count(Gauge.gauge_id)).where(
                 Gauge.status == "active",
                 Gauge.next_calibration_date.isnot(None),
@@ -682,7 +682,11 @@ async def get_widgets_data(
     needs_quality_trend = "quality_trend_ai_summary" in types
     if needs_quality_trend:
         try:
-            from app.services.quality_trend_service import build_quality_trend_summary, build_scope_description, build_scope_hash
+            from app.services.quality_trend_service import (
+                build_quality_trend_summary,
+                build_scope_description,
+                build_scope_hash,
+            )
 
             scope_description = build_scope_description(product_line_codes)
             scope_hash = await build_scope_hash(product_line_codes or [])

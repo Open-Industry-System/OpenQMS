@@ -5,20 +5,20 @@ Run: docker compose exec backend python -m app.seed
 import asyncio
 import secrets
 import uuid
-from datetime import date, datetime, timezone, timedelta
-from sqlalchemy import select, text, func
+from datetime import UTC, date, datetime
 
-from app.database import async_session
-from app.models.user import User
-from app.models.fmea import FMEADocument
-from app.models.capa import CAPAEightD
-from app.models.management_review import ManagementReview, ReviewOutput
-from app.models.customer_quality import Customer, CustomerComplaint, RMARecord, ShipmentRecord, WarrantyRecord
-from app.models.role import RoleDefinition, RolePermission, UserProductLine
-from app.models.factory import Factory, UserFactory
-from app.core.security import hash_password
+from sqlalchemy import func, select, text
+
 from app.config import SYSTEM_USER_ID
-
+from app.core.security import hash_password
+from app.database import async_session
+from app.models.capa import CAPAEightD
+from app.models.customer_quality import Customer, CustomerComplaint, RMARecord, ShipmentRecord, WarrantyRecord
+from app.models.factory import Factory, UserFactory
+from app.models.fmea import FMEADocument
+from app.models.management_review import ManagementReview, ReviewOutput
+from app.models.role import RoleDefinition, UserProductLine
+from app.models.user import User
 
 SAMPLE_GRAPH = {
     "nodes": [
@@ -129,9 +129,10 @@ SAMPLE_DFMEA_GRAPH = {
 
 async def seed_supplier_risk_configs(db):
     """Seed default supplier risk rule configs if not present."""
+    from sqlalchemy import select
+
     from app.models.supplier_risk import SupplierRiskConfig
     from app.models.user import User
-    from sqlalchemy import select
 
     admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one_or_none()
     if not admin:
@@ -182,8 +183,8 @@ async def seed_supplier_risk_configs(db):
 
 async def seed_supply_chain_risk_snapshots(db):
     """Seed sample risk map snapshots for 3 suppliers across 3 months."""
-    from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
     from app.models.supplier import Supplier
+    from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
 
     # Check if already seeded
     existing = await db.execute(
@@ -206,7 +207,7 @@ async def seed_supply_chain_risk_snapshots(db):
         {"quality": 72, "delivery": 80, "compliance": 65, "erp_ontime": 55, "scar": 5, "ppm": 35000, "risk": 76, "level": "high"},
     ]
 
-    for supplier, profile in zip(suppliers[:3], profiles):
+    for supplier, profile in zip(suppliers[:3], profiles, strict=False):
         for i, period in enumerate(periods):
             factor = 1 + i * 0.08
             snap = SupplyChainRiskSnapshot(
@@ -231,8 +232,9 @@ async def seed_supply_chain_risk_snapshots(db):
 
 
 async def seed_erp_permissions(db):
-    from app.models.role import RolePermission
     from sqlalchemy import select
+
+    from app.models.role import RolePermission
 
     result = await db.execute(select(RoleDefinition))
     roles = result.scalars().all()
@@ -318,8 +320,9 @@ PERMISSION_MATRIX = {
 
 async def seed_all_permissions(db):
     """Seed the full permission matrix if role_permissions is empty or incomplete."""
-    from app.models.role import RolePermission
     from sqlalchemy import select
+
+    from app.models.role import RolePermission
 
     # Check if permissions already exist
     count_result = await db.execute(
@@ -470,7 +473,7 @@ async def seed():
             graph_data=SAMPLE_GRAPH,
             created_by=engineer.user_id, updated_by=engineer.user_id,
             approved_by=manager.user_id,
-            approved_at=datetime.now(timezone.utc),
+            approved_at=datetime.now(UTC),
         )
         fmea2 = FMEADocument(
             document_no="PFMEA-2026-002", title="注塑工序PFMEA",
@@ -819,7 +822,7 @@ async def seed():
             attachments=attachment_report,
             assignee_id=engineer.user_id,
             supplier_responsibility=False,
-            closed_at=datetime(2026, 5, 10, tzinfo=timezone.utc),
+            closed_at=datetime(2026, 5, 10, tzinfo=UTC),
             created_by=engineer.user_id,
         )
         db.add_all([complaint1, complaint2, complaint3])
@@ -863,7 +866,7 @@ async def seed():
             assignee_id=engineer.user_id,
             tracking_number="DHL-20260520-0002",
             received_date=date(2026, 5, 21),
-            closed_at=datetime(2026, 5, 25, tzinfo=timezone.utc),
+            closed_at=datetime(2026, 5, 25, tzinfo=UTC),
             created_by=engineer.user_id,
         )
         db.add_all([rma1, rma2])
@@ -927,7 +930,8 @@ async def seed():
         db.add_all([eval1, eval2])
 
         # ─── Shipment records seed ───
-        from datetime import date as date_type, timedelta
+        from datetime import date as date_type
+        from datetime import timedelta
         for customer in [customer1, customer2]:
             for i in range(6):
                 db.add(ShipmentRecord(
@@ -956,8 +960,8 @@ async def seed():
 
         # ─── PLM demo data ───
         from app.models.plm import PLMConnection
-        from app.services.plm_service import PLMIngestionService
         from app.services.plm_connector import MockPLMConnector
+        from app.services.plm_service import PLMIngestionService
 
         existing_conn = await db.execute(
             select(PLMConnection).where(PLMConnection.name == "DC-DC PLM (Mock)")
@@ -976,7 +980,7 @@ async def seed():
 
             mock_connector = MockPLMConnector()
             ingestion = PLMIngestionService(db)
-            epoch = datetime(2020, 1, 1, tzinfo=timezone.utc)
+            epoch = datetime(2020, 1, 1, tzinfo=UTC)
 
             for part in await mock_connector.fetch_parts(epoch):
                 part["data_type"] = "part"

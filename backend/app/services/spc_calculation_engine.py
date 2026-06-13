@@ -1,5 +1,5 @@
 import math
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 # X-bar R control chart constants (n=2 to 10)
 # A2, D3, D4 from standard tables
@@ -143,9 +143,7 @@ def evaluate_western_electric(subgroup_stats: List[float], limits: Dict[str, Any
     for i, val in enumerate(subgroup_stats):
         curr_ucl = ucl_list[i] if ucl_list and i < len(ucl_list) else ucl
         curr_lcl = lcl_list[i] if lcl_list and i < len(lcl_list) else lcl
-        if curr_ucl is not None and val > curr_ucl:
-            add_alarm(i, 1)
-        elif curr_lcl is not None and val < curr_lcl:
+        if curr_ucl is not None and val > curr_ucl or curr_lcl is not None and val < curr_lcl:
             add_alarm(i, 1)
 
     # Rule 2: 9 points same side of center line
@@ -157,9 +155,7 @@ def evaluate_western_electric(subgroup_stats: List[float], limits: Dict[str, Any
     # Rule 3: 6 points trending up or down
     for i in range(5, len(subgroup_stats)):
         window = subgroup_stats[i - 5:i + 1]
-        if all(window[j] < window[j + 1] for j in range(5)):
-            add_alarm(i, 3)
-        elif all(window[j] > window[j + 1] for j in range(5)):
+        if all(window[j] < window[j + 1] for j in range(5)) or all(window[j] > window[j + 1] for j in range(5)):
             add_alarm(i, 3)
 
     # Rule 4: 14 points alternating up and down

@@ -11,7 +11,7 @@ from fastapi import status
 from app.main import app
 from app.core.deps import get_current_user, get_request_scope, RequestScope
 from app.core.factory_scope import FactoryScope, ProductLineScope
-from app.core.permissions import PermissionLevel
+from app.core.permissions import PermissionLevel, get_user_permission
 from app.graph.deps import get_graph_repository
 
 
@@ -179,6 +179,7 @@ async def client():
     app.dependency_overrides[get_current_user] = _override_get_current_user
     app.dependency_overrides[get_graph_repository] = _override_repo
     app.dependency_overrides[get_request_scope] = _override_request_scope
+    app.dependency_overrides[get_user_permission] = _override_get_user_permission
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -190,26 +191,29 @@ async def client():
 @pytest.mark.asyncio
 async def test_graph_stats_product_line_required(client: AsyncClient):
     """验证 product_line_code 缺失或纯空白返回 422。"""
-    resp = await client.get("/api/graph/stats")
-    assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.VIEW):
+        resp = await client.get("/api/graph/stats")
+        assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
-    resp = await client.get("/api/graph/stats?product_line_code=%20%20%20")
-    assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        resp = await client.get("/api/graph/stats?product_line_code=%20%20%20")
+        assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
 @pytest.mark.asyncio
 async def test_graph_similar_name_keyword_required(client: AsyncClient):
     """验证 name_keyword 纯空白返回 422。"""
-    resp = await client.get(
-        "/api/graph/similar?node_type=FailureMode&name_keyword=%20%20%20&product_line_code=DC-DC-100"
-    )
-    assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.VIEW):
+        resp = await client.get(
+            "/api/graph/similar?node_type=FailureMode&name_keyword=%20%20%20&product_line_code=DC-DC-100"
+        )
+        assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
 @pytest.mark.asyncio
 async def test_graph_stats_response_has_whitelist_fields_only(client: AsyncClient):
     """验证 stats 响应仅含白名单字段，无敏感字段外泄。"""
-    resp = await client.get("/api/graph/stats?product_line_code=DC-DC-100")
+    with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.VIEW):
+        resp = await client.get("/api/graph/stats?product_line_code=DC-DC-100")
     assert resp.status_code == status.HTTP_200_OK
     data = resp.json()
 
@@ -230,9 +234,10 @@ async def test_graph_stats_response_has_whitelist_fields_only(client: AsyncClien
 @pytest.mark.asyncio
 async def test_graph_similar_response_has_document_no(client: AsyncClient):
     """验证 similar 响应含 document_no。"""
-    resp = await client.get(
-        "/api/graph/similar?node_type=FailureMode&name_keyword=焊&product_line_code=DC-DC-100"
-    )
+    with patch("app.api.graph.get_user_permission", return_value=PermissionLevel.VIEW):
+        resp = await client.get(
+            "/api/graph/similar?node_type=FailureMode&name_keyword=焊&product_line_code=DC-DC-100"
+        )
     assert resp.status_code == status.HTTP_200_OK
     data = resp.json()
     assert isinstance(data, list)

@@ -1,8 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
+from pydantic import BaseModel, Field, field_validator
 
 VALID_CATEGORIES = {"safety", "function", "appearance", "delivery"}
 VALID_SEVERITIES = {"致命", "严重", "一般", "轻微"}

@@ -6,50 +6,49 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import check_factory_access
-from app.core.permissions import require_permission, PermissionLevel, Module
-from app.models.user import User
+from app.core.permissions import Module, PermissionLevel, require_permission
+from app.database import get_db
 from app.models.fmea_version import FMEAVersion
-from app.services import fmea_service, control_plan_service
-from app.services.version_service import (
-    list_fmea_versions,
-    get_fmea_version,
-    create_fmea_version,
-    verify_fmea_version,
-    rollback_fmea,
-    list_cp_versions,
-    get_cp_version,
-    create_cp_version,
-    verify_cp_version,
-    rollback_control_plan,
-    get_fmea_version_by_id,
-    build_sync_preview,
-    apply_sync_preview,
-)
-from app.services.diff_engine import diff_fmea_graphs, diff_cp_items, diff_cp_headers
+from app.models.user import User
 from app.schemas.version import (
-    FMEAVersionListItem,
-    FMEAVersionDetail,
-    ControlPlanVersionListItem,
     ControlPlanVersionDetail,
-    VersionListResponse,
-    ManualVersionCreate,
-    RollbackRequest,
-    RollbackResponse,
-    FMEADiffResult,
-    ModifiedNode,
+    ControlPlanVersionListItem,
+    CPCompareResponse,
     CPDiffResult,
     CPItemDiff,
     DiffSummary,
     FMEACompareResponse,
-    CPCompareResponse,
-    VerifyResponse,
+    FMEADiffResult,
+    FMEAVersionDetail,
+    FMEAVersionListItem,
+    ManualVersionCreate,
+    ModifiedNode,
+    RollbackRequest,
+    RollbackResponse,
+    SyncFromFMEARequest,
     SyncPreviewItem,
     SyncPreviewResponse,
     SyncSummary,
-    SyncFromFMEARequest,
+    VerifyResponse,
+    VersionListResponse,
+)
+from app.services import control_plan_service, fmea_service
+from app.services.diff_engine import diff_cp_headers, diff_cp_items, diff_fmea_graphs
+from app.services.version_service import (
+    apply_sync_preview,
+    build_sync_preview,
+    create_cp_version,
+    create_fmea_version,
+    get_cp_version,
+    get_fmea_version,
+    list_cp_versions,
+    list_fmea_versions,
+    rollback_control_plan,
+    rollback_fmea,
+    verify_cp_version,
+    verify_fmea_version,
 )
 
 router = APIRouter(prefix="/api", tags=["versions"])

@@ -4,16 +4,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import populate_factory_id, validate_factory_invariant
-from app.models.change_impact import ChangeImpactAnalysis
-from app.schemas.change_impact import ChangeImpactAnalyzeRequest, ChangeImpactAnalysisResponse
-from app.services.fmea_service import get_fmea
-from app.services.change_impact_service import ChangeImpactService
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
 from app.graph.deps import get_graph_repository
 from app.graph.repository import FMEAGraphRepository
+from app.models.change_impact import ChangeImpactAnalysis
+from app.schemas.change_impact import ChangeImpactAnalysisResponse, ChangeImpactAnalyzeRequest
+from app.services.change_impact_service import ChangeImpactService
+from app.services.fmea_service import get_fmea
 
 router = APIRouter(prefix="/api/change-impact", tags=["change-impact"])
 

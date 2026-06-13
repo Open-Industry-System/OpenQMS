@@ -7,7 +7,8 @@ Priority (highest first):
 4. Global default (both NULL)
 """
 import uuid
-from sqlalchemy import select, and_, or_
+
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.supplier_risk import SupplierRiskConfig

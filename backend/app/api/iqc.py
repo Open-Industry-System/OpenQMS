@@ -1,26 +1,43 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_db
-from app.core.permissions import get_user_permission, PermissionLevel, Module
-from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
+
 from app import schemas
-from app.services import iqc_material_service, iqc_template_service, iqc_inspection_service
-from app.services.aql_engine import calculate_aql_plan
-from app.services.iqc_aql_service import AqlService, RuleEngine, ProfileManager, RecommendationManager, AqlConfigManager, QualitySnapshotCalculator
-from app.schemas.iqc_aql import (
-    AqlProfileCreate, AqlProfileUpdate, AqlProfileResponse, AqlProfileListResponse,
-    AqlRecommendationResponse, AqlRecommendationListResponse,
-    AqlRecommendationApproveRequest, AqlRecommendationRejectRequest,
-    AqlQualitySnapshotResponse, AqlQualitySnapshotTrendResponse,
-    AqlConfigResponse, AqlConfigUpdate,
-    AqlTriggerRequest, AqlPreviewRequest, AqlPreviewResponse,
-)
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
 from app.models.iqc_aql_profile import IqcAqlProfile
-from app.models.iqc_aql_recommendation import IqcAqlRecommendation
 from app.models.iqc_aql_quality_snapshot import IqcAqlQualitySnapshot
-from app.models.iqc_aql_config import IqcAqlConfig
+from app.models.iqc_aql_recommendation import IqcAqlRecommendation
+from app.schemas.iqc_aql import (
+    AqlConfigResponse,
+    AqlConfigUpdate,
+    AqlPreviewRequest,
+    AqlPreviewResponse,
+    AqlProfileCreate,
+    AqlProfileListResponse,
+    AqlProfileResponse,
+    AqlProfileUpdate,
+    AqlQualitySnapshotResponse,
+    AqlQualitySnapshotTrendResponse,
+    AqlRecommendationApproveRequest,
+    AqlRecommendationListResponse,
+    AqlRecommendationRejectRequest,
+    AqlRecommendationResponse,
+    AqlTriggerRequest,
+)
+from app.services import iqc_inspection_service, iqc_material_service, iqc_template_service
+from app.services.aql_engine import calculate_aql_plan
+from app.services.iqc_aql_service import (
+    AqlConfigManager,
+    AqlService,
+    ProfileManager,
+    QualitySnapshotCalculator,
+    RecommendationManager,
+    RuleEngine,
+)
 
 router = APIRouter(prefix="/api/iqc", tags=["iqc"])
 
@@ -120,9 +137,11 @@ async def import_materials(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 IQC 模块的 CREATE 权限")
 
-    from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
     from dataclasses import asdict
+
     from fastapi.responses import JSONResponse
+
+    from app.utils.excel import MAX_UPLOAD_BYTES, ExcelParseError, parse_upload
 
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_BYTES:
@@ -744,7 +763,7 @@ async def list_aql_profiles(
         # When no explicit filter, use scope codes
         effective_pl = None  # will be handled via allowed_pls below
 
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
     q = select(IqcAqlProfile)
     count_q = select(func.count(IqcAqlProfile.profile_id))
 
@@ -914,7 +933,7 @@ async def list_aql_recommendations(
         return AqlRecommendationListResponse(items=[], total=0, page=page, page_size=page_size)
     allowed_pls = scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None
 
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
     q = select(IqcAqlRecommendation)
     count_q = select(func.count(IqcAqlRecommendation.recommendation_id))
 

@@ -1,7 +1,8 @@
 """Helpers to insert embedding sync outbox events and clean up orphan embeddings."""
 import uuid
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def enqueue_embedding(

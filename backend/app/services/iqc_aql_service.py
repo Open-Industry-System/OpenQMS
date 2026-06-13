@@ -4,25 +4,23 @@
 生成可解释的 AQL 调整建议，经工程师/经理审批后生效。
 """
 
-import uuid
 import logging
+import uuid
 from dataclasses import dataclass
-from datetime import datetime, date, timezone, timedelta
-from typing import Optional
+from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select, func, and_, or_, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.aql_engine import AQL_VALUES
-from app.models.iqc_aql_profile import IqcAqlProfile
-from app.models.iqc_aql_recommendation import IqcAqlRecommendation
-from app.models.iqc_aql_quality_snapshot import IqcAqlQualitySnapshot
+from app.models.audit import AuditLog
 from app.models.iqc_aql_config import IqcAqlConfig
+from app.models.iqc_aql_profile import IqcAqlProfile
+from app.models.iqc_aql_quality_snapshot import IqcAqlQualitySnapshot
+from app.models.iqc_aql_recommendation import IqcAqlRecommendation
 from app.models.iqc_inspection import IqcInspection
 from app.models.iqc_material import IqcMaterial
-from app.models.supplier import SupplierSCAR, SupplierEvaluation
-from app.models.audit import AuditLog
-from app.models.user import User
+from app.models.supplier import SupplierEvaluation, SupplierSCAR
+from app.services.aql_engine import AQL_VALUES
 
 logger = logging.getLogger(__name__)
 
@@ -412,7 +410,7 @@ class QualitySnapshotCalculator:
         product_line_code: str | None = None,
     ) -> AqlContext:
         """Calculate quality snapshot for (supplier, material) pair."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # 1. Load profile or use defaults
         profile = await ProfileManager.get_profile(db, supplier_id, material_id)
@@ -718,7 +716,7 @@ class ProfileManager:
 
         # 5. If state changed: update state_changed_at, baseline_inspection_id
         if old_state != target_state:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             profile.state_changed_at = now
             profile.baseline_inspection_id = inspection_id
 
@@ -730,7 +728,7 @@ class ProfileManager:
             profile.frozen_reason = evidence.get("frozen_reason")
 
         # 7. Update approved_by, approved_at, effective_from
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile.approved_by = recommendation.manager_decided_by or recommendation.engineer_decided_by
         profile.approved_at = now
         profile.effective_from = date.today()
@@ -822,7 +820,7 @@ class RecommendationManager:
         expiry_days = await AqlConfigManager.get_int(
             db, "recommendation_expiry_days", profile.product_line_code
         )
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         recommendation = IqcAqlRecommendation(
             profile_id=profile.profile_id,
@@ -896,7 +894,7 @@ class RecommendationManager:
                 raise ValueError(f"当前状态 {rec.status} 不允许工程师批准")
             rec.engineer_decision = "approve"
             rec.engineer_decided_by = user_id
-            rec.engineer_decided_at = datetime.now(timezone.utc)
+            rec.engineer_decided_at = datetime.now(UTC)
             rec.status = "approved"
         else:
             # Manager approval
@@ -904,7 +902,7 @@ class RecommendationManager:
                 raise ValueError(f"当前状态 {rec.status} 不允许经理批准")
             rec.manager_decision = "approve"
             rec.manager_decided_by = user_id
-            rec.manager_decided_at = datetime.now(timezone.utc)
+            rec.manager_decided_at = datetime.now(UTC)
             rec.status = "approved"
 
         db.add(AuditLog(
@@ -942,13 +940,13 @@ class RecommendationManager:
                 raise ValueError(f"当前状态 {rec.status} 不允许工程师拒绝")
             rec.engineer_decision = "reject"
             rec.engineer_decided_by = user_id
-            rec.engineer_decided_at = datetime.now(timezone.utc)
+            rec.engineer_decided_at = datetime.now(UTC)
         else:
             if rec.status not in ("pending", "forwarded"):
                 raise ValueError(f"当前状态 {rec.status} 不允许经理拒绝")
             rec.manager_decision = "reject"
             rec.manager_decided_by = user_id
-            rec.manager_decided_at = datetime.now(timezone.utc)
+            rec.manager_decided_at = datetime.now(UTC)
 
         rec.status = "rejected"
 
@@ -979,7 +977,7 @@ class RecommendationManager:
 
         rec.engineer_decision = "forward"
         rec.engineer_decided_by = user_id
-        rec.engineer_decided_at = datetime.now(timezone.utc)
+        rec.engineer_decided_at = datetime.now(UTC)
         rec.status = "forwarded"
 
         db.add(AuditLog(
@@ -1009,7 +1007,7 @@ class RecommendationManager:
     @staticmethod
     async def expire_stale(db: AsyncSession) -> int:
         """Mark all pending/forwarded recommendations past expires_at as expired."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await db.execute(
             update(IqcAqlRecommendation)
             .where(
@@ -1089,7 +1087,7 @@ class AqlService:
         )
 
         # 3. Save snapshot to DB
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snapshot = IqcAqlQualitySnapshot(
             supplier_id=supplier_id,
             material_id=material_id,

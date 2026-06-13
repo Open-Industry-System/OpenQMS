@@ -1,16 +1,17 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_db
-from app.schemas.recommendation import SimilarNodesRequest, SimilarNodesResponse, SimilarNodeMatch
-from app.core.permissions import get_user_permission, Module, PermissionLevel
+
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import check_factory_access
-from app.graph.repository import FMEAGraphRepository
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
 from app.graph.deps import get_graph_repository
+from app.graph.repository import FMEAGraphRepository
+from app.schemas.recommendation import SimilarNodeMatch, SimilarNodesRequest, SimilarNodesResponse
 from app.services import fmea_service
 
 
@@ -113,6 +114,9 @@ async def impact_chain(
     db: AsyncSession = Depends(get_db),
 ):
     """下游影响链：从指定节点出发追踪失效效应和控制措施。"""
+    level = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 knowledge_graph 模块的 VIEW 权限")
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
@@ -129,6 +133,9 @@ async def cause_chain(
     db: AsyncSession = Depends(get_db),
 ):
     """上游原因链：从指定节点出发追踪失效原因。"""
+    level = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 knowledge_graph 模块的 VIEW 权限")
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
@@ -144,8 +151,12 @@ async def similar_nodes(
     limit: int = Query(20, ge=1, le=100),
     repo: FMEAGraphRepository = Depends(get_graph_repository),
     scope: RequestScope = Depends(get_request_scope),
+    db: AsyncSession = Depends(get_db),
 ):
     """跨 FMEA 搜索相似节点。product_line_code 必填且不能为空字符串。返回白名单字段。"""
+    level = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 knowledge_graph 模块的 VIEW 权限")
     product_line_code = product_line_code.strip()
     name_keyword = name_keyword.strip()
     if not product_line_code:
@@ -165,8 +176,12 @@ async def cross_fmea_stats(
     product_line_code: str = Query(..., min_length=1, description="产品线代码（必填，租户隔离）"),
     repo: FMEAGraphRepository = Depends(get_graph_repository),
     scope: RequestScope = Depends(get_request_scope),
+    db: AsyncSession = Depends(get_db),
 ):
     """跨 FMEA 聚合统计。product_line_code 必填且不能为空字符串。返回白名单字段。"""
+    level = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 knowledge_graph 模块的 VIEW 权限")
     product_line_code = product_line_code.strip()
     if not product_line_code:
         raise HTTPException(status_code=422, detail="product_line_code cannot be empty")
@@ -267,9 +282,9 @@ async def trigger_rebuild(
         raise HTTPException(status_code=403, detail="Admin access required")
 
     async def _do_rebuild():
-        from app.services.graph_projection_service import GraphProjectionService
-        from app.graph.neo4j_driver import get_neo4j_driver
         from app.database import async_session
+        from app.graph.neo4j_driver import get_neo4j_driver
+        from app.services.graph_projection_service import GraphProjectionService
 
         driver = await get_neo4j_driver()
         projection = GraphProjectionService(driver, async_session)

@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
-from app.models.attribute import AttributeStudy, AttributeMeasurement, AttributeResult
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.attribute import AttributeMeasurement, AttributeResult, AttributeStudy
 from app.models.audit import AuditLog
 
 

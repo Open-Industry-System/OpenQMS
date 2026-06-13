@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Request
 from sqlalchemy import event, select, text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings

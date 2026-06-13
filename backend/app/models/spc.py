@@ -3,12 +3,11 @@ from datetime import datetime
 from typing import List, Optional
 
 import sqlalchemy as sa
-from sqlalchemy import ForeignKey, String, Numeric, Integer, Boolean, DateTime, func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-
 
 DEFAULT_RULES_CONFIG = {
     "rule_1": True, "rule_2": True, "rule_3": True, "rule_4": True,

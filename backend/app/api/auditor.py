@@ -1,12 +1,14 @@
 import uuid
 from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_db
-from app.core.deps import RequestScope, get_request_scope, require_admin
-from app.core.permissions import get_user_permission, Module, PermissionLevel
-from app.models.user import User
+
 from app import schemas
+from app.core.deps import RequestScope, get_request_scope, require_admin
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
+from app.models.user import User
 from app.services import audit_service
 
 router = APIRouter(prefix="/api/auditors", tags=["auditors"])

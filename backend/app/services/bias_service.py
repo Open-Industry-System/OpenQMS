@@ -1,13 +1,14 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
-from app.models.bias import BiasStudy, BiasMeasurement, BiasResult
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.audit import AuditLog
-from app.services.spc_service import get_spc_measurements_for_msa
+from app.models.bias import BiasMeasurement, BiasResult, BiasStudy
 from app.services.gauge_service import validate_gauge_for_use
+from app.services.spc_service import get_spc_measurements_for_msa
 
 
 async def _generate_study_no(db: AsyncSession) -> str:

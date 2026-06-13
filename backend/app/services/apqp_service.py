@@ -1,18 +1,17 @@
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.apqp import APQPProject
 from app.models.audit import AuditLog
-from app.models.fmea import FMEADocument
 from app.models.control_plan import ControlPlan
-from app.models.supplier import SupplierPPAPSubmission
+from app.models.fmea import FMEADocument
 from app.models.product_line import ProductLine
-
+from app.models.supplier import SupplierPPAPSubmission
 
 PHASE_NAMES = {
     1: "策划与定义",
@@ -30,7 +29,7 @@ DELIVERABLE_CHECKS = {
 
 
 async def _next_project_code(db: AsyncSession) -> str:
-    year = datetime.now(timezone.utc).year
+    year = datetime.now(UTC).year
     prefix = f"APQP-{year}-"
     result = await db.execute(
         select(APQPProject.project_code)
@@ -50,7 +49,7 @@ def _append_gate_history(project: APQPProject, action: str, user_id: uuid.UUID, 
         "user_id": str(user_id),
         "user_name": user_name,
         "comments": comments,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     if project.gate_history is None:
         project.gate_history = [entry]
@@ -223,9 +222,7 @@ async def update_project(
         if key in kwargs:
             val = kwargs[key]
             setattr(project, attr, val)
-            if attr in ("target_sop_date", "dfmea_id", "pfmea_id", "control_plan_id", "ppap_submission_id"):
-                changed[key] = str(val) if val is not None else None
-            elif attr == "team_members":
+            if attr in ("target_sop_date", "dfmea_id", "pfmea_id", "control_plan_id", "ppap_submission_id") or attr == "team_members":
                 changed[key] = str(val) if val is not None else None
             else:
                 changed[key] = val
@@ -310,7 +307,7 @@ async def transition_project(
         for check in checks:
             if not getattr(project, check["field"]):
                 raise ValueError(f"Phase {project.current_phase} 需关联 {check['label']} 后方可审批通过")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         project.gate_approved_by = user_id
         project.gate_approved_at = now
         project.gate_comments = comments

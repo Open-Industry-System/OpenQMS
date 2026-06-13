@@ -5,24 +5,28 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
 from app.core.deps import RequestScope, get_request_scope
-from app.core.permissions import get_current_user, Module, PermissionLevel, get_user_permission
+from app.core.permissions import Module, PermissionLevel, get_current_user, get_user_permission
+from app.database import get_db
 from app.models.user import User
-from app.schemas.factory import FactoryCreate, FactoryUpdate, FactoryResponse, FactoryListResponse
+from app.schemas.factory import FactoryCreate, FactoryListResponse, FactoryResponse, FactoryUpdate
 from app.schemas.group import (
-    GroupDashboardResponse, FactoryComparisonResponse,
-    SharedSupplierResponse, CrossFactoryAuditResponse,
-    SupplierMergeRequest, MergedSupplierResponse,
-    AuditFactoryAssignment, AuditProgramFactoriesResponse,
-)
-from app.services.factory_service import (
-    list_factories,
-    create_factory,
-    update_factory,
-    deactivate_factory,
+    AuditFactoryAssignment,
+    AuditProgramFactoriesResponse,
+    CrossFactoryAuditResponse,
+    FactoryComparisonResponse,
+    GroupDashboardResponse,
+    MergedSupplierResponse,
+    SharedSupplierResponse,
+    SupplierMergeRequest,
 )
 from app.services import group_service
+from app.services.factory_service import (
+    create_factory,
+    deactivate_factory,
+    list_factories,
+    update_factory,
+)
 
 router = APIRouter(prefix="/api/group", tags=["group"])
 

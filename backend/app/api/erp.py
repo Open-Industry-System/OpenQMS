@@ -1,27 +1,34 @@
 """ERP API routes."""
 import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import select, func, text
+from pydantic import ValidationError
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.core.permissions import get_user_permission, Module, PermissionLevel
+from app.api.erp_deps import require_erp_api_key
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
 from app.models.erp import (
-    ERPConnection, ERPSyncJob, ERPSupplier, ERPCustomer,
-    ERPMaterial, ERPLocation, ERPPurchaseOrder, ERPSalesOrder,
-    ERPInventoryBalance, ERPShipment, ERPCostRecord,
+    ERPConnection,
+    ERPCostRecord,
+    ERPCustomer,
+    ERPInventoryBalance,
+    ERPLocation,
+    ERPMaterial,
+    ERPPurchaseOrder,
+    ERPSalesOrder,
+    ERPShipment,
+    ERPSupplier,
+    ERPSyncJob,
 )
 from app.schemas import erp as schemas
-from app.services.erp_service import ERPIngestionService, ERPSyncService, ERPTraceabilityService
-from app.services.erp_connector import test_erp_connection, get_erp_connector, get_erp_connector_by_config
-from app.services.erp_crypto import hash_api_key, encrypt_credential, decrypt_credential, sanitize_config
-from app.api.erp_deps import require_erp_api_key
+from app.services.erp_connector import test_erp_connection
+from app.services.erp_crypto import decrypt_credential, encrypt_credential, hash_api_key, sanitize_config
+from app.services.erp_service import ERPIngestionService, ERPTraceabilityService
 
 router = APIRouter(prefix="/api/erp", tags=["erp"])
 
@@ -230,9 +237,7 @@ async def update_connection(
 
     # Validate new product_line_code BEFORE applying changes
     if data.product_line_code is not None and data.product_line_code != conn.product_line_code:
-        if scope.pl_scope.mode == "NONE":
-            raise HTTPException(status_code=403, detail="无权访问该产品线")
-        elif scope.pl_scope.mode == "EXPLICIT" and data.product_line_code not in (scope.pl_scope.codes or []):
+        if scope.pl_scope.mode == "NONE" or scope.pl_scope.mode == "EXPLICIT" and data.product_line_code not in (scope.pl_scope.codes or []):
             raise HTTPException(status_code=403, detail="无权访问该产品线")
 
     if data.config is not None:
@@ -681,7 +686,7 @@ async def get_dashboard(
     elif scope.factory_scope.accessible_factory_ids is not None:
         sync_query = sync_query.where(ERPSyncJob.factory_id.in_(scope.factory_scope.accessible_factory_ids))
     sync_total_result = await db.execute(sync_query)
-    sync_total = sync_total_result.scalar() or 0
+    _sync_total = sync_total_result.scalar() or 0  # noqa: F841
 
     sync_success_query = select(func.count()).select_from(ERPSyncJob).where(ERPSyncJob.status == "completed")
     if factory_filter:

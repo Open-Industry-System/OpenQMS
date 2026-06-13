@@ -5,27 +5,28 @@ The caller is responsible for transaction boundaries.
 """
 
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, func, update as sa_update
+from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session, get_tenant_aware_session
+from app.database import get_tenant_aware_session
+from app.models.audit import AuditLog
 from app.models.mes import (
     MESConnection,
+    MESEquipmentStatus,
     MESMeasurementIngestion,
     MESProductionOrder,
-    MESEquipmentStatus,
-    MESScrapRecord,
     MESPushOutbox,
+    MESScrapRecord,
     MESSyncJob,
 )
-from app.models.audit import AuditLog
 from app.models.spc import InspectionCharacteristic, SampleBatch
-from app.services.spc_service import _create_sample_batch_inner, _reevaluate_alarms_no_commit
 from app.services.mes_connector import get_mes_connector_by_config
+from app.services.spc_service import _create_sample_batch_inner, _reevaluate_alarms_no_commit
 
 
 class MESIngestionService:
@@ -426,7 +427,7 @@ class MESSyncService:
                 connection_id=connection_id,
                 data_type=dt,
                 status="pending",
-                next_run_at=datetime.now(timezone.utc),
+                next_run_at=datetime.now(UTC),
             )
             db.add(job)
         await db.flush()
@@ -444,10 +445,9 @@ class MESSyncService:
         - Set status=running, started_at=now(), claim_token=str(uuid.uuid4())
         - Return jobs (caller must commit)
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Build the subquery for eligible jobs with FOR UPDATE SKIP LOCKED
-        from sqlalchemy.orm import joinedload
 
         stmt = (
             select(MESSyncJob)
@@ -491,7 +491,7 @@ class MESSyncService:
         Reset to failed, clear claim_token.
         Return count (caller must commit).
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=MESSyncService.TIMEOUT_MINUTES)
+        cutoff = datetime.now(UTC) - timedelta(minutes=MESSyncService.TIMEOUT_MINUTES)
 
         stmt = (
             select(MESSyncJob)
@@ -511,7 +511,7 @@ class MESSyncService:
         for job in jobs:
             job.status = "failed"
             job.claim_token = None
-            job.error_message = "Job timed out after {} minutes".format(MESSyncService.TIMEOUT_MINUTES)
+            job.error_message = f"Job timed out after {MESSyncService.TIMEOUT_MINUTES} minutes"
             job.consecutive_failures += 1
 
         await db.flush()
@@ -591,7 +591,7 @@ class MESSyncService:
                     max_ts = ts
 
         # Update job status
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         refreshed_job.status = "completed"
         refreshed_job.claim_token = None
         refreshed_job.checkpoint = max_ts if max_ts is not None else refreshed_job.checkpoint
@@ -695,7 +695,7 @@ class MESSyncService:
             raise ValueError("Sync already in progress")
 
         # Set all completed/failed jobs to pending with next_run_at=now()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await db.execute(
             sa_update(MESSyncJob)
             .where(
@@ -739,7 +739,7 @@ class MESPushService:
         Reset to pending, clear started_at and claim_token.
         Return count (caller must commit).
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(
+        cutoff = datetime.now(UTC) - timedelta(
             minutes=MESPushService.OUTBOX_TIMEOUT_MINUTES
         )
 
@@ -776,7 +776,7 @@ class MESPushService:
         - Set status=processing, started_at=now(), claim_token=str(uuid.uuid4())
         - Return items (caller must commit to release locks)
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         stmt = (
             select(MESPushOutbox)
@@ -849,7 +849,7 @@ class MESPushService:
                     else:
                         failed_item.status = "pending"
                         backoff_minutes = 2 ** min(failed_item.retry_count, 5)
-                        failed_item.next_retry_at = datetime.now(timezone.utc) + timedelta(
+                        failed_item.next_retry_at = datetime.now(UTC) + timedelta(
                             minutes=backoff_minutes
                         )
                         failed_item.claim_token = None
@@ -885,7 +885,7 @@ class MESPushService:
         # 3b: HTTP push (NO transaction)
         connector = get_mes_connector_by_config(connector_type, config)
         try:
-            response = await connector.push_quality_event(
+            await connector.push_quality_event(
                 item.event_type,
                 item.payload,
                 event_id=str(item.outbox_id),
@@ -913,7 +913,7 @@ class MESPushService:
 
             if push_success:
                 refreshed.status = "sent"
-                refreshed.sent_at = datetime.now(timezone.utc)
+                refreshed.sent_at = datetime.now(UTC)
                 refreshed.claim_token = None
                 refreshed.last_error = None
             else:
@@ -926,7 +926,7 @@ class MESPushService:
                 else:
                     refreshed.status = "pending"
                     backoff_minutes = 2 ** min(refreshed.retry_count, 5)
-                    refreshed.next_retry_at = datetime.now(timezone.utc) + timedelta(
+                    refreshed.next_retry_at = datetime.now(UTC) + timedelta(
                         minutes=backoff_minutes
                     )
                     refreshed.claim_token = None
@@ -959,7 +959,7 @@ class MESLifecycleService:
     @staticmethod
     async def cleanup(db: AsyncSession) -> dict:
         from sqlalchemy import delete, text
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Transaction-level advisory lock (auto-released on commit/rollback)
         lock_result = await db.execute(text("SELECT pg_try_advisory_xact_lock(42)"))

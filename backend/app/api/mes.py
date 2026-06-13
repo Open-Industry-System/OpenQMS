@@ -1,30 +1,29 @@
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import select, func, and_, text, bindparam
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.core.permissions import get_user_permission, Module, PermissionLevel
+from app.api.mes_deps import require_mes_api_key
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
 from app.models.mes import (
     MESConnection,
-    MESSyncJob,
-    MESProductionOrder,
     MESEquipmentStatus,
-    MESScrapRecord,
+    MESProductionOrder,
     MESPushOutbox,
+    MESScrapRecord,
+    MESSyncJob,
 )
-from app.models.audit import AuditLog
 from app.schemas import mes as schemas
-from app.services.mes_service import MESIngestionService, MESSyncService, MESPushService
-from app.services.mes_connector import test_mes_connection, get_mes_connector, get_mes_connector_by_config
-from app.services.mes_crypto import hash_api_key, encrypt_credential, sanitize_config
-from app.api.mes_deps import require_mes_api_key
+from app.services.mes_connector import get_mes_connector_by_config, test_mes_connection
+from app.services.mes_crypto import encrypt_credential, hash_api_key, sanitize_config
+from app.services.mes_service import MESIngestionService, MESSyncService
 
 router = APIRouter(prefix="/api/mes", tags=["mes"])
 
@@ -688,8 +687,8 @@ async def get_dashboard(
     accessible_factory_ids = scope.factory_scope.accessible_factory_ids
 
     # Equipment summary: latest per equipment via ROW_NUMBER
-    from sqlalchemy.orm import aliased
     from sqlalchemy import desc
+    from sqlalchemy.orm import aliased
 
     eq_sub = (
         select(
@@ -733,7 +732,7 @@ async def get_dashboard(
             down_count += 1
 
     # Today's production aggregate
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     prod_query = select(
         func.coalesce(func.sum(MESProductionOrder.planned_qty), 0).label("total_planned"),
         func.coalesce(func.sum(MESProductionOrder.actual_qty), 0).label("total_actual"),

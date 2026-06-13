@@ -1,9 +1,9 @@
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
-from sqlalchemy import func, select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
 from app.models.audit_finding import AuditFinding
@@ -258,7 +258,7 @@ async def complete_customer_audit(db: AsyncSession, plan: AuditPlan, user_id: uu
         raise ValueError(f"cannot complete: {len(unconfirmed)} finding(s) not customer-confirmed")
 
     plan.status = "completed"
-    plan.actual_date = datetime.now(timezone.utc).date()
+    plan.actual_date = datetime.now(UTC).date()
 
     audit_log = AuditLog(
         table_name="audit_plans",
@@ -332,7 +332,7 @@ async def transition_finding(
     finding.customer_confirmation_attachments = new_customer_confirmation_attachments
     finding.status = new_status
     if new_status == "closed":
-        finding.closed_at = datetime.now(timezone.utc)
+        finding.closed_at = datetime.now(UTC)
 
     audit_log = AuditLog(
         table_name="audit_findings",

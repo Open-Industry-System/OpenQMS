@@ -1,14 +1,15 @@
 import uuid
-from datetime import date, datetime, timezone
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
+from datetime import UTC, date, datetime
 
-from app.models.capa import CAPAEightD
-from app.state_machines.eightd_state import EightDState, can_transition
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.audit import AuditLog
+from app.models.capa import CAPAEightD
 from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
+from app.state_machines.eightd_state import EightDState, can_transition
 
 EMBEDDING_FIELDS = {"d2_description", "d4_root_cause", "d5_correction", "d7_prevention"}
 
@@ -24,8 +25,8 @@ async def list_capas(
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
 ) -> tuple[list[CAPAEightD], int]:
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+    from datetime import datetime
+    now = datetime.now(UTC)
 
     query = select(CAPAEightD)
     count_query = select(func.count(CAPAEightD.report_id))
@@ -237,6 +238,7 @@ async def update_capa(
     # Close linked risk alerts if CAPA reached D8_CLOSURE
     if capa.status == "D8_CLOSURE":
         from sqlalchemy import update
+
         from app.models.supplier_risk import SupplierRiskAlert
         await db.execute(
             update(SupplierRiskAlert)
@@ -309,9 +311,10 @@ async def advance_capa(
 
     # Write to MES outbox before commit
     if capa.product_line_code and old_status != capa.status:
-        from app.services.mes_service import MESPushService
-        from app.models.mes import MESConnection
         from sqlalchemy import select
+
+        from app.models.mes import MESConnection
+        from app.services.mes_service import MESPushService
 
         query = select(MESConnection).where(
             MESConnection.is_active == True,
@@ -330,7 +333,7 @@ async def advance_capa(
                     "capa_id": str(capa.report_id),
                     "old_status": old_status,
                     "new_status": capa.status,
-                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                    "changed_at": datetime.now(UTC).isoformat(),
                     "product_line_code": capa.product_line_code,
                 },
             )

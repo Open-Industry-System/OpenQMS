@@ -4,16 +4,15 @@
     python -m app.cli.graph_rebuild              # 全量重建
     python -m app.cli.graph_rebuild --retry-failed  # 重置 dead 任务
 """
-import asyncio
 import argparse
-import sys
+import asyncio
+
+from sqlalchemy import func, update
 
 from app.database import async_session
-from app.graph.neo4j_driver import get_neo4j_driver, ensure_constraints
-from app.services.graph_projection_service import GraphProjectionService
+from app.graph.neo4j_driver import ensure_constraints, get_neo4j_driver
 from app.models.graph_sync_outbox import GraphSyncOutbox
-
-from sqlalchemy import select, update, func
+from app.services.graph_projection_service import GraphProjectionService
 
 
 async def retry_failed() -> int:

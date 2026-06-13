@@ -1,10 +1,12 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, datetime
+
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from app.models.management_review import ManagementReview, ReviewOutput
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.audit import AuditLog
+from app.models.management_review import ManagementReview, ReviewOutput
 
 
 def _parse_integrity_error(error: IntegrityError, operation: str) -> str:
@@ -262,7 +264,7 @@ async def close_review(
         raise ValueError("must have at least 1 output or meeting_minutes before closing")
 
     review.status = "closed"
-    review.actual_date = datetime.now(timezone.utc).date()
+    review.actual_date = datetime.now(UTC).date()
     review.updated_by = user_id
     await _audit(db, "TRANSITION", review.review_id, user_id, {
         "status": {"before": "in_review", "after": "closed"},
@@ -290,14 +292,14 @@ async def reopen_review(
 async def _aggregate_data_package(
     db: AsyncSession, product_line_code: str | None,
 ) -> dict:
-    from app.models.quality_goal import QualityGoal
     from app.models.audit_finding import AuditFinding
     from app.models.capa import CAPAEightD
     from app.models.fmea import FMEADocument
+    from app.models.quality_goal import QualityGoal
     from app.models.spc import InspectionCharacteristic, SPCAlarm
     from app.models.supplier import Supplier, SupplierEvaluation
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     pkg = {
         "generated_at": now.isoformat(),
         "product_line_code": product_line_code,
@@ -578,7 +580,7 @@ async def verify_output(
 
     output.status = "verified"
     output.verified_by = user_id
-    output.verified_at = datetime.now(timezone.utc).date()
+    output.verified_at = datetime.now(UTC).date()
     output.verification_notes = verification_notes
 
     await _audit(db, "TRANSITION", output.output_id, user_id, {

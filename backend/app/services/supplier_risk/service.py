@@ -1,18 +1,18 @@
 """Main service: evaluate supplier risk, handle alerts, create SCAR/CAPA from alerts."""
 import uuid
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.supplier_risk import SupplierRiskAlert
-from app.models.supplier import Supplier, SupplierSCAR, SupplierCertification, SupplierEvaluation
 from app.models.capa import CAPAEightD
 from app.models.iqc_inspection import IqcInspection
+from app.models.supplier import Supplier, SupplierCertification, SupplierEvaluation, SupplierSCAR
+from app.models.supplier_risk import SupplierRiskAlert
+from app.services.supplier_risk.config import get_effective_configs, get_effective_configs_batch
 from app.services.supplier_risk.rule_engine import SupplierRiskInput, run_all_rules
 from app.services.supplier_risk.scorer import calculate_risk_score
-from app.services.supplier_risk.config import get_effective_configs, get_effective_configs_batch
 
 
 async def evaluate_supplier_risk(
@@ -452,8 +452,8 @@ async def create_scar_from_alert(
     if not alert:
         raise ValueError("预警不存在")
 
-    from app.services.scar_service import _create_scar_without_commit
     from app.services.embedding_outbox import enqueue_embedding
+    from app.services.scar_service import _create_scar_without_commit
 
     # Create SCAR without commit
     scar = await _create_scar_without_commit(
@@ -492,10 +492,9 @@ async def create_capa_from_alert(
     if not alert:
         raise ValueError("预警不存在")
 
+
     from app.services.capa_service import _create_capa_without_commit
     from app.services.embedding_outbox import enqueue_embedding
-    from app.models.capa import CAPAEightD
-    import uuid as _uuid
 
     # Generate document number
     doc_no = f"8D-{date.today().year}-{str(alert.alert_id)[:8].upper()}"

@@ -1,10 +1,11 @@
 """Factory CRUD service."""
 import uuid
+
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.factory import Factory
 from app.models.audit import AuditLog
+from app.models.factory import Factory
 from app.schemas.factory import FactoryCreate, FactoryUpdate
 
 

@@ -7,9 +7,11 @@ connection pool reuse.
 """
 import asyncio
 import logging
+
 from sqlalchemy import text
+
 from app.database import run_for_each_tenant
-from app.services.supply_chain_risk_map.service import generate_snapshot, current_period
+from app.services.supply_chain_risk_map.service import current_period, generate_snapshot
 
 logger = logging.getLogger(__name__)
 

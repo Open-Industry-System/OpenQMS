@@ -1,24 +1,31 @@
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.core.permissions import get_user_permission, Module, PermissionLevel
+from app.config import settings
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
-from typing import Any
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
 from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
-
-from app.config import settings
-from app.schemas.capa import CAPACreate, CAPAUpdate, CAPAResponse, CAPAListResponse, AdvanceRequest, D4RecommendationResponse, D5RecommendationResponse
+from app.schemas.capa import (
+    AdvanceRequest,
+    CAPACreate,
+    CAPAListResponse,
+    CAPAResponse,
+    CAPAUpdate,
+    D4RecommendationResponse,
+    D5RecommendationResponse,
+)
 from app.schemas.capa_draft import DraftRequest, DraftResponse
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.services import capa_service
 from app.services.capa_draft_service import generate_draft
+from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from app.services.lessons_learned.service import LessonsLearnedService
 
 router = APIRouter(prefix="/api/capa", tags=["capa"])

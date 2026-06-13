@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, delete, func
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +29,7 @@ async def upsert_session(
             user_name=user_name,
             action=action,
             editing_area=editing_area,
-            last_activity=datetime.now(timezone.utc),
+            last_activity=datetime.now(UTC),
         )
         .on_conflict_do_update(
             index_elements=["document_type", "document_id", "user_id"],
@@ -37,7 +37,7 @@ async def upsert_session(
                 "user_name": user_name,
                 "action": action,
                 "editing_area": editing_area,
-                "last_activity": datetime.now(timezone.utc),
+                "last_activity": datetime.now(UTC),
             },
         )
     )
@@ -68,7 +68,7 @@ async def get_active_users(
     exclude_user_id: uuid.UUID | None = None,
 ) -> list[CollaborationSession]:
     """Get active users for a document, filtering expired sessions."""
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=SESSION_TTL_SECONDS)
+    cutoff = datetime.now(UTC) - timedelta(seconds=SESSION_TTL_SECONDS)
     stmt = (
         select(CollaborationSession)
         .where(
@@ -86,7 +86,7 @@ async def get_active_users(
 
 async def delete_expired_sessions(db: AsyncSession) -> int:
     """Delete expired sessions. Returns count deleted."""
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=SESSION_TTL_SECONDS)
+    cutoff = datetime.now(UTC) - timedelta(seconds=SESSION_TTL_SECONDS)
     stmt = delete(CollaborationSession).where(
         CollaborationSession.last_activity < cutoff
     )

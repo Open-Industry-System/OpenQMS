@@ -28,7 +28,7 @@ def calculate_risk_score(results: list, configs: list) -> RiskScore:
     This means triggering a single rule in a category gives a proportional score, not 100.
     """
     category_scores = {}
-    for cat, cat_weight in CATEGORY_WEIGHTS.items():
+    for cat, _cat_weight in CATEGORY_WEIGHTS.items():
         active_weights = sum(c.weight for c in configs if c.category == cat and c.enabled)
         if active_weights == 0:
             category_scores[cat] = 0.0

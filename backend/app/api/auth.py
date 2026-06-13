@@ -1,21 +1,59 @@
-import uuid
-from datetime import datetime, timezone
+import logging
+import time
+from collections import defaultdict
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import get_current_user
+from app.core.permissions import Module, PermissionLevel, require_permission
+from app.core.product_line_filter import get_user_product_line_codes
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+    hash_password,
+    verify_password,
+)
 from app.database import get_db
-from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token
-from app.core.deps import get_current_user, require_admin
-from app.models.user import User
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
-from app.schemas.auth import LoginRequest, RegisterRequest, UserResponse, TokenResponse, RefreshTokenRequest, RefreshTokenResponse
+from app.models.user import User
+from app.schemas.auth import (
+    LoginRequest,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
+    RegisterRequest,
+    TokenResponse,
+    UserResponse,
+)
 from app.services.permission_service import get_role_permissions
-from app.core.product_line_filter import get_user_product_line_codes
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+logger = logging.getLogger("app.auth")
+
+# --- Login rate limiting (in-memory, per-IP) ---
+_LOGIN_RATE_LIMIT = 10       # max attempts
+_LOGIN_RATE_WINDOW = 300     # 5-minute window
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_login_rate_limit(client_ip: str) -> None:
+    """Raise 429 if client_ip exceeds login rate limit."""
+    now = time.time()
+    cutoff = now - _LOGIN_RATE_WINDOW
+    attempts = _login_attempts[client_ip]
+    # Purge expired entries
+    _login_attempts[client_ip] = [t for t in attempts if t > cutoff]
+    if len(_login_attempts[client_ip]) >= _LOGIN_RATE_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="登录尝试过于频繁，请 5 分钟后再试",
+        )
+    _login_attempts[client_ip].append(now)
 
 
 async def build_user_response(user: User, db: AsyncSession) -> UserResponse:
@@ -29,7 +67,7 @@ async def build_user_response(user: User, db: AsyncSession) -> UserResponse:
 
     # Factory scope
     from app.core.factory_scope import get_user_factory_ids, resolve_factory_scope
-    from app.core.permissions import Module, get_user_permission, PermissionLevel
+    from app.core.permissions import Module, PermissionLevel, get_user_permission
     from app.models.factory import Factory
 
     user_factory_ids = await get_user_factory_ids(user, db)
@@ -69,11 +107,16 @@ async def build_user_response(user: User, db: AsyncSession) -> UserResponse:
 
 @router.post("/login", response_model=TokenResponse)
 async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    _check_login_rate_limit(client_ip)
+    user_agent = request.headers.get("user-agent", "")
     result = await db.execute(select(User).where(User.username == req.username))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(req.password, user.password_hash):
+        logger.warning("AUTH_LOGIN_FAILED username=%s ip=%s ua=%s", req.username, client_ip, user_agent[:200])
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.is_active:
+        logger.warning("AUTH_LOGIN_DEACTIVATED user_id=%s username=%s ip=%s", user.user_id, user.username, client_ip)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
     # Build JWT payload — include tenant_id when request has a resolved tenant
     tenant = getattr(request.state, "tenant", None)
@@ -92,6 +135,7 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     user.refresh_token = refresh_token
     user.refresh_token_expires = refresh_expires
     await db.commit()
+    logger.info("AUTH_LOGIN_SUCCESS user_id=%s username=%s role=%s ip=%s", user.user_id, user.username, user.role_definition.role_key, client_ip)
     user_resp = await build_user_response(user, db)
     return TokenResponse(access_token=token, refresh_token=refresh_token, user=user_resp)
 
@@ -100,7 +144,7 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
 async def register(
     req: RegisterRequest,
     db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    _admin: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)),
 ):
     existing = await db.execute(select(User).where(User.username == req.username))
     if existing.scalar_one_or_none():
@@ -119,11 +163,12 @@ async def register(
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    logger.info("AUTH_REGISTER new_user_id=%s username=%s role=%s by=%s", user.user_id, user.username, req.role_key, _admin.user_id)
     return await build_user_response(user, db)
 
 
 @router.get("/users", response_model=list[UserResponse])
-async def list_users(db: AsyncSession = Depends(get_db), _user: User = Depends(require_admin)):
+async def list_users(db: AsyncSession = Depends(get_db), _user: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN))):
     result = await db.execute(select(User))
     users = result.scalars().all()
     return [await build_user_response(u, db) for u in users]
@@ -136,6 +181,7 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
 
 @router.post("/refresh", response_model=RefreshTokenResponse)
 async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
     payload = decode_refresh_token(req.refresh_token)
     if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
@@ -145,8 +191,10 @@ async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSes
     result = await db.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
     if user is None or user.refresh_token != req.refresh_token:
+        logger.warning("AUTH_REFRESH_INVALID user_id=%s ip=%s", user_id, client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    if user.refresh_token_expires and user.refresh_token_expires < datetime.now(timezone.utc):
+    if user.refresh_token_expires and user.refresh_token_expires < datetime.now(UTC):
+        logger.warning("AUTH_REFRESH_EXPIRED user_id=%s ip=%s", user_id, client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
@@ -170,4 +218,5 @@ async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSes
     user.refresh_token = new_refresh
     user.refresh_token_expires = new_expires
     await db.commit()
+    logger.info("AUTH_REFRESH_SUCCESS user_id=%s ip=%s", user.user_id, client_ip)
     return RefreshTokenResponse(access_token=new_access, refresh_token=new_refresh)

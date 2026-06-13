@@ -4,14 +4,13 @@
 """
 import uuid
 from collections import deque
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fmea import FMEADocument
 from app.graph.repository import FMEAGraphRepository
-from app.schemas.change_impact import ChangeImpactResult, AffectedNode, ImpactSummary
+from app.models.fmea import FMEADocument
+from app.schemas.change_impact import AffectedNode, ChangeImpactResult, ImpactSummary
 from app.state_machines.fmea_state import compute_ap
 from app.utils.similarity import compute_similarity
 
@@ -214,8 +213,9 @@ class JSONBRepository(FMEAGraphRepository):
         """批量加载产品线名称，避免 N+1。"""
         if not codes:
             return {}
-        from app.models.product_line import ProductLine
         from sqlalchemy import select as sa_select
+
+        from app.models.product_line import ProductLine
         result = await self._db.execute(
             sa_select(ProductLine.code, ProductLine.name).where(ProductLine.code.in_(codes))
         )

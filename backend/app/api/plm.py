@@ -2,7 +2,7 @@
 
 import uuid
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select
@@ -10,15 +10,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.database import get_db
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import (
     Module,
     PermissionLevel,
     get_user_permission,
 )
-from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
-from app.models.fmea import FMEADocument
+from app.database import get_db
 from app.models.plm import (
     PLMBOM,
     PLMChangeImpactTask,
@@ -31,8 +30,8 @@ from app.models.plm import (
 from app.schemas import plm as schemas
 from app.schemas import special_characteristic as schemas_special_characteristic
 from app.services.fmea_service import get_fmea
-from app.services.plm_service import PLMSyncService
 from app.services.plm_connector import test_plm_connection
+from app.services.plm_service import PLMSyncService
 from app.services.special_characteristic_service import (
     SafetyApprovalStatus,
     prepare_special_characteristic,
@@ -901,7 +900,7 @@ async def confirm_part_sc(
     link.sc_id = sc.sc_id
     link.status = "confirmed"
     link.confirmed_by = scope.user.user_id
-    link.confirmed_at = datetime.now(timezone.utc)
+    link.confirmed_at = datetime.now(UTC)
 
     await db.commit()
 
@@ -938,11 +937,11 @@ async def trigger_impact_analysis(
     _check_factory_access(co, scope, detail="Change order not found")
 
     # Upsert impact task
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stmt = (
         pg_insert(PLMChangeImpactTask)
         .values(

@@ -7,9 +7,9 @@ from typing import Any
 
 from neo4j import AsyncDriver
 
-from app.graph.repository import FMEAGraphRepository
 from app.config import settings
-from app.schemas.change_impact import ChangeImpactResult, AffectedNode, ImpactSummary
+from app.graph.repository import FMEAGraphRepository
+from app.schemas.change_impact import AffectedNode, ChangeImpactResult, ImpactSummary
 from app.state_machines.fmea_state import compute_ap
 from app.utils.similarity import compute_similarity
 
@@ -352,7 +352,7 @@ class Neo4jRepository(FMEAGraphRepository):
             )
             start_records = await start_result.data()
             start_node = dict(start_records[0]["n"]) if start_records else {}
-            start_type = start_node.get("type", "")
+            _start_type = start_node.get("type", "")  # noqa: F841
 
             for direction in directions:
                 rel_pattern = downstream_rel_types if direction == "downstream" else upstream_rel_types

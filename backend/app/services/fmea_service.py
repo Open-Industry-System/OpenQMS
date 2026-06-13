@@ -1,16 +1,17 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
+from datetime import UTC, datetime
 
-from app.models.fmea import FMEADocument
-from app.state_machines.fmea_state import FMEAState, can_transition
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.audit import AuditLog
+from app.models.fmea import FMEADocument
 from app.models.graph_sync_outbox import GraphSyncOutbox
 from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import _create_fmea_version_no_commit
+from app.state_machines.fmea_state import FMEAState, can_transition
 
 
 async def list_fmeas(
@@ -240,8 +241,7 @@ async def update_fmea(
 
         # Invalidate recommendation cache when graph_data or product_line changes
         if graph_data is not None or product_line_code is not None:
-            from app.services.recommendation_service import RecommendationService
-            from app.services.recommendation_service import _NullGraphRepo
+            from app.services.recommendation_service import RecommendationService, _NullGraphRepo
             rec_service = RecommendationService(db=db, llm_provider=None, graph_repo=_NullGraphRepo())
             await rec_service.invalidate_cache_for_fmea(fmea.fmea_id)
 
@@ -270,7 +270,7 @@ async def transition_fmea(
 
     if target == FMEAState.APPROVED:
         fmea.approved_by = user_id
-        fmea.approved_at = datetime.now(timezone.utc)
+        fmea.approved_at = datetime.now(UTC)
 
     # Create version snapshot on submit or approve
     version = None

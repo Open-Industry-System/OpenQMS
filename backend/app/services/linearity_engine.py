@@ -1,8 +1,7 @@
 """Linearity calculation engine — linear regression of bias vs reference value."""
 
-import math
 
-from app.models.linearity import LinearityStudy, LinearityMeasurement, LinearityResult
+from app.models.linearity import LinearityMeasurement, LinearityResult, LinearityStudy
 
 
 def compute_linearity(study: LinearityStudy, measurements: list[LinearityMeasurement]) -> LinearityResult:
@@ -16,7 +15,7 @@ def compute_linearity(study: LinearityStudy, measurements: list[LinearityMeasure
     x_mean = sum(x) / n
     y_mean = sum(y) / n
 
-    ss_xy = sum((xi - x_mean) * (yi - y_mean) for xi, yi in zip(x, y))
+    ss_xy = sum((xi - x_mean) * (yi - y_mean) for xi, yi in zip(x, y, strict=False))
     ss_xx = sum((xi - x_mean) ** 2 for xi in x)
 
     slope = ss_xy / ss_xx if ss_xx != 0 else 0

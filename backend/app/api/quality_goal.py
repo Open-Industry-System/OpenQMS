@@ -1,11 +1,13 @@
 import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_db
-from app.core.deps import RequestScope, get_request_scope
-from app.core.permissions import get_user_permission, PermissionLevel, Module
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
+
 from app import schemas
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
 from app.services import quality_goal_service
 
 router = APIRouter(prefix="/api/quality-goals", tags=["quality-goals"])

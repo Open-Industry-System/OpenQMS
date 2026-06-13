@@ -1,12 +1,12 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 
 from app.core.deps import require_platform_admin
 from app.database import get_platform_db
 from app.models.tenant import Tenant
-from app.schemas.platform import TenantCreateRequest, TenantResponse, TenantListResponse
+from app.schemas.platform import TenantCreateRequest, TenantListResponse, TenantResponse
 from app.services.tenant_service import TenantService
 
 router = APIRouter()

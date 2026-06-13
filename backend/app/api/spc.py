@@ -1,19 +1,22 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, UploadFile, File
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.core.permissions import get_user_permission, PermissionLevel, Module
-from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access, apply_scope_filter
-from app.models.user import User
-from app.models.spc import SampleValue, SPCAlarm, InspectionCharacteristic
 from app import schemas
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import (
+    check_factory_access,
+    resolve_create_factory_id,
+    validate_factory_invariant,
+)
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.database import get_db
+from app.models.spc import SampleValue, SPCAlarm
 from app.schemas.spc import ControlLimitSnapshotOut
 from app.services import spc_service
-from sqlalchemy import select as sa_select
 
 router = APIRouter(prefix="/api/spc", tags=["SPC"])
 
@@ -203,9 +206,11 @@ async def import_samples(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    from app.utils.excel import parse_upload, ExcelParseError, ImportError as ExcelImportError, MAX_UPLOAD_BYTES
     from dataclasses import asdict
+
     from fastapi.responses import JSONResponse
+
+    from app.utils.excel import MAX_UPLOAD_BYTES, ExcelParseError, parse_upload
 
     level = await get_user_permission(scope.user, Module.SPC, db)
     if level < PermissionLevel.CREATE:
@@ -430,6 +435,7 @@ async def confirm_fmea_association(
 
     # 验证 node_id 在 FMEA 文档中存在且为 FailureMode
     from sqlalchemy import select
+
     from app.models.fmea import FMEADocument
     fmea_result = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == req.fmea_id))
     fmea = fmea_result.scalar_one_or_none()

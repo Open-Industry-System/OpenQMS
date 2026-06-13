@@ -1,19 +1,20 @@
 import sys
+
 from app.services.spc_calculation_engine import (
-    calculate_xbar_r_limits,
-    calculate_imr_limits,
-    calculate_histogram_data,
-    evaluate_western_electric,
-    calculate_cp_cpk,
-    calculate_pp_ppk,
-    calculate_cm,
-    calculate_ppm,
-    get_capability_grade,
-    get_capability_advice,
-    calculate_p_limits,
-    calculate_np_limits,
     calculate_c_limits,
+    calculate_cm,
+    calculate_cp_cpk,
+    calculate_histogram_data,
+    calculate_imr_limits,
+    calculate_np_limits,
+    calculate_p_limits,
+    calculate_pp_ppk,
+    calculate_ppm,
     calculate_u_limits,
+    calculate_xbar_r_limits,
+    evaluate_western_electric,
+    get_capability_advice,
+    get_capability_grade,
 )
 
 
@@ -50,7 +51,7 @@ def test_rule_1():
     rule1 = [a for a in alarms if a["rule_no"] == 1]
     assert len(rule1) == 1
     assert rule1[0]["batch_index"] == 3
-    print(f"Pass: Rule 1 detected out-of-control point at index 3")
+    print("Pass: Rule 1 detected out-of-control point at index 3")
 
 
 def test_rule_2():
@@ -60,7 +61,7 @@ def test_rule_2():
     alarms = evaluate_western_electric(stats, limits, config)
     rule2 = [a for a in alarms if a["rule_no"] == 2]
     assert len(rule2) >= 1
-    print(f"Pass: Rule 2 detected 9 points same side")
+    print("Pass: Rule 2 detected 9 points same side")
 
 
 def test_capability():

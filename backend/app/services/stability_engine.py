@@ -1,9 +1,7 @@
 """Stability calculation engine — Xbar-R control limits."""
 
-import math
 
-from app.models.stability import StabilityStudy, StabilityMeasurement, StabilityResult
-
+from app.models.stability import StabilityMeasurement, StabilityResult, StabilityStudy
 
 # AIAG SPC constants for subgroup size n
 A2_TABLE = {2: 1.880, 3: 1.023, 4: 0.729, 5: 0.577, 6: 0.483, 7: 0.419, 8: 0.373, 9: 0.337, 10: 0.308}

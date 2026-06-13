@@ -1,6 +1,7 @@
 import re
 import uuid
-from pydantic import BaseModel, EmailStr, field_validator, Field
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class LoginRequest(BaseModel):

@@ -3,8 +3,7 @@
 import math
 from collections import defaultdict
 
-from app.models.grr import GrrStudy, GrrMeasurement, GrrResult
-
+from app.models.grr import GrrMeasurement, GrrResult, GrrStudy
 
 # AIAG MSA 4th Ed constants (include 5.15 process spread factor)
 # K1: repeatability, based on number of trials (d2 for large g)

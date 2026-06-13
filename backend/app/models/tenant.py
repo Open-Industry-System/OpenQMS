@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, BigInteger, Integer, Text, DateTime, CheckConstraint, Index, func
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import mapped_column, Mapped
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import PlatformBase
 

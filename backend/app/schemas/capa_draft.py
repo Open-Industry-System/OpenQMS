@@ -1,7 +1,8 @@
 # backend/app/schemas/capa_draft.py
 import uuid
 from typing import Literal
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DraftRequest(BaseModel):
