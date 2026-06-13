@@ -1,0 +1,89 @@
+# Ruff configuration for OpenQMS backend
+# https://docs.astral.sh/ruff/configuration/
+
+target-version = "py311"
+line-length = 120
+
+[lint]
+select = [
+    # Core: pyflakes + pycodestyle errors
+    "E", "F",
+    # Bugbear: runtime correctness
+    "B",
+    # Security: bandit rules
+    "S",
+    # Upgrades: modern Python idioms
+    "UP",
+    # Simplify
+    "SIM",
+    # Imports
+    "I",
+]
+
+ignore = [
+    # S608: SQL injection via string-based query construction.
+    # All text(f"...") patterns have been manually audited: f-strings only
+    # interpolate hardcoded SQL fragments or table/column names from constants,
+    # never user input. User values always use :param bind parameters.
+    "S608",
+
+    # B008: Function call in argument default — standard FastAPI Depends() pattern.
+    "B008",
+
+    # UP006: Use `list[X]` instead of `List[X]` — SQLAlchemy models require
+    # `from __future__ import annotations` or string annotations for forward refs.
+    # Suppress globally to avoid churn on existing Mapped[List[X]] patterns.
+    "UP006",
+
+    # UP045: Use `X | None` instead of `Optional[X]` — same as UP006,
+    # SQLAlchemy Mapped[Optional[X]] patterns are pervasive.
+    "UP045",
+
+    # E501: Line too long — line-length=120 above handles this, but some
+    # SQL strings and URLs intentionally exceed the limit.
+    "E501",
+
+    # E712: Equality comparison to True — SQLAlchemy filters like
+    # `Model.is_active == True` generate correct SQL; `is_active` alone
+    # is a Python truthiness check, not a SQL WHERE clause.
+    "E712",
+
+    # E402: Module import not at top of file — some files need late imports
+    # to avoid circular dependency chains in the service layer.
+    "E402",
+
+    # SIM102: Collapsible if — many are intentionally separate for
+    # readability of permission check patterns (factory scope + PL scope).
+    "SIM102",
+
+    # S101: Use of assert — used for invariant checks in services.
+    "S101",
+
+    # S311: Suspicious non-cryptographic random — random module used for
+    # non-security purposes (sampling, shuffle, test data).
+    "S311",
+
+    # S105/S106: Hardcoded password strings — seed data and test fixtures.
+    "S105",
+    "S106",
+
+    # B011: Do not call raise NotImplemented — used in abstract service stubs.
+    "B011",
+
+    # B027: Empty method without abstract decorator — intentional no-op defaults.
+    "B027",
+
+    # UP035: Deprecated import — will be addressed in a separate modernization pass.
+    "UP035",
+
+    # UP042: Replace str enum — existing string enums are intentional.
+    "UP042",
+]
+
+[lint.per-file-ignores]
+"tests/**" = [
+    "B011",   # assert False in test stubs is fine
+]
+
+[format]
+quote-style = "double"
