@@ -332,7 +332,7 @@ async def test_ingest_part_creates_both_safety_and_key_characteristic_links(monk
     ingestion = plm_service.PLMIngestionService(db)
     created_links = []
 
-    async def capture_sc_link(_connection_id, data, characteristic_type):
+    async def capture_sc_link(_connection_id, data, characteristic_type, factory_id=None):
         created_links.append((data["part_number"], characteristic_type))
 
     monkeypatch.setattr(ingestion, "_upsert_sc_link", capture_sc_link)

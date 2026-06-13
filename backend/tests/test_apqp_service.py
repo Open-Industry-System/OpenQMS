@@ -50,10 +50,24 @@ async def db():
     await engine.dispose()
 
 
-async def _make_user(db: AsyncSession, username: str, role: str) -> User:
+async def _make_user(db: AsyncSession, username: str, legacy_role: str = "admin") -> User:
+    from app.models.role import RoleDefinition
+    from sqlalchemy import select
+    result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == legacy_role))
+    rd = result.scalar_one_or_none()
+    if rd is None:
+        rd = RoleDefinition(
+            role_key=legacy_role,
+            name_zh=legacy_role,
+            name_en=legacy_role,
+            is_system=True,
+            is_active=True,
+        )
+        db.add(rd)
+        await db.flush()
     user = User(
         user_id=uuid.uuid4(), username=username, display_name=username,
-        role=role, password_hash="hash",
+        legacy_role=legacy_role, role_id=rd.id, password_hash="hash",
         factory_id=_DEFAULT_FACTORY_ID,
     )
     db.add(user)
