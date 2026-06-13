@@ -1,6 +1,6 @@
 """add supply chain risk snapshot table + erp po actual_delivery_date
 
-Revision ID: 035_add_supply_chain_risk_snapshot
+Revision ID: 035_scrs
 Revises: 20260611_add_review_reports
 Create Date: 2026-06-12
 """
@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
-revision = "035_add_supply_chain_risk_snapshot"
+revision = "035_scrs"
 down_revision = "20260611_add_review_reports"
 
 
