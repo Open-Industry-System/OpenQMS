@@ -769,7 +769,6 @@ def upgrade() -> None:
     _plm_conn_tables = [
         "plm_parts", "plm_boms", "plm_change_orders",
         "plm_sync_jobs", "plm_push_outbox",
-        "plm_change_impact_tasks", "plm_part_fmea_links", "plm_part_sc_links",
     ]
 
     for tbl in _plm_conn_tables:
@@ -783,6 +782,43 @@ def upgrade() -> None:
                 WHERE plm_connections.connection_id = {tbl}.connection_id
             )
         """))
+
+    # PLM sub-tables without connection_id — derive from parent
+    op.add_column("plm_change_impact_tasks",
+                  sa.Column("factory_id", postgresql.UUID(as_uuid=True), nullable=True))
+    op.create_foreign_key("fk_plm_change_impact_tasks_factory_id",
+                          "plm_change_impact_tasks", "factories",
+                          ["factory_id"], ["id"])
+    op.execute(sa.text("""
+        UPDATE plm_change_impact_tasks SET factory_id = (
+            SELECT factory_id FROM plm_change_orders
+            WHERE plm_change_orders.change_id = plm_change_impact_tasks.change_id
+        )
+    """))
+
+    op.add_column("plm_part_fmea_links",
+                  sa.Column("factory_id", postgresql.UUID(as_uuid=True), nullable=True))
+    op.create_foreign_key("fk_plm_part_fmea_links_factory_id",
+                          "plm_part_fmea_links", "factories",
+                          ["factory_id"], ["id"])
+    op.execute(sa.text("""
+        UPDATE plm_part_fmea_links SET factory_id = (
+            SELECT factory_id FROM plm_parts
+            WHERE plm_parts.part_id = plm_part_fmea_links.part_id
+        )
+    """))
+
+    op.add_column("plm_part_sc_links",
+                  sa.Column("factory_id", postgresql.UUID(as_uuid=True), nullable=True))
+    op.create_foreign_key("fk_plm_part_sc_links_factory_id",
+                          "plm_part_sc_links", "factories",
+                          ["factory_id"], ["id"])
+    op.execute(sa.text("""
+        UPDATE plm_part_sc_links SET factory_id = (
+            SELECT factory_id FROM plm_parts
+            WHERE plm_parts.part_id = plm_part_sc_links.part_id
+        )
+    """))
 
     # ── ERP connection + sub-tables ────────────────────────────────────
 
