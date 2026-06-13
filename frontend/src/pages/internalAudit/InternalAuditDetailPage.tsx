@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Card,
   Button,
-  Tag,
   Space,
   Form,
   Input,
@@ -46,30 +45,41 @@ import {
   createCAPAFromFinding,
 } from "../../api/audit";
 import { listUsers } from "../../api/auth";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 import dayjs from "dayjs";
 
 const { Option } = Select;
 const { TextArea } = Input;
-const { Title, Text } = Typography;
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  planned: { label: "待执行", color: "blue" },
-  in_progress: { label: "进行中", color: "processing" },
-  completed: { label: "已完成", color: "success" },
-  cancelled: { label: "已取消", color: "default" },
+const { Text } = Typography;
+
+const STATUS_MAP: Record<string, { label: string }> = {
+  planned: { label: "待执行" },
+  in_progress: { label: "进行中" },
+  completed: { label: "已完成" },
+  cancelled: { label: "已取消" },
 };
 
-const FINDING_TYPE_MAP: Record<string, { label: string; color: string }> = {
-  major_nc: { label: "严重不符合", color: "red" },
-  minor_nc: { label: "一般不符合", color: "orange" },
-  ofi: { label: "改进机会", color: "blue" },
-  observation: { label: "观察项", color: "default" },
+const statusVariant = (s: string): string => {
+  if (s === "completed") return "success";
+  if (s === "in_progress") return "warning";
+  if (s === "cancelled") return "info";
+  return "info";
 };
 
-const FINDING_STATUS_MAP: Record<string, { label: string; color: string }> = {
-  open: { label: "开放", color: "red" },
-  in_progress: { label: "处理中", color: "processing" },
-  verified: { label: "已验证", color: "blue" },
-  closed: { label: "已关闭", color: "success" },
+const FINDING_TYPE_MAP: Record<string, { label: string; variant: string }> = {
+  major_nc: { label: "严重不符合", variant: "error" },
+  minor_nc: { label: "一般不符合", variant: "warning" },
+  ofi: { label: "改进机会", variant: "info" },
+  observation: { label: "观察项", variant: "info" },
+};
+
+const FINDING_STATUS_MAP: Record<string, { label: string; variant: string }> = {
+  open: { label: "开放", variant: "error" },
+  in_progress: { label: "处理中", variant: "warning" },
+  verified: { label: "已验证", variant: "info" },
+  closed: { label: "已关闭", variant: "success" },
 };
 
 const RESULT_OPTIONS = [
@@ -347,34 +357,32 @@ export default function InternalAuditDetailPage() {
   const openCount = findings.filter((f) => f.status !== "closed").length;
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/internal-audits")}>
-          返回列表
-        </Button>
-        <Title level={4} style={{ margin: 0 }}>
+    <PageShell
+      title={
+        <Space size={12}>
           {plan.audit_id.slice(0, 8).toUpperCase()}
-        </Title>
-        <Tag color={STATUS_MAP[plan.status]?.color}>{STATUS_MAP[plan.status]?.label}</Tag>
-        {plan.status === "planned" && canEdit('audit') && (
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>
-            开始
-          </Button>
-        )}
-        {plan.status === "in_progress" && canEdit('audit') && (
-          <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleComplete}>
-            完成
-          </Button>
-        )}
-        {plan.status === "planned" && canEdit('audit') && (
-          <Popconfirm title="确认取消？" onConfirm={handleCancel}>
-            <Button danger icon={<StopOutlined />}>取消</Button>
-          </Popconfirm>
-        )}
-      </Space>
-
-      <Card
-        title="基本信息"
+          <StatusBadge status={statusVariant(plan.status)}>{STATUS_MAP[plan.status]?.label}</StatusBadge>
+        </Space>
+      }
+      subtitle="内部审核计划详情"
+      actions={
+        <Space wrap>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/internal-audits")}>返回列表</Button>
+          {plan.status === "planned" && canEdit('audit') && (
+            <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>开始</Button>
+          )}
+          {plan.status === "in_progress" && canEdit('audit') && (
+            <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleComplete}>完成</Button>
+          )}
+          {plan.status === "planned" && canEdit('audit') && (
+            <Popconfirm title="确认取消？" onConfirm={handleCancel}>
+              <Button danger icon={<StopOutlined />}>取消</Button>
+            </Popconfirm>
+          )}
+        </Space>
+      }
+    >
+      <DataCard title="基本信息"
         extra={
           canEdit('audit') && (
             <Button
@@ -399,7 +407,7 @@ export default function InternalAuditDetailPage() {
             </Button>
           )
         }
-        style={{ marginBottom: 24 }}
+      style={{ marginBottom: 24 }}
       >
         {infoEditing ? (
           <Form form={infoForm} layout="vertical" onFinish={handleUpdateInfo}>
@@ -482,11 +490,12 @@ export default function InternalAuditDetailPage() {
             </Col>
           </Row>
         )}
-      </Card>
+      </DataCard>
 
-      <Tabs
-        defaultActiveKey="checklist"
-        items={[
+      <DataCard title="审核详情" noPadding>
+        <Tabs
+          defaultActiveKey="checklist"
+          items={[
           {
             key: "checklist",
             label: "检查表",
@@ -501,6 +510,7 @@ export default function InternalAuditDetailPage() {
                 }
               >
                 <Table
+                  className="qf-table"
                   rowKey={(record, index) => `${record.item_no}-${index}`}
                   dataSource={plan.checklist}
                   pagination={false}
@@ -583,6 +593,7 @@ export default function InternalAuditDetailPage() {
                 }
               >
                 <Table
+                  className="qf-table"
                   rowKey="finding_id"
                   dataSource={findings}
                   loading={findingsLoading}
@@ -596,7 +607,7 @@ export default function InternalAuditDetailPage() {
                       width: 100,
                       render: (type: string) => {
                         const cfg = FINDING_TYPE_MAP[type];
-                        return <Tag color={cfg?.color}>{cfg?.label}</Tag>;
+                        return <StatusBadge status={cfg?.variant || "info"}>{cfg?.label}</StatusBadge>;
                       },
                     },
                     { title: "描述", dataIndex: "description", ellipsis: true },
@@ -606,7 +617,7 @@ export default function InternalAuditDetailPage() {
                       width: 90,
                       render: (status: string) => {
                         const cfg = FINDING_STATUS_MAP[status];
-                        return <Tag color={cfg?.color}>{cfg?.label}</Tag>;
+                        return <StatusBadge status={cfg?.variant || "info"}>{cfg?.label}</StatusBadge>;
                       },
                     },
                     { title: "截止日期", dataIndex: "due_date", width: 110, render: (v: string | null) => v || "—" },
@@ -625,7 +636,7 @@ export default function InternalAuditDetailPage() {
                             查看CAPA
                           </Button>
                         ) : (
-                          <Tag>未关联</Tag>
+                          <StatusBadge status="info">未关联</StatusBadge>
                         ),
                     },
                     {
@@ -705,7 +716,7 @@ export default function InternalAuditDetailPage() {
                           {findings.map((f) => (
                             <div key={f.finding_id} style={{ padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>
                               <Space>
-                                <Tag color={FINDING_TYPE_MAP[f.finding_type]?.color}>{FINDING_TYPE_MAP[f.finding_type]?.label}</Tag>
+                                <StatusBadge status={FINDING_TYPE_MAP[f.finding_type]?.variant || "info"}>{FINDING_TYPE_MAP[f.finding_type]?.label}</StatusBadge>
                                 <Text strong>{f.clause_ref || "—"}</Text>
                               </Space>
                               <div style={{ marginTop: 4 }}>{f.description}</div>
@@ -726,6 +737,7 @@ export default function InternalAuditDetailPage() {
           },
         ]}
       />
+      </DataCard>
 
       <Modal
         title="添加发现项"
@@ -774,6 +786,6 @@ export default function InternalAuditDetailPage() {
           }
         }
       `}</style>
-    </div>
+    </PageShell>
   );
 }
