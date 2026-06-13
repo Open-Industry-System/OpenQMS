@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Table, Button, Tag, Typography, Space, Select, Popconfirm, App, Switch,
+  Table, Button, Space, Select, Popconfirm, App, Switch,
 } from "antd";
 import {
   PlusOutlined, FileTextOutlined, DeleteOutlined, TableOutlined,
@@ -13,13 +13,16 @@ import {
 import type { SpecialCharacteristic } from "../../../types";
 import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
-const { Title } = Typography;
-
-const msaStatusColors: Record<string, string> = {
-  PASS: "green",
-  FAIL: "red",
-  PENDING: "orange",
+const scTypeVariant = (t: string): string => (t === "CC" ? "error" : "warning");
+const sourceTypeVariant = (t: string): string => (t === "DFMEA" ? "info" : "success");
+const msaStatusVariant = (s: string): string => {
+  if (s === "PASS") return "success";
+  if (s === "FAIL") return "error";
+  return "warning";
 };
 
 export default function SCListPage() {
@@ -113,7 +116,7 @@ export default function SCListPage() {
       width: 100,
       render: (t: string, record: SpecialCharacteristic) => (
         <Space>
-          <Tag color={t === "CC" ? "red" : "gold"}>{t}</Tag>
+          <StatusBadge status={scTypeVariant(t)}>{t}</StatusBadge>
           {record.is_safety_related && (
             <SafetyCertificateOutlined style={{ color: "#ff4d4f", fontSize: 16 }} />
           )}
@@ -143,7 +146,7 @@ export default function SCListPage() {
       key: "source_type",
       width: 100,
       render: (t: string) => (
-        <Tag color={t === "DFMEA" ? "blue" : "green"}>{t}</Tag>
+        <StatusBadge status={sourceTypeVariant(t)}>{t}</StatusBadge>
       ),
     },
     {
@@ -170,7 +173,7 @@ export default function SCListPage() {
       key: "msa_status",
       width: 100,
       render: (s: string) => (
-        <Tag color={msaStatusColors[s] || "default"}>{s}</Tag>
+        <StatusBadge status={msaStatusVariant(s)}>{s}</StatusBadge>
       ),
     },
     {
@@ -212,20 +215,22 @@ export default function SCListPage() {
   ];
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
-        <Space>
-          <Title level={4} style={{ margin: 0 }}>
-            <TableOutlined style={{ marginRight: 8 }} />
-            特殊特性清单
-          </Title>
+    <PageShell
+      title={<>
+        <TableOutlined style={{ marginRight: 8 }} />
+        特殊特性清单
+      </>}
+      subtitle="CC/SC 与安全特性管理"
+      actions={
+        canEdit('special_characteristic') && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/special-characteristics/new")}>
+            新建特殊特性
+          </Button>
+        )
+      }
+    >
+      <DataCard title="特性清单">
+        <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder="类型筛选"
             allowClear
@@ -280,18 +285,13 @@ export default function SCListPage() {
             unCheckedChildren="全部"
           />
         </Space>
-        {canEdit('special_characteristic') && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/special-characteristics/new")}>
-            新建特殊特性
-          </Button>
-        )}
-      </div>
 
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="sc_id"
-        loading={loading}
+        <Table
+          className="qf-table"
+          columns={columns}
+          dataSource={data}
+          rowKey="sc_id"
+          loading={loading}
         pagination={{
           current: page,
           total,
@@ -302,6 +302,7 @@ export default function SCListPage() {
           },
         }}
       />
-    </div>
+      </DataCard>
+    </PageShell>
   );
 }

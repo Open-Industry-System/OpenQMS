@@ -1,23 +1,33 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Table, Button, Tag, Typography, Modal, Form, Input, Select, DatePicker, App } from "antd";
+import { Table, Button, Modal, Form, Input, Select, DatePicker, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { listCAPAs, createCAPA } from "../../api/capa";
 import type { CAPAReport } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 import dayjs from "dayjs";
-
-const { Title } = Typography;
-
-const severityColors: Record<string, string> = {
-  "致命": "red", "严重": "orange", "一般": "blue", "轻微": "default",
-};
 
 const statusLabels: Record<string, string> = {
   D1_TEAM: "D1 团队组建", D2_DESCRIPTION: "D2 问题描述",
   D3_INTERIM: "D3 临时措施", D4_ROOT_CAUSE: "D4 根因分析",
   D5_CORRECTION: "D5 永久措施", D6_VERIFICATION: "D6 实施验证",
   D7_PREVENTION: "D7 预防复发", D8_CLOSURE: "D8 关闭", ARCHIVED: "已归档",
+};
+
+const statusVariant = (s: string): string => {
+  if (["D8_CLOSURE", "ARCHIVED"].includes(s)) return "success";
+  if (s === "OVERDUE") return "error";
+  return "warning";
+};
+
+const severityVariant = (s: string): string => {
+  if (s === "致命") return "error";
+  if (s === "严重") return "warning";
+  if (s === "轻微") return "info";
+  return "info";
 };
 
 export default function CAPAListPage() {
@@ -70,11 +80,11 @@ export default function CAPAListPage() {
     { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
     {
       title: "当前步骤", dataIndex: "status", key: "status", width: 140,
-      render: (s: string) => <Tag color="processing">{statusLabels[s] || s}</Tag>,
+      render: (s: string) => <StatusBadge status={statusVariant(s)}>{statusLabels[s] || s}</StatusBadge>,
     },
     {
       title: "严重等级", dataIndex: "severity", key: "severity", width: 90,
-      render: (s: string) => <Tag color={severityColors[s] || "default"}>{s}</Tag>,
+      render: (s: string) => <StatusBadge status={severityVariant(s)}>{s}</StatusBadge>,
     },
     { title: "期限", dataIndex: "due_date", key: "due_date", width: 110, render: (v: string | null) => v || "-" },
     {
@@ -92,14 +102,18 @@ export default function CAPAListPage() {
   ];
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>8D / CAPA</Title>
+    <PageShell
+      title="8D / CAPA"
+      subtitle="客诉与质量问题闭环追踪"
+      actions={
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>新建 8D</Button>
-      </div>
-      <Table columns={columns} dataSource={data} rowKey="report_id" loading={loading}
-        pagination={{ current: page, total, pageSize: 20, onChange: (p) => { setPage(p); fetchData(p); } }}
-      />
+      }
+    >
+      <DataCard title="8D 报告列表" noPadding>
+        <Table className="qf-table" columns={columns} dataSource={data} rowKey="report_id" loading={loading}
+          pagination={{ current: page, total, pageSize: 20, onChange: (p) => { setPage(p); fetchData(p); } }}
+        />
+      </DataCard>
       <Modal title="新建 8D 报告" open={modalOpen} onOk={() => form.submit()} onCancel={() => setModalOpen(false)}>
         <Form form={form} layout="vertical" onFinish={handleCreate}>
           <Form.Item name="document_no" label="报告编号" rules={[{ required: true }]}>
@@ -119,6 +133,6 @@ export default function CAPAListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

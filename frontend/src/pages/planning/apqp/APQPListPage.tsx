@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tag, Tabs, Button, Space, Modal, Form, Input, DatePicker, message, Card, Row, Col } from "antd";
+import { Table, Tabs, Button, Space, Modal, Form, Input, DatePicker, message, Card, Row, Col } from "antd";
 import { PlusOutlined, ProjectOutlined, ClockCircleOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 import { listAPQPProjects, createAPQPProject, getAPQPProjectStats } from "../../../api/apqp";
 import type { APQPProject, APQPListResponse, APQPProjectStats } from "../../../types";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
 const PROJECT_STATUS_TABS = [
   { key: "all", label: "全部" },
@@ -20,18 +23,22 @@ const PHASE_NAMES: Record<number, string> = {
   5: "量产启动与反馈",
 };
 
-const PHASE_COLORS: Record<number, string> = {
-  1: "blue",
-  2: "cyan",
-  3: "geekblue",
-  4: "purple",
-  5: "green",
-};
-
 const PROJECT_STATUS_LABELS: Record<string, string> = {
   active: "进行中",
   completed: "已完成",
   cancelled: "已取消",
+};
+
+const phaseVariant = (phase: number): string => (phase === 5 ? "success" : "info");
+const projectStatusVariant = (status: string): string => {
+  if (status === "completed") return "success";
+  if (status === "active") return "warning";
+  return "info";
+};
+const phaseStatusVariant = (status: string): string => {
+  if (status === "completed") return "success";
+  if (status === "pending_approval") return "warning";
+  return "info";
 };
 
 function KPICard({ title, value, icon, color }: { title: string; value: number; icon: React.ReactNode; color: string }) {
@@ -111,17 +118,16 @@ export default function APQPListPage() {
       title: "当前阶段",
       dataIndex: "current_phase",
       key: "current_phase",
-      render: (p: number) => <Tag color={PHASE_COLORS[p]}>{PHASE_NAMES[p]}</Tag>,
+      render: (p: number) => <StatusBadge status={phaseVariant(p)}>{PHASE_NAMES[p]}</StatusBadge>,
     },
     {
       title: "阶段状态",
       dataIndex: "phase_status",
       key: "phase_status",
       render: (s: string | null) => {
-        if (s === "pending_approval") return <Tag color="orange">待审批</Tag>;
-        if (s === "in_progress") return <Tag color="blue">进行中</Tag>;
-        if (s === "completed") return <Tag color="green">已完成</Tag>;
-        return s || "-";
+        if (!s) return "-";
+        const labels: Record<string, string> = { pending_approval: "待审批", in_progress: "进行中", completed: "已完成" };
+        return <StatusBadge status={phaseStatusVariant(s)}>{labels[s] || s}</StatusBadge>;
       },
     },
     {
@@ -138,10 +144,9 @@ export default function APQPListPage() {
       title: "项目状态",
       dataIndex: "project_status",
       key: "project_status",
-      render: (s: string) => {
-        const colors: Record<string, string> = { active: "processing", completed: "success", cancelled: "default" };
-        return <Tag color={colors[s]}>{PROJECT_STATUS_LABELS[s] || s}</Tag>;
-      },
+      render: (s: string) => (
+        <StatusBadge status={projectStatusVariant(s)}>{PROJECT_STATUS_LABELS[s] || s}</StatusBadge>
+      ),
     },
     {
       title: "操作",
@@ -153,7 +158,15 @@ export default function APQPListPage() {
   ];
 
   return (
-    <div>
+    <PageShell
+      title="APQP 项目管理"
+      subtitle="产品质量先期策划全阶段跟踪"
+      actions={
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+          新建项目
+        </Button>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={4}><KPICard title="进行中" value={stats?.active_count ?? 0} icon={<ProjectOutlined />} color="#1677ff" /></Col>
         <Col span={4}><KPICard title="待审批" value={stats?.pending_approval_count ?? 0} icon={<ClockCircleOutlined />} color="#fa8c16" /></Col>
@@ -161,18 +174,14 @@ export default function APQPListPage() {
         <Col span={4}><KPICard title="逾期" value={stats?.overdue_count ?? 0} icon={<ExclamationCircleOutlined />} color="#ff4d4f" /></Col>
       </Row>
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Tabs activeKey={activeTab} onChange={(k) => { setActiveTab(k); setPage(1); }} items={PROJECT_STATUS_TABS} />
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          新建项目
-        </Button>
-      </div>
-
-      <Table
-        dataSource={data?.items || []}
-        columns={columns}
-        rowKey="project_id"
-        loading={loading}
+      <DataCard title="项目列表">
+        <Tabs activeKey={activeTab} onChange={(k) => { setActiveTab(k); setPage(1); }} items={PROJECT_STATUS_TABS} style={{ marginBottom: 16 }} />
+        <Table
+          className="qf-table"
+          dataSource={data?.items || []}
+          columns={columns}
+          rowKey="project_id"
+          loading={loading}
         pagination={{
           current: page,
           pageSize: 20,
@@ -180,6 +189,7 @@ export default function APQPListPage() {
           onChange: setPage,
         }}
       />
+      </DataCard>
 
       <Modal
         title="新建 APQP 项目"
@@ -227,6 +237,6 @@ export default function APQPListPage() {
           </Space>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

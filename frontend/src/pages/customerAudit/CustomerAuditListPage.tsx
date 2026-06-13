@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Card, Table, Button, Tag, Space, Modal, Form, Input, Select,
+  Card, Table, Button, Space, Modal, Form, Input, Select,
   DatePicker, App, Row, Col, Statistic,
 } from "antd";
 import { PlusOutlined, ReloadOutlined, EyeOutlined, PlayCircleOutlined, CheckCircleOutlined, StopOutlined } from "@ant-design/icons";
@@ -14,6 +14,9 @@ import {
   startAuditPlan, completeAuditPlan, cancelAuditPlan,
 } from "../../api/audit";
 import { listUsers } from "../../api/auth";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 import dayjs from "dayjs";
 
 const { Option } = Select;
@@ -21,8 +24,14 @@ const { Option } = Select;
 const statusLabel: Record<string, string> = {
   planned: "已计划", in_progress: "进行中", completed: "已完成", cancelled: "已取消",
 };
-const statusColor: Record<string, string> = {
-  planned: "blue", in_progress: "processing", completed: "success", cancelled: "default",
+
+const statusVariant = (status: string): string => {
+  switch (status) {
+    case "completed": return "success";
+    case "in_progress": return "warning";
+    case "cancelled": return "info";
+    default: return "info";
+  }
 };
 const customerTypeLabel: Record<string, string> = {
   OEM: "OEM", "Tier 1": "Tier 1", "Tier 2": "Tier 2", 其他: "其他",
@@ -112,7 +121,7 @@ export default function CustomerAuditListPage() {
     { title: "计划日期", dataIndex: "planned_date", key: "planned_date", width: 110,
       render: (v: string) => v ? dayjs(v).format("YYYY-MM-DD") : "-" },
     { title: "状态", dataIndex: "status", key: "status", width: 90,
-      render: (v: string) => <Tag color={statusColor[v]}>{statusLabel[v]}</Tag> },
+      render: (v: string) => <StatusBadge status={statusVariant(v)}>{statusLabel[v] || v}</StatusBadge> },
     {
       title: "操作", key: "actions", width: 180,
       render: (_: unknown, record: AuditPlan) => (
@@ -133,7 +142,18 @@ export default function CustomerAuditListPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
+    <PageShell
+      title="客户审核管理"
+      subtitle="客户审核计划与发现项跟踪"
+      actions={
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
+          {canEdit('customer_audit') && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建客户审核</Button>
+          )}
+        </Space>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={3}><Card><Statistic title="总计" value={stats?.total_customer_audits ?? 0} /></Card></Col>
         <Col span={3}><Card><Statistic title="已计划" value={stats?.planned ?? 0} valueStyle={{ color: "#1890ff" }} /></Card></Col>
@@ -145,18 +165,9 @@ export default function CustomerAuditListPage() {
         <Col span={3}><Card><Statistic title="待确认" value={stats?.pending_confirmation_count ?? 0} valueStyle={{ color: "#faad14" }} /></Card></Col>
       </Row>
 
-      <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-          <h3 style={{ margin: 0 }}>客户审核管理</h3>
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
-            {canEdit('customer_audit') && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建客户审核</Button>
-            )}
-          </Space>
-        </div>
-
+      <DataCard title="客户审核计划">
         <Table
+          className="qf-table"
           rowKey="audit_id"
           columns={columns}
           dataSource={audits}
@@ -169,7 +180,7 @@ export default function CustomerAuditListPage() {
             showTotal: (t) => `共 ${t} 条`,
           }}
         />
-      </Card>
+      </DataCard>
 
       <Modal
         title="新建客户审核"
@@ -214,6 +225,6 @@ export default function CustomerAuditListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

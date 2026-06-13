@@ -3,7 +3,6 @@ import {
   Card,
   Table,
   Button,
-  Tag,
   Space,
   Modal,
   Form,
@@ -47,10 +46,22 @@ import {
   updateAuditorInfo,
 } from "../../api/audit";
 import { listUsers } from "../../api/auth";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 
 const { Option } = Select;
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
+
+const statusVariant = (status: string): string => {
+  switch (status) {
+    case "completed": return "success";
+    case "in_progress": return "warning";
+    case "cancelled": return "info";
+    default: return "info";
+  }
+};
 
 const TYPE_MAP: Record<string, string> = {
   system: "体系",
@@ -307,7 +318,7 @@ export default function InternalAuditListPage() {
       width: 100,
       render: (status: string) => {
         const cfg = STATUS_MAP[status];
-        return <Tag color={cfg?.color}>{cfg?.label}</Tag>;
+        return <StatusBadge status={statusVariant(status)}>{cfg?.label}</StatusBadge>;
       },
     },
     {
@@ -351,7 +362,30 @@ export default function InternalAuditListPage() {
   ];
 
   return (
-    <div>
+    <PageShell
+      title="内部审核管理"
+      subtitle="年度审核计划与执行跟踪"
+      actions={
+        <Space>
+          {canEdit('audit') && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setProgramModalOpen(true)}>
+              新建方案
+            </Button>
+          )}
+          {canEdit('audit') && (
+            <Button icon={<PlusOutlined />} onClick={() => setPlanModalOpen(true)}>
+              新建计划
+            </Button>
+          )}
+          <Button icon={<TeamOutlined />} onClick={() => setAuditorDrawerOpen(true)}>
+            审核员管理
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
+            刷新
+          </Button>
+        </Space>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
           <Card>
@@ -375,29 +409,7 @@ export default function InternalAuditListPage() {
         </Col>
       </Row>
 
-      <Card
-        title="内部审核管理"
-        extra={
-          <Space>
-            {canEdit('audit') && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setProgramModalOpen(true)}>
-                新建方案
-              </Button>
-            )}
-            {canEdit('audit') && (
-              <Button icon={<PlusOutlined />} onClick={() => setPlanModalOpen(true)}>
-                新建计划
-              </Button>
-            )}
-            <Button icon={<TeamOutlined />} onClick={() => setAuditorDrawerOpen(true)}>
-              审核员管理
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              刷新
-            </Button>
-          </Space>
-        }
-      >
+      <DataCard title="审核计划">
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder="选择年份"
@@ -445,6 +457,7 @@ export default function InternalAuditListPage() {
         />
 
         <Table
+          className="qf-table"
           rowKey="audit_id"
           columns={columns}
           dataSource={plans}
@@ -459,7 +472,7 @@ export default function InternalAuditListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Modal
         title="新建方案"
@@ -603,6 +616,6 @@ export default function InternalAuditListPage() {
           ]}
         />
       </Drawer>
-    </div>
+    </PageShell>
   );
 }

@@ -15,7 +15,6 @@ import {
   Switch,
   Table,
   Tabs,
-  Tag,
   Typography,
 } from "antd";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
@@ -41,11 +40,38 @@ import type { Supplier } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 
 const { Title, Text } = Typography;
 
-const riskColor: Record<string, string> = { red: "red", yellow: "gold", green: "green" };
-const severityColor: Record<string, string> = { "致命": "red", "严重": "orange", "一般": "blue", "轻微": "default" };
+const severityVariant = (s: string): string => {
+  if (s === "致命") return "error";
+  if (s === "严重") return "warning";
+  if (s === "轻微") return "info";
+  return "info";
+};
+
+const complaintStatusVariant = (s: string): string => {
+  if (s === "closed") return "success";
+  if (["open", "investigating"].includes(s)) return "warning";
+  if (s === "responded") return "info";
+  return "info";
+};
+
+const rmaStatusVariant = (s: string): string => {
+  if (s === "closed") return "success";
+  if (["open", "analysis", "action_pending"].includes(s)) return "warning";
+  return "info";
+};
+
+const riskVariant = (light: string): string => {
+  if (light === "red") return "error";
+  if (light === "yellow") return "warning";
+  return "success";
+};
+
 const complaintStatusLabel: Record<string, string> = {
   open: "已接收",
   investigating: "调查中",
@@ -360,7 +386,8 @@ export default function CustomerQualityPage() {
       width: 70,
       render: (id: string) => {
         const summary = dashboard?.customers.find((item) => item.customer_id === id);
-        return <Tag color={riskColor[summary?.risk_light || "green"]}>{summary?.risk_light || "green"}</Tag>;
+        const light = summary?.risk_light || "green";
+        return <StatusBadge status={riskVariant(light)}>{light}</StatusBadge>;
       },
     },
     { title: "客户编号", dataIndex: "customer_code", width: 110 },
@@ -373,14 +400,14 @@ export default function CustomerQualityPage() {
       title: "严重度",
       dataIndex: "severity",
       width: 90,
-      render: (value: string) => <Tag color={severityColor[value]}>{value}</Tag>,
+      render: (value: string) => <StatusBadge status={severityVariant(value)}>{value}</StatusBadge>,
     },
     { title: "批次", dataIndex: "batch_no", width: 130, render: (value: string | null) => value || "-" },
     {
       title: "状态",
       dataIndex: "status",
       width: 100,
-      render: (value: string) => <Tag>{complaintStatusLabel[value] || value}</Tag>,
+      render: (value: string) => <StatusBadge status={complaintStatusVariant(value)}>{complaintStatusLabel[value] || value}</StatusBadge>,
     },
     { title: "期限", dataIndex: "due_date", width: 110, render: (value: string | null) => value || "-" },
     { title: "描述", dataIndex: "defect_desc", ellipsis: true },
@@ -409,7 +436,7 @@ export default function CustomerQualityPage() {
       title: "状态",
       dataIndex: "status",
       width: 100,
-      render: (value: string) => <Tag>{rmaStatusLabel[value] || value}</Tag>,
+      render: (value: string) => <StatusBadge status={rmaStatusVariant(value)}>{rmaStatusLabel[value] || value}</StatusBadge>,
     },
     { title: "责任", dataIndex: "responsibility", width: 120, render: (value: string | null) => value || "-" },
     { title: "不良类型", dataIndex: "defect_type", ellipsis: true },
@@ -431,17 +458,18 @@ export default function CustomerQualityPage() {
   ];
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>客户质量</Title>
+    <PageShell
+      title="客户质量"
+      subtitle="客诉、RMA 与客户档案"
+      actions={
         <Space>
           <Text>我的待办</Text>
           <Switch checked={mineOnly} onChange={setMineOnly} />
           <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
           {canEdit('customer_quality') && <Button icon={<PlusOutlined />} onClick={() => setCustomerModalOpen(true)}>新建客户</Button>}
         </Space>
-      </div>
-
+      }
+    >
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 12, marginBottom: 16 }}>
         <Card><Statistic title="客户数" value={customers.length} /></Card>
         <Card><Statistic title="开放客诉" value={dashboard?.kpi.open_complaint_count || 0} /></Card>
@@ -483,20 +511,22 @@ export default function CustomerQualityPage() {
         </Card>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 16 }}>
-        <Card styles={{ body: { padding: 0 } }}>
-          <Table
-            columns={customerColumns}
-            dataSource={customers}
-            rowKey="customer_id"
-            loading={loading}
-            pagination={false}
-            size="small"
-            rowClassName={(record) => record.customer_id === selectedCustomerId ? "ant-table-row-selected" : ""}
-            onRow={(record) => ({ onClick: () => setSelectedCustomerId(record.customer_id) })}
-          />
-        </Card>
-        <Card>
+      <DataCard title="客户质量工作台">
+        <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 16 }}>
+          <Card styles={{ body: { padding: 0 } }}>
+            <Table
+              className="qf-table"
+              columns={customerColumns}
+              dataSource={customers}
+              rowKey="customer_id"
+              loading={loading}
+              pagination={false}
+              size="small"
+              rowClassName={(record) => record.customer_id === selectedCustomerId ? "ant-table-row-selected" : ""}
+              onRow={(record) => ({ onClick: () => setSelectedCustomerId(record.customer_id) })}
+            />
+          </Card>
+          <Card>
           <Tabs
             items={[
               {
@@ -521,7 +551,7 @@ export default function CustomerQualityPage() {
                     <div style={{ textAlign: "right", marginBottom: 12 }}>
                       {canEdit('customer_quality') && <Button type="primary" icon={<PlusOutlined />} onClick={() => setComplaintModalOpen(true)}>新建客诉</Button>}
                     </div>
-                    <Table columns={complaintColumns} dataSource={complaints} rowKey="complaint_id" loading={loading} />
+                    <Table className="qf-table" columns={complaintColumns} dataSource={complaints} rowKey="complaint_id" loading={loading} />
                   </>
                 ),
               },
@@ -533,7 +563,7 @@ export default function CustomerQualityPage() {
                     <div style={{ textAlign: "right", marginBottom: 12 }}>
                       {canEdit('customer_quality') && <Button type="primary" icon={<PlusOutlined />} onClick={() => setRmaModalOpen(true)}>新建 RMA</Button>}
                     </div>
-                    <Table columns={rmaColumns} dataSource={rmas} rowKey="rma_id" loading={loading} />
+                    <Table className="qf-table" columns={rmaColumns} dataSource={rmas} rowKey="rma_id" loading={loading} />
                   </>
                 ),
               },
@@ -557,6 +587,7 @@ export default function CustomerQualityPage() {
                       )}
                     </div>
                     <Table
+                      className="qf-table"
                       dataSource={shipments}
                       rowKey="shipment_id"
                       loading={shipmentLoading}
@@ -581,6 +612,7 @@ export default function CustomerQualityPage() {
           />
         </Card>
       </div>
+      </DataCard>
 
       <Modal title="新建客户" open={customerModalOpen} onOk={() => customerForm.submit()} onCancel={() => setCustomerModalOpen(false)}>
         <Form form={customerForm} layout="vertical" onFinish={handleCreateCustomer}>
@@ -680,6 +712,6 @@ export default function CustomerQualityPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }
