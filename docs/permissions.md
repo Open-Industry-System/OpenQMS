@@ -1,200 +1,195 @@
-# OpenQMS 权限管理参考表
+# OpenQMS 权限参考
 
-> 最后更新: 2026-05-20 | 基于当前代码审计生成
-
----
-
-## 一、角色定义
-
-| 角色 | 常量名（建议） | 权限级别 | 说明 |
-|------|--------------|:--------:|------|
-| `admin` | `ROLE_ADMIN` | L4 完全控制 | 用户注册、FMEA 审批、CAPA 关闭/归档，所有 CRUD |
-| `manager` | `ROLE_MANAGER` | L3 审批级 | FMEA 审批、CAPA 关闭/归档，所有 CRUD（与 engineer 相同） |
-| `quality_engineer` | `ROLE_ENGINEER` | L2 编辑级 | FMEA/CAPA 创建、编辑、非审批流转 |
-| `viewer` | `ROLE_VIEWER` | L1 只读 | 查看所有数据，不可创建/编辑/流转 |
-
-**优先级**: L1 < L2 < L3 < L4（高级角色自动继承低级权限的判断逻辑）
+> 最后更新: 2026-06-13 | 基于代码库权限模型（ModuleKey × PermissionLevel × Role）
 
 ---
 
-## 二、操作权限矩阵
+## 一、权限模型
 
-### 2.1 FMEA 模块
+OpenQMS 使用**角色 + 模块权限等级 + 工厂/产品线范围**三级权限模型：
 
-| 操作 | viewer | quality_engineer | manager | admin |
-|------|:------:|:----------------:|:-------:|:-----:|
-| 查看 FMEA 列表 | ✅ | ✅ | ✅ | ✅ |
-| 查看 FMEA 详情 | ✅ | ✅ | ✅ | ✅ |
-| 查看 FMEA 图数据 | ✅ | ✅ | ✅ | ✅ |
-| 创建 FMEA | ❌ | ✅ | ✅ | ✅ |
-| 编辑 FMEA（字段/表格） | ❌ | ✅ | ✅ | ✅ |
-| 删除 FMEA 行 | ❌ | ✅ | ✅ | ✅ |
-| 流转 FMEA 状态（非审批） | ❌ | ✅ | ✅ | ✅ |
-| 审批 FMEA（→ approved） | ❌ | ❌ | ✅ | ✅ |
+```
+用户 (User)
+  └→ 角色 (RoleDefinition) — 7 个预设角色
+       └→ 角色权限 (RolePermission) — module × permission_level
+  └→ 工厂范围 (UserFactory) — 可访问的工厂列表
+  └→ 产品线范围 (UserProductLine) — 可访问的产品线列表
+```
 
-### 2.2 CAPA (8D) 模块
+### 1.1 PermissionLevel 枚举
 
-| 操作 | viewer | quality_engineer | manager | admin |
-|------|:------:|:----------------:|:-------:|:-----:|
-| 查看 CAPA 列表 | ✅ | ✅ | ✅ | ✅ |
-| 查看 CAPA 详情 | ✅ | ✅ | ✅ | ✅ |
-| 创建 CAPA | ❌ | ✅ | ✅ | ✅ |
-| 编辑 CAPA 各步骤内容 | ❌ | ✅ | ✅ | ✅ |
-| 添加/删除团队成员 | ❌ | ✅ | ✅ | ✅ |
-| 关联 FMEA 文档 | ❌ | ✅ | ✅ | ✅ |
-| 推进 D1-D6 步骤 | ❌ | ✅ | ✅ | ✅ |
-| 推进 D7/D8（关闭步骤） | ❌ | ❌ | ✅ | ✅ |
+| 值 | 常量 | 含义 |
+|:--:|------|------|
+| 0 | NONE | 无权限，模块菜单隐藏 |
+| 1 | VIEW | 只读 |
+| 2 | CREATE | 可创建新记录 |
+| 3 | EDIT | 可编辑已有记录 |
+| 4 | APPROVE | 可审批/关闭/归档 |
+| 5 | ADMIN | 完全控制 |
 
-### 2.3 Dashboard 模块
+### 1.2 ModuleKey 列表
 
-| 操作 | viewer | quality_engineer | manager | admin |
-|------|:------:|:----------------:|:-------:|:-----:|
-| 查看仪表盘 | ✅ | ✅ | ✅ | ✅ |
-| 查看 KPI | ✅ | ✅ | ✅ | ✅ |
-| 查看趋势 | ✅ | ✅ | ✅ | ✅ |
-| 查看告警 | ✅ | ✅ | ✅ | ✅ |
+后端 `Module` 枚举与前端 `ModuleKey` 类型一一对应：
 
-### 2.4 Auth / 用户管理
+| ModuleKey | 说明 |
+|-----------|------|
+| fmea | FMEA 管理 |
+| capa | 8D/CAPA |
+| planning | 控制计划/APQP |
+| ppap | PPAP |
+| iqc | 来料检验 |
+| supplier | 供应商管理 |
+| supplier_risk | 供应商风险 |
+| supply_chain_risk_map | 供应链风险地图 |
+| customer_quality | 客诉/RMA |
+| customer_audit | 客户审核 |
+| scar | SCAR |
+| spc | 统计过程控制 |
+| msa | 测量系统分析 |
+| special_characteristic | 特殊特性 |
+| quality_goal | 质量目标 |
+| audit | 内部审核 |
+| management_review | 管理评审 |
+| dashboard | 仪表盘 |
+| user_mgmt | 用户管理 |
+| permission_mgmt | 权限管理 |
+| knowledge_graph | 知识图谱 |
+| mes | MES 集成 |
+| plm | PLM 集成 |
+| erp | ERP 集成 |
+| group | 集团管理 |
 
-| 操作 | viewer | quality_engineer | manager | admin |
-|------|:------:|:----------------:|:-------:|:-----:|
-| 登录 | ✅ | ✅ | ✅ | ✅ |
-| 查看自己信息 | ✅ | ✅ | ✅ | ✅ |
-| 注册新用户 | ❌ | ❌ | ❌ | ✅ |
+### 1.3 角色定义
 
----
+| 角色 | role_key | 说明 | 系统角色 | 可编辑 |
+|------|----------|------|:--------:|:------:|
+| 系统管理员 | admin | 完全控制 | ✓ | ✗ |
+| 质量经理 | manager | 审批权限 | ✓ | ✓ |
+| 只读用户 | viewer | 仅查看 | ✓ | ✗ |
+| 客户质量工程师 | customer_qe | 客诉/审核编辑 | ✓ | ✓ |
+| 供应商质量工程师 | supplier_qe | 供应商/IQC 编辑 | ✓ | ✓ |
+| 现场质量工程师 | field_qe | FMEA/SPC 编辑 | ✓ | ✓ |
+| 前期策划质量工程师 | planning_qe | FMEA/PPAP 编辑 | ✓ | ✓ |
 
-## 三、API 端点权限表
-
-### 3.1 公开端点（无需认证）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/health` | 健康检查 |
-| `POST` | `/api/auth/login` | 用户登录 |
-
-### 3.2 需认证（任意角色）
-
-| 方法 | 路径 | 依赖函数 |
-|------|------|---------|
-| `GET` | `/api/auth/me` | `get_current_user` |
-| `GET` | `/api/fmea` | `get_current_user` |
-| `GET` | `/api/fmea/{id}` | `get_current_user` |
-| `GET` | `/api/fmea/{id}/graph` | `get_current_user` |
-| `GET` | `/api/capa` | `get_current_user` |
-| `GET` | `/api/capa/{id}` | `get_current_user` |
-| `GET` | `/api/dashboard` | `get_current_user` |
-| `GET` | `/api/dashboard/kpi` | `get_current_user` |
-| `GET` | `/api/dashboard/trends` | `get_current_user` |
-| `GET` | `/api/dashboard/alerts` | `get_current_user` |
-
-### 3.3 需编辑权限（admin / manager / quality_engineer）
-
-| 方法 | 路径 | 依赖函数 | 额外行内检查 |
-|------|------|---------|-------------|
-| `POST` | `/api/fmea` | `require_engineer_or_admin` | — |
-| `PUT` | `/api/fmea/{id}` | `require_engineer_or_admin` | — |
-| `POST` | `/api/fmea/{id}/transition` | `require_engineer_or_admin` | 若目标为 `approved`，限定 admin/manager |
-| `POST` | `/api/capa` | `require_engineer_or_admin` | — |
-| `PUT` | `/api/capa/{id}` | `require_engineer_or_admin` | — |
-| `POST` | `/api/capa/{id}/advance` | `require_engineer_or_admin` | 若当前为 D7/D8，限定 admin/manager |
-| `POST` | `/api/capa/{id}/link-fmea` | `require_engineer_or_admin` | — |
-
-### 3.4 仅 admin
-
-| 方法 | 路径 | 依赖函数 |
-|------|------|---------|
-| `POST` | `/api/auth/register` | `require_admin` |
+> `is_system=True` 的角色（admin、viewer）权限不建议修改。
 
 ---
 
-## 四、后端权限依赖函数速查
+## 二、默认权限矩阵
 
-| 函数 | 位置 | 允许的角色 | HTTP 失败 |
-|------|------|-----------|----------|
-| `get_current_user` | `app/core/deps.py` | 任意已认证活跃用户 | 401 |
-| `require_admin` | `app/core/deps.py` | `admin` | 403 |
-| `require_engineer_or_admin` | `app/core/deps.py` | `admin`, `manager`, `quality_engineer` | 403 |
-| `require_manager_or_admin` | `app/core/deps.py` | `admin`, `manager` | 403 |
+> 数据来源：`028_permission_matrix` 迁移 + `029`–`035` 迁移 + `seed.py`
 
-> ⚠️ `require_manager_or_admin` 已定义但**未被任何路由使用**，审批逻辑通过行内 `if user.role not in ["admin", "manager"]` 实现。
+| 模块 | admin | manager | field_qe | planning_qe | supplier_qe | customer_qe | viewer |
+|------|:-----:|:-------:|:--------:|:-----------:|:-----------:|:-----------:|:------:|
+| fmea | ADMIN | APPROVE | EDIT | EDIT | VIEW | VIEW | VIEW |
+| capa | ADMIN | APPROVE | EDIT | VIEW | EDIT | EDIT | VIEW |
+| planning | ADMIN | APPROVE | VIEW | EDIT | VIEW | VIEW | VIEW |
+| ppap | ADMIN | APPROVE | NONE | EDIT | EDIT | NONE | VIEW |
+| iqc | ADMIN | APPROVE | VIEW | VIEW | EDIT | NONE | VIEW |
+| supplier | ADMIN | APPROVE | VIEW | VIEW | EDIT | VIEW | VIEW |
+| supplier_risk | ADMIN | APPROVE | EDIT | VIEW | EDIT | VIEW | VIEW |
+| supply_chain_risk_map | ADMIN | ADMIN | EDIT | EDIT | EDIT | EDIT | VIEW |
+| customer_quality | ADMIN | APPROVE | VIEW | VIEW | NONE | EDIT | VIEW |
+| customer_audit | ADMIN | APPROVE | VIEW | VIEW | NONE | EDIT | VIEW |
+| scar | ADMIN | APPROVE | VIEW | VIEW | EDIT | VIEW | VIEW |
+| spc | ADMIN | APPROVE | EDIT | VIEW | VIEW | VIEW | VIEW |
+| msa | ADMIN | APPROVE | EDIT | NONE | NONE | NONE | VIEW |
+| special_characteristic | ADMIN | APPROVE | NONE | EDIT | NONE | NONE | VIEW |
+| quality_goal | ADMIN | APPROVE | NONE | NONE | NONE | NONE | VIEW |
+| audit | ADMIN | APPROVE | VIEW | VIEW | VIEW | VIEW | VIEW |
+| management_review | ADMIN | APPROVE | VIEW | VIEW | NONE | NONE | VIEW |
+| dashboard | ADMIN | APPROVE | VIEW | VIEW | VIEW | VIEW | VIEW |
+| user_mgmt | ADMIN | VIEW | NONE | NONE | NONE | NONE | NONE |
+| permission_mgmt | ADMIN | NONE | NONE | NONE | NONE | NONE | NONE |
+| knowledge_graph | VIEW | VIEW | — | — | — | — | — |
+| mes | ADMIN | APPROVE | CREATE | VIEW | VIEW | VIEW | VIEW |
+| plm | ADMIN | APPROVE | CREATE | VIEW | VIEW | VIEW | VIEW |
+| erp | ADMIN | APPROVE | CREATE | VIEW | VIEW | VIEW | VIEW |
+| group | ADMIN | EDIT | — | — | — | — | — |
+
+> `—` 表示该角色在种子数据中无此模块的权限行，实际 PermissionLevel 为 NONE (0)。
 
 ---
 
-## 五、前端权限执行点
+## 三、前端权限守卫
 
-### 5.1 路由守卫
-
-| 位置 | 检查内容 | 缺失 |
-|------|---------|------|
-| `App.tsx:ProtectedRoute` | token 是否存在 | 无角色检查，viewer 可导航到任意页面 |
-
-### 5.2 页面内角色控制
-
-| 页面 | 文件 | 控制变量 | 控制内容 |
-|------|------|---------|---------|
-| FMEAEditorPage | `pages/fmea/FMEAEditorPage.tsx:72-73` | `isViewer`, `isAdminOrManager` | viewer: 禁用所有输入框(21处)、隐藏保存/添加/删除按钮；admin/manager: 显示审批按钮 |
-| CAPADetailPage | `pages/capa/CAPADetailPage.tsx:40-41` | `isViewer`, `isAdminOrManager` | viewer: 禁用所有 TextArea、隐藏成员操作、阻止 save 调用；admin/manager: 显示 D7/D8 推进按钮 |
-| FMEAListPage | `pages/fmea/FMEAListPage.tsx` | **无** | "新建 FMEA"按钮始终可见 |
-| CAPAListPage | `pages/capa/CAPAListPage.tsx` | **无** | "新建 8D"按钮始终可见 |
-
----
-
-## 六、前端建议添加的角色 Hook
+### 3.1 路由守卫
 
 ```typescript
-// 建议在 hooks/usePermission.ts 中统一实现
-import { useAuthStore } from '@/store/authStore';
+// frontend/src/hooks/usePermission.ts
+const { canView, canCreate, canEdit, canApprove, canAdmin, isAdmin, roleKey } = usePermission();
+```
 
-export type Role = 'admin' | 'manager' | 'quality_engineer' | 'viewer';
+- `canView(module)` → `permissionLevel >= 1`
+- `canCreate(module)` → `permissionLevel >= 2`
+- `canEdit(module)` → `permissionLevel >= 3`
+- `canApprove(module)` → `permissionLevel >= 4`
+- `canAdmin(module)` → `permissionLevel >= 5`
+- `isAdmin` → `role_key === "admin"`
 
-const ROLE_HIERARCHY: Record<Role, number> = {
-  admin: 4,
-  manager: 3,
-  quality_engineer: 2,
-  viewer: 1,
-};
+### 3.2 未配置模块守卫的路由
 
-export function usePermission() {
-  const user = useAuthStore((s) => s.user);
-  const role = (user?.role as Role) || 'viewer';
-  const level = ROLE_HIERARCHY[role] ?? 0;
+以下路由使用 `ProtectedRoute`（仅要求登录），未设置 `requiredModule`：
 
-  return {
-    role,
-    isViewer:       level >= 1,
-    isEngineer:     level >= 2,
-    isManager:      level >= 3,
-    isAdmin:        level >= 4,
-    canEdit:        level >= 2,                       // L2+
-    canApprove:     level >= 3,                       // L3+
-    canManageUsers: level >= 4,                       // L4 only
-  };
-}
+| 路由 | 说明 |
+|------|------|
+| `/dashboard` | 仪表盘 |
+| `/knowledge-graph` | 知识图谱 |
+| `/change-impact` | 变更影响 |
+| `/mes/*` | MES 集成 |
+
+MES 的后端 API 仍使用 `require_permission(Module.MES, ...)` 做权限校验。
+
+---
+
+## 四、后端权限检查
+
+### 4.1 装饰器式检查
+
+```python
+from app.core.permissions import require_permission, Module, PermissionLevel
+
+@router.post("/", dependencies=[Depends(require_permission(Module.FMEA, PermissionLevel.CREATE))])
+async def create_fmea(...):
+    ...
+```
+
+### 4.2 行内检查
+
+部分操作在 Service 层做行内权限判断：
+
+```python
+# FMEA 审批：仅 admin/manager 可推进到 approved 状态
+if target_status == "approved" and user.role_definition.role_key not in ("admin", "manager"):
+    raise ValueError("仅管理员或经理可审批 FMEA")
 ```
 
 ---
 
-## 七、已知问题清单
+## 五、工厂与产品线范围
 
-| # | 严重度 | 问题 | 位置 |
-|---|:------:|------|------|
-| 1 | 🔴 高 | 前端路由无角色守卫，viewer 可导航到编辑器 | `App.tsx:ProtectedRoute` |
-| 2 | 🔴 高 | FMEA/CAPA 列表页"新建"按钮对所有角色可见 | `FMEAListPage.tsx`, `CAPAListPage.tsx` |
-| 3 | 🟡 中 | `require_manager_or_admin` 定义但未使用 | `deps.py`, `fmea.py` |
-| 4 | 🟡 中 | 角色字段无 DB/Python 枚举约束 | `models/user.py`, `schemas/auth.py` |
-| 5 | 🟡 中 | 无 Token 刷新机制，120 分钟硬过期 | `security.py` |
-| 6 | 🟢 低 | 认证事件未记录审计日志 | `api/auth.py` |
-| 7 | 🟢 低 | 登录接口无速率限制 | `api/auth.py` |
-| 8 | 🟢 低 | 无文档所有权/资源级权限 | 全局 |
-| 9 | 🟢 低 | 角色字符串全代码库硬编码 | 全局 |
+### 5.1 数据隔离
+
+| 用户类型 | 工厂范围 | 产品线范围 |
+|----------|----------|------------|
+| 普通用户 | 仅自己所属工厂 | 仅分配的产品线 |
+| 集团管理员 | 所有工厂 | 所有产品线 |
+
+### 5.2 范围过滤
+
+后端 `factory_scope.py` 提供自动过滤：
+
+- 列表查询自动添加 `factory_id` 过滤条件。
+- 创建时自动设置当前用户的 `factory_id`。
+- 集团管理员（`group` 模块 ADMIN）可跨工厂操作。
 
 ---
 
-## 八、后续扩展建议
+## 六、已知问题
 
-1. **短期**：统一前端角色判断为一个 `usePermission()` Hook，消除散落的 `user?.role === "viewer"` 硬编码
-2. **短期**：在 `ProtectedRoute` 中增加可选 `requiredRole` 参数，实现路由级角色守卫
-3. **中期**：引入角色枚举（Python `StrEnum` + TypeScript `enum`），替代裸字符串
-4. **中期**：为登录接口添加速率限制（如 `slowapi`）
-5. **长期**：引入资源级 ACL（文档所有权、团队共享），支持 `permissions` 表
+| # | 严重度 | 问题 | 位置 |
+|---|:------:|------|------|
+| 1 | 高 | 前端路由无模块守卫（knowledge_graph、change_impact、MES） | `App.tsx` |
+| 2 | 中 | 无 Token 刷新机制，120 分钟硬过期 | `security.py` |
+| 3 | 中 | 无登录接口速率限制 | `api/auth.py` |
+| 4 | 低 | 无认证审计日志 | `api/auth.py` |
