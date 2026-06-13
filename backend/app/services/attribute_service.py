@@ -172,6 +172,7 @@ async def upsert_measurements(
                 known_standard=d["known_standard"],
                 appraiser_decision=d["appraiser_decision"],
                 trial_no=d.get("trial_no", 1),
+                factory_id=study.factory_id,
             )
         )
     for item in new_items:

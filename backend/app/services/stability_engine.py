@@ -58,6 +58,7 @@ def compute_stability(study: StabilityStudy, measurements: list[StabilityMeasure
 
     return StabilityResult(
         study_id=study.study_id,
+        factory_id=study.factory_id,
         ucl_mean=ucl_mean,
         lcl_mean=lcl_mean,
         cl_mean=cl_mean,

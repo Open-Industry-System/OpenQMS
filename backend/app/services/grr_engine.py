@@ -145,6 +145,7 @@ def compute_grr(study: GrrStudy, measurements: list[GrrMeasurement]) -> GrrResul
 
     return GrrResult(
         study_id=study.study_id,
+        factory_id=study.factory_id,
         ev=EV,
         av=AV,
         grr=GRR,

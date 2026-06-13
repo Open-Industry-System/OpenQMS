@@ -165,6 +165,13 @@ async def admin_user(db: AsyncSession):
     user = result.scalar_one_or_none()
 
     if user is None:
+        from tests.conftest import DEFAULT_FACTORY_ID
+        from app.models.factory import Factory
+        # Ensure factory exists
+        existing_factory = await db.get(Factory, DEFAULT_FACTORY_ID)
+        if existing_factory is None:
+            db.add(Factory(id=DEFAULT_FACTORY_ID, code="TEST", name="Test Factory"))
+            await db.flush()
         user = User(
             username="test_mes_admin",
             password_hash=hash_password("Admin@2026"),
@@ -172,7 +179,7 @@ async def admin_user(db: AsyncSession):
             role_id=admin_role.id,
             legacy_role="admin",
             is_active=True,
-            factory_id=uuid.uuid4(),
+            factory_id=DEFAULT_FACTORY_ID,
         )
         db.add(user)
         await db.flush()
@@ -371,6 +378,7 @@ class TestSyncJobConcurrency:
                 status="running",
                 started_at=datetime.now(timezone.utc) - timedelta(minutes=15),
                 claim_token="old-token",
+                factory_id=test_connection.factory_id,
             )
             db.add(job)
         else:
@@ -410,6 +418,7 @@ class TestSyncJobConcurrency:
                 status="running",
                 started_at=datetime.now(timezone.utc),
                 claim_token="active-token",
+                factory_id=test_connection.factory_id,
             )
             db.add(job)
         else:
@@ -441,6 +450,7 @@ class TestSyncJobConcurrency:
             connection_id=conn.connection_id,
             data_type="production_orders",
             status="pending",
+            factory_id=conn.factory_id,
         )
         db.add(job)
         await db.commit()
@@ -471,6 +481,7 @@ class TestOutboxConcurrency:
             payload={"test": "data"},
             status="pending",
             next_retry_at=datetime.now(timezone.utc),
+            factory_id=test_connection.factory_id,
         )
         db.add(outbox)
         await db.commit()
@@ -504,6 +515,7 @@ class TestOutboxConcurrency:
             started_at=datetime.now(timezone.utc) - timedelta(minutes=15),
             claim_token="old-token",
             next_retry_at=datetime.now(timezone.utc) - timedelta(minutes=15),
+            factory_id=test_connection.factory_id,
         )
         db.add(outbox)
         await db.commit()
@@ -627,6 +639,7 @@ class TestIdempotentRedelivery:
             claim_token="crash-token",
             next_retry_at=datetime.now(timezone.utc),
             retry_count=0,
+            factory_id=test_connection.factory_id,
         )
         db.add(outbox)
         await db.commit()
@@ -664,6 +677,7 @@ class TestIdempotentRedelivery:
             status="pending",
             next_retry_at=datetime.now(timezone.utc),
             retry_count=0,
+            factory_id=test_connection.factory_id,
         )
         db.add(outbox)
         await db.commit()
@@ -1024,6 +1038,7 @@ class TestSyncRoundValidationFailure:
                 checkpoint=existing_checkpoint,
                 started_at=datetime.now(timezone.utc),
                 claim_token="test-token",
+                factory_id=test_connection.factory_id,
             )
             db.add(job)
         else:

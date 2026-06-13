@@ -114,6 +114,7 @@ async def seed_snapshots(db, test_user):
                 rule_id=cfg["rule_id"], enabled=True,
                 thresholds=cfg["thresholds"], weight=cfg["weight"],
                 supplier_id=None, category=cfg["category"], product_line_code=None,
+                factory_id=test_user.factory_id,
                 updated_by=test_user.user_id,
             ))
     for period, risk in [("2026-01", 15.0), ("2026-02", 25.0), ("2026-03", 40.0)]:
