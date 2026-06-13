@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Space, Select, Tag, Card } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 import { listManagementReviews } from "../../api/managementReview";
@@ -18,7 +17,6 @@ const statusMap: Record<string, { color: string; label: string }> = {
 export default function ManagementReviewListPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
   const { selected: selectedPL } = useProductLineStore();
 

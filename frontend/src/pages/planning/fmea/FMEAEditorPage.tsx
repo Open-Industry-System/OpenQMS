@@ -489,6 +489,9 @@ export default function FMEAEditorPage() {
       nodesUsedByOthers.add(r.failureModeNodeId);
       if (r.failureEffectNodeId) nodesUsedByOthers.add(r.failureEffectNodeId);
       if (r.failureCauseNodeId) nodesUsedByOthers.add(r.failureCauseNodeId);
+      r.preventionControlIds?.forEach(id => nodesUsedByOthers.add(id));
+      r.detectionControlIds?.forEach(id => nodesUsedByOthers.add(id));
+      r.recommendedActionIds?.forEach(id => nodesUsedByOthers.add(id));
     }
 
     const idsToDelete = new Set<string>();
@@ -505,9 +508,9 @@ export default function FMEAEditorPage() {
     if (!nodesUsedByOthers.has(row.failureModeNodeId)) {
       idsToDelete.add(row.failureModeNodeId);
     }
-    row.preventionControlIds.forEach((id) => idsToDelete.add(id));
-    row.detectionControlIds.forEach((id) => idsToDelete.add(id));
-    row.recommendedActionIds.forEach((id) => idsToDelete.add(id));
+    row.preventionControlIds.forEach((id) => { if (!nodesUsedByOthers.has(id)) idsToDelete.add(id); });
+    row.detectionControlIds.forEach((id) => { if (!nodesUsedByOthers.has(id)) idsToDelete.add(id); });
+    row.recommendedActionIds.forEach((id) => { if (!nodesUsedByOthers.has(id)) idsToDelete.add(id); });
 
     setNodes((prev) => prev.filter((n) => !idsToDelete.has(n.id)));
     // Delete edges connected to deleted nodes AND edges specific to this row

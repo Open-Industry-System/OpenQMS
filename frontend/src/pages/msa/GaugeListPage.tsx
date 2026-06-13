@@ -24,7 +24,6 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { Gauge } from "../../types";
 import { listGauges, getExpiringGauges, createGauge, deleteGauge } from "../../api/msa";
@@ -41,7 +40,6 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 
 export default function GaugeListPage() {
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
 
   const [gauges, setGauges] = useState<Gauge[]>([]);

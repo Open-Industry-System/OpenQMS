@@ -112,12 +112,14 @@ export interface FMEADocument {
   approved_at: string | null;
 }
 
-export interface FMEAListResponse {
-  items: FMEADocument[];
+export interface PaginatedResponse<T> {
+  items: T[];
   total: number;
   page: number;
   page_size: number;
 }
+
+export type FMEAListResponse = PaginatedResponse<FMEADocument>;
 
 export interface CAPAReport {
   report_id: string;
@@ -142,12 +144,7 @@ export interface CAPAReport {
   updated_at: string;
 }
 
-export interface CAPAListResponse {
-  items: CAPAReport[];
-  total: number;
-  page: number;
-  page_size: number;
-}
+export type CAPAListResponse = PaginatedResponse<CAPAReport>;
 
 export interface DashboardData {
   kpi: {
@@ -257,12 +254,7 @@ export interface ControlPlan {
   customer_requirements?: { title: string; description: string; source_customer_id: string | null; synced_at: string | null; source: string }[];
 }
 
-export interface ControlPlanListResponse {
-  items: ControlPlan[];
-  total: number;
-  page: number;
-  page_size: number;
-}
+export type ControlPlanListResponse = PaginatedResponse<ControlPlan>;
 
 export interface QualityGoal {
   goal_id: string;
@@ -440,12 +432,7 @@ export interface SupplierEvaluation {
   created_at: string;
 }
 
-export interface SupplierListResponse {
-  items: Supplier[];
-  total: number;
-  page: number;
-  page_size: number;
-}
+export type SupplierListResponse = PaginatedResponse<Supplier>;
 
 export interface SupplierStats {
   total_count: number;
@@ -1144,12 +1131,7 @@ export interface SupplierCompareResponse {
   ppm_trends: Record<string, PPMTrendPoint[]>;
 }
 
-export interface SCARListResponse {
-  items: SupplierSCAR[];
-  total: number;
-  page: number;
-  page_size: number;
-}
+export type SCARListResponse = PaginatedResponse<SupplierSCAR>;
 
 export interface SCARCreate {
   supplier_id: string;

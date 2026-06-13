@@ -76,11 +76,21 @@ import SupplyChainRiskMapPage from "./pages/supplyChainRiskMap/SupplyChainRiskMa
 import TenantSuspended from "./pages/TenantSuspended";
 import TenantDeactivated from "./pages/TenantDeactivated";
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp * 1000 < Date.now();
+  } catch {
+    return true;
+  }
+}
+
 function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
   const loading = useAuthStore((s) => s.loading);
   const fetchUser = useAuthStore((s) => s.fetchUser);
   const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
   const { canView } = usePermission();
 
   useEffect(() => {
@@ -95,7 +105,10 @@ function ProtectedRoute({ children, requiredModule }: { children: React.ReactNod
     );
   }
 
-  if (!token) return <Navigate to="/login" replace />;
+  if (!token || isTokenExpired(token)) {
+    if (token && isTokenExpired(token)) logout();
+    return <Navigate to="/login" replace />;
+  }
 
   if (requiredModule && !canView(requiredModule)) return <Navigate to="/dashboard" replace />;
 

@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import get_current_user, require_permission, PermissionLevel, Module
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import check_factory_access
+from app.core.permissions import require_permission, PermissionLevel, Module
 from app.models.user import User
 from app.services import fmea_service, control_plan_service
 from app.services.version_service import (
@@ -62,11 +64,12 @@ async def list_fmea_version_list(
     page_size: int = Query(20, ge=1, le=1000),
     major_only: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
+    check_factory_access(fmea.factory_id, scope)
     items, total = await list_fmea_versions(db, fmea_id, page, page_size, major_only)
     return VersionListResponse(
         items=[FMEAVersionListItem.model_validate(v) for v in items],
@@ -82,7 +85,7 @@ async def get_fmea_version_detail(
     major: int,
     minor: int,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     version = await get_fmea_version(db, fmea_id, major, minor)
     if version is None:
@@ -96,10 +99,12 @@ async def manual_create_fmea_version(
     req: ManualVersionCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
+    check_factory_access(fmea.factory_id, scope)
     version = await create_fmea_version(
         db, fmea, "manual", req.change_summary, user.user_id,
     )
@@ -114,10 +119,12 @@ async def rollback_fmea_version(
     req: RollbackRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
+    check_factory_access(fmea.factory_id, scope)
     try:
         version = await rollback_fmea(
             db, fmea, target_major, target_minor, req.reason, user.user_id,
@@ -135,7 +142,7 @@ async def compare_fmea_versions(
     major2: int = Query(..., description="Target version major"),
     minor2: int = Query(..., description="Target version minor"),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     v1 = await get_fmea_version(db, fmea_id, major1, minor1)
     v2 = await get_fmea_version(db, fmea_id, major2, minor2)
@@ -163,7 +170,7 @@ async def verify_fmea_version_integrity(
     major: int,
     minor: int,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     version = await get_fmea_version(db, fmea_id, major, minor)
     if version is None:
@@ -186,11 +193,12 @@ async def list_cp_version_list(
     page_size: int = Query(20, ge=1, le=1000),
     major_only: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
+    check_factory_access(cp.factory_id, scope)
     items, total = await list_cp_versions(db, cp_id, page, page_size, major_only)
     return VersionListResponse(
         items=[ControlPlanVersionListItem.model_validate(v) for v in items],
@@ -206,7 +214,7 @@ async def get_cp_version_detail(
     major: int,
     minor: int,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     version = await get_cp_version(db, cp_id, major, minor)
     if version is None:
@@ -220,10 +228,12 @@ async def manual_create_cp_version(
     req: ManualVersionCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
+    check_factory_access(cp.factory_id, scope)
     version = await create_cp_version(
         db, cp, "manual", req.change_summary, user.user_id,
     )
@@ -238,10 +248,12 @@ async def rollback_cp_version(
     req: RollbackRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.APPROVE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
+    check_factory_access(cp.factory_id, scope)
     try:
         version = await rollback_control_plan(
             db, cp, target_major, target_minor, req.reason, user.user_id,
@@ -259,7 +271,7 @@ async def compare_cp_versions(
     major2: int = Query(..., description="Target version major"),
     minor2: int = Query(..., description="Target version minor"),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     v1 = await get_cp_version(db, cp_id, major1, minor1)
     v2 = await get_cp_version(db, cp_id, major2, minor2)
@@ -291,7 +303,7 @@ async def verify_cp_version_integrity(
     major: int,
     minor: int,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     version = await get_cp_version(db, cp_id, major, minor)
     if version is None:
@@ -311,11 +323,12 @@ async def verify_cp_version_integrity(
 async def get_sync_preview(
     cp_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
+    check_factory_access(cp.factory_id, scope)
     if not cp.fmea_ref_id:
         raise HTTPException(status_code=400, detail="该控制计划未关联FMEA")
 
@@ -349,10 +362,12 @@ async def sync_from_fmea(
     req: SyncFromFMEARequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
+    check_factory_access(cp.factory_id, scope)
     if cp.status == "approved":
         raise HTTPException(status_code=400, detail="已批准的控制计划不能同步")
     if not cp.fmea_ref_id:

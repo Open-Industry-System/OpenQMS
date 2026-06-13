@@ -281,6 +281,10 @@ async def get_supplier_related(
     level = await get_user_permission(scope.user, Module.SUPPLIER, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 supplier 模块的 VIEW 权限")
+    supplier = await supplier_service.get_supplier(db, supplier_id)
+    if supplier is None:
+        raise HTTPException(status_code=404, detail="supplier not found")
+    _check_factory_access(supplier, scope)
     return await supplier_service.get_supplier_related(db, supplier_id)
 
 
@@ -467,6 +471,10 @@ async def list_certifications(
     level = await get_user_permission(scope.user, Module.SUPPLIER, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 supplier 模块的 VIEW 权限")
+    supplier = await supplier_service.get_supplier(db, supplier_id)
+    if supplier is None:
+        raise HTTPException(status_code=404, detail="supplier not found")
+    _check_factory_access(supplier, scope)
     items = await supplier_service.list_certifications(db, supplier_id)
     return schemas.supplier.SupplierCertificationListResponse(
         items=[schemas.supplier.SupplierCertificationResponse.model_validate(c) for c in items]
@@ -548,6 +556,10 @@ async def list_evaluations(
     level = await get_user_permission(scope.user, Module.SUPPLIER, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 supplier 模块的 VIEW 权限")
+    supplier = await supplier_service.get_supplier(db, supplier_id)
+    if supplier is None:
+        raise HTTPException(status_code=404, detail="supplier not found")
+    _check_factory_access(supplier, scope)
     items = await supplier_service.list_evaluations(db, supplier_id)
     return schemas.supplier.SupplierEvaluationListResponse(
         items=[schemas.supplier.SupplierEvaluationResponse.model_validate(e) for e in items]

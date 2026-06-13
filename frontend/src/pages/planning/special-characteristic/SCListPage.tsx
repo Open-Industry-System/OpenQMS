@@ -11,7 +11,6 @@ import {
   listSCs, deleteSC, safetyConfirm, safetyDismiss,
 } from "../../../api/specialCharacteristic";
 import type { SpecialCharacteristic } from "../../../types";
-import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
 
@@ -37,7 +36,6 @@ export default function SCListPage() {
   const [suggestedOnly, setSuggestedOnly] = useState(searchParams.get("suggested_only") === "true");
   const navigate = useNavigate();
 
-  const user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
 

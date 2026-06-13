@@ -3,7 +3,8 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.core.deps import get_current_user, require_admin
+from app.core.deps import RequestScope, get_request_scope, require_admin
+from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.models.user import User
 from app import schemas
 from app.services import audit_service
@@ -14,8 +15,10 @@ router = APIRouter(prefix="/api/auditors", tags=["auditors"])
 @router.get("")
 async def list_auditors(
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    if await get_user_permission(scope.user, Module.AUDIT, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 audit 模块的 VIEW 权限")
     auditors = await audit_service.list_auditors(db)
     return [
         {

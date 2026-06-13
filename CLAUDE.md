@@ -26,9 +26,9 @@ Run the relevant command (build, lint, test, or start the app) before declaring 
 
 ## Project Overview
 
-OpenQMS is a full-stack quality management platform targeting Chinese manufacturing. Covers FMEA (AIAG-VDA 7-step PFMEA/DFMEA), 8D/CAPA, and dashboard. UI in Chinese (zh_CN).
+OpenQMS is a full-stack quality management platform targeting Chinese manufacturing. Covers FMEA (AIAG-VDA 7-step PFMEA/DFMEA), 8D/CAPA, SPC, MSA, IQC, supplier quality, customer quality, APQP, PPAP, control plans, knowledge graph, and more. UI in Chinese (zh_CN).
 
-**Stack:** Python 3.11 + FastAPI 0.115 (async) | React 18 + TypeScript 5.6 + Vite 5.4 + Ant Design 5.21 | PostgreSQL 15 + SQLAlchemy 2.0 (async) | Redis 7 (configured, no logic yet)
+**Stack:** Python 3.11+ + FastAPI 0.115 (async) | React 18 + TypeScript 5.6 + Vite 5.4 + Ant Design 5.29 | PostgreSQL 15 + SQLAlchemy 2.0 (async) | Redis 7 (configured, no logic yet)
 
 ## Commands
 
@@ -47,7 +47,7 @@ cd backend
 pip install -r requirements.txt
 alembic upgrade head && python -m app.seed  # Fresh DB setup
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-python app/test_schema.py                 # Only tests (manual, no pytest)
+pytest tests/ -x --tb=short               # Run tests
 ```
 
 ### Frontend
@@ -75,33 +75,34 @@ npm run lint                              # ESLint
 ```
 api/          → Route handlers (thin): parse, call service, return response
 services/     → Business logic + manual AuditLog on every CRUD
-models/       → SQLAlchemy 2.0 ORM (UUID PKs, DeclarativeBase)
+models/       → SQLAlchemy 2.0 ORM (UUID PKs, DeclarativeBase, 50+ tables)
 schemas/      → Pydantic v2 request/response schemas
-core/         → security.py (bcrypt + JWT/HS256), deps.py (FastAPI Depends guards)
+core/         → security.py, deps.py (RequestScope + FastAPI Depends guards), factory_scope.py
 state_machines/ → FMEAState / EightDState enums + transition tables
+graph/        → FMEA graph repository + recommendation pipeline
 ```
 
-- PKs are UUID v4 generated in Python. FMEA uses a **graph model** in a single JSONB column (`graph_data`): `{nodes: [...], edges: [...]}`. Frontend flattens it to spreadsheet rows.
+- PKs are UUID v4 generated in Python. FMEA uses a **graph model** in JSONB (`graph_data`): `{nodes: [...], edges: [...]}`. Frontend flattens it to spreadsheet rows.
 - CAPA 8D steps are individual text columns (`d1_team`–`d8_closure`), with `d1_team` also JSONB for team member structs.
 - Dashboard service uses raw SQL (`text()`) with `jsonb_array_elements()` for RPN aggregation.
 - Services raise `ValueError`; API layer converts to `HTTPException`.
-- List endpoints return `{ items, total, page, page_size }` — no shared pagination helper.
+- List endpoints return `{ items, total, page, page_size }` — unified as `PaginatedResponse<T>` on frontend.
 
 ### Auth & Permissions
 
-4-role RBAC, single `users.role` VARCHAR column, no permissions table:
+7-role RBAC with permission matrix (25 modules × 5 levels). Multi-tenant with factory isolation.
 
 | Role | Level | Capabilities |
 |------|:-----:|-------------|
-| admin | L4 | Everything |
-| manager | L3 | CRUD all + approve FMEA / close CAPA (D7/D8) |
+| admin | L5 | Everything (all modules, all factories) |
+| manager | L3-L4 | CRUD all + approve FMEA / close CAPA (D7/D8) |
 | quality_engineer | L2 | CRUD FMEA/CAPA, non-approval transitions |
 | viewer | L1 | Read-only |
+| + group_admin, supplier_manager, customer_manager | varies | Module-specific access |
 
-- JWT: HS256, 120 min expiry, `sub`=user_id. No refresh mechanism.
-- Backend: 4 guards in `core/deps.py` — `get_current_user`, `require_admin`, `require_engineer_or_admin`, `require_manager_or_admin` (the last is defined but **unused** — FMEA/CAPA do manager-level checks inline).
-- FMEA approval and CAPA D7/D8 advancement have additional inline `user.role in ["admin", "manager"]` checks beyond route-level deps.
-- Frontend `ProtectedRoute` checks token existence only (not role). Pages use `isViewer`/`isAdminOrManager` booleans to disable inputs and hide buttons.
+- JWT: HS256, 120 min expiry, `sub`=user_id. Frontend validates expiry in `ProtectedRoute`.
+- Backend: `RequestScope` dependency in `core/deps.py` resolves factory + product line scope per request. `check_factory_access()` from `core/factory_scope.py` enforces row-level security.
+- `ProtectedRoute` on frontend validates token + optional `requiredModule` permission.
 - Full reference: `docs/permissions.md`
 
 ### Frontend (`frontend/src/`)
@@ -109,31 +110,37 @@ state_machines/ → FMEAState / EightDState enums + transition tables
 ```
 pages/           → One file per route, local useState for all page data
 components/      → layout/ (AppLayout: sidebar+header+Outlet), shared/ (KPICard)
-store/           → Zustand — auth state only
-api/             → Axios instance + per-module functions (auth, fmea, capa, dashboard)
-utils/           → fmea.ts (AIAG-VDA AP lookup), fmeaTable.ts (graph↔rows conversion)
-types/           → All TS interfaces in single index.ts
+store/           → Zustand — auth + product line + factory state
+api/             → Axios instance + per-module functions
+hooks/           → usePermission (useCallback-stabilized), useProductLineStore
+utils/           → fmea.ts (AP lookup), fmeaTable.ts (graph↔rows)
+types/           → All TS interfaces in single index.ts, PaginatedResponse<T> generic
 ```
 
-- Routes: `/login` (public), `/dashboard`, `/fmea`, `/fmea/:id`, `/capa`, `/capa/:id` (protected)
+- Routes: All protected via `<ProtectedRoute requiredModule="...">`. Menu items filtered by permissions.
 - Vite proxies `/api` → backend (`localhost:8000` or `BACKEND_URL` in Docker)
 - Axios interceptor injects Bearer token; 401 clears token → `/login`
 - FMEA editor is a custom 20+ column spreadsheet on Ant `Input`+`Select` (no third-party grid)
-- No form library beyond raw Ant Form. No test framework on frontend.
+- No form library beyond raw Ant Form.
 
 ### Database
 
-PostgreSQL 15 (asyncpg), 4 tables: `users`, `fmea_documents`, `capa_eightd`, `audit_logs`. Alembic migrations are hand-written (2 files), not autogenerated.
+PostgreSQL 15 (asyncpg), 50+ tables across 7 modules. Multi-tenant with factory isolation (`factory_id` NOT NULL on all business tables). Alembic migrations are hand-written.
+
+**Key tables:** `users`, `role_definitions`, `user_roles`, `permissions`, `factories`, `product_lines`, `fmea_documents`, `capa_eightd`, `suppliers`, `spc_charts`, `iqc_materials`, `control_plans`, `audit_programs`, `audit_findings`, `customer_complaints`, `rma_records`, `scar_records`, plus 30+ more.
 
 ## Key Conventions
 
 - Chinese UI, mixed Chinese/English comments
 - Document numbering: `PFMEA-2026-001`, `DFMEA-2026-001`, `8D-2026-001`
-- Product line: `DC-DC-100` (hardcoded in models)
+- Product line: `DC-DC-100` (seed data default)
 - Severity labels: `致命`, `严重`, `一般`, `轻微`
 - Every CRUD operation manually creates an `AuditLog` in its service method
-- FMEA graph nodes carry AIAG-VDA 7-step properties (Step 2 structure → Step 3 function → Steps 4-5 risk S/O/D → Step 6 optimization + revised S/O/D)
+- FMEA graph nodes carry AIAG-VDA 7-step properties
 - `frontend/src/utils/fmea.ts` has the AIAG-VDA Action Priority lookup table (H/M/L from S×O×D)
+- `factory_id` is NOT NULL on all business tables. Users may have NULL `factory_id` (group admins).
+- `RequestScope` in `core/deps.py` resolves factory + product line scope per request. Use `check_factory_access(entity_id, scope)` for row-level security.
+- Use `enqueue_embedding()` BEFORE `await db.commit()` to prevent outbox row loss.
 
 ## Working with the FMEA Graph
 
@@ -144,13 +151,13 @@ The JSONB graph is the most complex part of the system:
 - **Edge types:** `HAS_PROCESS_STEP`, `FUNCTION_MAPPED_TO`, `HAS_FAILURE_MODE`, `EFFECT_OF`, `CAUSE_OF`, `PREVENTED_BY`, `DETECTED_BY`, `OPTIMIZED_BY`
 - `fmeaTable.ts` handles graph↔spreadsheet bidirectional conversion
 - Reference examples: `SAMPLE_PFMEA_GRAPH` / `SAMPLE_DFMEA_GRAPH` in `seed.py`
+- **Row deletion**: Only deletes shared control/action nodes if no other row references them
+- **Multi-Effect**: Each FailureMode can have multiple Effects; rows fan out per (cause × effect) pair
 
 ## Known Gaps
 
-- No test framework (no pytest, no Vitest). Single manual `test_schema.py`.
-- No token refresh — 120 min hard expiry logs users out.
-- No rate limiting on login. No auth audit logging.
-- Redis configured but no caching logic implemented.
-- `require_manager_or_admin` dependency exists but unused (inline checks instead).
-- Frontend list pages show Create buttons to all roles; backend rejects viewers with 403.
-- Docker targets Python 3.11; local dev verified on 3.12 only.
+- No comprehensive test suite (pytest exists but many tests need factory_id fixtures)
+- No rate limiting on login
+- Redis configured but no caching logic implemented
+- Frontend bundle is 5.5MB — needs code splitting
+- Some Alembic migration numbers overlap; needs normalization

@@ -44,7 +44,9 @@ async def list_fmeas(
 
     if high_rpn:
         from app.utils.fmea_graph import build_rpn_rows
-        query = query.order_by(FMEADocument.created_at.desc())
+        # TEMP: filter in Python. TODO: add max_rpn materialized column
+        MAX_HIGH_RPN_SCAN = 500
+        query = query.order_by(FMEADocument.created_at.desc()).limit(MAX_HIGH_RPN_SCAN)
         all_docs = (await db.execute(query)).scalars().all()
         filtered = []
         for doc in all_docs:

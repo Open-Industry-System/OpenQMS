@@ -61,33 +61,39 @@ export function buildRows(nodes: GraphNode[], edges: GraphEdge[]): FMEARow[] {
         (e) => e.target === fmId && e.type === "CAUSE_OF"
       );
 
+      const effects = effectEdges.length > 0
+        ? effectEdges.map(e => e.target)
+        : [null as string | null];
+
       if (causeEdges.length === 0) {
-        // Row without cause
-        const effectId = effectEdges.length > 0 ? effectEdges[0].target : null;
-        rows.push({
-          key: `row_${funcNode.id}_${fmId}`,
-          functionNodeId: funcNode.id,
-          failureModeNodeId: fmId,
-          failureEffectNodeId: effectId,
-          failureCauseNodeId: null,
-          preventionControlIds: [],
-          detectionControlIds: findDetectionControls(fmId, null, edges),
-          recommendedActionIds: [],
-        });
+        // No causes — fan out by effects
+        for (const effectId of effects) {
+          rows.push({
+            key: `row_${funcNode.id}_${fmId}${effectId ? `_${effectId}` : ''}`,
+            functionNodeId: funcNode.id,
+            failureModeNodeId: fmId,
+            failureEffectNodeId: effectId,
+            failureCauseNodeId: null,
+            preventionControlIds: [],
+            detectionControlIds: findDetectionControls(fmId, null, edges),
+            recommendedActionIds: [],
+          });
+        }
       } else {
         for (const causeEdge of causeEdges) {
           const causeId = causeEdge.source;
-          rows.push({
-            key: `row_${funcNode.id}_${fmId}_${causeId}`,
-            functionNodeId: funcNode.id,
-            failureModeNodeId: fmId,
-            failureEffectNodeId:
-              effectEdges.length > 0 ? effectEdges[0].target : null,
-            failureCauseNodeId: causeId,
-            preventionControlIds: findPreventionControls(causeId, edges),
-            detectionControlIds: findDetectionControls(fmId, causeId, edges),
-            recommendedActionIds: findRecommendedActions(causeId, fmId, edges),
-          });
+          for (const effectId of effects) {
+            rows.push({
+              key: `row_${funcNode.id}_${fmId}_${causeId}${effectId ? `_${effectId}` : ''}`,
+              functionNodeId: funcNode.id,
+              failureModeNodeId: fmId,
+              failureEffectNodeId: effectId,
+              failureCauseNodeId: causeId,
+              preventionControlIds: findPreventionControls(causeId, edges),
+              detectionControlIds: findDetectionControls(fmId, causeId, edges),
+              recommendedActionIds: findRecommendedActions(causeId, fmId, edges),
+            });
+          }
         }
       }
     }

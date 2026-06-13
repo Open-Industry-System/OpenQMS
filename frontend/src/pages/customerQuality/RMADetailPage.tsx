@@ -14,7 +14,6 @@ import {
   updateRMARecord,
 } from "../../api/customerQuality";
 import type { RMARecord } from "../../types";
-import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 
 const { Title } = Typography;
@@ -30,7 +29,6 @@ export default function RMADetailPage() {
   const { message } = App.useApp();
   const { id } = useParams();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
   const [form] = Form.useForm();
   const [linkForm] = Form.useForm();
   const [data, setData] = useState<RMARecord | null>(null);

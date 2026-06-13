@@ -36,6 +36,7 @@ import {
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
 import { usePermission } from "../../hooks/usePermission";
+import type { ModuleKey } from "../../hooks/usePermission";
 
 const { Header, Sider, Content } = Layout;
 
@@ -115,11 +116,12 @@ function getSelectedMenuKey(pathname: string): string {
 }
 
 const menuItems = [
-  { key: "/dashboard", icon: <DashboardOutlined />, label: "仪表盘" },
+  { key: "/dashboard", icon: <DashboardOutlined />, label: "仪表盘", module: undefined as string | undefined },
   {
     key: "grp:planning",
     icon: <ExperimentOutlined />,
     label: "前期质量策划",
+    module: "planning",
     children: [
       { key: "/fmea", icon: <FileTextOutlined />, label: "FMEA 管理" },
       { key: "/control-plans", icon: <FileTextOutlined />, label: "控制计划" },
@@ -134,6 +136,7 @@ const menuItems = [
     key: "grp:shopfloor",
     icon: <ToolOutlined />,
     label: "现场质量管理",
+    module: "spc",
     children: [
       { key: "/spc", icon: <BarChartOutlined />, label: "SPC 控制图" },
       {
@@ -154,6 +157,7 @@ const menuItems = [
     key: "grp:customer",
     icon: <CustomerServiceOutlined />,
     label: "客户质量",
+    module: "customer_quality",
     children: [
       { key: "/customer-quality", icon: <CustomerServiceOutlined />, label: "客诉/RMA" },
       { key: "/customer-audits", icon: <AuditOutlined />, label: "客户审核" },
@@ -164,6 +168,7 @@ const menuItems = [
     key: "grp:supplier",
     icon: <ShopOutlined />,
     label: "供应商质量",
+    module: "supplier",
     children: [
       { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理" },
       { key: "/suppliers/quality", icon: <BarChartOutlined />, label: "供货质量看板" },
@@ -186,6 +191,7 @@ const menuItems = [
     key: "grp:mes",
     icon: <ToolOutlined />,
     label: "MES 集成",
+    module: "mes",
     children: [
       { key: "/mes/dashboard", label: "MES 看板" },
       { key: "/mes/orders", label: "工单列表" },
@@ -197,6 +203,7 @@ const menuItems = [
     key: "grp:plm",
     icon: <BuildOutlined />,
     label: "PLM 集成",
+    module: "plm",
     children: [
       { key: "/plm/dashboard", label: "PLM 看板" },
       { key: "/plm/parts", label: "零件列表" },
@@ -208,6 +215,7 @@ const menuItems = [
     key: "grp:erp",
     icon: <SettingOutlined />,
     label: "ERP 集成",
+    module: "erp",
     children: [
       { key: "/erp", label: "ERP 看板" },
       { key: "/erp/connections", label: "连接管理" },
@@ -221,6 +229,7 @@ const menuItems = [
     key: "grp:group",
     icon: <GlobalOutlined />,
     label: "集团管理",
+    module: "group",
     children: [
       { key: "/group/dashboard", icon: <DashboardOutlined />, label: "集团仪表盘" },
       { key: "/group/comparison", icon: <RadarChartOutlined />, label: "工厂对比" },
@@ -258,13 +267,9 @@ export default function AppLayout() {
     });
   }, [selectedKey]);
 
-  // Filter out PLM/ERP groups if user cannot view those modules
+  // Filter menu groups by module permission; dashboard (no module) is always visible
   const visibleMenuItems = menuItems.filter(
-    (item) => item.key !== "grp:plm" || canView("plm"),
-  ).filter(
-    (item) => item.key !== "grp:erp" || canView("erp"),
-  ).filter(
-    (item) => item.key !== "grp:group" || canView("group"),
+    (item) => !item.module || canView(item.module as ModuleKey),
   );
 
   // Factory switcher visible when user has access to multiple factories (or all)

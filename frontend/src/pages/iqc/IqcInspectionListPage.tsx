@@ -18,7 +18,6 @@ import {
   EyeOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { IqcInspection, IqcStats } from "../../types";
 import { listInspections, getIqcStats } from "../../api/iqc";
@@ -42,7 +41,6 @@ const RESULT_MAP: Record<string, { label: string; color: string }> = {
 export default function IqcInspectionListPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
 
   const [inspections, setInspections] = useState<IqcInspection[]>([]);

@@ -50,7 +50,8 @@ async def get_db(request: Request):
             try:
                 yield session
             finally:
-                await session.rollback()
+                if session.in_transaction():
+                    await session.rollback()
                 if tenant:
                     await session.execute(text('RESET search_path'))
                 await session.close()
@@ -67,7 +68,8 @@ async def get_platform_db():
         try:
             yield session
         finally:
-            await session.rollback()
+            if session.in_transaction():
+                await session.rollback()
             await session.execute(text('RESET search_path'))
             await session.close()
 
@@ -85,7 +87,8 @@ async def get_tenant_aware_session():
         try:
             yield session
         finally:
-            await session.rollback()
+            if session.in_transaction():
+                await session.rollback()
             if schema:
                 await session.execute(text('RESET search_path'))
             await session.close()
