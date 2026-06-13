@@ -24,10 +24,22 @@ depends_on = None
 def upgrade() -> None:
     """Create every table registered with TenantBase.metadata in the target schema.
 
-    create_all() uses CHECKFIRST by default, so it safely skips tables
-    that already exist (e.g., in single-tenant mode where main migrations
-    already created them).
+    Only runs when a tenant schema is active (i.e., the -x schema=xxx argument
+    is passed to alembic). In single-tenant / public-schema mode, the main-line
+    migrations already create these tables individually, so running create_all()
+    here would race ahead and create tables that later migrations also try to
+    create with op.create_table(), causing DuplicateTableError.
     """
+    from alembic import context
+    x_args = context.get_x_argument(as_dictionary=True)
+    schema_name = x_args.get("schema")
+
+    if not schema_name:
+        # Single-tenant mode: main-line migrations handle table creation.
+        # Skip to avoid creating tables that later migrations also create.
+        logger.info("Skipping tenant squash — no -x schema= arg (single-tenant mode)")
+        return
+
     from app.database import TenantBase
     import app.models  # noqa: F401
 
@@ -36,7 +48,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop all tenant tables."""
+    """Drop all tenant tables (only in multi-tenant schema mode)."""
+    from alembic import context
+    x_args = context.get_x_argument(as_dictionary=True)
+    schema_name = x_args.get("schema")
+
+    if not schema_name:
+        logger.info("Skipping tenant squash downgrade — single-tenant mode")
+        return
+
     from app.database import TenantBase
     import app.models  # noqa: F401
 
