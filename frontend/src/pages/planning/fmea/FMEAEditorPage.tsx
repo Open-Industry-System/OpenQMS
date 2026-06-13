@@ -536,21 +536,21 @@ export default function FMEAEditorPage() {
     {
       title: "过程项 / 功能要求",
       key: "function",
-      width: 140,
+      width: 200,
       fixed: "left" as const,
       render: (_: unknown, row: FMEARow) => {
         const funcNode = nodeMap.get(row.functionNodeId);
         return (
           <div
             tabIndex={0}
-            style={{ outline: "none" }}
+            style={{ outline: "none", minWidth: 180 }}
           >
-            <div style={{ fontWeight: 600, fontSize: 12 }}>{funcNode?.name || "-"}</div>
+            <div style={{ fontWeight: 600, fontSize: 13, lineHeight: "1.5" }}>{funcNode?.name || "-"}</div>
             {funcNode?.specification && (
-              <Text type="secondary" style={{ fontSize: 10 }}>{funcNode.specification}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{funcNode.specification}</Text>
             )}
             {funcNode?.requirement && (
-              <div><Text type="secondary" style={{ fontSize: 10, color: "#8c8c8c" }}>{funcNode.requirement}</Text></div>
+              <div><Text type="secondary" style={{ fontSize: 12 }}>{funcNode.requirement}</Text></div>
             )}
           </div>
         );
@@ -559,7 +559,7 @@ export default function FMEAEditorPage() {
     {
       title: "失效模式",
       key: "failureMode",
-      width: 130,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         const node = nodeMap.get(row.failureModeNodeId);
         return (
@@ -580,7 +580,7 @@ export default function FMEAEditorPage() {
     {
       title: "失效影响",
       key: "failureEffect",
-      width: 140,
+      width: 200,
       render: (_: unknown, row: FMEARow) => {
         if (!row.failureEffectNodeId) return "-";
         const node = nodeMap.get(row.failureEffectNodeId);
@@ -654,7 +654,7 @@ export default function FMEAEditorPage() {
     {
       title: "失效原因",
       key: "failureCause",
-      width: 140,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         if (!row.failureCauseNodeId) return "-";
         const node = nodeMap.get(row.failureCauseNodeId);
@@ -709,7 +709,7 @@ export default function FMEAEditorPage() {
     {
       title: "预防措施",
       key: "preventionControl",
-      width: 140,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         const nodeId = row.preventionControlIds[0];
         if (!nodeId) return "-";
@@ -737,7 +737,7 @@ export default function FMEAEditorPage() {
     {
       title: "检测措施",
       key: "detectionControl",
-      width: 140,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         const nodeId = row.detectionControlIds[0];
         if (!nodeId) return "-";
@@ -847,7 +847,7 @@ export default function FMEAEditorPage() {
     {
       title: "建议措施",
       key: "recommendedAction",
-      width: 140,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         if (row.recommendedActionIds.length === 0) {
           return (
@@ -903,7 +903,7 @@ export default function FMEAEditorPage() {
     {
       title: "责任人 / 期限",
       key: "responsibility",
-      width: 120,
+      width: 150,
       render: (_: unknown, row: FMEARow) => {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
@@ -931,14 +931,14 @@ export default function FMEAEditorPage() {
     {
       title: "已采取措施",
       key: "actionsTaken",
-      width: 130,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
         return (
           <Input.TextArea
             value={node?.action_taken || ""}
-            rows={2}
+            autoSize={{ minRows: 2, maxRows: 4 }}
             disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "action_taken", e.target.value)}
           />
@@ -1095,7 +1095,7 @@ export default function FMEAEditorPage() {
             { key: "failure", label: "失效分析", children: <>
           <Row gutter={16}>
             {/* Left: Structure/Function Tree */}
-            <Col span={5}>
+            <Col span={6}>
           <Card
             title={isDFMEA ? "结构 / 功能" : "工序 / 功能"}
             size="small"
@@ -1115,30 +1115,38 @@ export default function FMEAEditorPage() {
                   ? 24
                   : 0;
               const hasRows = rowsByFunction[node.id]?.length > 0;
+              const isSelected = selectedFunctionId === node.id;
               return (
                 <div
                   key={node.id}
                   onClick={() => setSelectedFunctionId(node.id)}
                   style={{
-                    padding: "5px 10px",
-                    marginBottom: 4,
+                    padding: "8px 12px",
+                    marginBottom: 6,
                     marginLeft: indent,
-                    borderRadius: 4,
+                    borderRadius: 6,
                     cursor: "pointer",
-                    background: selectedFunctionId === node.id ? "#e6f4ff" : isStructure ? "#fafafa" : "#fff",
-                    border: selectedFunctionId === node.id ? "1px solid #1677FF" : "1px solid #f0f0f0",
-                    fontSize: 12,
+                    background: isSelected ? "#1e3a5f" : isStructure ? "#1f2937" : "#111827",
+                    border: isSelected ? "1px solid #3b82f6" : "1px solid rgba(148, 163, 184, 0.2)",
+                    fontSize: 13,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
+                    transition: "background 0.2s, border-color 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = "#27354f";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = isSelected ? "#1e3a5f" : isStructure ? "#1f2937" : "#111827";
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: isStructure ? 600 : 400 }}>{node.name}</div>
-                    {node.process_number && <Text type="secondary" style={{ fontSize: 10 }}>{node.process_number}</Text>}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: isStructure ? 600 : 400, lineHeight: "1.5", wordBreak: "break-all" }}>{node.name}</div>
+                    {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
                   </div>
                   {hasRows && (
-                    <Tag color="processing" style={{ fontSize: 10, marginLeft: 4, lineHeight: "16px" }}>
+                    <Tag color="processing" style={{ fontSize: 10, marginLeft: 8, lineHeight: "16px", flexShrink: 0 }}>
                       {rowsByFunction[node.id].length}
                     </Tag>
                   )}
@@ -1150,7 +1158,7 @@ export default function FMEAEditorPage() {
         </Col>
 
         {/* Right: FMEA Table */}
-        <Col span={19}>
+        <Col span={18}>
           <Card
             title={
               <span style={{ fontSize: 14 }}>
@@ -1166,8 +1174,10 @@ export default function FMEAEditorPage() {
               rowKey="key"
               size="small"
               pagination={false}
-              scroll={{ x: 1700, y: 520 }}
+              scroll={{ x: 2400, y: 540 }}
               bordered
+              className="fmea-editor-table"
+              style={{ fontSize: 13 }}
               rowClassName={(row: FMEARow) => {
                 const classes = [];
                 if (selectedFunctionId && row.functionNodeId === selectedFunctionId) classes.push("fmea-row-highlight");
@@ -1215,24 +1225,38 @@ export default function FMEAEditorPage() {
           ]} />
 
       <style>{`
+        .fmea-editor-table .ant-table-cell {
+          white-space: normal !important;
+          word-break: break-all;
+          vertical-align: top;
+          padding: 10px 12px !important;
+        }
+        .fmea-editor-table .ant-input,
+        .fmea-editor-table .ant-select,
+        .fmea-editor-table .ant-select-selector {
+          font-size: 13px;
+        }
+        .fmea-editor-table .ant-input::placeholder {
+          font-size: 12px;
+        }
         .fmea-row-highlight td {
-          background-color: #e6f4ff !important;
+          background-color: #1e3a5f !important;
           transition: background-color 0.2s;
         }
         .fmea-row-highlight td:first-child {
-          border-left: 3px solid #1677ff !important;
+          border-left: 3px solid #3b82f6 !important;
         }
         .severity-warning-row td {
-          background-color: #fffbe6 !important;
+          background-color: #3d3018 !important;
         }
         .severity-warning-row td:first-child {
-          border-left: 3px solid #faad14 !important;
+          border-left: 3px solid #f59e0b !important;
         }
         .highlighted-row td {
-          background-color: #fffbe6 !important;
+          background-color: #3d3018 !important;
         }
         .highlighted-row td:first-child {
-          border-left: 3px solid #faad14 !important;
+          border-left: 3px solid #f59e0b !important;
         }
       `}</style>
 
