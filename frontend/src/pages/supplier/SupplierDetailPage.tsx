@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Card,
   Button,
-  Tag,
   Space,
   Form,
   Input,
@@ -50,25 +49,35 @@ import {
   reinstateSupplier,
 } from "../../api/supplier";
 import { listAuditPlans } from "../../api/audit";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 import dayjs from "dayjs";
 
 const { Option } = Select;
 const { TextArea } = Input;
 const { Text } = Typography;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending_review: { label: "待审核", color: "default" },
-  audit_required: { label: "需审核", color: "processing" },
-  approved: { label: "已批准", color: "success" },
-  rejected: { label: "已拒绝", color: "error" },
-  suspended: { label: "已暂停", color: "warning" },
+const STATUS_MAP: Record<string, { label: string }> = {
+  pending_review: { label: "待审核" },
+  audit_required: { label: "需审核" },
+  approved: { label: "已批准" },
+  rejected: { label: "已拒绝" },
+  suspended: { label: "已暂停" },
 };
 
-const GRADE_COLORS: Record<string, string> = {
-  A: "green",
-  B: "blue",
-  C: "orange",
-  D: "red",
+const statusVariant = (status: string): string => {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "error";
+  if (status === "suspended") return "warning";
+  return "info";
+};
+
+const gradeVariant = (g: string): string => {
+  if (g === "A") return "success";
+  if (g === "B") return "info";
+  if (g === "C") return "warning";
+  return "error";
 };
 
 function statusToStep(status: string): number {
@@ -651,6 +660,7 @@ export default function SupplierDetailPage() {
           }
         >
           <Table
+            className="qf-table"
             loading={certsLoading}
             dataSource={certs}
             rowKey="cert_id"
@@ -692,11 +702,11 @@ export default function SupplierDetailPage() {
                       title={
                         <Space>
                           <span>{ev.eval_period}</span>
-                          <Tag color={GRADE_COLORS[ev.grade]}>{ev.grade} 级</Tag>
+                          <StatusBadge status={gradeVariant(ev.grade)}>{ev.grade} 级</StatusBadge>
                           <span style={{ fontWeight: 400, color: "#666" }}>
                             综合得分：{ev.total_score}
                           </span>
-                          <Tag>{ev.eval_type === "quarterly" ? "季度评价" : "年度评价"}</Tag>
+                          <StatusBadge status="info">{ev.eval_type === "quarterly" ? "季度评价" : "年度评价"}</StatusBadge>
                         </Space>
                       }
                     >
@@ -876,7 +886,7 @@ export default function SupplierDetailPage() {
               onClick={() => navigate(`/customer-quality/complaints/${item.id}`)}
             >
               <List.Item.Meta title={item.no} />
-              <Tag>{item.status}</Tag>
+              <StatusBadge status={["open", "investigating"].includes(item.status) ? "warning" : item.status === "closed" ? "success" : "info"}>{item.status}</StatusBadge>
             </List.Item>
           )}
         />
@@ -895,7 +905,7 @@ export default function SupplierDetailPage() {
               onClick={() => navigate(`/iqc/inspections/${item.id}`)}
             >
               <List.Item.Meta title={item.no} />
-              <Tag color="error">{item.result}</Tag>
+              <StatusBadge status="error">{item.result}</StatusBadge>
             </List.Item>
           )}
         />
@@ -914,7 +924,7 @@ export default function SupplierDetailPage() {
               onClick={() => navigate(`/scars/${item.id}`)}
             >
               <List.Item.Meta title={item.no} />
-              <Tag>{item.status}</Tag>
+              <StatusBadge status={statusVariant(item.status)}>{item.status}</StatusBadge>
             </List.Item>
           )}
         />
@@ -923,84 +933,50 @@ export default function SupplierDetailPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Button
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate("/suppliers")}
-        >
-          返回
-        </Button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>{isNew ? "新建供应商" : supplier!.name}</h2>
-        {!isNew && <Tag color={statusInfo.color}>{statusInfo.label}</Tag>}
-        {!isNew && supplier && canApprove('supplier') && (
-          <Space style={{ marginLeft: "auto" }}>
-            {supplier.status === "pending_review" && (
-              <>
-                <Button
-                  type="primary"
-                  loading={transitioning}
-                  onClick={handleApprove}
-                >
-                  批准准入
-                </Button>
-                <Button
-                  danger
-                  loading={transitioning}
-                  onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}
-                >
-                  拒绝
-                </Button>
-              </>
-            )}
-            {supplier.status === "audit_required" && (
-              <>
-                <Popconfirm
-                  title="确认批准该供应商？"
-                  onConfirm={handleConfirmApproved}
-                  okText="确认"
-                  cancelText="取消"
-                >
-                  <Button type="primary" loading={transitioning}>
-                    确认批准
-                  </Button>
-                </Popconfirm>
-                <Button
-                  danger
-                  loading={transitioning}
-                  onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}
-                >
-                  拒绝
-                </Button>
-              </>
-            )}
-            {supplier.status === "approved" && (
-              <Button
-                danger
-                loading={transitioning}
-                onClick={() => { setSuspendReason(""); setSuspendModalVisible(true); }}
-              >
-                暂停合作
-              </Button>
-            )}
-            {supplier.status === "suspended" && (
-              <Popconfirm
-                title="确认恢复与该供应商的合作？"
-                onConfirm={handleReinstate}
-                okText="确认"
-                cancelText="取消"
-              >
-                <Button type="primary" loading={transitioning}>
-                  恢复合作
-                </Button>
-              </Popconfirm>
-            )}
+    <PageShell
+      title={
+        isNew ? "新建供应商" : (
+          <Space size={12}>
+            {supplier!.name}
+            <StatusBadge status={statusVariant(supplier!.status)}>{statusInfo.label}</StatusBadge>
           </Space>
-        )}
-      </div>
-
-      {/* Approval progress bar */}
+        )
+      }
+      subtitle={isNew ? undefined : supplier!.supplier_no}
+      actions={
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/suppliers")}>
+            返回
+          </Button>
+          {!isNew && supplier && canApprove('supplier') && (
+            <>
+              {supplier.status === "pending_review" && (
+                <>
+                  <Button type="primary" loading={transitioning} onClick={handleApprove}>批准准入</Button>
+                  <Button danger loading={transitioning} onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}>拒绝</Button>
+                </>
+              )}
+              {supplier.status === "audit_required" && (
+                <>
+                  <Popconfirm title="确认批准该供应商？" onConfirm={handleConfirmApproved} okText="确认" cancelText="取消">
+                    <Button type="primary" loading={transitioning}>确认批准</Button>
+                  </Popconfirm>
+                  <Button danger loading={transitioning} onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}>拒绝</Button>
+                </>
+              )}
+              {supplier.status === "approved" && (
+                <Button danger loading={transitioning} onClick={() => { setSuspendReason(""); setSuspendModalVisible(true); }}>暂停合作</Button>
+              )}
+              {supplier.status === "suspended" && (
+                <Popconfirm title="确认恢复与该供应商的合作？" onConfirm={handleReinstate} okText="确认" cancelText="取消">
+                  <Button type="primary" loading={transitioning}>恢复合作</Button>
+                </Popconfirm>
+              )}
+            </>
+          )}
+        </Space>
+      }
+    >
       {!isNew && (
         <Card style={{ marginBottom: 16 }}>
           <Steps
@@ -1027,7 +1003,9 @@ export default function SupplierDetailPage() {
       )}
 
       {/* Tabs */}
-      <Tabs items={isNew ? tabItems.filter(t => t.key === "info") : tabItems} />
+      <DataCard title="供应商详情" noPadding>
+        <Tabs items={isNew ? tabItems.filter(t => t.key === "info") : tabItems} />
+      </DataCard>
 
       {/* Certification Modal */}
       {!certModalOpen && (
@@ -1115,6 +1093,6 @@ export default function SupplierDetailPage() {
           onChange={(e) => setSuspendReason(e.target.value)}
         />
       </Modal>
-    </div>
+    </PageShell>
   );
 }
