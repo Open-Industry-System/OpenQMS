@@ -1,20 +1,41 @@
-node_modules/
-dist/
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
-.env
+*.pyo
+*.egg-info/
 .venv/
 venv/
-*.egg-info/
-pgdata/
-.DS_Store
-.agents/
-.superpowers/
+
+# ── Node.js ──────────────────────────────────────────────────────────────────
+node_modules/
+dist/
 *.tsbuildinfo
-.playwright-mcp/
-.worktrees/
-node_modules
+
+# ── Environment & secrets ────────────────────────────────────────────────────
+.env
+.env.*
+
+# ── Database / storage ───────────────────────────────────────────────────────
+pgdata/
+
+# ── IDE & OS ─────────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Tool-specific (Claude Code, CodeGraph, Playwright, etc.) ─────────────────
 .claude/
 .codegraph/
-/.superpowers/
+.agents/
+.superpowers/
+.playwright-mcp/
+.worktrees/
 AGENTS.md
+skills-lock.json
+
+# ── Prototype & reference material (not part of the project) ──────────────────
+prototypes/
+Reference/
+TEST_REPORT.md
