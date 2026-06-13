@@ -119,7 +119,7 @@ def _make_rest_config(**overrides: Any) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="session")
 async def db_engine():
     """Create a test database engine with NullPool to avoid event-loop attachment issues."""
     from sqlalchemy.pool import NullPool

@@ -10,6 +10,7 @@ from app.services.tenant_service import TenantService
 from app.schemas.platform import TenantCreateRequest
 
 
+@pytest.mark.skip(reason="Requires live DB with Alembic migrations; run manually against provisioned environment")
 @pytest.mark.asyncio
 async def test_tenant_provisioning():
     """Tenant provisioning creates schema, runs migrations, seeds data, and sets status active."""

@@ -10,7 +10,7 @@ from app.services.supply_chain_risk_map.aggregator import (
 
 
 @pytest.fixture
-async def test_user(db):
+async def test_user(db, default_factory):
     """Create a minimal user row so FKs like created_by/evaluated_by resolve."""
     from app.models.user import User
     from app.models.role import RoleDefinition
@@ -27,6 +27,7 @@ async def test_user(db):
         user_id=uuid4(), username=f"risk_agg_test_{uuid4().hex[:8]}",
         display_name="AggTest", password_hash="hashed",
         role_id=role.id, legacy_role="admin", is_active=True,
+        factory_id=default_factory.id,
     )
     db.add(user)
     await db.flush()
@@ -41,10 +42,11 @@ async def test_erp_on_time_rate_with_filter(db, test_user):
 
     conn_id = uuid4()
     supplier = Supplier(supplier_id=uuid4(), supplier_no="T-ONT-01", name="OntimeTest",
-                         short_name="OT", status="approved", created_by=test_user.user_id)
+                         short_name="OT", status="approved", created_by=test_user.user_id,
+                         factory_id=test_user.factory_id)
     db.add(supplier)
     erp_conn = ERPConnection(connection_id=conn_id, name="test_conn", connector_type="mock",
-                               is_active=True, created_by=test_user.user_id)
+                               is_active=True, created_by=test_user.user_id, factory_id=test_user.factory_id)
     db.add(erp_conn)
     db.add(ERPSupplier(
         connection_id=conn_id, supplier_code="T-ONT-01",
@@ -78,7 +80,8 @@ async def test_erp_fallback_to_evaluation(db, test_user):
     from app.models.supplier import SupplierEvaluation
 
     supplier = Supplier(supplier_id=uuid4(), supplier_no="T-FB-01", name="FallbackTest",
-                         short_name="FB", status="approved", created_by=test_user.user_id)
+                         short_name="FB", status="approved", created_by=test_user.user_id,
+                         factory_id=test_user.factory_id)
     db.add(supplier)
     db.add(SupplierEvaluation(
         eval_id=uuid4(), supplier_id=supplier.supplier_id,
@@ -111,7 +114,7 @@ async def test_purchase_amount_pct_window_function(db, test_user):
                     short_name="P2", status="approved", created_by=test_user.user_id)
     db.add_all([s1, s2])
     erp_conn = ERPConnection(connection_id=conn_id, name="test_conn", connector_type="mock",
-                               is_active=True, created_by=test_user.user_id)
+                               is_active=True, created_by=test_user.user_id, factory_id=test_user.factory_id)
     db.add(erp_conn)
     db.add(ERPSupplier(connection_id=conn_id, supplier_code="T-PCT-01", external_id="ERP-SUP-PCT-01", name=s1.name, openqms_supplier_id=s1.supplier_id))
     db.add(ERPSupplier(connection_id=conn_id, supplier_code="T-PCT-02", external_id="ERP-SUP-PCT-02", name=s2.name, openqms_supplier_id=s2.supplier_id))
