@@ -129,16 +129,9 @@ const { canView, canCreate, canEdit, canApprove, canAdmin, isAdmin, roleKey } = 
 
 ### 3.2 未配置模块守卫的路由
 
-以下路由使用 `ProtectedRoute`（仅要求登录），未设置 `requiredModule`：
+~~之前部分路由使用 `ProtectedRoute`（仅要求登录），未设置 `requiredModule`。现已全部修复。~~
 
-| 路由 | 说明 |
-|------|------|
-| `/dashboard` | 仪表盘 |
-| `/knowledge-graph` | 知识图谱 |
-| `/change-impact` | 变更影响 |
-| `/mes/*` | MES 集成 |
-
-MES 的后端 API 仍使用 `require_permission(Module.MES, ...)` 做权限校验。
+所有业务路由均已配置 `requiredModule`，与后端 `Module` 枚举一一对应。
 
 ---
 
@@ -187,9 +180,23 @@ if target_status == "approved" and user.role_definition.role_key not in ("admin"
 
 ## 六、已知问题
 
-| # | 严重度 | 问题 | 位置 |
-|---|:------:|------|------|
-| 1 | 高 | 前端路由无模块守卫（knowledge_graph、change_impact、MES） | `App.tsx` |
-| 2 | 中 | 前端未自动调用 refresh token，需确认刷新机制是否完整 | `authStore.ts` |
-| 3 | 中 | 无登录接口速率限制 | `api/auth.py` |
-| 4 | 低 | 无认证审计日志 | `api/auth.py` |
+| # | 严重度 | 问题 | 位置 | 状态 |
+|---|:------:|------|------|:----:|
+| 1 | 高 | ~~前端路由无模块守卫（knowledge_graph、change_impact、MES）~~ | `App.tsx` | ✅ 已修复 |
+| 2 | 中 | ~~前端未自动调用 refresh token，需确认刷新机制是否完整~~ | `authStore.ts`, `client.ts` | ✅ 已修复 |
+| 3 | 中 | ~~无登录接口速率限制~~ | `api/auth.py` | ✅ 已修复 |
+| 4 | 低 | ~~无认证审计日志~~ | `api/auth.py` | ✅ 已修复 |
+
+### 修复记录
+
+| 日期 | 修复内容 |
+|------|----------|
+| 2026-06-13 | 前端路由守卫：`/change-impact` 添加 `requiredModule="fmea"`，MES 4 个路由添加 `requiredModule="mes"`，`/dashboard` 添加 `requiredModule="dashboard"` |
+| 2026-06-13 | 后端 `search.py`：`semantic_search` 和 `ask` 端点添加 `Module.KNOWLEDGE_GRAPH VIEW` 权限检查 |
+| 2026-06-13 | 后端 `graph.py`：4 个只读端点添加 `Module.KNOWLEDGE_GRAPH VIEW` 权限检查 |
+| 2026-06-13 | 后端 `auth.py`：`register` 和 `list_users` 从 `require_admin` 改为 `require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)` |
+| 2026-06-13 | 前端侧边栏：菜单项添加独立 `module` 属性，递归过滤子菜单 |
+| 2026-06-13 | 移除废弃的 `require_engineer_or_admin` 函数 |
+| 2026-06-13 | 前端自动 refresh token：存储 refresh_token，401 时自动尝试刷新，并发请求排队等待 |
+| 2026-06-13 | 登录速率限制：同一 IP 5 分钟内最多 10 次登录尝试，超限返回 429 |
+| 2026-06-13 | 认证审计日志：登录成功/失败/账户停用/注册/refresh 成功/失败均输出结构化日志 |
