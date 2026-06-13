@@ -10,6 +10,7 @@ Only Module.GROUP ADMIN grants cross-factory visibility.
 """
 import uuid
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -18,6 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.models.role import UserProductLine
+
+if TYPE_CHECKING:
+    from app.core.deps import RequestScope
 from app.models.factory import UserFactory
 
 

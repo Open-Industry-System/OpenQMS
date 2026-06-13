@@ -6,7 +6,7 @@ import asyncio
 import secrets
 import uuid
 from datetime import date, datetime, timezone, timedelta
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 
 from app.database import async_session
 from app.models.user import User

@@ -37,7 +37,7 @@ class IqcInspectionItem(Base):
     result: Mapped[str] = mapped_column(String(10), nullable=False, default="pending")
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    inspection: Mapped["IqcInspection"] = relationship(back_populates="items")
+    inspection: Mapped["IqcInspection"] = relationship(back_populates="items")  # noqa: F821
     measurements: Mapped[List["IqcItemMeasurement"]] = relationship(
         back_populates="item", lazy="selectin", cascade="all, delete-orphan"
     )

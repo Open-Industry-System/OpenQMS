@@ -3,6 +3,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -10,6 +11,7 @@ from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import check_factory_access
 from app.core.permissions import require_permission, PermissionLevel, Module
 from app.models.user import User
+from app.models.fmea_version import FMEAVersion
 from app.services import fmea_service, control_plan_service
 from app.services.version_service import (
     list_fmea_versions,

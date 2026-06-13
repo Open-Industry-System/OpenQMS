@@ -34,4 +34,4 @@ class User(Base):
         UUID(as_uuid=True), ForeignKey("factories.id", ondelete="SET NULL"), nullable=True
     )
 
-    role_definition: Mapped["RoleDefinition"] = relationship("RoleDefinition", lazy="joined")
+    role_definition: Mapped["RoleDefinition"] = relationship("RoleDefinition", lazy="joined")  # noqa: F821

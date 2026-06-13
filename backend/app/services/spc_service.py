@@ -1012,7 +1012,7 @@ async def bulk_import_samples(
     ic: InspectionCharacteristic,
     rows: list[dict],
     user_id: uuid.UUID,
-) -> "ImportResult":
+) -> "ImportResult":  # noqa: F821
     from app.utils.excel import ImportError as ExcelImportError, ImportResult, MAX_IMPORT_ROWS
     from app.utils.excel import coerce_datetime, coerce_int_strict
 

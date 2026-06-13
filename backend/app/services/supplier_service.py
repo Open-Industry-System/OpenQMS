@@ -157,7 +157,7 @@ async def bulk_import_suppliers(
     db: AsyncSession,
     rows: list[dict],
     user_id: uuid.UUID,
-) -> "ImportResult":
+) -> "ImportResult":  # noqa: F821
     from app.utils.excel import ImportError as ExcelImportError, ImportResult, MAX_IMPORT_ROWS
 
     if len(rows) > MAX_IMPORT_ROWS:

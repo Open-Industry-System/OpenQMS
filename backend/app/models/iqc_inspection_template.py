@@ -32,7 +32,7 @@ class IqcInspectionTemplate(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    material: Mapped["IqcMaterial"] = relationship(back_populates="templates")
+    material: Mapped["IqcMaterial"] = relationship(back_populates="templates")  # noqa: F821
     items: Mapped[List["IqcTemplateItem"]] = relationship(
         back_populates="template", lazy="selectin", cascade="all, delete-orphan"
     )
