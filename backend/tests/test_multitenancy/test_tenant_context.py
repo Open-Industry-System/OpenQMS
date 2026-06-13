@@ -128,6 +128,8 @@ async def test_get_db_sets_search_path_for_tenant():
     mock_session.execute = AsyncMock()
     mock_session.rollback = AsyncMock()
     mock_session.close = AsyncMock()
+    # in_transaction() is a synchronous method in SQLAlchemy 2.0
+    mock_session.in_transaction = MagicMock(return_value=False)
     # session.begin() returns an async context manager, not a coroutine
     begin_cm = AsyncMock()
     begin_cm.__aenter__ = AsyncMock(return_value=None)
