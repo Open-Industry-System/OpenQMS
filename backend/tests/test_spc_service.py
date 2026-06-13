@@ -31,7 +31,10 @@ async def db_session():
     if not await _check_db_available():
         pytest.skip("Database not available")
     from sqlalchemy.pool import NullPool
-    engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
+    engine = create_async_engine(
+        os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL),
+        echo=False, poolclass=NullPool,
+    )
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with session_factory() as session:

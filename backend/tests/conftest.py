@@ -49,17 +49,20 @@ async def _check_db_available() -> bool:
         _db_available = False
     return _db_available
 
+# ── Resolve the effective database URL for this test run ──────────────────────
+_test_db_url = os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL)
+
 # ── Patch the production engine with NullPool to prevent event-loop attachment
 # issues across test functions.  Tests that use app.database.async_session or
 # get_tenant_aware_session (e.g. MES concurrency, PLM sync) must not hold
 # pooled connections that outlive the event loop of the test that created them.
 import app.database as _db_mod
-_db_mod.engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
+_db_mod.engine = create_async_engine(_test_db_url, echo=False, poolclass=NullPool)
 _db_mod.async_session = async_sessionmaker(_db_mod.engine, class_=AsyncSession, expire_on_commit=False)
 
 # Test-scoped engine with NullPool so every session gets a fresh connection
 # (avoids "another operation is in progress" cross-test contamination)
-_test_engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+_test_engine = create_async_engine(_test_db_url, poolclass=NullPool)
 _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
 
 # Stable UUID for the default test factory

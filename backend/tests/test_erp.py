@@ -11,6 +11,7 @@ Run:  DATABASE_URL="postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms" \
       SECRET_KEY=test-secret-key-not-default \
       pytest backend/tests/test_erp.py -v
 """
+import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -56,7 +57,10 @@ async def erp_db() -> AsyncSession:
     if not await _check_db_available():
         pytest.skip("Database not available")
     from sqlalchemy.pool import NullPool
-    engine = create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
+    engine = create_async_engine(
+        os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL),
+        echo=False, poolclass=NullPool,
+    )
     async with engine.connect() as conn:
         async with conn.begin() as tx:
             _sf = async_sessionmaker(

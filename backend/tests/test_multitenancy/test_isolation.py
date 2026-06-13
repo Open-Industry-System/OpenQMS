@@ -1,4 +1,6 @@
 """Test that tenant schemas are properly isolated — data in tenant A is invisible to tenant B."""
+import os
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
@@ -15,7 +17,10 @@ async def engine():
     from tests.conftest import _check_db_available
     if not await _check_db_available():
         pytest.skip("Database not available")
-    eng = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    eng = create_async_engine(
+        os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL),
+        poolclass=NullPool,
+    )
     yield eng
     await eng.dispose()
 
