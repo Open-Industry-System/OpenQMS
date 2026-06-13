@@ -37,8 +37,8 @@ class LinearityStudy(Base):
         UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
     product_line_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -57,8 +57,8 @@ class LinearityMeasurement(Base):
     study_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("linearity_studies.study_id", ondelete="CASCADE"), nullable=False
     )
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     reference_value: Mapped[float] = mapped_column(Float, nullable=False)
     measured_value: Mapped[float] = mapped_column(Float, nullable=False)
@@ -77,8 +77,8 @@ class LinearityResult(Base):
     study_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("linearity_studies.study_id", ondelete="CASCADE"), nullable=False, unique=True
     )
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     slope: Mapped[float] = mapped_column(Float, nullable=False)
     intercept: Mapped[float] = mapped_column(Float, nullable=False)

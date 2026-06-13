@@ -8,8 +8,10 @@ from app.database import get_db
 from app.schemas.recommendation import SimilarNodesRequest, SimilarNodesResponse, SimilarNodeMatch
 from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import check_factory_access
 from app.graph.repository import FMEAGraphRepository
 from app.graph.deps import get_graph_repository
+from app.services import fmea_service
 
 
 class SimilarNodeOut(BaseModel):
@@ -102,25 +104,19 @@ def _sanitize_global_stats(raw: dict) -> dict:
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
 
-def _check_factory_access(entity, scope: RequestScope):
-    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
-    if not hasattr(entity, "factory_id") or entity.factory_id is None:
-        return
-    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
-        raise HTTPException(status_code=404, detail="FMEA not found")
-    if scope.factory_scope.accessible_factory_ids is not None:
-        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
-            raise HTTPException(status_code=404, detail="FMEA not found")
-
-
 @router.get("/fmea/{fmea_id}/impact/{node_id}")
 async def impact_chain(
     fmea_id: uuid.UUID,
     node_id: str,
     repo: FMEAGraphRepository = Depends(get_graph_repository),
     scope: RequestScope = Depends(get_request_scope),
+    db: AsyncSession = Depends(get_db),
 ):
     """下游影响链：从指定节点出发追踪失效效应和控制措施。"""
+    fmea = await fmea_service.get_fmea(db, fmea_id)
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    check_factory_access(fmea.factory_id, scope)
     return await repo.get_impact_chain(fmea_id, node_id)
 
 
@@ -130,8 +126,13 @@ async def cause_chain(
     node_id: str,
     repo: FMEAGraphRepository = Depends(get_graph_repository),
     scope: RequestScope = Depends(get_request_scope),
+    db: AsyncSession = Depends(get_db),
 ):
     """上游原因链：从指定节点出发追踪失效原因。"""
+    fmea = await fmea_service.get_fmea(db, fmea_id)
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    check_factory_access(fmea.factory_id, scope)
     return await repo.get_cause_chain(fmea_id, node_id)
 
 
@@ -151,6 +152,11 @@ async def similar_nodes(
         raise HTTPException(status_code=422, detail="product_line_code cannot be empty")
     if not name_keyword:
         raise HTTPException(status_code=422, detail="name_keyword cannot be empty")
+    # 产品线访问校验
+    if scope.pl_scope.mode == "EXPLICIT" and product_line_code not in (scope.pl_scope.codes or []):
+        raise HTTPException(status_code=403, detail="No access to this product line")
+    if scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=403, detail="No product line access")
     return await repo.find_similar_nodes(node_type, name_keyword, product_line_code, limit)
 
 
@@ -164,6 +170,11 @@ async def cross_fmea_stats(
     product_line_code = product_line_code.strip()
     if not product_line_code:
         raise HTTPException(status_code=422, detail="product_line_code cannot be empty")
+    # 产品线访问校验
+    if scope.pl_scope.mode == "EXPLICIT" and product_line_code not in (scope.pl_scope.codes or []):
+        raise HTTPException(status_code=403, detail="No access to this product line")
+    if scope.pl_scope.mode == "NONE":
+        raise HTTPException(status_code=403, detail="No product line access")
     return await repo.get_cross_fmea_stats(product_line_code)
 
 

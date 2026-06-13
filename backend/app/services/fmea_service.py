@@ -152,6 +152,7 @@ async def create_fmea(
         payload={"version": 1, "product_line_code": product_line_code, "fmea_type": fmea_type},
     ))
 
+    await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code)
     try:
         await db.commit()
     except IntegrityError:
@@ -159,7 +160,6 @@ async def create_fmea(
         raise ValueError(f"FMEA document number '{document_no}' already exists.")
 
     await db.refresh(fmea)
-    await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code)
     return fmea
 
 
@@ -243,9 +243,9 @@ async def update_fmea(
             rec_service = RecommendationService(db=db, llm_provider=None, graph_repo=_NullGraphRepo())
             await rec_service.invalidate_cache_for_fmea(fmea.fmea_id)
 
+    await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code)
     await db.commit()
     await db.refresh(fmea)
-    await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code)
     return fmea
 
 

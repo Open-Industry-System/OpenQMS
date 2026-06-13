@@ -174,8 +174,8 @@ export default function App() {
         <Route path="/customer-quality" element={<ProtectedRoute requiredModule="customer_quality"><CustomerQualityPage /></ProtectedRoute>} />
         <Route path="/customer-quality/complaints/:id" element={<ProtectedRoute requiredModule="customer_quality"><ComplaintDetailPage /></ProtectedRoute>} />
         <Route path="/customer-quality/rma/:id" element={<ProtectedRoute requiredModule="customer_quality"><RMADetailPage /></ProtectedRoute>} />
-        <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
-        <Route path="/change-impact" element={<ChangeImpactPage />} />
+        <Route path="/knowledge-graph" element={<ProtectedRoute requiredModule="knowledge_graph"><KnowledgeGraphPage /></ProtectedRoute>} />
+        <Route path="/change-impact" element={<ProtectedRoute><ChangeImpactPage /></ProtectedRoute>} />
         <Route path="/mes/dashboard" element={<ProtectedRoute><MESDashboardPage /></ProtectedRoute>} />
         <Route path="/mes/connections" element={<ProtectedRoute><MESConnectionsPage /></ProtectedRoute>} />
         <Route path="/mes/orders" element={<ProtectedRoute><MESOrdersPage /></ProtectedRoute>} />

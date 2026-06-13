@@ -19,8 +19,8 @@ class DocumentEmbedding(Base):
     # embedding column is vector type - handled via raw SQL in migration, not mapped here
     # Queries using pgvector operators must use raw SQL or text()
     product_line_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     # "metadata" is reserved on SQLAlchemy Base — map DB column "metadata" to attribute "embedding_metadata"
     embedding_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default=text("'{}'::jsonb"))
@@ -36,8 +36,8 @@ class EmbeddingSyncOutbox(Base):
     entity_type: Mapped[str] = mapped_column(String(20), nullable=False)
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     product_line_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(20), default="pending", server_default="'pending'")
     retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

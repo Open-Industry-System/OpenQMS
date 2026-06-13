@@ -145,9 +145,9 @@ async def create_scar(
         changed_fields={"scar_no": scar.scar_no, "supplier_id": str(supplier_id), "source_type": source_type, "description": description},
         operated_by=user_id,
     ))
+    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
     await db.commit()
     await db.refresh(scar)
-    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
     # Re-load with supplier relationship
     return await get_scar(db, scar.scar_id)
 
@@ -220,8 +220,8 @@ async def update_scar(
         changed_fields={k: v for k, v in {"description": description, "requested_action": requested_action, "due_date": str(due_date) if due_date else None}.items() if v is not None},
         operated_by=user_id,
     ))
-    await db.commit()
     await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
+    await db.commit()
     return await get_scar(db, scar.scar_id)
 
 

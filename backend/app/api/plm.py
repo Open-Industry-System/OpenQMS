@@ -67,13 +67,13 @@ async def _resolve_change_order_product_line(
 
 
 def _check_factory_access(entity, scope: RequestScope, detail: str = "PLM connection not found"):
+    """Wrapper around centralized check_factory_access that raises 404 (information hiding)."""
     if not hasattr(entity, "factory_id") or entity.factory_id is None:
         return
-    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
+    try:
+        check_factory_access(entity.factory_id, scope)
+    except HTTPException:
         raise HTTPException(status_code=404, detail=detail)
-    if scope.factory_scope.accessible_factory_ids is not None:
-        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
-            raise HTTPException(status_code=404, detail=detail)
 
 
 def _apply_scope_filter(query, scope: RequestScope, model, pl_column: str = "product_line_code"):

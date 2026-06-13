@@ -4,10 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import get_user_permission, Module, PermissionLevel, get_current_user
+from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
-from app.models.user import User
 from app.models.fmea import FMEADocument
 
 from app.schemas.fmea import (
@@ -157,15 +156,14 @@ async def update_fmea(
 
 async def require_approve_permission(
     req: TransitionRequest,
-    user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
-) -> User:
+) -> RequestScope:
     if req.target_status == "approved":
-        from app.core.permissions import get_user_permission
-        level = await get_user_permission(user, Module.FMEA, db)
+        level = await get_user_permission(scope.user, Module.FMEA, db)
         if level < PermissionLevel.APPROVE:
             raise HTTPException(status_code=403, detail="审批权限不足")
-    return user
+    return scope
 
 
 @router.post("/{fmea_id}/transition", response_model=FMEAResponse)
@@ -173,13 +171,14 @@ async def transition_fmea(
     fmea_id: uuid.UUID,
     req: TransitionRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_approve_permission),
+    scope: RequestScope = Depends(require_approve_permission),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
+    check_factory_access(fmea.factory_id, scope)
     try:
-        fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, user.user_id)
+        fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return FMEAResponse.model_validate(fmea)

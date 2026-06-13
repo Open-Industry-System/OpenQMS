@@ -17,8 +17,8 @@ class CAPAEightD(Base):
     document_no: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     product_line_code: Mapped[str] = mapped_column(String(20), default="DC-DC-100")
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(20), default="D1_TEAM")
     severity: Mapped[str] = mapped_column(String(20), default="一般")

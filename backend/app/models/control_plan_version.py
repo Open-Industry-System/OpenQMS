@@ -19,8 +19,8 @@ class ControlPlanVersion(Base):
         ForeignKey("control_plans.cp_id", ondelete="CASCADE"),
         nullable=False,
     )
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     major_no: Mapped[int] = mapped_column(Integer, nullable=False)
     minor_no: Mapped[int] = mapped_column(Integer, nullable=False)

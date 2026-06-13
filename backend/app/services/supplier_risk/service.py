@@ -470,13 +470,13 @@ async def create_scar_from_alert(
     alert.linked_scar_id = scar.scar_id
     alert.status = "action_taken"
 
+    # Enqueue embedding before commit so outbox row is committed atomically
+    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
+
     # Commit everything atomically
     await db.commit()
     await db.refresh(scar)
     await db.refresh(alert)
-
-    # Enqueue embedding after commit
-    await enqueue_embedding(db, "scar", scar.scar_id, scar.product_line_code)
 
     return scar
 
@@ -515,12 +515,12 @@ async def create_capa_from_alert(
     alert.linked_capa_id = capa.report_id
     alert.status = "action_taken"
 
+    # Enqueue embedding before commit so outbox row is committed atomically
+    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
+
     # Commit everything atomically
     await db.commit()
     await db.refresh(capa)
     await db.refresh(alert)
-
-    # Enqueue embedding after commit
-    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
 
     return capa

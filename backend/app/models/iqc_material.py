@@ -26,8 +26,8 @@ class IqcMaterial(Base):
     default_inspection_level: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     unit: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     product_line_code: Mapped[str] = mapped_column(String(20), nullable=False, default="DC-DC-100")
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     created_by: Mapped[uuid.UUID] = mapped_column(

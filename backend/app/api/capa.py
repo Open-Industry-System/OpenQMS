@@ -6,11 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.core.permissions import get_user_permission, Module, PermissionLevel, get_current_user
+from app.core.permissions import get_user_permission, Module, PermissionLevel
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import validate_factory_invariant, resolve_create_factory_id, check_factory_access
 from typing import Any
-from app.models.user import User
 from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
 
@@ -120,17 +119,6 @@ async def capa_capabilities(
     }
 
 
-def _check_factory_access(entity, scope: RequestScope):
-    """Raise 404 if entity's factory_id is not in the user's accessible factories."""
-    if not hasattr(entity, "factory_id") or entity.factory_id is None:
-        return
-    if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
-        raise HTTPException(status_code=404, detail="8D report not found")
-    if scope.factory_scope.accessible_factory_ids is not None:
-        if entity.factory_id not in scope.factory_scope.accessible_factory_ids:
-            raise HTTPException(status_code=404, detail="8D report not found")
-
-
 @router.get("/{report_id}", response_model=CAPAResponse)
 async def get_capa(
     report_id: uuid.UUID,
@@ -143,7 +131,7 @@ async def get_capa(
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    _check_factory_access(capa, scope)
+    check_factory_access(capa.factory_id, scope)
     return CAPAResponse.model_validate(capa)
 
 
@@ -160,7 +148,7 @@ async def update_capa(
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    _check_factory_access(capa, scope)
+    check_factory_access(capa.factory_id, scope)
     update_data = req.model_dump(exclude_unset=True)
     capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     return CAPAResponse.model_validate(capa)
@@ -168,17 +156,18 @@ async def update_capa(
 
 async def require_close_permission(
     report_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
-) -> tuple[User, Any]:
+) -> tuple[RequestScope, Any]:
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
     if capa.status in ["D7_PREVENTION", "D8_CLOSURE"]:
-        level = await get_user_permission(user, Module.CAPA, db)
+        level = await get_user_permission(scope.user, Module.CAPA, db)
         if level < PermissionLevel.APPROVE:
             raise HTTPException(status_code=403, detail="审批权限不足")
-    return user, capa
+    return scope, capa
 
 
 @router.post("/{report_id}/advance", response_model=CAPAResponse)
@@ -186,12 +175,12 @@ async def advance_capa(
     report_id: uuid.UUID,
     body: AdvanceRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    result: tuple[User, Any] = Depends(require_close_permission),
+    result: tuple[RequestScope, Any] = Depends(require_close_permission),
 ):
-    user, capa = result
+    scope, capa = result
     skip_reasons = body.d7_skip_reasons if body else None
     try:
-        capa = await capa_service.advance_capa(db, capa, user.user_id, skip_reasons)
+        capa = await capa_service.advance_capa(db, capa, scope.user.user_id, skip_reasons)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CAPAResponse.model_validate(capa)
@@ -212,14 +201,14 @@ async def link_fmea(
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    _check_factory_access(capa, scope)
+    check_factory_access(capa.factory_id, scope)
 
     # Validate target FMEA exists and user can access its factory
     target_fmea = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id))
     target_fmea = target_fmea.scalar_one_or_none()
     if target_fmea is None:
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
-    _check_factory_access(target_fmea, scope)
+    check_factory_access(target_fmea.factory_id, scope)
 
     capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
     return CAPAResponse.model_validate(capa)
@@ -242,7 +231,7 @@ async def get_related_fmea(
     ).scalar_one_or_none()
     if not capa:
         raise HTTPException(status_code=404, detail="CAPA not found")
-    _check_factory_access(capa, scope)
+    check_factory_access(capa.factory_id, scope)
     if not capa.fmea_ref_id:
         return {"fmea_id": None, "document_no": None, "fmea_node_id": None}
 
@@ -285,7 +274,7 @@ async def get_d7_fmea_recommendations(
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    _check_factory_access(capa, scope)
+    check_factory_access(capa.factory_id, scope)
 
     # Resolve product line scope
     allowed_pls = _resolve_allowed_pls(scope)
@@ -343,7 +332,7 @@ async def get_d4_fmea_recommendations(
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    _check_factory_access(capa, scope)
+    check_factory_access(capa.factory_id, scope)
 
     allowed_pls = _resolve_allowed_pls(scope)
     if allowed_pls is not None and not allowed_pls:
@@ -414,7 +403,7 @@ async def get_d5_fmea_recommendations(
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
-    _check_factory_access(capa, scope)
+    check_factory_access(capa.factory_id, scope)
 
     allowed_pls = _resolve_allowed_pls(scope)
     if allowed_pls is not None and not allowed_pls:
@@ -494,7 +483,7 @@ async def draft_capabilities(
     capa = await capa_service.get_capa(db, report_id)
     if not capa:
         raise HTTPException(status_code=404, detail="CAPA 报告不存在")
-    _check_factory_access(capa, scope)
+    check_factory_access(capa.factory_id, scope)
 
     current_status = capa.status
     if current_status in ("ARCHIVED", "CLOSED", "D1_TEAM"):
@@ -551,7 +540,7 @@ async def get_capa_lessons(
     capa_doc = await capa_service.get_capa(db, report_id)
     if capa_doc is None:
         raise HTTPException(status_code=404, detail="CAPA not found")
-    _check_factory_access(capa_doc, scope)
+    check_factory_access(capa_doc.factory_id, scope)
 
     # Check FMEA VIEW permission since service may query FMEA sources
     fmea_level = await get_user_permission(scope.user, Module.FMEA, db)

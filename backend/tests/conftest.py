@@ -2,7 +2,8 @@
 
 Provides:
 - db: async SQLAlchemy session (real database, rolled back after each test)
-- admin_user: a persisted User with admin role
+- default_factory: a persisted Factory for test isolation
+- admin_user: a persisted User with admin role (linked to default_factory)
 - plm_connection: a persisted PLMConnection linked to admin_user
 """
 import os
@@ -16,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from app.config import settings
+from app.models.factory import Factory
 from app.models.plm import PLMConnection
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
@@ -27,6 +29,9 @@ from sqlalchemy.pool import NullPool
 # (avoids "another operation is in progress" cross-test contamination)
 _test_engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
 _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
+
+# Stable UUID for the default test factory
+DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 @pytest_asyncio.fixture
@@ -56,7 +61,29 @@ async def db():
 
 
 @pytest_asyncio.fixture
-async def admin_user(db: AsyncSession) -> User:
+async def default_factory(db: AsyncSession) -> Factory:
+    """Create and return a default factory for tests.
+
+    Uses a stable UUID so that FK references from other fixtures are
+    consistent across test runs.
+    """
+    result = await db.execute(
+        select(Factory).where(Factory.id == DEFAULT_FACTORY_ID)
+    )
+    factory = result.scalar_one_or_none()
+    if factory is None:
+        factory = Factory(
+            id=DEFAULT_FACTORY_ID,
+            code="TEST",
+            name="Test Factory",
+        )
+        db.add(factory)
+        await db.flush()
+    return factory
+
+
+@pytest_asyncio.fixture
+async def admin_user(db: AsyncSession, default_factory: Factory) -> User:
     """Create and return an admin user for the test.
 
     ProductLine and RoleDefinition are inserted idempotently -- the fixture
@@ -67,7 +94,11 @@ async def admin_user(db: AsyncSession) -> User:
         select(ProductLine).where(ProductLine.code == "DC-DC-100")
     )
     if result.scalar_one_or_none() is None:
-        db.add(ProductLine(code="DC-DC-100", name="DC-DC-100"))
+        db.add(ProductLine(
+            code="DC-DC-100",
+            name="DC-DC-100",
+            factory_id=default_factory.id,
+        ))
         await db.flush()
 
     # Ensure admin role exists (FK dependency for User)
@@ -100,6 +131,7 @@ async def admin_user(db: AsyncSession) -> User:
         role_id=role.id,
         legacy_role="admin",
         is_active=True,
+        factory_id=default_factory.id,
     )
     db.add(user)
     await db.flush()
@@ -108,7 +140,7 @@ async def admin_user(db: AsyncSession) -> User:
 
 
 @pytest_asyncio.fixture
-async def plm_connection(db: AsyncSession, admin_user: User) -> PLMConnection:
+async def plm_connection(db: AsyncSession, admin_user: User, default_factory: Factory) -> PLMConnection:
     """Create and return a PLMConnection for the test."""
     conn = PLMConnection(
         name="Test PLM Conn",
@@ -116,6 +148,7 @@ async def plm_connection(db: AsyncSession, admin_user: User) -> PLMConnection:
         config={},
         product_line_code="DC-DC-100",
         created_by=admin_user.user_id,
+        factory_id=default_factory.id,
     )
     db.add(conn)
     await db.flush()

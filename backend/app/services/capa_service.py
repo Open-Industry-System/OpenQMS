@@ -129,6 +129,7 @@ async def create_capa(
     )
     db.add(audit_log)
 
+    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
     try:
         await db.commit()
     except IntegrityError:
@@ -136,7 +137,6 @@ async def create_capa(
         raise ValueError(f"CAPA report number '{document_no}' already exists.")
 
     await db.refresh(capa)
-    await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
     return capa
 
 
@@ -245,10 +245,10 @@ async def update_capa(
             .values(status="closed", handled_at=func.now())
         )
 
-    await db.commit()
-    await db.refresh(capa)
     if embedding_changed:
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code)
+    await db.commit()
+    await db.refresh(capa)
     return capa
 
 

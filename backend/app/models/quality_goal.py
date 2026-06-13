@@ -18,8 +18,8 @@ class QualityGoal(Base):
     )
     level: Mapped[int] = mapped_column(Integer, nullable=False)
     product_line_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     target_value: Mapped[str] = mapped_column(String(50), nullable=False)

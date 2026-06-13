@@ -1,8 +1,9 @@
 """tenant squash — create all tenant business tables in one migration.
 
-In single-tenant mode (TENANT_MODE=single), the main-line migrations already
-create every business table, so this migration is a no-op.  In multi-tenant
-mode it runs `TenantBase.metadata.create_all()` inside the tenant schema.
+Creates all tables registered with TenantBase.metadata. In single-tenant
+mode the main-line migrations already create these tables, so create_all()
+is a no-op for existing tables (CHECKFIRST skips them). In multi-tenant
+mode this creates every business table inside the tenant schema.
 
 Revision ID: t001
 Revises: t000
@@ -23,15 +24,10 @@ depends_on = None
 def upgrade() -> None:
     """Create every table registered with TenantBase.metadata in the target schema.
 
-    In single-tenant mode the main-line migrations already create the tables,
-    so we skip create_all() to avoid duplicate-table errors.
+    create_all() uses CHECKFIRST by default, so it safely skips tables
+    that already exist (e.g., in single-tenant mode where main migrations
+    already created them).
     """
-    import os
-    tenant_mode = os.getenv("TENANT_MODE", "single")
-    if tenant_mode == "single":
-        logger.info("tenant squash: TENANT_MODE=single, skipping create_all (main migrations already create tables)")
-        return
-
     from app.database import TenantBase
     import app.models  # noqa: F401
 
@@ -41,11 +37,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Drop all tenant tables."""
-    import os
-    tenant_mode = os.getenv("TENANT_MODE", "single")
-    if tenant_mode == "single":
-        return
-
     from app.database import TenantBase
     import app.models  # noqa: F401
 

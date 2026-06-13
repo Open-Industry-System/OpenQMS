@@ -18,8 +18,8 @@ class FMEADocument(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     fmea_type: Mapped[str] = mapped_column(String(20), default="PFMEA")
     product_line_code: Mapped[str] = mapped_column(String(20), default="DC-DC-100")
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(20), default="draft")
     version: Mapped[int] = mapped_column(Integer, default=1)

@@ -28,6 +28,6 @@ class IqcAqlQualitySnapshot(Base):
     has_safety_defect: Mapped[bool] = mapped_column(Boolean, nullable=False)
     linked_customer_complaint: Mapped[bool] = mapped_column(Boolean, nullable=False)
     calculated_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )

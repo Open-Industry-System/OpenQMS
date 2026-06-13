@@ -30,8 +30,8 @@ class ManagementReview(Base):
         ForeignKey("product_lines.code", ondelete="SET NULL"),
         nullable=True,
     )
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     location: Mapped[str | None] = mapped_column(String(100), nullable=True)
     chair_person_id: Mapped[uuid.UUID] = mapped_column(
@@ -80,8 +80,8 @@ class ReviewOutput(Base):
         ForeignKey("management_reviews.review_id", ondelete="CASCADE"),
         nullable=False,
     )
-    factory_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     category: Mapped[str] = mapped_column(String(30), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)

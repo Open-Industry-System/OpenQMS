@@ -671,13 +671,13 @@ async def create_audit_finding(
     )
     db.add(audit_log)
 
+    await enqueue_embedding(db, "audit_finding", finding.finding_id, None)
     try:
         await db.commit()
     except IntegrityError as e:
         await db.rollback()
         raise ValueError(f"failed to create audit finding: {e}")
     await db.refresh(finding)
-    await enqueue_embedding(db, "audit_finding", finding.finding_id, None)
     return finding
 
 
@@ -733,13 +733,13 @@ async def update_audit_finding(
     )
     db.add(audit_log)
 
+    await enqueue_embedding(db, "audit_finding", finding.finding_id, None)
     try:
         await db.commit()
     except IntegrityError as e:
         await db.rollback()
         raise ValueError(f"failed to update audit finding: {e}")
     await db.refresh(finding)
-    await enqueue_embedding(db, "audit_finding", finding.finding_id, None)
     return finding
 
 
