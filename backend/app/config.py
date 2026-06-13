@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     SEARCH_VECTOR_WEIGHT: float = 0.7   # weight for vector search in RRF
     SEARCH_FULLTEXT_WEIGHT: float = 0.3 # weight for fulltext search in RRF
 
+    # Multi-tenant mode: "single" (default, no tenant resolution),
+    # "dev" (X-Tenant-ID header enabled), "production" (subdomain + JWT only)
+    TENANT_MODE: str = "single"
+    TENANT_DOMAIN: str = ""  # e.g., "openqms.com" — used for subdomain tenant resolution
+
     model_config = {"env_file": ".env"}
 
     @field_validator("SECRET_KEY")

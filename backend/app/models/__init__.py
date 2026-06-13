@@ -1,3 +1,6 @@
+from app.database import TenantBase  # noqa: F401 — ensures models register with TenantBase
+from app.database import PlatformBase  # noqa: F401 — ensures models register with PlatformBase
+
 from app.models.user import User
 from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
@@ -75,6 +78,12 @@ from app.models.group_kpi_snapshot import GroupKPISnapshot
 from app.models.supplier_shared_profile import SupplierSharedProfile
 from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
 
+# Platform-level models (public schema)
+from app.models.tenant import Tenant  # noqa: F401
+from app.models.platform_admin import PlatformAdminUser  # noqa: F401
+from app.models.reference_template import ReferenceTemplate  # noqa: F401
+from app.models.tenant_migration import TenantMigration  # noqa: F401
+
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
@@ -148,4 +157,8 @@ __all__ = [
     "GroupKPISnapshot",
     "SupplierSharedProfile",
     "SupplyChainRiskSnapshot",
+    "Tenant",
+    "PlatformAdminUser",
+    "ReferenceTemplate",
+    "TenantMigration",
 ]

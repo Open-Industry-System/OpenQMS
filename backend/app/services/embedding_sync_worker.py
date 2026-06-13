@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session
+from app.database import async_session, get_tenant_aware_session
 from app.models.document_embedding import EmbeddingSyncOutbox
 from app.services.embedding_provider import create_embedding_provider
 
@@ -282,7 +282,7 @@ async def run_worker():
     logger.info(f"Using embedding provider: {provider.model_name} ({provider.dimensions}d)")
 
     # Validate that provider dimensions match the table's vector dimensions
-    async with async_session() as db:
+    async with get_tenant_aware_session() as db:
         result = await db.execute(text("""
             SELECT atttypmod FROM pg_attribute
             WHERE attrelid = 'document_embeddings'::regclass AND attname = 'embedding'
@@ -311,7 +311,7 @@ async def run_worker():
 
     while running:
         try:
-            async with async_session() as db:
+            async with get_tenant_aware_session() as db:
                 # Recover events stuck in processing from prior crashes
                 await recover_stale_events(db)
 
@@ -339,7 +339,7 @@ async def run_worker():
         except Exception as e:
             logger.error(f"Worker error: {e}", exc_info=True)
             if 'events' in locals() and events:
-                async with async_session() as db:
+                async with get_tenant_aware_session() as db:
                     for event in events:
                         try:
                             await mark_failed(

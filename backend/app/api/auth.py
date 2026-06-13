@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,13 +68,27 @@ async def build_user_response(user: User, db: AsyncSession) -> UserResponse:
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.username == req.username))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    token = create_access_token(str(user.user_id))
-    refresh_token, refresh_expires = create_refresh_token(str(user.user_id))
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
+    # Build JWT payload — include tenant_id when request has a resolved tenant
+    tenant = getattr(request.state, "tenant", None)
+    token_data = {
+        "sub": str(user.user_id),
+        "role_id": str(user.role_id),
+        "factory_id": str(user.factory_id) if user.factory_id else None,
+    }
+    if tenant:
+        token_data["tenant_id"] = str(tenant.id)
+    token = create_access_token(data=token_data)
+    refresh_token, refresh_expires = create_refresh_token(
+        str(user.user_id),
+        tenant_id=str(tenant.id) if tenant else None,
+    )
     user.refresh_token = refresh_token
     user.refresh_token_expires = refresh_expires
     await db.commit()
@@ -121,8 +135,11 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
 
 
 @router.post("/refresh", response_model=RefreshTokenResponse)
-async def refresh_token(req: RefreshTokenRequest, db: AsyncSession = Depends(get_db)):
-    user_id = decode_refresh_token(req.refresh_token)
+async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    payload = decode_refresh_token(req.refresh_token)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    user_id = payload.get("sub")
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     result = await db.execute(select(User).where(User.user_id == user_id))
@@ -131,8 +148,25 @@ async def refresh_token(req: RefreshTokenRequest, db: AsyncSession = Depends(get
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     if user.refresh_token_expires and user.refresh_token_expires < datetime.now(timezone.utc):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
-    new_access = create_access_token(str(user.user_id))
-    new_refresh, new_expires = create_refresh_token(str(user.user_id))
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
+    # Preserve multi-tenant claims in refreshed token.
+    # Prefer tenant_id from the refresh token payload; fall back to the
+    # request-resolved tenant for backward compatibility.
+    token_data = {
+        "sub": str(user.user_id),
+        "role_id": str(user.role_id),
+        "factory_id": str(user.factory_id) if user.factory_id else None,
+    }
+    tenant = getattr(request.state, "tenant", None)
+    tenant_id = payload.get("tenant_id") or (str(tenant.id) if tenant else None)
+    if tenant_id:
+        token_data["tenant_id"] = tenant_id
+    new_access = create_access_token(data=token_data)
+    new_refresh, new_expires = create_refresh_token(
+        str(user.user_id),
+        tenant_id=tenant_id,
+    )
     user.refresh_token = new_refresh
     user.refresh_token_expires = new_expires
     await db.commit()

@@ -31,6 +31,7 @@ export interface User {
   auditor_info?: AuditorInfo;
   factory_scope?: FactoryScope | null;
   factories?: Factory[];
+  tenant_id?: string;
 }
 
 export interface LoginRequest {

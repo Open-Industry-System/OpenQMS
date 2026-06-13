@@ -14,7 +14,7 @@ from sqlalchemy import select, update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import async_session
+from app.database import async_session, get_tenant_aware_session
 from app.models.graph_sync_outbox import GraphSyncOutbox
 from app.graph.neo4j_driver import get_neo4j_driver, ensure_constraints
 from app.services.graph_projection_service import GraphProjectionService
@@ -111,7 +111,7 @@ async def _cleanup_stale_processing() -> int:
     Worker 启动时调用，清理上次崩溃残留。
     """
     stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
-    async with async_session() as db:
+    async with get_tenant_aware_session() as db:
         result = await db.execute(
             update(GraphSyncOutbox)
             .where(
@@ -185,7 +185,7 @@ async def run_worker() -> None:
 
     while True:
         try:
-            async with async_session() as db:
+            async with get_tenant_aware_session() as db:
                 tasks = await _poll_and_lock(db)
 
             if not tasks:
@@ -208,7 +208,7 @@ async def run_worker() -> None:
             process_ids = {t["id"] for t in deduped["process"]}
             for task in tasks:
                 if str(task.id) not in process_ids:
-                    async with async_session() as db:
+                    async with get_tenant_aware_session() as db:
                         await _mark_completed(db, task.id)
 
             # Process deduplicated tasks
@@ -217,12 +217,12 @@ async def run_worker() -> None:
                     continue
                 try:
                     await projection.sync_fmea_to_neo4j(task.aggregate_id)
-                    async with async_session() as db:
+                    async with get_tenant_aware_session() as db:
                         await _mark_completed(db, task.id)
                     logger.info(f"Synced FMEA {task.aggregate_id} to Neo4j")
                 except Exception as e:
                     logger.error(f"Failed to sync FMEA {task.aggregate_id}: {e}")
-                    async with async_session() as db:
+                    async with get_tenant_aware_session() as db:
                         await _mark_failed(db, task, str(e))
 
         except Exception as e:

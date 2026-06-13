@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import SYSTEM_USER_ID
-from app.database import async_session
+from app.database import async_session, get_tenant_aware_session
 from app.models.plm import (
     PLMBOM,
     PLMChangeImpactTask,
@@ -651,7 +651,7 @@ async def _run_single_sync_job(
     BATCH_SIZE = 50
     now = datetime.now(timezone.utc)
 
-    async with async_session() as ingest_db:
+    async with get_tenant_aware_session() as ingest_db:
         ingestion = PLMIngestionService(ingest_db)
         for i, item in enumerate(items):
             # Copy to avoid mutating the caller's dict; inject metadata keys.
@@ -670,7 +670,7 @@ async def _run_single_sync_job(
         await ingest_db.commit()
 
     # Update job status on success (re-fetch in the caller's session)
-    async with async_session() as update_db:
+    async with get_tenant_aware_session() as update_db:
         result = await update_db.execute(
             select(PLMSyncJob).where(PLMSyncJob.job_id == job.job_id)
         )
@@ -850,7 +850,7 @@ class PLMChangeImpactWorker:
             for link in links:
                 try:
                     # Use an independent session because analyze() commits internally
-                    async with async_session() as analysis_db:
+                    async with get_tenant_aware_session() as analysis_db:
                         from app.services.change_impact_service import (
                             ChangeImpactService,
                         )

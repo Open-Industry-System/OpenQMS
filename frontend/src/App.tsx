@@ -73,6 +73,8 @@ import FactoryComparisonPage from "./pages/group/FactoryComparison";
 import GroupSuppliersPage from "./pages/group/GroupSuppliers";
 import GroupAuditsPage from "./pages/group/GroupAudits";
 import SupplyChainRiskMapPage from "./pages/supplyChainRiskMap/SupplyChainRiskMapPage";
+import TenantSuspended from "./pages/TenantSuspended";
+import TenantDeactivated from "./pages/TenantDeactivated";
 
 function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
   const token = useAuthStore((s) => s.token);
@@ -104,6 +106,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/tenant-suspended" element={<TenantSuspended />} />
+      <Route path="/tenant-deactivated" element={<TenantDeactivated />} />
       <Route
         element={
           <ProtectedRoute>

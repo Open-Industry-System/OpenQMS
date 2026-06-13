@@ -2,7 +2,8 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import Depends, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import (
@@ -23,8 +24,11 @@ from app.core.factory_scope import (
     get_user_factory_ids,
     get_user_product_line_codes,
 )
-from app.database import get_db
+from app.core.security import verify_token, PLATFORM_ISSUER, PLATFORM_AUDIENCE, TENANT_ISSUER, TENANT_AUDIENCE
+from jose import JWTError
+from app.database import get_db, get_platform_db
 from app.models.user import User
+from app.models.platform_admin import PlatformAdminUser
 
 
 @dataclass
@@ -61,6 +65,49 @@ async def get_request_scope(
     )
 
 
+async def require_platform_admin(request: Request, db: AsyncSession = Depends(get_platform_db)):
+    """Dependency for /api/platform/* routes.
+    Rejects tenant JWTs (tenant_id claim present) with 403.
+    Requires platform admin JWT (is_platform_admin: true) with correct iss/aud.
+    Also verifies the admin is still active in the database.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    token = auth_header[7:]
+    try:
+        payload = verify_token(token, issuer=PLATFORM_ISSUER, audience=PLATFORM_AUDIENCE)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Reject refresh tokens
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    if payload.get("tenant_id"):
+        raise HTTPException(status_code=403, detail="Tenant JWT cannot access platform routes")
+
+    if not payload.get("is_platform_admin"):
+        raise HTTPException(status_code=403, detail="Platform admin access required")
+
+    if payload.get("iss") != PLATFORM_ISSUER:
+        raise HTTPException(status_code=403, detail="Invalid token issuer")
+    if payload.get("aud") != PLATFORM_AUDIENCE:
+        raise HTTPException(status_code=403, detail="Invalid token audience")
+
+    # Verify admin is still active in the database (not just the JWT payload)
+    admin_id = payload.get("sub")
+    if admin_id is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    result = await db.execute(select(PlatformAdminUser).where(PlatformAdminUser.id == admin_id))
+    admin = result.scalar_one_or_none()
+    if admin is None or not admin.is_active:
+        raise HTTPException(status_code=401, detail="Account deactivated or not found")
+
+    return payload
+
+
 __all__ = [
     "get_current_user",
     "require_permission",
@@ -70,4 +117,5 @@ __all__ = [
     "Module",
     "RequestScope",
     "get_request_scope",
+    "require_platform_admin",
 ]

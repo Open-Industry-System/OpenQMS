@@ -9,7 +9,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session
+from app.database import async_session, get_tenant_aware_session
 from app.services.embedding_outbox import enqueue_embedding
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ async def main():
 
     logger.info(f"Starting embedding backfill for: {types}")
 
-    async with async_session() as db:
+    async with get_tenant_aware_session() as db:
         for entity_type in types:
             logger.info(f"Processing {entity_type}...")
             count = await backfill_entity_type(db, entity_type, args.batch_size)

@@ -5,10 +5,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
-from app.database import async_session
+from app.database import async_session, run_for_each_tenant, get_tenant_aware_session
 from app.models.user import User
 from app.models.role import RoleDefinition
 from app.core.security import hash_password
+from app.config import settings
 from app.api.auth import router as auth_router
 from app.api.fmea import router as fmea_router
 from app.api.capa import router as capa_router
@@ -52,33 +53,40 @@ from app.api.erp import router as erp_router
 from app.api.supplier_risk import router as supplier_risk_router
 from app.api.supply_chain_risk_map import router as supply_chain_risk_map_router
 from app.api.group import router as group_router
+from app.api.platform import router as platform_router
+from app.core.tenant_context import TenantContextMiddleware
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with async_session() as db:
-        result = await db.execute(select(User).where(User.username == "admin"))
-        if not result.scalar_one_or_none():
-            try:
-                admin_role_result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
-                admin_role = admin_role_result.scalar_one_or_none()
-                if admin_role:
-                    db.add(User(
-                        username="admin",
-                        password_hash=hash_password("Admin@2026"),
-                        display_name="系统管理员",
-                        role_id=admin_role.id,
-                    ))
-                    await db.commit()
-                else:
-                    print("WARNING: admin role not found in role_definitions. Run migrations and seed.")
-            except Exception:
-                # role_definitions table may not exist yet (migration not run)
-                # Rollback failed transaction and skip admin creation
-                await db.rollback()
-                print("WARNING: role_definitions table not found. Run 'alembic upgrade head' and seed before using the permission system.")
+    # Legacy single-tenant bootstrap: create default admin user.
+    # In multi-tenant mode, users/role_definitions live in tenant schemas,
+    # so running this against the public schema would fail after platform-only
+    # migrations. Tenant seeding happens during provisioning instead.
+    if settings.TENANT_MODE == "single":
+        async with async_session() as db:
+            result = await db.execute(select(User).where(User.username == "admin"))
+            if not result.scalar_one_or_none():
+                try:
+                    admin_role_result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
+                    admin_role = admin_role_result.scalar_one_or_none()
+                    if admin_role:
+                        db.add(User(
+                            username="admin",
+                            password_hash=hash_password("Admin@2026"),
+                            display_name="系统管理员",
+                            role_id=admin_role.id,
+                        ))
+                        await db.commit()
+                    else:
+                        print("WARNING: admin role not found in role_definitions. Run migrations and seed.")
+                except Exception:
+                    # role_definitions table may not exist yet (migration not run)
+                    # Rollback failed transaction and skip admin creation
+                    await db.rollback()
+                    print("WARNING: role_definitions table not found. Run 'alembic upgrade head' and seed before using the permission system.")
 
     # Initialize LLM provider (non-fatal)
     from app.services.llm_provider import create_llm_provider
@@ -104,10 +112,13 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(60)
             try:
-                async with async_session() as db:
-                    deleted = await delete_expired_sessions(db)
-                    if deleted > 0:
-                        logger.info("[collaboration] cleaned up %d expired sessions", deleted)
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        deleted = await delete_expired_sessions(db)
+                        if deleted > 0:
+                            logger.info("[collaboration] cleaned up %d expired sessions for %s", deleted, tenant.slug)
+                    except Exception as e:
+                        logger.error("[collaboration] cleanup error for tenant %s: %s", tenant.slug, e)
             except Exception as e:
                 logger.error("[collaboration] cleanup error: %s", e)
 
@@ -120,8 +131,11 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(30)
             try:
-                async with async_session() as db:
-                    await MESSyncService.run_sync_round(db)
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        await MESSyncService.run_sync_round(db)
+                    except Exception as e:
+                        logger.error("[mes_sync] error for tenant %s: %s", tenant.slug, e)
             except Exception as e:
                 logger.error("[mes_sync] error: %s", e)
 
@@ -134,8 +148,11 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(30)
             try:
-                async with async_session() as db:
-                    await MESPushService.process_outbox(db)
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        await MESPushService.process_outbox(db)
+                    except Exception as e:
+                        logger.error("[mes_outbox] error for tenant %s: %s", tenant.slug, e)
             except Exception as e:
                 logger.error("[mes_outbox] error: %s", e)
 
@@ -148,10 +165,13 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(86400)
             try:
-                async with async_session() as db:
-                    stats = await MESLifecycleService.cleanup(db)
-                    if any(v > 0 for v in stats.values()):
-                        logger.info("[mes_lifecycle] cleanup: %s", stats)
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        stats = await MESLifecycleService.cleanup(db)
+                        if any(v > 0 for v in stats.values()):
+                            logger.info("[mes_lifecycle] cleanup for %s: %s", tenant.slug, stats)
+                    except Exception as e:
+                        logger.error("[mes_lifecycle] error for tenant %s: %s", tenant.slug, e)
             except Exception as e:
                 logger.error("[mes_lifecycle] error: %s", e)
 
@@ -164,8 +184,11 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(30)
             try:
-                async with async_session() as db:
-                    await PLMSyncService.run_sync_round(db)
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        await PLMSyncService.run_sync_round(db)
+                    except Exception as e:
+                        logger.error("[plm_sync] error for tenant %s: %s", tenant.slug, e)
             except Exception as e:
                 logger.error("[plm_sync] error: %s", e)
 
@@ -182,23 +205,22 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(30)
             try:
-                # Phase 1: recover stuck + claim in separate sessions
-                async with async_session() as db:
+                # Phase 1: recover stuck + claim + process, per tenant
+                async for tenant, db in run_for_each_tenant():
                     await PLMChangeImpactWorker.recover_stuck_tasks(db)
                     await db.commit()
-                async with async_session() as db:
                     claimed = await PLMChangeImpactWorker.claim_tasks(db)
                     await db.commit()
 
-                # Phase 2: process each claimed task — process_task() already
-                # re-verifies the claim token in its own session.
-                for task in claimed:
-                    try:
-                        async with async_session() as proc_db:
-                            await PLMChangeImpactWorker.process_task(proc_db, task)
-                            await proc_db.commit()
-                    except Exception as e:
-                        logger.error("[plm_impact] task %s error: %s", task.task_id, e)
+                    # Process claimed tasks within the tenant context
+                    # so get_tenant_aware_session() reads the correct schema.
+                    for task in claimed:
+                        try:
+                            async with get_tenant_aware_session() as proc_db:
+                                await PLMChangeImpactWorker.process_task(proc_db, task)
+                                await proc_db.commit()
+                        except Exception as e:
+                            logger.error("[plm_impact] task %s error: %s", task.task_id, e)
             except Exception as e:
                 logger.error("[plm_impact] error: %s", e)
 
@@ -210,8 +232,11 @@ async def lifespan(app: FastAPI):
     async def _erp_sync_loop():
         while True:
             try:
-                async with async_session() as db:
-                    await ERPSyncService.sync_all(db)
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        await ERPSyncService.sync_all(db)
+                    except Exception as e:
+                        logger.error("[erp_sync] error for tenant %s: %s", tenant.slug, e)
             except Exception as e:
                 logger.error("[erp_sync] error: %s", e)
             await asyncio.sleep(60)
@@ -225,10 +250,13 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(86400)
             try:
-                async with async_session() as db:
-                    expired = await AqlService.expire_stale_recommendations(db)
-                    if expired > 0:
-                        logger.info("[aql_optimization] expired %d stale recommendations", expired)
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        expired = await AqlService.expire_stale_recommendations(db)
+                        if expired > 0:
+                            logger.info("[aql_optimization] expired %d stale recommendations for %s", expired, tenant.slug)
+                    except Exception as e:
+                        logger.error("[aql_optimization] expiry error for tenant %s: %s", tenant.slug, e)
             except Exception as e:
                 logger.error("[aql_optimization] expiry error: %s", e)
 
@@ -241,8 +269,11 @@ async def lifespan(app: FastAPI):
         # Initial evaluation 10 seconds after startup (avoids startup peak)
         await asyncio.sleep(10)
         try:
-            async with async_session() as db:
-                await evaluate_all_suppliers(db, product_line_code=None)
+            async for tenant, db in run_for_each_tenant():
+                try:
+                    await evaluate_all_suppliers(db, product_line_code=None)
+                except Exception as e:
+                    logger.error("[risk_eval] error for tenant %s: %s", tenant.slug, e)
         except Exception as e:
             logger.error("[risk_eval_init] error: %s", e)
 
@@ -250,8 +281,11 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(86400)
             try:
-                async with async_session() as db:
-                    await evaluate_all_suppliers(db, product_line_code=None)
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        await evaluate_all_suppliers(db, product_line_code=None)
+                    except Exception as e:
+                        logger.error("[risk_eval] error for tenant %s: %s", tenant.slug, e)
             except Exception as e:
                 logger.error("[risk_eval] error: %s", e)
 
@@ -290,10 +324,18 @@ async def lifespan(app: FastAPI):
     # Cancel ERP background tasks
     for task in (erp_sync_task,):
         task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Cancel AQL background tasks
     for task in (aql_expiry_task,):
         task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Cancel risk eval task
     risk_eval_task.cancel()
@@ -319,6 +361,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="OpenQMS API", version="0.1.0", lifespan=lifespan)
+
+# Expose tenant domain for subdomain-based tenant resolution
+app.state.tenant_domain = settings.TENANT_DOMAIN
+
+app.add_middleware(TenantContextMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -369,6 +416,7 @@ app.include_router(erp_router)
 app.include_router(supplier_risk_router)
 app.include_router(supply_chain_risk_map_router)
 app.include_router(group_router)
+app.include_router(platform_router)
 
 
 @app.get("/api/health")

@@ -13,12 +13,12 @@ from app.schemas.control_plan import ControlPlanCreate, ControlPlanUpdate, Impor
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import create_cp_version
 from app.services.cp_validation.engine import CPValidationEngine
-from app.database import async_session
+from app.database import async_session, get_tenant_aware_session
 
 
 async def _run_validation_background(cp_id: uuid.UUID, user_id: uuid.UUID, trigger: str) -> None:
     """Run CP validation in a background task with an isolated DB session."""
-    async with async_session() as db:
+    async with get_tenant_aware_session() as db:
         try:
             engine = CPValidationEngine()
             await engine.validate(db, cp_id, user_id, trigger=trigger)

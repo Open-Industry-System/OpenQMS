@@ -16,6 +16,14 @@ client.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
+  // Development mode: inject X-Tenant-ID header from localStorage
+  if (import.meta.env.DEV) {
+    const tenantSlug = localStorage.getItem("tenant_slug");
+    if (tenantSlug) {
+      config.headers["X-Tenant-ID"] = tenantSlug;
+    }
+  }
+
   // Auto-inject factory_id on GET requests for business APIs
   const currentFactoryId = localStorage.getItem("current_factory_id");
   const isGetRequest = config.method === "get";
@@ -33,6 +41,14 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (response) => response,
   async (error) => {
+    if (error.response?.status === 503 && error.response?.data?.detail?.tenant_suspended) {
+      window.location.href = "/tenant-suspended";
+      return;
+    }
+    if (error.response?.status === 410) {
+      window.location.href = "/tenant-deactivated";
+      return;
+    }
     if (error.response?.status === 401) {
       localStorage.removeItem("access_token");
       window.location.href = "/login";
