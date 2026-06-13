@@ -1,6 +1,6 @@
 # OpenQMS 开发路线图
 
-**更新日期**: 2026-06-12
+**更新日期**: 2026-06-13
 **当前版本**: v0.1.0 (MVP)
 **目标版本**: v3.0 (全功能发布)
 
@@ -157,7 +157,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 | 供应链风险地图 | P3 | ✅ 完成 (2026-06-12) | 多维度供应风险热力图 + 产品线隔离 + 环比差异 + 供应商详情/对比 + 6 月趋势 + 定时快照(pg_try_advisory_lock) + CSV/Excel 导出 + 830 测试 |
 | 自定义看板（拖拽式）| P3 | ✅ 完成 | react-grid-layout 拖拽布局，widget 库面板（18 种 widget），用户级 layout 存储，产品线过滤，权限控制 |
 | 多工厂部署支持 | P3 | ✅ 完成 (2026-06-12) | 单数据库 + factory_id 行级隔离 + 三层 Scope 模型 + 集团汇总 |
-| SaaS 多租户架构 | P3 | 🔲 待开发 | Schema 级别隔离 + 弹性资源 |
+| SaaS 多租户架构 | P3 | ✅ 完成 (2026-06-13) | Schema-per-tenant 隔离 + 平台/租户双 Base + JWT 域隔离 + 租户配置 API |
 
 **Phase 4 MES 集成已完成 (2026-06-05)**:
 1. ~~数据库迁移~~ ✅ 9 张 MES 表 + CHECK 约束 + 权限种子（alembic/030）
@@ -213,16 +213,16 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 ---
 
-## 项目统计 (截至 2026-06-12)
+## 项目统计 (截至 2026-06-13)
 
 | 指标 | 数量 |
 |------|------|
-| Git 提交 | 1,050+ 次 |
-| 后端 Python 文件 | 210+ 个 |
+| Git 提交 | 1,060+ 次 |
+| 后端 Python 文件 | 215+ 个 |
 | 前端 TS/TSX 文件 | 195+ 个 |
-| API 路由模块 | 36 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/supply_chain_risk_map/...) |
+| API 路由模块 | 37 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/supply_chain_risk_map/platform...) |
 | 前端页面 | 75+ 个 TSX 页面 |
-| 数据库表 | 105+ 张 (含 ERP 12 张 + Factory/Group 关联表 + Supply Chain Risk Snapshot) |
+| 数据库表 | 109+ 张 (含 ERP 12 张 + Factory/Group 关联表 + Supply Chain Risk Snapshot + Platform 4 张 + Tenant 114 张业务表) |
 | 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
 | 种子数据 | 5 用户 + 2 工厂 + 多模块演示数据 |
 
@@ -260,6 +260,17 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 ---
 
 ## 下一步行动
+
+**Phase 4 全部完成 — SaaS 多租户架构已上线 (2026-06-13)**:
+
+Phase 4 全部功能已开发完毕。多租户架构是最后一个 Phase 4 模块，包括：
+- Schema-per-tenant 隔离（PostgreSQL schema 级别）
+- 平台/租户双 DeclarativeBase + Alembic 双分支迁移
+- JWT 域隔离（TENANT_ISSUER/AUDIENCE vs PLATFORM_ISSUER/AUDIENCE）
+- TenantContextMiddleware 三层租户解析 + 状态码处理
+- 租户配置 API + 完整种子数据
+- 5 轮安全审计修复
+- 43+ 条非数据库测试 + 8 条真实 JWT 验证测试
 
 **已完成 (2026-05-31)**:
 - [x] Neo4j 知识图谱基础设施 (Docker Compose + 双 Repository 实现 + API 路由)
@@ -334,8 +345,17 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 8. ~~前端类型 + API~~ ✅ 5 接口 + 17 API 函数
 9. ~~前端页面~~ ✅ 4 页 + 2 组件 + 路由 + 侧边栏
 
-**Phase 4 剩余 (待开发)**:
-- [ ] SaaS 多租户架构 — Schema 级别隔离 + 弹性资源
+**Phase 4 SaaS 多租户架构已完成 (2026-06-13)**:
+1. ~~双 DeclarativeBase~~ ✅ PlatformBase（public schema）+ TenantBase（tenant schema）+ Base = TenantBase 别名
+2. ~~Alembic 双分支迁移~~ ✅ platform@head + tenant@head 独立分支 + t000 基线 + t001 squash（114 张业务表）
+3. ~~TenantContextMiddleware~~ ✅ 子域名 → X-Tenant-ID（dev only） → JWT tenant_id 三层回退解析 + 503/410/400 状态码
+4. ~~get_db + search_path~~ ✅ 请求级 search_path 设置 + ContextVar 传递 + 池 checkout RESET 安全网
+5. ~~平台 API~~ ✅ /api/platform/* 独立路由 + get_platform_db 强制 public + require_platform_admin（含 is_active DB 校验）
+6. ~~JWT 域隔离~~ ✅ TENANT_ISSUER/AUDIENCE + PLATFORM_ISSUER/AUDIENCE + iss/aud 密码学验证 + refresh token 含 tenant_id
+7. ~~后台任务租户隔离~~ ✅ run_for_each_tenant() 异步生成器 + 每租户 try/except + get_tenant_aware_session() ContextVar 读取
+8. ~~租户配置 API~~ ✅ POST /api/platform/tenants（含 admin_email/password）+ 列表 + 状态管理 + 完整种子（7 角色 + 25 权限 + 默认工厂/产品线 + 首个管理员）
+9. ~~5 轮安全审计修复~~ ✅ refresh token 域隔离 + iss/aud 密码学验证 + is_active DB 校验 + 未解析租户 400 + token type 检查 + 单租户模式跳过 bootstrap + session cleanup 简化 + 租户唯一性 409
+10. ~~测试覆盖~~ ✅ 43 条非数据库测试 + 8 条真实 JWT 验证测试 + 3 条生命周期测试（需 PostgreSQL）
 
 **Phase 4 供应链风险地图已完成 (2026-06-12)**:
 1. ~~数据库迁移~~ ✅ supply_chain_risk_snapshots 表 + UNIQUE NULLS NOT DISTINCT + 权限种子 + erp_purchase_orders.actual_delivery_date
