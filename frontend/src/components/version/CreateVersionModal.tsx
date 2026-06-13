@@ -62,7 +62,7 @@ export default function CreateVersionModal({
       onCancel={onClose}
       onOk={handleSubmit}
       confirmLoading={loading}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical">
         <Form.Item

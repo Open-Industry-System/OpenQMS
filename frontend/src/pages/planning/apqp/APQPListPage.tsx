@@ -185,7 +185,7 @@ export default function APQPListPage() {
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => form.submit()}
-        destroyOnClose
+        destroyOnHidden
         width={640}
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>

@@ -232,7 +232,7 @@ export default function SmartSuggestionDropdown({
   return (
     <Dropdown
       open={open && !disabled}
-      dropdownRender={() => dropdownContent}
+      popupRender={() => dropdownContent}
       trigger={[]}
       placement="bottomLeft"
     >

@@ -26,7 +26,7 @@ def upgrade() -> None:
         "audit_mode", sa.String(20), nullable=True,
     ))
     op.add_column("audit_plans", sa.Column(
-        "customer_confirmation_doc", JSONB, server_default="[]", nullable=False,
+        "customer_confirmation_doc", JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False,
     ))
 
     # CHECK constraints
@@ -55,7 +55,7 @@ def upgrade() -> None:
         "customer_confirmation_date", sa.Date, nullable=True,
     ))
     op.add_column("audit_findings", sa.Column(
-        "customer_confirmation_attachments", JSONB, server_default="[]", nullable=False,
+        "customer_confirmation_attachments", JSONB, server_default=sa.text("'[]'::jsonb"), nullable=False,
     ))
 
     op.create_index("idx_audit_findings_confirmed", "audit_findings", ["customer_confirmed"])

@@ -55,7 +55,7 @@ def upgrade() -> None:
         sa.Column("batch_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("sample_batches.batch_id", ondelete="CASCADE"), nullable=False),
         sa.Column("sequence_no", sa.Integer, nullable=False),
         sa.Column("value", sa.Numeric(12, 4), nullable=False),
-        sa.Column("alarm_flags", postgresql.JSONB, nullable=False, server_default="[]"),
+        sa.Column("alarm_flags", postgresql.JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),
     )
 
     op.create_table(

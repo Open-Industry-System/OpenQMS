@@ -715,8 +715,8 @@ export default function ControlPlanEditorPage() {
         />
       )}
 
-      <Tabs activeKey={outerTab} onChange={setOuterTab}>
-        <Tabs.TabPane tab="编辑器" key="editor">
+      <Tabs activeKey={outerTab} onChange={setOuterTab} items={[
+        { key: "editor", label: "编辑器", children: <>
 
       {/* Action buttons */}
       <Space style={{ marginBottom: 16 }}>
@@ -897,8 +897,8 @@ export default function ControlPlanEditorPage() {
           onSuccess={handleImportSuccess}
         />
       )}
-        </Tabs.TabPane>
-        <Tabs.TabPane tab={<span><HistoryOutlined /> 版本历史</span>} key="history">
+        </>},
+        { key: "history", label: <span><HistoryOutlined /> 版本历史</span>, children: (
           <VersionHistoryTab
             documentId={id!}
             documentType="cp"
@@ -910,8 +910,8 @@ export default function ControlPlanEditorPage() {
             onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}
           />
-        </Tabs.TabPane>
-      </Tabs>
+        )},
+      ]} />
 
       {!isNew && id && (
         <div style={{ marginTop: 16 }}>

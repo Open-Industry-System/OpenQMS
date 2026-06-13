@@ -170,7 +170,7 @@ export default function PPAPListPage() {
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => form.submit()}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={handleCreate} initialValues={{ submission_level: 3 }}>
           <Form.Item name="supplier_id" label="供应商" rules={[{ required: true, message: "请选择供应商" }]}>

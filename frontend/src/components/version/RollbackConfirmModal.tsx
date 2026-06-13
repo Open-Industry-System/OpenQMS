@@ -70,7 +70,7 @@ export default function RollbackConfirmModal({
       onCancel={onClose}
       onOk={handleSubmit}
       confirmLoading={loading}
-      destroyOnClose
+      destroyOnHidden
     >
       <Alert
         message="版本回退说明"

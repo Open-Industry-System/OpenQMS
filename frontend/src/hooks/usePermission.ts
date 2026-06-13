@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useAuthStore } from "../store/authStore";
 
 export type ModuleKey =
@@ -20,13 +20,18 @@ export function usePermission() {
       return (permissions[module] ?? 0) as PermissionLevel;
     };
   }, [permissions]);
+  const canView = useCallback((module: ModuleKey) => getLevel(module) >= PermissionLevel.VIEW, [getLevel]);
+  const canCreate = useCallback((module: ModuleKey) => getLevel(module) >= PermissionLevel.CREATE, [getLevel]);
+  const canEdit = useCallback((module: ModuleKey) => getLevel(module) >= PermissionLevel.EDIT, [getLevel]);
+  const canApprove = useCallback((module: ModuleKey) => getLevel(module) >= PermissionLevel.APPROVE, [getLevel]);
+  const canAdmin = useCallback((module: ModuleKey) => getLevel(module) >= PermissionLevel.ADMIN, [getLevel]);
   return {
     getLevel,
-    canView: (module: ModuleKey) => getLevel(module) >= PermissionLevel.VIEW,
-    canCreate: (module: ModuleKey) => getLevel(module) >= PermissionLevel.CREATE,
-    canEdit: (module: ModuleKey) => getLevel(module) >= PermissionLevel.EDIT,
-    canApprove: (module: ModuleKey) => getLevel(module) >= PermissionLevel.APPROVE,
-    canAdmin: (module: ModuleKey) => getLevel(module) >= PermissionLevel.ADMIN,
+    canView,
+    canCreate,
+    canEdit,
+    canApprove,
+    canAdmin,
     isAdmin: user?.role_key === "admin",
     roleKey: user?.role_key ?? "viewer",
   };

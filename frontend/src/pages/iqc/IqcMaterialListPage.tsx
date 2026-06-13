@@ -255,7 +255,7 @@ export default function IqcMaterialListPage() {
         onOk={handleSubmit}
         onCancel={() => setModalOpen(false)}
         okText="保存"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item

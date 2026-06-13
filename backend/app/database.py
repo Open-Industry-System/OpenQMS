@@ -13,7 +13,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 
 @event.listens_for(engine.sync_engine, "checkout")
-def _reset_search_path_on_checkout(dbapi_connection, connection_record):
+def _reset_search_path_on_checkout(dbapi_connection, connection_record, *args):
     """Safety net: ensure search_path is reset to default on every pool checkout."""
     cursor = dbapi_connection.cursor()
     cursor.execute("RESET search_path")

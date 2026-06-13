@@ -248,8 +248,139 @@ async def seed_erp_permissions(db):
             db.add(RolePermission(role_id=role.id, module="erp", permission_level=level))
 
 
+# Full permission matrix (mirrors alembic/028_permission_matrix.py)
+_MODULES = [
+    "fmea", "capa", "dashboard", "audit", "customer_quality", "customer_audit",
+    "supplier", "iqc", "ppap", "spc", "msa", "planning", "management_review",
+    "user_mgmt", "permission_mgmt", "special_characteristic", "quality_goal", "scar",
+    "knowledge_graph", "mes", "plm", "erp", "supplier_risk", "supply_chain_risk_map",
+    "group",
+]
+
+PERMISSION_MATRIX = {
+    "admin": {m: 5 for m in _MODULES},
+    "manager": {
+        "fmea": 4, "capa": 4, "dashboard": 4, "audit": 4,
+        "customer_quality": 4, "customer_audit": 4, "supplier": 4,
+        "iqc": 4, "ppap": 4, "spc": 4, "msa": 4, "planning": 4,
+        "management_review": 4, "user_mgmt": 1, "permission_mgmt": 0,
+        "special_characteristic": 4, "quality_goal": 4, "scar": 4,
+        "knowledge_graph": 3, "mes": 3, "plm": 3, "erp": 4,
+        "supplier_risk": 3, "supply_chain_risk_map": 3, "group": 3,
+    },
+    "viewer": {
+        "fmea": 1, "capa": 1, "dashboard": 1, "audit": 1,
+        "customer_quality": 1, "customer_audit": 1, "supplier": 1,
+        "iqc": 1, "ppap": 1, "spc": 1, "msa": 1, "planning": 1,
+        "management_review": 1, "user_mgmt": 0, "permission_mgmt": 0,
+        "special_characteristic": 1, "quality_goal": 1, "scar": 1,
+        "knowledge_graph": 1, "mes": 1, "plm": 1, "erp": 1,
+        "supplier_risk": 1, "supply_chain_risk_map": 1, "group": 1,
+    },
+    "customer_qe": {
+        "fmea": 1, "capa": 2, "dashboard": 1, "audit": 1,
+        "customer_quality": 3, "customer_audit": 3, "supplier": 1,
+        "iqc": 0, "ppap": 0, "spc": 1, "msa": 0, "planning": 0,
+        "management_review": 0, "user_mgmt": 0, "permission_mgmt": 0,
+        "special_characteristic": 0, "quality_goal": 0, "scar": 1,
+        "knowledge_graph": 0, "mes": 0, "plm": 0, "erp": 1,
+        "supplier_risk": 1, "supply_chain_risk_map": 1, "group": 1,
+    },
+    "supplier_qe": {
+        "fmea": 1, "capa": 2, "dashboard": 1, "audit": 1,
+        "customer_quality": 0, "customer_audit": 0, "supplier": 3,
+        "iqc": 3, "ppap": 3, "spc": 1, "msa": 0, "planning": 1,
+        "management_review": 0, "user_mgmt": 0, "permission_mgmt": 0,
+        "special_characteristic": 0, "quality_goal": 0, "scar": 3,
+        "knowledge_graph": 0, "mes": 1, "plm": 1, "erp": 1,
+        "supplier_risk": 3, "supply_chain_risk_map": 3, "group": 1,
+    },
+    "field_qe": {
+        "fmea": 3, "capa": 3, "dashboard": 1, "audit": 1,
+        "customer_quality": 1, "customer_audit": 1, "supplier": 1,
+        "iqc": 1, "ppap": 0, "spc": 3, "msa": 3, "planning": 1,
+        "management_review": 1, "user_mgmt": 0, "permission_mgmt": 0,
+        "special_characteristic": 0, "quality_goal": 0, "scar": 1,
+        "knowledge_graph": 1, "mes": 2, "plm": 1, "erp": 2,
+        "supplier_risk": 1, "supply_chain_risk_map": 1, "group": 1,
+    },
+    "planning_qe": {
+        "fmea": 3, "capa": 1, "dashboard": 1, "audit": 1,
+        "customer_quality": 1, "customer_audit": 1, "supplier": 1,
+        "iqc": 1, "ppap": 3, "spc": 1, "msa": 0, "planning": 3,
+        "management_review": 1, "user_mgmt": 0, "permission_mgmt": 0,
+        "special_characteristic": 3, "quality_goal": 0, "scar": 1,
+        "knowledge_graph": 0, "mes": 1, "plm": 3, "erp": 1,
+        "supplier_risk": 1, "supply_chain_risk_map": 1, "group": 1,
+    },
+}
+
+
+async def seed_all_permissions(db):
+    """Seed the full permission matrix if role_permissions is empty or incomplete."""
+    from app.models.role import RolePermission
+    from sqlalchemy import select
+
+    # Check if permissions already exist
+    count_result = await db.execute(
+        select(func.count()).select_from(RolePermission)
+    )
+    existing_count = count_result.scalar() or 0
+    expected_count = len(PERMISSION_MATRIX) * len(_MODULES)  # 7 * 25 = 175
+    if existing_count >= expected_count:
+        return  # Already seeded
+
+    result = await db.execute(select(RoleDefinition))
+    roles_map = {r.role_key: r.id for r in result.scalars().all()}
+
+    for role_key, perms in PERMISSION_MATRIX.items():
+        if role_key not in roles_map:
+            continue
+        role_id = roles_map[role_key]
+        for module, level in perms.items():
+            existing = await db.execute(
+                select(RolePermission).where(
+                    RolePermission.role_id == role_id,
+                    RolePermission.module == module,
+                )
+            )
+            if not existing.scalar_one_or_none():
+                db.add(RolePermission(
+                    role_id=role_id, module=module, permission_level=level
+                ))
+
+    await db.flush()
+    print("Seeded full permission matrix.")
+
+
 async def seed():
     async with async_session() as db:
+        # ─── Seed roles if missing (single-tenant mode) ───
+        from app.models.role import RoleDefinition, RolePermission
+        role_result = await db.execute(select(RoleDefinition))
+        existing_roles = {r.role_key for r in role_result.scalars().all()}
+        _ROLES = [
+            ("admin", "系统管理员", "System Admin", True, False, True, 1),
+            ("manager", "质量经理", "Quality Manager", True, True, False, 2),
+            ("viewer", "只读用户", "Viewer", True, False, False, 3),
+            ("customer_qe", "客户质量工程师", "Customer QE", True, True, False, 4),
+            ("supplier_qe", "供应商质量工程师", "Supplier QE", True, True, False, 5),
+            ("field_qe", "现场质量工程师", "Field QE", True, True, False, 6),
+            ("planning_qe", "前期策划质量工程师", "Planning QE", True, True, False, 7),
+        ]
+        for role_key, name_zh, name_en, is_system, is_editable, bypass, sort in _ROLES:
+            if role_key not in existing_roles:
+                db.add(RoleDefinition(
+                    role_key=role_key,
+                    name_zh=name_zh,
+                    name_en=name_en,
+                    is_system=is_system,
+                    is_editable=is_editable,
+                    bypass_row_level_security=bypass,
+                    sort_order=sort,
+                ))
+        await db.flush()
+
         # ─── Ensure system user exists (for PLM background task FKs) ───
         system_user_result = await db.execute(
             select(User).where(User.user_id == SYSTEM_USER_ID)
@@ -287,6 +418,18 @@ async def seed():
         role_result = await db.execute(select(RoleDefinition))
         roles = {r.role_key: r.id for r in role_result.scalars().all()}
 
+        # Admin user (may already exist from lifespan bootstrap)
+        admin_result = await db.execute(select(User).where(User.username == "admin"))
+        admin = admin_result.scalar_one_or_none()
+        if not admin:
+            admin = User(
+                username="admin", display_name="系统管理员",
+                password_hash=hash_password("Admin@2026"),
+                role_id=roles["admin"],
+            )
+            db.add(admin)
+            await db.flush()
+
         # Users
         engineer = User(
             username="engineer", display_name="质量工程师",
@@ -301,6 +444,18 @@ async def seed():
             password_hash=hash_password("Viewer@2026"), role_id=roles["viewer"],
         )
         db.add_all([engineer, manager, viewer])
+        await db.flush()
+
+        # Product lines (must exist before UserProductLine assignments)
+        from app.models.product_line import ProductLine
+        pl_data = [
+            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块"},
+            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线"},
+        ]
+        for pl_dict in pl_data:
+            existing = await db.execute(select(ProductLine).where(ProductLine.code == pl_dict["code"]))
+            if not existing.scalar_one_or_none():
+                db.add(ProductLine(**pl_dict))
         await db.flush()
 
         # Product line assignments
@@ -852,8 +1007,8 @@ async def seed():
 
             print("PLM demo data seeded (mock connector).")
 
-        # ─── ERP permissions ───
-        await seed_erp_permissions(db)
+        # ─── Full permission matrix ───
+        await seed_all_permissions(db)
 
         # ─── Supplier risk default configs ───
         await seed_supplier_risk_configs(db)
@@ -899,21 +1054,31 @@ async def seed():
         )
         db.add(sh_product_line)
 
+        # ─── Set factory_id on FMEA/CAPA records created earlier ───
+        await db.execute(
+            text("UPDATE fmea_documents SET factory_id = :fid WHERE factory_id IS NULL"),
+            {"fid": default_factory.id}
+        )
+        await db.execute(
+            text("UPDATE capa_eightd SET factory_id = :fid WHERE factory_id IS NULL"),
+            {"fid": default_factory.id}
+        )
+
         # Assign existing users to factories
-        admin_user = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
+        admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
         manager_user = (await db.execute(select(User).where(User.username == "manager"))).scalar_one()
         engineer_user = (await db.execute(select(User).where(User.username == "engineer"))).scalar_one()
         viewer_user = (await db.execute(select(User).where(User.username == "viewer"))).scalar_one()
 
-        db.add(UserFactory(user_id=admin_user.user_id, factory_id=default_factory.id))
-        db.add(UserFactory(user_id=admin_user.user_id, factory_id=shanghai_factory.id))
+        db.add(UserFactory(user_id=admin.user_id, factory_id=default_factory.id))
+        db.add(UserFactory(user_id=admin.user_id, factory_id=shanghai_factory.id))
         db.add(UserFactory(user_id=manager_user.user_id, factory_id=default_factory.id))
         db.add(UserFactory(user_id=manager_user.user_id, factory_id=shanghai_factory.id))
         db.add(UserFactory(user_id=engineer_user.user_id, factory_id=default_factory.id))
         db.add(UserFactory(user_id=viewer_user.user_id, factory_id=default_factory.id))
 
         # Set default factory for existing users
-        admin_user.factory_id = default_factory.id
+        admin.factory_id = default_factory.id
         manager_user.factory_id = default_factory.id
         engineer_user.factory_id = default_factory.id
         viewer_user.factory_id = default_factory.id
@@ -924,7 +1089,7 @@ async def seed():
             display_name="集团管理员",
             email="groupadmin@qms.example.com",
             password_hash=hash_password("GroupAdmin@2026"),
-            role_id=admin_user.role_id,  # same role as admin
+            role_id=admin.role_id,  # same role as admin
             is_active=True,
         )
         db.add(group_admin)

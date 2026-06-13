@@ -27,5 +27,5 @@ class SupplyChainRiskSnapshot(Base):
     delivery_delay_days: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     open_scar_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     ppm_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    dimensions: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    dimensions: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

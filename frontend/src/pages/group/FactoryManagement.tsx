@@ -109,7 +109,7 @@ export default function FactoryManagementPage() {
         open={modalOpen}
         onOk={handleSubmit}
         onCancel={() => setModalOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           {!editItem && (

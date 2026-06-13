@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, DateTime, Text, ForeignKey
+from sqlalchemy import String, Integer, DateTime, Text, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
@@ -23,7 +23,7 @@ class DocumentEmbedding(Base):
         UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=True
     )
     # "metadata" is reserved on SQLAlchemy Base — map DB column "metadata" to attribute "embedding_metadata"
-    embedding_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default="'{}'")
+    embedding_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default=text("'{}'::jsonb"))
     embedding_model: Mapped[str] = mapped_column(String(50), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default="NOW()")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default="NOW()")

@@ -1084,10 +1084,10 @@ export default function FMEAEditorPage() {
         </Descriptions>
       </Card>
 
-      <Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }}>
-        <Tabs.TabPane tab="编辑器" key="editor">
-          <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }}>
-        <Tabs.TabPane tab="失效分析" key="failure">
+      <Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }} items={[
+        { key: "editor", label: "编辑器", children: <>
+          <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }} items={[
+            { key: "failure", label: "失效分析", children: <>
           <Row gutter={16}>
             {/* Left: Structure/Function Tree */}
             <Col span={5}>
@@ -1179,8 +1179,8 @@ export default function FMEAEditorPage() {
           </Card>
         </Col>
       </Row>
-        </Tabs.TabPane>
-        <Tabs.TabPane tab="结构分析" key="structure">
+        </>},
+            { key: "structure", label: "结构分析", children: <>
           <Row gutter={16}>
             <Col span={8}>
               <Card title="结构树" size="small">
@@ -1206,8 +1206,8 @@ export default function FMEAEditorPage() {
               </Card>
             </Col>
           </Row>
-        </Tabs.TabPane>
-      </Tabs>
+        </>},
+          ]} />
 
       <style>{`
         .fmea-row-highlight td {
@@ -1235,8 +1235,8 @@ export default function FMEAEditorPage() {
       <Text type="secondary" style={{ fontSize: 11 }}>
         S=严重度 O=发生度 D=探测度 | RPN=风险优先数 | AP=措施优先级 (H=高 M=中 L=低) | 带 ' = 改进后评分
       </Text>
-        </Tabs.TabPane>
-        <Tabs.TabPane tab="🕸️ 图谱" key="graph">
+        </>},
+        { key: "graph", label: "🕸️ 图谱", children: <>
           <div style={{ display: "flex", gap: 16, height: "calc(100vh - 240px)" }}>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
               <GraphToolbar
@@ -1367,8 +1367,8 @@ export default function FMEAEditorPage() {
               </Space>
             )}
           </Modal>
-        </Tabs.TabPane>
-        <Tabs.TabPane tab="关联 CAPA" key="related-capa">
+        </>},
+        { key: "related-capa", label: "关联 CAPA", children: <>
           {selectedFunctionId ? (
             <RelatedCAPAList
               fmeaId={fmea!.fmea_id}
@@ -1379,8 +1379,8 @@ export default function FMEAEditorPage() {
               请先在编辑器中选择一个失效模式行
             </Typography.Text>
           )}
-        </Tabs.TabPane>
-        <Tabs.TabPane tab={<span><HistoryOutlined /> 版本历史</span>} key="history">
+        </>},
+        { key: "history", label: <span><HistoryOutlined /> 版本历史</span>, children: <>
           <VersionHistoryTab
             documentId={id!}
             documentType="fmea"
@@ -1392,8 +1392,8 @@ export default function FMEAEditorPage() {
             onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}
           />
-        </Tabs.TabPane>
-      </Tabs>
+        </>},
+      ]} />
 
       <CreateVersionModal
         open={createVersionOpen}

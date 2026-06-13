@@ -134,7 +134,7 @@ def upgrade() -> None:
         "iqc_materials", "iqc_inspections",
         "iqc_aql_configs", "iqc_aql_profiles",
         "quality_goals", "management_reviews",
-        "audit_checklist_templates", "supplier_risk_configs",
+        "supplier_risk_configs",
         "supplier_risk_notification_channels",
     ]
 
@@ -169,8 +169,8 @@ def upgrade() -> None:
     # --- Tables with product_line_code (NOT NULL, no COALESCE needed) ---
 
     _pl_nonnull_tables = [
-        "control_plan_items", "apqp_projects", "change_impact_analysis",
-        "special_characteristics", "customers", "customer_complaints",
+        "apqp_projects", "change_impact_analysis",
+        "special_characteristics", "customer_complaints",
         "rma_records",
     ]
 
@@ -186,6 +186,18 @@ def upgrade() -> None:
             )
         """))
 
+    # control_plan_items derives from control_plans (no product_line_code of its own)
+    op.add_column("control_plan_items",
+                  sa.Column("factory_id", postgresql.UUID(as_uuid=True), nullable=True))
+    op.create_foreign_key("fk_control_plan_items_factory_id", "control_plan_items",
+                          "factories", ["factory_id"], ["id"])
+    op.execute(sa.text("""
+        UPDATE control_plan_items SET factory_id = (
+            SELECT factory_id FROM control_plans
+            WHERE control_plans.cp_id = control_plan_items.cp_id
+        )
+    """))
+
     # --- SPC child tables (no product_line_code, derive from inspection_characteristics) ---
 
     _spc_child_tables = [
@@ -199,11 +211,11 @@ def upgrade() -> None:
         op.create_foreign_key(f"fk_{tbl}_factory_id", tbl,
                               "factories", ["factory_id"], ["id"])
 
-    # Backfill SPC children from inspection_characteristics via characteristic_id
+    # Backfill SPC children from inspection_characteristics via ic_id
     op.execute(sa.text("""
         UPDATE sample_batches SET factory_id = (
             SELECT factory_id FROM inspection_characteristics ic
-            WHERE ic.characteristic_id = sample_batches.characteristic_id
+            WHERE ic.ic_id = sample_batches.ic_id
         )
     """))
     op.execute(sa.text("""
@@ -215,13 +227,13 @@ def upgrade() -> None:
     op.execute(sa.text("""
         UPDATE spc_alarms SET factory_id = (
             SELECT factory_id FROM inspection_characteristics ic
-            WHERE ic.characteristic_id = spc_alarms.characteristic_id
+            WHERE ic.ic_id = spc_alarms.ic_id
         )
     """))
     op.execute(sa.text("""
         UPDATE control_limit_snapshots SET factory_id = (
             SELECT factory_id FROM inspection_characteristics ic
-            WHERE ic.characteristic_id = control_limit_snapshots.characteristic_id
+            WHERE ic.ic_id = control_limit_snapshots.ic_id
         )
     """))
 
@@ -621,9 +633,28 @@ def upgrade() -> None:
         )
     """))
 
+    # ── Step 8b: customers has no product_line_code — backfill with default factory ──
+
+    op.add_column("customers",
+                  sa.Column("factory_id", postgresql.UUID(as_uuid=True), nullable=True))
+    op.create_foreign_key("fk_customers_factory_id", "customers",
+                          "factories", ["factory_id"], ["id"])
+    op.execute(sa.text(
+        f"UPDATE customers SET factory_id = '{default_factory_id}'"
+    ))
+
     # ── Step 8: Add factory_id to audit_programs + audit_checklist_templates ──
 
-    # audit_checklist_templates was already handled in Step 6 (nullable product_line_code)
+    # audit_checklist_templates has no product_line_code — backfill with default factory
+    op.add_column("audit_checklist_templates",
+                  sa.Column("factory_id", postgresql.UUID(as_uuid=True), nullable=True))
+    op.create_foreign_key("fk_audit_checklist_templates_factory_id",
+                          "audit_checklist_templates", "factories",
+                          ["factory_id"], ["id"])
+    op.execute(sa.text(
+        f"UPDATE audit_checklist_templates SET factory_id = '{default_factory_id}'"
+    ))
+
     # Now add factory_id to audit_programs (nullable product_line_code)
     op.add_column("audit_programs",
                   sa.Column("factory_id", postgresql.UUID(as_uuid=True), nullable=True))
@@ -846,6 +877,10 @@ def downgrade() -> None:
     op.drop_constraint("fk_audit_programs_factory_id", "audit_programs", type_="foreignkey")
     op.drop_column("audit_programs", "factory_id")
 
+    # --- customers (no product_line_code) ---
+    op.drop_constraint("fk_customers_factory_id", "customers", type_="foreignkey")
+    op.drop_column("customers", "factory_id")
+
     # --- Supplier sub-tables + alerts ---
     for tbl in ["supplier_certifications", "supplier_evaluations",
                 "supplier_ppap_submissions", "supplier_scars", "supplier_risk_alerts"]:
@@ -937,21 +972,29 @@ def downgrade() -> None:
     op.drop_column("inspection_characteristics", "factory_id")
 
     # --- product_line_code NOT NULL tables ---
-    for tbl in ["control_plan_items", "apqp_projects", "change_impact_analysis",
-                "special_characteristics", "customers", "customer_complaints",
+    for tbl in ["apqp_projects", "change_impact_analysis",
+                "special_characteristics", "customer_complaints",
                 "rma_records"]:
         op.drop_constraint(f"fk_{tbl}_factory_id", tbl, type_="foreignkey")
         op.drop_column(tbl, "factory_id")
+
+    # --- control_plan_items (derive from parent) ---
+    op.drop_constraint("fk_control_plan_items_factory_id", "control_plan_items", type_="foreignkey")
+    op.drop_column("control_plan_items", "factory_id")
 
     # --- product_line_code nullable tables ---
     for tbl in ["fmea_documents", "capa_eightd", "control_plans",
                 "iqc_materials", "iqc_inspections",
                 "iqc_aql_configs", "iqc_aql_profiles",
                 "quality_goals", "management_reviews",
-                "audit_checklist_templates", "supplier_risk_configs",
+                "supplier_risk_configs",
                 "supplier_risk_notification_channels"]:
         op.drop_constraint(f"fk_{tbl}_factory_id", tbl, type_="foreignkey")
         op.drop_column(tbl, "factory_id")
+
+    # --- audit_checklist_templates (no product_line_code) ---
+    op.drop_constraint("fk_audit_checklist_templates_factory_id", "audit_checklist_templates", type_="foreignkey")
+    op.drop_column("audit_checklist_templates", "factory_id")
 
     # --- users ---
     op.drop_constraint("fk_users_factory_id", "users", type_="foreignkey")

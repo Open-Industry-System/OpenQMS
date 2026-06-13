@@ -37,7 +37,7 @@ def upgrade() -> None:
         sa.Column("delivery_delay_days", sa.Float(), nullable=True),
         sa.Column("open_scar_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("ppm_value", sa.Float(), nullable=True),
-        sa.Column("dimensions", JSONB(), nullable=False, server_default="{}"),
+        sa.Column("dimensions", JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
 

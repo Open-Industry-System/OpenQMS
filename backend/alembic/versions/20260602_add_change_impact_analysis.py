@@ -31,7 +31,7 @@ def upgrade():
         sa.Column("scope", sa.String(), nullable=False, server_default="single_fmea"),
         sa.Column("status", sa.String(), nullable=False, server_default="completed"),
         sa.Column("impact_score", sa.Integer(), nullable=True),
-        sa.Column("impact_result", postgresql.JSONB(), nullable=False, server_default="{}"),
+        sa.Column("impact_result", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )

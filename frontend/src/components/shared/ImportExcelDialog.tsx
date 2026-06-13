@@ -74,7 +74,7 @@ export default function ImportExcelDialog({
       onCancel={handleClose}
       footer={null}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       {errors.length > 0 ? (
         <>

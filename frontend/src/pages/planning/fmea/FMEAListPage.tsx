@@ -145,7 +145,7 @@ export default function FMEAListPage() {
             编辑
           </Button>
         ) : (
-          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)} disabled>
+          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
             查看
           </Button>
         ),

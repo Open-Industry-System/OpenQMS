@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Integer, Text, DateTime, func
+from sqlalchemy import String, Integer, Text, DateTime, func, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,7 +17,7 @@ class GraphSyncOutbox(Base):
     aggregate_type: Mapped[str] = mapped_column(String(50), nullable=False, default="fmea")
     aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
     )  # pending / processing / completed / dead
