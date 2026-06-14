@@ -1,8 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Table,
-  Tag,
-  Typography,
   Tabs,
   Statistic,
   Row,
@@ -20,21 +18,20 @@ import type {
   ERPShipment,
   ERPCostRecord,
 } from "../../types/erp";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
-
-const soStatusColors: Record<string, string> = {
-  confirmed: "green",
-  open: "blue",
-  cancelled: "red",
-  delivered: "default",
+const soStatusVariant: Record<string, string> = {
+  confirmed: "success",
+  open: "warning",
+  cancelled: "error",
+  delivered: "info",
 };
 
-const linkStatusColors: Record<string, string> = {
-  linked: "green",
-  pending: "orange",
-  unlinked: "default",
-  error: "red",
+const linkStatusVariant: Record<string, string> = {
+  linked: "success",
+  pending: "warning",
+  unlinked: "info",
+  error: "error",
 };
 
 const costCategoryLabels: Record<string, string> = {
@@ -127,7 +124,7 @@ function SalesOrdersTab() {
       key: "status",
       width: 100,
       render: (v: string) => (
-        <Tag color={soStatusColors[v] || "default"}>{v}</Tag>
+        <StatusBadge status={soStatusVariant[v] || "info"}>{v}</StatusBadge>
       ),
     },
     {
@@ -140,21 +137,24 @@ function SalesOrdersTab() {
   ];
 
   return (
-    <Table
-      columns={columns}
-      dataSource={data}
-      rowKey="so_id"
-      loading={loading}
-      pagination={{
-        current: page,
-        total,
-        pageSize: 20,
-        onChange: (p) => {
-          setPage(p);
-          fetchData(p, productLine);
-        },
-      }}
-    />
+    <DataCard title="销售订单">
+      <Table
+        className="qf-table"
+        columns={columns}
+        dataSource={data}
+        rowKey="so_id"
+        loading={loading}
+        pagination={{
+          current: page,
+          total,
+          pageSize: 20,
+          onChange: (p) => {
+            setPage(p);
+            fetchData(p, productLine);
+          },
+        }}
+      />
+    </DataCard>
   );
 }
 
@@ -234,27 +234,30 @@ function ShipmentsTab() {
       key: "link_status",
       width: 100,
       render: (v: string) => (
-        <Tag color={linkStatusColors[v] || "default"}>{v}</Tag>
+        <StatusBadge status={linkStatusVariant[v] || "info"}>{v}</StatusBadge>
       ),
     },
   ];
 
   return (
-    <Table
-      columns={columns}
-      dataSource={data}
-      rowKey="erp_shipment_id"
-      loading={loading}
-      pagination={{
-        current: page,
-        total,
-        pageSize: 20,
-        onChange: (p) => {
-          setPage(p);
-          fetchData(p, productLine);
-        },
-      }}
-    />
+    <DataCard title="发货记录">
+      <Table
+        className="qf-table"
+        columns={columns}
+        dataSource={data}
+        rowKey="erp_shipment_id"
+        loading={loading}
+        pagination={{
+          current: page,
+          total,
+          pageSize: 20,
+          onChange: (p) => {
+            setPage(p);
+            fetchData(p, productLine);
+          },
+        }}
+      />
+    </DataCard>
   );
 }
 
@@ -345,7 +348,7 @@ function CostRecordsTab() {
   ];
 
   return (
-    <>
+    <DataCard title="成本记录">
       <Row gutter={16} style={{ marginBottom: 16 }}>
         {Object.entries(coqSummary).map(([cat, amount]) => (
           <Col key={cat} span={6}>
@@ -360,6 +363,7 @@ function CostRecordsTab() {
         ))}
       </Row>
       <Table
+        className="qf-table"
         columns={columns}
         dataSource={data}
         rowKey="cost_id"
@@ -374,7 +378,7 @@ function CostRecordsTab() {
           },
         }}
       />
-    </>
+    </DataCard>
   );
 }
 
@@ -384,10 +388,7 @@ export default function ERPSalesAndCostPage() {
   const [activeTab, setActiveTab] = useState("sales_orders");
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 16 }}>
-        销售与成本
-      </Title>
+    <PageShell title="销售与成本">
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
@@ -397,6 +398,6 @@ export default function ERPSalesAndCostPage() {
           { key: "cost_records", label: "成本记录", children: <CostRecordsTab /> },
         ]}
       />
-    </div>
+    </PageShell>
   );
 }

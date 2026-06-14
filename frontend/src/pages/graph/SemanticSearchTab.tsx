@@ -1,11 +1,12 @@
 import { useState, useCallback, useRef } from "react";
-import { Input, Button, Select, Card, Tag, Space, Spin, Empty, Typography, Tooltip } from "antd";
+import { Input, Button, Select, Tag, Space, Spin, Empty, Typography, Tooltip } from "antd";
 import { SearchOutlined, RobotOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { semanticSearch, askQuestion } from "../../api/search";
 import type { SearchResultItem, QAResponse } from "../../api/search";
 import QAAnswer from "../../components/search/QAAnswer";
 import { useProductLineStore } from "../../store/productLineStore";
+import DataCard from "../../components/design/DataCard";
 
 const { Text } = Typography;
 
@@ -148,12 +149,11 @@ export default function SemanticSearchTab() {
             找到 {results.length} 条结果，耗时 {queryTime}ms
           </Text>
           {results.map((item) => (
-            <Card
+            <DataCard
               key={item.entity_id + item.entity_field + (item.node_id || "")}
-              hoverable={!!getEntityRoute(item)}
+              title={null}
               style={{ marginBottom: 8, cursor: getEntityRoute(item) ? "pointer" : "default" }}
               onClick={() => handleResultClick(item)}
-              size="small"
             >
               <Space>
                 <Tag color={ENTITY_COLORS[item.entity_type] || "default"}>
@@ -178,7 +178,7 @@ export default function SemanticSearchTab() {
                   相似度: {(item.score * 100).toFixed(0)}% | 来源: {item.source}
                 </Text>
               </div>
-            </Card>
+            </DataCard>
           ))}
         </>
       )}

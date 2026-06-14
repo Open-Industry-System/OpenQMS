@@ -1,11 +1,14 @@
 import { useState, useEffect } from "react";
-import { Card, Tabs, Input, Select, Table, Tag, Spin, Empty, Space, Statistic, Row, Col, Button } from "antd";
+import { Tabs, Input, Select, Table, Tag, Spin, Empty, Space, Statistic, Row, Col, Button } from "antd";
 import { SearchOutlined, BarChartOutlined, FireOutlined, LinkOutlined, RobotOutlined } from "@ant-design/icons";
 import SemanticSearchTab from "./SemanticSearchTab";
 import { useNavigate } from "react-router-dom";
 import { useProductLineStore } from "../../store/productLineStore";
 import { searchSimilarNodes, getCrossFmeaStats } from "../../api/graph";
 import type { SimilarNode, CrossFmeaStats } from "../../api/graph";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 
 export default function KnowledgeGraphPage() {
   const navigate = useNavigate();
@@ -104,9 +107,9 @@ export default function KnowledgeGraphPage() {
 
   if (!productLineCode) {
     return (
-      <Card>
+      <DataCard title={null}>
         <Empty description="请先选择产品线" />
-      </Card>
+      </DataCard>
     );
   }
 
@@ -120,47 +123,51 @@ export default function KnowledgeGraphPage() {
         <Space direction="vertical" size="large" style={{ width: "100%" }}>
           <Row gutter={16}>
             <Col span={6}>
-              <Card><Statistic title="FMEA 总数" value={stats.total_fmeas} /></Card>
+              <DataCard title={null}><Statistic title="FMEA 总数" value={stats.total_fmeas} /></DataCard>
             </Col>
             <Col span={6}>
-              <Card><Statistic title="节点总数" value={stats.total_nodes} /></Card>
+              <DataCard title={null}><Statistic title="节点总数" value={stats.total_nodes} /></DataCard>
             </Col>
             <Col span={6}>
-              <Card>
+              <DataCard title={null}>
                 <Statistic
                   title="高优先级失效模式 (AP=H)"
                   value={stats.high_ap_nodes?.length || 0}
                   prefix={<FireOutlined style={{ color: "#ff4d4f" }} />}
                 />
-              </Card>
+              </DataCard>
             </Col>
             <Col span={6}>
-              <Card><Statistic title="平均 RPN" value={stats.avg_rpn || 0} precision={1} /></Card>
+              <DataCard title={null}><Statistic title="平均 RPN" value={stats.avg_rpn || 0} precision={1} /></DataCard>
             </Col>
           </Row>
-          <Card title="AP 分布">
+          <DataCard title="AP 分布">
             <Space size="large">
-              <Tag color="red">高 (H): {stats.ap_distribution?.H || 0}</Tag>
-              <Tag color="orange">中 (M): {stats.ap_distribution?.M || 0}</Tag>
-              <Tag color="green">低 (L): {stats.ap_distribution?.L || 0}</Tag>
+              <StatusBadge status="error">高 (H): {stats.ap_distribution?.H || 0}</StatusBadge>
+              <StatusBadge status="info">中 (M): {stats.ap_distribution?.M || 0}</StatusBadge>
+              <StatusBadge status="success">低 (L): {stats.ap_distribution?.L || 0}</StatusBadge>
             </Space>
-          </Card>
-          <Card title="高优先级失效模式 Top 10" extra={<Tag color="red">AP = H (高优先级)</Tag>}>
+          </DataCard>
+          <DataCard
+            title="高优先级失效模式 Top 10"
+            extra={<StatusBadge status="error">AP = H (高优先级)</StatusBadge>}
+          >
             <Table
+              className="qf-table"
               dataSource={stats.high_ap_nodes || []}
               columns={riskColumns}
               rowKey={(r) => `${r.fmea_id}-${r.node_id}`}
               pagination={false}
               size="small"
             />
-          </Card>
-          <Card title="节点类型分布">
+          </DataCard>
+          <DataCard title="节点类型分布">
             <Space wrap>
               {Object.entries(stats.node_type_distribution || {}).map(([type, count]) => (
                 <Tag key={type}>{type}: {count}</Tag>
               ))}
             </Space>
-          </Card>
+          </DataCard>
         </Space>
       ) : (
         <Empty description="暂无统计数据" />
@@ -189,6 +196,7 @@ export default function KnowledgeGraphPage() {
           </Space>
           {searchResults.length > 0 && (
             <Table
+              className="qf-table"
               dataSource={searchResults}
               columns={searchColumns}
               rowKey={(r) => `${r.fmea_id}-${r.node_id}`}
@@ -206,9 +214,8 @@ export default function KnowledgeGraphPage() {
   ];
 
   return (
-    <div>
-      <h2>知识图谱</h2>
+    <PageShell title="知识图谱">
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
-    </div>
+    </PageShell>
   );
 }

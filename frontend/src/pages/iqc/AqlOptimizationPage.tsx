@@ -1,26 +1,52 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Table, Tag, Space, Input, Select, Row, Col, Statistic, App, Button,
+  Table, Tag, Space, Input, Select, Row, Col, Statistic, App, Button,
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { AqlRecommendation } from '../../types';
 import { listAqlRecommendations } from '../../api/iqcAql';
 import AqlRecommendationDrawer from '../../components/iqc/AqlRecommendationDrawer';
+import { PageShell, DataCard, StatusBadge } from '../../components/design';
 
-const DIRECTION_MAP: Record<string, { label: string; color: string; emoji: string }> = {
-  tighten: { label: '加严', color: 'orange', emoji: '🔴' },
-  reduce: { label: '放宽', color: 'green', emoji: '🟢' },
-  freeze: { label: '冻结', color: 'red', emoji: '🔵' },
-  keep: { label: '保持', color: 'default', emoji: '' },
+const DIRECTION_MAP: Record<string, { label: string }> = {
+  tighten: { label: '加严' },
+  reduce: { label: '放宽' },
+  freeze: { label: '冻结' },
+  keep: { label: '保持' },
 };
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: '待审批', color: 'orange' },
-  forwarded: { label: '已转交', color: 'blue' },
-  approved: { label: '已批准', color: 'green' },
-  effective: { label: '已生效', color: 'green' },
-  rejected: { label: '已拒绝', color: 'red' },
-  expired: { label: '已过期', color: 'default' },
+const STATUS_MAP: Record<string, { label: string }> = {
+  pending: { label: '待审批' },
+  forwarded: { label: '已转交' },
+  approved: { label: '已批准' },
+  effective: { label: '已生效' },
+  rejected: { label: '已拒绝' },
+  expired: { label: '已过期' },
+};
+
+const directionVariant = (dir: string): string => {
+  switch (dir) {
+    case 'tighten': return 'warning';
+    case 'reduce': return 'success';
+    case 'freeze': return 'error';
+    case 'keep': return 'info';
+    default: return 'info';
+  }
+};
+
+const statusVariant = (status: string): string => {
+  switch (status) {
+    case 'approved':
+    case 'effective':
+      return 'success';
+    case 'pending':
+    case 'forwarded':
+      return 'warning';
+    case 'rejected':
+      return 'error';
+    default:
+      return 'info';
+  }
 };
 
 export default function AqlOptimizationPage() {
@@ -113,8 +139,11 @@ export default function AqlOptimizationPage() {
       width: 90,
       render: (dir: string) => {
         const cfg = DIRECTION_MAP[dir];
-        if (!cfg) return dir;
-        return <Tag color={cfg.color}>{cfg.emoji} {cfg.label}</Tag>;
+        return (
+          <StatusBadge status={directionVariant(dir)}>
+            {cfg?.label || dir}
+          </StatusBadge>
+        );
       },
     },
     {
@@ -133,36 +162,48 @@ export default function AqlOptimizationPage() {
       width: 90,
       render: (status: string) => {
         const cfg = STATUS_MAP[status];
-        return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
+        return (
+          <StatusBadge status={statusVariant(status)}>
+            {cfg?.label || status}
+          </StatusBadge>
+        );
       },
     },
   ];
 
   return (
-    <div>
+    <PageShell
+      title="AQL优化建议"
+      actions={
+        <Button icon={<ReloadOutlined />} onClick={() => { fetchData(); fetchKpi(); }}>
+          刷新
+        </Button>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card><Statistic title="待审批" value={pendingCount} valueStyle={{ color: '#faad14' }} /></Card>
+          <DataCard title="">
+            <Statistic title="待审批" value={pendingCount} valueStyle={{ color: '#faad14' }} />
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="今日生成" value={todayCount} /></Card>
+          <DataCard title="">
+            <Statistic title="今日生成" value={todayCount} />
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="已批准" value={approvedCount} valueStyle={{ color: '#52c41a' }} /></Card>
+          <DataCard title="">
+            <Statistic title="已批准" value={approvedCount} valueStyle={{ color: '#52c41a' }} />
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="已拒绝" value={rejectedCount} valueStyle={{ color: '#ff4d4f' }} /></Card>
+          <DataCard title="">
+            <Statistic title="已拒绝" value={rejectedCount} valueStyle={{ color: '#ff4d4f' }} />
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
-        title="AQL优化建议"
-        extra={
-          <Button icon={<ReloadOutlined />} onClick={() => { fetchData(); fetchKpi(); }}>
-            刷新
-          </Button>
-        }
-      >
+      <DataCard title="">
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder="状态"
@@ -200,6 +241,7 @@ export default function AqlOptimizationPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="recommendation_id"
           columns={columns}
           dataSource={data}
@@ -216,7 +258,7 @@ export default function AqlOptimizationPage() {
             onChange: (p, ps) => { setPage(p); setPageSize(ps || 20); },
           }}
         />
-      </Card>
+      </DataCard>
 
       <AqlRecommendationDrawer
         open={drawerOpen}
@@ -224,6 +266,6 @@ export default function AqlOptimizationPage() {
         onClose={() => setDrawerOpen(false)}
         onAction={() => { setDrawerOpen(false); fetchData(); fetchKpi(); }}
       />
-    </div>
+    </PageShell>
   );
 }

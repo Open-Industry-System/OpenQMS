@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Card,
   Button,
-  Tag,
   Space,
   Form,
   Input,
@@ -15,6 +13,7 @@ import {
   InputNumber,
   Descriptions,
   Divider,
+  Spin,
 } from "antd";
 import {
   ArrowLeftOutlined,
@@ -35,23 +34,46 @@ import {
   requestReinspect,
   approveConcession,
 } from "../../api/iqc";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 const { TextArea } = Input;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: "待检验", color: "orange" },
-  inspecting: { label: "检验中", color: "blue" },
-  judged: { label: "已判定", color: "cyan" },
-  closed: { label: "已关闭", color: "default" },
+const STATUS_MAP: Record<string, string> = {
+  pending: "待检验",
+  inspecting: "检验中",
+  judged: "已判定",
+  closed: "已关闭",
 };
 
-const RESULT_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: "待定", color: "default" },
-  accepted: { label: "合格", color: "green" },
-  rejected: { label: "拒收", color: "red" },
-  concession: { label: "让步接收", color: "gold" },
+const RESULT_MAP: Record<string, string> = {
+  pending: "待定",
+  accepted: "合格",
+  rejected: "拒收",
+  concession: "让步接收",
 };
+
+function renderStatusBadge(status: string) {
+  const label = STATUS_MAP[status] || status;
+  const statusProp: Record<string, string> = {
+    pending: "pending",
+    inspecting: "processing",
+    judged: "info",
+    closed: "closed",
+  };
+  return <StatusBadge status={statusProp[status] || "info"}>{label}</StatusBadge>;
+}
+
+function renderResultBadge(result: string) {
+  const label = RESULT_MAP[result] || result;
+  const statusProp: Record<string, string> = {
+    pending: "info",
+    accepted: "closed",
+    rejected: "reject",
+    concession: "pending",
+  };
+  return <StatusBadge status={statusProp[result] || "info"}>{label}</StatusBadge>;
+}
 
 function statusToStep(status: string): number {
   switch (status) {
@@ -205,10 +227,7 @@ export default function IqcInspectionDetailPage() {
       title: "结果",
       dataIndex: "result",
       width: 100,
-      render: (result: string) => {
-        const cfg = RESULT_MAP[result] || { label: result, color: "default" };
-        return <Tag color={cfg.color}>{cfg.label}</Tag>;
-      },
+      render: (result: string) => renderResultBadge(result),
     },
     { title: "备注", dataIndex: "remark", ellipsis: true, render: (v: string | null) => v || "—" },
   ];
@@ -218,76 +237,73 @@ export default function IqcInspectionDetailPage() {
   }
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/iqc/inspections")}>
-          返回列表
-        </Button>
-        {inspection.status === "pending" && canEdit('iqc') && (
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>
-            开始检验
+    <PageShell
+      title="检验单详情"
+      actions={
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/iqc/inspections")}>
+            返回列表
           </Button>
-        )}
-        {inspection.status === "judged" && canEdit('iqc') && (
-          <Button type="primary" onClick={handleClose}>
-            关闭检验单
-          </Button>
-        )}
-        {inspection.status === "judged" && inspection.inspection_result === "rejected" && canEdit('iqc') && (
-          <>
-            <Button danger onClick={handleTriggerScar}>
-              触发SCAR
+          {inspection.status === "pending" && canEdit('iqc') && (
+            <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>
+              开始检验
             </Button>
-            <Button onClick={handleReinspect}>申请复检</Button>
-            {canApprove('iqc') && (
-              <Button onClick={handleConcession}>让步接收</Button>
-            )}
-          </>
-        )}
-      </Space>
+          )}
+          {inspection.status === "judged" && canEdit('iqc') && (
+            <Button type="primary" onClick={handleClose}>
+              关闭检验单
+            </Button>
+          )}
+          {inspection.status === "judged" && inspection.inspection_result === "rejected" && canEdit('iqc') && (
+            <>
+              <Button danger onClick={handleTriggerScar}>
+                触发SCAR
+              </Button>
+              <Button onClick={handleReinspect}>申请复检</Button>
+              {canApprove('iqc') && (
+                <Button onClick={handleConcession}>让步接收</Button>
+              )}
+            </>
+          )}
+        </Space>
+      }
+    >
+      <DataCard title="检验单信息">
+        <Spin spinning={loading}>
+          <Steps current={statusToStep(inspection.status)} style={{ marginBottom: 24 }}>
+            <Steps.Step title="待检验" />
+            <Steps.Step title="检验中" />
+            <Steps.Step title="已判定" />
+            <Steps.Step title="已关闭" />
+          </Steps>
 
-      <Card title="检验单信息" loading={loading}>
-        <Steps current={statusToStep(inspection.status)} style={{ marginBottom: 24 }}>
-          <Steps.Step title="待检验" />
-          <Steps.Step title="检验中" />
-          <Steps.Step title="已判定" />
-          <Steps.Step title="已关闭" />
-        </Steps>
-
-        <Descriptions bordered column={3}>
-          <Descriptions.Item label="检验单号">{inspection.inspection_no}</Descriptions.Item>
-          <Descriptions.Item label="物料号">{inspection.part_no || "—"}</Descriptions.Item>
-          <Descriptions.Item label="物料名称">{inspection.part_name || "—"}</Descriptions.Item>
-          <Descriptions.Item label="批号">{inspection.lot_no || "—"}</Descriptions.Item>
-          <Descriptions.Item label="批量">{inspection.lot_qty || "—"}</Descriptions.Item>
-          <Descriptions.Item label="样本量">{inspection.sample_qty || "—"}</Descriptions.Item>
-          <Descriptions.Item label="检验模式">
-            {inspection.inspection_mode === "quick" ? "快速检验" : "详细检验"}
-          </Descriptions.Item>
-          <Descriptions.Item label="状态">
-            <Tag color={STATUS_MAP[inspection.status]?.color}>
-              {STATUS_MAP[inspection.status]?.label}
-            </Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label="检验结果">
-            <Tag color={RESULT_MAP[inspection.inspection_result]?.color}>
-              {RESULT_MAP[inspection.inspection_result]?.label}
-            </Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label="AQL等级">{inspection.aql_level || "—"}</Descriptions.Item>
-          <Descriptions.Item label="检验水平">{inspection.inspection_level || "—"}</Descriptions.Item>
-          <Descriptions.Item label="代码字">{inspection.code_letter || "—"}</Descriptions.Item>
-          <Descriptions.Item label="Ac">{inspection.accept_number ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Re">{inspection.reject_number ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="缺陷数">{inspection.defect_qty}</Descriptions.Item>
-          <Descriptions.Item label="检验日期">{inspection.inspection_date || "—"}</Descriptions.Item>
-        </Descriptions>
-      </Card>
+          <Descriptions bordered column={3}>
+            <Descriptions.Item label="检验单号">{inspection.inspection_no}</Descriptions.Item>
+            <Descriptions.Item label="物料号">{inspection.part_no || "—"}</Descriptions.Item>
+            <Descriptions.Item label="物料名称">{inspection.part_name || "—"}</Descriptions.Item>
+            <Descriptions.Item label="批号">{inspection.lot_no || "—"}</Descriptions.Item>
+            <Descriptions.Item label="批量">{inspection.lot_qty || "—"}</Descriptions.Item>
+            <Descriptions.Item label="样本量">{inspection.sample_qty || "—"}</Descriptions.Item>
+            <Descriptions.Item label="检验模式">
+              {inspection.inspection_mode === "quick" ? "快速检验" : "详细检验"}
+            </Descriptions.Item>
+            <Descriptions.Item label="状态">{renderStatusBadge(inspection.status)}</Descriptions.Item>
+            <Descriptions.Item label="检验结果">{renderResultBadge(inspection.inspection_result)}</Descriptions.Item>
+            <Descriptions.Item label="AQL等级">{inspection.aql_level || "—"}</Descriptions.Item>
+            <Descriptions.Item label="检验水平">{inspection.inspection_level || "—"}</Descriptions.Item>
+            <Descriptions.Item label="代码字">{inspection.code_letter || "—"}</Descriptions.Item>
+            <Descriptions.Item label="Ac">{inspection.accept_number ?? "—"}</Descriptions.Item>
+            <Descriptions.Item label="Re">{inspection.reject_number ?? "—"}</Descriptions.Item>
+            <Descriptions.Item label="缺陷数">{inspection.defect_qty}</Descriptions.Item>
+            <Descriptions.Item label="检验日期">{inspection.inspection_date || "—"}</Descriptions.Item>
+          </Descriptions>
+        </Spin>
+      </DataCard>
 
       <Divider />
 
       {inspection.status === "inspecting" && canEdit('iqc') && (
-        <Card title="录入检验结果">
+        <DataCard title="录入检验结果">
           <Form form={itemForm} onFinish={handleUpdateItems} layout="vertical">
             <Form.Item
               name="items"
@@ -306,11 +322,11 @@ export default function IqcInspectionDetailPage() {
               提交结果
             </Button>
           </Form>
-        </Card>
+        </DataCard>
       )}
 
       {inspection.status === "inspecting" && canEdit('iqc') && (
-        <Card title="判定" style={{ marginTop: 16 }}>
+        <DataCard title="判定" style={{ marginTop: 16 }}>
           <Form form={judgeForm} onFinish={handleJudge} layout="vertical">
             <Row gutter={16}>
               <Col span={8}>
@@ -343,20 +359,21 @@ export default function IqcInspectionDetailPage() {
               提交判定
             </Button>
           </Form>
-        </Card>
+        </DataCard>
       )}
 
       <Divider />
 
-      <Card title="检验项目">
+      <DataCard title="检验项目">
         <Table
+          className="qf-table"
           rowKey="item_id"
           columns={itemColumns}
           dataSource={inspection.items || []}
           scroll={{ x: 1200 }}
           pagination={false}
         />
-      </Card>
-    </div>
+      </DataCard>
+    </PageShell>
   );
 }
