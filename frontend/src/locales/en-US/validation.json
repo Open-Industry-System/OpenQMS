@@ -1,0 +1,12 @@
+{
+  "required": "Please enter {{field}}",
+  "requiredField": "{{field}} is required",
+  "pleaseEnter": "Please enter {{field}}",
+  "pleaseSelect": "Please select {{field}}",
+  "invalidFormat": "{{field}} format is invalid",
+  "minLength": "{{field}} must be at least {{count}} characters",
+  "maxLength": "{{field}} cannot exceed {{count}} characters",
+  "number": "{{field}} must be a number",
+  "min": "{{field}} cannot be less than {{min}}",
+  "max": "{{field}} cannot be greater than {{max}}"
+}

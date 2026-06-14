@@ -4,9 +4,13 @@ import LanguageDetector from "i18next-browser-languagedetector";
 import zhCommon from "../locales/zh-CN/common.json";
 import zhLogin from "../locales/zh-CN/login.json";
 import zhLayout from "../locales/zh-CN/layout.json";
+import zhValidation from "../locales/zh-CN/validation.json";
+import zhFmea from "../locales/zh-CN/fmea.json";
 import enCommon from "../locales/en-US/common.json";
 import enLogin from "../locales/en-US/login.json";
 import enLayout from "../locales/en-US/layout.json";
+import enValidation from "../locales/en-US/validation.json";
+import enFmea from "../locales/en-US/fmea.json";
 
 export const SUPPORTED_LANGUAGES = ["zh-CN", "en-US"] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
@@ -16,11 +20,15 @@ const resources = {
     common: zhCommon,
     login: zhLogin,
     layout: zhLayout,
+    validation: zhValidation,
+    fmea: zhFmea,
   },
   "en-US": {
     common: enCommon,
     login: enLogin,
     layout: enLayout,
+    validation: enValidation,
+    fmea: enFmea,
   },
 };
 
@@ -40,7 +48,7 @@ i18n
       escapeValue: false,
     },
     defaultNS: "common",
-    ns: ["common", "login", "layout"],
+    ns: ["common", "login", "layout", "validation", "fmea"],
     react: {
       useSuspense: false,
     },

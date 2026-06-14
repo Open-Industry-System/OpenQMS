@@ -19,20 +19,65 @@
     "add": "Add",
     "refresh": "Refresh",
     "back": "Back",
-    "more": "More"
+    "more": "More",
+    "create": "Create",
+    "update": "Update",
+    "import": "Import",
+    "export": "Export",
+    "download": "Download",
+    "upload": "Upload",
+    "filter": "Filter",
+    "sort": "Sort",
+    "copy": "Copy",
+    "move": "Move",
+    "archive": "Archive",
+    "approve": "Approve",
+    "reject": "Reject",
+    "revoke": "Revoke",
+    "send": "Send",
+    "print": "Print",
+    "preview": "Preview",
+    "detail": "Detail",
+    "settings": "Settings"
   },
   "status": {
     "success": "Success",
     "error": "Error",
     "warning": "Warning",
-    "info": "Info"
+    "info": "Info",
+    "pending": "Pending",
+    "processing": "Processing",
+    "completed": "Completed",
+    "failed": "Failed",
+    "active": "Active",
+    "inactive": "Inactive"
   },
   "empty": {
     "data": "No data",
-    "description": "No relevant data"
+    "description": "No relevant data",
+    "search": "No matching results",
+    "select": "Please select from the left"
   },
   "table": {
     "noData": "No data",
-    "operations": "Actions"
+    "operations": "Actions",
+    "selectAll": "Select All",
+    "selected": "{{count}} selected",
+    "total": "Total {{total}} items"
+  },
+  "pagination": {
+    "total": "Total {{total}} items"
+  },
+  "messages": {
+    "saveSuccess": "Saved successfully",
+    "saveFailed": "Save failed",
+    "deleteSuccess": "Deleted successfully",
+    "deleteFailed": "Delete failed",
+    "operationSuccess": "Operation successful",
+    "operationFailed": "Operation failed",
+    "confirmDelete": "Confirm delete?",
+    "confirmOperation": "Confirm this operation?",
+    "loading": "Loading...",
+    "noPermission": "No permission to perform this operation"
   }
 }

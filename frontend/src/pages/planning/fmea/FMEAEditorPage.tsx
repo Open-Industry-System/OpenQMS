@@ -41,31 +41,41 @@ import { CollaborationBar, ActiveUserIndicator, ConflictResolutionModal } from "
 import { diffGraphs } from "../../../utils/graphDiff";
 import type { ConflictInfo } from "../../../types/collaboration";
 import type { GraphDiff } from "../../../utils/graphDiff";
+import { useTranslation } from "react-i18next";
 
 const { Title, Text } = Typography;
 
-const statusLabels: Record<string, string> = {
-  draft: "草稿", in_review: "审核中", approved: "已批准",
-  rework: "返工中", archived: "已归档",
-};
+function useStatusLabels(): Record<string, string> {
+  const { t } = useTranslation("fmea");
+  return {
+    draft: t("status.draft"),
+    in_review: t("status.in_review"),
+    approved: t("status.approved"),
+    rework: t("status.rework"),
+    archived: t("status.archived"),
+  };
+}
 
-const nextTransitions: Record<string, { label: string; target: string; icon: React.ReactNode }[]> = {
-  draft: [
-    { label: "提交审核", target: "in_review", icon: <SendOutlined /> },
-    { label: "归档", target: "archived", icon: <CheckOutlined /> },
-  ],
-  in_review: [
-    { label: "批准", target: "approved", icon: <CheckOutlined /> },
-    { label: "打回修改", target: "rework", icon: <UndoOutlined /> },
-  ],
-  approved: [
-    { label: "打回修改", target: "rework", icon: <UndoOutlined /> },
-    { label: "归档", target: "archived", icon: <CheckOutlined /> },
-  ],
-  rework: [
-    { label: "重新提交", target: "in_review", icon: <SendOutlined /> },
-  ],
-};
+function useNextTransitions(): Record<string, { label: string; target: string; icon: React.ReactNode }[]> {
+  const { t } = useTranslation("fmea");
+  return {
+    draft: [
+      { label: t("transition.submitReview"), target: "in_review", icon: <SendOutlined /> },
+      { label: t("transition.archive"), target: "archived", icon: <CheckOutlined /> },
+    ],
+    in_review: [
+      { label: t("transition.approve"), target: "approved", icon: <CheckOutlined /> },
+      { label: t("transition.rework"), target: "rework", icon: <UndoOutlined /> },
+    ],
+    approved: [
+      { label: t("transition.rework"), target: "rework", icon: <UndoOutlined /> },
+      { label: t("transition.archive"), target: "archived", icon: <CheckOutlined /> },
+    ],
+    rework: [
+      { label: t("transition.resubmit"), target: "in_review", icon: <SendOutlined /> },
+    ],
+  };
+}
 
 function getStructureNodes(nodes: GraphNode[], fmeaType: string): GraphNode[] {
   if (fmeaType === "DFMEA") {
@@ -90,6 +100,10 @@ export default function FMEAEditorPage() {
   const { id } = useParams<{ id: string }>();
   const fmeaId = id || "";
   const navigate = useNavigate();
+  const { t } = useTranslation("fmea");
+  const { t: tc } = useTranslation("common");
+  const statusLabels = useStatusLabels();
+  const nextTransitions = useNextTransitions();
   const [fmea, setFmea] = useState<FMEADocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -136,7 +150,7 @@ export default function FMEAEditorPage() {
         controller.abort();
         setLessonsLoading(false);
         setLessonsModalOpen(false);
-        message.warning("检索超时，请稍后在编辑过程中使用推荐功能");
+        message.warning(t("messages.searchTimeout"));
       }, 10000);
 
       const problemDescription = location.state?.problemDescription;
@@ -153,7 +167,7 @@ export default function FMEAEditorPage() {
         .catch((err) => {
           clearTimeout(timeoutId);
           if (!axios.isCancel(err)) {
-            message.error("检索经验教训失败");
+            message.error(t("messages.searchFailed"));
           }
           setLessonsLoading(false);
         });
@@ -238,11 +252,11 @@ export default function FMEAEditorPage() {
         setPendingHighlightNode(null);
       }
     } catch {
-      message.error("图谱数据加载失败");
+      message.error(t("messages.graphLoadFailed"));
     } finally {
       setGraphLoading(false);
     }
-  }, [id, message, pendingHighlightNode]);
+  }, [id, message, pendingHighlightNode, t]);
 
   const handleTraceImpact = async (nodeId: string) => {
     if (!id) return;
@@ -252,7 +266,7 @@ export default function FMEAEditorPage() {
       setHighlightNodes(nodes.map((n) => n.id));
       setDimOthers(true);
     } catch {
-      message.error("影响链查询失败");
+      message.error(t("messages.impactChainFailed"));
     }
   };
 
@@ -264,7 +278,7 @@ export default function FMEAEditorPage() {
       setHighlightNodes(nodes.map((n) => n.id));
       setDimOthers(true);
     } catch {
-      message.error("原因链查询失败");
+      message.error(t("messages.causeChainFailed"));
     }
   };
 
@@ -283,9 +297,9 @@ export default function FMEAEditorPage() {
       };
       const result = await analyzeChangeImpact(request);
       setImpactResult(result);
-      message.success("分析完成");
+      message.success(t("messages.analysisComplete"));
     } catch {
-      message.error("分析失败");
+      message.error(t("messages.analysisFailed"));
     } finally {
       setImpactLoading(false);
     }
@@ -307,7 +321,7 @@ export default function FMEAEditorPage() {
         edges: JSON.parse(JSON.stringify(edges)),
       };
       graphDataRef.current = null; // 保存后清空缓存，下次切回 graph 时重新加载
-      message.success("保存成功");
+      message.success(t("messages.saveSuccess"));
       try {
         if (id) await syncFromFMEA(id);
       } catch { /* silent */ }
@@ -339,7 +353,7 @@ export default function FMEAEditorPage() {
         }
         setConflictVisible(true);
       } else {
-        message.error("保存失败");
+        message.error(t("messages.saveFailed"));
       }
     } finally {
       setSaving(false);
@@ -368,13 +382,13 @@ export default function FMEAEditorPage() {
         edges: JSON.parse(JSON.stringify(edges)),
       };
       setConflictVisible(false);
-      message.success("强制保存成功");
+      message.success(t("messages.forceSaveSuccess"));
     } catch (e: unknown) {
       const err = e as { response?: { status?: number; data?: { detail?: string } } };
       if (err.response?.status === 409) {
-        message.error("文档又被修改了，请刷新后重试");
+        message.error(t("messages.concurrentUpdate"));
       } else {
-        message.error("强制保存失败");
+        message.error(t("messages.forceSaveFailed"));
       }
     } finally {
       setSaving(false);
@@ -386,10 +400,10 @@ export default function FMEAEditorPage() {
     try {
       const updated = await transitionFMEA(id, target);
       setFmea(updated);
-      message.success(`状态已变更为: ${statusLabels[target] || target}`);
+      message.success(t("messages.statusChanged", { status: statusLabels[target] || target }));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || "操作失败");
+      message.error(err?.response?.data?.detail || t("messages.operationFailed"));
     }
   };
 
@@ -474,7 +488,7 @@ export default function FMEAEditorPage() {
 
   const addRow = useCallback(() => {
     if (!selectedFunctionId || !fmea) {
-      message.warning("请先在左侧选择一个功能/工序节点");
+      message.warning(t("table.selectFunctionFirst"));
       return;
     }
     const { newNodes, newEdges } = createRowNodes(selectedFunctionId, fmea.fmea_type);
@@ -528,13 +542,13 @@ export default function FMEAEditorPage() {
   const functionNodes = fmea ? getFunctionNodes(nodes, fmea.fmea_type) : [];
 
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
-  if (!fmea) return <Empty description="FMEA 未找到" />;
+  if (!fmea) return <Empty description={t("messages.fmeaNotFound")} />;
 
   const isDFMEA = fmea.fmea_type === "DFMEA";
 
     const columns = [
     {
-      title: "过程项 / 功能要求",
+      title: t("table.processFunction"),
       key: "function",
       width: 140,
       fixed: "left" as const,
@@ -557,7 +571,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: "失效模式",
+      title: t("table.failureMode"),
       key: "failureMode",
       width: 130,
       render: (_: unknown, row: FMEARow) => {
@@ -578,7 +592,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: "失效影响",
+      title: t("table.failureEffect"),
       key: "failureEffect",
       width: 140,
       render: (_: unknown, row: FMEARow) => {
@@ -601,7 +615,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="严重度 (1-10, 10最严重)">S</Tooltip>,
+      title: <Tooltip title={t("table.severity")}>{t("table.severityShort")}</Tooltip>,
       key: "severity",
       width: 60,
       align: "center" as const,
@@ -631,7 +645,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={fmea.fmea_type === "DFMEA" ? "筛选器代码 (Filter Code)" : "分类 (CC/SC)"}>Class</Tooltip>,
+      title: <Tooltip title={t("table.class")}>{t("table.classShort")}</Tooltip>,
       key: "class",
       width: 70,
       align: "center" as const,
@@ -652,7 +666,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: "失效原因",
+      title: t("table.failureCause"),
       key: "failureCause",
       width: 140,
       render: (_: unknown, row: FMEARow) => {
@@ -677,7 +691,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="发生度 (1-10, 10最高)">O</Tooltip>,
+      title: <Tooltip title={t("table.occurrence")}>{t("table.occurrenceShort")}</Tooltip>,
       key: "occurrence",
       width: 60,
       align: "center" as const,
@@ -707,7 +721,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: "预防措施",
+      title: t("table.preventionControl"),
       key: "preventionControl",
       width: 140,
       render: (_: unknown, row: FMEARow) => {
@@ -735,7 +749,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: "检测措施",
+      title: t("table.detectionControl"),
       key: "detectionControl",
       width: 140,
       render: (_: unknown, row: FMEARow) => {
@@ -762,7 +776,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="探测度 (1-10, 10最低)">D</Tooltip>,
+      title: <Tooltip title={t("table.detection")}>{t("table.detectionShort")}</Tooltip>,
       key: "detection",
       width: 60,
       align: "center" as const,
@@ -792,7 +806,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="风险优先数 S×O×D">RPN</Tooltip>,
+      title: <Tooltip title={t("table.rpn")}>{t("table.rpnShort")}</Tooltip>,
       key: "rpn",
       width: 60,
       align: "center" as const,
@@ -816,7 +830,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="措施优先级 H/M/L">AP</Tooltip>,
+      title: <Tooltip title={t("table.ap")}>{t("table.apShort")}</Tooltip>,
       key: "ap",
       width: 55,
       align: "center" as const,
@@ -845,7 +859,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: "建议措施",
+      title: t("table.recommendedAction"),
       key: "recommendedAction",
       width: 140,
       render: (_: unknown, row: FMEARow) => {
@@ -861,7 +875,7 @@ export default function FMEAEditorPage() {
                 const newNode: GraphNode = {
                   id: raId,
                   type: "RecommendedAction",
-                  name: "新建议措施",
+                  name: t("table.newRecommendedAction"),
                   severity: 0,
                   occurrence: 0,
                   detection: 0,
@@ -872,7 +886,7 @@ export default function FMEAEditorPage() {
                 setEdges((prev) => [...prev, newEdge]);
               }}
             >
-              + 添加
+              {t("table.addRecommendedAction")}
             </Button>
           );
         }
@@ -901,7 +915,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: "责任人 / 期限",
+      title: t("table.responsibility"),
       key: "responsibility",
       width: 120,
       render: (_: unknown, row: FMEARow) => {
@@ -911,7 +925,7 @@ export default function FMEAEditorPage() {
           <div>
             <Input
               size="small"
-              placeholder="责任人"
+              placeholder={t("table.responsiblePlaceholder")}
               value={node?.responsible || ""}
               disabled={!canEdit('fmea')}
               style={{ marginBottom: 4 }}
@@ -919,7 +933,7 @@ export default function FMEAEditorPage() {
             />
             <Input
               size="small"
-              placeholder="YYYY-MM-DD"
+              placeholder={t("table.dueDatePlaceholder")}
               value={node?.due_date || ""}
               disabled={!canEdit('fmea')}
               onChange={(e) => updateNode(row.recommendedActionIds[0], "due_date", e.target.value)}
@@ -929,7 +943,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: "已采取措施",
+      title: t("table.actionsTaken"),
       key: "actionsTaken",
       width: 130,
       render: (_: unknown, row: FMEARow) => {
@@ -946,7 +960,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="改进后严重度">S'</Tooltip>,
+      title: <Tooltip title={t("table.revisedSeverity")}>{t("table.revisedSeverityShort")}</Tooltip>,
       key: "revisedSeverity",
       width: 55,
       align: "center" as const,
@@ -967,7 +981,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="改进后发生度">O'</Tooltip>,
+      title: <Tooltip title={t("table.revisedOccurrence")}>{t("table.revisedOccurrenceShort")}</Tooltip>,
       key: "revisedOccurrence",
       width: 55,
       align: "center" as const,
@@ -988,7 +1002,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="改进后探测度">D'</Tooltip>,
+      title: <Tooltip title={t("table.revisedDetection")}>{t("table.revisedDetectionShort")}</Tooltip>,
       key: "revisedDetection",
       width: 55,
       align: "center" as const,
@@ -1009,7 +1023,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title="改进后RPN">RPN'</Tooltip>,
+      title: <Tooltip title={t("table.revisedRpn")}>{t("table.revisedRpnShort")}</Tooltip>,
       key: "revisedRpn",
       width: 60,
       align: "center" as const,
@@ -1035,7 +1049,7 @@ export default function FMEAEditorPage() {
       width: 40,
       fixed: "right" as const,
       render: (_: unknown, row: FMEARow) => (
-        <Popconfirm title="确认删除此行？" onConfirm={() => deleteRow(row)}>
+        <Popconfirm title={t("table.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
           <Button type="text" danger size="small" disabled={!canEdit('fmea')} icon={<DeleteOutlined />} />
         </Popconfirm>
       ),
@@ -1049,7 +1063,7 @@ export default function FMEAEditorPage() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/fmea")}>返回</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/fmea")}>{tc("actions.back")}</Button>
           <Title level={4} style={{ margin: 0 }}>{fmea.title}</Title>
           <Tag color={isDFMEA ? "green" : "blue"}>{isDFMEA ? "DFMEA" : "PFMEA"}</Tag>
           <Tag>{statusLabels[fmea.status] || fmea.status}</Tag>
@@ -1057,18 +1071,18 @@ export default function FMEAEditorPage() {
         </Space>
         <Space>
           {nextTransitions[fmea.status]
-            ?.filter((t) => {
+            ?.filter((trans) => {
               if (!canEdit('fmea')) return false;
-              if (t.target === "approved" && !canApprove('fmea')) return false;
+              if (trans.target === "approved" && !canApprove('fmea')) return false;
               return true;
             })
-            ?.map((t) => (
-              <Popconfirm key={t.target} title={`确认${t.label}？`} onConfirm={() => handleTransition(t.target)}>
-                <Button icon={t.icon}>{t.label}</Button>
+            ?.map((trans) => (
+              <Popconfirm key={trans.target} title={`${tc("actions.confirm")} ${trans.label}？`} onConfirm={() => handleTransition(trans.target)}>
+                <Button icon={trans.icon}>{trans.label}</Button>
               </Popconfirm>
             ))}
           {canEdit('fmea') && (
-            <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>保存</Button>
+            <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>{tc("actions.save")}</Button>
           )}
         </Space>
       </div>
@@ -1076,33 +1090,33 @@ export default function FMEAEditorPage() {
       {/* FMEA Header Info */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Descriptions size="small" column={4}>
-          <Descriptions.Item label={isDFMEA ? "系统" : "过程项"}>
+          <Descriptions.Item label={isDFMEA ? t("header.system") : t("header.processItem")}>
             {structureNodes.find((n) => n.type === (isDFMEA ? "System" : "ProcessItem"))?.name || "-"}
           </Descriptions.Item>
-          <Descriptions.Item label={isDFMEA ? "设计责任" : "过程责任"}>
-            <Input size="small" placeholder="责任部门" style={{ width: 150 }} disabled={!canEdit('fmea')} />
+          <Descriptions.Item label={isDFMEA ? t("header.designResponsibility") : t("header.processResponsibility")}>
+            <Input size="small" placeholder={t("header.departmentPlaceholder")} style={{ width: 150 }} disabled={!canEdit('fmea')} />
           </Descriptions.Item>
-          <Descriptions.Item label="FMEA 编号">{fmea.document_no}</Descriptions.Item>
-          <Descriptions.Item label="关键日期">
-            <Input size="small" placeholder="YYYY-MM-DD" style={{ width: 100 }} disabled={!canEdit('fmea')} />
+          <Descriptions.Item label={t("header.fmeaNumber")}>{fmea.document_no}</Descriptions.Item>
+          <Descriptions.Item label={t("header.keyDate")}>
+            <Input size="small" placeholder={t("header.datePlaceholder")} style={{ width: 100 }} disabled={!canEdit('fmea')} />
           </Descriptions.Item>
         </Descriptions>
       </Card>
 
       <Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }} items={[
-        { key: "editor", label: "编辑器", children: <>
+        { key: "editor", label: t("editor.title"), children: <>
           <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }} items={[
-            { key: "failure", label: "失效分析", children: <>
+            { key: "failure", label: t("editor.failureAnalysis"), children: <>
           <Row gutter={16}>
             {/* Left: Structure/Function Tree */}
             <Col span={5}>
           <Card
-            title={isDFMEA ? "结构 / 功能" : "工序 / 功能"}
+            title={isDFMEA ? t("table.structureFunctionTitle") : t("table.processFunctionTitle")}
             size="small"
             extra={
               canEdit('fmea') && (
                 <Button size="small" icon={<PlusOutlined />} onClick={addRow} disabled={!selectedFunctionId}>
-                  添加行
+                  {t("table.addRow")}
                 </Button>
               )
             }
@@ -1145,7 +1159,7 @@ export default function FMEAEditorPage() {
                 </div>
               );
             })}
-            {functionNodes.length === 0 && <Empty description="暂无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+            {functionNodes.length === 0 && <Empty description={t("table.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
           </Card>
         </Col>
 
@@ -1154,7 +1168,7 @@ export default function FMEAEditorPage() {
           <Card
             title={
               <span style={{ fontSize: 14 }}>
-                {isDFMEA ? "设计失效模式与影响分析 (DFMEA)" : "过程失效模式与影响分析 (PFMEA)"}
+                {isDFMEA ? t("table.dfmeaTitle") : t("table.pfmeaTitle")}
               </span>
             }
             size="small"
@@ -1178,17 +1192,17 @@ export default function FMEAEditorPage() {
             />
             {rows.length === 0 && (
               <div style={{ textAlign: "center", padding: 40 }}>
-                <Text type="secondary">选择左侧功能节点后点击"添加行"开始分析</Text>
+                <Text type="secondary">{t("table.startAnalysisHint")}</Text>
               </div>
             )}
           </Card>
         </Col>
       </Row>
         </>},
-            { key: "structure", label: "结构分析", children: <>
+            { key: "structure", label: t("editor.structureAnalysis"), children: <>
           <Row gutter={16}>
             <Col span={8}>
-              <Card title="结构树" size="small">
+              <Card title={t("editor.structureTree")} size="small">
                 <StructureTree
                   nodes={nodes}
                   edges={edges}
@@ -1200,7 +1214,7 @@ export default function FMEAEditorPage() {
               </Card>
             </Col>
             <Col span={16}>
-              <Card title="节点详情" size="small">
+              <Card title={t("editor.nodeDetail")} size="small">
                 <ParameterDiagram
                   node={selectedStructureNode}
                   onUpdateNode={(nodeId, updates) => {
@@ -1238,10 +1252,10 @@ export default function FMEAEditorPage() {
 
       <Divider />
       <Text type="secondary" style={{ fontSize: 11 }}>
-        S=严重度 O=发生度 D=探测度 | RPN=风险优先数 | AP=措施优先级 (H=高 M=中 L=低) | 带 ' = 改进后评分
+        {t("table.footer")}
       </Text>
         </>},
-        { key: "graph", label: "🕸️ 图谱", children: <>
+        { key: "graph", label: t("editor.graph"), children: <>
           <div style={{ display: "flex", gap: 16, height: "calc(100vh - 240px)" }}>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
               <GraphToolbar
@@ -1279,8 +1293,8 @@ export default function FMEAEditorPage() {
                     onOpenChange={setContextMenuOpen}
                     menu={{
                       items: [
-                        { key: "impact", label: "追溯影响" },
-                        { key: "cause", label: "追溯原因" },
+                        { key: "impact", label: t("messages.traceImpact") },
+                        { key: "cause", label: t("messages.traceCause") },
                       ],
                       onClick: ({ key }) => {
                         setContextMenuOpen(false);
@@ -1298,26 +1312,26 @@ export default function FMEAEditorPage() {
                   </Dropdown>
                 </>
               ) : (
-                <Empty description="暂无图谱数据" style={{ flex: 1 }} />
+                <Empty description={t("messages.noGraphData")} style={{ flex: 1 }} />
               )}
             </div>
             <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 16 }}>
               <GraphLegend />
               {highlightNodes.length > 0 && (
                 <Button onClick={() => { setHighlightNodes([]); setDimOthers(false); }}>
-                  清除高亮
+                  {t("messages.clearHighlight")}
                 </Button>
               )}
-              <Card title="变更影响分析" size="small">
+              <Card title={t("messages.changeImpactAnalysis")} size="small">
                 <Space direction="vertical" style={{ width: "100%" }}>
-                  <Text type="secondary">分析此节点的变更对上下游的影响范围</Text>
+                  <Text type="secondary">{t("messages.changeImpactDescription")}</Text>
                   <Button
                     type="primary"
                     icon={<RadarChartOutlined />}
                     onClick={() => { setImpactModalOpen(true); setImpactResult(null); }}
                     disabled={!canEdit("fmea") || !selectedGraphNode}
                   >
-                    分析影响范围
+                    {t("messages.analyzeImpactScope")}
                   </Button>
                 </Space>
               </Card>
@@ -1331,17 +1345,17 @@ export default function FMEAEditorPage() {
             allEdges={graphDataRef.current?.edges}
           />
           <Modal
-            title="变更影响分析"
+            title={t("messages.changeImpactAnalysis")}
             open={impactModalOpen}
             onCancel={() => setImpactModalOpen(false)}
             width={800}
             footer={
               impactResult ? (
-                <Button onClick={() => setImpactModalOpen(false)}>关闭</Button>
+                <Button onClick={() => setImpactModalOpen(false)}>{t("messages.close")}</Button>
               ) : (
                 <>
-                  <Button onClick={() => setImpactModalOpen(false)}>取消</Button>
-                  <Button type="primary" onClick={handleAnalyzeImpact} loading={impactLoading}>执行分析</Button>
+                  <Button onClick={() => setImpactModalOpen(false)}>{t("messages.cancel")}</Button>
+                  <Button type="primary" onClick={handleAnalyzeImpact} loading={impactLoading}>{t("messages.executeAnalysis")}</Button>
                 </>
               )
             }
@@ -1360,20 +1374,20 @@ export default function FMEAEditorPage() {
                   value={impactForm.change_type}
                   onChange={(e) => setImpactForm({ ...impactForm, change_type: e.target.value })}
                 >
-                  <Radio.Button value="attribute">属性变更</Radio.Button>
-                  <Radio.Button value="structural">结构变更</Radio.Button>
+                  <Radio.Button value="attribute">{t("messages.attributeChange")}</Radio.Button>
+                  <Radio.Button value="structural">{t("messages.structuralChange")}</Radio.Button>
                 </Radio.Group>
                 {impactForm.change_type === "attribute" && (
                   <>
-                    <Input placeholder="字段名（如 design_parameter）" value={impactForm.field_name} onChange={(e) => setImpactForm({ ...impactForm, field_name: e.target.value })} />
-                    <Input placeholder="新值" value={impactForm.new_value} onChange={(e) => setImpactForm({ ...impactForm, new_value: e.target.value })} />
+                    <Input placeholder={t("messages.fieldNamePlaceholder")} value={impactForm.field_name} onChange={(e) => setImpactForm({ ...impactForm, field_name: e.target.value })} />
+                    <Input placeholder={t("messages.newValuePlaceholder")} value={impactForm.new_value} onChange={(e) => setImpactForm({ ...impactForm, new_value: e.target.value })} />
                   </>
                 )}
               </Space>
             )}
           </Modal>
         </>},
-        { key: "related-capa", label: "关联 CAPA", children: <>
+        { key: "related-capa", label: t("editor.relatedCapa"), children: <>
           {selectedFunctionId ? (
             <RelatedCAPAList
               fmeaId={fmea!.fmea_id}
@@ -1381,18 +1395,18 @@ export default function FMEAEditorPage() {
             />
           ) : (
             <Typography.Text type="secondary">
-              请先在编辑器中选择一个失效模式行
+              {t("messages.selectFailureMode")}
             </Typography.Text>
           )}
         </>},
-        { key: "history", label: <span><HistoryOutlined /> 版本历史</span>, children: <>
+        { key: "history", label: <span><HistoryOutlined /> {t("editor.history")}</span>, children: <>
           <VersionHistoryTab
             documentId={id!}
             documentType="fmea"
             canCreate={canEdit('fmea')}
             canRollback={canApprove('fmea')}
             isDraft={fmea.status === "draft"}
-            onViewSnapshot={(major, minor) => message.info(`查看版本 v${major}.${minor} 快照（功能开发中）`)}
+            onViewSnapshot={(major, minor) => message.info(t("messages.viewSnapshot", { version: `${major}.${minor}` }))}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
             onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}
@@ -1418,7 +1432,7 @@ export default function FMEAEditorPage() {
       {compareState && (
         <Modal
           open={!!compareState}
-          title="版本对比"
+          title={t("messages.versionCompare")}
           width={900}
           footer={null}
           onCancel={() => setCompareState(null)}

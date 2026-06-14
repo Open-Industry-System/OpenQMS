@@ -1,0 +1,12 @@
+{
+  "required": "请输入{{field}}",
+  "requiredField": "{{field}}不能为空",
+  "pleaseEnter": "请输入{{field}}",
+  "pleaseSelect": "请选择{{field}}",
+  "invalidFormat": "{{field}}格式不正确",
+  "minLength": "{{field}}至少需要{{count}}个字符",
+  "maxLength": "{{field}}不能超过{{count}}个字符",
+  "number": "{{field}}必须是数字",
+  "min": "{{field}}不能小于{{min}}",
+  "max": "{{field}}不能大于{{max}}"
+}
