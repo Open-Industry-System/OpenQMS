@@ -4,6 +4,7 @@ import zhLogin from "../locales/zh-CN/login.json";
 import zhLayout from "../locales/zh-CN/layout.json";
 import zhValidation from "../locales/zh-CN/validation.json";
 import zhFmea from "../locales/zh-CN/fmea.json";
+import zhSupplier from "../locales/zh-CN/supplier.json";
 
 declare module "i18next" {
   interface CustomTypeOptions {
@@ -14,6 +15,7 @@ declare module "i18next" {
       layout: typeof zhLayout;
       validation: typeof zhValidation;
       fmea: typeof zhFmea;
+      supplier: typeof zhSupplier;
     };
   }
 }
