@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Form, Input, Button, Card, Typography, App, Space } from "antd";
+import { Form, Input, Button, Card, Typography, App, Space, Segmented } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
+import i18n from "../../i18n";
 import { useAuthStore } from "../../store/authStore";
 
 const { Title, Text } = Typography;
@@ -11,15 +13,16 @@ export default function LoginPage() {
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
   const { message } = App.useApp();
+  const { t } = useTranslation("login");
 
   const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true);
     try {
       await login(values.username, values.password);
-      message.success("登录成功");
+      message.success(t("loginSuccess"));
       navigate("/dashboard", { replace: true });
     } catch {
-      message.error("用户名或密码错误");
+      message.error(t("loginError"));
     } finally {
       setLoading(false);
     }
@@ -39,25 +42,35 @@ export default function LoginPage() {
         <Space direction="vertical" size="large" style={{ width: "100%" }}>
           <div style={{ textAlign: "center" }}>
             <Title level={3} style={{ margin: 0 }}>
-              OpenQMS
+              {t("title")}
             </Title>
-            <Text type="secondary">智能质量管理平台</Text>
+            <Text type="secondary">{t("subtitle")}</Text>
+          </div>
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <Segmented
+              value={i18n.language}
+              onChange={(value) => i18n.changeLanguage(value as string)}
+              options={[
+                { label: "中文", value: "zh-CN" },
+                { label: "English", value: "en-US" },
+              ]}
+            />
           </div>
           <Form onFinish={onFinish} size="large">
-            <Form.Item name="username" rules={[{ required: true, message: "请输入用户名" }]}>
-              <Input prefix={<UserOutlined />} placeholder="用户名" />
+            <Form.Item name="username" rules={[{ required: true, message: t("usernameRequired") }]}>
+              <Input prefix={<UserOutlined />} placeholder={t("usernamePlaceholder")} />
             </Form.Item>
-            <Form.Item name="password" rules={[{ required: true, message: "请输入密码" }]}>
-              <Input.Password prefix={<LockOutlined />} placeholder="密码" />
+            <Form.Item name="password" rules={[{ required: true, message: t("passwordRequired") }]}>
+              <Input.Password prefix={<LockOutlined />} placeholder={t("passwordPlaceholder")} />
             </Form.Item>
             <Form.Item>
               <Button type="primary" htmlType="submit" loading={loading} block>
-                登录
+                {t("login")}
               </Button>
             </Form.Item>
           </Form>
           <Text type="secondary" style={{ display: "block", textAlign: "center", fontSize: 12 }}>
-            默认账号: admin / Admin@2026
+            {t("defaultAccount")}
           </Text>
         </Space>
       </Card>

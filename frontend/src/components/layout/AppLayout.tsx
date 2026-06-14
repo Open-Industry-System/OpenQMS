@@ -1,6 +1,6 @@
-import { useState, useEffect, ReactNode } from "react";
+import { useState, useEffect, ReactNode, useMemo } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import { Layout, Menu, Button, Avatar, Dropdown, theme, Space, Select } from "antd";
+import { Layout, Menu, Button, Avatar, Dropdown, Space, Select, Segmented, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import {
   DashboardOutlined,
@@ -30,9 +30,10 @@ import {
   WarningOutlined,
   GlobalOutlined,
   BankOutlined,
-  SwapOutlined,
   HeatMapOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
+import i18n from "../../i18n";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
 import { usePermission } from "../../hooks/usePermission";
@@ -40,7 +41,6 @@ import type { ModuleKey } from "../../hooks/usePermission";
 
 const { Header, Sider, Content } = Layout;
 
-// 所有菜单 key 列表（用于最长前缀匹配）
 const MENU_KEYS = [
   "/dashboard",
   "/fmea", "/control-plans", "/apqp", "/ppap",
@@ -58,7 +58,6 @@ const MENU_KEYS = [
   "/group/dashboard", "/group/comparison", "/group/suppliers", "/group/audits", "/group/factories",
 ];
 
-// 菜单 key → 需要展开的所有 SubMenu key 列表
 const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/fmea": ["grp:planning"],
   "/control-plans": ["grp:planning"],
@@ -116,7 +115,6 @@ interface MenuItem {
   children?: MenuItem[];
 }
 
-/** Strip the custom `module` field before passing to Ant Menu (which doesn't expect it). */
 function stripModuleField(items: MenuItem[]): MenuProps["items"] {
   return items.map(({ module: _m, ...rest }) => ({
     ...rest,
@@ -131,161 +129,168 @@ function getSelectedMenuKey(pathname: string): string {
   return matched[0] || "/dashboard";
 }
 
-const menuItems: MenuItem[] = [
-  { key: "/dashboard", icon: <DashboardOutlined />, label: "仪表盘" },
-  {
-    key: "grp:planning",
-    icon: <ExperimentOutlined />,
-    label: "前期质量策划",
-    module: "planning",
-    children: [
-      { key: "/fmea", icon: <FileTextOutlined />, label: "FMEA 管理", module: "fmea" },
-      { key: "/control-plans", icon: <FileTextOutlined />, label: "控制计划", module: "planning" },
-      { key: "/apqp", icon: <ProjectOutlined />, label: "APQP 质量策划", module: "planning" },
-      { key: "/ppap", icon: <FileProtectOutlined />, label: "PPAP", module: "ppap" },
-      { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: "特殊特性", module: "special_characteristic" },
-      { key: "/knowledge-graph", icon: <ShareAltOutlined />, label: "知识图谱", module: "knowledge_graph" },
-      { key: "/change-impact", icon: <RadarChartOutlined />, label: "变更影响分析", module: "fmea" },
-    ],
-  },
-  {
-    key: "grp:shopfloor",
-    icon: <ToolOutlined />,
-    label: "现场质量管理",
-    module: "spc",
-    children: [
-      { key: "/spc", icon: <BarChartOutlined />, label: "SPC 控制图", module: "spc" },
+function useMenuItems(): MenuItem[] {
+  const { t } = useTranslation("layout");
+  return useMemo(
+    () => [
+      { key: "/dashboard", icon: <DashboardOutlined />, label: t("menu.dashboard") },
       {
-        key: "grp:msa",
-        icon: <ToolOutlined />,
-        label: "MSA 分析",
-        module: "msa",
-        children: [
-          { key: "/msa/gauges", label: "量具管理", module: "msa" },
-          { key: "/msa/studies", label: "研究管理", module: "msa" },
-        ],
-      },
-      { key: "/quality-goals", icon: <AimOutlined />, label: "质量目标", module: "quality_goal" },
-      { key: "/internal-audits", icon: <SafetyOutlined />, label: "内部审核", module: "audit" },
-      { key: "/management-reviews", icon: <TeamOutlined />, label: "管理评审", module: "management_review" },
-    ],
-  },
-  {
-    key: "grp:customer",
-    icon: <CustomerServiceOutlined />,
-    label: "客户质量",
-    module: "customer_quality",
-    children: [
-      { key: "/customer-quality", icon: <CustomerServiceOutlined />, label: "客诉/RMA", module: "customer_quality" },
-      { key: "/customer-audits", icon: <AuditOutlined />, label: "客户审核", module: "customer_audit" },
-      { key: "/capa", icon: <BugOutlined />, label: "8D/CAPA", module: "capa" },
-    ],
-  },
-  {
-    key: "grp:supplier",
-    icon: <ShopOutlined />,
-    label: "供应商质量",
-    module: "supplier",
-    children: [
-      { key: "/suppliers", icon: <ShopOutlined />, label: "供应商管理", module: "supplier" },
-      { key: "/suppliers/quality", icon: <BarChartOutlined />, label: "供货质量看板", module: "supplier" },
-      { key: "/supplier-risk", icon: <WarningOutlined />, label: "供应商风险预警", module: "supplier_risk" },
-      { key: "/supply-chain-risk-map", icon: <HeatMapOutlined />, label: "供应链风险地图", module: "supply_chain_risk_map" },
-      { key: "/scars", icon: <AlertOutlined />, label: "SCAR 管理", module: "scar" },
-      {
-        key: "grp:iqc",
+        key: "grp:planning",
         icon: <ExperimentOutlined />,
-        label: "来料检验",
-        module: "iqc",
+        label: t("menu.planning"),
+        module: "planning",
         children: [
-          { key: "/iqc/inspections", label: "检验单", module: "iqc" },
-          { key: "/iqc/materials", label: "物料管理", module: "iqc" },
-          { key: "/iqc/aql-optimization", icon: <SafetyCertificateOutlined />, label: "抽样方案优化", module: "iqc" },
+          { key: "/fmea", icon: <FileTextOutlined />, label: t("menu.fmea"), module: "fmea" },
+          { key: "/control-plans", icon: <FileTextOutlined />, label: t("menu.controlPlan"), module: "planning" },
+          { key: "/apqp", icon: <ProjectOutlined />, label: t("menu.apqp"), module: "planning" },
+          { key: "/ppap", icon: <FileProtectOutlined />, label: t("menu.ppap"), module: "ppap" },
+          { key: "/special-characteristics", icon: <SafetyCertificateOutlined />, label: t("menu.specialCharacteristics"), module: "special_characteristic" },
+          { key: "/knowledge-graph", icon: <ShareAltOutlined />, label: t("menu.knowledgeGraph"), module: "knowledge_graph" },
+          { key: "/change-impact", icon: <RadarChartOutlined />, label: t("menu.changeImpact"), module: "fmea" },
+        ],
+      },
+      {
+        key: "grp:shopfloor",
+        icon: <ToolOutlined />,
+        label: t("menu.shopfloor"),
+        module: "spc",
+        children: [
+          { key: "/spc", icon: <BarChartOutlined />, label: t("menu.spc"), module: "spc" },
+          {
+            key: "grp:msa",
+            icon: <ToolOutlined />,
+            label: t("menu.msa"),
+            module: "msa",
+            children: [
+              { key: "/msa/gauges", label: t("menu.gaugeManagement"), module: "msa" },
+              { key: "/msa/studies", label: t("menu.studyManagement"), module: "msa" },
+            ],
+          },
+          { key: "/quality-goals", icon: <AimOutlined />, label: t("menu.qualityGoals"), module: "quality_goal" },
+          { key: "/internal-audits", icon: <SafetyOutlined />, label: t("menu.internalAudit"), module: "audit" },
+          { key: "/management-reviews", icon: <TeamOutlined />, label: t("menu.managementReview"), module: "management_review" },
+        ],
+      },
+      {
+        key: "grp:customer",
+        icon: <CustomerServiceOutlined />,
+        label: t("menu.customerQuality"),
+        module: "customer_quality",
+        children: [
+          { key: "/customer-quality", icon: <CustomerServiceOutlined />, label: t("menu.customerComplaints"), module: "customer_quality" },
+          { key: "/customer-audits", icon: <AuditOutlined />, label: t("menu.customerAudit"), module: "customer_audit" },
+          { key: "/capa", icon: <BugOutlined />, label: t("menu.capa"), module: "capa" },
+        ],
+      },
+      {
+        key: "grp:supplier",
+        icon: <ShopOutlined />,
+        label: t("menu.supplierQuality"),
+        module: "supplier",
+        children: [
+          { key: "/suppliers", icon: <ShopOutlined />, label: t("menu.supplierManagement"), module: "supplier" },
+          { key: "/suppliers/quality", icon: <BarChartOutlined />, label: t("menu.supplierQualityDashboard"), module: "supplier" },
+          { key: "/supplier-risk", icon: <WarningOutlined />, label: t("menu.supplierRiskAlert"), module: "supplier_risk" },
+          { key: "/supply-chain-risk-map", icon: <HeatMapOutlined />, label: t("menu.supplyChainRiskMap"), module: "supply_chain_risk_map" },
+          { key: "/scars", icon: <AlertOutlined />, label: t("menu.scarManagement"), module: "scar" },
+          {
+            key: "grp:iqc",
+            icon: <ExperimentOutlined />,
+            label: t("menu.iqc"),
+            module: "iqc",
+            children: [
+              { key: "/iqc/inspections", label: t("menu.inspectionOrders"), module: "iqc" },
+              { key: "/iqc/materials", label: t("menu.materialManagement"), module: "iqc" },
+              { key: "/iqc/aql-optimization", icon: <SafetyCertificateOutlined />, label: t("menu.samplingOptimization"), module: "iqc" },
+            ],
+          },
+        ],
+      },
+      {
+        key: "grp:mes",
+        icon: <ToolOutlined />,
+        label: t("menu.mesIntegration"),
+        module: "mes",
+        children: [
+          { key: "/mes/dashboard", label: t("menu.mesDashboard"), module: "mes" },
+          { key: "/mes/orders", label: t("menu.workOrders"), module: "mes" },
+          { key: "/mes/scrap", label: t("menu.scrapRework"), module: "mes" },
+          { key: "/mes/connections", label: t("menu.mesConnections"), module: "mes" },
+        ],
+      },
+      {
+        key: "grp:plm",
+        icon: <BuildOutlined />,
+        label: t("menu.plmIntegration"),
+        module: "plm",
+        children: [
+          { key: "/plm/dashboard", label: t("menu.plmDashboard"), module: "plm" },
+          { key: "/plm/parts", label: t("menu.partList"), module: "plm" },
+          { key: "/plm/change-orders", label: t("menu.changeOrderManagement"), module: "plm" },
+          { key: "/plm/connections", label: t("menu.plmConnections"), module: "plm" },
+        ],
+      },
+      {
+        key: "grp:erp",
+        icon: <SettingOutlined />,
+        label: t("menu.erpIntegration"),
+        module: "erp",
+        children: [
+          { key: "/erp", label: t("menu.erpDashboard"), module: "erp" },
+          { key: "/erp/connections", label: t("menu.erpConnections"), module: "erp" },
+          { key: "/erp/master-data", label: t("menu.masterData"), module: "erp" },
+          { key: "/erp/supply-chain", label: t("menu.supplyChain"), module: "erp" },
+          { key: "/erp/commercial", label: t("menu.salesCost"), module: "erp" },
+          { key: "/erp/traceability", label: t("menu.batchTraceability"), module: "erp" },
+        ],
+      },
+      {
+        key: "grp:group",
+        icon: <GlobalOutlined />,
+        label: t("menu.groupManagement"),
+        module: "group",
+        children: [
+          { key: "/group/dashboard", icon: <DashboardOutlined />, label: t("menu.groupDashboard"), module: "group" },
+          { key: "/group/comparison", icon: <RadarChartOutlined />, label: t("menu.factoryComparison"), module: "group" },
+          { key: "/group/suppliers", icon: <ShareAltOutlined />, label: t("menu.sharedSuppliers"), module: "group" },
+          { key: "/group/audits", icon: <AuditOutlined />, label: t("menu.crossFactoryAudit"), module: "group" },
+          { key: "/group/factories", icon: <BankOutlined />, label: t("menu.factoryManagement"), module: "group" },
         ],
       },
     ],
-  },
-  {
-    key: "grp:mes",
-    icon: <ToolOutlined />,
-    label: "MES 集成",
-    module: "mes",
-    children: [
-      { key: "/mes/dashboard", label: "MES 看板", module: "mes" },
-      { key: "/mes/orders", label: "工单列表", module: "mes" },
-      { key: "/mes/scrap", label: "报废/返工", module: "mes" },
-      { key: "/mes/connections", label: "连接管理", module: "mes" },
-    ],
-  },
-  {
-    key: "grp:plm",
-    icon: <BuildOutlined />,
-    label: "PLM 集成",
-    module: "plm",
-    children: [
-      { key: "/plm/dashboard", label: "PLM 看板", module: "plm" },
-      { key: "/plm/parts", label: "零件列表", module: "plm" },
-      { key: "/plm/change-orders", label: "变更单管理", module: "plm" },
-      { key: "/plm/connections", label: "连接管理", module: "plm" },
-    ],
-  },
-  {
-    key: "grp:erp",
-    icon: <SettingOutlined />,
-    label: "ERP 集成",
-    module: "erp",
-    children: [
-      { key: "/erp", label: "ERP 看板", module: "erp" },
-      { key: "/erp/connections", label: "连接管理", module: "erp" },
-      { key: "/erp/master-data", label: "主数据", module: "erp" },
-      { key: "/erp/supply-chain", label: "供应链", module: "erp" },
-      { key: "/erp/commercial", label: "销售与成本", module: "erp" },
-      { key: "/erp/traceability", label: "批次追溯", module: "erp" },
-    ],
-  },
-  {
-    key: "grp:group",
-    icon: <GlobalOutlined />,
-    label: "集团管理",
-    module: "group",
-    children: [
-      { key: "/group/dashboard", icon: <DashboardOutlined />, label: "集团仪表盘", module: "group" },
-      { key: "/group/comparison", icon: <RadarChartOutlined />, label: "工厂对比", module: "group" },
-      { key: "/group/suppliers", icon: <ShareAltOutlined />, label: "共享供应商", module: "group" },
-      { key: "/group/audits", icon: <AuditOutlined />, label: "跨厂审核", module: "group" },
-      { key: "/group/factories", icon: <BankOutlined />, label: "工厂管理", module: "group" },
-    ],
-  },
-];
+    [t]
+  );
+}
 
-/** Recursively filter menu items by permission.
- *  - Items with no module are always visible (e.g. dashboard).
- *  - Items with a module are visible only if canView(module) is true.
- *  - Groups with no visible children are hidden entirely.
- */
 function filterMenuByPermission(
   items: MenuItem[],
   canViewFn: (m: ModuleKey) => boolean,
 ): MenuItem[] {
   return items
     .map((item) => {
-      // No module = always visible (dashboard)
       if (!item.module) return item;
-
-      // If the user can't see this item's own module, hide it
       if (!canViewFn(item.module)) return null;
-
-      // If it has children, recursively filter them
       if (item.children) {
         const filteredChildren = filterMenuByPermission(item.children, canViewFn);
-        // If all children were filtered out, hide the group too
         if (filteredChildren.length === 0) return null;
         return { ...item, children: filteredChildren };
       }
-
       return item;
     })
     .filter((item): item is MenuItem => item !== null);
+}
+
+function LanguageSwitcher() {
+  return (
+    <Segmented
+      value={i18n.language}
+      onChange={(value) => i18n.changeLanguage(value as string)}
+      options={[
+        { label: "中文", value: "zh-CN" },
+        { label: "English", value: "en-US" },
+      ]}
+    />
+  );
 }
 
 export default function AppLayout() {
@@ -298,11 +303,12 @@ export default function AppLayout() {
   const factories = useAuthStore((s) => s.factories);
   const currentFactoryId = useAuthStore((s) => s.currentFactoryId);
   const setCurrentFactoryId = useAuthStore((s) => s.setCurrentFactoryId);
-  const { token: themeToken } = theme.useToken();
   const { productLines, selected, setSelected, load } = useProductLineStore();
   const { canView } = usePermission();
+  const { t } = useTranslation("layout");
   useEffect(() => { load(); }, [load]);
 
+  const menuItems = useMenuItems();
   const selectedKey = getSelectedMenuKey(location.pathname);
   const requiredOpenKeys = MENU_KEY_TO_OPEN_KEYS[selectedKey] || [];
   const [openKeys, setOpenKeys] = useState<string[]>(requiredOpenKeys);
@@ -316,36 +322,23 @@ export default function AppLayout() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
 
-  // Filter menu items recursively by per-item module permission
-  const visibleMenuItems = filterMenuByPermission(menuItems, canView);
+  const visibleMenuItems = useMemo(
+    () => filterMenuByPermission(menuItems, canView),
+    [menuItems, canView]
+  );
 
-  // Factory switcher visible when user has access to multiple factories (or all)
   const showFactorySwitcher = factoryScope?.accessible_factory_ids === null
     || (factoryScope?.accessible_factory_ids?.length ?? 0) > 1;
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      <Sider
-        trigger={null}
-        collapsible
-        collapsed={collapsed}
-      >
-        <div
-          style={{
-            height: 64,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 700,
-            fontSize: collapsed ? 16 : 20,
-            color: themeToken.colorPrimary,
-            borderBottom: `1px solid ${themeToken.colorBorderSecondary}`,
-          }}
-        >
-          {collapsed ? "QMS" : "OpenQMS"}
+      <Sider trigger={null} collapsible collapsed={collapsed} width={240} collapsedWidth={72}>
+        <div style={{ height: 64, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {!collapsed && <span style={{ fontSize: 18, fontWeight: 600 }}>OpenQMS</span>}
         </div>
         <Menu
           mode="inline"
+          inlineCollapsed={collapsed}
           selectedKeys={[selectedKey]}
           openKeys={openKeys}
           onOpenChange={setOpenKeys}
@@ -354,31 +347,25 @@ export default function AppLayout() {
             if (key.startsWith("grp:")) return;
             navigate(key);
           }}
-          style={{ borderRight: 0 }}
+          style={{ height: "calc(100vh - 64px)" }}
         />
       </Sider>
       <Layout>
-        <Header
-          style={{
-            padding: "0 24px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <Button
-            type="text"
-            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={() => setCollapsed(!collapsed)}
-          />
-          <Space>
+        <Header style={{ padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff" }}>
+          <Tooltip title={collapsed ? t("header.expandMenu") : t("header.collapseMenu")}>
+            <Button
+              type="text"
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setCollapsed(!collapsed)}
+            />
+          </Tooltip>
+          <Space size="middle">
             {showFactorySwitcher && (
               <Select
                 style={{ width: 200 }}
                 value={currentFactoryId || undefined}
-                placeholder="选择工厂"
+                placeholder={t("header.selectFactory")}
                 onChange={(v) => setCurrentFactoryId(v)}
-                suffixIcon={<SwapOutlined />}
               >
                 {factories.map((f) => (
                   <Select.Option key={f.id} value={f.id}>
@@ -389,32 +376,38 @@ export default function AppLayout() {
             )}
             <Select
               allowClear
-              placeholder="全部产品线"
+              placeholder={t("header.allProductLines")}
               style={{ width: 200 }}
               value={selected || undefined}
               onChange={(v) => setSelected(v || null)}
             >
-              {productLines.map((pl) => (
-                <Select.Option key={pl.code} value={pl.code}>
-                  {pl.code} - {pl.name}
-                </Select.Option>
-              ))}
-            </Select>
+                {productLines.map((pl) => (
+                  <Select.Option key={pl.code} value={pl.code}>
+                    {pl.code} - {pl.name}
+                  </Select.Option>
+                ))}
+              </Select>
+            <LanguageSwitcher />
             <Dropdown
-            menu={{
-              items: [
-                { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => { logout(); navigate("/login"); } },
-              ],
-            }}
-          >
-            <Space style={{ cursor: "pointer" }}>
-              <Avatar icon={<UserOutlined />} />
-              <span>{user?.display_name || user?.username}</span>
-            </Space>
-          </Dropdown>
+              menu={{
+                items: [
+                  {
+                    key: "logout",
+                    icon: <LogoutOutlined />,
+                    label: t("header.logout"),
+                    onClick: () => { logout(); navigate("/login"); },
+                  },
+                ],
+              }}
+            >
+              <Space style={{ cursor: "pointer" }}>
+                <Avatar icon={<UserOutlined />} />
+                <span>{user?.display_name || user?.username}</span>
+              </Space>
+            </Dropdown>
           </Space>
         </Header>
-        <Content style={{ margin: 24 }}>
+        <Content style={{ padding: 24 }}>
           <Outlet />
         </Content>
       </Layout>

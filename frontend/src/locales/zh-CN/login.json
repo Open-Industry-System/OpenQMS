@@ -1,0 +1,15 @@
+{
+  "title": "OpenQMS",
+  "subtitle": "智能质量管理平台 · 精密熔炉",
+  "username": "用户名",
+  "password": "密码",
+  "usernamePlaceholder": "请输入用户名",
+  "passwordPlaceholder": "请输入密码",
+  "usernameRequired": "请输入用户名",
+  "passwordRequired": "请输入密码",
+  "login": "登录",
+  "loginSuccess": "登录成功",
+  "loginError": "用户名或密码错误",
+  "defaultAccount": "默认账号 admin / Admin@2026",
+  "footer": "© OpenQMS · 中国制造质量操作系统"
+}

@@ -1,0 +1,38 @@
+{
+  "language": {
+    "zh": "中文",
+    "en": "English",
+    "switch": "Switch Language"
+  },
+  "actions": {
+    "save": "Save",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View",
+    "search": "Search",
+    "reset": "Reset",
+    "loading": "Loading",
+    "confirm": "Confirm",
+    "close": "Close",
+    "add": "Add",
+    "refresh": "Refresh",
+    "back": "Back",
+    "more": "More"
+  },
+  "status": {
+    "success": "Success",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info"
+  },
+  "empty": {
+    "data": "No data",
+    "description": "No relevant data"
+  },
+  "table": {
+    "noData": "No data",
+    "operations": "Actions"
+  }
+}

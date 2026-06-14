@@ -1,0 +1,15 @@
+{
+  "title": "OpenQMS",
+  "subtitle": "Intelligent Quality Management Platform · Precision Forge",
+  "username": "Username",
+  "password": "Password",
+  "usernamePlaceholder": "Please enter username",
+  "passwordPlaceholder": "Please enter password",
+  "usernameRequired": "Username is required",
+  "passwordRequired": "Password is required",
+  "login": "Login",
+  "loginSuccess": "Login successful",
+  "loginError": "Invalid username or password",
+  "defaultAccount": "Default account admin / Admin@2026",
+  "footer": "© OpenQMS · China Manufacturing Quality Operating System"
+}
