@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Card, Descriptions, Button, Space, Tag, Collapse, Input, Table,
+  Descriptions, Button, Space, Tag, Collapse, Input, Table,
   Modal, Form, Select, DatePicker, message, Spin, Popconfirm,
 } from "antd";
 import {
@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { ManagementReview, ReviewOutput } from "../../types";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import ManagementReviewReportPanel from "./ManagementReviewReportPanel";
 
 const { TextArea } = Input;
@@ -195,7 +196,7 @@ export default function ManagementReviewDetailPage() {
       title: "状态", dataIndex: "status", width: 100,
       render: (st: string) => {
         const info = outputStatusMap[st] || { color: "default", label: st };
-        return <Tag color={info.color}>{info.label}</Tag>;
+        return <StatusBadge status={st}>{info.label}</StatusBadge>;
       },
     },
     {
@@ -234,139 +235,136 @@ export default function ManagementReviewDetailPage() {
   ];
 
   return (
-    <Space direction="vertical" style={{ width: "100%" }} size="large">
-      {/* Basic info */}
-      <Card
-        title={
-          <Space>
-            <span>{review.doc_no}</span>
-            <Tag color={statusMap[s]?.color}>{statusMap[s]?.label}</Tag>
-          </Space>
-        }
-        extra={
-          <Space>
-            {s === "draft" && !!canEdit('management_review') && (
-              <Button type="primary" onClick={() => handleTransition(() => collectData(id!))}>汇总数据</Button>
-            )}
-            {s === "data_collected" && !!canEdit('management_review') && (
-              <>
-                <Button onClick={() => handleTransition(() => refreshData(id!))}>刷新数据</Button>
-                <Button onClick={() => handleTransition(() => backToDraft(id!))}>返回草稿</Button>
-                <Button type="primary" onClick={() => handleTransition(() => startReview(id!))}>开始评审</Button>
-              </>
-            )}
-            {s === "in_review" && canApprove('management_review') && (
-              <Button type="primary" onClick={() => handleTransition(() => closeReview(id!))}>关闭评审</Button>
-            )}
-            {s === "closed" && canApprove('management_review') && (
-              <Popconfirm title="确认重新打开?" onConfirm={() => handleTransition(() => reopenReview(id!))}>
-                <Button>重新打开</Button>
-              </Popconfirm>
-            )}
-            <Button onClick={() => navigate("/management-reviews")}>返回列表</Button>
-          </Space>
-        }
-      >
-        <Descriptions column={2}>
-          <Descriptions.Item label="评审主题">{review.title}</Descriptions.Item>
-          <Descriptions.Item label="评审日期">{review.review_date}</Descriptions.Item>
-          <Descriptions.Item label="实际日期">{review.actual_date || "-"}</Descriptions.Item>
-          <Descriptions.Item label="产品线">{review.product_line_code || "全厂"}</Descriptions.Item>
-          <Descriptions.Item label="地点">{review.location || "-"}</Descriptions.Item>
-        </Descriptions>
-      </Card>
+    <PageShell
+      title="管理评审详情"
+      actions={
+        <Space>
+          {s === "draft" && !!canEdit('management_review') && (
+            <Button type="primary" onClick={() => handleTransition(() => collectData(id!))}>汇总数据</Button>
+          )}
+          {s === "data_collected" && !!canEdit('management_review') && (
+            <>
+              <Button onClick={() => handleTransition(() => refreshData(id!))}>刷新数据</Button>
+              <Button onClick={() => handleTransition(() => backToDraft(id!))}>返回草稿</Button>
+              <Button type="primary" onClick={() => handleTransition(() => startReview(id!))}>开始评审</Button>
+            </>
+          )}
+          {s === "in_review" && canApprove('management_review') && (
+            <Button type="primary" onClick={() => handleTransition(() => closeReview(id!))}>关闭评审</Button>
+          )}
+          {s === "closed" && canApprove('management_review') && (
+            <Popconfirm title="确认重新打开?" onConfirm={() => handleTransition(() => reopenReview(id!))}>
+              <Button>重新打开</Button>
+            </Popconfirm>
+          )}
+          <Button onClick={() => navigate("/management-reviews")}>返回列表</Button>
+        </Space>
+      }
+    >
+      <Space direction="vertical" style={{ width: "100%" }} size="large">
+        {/* Basic info */}
+        <DataCard title={<Space><span>{review.doc_no}</span><StatusBadge status={s}>{statusMap[s]?.label}</StatusBadge></Space>}>
+          <Descriptions column={2}>
+            <Descriptions.Item label="评审主题">{review.title}</Descriptions.Item>
+            <Descriptions.Item label="评审日期">{review.review_date}</Descriptions.Item>
+            <Descriptions.Item label="实际日期">{review.actual_date || "-"}</Descriptions.Item>
+            <Descriptions.Item label="产品线">{review.product_line_code || "全厂"}</Descriptions.Item>
+            <Descriptions.Item label="地点">{review.location || "-"}</Descriptions.Item>
+          </Descriptions>
+        </DataCard>
 
-      {/* Data package */}
-      {(s === "data_collected" || s === "in_review" || s === "closed") && (
-        <Card title="评审输入数据包">
-          <Collapse items={dataPackageItems} />
-        </Card>
-      )}
+        {/* Data package */}
+        {(s === "data_collected" || s === "in_review" || s === "closed") && (
+          <DataCard title="评审输入数据包">
+            <Collapse items={dataPackageItems} />
+          </DataCard>
+        )}
 
-      {/* Meeting minutes */}
-      {(s === "in_review" || s === "closed") && (
-        <Card title="会议纪要">
-          <TextArea
-            rows={6}
-            defaultValue={review.meeting_minutes || ""}
-            disabled={isClosed || !canEdit('management_review')}
-            onBlur={async (e) => {
-              if (!id) return;
-              const updated = await updateManagementReview(id, { meeting_minutes: e.target.value });
-              setReview(updated);
-            }}
-            placeholder="请输入评审会议纪要..."
-          />
-        </Card>
-      )}
+        {/* Meeting minutes */}
+        {(s === "in_review" || s === "closed") && (
+          <DataCard title="会议纪要">
+            <TextArea
+              rows={6}
+              defaultValue={review.meeting_minutes || ""}
+              disabled={isClosed || !canEdit('management_review')}
+              onBlur={async (e) => {
+                if (!id) return;
+                const updated = await updateManagementReview(id, { meeting_minutes: e.target.value });
+                setReview(updated);
+              }}
+              placeholder="请输入评审会议纪要..."
+            />
+          </DataCard>
+        )}
 
-      {/* Outputs */}
-      {(s === "in_review" || s === "closed") && (
-        <Card
-          title="评审输出措施"
-          extra={!isClosed && !!canEdit('management_review') ? (
-            <Button type="primary" onClick={() => setOutputModalOpen(true)}>添加措施</Button>
-          ) : undefined}
-        >
-          <Table rowKey="output_id" columns={outputColumns} dataSource={outputs} pagination={false} size="small" />
-        </Card>
-      )}
+        {/* Outputs */}
+        {(s === "in_review" || s === "closed") && (
+          <DataCard
+            title="评审输出措施"
+            extra={!isClosed && !!canEdit('management_review') ? (
+              <Button type="primary" onClick={() => setOutputModalOpen(true)}>添加措施</Button>
+            ) : undefined}
+          >
+            <Table rowKey="output_id" columns={outputColumns} dataSource={outputs} pagination={false} size="small" className="qf-table" />
+          </DataCard>
+        )}
 
-      {/* Management Review Report */}
-      <ManagementReviewReportPanel review={review} onReviewChange={setReview} />
+        {/* Management Review Report */}
+        <ManagementReviewReportPanel review={review} onReviewChange={setReview} />
 
-      {/* Add output modal */}
-      <Modal
-        title="添加措施"
-        open={outputModalOpen}
-        onCancel={() => setOutputModalOpen(false)}
-        onOk={async () => {
-          const values = await form.validateFields();
-          await createOutput(id!, values);
-          setOutputModalOpen(false);
-          form.resetFields();
-          fetchData();
-        }}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item name="category" label="类别" rules={[{ required: true }]}>
-            <Select>
-              <Select.Option value="improvement_opportunity">改进机会</Select.Option>
-              <Select.Option value="system_change">体系变更</Select.Option>
-              <Select.Option value="resource_need">资源需求</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="description" label="描述" rules={[{ required: true }]}>
-            <TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="due_date" label="截止日期">
-            <DatePicker style={{ width: "100%" }} />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* Verify output modal */}
-      <Modal
-        title="效果验证"
-        open={verifyModalOpen}
-        onCancel={() => { setVerifyModalOpen(false); setActiveOutput(null); }}
-        onOk={async () => {
-          const values = await verifyForm.validateFields();
-          if (activeOutput && id) {
-            await verifyOutput(id, activeOutput.output_id, values.verification_notes);
-            setVerifyModalOpen(false);
-            setActiveOutput(null);
-            verifyForm.resetFields();
+        {/* Add output modal */}
+        <Modal
+          title="添加措施"
+          open={outputModalOpen}
+          onCancel={() => setOutputModalOpen(false)}
+          onOk={async () => {
+            const values = await form.validateFields();
+            await createOutput(id!, values);
+            setOutputModalOpen(false);
+            form.resetFields();
             fetchData();
-          }
-        }}
-      >
-        <Form form={verifyForm} layout="vertical">
-          <Form.Item name="verification_notes" label="验证结论" rules={[{ required: true }]}>
-            <TextArea rows={3} placeholder="请输入效果验证结论..." />
-          </Form.Item>
-        </Form>
-      </Modal>
-    </Space>
+          }}
+        >
+          <Form form={form} layout="vertical">
+            <Form.Item name="category" label="类别" rules={[{ required: true }]}>
+              <Select>
+                <Select.Option value="improvement_opportunity">改进机会</Select.Option>
+                <Select.Option value="system_change">体系变更</Select.Option>
+                <Select.Option value="resource_need">资源需求</Select.Option>
+              </Select>
+            </Form.Item>
+            <Form.Item name="description" label="描述" rules={[{ required: true }]}>
+              <TextArea rows={3} />
+            </Form.Item>
+            <Form.Item name="due_date" label="截止日期">
+              <DatePicker style={{ width: "100%" }} />
+            </Form.Item>
+          </Form>
+        </Modal>
+
+        {/* Verify output modal */}
+        <Modal
+          title="效果验证"
+          open={verifyModalOpen}
+          onCancel={() => { setVerifyModalOpen(false); setActiveOutput(null); }}
+          onOk={async () => {
+            const values = await verifyForm.validateFields();
+            if (activeOutput && id) {
+              await verifyOutput(id, activeOutput.output_id, values.verification_notes);
+              setVerifyModalOpen(false);
+              setActiveOutput(null);
+              verifyForm.resetFields();
+              fetchData();
+            }
+          }}
+        >
+          <Form form={verifyForm} layout="vertical">
+            <Form.Item name="verification_notes" label="验证结论" rules={[{ required: true }]}>
+              <TextArea rows={3} placeholder="请输入效果验证结论..." />
+            </Form.Item>
+          </Form>
+        </Modal>
+      </Space>
+    </PageShell>
   );
 }

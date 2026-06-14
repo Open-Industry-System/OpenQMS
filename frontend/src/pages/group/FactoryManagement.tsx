@@ -3,6 +3,7 @@ import { Table, Button, Modal, Form, Input, Switch, message, Space, Popconfirm }
 import { PlusOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { listFactories, createFactory, updateFactory, deactivateFactory, type Factory } from "../../api/group";
+import { PageShell, DataCard } from "../../components/design";
 
 export default function FactoryManagementPage() {
   const [factories, setFactories] = useState<Factory[]>([]);
@@ -90,19 +91,22 @@ export default function FactoryManagementPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <h2>工厂管理</h2>
+    <PageShell
+      title="工厂管理"
+      actions={
         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新建工厂</Button>
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={factories}
-        rowKey="id"
-        loading={loading}
-        pagination={false}
-      />
+      }
+    >
+      <DataCard title="工厂列表">
+        <Table
+          columns={columns}
+          dataSource={factories}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          className="qf-table"
+        />
+      </DataCard>
 
       <Modal
         title={editItem ? "编辑工厂" : "新建工厂"}
@@ -130,6 +134,6 @@ export default function FactoryManagementPage() {
           )}
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

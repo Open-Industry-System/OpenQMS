@@ -1,16 +1,8 @@
 import { useEffect, useState } from "react";
-import { Table, Spin, Typography, Tag } from "antd";
+import { Table, Spin, Tag } from "antd";
 import { getCrossFactoryAudits, type CrossFactoryAuditResponse } from "../../api/group";
 import { usePermission } from "../../hooks/usePermission";
-
-const { Title } = Typography;
-
-const statusColors: Record<string, string> = {
-  planned: "blue",
-  in_progress: "orange",
-  completed: "green",
-  cancelled: "red",
-};
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 export default function GroupAuditsPage() {
   const { canView } = usePermission();
@@ -49,7 +41,7 @@ export default function GroupAuditsPage() {
       key: "status",
       width: 100,
       render: (status: string) => (
-        <Tag color={statusColors[status] || "default"}>{status}</Tag>
+        <StatusBadge status={status}>{status}</StatusBadge>
       ),
     },
     {
@@ -72,18 +64,20 @@ export default function GroupAuditsPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <Title level={3}>跨厂审核</Title>
-      {loading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 48 }}><Spin size="large" /></div>
-      ) : (
-        <Table
-          columns={columns}
-          dataSource={audits}
-          rowKey="program_id"
-          pagination={{ pageSize: 20 }}
-        />
-      )}
-    </div>
+    <PageShell title="跨厂审核">
+      <DataCard title="审核列表">
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: 48 }}><Spin size="large" /></div>
+        ) : (
+          <Table
+            columns={columns}
+            dataSource={audits}
+            rowKey="program_id"
+            pagination={{ pageSize: 20 }}
+            className="qf-table"
+          />
+        )}
+      </DataCard>
+    </PageShell>
   );
 }

@@ -1,4 +1,5 @@
-import { List, Tag } from "antd";
+import { List } from "antd";
+import { StatusBadge } from "../../components/design";
 import type { ReviewReportVersion } from "../../types";
 
 interface Props {
@@ -17,7 +18,7 @@ export default function ReportVersionList({ versions, selectedId, onSelect }: Pr
           style={{ cursor: "pointer", background: selectedId === v.report_id ? "#e6f7ff" : undefined }}
           onClick={() => onSelect(v)}
         >
-          <Tag color="green">v{v.version_no}</Tag>
+          <StatusBadge status="success">v{v.version_no}</StatusBadge>
           <span style={{ fontSize: 12 }}>
             {v.finalized_at ? new Date(v.finalized_at).toLocaleDateString() : "-"}
           </span>

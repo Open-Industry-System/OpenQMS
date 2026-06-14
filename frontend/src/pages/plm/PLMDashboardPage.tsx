@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Row, Col, Card, Statistic, Table, Tag, Typography, Spin, App } from "antd";
+import { Row, Col, Card, Statistic, Table, Spin, App } from "antd";
 import {
   InboxOutlined,
   ApartmentOutlined,
@@ -9,8 +9,16 @@ import {
 import { getPLMDashboard } from "../../api/plm";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { PLMDashboard, PLMChangeOrder } from "../../types/plm";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
+const statusVariant: Record<string, string> = {
+  open: "info",
+  in_review: "warning",
+  approved: "success",
+  implemented: "info",
+  closed: "info",
+  cancelled: "error",
+};
 
 export default function PLMDashboardPage() {
   const { message } = App.useApp();
@@ -43,7 +51,9 @@ export default function PLMDashboardPage() {
       dataIndex: "status",
       key: "status",
       width: 100,
-      render: (s: string) => <Tag>{s}</Tag>,
+      render: (s: string) => (
+        <StatusBadge status={statusVariant[s] || s}>{s}</StatusBadge>
+      ),
     },
     { title: "优先级", dataIndex: "priority", key: "priority", width: 80 },
     {
@@ -56,11 +66,7 @@ export default function PLMDashboardPage() {
   ];
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 24 }}>
-        PLM 集成看板
-      </Title>
-
+    <PageShell title="PLM 集成看板">
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} lg={6}>
           <Card>
@@ -102,15 +108,16 @@ export default function PLMDashboardPage() {
         </Col>
       </Row>
 
-      <Card title="最近变更">
+      <DataCard title="最近变更">
         <Table<PLMChangeOrder>
           columns={recentColumns}
           dataSource={data?.recent_changes ?? []}
           rowKey="change_id"
           pagination={false}
           size="small"
+          className="qf-table"
         />
-      </Card>
-    </div>
+      </DataCard>
+    </PageShell>
   );
 }

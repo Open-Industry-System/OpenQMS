@@ -1,25 +1,24 @@
 import { useEffect, useState } from "react";
 import {
-  Table, Tag, Typography, App, Select, Tabs,
+  Table, App, Select, Tabs,
 } from "antd";
 import {
   fetchERPPurchaseOrders,
   fetchERPInventoryBalances,
 } from "../../api/erp";
 import { useProductLineStore } from "../../store/productLineStore";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import type { ERPPurchaseOrder, ERPInventoryBalance } from "../../types/erp";
-
-const { Title } = Typography;
 
 // ─── Purchase Orders Tab ───
 
-const poStatusColor: Record<string, string> = {
-  draft: "default",
-  submitted: "blue",
-  confirmed: "processing",
-  partially_received: "cyan",
+const poStatusVariant: Record<string, string> = {
+  draft: "info",
+  submitted: "info",
+  confirmed: "warning",
+  partially_received: "info",
   received: "success",
-  closed: "default",
+  closed: "info",
 };
 
 const poStatusLabel: Record<string, string> = {
@@ -92,9 +91,9 @@ function PurchaseOrdersTab() {
       key: "status",
       width: 110,
       render: (s: string) => (
-        <Tag color={poStatusColor[s] || "default"}>
+        <StatusBadge status={poStatusVariant[s] || s}>
           {poStatusLabel[s] || s}
-        </Tag>
+        </StatusBadge>
       ),
     },
     {
@@ -118,29 +117,32 @@ function PurchaseOrdersTab() {
           options={Object.entries(poStatusLabel).map(([value, label]) => ({ value, label }))}
         />
       </div>
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="po_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => { setPage(p); fetchData(p, statusFilter || undefined, productLine); },
-        }}
-      />
+      <DataCard title="采购订单">
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="po_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => { setPage(p); fetchData(p, statusFilter || undefined, productLine); },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
     </div>
   );
 }
 
 // ─── Inventory Balances Tab ───
 
-const invStatusColor: Record<string, string> = {
-  available: "green",
-  restricted: "orange",
-  blocked: "red",
-  in_inspection: "blue",
+const invStatusVariant: Record<string, string> = {
+  available: "success",
+  restricted: "warning",
+  blocked: "error",
+  in_inspection: "info",
 };
 
 const invStatusLabel: Record<string, string> = {
@@ -191,26 +193,29 @@ function InventoryBalancesTab() {
       key: "inventory_status",
       width: 110,
       render: (v: string) => (
-        <Tag color={invStatusColor[v] || "default"}>
+        <StatusBadge status={invStatusVariant[v] || v}>
           {invStatusLabel[v] || v}
-        </Tag>
+        </StatusBadge>
       ),
     },
   ];
 
   return (
-    <Table
-      columns={columns}
-      dataSource={data}
-      rowKey="balance_id"
-      loading={loading}
-      pagination={{
-        current: page,
-        total,
-        pageSize: 20,
-        onChange: (p) => { setPage(p); fetchData(p, productLine); },
-      }}
-    />
+    <DataCard title="库存余额">
+      <Table
+        columns={columns}
+        dataSource={data}
+        rowKey="balance_id"
+        loading={loading}
+        pagination={{
+          current: page,
+          total,
+          pageSize: 20,
+          onChange: (p) => { setPage(p); fetchData(p, productLine); },
+        }}
+        className="qf-table"
+      />
+    </DataCard>
   );
 }
 
@@ -225,13 +230,12 @@ export default function ERPSupplyChainPage() {
   const [activeTab, setActiveTab] = useState("purchase_orders");
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 16 }}>ERP 供应链</Title>
+    <PageShell title="ERP 供应链">
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         items={tabItems}
       />
-    </div>
+    </PageShell>
   );
 }

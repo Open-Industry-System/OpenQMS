@@ -8,6 +8,7 @@ import {
 } from "@ant-design/icons";
 import { usePermission } from "../../hooks/usePermission";
 import { getGroupDashboard, type GroupDashboardResponse } from "../../api/group";
+import { PageShell } from "../../components/design";
 
 const { Title } = Typography;
 
@@ -42,9 +43,7 @@ export default function GroupDashboardPage() {
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <Title level={3}>集团仪表盘</Title>
-
+    <PageShell title="集团仪表盘">
       {/* Totals row */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col span={4}>
@@ -97,6 +96,6 @@ export default function GroupDashboardPage() {
           </Col>
         ))}
       </Row>
-    </div>
+    </PageShell>
   );
 }

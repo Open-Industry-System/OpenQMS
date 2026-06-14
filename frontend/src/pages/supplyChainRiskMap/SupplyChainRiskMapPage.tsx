@@ -3,6 +3,7 @@ import { Card, Row, Col, Spin, Empty } from "antd";
 import { riskMapApi } from "../../api/supplyChainRiskMap";
 import type { HeatmapResponse, TimelineResponse } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
+import { PageShell } from "../../components/design";
 import HeatmapToolbar from "./components/HeatmapToolbar";
 import TimelineSlider from "./components/TimelineSlider";
 import RiskHeatmap from "./components/RiskHeatmap";
@@ -72,8 +73,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
   const showDetail = selectedSupplierIds.length > 0;
 
   return (
-    <div style={{ padding: 24 }}>
-      <h2>供应链风险地图</h2>
+    <PageShell title="供应链风险地图">
       <HeatmapToolbar
         period={period}
         productLineCode={selectedProductLine}
@@ -113,7 +113,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
           </Col>
         )}
       </Row>
-    </div>
+    </PageShell>
   );
 };
 

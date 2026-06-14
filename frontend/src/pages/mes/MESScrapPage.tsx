@@ -1,16 +1,15 @@
 import { useEffect, useState } from "react";
 import {
-  Table, Tag, Typography, Select, App,
+  Table, Select, App,
 } from "antd";
 import { listScrapRecords } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { MESScrapRecord } from "../../types/mes";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
-
-const defectColors: Record<string, string> = {
-  scrap: "red",
-  rework: "orange",
+const defectVariant: Record<string, string> = {
+  scrap: "error",
+  rework: "warning",
   reject: "error",
 };
 
@@ -58,9 +57,9 @@ export default function MESScrapPage() {
       key: "defect_type",
       width: 100,
       render: (t: string) => (
-        <Tag color={defectColors[t] || "default"}>
+        <StatusBadge status={defectVariant[t] || t}>
           {defectLabels[t] || t}
-        </Tag>
+        </StatusBadge>
       ),
     },
     {
@@ -110,9 +109,9 @@ export default function MESScrapPage() {
   ];
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, alignItems: "center" }}>
-        <Title level={4} style={{ margin: 0 }}>不良记录</Title>
+    <PageShell
+      title="不良记录"
+      actions={
         <Select
           placeholder="筛选不良类型"
           allowClear
@@ -125,23 +124,26 @@ export default function MESScrapPage() {
             { value: "reject", label: "拒收" },
           ]}
         />
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="scrap_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p, defectFilter || undefined, productLine);
-          },
-        }}
-      />
-    </div>
+      }
+    >
+      <DataCard title="不良记录">
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="scrap_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p, defectFilter || undefined, productLine);
+            },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
+    </PageShell>
   );
 }

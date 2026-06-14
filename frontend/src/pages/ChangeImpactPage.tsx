@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { App, Card, Col, Row, Typography } from "antd";
+import { App, Col, Row, Spin, Typography } from "antd";
 import { ChangeHistoryTable, ImpactReportPanel } from "../components/change-impact";
 import { listAllChangeImpacts, getChangeImpact } from "../api/changeImpact";
 import type { ChangeImpactAnalysis, PaginatedChangeImpactResponse } from "../api/changeImpact";
+import { PageShell, DataCard } from "../components/design";
 
 export default function ChangeImpactPage() {
   const { message } = App.useApp();
@@ -41,24 +42,25 @@ export default function ChangeImpactPage() {
   };
 
   return (
-    <div style={{ padding: 24 }}>
-      <Typography.Title level={3}>变更影响分析</Typography.Title>
+    <PageShell title="变更影响分析">
       <Row gutter={16}>
         <Col span={10}>
-          <Card title="分析历史" loading={loading}>
-            <ChangeHistoryTable data={history} onSelect={handleSelect} />
-          </Card>
+          <DataCard title="分析历史" noPadding>
+            <Spin spinning={loading}>
+              <ChangeHistoryTable data={history} onSelect={handleSelect} />
+            </Spin>
+          </DataCard>
         </Col>
         <Col span={14}>
-          <Card title="分析详情">
+          <DataCard title="分析详情">
             {selected ? (
               <ImpactReportPanel analysis={selected} onViewGraph={handleViewGraph} />
             ) : (
               <Typography.Text type="secondary">请选择左侧历史记录查看详情</Typography.Text>
             )}
-          </Card>
+          </DataCard>
         </Col>
       </Row>
-    </div>
+    </PageShell>
   );
 }
