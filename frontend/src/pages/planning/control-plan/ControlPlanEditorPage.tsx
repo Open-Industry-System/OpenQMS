@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Button, Space, Tag, Typography, Input, Table, Card, Row, Col,
+  Button, Space, Typography, Input, Table, Row, Col,
   App, Spin, Select, Alert, Tooltip, Tabs, Modal,
 } from "antd";
 import {
@@ -31,8 +31,11 @@ import RollbackConfirmModal from "../../../components/version/RollbackConfirmMod
 import VersionCompareView from "../../../components/version/VersionCompareView";
 import SyncPreviewDrawer from "../../../components/version/SyncPreviewDrawer";
 import ValidationPanel from "../../../components/control-plan/ValidationPanel";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const phaseOptions = [
   { value: "sample", label: "样件" },
@@ -514,7 +517,7 @@ export default function ControlPlanEditorPage() {
             />
             {outOfSync && (
               <Tooltip title="节点特性已变更，建议同步">
-                <Tag color="warning">!</Tag>
+                <StatusBadge status="warning">!</StatusBadge>
               </Tooltip>
             )}
           </div>
@@ -665,28 +668,16 @@ export default function ControlPlanEditorPage() {
   const currentStatus = cp?.status || "draft";
 
   return (
-    <div>
+    <PageShell
+      title={isNew ? "新建控制计划" : title || "控制计划详情"}
+      subtitle={`状态：${statusLabels[currentStatus] || currentStatus}`}
+      actions={
+        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/control-plans")}>
+          返回
+        </Button>
+      }
+    >
       <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
-
-      {/* Top bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/control-plans")}>
-            返回
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            {isNew ? "新建控制计划" : title || "控制计划详情"}
-          </Title>
-        </Space>
-        <Space>
-          <Text>
-            状态：
-            <Tag color={currentStatus === "approved" ? "green" : "blue"}>
-              {statusLabels[currentStatus] || currentStatus}
-            </Tag>
-          </Text>
-        </Space>
-      </div>
 
       {/* Stale alert */}
       {staleAlert.visible && (
@@ -770,7 +761,7 @@ export default function ControlPlanEditorPage() {
       </Space>
 
       {/* Header info card */}
-      <Card title="基本信息" style={{ marginBottom: 16 }}>
+      <DataCard title="基本信息" style={{ marginBottom: 16 }}>
         <Row gutter={24}>
           <Col span={12}>
             <div style={{ marginBottom: 12 }}>
@@ -867,11 +858,12 @@ export default function ControlPlanEditorPage() {
             </div>
           </Col>
         </Row>
-      </Card>
+      </DataCard>
 
       {/* Items table */}
-      <Card title="控制计划内容">
+      <DataCard title="控制计划内容">
         <Table
+          className="qf-table"
           columns={columns}
           dataSource={items}
           rowKey="item_id"
@@ -887,7 +879,7 @@ export default function ControlPlanEditorPage() {
             ) : null
           }
         />
-      </Card>
+      </DataCard>
 
       {/* Import modal */}
       {!isNew && id && (
@@ -1005,6 +997,6 @@ export default function ControlPlanEditorPage() {
           </Modal>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }
