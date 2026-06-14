@@ -1,16 +1,25 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Card, Tag, Button, Space, Descriptions, Modal, Input, Select, message, Spin, Row, Col, Table } from "antd";
+import { Button, Space, Descriptions, Modal, Input, Select, message, Spin, Table } from "antd";
 import { getPPAP, updatePPAPElement, transitionPPAP, deletePPAP } from "../../../api/ppap";
-import { STATUS_COLORS, STATUS_LABELS, LEVEL_LABELS } from "./PPAPListPage";
+import { STATUS_LABELS, LEVEL_LABELS } from "./PPAPListPage";
 import type { PPAPSubmission, PPAPElement } from "../../../types";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
-const ELEMENT_STATUS_COLORS: Record<string, string> = {
-  pending: "default",
-  in_review: "processing",
-  approved: "success",
-  not_applicable: "default",
+const elementStatusVariant = (s: string): string => {
+  if (s === "approved") return "success";
+  if (s === "in_review") return "warning";
+  return "info";
+};
+
+const ppapStatusVariant = (s: string): string => {
+  if (s === "approved") return "success";
+  if (s === "rejected") return "error";
+  if (s === "under_review") return "warning";
+  return "info";
 };
 
 const ELEMENT_STATUS_LABELS: Record<string, string> = {
@@ -129,7 +138,7 @@ export default function PPAPDetailPage() {
       dataIndex: "status",
       key: "status",
       width: 100,
-      render: (s: string) => <Tag color={ELEMENT_STATUS_COLORS[s]}>{ELEMENT_STATUS_LABELS[s] || s}</Tag>,
+      render: (s: string) => <StatusBadge status={elementStatusVariant(s)}>{ELEMENT_STATUS_LABELS[s] || s}</StatusBadge>,
     },
     { title: "审查人", dataIndex: "reviewed_by", key: "reviewed_by", width: 100, render: (v: string | null) => v || "-" },
     { title: "审查时间", dataIndex: "reviewed_at", key: "reviewed_at", width: 160, render: (v: string | null) => v ? v.split(".")[0].replace("T", " ") : "-" },
@@ -146,23 +155,18 @@ export default function PPAPDetailPage() {
   ];
 
   return (
-    <div>
-      <Card style={{ marginBottom: 16 }}>
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Space>
-              <span style={{ fontSize: 20, fontWeight: 600 }}>{ppap.ppap_no}</span>
-              <Tag color={STATUS_COLORS[ppap.status]}>{STATUS_LABELS[ppap.status]}</Tag>
-              <span style={{ color: "#999" }}>版本 {ppap.revision}</span>
-            </Space>
-          </Col>
-          <Col>
-            <Space>{actionButtons()}</Space>
-          </Col>
-        </Row>
-      </Card>
-
-      <Card title="PPAP 信息" style={{ marginBottom: 16 }}>
+    <PageShell
+      title={
+        <Space size={12}>
+          <span>{ppap.ppap_no}</span>
+          <StatusBadge status={ppapStatusVariant(ppap.status)}>{STATUS_LABELS[ppap.status]}</StatusBadge>
+          <span style={{ color: "#999" }}>版本 {ppap.revision}</span>
+        </Space>
+      }
+      subtitle="PPAP 提交详情"
+      actions={<Space>{actionButtons()}</Space>}
+    >
+      <DataCard title="PPAP 信息" style={{ marginBottom: 16 }}>
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label="供应商">{ppap.supplier_name || ppap.supplier_id}</Descriptions.Item>
           <Descriptions.Item label="零件号">{ppap.part_no}</Descriptions.Item>
@@ -173,16 +177,17 @@ export default function PPAPDetailPage() {
           <Descriptions.Item label="提交日期">{ppap.submission_date || "-"}</Descriptions.Item>
           <Descriptions.Item label="备注" span={2}>{ppap.notes || "-"}</Descriptions.Item>
         </Descriptions>
-      </Card>
+      </DataCard>
 
       {ppap.status === "rejected" && ppap.rejection_reason && (
-        <Card title="驳回原因" style={{ marginBottom: 16, borderColor: "#ff4d4f" }}>
+        <DataCard title="驳回原因" style={{ marginBottom: 16, borderColor: "#ff4d4f" }}>
           <div style={{ color: "#ff4d4f", whiteSpace: "pre-wrap" }}>{ppap.rejection_reason}</div>
-        </Card>
+        </DataCard>
       )}
 
-      <Card title="18 元素">
+      <DataCard title="18 元素">
         <Table
+          className="qf-table"
           dataSource={ppap.elements}
           columns={elementColumns}
           rowKey="element_id"
@@ -190,7 +195,7 @@ export default function PPAPDetailPage() {
           size="small"
           rowClassName={(record) => !record.required ? "ppap-row-optional" : ""}
         />
-      </Card>
+      </DataCard>
 
       {/* Reject Modal */}
       <Modal title="驳回 PPAP" open={rejectModalOpen} onCancel={() => setRejectModalOpen(false)} onOk={handleReject}>
@@ -227,6 +232,6 @@ export default function PPAPDetailPage() {
           <Input.TextArea rows={2} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="备注（可选）" />
         </div>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

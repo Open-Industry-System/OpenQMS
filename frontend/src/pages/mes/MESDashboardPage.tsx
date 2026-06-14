@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Table, Tag, Typography, Row, Col, Card, Statistic, App,
+  Table, Row, Col, Card, Statistic, App,
 } from "antd";
 import {
   CheckCircleOutlined, CloseCircleOutlined,
@@ -9,12 +9,11 @@ import {
 import { getMESDashboard } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { MESDashboardData, MESEquipmentSummary } from "../../types/mes";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
-
-const statusColors: Record<string, string> = {
+const statusVariant: Record<string, string> = {
   running: "success",
-  idle: "default",
+  idle: "info",
   down: "error",
   changeover: "warning",
 };
@@ -59,9 +58,9 @@ export default function MESDashboardPage() {
       key: "status",
       width: 100,
       render: (s: string) => (
-        <Tag color={statusColors[s] || "default"}>
+        <StatusBadge status={statusVariant[s] || s}>
           {statusLabels[s] || s}
-        </Tag>
+        </StatusBadge>
       ),
     },
     {
@@ -99,11 +98,7 @@ export default function MESDashboardPage() {
   ];
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 16 }}>
-        MES 仪表盘
-      </Title>
-
+    <PageShell title="MES 仪表盘">
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={12} lg={6}>
           <Card loading={loading}>
@@ -145,17 +140,17 @@ export default function MESDashboardPage() {
         </Col>
       </Row>
 
-      <Title level={5} style={{ marginBottom: 8 }}>
-        设备状态
-      </Title>
-      <Table
-        columns={columns}
-        dataSource={data?.equipment_summary ?? []}
-        rowKey={(r: MESEquipmentSummary) => `${r.connection_id}:${r.equipment_code}`}
-        loading={loading}
-        pagination={false}
-        size="small"
-      />
-    </div>
+      <DataCard title="设备状态">
+        <Table
+          columns={columns}
+          dataSource={data?.equipment_summary ?? []}
+          rowKey={(r: MESEquipmentSummary) => `${r.connection_id}:${r.equipment_code}`}
+          loading={loading}
+          pagination={false}
+          size="small"
+          className="qf-table"
+        />
+      </DataCard>
+    </PageShell>
   );
 }

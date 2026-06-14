@@ -1,18 +1,17 @@
 import { useEffect, useState } from "react";
 import {
-  Table, Tag, Typography, Select, App,
+  Table, Select, App,
 } from "antd";
 import { listProductionOrders } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { MESProductionOrder } from "../../types/mes";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
-
-const statusColors: Record<string, string> = {
-  planned: "blue",
-  in_progress: "processing",
+const statusVariant: Record<string, string> = {
+  planned: "info",
+  in_progress: "warning",
   completed: "success",
-  closed: "default",
+  closed: "info",
 };
 
 const statusLabels: Record<string, string> = {
@@ -81,9 +80,9 @@ export default function MESOrdersPage() {
       key: "status",
       width: 100,
       render: (s: string) => (
-        <Tag color={statusColors[s] || "default"}>
+        <StatusBadge status={statusVariant[s] || s}>
           {statusLabels[s] || s}
-        </Tag>
+        </StatusBadge>
       ),
     },
     {
@@ -105,9 +104,9 @@ export default function MESOrdersPage() {
   ];
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, alignItems: "center" }}>
-        <Title level={4} style={{ margin: 0 }}>生产工单</Title>
+    <PageShell
+      title="生产工单"
+      actions={
         <Select
           placeholder="筛选状态"
           allowClear
@@ -121,23 +120,26 @@ export default function MESOrdersPage() {
             { value: "closed", label: "已关闭" },
           ]}
         />
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="order_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p, statusFilter || undefined, productLine);
-          },
-        }}
-      />
-    </div>
+      }
+    >
+      <DataCard title="工单列表">
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="order_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p, statusFilter || undefined, productLine);
+            },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
+    </PageShell>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, ReactNode } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import { Layout, Menu, Button, Avatar, Dropdown, theme, Space, Select } from "antd";
+import { Layout, Menu, Button, Avatar, Dropdown, Space, Select, Badge } from "antd";
 import type { MenuProps } from "antd";
 import {
   DashboardOutlined,
@@ -40,7 +40,6 @@ import type { ModuleKey } from "../../hooks/usePermission";
 
 const { Header, Sider, Content } = Layout;
 
-// 所有菜单 key 列表（用于最长前缀匹配）
 const MENU_KEYS = [
   "/dashboard",
   "/fmea", "/control-plans", "/apqp", "/ppap",
@@ -58,7 +57,6 @@ const MENU_KEYS = [
   "/group/dashboard", "/group/comparison", "/group/suppliers", "/group/audits", "/group/factories",
 ];
 
-// 菜单 key → 需要展开的所有 SubMenu key 列表
 const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/fmea": ["grp:planning"],
   "/control-plans": ["grp:planning"],
@@ -116,7 +114,6 @@ interface MenuItem {
   children?: MenuItem[];
 }
 
-/** Strip the custom `module` field before passing to Ant Menu (which doesn't expect it). */
 function stripModuleField(items: MenuItem[]): MenuProps["items"] {
   return items.map(({ module: _m, ...rest }) => ({
     ...rest,
@@ -258,31 +255,19 @@ const menuItems: MenuItem[] = [
   },
 ];
 
-/** Recursively filter menu items by permission.
- *  - Items with no module are always visible (e.g. dashboard).
- *  - Items with a module are visible only if canView(module) is true.
- *  - Groups with no visible children are hidden entirely.
- */
 function filterMenuByPermission(
   items: MenuItem[],
   canViewFn: (m: ModuleKey) => boolean,
 ): MenuItem[] {
   return items
     .map((item) => {
-      // No module = always visible (dashboard)
       if (!item.module) return item;
-
-      // If the user can't see this item's own module, hide it
       if (!canViewFn(item.module)) return null;
-
-      // If it has children, recursively filter them
       if (item.children) {
         const filteredChildren = filterMenuByPermission(item.children, canViewFn);
-        // If all children were filtered out, hide the group too
         if (filteredChildren.length === 0) return null;
         return { ...item, children: filteredChildren };
       }
-
       return item;
     })
     .filter((item): item is MenuItem => item !== null);
@@ -298,7 +283,6 @@ export default function AppLayout() {
   const factories = useAuthStore((s) => s.factories);
   const currentFactoryId = useAuthStore((s) => s.currentFactoryId);
   const setCurrentFactoryId = useAuthStore((s) => s.setCurrentFactoryId);
-  const { token: themeToken } = theme.useToken();
   const { productLines, selected, setSelected, load } = useProductLineStore();
   const { canView } = usePermission();
   useEffect(() => { load(); }, [load]);
@@ -316,19 +300,25 @@ export default function AppLayout() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
 
-  // Filter menu items recursively by per-item module permission
   const visibleMenuItems = filterMenuByPermission(menuItems, canView);
 
-  // Factory switcher visible when user has access to multiple factories (or all)
   const showFactorySwitcher = factoryScope?.accessible_factory_ids === null
     || (factoryScope?.accessible_factory_ids?.length ?? 0) > 1;
 
   return (
-    <Layout style={{ minHeight: "100vh" }}>
+    <Layout style={{ minHeight: "100vh", background: "var(--qf-bg-base)" }}>
       <Sider
         trigger={null}
         collapsible
         collapsed={collapsed}
+        width={240}
+        collapsedWidth={72}
+        style={{
+          background: "var(--qf-bg-panel)",
+          borderRight: "1px solid var(--qf-border)",
+          boxShadow: "var(--qf-shadow-md)",
+          zIndex: 10,
+        }}
       >
         <div
           style={{
@@ -336,16 +326,46 @@ export default function AppLayout() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontWeight: 700,
-            fontSize: collapsed ? 16 : 20,
-            color: themeToken.colorPrimary,
-            borderBottom: `1px solid ${themeToken.colorBorderSecondary}`,
+            borderBottom: "1px solid var(--qf-border)",
+            gap: 8,
           }}
         >
-          {collapsed ? "QMS" : "OpenQMS"}
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              background: "linear-gradient(135deg, var(--qf-cyan), #00b8d4)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 700,
+              fontSize: 14,
+              color: "#0b0d12",
+              boxShadow: "0 0 12px rgba(0, 229, 255, 0.35)",
+              fontFamily: "var(--qf-font-mono)",
+              flexShrink: 0,
+            }}
+          >
+            Q
+          </div>
+          {!collapsed && (
+            <span
+              style={{
+                fontFamily: "var(--qf-font-display)",
+                fontSize: 18,
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                color: "var(--qf-text-primary)",
+              }}
+            >
+              OpenQMS
+            </span>
+          )}
         </div>
         <Menu
           mode="inline"
+          inlineCollapsed={collapsed}
           selectedKeys={[selectedKey]}
           openKeys={openKeys}
           onOpenChange={setOpenKeys}
@@ -354,35 +374,58 @@ export default function AppLayout() {
             if (key.startsWith("grp:")) return;
             navigate(key);
           }}
-          style={{ borderRight: 0 }}
+          className="qf-menu"
+          style={{
+            background: "transparent",
+            borderRight: 0,
+            padding: "8px 0",
+          }}
+          theme="dark"
         />
       </Sider>
-      <Layout>
+      <Layout style={{ background: "var(--qf-bg-base)" }}>
         <Header
           style={{
+            height: 64,
             padding: "0 24px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            background: "var(--qf-bg-panel)",
+            borderBottom: "1px solid var(--qf-border)",
+            position: "sticky",
+            top: 0,
+            zIndex: 9,
           }}
         >
           <Button
             type="text"
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={() => setCollapsed(!collapsed)}
+            style={{
+              color: "var(--qf-text-secondary)",
+              width: 36,
+              height: 36,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
           />
-          <Space>
+          <Space size="middle">
             {showFactorySwitcher && (
               <Select
                 style={{ width: 200 }}
                 value={currentFactoryId || undefined}
                 placeholder="选择工厂"
                 onChange={(v) => setCurrentFactoryId(v)}
-                suffixIcon={<SwapOutlined />}
+                suffixIcon={<SwapOutlined style={{ color: "var(--qf-cyan)" }} />}
               >
                 {factories.map((f) => (
                   <Select.Option key={f.id} value={f.id}>
-                    {f.code} - {f.name}
+                    <span style={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-cyan)", marginRight: 8 }}>
+                      {f.code}
+                    </span>
+                    {f.name}
                   </Select.Option>
                 ))}
               </Select>
@@ -394,27 +437,46 @@ export default function AppLayout() {
               value={selected || undefined}
               onChange={(v) => setSelected(v || null)}
             >
-              {productLines.map((pl) => (
-                <Select.Option key={pl.code} value={pl.code}>
-                  {pl.code} - {pl.name}
-                </Select.Option>
-              ))}
-            </Select>
+                {productLines.map((pl) => (
+                  <Select.Option key={pl.code} value={pl.code}>
+                    <span style={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-cyan)", marginRight: 8 }}>
+                      {pl.code}
+                    </span>
+                    {pl.name}
+                  </Select.Option>
+                ))}
+              </Select>
             <Dropdown
-            menu={{
-              items: [
-                { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => { logout(); navigate("/login"); } },
-              ],
-            }}
-          >
-            <Space style={{ cursor: "pointer" }}>
-              <Avatar icon={<UserOutlined />} />
-              <span>{user?.display_name || user?.username}</span>
-            </Space>
-          </Dropdown>
+              menu={{
+                items: [
+                  {
+                    key: "logout",
+                    icon: <LogoutOutlined style={{ color: "var(--qf-red)" }} />,
+                    label: "退出登录",
+                    onClick: () => { logout(); navigate("/login"); },
+                  },
+                ],
+              }}
+            >
+              <Space style={{ cursor: "pointer", padding: "4px 8px", borderRadius: 8 }}>
+                <Badge dot color="var(--qf-green)" offset={[-2, 24]}>
+                  <Avatar
+                    icon={<UserOutlined />}
+                    style={{
+                      background: "var(--qf-bg-elevated)",
+                      color: "var(--qf-cyan)",
+                      border: "1px solid var(--qf-border)",
+                    }}
+                  />
+                </Badge>
+                <span style={{ color: "var(--qf-text-primary)", fontWeight: 500 }}>
+                  {user?.display_name || user?.username}
+                </span>
+              </Space>
+            </Dropdown>
           </Space>
         </Header>
-        <Content style={{ margin: 24 }}>
+        <Content style={{ padding: 24, background: "var(--qf-bg-base)" }}>
           <Outlet />
         </Content>
       </Layout>

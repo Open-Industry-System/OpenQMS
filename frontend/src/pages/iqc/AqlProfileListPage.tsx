@@ -1,18 +1,26 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Table, Badge, Space, Select, Button, Modal, Form, Input, InputNumber, App,
+  Table, Space, Select, Button, Modal, Form, Input, InputNumber, App,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { AqlProfile } from '../../types';
 import { listAqlProfiles, createAqlProfile } from '../../api/iqcAql';
 import { useAuthStore } from '../../store/authStore';
+import { PageShell, DataCard, StatusBadge } from '../../components/design';
 
-const STATE_MAP: Record<string, { label: string; status: 'success' | 'warning' | 'processing' | 'error' | 'default' }> = {
-  normal: { label: '正常', status: 'success' },
-  tightened: { label: '加严', status: 'warning' },
-  reduced: { label: '放宽', status: 'processing' },
-  frozen: { label: '冻结', status: 'error' },
+const STATE_VARIANTS: Record<string, 'success' | 'warning' | 'error' | 'info'> = {
+  normal: 'info',
+  tightened: 'warning',
+  reduced: 'info',
+  frozen: 'error',
+};
+
+const STATE_LABELS: Record<string, string> = {
+  normal: '正常',
+  tightened: '加严',
+  reduced: '放宽',
+  frozen: '冻结',
 };
 
 export default function AqlProfileListPage() {
@@ -99,10 +107,11 @@ export default function AqlProfileListPage() {
       title: '状态',
       dataIndex: 'state',
       width: 90,
-      render: (state: string) => {
-        const cfg = STATE_MAP[state];
-        return <Badge status={cfg?.status || 'default'} text={cfg?.label || state} />;
-      },
+      render: (state: string) => (
+        <StatusBadge status={STATE_VARIANTS[state] || 'info'}>
+          {STATE_LABELS[state] || state}
+        </StatusBadge>
+      ),
     },
     {
       title: '冻结截止',
@@ -119,20 +128,20 @@ export default function AqlProfileListPage() {
   ];
 
   return (
-    <div>
-      <Card
-        title="AQL档案管理"
-        extra={
-          <Space>
-            {(isAdmin || isEngineer) && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                新建档案
-              </Button>
-            )}
-            <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
-          </Space>
-        }
-      >
+    <PageShell
+      title="AQL档案管理"
+      actions={
+        <Space>
+          {(isAdmin || isEngineer) && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建档案
+            </Button>
+          )}
+          <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>
+        </Space>
+      }
+    >
+      <DataCard title={null}>
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder="状态"
@@ -156,6 +165,7 @@ export default function AqlProfileListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="profile_id"
           columns={columns}
           dataSource={data}
@@ -172,7 +182,7 @@ export default function AqlProfileListPage() {
             onChange: (p, ps) => { setPage(p); setPageSize(ps || 20); },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Modal
         title="新建AQL档案"
@@ -212,6 +222,6 @@ export default function AqlProfileListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

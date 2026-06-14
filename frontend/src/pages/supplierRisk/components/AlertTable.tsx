@@ -1,15 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { Table, Tag, Button, Space, Select } from "antd";
+import { Table, Button, Space, Select } from "antd";
 import type { SupplierRiskAlert } from "../../../types";
 import { riskAlertApi } from "../../../api/supplierRisk";
 import HandleAlertDrawer from "./HandleAlertDrawer";
-
-const RISK_COLORS: Record<string, string> = {
-  low: "green",
-  medium: "gold",
-  high: "orange",
-  critical: "red",
-};
+import { StatusBadge } from "../../../components/design";
 
 const STATUS_LABELS: Record<string, string> = {
   open: "开放",
@@ -72,11 +66,11 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
       title: "风险等级",
       dataIndex: "risk_level",
       render: (v: string) => (
-        <Tag color={RISK_COLORS[v]}>{RISK_LABELS[v] || v}</Tag>
+        <StatusBadge status={v}>{RISK_LABELS[v] || v}</StatusBadge>
       ),
     },
     { title: "风险分", dataIndex: "risk_score", sorter: true },
-    { title: "状态", dataIndex: "status", render: (v: string) => STATUS_LABELS[v] || v },
+    { title: "状态", dataIndex: "status", render: (v: string) => <StatusBadge status={v}>{STATUS_LABELS[v] || v}</StatusBadge> },
     { title: "快照日期", dataIndex: "snapshot_date" },
     {
       title: "操作",
@@ -143,6 +137,7 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
           onChange: setPage,
           showTotal: (t) => `共 ${t} 条`,
         }}
+        className="qf-table"
       />
       <HandleAlertDrawer
         alert={selectedAlert}

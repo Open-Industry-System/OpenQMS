@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Card, Row, Col, Spin, Empty } from "antd";
+import { Row, Col, Spin, Empty } from "antd";
 import { riskMapApi } from "../../api/supplyChainRiskMap";
 import type { HeatmapResponse, TimelineResponse } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
+import { PageShell, DataCard } from "../../components/design";
 import HeatmapToolbar from "./components/HeatmapToolbar";
 import TimelineSlider from "./components/TimelineSlider";
 import RiskHeatmap from "./components/RiskHeatmap";
@@ -72,8 +73,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
   const showDetail = selectedSupplierIds.length > 0;
 
   return (
-    <div style={{ padding: 24 }}>
-      <h2>供应链风险地图</h2>
+    <PageShell title="供应链风险地图">
       <HeatmapToolbar
         period={period}
         productLineCode={selectedProductLine}
@@ -93,7 +93,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
       )}
       <Row gutter={16}>
         <Col span={showDetail ? 16 : 24}>
-          <Card>
+          <DataCard title={null}>
             {loading ? (
               <Spin />
             ) : heatmap && heatmap.rows.length > 0 ? (
@@ -101,7 +101,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
             ) : (
               <Empty description="暂无数据，请先生成快照" />
             )}
-          </Card>
+          </DataCard>
         </Col>
         {showDetail && (
           <Col span={8}>
@@ -113,7 +113,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
           </Col>
         )}
       </Row>
-    </div>
+    </PageShell>
   );
 };
 

@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { Card, Button, Space, Tag, Collapse, Spin, message, Modal, Empty, Alert } from "antd";
+import { Button, Space, Collapse, Spin, message, Modal, Empty, Alert } from "antd";
 import {
   generateReport, saveReportDraft, finalizeReport, reopenReport,
   listReportVersions, exportReport,
 } from "../../api/managementReview";
 import { usePermission } from "../../hooks/usePermission";
+import { DataCard, StatusBadge } from "../../components/design";
 import type {
   ManagementReview,
   ManagementReviewReport,
@@ -159,10 +160,10 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
   };
 
   return (
-    <Card title="管理评审报告">
+    <DataCard title="管理评审报告">
       <Space direction="vertical" style={{ width: "100%" }}>
         <Space>
-          <span>报告状态：<Tag color={statusMap[review.report_status]?.color}>{statusMap[review.report_status]?.label}</Tag></span>
+          <span>报告状态：<StatusBadge status={review.report_status}>{statusMap[review.report_status]?.label}</StatusBadge></span>
           {!readOnly && canCreate("management_review") && (
             <Button type="primary" onClick={handleGenerate} loading={loading}>
               {report ? "重新生成" : "AI 生成报告"}
@@ -220,16 +221,16 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
           </div>
           {versions.length > 0 && (
             <div style={{ width: 240 }}>
-              <Card title="历史版本" size="small">
+              <DataCard title="历史版本" noPadding>
                 <ReportVersionList
                   versions={versions}
                   onSelect={(v) => setPreviewVersion(v)}
                 />
-              </Card>
+              </DataCard>
             </div>
           )}
         </div>
       </Space>
-    </Card>
+    </DataCard>
   );
 }

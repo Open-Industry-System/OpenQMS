@@ -1,17 +1,20 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Table, Button, Space, Select, Tag, Card } from "antd";
+import { Table, Button, Space, Select } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 import { listManagementReviews } from "../../api/managementReview";
 import type { ManagementReview } from "../../types";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 
-const statusMap: Record<string, { color: string; label: string }> = {
-  draft: { color: "blue", label: "草稿" },
-  data_collected: { color: "cyan", label: "数据已汇总" },
-  in_review: { color: "orange", label: "评审中" },
-  closed: { color: "green", label: "已关闭" },
+const statusMap: Record<string, { label: string; variant: string }> = {
+  draft: { label: "草稿", variant: "info" },
+  data_collected: { label: "数据已汇总", variant: "info" },
+  in_review: { label: "评审中", variant: "warning" },
+  closed: { label: "已关闭", variant: "success" },
 };
 
 export default function ManagementReviewListPage() {
@@ -58,8 +61,8 @@ export default function ManagementReviewListPage() {
     {
       title: "状态", dataIndex: "status", key: "status", width: 120,
       render: (s: string) => {
-        const info = statusMap[s] || { color: "default", label: s };
-        return <Tag color={info.color}>{info.label}</Tag>;
+        const info = statusMap[s] || { variant: "info", label: s };
+        return <StatusBadge status={info.variant}>{info.label}</StatusBadge>;
       },
     },
     {
@@ -75,25 +78,33 @@ export default function ManagementReviewListPage() {
   ];
 
   return (
-    <Card title="管理评审">
-      <Space style={{ marginBottom: 16 }}>
-        {canEdit('management_review') && (
+    <PageShell
+      title="管理评审"
+      subtitle="管理层质量评审计划"
+      actions={
+        canEdit('management_review') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/management-reviews/new")}>新建评审</Button>
-        )}
-        <Select
-          allowClear placeholder="状态筛选" style={{ width: 150 }}
-          value={statusFilter}
-          onChange={(v) => { setStatusFilter(v); setPage(1); }}
-        >
-          {Object.entries(statusMap).map(([k, v]) => (
-            <Select.Option key={k} value={k}>{v.label}</Select.Option>
-          ))}
-        </Select>
-      </Space>
-      <Table
-        rowKey="review_id" columns={columns} dataSource={data} loading={loading}
-        pagination={{ total, current: page, pageSize: 20, onChange: setPage }}
-      />
-    </Card>
+        )
+      }
+    >
+      <DataCard title="评审清单">
+        <Space style={{ marginBottom: 16 }}>
+          <Select
+            allowClear placeholder="状态筛选" style={{ width: 150 }}
+            value={statusFilter}
+            onChange={(v) => { setStatusFilter(v); setPage(1); }}
+          >
+            {Object.entries(statusMap).map(([k, v]) => (
+              <Select.Option key={k} value={k}>{v.label}</Select.Option>
+            ))}
+          </Select>
+        </Space>
+        <Table
+          className="qf-table"
+          rowKey="review_id" columns={columns} dataSource={data} loading={loading}
+          pagination={{ total, current: page, pageSize: 20, onChange: setPage }}
+        />
+      </DataCard>
+    </PageShell>
   );
 }

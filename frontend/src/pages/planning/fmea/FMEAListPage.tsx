@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Table, Button, Tag, Typography, Modal, Form, Input, Select, App } from "antd";
+import { Table, Button, Tag, Form, Input, Select, Modal, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { listFMEAs, createFMEA, updateFMEA } from "../../../api/fmea";
 import type { FMEADocument, GraphNode, GraphEdge } from "../../../types";
@@ -8,25 +8,11 @@ import GenerationWizard from "../../../components/dfmea/GenerationWizard";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
-
-const { Title } = Typography;
-
-const statusColors: Record<string, string> = {
-  draft: "default",
-  in_review: "processing",
-  approved: "success",
-  rework: "warning",
-  archived: "default",
-};
+import { PageShell, StatusBadge } from "../../../components/design";
 
 const typeLabels: Record<string, string> = {
   PFMEA: "PFMEA",
   DFMEA: "DFMEA",
-};
-
-const typeColors: Record<string, string> = {
-  PFMEA: "blue",
-  DFMEA: "green",
 };
 
 const statusLabels: Record<string, string> = {
@@ -72,7 +58,7 @@ export default function FMEAListPage() {
 
   useEffect(() => {
     fetchData(1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine, searchParams]);
 
   const handleCreate = async (values: { title: string; document_no: string; fmea_type: string; problem_description?: string }) => {
@@ -112,23 +98,39 @@ export default function FMEAListPage() {
   };
 
   const columns = [
-    { title: "文档编号", dataIndex: "document_no", key: "document_no", width: 150 },
+    {
+      title: "文档编号",
+      dataIndex: "document_no",
+      key: "document_no",
+      width: 150,
+      render: (v: string) => <span style={{ fontFamily: "var(--qf-font-mono)" }}>{v}</span>,
+    },
     { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
     {
       title: "类型",
       dataIndex: "fmea_type",
       key: "fmea_type",
-      width: 80,
-      render: (t: string) => <Tag color={typeColors[t] || "default"}>{typeLabels[t] || t}</Tag>,
+      width: 90,
+      render: (t: string) => (
+        <Tag style={{ background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
+          {typeLabels[t] || t}
+        </Tag>
+      ),
     },
     {
       title: "状态",
       dataIndex: "status",
       key: "status",
-      width: 100,
-      render: (s: string) => <Tag color={statusColors[s] || "default"}>{statusLabels[s] || s}</Tag>,
+      width: 110,
+      render: (s: string) => <StatusBadge status={s}>{statusLabels[s] || s}</StatusBadge>,
     },
-    { title: "版本", dataIndex: "version", key: "version", width: 60, render: (v: number) => `v${v}` },
+    {
+      title: "版本",
+      dataIndex: "version",
+      key: "version",
+      width: 70,
+      render: (v: number) => <span className="qf-mono">v{v}</span>,
+    },
     {
       title: "更新时间",
       dataIndex: "updated_at",
@@ -140,31 +142,24 @@ export default function FMEAListPage() {
       title: "操作",
       key: "actions",
       width: 100,
-      render: (_: unknown, record: FMEADocument) =>
-        canEdit('fmea') ? (
-          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
-            编辑
-          </Button>
-        ) : (
-          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
-            查看
-          </Button>
-        ),
+      render: (_: unknown, record: FMEADocument) => (
+        <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
+          {canEdit('fmea') ? "编辑" : "查看"}
+        </Button>
+      ),
     },
   ];
 
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>FMEA 管理</Title>
-        {canEdit('fmea') && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-            新建 FMEA
-          </Button>
-        )}
-      </div>
+  const actions = canEdit('fmea') ? (
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+      新建 FMEA
+    </Button>
+  ) : null;
 
+  return (
+    <PageShell title="FMEA 管理" subtitle="失效模式与影响分析 · PFMEA / DFMEA" actions={actions}>
       <Table
+        className="qf-table"
         columns={columns}
         dataSource={data}
         rowKey="fmea_id"
@@ -185,6 +180,7 @@ export default function FMEAListPage() {
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => setModalOpen(false)}
+        okButtonProps={{ className: "qf-btn-primary" }}
       >
         <Form form={form} layout="vertical" onFinish={handleCreate} initialValues={{ fmea_type: "PFMEA" }}>
           <Form.Item name="fmea_type" label="FMEA 类型" rules={[{ required: true, message: "请选择 FMEA 类型" }]}>
@@ -212,6 +208,6 @@ export default function FMEAListPage() {
         onCancel={() => setWizardOpen(false)}
         onComplete={handleWizardComplete}
       />
-    </div>
+    </PageShell>
   );
 }

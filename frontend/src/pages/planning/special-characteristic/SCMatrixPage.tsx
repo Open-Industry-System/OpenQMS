@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tag, Typography, Space, App, Card, Row, Col, Statistic, Button } from "antd";
+import { Table, Tag, Typography, App, Row, Col, Statistic, Button } from "antd";
 import { ApartmentOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { getMatrix } from "../../../api/specialCharacteristic";
 import type { MatrixRow } from "../../../types";
 import { useProductLineStore } from "../../../store/productLineStore";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
 const { Title } = Typography;
 
-const msaStatusColors: Record<string, string> = {
-  PASS: "green",
-  FAIL: "red",
-  PENDING: "orange",
+const scTypeVariant = (t: string): string => (t === "CC" ? "error" : "warning");
+const msaStatusVariant = (s: string): string => {
+  if (s === "PASS") return "success";
+  if (s === "FAIL") return "error";
+  return "warning";
 };
 
 export default function SCMatrixPage() {
@@ -99,12 +103,9 @@ export default function SCMatrixPage() {
       key: "sc_type",
       width: 80,
       render: (t: string, record: MatrixRow) => (
-        <Tag
-          color={t === "CC" ? "red" : "gold"}
-          style={{ backgroundColor: record.is_safety_related ? "#fff2f0" : undefined }}
-        >
-          {t}
-        </Tag>
+        <span style={{ backgroundColor: record.is_safety_related ? "rgba(255,71,87,0.12)" : undefined, borderRadius: 4, display: "inline-block" }}>
+          <StatusBadge status={scTypeVariant(t)}>{t}</StatusBadge>
+        </span>
       ),
     },
     {
@@ -160,9 +161,9 @@ export default function SCMatrixPage() {
           );
         }
         return (
-          <Tag color={msaStatusColors[status] || "default"}>
+          <StatusBadge status={msaStatusVariant(status)}>
             {status}
-          </Tag>
+          </StatusBadge>
         );
       },
     },
@@ -182,34 +183,29 @@ export default function SCMatrixPage() {
   ];
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
-        <Space>
-          <Title level={4} style={{ margin: 0 }}>
-            <ApartmentOutlined style={{ marginRight: 8 }} />
-            特殊特性覆盖矩阵
-          </Title>
-        </Space>
-      </div>
+    <PageShell
+      title={
+        <>
+          <ApartmentOutlined style={{ marginRight: 8 }} />
+          特殊特性覆盖矩阵
+        </>
+      }
+      subtitle="CC/SC 跨文档覆盖状态"
+    >
+      <DataCard title="覆盖矩阵" noPadding>
+        <Table
+          className="qf-table"
+          columns={columns}
+          dataSource={data}
+          rowKey="sc_id"
+          loading={loading}
+          pagination={false}
+          size="middle"
+          scroll={{ x: 900 }}
+        />
+      </DataCard>
 
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="sc_id"
-        loading={loading}
-        pagination={false}
-        size="middle"
-        scroll={{ x: 900 }}
-      />
-
-      <Card style={{ marginTop: 16 }}>
+      <DataCard title="覆盖率统计" style={{ marginTop: 16 }}>
         <Title level={5} style={{ marginBottom: 16 }}>
           覆盖率统计
         </Title>
@@ -268,7 +264,7 @@ export default function SCMatrixPage() {
             />
           </Col>
         </Row>
-      </Card>
-    </div>
+      </DataCard>
+    </PageShell>
   );
 }

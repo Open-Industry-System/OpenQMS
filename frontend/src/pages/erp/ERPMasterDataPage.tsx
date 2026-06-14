@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Table, Tag, Button, Typography, App, Space, Input, Tabs, Modal, Select,
+  Table, Tag, Button, App, Space, Input, Tabs, Modal, Select,
 } from "antd";
 import {
   fetchERPSuppliers,
@@ -15,6 +15,7 @@ import {
 import { listSuppliers } from "../../api/supplier";
 import { listCustomers } from "../../api/customerQuality";
 import { useProductLineStore } from "../../store/productLineStore";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import type {
   ERPSupplier,
   ERPCustomer,
@@ -22,17 +23,7 @@ import type {
   ERPLocation,
 } from "../../types/erp";
 
-const { Title } = Typography;
-
 // ─── Suppliers Tab ───
-
-const linkStatusColor = (v: string) => {
-  switch (v) {
-    case "linked": return "green";
-    case "pending": return "orange";
-    default: return "red";
-  }
-};
 
 const linkStatusLabel = (v: string) => {
   switch (v) {
@@ -40,6 +31,15 @@ const linkStatusLabel = (v: string) => {
     case "pending": return "待关联";
     case "unlinked": return "未关联";
     default: return v;
+  }
+};
+
+const linkStatusVariant = (v: string) => {
+  switch (v) {
+    case "linked": return "success";
+    case "pending": return "warning";
+    case "unlinked": return "error";
+    default: return "info";
   }
 };
 
@@ -118,7 +118,9 @@ function SuppliersTab() {
       dataIndex: "link_status",
       key: "link_status",
       width: 110,
-      render: (v: string) => <Tag color={linkStatusColor(v)}>{linkStatusLabel(v)}</Tag>,
+      render: (v: string) => (
+        <StatusBadge status={linkStatusVariant(v)}>{linkStatusLabel(v)}</StatusBadge>
+      ),
     },
     {
       title: "操作",
@@ -139,18 +141,21 @@ function SuppliersTab() {
 
   return (
     <>
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="erp_supplier_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => { setPage(p); fetchData(p, productLine); },
-        }}
-      />
+      <DataCard title="供应商">
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="erp_supplier_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => { setPage(p); fetchData(p, productLine); },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
       <Modal
         title="关联 OpenQMS 供应商"
         open={linkModalOpen}
@@ -255,7 +260,9 @@ function CustomersTab() {
       dataIndex: "link_status",
       key: "link_status",
       width: 110,
-      render: (v: string) => <Tag color={linkStatusColor(v)}>{linkStatusLabel(v)}</Tag>,
+      render: (v: string) => (
+        <StatusBadge status={linkStatusVariant(v)}>{linkStatusLabel(v)}</StatusBadge>
+      ),
     },
     {
       title: "操作",
@@ -276,18 +283,21 @@ function CustomersTab() {
 
   return (
     <>
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="erp_customer_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => { setPage(p); fetchData(p, productLine); },
-        }}
-      />
+      <DataCard title="客户">
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="erp_customer_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => { setPage(p); fetchData(p, productLine); },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
       <Modal
         title="关联 OpenQMS 客户"
         open={linkModalOpen}
@@ -388,18 +398,21 @@ function MaterialsTab() {
           style={{ width: 280 }}
         />
       </div>
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="material_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => { setPage(p); fetchData(p, search, productLine); },
-        }}
-      />
+      <DataCard title="物料">
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="material_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => { setPage(p); fetchData(p, search, productLine); },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
     </div>
   );
 }
@@ -456,18 +469,21 @@ function LocationsTab() {
   ];
 
   return (
-    <Table
-      columns={columns}
-      dataSource={data}
-      rowKey="location_id"
-      loading={loading}
-      pagination={{
-        current: page,
-        total,
-        pageSize: 20,
-        onChange: (p) => { setPage(p); fetchData(p, productLine); },
-      }}
-    />
+    <DataCard title="库位">
+      <Table
+        columns={columns}
+        dataSource={data}
+        rowKey="location_id"
+        loading={loading}
+        pagination={{
+          current: page,
+          total,
+          pageSize: 20,
+          onChange: (p) => { setPage(p); fetchData(p, productLine); },
+        }}
+        className="qf-table"
+      />
+    </DataCard>
   );
 }
 
@@ -484,13 +500,12 @@ export default function ERPMasterDataPage() {
   const [activeTab, setActiveTab] = useState("suppliers");
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 16 }}>ERP 主数据</Title>
+    <PageShell title="ERP 主数据">
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         items={tabItems}
       />
-    </div>
+    </PageShell>
   );
 }

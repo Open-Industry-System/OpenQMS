@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Table, Button, Tag, Typography, Modal, Form, Input, Select, App, Space,
+  Table, Button, Modal, Form, Input, Select, App, Space,
   InputNumber,
 } from "antd";
 import {
@@ -13,8 +13,7 @@ import {
 } from "../../api/erp";
 import type { ERPConnection } from "../../types/erp";
 import { usePermission } from "../../hooks/usePermission";
-
-const { Title } = Typography;
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const typeLabels: Record<string, string> = {
   mock: "Mock",
@@ -200,9 +199,9 @@ export default function ERPConnectionsPage() {
       key: "is_active",
       width: 80,
       render: (active: boolean) => (
-        <Tag color={active ? "success" : "error"}>
+        <StatusBadge status={active ? "ok" : "error"}>
           {active ? "正常" : "停用"}
-        </Tag>
+        </StatusBadge>
       ),
     },
     {
@@ -268,39 +267,34 @@ export default function ERPConnectionsPage() {
   ], [canEditErp, canAdminErp, testLoading, syncLoading]);
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: 16,
-        }}
-      >
-        <Title level={4} style={{ margin: 0 }}>
-          ERP 连接管理
-        </Title>
-        {canCreateErp && (
+    <PageShell
+      title="ERP 连接管理"
+      actions={
+        canCreateErp && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新建连接
           </Button>
-        )}
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="connection_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p);
-          },
-        }}
-      />
+        )
+      }
+    >
+      <DataCard title="连接列表">
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="connection_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p);
+            },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
 
       <Modal
         title={editingId ? "编辑连接" : "新建连接"}
@@ -369,6 +363,6 @@ export default function ERPConnectionsPage() {
           )}
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

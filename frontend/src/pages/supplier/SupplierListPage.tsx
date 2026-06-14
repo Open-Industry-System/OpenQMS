@@ -3,7 +3,6 @@ import {
   Card,
   Table,
   Button,
-  Tag,
   Space,
   Input,
   Select,
@@ -44,15 +43,25 @@ import {
   downloadSupplierImportTemplate,
 } from "../../api/supplier";
 import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 
 const { Option } = Select;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending_review: { label: "待审核", color: "orange" },
-  audit_required: { label: "需审核", color: "blue" },
-  approved: { label: "已批准", color: "green" },
-  rejected: { label: "已拒绝", color: "red" },
-  suspended: { label: "已暂停", color: "default" },
+const STATUS_MAP: Record<string, { label: string }> = {
+  pending_review: { label: "待审核" },
+  audit_required: { label: "需审核" },
+  approved: { label: "已批准" },
+  rejected: { label: "已拒绝" },
+  suspended: { label: "已暂停" },
+};
+
+const statusVariant = (status: string): string => {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "error";
+  if (status === "pending_review") return "warning";
+  return "info";
 };
 
 export default function SupplierListPage() {
@@ -260,7 +269,7 @@ export default function SupplierListPage() {
       width: 100,
       render: (status: string) => {
         const cfg = STATUS_MAP[status];
-        return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
+        return <StatusBadge status={statusVariant(status)}>{cfg?.label || status}</StatusBadge>;
       },
     },
     {
@@ -322,7 +331,31 @@ export default function SupplierListPage() {
   ];
 
   return (
-    <div>
+    <PageShell
+      title="供应商管理"
+      subtitle="准入、绩效与证书到期监控"
+      actions={
+        <Space>
+          {canEdit('supplier') && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/suppliers/new")}>
+              新增供应商
+            </Button>
+          )}
+          <Button icon={<DownloadOutlined />} onClick={() => exportSuppliers({
+            search: filterName || undefined,
+            status: filterStatus,
+          })}>
+            导出
+          </Button>
+          <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+            导入
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
+            刷新
+          </Button>
+        </Space>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
           <Card>
@@ -362,34 +395,7 @@ export default function SupplierListPage() {
         </Col>
       </Row>
 
-      <Card
-        title="供应商管理"
-        extra={
-          <Space>
-            {canEdit('supplier') && (
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => navigate("/suppliers/new")}
-              >
-                新增供应商
-              </Button>
-            )}
-            <Button icon={<DownloadOutlined />} onClick={() => exportSuppliers({
-              search: filterName || undefined,
-              status: filterStatus,
-            })}>
-              导出
-            </Button>
-            <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-              导入
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              刷新
-            </Button>
-          </Space>
-        }
-      >
+      <DataCard title="供应商清单">
         <Space style={{ marginBottom: 16 }} wrap>
           <Input
             placeholder="搜索名称 / 简称"
@@ -418,6 +424,7 @@ export default function SupplierListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="supplier_id"
           columns={columns}
           dataSource={suppliers}
@@ -433,7 +440,7 @@ export default function SupplierListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Drawer
         title="证书到期提醒（90天内）"
@@ -442,6 +449,7 @@ export default function SupplierListPage() {
         width={640}
       >
         <Table
+          className="qf-table"
           rowKey="cert_id"
           dataSource={expiryAlerts}
           loading={expiryLoading}
@@ -490,6 +498,6 @@ export default function SupplierListPage() {
         templateDownloadFn={downloadSupplierImportTemplate}
         hint="每行包含: 名称*, 简称*, 联系人, 电话, 邮箱, 地址, 供货范围"
       />
-    </div>
+    </PageShell>
   );
 }

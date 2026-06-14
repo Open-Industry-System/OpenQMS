@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Card, Typography, Select, Tag, Space, Timeline, Empty, Spin, Alert } from 'antd';
+import { Typography, Select, Space, Timeline, Empty, Spin, Alert } from 'antd';
 import { Link } from 'react-router-dom';
 import {
   SafetyOutlined,
@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import client from '../../../api/client';
 import type { SpecialCharacteristic } from '../../../types/specialCharacteristic';
+import { PageShell, DataCard, StatusBadge } from '../../../components/design';
 
 const { Title, Text } = Typography;
 
@@ -78,9 +79,8 @@ export default function TraceabilityPage() {
   }, [selectedId]);
 
   return (
-    <div style={{ padding: 24 }}>
-      <Title level={4}>特殊特性贯穿追踪</Title>
-      <Card style={{ marginBottom: 24 }}>
+    <PageShell title="特殊特性贯穿追踪">
+      <DataCard title={null} style={{ marginBottom: 24 }}>
         <Space>
           <Text strong>选择特殊特性：</Text>
           <Select
@@ -97,7 +97,7 @@ export default function TraceabilityPage() {
             }))}
           />
         </Space>
-      </Card>
+      </DataCard>
 
       {loading && <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />}
 
@@ -107,17 +107,17 @@ export default function TraceabilityPage() {
 
       {!loading && chain && (
         <div>
-          <Card style={{ marginBottom: 24 }}>
+          <DataCard title={null} style={{ marginBottom: 24 }}>
             <Space>
-              <Tag color={chain.sc_type === 'CC' ? 'red' : 'orange'} style={{ fontSize: 14 }}>
+              <StatusBadge status={chain.sc_type === 'CC' ? 'critical' : 'warning'}>
                 {chain.sc_type}
-              </Tag>
+              </StatusBadge>
               <Title level={5} style={{ margin: 0 }}>{chain.sc_code} - {chain.sc_name}</Title>
             </Space>
             <div style={{ marginTop: 8 }}>
               <Text type="secondary">规格要求：</Text> {chain.spec_requirement || '—'}
             </div>
-          </Card>
+          </DataCard>
 
           <Timeline
             style={{ marginTop: 24 }}
@@ -126,7 +126,7 @@ export default function TraceabilityPage() {
                 dot: <SafetyOutlined style={{ fontSize: 18 }} />,
                 color: 'blue',
                 children: (
-                  <Card title="FMEA 来源" size="small" style={{ marginBottom: 16 }}>
+                  <DataCard title="FMEA 来源" style={{ marginBottom: 16 }}>
                     {chain.fmea_source ? (
                       <div>
                         <Link to={`/fmea/${chain.fmea_source.fmea_id}`}>
@@ -134,14 +134,16 @@ export default function TraceabilityPage() {
                         </Link>
                         <Text type="secondary"> — {chain.fmea_source.title}</Text>
                         <div style={{ marginTop: 8 }}>
-                          <Tag>{chain.fmea_source.fmea_type}</Tag>
+                          <StatusBadge status="info">{chain.fmea_source.fmea_type}</StatusBadge>
                           <Text>节点: {chain.fmea_source.node_name} ({chain.fmea_source.node_type})</Text>
                         </div>
                         {chain.fmea_source.connected_failure_modes.length > 0 && (
                           <div style={{ marginTop: 8 }}>
                             <Text type="secondary">关联失效模式：</Text>
                             {chain.fmea_source.connected_failure_modes.map((fm) => (
-                              <Tag key={fm.id} style={{ marginTop: 4 }}>{fm.name}</Tag>
+                              <StatusBadge key={fm.id} status="info" style={{ marginTop: 4 }}>
+                                {fm.name}
+                              </StatusBadge>
                             ))}
                           </div>
                         )}
@@ -149,14 +151,14 @@ export default function TraceabilityPage() {
                     ) : (
                       <Text type="secondary">未关联 FMEA 来源</Text>
                     )}
-                  </Card>
+                  </DataCard>
                 ),
               },
               {
                 dot: <FileTextOutlined style={{ fontSize: 18 }} />,
                 color: 'green',
                 children: (
-                  <Card title="控制计划" size="small" style={{ marginBottom: 16 }}>
+                  <DataCard title="控制计划" style={{ marginBottom: 16 }}>
                     {chain.control_plan_items.length > 0 ? (
                       <div>
                         {chain.control_plan_items.map((item) => (
@@ -164,7 +166,7 @@ export default function TraceabilityPage() {
                             <Text strong>{item.cp_document_no}</Text>
                             <Text type="secondary"> — {item.cp_title}</Text>
                             <div style={{ marginTop: 4 }}>
-                              <Tag>步骤 {item.step_no}</Tag>
+                              <StatusBadge status="info">步骤 {item.step_no}</StatusBadge>
                               <Text> {item.process_name} / {item.characteristic_no}</Text>
                             </div>
                             <div style={{ marginTop: 4 }}>
@@ -176,29 +178,29 @@ export default function TraceabilityPage() {
                     ) : (
                       <Text type="secondary">未在控制计划中引用</Text>
                     )}
-                  </Card>
+                  </DataCard>
                 ),
               },
               {
                 dot: <ExperimentOutlined style={{ fontSize: 18 }} />,
                 color: 'orange',
                 children: (
-                  <Card title="MSA 分析" size="small" style={{ marginBottom: 16 }}>
+                  <DataCard title="MSA 分析" style={{ marginBottom: 16 }}>
                     <Text type="secondary">量具与测量系统分析（通过量具台账管理）</Text>
-                  </Card>
+                  </DataCard>
                 ),
               },
               {
                 dot: <BarChartOutlined style={{ fontSize: 18 }} />,
                 color: 'purple',
                 children: (
-                  <Card title="SPC 监控" size="small">
+                  <DataCard title="SPC 监控">
                     {chain.spc_characteristics.length > 0 ? (
                       <div>
                         {chain.spc_characteristics.map((ic) => (
                           <div key={ic.ic_id} style={{ marginBottom: 12, padding: 8, background: '#f9f0ff', borderRadius: 4 }}>
                             <Text strong>{ic.characteristic_name}</Text>
-                            <Tag color="blue" style={{ marginLeft: 8 }}>{ic.chart_type}</Tag>
+                            <StatusBadge status="info" style={{ marginLeft: 8 }}>{ic.chart_type}</StatusBadge>
                             <div style={{ marginTop: 4 }}>
                               {ic.spec_target !== null && <Text>目标值: {ic.spec_target} </Text>}
                               {ic.spec_upper !== null && <Text>USL: {ic.spec_upper} </Text>}
@@ -210,7 +212,7 @@ export default function TraceabilityPage() {
                     ) : (
                       <Text type="secondary">未关联 SPC 检验特性</Text>
                     )}
-                  </Card>
+                  </DataCard>
                 ),
               },
             ]}
@@ -221,6 +223,6 @@ export default function TraceabilityPage() {
       {!selectedId && !loading && (
         <Empty description="请选择一个特殊特性以查看其贯穿追踪链" />
       )}
-    </div>
+    </PageShell>
   );
 }

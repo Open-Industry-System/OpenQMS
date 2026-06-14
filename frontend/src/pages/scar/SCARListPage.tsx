@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tag, Tabs, Button, Select, Space, Modal, Form, Input, DatePicker, message } from "antd";
+import { Table, Tabs, Button, Select, Space, Modal, Form, Input, DatePicker, message } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { listSCARs, createSCAR } from "../../api/scar";
 import { listSuppliers } from "../../api/supplier";
 import type { SupplierSCAR, SCARListResponse, Supplier } from "../../types";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 
 const STATUS_TABS = [
   { key: "all", label: "全部" },
@@ -22,6 +25,14 @@ const STATUS_MAP: Record<string, string | undefined> = {
   closed: "closed",
 };
 
+export const STATUS_LABELS: Record<string, string> = {
+  open: "待处理",
+  in_progress: "处理中",
+  responded: "已回复",
+  verified: "已验证",
+  closed: "已关闭",
+};
+
 export const STATUS_COLORS: Record<string, string> = {
   open: "default",
   in_progress: "processing",
@@ -30,12 +41,10 @@ export const STATUS_COLORS: Record<string, string> = {
   closed: "default",
 };
 
-export const STATUS_LABELS: Record<string, string> = {
-  open: "待处理",
-  in_progress: "处理中",
-  responded: "已回复",
-  verified: "已验证",
-  closed: "已关闭",
+const statusVariant = (s: string): string => {
+  if (["verified", "closed"].includes(s)) return "success";
+  if (["responded", "in_progress"].includes(s)) return "warning";
+  return "info";
 };
 
 export const SOURCE_LABELS: Record<string, string> = {
@@ -105,7 +114,7 @@ export default function SCARListPage() {
       title: "状态",
       dataIndex: "status",
       key: "status",
-      render: (s: string) => <Tag color={STATUS_COLORS[s]}>{STATUS_LABELS[s] || s}</Tag>,
+      render: (s: string) => <StatusBadge status={statusVariant(s)}>{STATUS_LABELS[s] || s}</StatusBadge>,
     },
     { title: "发出日期", dataIndex: "issued_date", key: "issued_date" },
     { title: "到期日", dataIndex: "due_date", key: "due_date", render: (v: string) => v || "-" },
@@ -121,46 +130,53 @@ export default function SCARListPage() {
   ];
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={STATUS_TABS} />
-        <Space>
-          <Select
-            allowClear
-            showSearch
-            filterOption={false}
-            placeholder="筛选供应商"
-            style={{ width: 160 }}
-            onSearch={async (search) => {
-              const res = await listSuppliers({ search, page_size: 20 });
-              setSuppliers(res.items);
-            }}
-            onChange={(v) => { setSupplierId(v); setPage(1); }}
-            options={suppliers.map((s) => ({ value: s.supplier_id, label: s.name }))}
-          />
-          <Select
-            allowClear
-            placeholder="来源类型"
-            style={{ width: 120 }}
-            onChange={(v) => { setSourceType(v); setPage(1); }}
-            options={[
-              { value: "iqc", label: "IQC拒收" },
-              { value: "complaint", label: "客诉" },
-              { value: "rma", label: "RMA" },
-              { value: "manual", label: "手动创建" },
-            ]}
-          />
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建 SCAR
-          </Button>
-        </Space>
-      </div>
+    <PageShell
+      title="SCAR 管理"
+      subtitle="供应商纠正措施请求"
+      actions={
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+          新建 SCAR
+        </Button>
+      }
+    >
+      <DataCard title="SCAR 清单">
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+          <Tabs activeKey={activeTab} onChange={setActiveTab} items={STATUS_TABS} />
+          <Space>
+            <Select
+              allowClear
+              showSearch
+              filterOption={false}
+              placeholder="筛选供应商"
+              style={{ width: 160 }}
+              onSearch={async (search) => {
+                const res = await listSuppliers({ search, page_size: 20 });
+                setSuppliers(res.items);
+              }}
+              onChange={(v) => { setSupplierId(v); setPage(1); }}
+              options={suppliers.map((s) => ({ value: s.supplier_id, label: s.name }))}
+            />
+            <Select
+              allowClear
+              placeholder="来源类型"
+              style={{ width: 120 }}
+              onChange={(v) => { setSourceType(v); setPage(1); }}
+              options={[
+                { value: "iqc", label: "IQC拒收" },
+                { value: "complaint", label: "客诉" },
+                { value: "rma", label: "RMA" },
+                { value: "manual", label: "手动创建" },
+              ]}
+            />
+          </Space>
+        </div>
 
-      <Table
-        dataSource={data?.items || []}
-        columns={columns}
-        rowKey="scar_id"
-        loading={loading}
+        <Table
+          className="qf-table"
+          dataSource={data?.items || []}
+          columns={columns}
+          rowKey="scar_id"
+          loading={loading}
         pagination={{
           current: page,
           pageSize: 20,
@@ -168,6 +184,7 @@ export default function SCARListPage() {
           onChange: setPage,
         }}
       />
+      </DataCard>
 
       <Modal
         title="新建 SCAR"
@@ -200,6 +217,6 @@ export default function SCARListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

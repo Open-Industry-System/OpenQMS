@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tag, Tabs, Button, Select, Space, Modal, Form, Input, InputNumber, message, Card, Row, Col } from "antd";
+import { Table, Tabs, Button, Select, Modal, Form, Input, InputNumber, message, Row, Col } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { listPPAPs, createPPAP } from "../../../api/ppap";
 import { listSuppliers } from "../../../api/supplier";
 import type { PPAPSubmission, PPAPListResponse, Supplier } from "../../../types";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
 const STATUS_TABS = [
   { key: "all", label: "全部" },
@@ -22,6 +25,13 @@ const STATUS_MAP: Record<string, string | undefined> = {
   rejected: "rejected",
 };
 
+export const STATUS_LABELS: Record<string, string> = {
+  draft: "草稿",
+  under_review: "审查中",
+  approved: "已批准",
+  rejected: "已驳回",
+};
+
 export const STATUS_COLORS: Record<string, string> = {
   draft: "default",
   under_review: "processing",
@@ -29,11 +39,11 @@ export const STATUS_COLORS: Record<string, string> = {
   rejected: "error",
 };
 
-export const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
-  under_review: "审查中",
-  approved: "已批准",
-  rejected: "已驳回",
+const statusVariant = (s: string): string => {
+  if (s === "approved") return "success";
+  if (s === "rejected") return "error";
+  if (s === "under_review") return "warning";
+  return "info";
 };
 
 export const LEVEL_LABELS: Record<number, string> = {
@@ -101,13 +111,13 @@ export default function PPAPListPage() {
       title: "提交等级",
       dataIndex: "submission_level",
       key: "submission_level",
-      render: (v: number) => <Tag>{LEVEL_LABELS[v] || v}</Tag>,
+      render: (v: number) => <StatusBadge status="info">{LEVEL_LABELS[v] || v}</StatusBadge>,
     },
     {
       title: "状态",
       dataIndex: "status",
       key: "status",
-      render: (s: string) => <Tag color={STATUS_COLORS[s]}>{STATUS_LABELS[s] || s}</Tag>,
+      render: (s: string) => <StatusBadge status={statusVariant(s)}>{STATUS_LABELS[s] || s}</StatusBadge>,
     },
     { title: "版本", dataIndex: "revision", key: "revision" },
     { title: "创建时间", dataIndex: "created_at", key: "created_at", render: (v: string) => v?.split("T")[0] || "-" },
@@ -123,17 +133,25 @@ export default function PPAPListPage() {
   ];
 
   return (
-    <div>
+    <PageShell
+      title="PPAP 提交管理"
+      subtitle="生产件批准程序清单"
+      actions={
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+          新建 PPAP
+        </Button>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>PPAP 总数</div><div style={{ fontSize: 24, fontWeight: 600 }}>{kpis.total}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>待审</div><div style={{ fontSize: 24, fontWeight: 600, color: "#1677ff" }}>{kpis.pending}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>已批准</div><div style={{ fontSize: 24, fontWeight: 600, color: "#52c41a" }}>{kpis.approved}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>已驳回</div><div style={{ fontSize: 24, fontWeight: 600, color: "#ff4d4f" }}>{kpis.rejected}</div></Card></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>PPAP 总数</div><div style={{ fontSize: 24, fontWeight: 600 }}>{kpis.total}</div></DataCard></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>待审</div><div style={{ fontSize: 24, fontWeight: 600, color: "#1677ff" }}>{kpis.pending}</div></DataCard></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>已批准</div><div style={{ fontSize: 24, fontWeight: 600, color: "#52c41a" }}>{kpis.approved}</div></DataCard></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>已驳回</div><div style={{ fontSize: 24, fontWeight: 600, color: "#ff4d4f" }}>{kpis.rejected}</div></DataCard></Col>
       </Row>
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={STATUS_TABS} />
-        <Space>
+      <DataCard title="PPAP 清单">
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+          <Tabs activeKey={activeTab} onChange={setActiveTab} items={STATUS_TABS} />
           <Select
             allowClear
             showSearch
@@ -147,17 +165,14 @@ export default function PPAPListPage() {
             onChange={(v) => { setSupplierId(v); setPage(1); }}
             options={suppliers.map((s) => ({ value: s.supplier_id, label: s.name }))}
           />
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建 PPAP
-          </Button>
-        </Space>
-      </div>
+        </div>
 
-      <Table
-        dataSource={data?.items || []}
-        columns={columns}
-        rowKey="submission_id"
-        loading={loading}
+        <Table
+          className="qf-table"
+          dataSource={data?.items || []}
+          columns={columns}
+          rowKey="submission_id"
+          loading={loading}
         pagination={{
           current: page,
           pageSize: 20,
@@ -165,6 +180,7 @@ export default function PPAPListPage() {
           onChange: setPage,
         }}
       />
+      </DataCard>
 
       <Modal
         title="新建 PPAP"
@@ -200,6 +216,6 @@ export default function PPAPListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

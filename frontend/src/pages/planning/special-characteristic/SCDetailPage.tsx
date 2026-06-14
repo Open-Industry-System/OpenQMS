@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Button, Tag, Typography, Card, Form, Input, Select, Switch, App,
+  Button, Typography, Form, Input, Select, Switch, App,
   Spin, Row, Col, Descriptions, Space, Timeline, Collapse,
 } from "antd";
 import {
@@ -16,9 +16,26 @@ import {
 import type { SpecialCharacteristic } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { TextArea } = Input;
+
+const scTypeVariant = (t: string): string => (t === "CC" ? "error" : "warning");
+const sourceTypeVariant = (t: string): string => (t === "DFMEA" ? "info" : "success");
+const msaStatusVariant = (s: string): string => {
+  if (s === "PASS") return "success";
+  if (s === "FAIL") return "error";
+  return "warning";
+};
+const safetyStatusVariant = (s: string): string => {
+  if (s === "approved") return "success";
+  if (s === "rejected") return "error";
+  if (s === "submitted") return "warning";
+  return "info";
+};
 
 export default function SCDetailPage() {
   const { message } = App.useApp();
@@ -158,63 +175,46 @@ export default function SCDetailPage() {
   }
 
   return (
-    <div>
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
-        <Space>
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate("/special-characteristics")}
-          >
-            返回列表
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            {isNew ? "新建特殊特性" : `${sc!.sc_code} - ${sc!.sc_name}`}
-          </Title>
-          {!isNew && (
-            <Tag color={sc!.sc_type === "CC" ? "red" : "gold"}>
-              {sc!.sc_type}
-            </Tag>
-          )}
-        </Space>
-      </div>
-
+    <PageShell
+      title={
+        isNew ? "新建特殊特性" : (
+          <Space size={12}>
+            {`${sc!.sc_code} - ${sc!.sc_name}`}
+            <StatusBadge status={scTypeVariant(sc!.sc_type)}>{sc!.sc_type}</StatusBadge>
+          </Space>
+        )
+      }
+      subtitle={isNew ? undefined : `产品线：${sc!.product_line_code}`}
+      actions={
+        <Button
+          icon={<ArrowLeftOutlined />}
+          onClick={() => navigate("/special-characteristics")}
+        >
+          返回列表
+        </Button>
+      }
+    >
       <Row gutter={16}>
         {/* Left: Read-only info (edit mode only) */}
         {!isNew && (
           <Col span={10}>
-            <Card title="基本信息" style={{ marginBottom: 16 }}>
+            <DataCard title="基本信息" style={{ marginBottom: 16 }}>
               <Descriptions column={1} size="small">
                 <Descriptions.Item label="SC编号">
                   {sc!.sc_code}
                 </Descriptions.Item>
                 <Descriptions.Item label="类型">
-                  <span
-                    style={{
-                      backgroundColor: sc!.sc_type === "CC" ? "#fff1f0" : "#fffbe6",
-                      padding: "2px 8px",
-                      borderRadius: 4,
-                    }}
-                  >
-                    <Tag color={sc!.sc_type === "CC" ? "red" : "gold"}>
-                      {sc!.sc_type === "CC" ? "关键特性 (CC)" : "重要特性 (SC)"}
-                    </Tag>
-                  </span>
+                  <StatusBadge status={scTypeVariant(sc!.sc_type)}>
+                    {sc!.sc_type === "CC" ? "关键特性 (CC)" : "重要特性 (SC)"}
+                  </StatusBadge>
                 </Descriptions.Item>
                 <Descriptions.Item label="产品线">
                   {sc!.product_line_code}
                 </Descriptions.Item>
                 <Descriptions.Item label="来源类型">
-                  <Tag color={sc!.source_type === "DFMEA" ? "blue" : "green"}>
+                  <StatusBadge status={sourceTypeVariant(sc!.source_type)}>
                     {sc!.source_type}
-                  </Tag>
+                  </StatusBadge>
                 </Descriptions.Item>
                 <Descriptions.Item label="来源FMEA文档">
                   {sc!.source_fmea_document_no ? (
@@ -249,24 +249,16 @@ export default function SCDetailPage() {
                   )}
                 </Descriptions.Item>
                 <Descriptions.Item label="MSA状态">
-                  <Tag
-                    color={
-                      sc!.msa_status === "PASS"
-                        ? "green"
-                        : sc!.msa_status === "FAIL"
-                        ? "red"
-                        : "orange"
-                    }
-                  >
+                  <StatusBadge status={msaStatusVariant(sc!.msa_status)}>
                     {sc!.msa_status}
-                  </Tag>
+                  </StatusBadge>
                 </Descriptions.Item>
               </Descriptions>
-            </Card>
+            </DataCard>
 
             {/* Source FMEA info */}
             {sc!.source_fmea_title && (
-              <Card title="来源FMEA信息">
+              <DataCard title="来源FMEA信息">
                 <Descriptions column={1} size="small">
                   <Descriptions.Item label="FMEA标题">
                     {sc!.source_fmea_title}
@@ -284,14 +276,14 @@ export default function SCDetailPage() {
                     </Button>
                   </Descriptions.Item>
                 </Descriptions>
-              </Card>
+              </DataCard>
             )}
           </Col>
         )}
 
         {/* Right: Editable form */}
         <Col span={isNew ? 24 : 14}>
-          <Card title={isNew ? "创建信息" : "编辑信息"}>
+          <DataCard title={isNew ? "创建信息" : "编辑信息"}>
             <Form
               form={form}
               layout="vertical"
@@ -377,7 +369,7 @@ export default function SCDetailPage() {
                 </Form.Item>
               )}
             </Form>
-          </Card>
+          </DataCard>
 
           {/* Safety Characteristic Panel */}
           {!isNew && sc && (
@@ -392,16 +384,12 @@ export default function SCDetailPage() {
                     <SafetyCertificateOutlined style={{ color: "#ff4d4f" }} />
                     <span>安全特性</span>
                     {sc.safety_approval_status && (
-                      <Tag color={
-                        sc.safety_approval_status === "approved" ? "green" :
-                        sc.safety_approval_status === "rejected" ? "red" :
-                        sc.safety_approval_status === "submitted" ? "blue" : "orange"
-                      }>
+                      <StatusBadge status={safetyStatusVariant(sc.safety_approval_status)}>
                         {sc.safety_approval_status === "pending" && "待提交"}
                         {sc.safety_approval_status === "submitted" && "待审批"}
                         {sc.safety_approval_status === "approved" && "已批准"}
                         {sc.safety_approval_status === "rejected" && "已驳回"}
-                      </Tag>
+                      </StatusBadge>
                     )}
                   </Space>
                 }
@@ -418,6 +406,7 @@ export default function SCDetailPage() {
 
                   {sc.is_safety_related && (
                     <>
+                      <StatusBadge status="info">待模块上线后自动切换</StatusBadge>
                       <Form
                         form={safetyForm}
                         layout="vertical"
@@ -495,6 +484,6 @@ export default function SCDetailPage() {
           )}
         </Col>
       </Row>
-    </div>
+    </PageShell>
   );
 }

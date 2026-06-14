@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { App, Button, Card, DatePicker, Form, Input, InputNumber, Select, Space, Switch, Tag, Typography } from "antd";
+import { App, Button, DatePicker, Form, Input, InputNumber, Select, Space, Spin, Switch } from "antd";
 import dayjs from "dayjs";
 import {
   cancelComplaint,
@@ -18,10 +18,35 @@ import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import SupplierBadge from "../../components/cross-links/SupplierBadge";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
+import { DataCard, PageShell, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
+const severityVariant = (severity: string) => {
+  switch (severity) {
+    case "致命":
+      return "fatal";
+    case "严重":
+      return "rework";
+    case "一般":
+    case "轻微":
+    default:
+      return "normal";
+  }
+};
 
-const severityColor: Record<string, string> = { "致命": "red", "严重": "orange", "一般": "blue", "轻微": "default" };
+const complaintStatusVariant = (status: string) => {
+  switch (status) {
+    case "closed":
+      return "closed";
+    case "cancelled":
+      return "reject";
+    case "open":
+    case "investigating":
+    case "responded":
+    default:
+      return "pending";
+  }
+};
+
 const statusLabel: Record<string, string> = {
   open: "已接收",
   investigating: "调查中",
@@ -109,50 +134,54 @@ export default function ComplaintDetailPage() {
   };
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+    <PageShell
+      title={
         <Space>
           <Button onClick={() => navigate("/customer-quality")}>返回</Button>
-          <Title level={4} style={{ margin: 0 }}>{data?.complaint_no || "客诉详情"}</Title>
-          {data && <Tag color={severityColor[data.severity]}>{data.severity}</Tag>}
-          {data && <Tag>{statusLabel[data.status] || data.status}</Tag>}
+          <span>{data?.complaint_no || "客诉详情"}</span>
+          {data && <StatusBadge status={severityVariant(data.severity)}>{data.severity}</StatusBadge>}
+          {data && <StatusBadge status={complaintStatusVariant(data.status)}>{statusLabel[data.status] || data.status}</StatusBadge>}
           {data?.supplier_id && <SupplierBadge supplierId={data.supplier_id} />}
           {data?.fmea_ref_id && <RelatedFMEALink fmeaRefId={data.fmea_ref_id} />}
         </Space>
-        {canEdit('customer_quality') && data && (
+      }
+      actions={
+        canEdit('customer_quality') && data ? (
           <Space>
             <Button onClick={() => runAction(() => startComplaintInvestigation(data.complaint_id), "已进入调查")}>调查</Button>
             <Button onClick={() => runAction(() => markComplaintResponded(data.complaint_id), "已标记回复")}>已回复</Button>
             <Button onClick={() => runAction(() => cancelComplaint(data.complaint_id), "已取消")}>取消</Button>
             {canApprove('customer_quality') && <Button type="primary" onClick={() => runAction(() => closeComplaint(data.complaint_id), "已关闭")}>关闭</Button>}
           </Space>
-        )}
-      </div>
-
+        ) : null
+      }
+    >
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
-        <Card loading={loading}>
-          <Form form={form} layout="vertical" onFinish={save} disabled={!canEdit('customer_quality')}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-              <Form.Item name="category" label="分类"><Select options={[{ value: "safety", label: "安全" }, { value: "function", label: "功能" }, { value: "appearance", label: "外观" }, { value: "delivery", label: "交付" }]} /></Form.Item>
-              <Form.Item name="severity" label="严重等级"><Select options={["致命", "严重", "一般", "轻微"].map((value) => ({ value, label: value }))} /></Form.Item>
-              <Form.Item name="impact_qty" label="影响数量"><InputNumber style={{ width: "100%" }} min={0} /></Form.Item>
-              <Form.Item name="product_id" label="产品号"><Input /></Form.Item>
-              <Form.Item name="batch_no" label="批次号"><Input /></Form.Item>
-              <Form.Item name="serial_number" label="序列号"><Input /></Form.Item>
-              <Form.Item name="occurred_date" label="发生日期"><DatePicker style={{ width: "100%" }} /></Form.Item>
-              <Form.Item name="received_date" label="接收日期"><DatePicker style={{ width: "100%" }} /></Form.Item>
-              <Form.Item name="due_date" label="期限"><DatePicker style={{ width: "100%" }} /></Form.Item>
-            </div>
-            <Form.Item name="defect_desc" label="投诉描述"><Input.TextArea rows={3} /></Form.Item>
-            <Form.Item name="preliminary_response" label="初步回复"><Input.TextArea rows={3} /></Form.Item>
-            <Form.Item name="root_cause" label="根因"><Input.TextArea rows={3} /></Form.Item>
-            <Form.Item name="corrective_action" label="纠正措施"><Input.TextArea rows={3} /></Form.Item>
-            <Form.Item name="supplier_responsibility" label="供应商责任" valuePropName="checked"><Switch /></Form.Item>
-            {canEdit('customer_quality') && <Button type="primary" htmlType="submit">保存</Button>}
-          </Form>
-        </Card>
+        <DataCard title="投诉信息">
+          <Spin spinning={loading}>
+            <Form form={form} layout="vertical" onFinish={save} disabled={!canEdit('customer_quality')}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                <Form.Item name="category" label="分类"><Select options={[{ value: "safety", label: "安全" }, { value: "function", label: "功能" }, { value: "appearance", label: "外观" }, { value: "delivery", label: "交付" }]} /></Form.Item>
+                <Form.Item name="severity" label="严重等级"><Select options={["致命", "严重", "一般", "轻微"].map((value) => ({ value, label: value }))} /></Form.Item>
+                <Form.Item name="impact_qty" label="影响数量"><InputNumber style={{ width: "100%" }} min={0} /></Form.Item>
+                <Form.Item name="product_id" label="产品号"><Input /></Form.Item>
+                <Form.Item name="batch_no" label="批次号"><Input /></Form.Item>
+                <Form.Item name="serial_number" label="序列号"><Input /></Form.Item>
+                <Form.Item name="occurred_date" label="发生日期"><DatePicker style={{ width: "100%" }} /></Form.Item>
+                <Form.Item name="received_date" label="接收日期"><DatePicker style={{ width: "100%" }} /></Form.Item>
+                <Form.Item name="due_date" label="期限"><DatePicker style={{ width: "100%" }} /></Form.Item>
+              </div>
+              <Form.Item name="defect_desc" label="投诉描述"><Input.TextArea rows={3} /></Form.Item>
+              <Form.Item name="preliminary_response" label="初步回复"><Input.TextArea rows={3} /></Form.Item>
+              <Form.Item name="root_cause" label="根因"><Input.TextArea rows={3} /></Form.Item>
+              <Form.Item name="corrective_action" label="纠正措施"><Input.TextArea rows={3} /></Form.Item>
+              <Form.Item name="supplier_responsibility" label="供应商责任" valuePropName="checked"><Switch /></Form.Item>
+              {canEdit('customer_quality') && <Button type="primary" htmlType="submit">保存</Button>}
+            </Form>
+          </Spin>
+        </DataCard>
 
-        <Card title="关联与证据">
+        <DataCard title="关联与证据">
           <Form form={linkForm} layout="vertical" onFinish={handleLinks} disabled={!canEdit('customer_quality')}>
             <Form.Item name="capa_ref_id" label="关联 CAPA ID"><Input /></Form.Item>
             <Form.Item name="fmea_ref_id" label="关联 FMEA ID"><Input /></Form.Item>
@@ -162,8 +191,8 @@ export default function ComplaintDetailPage() {
           <pre style={{ marginTop: 16, whiteSpace: "pre-wrap" }}>
             {JSON.stringify(data?.attachments || [], null, 2)}
           </pre>
-        </Card>
+        </DataCard>
       </div>
-    </div>
+    </PageShell>
   );
 }

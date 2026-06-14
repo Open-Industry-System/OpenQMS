@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Tabs, Card, Input,
   DatePicker, Table, App, Spin, Row, Col,
-  Switch, Divider, Badge, Statistic, Empty,
+  Switch, Divider, Statistic, Empty,
 } from "antd";
 import {
   ArrowLeftOutlined, LockOutlined, UnlockOutlined,
@@ -35,6 +35,7 @@ import type {
 } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
+import { PageShell, StatusBadge } from "../../components/design";
 
 const { Title, Text } = Typography;
 
@@ -49,10 +50,10 @@ const ruleLabels: Record<string, string> = {
   rule8: "规则8: 连续8点在C区外",
 };
 
-const severityColors: Record<string, string> = {
-  critical: "red",
-  major: "orange",
-  minor: "blue",
+const severityStatus: Record<string, string> = {
+  critical: "fatal",
+  major: "error",
+  minor: "info",
 };
 
 const severityLabels: Record<string, string> = {
@@ -77,11 +78,11 @@ const chartTypeLabels: Record<string, string> = {
   u: "U图",
 };
 
-function getGradeColor(grade: string): string {
-  if (grade.startsWith("A")) return "green";
-  if (grade.startsWith("B")) return "blue";
-  if (grade.startsWith("C")) return "orange";
-  return "red";
+function getGradeStatus(grade: string): string {
+  if (grade.startsWith("A")) return "success";
+  if (grade.startsWith("B")) return "info";
+  if (grade.startsWith("C")) return "warning";
+  return "error";
 }
 
 export default function SPCDetailPage() {
@@ -451,7 +452,7 @@ export default function SPCDetailPage() {
       key: "severity",
       width: 100,
       render: (s: string) => (
-        <Tag color={severityColors[s] || "default"}>{severityLabels[s] || s}</Tag>
+        <StatusBadge status={severityStatus[s] || "draft"}>{severityLabels[s] || s}</StatusBadge>
       ),
     },
     {
@@ -460,10 +461,9 @@ export default function SPCDetailPage() {
       key: "status",
       width: 100,
       render: (s: string) => (
-        <Badge
-          status={s === "open" ? "error" : s === "acknowledged" ? "warning" : "success"}
-          text={statusLabels[s] || s}
-        />
+        <StatusBadge status={s === "open" ? "error" : s === "acknowledged" ? "warning" : "success"}>
+          {statusLabels[s] || s}
+        </StatusBadge>
       ),
     },
     {
@@ -471,7 +471,7 @@ export default function SPCDetailPage() {
       dataIndex: "linked_capa_id",
       key: "linked_capa_id",
       width: 120,
-      render: (v: string | undefined) => v || "-",
+      render: (v: string | undefined) => <span style={{ fontFamily: "var(--qf-font-mono)" }}>{v || "-"}</span>,
     },
     {
       title: "关联 FMEA",
@@ -480,9 +480,9 @@ export default function SPCDetailPage() {
       width: 120,
       render: (_: unknown, record: SPCAlarm) =>
         record.confirmed_fmea_id ? (
-          <Tag color="blue">已关联</Tag>
+          <Tag style={{ background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>已关联</Tag>
         ) : (
-          <Tag color="default">未关联</Tag>
+          <Tag style={{ background: "var(--qf-bg-hover)", color: "var(--qf-text-secondary)", borderColor: "var(--qf-border)" }}>未关联</Tag>
         ),
     },
     {
@@ -542,36 +542,30 @@ export default function SPCDetailPage() {
     );
   }
 
+  const headerTags = (
+    <Space>
+      <Tag style={{ background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>{ic.ic_code}</Tag>
+      <Tag style={{ background: "var(--qf-bg-hover)", color: "var(--qf-text-secondary)", borderColor: "var(--qf-border)" }}>{chartTypeLabels[ic.chart_type] || ic.chart_type}</Tag>
+      {chartData?.active_snapshot && (
+        <Tag style={{ background: "var(--qf-blue-dim)", color: "var(--qf-blue)", borderColor: "var(--qf-blue)" }}>控制限 v{chartData.active_snapshot.version_no}</Tag>
+      )}
+      <StatusBadge status={ic.control_limits_locked ? "success" : "warning"}>
+        {ic.control_limits_locked ? "控制限已锁定" : "控制限自动计算"}
+      </StatusBadge>
+    </Space>
+  );
+
   return (
-    <div>
-      {/* Top bar */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
+    <PageShell
+      title={
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/spc")}>
-            返回
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            {ic.characteristic_name}
-          </Title>
-          <Tag color="blue">{ic.ic_code}</Tag>
-          <Tag>{chartTypeLabels[ic.chart_type] || ic.chart_type}</Tag>
-          {chartData?.active_snapshot && (
-            <Tag color="blue" style={{ marginLeft: 8 }}>控制限 v{chartData.active_snapshot.version_no}</Tag>
-          )}
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/spc")}>返回</Button>
+          <Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{ic.characteristic_name}</Title>
         </Space>
-        <Space>
-          <Tag color={ic.control_limits_locked ? "green" : "orange"}>
-            {ic.control_limits_locked ? "控制限已锁定" : "控制限自动计算"}
-          </Tag>
-        </Space>
-      </div>
+      }
+      subtitle={headerTags}
+      fullHeight
+    >
 
       <Tabs
         activeKey={activeTab}
@@ -662,9 +656,9 @@ export default function SPCDetailPage() {
                 <div>
                   <Row gutter={16} style={{ marginBottom: 24 }}>
                     <Col>
-                      <Tag color={getGradeColor(capability.grade)} style={{ fontSize: 18, padding: "8px 16px" }}>
+                      <StatusBadge status={getGradeStatus(capability.grade)} style={{ fontSize: 14, padding: "6px 12px" }}>
                         等级: {capability.grade}
-                      </Tag>
+                      </StatusBadge>
                     </Col>
                   </Row>
                   <Row gutter={[16, 16]}>
@@ -922,6 +916,6 @@ export default function SPCDetailPage() {
         }}
         onConfirmed={fetchAll}
       />
-    </div>
+    </PageShell>
   );
 }

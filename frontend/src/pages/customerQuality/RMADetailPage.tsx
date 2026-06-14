@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { App, Button, Card, DatePicker, Form, Input, InputNumber, Select, Space, Tag, Typography } from "antd";
+import { App, Button, DatePicker, Form, Input, InputNumber, Select, Space } from "antd";
 import dayjs from "dayjs";
 import {
   cancelRMA,
@@ -15,8 +15,22 @@ import {
 } from "../../api/customerQuality";
 import type { RMARecord } from "../../types";
 import { usePermission } from "../../hooks/usePermission";
+import { DataCard, PageShell, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
+const rmaStatusVariant = (status: string) => {
+  switch (status) {
+    case "closed":
+      return "closed";
+    case "cancelled":
+      return "reject";
+    case "open":
+    case "analysis":
+    case "action_pending":
+    default:
+      return "pending";
+  }
+};
+
 const statusLabel: Record<string, string> = {
   open: "已登记",
   analysis: "分析中",
@@ -32,7 +46,7 @@ export default function RMADetailPage() {
   const [form] = Form.useForm();
   const [linkForm] = Form.useForm();
   const [data, setData] = useState<RMARecord | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const { canEdit, canApprove } = usePermission();
 
   const load = async () => {
@@ -99,25 +113,27 @@ export default function RMADetailPage() {
   };
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+    <PageShell
+      title={
         <Space>
           <Button onClick={() => navigate("/customer-quality")}>返回</Button>
-          <Title level={4} style={{ margin: 0 }}>{data?.rma_no || "RMA详情"}</Title>
-          {data && <Tag>{statusLabel[data.status] || data.status}</Tag>}
+          <span>{data?.rma_no || "RMA详情"}</span>
+          {data && <StatusBadge status={rmaStatusVariant(data.status)}>{statusLabel[data.status] || data.status}</StatusBadge>}
         </Space>
-        {canEdit('customer_quality') && data && (
+      }
+      actions={
+        canEdit('customer_quality') && data ? (
           <Space>
             <Button onClick={() => runAction(() => startRMAAnalysis(data.rma_id), "已进入分析")}>分析</Button>
             <Button onClick={() => runAction(() => markRMAActionPending(data.rma_id), "已标记等待措施")}>等待措施</Button>
             <Button onClick={() => runAction(() => cancelRMA(data.rma_id), "已取消")}>取消</Button>
             {canApprove('customer_quality') && <Button type="primary" onClick={() => runAction(() => closeRMA(data.rma_id), "已关闭")}>关闭</Button>}
           </Space>
-        )}
-      </div>
-
+        ) : null
+      }
+    >
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
-        <Card loading={loading}>
+        <DataCard title="RMA 信息">
           <Form form={form} layout="vertical" onFinish={save} disabled={!canEdit('customer_quality')}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
               <Form.Item name="product_id" label="产品号"><Input /></Form.Item>
@@ -133,8 +149,8 @@ export default function RMADetailPage() {
             <Form.Item name="corrective_action" label="纠正措施"><Input.TextArea rows={4} /></Form.Item>
             {canEdit('customer_quality') && <Button type="primary" htmlType="submit">保存</Button>}
           </Form>
-        </Card>
-        <Card title="关联与证据">
+        </DataCard>
+        <DataCard title="关联与证据">
           <Form form={linkForm} layout="vertical" onFinish={handleLinks} disabled={!canEdit('customer_quality')}>
             <Form.Item name="complaint_id" label="关联客诉 ID"><Input /></Form.Item>
             <Form.Item name="capa_ref_id" label="关联 CAPA ID"><Input /></Form.Item>
@@ -144,8 +160,8 @@ export default function RMADetailPage() {
           <pre style={{ marginTop: 16, whiteSpace: "pre-wrap" }}>
             {JSON.stringify(data?.attachments || [], null, 2)}
           </pre>
-        </Card>
+        </DataCard>
       </div>
-    </div>
+    </PageShell>
   );
 }

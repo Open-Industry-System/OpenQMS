@@ -1,20 +1,19 @@
 import { useEffect, useState, useMemo } from "react";
-import { Table, Button, Tag, Typography, App } from "antd";
+import { Table, Button, App } from "antd";
 import { ThunderboltOutlined } from "@ant-design/icons";
 import { getPLMChangeOrders, triggerImpactAnalysis } from "../../api/plm";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { PLMChangeOrder } from "../../types/plm";
 import { usePermission } from "../../hooks/usePermission";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
-
-const statusColors: Record<string, string> = {
-  open: "blue",
-  in_review: "orange",
-  approved: "green",
-  implemented: "cyan",
-  closed: "default",
-  cancelled: "red",
+const statusVariant: Record<string, string> = {
+  open: "info",
+  in_review: "warning",
+  approved: "success",
+  implemented: "info",
+  closed: "info",
+  cancelled: "error",
 };
 
 const changeTypeLabels: Record<string, string> = {
@@ -80,7 +79,9 @@ export default function PLMChangeOrdersPage() {
           dataIndex: "status",
           key: "status",
           width: 100,
-          render: (s: string) => <Tag color={statusColors[s] || "default"}>{s}</Tag>,
+          render: (s: string) => (
+            <StatusBadge status={statusVariant[s] || s}>{s}</StatusBadge>
+          ),
         },
         { title: "优先级", dataIndex: "priority", key: "priority", width: 80 },
       ];
@@ -112,26 +113,25 @@ export default function PLMChangeOrdersPage() {
   );
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 16 }}>
-        PLM 变更单管理
-      </Title>
-
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="change_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p, productLine);
-          },
-        }}
-      />
-    </div>
+    <PageShell title="PLM 变更单管理">
+      <DataCard title="变更单列表">
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="change_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p, productLine);
+            },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
+    </PageShell>
   );
 }

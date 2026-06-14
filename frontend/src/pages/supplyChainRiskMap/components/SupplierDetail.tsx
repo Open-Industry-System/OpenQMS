@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Card, Descriptions, Spin, Empty } from "antd";
+import { Descriptions, Spin, Empty } from "antd";
 import { riskMapApi } from "../../../api/supplyChainRiskMap";
 import type { SupplierDetailResponse } from "../../../types";
+import { DataCard } from "../../../components/design";
 import DataSourceBadge from "./DataSourceBadge";
 
 interface SupplierDetailProps {
@@ -41,7 +42,7 @@ const SupplierDetail: React.FC<SupplierDetailProps> = ({ supplierId, productLine
   if (!detail) return <Empty description="选择供应商查看详情" />;
 
   return (
-    <Card title={detail.supplier_name} size="small" style={{ marginBottom: 16 }}>
+    <DataCard title={detail.supplier_name} style={{ marginBottom: 16 }}>
       <Descriptions column={1} size="small">
         <Descriptions.Item label="周期">{detail.period}</Descriptions.Item>
         {Object.entries(detail.dimensions).map(([key, dim]) => (
@@ -85,7 +86,7 @@ const SupplierDetail: React.FC<SupplierDetailProps> = ({ supplierId, productLine
           </table>
         </div>
       )}
-    </Card>
+    </DataCard>
   );
 };
 

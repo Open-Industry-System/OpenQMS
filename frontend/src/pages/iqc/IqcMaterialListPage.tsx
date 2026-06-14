@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Card,
   Table,
   Button,
-  Tag,
   Space,
   Input,
   App,
@@ -25,8 +23,23 @@ import { usePermission } from "../../hooks/usePermission";
 import type { IqcMaterial } from "../../types";
 import { listMaterials, createMaterial, updateMaterial, deleteMaterial, importMaterials, downloadMaterialImportTemplate } from "../../api/iqc";
 import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
+
+function renderTypeBadge(type: string) {
+  const label = type === "raw" ? "原材料" : type;
+  return <StatusBadge status="info">{label}</StatusBadge>;
+}
+
+function renderStatusBadge(status: string) {
+  const active = status === "active";
+  return (
+    <StatusBadge status={active ? "closed" : "normal"}>
+      {active ? "启用" : "停用"}
+    </StatusBadge>
+  );
+}
 
 export default function IqcMaterialListPage() {
   const { message } = App.useApp();
@@ -136,7 +149,7 @@ export default function IqcMaterialListPage() {
       title: "类型",
       dataIndex: "material_type",
       width: 100,
-      render: (v: string) => <Tag>{v === "raw" ? "原材料" : v}</Tag>,
+      render: (v: string) => renderTypeBadge(v),
     },
     {
       title: "默认AQL",
@@ -160,11 +173,7 @@ export default function IqcMaterialListPage() {
       title: "状态",
       dataIndex: "status",
       width: 80,
-      render: (status: string) => (
-        <Tag color={status === "active" ? "green" : "default"}>
-          {status === "active" ? "启用" : "停用"}
-        </Tag>
-      ),
+      render: (status: string) => renderStatusBadge(status),
     },
     {
       title: "操作",
@@ -196,27 +205,27 @@ export default function IqcMaterialListPage() {
   ];
 
   return (
-    <div>
-      <Card
-        title="物料管理"
-        extra={
-          <Space>
-            {canEdit('iqc') && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
-                新增物料
-              </Button>
-            )}
-            {canEdit('iqc') && (
-              <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-                导入物料
-              </Button>
-            )}
-            <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              刷新
+    <PageShell
+      title="物料管理"
+      actions={
+        <Space>
+          {canEdit('iqc') && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
+              新增物料
             </Button>
-          </Space>
-        }
-      >
+          )}
+          {canEdit('iqc') && (
+            <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+              导入物料
+            </Button>
+          )}
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
+            刷新
+          </Button>
+        </Space>
+      }
+    >
+      <DataCard title="物料清单">
         <Space style={{ marginBottom: 16 }}>
           <Input
             placeholder="搜索物料号 / 物料名称"
@@ -232,6 +241,7 @@ export default function IqcMaterialListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="material_id"
           columns={columns}
           dataSource={materials}
@@ -247,7 +257,7 @@ export default function IqcMaterialListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Modal
         title={editingMaterial ? "编辑物料" : "新增物料"}
@@ -311,6 +321,6 @@ export default function IqcMaterialListPage() {
         templateDownloadFn={downloadMaterialImportTemplate}
         hint="每行: 物料号*, 名称*, 规格, 类型, 默认AQL, 检验水平, 单位, 产品线"
       />
-    </div>
+    </PageShell>
   );
 }

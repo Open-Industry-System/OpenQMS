@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Card,
   Table,
   Button,
-  Tag,
   Space,
   Input,
   Select,
@@ -26,21 +24,22 @@ import { usePermission } from "../../hooks/usePermission";
 import type { MsaStudyOverview } from "../../types";
 import { listMsaStudies, deleteGrrStudy, deleteBiasStudy, deleteLinearityStudy, deleteStabilityStudy, deleteAttributeStudy } from "../../api/msa";
 import dayjs from "dayjs";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
-const TYPE_MAP: Record<string, { label: string; color: string }> = {
-  GRR: { label: "GRR", color: "blue" },
-  偏倚: { label: "偏倚", color: "cyan" },
-  线性: { label: "线性", color: "purple" },
-  稳定性: { label: "稳定性", color: "orange" },
-  计数型: { label: "计数型", color: "green" },
+const TYPE_MAP: Record<string, { label: string; status: string }> = {
+  GRR: { label: "GRR", status: "info" },
+  偏倚: { label: "偏倚", status: "normal" },
+  线性: { label: "线性", status: "warning" },
+  稳定性: { label: "稳定性", status: "rework" },
+  计数型: { label: "计数型", status: "success" },
 };
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  draft: { label: "草稿", color: "default" },
-  ongoing: { label: "进行中", color: "processing" },
-  completed: { label: "已完成", color: "success" },
+const STATUS_MAP: Record<string, { label: string; status: string }> = {
+  draft: { label: "草稿", status: "draft" },
+  ongoing: { label: "进行中", status: "warning" },
+  completed: { label: "已完成", status: "success" },
 };
 
 export default function MsaStudyListPage() {
@@ -128,7 +127,7 @@ export default function MsaStudyListPage() {
       title: "研究编号",
       dataIndex: "study_no",
       width: 160,
-      render: (no: string) => <span style={{ fontFamily: "monospace" }}>{no}</span>,
+      render: (no: string) => <span className="qf-mono">{no}</span>,
     },
     {
       title: "类型",
@@ -136,7 +135,7 @@ export default function MsaStudyListPage() {
       width: 90,
       render: (type: string) => {
         const cfg = TYPE_MAP[type];
-        return <Tag color={cfg?.color}>{cfg?.label || type}</Tag>;
+        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label || type}</StatusBadge>;
       },
     },
     { title: "标题", dataIndex: "title" },
@@ -151,7 +150,7 @@ export default function MsaStudyListPage() {
       width: 100,
       render: (status: string) => {
         const cfg = STATUS_MAP[status];
-        return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
+        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label || status}</StatusBadge>;
       },
     },
     {
@@ -196,37 +195,52 @@ export default function MsaStudyListPage() {
   };
 
   return (
-    <div>
+    <PageShell title="MSA 研究管理" subtitle="测量系统分析 · GRR / 偏倚 / 线性 / 稳定性 / 计数型">
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={4}>
-          <Card>
-            <Statistic title="GRR" value={counts.grr} valueStyle={{ color: "#1890ff" }} />
-          </Card>
+          <DataCard title="GRR" noPadding>
+            <Statistic
+              value={counts.grr}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-cyan)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={5}>
-          <Card>
-            <Statistic title="偏倚" value={counts.bias} valueStyle={{ color: "#13c2c2" }} />
-          </Card>
+          <DataCard title="偏倚" noPadding>
+            <Statistic
+              value={counts.bias}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-blue)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={5}>
-          <Card>
-            <Statistic title="线性" value={counts.linearity} valueStyle={{ color: "#722ed1" }} />
-          </Card>
+          <DataCard title="线性" noPadding>
+            <Statistic
+              value={counts.linearity}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-purple)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={5}>
-          <Card>
-            <Statistic title="稳定性" value={counts.stability} valueStyle={{ color: "#fa8c16" }} />
-          </Card>
+          <DataCard title="稳定性" noPadding>
+            <Statistic
+              value={counts.stability}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-amber)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={5}>
-          <Card>
-            <Statistic title="计数型" value={counts.attribute} valueStyle={{ color: "#52c41a" }} />
-          </Card>
+          <DataCard title="计数型" noPadding>
+            <Statistic
+              value={counts.attribute}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
+            />
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
-        title="MSA 研究管理"
+      <DataCard
+        title="研究列表"
         extra={
           <Space>
             {canEdit('msa') && (
@@ -285,6 +299,7 @@ export default function MsaStudyListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="study_id"
           columns={columns}
           dataSource={studies}
@@ -300,7 +315,7 @@ export default function MsaStudyListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Modal
         title="新建 MSA 研究"
@@ -338,6 +353,6 @@ export default function MsaStudyListPage() {
           </Button>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

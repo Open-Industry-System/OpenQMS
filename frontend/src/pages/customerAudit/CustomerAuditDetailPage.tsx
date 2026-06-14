@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  Card, Button, Tag, Space, Form, Input, Select, DatePicker, App,
+  Button, Space, Form, Input, Select, DatePicker, App,
   Tabs, Table, Modal, Popconfirm, Row, Col, Statistic, Descriptions,
   Typography,
 } from "antd";
@@ -20,6 +20,9 @@ import {
   confirmCustomerAudit,
 } from "../../api/audit";
 import { listUsers } from "../../api/auth";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 import dayjs from "dayjs";
 
 const { Option } = Select;
@@ -28,14 +31,19 @@ const { Text } = Typography;
 const statusLabel: Record<string, string> = {
   planned: "已计划", in_progress: "进行中", completed: "已完成", cancelled: "已取消",
 };
-const statusColor: Record<string, string> = {
-  planned: "blue", in_progress: "processing", completed: "success", cancelled: "default",
+const statusVariant = (s: string): string => {
+  if (s === "completed") return "success";
+  if (s === "in_progress") return "warning";
+  if (s === "cancelled") return "info";
+  return "info";
 };
 const findingStatusLabel: Record<string, string> = {
   open: "已开立", in_progress: "整改中", closed: "已关闭",
 };
-const findingStatusColor: Record<string, string> = {
-  open: "error", in_progress: "processing", closed: "success",
+const findingStatusVariant = (s: string): string => {
+  if (s === "closed") return "success";
+  if (s === "open") return "error";
+  return "warning";
 };
 const findingTypeLabel: Record<string, string> = {
   major_nc: "严重不符合", minor_nc: "一般不符合", ofi: "改进机会", observation: "观察项",
@@ -51,7 +59,7 @@ export default function CustomerAuditDetailPage() {
 
   const [plan, setPlan] = useState<AuditPlan | null>(null);
   const [findings, setFindings] = useState<AuditFinding[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [findingModalOpen, setFindingModalOpen] = useState(false);
   const [editingFinding, setEditingFinding] = useState<AuditFinding | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
@@ -193,11 +201,11 @@ export default function CustomerAuditDetailPage() {
     { title: "根本原因", dataIndex: "root_cause", key: "root_cause", ellipsis: true, render: (v: string) => v || "-" },
     { title: "纠正措施", dataIndex: "corrective_action", key: "corrective_action", ellipsis: true, render: (v: string) => v || "-" },
     { title: "状态", dataIndex: "status", key: "status", width: 90,
-      render: (v: string) => <Tag color={findingStatusColor[v]}>{findingStatusLabel[v]}</Tag> },
+      render: (v: string) => <StatusBadge status={findingStatusVariant(v)}>{findingStatusLabel[v] || v}</StatusBadge> },
     { title: "客户确认", dataIndex: "customer_confirmed", key: "customer_confirmed", width: 90,
-      render: (v: boolean) => v ? <Tag color="success">已确认</Tag> : <Tag color="warning">待确认</Tag> },
+      render: (v: boolean) => v ? <StatusBadge status="success">已确认</StatusBadge> : <StatusBadge status="warning">待确认</StatusBadge> },
     { title: "CAPA", dataIndex: "capa_ref_id", key: "capa_ref_id", width: 80,
-      render: (v: string) => v ? <Tag color="blue" style={{ cursor: "pointer" }} onClick={() => navigate(`/capa/${v}`)}>查看</Tag> : "-" },
+      render: (v: string) => v ? <Button type="link" size="small" onClick={() => navigate(`/capa/${v}`)}>查看</Button> : "-" },
     {
       title: "操作", key: "finding_actions", width: 280,
       render: (_: unknown, record: AuditFinding) => (
@@ -233,30 +241,30 @@ export default function CustomerAuditDetailPage() {
   if (!plan) return null;
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ marginBottom: 16 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/customer-audits")}>返回列表</Button>
-      </div>
-
-      <Card loading={loading}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-          <h3 style={{ margin: 0 }}>{plan.plan_no} - {plan.customer_name}</h3>
-          <Space>
-            {plan.status === "planned" && canEdit('customer_audit') && (
-              <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => handlePlanAction("start")}>开始审核</Button>
-            )}
-            {plan.status === "in_progress" && canApprove('customer_audit') && (
-              <>
-                <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => handlePlanAction("complete")}>完成审核</Button>
-                <Button danger icon={<StopOutlined />} onClick={() => handlePlanAction("cancel")}>取消</Button>
-              </>
-            )}
-            <Tag color={statusColor[plan.status]} style={{ fontSize: 14, padding: "4px 12px" }}>
-              {statusLabel[plan.status]}
-            </Tag>
-          </Space>
-        </div>
-
+    <PageShell
+      title={
+        <Space size={12}>
+          {plan.plan_no} - {plan.customer_name}
+          <StatusBadge status={statusVariant(plan.status)}>{statusLabel[plan.status]}</StatusBadge>
+        </Space>
+      }
+      subtitle="客户审核详情"
+      actions={
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/customer-audits")}>返回列表</Button>
+          {plan.status === "planned" && canEdit('customer_audit') && (
+            <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => handlePlanAction("start")}>开始审核</Button>
+          )}
+          {plan.status === "in_progress" && canApprove('customer_audit') && (
+            <>
+              <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => handlePlanAction("complete")}>完成审核</Button>
+              <Button danger icon={<StopOutlined />} onClick={() => handlePlanAction("cancel")}>取消</Button>
+            </>
+          )}
+        </Space>
+      }
+    >
+      <DataCard title="基本信息">
         <Descriptions column={3} bordered size="small">
           <Descriptions.Item label="客户名称">{plan.customer_name}</Descriptions.Item>
           <Descriptions.Item label="客户类型">{plan.customer_type}</Descriptions.Item>
@@ -265,9 +273,9 @@ export default function CustomerAuditDetailPage() {
           <Descriptions.Item label="计划日期">{plan.planned_date}</Descriptions.Item>
           <Descriptions.Item label="审核准则" span={3}>{plan.audit_criteria}</Descriptions.Item>
         </Descriptions>
-      </Card>
+      </DataCard>
 
-      <Card style={{ marginTop: 16 }}>
+      <DataCard title="发现项与确认">
         <Tabs items={[
           {
             key: "findings",
@@ -283,6 +291,7 @@ export default function CustomerAuditDetailPage() {
                   )}
                 </div>
                 <Table
+                  className="qf-table"
                   rowKey="finding_id"
                   columns={findingColumns}
                   dataSource={findings}
@@ -338,7 +347,7 @@ export default function CustomerAuditDetailPage() {
             ),
           },
         ]} />
-      </Card>
+      </DataCard>
 
       {/* Create/Edit Finding Modal */}
       <Modal
@@ -463,6 +472,6 @@ export default function CustomerAuditDetailPage() {
           </Form.List>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

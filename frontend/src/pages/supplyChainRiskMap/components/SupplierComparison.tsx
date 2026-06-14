@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Card, Table, Empty, Spin } from "antd";
+import { Table, Empty, Spin } from "antd";
 import { riskMapApi } from "../../../api/supplyChainRiskMap";
 import type { ComparisonResponse } from "../../../types";
+import { DataCard } from "../../../components/design";
 import DataSourceBadge from "./DataSourceBadge";
 
 interface SupplierComparisonProps {
@@ -86,15 +87,16 @@ const SupplierComparison: React.FC<SupplierComparisonProps> = ({ supplierIds, pr
   });
 
   return (
-    <Card title="供应商对比" size="small">
+    <DataCard title="供应商对比">
       <Table
+        className="qf-table"
         columns={columns}
         dataSource={tableData}
         pagination={false}
         size="small"
         rowKey="dimension"
       />
-    </Card>
+    </DataCard>
   );
 };
 

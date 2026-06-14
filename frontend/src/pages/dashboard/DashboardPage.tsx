@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Button, Typography, Space, message } from "antd";
+import { Button, Space, message } from "antd";
 import {
   EditOutlined,
   CheckOutlined,
@@ -16,6 +16,7 @@ import {
 } from "../../api/dashboard";
 import { useProductLineStore } from "../../store/productLineStore";
 import { usePermission } from "../../hooks/usePermission";
+import { PageShell } from "../../components/design";
 import type {
   WidgetLayoutItem,
   DashboardLayoutConfig,
@@ -54,8 +55,6 @@ function createEmptyData(): DashboardWidgetsData {
   };
 }
 
-const { Title } = Typography;
-
 export default function DashboardPage() {
   const productLine = useProductLineStore((s) => s.selected);
   const { canEdit, canView } = usePermission();
@@ -69,7 +68,6 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardWidgetsData>(createEmptyData);
   const [loading, setLoading] = useState(true);
 
-  // Fetch layout first, then fetch widgets based on returned layout types
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -107,7 +105,6 @@ export default function DashboardPage() {
       setIsEditing(false);
       setEditLayout(null);
       message.success("布局已保存");
-      // Re-fetch only widget data for the new layout types, no loading flicker
       const widgetTypes = [...new Set(editLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
@@ -128,7 +125,6 @@ export default function DashboardPage() {
       setLayout(resetLayout);
       setEditLayout(resetLayout);
       message.success("已恢复默认布局");
-      // Re-fetch only widget data for default layout types, no loading flicker
       const widgetTypes = [...new Set(resetLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
@@ -154,43 +150,41 @@ export default function DashboardPage() {
 
   const currentLayout = isEditing && editLayout ? editLayout : layout;
 
-  return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>质量仪表盘</Title>
-        <Space>
-          {isEditing ? (
-            <>
-              <Button icon={<CheckOutlined />} type="primary" onClick={handleSave}>
-                完成
-              </Button>
-              <Button icon={<CloseOutlined />} onClick={handleCancel}>
-                取消
-              </Button>
-              <Button icon={<RollbackOutlined />} onClick={handleReset}>
-                恢复默认
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
-                刷新
-              </Button>
-              {canEditDashboard && (
-                <Button icon={<EditOutlined />} onClick={handleEdit}>
-                  编辑布局
-                </Button>
-              )}
-            </>
-          )}
-        </Space>
-      </div>
+  const actions = isEditing ? (
+    <Space>
+      <Button icon={<CheckOutlined />} type="primary" onClick={handleSave}>
+        完成
+      </Button>
+      <Button icon={<CloseOutlined />} onClick={handleCancel}>
+        取消
+      </Button>
+      <Button icon={<RollbackOutlined />} onClick={handleReset}>
+        恢复默认
+      </Button>
+    </Space>
+  ) : (
+    <Space>
+      <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
+        刷新
+      </Button>
+      {canEditDashboard && (
+        <Button icon={<EditOutlined />} onClick={handleEdit}>
+          编辑布局
+        </Button>
+      )}
+    </Space>
+  );
 
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {isEditing && (
-          <WidgetLibraryPanel onAddWidget={handleAddWidget} />
-        )}
-        <div style={{ flex: 1, overflow: "auto", padding: "0 8px" }}>
+  return (
+    <PageShell
+      title="质量仪表盘"
+      subtitle="全局质量态势 · KPI · 预警 · 近期动态"
+      actions={actions}
+      fullHeight
+    >
+      <div style={{ flex: 1, display: "flex", overflow: "hidden", margin: "0 -24px -24px" }}>
+        {isEditing && <WidgetLibraryPanel onAddWidget={handleAddWidget} />}
+        <div style={{ flex: 1, overflow: "auto", padding: "0 8px 24px" }}>
           <DashboardGrid
             layout={currentLayout}
             data={data}
@@ -204,6 +198,6 @@ export default function DashboardPage() {
           />
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

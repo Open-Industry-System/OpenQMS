@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Tabs } from "antd";
 import { BarChartOutlined, UserOutlined, SwapOutlined } from "@ant-design/icons";
+import { PageShell } from "../../components/design";
 import DashboardView from "./components/DashboardView";
 import SupplierDetailView from "./components/SupplierDetailView";
 import CompareView from "./components/CompareView";
@@ -9,7 +10,7 @@ export default function SupplierQualityPage() {
   const [activeTab, setActiveTab] = useState("dashboard");
 
   return (
-    <div>
+    <PageShell title="供应商质量管理">
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
@@ -46,6 +47,6 @@ export default function SupplierQualityPage() {
           },
         ]}
       />
-    </div>
+    </PageShell>
   );
 }

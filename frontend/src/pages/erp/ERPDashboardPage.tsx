@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Row, Col, Card, Statistic, Tag, Typography, Spin, App,
+  Row, Col, Statistic, Spin, App,
   Button, Space,
 } from "antd";
 import {
@@ -11,14 +11,13 @@ import {
 import { Link } from "react-router-dom";
 import { fetchERPDashboard } from "../../api/erp";
 import { useProductLineStore } from "../../store/productLineStore";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import type { ERPDashboardData } from "../../types/erp";
 
-const { Title } = Typography;
-
-const syncStatusColors: Record<string, string> = {
+const syncStatusVariants: Record<string, string> = {
   completed: "success",
   failed: "error",
-  running: "processing",
+  running: "warning",
   pending: "warning",
 };
 
@@ -55,24 +54,20 @@ export default function ERPDashboardPage() {
   }
 
   return (
-    <div>
-      <Title level={4} style={{ marginBottom: 24 }}>
-        ERP 集成看板
-      </Title>
-
+    <PageShell title="ERP 集成看板">
       {/* Sync Health */}
-      <Card
+      <DataCard
         title="同步健康"
         style={{ marginBottom: 16 }}
         extra={
           <Space>
             {data.sync_health.map((s) => (
-              <Tag
+              <StatusBadge
                 key={s.data_type}
-                color={syncStatusColors[s.status] || "default"}
+                status={syncStatusVariants[s.status] || "info"}
               >
                 {s.data_type}: {syncStatusLabels[s.status] || s.status}
-              </Tag>
+              </StatusBadge>
             ))}
           </Space>
         }
@@ -94,7 +89,7 @@ export default function ERPDashboardPage() {
             ))}
           </Row>
         )}
-      </Card>
+      </DataCard>
 
       {/* KPI Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
@@ -113,14 +108,13 @@ export default function ERPDashboardPage() {
 
           return (
             <Col key={kpi.label} xs={24} sm={12} lg={6}>
-              <Card>
+              <DataCard title={kpi.label}>
                 <Statistic
-                  title={kpi.label}
                   value={kpi.value}
                   prefix={icon}
                   valueStyle={color ? { color } : undefined}
                 />
-              </Card>
+              </DataCard>
             </Col>
           );
         })}
@@ -129,7 +123,7 @@ export default function ERPDashboardPage() {
       {/* COQ Summary */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} lg={12}>
-          <Card title="COQ 成本摘要（本月）">
+          <DataCard title="COQ 成本摘要（本月）">
             {Object.keys(data.coq_summary).length === 0 ? (
               <span style={{ color: "#999" }}>暂无数据</span>
             ) : (
@@ -146,12 +140,12 @@ export default function ERPDashboardPage() {
                 ))}
               </Row>
             )}
-          </Card>
+          </DataCard>
         </Col>
 
         {/* Quick Links */}
         <Col xs={24} lg={12}>
-          <Card title="快速入口">
+          <DataCard title="快速入口">
             <Space direction="vertical" style={{ width: "100%" }} size={8}>
               <Link to="/erp/connections">
                 <Button icon={<LinkOutlined />} block>连接管理</Button>
@@ -166,9 +160,9 @@ export default function ERPDashboardPage() {
                 <Button block>批次追溯</Button>
               </Link>
             </Space>
-          </Card>
+          </DataCard>
         </Col>
       </Row>
-    </div>
+    </PageShell>
   );
 }

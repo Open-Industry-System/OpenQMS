@@ -3,7 +3,6 @@ import {
   Table,
   Input,
   Button,
-  Typography,
   Tag,
   Drawer,
   Descriptions,
@@ -22,13 +21,12 @@ import {
 } from "../../api/plm";
 import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import type {
   PLMPart,
   PLMBOMTreeNode,
   PLMPartConfirmSCRequest,
 } from "../../types/plm";
-
-const { Title } = Typography;
 
 export default function PLMPartsPage() {
   const { message } = App.useApp();
@@ -172,7 +170,7 @@ export default function PLMPartsPage() {
       dataIndex: "status",
       key: "status",
       width: 100,
-      render: (s: string) => <Tag>{s}</Tag>,
+      render: (s: string) => <StatusBadge status={s}>{s}</StatusBadge>,
     },
     {
       title: "安全件",
@@ -221,41 +219,35 @@ export default function PLMPartsPage() {
   ];
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: 16,
-          alignItems: "center",
-        }}
-      >
-        <Title level={4} style={{ margin: 0 }}>
-          PLM 零件列表
-        </Title>
+    <PageShell
+      title="PLM 零件列表"
+      actions={
         <Input.Search
           placeholder="搜索零件号或名称"
           allowClear
           onSearch={handleSearch}
           style={{ width: 280 }}
         />
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="part_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p, search, productLine);
-          },
-        }}
-      />
+      }
+    >
+      <DataCard title="零件列表">
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="part_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p, search, productLine);
+            },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
 
       <Drawer
         title="零件详情"
@@ -357,6 +349,6 @@ export default function PLMPartsPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

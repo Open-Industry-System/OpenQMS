@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Card, Tag, Button, Space, Descriptions, Input, Modal, message, Spin, Row, Col, Steps, Timeline } from "antd";
+import { Button, Space, Descriptions, Input, Modal, message, Spin, Steps, Timeline } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import { getAPQPProject, updateAPQPProject, transitionAPQPProject } from "../../../api/apqp";
 import type { APQPProject, APQPProjectUpdate } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
 const PHASE_NAMES: Record<number, string> = {
   1: "策划与定义",
@@ -22,10 +25,16 @@ const PROJECT_STATUS_LABELS: Record<string, string> = {
   cancelled: "已取消",
 };
 
-const PROJECT_STATUS_COLORS: Record<string, string> = {
-  active: "processing",
-  completed: "success",
-  cancelled: "default",
+const projectStatusVariant = (s: string): string => {
+  if (s === "completed") return "success";
+  if (s === "active") return "warning";
+  return "info";
+};
+
+const phaseStatusVariant = (s: string): string => {
+  if (s === "pending_approval") return "warning";
+  if (s === "completed") return "success";
+  return "info";
 };
 
 export default function APQPDetailPage() {
@@ -134,45 +143,39 @@ export default function APQPDetailPage() {
   };
 
   return (
-    <div>
-      {/* Header */}
-      <Card style={{ marginBottom: 16 }}>
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Space>
-              <span style={{ fontSize: 20, fontWeight: 600 }}>{project.project_code}</span>
-              <span style={{ fontSize: 16 }}>{project.project_name}</span>
-              <Tag color={PROJECT_STATUS_COLORS[project.project_status]}>
-                {PROJECT_STATUS_LABELS[project.project_status]}
-              </Tag>
-            </Space>
-          </Col>
-          <Col>
-            <Space>
-              {canEdit('planning') && project.project_status === "active" && (
-                <Button icon={<EditOutlined />} onClick={() => {
-                  setEditForm({
-                    project_name: project.project_name,
-                    product_name: project.product_name,
-                    customer_name: project.customer_name || "",
-                    description: project.description || "",
-                    dfmea_id: project.dfmea_id || "",
-                    pfmea_id: project.pfmea_id || "",
-                    control_plan_id: project.control_plan_id || "",
-                    ppap_submission_id: project.ppap_submission_id || "",
-                  });
-                  setEditOpen(true);
-                }}>
-                  编辑
-                </Button>
-              )}
-            </Space>
-          </Col>
-        </Row>
-      </Card>
-
+    <PageShell
+      title={
+        <Space size={12}>
+          <span>{project.project_code}</span>
+          <span>{project.project_name}</span>
+          <StatusBadge status={projectStatusVariant(project.project_status)}>
+            {PROJECT_STATUS_LABELS[project.project_status]}
+          </StatusBadge>
+        </Space>
+      }
+      subtitle="APQP 项目详情"
+      actions={
+        canEdit('planning') && project.project_status === "active" ? (
+          <Button icon={<EditOutlined />} onClick={() => {
+            setEditForm({
+              project_name: project.project_name,
+              product_name: project.product_name,
+              customer_name: project.customer_name || "",
+              description: project.description || "",
+              dfmea_id: project.dfmea_id || "",
+              pfmea_id: project.pfmea_id || "",
+              control_plan_id: project.control_plan_id || "",
+              ppap_submission_id: project.ppap_submission_id || "",
+            });
+            setEditOpen(true);
+          }}>
+            编辑
+          </Button>
+        ) : undefined
+      }
+    >
       {/* Project Info */}
-      <Card title="项目信息" style={{ marginBottom: 16 }}>
+      <DataCard title="项目信息" style={{ marginBottom: 16 }}>
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label="项目编号">{project.project_code}</Descriptions.Item>
           <Descriptions.Item label="项目名称">{project.project_name}</Descriptions.Item>
@@ -184,22 +187,24 @@ export default function APQPDetailPage() {
           <Descriptions.Item label="创建时间">{project.created_at ? new Date(project.created_at).toLocaleString() : "-"}</Descriptions.Item>
           <Descriptions.Item label="描述" span={2}>{project.description || "-"}</Descriptions.Item>
         </Descriptions>
-      </Card>
+      </DataCard>
 
       {/* Phase Progress */}
-      <Card title="阶段进度" style={{ marginBottom: 16 }}>
+      <DataCard title="阶段进度" style={{ marginBottom: 16 }}>
         <Steps items={stepItems} current={project.current_phase - 1} status={project.phase_status === "pending_approval" ? "error" : undefined} />
-      </Card>
+      </DataCard>
 
       {/* Current Phase Actions */}
       {project.project_status === "active" && (
-        <Card title="阶段操作" style={{ marginBottom: 16 }}>
+        <DataCard title="阶段操作" style={{ marginBottom: 16 }}>
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="当前阶段">
-              <Tag color="blue">Phase {project.current_phase} — {PHASE_NAMES[project.current_phase]}</Tag>
+              <StatusBadge status="info">Phase {project.current_phase} — {PHASE_NAMES[project.current_phase]}</StatusBadge>
             </Descriptions.Item>
             <Descriptions.Item label="阶段状态">
-              {project.phase_status === "pending_approval" ? <Tag color="orange">待审批</Tag> : <Tag color="blue">进行中</Tag>}
+              <StatusBadge status={phaseStatusVariant(project.phase_status || "")}>
+                {project.phase_status === "pending_approval" ? "待审批" : "进行中"}
+              </StatusBadge>
             </Descriptions.Item>
           </Descriptions>
           <div style={{ marginTop: 12 }}>
@@ -212,11 +217,11 @@ export default function APQPDetailPage() {
             />
             <Space>{actionButtons()}</Space>
           </div>
-        </Card>
+        </DataCard>
       )}
 
       {/* Cross-module Links */}
-      <Card title="关联交付物" style={{ marginBottom: 16 }}>
+      <DataCard title="关联交付物" style={{ marginBottom: 16 }}>
         <Descriptions column={1} bordered size="small">
           <Descriptions.Item label="DFMEA（Phase 2）">
             {project.dfmea_id ? (
@@ -250,10 +255,10 @@ export default function APQPDetailPage() {
             ) : <span style={{ color: "#999" }}>未关联</span>}
           </Descriptions.Item>
         </Descriptions>
-      </Card>
+      </DataCard>
 
       {/* Phase Timeline */}
-      <Card title="阶段时间线" style={{ marginBottom: 16 }}>
+      <DataCard title="阶段时间线" style={{ marginBottom: 16 }}>
         <Timeline
           items={[1, 2, 3, 4, 5].map((phase) => {
             const completedAt = (project as unknown as Record<string, string | null>)[`phase_${phase}_completed_at`];
@@ -268,11 +273,11 @@ export default function APQPDetailPage() {
             };
           })}
         />
-      </Card>
+      </DataCard>
 
       {/* Gate History */}
       {project.gate_history && project.gate_history.length > 0 && (
-        <Card title="门控审批记录">
+        <DataCard title="门控审批记录">
           <Timeline
             items={project.gate_history.map((entry) => ({
               color: entry.action === "approve" ? "green" : entry.action === "reject" ? "red" : "blue",
@@ -293,7 +298,7 @@ export default function APQPDetailPage() {
               ),
             }))}
           />
-        </Card>
+        </DataCard>
       )}
 
       {/* Edit Modal */}
@@ -339,6 +344,6 @@ export default function APQPDetailPage() {
           </div>
         </div>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

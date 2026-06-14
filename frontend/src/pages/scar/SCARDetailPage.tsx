@@ -1,11 +1,20 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Card, Tag, Button, Space, Descriptions, Input, Modal, message, Spin, Row, Col } from "antd";
+import { Button, Space, Descriptions, Input, Modal, message, Spin } from "antd";
 import { getSCAR, transitionSCAR, linkCAPA } from "../../api/scar";
 import { createCAPA, getCAPA } from "../../api/capa";
-import { STATUS_COLORS, STATUS_LABELS, SOURCE_LABELS } from "./SCARListPage";
+import { STATUS_LABELS, SOURCE_LABELS } from "./SCARListPage";
 import type { SupplierSCAR } from "../../types";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
+
+const statusVariant = (s: string): string => {
+  if (["verified", "closed"].includes(s)) return "success";
+  if (["responded", "in_progress"].includes(s)) return "warning";
+  return "info";
+};
 
 export default function SCARDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -103,22 +112,17 @@ export default function SCARDetailPage() {
   };
 
   return (
-    <div>
-      <Card style={{ marginBottom: 16 }}>
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Space>
-              <span style={{ fontSize: 20, fontWeight: 600 }}>{scar.scar_no}</span>
-              <Tag color={STATUS_COLORS[scar.status]}>{STATUS_LABELS[scar.status]}</Tag>
-            </Space>
-          </Col>
-          <Col>
-            <Space>{actionButtons()}</Space>
-          </Col>
-        </Row>
-      </Card>
-
-      <Card title="SCAR 信息" style={{ marginBottom: 16 }}>
+    <PageShell
+      title={
+        <Space size={12}>
+          {scar.scar_no}
+          <StatusBadge status={statusVariant(scar.status)}>{STATUS_LABELS[scar.status]}</StatusBadge>
+        </Space>
+      }
+      subtitle="供应商纠正措施请求详情"
+      actions={<Space>{actionButtons()}</Space>}
+    >
+      <DataCard title="SCAR 信息">
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label="供应商">{scar.supplier_name || scar.supplier_id}</Descriptions.Item>
           <Descriptions.Item label="来源">{SOURCE_LABELS[scar.source_type] || scar.source_type}</Descriptions.Item>
@@ -129,32 +133,32 @@ export default function SCARDetailPage() {
           <Descriptions.Item label="问题描述" span={2}>{scar.description}</Descriptions.Item>
           <Descriptions.Item label="要求措施" span={2}>{scar.requested_action || "-"}</Descriptions.Item>
         </Descriptions>
-      </Card>
+      </DataCard>
 
-      <Card title="供应商回复" style={{ marginBottom: 16 }}>
+      <DataCard title="供应商回复">
         {scar.supplier_response ? (
           <div style={{ whiteSpace: "pre-wrap" }}>{scar.supplier_response}</div>
         ) : (
           <div style={{ color: "#999" }}>暂无回复</div>
         )}
-      </Card>
+      </DataCard>
 
-      <Card title="CAPA 关联" style={{ marginBottom: 16 }}>
+      <DataCard title="CAPA 关联">
         {scar.capa_ref_id && capaInfo ? (
           <Space>
             <span>已关联 8D: <strong>{capaInfo.document_no}</strong></span>
-            <Tag>{capaInfo.status}</Tag>
+            <StatusBadge status={statusVariant(capaInfo.status)}>{capaInfo.status}</StatusBadge>
             <Button type="link" onClick={() => navigate(`/capa/${scar.capa_ref_id}`)}>查看</Button>
           </Space>
         ) : (
           <Button type="dashed" onClick={() => setCapaModalOpen(true)}>创建关联 8D</Button>
         )}
-      </Card>
+      </DataCard>
 
       {scar.resolution_summary && (
-        <Card title="解决摘要">
+        <DataCard title="解决摘要">
           <div style={{ whiteSpace: "pre-wrap" }}>{scar.resolution_summary}</div>
-        </Card>
+        </DataCard>
       )}
 
       {/* Respond Modal */}
@@ -173,6 +177,6 @@ export default function SCARDetailPage() {
         <p>SCAR: {scar.scar_no}</p>
         <p>描述: {scar.description.slice(0, 100)}...</p>
       </Modal>
-    </div>
+    </PageShell>
   );
 }
