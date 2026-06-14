@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Card, Row, Col, Statistic, Spin, Typography } from "antd";
+import { Row, Col, Statistic, Spin, Typography } from "antd";
 import {
   SafetyCertificateOutlined,
   WarningOutlined,
@@ -8,7 +8,7 @@ import {
 } from "@ant-design/icons";
 import { usePermission } from "../../hooks/usePermission";
 import { getGroupDashboard, type GroupDashboardResponse } from "../../api/group";
-import { PageShell } from "../../components/design";
+import { PageShell, DataCard } from "../../components/design";
 
 const { Title } = Typography;
 
@@ -47,34 +47,34 @@ export default function GroupDashboardPage() {
       {/* Totals row */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col span={4}>
-          <Card>
+          <DataCard title={null}>
             <Statistic title="开放 FMEA" value={data.totals.open_fmea_count} prefix={<SafetyCertificateOutlined />} />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={4}>
-          <Card>
+          <DataCard title={null}>
             <Statistic title="开放 CAPA" value={data.totals.open_capa_count} prefix={<WarningOutlined />} />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={4}>
-          <Card>
+          <DataCard title={null}>
             <Statistic title="逾期 CAPA" value={data.totals.overdue_capa_count} prefix={<ClockCircleOutlined />} valueStyle={{ color: data.totals.overdue_capa_count > 0 ? "#cf1322" : undefined }} />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={4}>
-          <Card>
+          <DataCard title={null}>
             <Statistic title="SPC 告警" value={data.totals.active_spc_alarms} prefix={<WarningOutlined />} />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={4}>
-          <Card>
+          <DataCard title={null}>
             <Statistic title="待检 IQC" value={data.totals.pending_iqc_inspections} prefix={<ClockCircleOutlined />} />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={4}>
-          <Card>
+          <DataCard title={null}>
             <Statistic title="开放 SCAR" value={data.totals.open_scars} prefix={<CheckCircleOutlined />} />
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 
@@ -83,7 +83,7 @@ export default function GroupDashboardPage() {
       <Row gutter={[16, 16]}>
         {data.factories.map((f) => (
           <Col key={f.factory_id} span={8}>
-            <Card title={`${f.factory_code} - ${f.factory_name}`} size="small">
+            <DataCard title={`${f.factory_code} - ${f.factory_name}`}>
               <Row gutter={[8, 8]}>
                 <Col span={8}><Statistic title="FMEA" value={f.open_fmea_count} /></Col>
                 <Col span={8}><Statistic title="CAPA" value={f.open_capa_count} /></Col>
@@ -92,7 +92,7 @@ export default function GroupDashboardPage() {
                 <Col span={8}><Statistic title="IQC" value={f.pending_iqc_inspections} /></Col>
                 <Col span={8}><Statistic title="SCAR" value={f.open_scars} /></Col>
               </Row>
-            </Card>
+            </DataCard>
           </Col>
         ))}
       </Row>

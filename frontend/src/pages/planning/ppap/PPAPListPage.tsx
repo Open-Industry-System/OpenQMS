@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tabs, Button, Select, Modal, Form, Input, InputNumber, message, Card, Row, Col } from "antd";
+import { Table, Tabs, Button, Select, Modal, Form, Input, InputNumber, message, Row, Col } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { listPPAPs, createPPAP } from "../../../api/ppap";
 import { listSuppliers } from "../../../api/supplier";
@@ -143,10 +143,10 @@ export default function PPAPListPage() {
       }
     >
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>PPAP 总数</div><div style={{ fontSize: 24, fontWeight: 600 }}>{kpis.total}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>待审</div><div style={{ fontSize: 24, fontWeight: 600, color: "#1677ff" }}>{kpis.pending}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>已批准</div><div style={{ fontSize: 24, fontWeight: 600, color: "#52c41a" }}>{kpis.approved}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>已驳回</div><div style={{ fontSize: 24, fontWeight: 600, color: "#ff4d4f" }}>{kpis.rejected}</div></Card></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>PPAP 总数</div><div style={{ fontSize: 24, fontWeight: 600 }}>{kpis.total}</div></DataCard></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>待审</div><div style={{ fontSize: 24, fontWeight: 600, color: "#1677ff" }}>{kpis.pending}</div></DataCard></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>已批准</div><div style={{ fontSize: 24, fontWeight: 600, color: "#52c41a" }}>{kpis.approved}</div></DataCard></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>已驳回</div><div style={{ fontSize: 24, fontWeight: 600, color: "#ff4d4f" }}>{kpis.rejected}</div></DataCard></Col>
       </Row>
 
       <DataCard title="PPAP 清单">

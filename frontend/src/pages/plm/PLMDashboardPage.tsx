@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Row, Col, Card, Statistic, Table, Spin, App } from "antd";
+import { Row, Col, Statistic, Table, Spin, App } from "antd";
 import {
   InboxOutlined,
   ApartmentOutlined,
@@ -69,42 +69,42 @@ export default function PLMDashboardPage() {
     <PageShell title="PLM 集成看板">
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic
               title="零件总数"
               value={data?.part_count ?? 0}
               prefix={<InboxOutlined />}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic
               title="BOM 条目"
               value={data?.bom_count ?? 0}
               prefix={<ApartmentOutlined />}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic
               title="待处理 ECN"
               value={data?.pending_ecn_count ?? 0}
               prefix={<FileTextOutlined />}
               valueStyle={{ color: (data?.pending_ecn_count ?? 0) > 0 ? "#faad14" : undefined }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic
               title="待处理特殊特性"
               value={data?.pending_sc_count ?? 0}
               prefix={<SafetyOutlined />}
               valueStyle={{ color: (data?.pending_sc_count ?? 0) > 0 ? "#ff4d4f" : undefined }}
             />
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 

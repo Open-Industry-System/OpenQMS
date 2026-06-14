@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tabs, Button, Space, Modal, Form, Input, DatePicker, message, Card, Row, Col } from "antd";
+import { Table, Tabs, Button, Space, Modal, Form, Input, DatePicker, message, Row, Col } from "antd";
 import { PlusOutlined, ProjectOutlined, ClockCircleOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 import { listAPQPProjects, createAPQPProject, getAPQPProjectStats } from "../../../api/apqp";
 import type { APQPProject, APQPListResponse, APQPProjectStats } from "../../../types";
@@ -43,7 +43,7 @@ const phaseStatusVariant = (status: string): string => {
 
 function KPICard({ title, value, icon, color }: { title: string; value: number; icon: React.ReactNode; color: string }) {
   return (
-    <Card size="small">
+    <DataCard title={null}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ fontSize: 24, color }}>{icon}</div>
         <div>
@@ -51,7 +51,7 @@ function KPICard({ title, value, icon, color }: { title: string; value: number; 
           <div style={{ fontSize: 24, fontWeight: 600 }}>{value}</div>
         </div>
       </div>
-    </Card>
+    </DataCard>
   );
 }
 
