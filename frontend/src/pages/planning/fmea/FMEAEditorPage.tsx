@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import {
-  Button, Space, Tag, Typography, Input, Select, Table, Card, Tabs,
+  Button, Space, Tag, Typography, Input, Select, Table, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
   Descriptions, Divider, Modal, Radio,
 } from "antd";
@@ -41,9 +41,9 @@ import { CollaborationBar, ActiveUserIndicator, ConflictResolutionModal } from "
 import { diffGraphs } from "../../../utils/graphDiff";
 import type { ConflictInfo } from "../../../types/collaboration";
 import type { GraphDiff } from "../../../utils/graphDiff";
-import { StatusBadge } from "../../../components/design";
+import { PageShell, DataCard, StatusBadge } from "../../../components/design";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const statusLabels: Record<string, string> = {
   draft: "草稿", in_review: "审核中", approved: "已批准",
@@ -1066,32 +1066,20 @@ export default function FMEAEditorPage() {
   ];
 
   return (
-    <div>
-      <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
-
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-          padding: "16px 20px",
-          background: "var(--qf-bg-panel)",
-          border: "1px solid var(--qf-border)",
-          borderRadius: "var(--qf-radius-lg)",
-        }}
-      >
-        <Space size="middle">
+    <PageShell
+      title={
+        <>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/fmea")}>返回</Button>
-          <Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{fmea.title}</Title>
+          <span>{fmea.title}</span>
           <StatusBadge status={isDFMEA ? "normal" : "info"}>{isDFMEA ? "DFMEA" : "PFMEA"}</StatusBadge>
           <StatusBadge status={fmea.status}>{statusLabels[fmea.status] || fmea.status}</StatusBadge>
-          <Text style={{ color: "var(--qf-text-secondary)", fontFamily: "var(--qf-font-mono)" }}>
+          <span style={{ color: "var(--qf-text-secondary)", fontFamily: "var(--qf-font-mono)", fontSize: 14 }}>
             {fmea.document_no} · v{fmea.version}
-          </Text>
-        </Space>
-        <Space>
+          </span>
+        </>
+      }
+      actions={
+        <>
           {nextTransitions[fmea.status]
             ?.filter((t) => {
               if (!canEdit('fmea')) return false;
@@ -1106,8 +1094,10 @@ export default function FMEAEditorPage() {
           {canEdit('fmea') && (
             <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>保存</Button>
           )}
-        </Space>
-      </div>
+        </>
+      }
+    >
+      <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
 
       {/* FMEA Header Info */}
       <div
@@ -1142,9 +1132,8 @@ export default function FMEAEditorPage() {
           <Row gutter={16}>
             {/* Left: Structure/Function Tree */}
             <Col span={6}>
-          <Card
+          <DataCard
             title={isDFMEA ? "结构 / 功能" : "工序 / 功能"}
-            size="small"
             extra={
               canEdit('fmea') && (
                 <Button size="small" icon={<PlusOutlined />} onClick={addRow} disabled={!selectedFunctionId}>
@@ -1201,51 +1190,52 @@ export default function FMEAEditorPage() {
               );
             })}
             {functionNodes.length === 0 && <Empty description="暂无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-          </Card>
+          </DataCard>
         </Col>
 
         {/* Right: FMEA Table */}
         <Col span={18}>
-          <Card
+          <DataCard
             title={
               <span style={{ fontSize: 14 }}>
                 {isDFMEA ? "设计失效模式与影响分析 (DFMEA)" : "过程失效模式与影响分析 (PFMEA)"}
               </span>
             }
-            size="small"
-            styles={{ body: { padding: "8px 0" } }}
+            noPadding
           >
-            <Table
-              dataSource={rows}
-              columns={columns}
-              rowKey="key"
-              size="small"
-              pagination={false}
-              scroll={{ x: 2400, y: 540 }}
-              bordered
-              className="fmea-editor-table"
-              style={{ fontSize: 13 }}
-              rowClassName={(row: FMEARow) => {
-                const classes = [];
-                if (selectedFunctionId && row.functionNodeId === selectedFunctionId) classes.push("fmea-row-highlight");
-                if (severityWarnings.includes(row.failureModeNodeId)) classes.push("severity-warning-row");
-                if (row.key === highlightedRowKey) classes.push("highlighted-row");
-                return classes.join(" ");
-              }}
-            />
-            {rows.length === 0 && (
-              <div style={{ textAlign: "center", padding: 40 }}>
-                <Text type="secondary">选择左侧功能节点后点击"添加行"开始分析</Text>
-              </div>
-            )}
-          </Card>
+            <div style={{ padding: "8px 0" }}>
+              <Table
+                dataSource={rows}
+                columns={columns}
+                rowKey="key"
+                size="small"
+                pagination={false}
+                scroll={{ x: 2400, y: 540 }}
+                bordered
+                className="qf-table fmea-editor-table"
+                style={{ fontSize: 13 }}
+                rowClassName={(row: FMEARow) => {
+                  const classes = [];
+                  if (selectedFunctionId && row.functionNodeId === selectedFunctionId) classes.push("fmea-row-highlight");
+                  if (severityWarnings.includes(row.failureModeNodeId)) classes.push("severity-warning-row");
+                  if (row.key === highlightedRowKey) classes.push("highlighted-row");
+                  return classes.join(" ");
+                }}
+              />
+              {rows.length === 0 && (
+                <div style={{ textAlign: "center", padding: 40 }}>
+                  <Text type="secondary">选择左侧功能节点后点击"添加行"开始分析</Text>
+                </div>
+              )}
+            </div>
+          </DataCard>
         </Col>
       </Row>
         </>},
             { key: "structure", label: "结构分析", children: <>
           <Row gutter={16}>
             <Col span={8}>
-              <Card title="结构树" size="small">
+              <DataCard title="结构树">
                 <StructureTree
                   nodes={nodes}
                   edges={edges}
@@ -1254,10 +1244,10 @@ export default function FMEAEditorPage() {
                   isViewer={!canEdit('fmea')}
                   onSelectNode={(node) => setSelectedStructureNode(node)}
                 />
-              </Card>
+              </DataCard>
             </Col>
             <Col span={16}>
-              <Card title="节点详情" size="small">
+              <DataCard title="节点详情">
                 <ParameterDiagram
                   node={selectedStructureNode}
                   onUpdateNode={(nodeId, updates) => {
@@ -1265,7 +1255,7 @@ export default function FMEAEditorPage() {
                   }}
                   isViewer={!canEdit('fmea')}
                 />
-              </Card>
+              </DataCard>
             </Col>
           </Row>
         </>},
@@ -1379,7 +1369,7 @@ export default function FMEAEditorPage() {
                   清除高亮
                 </Button>
               )}
-              <Card title="变更影响分析" size="small">
+              <DataCard title="变更影响分析">
                 <Space direction="vertical" style={{ width: "100%" }}>
                   <Text type="secondary">分析此节点的变更对上下游的影响范围</Text>
                   <Button
@@ -1391,7 +1381,7 @@ export default function FMEAEditorPage() {
                     分析影响范围
                   </Button>
                 </Space>
-              </Card>
+              </DataCard>
             </div>
           </div>
           <NodeDetailDrawer
@@ -1531,6 +1521,6 @@ export default function FMEAEditorPage() {
           }
         }}
       />
-    </div>
+    </PageShell>
   );
 }

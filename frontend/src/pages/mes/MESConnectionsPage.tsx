@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Table, Button, Tag, Typography, Modal, Form, Input, Select, App, Space,
+  Table, Button, Modal, Form, Input, Select, App, Space,
 } from "antd";
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined,
@@ -11,8 +11,7 @@ import {
   testConnection, manualSync,
 } from "../../api/mes";
 import type { MESConnection, MESConnectionCreate } from "../../types/mes";
-
-const { Title } = Typography;
+import { PageShell, StatusBadge } from "../../components/design";
 
 const typeLabels: Record<string, string> = {
   mock: "Mock",
@@ -140,9 +139,9 @@ export default function MESConnectionsPage() {
       key: "is_active",
       width: 80,
       render: (active: boolean) => (
-        <Tag color={active ? "success" : "error"}>
+        <StatusBadge status={active ? "completed" : "failed"}>
           {active ? "正常" : "停用"}
-        </Tag>
+        </StatusBadge>
       ),
     },
     {
@@ -197,15 +196,16 @@ export default function MESConnectionsPage() {
   ];
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>MES 连接管理</Title>
+    <PageShell
+      title="MES 连接管理"
+      actions={
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           新建连接
         </Button>
-      </div>
-
+      }
+    >
       <Table
+        className="qf-table"
         columns={columns}
         dataSource={data}
         rowKey="connection_id"
@@ -260,6 +260,6 @@ export default function MESConnectionsPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

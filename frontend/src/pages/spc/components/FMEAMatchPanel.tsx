@@ -1,11 +1,13 @@
 // frontend/src/pages/spc/components/FMEAMatchPanel.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, ReactNode } from "react";
 import {
-  Modal, Card, Button, Tag, Space, Typography, Spin, Empty, Alert,
+  Modal, Button, Space, Typography, Spin, Empty, Alert,
 } from "antd";
 import {
   LinkOutlined, SearchOutlined, CheckCircleOutlined,
 } from "@ant-design/icons";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 import { getFMEAMatchRecommendations, confirmFMEAAssociation } from "../../../api/spc";
 import type { FMEAMatch, FMEAMatchResponse } from "../../../types";
 
@@ -19,10 +21,10 @@ interface Props {
   onConfirmed?: () => void; // 确认成功后回调，父组件可刷新列表
 }
 
-const MATCH_SOURCE_LABELS: Record<string, { text: string; icon: React.ReactNode; color: string }> = {
-  control_plan: { text: "控制计划关联", icon: <LinkOutlined />, color: "blue" },
-  process_name: { text: "工序名称匹配", icon: <SearchOutlined />, color: "orange" },
-  characteristic_name: { text: "特性名称匹配", icon: <SearchOutlined />, color: "orange" },
+const MATCH_SOURCE_LABELS: Record<string, { text: string; icon: ReactNode; status: string }> = {
+  control_plan: { text: "控制计划关联", icon: <LinkOutlined />, status: "info" },
+  process_name: { text: "工序名称匹配", icon: <SearchOutlined />, status: "warning" },
+  characteristic_name: { text: "特性名称匹配", icon: <SearchOutlined />, status: "warning" },
 };
 
 export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA, onConfirmed }: Props) {
@@ -114,9 +116,9 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
             const source = MATCH_SOURCE_LABELS[rec.match_source];
             const isSelected = `${rec.fmea_id}:${rec.node_id}` === selectedKey;
             return (
-              <Card
+              <DataCard
                 key={`${rec.fmea_id}:${rec.node_id}`}
-                size="small"
+                title={null}
                 style={{
                   borderColor: isSelected ? "#1890ff" : undefined,
                   background: isSelected ? "#e6f7ff" : undefined,
@@ -124,10 +126,10 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
               >
                 <Space direction="vertical" style={{ width: "100%" }}>
                   <Space>
-                    <Tag icon={source?.icon} color={source?.color}>
-                      {source?.text}
-                    </Tag>
-                    <Tag>匹配度 {Math.round(rec.match_score * 100)}%</Tag>
+                    <StatusBadge status={source?.status || "info"}>
+                      {source?.icon} {source?.text}
+                    </StatusBadge>
+                    <StatusBadge status="info">匹配度 {Math.round(rec.match_score * 100)}%</StatusBadge>
                   </Space>
 
                   <Title level={5} style={{ margin: 0 }}>
@@ -161,7 +163,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
                     </Button>
                   </Space>
                 </Space>
-              </Card>
+              </DataCard>
             );
           })}
         </Space>

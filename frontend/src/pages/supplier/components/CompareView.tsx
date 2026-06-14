@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Card, Select, Table, Tag, Row, Col, Empty, Spin } from "antd";
+import { Select, Table, Tag, Row, Col, Empty, Spin } from "antd";
 import { Radar } from "@ant-design/charts";
+import { DataCard, StatusBadge } from "../../../components/design";
 import { getSupplierCompare, listSuppliers } from "../../../api/supplier";
 import type { SupplierCompareResponse, Supplier } from "../../../types";
 
@@ -89,7 +90,7 @@ export default function CompareView() {
           ...Object.fromEntries(
             compareData.suppliers.map((s) => [
               s.supplier_id,
-              <Tag color={s.open_scar_count > 0 ? "error" : "success"} key={s.supplier_id}>{s.open_scar_count}</Tag>,
+              <StatusBadge status={s.open_scar_count > 0 ? "open" : "closed"} key={s.supplier_id}>{s.open_scar_count}</StatusBadge>,
             ])
           ),
         },
@@ -98,7 +99,7 @@ export default function CompareView() {
 
   return (
     <div>
-      <Card style={{ marginBottom: 16 }}>
+      <DataCard style={{ marginBottom: 16 }} title={null}>
         <Row gutter={16} align="middle">
           <Col flex="auto">
             <Select
@@ -123,26 +124,27 @@ export default function CompareView() {
             />
           </Col>
         </Row>
-      </Card>
+      </DataCard>
 
       {loading ? (
         <div style={{ textAlign: "center", padding: "60px 0" }}><Spin size="large" /></div>
       ) : compareData ? (
         <Row gutter={16}>
           <Col span={12}>
-            <Card title="雷达图对比">
+            <DataCard title="雷达图对比">
               <Radar {...radarConfig!} />
-            </Card>
+            </DataCard>
           </Col>
           <Col span={12}>
-            <Card title="指标明细对比">
+            <DataCard title="指标明细对比">
               <Table
+                className="qf-table"
                 dataSource={compareTableData}
                 columns={compareColumns}
                 pagination={false}
                 size="small"
               />
-            </Card>
+            </DataCard>
           </Col>
         </Row>
       ) : (

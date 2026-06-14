@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Row, Col, Card, Statistic, Button, Space } from "antd";
+import { Row, Col, Statistic, Button } from "antd";
 import { WarningOutlined, AlertOutlined, ReloadOutlined } from "@ant-design/icons";
 import { message } from "antd";
 import RiskMatrixChart from "./components/RiskMatrixChart";
 import AlertTable from "./components/AlertTable";
 import { riskAlertApi } from "../../api/supplierRisk";
 import { useProductLineStore } from "../../store/productLineStore";
+import { PageShell, DataCard } from "../../components/design";
 import type { RiskDashboard } from "../../types";
 
 const SupplierRiskPage: React.FC = () => {
@@ -41,58 +42,59 @@ const SupplierRiskPage: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: 24 }}>
-      <Space style={{ marginBottom: 16 }}>
+    <PageShell
+      title="供应商风险"
+      actions={
         <Button type="primary" icon={<ReloadOutlined />} loading={evaluating} onClick={evaluateAll}>
           立即评估全部
         </Button>
-      </Space>
-
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic
               title="高风险供应商"
               value={dashboard?.high_risk_count ?? 0}
               prefix={<WarningOutlined />}
               valueStyle={{ color: "#fa8c16" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic
               title="极高风险"
               value={dashboard?.critical_risk_count ?? 0}
               prefix={<AlertOutlined />}
               valueStyle={{ color: "#f5222d" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic title="开放预警" value={dashboard?.open_alert_count ?? 0} />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic title="平均风险分" value={dashboard?.avg_risk_score ?? 0} precision={1} />
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 
-      <Card title="风险矩阵（质量 vs 交付）" style={{ marginBottom: 24 }}>
+      <DataCard title="风险矩阵（质量 vs 交付）" style={{ marginBottom: 24 }}>
         {dashboard && dashboard.supplier_risk_points.length > 0 ? (
           <RiskMatrixChart data={dashboard.supplier_risk_points} />
         ) : (
           <div style={{ textAlign: "center", padding: 48, color: "#999" }}>暂无数据</div>
         )}
-      </Card>
+      </DataCard>
 
-      <Card title="预警列表">
+      <DataCard title="预警列表">
         <AlertTable productLineCode={selected} onRefresh={fetchDashboard} />
-      </Card>
-    </div>
+      </DataCard>
+    </PageShell>
   );
 };
 

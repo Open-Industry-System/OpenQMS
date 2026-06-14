@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Modal, Form, Input, Select, Switch, message, Popconfirm, Tag } from "antd";
+import { Table, Button, Modal, Form, Input, Select, Switch, message, Popconfirm } from "antd";
 import type { NotificationChannel } from "../../../types";
 import { riskAlertApi } from "../../../api/supplierRisk";
+import { StatusBadge } from "../../../components/design";
 
 const ChannelConfigTable: React.FC = () => {
   const [data, setData] = useState<NotificationChannel[]>([]);
@@ -59,9 +60,7 @@ const ChannelConfigTable: React.FC = () => {
       title: "类型",
       dataIndex: "channel_type",
       render: (v: string) => (
-        <Tag color={v === "email" ? "blue" : "green"}>
-          {v === "email" ? "邮件" : "Webhook"}
-        </Tag>
+        <StatusBadge status={v}>{v === "email" ? "邮件" : "Webhook"}</StatusBadge>
       ),
     },
     {
@@ -105,6 +104,7 @@ const ChannelConfigTable: React.FC = () => {
         columns={columns}
         dataSource={data}
         loading={loading}
+        className="qf-table"
       />
       <Modal
         title="添加通知渠道"

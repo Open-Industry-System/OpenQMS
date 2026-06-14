@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Card, Tabs, Table, Tag, Spin, Row, Col } from "antd";
+import { Tabs, Table, Tag, Spin, Row, Col } from "antd";
 import { Line } from "@ant-design/charts";
 import { useParams } from "react-router-dom";
+import { DataCard } from "../../../components/design";
 import { getSupplierQualityDetail, listCertifications, listEvaluations } from "../../../api/supplier";
 import type { SupplierQualityDetailResponse, SupplierCertification, SupplierEvaluation } from "../../../types";
 
@@ -63,7 +64,7 @@ export default function SupplierDetailView() {
 
   return (
     <div>
-      <Card style={{ marginBottom: 16 }}>
+      <DataCard style={{ marginBottom: 16 }} title={null}>
         <Row gutter={16} align="middle">
           <Col flex="auto">
             <h2 style={{ margin: 0 }}>
@@ -97,22 +98,22 @@ export default function SupplierDetailView() {
             </Row>
           </Col>
         </Row>
-      </Card>
+      </DataCard>
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
-          <Card title="PPM 月度趋势">
+          <DataCard title="PPM 月度趋势">
             <Line {...ppmTrendConfig} />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={12}>
-          <Card title="批次合格率趋势">
+          <DataCard title="批次合格率趋势">
             <Line {...acceptanceTrendConfig} />
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 
-      <Card>
+      <DataCard title={null}>
         <Tabs
           items={[
             {
@@ -158,6 +159,7 @@ export default function SupplierDetailView() {
               label: "资质证书",
               children: (
                 <Table
+                  className="qf-table"
                   dataSource={certifications}
                   columns={[
                     { title: "证书类型", dataIndex: "cert_type" },
@@ -176,6 +178,7 @@ export default function SupplierDetailView() {
               label: "评价历史",
               children: (
                 <Table
+                  className="qf-table"
                   dataSource={evaluations}
                   columns={[
                     { title: "评价周期", dataIndex: "eval_period" },
@@ -193,7 +196,7 @@ export default function SupplierDetailView() {
             },
           ]}
         />
-      </Card>
+      </DataCard>
     </div>
   );
 }

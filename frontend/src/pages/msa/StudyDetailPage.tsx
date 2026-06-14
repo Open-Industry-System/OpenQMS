@@ -1,9 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Card,
   Button,
-  Tag,
-  Space,
   Form,
   Input,
   Select,
@@ -28,6 +25,7 @@ import {
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import type {
   GrrStudy,
   BiasStudy,
@@ -90,10 +88,23 @@ import dayjs from "dayjs";
 
 const { Option } = Select;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  draft: { label: "草稿", color: "default" },
-  ongoing: { label: "进行中", color: "processing" },
-  completed: { label: "已完成", color: "success" },
+const STATUS_MAP: Record<string, { label: string }> = {
+  draft: { label: "草稿" },
+  ongoing: { label: "进行中" },
+  completed: { label: "已完成" },
+};
+
+const statusToVariant = (status: string): string => {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "ongoing":
+      return "warning";
+    case "draft":
+      return "info";
+    default:
+      return "info";
+  }
 };
 
 type StudyType = "grr" | "bias" | "linearity" | "stability" | "attribute";
@@ -512,16 +523,17 @@ export default function StudyDetailPage() {
   // ─── Create form ───
   if (isNew) {
     return (
-      <div style={{ padding: 24 }}>
-        <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
-            返回
-          </Button>
-          <h2 style={{ margin: 0, fontSize: 20 }}>
-            新建{typeLabel}研究
-          </h2>
-        </div>
-        <Card>
+      <PageShell
+        title={
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
+              返回
+            </Button>
+            <span>新建{typeLabel}研究</span>
+          </div>
+        }
+      >
+        <DataCard title={null}>
           <Form form={infoForm} layout="vertical">
             <Row gutter={16}>
               <Col span={12}>
@@ -695,16 +707,20 @@ export default function StudyDetailPage() {
               </Button>
             </Form.Item>
           </Form>
-        </Card>
-      </div>
+        </DataCard>
+      </PageShell>
     );
   }
 
   if (!study) {
-    return <div style={{ padding: 24 }}>研究不存在</div>;
+    return (
+      <PageShell title="研究不存在">
+        <div>研究不存在</div>
+      </PageShell>
+    );
   }
 
-  const statusInfo = STATUS_MAP[study.status] ?? { label: study.status, color: "default" };
+  const statusInfo = STATUS_MAP[study.status] ?? { label: study.status };
 
   // ─── Measurement editors ───
 
@@ -740,6 +756,7 @@ export default function StudyDetailPage() {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -771,6 +788,7 @@ export default function StudyDetailPage() {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -796,6 +814,7 @@ export default function StudyDetailPage() {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -824,6 +843,7 @@ export default function StudyDetailPage() {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -855,6 +875,7 @@ export default function StudyDetailPage() {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -996,10 +1017,11 @@ export default function StudyDetailPage() {
       key: "info",
       label: "基本信息",
       children: (
-        <Card
+        <DataCard
+          title={null}
           extra={
             canEdit('msa') && (
-              <Space>
+              <div style={{ display: "flex", gap: 8 }}>
                 {editing ? (
                   <>
                     <Button onClick={() => setEditing(false)}>取消</Button>
@@ -1012,7 +1034,7 @@ export default function StudyDetailPage() {
                     编辑
                   </Button>
                 )}
-              </Space>
+              </div>
             )
           }
         >
@@ -1064,7 +1086,7 @@ export default function StudyDetailPage() {
                 {gauges.find((g) => g.gauge_id === study.gauge_id)?.name ?? "—"}
               </Descriptions.Item>
               <Descriptions.Item label="状态">
-                <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
+                <StatusBadge status={statusToVariant(study.status)}>{statusInfo.label}</StatusBadge>
               </Descriptions.Item>
               <Descriptions.Item label="研究日期">
                 {study.study_date ? dayjs(study.study_date).format("YYYY-MM-DD") : "—"}
@@ -1101,36 +1123,38 @@ export default function StudyDetailPage() {
               )}
             </Descriptions>
           )}
-        </Card>
+        </DataCard>
       ),
     },
     {
       key: "measurements",
       label: "测量数据",
       children: (
-        <Card
+        <DataCard
+          title={null}
           extra={
             canEdit('msa') && study.status !== "completed" && (
-              <Space>
+              <div style={{ display: "flex", gap: 8 }}>
                 <Button loading={measSaving} onClick={handleSaveMeasurements} icon={<SaveOutlined />}>
                   保存数据
                 </Button>
-              </Space>
+              </div>
             )
           }
         >
           {renderMeasurementsEditor()}
-        </Card>
+        </DataCard>
       ),
     },
     {
       key: "results",
       label: "分析结果",
       children: (
-        <Card
+        <DataCard
+          title={null}
           extra={
             canEdit('msa') && study.status !== "completed" && (
-              <Space>
+              <div style={{ display: "flex", gap: 8 }}>
                 <Button loading={resultLoading} onClick={handleCompute} icon={<CalculatorOutlined />} type="primary">
                   计算结果
                 </Button>
@@ -1144,27 +1168,30 @@ export default function StudyDetailPage() {
                     </Button>
                   </>
                 )}
-              </Space>
+              </div>
             )
           }
         >
           {renderResults()}
-        </Card>
+        </DataCard>
       ),
     },
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
-          返回
-        </Button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>{study.title}</h2>
-        <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
-        <Tag>{typeLabel}</Tag>
-      </div>
+    <PageShell
+      title={
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
+            返回
+          </Button>
+          <span>{study.title}</span>
+          <StatusBadge status={statusToVariant(study.status)}>{statusInfo.label}</StatusBadge>
+          <StatusBadge status="info">{typeLabel}</StatusBadge>
+        </div>
+      }
+    >
       <Tabs items={tabItems} />
-    </div>
+    </PageShell>
   );
 }
