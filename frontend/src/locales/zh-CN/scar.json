@@ -1,0 +1,95 @@
+{
+  "pageTitle": {
+    "list": "SCAR 管理",
+    "detail": "SCAR 详情"
+  },
+  "status": {
+    "open": "待处理",
+    "in_progress": "处理中",
+    "responded": "已回复",
+    "verified": "已验证",
+    "closed": "已关闭"
+  },
+  "source": {
+    "iqc": "IQC拒收",
+    "complaint": "客诉",
+    "rma": "RMA",
+    "manual": "手动创建"
+  },
+  "tabs": {
+    "all": "全部",
+    "pending": "待处理",
+    "responded": "已回复",
+    "verified": "已验证",
+    "closed": "已关闭"
+  },
+  "table": {
+    "scarNo": "SCAR编号",
+    "supplier": "供应商",
+    "source": "来源",
+    "status": "状态",
+    "issuedDate": "发出日期",
+    "dueDate": "到期日",
+    "operations": "操作"
+  },
+  "actions": {
+    "newScar": "新建 SCAR",
+    "view": "查看",
+    "start": "开始处理",
+    "respond": "提交回复",
+    "verify": "验证通过",
+    "reject": "退回",
+    "close": "关闭",
+    "reopen": "重新打开",
+    "createLinked8D": "创建关联 8D"
+  },
+  "card": {
+    "scarInfo": "SCAR 信息",
+    "supplierResponse": "供应商回复",
+    "capaLink": "CAPA 关联",
+    "resolutionSummary": "解决摘要"
+  },
+  "descriptions": {
+    "supplier": "供应商",
+    "source": "来源",
+    "productLine": "产品线",
+    "issuedDate": "发出日期",
+    "dueDate": "到期日",
+    "closedDate": "关闭日期",
+    "description": "问题描述",
+    "requestedAction": "要求措施"
+  },
+  "modal": {
+    "submitResponse": "提交供应商回复",
+    "closeScar": "关闭 SCAR",
+    "createLinked8D": "创建关联 8D",
+    "createLinked8DContent": "将基于 SCAR 信息创建新的 8D/CAPA 记录并自动关联。",
+    "scarLabel": "SCAR:",
+    "descriptionLabel": "描述:"
+  },
+  "placeholder": {
+    "supplierResponse": "请输入供应商回复内容",
+    "resolutionSummary": "请输入解决摘要"
+  },
+  "messages": {
+    "createSuccess": "SCAR 创建成功",
+    "statusUpdated": "状态更新成功",
+    "capaLinked": "CAPA 创建并关联成功",
+    "enterResponse": "请输入供应商回复",
+    "enterResolution": "请输入解决摘要"
+  },
+  "empty": {
+    "noResponse": "暂无回复",
+    "notLinked": "未关联"
+  },
+  "severity": {
+    "normal": "一般"
+  },
+  "linked": {
+    "linked8D": "已关联 8D:"
+  },
+  "validation": {
+    "supplierRequired": "请选择供应商",
+    "descriptionRequired": "请输入问题描述"
+  }
+}

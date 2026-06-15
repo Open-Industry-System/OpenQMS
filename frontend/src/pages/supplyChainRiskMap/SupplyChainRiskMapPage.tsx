@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Card, Row, Col, Spin, Empty } from "antd";
+import { useTranslation } from "react-i18next";
 import { riskMapApi } from "../../api/supplyChainRiskMap";
 import type { HeatmapResponse, TimelineResponse } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -9,6 +10,7 @@ import RiskHeatmap from "./components/RiskHeatmap";
 import DetailPanel from "./components/DetailPanel";
 
 const SupplyChainRiskMapPage: React.FC = () => {
+  const { t } = useTranslation("supplyChainRiskMap");
   const { productLines, selected: selectedProductLine, setSelected: setSelectedProductLine } = useProductLineStore();
   const [heatmap, setHeatmap] = useState<HeatmapResponse | null>(null);
   const [timeline, setTimeline] = useState<TimelineResponse | null>(null);
@@ -73,7 +75,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
 
   return (
     <div style={{ padding: 24 }}>
-      <h2>供应链风险地图</h2>
+      <h2>{t("page.title")}</h2>
       <HeatmapToolbar
         period={period}
         productLineCode={selectedProductLine}
@@ -99,7 +101,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
             ) : heatmap && heatmap.rows.length > 0 ? (
               <RiskHeatmap data={heatmap} onSupplierClick={handleSupplierClick} />
             ) : (
-              <Empty description="暂无数据，请先生成快照" />
+              <Empty description={t("page.emptyDescription")} />
             )}
           </Card>
         </Col>

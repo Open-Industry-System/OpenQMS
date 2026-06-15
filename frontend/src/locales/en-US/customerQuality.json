@@ -1,0 +1,346 @@
+{
+  "page": {
+    "title": "Customer Quality",
+    "complaintDetailTitle": "Complaint Detail",
+    "rmaDetailTitle": "RMA Detail"
+  },
+  "kpi": {
+    "customers": "Customers",
+    "openComplaints": "Open Complaints",
+    "overdueComplaints": "Overdue Complaints",
+    "rmaCount": "RMA Count",
+    "impactQty": "Impact Qty",
+    "spcCpk": "SPC CPK",
+    "warrantyCost": "Warranty Cost",
+    "customerSatisfaction": "Customer Satisfaction",
+    "customerAudit": "Customer Audit",
+    "auditCount": "{{count}} times",
+    "findingCount": "Findings {{count}}",
+    "total": "Total",
+    "planned": "Planned",
+    "inProgress": "In Progress",
+    "completed": "Completed",
+    "openFindings": "Open Findings",
+    "majorNc": "Major NC",
+    "confirmed": "Confirmed",
+    "pendingConfirmation": "Pending Confirmation",
+    "confirmedFindings": "Confirmed Findings",
+    "pendingConfirmations": "Pending Confirmations"
+  },
+  "tabs": {
+    "overview": "Overview",
+    "complaints": "Complaints",
+    "rma": "RMA",
+    "profile": "Profile",
+    "shipments": "Shipments",
+    "findings": "Findings",
+    "findingsWithCount": "Findings ({{count}})",
+    "confirmation": "Confirmation"
+  },
+  "actions": {
+    "myTodos": "My Todos",
+    "newCustomer": "New Customer",
+    "newComplaint": "New Complaint",
+    "newRma": "New RMA",
+    "newShipment": "New Shipment",
+    "handle": "Handle",
+    "analyze": "Analyze",
+    "createScar": "Create SCAR",
+    "viewScar": "View SCAR",
+    "investigate": "Investigate",
+    "markResponded": "Mark Responded",
+    "updateLinks": "Update Links",
+    "markActionPending": "Action Pending",
+    "startAudit": "Start Audit",
+    "completeAudit": "Complete Audit",
+    "backToList": "Back to List",
+    "startRectification": "Start Rectification",
+    "customerConfirm": "Customer Confirm",
+    "uploadConfirmationLetter": "Upload Confirmation Letter",
+    "addAttachment": "Add Attachment"
+  },
+  "table": {
+    "operations": "Actions",
+    "customer": {
+      "risk": "Risk",
+      "code": "Customer Code",
+      "name": "Customer Name"
+    },
+    "complaint": {
+      "no": "No.",
+      "severity": "Severity",
+      "batchNo": "Batch No.",
+      "status": "Status",
+      "dueDate": "Due Date",
+      "description": "Description"
+    },
+    "rma": {
+      "no": "No.",
+      "returnQty": "Return Qty",
+      "batchNo": "Batch No.",
+      "status": "Status",
+      "responsibility": "Responsibility",
+      "defectType": "Defect Type"
+    },
+    "shipment": {
+      "date": "Date",
+      "quantity": "Quantity",
+      "batchNo": "Batch No.",
+      "destination": "Destination"
+    },
+    "audit": {
+      "no": "No.",
+      "customerName": "Customer Name",
+      "customerType": "Customer Type",
+      "auditMode": "Audit Mode",
+      "auditScope": "Audit Scope",
+      "plannedDate": "Planned Date",
+      "status": "Status"
+    },
+    "finding": {
+      "clause": "Clause",
+      "type": "Type",
+      "description": "Description",
+      "rootCause": "Root Cause",
+      "correctiveAction": "Corrective Action",
+      "status": "Status",
+      "customerConfirm": "Customer Confirm",
+      "capa": "CAPA"
+    }
+  },
+  "form": {
+    "customer": {
+      "customerCode": "Customer Code",
+      "name": "Customer Name",
+      "segment": "Segment",
+      "contactName": "Contact Name",
+      "contactEmail": "Email",
+      "contactPhone": "Phone",
+      "ppmTarget": "PPM Target",
+      "annualShipmentQty": "Annual Shipment Qty",
+      "notes": "Notes"
+    },
+    "complaint": {
+      "complaintNo": "Complaint No.",
+      "category": "Category",
+      "severity": "Severity",
+      "productId": "Product ID",
+      "batchNo": "Batch No.",
+      "serialNumber": "Serial Number",
+      "impactQty": "Impact Qty",
+      "occurredDate": "Occurred Date",
+      "receivedDate": "Received Date",
+      "dueDate": "Due Date",
+      "defectDesc": "Defect Description",
+      "supplierResponsibility": "Supplier Responsibility",
+      "preliminaryResponse": "Preliminary Response",
+      "rootCause": "Root Cause",
+      "correctiveAction": "Corrective Action"
+    },
+    "rma": {
+      "rmaNo": "RMA No.",
+      "complaintId": "Related Complaint",
+      "productId": "Product ID",
+      "batchNo": "Batch No.",
+      "serialNumber": "Serial Number",
+      "returnQty": "Return Qty",
+      "defectType": "Defect Type",
+      "responsibility": "Responsibility",
+      "trackingNumber": "Tracking Number",
+      "receivedDate": "Received Date",
+      "analysisResult": "Analysis Result",
+      "correctiveAction": "Corrective Action"
+    },
+    "scar": {
+      "supplier": "Responsible Supplier",
+      "selectSupplier": "Select Supplier",
+      "supplierRequired": "Please select supplier",
+      "description": "Problem Description",
+      "requestedAction": "Requested Action",
+      "dueDate": "Due Date"
+    },
+    "shipment": {
+      "shipmentDate": "Shipment Date",
+      "quantity": "Quantity",
+      "batchNo": "Batch No.",
+      "destination": "Destination",
+      "notes": "Notes"
+    },
+    "audit": {
+      "customerName": "Customer Name",
+      "customerNamePlaceholder": "e.g. Tesla, BYD",
+      "customerType": "Customer Type",
+      "selectCustomerType": "Select Customer Type",
+      "auditMode": "Audit Mode",
+      "selectAuditMode": "Select Audit Mode",
+      "auditScope": "Audit Scope",
+      "auditCriteria": "Audit Criteria",
+      "plannedDate": "Planned Date",
+      "leadAuditor": "Lead Auditor",
+      "selectLeadAuditor": "Select Lead Auditor",
+      "validation": {
+        "customerNameRequired": "Please enter customer name",
+        "customerTypeRequired": "Please select customer type",
+        "auditScopeRequired": "Please enter audit scope",
+        "auditCriteriaRequired": "Please enter audit criteria",
+        "plannedDateRequired": "Please select date"
+      }
+    },
+    "finding": {
+      "findingType": "Finding Type",
+      "clauseRef": "Clause Ref",
+      "clauseRefPlaceholder": "e.g. 8.5.1",
+      "description": "Nonconformity Description",
+      "rootCause": "Root Cause",
+      "correction": "Correction",
+      "correctiveAction": "Corrective Action",
+      "dueDate": "Due Date"
+    },
+    "confirm": {
+      "confirmationDate": "Confirmation Date"
+    },
+    "attachments": {
+      "fileName": "File Name",
+      "fileLink": "File Link"
+    },
+    "links": {
+      "complaintId": "Related Complaint ID",
+      "capaRefId": "Related CAPA ID",
+      "fmeaRefId": "Related FMEA ID",
+      "eightDNo": "New 8D No.",
+      "eightDPlaceholder": "e.g. 8D-2026-010"
+    }
+  },
+  "detail": {
+    "customerCode": "Customer Code: ",
+    "segment": "Segment: ",
+    "ppmTarget": "PPM Target: ",
+    "annualShipmentQty": "Annual Shipment Qty: ",
+    "contactName": "Contact: ",
+    "audit": {
+      "customerName": "Customer Name",
+      "customerType": "Customer Type",
+      "auditMode": "Audit Mode",
+      "auditScope": "Audit Scope",
+      "plannedDate": "Planned Date",
+      "auditCriteria": "Audit Criteria"
+    }
+  },
+  "sections": {
+    "linksAndEvidence": "Links & Evidence",
+    "auditConfirmationAttachments": "Audit Confirmation Attachments:"
+  },
+  "modal": {
+    "newCustomer": "New Customer",
+    "newComplaint": "New Complaint",
+    "newRma": "New RMA",
+    "createScar": "Create SCAR",
+    "editShipment": "Edit Shipment Record",
+    "newShipment": "New Shipment Record",
+    "newAudit": "New Customer Audit",
+    "editFinding": "Edit Finding",
+    "newFinding": "New Finding",
+    "customerConfirm": "Customer Confirm Rectification",
+    "uploadConfirmationLetter": "Upload Confirmation Letter"
+  },
+  "status": {
+    "complaint": {
+      "open": "Received",
+      "investigating": "Investigating",
+      "responded": "Responded",
+      "closed": "Closed",
+      "cancelled": "Cancelled"
+    },
+    "rma": {
+      "open": "Registered",
+      "analysis": "Analyzing",
+      "action_pending": "Action Pending",
+      "closed": "Closed",
+      "cancelled": "Cancelled"
+    },
+    "audit": {
+      "planned": "Planned",
+      "in_progress": "In Progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "finding": {
+      "open": "Open",
+      "in_progress": "In Progress",
+      "closed": "Closed"
+    },
+    "confirmed": "Confirmed",
+    "pendingConfirmation": "Pending"
+  },
+  "category": {
+    "safety": "Safety",
+    "function": "Function",
+    "appearance": "Appearance",
+    "delivery": "Delivery"
+  },
+  "severity": {
+    "fatal": "Fatal",
+    "serious": "Serious",
+    "general": "General",
+    "minor": "Minor"
+  },
+  "responsibility": {
+    "supplier": "Supplier",
+    "internal": "Internal",
+    "transport": "Transport",
+    "customer_misuse": "Customer Misuse",
+    "unknown": "Unknown"
+  },
+  "customerType": {
+    "OEM": "OEM",
+    "Tier 1": "Tier 1",
+    "Tier 2": "Tier 2",
+    "other": "Other",
+    "其他": "Other"
+  },
+  "auditMode": {
+    "on_site": "On Site",
+    "remote": "Remote"
+  },
+  "findingType": {
+    "major_nc": "Major NC",
+    "minor_nc": "Minor NC",
+    "ofi": "OFI",
+    "observation": "Observation"
+  },
+  "messages": {
+    "loadDataFailed": "Failed to load customer quality data",
+    "loadShipmentsFailed": "Failed to load shipment records",
+    "scarCreateSuccess": "SCAR created successfully",
+    "scarCreateFailed": "Failed to create SCAR",
+    "customerCreateSuccess": "Customer created successfully",
+    "customerCreateFailed": "Failed to create customer",
+    "complaintCreateSuccess": "Complaint created successfully",
+    "complaintCreateFailed": "Failed to create complaint",
+    "rmaCreateSuccess": "RMA created successfully",
+    "rmaCreateFailed": "Failed to create RMA",
+    "selectCustomerAndProductLine": "Please select a customer and product line first",
+    "confirmDeleteShipment": "Delete shipment record on {{date}}?",
+    "loadComplaintFailed": "Failed to load complaint",
+    "investigationStarted": "Investigation started",
+    "markedResponded": "Marked as responded",
+    "cancelled": "Cancelled",
+    "closed": "Closed",
+    "linksUpdated": "Links updated",
+    "linksUpdateFailed": "Failed to update links",
+    "rmaLoadFailed": "Failed to load RMA",
+    "analysisStarted": "Analysis started",
+    "markedActionPending": "Marked as action pending",
+    "loadFailed": "Failed to load",
+    "createAuditSuccess": "Created successfully",
+    "createAuditFailed": "Failed to create",
+    "confirmCloseFinding": "Confirm close? All closure conditions must be met",
+    "confirmCreateCapa": "Create CAPA?",
+    "capaCreated": "CAPA created",
+    "capaCreateFailed": "Failed to create CAPA",
+    "confirmSuccess": "Confirmed successfully",
+    "confirmFailed": "Confirmation failed",
+    "auditConfirmSuccess": "Audit confirmed successfully",
+    "auditConfirmFailed": "Failed to confirm audit"
+  }
+}

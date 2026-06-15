@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from "react";
 import { Input, Button, Select, Card, Tag, Space, Spin, Empty, Typography, Tooltip } from "antd";
 import { SearchOutlined, RobotOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { semanticSearch, askQuestion } from "../../api/search";
 import type { SearchResultItem, QAResponse } from "../../api/search";
 import QAAnswer from "../../components/search/QAAnswer";
@@ -9,25 +10,8 @@ import { useProductLineStore } from "../../store/productLineStore";
 
 const { Text } = Typography;
 
-const ENTITY_TYPE_OPTIONS = [
-  { label: "FMEA 节点", value: "fmea_node" },
-  { label: "CAPA", value: "capa" },
-  { label: "审核发现", value: "audit_finding" },
-  { label: "客诉", value: "complaint" },
-  { label: "SCAR", value: "scar" },
-  { label: "RMA", value: "rma" },
-];
-
-const ENTITY_COLORS: Record<string, string> = {
-  fmea_node: "blue",
-  capa: "orange",
-  audit_finding: "purple",
-  complaint: "red",
-  scar: "cyan",
-  rma: "magenta",
-};
-
 export default function SemanticSearchTab() {
+  const { t } = useTranslation("search");
   const [query, setQuery] = useState("");
   const [entityTypes, setEntityTypes] = useState<string[]>([]);
   const [mode, setMode] = useState<"search" | "qa">("search");
@@ -38,6 +22,15 @@ export default function SemanticSearchTab() {
   const abortRef = useRef<AbortController | null>(null);
   const navigate = useNavigate();
   const productLineCode = useProductLineStore((s) => s.selected);
+
+  const entityTypeOptions = [
+    { label: t("qa.entityTypes.fmeaNode"), value: "fmea_node" },
+    { label: t("qa.entityTypes.capa"), value: "capa" },
+    { label: t("qa.entityTypes.auditFinding"), value: "audit_finding" },
+    { label: t("qa.entityTypes.complaint"), value: "complaint" },
+    { label: t("qa.entityTypes.scar"), value: "scar" },
+    { label: t("qa.entityTypes.rma"), value: "rma" },
+  ];
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return;
@@ -88,7 +81,7 @@ export default function SemanticSearchTab() {
       case "capa":
         return `/capa/${item.entity_id}`;
       default:
-        return null; // No detail page yet for audit_finding, complaint, scar, rma
+        return null;
     }
   };
 
@@ -101,7 +94,7 @@ export default function SemanticSearchTab() {
     <div style={{ padding: "16px 0" }}>
       <Space.Compact style={{ width: "100%", marginBottom: 16 }}>
         <Input
-          placeholder="输入自然语言问题，搜索历史质量记录..."
+          placeholder={t("qa.placeholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onPressEnter={handleSearch}
@@ -114,16 +107,16 @@ export default function SemanticSearchTab() {
           type={mode === "search" ? "primary" : "default"}
           size="large"
         >
-          搜索
+          {t("qa.search")}
         </Button>
-        <Tooltip title={mode === "qa" ? "切换到搜索模式" : "切换到问答模式"}>
+        <Tooltip title={mode === "qa" ? t("qa.switchToSearch") : t("qa.switchToQa")}>
           <Button
             icon={<RobotOutlined />}
             onClick={() => setMode(mode === "search" ? "qa" : "search")}
             type={mode === "qa" ? "primary" : "default"}
             size="large"
           >
-            问答
+            {t("qa.qa")}
           </Button>
         </Tooltip>
       </Space.Compact>
@@ -131,8 +124,8 @@ export default function SemanticSearchTab() {
       <Space style={{ marginBottom: 16 }}>
         <Select
           mode="multiple"
-          placeholder="筛选类型"
-          options={ENTITY_TYPE_OPTIONS}
+          placeholder={t("qa.filterType")}
+          options={entityTypeOptions}
           value={entityTypes}
           onChange={setEntityTypes}
           style={{ minWidth: 300 }}
@@ -145,7 +138,7 @@ export default function SemanticSearchTab() {
       {!loading && mode === "search" && results.length > 0 && (
         <>
           <Text type="secondary" style={{ marginBottom: 8, display: "block" }}>
-            找到 {results.length} 条结果，耗时 {queryTime}ms
+            {t("qa.resultsFound", { count: results.length, ms: queryTime })}
           </Text>
           {results.map((item) => (
             <Card
@@ -175,7 +168,7 @@ export default function SemanticSearchTab() {
               </div>
               <div style={{ marginTop: 4 }}>
                 <Text type="secondary">
-                  相似度: {(item.score * 100).toFixed(0)}% | 来源: {item.source}
+                  {t("qa.similarity", { score: (item.score * 100).toFixed(0), source: item.source })}
                 </Text>
               </div>
             </Card>
@@ -186,8 +179,17 @@ export default function SemanticSearchTab() {
       {!loading && mode === "qa" && qaData && <QAAnswer data={qaData} />}
 
       {!loading && !results.length && !qaData && (
-        <Empty description="输入问题开始搜索" style={{ marginTop: 60 }} />
+        <Empty description={t("qa.startSearch")} style={{ marginTop: 60 }} />
       )}
     </div>
   );
 }
+
+const ENTITY_COLORS: Record<string, string> = {
+  fmea_node: "blue",
+  capa: "orange",
+  audit_finding: "purple",
+  complaint: "red",
+  scar: "cyan",
+  rma: "magenta",
+};

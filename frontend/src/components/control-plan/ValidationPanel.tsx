@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, Button, Spin, Empty, Alert, Badge, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import ValidationCard from "./ValidationCard";
 import {
   getValidationResults,
@@ -22,6 +23,7 @@ const POLL_INTERVAL = 2000;
 const MAX_POLLS = 30;
 
 export default function ValidationPanel({ cpId }: Props) {
+  const { t } = useTranslation("controlPlan");
   const [results, setResults] = useState<ValidationResult[]>([]);
   const [summary, setSummary] = useState<ValidationSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,10 +44,10 @@ export default function ValidationPanel({ cpId }: Props) {
       setError(null);
       return sum.status;
     } catch (_e) {
-      setError("加载校验结果失败");
+      setError(t("validation.loadFailed"));
       return null;
     }
-  }, [cpId]);
+  }, [cpId, t]);
 
   const handleTrigger = async () => {
     setLoading(true);
@@ -56,7 +58,7 @@ export default function ValidationPanel({ cpId }: Props) {
       pollingRef.current = true;
       setPolling(true);
     } catch (_e) {
-      setError("触发校验失败");
+      setError(t("validation.triggerFailed"));
     } finally {
       setLoading(false);
     }
@@ -104,7 +106,7 @@ export default function ValidationPanel({ cpId }: Props) {
       await action(id);
       await fetchData();
     } catch (_e) {
-      setError("操作失败");
+      setError(t("validation.operationFailed"));
     } finally {
       setLoading(false);
     }
@@ -118,7 +120,7 @@ export default function ValidationPanel({ cpId }: Props) {
       title={
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>
-            智能校验
+            {t("validation.title")}
             {errorCount > 0 && <Badge count={errorCount} style={{ backgroundColor: "#ff4d4f", marginLeft: 8 }} />}
             {errorCount === 0 && warningCount > 0 && <Badge count={warningCount} style={{ backgroundColor: "#faad14", marginLeft: 8 }} />}
           </span>
@@ -129,7 +131,7 @@ export default function ValidationPanel({ cpId }: Props) {
             loading={loading}
             disabled={polling}
           >
-            {polling ? "校验中..." : "重新校验"}
+            {polling ? t("validation.validating") : t("validation.revalidate")}
           </Button>
         </div>
       }
@@ -141,12 +143,12 @@ export default function ValidationPanel({ cpId }: Props) {
       {polling && results.length === 0 && (
         <div style={{ textAlign: "center", padding: 24 }}>
           <Spin />
-          <Text type="secondary" style={{ display: "block", marginTop: 8 }}>正在执行校验...</Text>
+          <Text type="secondary" style={{ display: "block", marginTop: 8 }}>{t("validation.validating")}</Text>
         </div>
       )}
 
       {!polling && results.length === 0 && !error && (
-        <Empty description="暂无校验结果" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description={t("validation.noResults")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       )}
 
       {results.length > 0 && (
@@ -167,12 +169,12 @@ export default function ValidationPanel({ cpId }: Props) {
       {summary && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f0f0f0", fontSize: 12 }}>
           <Text type="secondary">
-            共 {summary.total} 项:{" "}
-            <span style={{ color: "#ff4d4f" }}>{summary.error_count} 错误</span>,{" "}
-            <span style={{ color: "#faad14" }}>{summary.warning_count} 警告</span>,{" "}
-            <span style={{ color: "#1890ff" }}>{summary.info_count} 提示</span>
+            {t("validation.total", { total: summary.total })}:{" "}
+            <span style={{ color: "#ff4d4f" }}>{t("validation.errors", { count: summary.error_count })}</span>,{" "}
+            <span style={{ color: "#faad14" }}>{t("validation.warnings", { count: summary.warning_count })}</span>,{" "}
+            <span style={{ color: "#1890ff" }}>{t("validation.infos", { count: summary.info_count })}</span>
             {" | "}
-            {summary.open_count} 待处理, {summary.resolved_count} 已解决, {summary.rejected_count} 已忽略
+            {t("validation.pending", { count: summary.open_count })}, {t("validation.resolved", { count: summary.resolved_count })}, {t("validation.rejected", { count: summary.rejected_count })}
           </Text>
         </div>
       )}

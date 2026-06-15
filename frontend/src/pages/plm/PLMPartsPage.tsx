@@ -14,6 +14,7 @@ import {
   Select,
   Checkbox,
 } from "antd";
+import { useTranslation } from "react-i18next";
 import {
   getPLMParts,
   getPLMBOMTree,
@@ -31,6 +32,8 @@ import type {
 const { Title } = Typography;
 
 export default function PLMPartsPage() {
+  const { t } = useTranslation("plm");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const { canEdit, canCreate } = usePermission();
   const canEditPlm = canEdit("plm");
@@ -63,7 +66,7 @@ export default function PLMPartsPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载零件列表失败"))
+      .catch(() => message.error(t("parts.messages.loadFailed")))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -108,7 +111,7 @@ export default function PLMPartsPage() {
       });
       setBomItems(res.items);
     } catch {
-      message.error("查询 BOM 失败");
+      message.error(t("parts.messages.queryBomFailed"));
     } finally {
       setBomLoading(false);
     }
@@ -126,10 +129,10 @@ export default function PLMPartsPage() {
         { fmea_id: importValues.fmea_id, overwrite: importValues.overwrite },
         { revision: queryValues.revision, bom_revision: queryValues.bom_revision },
       );
-      message.success("BOM 已导入 FMEA");
+      message.success(t("parts.messages.importFMEASuccess"));
       setBomPart(null);
     } catch {
-      message.error("导入 FMEA 失败");
+      message.error(t("parts.messages.importFMEAFailed"));
     } finally {
       setBomLoading(false);
     }
@@ -153,56 +156,60 @@ export default function PLMPartsPage() {
     setScLoading(true);
     try {
       await confirmPLMPartSC(scPart.part_id, values);
-      message.success("特殊特性已确认");
+      message.success(t("parts.messages.scConfirmed"));
       setScPart(null);
       fetchData(page, search, productLine);
     } catch {
-      message.error("确认特殊特性失败");
+      message.error(t("parts.messages.scConfirmFailed"));
     } finally {
       setScLoading(false);
     }
   };
 
+  const boolText = (v: boolean) => (v ? t("yes") : t("no"));
+  const boolTag = (v: boolean) => (v ? <Tag color="red">{t("yes")}</Tag> : t("no"));
+  const boolTagOrange = (v: boolean) => (v ? <Tag color="orange">{t("yes")}</Tag> : t("no"));
+
   const columns = [
-    { title: "零件号", dataIndex: "part_number", key: "part_number", width: 160 },
-    { title: "名称", dataIndex: "name", key: "name", ellipsis: true },
-    { title: "版本", dataIndex: "revision", key: "revision", width: 80 },
+    { title: t("parts.columns.partNumber"), dataIndex: "part_number", key: "part_number", width: 160 },
+    { title: t("parts.columns.name"), dataIndex: "name", key: "name", ellipsis: true },
+    { title: t("parts.columns.revision"), dataIndex: "revision", key: "revision", width: 80 },
     {
-      title: "状态",
+      title: t("parts.columns.status"),
       dataIndex: "status",
       key: "status",
       width: 100,
       render: (s: string) => <Tag>{s}</Tag>,
     },
     {
-      title: "安全件",
+      title: t("parts.columns.safetyRelated"),
       dataIndex: "is_safety_related",
       key: "is_safety_related",
       width: 80,
-      render: (v: boolean) => (v ? <Tag color="red">是</Tag> : "否"),
+      render: (v: boolean) => boolTag(v),
     },
     {
-      title: "关键特性",
+      title: t("parts.columns.keyCharacteristic"),
       dataIndex: "is_key_characteristic",
       key: "is_key_characteristic",
       width: 80,
-      render: (v: boolean) => (v ? <Tag color="orange">是</Tag> : "否"),
+      render: (v: boolean) => boolTagOrange(v),
     },
     {
-      title: "操作",
+      title: t("parts.columns.actions"),
       key: "actions",
       width: 220,
       render: (_: unknown, record: PLMPart) => {
         const hasPendingScLink = getPendingScLinks(record).length > 0;
         return (
           <Space size={4}>
-            <Button type="link" size="small" onClick={() => setDrawerPart(record)}>详情</Button>
-            <Button type="link" size="small" onClick={() => openBomModal(record)}>BOM</Button>
+            <Button type="link" size="small" onClick={() => setDrawerPart(record)}>{t("parts.actions.detail")}</Button>
+            <Button type="link" size="small" onClick={() => openBomModal(record)}>{t("parts.actions.bom")}</Button>
             {canEditPlm && (
-              <Button type="link" size="small" onClick={() => openBomModal(record)}>导入 FMEA</Button>
+              <Button type="link" size="small" onClick={() => openBomModal(record)}>{t("parts.actions.importFMEA")}</Button>
             )}
             {canEditPlm && canCreateSc && hasPendingScLink && (
-              <Button type="link" size="small" onClick={() => openScModal(record)}>确认SC</Button>
+              <Button type="link" size="small" onClick={() => openScModal(record)}>{t("parts.actions.confirmSC")}</Button>
             )}
           </Space>
         );
@@ -211,13 +218,13 @@ export default function PLMPartsPage() {
   ];
 
   const bomColumns = [
-    { title: "父零件号", dataIndex: "parent_part_number", key: "parent_part_number" },
-    { title: "父版本", dataIndex: "parent_revision", key: "parent_revision", width: 90 },
-    { title: "子零件号", dataIndex: "child_part_number", key: "child_part_number" },
-    { title: "子版本", dataIndex: "child_revision", key: "child_revision", width: 90 },
-    { title: "数量", dataIndex: "quantity", key: "quantity", width: 90 },
-    { title: "层级", dataIndex: "level", key: "level", width: 80 },
-    { title: "BOM 版本", dataIndex: "bom_revision", key: "bom_revision", width: 100 },
+    { title: t("parts.bom.columns.parentPartNumber"), dataIndex: "parent_part_number", key: "parent_part_number" },
+    { title: t("parts.bom.columns.parentRevision"), dataIndex: "parent_revision", key: "parent_revision", width: 90 },
+    { title: t("parts.bom.columns.childPartNumber"), dataIndex: "child_part_number", key: "child_part_number" },
+    { title: t("parts.bom.columns.childRevision"), dataIndex: "child_revision", key: "child_revision", width: 90 },
+    { title: t("parts.bom.columns.quantity"), dataIndex: "quantity", key: "quantity", width: 90 },
+    { title: t("parts.bom.columns.level"), dataIndex: "level", key: "level", width: 80 },
+    { title: t("parts.bom.columns.bomRevision"), dataIndex: "bom_revision", key: "bom_revision", width: 100 },
   ];
 
   return (
@@ -231,10 +238,10 @@ export default function PLMPartsPage() {
         }}
       >
         <Title level={4} style={{ margin: 0 }}>
-          PLM 零件列表
+          {t("parts.title")}
         </Title>
         <Input.Search
-          placeholder="搜索零件号或名称"
+          placeholder={t("parts.searchPlaceholder")}
           allowClear
           onSearch={handleSearch}
           style={{ width: 280 }}
@@ -258,32 +265,32 @@ export default function PLMPartsPage() {
       />
 
       <Drawer
-        title="零件详情"
+        title={t("parts.drawer.title")}
         open={!!drawerPart}
         onClose={() => setDrawerPart(null)}
         width={520}
       >
         {drawerPart && (
           <Descriptions bordered column={1} size="small">
-            <Descriptions.Item label="零件号">{drawerPart.part_number}</Descriptions.Item>
-            <Descriptions.Item label="名称">{drawerPart.name}</Descriptions.Item>
-            <Descriptions.Item label="版本">{drawerPart.revision}</Descriptions.Item>
-            <Descriptions.Item label="状态">{drawerPart.status}</Descriptions.Item>
-            <Descriptions.Item label="材质">{drawerPart.material || "—"}</Descriptions.Item>
-            <Descriptions.Item label="规格">{drawerPart.specification || "—"}</Descriptions.Item>
-            <Descriptions.Item label="安全件">
-              {drawerPart.is_safety_related ? "是" : "否"}
+            <Descriptions.Item label={t("parts.drawer.labels.partNumber")}>{drawerPart.part_number}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.labels.name")}>{drawerPart.name}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.labels.revision")}>{drawerPart.revision}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.labels.status")}>{drawerPart.status}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.labels.material")}>{drawerPart.material || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.labels.specification")}>{drawerPart.specification || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.labels.safetyRelated")}>
+              {boolText(drawerPart.is_safety_related)}
             </Descriptions.Item>
-            <Descriptions.Item label="关键特性">
-              {drawerPart.is_key_characteristic ? "是" : "否"}
+            <Descriptions.Item label={t("parts.drawer.labels.keyCharacteristic")}>
+              {boolText(drawerPart.is_key_characteristic)}
             </Descriptions.Item>
-            <Descriptions.Item label="外部 ID">{drawerPart.external_id}</Descriptions.Item>
-            <Descriptions.Item label="产线代码">
+            <Descriptions.Item label={t("parts.drawer.labels.externalId")}>{drawerPart.external_id}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.labels.productLineCode")}>
               {drawerPart.product_line_code || "—"}
             </Descriptions.Item>
-            <Descriptions.Item label="PLM 更新时间">
+            <Descriptions.Item label={t("parts.drawer.labels.updatedAt")}>
               {drawerPart.source_updated_at
-                ? new Date(drawerPart.source_updated_at).toLocaleString("zh-CN")
+                ? new Date(drawerPart.source_updated_at).toLocaleString()
                 : "—"}
             </Descriptions.Item>
           </Descriptions>
@@ -291,21 +298,21 @@ export default function PLMPartsPage() {
       </Drawer>
 
       <Modal
-        title={bomPart ? `BOM：${bomPart.part_number}` : "BOM"}
+        title={bomPart ? t("parts.bom.modalTitle", { partNumber: bomPart.part_number }) : t("parts.actions.bom")}
         open={!!bomPart}
         onCancel={() => setBomPart(null)}
         footer={null}
         width={900}
       >
         <Form form={bomQueryForm} layout="inline" style={{ marginBottom: 16 }}>
-          <Form.Item name="revision" label="零件版本" rules={[{ required: true, message: "请输入零件版本" }]}>
+          <Form.Item name="revision" label={t("parts.bom.partRevision")} rules={[{ required: true, message: t("parts.bom.partRevisionRequired") }]}>
             <Input style={{ width: 120 }} />
           </Form.Item>
-          <Form.Item name="bom_revision" label="BOM 版本" rules={[{ required: true, message: "请输入 BOM 版本" }]}>
+          <Form.Item name="bom_revision" label={t("parts.bom.bomRevision")} rules={[{ required: true, message: t("parts.bom.bomRevisionRequired") }]}>
             <Input style={{ width: 120 }} />
           </Form.Item>
           <Form.Item>
-            <Button onClick={queryBom} loading={bomLoading}>查询 BOM</Button>
+            <Button onClick={queryBom} loading={bomLoading}>{t("parts.bom.query")}</Button>
           </Form.Item>
         </Form>
         <Table
@@ -318,41 +325,41 @@ export default function PLMPartsPage() {
         />
         {canEditPlm && (
           <Form form={bomImportForm} layout="inline" style={{ marginTop: 16 }}>
-            <Form.Item name="fmea_id" label="FMEA ID" rules={[{ required: true, message: "请输入 FMEA ID" }]}>
+            <Form.Item name="fmea_id" label={t("parts.bom.import.fmeaId")} rules={[{ required: true, message: t("parts.bom.import.fmeaIdRequired") }]}>
               <Input style={{ width: 260 }} />
             </Form.Item>
             <Form.Item name="overwrite" valuePropName="checked">
-              <Checkbox>覆盖已有节点</Checkbox>
+              <Checkbox>{t("parts.bom.import.overwrite")}</Checkbox>
             </Form.Item>
             <Form.Item>
-              <Button type="primary" onClick={handleImportBom} loading={bomLoading}>导入 FMEA</Button>
+              <Button type="primary" onClick={handleImportBom} loading={bomLoading}>{t("parts.bom.import.import")}</Button>
             </Form.Item>
           </Form>
         )}
       </Modal>
 
       <Modal
-        title={scPart ? `确认特殊特性：${scPart.part_number}` : "确认特殊特性"}
+        title={scPart ? t("parts.sc.modalTitle", { partNumber: scPart.part_number }) : t("parts.actions.confirmSC")}
         open={!!scPart}
         onCancel={() => setScPart(null)}
         onOk={handleConfirmSc}
         confirmLoading={scLoading}
-        okText="确认"
-        cancelText="取消"
+        okText={t("parts.sc.okText")}
+        cancelText={tc("actions.cancel")}
       >
         <Form form={scForm} layout="vertical">
-          <Form.Item name="characteristic_type" label="特性类型" rules={[{ required: true, message: "请选择特性类型" }]}>
+          <Form.Item name="characteristic_type" label={t("parts.sc.characteristicType")} rules={[{ required: true, message: t("parts.sc.characteristicTypeRequired") }]}>
             <Select
               options={(scPart ? getPendingScLinks(scPart) : []).map((link) => ({
                 value: link.characteristic_type,
-                label: link.characteristic_type === "safety" ? "安全特性" : "关键特性",
+                label: link.characteristic_type === "safety" ? t("parts.sc.safety") : t("parts.sc.key"),
               }))}
             />
           </Form.Item>
-          <Form.Item name="fmea_id" label="FMEA ID" rules={[{ required: true, message: "请输入 FMEA ID" }]}>
+          <Form.Item name="fmea_id" label={t("parts.sc.fmeaId")} rules={[{ required: true, message: t("parts.sc.fmeaIdRequired") }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="node_id" label="节点 ID" rules={[{ required: true, message: "请输入节点 ID" }]}>
+          <Form.Item name="node_id" label={t("parts.sc.nodeId")} rules={[{ required: true, message: t("parts.sc.nodeIdRequired") }]}>
             <Input />
           </Form.Item>
         </Form>

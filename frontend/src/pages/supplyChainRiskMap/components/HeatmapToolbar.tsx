@@ -1,6 +1,7 @@
 import React from "react";
 import { Select, Button, Space, Dropdown, message } from "antd";
 import { ReloadOutlined, DownloadOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { riskMapApi } from "../../../api/supplyChainRiskMap";
 import { usePermission } from "../../../hooks/usePermission";
 
@@ -25,6 +26,8 @@ const HeatmapToolbar: React.FC<HeatmapToolbarProps> = ({
   periods,
   productLines,
 }) => {
+  const { t } = useTranslation("supplyChainRiskMap");
+  const { t: tc } = useTranslation("common");
   const { canEdit } = usePermission();
   const canGenerate = canEdit("supply_chain_risk_map");
 
@@ -32,10 +35,10 @@ const HeatmapToolbar: React.FC<HeatmapToolbarProps> = ({
     try {
       const params = productLineCode ? { product_line_code: productLineCode } : undefined;
       const res = await riskMapApi.generateSnapshot(params);
-      message.success(`已生成 ${res.data.snapshot_count} 个快照`);
+      message.success(t("toolbar.snapshotSuccess", { count: res.data.snapshot_count }));
       onRefresh();
     } catch {
-      message.error("快照生成失败");
+      message.error(t("toolbar.snapshotFailed"));
     }
   };
 
@@ -56,14 +59,14 @@ const HeatmapToolbar: React.FC<HeatmapToolbarProps> = ({
       a.click();
       window.URL.revokeObjectURL(url);
     } catch {
-      message.error("导出失败");
+      message.error(t("toolbar.exportFailed"));
     }
   };
 
   const exportMenu = {
     items: [
-      { key: "csv", label: "CSV", onClick: () => handleExport("csv") },
-      { key: "excel", label: "Excel", onClick: () => handleExport("excel") },
+      { key: "csv", label: t("export.csv"), onClick: () => handleExport("csv") },
+      { key: "excel", label: t("export.excel"), onClick: () => handleExport("excel") },
     ],
   };
 
@@ -71,7 +74,7 @@ const HeatmapToolbar: React.FC<HeatmapToolbarProps> = ({
     <Space style={{ marginBottom: 16 }}>
       <Select
         value={productLineCode ?? undefined}
-        placeholder="全部产品线"
+        placeholder={t("toolbar.allProductLines")}
         allowClear
         style={{ width: 180 }}
         onChange={(val) => onProductLineChange(val ?? null)}
@@ -89,11 +92,11 @@ const HeatmapToolbar: React.FC<HeatmapToolbarProps> = ({
           onClick={handleGenerateSnapshot}
           loading={refreshing}
         >
-          刷新数据
+          {t("toolbar.refresh")}
         </Button>
       )}
       <Dropdown menu={exportMenu}>
-        <Button icon={<DownloadOutlined />}>导出</Button>
+        <Button icon={<DownloadOutlined />}>{tc("actions.export")}</Button>
       </Dropdown>
     </Space>
   );

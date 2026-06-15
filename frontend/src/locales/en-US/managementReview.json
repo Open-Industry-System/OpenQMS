@@ -1,0 +1,138 @@
+{
+  "pageTitle": {
+    "list": "Management Review",
+    "detail": "Management Review Detail"
+  },
+  "status": {
+    "review": {
+      "draft": "Draft",
+      "data_collected": "Data Collected",
+      "in_review": "In Review",
+      "closed": "Closed"
+    },
+    "report": {
+      "none": "Not Generated",
+      "draft": "Draft",
+      "final": "Finalized"
+    },
+    "output": {
+      "pending": "Pending",
+      "in_progress": "In Progress",
+      "completed": "Pending Verification",
+      "verified": "Verified"
+    }
+  },
+  "category": {
+    "improvement_opportunity": "Improvement Opportunity",
+    "system_change": "System Change",
+    "resource_need": "Resource Need"
+  },
+  "dataSource": {
+    "previousReviewActions": "1. Previous Management Review Actions",
+    "qualityGoals": "2. Quality Goal Achievement",
+    "internalAudits": "3. Audit Results",
+    "capaStats": "4. Nonconformities and Corrective Actions",
+    "fmeaRisks": "5. FMEA Risk Analysis",
+    "spcCapability": "6. SPC Process Capability",
+    "supplierPerformance": "7. External Supplier Performance",
+    "externalFactors": "8. Changes in Internal and External Factors",
+    "resourceAdequacy": "9. Resource Adequacy",
+    "customerSatisfaction": "10. Customer Satisfaction and Feedback",
+    "equipmentMonitoring": "11. Monitoring and Measurement Results (Equipment)",
+    "copq": "12. Cost of Poor Quality",
+    "manufacturingFeasibility": "13. Manufacturing Feasibility Assessment",
+    "manualTag": "Manual Entry",
+    "pendingModule": "Will auto-switch after module goes live",
+    "noData": "No data"
+  },
+  "card": {
+    "dataPackage": "Review Input Data Package",
+    "meetingMinutes": "Meeting Minutes",
+    "outputs": "Review Outputs & Actions",
+    "report": "Management Review Report",
+    "historyVersions": "History Versions"
+  },
+  "table": {
+    "docNo": "Doc No.",
+    "title": "Title",
+    "reviewDate": "Review Date",
+    "productLine": "Product Line",
+    "category": "Category",
+    "description": "Description",
+    "dueDate": "Due Date",
+    "status": "Status",
+    "operations": "Actions"
+  },
+  "actions": {
+    "newReview": "New Review",
+    "collectData": "Collect Data",
+    "refreshData": "Refresh Data",
+    "backToDraft": "Back to Draft",
+    "startReview": "Start Review",
+    "closeReview": "Close Review",
+    "reopenReview": "Reopen",
+    "addOutput": "Add Action",
+    "start": "Start",
+    "complete": "Complete",
+    "verify": "Verify",
+    "exportMarkdown": "Export Markdown",
+    "generateReport": "AI Generate Report",
+    "regenerate": "Regenerate",
+    "saveDraft": "Save Draft",
+    "finalize": "Finalize & Archive",
+    "reopenEdit": "Reopen for Editing",
+    "restoreDraft": "Restore as Draft",
+    "cancelPreview": "Cancel Preview"
+  },
+  "form": {
+    "category": "Category",
+    "description": "Description",
+    "dueDate": "Due Date",
+    "verificationNotes": "Verification Conclusion"
+  },
+  "modal": {
+    "addOutput": "Add Action",
+    "effectVerification": "Effect Verification"
+  },
+  "report": {
+    "statusLabel": "Report Status: ",
+    "noReportData": "No report data. Click \"AI Generate Report\" to initialize.",
+    "previewingVersion": "Previewing historical version v{{version}}",
+    "restoreConfirmTitle": "Restore as Draft?",
+    "restoreConfirmContent": "Restore content from version v{{version}} as current draft? Current draft will be overwritten.",
+    "regenerateConfirmTitle": "Confirm Regenerate?",
+    "regenerateConfirmContent": "Regenerating will overwrite manual edits in the current draft."
+  },
+  "sectionEditor": {
+    "aiAnalysis": "AI Analysis:",
+    "keyFindings": "Key Findings:",
+    "recommendations": "Recommendations:",
+    "placeholder": "Enter manual edits here; they take precedence on export..."
+  },
+  "descriptions": {
+    "title": "Review Topic",
+    "reviewDate": "Review Date",
+    "actualDate": "Actual Date",
+    "productLine": "Product Line",
+    "allPlants": "All Plants",
+    "location": "Location"
+  },
+  "messages": {
+    "loadFailed": "Failed to load",
+    "operationSuccess": "Operation successful",
+    "collectFailed": "Failed to collect data",
+    "saveDraftSuccess": "Draft saved",
+    "saveDraftFailed": "Failed to save",
+    "finalizeSuccess": "Report finalized and archived",
+    "finalizeFailed": "Failed to finalize",
+    "reopenSuccess": "Report reopened",
+    "reopenFailed": "Failed to reopen",
+    "exportFailed": "Export failed",
+    "generateFailed": "Generation failed",
+    "restoreSuccess": "Restored as draft"
+  },
+  "confirm": {
+    "reopenReview": "Confirm reopen?",
+    "deleteOutput": "Confirm delete?"
+  }
+}

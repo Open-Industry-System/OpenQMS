@@ -1,27 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, Row, Col, Statistic, Descriptions, Table, Tag, App, Spin } from 'antd';
 import { useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import type { AqlProfile, AqlQualitySnapshot, AqlRecommendation } from '../../types';
 import { listAqlProfiles, getAqlQualitySnapshot, listAqlRecommendations } from '../../api/iqcAql';
 import AqlQualityChart from '../../components/iqc/AqlQualityChart';
 
-const STATE_MAP: Record<string, { label: string; status: 'success' | 'warning' | 'processing' | 'error' | 'default' }> = {
-  normal: { label: '正常', status: 'success' },
-  tightened: { label: '加严', status: 'warning' },
-  reduced: { label: '放宽', status: 'processing' },
-  frozen: { label: '冻结', status: 'error' },
-};
-
-const REC_STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: '待审批', color: 'orange' },
-  forwarded: { label: '已转交', color: 'blue' },
-  approved: { label: '已批准', color: 'green' },
-  effective: { label: '已生效', color: 'green' },
-  rejected: { label: '已拒绝', color: 'red' },
-  expired: { label: '已过期', color: 'default' },
-};
-
 export default function AqlProfileDetailPage() {
+  const { t, i18n } = useTranslation('iqc');
+  const { t: tc } = useTranslation('common');
   const { message: _message } = App.useApp();
   const { supplierId, materialId } = useParams<{ supplierId: string; materialId: string }>();
 
@@ -29,6 +16,28 @@ export default function AqlProfileDetailPage() {
   const [snapshot, setSnapshot] = useState<AqlQualitySnapshot | null>(null);
   const [recommendations, setRecommendations] = useState<AqlRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const stateMap = useMemo<Record<string, { label: string; status: 'success' | 'warning' | 'processing' | 'error' | 'default' }>>(
+    () => ({
+      normal: { label: t('status.profileState.normal'), status: 'success' },
+      tightened: { label: t('status.profileState.tightened'), status: 'warning' },
+      reduced: { label: t('status.profileState.reduced'), status: 'processing' },
+      frozen: { label: t('status.profileState.frozen'), status: 'error' },
+    }),
+    [t]
+  );
+
+  const recStatusMap = useMemo<Record<string, { label: string; color: string }>>(
+    () => ({
+      pending: { label: t('status.recStatus.pending'), color: 'orange' },
+      forwarded: { label: t('status.recStatus.forwarded'), color: 'blue' },
+      approved: { label: t('status.recStatus.approved'), color: 'green' },
+      effective: { label: t('status.recStatus.effective'), color: 'green' },
+      rejected: { label: t('status.recStatus.rejected'), color: 'red' },
+      expired: { label: t('status.recStatus.expired'), color: 'default' },
+    }),
+    [t]
+  );
 
   useEffect(() => {
     if (!supplierId || !materialId) return;
@@ -55,86 +64,89 @@ export default function AqlProfileDetailPage() {
   }, [supplierId, materialId]);
 
   if (loading) return <div style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /></div>;
-  if (!profile) return <Card><div style={{ textAlign: 'center', padding: 24, color: '#999' }}>未找到档案</div></Card>;
+  if (!profile) return <Card><div style={{ textAlign: 'center', padding: 24, color: '#999' }}>{t('messages.profileNotFound')}</div></Card>;
 
-  const stateCfg = STATE_MAP[profile.state] || { label: profile.state, status: 'default' as const };
+  const stateCfg = stateMap[profile.state] || { label: profile.state, status: 'default' as const };
+
+  const formatDate = (v: string | null) => v ? new Date(v).toLocaleDateString(i18n.language) : '—';
+  const formatDateTime = (v: string) => v ? new Date(v).toLocaleString(i18n.language) : '—';
 
   const recColumns = [
-    { title: '建议AQL', dataIndex: 'recommended_aql', width: 90 },
+    { title: t('table.recommendedAql'), dataIndex: 'recommended_aql', width: 90 },
     {
-      title: '方向',
+      title: t('table.direction'),
       dataIndex: 'direction',
       width: 80,
       render: (d: string) => <Tag>{d}</Tag>,
     },
     {
-      title: '状态',
+      title: t('table.status'),
       dataIndex: 'status',
       width: 90,
       render: (s: string) => {
-        const cfg = REC_STATUS_MAP[s];
+        const cfg = recStatusMap[s];
         return <Tag color={cfg?.color}>{cfg?.label || s}</Tag>;
       },
     },
-    { title: '创建时间', dataIndex: 'created_at', width: 160, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
+    { title: t('table.createdAt'), dataIndex: 'created_at', width: 160, render: formatDateTime },
   ];
 
   return (
     <div>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card><Statistic title="基准AQL" value={profile.base_aql} /></Card>
+          <Card><Statistic title={t('table.baseAql')} value={profile.base_aql} /></Card>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="当前AQL" value={profile.current_aql} /></Card>
+          <Card><Statistic title={t('table.currentAql')} value={profile.current_aql} /></Card>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="状态" value={stateCfg.label} /></Card>
+          <Card><Statistic title={t('table.state')} value={stateCfg.label} /></Card>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="生效日期" value={profile.effective_from ? new Date(profile.effective_from).toLocaleDateString('zh-CN') : '—'} /></Card>
+          <Card><Statistic title={t('table.effectiveFrom')} value={formatDate(profile.effective_from)} /></Card>
         </Col>
       </Row>
 
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={12}>
-          <Card title="检验统计" size="small">
+          <Card title={t('detail.inspectionStats')} size="small">
             {snapshot ? (
               <Descriptions column={1} bordered size="small">
-                <Descriptions.Item label="总批次数">{snapshot.total_batches}</Descriptions.Item>
-                <Descriptions.Item label="连续合格">{snapshot.consecutive_accepted}</Descriptions.Item>
-                <Descriptions.Item label="连续不合格">{snapshot.consecutive_rejected}</Descriptions.Item>
-                <Descriptions.Item label="30天批次">{snapshot.last_30d_batch_count}</Descriptions.Item>
-                <Descriptions.Item label="30天PPM">{snapshot.last_30d_ppm ?? '—'}</Descriptions.Item>
-                <Descriptions.Item label="90天PPM">{snapshot.last_90d_ppm ?? '—'}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.totalBatches')}>{snapshot.total_batches}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.consecutiveAccepted')}>{snapshot.consecutive_accepted}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.consecutiveRejected')}>{snapshot.consecutive_rejected}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.last30dBatches')}>{snapshot.last_30d_batch_count}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.last30dPpm')}>{snapshot.last_30d_ppm ?? '—'}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.last90dPpm')}>{snapshot.last_90d_ppm ?? '—'}</Descriptions.Item>
               </Descriptions>
             ) : (
-              <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>暂无数据</div>
+              <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>{tc('empty.data')}</div>
             )}
           </Card>
         </Col>
         <Col span={12}>
-          <Card title="供应商表现" size="small">
+          <Card title={t('detail.supplierPerformance')} size="small">
             {snapshot ? (
               <Descriptions column={1} bordered size="small">
-                <Descriptions.Item label="供应商评级">{snapshot.supplier_rating || '—'}</Descriptions.Item>
-                <Descriptions.Item label="未关闭SCAR">{snapshot.open_scar_count}</Descriptions.Item>
-                <Descriptions.Item label="安全缺陷">{snapshot.has_safety_defect ? '是' : '否'}</Descriptions.Item>
-                <Descriptions.Item label="关联客诉">{snapshot.linked_customer_complaint ? '是' : '否'}</Descriptions.Item>
-                <Descriptions.Item label="计算状态">{snapshot.calculated_state || '—'}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.supplierRating')}>{snapshot.supplier_rating || '—'}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.openScar')}>{snapshot.open_scar_count}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.safetyDefect')}>{snapshot.has_safety_defect ? t('status.yes') : t('status.no')}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.linkedComplaint')}>{snapshot.linked_customer_complaint ? t('status.yes') : t('status.no')}</Descriptions.Item>
+                <Descriptions.Item label={t('descriptions.calculatedState')}>{snapshot.calculated_state || '—'}</Descriptions.Item>
               </Descriptions>
             ) : (
-              <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>暂无数据</div>
+              <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>{tc('empty.data')}</div>
             )}
           </Card>
         </Col>
       </Row>
 
-      <Card title="质量趋势" style={{ marginBottom: 24 }}>
+      <Card title={t('detail.qualityTrend')} style={{ marginBottom: 24 }}>
         <AqlQualityChart snapshots={snapshot ? [snapshot] : []} />
       </Card>
 
-      <Card title="历史建议">
+      <Card title={t('detail.historyRecommendations')}>
         <Table
           rowKey="recommendation_id"
           columns={recColumns}

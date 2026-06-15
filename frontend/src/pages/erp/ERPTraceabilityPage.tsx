@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Input, Button, Radio, Card, Tag, Alert, Typography, App } from "antd";
+import { useTranslation } from "react-i18next";
 import { queryERPTraceability } from "../../api/erp";
 import type { TraceabilityResponse, TraceabilityNode } from "../../types/erp";
 
@@ -14,6 +15,7 @@ const nodeTypeColors: Record<string, string> = {
 };
 
 export default function ERPTraceabilityPage() {
+  const { t } = useTranslation("erp");
   const { message } = App.useApp();
   const [lotNo, setLotNo] = useState("");
   const [direction, setDirection] = useState<"forward" | "backward">("forward");
@@ -27,7 +29,7 @@ export default function ERPTraceabilityPage() {
       const res = await queryERPTraceability(lotNo.trim(), direction);
       setResult(res);
     } catch {
-      message.error("追溯查询失败");
+      message.error(t("traceability.errors.queryFailed"));
       setResult(null);
     } finally {
       setLoading(false);
@@ -42,13 +44,13 @@ export default function ERPTraceabilityPage() {
   return (
     <div>
       <Title level={4} style={{ marginBottom: 16 }}>
-        批次追溯
+        {t("traceability.title")}
       </Title>
 
       <Card>
         <div style={{ display: "flex", gap: 16, marginBottom: 16, alignItems: "center" }}>
           <Input
-            placeholder="输入批次号"
+            placeholder={t("traceability.lotPlaceholder")}
             value={lotNo}
             onChange={(e) => setLotNo(e.target.value)}
             onPressEnter={handleSearch}
@@ -58,11 +60,11 @@ export default function ERPTraceabilityPage() {
             value={direction}
             onChange={(e) => setDirection(e.target.value)}
           >
-            <Radio.Button value="forward">正向（原料 → 客户）</Radio.Button>
-            <Radio.Button value="backward">反向（客户 → 原料）</Radio.Button>
+            <Radio.Button value="forward">{t("traceability.direction.forward")}</Radio.Button>
+            <Radio.Button value="backward">{t("traceability.direction.backward")}</Radio.Button>
           </Radio.Group>
           <Button type="primary" onClick={handleSearch} loading={loading}>
-            查询
+            {t("traceability.search")}
           </Button>
         </div>
 
@@ -82,7 +84,7 @@ export default function ERPTraceabilityPage() {
 
         {result && (
           <>
-            <Title level={5}>追溯节点</Title>
+            <Title level={5}>{t("traceability.nodes")}</Title>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 24 }}>
               {result.nodes.map((node) => (
                 <Card
@@ -100,7 +102,7 @@ export default function ERPTraceabilityPage() {
 
             {result.edges.length > 0 && (
               <>
-                <Title level={5}>追溯关系</Title>
+                <Title level={5}>{t("traceability.edges")}</Title>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {result.edges.map((edge, i) => (
                     <div key={i}>
@@ -117,7 +119,7 @@ export default function ERPTraceabilityPage() {
             )}
 
             {result.nodes.length === 0 && (
-              <Alert type="info" message="未找到追溯数据" />
+              <Alert type="info" message={t("traceability.noData")} />
             )}
           </>
         )}

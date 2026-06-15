@@ -1,4 +1,5 @@
 {
+  "supplier": "供应商",
   "status": {
     "pending_review": "待审核",
     "audit_required": "需审核",

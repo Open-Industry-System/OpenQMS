@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Tree, Button, Space, Input, Modal, Form, App } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { GraphNode, GraphEdge } from "../../types";
@@ -27,12 +28,19 @@ export default function StructureTree({
   isViewer,
   onSelectNode,
 }: StructureTreeProps) {
+  const { t } = useTranslation("dfmea");
+  const { t: tc } = useTranslation("common");
+  const { t: tv } = useTranslation("validation");
   const { message } = App.useApp();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingNode, setEditingNode] = useState<GraphNode | null>(null);
   const [parentId, setParentId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+
+  const typeLabel = useCallback((type: string) => {
+    return t(`structureTree.typeLabels.${type}`, { defaultValue: type });
+  }, [t]);
 
   const buildTreeData = useCallback(() => {
     const structureNodes = nodes.filter((n) => STRUCTURE_TYPES.includes(n.type));
@@ -57,7 +65,7 @@ export default function StructureTree({
           <Space>
             <span style={{ fontWeight: node.type === "System" ? 600 : 400 }}>{node.name}</span>
             <span style={{ fontSize: 11, color: "#999" }}>
-              {node.type === "System" ? "系统" : node.type === "Subsystem" ? "子系统" : "零部件"}
+              {typeLabel(node.type)}
             </span>
           </Space>
         ),
@@ -71,7 +79,7 @@ export default function StructureTree({
     );
     const roots = structureNodes.filter((n) => !childrenIds.has(n.id));
     return roots.map((r) => buildNode(r.id)).filter(Boolean);
-  }, [nodes, edges]);
+  }, [nodes, edges, typeLabel]);
 
   const handleAdd = (parentNodeId?: string) => {
     setEditingNode(null);
@@ -106,7 +114,7 @@ export default function StructureTree({
 
     onUpdateNodes(nodes.filter((n) => !toDelete.has(n.id)));
     onUpdateEdges(edges.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target)));
-    message.success("已删除");
+    message.success(tc("messages.deleteSuccess"));
   };
 
   const handleSave = (values: { name: string; type: string; description?: string }) => {
@@ -147,14 +155,14 @@ export default function StructureTree({
       {!isViewer && (
         <div style={{ marginBottom: 12 }}>
           <Button size="small" icon={<PlusOutlined />} onClick={() => handleAdd()}>
-            添加系统
+            {t("structureTree.addSystem")}
           </Button>
         </div>
       )}
 
       {treeData.length === 0 && (
         <div style={{ textAlign: "center", padding: 40, color: "#999" }}>
-          暂无结构节点
+          {t("structureTree.empty")}
         </div>
       )}
 
@@ -200,21 +208,21 @@ export default function StructureTree({
       />
 
       <Modal
-        title={editingNode ? "编辑节点" : "添加节点"}
+        title={editingNode ? t("structureTree.editNode") : t("structureTree.addNode")}
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => setModalOpen(false)}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={handleSave}>
-          <Form.Item name="type" label="类型" rules={[{ required: true }]}>
+          <Form.Item name="type" label={t("structureTree.type")} rules={[{ required: true }]}>
             <Input disabled />
           </Form.Item>
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: "请输入名称" }]}>
-            <Input placeholder="如 BMS / BMU / LTC6811" />
+          <Form.Item name="name" label={t("structureTree.name")} rules={[{ required: true, message: tv("required", { field: t("structureTree.name") }) }]}>
+            <Input placeholder={t("structureTree.namePlaceholder")} />
           </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={2} placeholder="可选描述" />
+          <Form.Item name="description" label={t("structureTree.description")}>
+            <Input.TextArea rows={2} placeholder={t("structureTree.descriptionPlaceholder")} />
           </Form.Item>
         </Form>
       </Modal>

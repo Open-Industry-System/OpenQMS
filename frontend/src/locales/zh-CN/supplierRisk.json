@@ -1,0 +1,133 @@
+{
+  "page": {
+    "evaluateAll": "立即评估全部",
+    "evaluateSuccess": "全量评估完成",
+    "evaluateFailed": "评估失败",
+    "highRiskSuppliers": "高风险供应商",
+    "criticalRisk": "极高风险",
+    "openAlerts": "开放预警",
+    "avgRiskScore": "平均风险分",
+    "riskMatrixTitle": "风险矩阵（质量 vs 交付）",
+    "alertListTitle": "预警列表",
+    "noData": "暂无数据"
+  },
+  "config": {
+    "rules": "规则配置",
+    "channels": "通知渠道"
+  },
+  "alert": {
+    "columns": {
+      "supplierNo": "供应商编号",
+      "supplierName": "供应商名称",
+      "riskLevel": "风险等级",
+      "riskScore": "风险分",
+      "status": "状态",
+      "snapshotDate": "快照日期",
+      "actions": "操作"
+    },
+    "placeholder": {
+      "riskLevel": "风险等级",
+      "status": "状态"
+    },
+    "handle": "处置",
+    "riskLevels": {
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "critical": "极高"
+    },
+    "statuses": {
+      "open": "开放",
+      "acknowledged": "已确认",
+      "action_taken": "已处置",
+      "ignored": "已忽略",
+      "closed": "已关闭"
+    }
+  },
+  "channel": {
+    "add": "添加渠道",
+    "addTitle": "添加通知渠道",
+    "columns": {
+      "type": "类型",
+      "minRiskLevel": "最低风险等级",
+      "enabled": "启用",
+      "actions": "操作"
+    },
+    "types": {
+      "email": "邮件",
+      "webhook": "Webhook"
+    },
+    "minRiskLevels": {
+      "high": "高",
+      "critical": "极高"
+    },
+    "form": {
+      "type": "类型",
+      "minRiskLevel": "最低风险等级",
+      "emailAddresses": "邮件地址（逗号分隔）",
+      "webhookUrl": "Webhook URL",
+      "secret": "签名密钥"
+    },
+    "placeholders": {
+      "emailAddresses": "a@b.com,c@d.com",
+      "webhookUrl": "https://hooks.example.com/..."
+    },
+    "messages": {
+      "created": "已创建",
+      "createFailed": "创建失败",
+      "updateFailed": "更新失败",
+      "deleted": "已删除",
+      "deleteFailed": "删除失败"
+    }
+  },
+  "handleDrawer": {
+    "title": "预警处置 — {{supplier_name}}",
+    "labels": {
+      "riskLevel": "风险等级",
+      "totalScore": "综合风险分",
+      "qualityScore": "质量分",
+      "deliveryScore": "交付分",
+      "complianceScore": "合规分",
+      "currentStatus": "当前状态"
+    },
+    "notePlaceholder": "处置备注（忽略时必填理由）",
+    "actions": {
+      "acknowledge": "确认",
+      "ignore": "忽略",
+      "close": "关闭",
+      "createScar": "创建 SCAR",
+      "createCapa": "创建 CAPA"
+    },
+    "messages": {
+      "ignoreReasonRequired": "忽略预警需填写理由",
+      "operationSuccess": "操作成功",
+      "operationFailed": "操作失败",
+      "scarCreated": "SCAR 已创建",
+      "capaCreated": "CAPA 已创建",
+      "createFailed": "创建失败"
+    }
+  },
+  "ruleConfig": {
+    "columns": {
+      "rule": "规则",
+      "category": "类别",
+      "enabled": "启用",
+      "weight": "权重",
+      "threshold": "阈值"
+    },
+    "categories": {
+      "quality": "质量",
+      "delivery": "交付",
+      "compliance": "合规"
+    },
+    "messages": {
+      "updateSuccess": "已更新",
+      "weightUpdated": "权重已更新",
+      "updateFailed": "更新失败"
+    }
+  },
+  "riskMatrix": {
+    "xAxis": "质量风险分",
+    "yAxis": "交付风险分"
+  }
+}

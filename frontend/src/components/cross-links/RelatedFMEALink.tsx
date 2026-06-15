@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Tag } from "antd";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import client from "../../api/client";
 
 interface FMEAInfo {
@@ -16,6 +17,7 @@ export default function RelatedFMEALink({
   fmeaNodeId?: string | null;
 }) {
   const navigate = useNavigate();
+  const { t } = useTranslation("capa");
   const [fmea, setFmea] = useState<FMEAInfo | null>(null);
 
   useEffect(() => {
@@ -37,7 +39,7 @@ export default function RelatedFMEALink({
   return (
     <Tag color="blue" style={{ cursor: "pointer" }} onClick={handleClick}>
       {fmea.document_no}
-      {fmeaNodeId && " (失效模式)"}
+      {fmeaNodeId && t("fmea.failureModeSuffix")}
     </Tag>
   );
 }

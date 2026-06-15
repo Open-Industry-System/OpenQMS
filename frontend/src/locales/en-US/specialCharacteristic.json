@@ -1,0 +1,171 @@
+{
+  "pageTitle": {
+    "scList": "Special Characteristics",
+    "scMatrix": "Special Characteristic Coverage Matrix",
+    "scTraceability": "Special Characteristic Traceability",
+    "newSC": "New Special Characteristic",
+    "scDetail": "Special Characteristic Detail"
+  },
+  "filter": {
+    "type": "Type filter",
+    "source": "Source filter",
+    "safetyRelated": "Safety related",
+    "approvalStatus": "Approval status",
+    "suggestedOnly": "Suggested only",
+    "all": "All"
+  },
+  "scType": {
+    "CC": "CC",
+    "SC": "SC",
+    "critical": "Critical Characteristic (CC)",
+    "significant": "Significant Characteristic (SC)"
+  },
+  "sourceType": {
+    "DFMEA": "DFMEA",
+    "PFMEA": "PFMEA"
+  },
+  "approvalStatus": {
+    "pending": "Pending",
+    "submitted": "Submitted",
+    "approved": "Approved",
+    "rejected": "Rejected"
+  },
+  "column": {
+    "scCode": "SC Code",
+    "name": "Name",
+    "type": "Type",
+    "customerSymbol": "Customer Symbol",
+    "category": "Category",
+    "sourceType": "Source Type",
+    "sourceFMEA": "Source FMEA",
+    "msaStatus": "MSA Status",
+    "actions": "Actions"
+  },
+  "matrixColumn": {
+    "dfmea": "DFMEA",
+    "pfmea": "PFMEA",
+    "cp": "CP",
+    "msa": "MSA",
+    "sop": "SOP"
+  },
+  "matrix": {
+    "coverageStats": "Coverage Statistics",
+    "total": "Total Characteristics",
+    "dfmeaCoverage": "DFMEA Coverage",
+    "pfmeaCoverage": "PFMEA Coverage",
+    "cpCoverage": "CP Coverage",
+    "msaPass": "MSA Pass",
+    "sopCoverage": "SOP Coverage"
+  },
+  "traceability": {
+    "selectSC": "Select Special Characteristic",
+    "placeholder": "Select a CC / SC characteristic",
+    "specRequirement": "Specification Requirement",
+    "fmeaSource": "FMEA Source",
+    "notLinkedFMEA": "No FMEA source linked",
+    "relatedFailureModes": "Related Failure Modes",
+    "controlPlan": "Control Plan",
+    "notInControlPlan": "Not referenced in control plan",
+    "step": "Step",
+    "specification": "Specification",
+    "msaAnalysis": "MSA Analysis",
+    "msaDescription": "Gauge & Measurement System Analysis (managed via gauge register)",
+    "spcMonitor": "SPC Monitoring",
+    "notLinkedSPC": "No SPC inspection characteristic linked",
+    "targetValue": "Target",
+    "usl": "USL",
+    "lsl": "LSL",
+    "emptySelect": "Please select a special characteristic to view its traceability chain",
+    "loadFailed": "Unable to load traceability chain"
+  },
+  "form": {
+    "scType": "Characteristic Type",
+    "scName": "Characteristic Name",
+    "scCategory": "Characteristic Category",
+    "customerSymbol": "Customer Symbol",
+    "specRequirement": "Specification Requirement",
+    "sopRef": "SOP Reference",
+    "supplierShared": "Supplier Shared",
+    "supplierCode": "Supplier Code"
+  },
+  "category": {
+    "product": "Product Characteristic",
+    "process": "Process Characteristic"
+  },
+  "placeholder": {
+    "scName": "Enter characteristic name",
+    "customerSymbol": "Customer special symbol identifier",
+    "specRequirement": "Enter specification requirement",
+    "sopRef": "SOP document number",
+    "supplierCode": "Supplier code",
+    "selectType": "Please select",
+    "safetyRegulationRef": "e.g. UN ECE R100, GB/T 18384",
+    "safetyVerificationMethod": "e.g. 100% high-voltage insulation test"
+  },
+  "card": {
+    "basicInfo": "Basic Information",
+    "sourceFMEAInfo": "Source FMEA Info",
+    "editInfo": "Edit Info",
+    "createInfo": "Create Info",
+    "safetyCharacteristic": "Safety Characteristic"
+  },
+  "label": {
+    "scCode": "SC Code",
+    "type": "Type",
+    "productLine": "Product Line",
+    "sourceType": "Source Type",
+    "sourceFMEADoc": "Source FMEA Document",
+    "sourceNodeId": "Source Node ID",
+    "parentSC": "Parent SC",
+    "msaStatus": "MSA Status",
+    "fmeaTitle": "FMEA Title",
+    "viewFMEA": "View FMEA",
+    "safetyRelated": "Safety Related",
+    "safetyRegulationRef": "Safety Regulation Reference",
+    "safetyVerificationMethod": "Safety Verification Method",
+    "submitForApproval": "Submit for Approval",
+    "approve": "Approve",
+    "reject": "Reject"
+  },
+  "timeline": {
+    "pending": "Pending: fill safety info and submit for approval",
+    "submitted": "Submitted: {{time}}",
+    "approved": "Approved: {{time}}",
+    "rejected": "Rejected: {{time}}{{comment}}",
+    "result": "Approval Result"
+  },
+  "action": {
+    "view": "View",
+    "confirmSafety": "Confirm Safety",
+    "dismiss": "Dismiss",
+    "delete": "Delete",
+    "backToList": "Back to List"
+  },
+  "message": {
+    "loadFailed": "Failed to load special characteristic",
+    "createSuccess": "Created successfully",
+    "saveSuccess": "Saved successfully",
+    "createFailed": "Create failed",
+    "saveFailed": "Save failed",
+    "deleteSuccess": "Deleted successfully",
+    "deleteFailed": "Delete failed",
+    "confirmSafetySuccess": "Confirmed as safety characteristic",
+    "confirmSafetyFailed": "Confirm failed",
+    "dismissSuccess": "Safety suggestion dismissed",
+    "dismissFailed": "Dismiss failed",
+    "adminOnlyCancel": "Only administrators or managers can cancel safety marking",
+    "cancelSafetySuccess": "Safety marking cancelled",
+    "cancelFailed": "Cancel failed",
+    "safetySubmitted": "Safety characteristic submitted for approval",
+    "submitFailed": "Submit failed",
+    "approved": "Approved",
+    "approveFailed": "Approval failed",
+    "rejected": "Rejected",
+    "rejectFailed": "Reject failed",
+    "notFound": "Special characteristic not found",
+    "selectType": "Please select characteristic type",
+    "enterName": "Please enter characteristic name",
+    "enterRegulationRef": "Please enter regulation reference",
+    "enterVerificationMethod": "Please enter verification method"
+  }
+}

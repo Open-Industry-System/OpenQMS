@@ -1,0 +1,171 @@
+{
+  "pageTitle": {
+    "scList": "特殊特性清单",
+    "scMatrix": "特殊特性覆盖矩阵",
+    "scTraceability": "特殊特性贯穿追踪",
+    "newSC": "新建特殊特性",
+    "scDetail": "特殊特性详情"
+  },
+  "filter": {
+    "type": "类型筛选",
+    "source": "来源筛选",
+    "safetyRelated": "安全相关",
+    "approvalStatus": "审批状态",
+    "suggestedOnly": "仅建议",
+    "all": "全部"
+  },
+  "scType": {
+    "CC": "CC",
+    "SC": "SC",
+    "critical": "关键特性 (CC)",
+    "significant": "重要特性 (SC)"
+  },
+  "sourceType": {
+    "DFMEA": "DFMEA",
+    "PFMEA": "PFMEA"
+  },
+  "approvalStatus": {
+    "pending": "待提交",
+    "submitted": "待审批",
+    "approved": "已批准",
+    "rejected": "已驳回"
+  },
+  "column": {
+    "scCode": "SC编号",
+    "name": "名称",
+    "type": "类型",
+    "customerSymbol": "客户符号",
+    "category": "分类",
+    "sourceType": "来源类型",
+    "sourceFMEA": "来源FMEA",
+    "msaStatus": "MSA状态",
+    "actions": "操作"
+  },
+  "matrixColumn": {
+    "dfmea": "DFMEA",
+    "pfmea": "PFMEA",
+    "cp": "CP",
+    "msa": "MSA",
+    "sop": "SOP"
+  },
+  "matrix": {
+    "coverageStats": "覆盖率统计",
+    "total": "特性总数",
+    "dfmeaCoverage": "DFMEA覆盖",
+    "pfmeaCoverage": "PFMEA覆盖",
+    "cpCoverage": "CP覆盖",
+    "msaPass": "MSA通过",
+    "sopCoverage": "SOP覆盖"
+  },
+  "traceability": {
+    "selectSC": "选择特殊特性",
+    "placeholder": "选择一个 CC / SC 特性",
+    "specRequirement": "规格要求",
+    "fmeaSource": "FMEA 来源",
+    "notLinkedFMEA": "未关联 FMEA 来源",
+    "relatedFailureModes": "关联失效模式",
+    "controlPlan": "控制计划",
+    "notInControlPlan": "未在控制计划中引用",
+    "step": "步骤",
+    "specification": "规格",
+    "msaAnalysis": "MSA 分析",
+    "msaDescription": "量具与测量系统分析（通过量具台账管理）",
+    "spcMonitor": "SPC 监控",
+    "notLinkedSPC": "未关联 SPC 检验特性",
+    "targetValue": "目标值",
+    "usl": "USL",
+    "lsl": "LSL",
+    "emptySelect": "请选择一个特殊特性以查看其贯穿追踪链",
+    "loadFailed": "无法获取追溯链"
+  },
+  "form": {
+    "scType": "特性类型",
+    "scName": "特性名称",
+    "scCategory": "特性分类",
+    "customerSymbol": "客户符号",
+    "specRequirement": "规格要求",
+    "sopRef": "SOP参考",
+    "supplierShared": "供应商共享",
+    "supplierCode": "供应商代码"
+  },
+  "category": {
+    "product": "产品特性",
+    "process": "过程特性"
+  },
+  "placeholder": {
+    "scName": "请输入特性名称",
+    "customerSymbol": "客户特殊符号标识",
+    "specRequirement": "请输入规格要求",
+    "sopRef": "SOP文档编号",
+    "supplierCode": "供应商代码",
+    "selectType": "请选择",
+    "safetyRegulationRef": "例：UN ECE R100, GB/T 18384",
+    "safetyVerificationMethod": "例：100% 高压绝缘测试"
+  },
+  "card": {
+    "basicInfo": "基本信息",
+    "sourceFMEAInfo": "来源FMEA信息",
+    "editInfo": "编辑信息",
+    "createInfo": "创建信息",
+    "safetyCharacteristic": "安全特性"
+  },
+  "label": {
+    "scCode": "SC编号",
+    "type": "类型",
+    "productLine": "产品线",
+    "sourceType": "来源类型",
+    "sourceFMEADoc": "来源FMEA文档",
+    "sourceNodeId": "来源节点ID",
+    "parentSC": "父级特性",
+    "msaStatus": "MSA状态",
+    "fmeaTitle": "FMEA标题",
+    "viewFMEA": "查看FMEA",
+    "safetyRelated": "安全相关",
+    "safetyRegulationRef": "安全法规引用",
+    "safetyVerificationMethod": "安全验证方法",
+    "submitForApproval": "提交审批",
+    "approve": "批准",
+    "reject": "驳回"
+  },
+  "timeline": {
+    "pending": "待提交：填写安全信息并提交审批",
+    "submitted": "已提交：{{time}}",
+    "approved": "已批准：{{time}}",
+    "rejected": "已驳回：{{time}}{{comment}}",
+    "result": "审批结果"
+  },
+  "action": {
+    "view": "查看",
+    "confirmSafety": "确认安全",
+    "dismiss": "忽略",
+    "delete": "删除",
+    "backToList": "返回列表"
+  },
+  "message": {
+    "loadFailed": "加载特殊特性失败",
+    "createSuccess": "创建成功",
+    "saveSuccess": "保存成功",
+    "createFailed": "创建失败",
+    "saveFailed": "保存失败",
+    "deleteSuccess": "删除成功",
+    "deleteFailed": "删除失败",
+    "confirmSafetySuccess": "已确认为安全特性",
+    "confirmSafetyFailed": "确认失败",
+    "dismissSuccess": "已忽略安全建议",
+    "dismissFailed": "忽略失败",
+    "adminOnlyCancel": "仅管理员或经理可取消安全标记",
+    "cancelSafetySuccess": "已取消安全标记",
+    "cancelFailed": "取消失败",
+    "safetySubmitted": "安全特性已提交审批",
+    "submitFailed": "提交失败",
+    "approved": "已批准",
+    "approveFailed": "审批失败",
+    "rejected": "已驳回",
+    "rejectFailed": "驳回失败",
+    "notFound": "未找到特殊特性",
+    "selectType": "请选择特性类型",
+    "enterName": "请输入特性名称",
+    "enterRegulationRef": "请输入法规引用",
+    "enterVerificationMethod": "请输入验证方法"
+  }
+}

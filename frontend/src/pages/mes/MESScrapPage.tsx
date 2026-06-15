@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Table, Tag, Typography, Select, App,
 } from "antd";
+import { useTranslation } from "react-i18next";
 import { listScrapRecords } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { MESScrapRecord } from "../../types/mes";
@@ -14,13 +15,18 @@ const defectColors: Record<string, string> = {
   reject: "error",
 };
 
-const defectLabels: Record<string, string> = {
-  scrap: "报废",
-  rework: "返工",
-  reject: "拒收",
-};
+function useDefectLabels() {
+  const { t } = useTranslation("mes");
+  return useMemo(() => ({
+    scrap: t("scrap.defectType.scrap"),
+    rework: t("scrap.defectType.rework"),
+    reject: t("scrap.defectType.reject"),
+  }), [t]);
+}
 
 export default function MESScrapPage() {
+  const { t } = useTranslation("mes");
+  const defectLabels = useDefectLabels();
   const { message } = App.useApp();
   const [data, setData] = useState<MESScrapRecord[]>([]);
   const [total, setTotal] = useState(0);
@@ -36,7 +42,7 @@ export default function MESScrapPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载不良记录失败"))
+      .catch(() => message.error(t("scrap.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -50,40 +56,45 @@ export default function MESScrapPage() {
     setPage(1);
   };
 
+  const defectOptions = useMemo(
+    () => Object.entries(defectLabels).map(([value, label]) => ({ value, label })),
+    [defectLabels],
+  );
+
   const columns = [
-    { title: "外部ID", dataIndex: "external_id", key: "external_id", width: 140 },
+    { title: t("scrap.columns.externalId"), dataIndex: "external_id", key: "external_id", width: 140 },
     {
-      title: "不良类型",
+      title: t("scrap.columns.defectType"),
       dataIndex: "defect_type",
       key: "defect_type",
       width: 100,
-      render: (t: string) => (
-        <Tag color={defectColors[t] || "default"}>
-          {defectLabels[t] || t}
+      render: (type: string) => (
+        <Tag color={defectColors[type] || "default"}>
+          {defectLabels[type as keyof typeof defectLabels] || type}
         </Tag>
       ),
     },
     {
-      title: "不良分类",
+      title: t("scrap.columns.defectCategory"),
       dataIndex: "defect_category",
       key: "defect_category",
       width: 120,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "不良数量",
+      title: t("scrap.columns.defectQty"),
       dataIndex: "defect_qty",
       key: "defect_qty",
       width: 100,
     },
     {
-      title: "总数量",
+      title: t("scrap.columns.totalQty"),
       dataIndex: "total_qty",
       key: "total_qty",
       width: 100,
     },
     {
-      title: "不良率 (%)",
+      title: t("scrap.columns.defectRate"),
       key: "defect_rate",
       width: 110,
       render: (_: unknown, record: MESScrapRecord) => {
@@ -94,36 +105,32 @@ export default function MESScrapPage() {
       },
     },
     {
-      title: "不良描述",
+      title: t("scrap.columns.defectDescription"),
       dataIndex: "defect_description",
       key: "defect_description",
       ellipsis: true,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "记录时间",
+      title: t("scrap.columns.recordedAt"),
       dataIndex: "recorded_at",
       key: "recorded_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      render: (v: string) => new Date(v).toLocaleString(),
     },
   ];
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, alignItems: "center" }}>
-        <Title level={4} style={{ margin: 0 }}>不良记录</Title>
+        <Title level={4} style={{ margin: 0 }}>{t("scrap.title")}</Title>
         <Select
-          placeholder="筛选不良类型"
+          placeholder={t("scrap.filterPlaceholder")}
           allowClear
           style={{ width: 140 }}
           value={defectFilter || undefined}
           onChange={handleDefectChange}
-          options={[
-            { value: "scrap", label: "报废" },
-            { value: "rework", label: "返工" },
-            { value: "reject", label: "拒收" },
-          ]}
+          options={defectOptions}
         />
       </div>
 

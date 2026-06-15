@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Table, Tag, Typography, App, Select, Tabs,
 } from "antd";
+import { useTranslation } from "react-i18next";
 import {
   fetchERPPurchaseOrders,
   fetchERPInventoryBalances,
@@ -22,16 +23,21 @@ const poStatusColor: Record<string, string> = {
   closed: "default",
 };
 
-const poStatusLabel: Record<string, string> = {
-  draft: "草稿",
-  submitted: "已提交",
-  confirmed: "已确认",
-  partially_received: "部分收货",
-  received: "已收货",
-  closed: "已关闭",
-};
+function usePOStatusLabel() {
+  const { t } = useTranslation("erp");
+  return useMemo(() => ({
+    draft: t("supplyChain.poStatus.draft"),
+    submitted: t("supplyChain.poStatus.submitted"),
+    confirmed: t("supplyChain.poStatus.confirmed"),
+    partially_received: t("supplyChain.poStatus.partiallyReceived"),
+    received: t("supplyChain.poStatus.received"),
+    closed: t("supplyChain.poStatus.closed"),
+  }), [t]);
+}
 
 function PurchaseOrdersTab() {
+  const { t } = useTranslation("erp");
+  const poStatusLabel = usePOStatusLabel();
   const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPPurchaseOrder[]>([]);
@@ -53,7 +59,7 @@ function PurchaseOrdersTab() {
           setTotal(res.total);
         }
       })
-      .catch(() => message.error("加载采购订单失败"))
+      .catch(() => message.error(t("supplyChain.messages.loadPurchaseOrdersFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -67,38 +73,38 @@ function PurchaseOrdersTab() {
   };
 
   const columns = [
-    { title: "采购单号", dataIndex: "po_number", key: "po_number", width: 140 },
-    { title: "行号", dataIndex: "line_number", key: "line_number", width: 80 },
-    { title: "供应商编码", dataIndex: "supplier_code", key: "supplier_code", width: 130, render: (v: string | null) => v || "—" },
-    { title: "物料编码", dataIndex: "material_code", key: "material_code", width: 130, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.columns.poNumber"), dataIndex: "po_number", key: "po_number", width: 140 },
+    { title: t("supplyChain.columns.lineNumber"), dataIndex: "line_number", key: "line_number", width: 80 },
+    { title: t("supplyChain.columns.supplierCode"), dataIndex: "supplier_code", key: "supplier_code", width: 130, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.columns.materialCode"), dataIndex: "material_code", key: "material_code", width: 130, render: (v: string | null) => v || "—" },
     {
-      title: "数量",
+      title: t("supplyChain.columns.quantity"),
       dataIndex: "quantity",
       key: "quantity",
       width: 90,
       render: (v: number | null) => v ?? "—",
     },
     {
-      title: "已收货",
+      title: t("supplyChain.columns.receivedQuantity"),
       dataIndex: "received_quantity",
       key: "received_quantity",
       width: 90,
       render: (v: number | null) => v ?? "—",
     },
-    { title: "批次号", dataIndex: "lot_no", key: "lot_no", width: 130, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.columns.lotNo"), dataIndex: "lot_no", key: "lot_no", width: 130, render: (v: string | null) => v || "—" },
     {
-      title: "状态",
+      title: t("supplyChain.columns.status"),
       dataIndex: "status",
       key: "status",
       width: 110,
       render: (s: string) => (
         <Tag color={poStatusColor[s] || "default"}>
-          {poStatusLabel[s] || s}
+          {poStatusLabel[s as keyof typeof poStatusLabel] || s}
         </Tag>
       ),
     },
     {
-      title: "交货日期",
+      title: t("supplyChain.columns.deliveryDate"),
       dataIndex: "delivery_date",
       key: "delivery_date",
       width: 120,
@@ -110,7 +116,7 @@ function PurchaseOrdersTab() {
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
         <Select
-          placeholder="筛选状态"
+          placeholder={t("supplyChain.filterStatusPlaceholder")}
           allowClear
           style={{ width: 140 }}
           value={statusFilter || undefined}
@@ -143,14 +149,19 @@ const invStatusColor: Record<string, string> = {
   in_inspection: "blue",
 };
 
-const invStatusLabel: Record<string, string> = {
-  available: "可用",
-  restricted: "受限",
-  blocked: "冻结",
-  in_inspection: "检验中",
-};
+function useInvStatusLabel() {
+  const { t } = useTranslation("erp");
+  return useMemo(() => ({
+    available: t("supplyChain.inventoryStatus.available"),
+    restricted: t("supplyChain.inventoryStatus.restricted"),
+    blocked: t("supplyChain.inventoryStatus.blocked"),
+    in_inspection: t("supplyChain.inventoryStatus.inInspection"),
+  }), [t]);
+}
 
 function InventoryBalancesTab() {
+  const { t } = useTranslation("erp");
+  const invStatusLabel = useInvStatusLabel();
   const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPInventoryBalance[]>([]);
@@ -165,7 +176,7 @@ function InventoryBalancesTab() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载库存余额失败"))
+      .catch(() => message.error(t("supplyChain.messages.loadInventoryFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -173,26 +184,26 @@ function InventoryBalancesTab() {
   }, [productLine]);
 
   const columns = [
-    { title: "物料编码", dataIndex: "material_code", key: "material_code", width: 140 },
-    { title: "库位编码", dataIndex: "location_code", key: "location_code", width: 130 },
-    { title: "批次号", dataIndex: "lot_no", key: "lot_no", width: 130 },
-    { title: "供应商批次号", dataIndex: "supplier_lot_no", key: "supplier_lot_no", width: 130, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.columns.materialCode"), dataIndex: "material_code", key: "material_code", width: 140 },
+    { title: t("supplyChain.columns.locationCode"), dataIndex: "location_code", key: "location_code", width: 130 },
+    { title: t("supplyChain.columns.lotNo"), dataIndex: "lot_no", key: "lot_no", width: 130 },
+    { title: t("supplyChain.columns.supplierLotNo"), dataIndex: "supplier_lot_no", key: "supplier_lot_no", width: 130, render: (v: string | null) => v || "—" },
     {
-      title: "数量",
+      title: t("supplyChain.columns.quantity"),
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
       render: (v: number | null) => v ?? "—",
     },
-    { title: "单位", dataIndex: "unit", key: "unit", width: 70, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.columns.unit"), dataIndex: "unit", key: "unit", width: 70, render: (v: string | null) => v || "—" },
     {
-      title: "库存状态",
+      title: t("supplyChain.columns.inventoryStatus"),
       dataIndex: "inventory_status",
       key: "inventory_status",
       width: 110,
       render: (v: string) => (
         <Tag color={invStatusColor[v] || "default"}>
-          {invStatusLabel[v] || v}
+          {invStatusLabel[v as keyof typeof invStatusLabel] || v}
         </Tag>
       ),
     },
@@ -216,17 +227,18 @@ function InventoryBalancesTab() {
 
 // ─── Main Page ───
 
-const tabItems = [
-  { key: "purchase_orders", label: "采购订单", children: <PurchaseOrdersTab /> },
-  { key: "inventory", label: "库存余额", children: <InventoryBalancesTab /> },
-];
-
 export default function ERPSupplyChainPage() {
+  const { t } = useTranslation("erp");
   const [activeTab, setActiveTab] = useState("purchase_orders");
+
+  const tabItems = [
+    { key: "purchase_orders", label: t("supplyChain.tabs.purchaseOrders"), children: <PurchaseOrdersTab /> },
+    { key: "inventory", label: t("supplyChain.tabs.inventory"), children: <InventoryBalancesTab /> },
+  ];
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>ERP 供应链</Title>
+      <Title level={4} style={{ marginBottom: 16 }}>{t("supplyChain.title")}</Title>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}

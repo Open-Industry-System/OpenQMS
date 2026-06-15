@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { Radio, Spin, Empty, Tag, Card, Descriptions, Typography } from "antd";
+import { useTranslation } from "react-i18next";
 import type {
   FMEACompareResponse,
   CPCompareResponse,
@@ -25,9 +26,11 @@ type FilterKey = "all" | "added" | "deleted" | "modified";
 function FMEADiffSection({
   diff,
   filter,
+  t,
 }: {
   diff: FMEACompareResponse["diff"];
   filter: FilterKey;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const filteredAdded =
     filter === "all" || filter === "added" ? diff.added_nodes : [];
@@ -39,16 +42,16 @@ function FMEADiffSection({
   return (
     <div>
       {filteredAdded.map((node) => (
-        <NodeCard key={node.id} node={node} diffType="added" />
+        <NodeCard key={node.id} node={node} diffType="added" t={t} />
       ))}
       {filteredDeleted.map((node) => (
-        <NodeCard key={node.id} node={node} diffType="deleted" />
+        <NodeCard key={node.id} node={node} diffType="deleted" t={t} />
       ))}
       {filteredModified.map((node) => (
-        <ModifiedNodeCard key={node.node_id} node={node} />
+        <ModifiedNodeCard key={node.node_id} node={node} t={t} />
       ))}
       {filteredAdded.length + filteredDeleted.length + filteredModified.length === 0 && (
-        <Empty description="无匹配变更" />
+        <Empty description={t("compare.noMatch")} />
       )}
     </div>
   );
@@ -57,9 +60,11 @@ function FMEADiffSection({
 function NodeCard({
   node,
   diffType,
+  t,
 }: {
   node: GraphNode;
   diffType: "added" | "deleted";
+  t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const bg =
     diffType === "added"
@@ -69,7 +74,7 @@ function NodeCard({
     diffType === "added"
       ? "#b7eb8f"
       : "#ffccc7";
-  const label = diffType === "added" ? "新增" : "删除";
+  const label = diffType === "added" ? t("compare.addedTag") : t("compare.deletedTag");
   const tagColor = diffType === "added" ? "green" : "red";
 
   return (
@@ -90,14 +95,14 @@ function NodeCard({
   );
 }
 
-function ModifiedNodeCard({ node }: { node: ModifiedNode }) {
+function ModifiedNodeCard({ node, t }: { node: ModifiedNode; t: (key: string, options?: Record<string, unknown>) => string }) {
   return (
     <Card
       size="small"
       style={{ marginBottom: 8, background: "#fffbe6", borderColor: "#ffe58f" }}
     >
       <SpaceInline>
-        <Tag color="orange">修改</Tag>
+        <Tag color="orange">{t("compare.modifiedTag")}</Tag>
         <Text strong>{node.node_name}</Text>
         {node.impact_chain.length > 0 && (
           <>
@@ -126,9 +131,11 @@ function ModifiedNodeCard({ node }: { node: ModifiedNode }) {
 function CPDiffSection({
   diff,
   filter,
+  t,
 }: {
   diff: CPCompareResponse["diff"];
   filter: FilterKey;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const filteredAdded =
     filter === "all" || filter === "added" ? diff.added_items : [];
@@ -145,6 +152,7 @@ function CPDiffSection({
           stepNo={item.step_no}
           name={item.process_name}
           diffType="added"
+          t={t}
         />
       ))}
       {filteredDeleted.map((item) => (
@@ -153,13 +161,14 @@ function CPDiffSection({
           stepNo={item.step_no}
           name={item.process_name}
           diffType="deleted"
+          t={t}
         />
       ))}
       {filteredModified.map((item) => (
-        <CPModifiedCard key={item.item_id} item={item} />
+        <CPModifiedCard key={item.item_id} item={item} t={t} />
       ))}
       {filteredAdded.length + filteredDeleted.length + filteredModified.length === 0 && (
-        <Empty description="无匹配变更" />
+        <Empty description={t("compare.noMatch")} />
       )}
     </div>
   );
@@ -169,14 +178,16 @@ function CPItemCard({
   stepNo,
   name,
   diffType,
+  t,
 }: {
   stepNo: string;
   name: string;
   diffType: "added" | "deleted";
+  t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const bg = diffType === "added" ? "#f6ffed" : "#fff2f0";
   const border = diffType === "added" ? "#b7eb8f" : "#ffccc7";
-  const label = diffType === "added" ? "新增" : "删除";
+  const label = diffType === "added" ? t("compare.addedTag") : t("compare.deletedTag");
   const tagColor = diffType === "added" ? "green" : "red";
 
   return (
@@ -193,14 +204,14 @@ function CPItemCard({
   );
 }
 
-function CPModifiedCard({ item }: { item: CPItemDiff }) {
+function CPModifiedCard({ item, t }: { item: CPItemDiff; t: (key: string, options?: Record<string, unknown>) => string }) {
   return (
     <Card
       size="small"
       style={{ marginBottom: 8, background: "#fffbe6", borderColor: "#ffe58f" }}
     >
       <SpaceInline>
-        <Tag color="orange">修改</Tag>
+        <Tag color="orange">{t("compare.modifiedTag")}</Tag>
         <Text strong>{item.step_no}</Text>
       </SpaceInline>
       {item.changes && (
@@ -235,6 +246,7 @@ export default function VersionCompareView({
   major2,
   minor2,
 }: VersionCompareViewProps) {
+  const { t } = useTranslation("version");
   const [loading, setLoading] = useState(true);
   const [fmeaDiff, setFmeaDiff] = useState<FMEACompareResponse | null>(null);
   const [cpDiff, setCpDiff] = useState<CPCompareResponse | null>(null);
@@ -295,7 +307,7 @@ export default function VersionCompareView({
   }
 
   if (!fmeaDiff && !cpDiff) {
-    return <Empty description="无法加载对比数据" />;
+    return <Empty description={t("compare.loadFailed")} />;
   }
 
   return (
@@ -309,8 +321,8 @@ export default function VersionCompareView({
         }}
       >
         <Descriptions size="small" column={1}>
-          <Descriptions.Item label="版本对比">
-            v{major1}.{minor1} → v{major2}.{minor2}
+          <Descriptions.Item label={t("compare.versionCompare")}>
+            v{major1}.{minor1} {t("compare.arrow")} v{major2}.{minor2}
           </Descriptions.Item>
         </Descriptions>
         {summary && (
@@ -322,23 +334,23 @@ export default function VersionCompareView({
             size="small"
           >
             <Radio.Button value="all">
-              全部 ({summary.added_count + summary.deleted_count + summary.modified_count})
+              {t("compare.all", { count: summary.added_count + summary.deleted_count + summary.modified_count })}
             </Radio.Button>
             <Radio.Button value="added">
-              新增 ({summary.added_count})
+              {t("compare.added", { count: summary.added_count })}
             </Radio.Button>
             <Radio.Button value="deleted">
-              删除 ({summary.deleted_count})
+              {t("compare.deleted", { count: summary.deleted_count })}
             </Radio.Button>
             <Radio.Button value="modified">
-              修改 ({summary.modified_count})
+              {t("compare.modified", { count: summary.modified_count })}
             </Radio.Button>
           </Radio.Group>
         )}
       </div>
 
-      {fmeaDiff && <FMEADiffSection diff={fmeaDiff.diff} filter={filter} />}
-      {cpDiff && <CPDiffSection diff={cpDiff.diff} filter={filter} />}
+      {fmeaDiff && <FMEADiffSection diff={fmeaDiff.diff} filter={filter} t={t} />}
+      {cpDiff && <CPDiffSection diff={cpDiff.diff} filter={filter} t={t} />}
     </div>
   );
 }

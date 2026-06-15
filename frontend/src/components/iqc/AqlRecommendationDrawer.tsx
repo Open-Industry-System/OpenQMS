@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Drawer, Descriptions, Tag, Button, Space, App, Divider, List, Input } from 'antd';
+import { useTranslation } from 'react-i18next';
 import type { AqlRecommendation } from '../../types';
 import {
   engineerApproveRecommendation,
@@ -10,22 +11,6 @@ import {
 } from '../../api/iqcAql';
 import { useAuthStore } from '../../store/authStore';
 
-const DIRECTION_MAP: Record<string, { label: string; color: string }> = {
-  keep: { label: '保持', color: 'default' },
-  reduce: { label: '放宽', color: 'green' },
-  tighten: { label: '加严', color: 'orange' },
-  freeze: { label: '冻结', color: 'red' },
-};
-
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: '待审批', color: 'orange' },
-  forwarded: { label: '已转交', color: 'blue' },
-  approved: { label: '已批准', color: 'green' },
-  effective: { label: '已生效', color: 'green' },
-  rejected: { label: '已拒绝', color: 'red' },
-  expired: { label: '已过期', color: 'default' },
-};
-
 interface Props {
   open: boolean;
   recommendation: AqlRecommendation | null;
@@ -34,11 +19,35 @@ interface Props {
 }
 
 export default function AqlRecommendationDrawer({ open, recommendation, onClose, onAction }: Props) {
+  const { t, i18n } = useTranslation('iqc');
+  const { t: tc } = useTranslation('common');
   const { message, modal: _modal } = App.useApp();
   const user = useAuthStore((s) => s.user);
   const [actionLoading, setActionLoading] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
+
+  const directionMap = useMemo<Record<string, { label: string; color: string }>>(
+    () => ({
+      keep: { label: t('status.recDirection.keep'), color: 'default' },
+      reduce: { label: t('status.recDirection.reduce'), color: 'green' },
+      tighten: { label: t('status.recDirection.tighten'), color: 'orange' },
+      freeze: { label: t('status.recDirection.freeze'), color: 'red' },
+    }),
+    [t]
+  );
+
+  const statusMap = useMemo<Record<string, { label: string; color: string }>>(
+    () => ({
+      pending: { label: t('status.recStatus.pending'), color: 'orange' },
+      forwarded: { label: t('status.recStatus.forwarded'), color: 'blue' },
+      approved: { label: t('status.recStatus.approved'), color: 'green' },
+      effective: { label: t('status.recStatus.effective'), color: 'green' },
+      rejected: { label: t('status.recStatus.rejected'), color: 'red' },
+      expired: { label: t('status.recStatus.expired'), color: 'default' },
+    }),
+    [t]
+  );
 
   if (!recommendation) return null;
 
@@ -57,7 +66,7 @@ export default function AqlRecommendationDrawer({ open, recommendation, onClose,
       setRejectReason('');
       onAction();
     } catch {
-      message.error('操作失败');
+      message.error(tc('messages.operationFailed'));
     } finally {
       setActionLoading(false);
     }
@@ -65,49 +74,51 @@ export default function AqlRecommendationDrawer({ open, recommendation, onClose,
 
   const doReject = (actionFn: (id: string, reason: string) => Promise<AqlRecommendation>) => {
     if (!rejectReason.trim()) {
-      message.error('请填写拒绝原因');
+      message.error(t('messages.enterRejectReason'));
       return;
     }
-    handleAction(() => actionFn(recommendation.recommendation_id, rejectReason.trim()), '已拒绝');
+    handleAction(() => actionFn(recommendation.recommendation_id, rejectReason.trim()), t('messages.rejected'));
   };
 
-  const dir = DIRECTION_MAP[recommendation.direction] || { label: recommendation.direction, color: 'default' };
-  const st = STATUS_MAP[recommendation.status] || { label: recommendation.status, color: 'default' };
+  const dir = directionMap[recommendation.direction] || { label: recommendation.direction, color: 'default' };
+  const st = statusMap[recommendation.status] || { label: recommendation.status, color: 'default' };
 
   const evidence = recommendation.evidence as Record<string, unknown> | null;
 
+  const formatDateTime = (v: string) => v ? new Date(v).toLocaleString(i18n.language) : '—';
+
   return (
     <Drawer
-      title="建议详情"
+      title={t('drawer.recommendationDetail')}
       open={open}
       onClose={onClose}
       width={640}
     >
       <Descriptions column={2} bordered size="small">
-        <Descriptions.Item label="当前AQL">{recommendation.current_aql}</Descriptions.Item>
-        <Descriptions.Item label="建议AQL">{recommendation.recommended_aql}</Descriptions.Item>
-        <Descriptions.Item label="方向"><Tag color={dir.color}>{dir.label}</Tag></Descriptions.Item>
-        <Descriptions.Item label="审批级别">{recommendation.approval_level === 'manager' ? '经理' : '工程师'}</Descriptions.Item>
-        <Descriptions.Item label="状态"><Tag color={st.color}>{st.label}</Tag></Descriptions.Item>
-        <Descriptions.Item label="创建时间">{new Date(recommendation.created_at).toLocaleString('zh-CN')}</Descriptions.Item>
-        <Descriptions.Item label="过期时间" span={2}>{new Date(recommendation.expires_at).toLocaleString('zh-CN')}</Descriptions.Item>
+        <Descriptions.Item label={t('table.currentAql')}>{recommendation.current_aql}</Descriptions.Item>
+        <Descriptions.Item label={t('table.recommendedAql')}>{recommendation.recommended_aql}</Descriptions.Item>
+        <Descriptions.Item label={t('table.direction')}><Tag color={dir.color}>{dir.label}</Tag></Descriptions.Item>
+        <Descriptions.Item label={t('recommendation.approvalLevel')}>{recommendation.approval_level === 'manager' ? t('status.approvalLevel.manager') : t('status.approvalLevel.engineer')}</Descriptions.Item>
+        <Descriptions.Item label={t('table.status')}><Tag color={st.color}>{st.label}</Tag></Descriptions.Item>
+        <Descriptions.Item label={t('table.createdAt')}>{formatDateTime(recommendation.created_at)}</Descriptions.Item>
+        <Descriptions.Item label={t('recommendation.expiresAt')} span={2}>{formatDateTime(recommendation.expires_at)}</Descriptions.Item>
       </Descriptions>
 
       {evidence && (
         <>
-          <Divider orientation="left" orientationMargin={0}>质量快照</Divider>
+          <Divider orientation="left" orientationMargin={0}>{t('recommendation.qualitySnapshot')}</Divider>
           <Descriptions column={2} bordered size="small">
-            <Descriptions.Item label="总批次数">{String(evidence.total_batches ?? '—')}</Descriptions.Item>
-            <Descriptions.Item label="连续合格">{String(evidence.consecutive_accepted ?? '—')}</Descriptions.Item>
-            <Descriptions.Item label="连续不合格">{String(evidence.consecutive_rejected ?? '—')}</Descriptions.Item>
-            <Descriptions.Item label="30天PPM">{evidence.last_30d_ppm != null ? String(evidence.last_30d_ppm) : '—'}</Descriptions.Item>
+            <Descriptions.Item label={t('descriptions.totalBatches')}>{String(evidence.total_batches ?? '—')}</Descriptions.Item>
+            <Descriptions.Item label={t('descriptions.consecutiveAccepted')}>{String(evidence.consecutive_accepted ?? '—')}</Descriptions.Item>
+            <Descriptions.Item label={t('descriptions.consecutiveRejected')}>{String(evidence.consecutive_rejected ?? '—')}</Descriptions.Item>
+            <Descriptions.Item label={t('descriptions.last30dPpm')}>{evidence.last_30d_ppm != null ? String(evidence.last_30d_ppm) : '—'}</Descriptions.Item>
           </Descriptions>
         </>
       )}
 
       {recommendation.trigger_rules.length > 0 && (
         <>
-          <Divider orientation="left" orientationMargin={0}>触发规则</Divider>
+          <Divider orientation="left" orientationMargin={0}>{t('recommendation.triggerRules')}</Divider>
           <List
             size="small"
             dataSource={recommendation.trigger_rules}
@@ -127,7 +138,7 @@ export default function AqlRecommendationDrawer({ open, recommendation, onClose,
             <div style={{ marginBottom: 12 }}>
               <Input.TextArea
                 rows={3}
-                placeholder="拒绝原因（必填）"
+                placeholder={t('messages.enterRejectReason')}
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
               />
@@ -135,42 +146,42 @@ export default function AqlRecommendationDrawer({ open, recommendation, onClose,
           )}
           <Space>
             {canEngineerAct && !isReduce && (
-              <Button type="primary" loading={actionLoading} onClick={() => handleAction(() => engineerApproveRecommendation(recommendation.recommendation_id), '已批准')}>
-                批准
+              <Button type="primary" loading={actionLoading} onClick={() => handleAction(() => engineerApproveRecommendation(recommendation.recommendation_id), t('messages.approved'))}>
+                {t('recommendation.approve')}
               </Button>
             )}
             {canEngineerAct && isReduce && (
-              <Button type="primary" loading={actionLoading} onClick={() => handleAction(() => forwardRecommendation(recommendation.recommendation_id), '已提交经理')}>
-                提交经理
+              <Button type="primary" loading={actionLoading} onClick={() => handleAction(() => forwardRecommendation(recommendation.recommendation_id), t('messages.submittedToManager'))}>
+                {t('recommendation.submitToManager')}
               </Button>
             )}
             {canEngineerAct && !showReject && (
               <Button danger onClick={() => setShowReject(true)}>
-                拒绝
+                {t('recommendation.reject')}
               </Button>
             )}
             {canEngineerAct && showReject && (
               <Button danger loading={actionLoading} onClick={() => doReject(engineerRejectRecommendation)}>
-                确认拒绝
+                {t('recommendation.confirmReject')}
               </Button>
             )}
             {canManagerAct && (
-              <Button type="primary" loading={actionLoading} onClick={() => handleAction(() => managerApproveRecommendation(recommendation.recommendation_id), '已批准')}>
-                批准
+              <Button type="primary" loading={actionLoading} onClick={() => handleAction(() => managerApproveRecommendation(recommendation.recommendation_id), t('messages.approved'))}>
+                {t('recommendation.approve')}
               </Button>
             )}
             {canManagerAct && !showReject && (
               <Button danger onClick={() => setShowReject(true)}>
-                拒绝
+                {t('recommendation.reject')}
               </Button>
             )}
             {canManagerAct && showReject && (
               <Button danger loading={actionLoading} onClick={() => doReject(managerRejectRecommendation)}>
-                确认拒绝
+                {t('recommendation.confirmReject')}
               </Button>
             )}
             {showReject && (
-              <Button onClick={() => { setShowReject(false); setRejectReason(''); }}>取消</Button>
+              <Button onClick={() => { setShowReject(false); setRejectReason(''); }}>{tc('actions.cancel')}</Button>
             )}
           </Space>
         </>

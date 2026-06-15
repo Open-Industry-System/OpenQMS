@@ -1,0 +1,17 @@
+{
+  "import": {
+    "title": "批量导入",
+    "success": "成功导入 {{count}} 条记录",
+    "failed": "导入失败，请检查文件格式",
+    "reselect": "重新选择文件",
+    "cancel": "取消",
+    "dragText": "点击或拖拽 .xlsx 文件到此区域上传",
+    "downloadTemplate": "下载导入模板",
+    "fileTooLarge": "文件超过 10MB 限制",
+    "columns": {
+      "row": "行号",
+      "field": "字段",
+      "message": "错误信息"
+    }
+  }
+}

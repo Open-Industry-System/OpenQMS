@@ -1,5 +1,6 @@
 import { Card, Steps } from "antd";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
 interface SubModule {
   type: "fmea" | "control_plan" | "ppap";
@@ -13,6 +14,7 @@ export default function APQPProgressCard({
 }: {
   subModules: SubModule[];
 }) {
+  const { t } = useTranslation("apqp");
   const navigate = useNavigate();
 
   const pathMap: Record<string, string> = {
@@ -22,7 +24,7 @@ export default function APQPProgressCard({
   };
 
   return (
-    <Card title="子模块进度" size="small">
+    <Card title={t("progress.subModules")} size="small">
       <Steps
         direction="vertical"
         size="small"

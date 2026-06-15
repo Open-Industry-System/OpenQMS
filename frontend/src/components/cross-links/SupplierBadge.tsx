@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Tag } from "antd";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import client from "../../api/client";
 
 export default function SupplierBadge({
@@ -8,6 +9,7 @@ export default function SupplierBadge({
 }: {
   supplierId: string | null;
 }) {
+  const { t } = useTranslation("supplier");
   const navigate = useNavigate();
   const [name, setName] = useState<string>("");
 
@@ -26,7 +28,7 @@ export default function SupplierBadge({
       style={{ cursor: "pointer" }}
       onClick={() => navigate(`/suppliers/${supplierId}`)}
     >
-      {name || "供应商"}
+      {name || t("supplier")}
     </Tag>
   );
 }

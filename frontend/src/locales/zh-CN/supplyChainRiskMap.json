@@ -1,0 +1,80 @@
+{
+  "page": {
+    "title": "供应链风险地图",
+    "emptyDescription": "暂无数据，请先生成快照"
+  },
+  "toolbar": {
+    "allProductLines": "全部产品线",
+    "refresh": "刷新数据",
+    "export": "导出",
+    "snapshotSuccess": "已生成 {{count}} 个快照",
+    "snapshotFailed": "快照生成失败",
+    "exportFailed": "导出失败"
+  },
+  "export": {
+    "csv": "CSV",
+    "excel": "Excel",
+    "failed": "导出失败"
+  },
+  "detail": {
+    "selectSupplier": "选择供应商查看详情",
+    "period": "周期",
+    "trendHeader": "趋势（最近6期）",
+    "riskIndex": "风险指数: {{index}}",
+    "dimensions": {
+      "risk_score": "风险分",
+      "quality_score": "质量分",
+      "delivery_score": "交付分",
+      "compliance_score": "合规分",
+      "erp_on_time_rate": "ERP准时率",
+      "purchase_amount_pct": "采购占比",
+      "open_scar_count": "开放SCAR",
+      "ppm_value": "PPM"
+    },
+    "trendColumns": {
+      "period": "周期",
+      "risk": "风险",
+      "quality": "质量",
+      "delivery": "交付",
+      "compliance": "合规"
+    }
+  },
+  "comparison": {
+    "selectMultiple": "选择2个或以上供应商进行对比",
+    "title": "供应商对比",
+    "dimension": "维度",
+    "dimensions": {
+      "risk_score": "风险分",
+      "quality_score": "质量分",
+      "delivery_score": "交付分",
+      "compliance_score": "合规分",
+      "erp_on_time_rate": "ERP准时率",
+      "purchase_amount_pct": "采购占比",
+      "open_scar_count": "开放SCAR",
+      "ppm_value": "PPM"
+    }
+  },
+  "detailPanel": {
+    "clickSupplier": "点击供应商查看详情"
+  },
+  "heatmap": {
+    "tooltipSource": "来源: {{source}}",
+    "columns": {
+      "risk_score": "风险分",
+      "quality_score": "质量分",
+      "delivery_score": "交付分",
+      "compliance_score": "合规分",
+      "erp_on_time_rate": "ERP准时率",
+      "purchase_amount_pct": "采购占比",
+      "open_scar_count": "开放SCAR",
+      "ppm_value": "PPM"
+    }
+  },
+  "dataSource": {
+    "risk_evaluation": "风险评分",
+    "erp_po": "ERP",
+    "supplier_evaluation_fallback": "供应商评价",
+    "iqc_inspection": "IQC",
+    "missing": "无数据"
+  }
+}

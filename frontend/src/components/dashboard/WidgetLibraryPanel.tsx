@@ -1,31 +1,39 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Input, Collapse, Button, theme } from "antd";
 import { SearchOutlined, PlusOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { usePermission } from "../../hooks/usePermission";
-import { getAllWidgets } from "./widgets/registry";
+import { getAllWidgets, getWidgetNameKey } from "./widgets/registry";
 import type { WidgetMeta } from "./widgets/types";
 
 interface WidgetLibraryPanelProps {
   onAddWidget: (type: string) => void;
 }
 
-const categoryLabels: Record<string, string> = {
-  kpi: "KPI 指标",
-  alert: "预警提醒",
-  chart: "图表分析",
-  list: "列表",
-  ai: "AI/高级分析",
-};
-
 export default function WidgetLibraryPanel({ onAddWidget }: WidgetLibraryPanelProps) {
+  const { t } = useTranslation("dashboard");
   const { token } = theme.useToken();
   const { canView } = usePermission();
   const [search, setSearch] = useState("");
 
-  const allWidgets = getAllWidgets().filter((w) => canView(w.module));
+  const categoryLabels: Record<string, string> = useMemo(
+    () => ({
+      kpi: t("widgetLibrary.category.kpi"),
+      alert: t("widgetLibrary.category.alert"),
+      chart: t("widgetLibrary.category.chart"),
+      list: t("widgetLibrary.category.list"),
+      ai: t("widgetLibrary.category.ai"),
+    }),
+    [t]
+  );
+
+  const allWidgets = useMemo(
+    () => getAllWidgets().filter((w) => canView(w.module)),
+    [canView]
+  );
 
   const filtered = search
-    ? allWidgets.filter((w) => w.name.toLowerCase().includes(search.toLowerCase()))
+    ? allWidgets.filter((w) => t(getWidgetNameKey(w.type)).toLowerCase().includes(search.toLowerCase()))
     : allWidgets;
 
   const byCategory: Record<string, WidgetMeta[]> = {};
@@ -48,7 +56,7 @@ export default function WidgetLibraryPanel({ onAddWidget }: WidgetLibraryPanelPr
             onClick={() => onAddWidget(w.type)}
             style={{ textAlign: "left" }}
           >
-            {w.name}
+            {t(getWidgetNameKey(w.type))}
           </Button>
         ))}
       </div>
@@ -66,9 +74,9 @@ export default function WidgetLibraryPanel({ onAddWidget }: WidgetLibraryPanelPr
         background: token.colorBgContainer,
       }}
     >
-      <h4 style={{ marginBottom: 12 }}>组件库</h4>
+      <h4 style={{ marginBottom: 12 }}>{t("widgetLibrary.title")}</h4>
       <Input
-        placeholder="搜索组件..."
+        placeholder={t("widgetLibrary.searchPlaceholder")}
         prefix={<SearchOutlined />}
         value={search}
         onChange={(e) => setSearch(e.target.value)}

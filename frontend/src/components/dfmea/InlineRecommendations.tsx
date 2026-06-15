@@ -1,12 +1,8 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Card, List, Tag, Button, Space, Typography } from "antd";
 import { BulbOutlined } from "@ant-design/icons";
-import {
-  generateFailureModes,
-  suggestFailureChain,
-  analyzeRisk,
-  suggestMeasures,
-} from "../../utils/dfmeaRules";
+import { useDfmeaRules } from "../../utils/dfmeaRules";
 
 const { Text } = Typography;
 
@@ -24,31 +20,20 @@ export interface InlineRecommendationsProps {
   onApplySuggestion?: (suggestion: string, field: string) => void;
 }
 
+type RecommendationType =
+  | "failureModeSuggestion"
+  | "failureEffectSuggestion"
+  | "failureCauseSuggestion"
+  | "apAnalysis"
+  | "preventionSuggestion"
+  | "detectionSuggestion";
+
 interface RecommendationItem {
   key: string;
-  type:
-    | "失效模式建议"
-    | "失效影响建议"
-    | "失效原因建议"
-    | "AP分析"
-    | "预防措施建议"
-    | "探测措施建议";
+  type: RecommendationType;
   content: string;
   applyField: string;
 }
-
-// ---------------------------------------------------------------------------
-// Tag colour map
-// ---------------------------------------------------------------------------
-
-const TAG_COLORS: Record<RecommendationItem["type"], string> = {
-  "失效模式建议": "blue",
-  "失效影响建议": "orange",
-  "失效原因建议": "purple",
-  "AP分析": "red",
-  "预防措施建议": "green",
-  "探测措施建议": "cyan",
-};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -63,6 +48,9 @@ export default function InlineRecommendations({
   d,
   onApplySuggestion,
 }: InlineRecommendationsProps) {
+  const { t } = useTranslation("dfmea");
+  const { generateFailureModes, suggestFailureChain, analyzeRisk, suggestMeasures } = useDfmeaRules();
+
   const recommendations = useMemo<RecommendationItem[]>(() => {
     if (!trigger) return [];
 
@@ -70,7 +58,7 @@ export default function InlineRecommendations({
       const modes = generateFailureModes(functionDesc);
       return modes.map((mode, i) => ({
         key: `fm-${i}`,
-        type: "失效模式建议" as const,
+        type: "failureModeSuggestion" as const,
         content: mode,
         applyField: "failureMode",
       }));
@@ -82,7 +70,7 @@ export default function InlineRecommendations({
       chain.effects.forEach((effect, i) => {
         items.push({
           key: `fe-${i}`,
-          type: "失效影响建议",
+          type: "failureEffectSuggestion",
           content: effect,
           applyField: "effect",
         });
@@ -90,7 +78,7 @@ export default function InlineRecommendations({
       chain.causes.forEach((cause, i) => {
         items.push({
           key: `fc-${i}`,
-          type: "失效原因建议",
+          type: "failureCauseSuggestion",
           content: cause,
           applyField: "cause",
         });
@@ -106,7 +94,7 @@ export default function InlineRecommendations({
       if (result.ap) {
         items.push({
           key: "ap-analysis",
-          type: "AP分析",
+          type: "apAnalysis",
           content: `RPN=${result.rpn}  AP=${result.ap}  ${result.hint}`,
           applyField: "",
         });
@@ -121,7 +109,7 @@ export default function InlineRecommendations({
         measures.prevention.forEach((pm, i) => {
           items.push({
             key: `pm-${i}`,
-            type: "预防措施建议",
+            type: "preventionSuggestion",
             content: pm,
             applyField: "prevention",
           });
@@ -129,7 +117,7 @@ export default function InlineRecommendations({
         measures.detection.forEach((dm, i) => {
           items.push({
             key: `dm-${i}`,
-            type: "探测措施建议",
+            type: "detectionSuggestion",
             content: dm,
             applyField: "detection",
           });
@@ -140,16 +128,25 @@ export default function InlineRecommendations({
     }
 
     return [];
-  }, [trigger, functionDesc, failureMode, s, o, d]);
+  }, [trigger, functionDesc, failureMode, s, o, d, generateFailureModes, suggestFailureChain, analyzeRisk, suggestMeasures]);
 
   if (recommendations.length === 0) return null;
+
+  const tagColors: Record<RecommendationType, string> = {
+    failureModeSuggestion: "blue",
+    failureEffectSuggestion: "orange",
+    failureCauseSuggestion: "purple",
+    apAnalysis: "red",
+    preventionSuggestion: "green",
+    detectionSuggestion: "cyan",
+  };
 
   return (
     <Card
       title={
         <Space>
           <BulbOutlined style={{ color: "#faad14" }} />
-          <span>智能推荐</span>
+          <span>{t("inlineRecommendations.title")}</span>
         </Space>
       }
       size="small"
@@ -161,19 +158,19 @@ export default function InlineRecommendations({
         renderItem={(item) => (
           <List.Item
             extra={
-              item.type !== "AP分析" && onApplySuggestion ? (
+              item.type !== "apAnalysis" && onApplySuggestion ? (
                 <Button
                   size="small"
                   type="link"
                   onClick={() => onApplySuggestion(item.content, item.applyField)}
                 >
-                  采用
+                  {t("inlineRecommendations.apply")}
                 </Button>
               ) : null
             }
           >
             <Space>
-              <Tag color={TAG_COLORS[item.type]}>{item.type}</Tag>
+              <Tag color={tagColors[item.type]}>{t(`inlineRecommendations.types.${item.type}`)}</Tag>
               <Text>{item.content}</Text>
             </Space>
           </List.Item>

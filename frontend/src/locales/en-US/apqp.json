@@ -1,0 +1,118 @@
+{
+  "pageTitle": {
+    "apqpProjects": "APQP Projects",
+    "newAPQPProject": "New APQP Project",
+    "projectDetail": "Project Detail",
+    "editProject": "Edit Project"
+  },
+  "tab": {
+    "all": "All",
+    "active": "Active",
+    "completed": "Completed",
+    "cancelled": "Cancelled"
+  },
+  "phase": {
+    "1": "Planning and Definition",
+    "2": "Product Design and Development",
+    "3": "Process Design and Development",
+    "4": "Product and Process Validation",
+    "5": "Launch, Feedback, Assessment",
+    "phaseN": "Phase {{phase}}",
+    "phaseNName": "Phase {{phase}} — {{name}}"
+  },
+  "projectStatus": {
+    "active": "Active",
+    "completed": "Completed",
+    "cancelled": "Cancelled"
+  },
+  "phaseStatus": {
+    "pendingApproval": "Pending Approval",
+    "inProgress": "In Progress",
+    "completed": "Completed"
+  },
+  "kpi": {
+    "active": "Active",
+    "pendingApproval": "Pending Approval",
+    "completed": "Completed",
+    "overdue": "Overdue"
+  },
+  "column": {
+    "projectCode": "Project Code",
+    "projectName": "Project Name",
+    "product": "Product",
+    "customer": "Customer",
+    "currentPhase": "Current Phase",
+    "phaseStatus": "Phase Status",
+    "targetSOP": "Target SOP",
+    "projectStatus": "Project Status",
+    "action": "Action"
+  },
+  "form": {
+    "projectName": "Project Name",
+    "productName": "Product Name",
+    "productLine": "Product Line",
+    "customerName": "Customer Name",
+    "description": "Description",
+    "targetSOPDate": "Target SOP Date",
+    "dfmea": "DFMEA",
+    "pfmea": "PFMEA",
+    "controlPlan": "Control Plan",
+    "ppap": "PPAP"
+  },
+  "placeholder": {
+    "productLine": "e.g. DC-DC-100",
+    "fmeaOptional": "FMEA ID (optional, v1 text input)",
+    "cpOptional": "CP ID (optional, v1 text input)",
+    "ppapOptional": "PPAP ID (optional, v1 text input)"
+  },
+  "card": {
+    "projectInfo": "Project Info",
+    "phaseProgress": "Phase Progress",
+    "phaseActions": "Phase Actions",
+    "deliverables": "Linked Deliverables",
+    "phaseTimeline": "Phase Timeline",
+    "gateHistory": "Gate Review History"
+  },
+  "label": {
+    "projectCode": "Project Code",
+    "projectName": "Project Name",
+    "product": "Product",
+    "productLine": "Product Line",
+    "customer": "Customer",
+    "targetSOP": "Target SOP",
+    "createdBy": "Created By",
+    "createdAt": "Created At",
+    "description": "Description",
+    "currentPhase": "Current Phase",
+    "phaseStatus": "Phase Status",
+    "view": "View",
+    "notLinked": "Not linked",
+    "gateComment": "Gate review comments (optional)",
+    "dfmeaPhase2": "DFMEA (Phase 2)",
+    "pfmeaPhase3": "PFMEA (Phase 3)",
+    "controlPlanPhase3": "Control Plan (Phase 3)",
+    "ppapPhase4": "PPAP (Phase 4)",
+    "overdue": "⚠"
+  },
+  "action": {
+    "submitForApproval": "Submit for Approval",
+    "approveGate": "Approve",
+    "rejectGate": "Reject",
+    "cancelProject": "Cancel Project",
+    "gateSubmitted": "Submitted",
+    "gateApproved": "Approved",
+    "gateRejected": "Rejected"
+  },
+  "progress": {
+    "subModules": "Sub-module Progress"
+  },
+  "message": {
+    "createSuccess": "Project created successfully",
+    "updateSuccess": "Updated successfully",
+    "operationSuccess": "Operation successful",
+    "notCompleted": "Not completed",
+    "enterName": "Please enter project name",
+    "enterProductName": "Please enter product name",
+    "enterProductLine": "Please enter product line"
+  }
+}

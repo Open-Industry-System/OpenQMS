@@ -2,6 +2,7 @@ import { Card, Statistic, Skeleton, Typography, theme } from "antd";
 import type { GlobalToken } from "antd/es/theme/interface";
 import type { ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export type KPIStatus = "success" | "warning" | "danger";
 
@@ -40,12 +41,16 @@ export default function KPICard({
   onRetry,
   disabled = false,
 }: KPICardProps) {
+  const { t } = useTranslation("dashboard");
   const { token } = theme.useToken();
   const [focused, setFocused] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
   const clickable = !loading && !disabled && !error && !!onClick;
   const retryable = error && !!onRetry;
+
+  const statusLabel =
+    status === "success" ? t("kpi.normal") : status === "warning" ? t("kpi.warning") : t("kpi.danger");
 
   const handleClick = useCallback(() => {
     if (clickable && onClick) {
@@ -73,10 +78,10 @@ export default function KPICard({
   const focusOutlineColor = token.colorPrimary;
 
   const ariaLabel = loading
-    ? `${title}，加载中`
+    ? `${title}，${t("kpi.loading")}`
     : error
-      ? `${title}，加载失败，点击重试`
-      : `${title}，当前值 ${value ?? 0}，${status === "success" ? "正常" : status === "warning" ? "警告" : "危险"}${subtitle ? `，${subtitle}` : ""}`;
+      ? `${title}，${t("kpi.loadFailed")}`
+      : `${title}，${t("kpi.currentValue", { value: value ?? 0 })}，${statusLabel}${subtitle ? `，${subtitle}` : ""}`;
 
   return (
     <div
@@ -179,10 +184,10 @@ export default function KPICard({
                         textDecoration: "underline",
                       }}
                     >
-                      加载失败，点击重试
+                      {t("kpi.loadFailed")}
                     </span>
                   ) : (
-                    subtitle ?? "暂无"
+                    subtitle ?? t("kpi.noData")
                   )}
                 </Typography.Text>
               </>

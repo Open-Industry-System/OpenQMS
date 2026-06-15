@@ -1,0 +1,125 @@
+{
+  "page": {
+    "title": "Quality Dashboard"
+  },
+  "actions": {
+    "editLayout": "Edit Layout",
+    "done": "Done",
+    "resetDefault": "Reset Default"
+  },
+  "messages": {
+    "loadFailed": "Failed to load dashboard",
+    "saveSuccess": "Layout saved",
+    "saveFailed": "Save failed",
+    "resetSuccess": "Default layout restored",
+    "resetFailed": "Reset failed"
+  },
+  "widgetLibrary": {
+    "title": "Widget Library",
+    "searchPlaceholder": "Search widgets...",
+    "category": {
+      "kpi": "KPI Metrics",
+      "alert": "Alerts",
+      "chart": "Charts",
+      "list": "Lists",
+      "ai": "AI / Advanced Analysis"
+    }
+  },
+  "widget": {
+    "unknown": "Unknown widget",
+    "pendingActions": "Pending Actions",
+    "overdueTasks": "Overdue Tasks",
+    "highRiskItems": "High Risk Items",
+    "monthTrend": "New FMEAs This Month",
+    "highRpnFmeaTop5": "High RPN FMEA Top 5",
+    "overdueCapaTop5": "Overdue CAPA Top 5",
+    "highPpmSuppliersTop5": "High PPM Suppliers Top 5",
+    "recentActions": "Recent Actions",
+    "spcAbnormalCount": "SPC Abnormal Points",
+    "capabilitySummary": "Process Capability Summary",
+    "gaugeExpiry": "Gauge Expiry Reminder",
+    "iqcPendingInspections": "IQC Pending Inspections",
+    "equipmentStatus": "Equipment Status Overview",
+    "supplierPpmTrend": "Supplier PPM Trend",
+    "qualityTrendAi": "Quality Trend AI Interpretation"
+  },
+  "kpi": {
+    "loading": "Loading...",
+    "loadFailed": "Load failed, click to retry",
+    "currentValue": "Current value {{value}}",
+    "normal": "Normal",
+    "warning": "Warning",
+    "danger": "Danger",
+    "noData": "No data",
+    "subtitle": {
+      "gaugeExpiry": "Expires in 30 days",
+      "spcAbnormal": "Last 7 days"
+    }
+  },
+  "equipment": {
+    "running": "Running",
+    "down": "Down",
+    "idle": "Idle"
+  },
+  "spc": {
+    "count": "Monitored Items",
+    "avgCpk": "Average CPK"
+  },
+  "alert": {
+    "empty": {
+      "highRpn": "No high RPN items",
+      "overdueCapa": "No overdue CAPA",
+      "highPpm": "No high PPM suppliers",
+      "supplierPpm": "No data"
+    },
+    "overdueDays": "{{days}} days overdue",
+    "ppmValue": "{{ppm}} PPM"
+  },
+  "recentActions": {
+    "columns": {
+      "action": "Action",
+      "object": "Object",
+      "time": "Time"
+    },
+    "empty": "No recent actions",
+    "types": {
+      "fmeaDocuments": "FMEA",
+      "capaEightd": "CAPA"
+    }
+  },
+  "riskList": {
+    "empty": "No pending items, no overdue or high-risk items",
+    "loadFailed": "Load failed",
+    "retry": "Retry",
+    "goApprove": "Go to approve",
+    "goFollowUp": "Go to follow up",
+    "goView": "Go to view",
+    "supplierPpmExceeded": "Supplier PPM exceeded",
+    "overdueDays": "{{days}} days overdue",
+    "overdueDaysTag": "{{days}}d"
+  },
+  "relativeTime": {
+    "justNow": "Just now",
+    "minutesAgo": "{{count}} minutes ago",
+    "hoursAgo": "{{count}} hours ago",
+    "yesterday": "Yesterday"
+  },
+  "qualityTrend": {
+    "keyEvidence": "Key Evidence",
+    "suggestedActions": "Suggested Actions",
+    "aiInterpret": "AI Deep Interpretation",
+    "aiUnavailable": "Unavailable when LLM is not configured or data is insufficient",
+    "aiError": "AI interpretation temporarily unavailable, please try again later",
+    "dataUpdated": "Data updated, click to regenerate AI interpretation",
+    "noTrendData": "No trend data",
+    "omittedModules": "Current view lacks module permissions, omitted: {{modules}}",
+    "confidence": "Confidence",
+    "cached": "Cached",
+    "yes": "Yes",
+    "no": "No",
+    "trend": "Trend",
+    "evidenceFormat": "{{label}}: {{value}} (Trend: {{trend}})",
+    "actionFormat": "[{{priority}}] {{text}}",
+    "confidenceFormat": "Confidence: {{confidence}}, Cached: {{cached}}"
+  }
+}

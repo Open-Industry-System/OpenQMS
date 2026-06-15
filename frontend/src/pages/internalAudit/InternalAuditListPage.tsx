@@ -30,6 +30,7 @@ import {
   EditOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { AuditPlan, AuditProgram, AuditStats, AuditChecklistItem, User } from "../../types";
@@ -47,29 +48,23 @@ import {
   updateAuditorInfo,
 } from "../../api/audit";
 import { listUsers } from "../../api/auth";
+import { useAuditTypeMap, useAuditStatusMap, useAuditStatusColor } from "./useOptions";
 
 const { Option } = Select;
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
 
-const TYPE_MAP: Record<string, string> = {
-  system: "体系",
-  process: "过程",
-  product: "产品",
-};
-
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  planned: { label: "待执行", color: "blue" },
-  in_progress: { label: "进行中", color: "orange" },
-  completed: { label: "已完成", color: "green" },
-  cancelled: { label: "已取消", color: "gray" },
-};
-
 export default function InternalAuditListPage() {
+  const { t } = useTranslation("internalAudit");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const navigate = useNavigate();
   const _user = useAuthStore((s) => s.user);
   const { canEdit, isAdmin } = usePermission();
+
+  const auditTypeMap = useAuditTypeMap();
+  const auditStatusMap = useAuditStatusMap();
+  const auditStatusColor = useAuditStatusColor();
 
   const [plans, setPlans] = useState<AuditPlan[]>([]);
   const [loading, setLoading] = useState(false);
@@ -126,29 +121,12 @@ export default function InternalAuditListPage() {
       setPlans(resp.items);
       setTotal(resp.total);
     } catch {
-      message.error("加载审核计划失败");
+      message.error(t("messages.loadPlansFailed"));
     } finally {
       setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize, activeTab, filterYear, filterType, filterDateRange]);
-
-  const _fetchPrograms = useCallback(async () => {
-    try {
-      // We need to fetch programs for the plan creation dropdown.
-      // listAuditPrograms is not exported from audit.ts, so we use listAuditPlans with a large page size to get programs indirectly,
-      // or we can call the endpoint directly. Since listAuditPrograms exists in the backend but isn't in audit.ts exports,
-      // let's use the client directly or add it. Wait — looking at audit.ts, listAuditPrograms IS exported.
-      // But we need it here. Let's import it.
-      // Actually I didn't import it above. I'll add a direct call via the API module if needed.
-      // For now, we can fetch programs by calling listAuditPrograms which is in audit.ts.
-      // Let me adjust: I need to import it.
-      message.error("请导入 listAuditPrograms");
-    } catch {
-      // ignore
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     fetchPlans();
@@ -162,7 +140,6 @@ export default function InternalAuditListPage() {
     listUsers().then(setUsers).catch(() => {});
     listAuditors().then(setAuditors).catch(() => {});
     getChecklistTemplates().then(setChecklistTemplates).catch(() => {});
-    // Load programs for plan creation
     listAuditPrograms({ page_size: 1000 }).then((resp) => setPrograms(resp.items)).catch(() => {});
   }, []);
 
@@ -179,15 +156,14 @@ export default function InternalAuditListPage() {
         scope: values.scope as string,
         criteria: values.criteria as string,
       });
-      message.success("方案创建成功");
+      message.success(t("messages.programCreated"));
       setProgramModalOpen(false);
       programForm.resetFields();
       fetchStats();
-      // Refresh programs list
       listAuditPrograms({ page_size: 1000 }).then((resp) => setPrograms(resp.items)).catch(() => {});
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "创建失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
@@ -206,50 +182,50 @@ export default function InternalAuditListPage() {
         checklist: template?.items || [],
         audit_category: "internal",
       });
-      message.success("计划创建成功");
+      message.success(t("messages.planCreated"));
       setPlanModalOpen(false);
       planForm.resetFields();
       fetchPlans();
       fetchStats();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "创建失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
   const handleStart = async (id: string) => {
     try {
       await startAuditPlan(id);
-      message.success("审核已开始");
+      message.success(t("messages.auditStarted"));
       fetchPlans();
       fetchStats();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
   const handleComplete = async (id: string) => {
     try {
       await completeAuditPlan(id);
-      message.success("审核已完成");
+      message.success(t("messages.auditCompleted"));
       fetchPlans();
       fetchStats();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
   const handleCancel = async (id: string) => {
     try {
       await cancelAuditPlan(id);
-      message.success("计划已取消");
+      message.success(t("messages.planCancelled"));
       fetchPlans();
       fetchStats();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
@@ -259,40 +235,40 @@ export default function InternalAuditListPage() {
         is_auditor: values.is_auditor,
         qualifications: values.qualifications,
       });
-      message.success("审核员信息已更新");
+      message.success(t("messages.auditorUpdated"));
       const resp = await listAuditors();
       setAuditors(resp);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "更新失败");
+      message.error(err.response?.data?.detail || t("messages.updateFailed"));
     }
   };
 
   const columns = [
     {
-      title: "计划编号",
+      title: t("table.planNo"),
       dataIndex: "audit_id",
       width: 220,
       render: (id: string) => <span style={{ fontFamily: "monospace" }}>{id.slice(0, 8)}</span>,
     },
     {
-      title: "类型",
+      title: t("table.auditType"),
       dataIndex: "audit_type",
       width: 100,
-      render: (type: string) => TYPE_MAP[type] || type,
+      render: (type: string) => auditTypeMap[type] || type,
     },
     {
-      title: "审核范围",
+      title: t("table.auditScope"),
       dataIndex: "audit_scope",
       ellipsis: true,
     },
     {
-      title: "计划日期",
+      title: t("table.plannedDate"),
       dataIndex: "planned_date",
       width: 120,
     },
     {
-      title: "审核组长",
+      title: t("table.leadAuditor"),
       dataIndex: "lead_auditor",
       width: 120,
       render: (leadAuditor: string | null) => {
@@ -302,46 +278,43 @@ export default function InternalAuditListPage() {
       },
     },
     {
-      title: "状态",
+      title: t("table.status"),
       dataIndex: "status",
       width: 100,
       render: (status: string) => {
-        const cfg = STATUS_MAP[status];
-        return <Tag color={cfg?.color}>{cfg?.label}</Tag>;
+        const color = auditStatusColor[status];
+        const label = auditStatusMap[status];
+        return <Tag color={color}>{label}</Tag>;
       },
     },
     {
-      title: "发现项数",
+      title: t("table.findingCount"),
       dataIndex: "finding_count",
       width: 100,
-      render: (_: unknown, _record: AuditPlan) => {
-        // finding_count is not in AuditPlan type, so we show placeholder or compute from something else.
-        // Since the backend may not return it, we show "—" for now.
-        return "—";
-      },
+      render: () => "—",
     },
     {
-      title: "操作",
+      title: t("table.operations"),
       width: 240,
       render: (_: unknown, _record: AuditPlan) => (
         <Space size="small" wrap>
           <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/internal-audits/${_record.audit_id}`)}>
-            查看详情
+            {t("actions.viewDetail")}
           </Button>
           {_record.status === "planned" && canEdit('audit') && (
             <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => handleStart(_record.audit_id)}>
-              开始
+              {t("actions.start")}
             </Button>
           )}
           {_record.status === "in_progress" && canEdit('audit') && (
             <Button size="small" type="primary" icon={<CheckCircleOutlined />} onClick={() => handleComplete(_record.audit_id)}>
-              完成
+              {t("actions.complete")}
             </Button>
           )}
           {_record.status === "planned" && canEdit('audit') && (
-            <Popconfirm title="确认取消？" onConfirm={() => handleCancel(_record.audit_id)}>
+            <Popconfirm title={t("confirm.cancel")} onConfirm={() => handleCancel(_record.audit_id)}>
               <Button size="small" danger icon={<StopOutlined />}>
-                取消
+                {tc("actions.cancel")}
               </Button>
             </Popconfirm>
           )}
@@ -355,52 +328,52 @@ export default function InternalAuditListPage() {
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
           <Card>
-            <Statistic title="年度方案数" value={stats.program_count} />
+            <Statistic title={t("stats.annualPrograms")} value={stats.program_count} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="待执行审核" value={stats.planned_count} valueStyle={{ color: "#1890ff" }} />
+            <Statistic title={t("stats.plannedAudits")} value={stats.planned_count} valueStyle={{ color: "#1890ff" }} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="开放发现项" value={stats.open_findings} valueStyle={{ color: "#faad14" }} />
+            <Statistic title={t("stats.openFindings")} value={stats.open_findings} valueStyle={{ color: "#faad14" }} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="严重不符合项" value={stats.major_nc_count} valueStyle={{ color: "#ff4d4f" }} />
+            <Statistic title={t("stats.majorNc")} value={stats.major_nc_count} valueStyle={{ color: "#ff4d4f" }} />
           </Card>
         </Col>
       </Row>
 
       <Card
-        title="内部审核管理"
+        title={t("pageTitle.list")}
         extra={
           <Space>
             {canEdit('audit') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setProgramModalOpen(true)}>
-                新建方案
+                {t("actions.newProgram")}
               </Button>
             )}
             {canEdit('audit') && (
               <Button icon={<PlusOutlined />} onClick={() => setPlanModalOpen(true)}>
-                新建计划
+                {t("actions.newPlan")}
               </Button>
             )}
             <Button icon={<TeamOutlined />} onClick={() => setAuditorDrawerOpen(true)}>
-              审核员管理
+              {t("actions.auditorManagement")}
             </Button>
             <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              刷新
+              {tc("actions.refresh")}
             </Button>
           </Space>
         }
       >
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
-            placeholder="选择年份"
+            placeholder={t("placeholder.year")}
             allowClear
             style={{ width: 120 }}
             value={filterYear}
@@ -412,15 +385,15 @@ export default function InternalAuditListPage() {
             <Option value={2027}>2027</Option>
           </Select>
           <Select
-            placeholder="审核类型"
+            placeholder={t("table.auditType")}
             allowClear
             style={{ width: 140 }}
             value={filterType}
             onChange={(v) => setFilterType(v || undefined)}
           >
-            <Option value="system">体系</Option>
-            <Option value="process">过程</Option>
-            <Option value="product">产品</Option>
+            <Option value="system">{auditTypeMap.system}</Option>
+            <Option value="process">{auditTypeMap.process}</Option>
+            <Option value="product">{auditTypeMap.product}</Option>
           </Select>
           <RangePicker
             onChange={(dates) => {
@@ -437,10 +410,10 @@ export default function InternalAuditListPage() {
           activeKey={activeTab}
           onChange={setActiveTab}
           items={[
-            { label: "全部", key: "all" },
-            { label: "待执行", key: "planned" },
-            { label: "进行中", key: "in_progress" },
-            { label: "已完成", key: "completed" },
+            { label: t("tabs.all"), key: "all" },
+            { label: t("tabs.planned"), key: "planned" },
+            { label: t("tabs.in_progress"), key: "in_progress" },
+            { label: t("tabs.completed"), key: "completed" },
           ]}
         />
 
@@ -462,7 +435,7 @@ export default function InternalAuditListPage() {
       </Card>
 
       <Modal
-        title="新建方案"
+        title={t("modal.newProgram")}
         open={programModalOpen}
         onCancel={() => {
           setProgramModalOpen(false);
@@ -472,27 +445,27 @@ export default function InternalAuditListPage() {
         width={600}
       >
         <Form form={programForm} layout="vertical" onFinish={handleCreateProgram}>
-          <Form.Item name="program_year" label="年度" rules={[{ required: true, message: "请输入年度" }]}>
-            <InputNumber style={{ width: "100%" }} placeholder="如 2026" min={2000} max={2100} />
+          <Form.Item name="program_year" label={t("form.year")} rules={[{ required: true, message: t("validation.yearRequired") }]}>
+            <InputNumber style={{ width: "100%" }} placeholder={t("placeholder.year")} min={2000} max={2100} />
           </Form.Item>
-          <Form.Item name="audit_type" label="审核类型" rules={[{ required: true, message: "请选择审核类型" }]}>
-            <Select placeholder="选择审核类型">
-              <Option value="system">体系</Option>
-              <Option value="process">过程</Option>
-              <Option value="product">产品</Option>
+          <Form.Item name="audit_type" label={t("form.auditType")} rules={[{ required: true, message: t("validation.auditTypeRequired") }]}>
+            <Select placeholder={t("placeholder.auditType")}>
+              <Option value="system">{auditTypeMap.system}</Option>
+              <Option value="process">{auditTypeMap.process}</Option>
+              <Option value="product">{auditTypeMap.product}</Option>
             </Select>
           </Form.Item>
-          <Form.Item name="scope" label="审核范围" rules={[{ required: true, message: "请输入审核范围" }]}>
-            <TextArea rows={3} placeholder="描述审核覆盖的范围" />
+          <Form.Item name="scope" label={t("form.scope")} rules={[{ required: true, message: t("validation.scopeRequired") }]}>
+            <TextArea rows={3} placeholder={t("placeholder.scope")} />
           </Form.Item>
-          <Form.Item name="criteria" label="审核准则" rules={[{ required: true, message: "请输入审核准则" }]}>
-            <TextArea rows={3} placeholder="如 ISO 9001, IATF 16949 等" />
+          <Form.Item name="criteria" label={t("form.criteria")} rules={[{ required: true, message: t("validation.criteriaRequired") }]}>
+            <TextArea rows={3} placeholder={t("placeholder.criteria")} />
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title="新建计划"
+        title={t("modal.newPlan")}
         open={planModalOpen}
         onCancel={() => {
           setPlanModalOpen(false);
@@ -502,26 +475,26 @@ export default function InternalAuditListPage() {
         width={600}
       >
         <Form form={planForm} layout="vertical" onFinish={handleCreatePlan}>
-          <Form.Item name="program_id" label="所属方案" rules={[{ required: true, message: "请选择方案" }]}>
-            <Select placeholder="选择审核方案">
+          <Form.Item name="program_id" label={t("form.program")} rules={[{ required: true, message: t("validation.programRequired") }]}>
+            <Select placeholder={t("placeholder.program")}>
               {programs.map((p) => (
                 <Option key={p.program_id} value={p.program_id}>
-                  {p.program_year}年 - {TYPE_MAP[p.audit_type]} ({p.scope.slice(0, 20)}...)
+                  {p.program_year} - {auditTypeMap[p.audit_type]} ({p.scope.slice(0, 20)}...)
                 </Option>
               ))}
             </Select>
           </Form.Item>
-          <Form.Item name="audit_scope" label="审核范围" rules={[{ required: true, message: "请输入审核范围" }]}>
-            <TextArea rows={2} placeholder="本次审核的具体范围" />
+          <Form.Item name="audit_scope" label={t("form.scope")} rules={[{ required: true, message: t("validation.scopeRequired") }]}>
+            <TextArea rows={2} placeholder={t("placeholder.scope")} />
           </Form.Item>
-          <Form.Item name="audit_criteria" label="审核准则" rules={[{ required: true, message: "请输入审核准则" }]}>
-            <TextArea rows={2} placeholder="本次审核依据的准则" />
+          <Form.Item name="audit_criteria" label={t("form.criteria")} rules={[{ required: true, message: t("validation.criteriaRequired") }]}>
+            <TextArea rows={2} placeholder={t("placeholder.criteria")} />
           </Form.Item>
-          <Form.Item name="planned_date" label="计划日期" rules={[{ required: true, message: "请选择计划日期" }]}>
-            <DatePicker style={{ width: "100%" }} placeholder="选择计划日期" />
+          <Form.Item name="planned_date" label={t("form.plannedDate")} rules={[{ required: true, message: t("validation.plannedDateRequired") }]}>
+            <DatePicker style={{ width: "100%" }} placeholder={t("placeholder.plannedDate")} />
           </Form.Item>
-          <Form.Item name="lead_auditor" label="审核组长" rules={[{ required: true, message: "请选择审核组长" }]}>
-            <Select placeholder="选择审核组长">
+          <Form.Item name="lead_auditor" label={t("form.leadAuditor")} rules={[{ required: true, message: t("validation.leadAuditorRequired") }]}>
+            <Select placeholder={t("placeholder.leadAuditor")}>
               {auditors.map((u) => (
                 <Option key={u.user_id} value={u.user_id}>
                   {u.display_name || u.username}
@@ -533,7 +506,7 @@ export default function InternalAuditListPage() {
       </Modal>
 
       <Drawer
-        title="审核员管理"
+        title={t("drawer.auditorManagement")}
         open={auditorDrawerOpen}
         onClose={() => setAuditorDrawerOpen(false)}
         width={720}
@@ -544,27 +517,24 @@ export default function InternalAuditListPage() {
           pagination={false}
           columns={[
             {
-              title: "用户名",
+              title: t("auditorTable.username"),
               dataIndex: "username",
             },
             {
-              title: "显示名",
+              title: t("auditorTable.displayName"),
               dataIndex: "display_name",
               render: (v: string | null) => v || "—",
             },
             {
-              title: "资格类型",
+              title: t("auditorTable.qualifications"),
               dataIndex: "qualifications",
               render: (_: unknown, record: User) => {
-                // qualifications may be on auditor_info; since User type doesn't have it,
-                // we cast to any for now or show placeholder.
-                // The backend returns auditor_info as part of User when listing auditors.
                 const info = record.auditor_info;
                 return info?.qualifications?.join(", ") || "—";
               },
             },
             {
-              title: "最近资格日期",
+              title: t("auditorTable.lastQualificationDate"),
               dataIndex: "last_qualification_date",
               render: (_: unknown, record: User) => {
                 const info = record.auditor_info;
@@ -572,7 +542,7 @@ export default function InternalAuditListPage() {
               },
             },
             {
-              title: "操作",
+              title: t("table.operations"),
               render: (_: unknown, record: User) => {
                 if (!isAdmin) return null;
                 return (
@@ -585,8 +555,7 @@ export default function InternalAuditListPage() {
                         is_auditor: info?.is_auditor ?? true,
                         qualifications: info?.qualifications || [],
                       };
-                      // Simple prompt-based edit for qualifications
-                      const qStr = prompt("资格类型（逗号分隔）:", values.qualifications.join(", "));
+                      const qStr = prompt(t("prompt.qualifications"), values.qualifications.join(", "));
                       if (qStr !== null) {
                         handleUpdateAuditor(record.user_id, {
                           is_auditor: values.is_auditor,
@@ -595,7 +564,7 @@ export default function InternalAuditListPage() {
                       }
                     }}
                   >
-                    编辑
+                    {tc("actions.edit")}
                   </Button>
                 );
               },

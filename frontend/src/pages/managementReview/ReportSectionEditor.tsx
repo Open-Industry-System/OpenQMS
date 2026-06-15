@@ -1,4 +1,5 @@
 import { Input } from "antd";
+import { useTranslation } from "react-i18next";
 import type { ManagementReviewReportSection } from "../../types";
 
 const { TextArea } = Input;
@@ -10,6 +11,8 @@ interface Props {
 }
 
 export default function ReportSectionEditor({ section, readOnly, onChange }: Props) {
+  const { t } = useTranslation("managementReview");
+
   return (
     <div>
       {section.source === "data_package" && (
@@ -19,13 +22,13 @@ export default function ReportSectionEditor({ section, readOnly, onChange }: Pro
       )}
       {section.ai_analysis && (
         <div style={{ marginBottom: 12, color: "#333" }}>
-          <strong>AI 分析：</strong>
+          <strong>{t("sectionEditor.aiAnalysis")}</strong>
           <div>{section.ai_analysis}</div>
         </div>
       )}
       {section.findings.length > 0 && (
         <div style={{ marginBottom: 12 }}>
-          <strong>关键发现：</strong>
+          <strong>{t("sectionEditor.keyFindings")}</strong>
           <ul style={{ margin: "4px 0", paddingLeft: 20 }}>
             {section.findings.map((f, i) => (
               <li key={i}>{f}</li>
@@ -35,7 +38,7 @@ export default function ReportSectionEditor({ section, readOnly, onChange }: Pro
       )}
       {section.recommendations.length > 0 && (
         <div style={{ marginBottom: 12 }}>
-          <strong>改进建议：</strong>
+          <strong>{t("sectionEditor.recommendations")}</strong>
           <ul style={{ margin: "4px 0", paddingLeft: 20 }}>
             {section.recommendations.map((r, i) => (
               <li key={i}>{r}</li>
@@ -48,7 +51,7 @@ export default function ReportSectionEditor({ section, readOnly, onChange }: Pro
         value={section.manual_text}
         disabled={readOnly}
         onChange={(e) => onChange({ ...section, manual_text: e.target.value })}
-        placeholder="在此输入人工编辑内容，导出时优先使用..."
+        placeholder={t("sectionEditor.placeholder")}
       />
     </div>
   );

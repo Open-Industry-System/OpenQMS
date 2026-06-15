@@ -1,0 +1,129 @@
+{
+  "yes": "是",
+  "no": "否",
+  "dashboard": {
+    "title": "MES 仪表盘",
+    "errors": {
+      "loadFailed": "加载 MES 仪表盘失败"
+    },
+    "stats": {
+      "runningEquipment": "运行设备",
+      "downEquipment": "停机设备",
+      "plannedOutput": "计划产量",
+      "actualOutput": "实际产量"
+    },
+    "equipmentStatus": "设备状态",
+    "equipmentStatusLabels": {
+      "running": "运行中",
+      "idle": "待机",
+      "down": "停机",
+      "changeover": "换模中"
+    },
+    "columns": {
+      "equipmentName": "设备名称",
+      "status": "状态",
+      "availability": "可用率 (%)",
+      "performance": "性能 (%)",
+      "quality": "质量 (%)",
+      "oee": "OEE (%)"
+    }
+  },
+  "orders": {
+    "title": "生产工单",
+    "filterPlaceholder": "筛选状态",
+    "status": {
+      "planned": "计划中",
+      "inProgress": "进行中",
+      "completed": "已完成",
+      "closed": "已关闭"
+    },
+    "columns": {
+      "orderNo": "工单号",
+      "productModel": "产品型号",
+      "plannedQty": "计划数量",
+      "actualQty": "实际数量",
+      "status": "状态",
+      "startedAt": "开始时间",
+      "completedAt": "完成时间"
+    },
+    "messages": {
+      "loadFailed": "加载生产工单失败"
+    }
+  },
+  "scrap": {
+    "title": "不良记录",
+    "filterPlaceholder": "筛选不良类型",
+    "defectType": {
+      "scrap": "报废",
+      "rework": "返工",
+      "reject": "拒收"
+    },
+    "columns": {
+      "externalId": "外部ID",
+      "defectType": "不良类型",
+      "defectCategory": "不良分类",
+      "defectQty": "不良数量",
+      "totalQty": "总数量",
+      "defectRate": "不良率 (%)",
+      "defectDescription": "不良描述",
+      "recordedAt": "记录时间"
+    },
+    "messages": {
+      "loadFailed": "加载不良记录失败"
+    }
+  },
+  "connections": {
+    "title": "MES 连接管理",
+    "create": "新建连接",
+    "edit": "编辑",
+    "test": "测试",
+    "sync": "同步",
+    "delete": "删除",
+    "columns": {
+      "name": "连接名称",
+      "type": "类型",
+      "status": "状态",
+      "productLine": "产线",
+      "actions": "操作"
+    },
+    "status": {
+      "active": "正常",
+      "inactive": "停用"
+    },
+    "modal": {
+      "createTitle": "新建连接",
+      "editTitle": "编辑连接"
+    },
+    "form": {
+      "name": "连接名称",
+      "nameRequired": "请输入连接名称",
+      "namePlaceholder": "如 产线A-MES",
+      "connectorType": "连接器类型",
+      "connectorTypeRequired": "请选择连接器类型",
+      "productLineCode": "产线代码",
+      "productLineCodePlaceholder": "如 DC-DC-100"
+    },
+    "connector": {
+      "mock": "Mock - 模拟数据",
+      "rest": "REST API"
+    },
+    "deleteConfirm": {
+      "title": "确认删除",
+      "content": "确定删除连接 \"{{name}}\" 吗？"
+    },
+    "messages": {
+      "loadFailed": "加载连接列表失败",
+      "createSuccess": "连接创建成功",
+      "createFailed": "创建失败",
+      "updateSuccess": "连接更新成功",
+      "updateFailed": "更新失败",
+      "deleteSuccess": "删除成功",
+      "deleteFailed": "删除失败",
+      "testSuccess": "连接测试成功",
+      "testFailed": "连接测试失败",
+      "testFailedWithError": "连接测试失败: {{error}}",
+      "syncTriggered": "同步已触发，后台将在 30 秒内开始执行",
+      "syncFailed": "同步触发失败"
+    }
+  }
+}

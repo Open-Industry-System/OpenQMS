@@ -3,24 +3,11 @@ import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, Tag, Button, Space, Descriptions, Input, Modal, message, Spin, Row, Col, Steps, Timeline } from "antd";
 import { EditOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { getAPQPProject, updateAPQPProject, transitionAPQPProject } from "../../../api/apqp";
 import type { APQPProject, APQPProjectUpdate } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
-
-const PHASE_NAMES: Record<number, string> = {
-  1: "策划与定义",
-  2: "产品设计与开发",
-  3: "过程设计与开发",
-  4: "产品与过程确认",
-  5: "量产启动与反馈",
-};
-
-const PROJECT_STATUS_LABELS: Record<string, string> = {
-  active: "进行中",
-  completed: "已完成",
-  cancelled: "已取消",
-};
 
 const PROJECT_STATUS_COLORS: Record<string, string> = {
   active: "processing",
@@ -28,7 +15,34 @@ const PROJECT_STATUS_COLORS: Record<string, string> = {
   cancelled: "default",
 };
 
+function useAPQPDetailLabels(t: (key: string) => string) {
+  const phaseNames: Record<number, string> = {
+    1: t("phase.1"),
+    2: t("phase.2"),
+    3: t("phase.3"),
+    4: t("phase.4"),
+    5: t("phase.5"),
+  };
+
+  const projectStatusLabels: Record<string, string> = {
+    active: t("projectStatus.active"),
+    completed: t("projectStatus.completed"),
+    cancelled: t("projectStatus.cancelled"),
+  };
+
+  const phaseStatusLabel = (status: string) => {
+    if (status === "pending_approval") return t("phaseStatus.pendingApproval");
+    if (status === "in_progress") return t("phaseStatus.inProgress");
+    if (status === "completed") return t("phaseStatus.completed");
+    return status;
+  };
+
+  return { phaseNames, projectStatusLabels, phaseStatusLabel };
+}
+
 export default function APQPDetailPage() {
+  const { t } = useTranslation("apqp");
+  const { t: tc } = useTranslation("common");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const _user = useAuthStore((s) => s.user);
@@ -38,6 +52,8 @@ export default function APQPDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [gateComment, setGateComment] = useState("");
+
+  const { phaseNames, projectStatusLabels, phaseStatusLabel } = useAPQPDetailLabels(t);
 
   const load = async () => {
     if (!id) return;
@@ -56,7 +72,7 @@ export default function APQPDetailPage() {
   const handleTransition = async (action: string, comments?: string) => {
     if (!id) return;
     await transitionAPQPProject(id, { action: action as "submit_gate" | "approve_gate" | "reject_gate" | "cancel", comments });
-    message.success("操作成功");
+    message.success(t("message.operationSuccess"));
     setGateComment("");
     load();
   };
@@ -69,7 +85,7 @@ export default function APQPDetailPage() {
       (payload as Record<string, string | null>)[k] = nullableFields.includes(k) ? (v || null) : v;
     }
     await updateAPQPProject(id, payload);
-    message.success("更新成功");
+    message.success(t("message.updateSuccess"));
     setEditOpen(false);
     load();
   };
@@ -88,12 +104,12 @@ export default function APQPDetailPage() {
       description = completedAt.slice(0, 10);
     } else if (project.current_phase === phase) {
       status = project.phase_status === "pending_approval" ? "error" : "process";
-      description = project.phase_status === "pending_approval" ? "待审批" : "进行中";
+      description = phaseStatusLabel(project.phase_status || "");
     }
 
     return {
-      title: `Phase ${phase}`,
-      subTitle: PHASE_NAMES[phase],
+      title: t("phase.phaseN", { phase }),
+      subTitle: phaseNames[phase],
       status,
       description,
     };
@@ -105,7 +121,7 @@ export default function APQPDetailPage() {
     if (project.phase_status === "in_progress" && canEdit('planning')) {
       btns.push(
         <Button key="submit" type="primary" onClick={() => handleTransition("submit_gate")}>
-          提交审批
+          {t("action.submitForApproval")}
         </Button>
       );
     }
@@ -113,12 +129,12 @@ export default function APQPDetailPage() {
       if (canApprove('planning')) {
         btns.push(
           <Button key="approve" type="primary" onClick={() => handleTransition("approve_gate", gateComment)}>
-            审批通过
+            {t("action.approveGate")}
           </Button>
         );
         btns.push(
           <Button key="reject" danger onClick={() => handleTransition("reject_gate", gateComment)}>
-            驳回
+            {t("action.rejectGate")}
           </Button>
         );
       }
@@ -126,7 +142,7 @@ export default function APQPDetailPage() {
     if (isAdmin && project.project_status === "active") {
       btns.push(
         <Button key="cancel" danger onClick={() => handleTransition("cancel")}>
-          取消项目
+          {t("action.cancelProject")}
         </Button>
       );
     }
@@ -143,7 +159,7 @@ export default function APQPDetailPage() {
               <span style={{ fontSize: 20, fontWeight: 600 }}>{project.project_code}</span>
               <span style={{ fontSize: 16 }}>{project.project_name}</span>
               <Tag color={PROJECT_STATUS_COLORS[project.project_status]}>
-                {PROJECT_STATUS_LABELS[project.project_status]}
+                {projectStatusLabels[project.project_status]}
               </Tag>
             </Space>
           </Col>
@@ -163,7 +179,7 @@ export default function APQPDetailPage() {
                   });
                   setEditOpen(true);
                 }}>
-                  编辑
+                  {tc("actions.edit")}
                 </Button>
               )}
             </Space>
@@ -172,34 +188,34 @@ export default function APQPDetailPage() {
       </Card>
 
       {/* Project Info */}
-      <Card title="项目信息" style={{ marginBottom: 16 }}>
+      <Card title={t("card.projectInfo")} style={{ marginBottom: 16 }}>
         <Descriptions column={2} bordered size="small">
-          <Descriptions.Item label="项目编号">{project.project_code}</Descriptions.Item>
-          <Descriptions.Item label="项目名称">{project.project_name}</Descriptions.Item>
-          <Descriptions.Item label="产品">{project.product_name}</Descriptions.Item>
-          <Descriptions.Item label="产品线">{project.product_line_code}</Descriptions.Item>
-          <Descriptions.Item label="客户">{project.customer_name || "-"}</Descriptions.Item>
-          <Descriptions.Item label="目标SOP">{project.target_sop_date || "-"}</Descriptions.Item>
-          <Descriptions.Item label="创建人">{project.created_by_name}</Descriptions.Item>
-          <Descriptions.Item label="创建时间">{project.created_at ? new Date(project.created_at).toLocaleString() : "-"}</Descriptions.Item>
-          <Descriptions.Item label="描述" span={2}>{project.description || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("label.projectCode")}>{project.project_code}</Descriptions.Item>
+          <Descriptions.Item label={t("label.projectName")}>{project.project_name}</Descriptions.Item>
+          <Descriptions.Item label={t("label.product")}>{project.product_name}</Descriptions.Item>
+          <Descriptions.Item label={t("label.productLine")}>{project.product_line_code}</Descriptions.Item>
+          <Descriptions.Item label={t("label.customer")}>{project.customer_name || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("label.targetSOP")}>{project.target_sop_date || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("label.createdBy")}>{project.created_by_name}</Descriptions.Item>
+          <Descriptions.Item label={t("label.createdAt")}>{project.created_at ? new Date(project.created_at).toLocaleString() : "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("label.description")} span={2}>{project.description || "-"}</Descriptions.Item>
         </Descriptions>
       </Card>
 
       {/* Phase Progress */}
-      <Card title="阶段进度" style={{ marginBottom: 16 }}>
+      <Card title={t("card.phaseProgress")} style={{ marginBottom: 16 }}>
         <Steps items={stepItems} current={project.current_phase - 1} status={project.phase_status === "pending_approval" ? "error" : undefined} />
       </Card>
 
       {/* Current Phase Actions */}
       {project.project_status === "active" && (
-        <Card title="阶段操作" style={{ marginBottom: 16 }}>
+        <Card title={t("card.phaseActions")} style={{ marginBottom: 16 }}>
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="当前阶段">
-              <Tag color="blue">Phase {project.current_phase} — {PHASE_NAMES[project.current_phase]}</Tag>
+            <Descriptions.Item label={t("label.currentPhase")}>
+              <Tag color="blue">{t("phase.phaseNName", { phase: project.current_phase, name: phaseNames[project.current_phase] })}</Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="阶段状态">
-              {project.phase_status === "pending_approval" ? <Tag color="orange">待审批</Tag> : <Tag color="blue">进行中</Tag>}
+            <Descriptions.Item label={t("label.phaseStatus")}>
+              {project.phase_status === "pending_approval" ? <Tag color="orange">{t("phaseStatus.pendingApproval")}</Tag> : <Tag color="blue">{t("phaseStatus.inProgress")}</Tag>}
             </Descriptions.Item>
           </Descriptions>
           <div style={{ marginTop: 12 }}>
@@ -207,7 +223,7 @@ export default function APQPDetailPage() {
               rows={3}
               value={gateComment}
               onChange={(e) => setGateComment(e.target.value)}
-              placeholder="门控审批意见（可选）"
+              placeholder={t("label.gateComment")}
               style={{ marginBottom: 8 }}
             />
             <Space>{actionButtons()}</Space>
@@ -216,44 +232,44 @@ export default function APQPDetailPage() {
       )}
 
       {/* Cross-module Links */}
-      <Card title="关联交付物" style={{ marginBottom: 16 }}>
+      <Card title={t("card.deliverables")} style={{ marginBottom: 16 }}>
         <Descriptions column={1} bordered size="small">
-          <Descriptions.Item label="DFMEA（Phase 2）">
+          <Descriptions.Item label={t("label.dfmeaPhase2")}>
             {project.dfmea_id ? (
               <Space>
                 <span>{project.dfmea_document_no || project.dfmea_id}</span>
-                <Button size="small" type="link" onClick={() => navigate(`/fmea/${project.dfmea_id}`)}>查看</Button>
+                <Button size="small" type="link" onClick={() => navigate(`/fmea/${project.dfmea_id}`)}>{tc("actions.view")}</Button>
               </Space>
-            ) : <span style={{ color: "#999" }}>未关联</span>}
+            ) : <span style={{ color: "#999" }}>{t("label.notLinked")}</span>}
           </Descriptions.Item>
-          <Descriptions.Item label="PFMEA（Phase 3）">
+          <Descriptions.Item label={t("label.pfmeaPhase3")}>
             {project.pfmea_id ? (
               <Space>
                 <span>{project.pfmea_document_no || project.pfmea_id}</span>
-                <Button size="small" type="link" onClick={() => navigate(`/fmea/${project.pfmea_id}`)}>查看</Button>
+                <Button size="small" type="link" onClick={() => navigate(`/fmea/${project.pfmea_id}`)}>{tc("actions.view")}</Button>
               </Space>
-            ) : <span style={{ color: "#999" }}>未关联</span>}
+            ) : <span style={{ color: "#999" }}>{t("label.notLinked")}</span>}
           </Descriptions.Item>
-          <Descriptions.Item label="控制计划（Phase 3）">
+          <Descriptions.Item label={t("label.controlPlanPhase3")}>
             {project.control_plan_id ? (
               <Space>
                 <span>{project.control_plan_document_no || project.control_plan_id}</span>
-                <Button size="small" type="link" onClick={() => navigate(`/control-plans/${project.control_plan_id}`)}>查看</Button>
+                <Button size="small" type="link" onClick={() => navigate(`/control-plans/${project.control_plan_id}`)}>{tc("actions.view")}</Button>
               </Space>
-            ) : <span style={{ color: "#999" }}>未关联</span>}
+            ) : <span style={{ color: "#999" }}>{t("label.notLinked")}</span>}
           </Descriptions.Item>
-          <Descriptions.Item label="PPAP（Phase 4）">
+          <Descriptions.Item label={t("label.ppapPhase4")}>
             {project.ppap_submission_id ? (
               <Space>
                 <span>{project.ppap_submission_part_no} — {project.ppap_submission_part_name}</span>
               </Space>
-            ) : <span style={{ color: "#999" }}>未关联</span>}
+            ) : <span style={{ color: "#999" }}>{t("label.notLinked")}</span>}
           </Descriptions.Item>
         </Descriptions>
       </Card>
 
       {/* Phase Timeline */}
-      <Card title="阶段时间线" style={{ marginBottom: 16 }}>
+      <Card title={t("card.phaseTimeline")} style={{ marginBottom: 16 }}>
         <Timeline
           items={[1, 2, 3, 4, 5].map((phase) => {
             const completedAt = (project as unknown as Record<string, string | null>)[`phase_${phase}_completed_at`];
@@ -261,8 +277,8 @@ export default function APQPDetailPage() {
               color: completedAt ? "green" : project.current_phase === phase ? "blue" : "gray",
               children: (
                 <div>
-                  <strong>Phase {phase} — {PHASE_NAMES[phase]}</strong>
-                  <div style={{ color: "#999", fontSize: 12 }}>{completedAt || "未完成"}</div>
+                  <strong>{t("phase.phaseNName", { phase, name: phaseNames[phase] })}</strong>
+                  <div style={{ color: "#999", fontSize: 12 }}>{completedAt || t("message.notCompleted")}</div>
                 </div>
               ),
             };
@@ -272,14 +288,14 @@ export default function APQPDetailPage() {
 
       {/* Gate History */}
       {project.gate_history && project.gate_history.length > 0 && (
-        <Card title="门控审批记录">
+        <Card title={t("card.gateHistory")}>
           <Timeline
             items={project.gate_history.map((entry) => ({
               color: entry.action === "approve" ? "green" : entry.action === "reject" ? "red" : "blue",
               children: (
                 <div>
                   <strong>
-                    Phase {entry.phase} — {entry.action === "approve" ? "审批通过" : entry.action === "reject" ? "驳回" : "提交审批"}
+                    {t("phase.phaseN", { phase: entry.phase })} — {entry.action === "approve" ? t("action.gateApproved") : entry.action === "reject" ? t("action.gateRejected") : t("action.gateSubmitted")}
                   </strong>
                   <span style={{ marginLeft: 8, color: "#999", fontSize: 12 }}>
                     by {entry.user_name} · {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ""}
@@ -298,7 +314,7 @@ export default function APQPDetailPage() {
 
       {/* Edit Modal */}
       <Modal
-        title="编辑项目"
+        title={t("pageTitle.editProject")}
         open={editOpen}
         onCancel={() => setEditOpen(false)}
         onOk={handleEdit}
@@ -306,19 +322,19 @@ export default function APQPDetailPage() {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
-            <label>项目名称</label>
+            <label>{t("form.projectName")}</label>
             <Input value={editForm.project_name} onChange={(e) => setEditForm({ ...editForm, project_name: e.target.value })} />
           </div>
           <div>
-            <label>产品名称</label>
+            <label>{t("form.productName")}</label>
             <Input value={editForm.product_name} onChange={(e) => setEditForm({ ...editForm, product_name: e.target.value })} />
           </div>
           <div>
-            <label>客户名称</label>
+            <label>{t("form.customerName")}</label>
             <Input value={editForm.customer_name} onChange={(e) => setEditForm({ ...editForm, customer_name: e.target.value })} />
           </div>
           <div>
-            <label>描述</label>
+            <label>{t("form.description")}</label>
             <Input.TextArea rows={3} value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
           </div>
           <div>
@@ -330,7 +346,7 @@ export default function APQPDetailPage() {
             <Input value={editForm.pfmea_id} onChange={(e) => setEditForm({ ...editForm, pfmea_id: e.target.value })} />
           </div>
           <div>
-            <label>控制计划 ID</label>
+            <label>{t("form.controlPlan")} ID</label>
             <Input value={editForm.control_plan_id} onChange={(e) => setEditForm({ ...editForm, control_plan_id: e.target.value })} />
           </div>
           <div>

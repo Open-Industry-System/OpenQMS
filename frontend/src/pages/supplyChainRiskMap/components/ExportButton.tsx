@@ -1,6 +1,7 @@
 import React from "react";
 import { Button, Dropdown, message } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { riskMapApi } from "../../../api/supplyChainRiskMap";
 
 interface ExportButtonProps {
@@ -9,6 +10,9 @@ interface ExportButtonProps {
 }
 
 const ExportButton: React.FC<ExportButtonProps> = ({ period, productLineCode }) => {
+  const { t } = useTranslation("supplyChainRiskMap");
+  const { t: tc } = useTranslation("common");
+
   const handleExport = async (format: "csv" | "excel") => {
     try {
       const params = {
@@ -26,18 +30,18 @@ const ExportButton: React.FC<ExportButtonProps> = ({ period, productLineCode }) 
       a.click();
       window.URL.revokeObjectURL(url);
     } catch {
-      message.error("导出失败");
+      message.error(t("export.failed"));
     }
   };
 
   const menuItems = [
-    { key: "csv", label: "CSV", onClick: () => handleExport("csv") },
-    { key: "excel", label: "Excel", onClick: () => handleExport("excel") },
+    { key: "csv", label: t("export.csv"), onClick: () => handleExport("csv") },
+    { key: "excel", label: t("export.excel"), onClick: () => handleExport("excel") },
   ];
 
   return (
     <Dropdown menu={{ items: menuItems }}>
-      <Button icon={<DownloadOutlined />}>导出</Button>
+      <Button icon={<DownloadOutlined />}>{tc("actions.export")}</Button>
     </Dropdown>
   );
 };

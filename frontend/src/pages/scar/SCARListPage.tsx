@@ -2,17 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Table, Tag, Tabs, Button, Select, Space, Modal, Form, Input, DatePicker, message } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { listSCARs, createSCAR } from "../../api/scar";
 import { listSuppliers } from "../../api/supplier";
 import type { SupplierSCAR, SCARListResponse, Supplier } from "../../types";
-
-const STATUS_TABS = [
-  { key: "all", label: "全部" },
-  { key: "pending", label: "待处理" },
-  { key: "responded", label: "已回复" },
-  { key: "verified", label: "已验证" },
-  { key: "closed", label: "已关闭" },
-];
+import { STATUS_COLORS, useSCARStatusMap, useSCARSourceMap, useSCARTabs, useSCARSourceOptions } from "./useOptions";
 
 const STATUS_MAP: Record<string, string | undefined> = {
   all: undefined,
@@ -22,31 +16,15 @@ const STATUS_MAP: Record<string, string | undefined> = {
   closed: "closed",
 };
 
-export const STATUS_COLORS: Record<string, string> = {
-  open: "default",
-  in_progress: "processing",
-  responded: "warning",
-  verified: "success",
-  closed: "default",
-};
-
-export const STATUS_LABELS: Record<string, string> = {
-  open: "待处理",
-  in_progress: "处理中",
-  responded: "已回复",
-  verified: "已验证",
-  closed: "已关闭",
-};
-
-export const SOURCE_LABELS: Record<string, string> = {
-  iqc: "IQC拒收",
-  complaint: "客诉",
-  rma: "RMA",
-  manual: "手动创建",
-};
-
 export default function SCARListPage() {
+  const { t } = useTranslation("scar");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
+  const statusMap = useSCARStatusMap();
+  const sourceMap = useSCARSourceMap();
+  const statusTabs = useSCARTabs();
+  const sourceOptions = useSCARSourceOptions();
+
   const [data, setData] = useState<SCARListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("all");
@@ -86,35 +64,35 @@ export default function SCARListPage() {
       requested_action: values.requested_action as string | undefined,
       due_date: values.due_date ? (values.due_date as { format: (f: string) => string }).format("YYYY-MM-DD") : undefined,
     });
-    message.success("SCAR 创建成功");
+    message.success(t("messages.createSuccess"));
     setCreateOpen(false);
     form.resetFields();
     loadData();
   };
 
   const columns = [
-    { title: "SCAR编号", dataIndex: "scar_no", key: "scar_no" },
-    { title: "供应商", dataIndex: "supplier_name", key: "supplier_name", render: (v: string) => v || "-" },
+    { title: t("table.scarNo"), dataIndex: "scar_no", key: "scar_no" },
+    { title: t("table.supplier"), dataIndex: "supplier_name", key: "supplier_name", render: (v: string) => v || "-" },
     {
-      title: "来源",
+      title: t("table.source"),
       dataIndex: "source_type",
       key: "source_type",
-      render: (v: string) => SOURCE_LABELS[v] || v,
+      render: (v: string) => sourceMap[v] || v,
     },
     {
-      title: "状态",
+      title: t("table.status"),
       dataIndex: "status",
       key: "status",
-      render: (s: string) => <Tag color={STATUS_COLORS[s]}>{STATUS_LABELS[s] || s}</Tag>,
+      render: (s: string) => <Tag color={STATUS_COLORS[s]}>{statusMap[s] || s}</Tag>,
     },
-    { title: "发出日期", dataIndex: "issued_date", key: "issued_date" },
-    { title: "到期日", dataIndex: "due_date", key: "due_date", render: (v: string) => v || "-" },
+    { title: t("table.issuedDate"), dataIndex: "issued_date", key: "issued_date" },
+    { title: t("table.dueDate"), dataIndex: "due_date", key: "due_date", render: (v: string) => v || "-" },
     {
-      title: "操作",
+      title: t("table.operations"),
       key: "action",
       render: (_: unknown, record: SupplierSCAR) => (
         <Button type="link" onClick={() => navigate(`/scars/${record.scar_id}`)}>
-          查看
+          {tc("actions.view")}
         </Button>
       ),
     },
@@ -123,13 +101,13 @@ export default function SCARListPage() {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={STATUS_TABS} />
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={statusTabs} />
         <Space>
           <Select
             allowClear
             showSearch
             filterOption={false}
-            placeholder="筛选供应商"
+            placeholder={t("table.supplier")}
             style={{ width: 160 }}
             onSearch={async (search) => {
               const res = await listSuppliers({ search, page_size: 20 });
@@ -140,18 +118,13 @@ export default function SCARListPage() {
           />
           <Select
             allowClear
-            placeholder="来源类型"
+            placeholder={t("table.source")}
             style={{ width: 120 }}
             onChange={(v) => { setSourceType(v); setPage(1); }}
-            options={[
-              { value: "iqc", label: "IQC拒收" },
-              { value: "complaint", label: "客诉" },
-              { value: "rma", label: "RMA" },
-              { value: "manual", label: "手动创建" },
-            ]}
+            options={sourceOptions}
           />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建 SCAR
+            {t("actions.newScar")}
           </Button>
         </Space>
       </div>
@@ -170,14 +143,14 @@ export default function SCARListPage() {
       />
 
       <Modal
-        title="新建 SCAR"
+        title={t("actions.newScar")}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => form.submit()}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Form.Item name="supplier_id" label="供应商" rules={[{ required: true, message: "请选择供应商" }]}>
+          <Form.Item name="supplier_id" label={t("descriptions.supplier")} rules={[{ required: true, message: t("validation.supplierRequired") }]}>
             <Select
               showSearch
               filterOption={false}
@@ -186,16 +159,16 @@ export default function SCARListPage() {
                 setSuppliers(res.items);
               }}
               options={suppliers.map((s) => ({ value: s.supplier_id, label: `${s.supplier_no} - ${s.name}` }))}
-              placeholder="搜索供应商"
+              placeholder={t("table.supplier")}
             />
           </Form.Item>
-          <Form.Item name="description" label="问题描述" rules={[{ required: true, message: "请输入问题描述" }]}>
+          <Form.Item name="description" label={t("descriptions.description")} rules={[{ required: true, message: t("validation.descriptionRequired") }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Form.Item name="requested_action" label="要求措施">
+          <Form.Item name="requested_action" label={t("descriptions.requestedAction")}>
             <Input.TextArea rows={2} />
           </Form.Item>
-          <Form.Item name="due_date" label="到期日">
+          <Form.Item name="due_date" label={t("descriptions.dueDate")}>
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
         </Form>

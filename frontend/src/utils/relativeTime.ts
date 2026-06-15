@@ -1,4 +1,6 @@
-export function relativeTime(dateStr: string): string {
+import { useTranslation } from "react-i18next";
+
+export function relativeTime(dateStr: string, t: (key: string, options?: Record<string, unknown>) => string): string {
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -6,16 +8,16 @@ export function relativeTime(dateStr: string): string {
   const diffHour = Math.floor(diffMs / 3600000);
 
   if (diffMin < 5) {
-    return "刚刚";
+    return t("relativeTime.justNow");
   }
   if (diffHour < 1) {
-    return `${diffMin}分钟前`;
+    return t("relativeTime.minutesAgo", { count: diffMin });
   }
   if (diffHour < 24) {
-    return `${diffHour}小时前`;
+    return t("relativeTime.hoursAgo", { count: diffHour });
   }
   if (diffHour < 48) {
-    return "昨天";
+    return t("relativeTime.yesterday");
   }
 
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -24,4 +26,9 @@ export function relativeTime(dateStr: string): string {
   const minute = String(date.getMinutes()).padStart(2, "0");
 
   return `${month}-${day} ${hour}:${minute}`;
+}
+
+export function useRelativeTime(): (dateStr: string) => string {
+  const { t } = useTranslation("dashboard");
+  return (dateStr: string) => relativeTime(dateStr, t);
 }

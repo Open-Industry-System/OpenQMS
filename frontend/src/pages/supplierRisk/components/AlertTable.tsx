@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Table, Tag, Button, Space, Select } from "antd";
+import { useTranslation } from "react-i18next";
 import type { SupplierRiskAlert } from "../../../types";
 import { riskAlertApi } from "../../../api/supplierRisk";
 import HandleAlertDrawer from "./HandleAlertDrawer";
@@ -11,27 +12,14 @@ const RISK_COLORS: Record<string, string> = {
   critical: "red",
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  open: "开放",
-  acknowledged: "已确认",
-  action_taken: "已处置",
-  ignored: "已忽略",
-  closed: "已关闭",
-};
-
-const RISK_LABELS: Record<string, string> = {
-  low: "低",
-  medium: "中",
-  high: "高",
-  critical: "极高",
-};
-
 interface Props {
   productLineCode?: string | null;
   onRefresh?: () => void;
 }
 
 const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
+  const { t } = useTranslation("supplierRisk");
+  const { t: tc } = useTranslation("common");
   const [data, setData] = useState<SupplierRiskAlert[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -40,6 +28,21 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [selectedAlert, setSelectedAlert] = useState<SupplierRiskAlert | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const STATUS_LABELS: Record<string, string> = {
+    open: t("alert.statuses.open"),
+    acknowledged: t("alert.statuses.acknowledged"),
+    action_taken: t("alert.statuses.action_taken"),
+    ignored: t("alert.statuses.ignored"),
+    closed: t("alert.statuses.closed"),
+  };
+
+  const RISK_LABELS: Record<string, string> = {
+    low: t("alert.riskLevels.low"),
+    medium: t("alert.riskLevels.medium"),
+    high: t("alert.riskLevels.high"),
+    critical: t("alert.riskLevels.critical"),
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -66,20 +69,20 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
   }, [page, productLineCode, riskFilter, statusFilter]);
 
   const columns = [
-    { title: "供应商编号", dataIndex: "supplier_no" },
-    { title: "供应商名称", dataIndex: "supplier_name" },
+    { title: t("alert.columns.supplierNo"), dataIndex: "supplier_no" },
+    { title: t("alert.columns.supplierName"), dataIndex: "supplier_name" },
     {
-      title: "风险等级",
+      title: t("alert.columns.riskLevel"),
       dataIndex: "risk_level",
       render: (v: string) => (
         <Tag color={RISK_COLORS[v]}>{RISK_LABELS[v] || v}</Tag>
       ),
     },
-    { title: "风险分", dataIndex: "risk_score", sorter: true },
-    { title: "状态", dataIndex: "status", render: (v: string) => STATUS_LABELS[v] || v },
-    { title: "快照日期", dataIndex: "snapshot_date" },
+    { title: t("alert.columns.riskScore"), dataIndex: "risk_score", sorter: true },
+    { title: t("alert.columns.status"), dataIndex: "status", render: (v: string) => STATUS_LABELS[v] || v },
+    { title: t("alert.columns.snapshotDate"), dataIndex: "snapshot_date" },
     {
-      title: "操作",
+      title: tc("table.operations"),
       render: (_: unknown, record: SupplierRiskAlert) => (
         <Button
           size="small"
@@ -88,7 +91,7 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
             setDrawerOpen(true);
           }}
         >
-          处置
+          {t("alert.handle")}
         </Button>
       ),
     },
@@ -99,7 +102,7 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
       <Space style={{ marginBottom: 16 }}>
         <Select
           allowClear
-          placeholder="风险等级"
+          placeholder={t("alert.placeholder.riskLevel")}
           style={{ width: 120 }}
           value={riskFilter}
           onChange={(v) => {
@@ -107,15 +110,15 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
             setPage(1);
           }}
           options={[
-            { value: "low", label: "低" },
-            { value: "medium", label: "中" },
-            { value: "high", label: "高" },
-            { value: "critical", label: "极高" },
+            { value: "low", label: RISK_LABELS.low },
+            { value: "medium", label: RISK_LABELS.medium },
+            { value: "high", label: RISK_LABELS.high },
+            { value: "critical", label: RISK_LABELS.critical },
           ]}
         />
         <Select
           allowClear
-          placeholder="状态"
+          placeholder={t("alert.placeholder.status")}
           style={{ width: 120 }}
           value={statusFilter}
           onChange={(v) => {
@@ -123,11 +126,11 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
             setPage(1);
           }}
           options={[
-            { value: "open", label: "开放" },
-            { value: "acknowledged", label: "已确认" },
-            { value: "action_taken", label: "已处置" },
-            { value: "ignored", label: "已忽略" },
-            { value: "closed", label: "已关闭" },
+            { value: "open", label: STATUS_LABELS.open },
+            { value: "acknowledged", label: STATUS_LABELS.acknowledged },
+            { value: "action_taken", label: STATUS_LABELS.action_taken },
+            { value: "ignored", label: STATUS_LABELS.ignored },
+            { value: "closed", label: STATUS_LABELS.closed },
           ]}
         />
       </Space>
@@ -141,7 +144,7 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
           total,
           pageSize: 20,
           onChange: setPage,
-          showTotal: (t) => `共 ${t} 条`,
+          showTotal: (totalCount) => tc("pagination.total", { total: totalCount }),
         }}
       />
       <HandleAlertDrawer

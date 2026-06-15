@@ -1,0 +1,162 @@
+{
+  "pageTitle": {
+    "controlPlanList": "Control Plans",
+    "controlPlanEditor": "Control Plan Editor",
+    "controlPlanDetail": "Control Plan Detail",
+    "newControlPlan": "New Control Plan",
+    "versionHistory": "Version History",
+    "versionCompare": "Version Compare"
+  },
+  "button": {
+    "newControlPlan": "New Control Plan",
+    "importFromPFMEA": "Import from PFMEA",
+    "checkPFMEAChange": "Check PFMEA Changes",
+    "syncSpecialCharacteristics": "Sync Special Characteristics",
+    "syncCSR": "Sync CSR",
+    "addRow": "Add Row",
+    "openFMEAEditor": "Open FMEA Editor",
+    "viewSnapshot": "View Snapshot"
+  },
+  "phase": {
+    "sample": "Sample",
+    "trial": "Trial Run",
+    "production": "Production"
+  },
+  "status": {
+    "draft": "Draft",
+    "approved": "Approved"
+  },
+  "column": {
+    "documentNo": "No.",
+    "title": "Title",
+    "validationStatus": "Validation Status",
+    "phase": "Phase",
+    "status": "Status",
+    "version": "Version",
+    "updatedAt": "Updated At",
+    "actions": "Actions",
+    "stepNo": "Part / Process No.",
+    "processName": "Process Name / Operation Description",
+    "equipment": "Equipment / Tooling / Fixture",
+    "characteristic": "Characteristic",
+    "characteristicNo": "Characteristic No.",
+    "productCharacteristic": "Product Characteristic",
+    "processCharacteristic": "Process Characteristic",
+    "specialClass": "Special Characteristic Class",
+    "specificationTolerance": "Product / Process / Spec / Tolerance",
+    "method": "Method",
+    "evaluationMethod": "Evaluation / Measurement Technique",
+    "sample": "Sample",
+    "sampleSize": "Sample Size",
+    "sampleFrequency": "Sample Frequency",
+    "controlMethod": "Control Method",
+    "reactionPlan": "Reaction Plan"
+  },
+  "form": {
+    "documentNo": "Document No.",
+    "title": "Title",
+    "partNo": "Part No.",
+    "partName": "Part Name",
+    "contactInfo": "Contact Info",
+    "coreGroup": "Core Team",
+    "orgFactory": "Organization / Plant",
+    "drawingRev": "Drawing Revision",
+    "phase": "Phase",
+    "relatedPFMEA": "Related PFMEA",
+    "notAssociated": "Not associated"
+  },
+  "placeholder": {
+    "documentNo": "e.g. CP-2026-001",
+    "title": "e.g. SMT Welding Control Plan",
+    "partNo": "Part number",
+    "partName": "Part name",
+    "contactInfo": "Contact information",
+    "coreGroup": "Core team members",
+    "orgFactory": "Organization / plant",
+    "drawingRev": "Drawing revision",
+    "selectPhase": "Select phase"
+  },
+  "validation": {
+    "title": "Smart Validation",
+    "validating": "Validating...",
+    "revalidate": "Re-validate",
+    "noResults": "No validation results",
+    "loadFailed": "Failed to load validation results",
+    "triggerFailed": "Failed to trigger validation",
+    "operationFailed": "Operation failed",
+    "total": "Total {{total}} items",
+    "errors": "{{count}} errors",
+    "warnings": "{{count}} warnings",
+    "infos": "{{count}} infos",
+    "pending": "{{count}} pending",
+    "resolved": "{{count}} resolved",
+    "rejected": "{{count}} ignored",
+    "errorLabel": "Error",
+    "warningLabel": "Warning",
+    "infoLabel": "Info",
+    "markResolved": "Mark Resolved",
+    "ignore": "Ignore",
+    "restore": "Restore",
+    "resolvedTag": "Resolved",
+    "suggestion": "Suggestion",
+    "notValidated": "Not validated",
+    "errorsPending": "{{count}} errors pending",
+    "warningsPending": "{{count}} warnings",
+    "allPassed": "All passed"
+  },
+  "importModal": {
+    "title": "Import from PFMEA",
+    "selectPFMEA": "Select an approved PFMEA",
+    "processNo": "Process No.",
+    "processName": "Process Name",
+    "loadFailed": "Failed to load PFMEA list",
+    "selectFirst": "Please select a PFMEA first",
+    "importSuccess": "Import successful",
+    "importFailed": "Import failed"
+  },
+  "csrModal": {
+    "title": "Sync Customer Specific Requirements (CSR)",
+    "description": "Select customers to sync their CSR lists into the control plan customer requirements field. Existing manual entries will be retained.",
+    "selectCustomers": "Select customers",
+    "currentRequirements": "Currently has {{count}} customer requirements"
+  },
+  "staleAlert": {
+    "message": "Related PFMEA has changed; the following rows may be stale: {{steps}}. Re-import or manually verify.",
+    "syncPending": "Related FMEA has been updated (current CP is based on an older version). Sync is recommended.",
+    "syncNow": "Sync Now",
+    "noChange": "No PFMEA changes detected",
+    "nodeChanged": "Node characteristics have changed; sync recommended"
+  },
+  "conflict": {
+    "forceSaveSuccess": "Force save successful",
+    "forceSaveFailed": "Force save failed",
+    "documentModified": "Document was modified again; please refresh and retry"
+  },
+  "card": {
+    "basicInfo": "Basic Information",
+    "controlPlanContent": "Control Plan Content",
+    "customerRequirements": "Customer Requirements"
+  },
+  "specialClass": {
+    "none": "-",
+    "CC": "CC",
+    "SC": "SC"
+  },
+  "message": {
+    "createSuccess": "Control plan created successfully",
+    "createFailed": "Create failed",
+    "deleteSuccess": "Deleted successfully",
+    "deleteFailed": "Delete failed",
+    "saveSuccess": "Saved successfully",
+    "saveFailed": "Save failed",
+    "loadFailed": "Failed to load control plan",
+    "approveSuccess": "Approved successfully",
+    "approveFailed": "Approve failed",
+    "checkFailed": "Check failed",
+    "syncSuccess": "Sync successful",
+    "syncFailed": "Sync failed",
+    "refreshFailed": "Failed to refresh data",
+    "enterTitle": "Please enter title",
+    "enterDocumentNo": "Please enter document number"
+  }
+}

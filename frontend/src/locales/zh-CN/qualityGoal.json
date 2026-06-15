@@ -1,0 +1,107 @@
+{
+  "pageTitle": {
+    "list": "质量目标列表"
+  },
+  "status": {
+    "draft": "草稿",
+    "pending": "待审批",
+    "active": "生效中",
+    "archived": "已停用"
+  },
+  "level": {
+    "1": "公司级",
+    "2": "产品线级",
+    "3": "过程级"
+  },
+  "achievement": {
+    "achieved": "已达成",
+    "not_achieved": "未达成",
+    "pending": "待录入"
+  },
+  "period": {
+    "monthly": { "value": "月度", "label": "月度" },
+    "quarterly": { "value": "季度", "label": "季度" },
+    "yearly": { "value": "年度", "label": "年度" }
+  },
+  "stats": {
+    "totalGoals": "目标总数",
+    "active": "生效中",
+    "pendingApproval": "待审批",
+    "achievementRate": "达成率"
+  },
+  "tabs": {
+    "all": "全部",
+    "pendingMe": "待我审批",
+    "my": "我的目标",
+    "draft": "草稿"
+  },
+  "table": {
+    "name": "指标名称",
+    "progress": "进度与达成",
+    "target": "目标",
+    "actual": "实际",
+    "period": "周期",
+    "owner": "责任人",
+    "status": "状态",
+    "operations": "操作"
+  },
+  "actions": {
+    "newGoal": "新建目标",
+    "updateValue": "更新值",
+    "archive": "停用",
+    "withdraw": "撤回"
+  },
+  "form": {
+    "level": "层级",
+    "parentGoal": "父目标",
+    "productLine": "产品线",
+    "name": "指标名称",
+    "targetValue": "目标值",
+    "unit": "单位",
+    "period": "周期",
+    "owner": "责任人",
+    "description": "说明"
+  },
+  "placeholder": {
+    "rejectReason": "请输入驳回理由",
+    "productLine": "如 DC-DC-100",
+    "name": "如 客户投诉率",
+    "targetValue": "如 ≤500 或 ≥90%",
+    "unit": "如 PPM、%",
+    "parentGoal": "选择父目标（公司级无需选择）",
+    "selectLevel": "选择层级",
+    "selectPeriod": "选择周期",
+    "selectOwner": "选择责任人"
+  },
+  "modal": {
+    "newGoal": "新建质量目标",
+    "editGoal": "编辑质量目标",
+    "rejectReason": "驳回理由"
+  },
+  "validation": {
+    "levelRequired": "请选择层级",
+    "nameRequired": "请输入指标名称",
+    "targetValueRequired": "请输入目标值",
+    "unitRequired": "请输入单位",
+    "periodRequired": "请选择周期",
+    "ownerRequired": "请选择责任人"
+  },
+  "messages": {
+    "loadFailed": "加载数据失败",
+    "createSuccess": "创建成功",
+    "updateSuccess": "更新成功",
+    "deleteSuccess": "删除成功",
+    "submitSuccess": "已提交审批",
+    "withdrawSuccess": "已撤回",
+    "approveSuccess": "审批通过",
+    "rejectSuccess": "已驳回",
+    "archiveSuccess": "已停用",
+    "actualValueUpdated": "实际值已更新",
+    "operationFailed": "操作失败",
+    "updateFailed": "更新失败",
+    "deleteFailed": "删除失败"
+  },
+  "prompt": {
+    "actualValue": "请输入实际值:"
+  }
+}

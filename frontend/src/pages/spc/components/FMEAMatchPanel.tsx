@@ -1,5 +1,6 @@
 // frontend/src/pages/spc/components/FMEAMatchPanel.tsx
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Modal, Card, Button, Tag, Space, Typography, Spin, Empty, Alert,
 } from "antd";
@@ -16,19 +17,13 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   onCreateCAPA: () => void;
-  onConfirmed?: () => void; // 确认成功后回调，父组件可刷新列表
+  onConfirmed?: () => void;
 }
 
-const MATCH_SOURCE_LABELS: Record<string, { text: string; icon: React.ReactNode; color: string }> = {
-  control_plan: { text: "控制计划关联", icon: <LinkOutlined />, color: "blue" },
-  process_name: { text: "工序名称匹配", icon: <SearchOutlined />, color: "orange" },
-  characteristic_name: { text: "特性名称匹配", icon: <SearchOutlined />, color: "orange" },
-};
-
 export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA, onConfirmed }: Props) {
+  const { t } = useTranslation("spc");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<FMEAMatchResponse | null>(null);
-  // 选中键使用 `${fmea_id}:${node_id}` 组合，避免跨 FMEA 节点 ID 冲突
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +45,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
         setSelectedKey(`${res.confirmed_fmea_id}:${res.confirmed_fmea_node_id}`);
       }
     } catch (_e) {
-      setError("获取推荐失败，请重试");
+      setError(t("fmeaMatch.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -63,7 +58,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
       setSelectedKey(`${rec.fmea_id}:${rec.node_id}`);
       onConfirmed?.();
     } catch (_e) {
-      setError("确认关联失败");
+      setError(t("fmeaMatch.confirmFailed"));
     } finally {
       setConfirming(false);
     }
@@ -73,21 +68,34 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
     r => `${r.fmea_id}:${r.node_id}` === selectedKey
   );
 
+  const sourceInfo = (source: string): { text: string; icon: React.ReactNode; color: string } => {
+    switch (source) {
+      case "control_plan":
+        return { text: t("fmeaMatch.source.control_plan"), icon: <LinkOutlined />, color: "blue" };
+      case "process_name":
+        return { text: t("fmeaMatch.source.process_name"), icon: <SearchOutlined />, color: "orange" };
+      case "characteristic_name":
+        return { text: t("fmeaMatch.source.characteristic_name"), icon: <SearchOutlined />, color: "orange" };
+      default:
+        return { text: source, icon: <SearchOutlined />, color: "default" };
+    }
+  };
+
   return (
     <Modal
-      title="FMEA 关联推荐"
+      title={t("fmeaMatch.title")}
       open={visible}
       onCancel={onClose}
       width={720}
       footer={
         <Space>
-          <Button onClick={onClose}>取消</Button>
+          <Button onClick={onClose}>{t("fmeaMatch.cancel")}</Button>
           <Button
             type="primary"
             onClick={onCreateCAPA}
             disabled={!selectedKey}
           >
-            创建 CAPA 8D
+            {t("fmeaMatch.createCapa")}
           </Button>
         </Space>
       }
@@ -95,7 +103,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
       {data && (
         <div style={{ marginBottom: 16 }}>
           <Text type="secondary">
-            SPC告警: {data.ic_code} | 工序: {data.process_name} | 特性: {data.characteristic_name}
+            {t("fmeaMatch.summary", { icCode: data.ic_code, processName: data.process_name, characteristicName: data.characteristic_name })}
           </Text>
         </div>
       )}
@@ -103,15 +111,15 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
       {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
 
       {loading ? (
-        <Spin tip="加载推荐中..." />
+        <Spin tip={t("fmeaMatch.loading")} />
       ) : data?.recommendations.length === 0 ? (
-        <Empty description="未找到关联的 FMEA 失效模式">
-          <Button onClick={() => fetchRecommendations(true)}>刷新</Button>
+        <Empty description={t("fmeaMatch.empty")}>
+          <Button onClick={() => fetchRecommendations(true)}>{t("fmeaMatch.refresh")}</Button>
         </Empty>
       ) : (
         <Space direction="vertical" style={{ width: "100%" }}>
           {data?.recommendations.map(rec => {
-            const source = MATCH_SOURCE_LABELS[rec.match_source];
+            const source = sourceInfo(rec.match_source);
             const isSelected = `${rec.fmea_id}:${rec.node_id}` === selectedKey;
             return (
               <Card
@@ -124,17 +132,17 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
               >
                 <Space direction="vertical" style={{ width: "100%" }}>
                   <Space>
-                    <Tag icon={source?.icon} color={source?.color}>
-                      {source?.text}
+                    <Tag icon={source.icon} color={source.color}>
+                      {source.text}
                     </Tag>
-                    <Tag>匹配度 {Math.round(rec.match_score * 100)}%</Tag>
+                    <Tag>{t("fmeaMatch.matchScore", { score: Math.round(rec.match_score * 100) })}</Tag>
                   </Space>
 
                   <Title level={5} style={{ margin: 0 }}>
                     {rec.name}
                   </Title>
 
-                  <Text type="secondary">路径: {rec.path}</Text>
+                  <Text type="secondary">{t("fmeaMatch.path", { path: rec.path })}</Text>
 
                   <Space>
                     <Text>RPN: {rec.rpn || "-"}</Text>
@@ -144,11 +152,11 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
 
                   {rec.cause_preview.length > 0 && (
                     <Text type="secondary">
-                      失效原因: {rec.cause_preview.join("、")}
+                      {t("fmeaMatch.failureCauses", { causes: rec.cause_preview.join("、") })}
                     </Text>
                   )}
 
-                  <Text type="secondary">控制措施: {rec.control_count}项</Text>
+                  <Text type="secondary">{t("fmeaMatch.controls", { count: rec.control_count })}</Text>
 
                   <Space>
                     <Button
@@ -157,7 +165,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
                       loading={confirming}
                       onClick={() => handleSelect(rec)}
                     >
-                      {isSelected ? <><CheckCircleOutlined /> 已选择</> : "选择此关联"}
+                      {isSelected ? <><CheckCircleOutlined /> {t("fmeaMatch.source.selected")}</> : t("fmeaMatch.source.select")}
                     </Button>
                   </Space>
                 </Space>
@@ -169,7 +177,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
 
       {selectedRec && (
         <div style={{ marginTop: 16, textAlign: "right" }}>
-          <Text type="success">已选择: {selectedRec.name}</Text>
+          <Text type="success">{t("fmeaMatch.selected", { name: selectedRec.name })}</Text>
         </div>
       )}
     </Modal>

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Drawer, Button, Space, Input, message, Descriptions } from "antd";
+import { useTranslation } from "react-i18next";
 import type { SupplierRiskAlert } from "../../../types";
 import { riskAlertApi } from "../../../api/supplierRisk";
 
@@ -10,6 +11,8 @@ interface Props {
 }
 
 const HandleAlertDrawer: React.FC<Props> = ({ alert, open, onClose }) => {
+  const { t } = useTranslation("supplierRisk");
+  const { t: tc } = useTranslation("common");
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -17,16 +20,16 @@ const HandleAlertDrawer: React.FC<Props> = ({ alert, open, onClose }) => {
 
   const handle = async (action: string) => {
     if (action === "ignore" && !note.trim()) {
-      message.warning("忽略预警需填写理由");
+      message.warning(t("handleDrawer.messages.ignoreReasonRequired"));
       return;
     }
     setLoading(true);
     try {
       await riskAlertApi.handle(alert.alert_id, { action, note: note || undefined });
-      message.success("操作成功");
+      message.success(t("handleDrawer.messages.operationSuccess"));
       onClose();
     } catch {
-      message.error("操作失败");
+      message.error(t("handleDrawer.messages.operationFailed"));
     } finally {
       setLoading(false);
     }
@@ -36,10 +39,10 @@ const HandleAlertDrawer: React.FC<Props> = ({ alert, open, onClose }) => {
     setLoading(true);
     try {
       await riskAlertApi.createScar(alert.alert_id);
-      message.success("SCAR 已创建");
+      message.success(t("handleDrawer.messages.scarCreated"));
       onClose();
     } catch {
-      message.error("创建失败");
+      message.error(t("handleDrawer.messages.createFailed"));
     } finally {
       setLoading(false);
     }
@@ -49,10 +52,10 @@ const HandleAlertDrawer: React.FC<Props> = ({ alert, open, onClose }) => {
     setLoading(true);
     try {
       await riskAlertApi.createCapa(alert.alert_id);
-      message.success("CAPA 已创建");
+      message.success(t("handleDrawer.messages.capaCreated"));
       onClose();
     } catch {
-      message.error("创建失败");
+      message.error(t("handleDrawer.messages.createFailed"));
     } finally {
       setLoading(false);
     }
@@ -66,23 +69,23 @@ const HandleAlertDrawer: React.FC<Props> = ({ alert, open, onClose }) => {
   };
 
   return (
-    <Drawer title={`预警处置 — ${alert.supplier_name}`} open={open} onClose={onClose} width={420}>
+    <Drawer title={t("handleDrawer.title", { supplier_name: alert.supplier_name })} open={open} onClose={onClose} width={420}>
       <Space direction="vertical" style={{ width: "100%" }} size="middle">
         <Descriptions column={1} size="small" bordered>
-          <Descriptions.Item label="风险等级">
+          <Descriptions.Item label={t("handleDrawer.labels.riskLevel")}>
             <span style={{ color: RISK_COLORS[alert.risk_level], fontWeight: 600 }}>
               {alert.risk_level}
             </span>
           </Descriptions.Item>
-          <Descriptions.Item label="综合风险分">{alert.risk_score}</Descriptions.Item>
-          <Descriptions.Item label="质量分">{alert.quality_score}</Descriptions.Item>
-          <Descriptions.Item label="交付分">{alert.delivery_score}</Descriptions.Item>
-          <Descriptions.Item label="合规分">{alert.compliance_score}</Descriptions.Item>
-          <Descriptions.Item label="当前状态">{alert.status}</Descriptions.Item>
+          <Descriptions.Item label={t("handleDrawer.labels.totalScore")}>{alert.risk_score}</Descriptions.Item>
+          <Descriptions.Item label={t("handleDrawer.labels.qualityScore")}>{alert.quality_score}</Descriptions.Item>
+          <Descriptions.Item label={t("handleDrawer.labels.deliveryScore")}>{alert.delivery_score}</Descriptions.Item>
+          <Descriptions.Item label={t("handleDrawer.labels.complianceScore")}>{alert.compliance_score}</Descriptions.Item>
+          <Descriptions.Item label={t("handleDrawer.labels.currentStatus")}>{alert.status}</Descriptions.Item>
         </Descriptions>
 
         <Input.TextArea
-          placeholder="处置备注（忽略时必填理由）"
+          placeholder={t("handleDrawer.notePlaceholder")}
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={3}
@@ -90,22 +93,22 @@ const HandleAlertDrawer: React.FC<Props> = ({ alert, open, onClose }) => {
 
         <Space wrap>
           <Button onClick={() => handle("acknowledge")} loading={loading}>
-            确认
+            {t("handleDrawer.actions.acknowledge")}
           </Button>
           <Button onClick={() => handle("ignore")} loading={loading}>
-            忽略
+            {t("handleDrawer.actions.ignore")}
           </Button>
           <Button onClick={() => handle("close")} loading={loading}>
-            关闭
+            {tc("actions.close")}
           </Button>
         </Space>
 
         <Space wrap>
           <Button type="primary" onClick={createScar} loading={loading}>
-            创建 SCAR
+            {t("handleDrawer.actions.createScar")}
           </Button>
           <Button type="primary" onClick={createCapa} loading={loading}>
-            创建 CAPA
+            {t("handleDrawer.actions.createCapa")}
           </Button>
         </Space>
       </Space>

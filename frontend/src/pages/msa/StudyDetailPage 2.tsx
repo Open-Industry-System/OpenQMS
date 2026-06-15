@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Card,
   Button,
@@ -90,17 +91,13 @@ import dayjs from "dayjs";
 
 const { Option } = Select;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  draft: { label: "草稿", color: "default" },
-  ongoing: { label: "进行中", color: "processing" },
-  completed: { label: "已完成", color: "success" },
-};
-
 type StudyType = "grr" | "bias" | "linearity" | "stability" | "attribute";
 type Study = GrrStudy | BiasStudy | LinearityStudy | StabilityStudy | AttributeStudy;
 type Result = GrrResult | BiasResult | LinearityResult | StabilityResult | AttributeResult;
 
 export default function StudyDetailPage() {
+  const { t } = useTranslation("msa");
+  const { t: tc } = useTranslation("common");
   const { type, id } = useParams<{ type: StudyType; id: string }>();
   const navigate = useNavigate();
   const { user: _user } = useAuthStore();
@@ -126,6 +123,9 @@ export default function StudyDetailPage() {
   const [completing, setCompleting] = useState(false);
 
   const studyType = type as StudyType;
+
+  const statusLabel = (status: string) => t(`study.status.${status}`, { defaultValue: status });
+  const statusColor = (status: string) => status === "draft" ? "default" : status === "ongoing" ? "processing" : "success";
 
   const loadGauges = useCallback(async () => {
     try {
@@ -171,11 +171,11 @@ export default function StudyDetailPage() {
       }
       setStudy(s);
     } catch {
-      message.error("加载研究信息失败");
+      message.error(t("study.detail.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [id, isNew, studyType]);
+  }, [id, isNew, studyType, t]);
 
   const loadMeasurements = useCallback(async () => {
     if (!id || isNew) return;
@@ -337,7 +337,7 @@ export default function StudyDetailPage() {
           default:
             throw new Error("unknown type");
         }
-        message.success("研究已创建");
+        message.success(t("study.detail.createSuccess"));
         navigate(`/msa/studies/${studyType}/${updated.study_id}`);
       } else {
         switch (studyType) {
@@ -361,12 +361,12 @@ export default function StudyDetailPage() {
         }
         setStudy(updated);
         setEditing(false);
-        message.success("保存成功");
+        message.success(t("study.detail.saveSuccess"));
       }
     } catch (err: unknown) {
       if (err && typeof err === "object" && "errorFields" in err) return;
       const e = err as { response?: { data?: { detail?: string } } };
-      message.error(e.response?.data?.detail || "保存失败");
+      message.error(e.response?.data?.detail || t("study.detail.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -408,11 +408,11 @@ export default function StudyDetailPage() {
           );
           break;
       }
-      message.success("测量数据已保存");
+      message.success(t("study.detail.measurementsSaved"));
       loadStudy();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "保存失败");
+      message.error(err.response?.data?.detail || t("study.detail.saveFailed"));
     } finally {
       setMeasSaving(false);
     }
@@ -443,10 +443,10 @@ export default function StudyDetailPage() {
           throw new Error("unknown type");
       }
       setResult(r);
-      message.success("计算完成");
+      message.success(t("study.detail.computeSuccess"));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "计算失败");
+      message.error(err.response?.data?.detail || t("study.detail.computeFailed"));
     } finally {
       setResultLoading(false);
     }
@@ -477,29 +477,18 @@ export default function StudyDetailPage() {
           throw new Error("unknown type");
       }
       setStudy(updated);
-      message.success(accepted ? "研究已验收通过" : "研究已标记为不通过");
+      message.success(accepted ? t("study.detail.accepted") : t("study.detail.rejected"));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || t("study.detail.operationFailed"));
     } finally {
       setCompleting(false);
     }
   };
 
   const typeLabel = useMemo(() => {
-    switch (studyType) {
-      case "grr":
-        return "GRR";
-      case "bias":
-        return "偏倚";
-      case "linearity":
-        return "线性";
-      case "stability":
-        return "稳定性";
-      case "attribute":
-        return "计数型";
-    }
-  }, [studyType]);
+    return t(`study.type.${studyType}`, { defaultValue: studyType.toUpperCase() });
+  }, [studyType, t]);
 
   if (loading) {
     return (
@@ -515,30 +504,30 @@ export default function StudyDetailPage() {
       <div style={{ padding: 24 }}>
         <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
-            返回
+            {tc("actions.back")}
           </Button>
           <h2 style={{ margin: 0, fontSize: 20 }}>
-            新建{typeLabel}研究
+            {t("study.detail.newTitle", { type: typeLabel })}
           </h2>
         </div>
         <Card>
           <Form form={infoForm} layout="vertical">
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item label="标题" name="title" rules={[{ required: true, message: "请输入标题" }]}>
+                <Form.Item label={t("study.fields.title")} name="title" rules={[{ required: true }]}>
                   <Input />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label="特性名称" name="characteristic_name" rules={[{ required: true, message: "请输入特性名称" }]}>
+                <Form.Item label={t("study.fields.characteristic_name")} name="characteristic_name" rules={[{ required: true }]}>
                   <Input />
                 </Form.Item>
               </Col>
             </Row>
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item label="关联量具" name="gauge_id">
-                  <Select allowClear placeholder="选择量具">
+                <Form.Item label={t("study.fields.gauge_id")} name="gauge_id">
+                  <Select allowClear placeholder={t("study.placeholders.selectGauge")}>
                     {gauges.map((g) => (
                       <Option key={g.gauge_id} value={g.gauge_id}>
                         {g.gauge_no} - {g.name}
@@ -548,8 +537,8 @@ export default function StudyDetailPage() {
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label="SPC特性" name="spc_characteristic_id">
-                  <Select allowClear placeholder="选择SPC检验特性">
+                <Form.Item label={t("study.fields.spc_characteristic_id")} name="spc_characteristic_id">
+                  <Select allowClear placeholder={t("study.placeholders.selectSpc")}>
                     {spcChars.map((c) => (
                       <Option key={c.ic_id} value={c.ic_id}>
                         {c.ic_code} - {c.characteristic_name}
@@ -561,12 +550,12 @@ export default function StudyDetailPage() {
             </Row>
             <Row gutter={16}>
               <Col span={8}>
-                <Form.Item label="单位" name="unit">
-                  <Input placeholder="如: mm" />
+                <Form.Item label={t("study.fields.unit")} name="unit">
+                  <Input placeholder={t("study.placeholders.unit")} />
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item label="研究日期" name="study_date">
+                <Form.Item label={t("study.fields.study_date")} name="study_date">
                   <DatePicker style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
@@ -575,42 +564,42 @@ export default function StudyDetailPage() {
               <>
                 <Row gutter={16}>
                   <Col span={8}>
-                    <Form.Item label="方法" name="method" initialValue="average_range">
+                    <Form.Item label={t("study.fields.method")} name="method" initialValue="average_range">
                       <Select>
-                        <Option value="average_range">平均极差法</Option>
-                        <Option value="anova">方差分析法</Option>
+                        <Option value="average_range">{t("study.method.average_range")}</Option>
+                        <Option value="anova">{t("study.method.anova")}</Option>
                       </Select>
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item label="评价人数量" name="appraiser_count" initialValue={3}>
+                    <Form.Item label={t("study.fields.appraiser_count")} name="appraiser_count" initialValue={3}>
                       <InputNumber min={2} max={5} style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item label="零件数量" name="part_count" initialValue={10}>
+                    <Form.Item label={t("study.fields.part_count")} name="part_count" initialValue={10}>
                       <InputNumber min={2} max={10} style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
                 </Row>
                 <Row gutter={16}>
                   <Col span={8}>
-                    <Form.Item label="试验次数" name="trial_count" initialValue={3}>
+                    <Form.Item label={t("study.fields.trial_count")} name="trial_count" initialValue={3}>
                       <InputNumber min={2} max={3} style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item label="公差上限" name="tolerance_upper">
+                    <Form.Item label={t("study.fields.tolerance_upper")} name="tolerance_upper">
                       <InputNumber style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item label="公差下限" name="tolerance_lower">
+                    <Form.Item label={t("study.fields.tolerance_lower")} name="tolerance_lower">
                       <InputNumber style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
                 </Row>
-                <Form.Item label="基准值" name="reference_value">
+                <Form.Item label={t("study.fields.reference_value")} name="reference_value">
                   <InputNumber style={{ width: "100%" }} />
                 </Form.Item>
               </>
@@ -618,12 +607,12 @@ export default function StudyDetailPage() {
             {studyType === "bias" && (
               <Row gutter={16}>
                 <Col span={8}>
-                  <Form.Item label="基准值" name="reference_value" rules={[{ required: true }]}>
+                  <Form.Item label={t("study.fields.reference_value")} name="reference_value" rules={[{ required: true }]}>
                     <InputNumber style={{ width: "100%" }} />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="样本量" name="sample_size" initialValue={10}>
+                  <Form.Item label={t("study.fields.sample_size")} name="sample_size" initialValue={10}>
                     <InputNumber min={5} style={{ width: "100%" }} />
                   </Form.Item>
                 </Col>
@@ -633,17 +622,17 @@ export default function StudyDetailPage() {
               <>
                 <Row gutter={16}>
                   <Col span={8}>
-                    <Form.Item label="公差上限" name="tolerance_upper">
+                    <Form.Item label={t("study.fields.tolerance_upper")} name="tolerance_upper">
                       <InputNumber style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item label="公差下限" name="tolerance_lower">
+                    <Form.Item label={t("study.fields.tolerance_lower")} name="tolerance_lower">
                       <InputNumber style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item label="每基准样本量" name="sample_size_per_reference" initialValue={5}>
+                    <Form.Item label={t("study.fields.sample_size_per_reference")} name="sample_size_per_reference" initialValue={5}>
                       <InputNumber min={3} style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
@@ -653,12 +642,12 @@ export default function StudyDetailPage() {
             {studyType === "stability" && (
               <Row gutter={16}>
                 <Col span={8}>
-                  <Form.Item label="基准值" name="reference_value">
+                  <Form.Item label={t("study.fields.reference_value")} name="reference_value">
                     <InputNumber style={{ width: "100%" }} />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="子组大小" name="subgroup_size" initialValue={5}>
+                  <Form.Item label={t("study.fields.subgroup_size")} name="subgroup_size" initialValue={5}>
                     <InputNumber min={2} style={{ width: "100%" }} />
                   </Form.Item>
                 </Col>
@@ -668,21 +657,21 @@ export default function StudyDetailPage() {
               <>
                 <Row gutter={16}>
                   <Col span={8}>
-                    <Form.Item label="方法" name="method" initialValue="risk_analysis">
+                    <Form.Item label={t("study.fields.method")} name="method" initialValue="risk_analysis">
                       <Select>
-                        <Option value="risk_analysis">风险分析法</Option>
-                        <Option value="signal_detection">信号探测法</Option>
-                        <Option value="analytic">解析法</Option>
+                        <Option value="risk_analysis">{t("study.method.risk_analysis")}</Option>
+                        <Option value="signal_detection">{t("study.method.signal_detection")}</Option>
+                        <Option value="analytic">{t("study.method.analytic")}</Option>
                       </Select>
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item label="样本量" name="sample_size" initialValue={50}>
+                    <Form.Item label={t("study.fields.sample_size")} name="sample_size" initialValue={50}>
                       <InputNumber min={10} style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item label="已知标准数量" name="known_standard_count">
+                    <Form.Item label={t("study.fields.known_standard_count")} name="known_standard_count">
                       <InputNumber style={{ width: "100%" }} />
                     </Form.Item>
                   </Col>
@@ -691,7 +680,7 @@ export default function StudyDetailPage() {
             )}
             <Form.Item>
               <Button type="primary" loading={saving} onClick={handleSaveInfo}>
-                创建研究
+                {t("study.detail.newTitle", { type: typeLabel })}
               </Button>
             </Form.Item>
           </Form>
@@ -701,10 +690,10 @@ export default function StudyDetailPage() {
   }
 
   if (!study) {
-    return <div style={{ padding: 24 }}>研究不存在</div>;
+    return <div style={{ padding: 24 }}>{t("study.detail.notFound")}</div>;
   }
 
-  const statusInfo = STATUS_MAP[study.status] ?? { label: study.status, color: "default" };
+  const statusInfo = { label: statusLabel(study.status), color: statusColor(study.status) };
 
   // ─── Measurement editors ───
 
@@ -736,6 +725,15 @@ export default function StudyDetailPage() {
       setMeasurements(next);
     };
 
+    const commonColumns = [
+      {
+        title: tc("actions.delete"),
+        render: (_: unknown, __: unknown, idx: number) => (
+          <Button size="small" danger onClick={() => removeRow(idx)}>{tc("actions.delete")}</Button>
+        ),
+      },
+    ];
+
     if (studyType === "grr") {
       return (
         <div>
@@ -745,24 +743,22 @@ export default function StudyDetailPage() {
             size="small"
             loading={measLoading}
             columns={[
-              { title: "评价人", dataIndex: "appraiser_name", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.appraiser_name"), dataIndex: "appraiser_name", render: (_: unknown, __: unknown, idx: number) => (
                 <Input value={measurements[idx].appraiser_name as string} onChange={(e) => updateRow(idx, "appraiser_name", e.target.value)} size="small" style={{ width: 100 }} />
               )},
-              { title: "零件号", dataIndex: "part_no", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.part_no"), dataIndex: "part_no", render: (_: unknown, __: unknown, idx: number) => (
                 <Input value={measurements[idx].part_no as string} onChange={(e) => updateRow(idx, "part_no", e.target.value)} size="small" style={{ width: 100 }} />
               )},
-              { title: "试验", dataIndex: "trial_no", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.trial_no"), dataIndex: "trial_no", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber min={1} value={measurements[idx].trial_no as number} onChange={(v) => updateRow(idx, "trial_no", v)} size="small" style={{ width: 60 }} />
               )},
-              { title: "测量值", dataIndex: "value", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.value"), dataIndex: "value", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].value as number} onChange={(v) => updateRow(idx, "value", v)} size="small" style={{ width: 100 }} />
               )},
-              { title: "操作", render: (_: unknown, __: unknown, idx: number) => (
-                <Button size="small" danger onClick={() => removeRow(idx)}>删除</Button>
-              )},
+              ...commonColumns,
             ]}
           />
-          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">添加行</Button>
+          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
         </div>
       );
     }
@@ -776,18 +772,16 @@ export default function StudyDetailPage() {
             size="small"
             loading={measLoading}
             columns={[
-              { title: "序号", dataIndex: "sequence_no", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.sequence_no"), dataIndex: "sequence_no", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber min={1} value={measurements[idx].sequence_no as number} onChange={(v) => updateRow(idx, "sequence_no", v)} size="small" style={{ width: 60 }} />
               )},
-              { title: "测量值", dataIndex: "value", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.value"), dataIndex: "value", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].value as number} onChange={(v) => updateRow(idx, "value", v)} size="small" style={{ width: 120 }} />
               )},
-              { title: "操作", render: (_: unknown, __: unknown, idx: number) => (
-                <Button size="small" danger onClick={() => removeRow(idx)}>删除</Button>
-              )},
+              ...commonColumns,
             ]}
           />
-          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">添加行</Button>
+          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
         </div>
       );
     }
@@ -801,21 +795,19 @@ export default function StudyDetailPage() {
             size="small"
             loading={measLoading}
             columns={[
-              { title: "序号", dataIndex: "sequence_no", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.sequence_no"), dataIndex: "sequence_no", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber min={1} value={measurements[idx].sequence_no as number} onChange={(v) => updateRow(idx, "sequence_no", v)} size="small" style={{ width: 60 }} />
               )},
-              { title: "基准值", dataIndex: "reference_value", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.reference_value"), dataIndex: "reference_value", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].reference_value as number} onChange={(v) => updateRow(idx, "reference_value", v)} size="small" style={{ width: 120 }} />
               )},
-              { title: "实测值", dataIndex: "measured_value", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.value"), dataIndex: "measured_value", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].measured_value as number} onChange={(v) => updateRow(idx, "measured_value", v)} size="small" style={{ width: 120 }} />
               )},
-              { title: "操作", render: (_: unknown, __: unknown, idx: number) => (
-                <Button size="small" danger onClick={() => removeRow(idx)}>删除</Button>
-              )},
+              ...commonColumns,
             ]}
           />
-          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">添加行</Button>
+          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
         </div>
       );
     }
@@ -829,24 +821,22 @@ export default function StudyDetailPage() {
             size="small"
             loading={measLoading}
             columns={[
-              { title: "序号", dataIndex: "sequence_no", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.sequence_no"), dataIndex: "sequence_no", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber min={1} value={measurements[idx].sequence_no as number} onChange={(v) => updateRow(idx, "sequence_no", v)} size="small" style={{ width: 60 }} />
               )},
-              { title: "日期", dataIndex: "measurement_date", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.measurement_date"), dataIndex: "measurement_date", render: (_: unknown, __: unknown, idx: number) => (
                 <Input value={measurements[idx].measurement_date as string} onChange={(e) => updateRow(idx, "measurement_date", e.target.value)} size="small" style={{ width: 130 }} />
               )},
-              { title: "样本均值", dataIndex: "sample_mean", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.sample_mean"), dataIndex: "sample_mean", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].sample_mean as number} onChange={(v) => updateRow(idx, "sample_mean", v)} size="small" style={{ width: 100 }} />
               )},
-              { title: "样本极差", dataIndex: "sample_range", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.sample_range"), dataIndex: "sample_range", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].sample_range as number} onChange={(v) => updateRow(idx, "sample_range", v)} size="small" style={{ width: 100 }} />
               )},
-              { title: "操作", render: (_: unknown, __: unknown, idx: number) => (
-                <Button size="small" danger onClick={() => removeRow(idx)}>删除</Button>
-              )},
+              ...commonColumns,
             ]}
           />
-          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">添加行</Button>
+          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
         </div>
       );
     }
@@ -860,33 +850,31 @@ export default function StudyDetailPage() {
             size="small"
             loading={measLoading}
             columns={[
-              { title: "评价人", dataIndex: "appraiser_name", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.appraiser_name"), dataIndex: "appraiser_name", render: (_: unknown, __: unknown, idx: number) => (
                 <Input value={measurements[idx].appraiser_name as string} onChange={(e) => updateRow(idx, "appraiser_name", e.target.value)} size="small" style={{ width: 100 }} />
               )},
-              { title: "零件号", dataIndex: "part_no", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.part_no"), dataIndex: "part_no", render: (_: unknown, __: unknown, idx: number) => (
                 <Input value={measurements[idx].part_no as string} onChange={(e) => updateRow(idx, "part_no", e.target.value)} size="small" style={{ width: 100 }} />
               )},
-              { title: "已知标准", dataIndex: "known_standard", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.known_standard"), dataIndex: "known_standard", render: (_: unknown, __: unknown, idx: number) => (
                 <Select value={measurements[idx].known_standard as string} onChange={(v) => updateRow(idx, "known_standard", v)} size="small" style={{ width: 90 }}>
-                  <Option value="合格">合格</Option>
-                  <Option value="不合格">不合格</Option>
+                  <Option value={t("study.dataValues.pass")}>{t("study.measurementColumns.pass")}</Option>
+                  <Option value={t("study.dataValues.fail")}>{t("study.measurementColumns.fail")}</Option>
                 </Select>
               )},
-              { title: "评价决策", dataIndex: "appraiser_decision", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.appraiser_decision"), dataIndex: "appraiser_decision", render: (_: unknown, __: unknown, idx: number) => (
                 <Select value={measurements[idx].appraiser_decision as string} onChange={(v) => updateRow(idx, "appraiser_decision", v)} size="small" style={{ width: 90 }}>
-                  <Option value="合格">合格</Option>
-                  <Option value="不合格">不合格</Option>
+                  <Option value={t("study.dataValues.pass")}>{t("study.measurementColumns.pass")}</Option>
+                  <Option value={t("study.dataValues.fail")}>{t("study.measurementColumns.fail")}</Option>
                 </Select>
               )},
-              { title: "试验", dataIndex: "trial_no", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.trial_no"), dataIndex: "trial_no", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber min={1} value={measurements[idx].trial_no as number} onChange={(v) => updateRow(idx, "trial_no", v)} size="small" style={{ width: 60 }} />
               )},
-              { title: "操作", render: (_: unknown, __: unknown, idx: number) => (
-                <Button size="small" danger onClick={() => removeRow(idx)}>删除</Button>
-              )},
+              ...commonColumns,
             ]}
           />
-          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">添加行</Button>
+          <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
         </div>
       );
     }
@@ -900,7 +888,7 @@ export default function StudyDetailPage() {
     if (!result) {
       return (
         <div style={{ textAlign: "center", padding: 60, color: "#999" }}>
-          尚未计算结果，请先录入测量数据并点击计算
+          {t("study.notCalculated")}
         </div>
       );
     }
@@ -909,18 +897,18 @@ export default function StudyDetailPage() {
       const r = result as GrrResult;
       return (
         <Descriptions bordered column={3}>
-          <Descriptions.Item label="重复性 EV">{r.ev.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="再现性 AV">{r.av.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="GRR">{r.grr.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="零件变差 PV">{r.pv.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="总变差 TV">{r.tv.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="可区分的类别数 NDC">{r.ndc.toFixed(1)}</Descriptions.Item>
-          <Descriptions.Item label="GRR%公差">{r.grr_percent_tol.toFixed(2)}%</Descriptions.Item>
-          <Descriptions.Item label="GRR%TV">{r.grr_percent_tv.toFixed(2)}%</Descriptions.Item>
-          <Descriptions.Item label="EV%">{r.ev_percent.toFixed(2)}%</Descriptions.Item>
-          <Descriptions.Item label="AV%">{r.av_percent.toFixed(2)}%</Descriptions.Item>
-          <Descriptions.Item label="PV%">{r.pv_percent.toFixed(2)}%</Descriptions.Item>
-          <Descriptions.Item label="结论">{r.conclusion}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.ev")}>{r.ev.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.av")}>{r.av.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.grr")}>{r.grr.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.pv")}>{r.pv.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.tv")}>{r.tv.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.ndc")}>{r.ndc.toFixed(1)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.grr_percent_tol")}>{r.grr_percent_tol.toFixed(2)}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.grr_percent_tv")}>{r.grr_percent_tv.toFixed(2)}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.ev_percent")}>{r.ev_percent.toFixed(2)}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.av_percent")}>{r.av_percent.toFixed(2)}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.pv_percent")}>{r.pv_percent.toFixed(2)}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.conclusion")}>{r.conclusion}</Descriptions.Item>
         </Descriptions>
       );
     }
@@ -929,14 +917,14 @@ export default function StudyDetailPage() {
       const r = result as BiasResult;
       return (
         <Descriptions bordered column={2}>
-          <Descriptions.Item label="均值">{r.mean.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="偏倚">{r.bias.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="偏倚%">{r.bias_percent?.toFixed(2) ?? "—"}%</Descriptions.Item>
-          <Descriptions.Item label="标准差">{r.std_dev.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="t统计量">{r.t_statistic.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="p值">{r.p_value.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="置信区间">[{r.lower_ci?.toFixed(4) ?? "—"}, {r.upper_ci?.toFixed(4) ?? "—"}]</Descriptions.Item>
-          <Descriptions.Item label="结论">{r.conclusion}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.mean")}>{r.mean.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.bias")}>{r.bias.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.bias_percent")}>{r.bias_percent?.toFixed(2) ?? "—"}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.std_dev")}>{r.std_dev.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.t_statistic")}>{r.t_statistic.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.p_value")}>{r.p_value.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.confidence_interval")}>[{r.lower_ci?.toFixed(4) ?? "—"}, {r.upper_ci?.toFixed(4) ?? "—"}]</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.conclusion")}>{r.conclusion}</Descriptions.Item>
         </Descriptions>
       );
     }
@@ -945,14 +933,14 @@ export default function StudyDetailPage() {
       const r = result as LinearityResult;
       return (
         <Descriptions bordered column={2}>
-          <Descriptions.Item label="斜率">{r.slope.toFixed(6)}</Descriptions.Item>
-          <Descriptions.Item label="截距">{r.intercept.toFixed(6)}</Descriptions.Item>
-          <Descriptions.Item label="R²">{r.r_squared.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="线性度">{r.linearity.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="线性度%">{r.linearity_percent?.toFixed(2) ?? "—"}%</Descriptions.Item>
-          <Descriptions.Item label="下限偏倚">{r.bias_at_lower?.toFixed(4) ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="上限偏倚">{r.bias_at_upper?.toFixed(4) ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="结论">{r.conclusion}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.slope")}>{r.slope.toFixed(6)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.intercept")}>{r.intercept.toFixed(6)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.r_squared")}>{r.r_squared.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.linearity")}>{r.linearity.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.linearity_percent")}>{r.linearity_percent?.toFixed(2) ?? "—"}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.bias_at_lower")}>{r.bias_at_lower?.toFixed(4) ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.bias_at_upper")}>{r.bias_at_upper?.toFixed(4) ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.conclusion")}>{r.conclusion}</Descriptions.Item>
         </Descriptions>
       );
     }
@@ -961,14 +949,14 @@ export default function StudyDetailPage() {
       const r = result as StabilityResult;
       return (
         <Descriptions bordered column={2}>
-          <Descriptions.Item label="均值 UCL">{r.ucl_mean.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="均值 LCL">{r.lcl_mean?.toFixed(4) ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="均值 CL">{r.cl_mean.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="极差 UCL">{r.ucl_range.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="极差 LCL">{r.lcl_range?.toFixed(4) ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="极差 CL">{r.cl_range.toFixed(4)}</Descriptions.Item>
-          <Descriptions.Item label="Cpk">{r.cpk?.toFixed(4) ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="结论">{r.conclusion}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.ucl_mean")}>{r.ucl_mean.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.lcl_mean")}>{r.lcl_mean?.toFixed(4) ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.cl_mean")}>{r.cl_mean.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.ucl_range")}>{r.ucl_range.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.lcl_range")}>{r.lcl_range?.toFixed(4) ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.cl_range")}>{r.cl_range.toFixed(4)}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.cpk")}>{r.cpk?.toFixed(4) ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.conclusion")}>{r.conclusion}</Descriptions.Item>
         </Descriptions>
       );
     }
@@ -977,13 +965,13 @@ export default function StudyDetailPage() {
       const r = result as AttributeResult;
       return (
         <Descriptions bordered column={2}>
-          <Descriptions.Item label="有效性">{r.effectiveness.toFixed(2)}%</Descriptions.Item>
-          <Descriptions.Item label="漏判率">{r.miss_rate.toFixed(2)}%</Descriptions.Item>
-          <Descriptions.Item label="误判率">{r.false_alarm_rate.toFixed(2)}%</Descriptions.Item>
-          <Descriptions.Item label="Kappa(内部)">{r.kappa_within?.toFixed(4) ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Kappa(与标准)">{r.kappa_vs_standard?.toFixed(4) ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Kappa(评价人间)">{r.kappa_between?.toFixed(4) ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="结论">{r.conclusion}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.effectiveness")}>{r.effectiveness.toFixed(2)}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.miss_rate")}>{r.miss_rate.toFixed(2)}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.false_alarm_rate")}>{r.false_alarm_rate.toFixed(2)}%</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.kappa_within")}>{r.kappa_within?.toFixed(4) ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.kappa_vs_standard")}>{r.kappa_vs_standard?.toFixed(4) ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.kappa_between")}>{r.kappa_between?.toFixed(4) ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("study.resultLabels.conclusion")}>{r.conclusion}</Descriptions.Item>
         </Descriptions>
       );
     }
@@ -994,7 +982,7 @@ export default function StudyDetailPage() {
   const tabItems = [
     {
       key: "info",
-      label: "基本信息",
+      label: t("study.tabs.info"),
       children: (
         <Card
           extra={
@@ -1002,14 +990,14 @@ export default function StudyDetailPage() {
               <Space>
                 {editing ? (
                   <>
-                    <Button onClick={() => setEditing(false)}>取消</Button>
+                    <Button onClick={() => setEditing(false)}>{tc("actions.cancel")}</Button>
                     <Button type="primary" loading={saving} onClick={handleSaveInfo}>
-                      保存
+                      {tc("actions.save")}
                     </Button>
                   </>
                 ) : (
                   <Button icon={<EditOutlined />} onClick={() => setEditing(true)}>
-                    编辑
+                    {tc("actions.edit")}
                   </Button>
                 )}
               </Space>
@@ -1020,19 +1008,19 @@ export default function StudyDetailPage() {
             <Form form={infoForm} layout="vertical">
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item label="标题" name="title" rules={[{ required: true }]}>
+                  <Form.Item label={t("study.fields.title")} name="title" rules={[{ required: true }]}>
                     <Input />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item label="特性名称" name="characteristic_name" rules={[{ required: true }]}>
+                  <Form.Item label={t("study.fields.characteristic_name")} name="characteristic_name" rules={[{ required: true }]}>
                     <Input />
                   </Form.Item>
                 </Col>
               </Row>
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item label="关联量具" name="gauge_id">
+                  <Form.Item label={t("study.fields.gauge_id")} name="gauge_id">
                     <Select allowClear>
                       {gauges.map((g) => (
                         <Option key={g.gauge_id} value={g.gauge_id}>
@@ -1043,7 +1031,7 @@ export default function StudyDetailPage() {
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item label="SPC特性" name="spc_characteristic_id">
+                  <Form.Item label={t("study.fields.spc_characteristic_id")} name="spc_characteristic_id">
                     <Select allowClear>
                       {spcChars.map((c) => (
                         <Option key={c.ic_id} value={c.ic_id}>
@@ -1057,46 +1045,47 @@ export default function StudyDetailPage() {
             </Form>
           ) : (
             <Descriptions bordered column={2}>
-              <Descriptions.Item label="研究编号">{study.study_no}</Descriptions.Item>
-              <Descriptions.Item label="标题">{study.title}</Descriptions.Item>
-              <Descriptions.Item label="特性名称">{study.characteristic_name}</Descriptions.Item>
-              <Descriptions.Item label="关联量具">
+              <Descriptions.Item label={t("study.columns.studyNo")}>{study.study_no}</Descriptions.Item>
+              <Descriptions.Item label={t("study.fields.title")}>{study.title}</Descriptions.Item>
+              <Descriptions.Item label={t("study.fields.characteristic_name")}>{study.characteristic_name}</Descriptions.Item>
+              <Descriptions.Item label={t("study.fields.gauge_id")}>
                 {gauges.find((g) => g.gauge_id === study.gauge_id)?.name ?? "—"}
               </Descriptions.Item>
-              <Descriptions.Item label="状态">
+              <Descriptions.Item label={t("study.columns.status")}>
                 <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="研究日期">
+              <Descriptions.Item label={t("study.fields.study_date")}>
                 {study.study_date ? dayjs(study.study_date).format("YYYY-MM-DD") : "—"}
               </Descriptions.Item>
               {studyType === "grr" && (
                 <>
-                  <Descriptions.Item label="方法">{(study as GrrStudy).method}</Descriptions.Item>
-                  <Descriptions.Item label="评价人/零件/试验">
+                  <Descriptions.Item label={t("study.fields.method")}>{(study as GrrStudy).method}</Descriptions.Item>
+                  <Descriptions.Item label={t("study.measurementColumns.appraiser_name")}>
                     {(study as GrrStudy).appraiser_count} / {(study as GrrStudy).part_count} / {(study as GrrStudy).trial_count}
                   </Descriptions.Item>
                 </>
               )}
               {studyType === "bias" && (
                 <>
-                  <Descriptions.Item label="基准值">{(study as BiasStudy).reference_value}</Descriptions.Item>
-                  <Descriptions.Item label="样本量">{(study as BiasStudy).sample_size}</Descriptions.Item>
+                  <Descriptions.Item label={t("study.fields.reference_value")}>{(study as BiasStudy).reference_value}</Descriptions.Item>
+                  <Descriptions.Item label={t("study.fields.sample_size")}>{(study as BiasStudy).sample_size}</Descriptions.Item>
                 </>
               )}
               {studyType === "linearity" && (
                 <>
-                  <Descriptions.Item label="每基准样本量">{(study as LinearityStudy).sample_size_per_reference}</Descriptions.Item>
+                  <Descriptions.Item label={t("study.fields.sample_size_per_reference")}>{(study as LinearityStudy).sample_size_per_reference}</Descriptions.Item>
                 </>
               )}
               {studyType === "stability" && (
                 <>
-                  <Descriptions.Item label="子组大小">{(study as StabilityStudy).subgroup_size}</Descriptions.Item>
+                  <Descriptions.Item label={t("study.fields.reference_value")}>{(study as StabilityStudy).reference_value}</Descriptions.Item>
+                  <Descriptions.Item label={t("study.fields.subgroup_size")}>{(study as StabilityStudy).subgroup_size}</Descriptions.Item>
                 </>
               )}
               {studyType === "attribute" && (
                 <>
-                  <Descriptions.Item label="方法">{(study as AttributeStudy).method}</Descriptions.Item>
-                  <Descriptions.Item label="样本量">{(study as AttributeStudy).sample_size}</Descriptions.Item>
+                  <Descriptions.Item label={t("study.fields.method")}>{(study as AttributeStudy).method}</Descriptions.Item>
+                  <Descriptions.Item label={t("study.fields.sample_size")}>{(study as AttributeStudy).sample_size}</Descriptions.Item>
                 </>
               )}
             </Descriptions>
@@ -1106,14 +1095,14 @@ export default function StudyDetailPage() {
     },
     {
       key: "measurements",
-      label: "测量数据",
+      label: t("study.tabs.measurements"),
       children: (
         <Card
           extra={
             canEdit('msa') && study.status !== "completed" && (
               <Space>
                 <Button loading={measSaving} onClick={handleSaveMeasurements} icon={<SaveOutlined />}>
-                  保存数据
+                  {t("study.actions.saveMeasurements")}
                 </Button>
               </Space>
             )
@@ -1125,22 +1114,22 @@ export default function StudyDetailPage() {
     },
     {
       key: "results",
-      label: "分析结果",
+      label: t("study.tabs.results"),
       children: (
         <Card
           extra={
             canEdit('msa') && study.status !== "completed" && (
               <Space>
                 <Button loading={resultLoading} onClick={handleCompute} icon={<CalculatorOutlined />} type="primary">
-                  计算结果
+                  {t("study.actions.compute")}
                 </Button>
                 {result && (
                   <>
                     <Button loading={completing} onClick={() => handleComplete(true)} icon={<CheckCircleOutlined />}>
-                      验收通过
+                      {t("study.actions.accept")}
                     </Button>
                     <Button loading={completing} onClick={() => handleComplete(false)} icon={<CloseCircleOutlined />} danger>
-                      不通过
+                      {t("study.actions.reject")}
                     </Button>
                   </>
                 )}
@@ -1158,7 +1147,7 @@ export default function StudyDetailPage() {
     <div style={{ padding: 24 }}>
       <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
-          返回
+          {tc("actions.back")}
         </Button>
         <h2 style={{ margin: 0, fontSize: 20 }}>{study.title}</h2>
         <Tag color={statusInfo.color}>{statusInfo.label}</Tag>

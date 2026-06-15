@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Card, Form, Input, Select, Button, App, Row, Col, Space, Spin } from 'antd';
 import { RestOutlined, SaveOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { AqlConfig } from '../../types';
 import { listAqlConfigs, updateAqlConfig, resetAqlConfigs } from '../../api/iqcAql';
 import { useAuthStore } from '../../store/authStore';
 
 export default function AqlConfigPage() {
+  const { t } = useTranslation('iqc');
+  const { t: tc } = useTranslation('common');
   const { message, modal } = App.useApp();
   const user = useAuthStore((s) => s.user);
   const [configs, setConfigs] = useState<AqlConfig[]>([]);
@@ -26,7 +29,7 @@ export default function AqlConfigPage() {
       data.forEach((c) => { formValues[c.config_key] = c.config_value; });
       form.setFieldsValue(formValues);
     } catch {
-      message.error('加载配置失败');
+      message.error(t('messages.loadConfigFailed'));
     } finally {
       setLoading(false);
     }
@@ -38,7 +41,7 @@ export default function AqlConfigPage() {
   }, [productLine]);
 
   if (!isAdmin) {
-    return <Card><div style={{ textAlign: 'center', padding: 48, color: '#999' }}>仅管理员可访问此页面</div></Card>;
+    return <Card><div style={{ textAlign: 'center', padding: 48, color: '#999' }}>{t('messages.adminOnly')}</div></Card>;
   }
 
   const handleSave = async () => {
@@ -48,11 +51,11 @@ export default function AqlConfigPage() {
       // Only save changed values
       const updates = configs.filter((c) => values[c.config_key] !== c.config_value);
       await Promise.all(updates.map((c) => updateAqlConfig(c.config_key, { config_value: values[c.config_key] })));
-      message.success('配置保存成功');
+      message.success(t('messages.configSaved'));
       fetchConfigs(productLine);
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'errorFields' in err) return;
-      message.error('保存失败');
+      message.error(tc('messages.operationFailed'));
     } finally {
       setSaving(false);
     }
@@ -60,25 +63,25 @@ export default function AqlConfigPage() {
 
   const handleReset = () => {
     modal.confirm({
-      title: '重置配置',
-      content: '确定要将所有配置恢复为默认值吗？此操作不可撤销。',
+      title: t('modal.resetConfigTitle'),
+      content: t('modal.resetConfigContent'),
       onOk: async () => {
         try {
           await resetAqlConfigs();
-          message.success('配置已重置');
+          message.success(t('messages.configReset'));
           fetchConfigs(productLine);
         } catch {
-          message.error('重置失败');
+          message.error(tc('messages.operationFailed'));
         }
       },
     });
   };
 
   return (
-    <Card title="AQL规则参数配置" extra={
+    <Card title={t('pageTitle.aqlConfig')} extra={
       <Space>
         <Select
-          placeholder="产品线（全局默认）"
+          placeholder={t('placeholder.productLineWithGlobal')}
           allowClear
           style={{ width: 200 }}
           value={productLine}
@@ -111,10 +114,10 @@ export default function AqlConfigPage() {
           </Row>
           <Space style={{ marginTop: 16 }}>
             <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
-              保存
+              {tc('actions.save')}
             </Button>
             <Button icon={<RestOutlined />} onClick={handleReset}>
-              恢复默认
+              {t('actions.resetConfig')}
             </Button>
           </Space>
         </Form>

@@ -6,6 +6,7 @@ import {
   RollbackOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type { FMEAVersion, CPVersion } from "../../types";
 
 type VersionItem = FMEAVersion | CPVersion;
@@ -22,17 +23,6 @@ interface VersionHistoryTabProps {
   onCreateVersion: () => void;
 }
 
-const CHANGE_TYPE_CONFIG: Record<
-  string,
-  { label: string; color: string }
-> = {
-  submit: { label: "提交审批", color: "blue" },
-  approve: { label: "审批通过", color: "green" },
-  manual: { label: "手动创建", color: "default" },
-  rollback: { label: "版本回退", color: "orange" },
-  fmea_sync: { label: "FMEA同步", color: "purple" },
-};
-
 export default function VersionHistoryTab({
   documentId,
   documentType,
@@ -44,9 +34,27 @@ export default function VersionHistoryTab({
   onRollback,
   onCreateVersion,
 }: VersionHistoryTabProps) {
+  const { t } = useTranslation("version");
   const [versions, setVersions] = useState<VersionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [majorOnly, setMajorOnly] = useState(true);
+
+  const getChangeTypeConfig = (changeType: string): { label: string; color: string } => {
+    switch (changeType) {
+      case "submit":
+        return { label: t("history.changeTypes.submit"), color: "blue" };
+      case "approve":
+        return { label: t("history.changeTypes.approve"), color: "green" };
+      case "manual":
+        return { label: t("history.changeTypes.manual"), color: "default" };
+      case "rollback":
+        return { label: t("history.changeTypes.rollback"), color: "orange" };
+      case "fmea_sync":
+        return { label: t("history.changeTypes.fmea_sync"), color: "purple" };
+      default:
+        return { label: changeType, color: "default" };
+    }
+  };
 
   const fetchVersions = useCallback(async () => {
     setLoading(true);
@@ -79,7 +87,7 @@ export default function VersionHistoryTab({
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
-    return d.toLocaleString("zh-CN", {
+    return d.toLocaleString(undefined, {
       month: "2-digit",
       day: "2-digit",
       hour: "2-digit",
@@ -106,7 +114,7 @@ export default function VersionHistoryTab({
         }}
       >
         <Space>
-          <span style={{ color: "#666" }}>仅主版本</span>
+          <span style={{ color: "#666" }}>{t("history.majorOnly")}</span>
           <Switch
             checked={majorOnly}
             onChange={setMajorOnly}
@@ -119,20 +127,17 @@ export default function VersionHistoryTab({
             icon={<PlusOutlined />}
             onClick={onCreateVersion}
           >
-            创建版本
+            {t("history.createVersion")}
           </Button>
         )}
       </div>
 
       {versions.length === 0 ? (
-        <Empty description="暂无版本记录" />
+        <Empty description={t("history.noRecords")} />
       ) : (
         <Timeline
           items={versions.map((v, idx) => {
-            const cfg = CHANGE_TYPE_CONFIG[v.change_type] || {
-              label: v.change_type,
-              color: "default",
-            };
+            const cfg = getChangeTypeConfig(v.change_type);
             const nextVersion = idx < versions.length - 1 ? versions[idx + 1] : null;
 
             return {
@@ -162,7 +167,7 @@ export default function VersionHistoryTab({
                         icon={<EyeOutlined />}
                         onClick={() => onViewSnapshot(v.major_no, v.minor_no)}
                       >
-                        查看
+                        {t("history.view")}
                       </Button>
                       {nextVersion && (
                         <Button
@@ -177,7 +182,7 @@ export default function VersionHistoryTab({
                             )
                           }
                         >
-                          对比
+                          {t("history.compare")}
                         </Button>
                       )}
                       {canRollback && idx > 0 && (
@@ -187,7 +192,7 @@ export default function VersionHistoryTab({
                           icon={<RollbackOutlined />}
                           onClick={() => onRollback(v.major_no, v.minor_no)}
                         >
-                          回退
+                          {t("history.rollback")}
                         </Button>
                       )}
                     </Space>

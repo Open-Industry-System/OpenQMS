@@ -1,0 +1,27 @@
+{
+  "conflict": {
+    "title": "Save Conflict",
+    "documentChanged": "Document has been modified by others",
+    "changedBy": "{{user}} saved changes",
+    "changedByOther": "Document was saved by another user while you were editing",
+    "changesCount": "Other user made {{count}} changes",
+    "conflictsCount": "{{count}} conflicts",
+    "added": "Added {{type}} {{name}}",
+    "removed": "Removed {{type}} {{name}}",
+    "modified": "Modified {{field}} of {{type}} {{name}}",
+    "conflictTag": "Conflict",
+    "moreChanges": "{{count}} more changes...",
+    "refresh": "Discard my changes and refresh",
+    "forceSave": "Force save (overwrite other changes)"
+  },
+  "bar": {
+    "editing": "Editing",
+    "viewing": "Viewing",
+    "onlyYou": "Only you",
+    "onlineCount": "{{count}} users online",
+    "syncFailed": "Collaboration sync failed"
+  },
+  "activeUser": {
+    "editing": "{{users}} editing"
+  }
+}

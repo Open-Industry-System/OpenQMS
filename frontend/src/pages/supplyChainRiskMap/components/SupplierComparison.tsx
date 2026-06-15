@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Card, Table, Empty, Spin } from "antd";
+import { useTranslation } from "react-i18next";
 import { riskMapApi } from "../../../api/supplyChainRiskMap";
 import type { ComparisonResponse } from "../../../types";
 import DataSourceBadge from "./DataSourceBadge";
@@ -12,20 +13,21 @@ interface SupplierComparisonProps {
 
 const COLORS = ["#1890ff", "#52c41a", "#fa8c16", "#722ed1", "#eb2f96"];
 
-const DIMENSION_LABELS: Record<string, string> = {
-  risk_score: "风险分",
-  quality_score: "质量分",
-  delivery_score: "交付分",
-  compliance_score: "合规分",
-  erp_on_time_rate: "ERP准时率",
-  purchase_amount_pct: "采购占比",
-  open_scar_count: "开放SCAR",
-  ppm_value: "PPM",
-};
-
 const SupplierComparison: React.FC<SupplierComparisonProps> = ({ supplierIds, productLineCode, period }) => {
+  const { t } = useTranslation("supplyChainRiskMap");
   const [data, setData] = useState<ComparisonResponse | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const DIMENSION_LABELS: Record<string, string> = {
+    risk_score: t("comparison.dimensions.risk_score"),
+    quality_score: t("comparison.dimensions.quality_score"),
+    delivery_score: t("comparison.dimensions.delivery_score"),
+    compliance_score: t("comparison.dimensions.compliance_score"),
+    erp_on_time_rate: t("comparison.dimensions.erp_on_time_rate"),
+    purchase_amount_pct: t("comparison.dimensions.purchase_amount_pct"),
+    open_scar_count: t("comparison.dimensions.open_scar_count"),
+    ppm_value: t("comparison.dimensions.ppm_value"),
+  };
 
   useEffect(() => {
     if (supplierIds.length < 2) {
@@ -43,12 +45,12 @@ const SupplierComparison: React.FC<SupplierComparisonProps> = ({ supplierIds, pr
   }, [supplierIds, productLineCode, period]);
 
   if (loading) return <Spin />;
-  if (!data || data.suppliers.length < 2) return <Empty description="选择2个或以上供应商进行对比" />;
+  if (!data || data.suppliers.length < 2) return <Empty description={t("comparison.selectMultiple")} />;
 
   const dimensionKeys = Object.keys(data.suppliers[0]?.dimensions ?? {});
 
   const columns = [
-    { title: "维度", dataIndex: "dimension", key: "dimension", width: 100 },
+    { title: t("comparison.dimension"), dataIndex: "dimension", key: "dimension", width: 100 },
     ...data.suppliers.map((s, i) => ({
       title: (
         <span>
@@ -86,7 +88,7 @@ const SupplierComparison: React.FC<SupplierComparisonProps> = ({ supplierIds, pr
   });
 
   return (
-    <Card title="供应商对比" size="small">
+    <Card title={t("comparison.title")} size="small">
       <Table
         columns={columns}
         dataSource={tableData}

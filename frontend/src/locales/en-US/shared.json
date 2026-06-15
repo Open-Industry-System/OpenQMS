@@ -1,0 +1,17 @@
+{
+  "import": {
+    "title": "Batch Import",
+    "success": "Successfully imported {{count}} records",
+    "failed": "Import failed, please check the file format",
+    "reselect": "Reselect File",
+    "cancel": "Cancel",
+    "dragText": "Click or drag an .xlsx file here to upload",
+    "downloadTemplate": "Download Import Template",
+    "fileTooLarge": "File exceeds 10MB limit",
+    "columns": {
+      "row": "Row",
+      "field": "Field",
+      "message": "Error Message"
+    }
+  }
+}

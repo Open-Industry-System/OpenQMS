@@ -1,4 +1,5 @@
 import { Modal, Alert, Button, List, Tag } from "antd";
+import { useTranslation } from "react-i18next";
 import type { ConflictInfo } from "../../types/collaboration";
 import type { GraphDiff } from "../../utils/graphDiff";
 
@@ -17,9 +18,10 @@ export default function ConflictResolutionModal({
   onRefresh,
   onForceSave,
 }: ConflictResolutionModalProps) {
+  const { t } = useTranslation("collaboration");
   return (
     <Modal
-      title="保存冲突"
+      title={t("conflict.title")}
       open={visible}
       closable={false}
       footer={null}
@@ -27,11 +29,11 @@ export default function ConflictResolutionModal({
     >
       <Alert
         type="warning"
-        message="文档已被他人修改"
+        message={t("conflict.documentChanged")}
         description={
           conflictInfo?.saved_by
-            ? `${conflictInfo.saved_by} 保存了更改`
-            : "文档在您编辑期间已被其他用户保存"
+            ? t("conflict.changedBy", { user: conflictInfo.saved_by })
+            : t("conflict.changedByOther")
         }
         style={{ marginBottom: 16 }}
       />
@@ -39,10 +41,10 @@ export default function ConflictResolutionModal({
       {diff && (
         <div style={{ marginBottom: 16 }}>
           <p style={{ fontWeight: 600, marginBottom: 8 }}>
-            对方修改了 {diff.nodeChanges.length} 处内容
+            {t("conflict.changesCount", { count: diff.nodeChanges.length })}
             {diff.conflictingFields.length > 0 && (
               <Tag color="red" style={{ marginLeft: 8 }}>
-                {diff.conflictingFields.length} 处冲突
+                {t("conflict.conflictsCount", { count: diff.conflictingFields.length })}
               </Tag>
             )}
           </p>
@@ -53,23 +55,22 @@ export default function ConflictResolutionModal({
               <List.Item>
                 {change.type === "added" && (
                   <span>
-                    新增 <Tag>{change.nodeType}</Tag> {change.name}
+                    {t("conflict.added", { type: change.nodeType, name: change.name })}
                   </span>
                 )}
                 {change.type === "removed" && (
                   <span style={{ color: "#cf1322" }}>
-                    删除 <Tag>{change.nodeType}</Tag> {change.name}
+                    {t("conflict.removed", { type: change.nodeType, name: change.name })}
                   </span>
                 )}
                 {change.type === "modified" && (
                   <span>
-                    修改 <Tag>{change.nodeType}</Tag> {change.name} 的{" "}
-                    <Tag color="blue">{change.field}</Tag>
+                    {t("conflict.modified", { type: change.nodeType, name: change.name, field: change.field })}
                     {diff.conflictingFields.some(
                       (c) => c.node_id === change.node_id && c.field === change.field
                     ) && (
                       <Tag color="red" style={{ marginLeft: 4 }}>
-                        冲突
+                        {t("conflict.conflictTag")}
                       </Tag>
                     )}
                   </span>
@@ -79,16 +80,16 @@ export default function ConflictResolutionModal({
           />
           {diff.nodeChanges.length > 10 && (
             <p style={{ color: "#8c8c8c", fontSize: 12 }}>
-              还有 {diff.nodeChanges.length - 10} 处修改...
+              {t("conflict.moreChanges", { count: diff.nodeChanges.length - 10 })}
             </p>
           )}
         </div>
       )}
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <Button onClick={onRefresh}>放弃我的更改，刷新页面</Button>
+        <Button onClick={onRefresh}>{t("conflict.refresh")}</Button>
         <Button type="primary" danger onClick={onForceSave}>
-          强制保存（覆盖对方更改）
+          {t("conflict.forceSave")}
         </Button>
       </div>
     </Modal>

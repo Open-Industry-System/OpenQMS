@@ -1,0 +1,83 @@
+{
+  "noPermission": "您没有集团管理权限",
+  "dashboard": {
+    "title": "集团仪表盘",
+    "openFMEA": "开放 FMEA",
+    "openCAPA": "开放 CAPA",
+    "overdueCAPA": "逾期 CAPA",
+    "spcAlarms": "SPC 告警",
+    "pendingIQC": "待检 IQC",
+    "openSCAR": "开放 SCAR",
+    "factoryData": "各工厂数据",
+    "factoryCardTitle": "{{factory_code}} - {{factory_name}}"
+  },
+  "suppliers": {
+    "title": "共享供应商",
+    "columns": {
+      "name": "供应商名称",
+      "shortName": "简称",
+      "unifiedCreditCode": "统一信用代码",
+      "industry": "行业",
+      "evaluations": "各厂评价"
+    },
+    "evaluationTag": "{{factory_code}}: {{grade}}({{score}})"
+  },
+  "factoryManagement": {
+    "title": "工厂管理",
+    "createFactory": "新建工厂",
+    "editFactory": "编辑工厂",
+    "newFactory": "新建工厂",
+    "columns": {
+      "code": "工厂编码",
+      "name": "工厂名称",
+      "location": "地点",
+      "status": "状态",
+      "actions": "操作"
+    },
+    "status": {
+      "active": "启用",
+      "inactive": "停用"
+    },
+    "form": {
+      "code": "工厂编码",
+      "name": "工厂名称",
+      "location": "地点",
+      "isActive": "启用"
+    },
+    "placeholders": {
+      "code": "如 BJ-01",
+      "name": "如 北京工厂",
+      "location": "如 北京市朝阳区"
+    },
+    "rules": {
+      "codeRequired": "请输入工厂编码",
+      "nameRequired": "请输入工厂名称"
+    },
+    "messages": {
+      "loadFailed": "加载工厂列表失败",
+      "updateSuccess": "更新成功",
+      "createSuccess": "创建成功",
+      "deactivateSuccess": "已停用",
+      "deactivateFailed": "停用失败"
+    },
+    "confirmDeactivate": "确定停用该工厂？",
+    "deactivate": "停用"
+  },
+  "factoryComparison": {
+    "title": "工厂对比",
+    "columns": {
+      "code": "工厂编码",
+      "name": "工厂名称"
+    }
+  },
+  "audits": {
+    "title": "跨厂审核",
+    "columns": {
+      "programNo": "审核编号",
+      "auditType": "审核类型",
+      "status": "状态",
+      "factories": "涉及工厂",
+      "findingCount": "发现项数"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import { Button, theme } from "antd";
 
 import { CloseOutlined, ReloadOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type { WidgetLayoutItem, DashboardWidgetsData } from "./widgets/types";
 import { getWidgetMeta, getWidgetComponent } from "./widgets/registry";
 import { getWidgetErrorKey } from "./dashboardLayoutUtils";
@@ -22,6 +23,7 @@ export default function WidgetWrapper({
   onRemove,
   onRetry,
 }: WidgetWrapperProps) {
+  const { t } = useTranslation("dashboard");
   const { token } = theme.useToken();
   const meta = getWidgetMeta(item.type);
   const Component = getWidgetComponent(item.type);
@@ -29,7 +31,7 @@ export default function WidgetWrapper({
   if (!Component || !meta) {
     return (
       <div style={{ padding: 16, color: token.colorTextSecondary }}>
-        未知组件: {item.type}
+        {t("widget.unknown")}: {item.type}
       </div>
     );
   }

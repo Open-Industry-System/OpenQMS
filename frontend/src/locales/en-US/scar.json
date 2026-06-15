@@ -1,0 +1,95 @@
+{
+  "pageTitle": {
+    "list": "SCAR Management",
+    "detail": "SCAR Detail"
+  },
+  "status": {
+    "open": "Pending",
+    "in_progress": "In Progress",
+    "responded": "Responded",
+    "verified": "Verified",
+    "closed": "Closed"
+  },
+  "source": {
+    "iqc": "IQC Rejection",
+    "complaint": "Customer Complaint",
+    "rma": "RMA",
+    "manual": "Manual"
+  },
+  "tabs": {
+    "all": "All",
+    "pending": "Pending",
+    "responded": "Responded",
+    "verified": "Verified",
+    "closed": "Closed"
+  },
+  "table": {
+    "scarNo": "SCAR No.",
+    "supplier": "Supplier",
+    "source": "Source",
+    "status": "Status",
+    "issuedDate": "Issued Date",
+    "dueDate": "Due Date",
+    "operations": "Actions"
+  },
+  "actions": {
+    "newScar": "New SCAR",
+    "view": "View",
+    "start": "Start",
+    "respond": "Submit Response",
+    "verify": "Verify",
+    "reject": "Reject",
+    "close": "Close",
+    "reopen": "Reopen",
+    "createLinked8D": "Create Linked 8D"
+  },
+  "card": {
+    "scarInfo": "SCAR Info",
+    "supplierResponse": "Supplier Response",
+    "capaLink": "CAPA Link",
+    "resolutionSummary": "Resolution Summary"
+  },
+  "descriptions": {
+    "supplier": "Supplier",
+    "source": "Source",
+    "productLine": "Product Line",
+    "issuedDate": "Issued Date",
+    "dueDate": "Due Date",
+    "closedDate": "Closed Date",
+    "description": "Description",
+    "requestedAction": "Requested Action"
+  },
+  "modal": {
+    "submitResponse": "Submit Supplier Response",
+    "closeScar": "Close SCAR",
+    "createLinked8D": "Create Linked 8D",
+    "createLinked8DContent": "A new 8D/CAPA record will be created from this SCAR and linked automatically.",
+    "scarLabel": "SCAR:",
+    "descriptionLabel": "Description:"
+  },
+  "placeholder": {
+    "supplierResponse": "Enter supplier response",
+    "resolutionSummary": "Enter resolution summary"
+  },
+  "messages": {
+    "createSuccess": "SCAR created successfully",
+    "statusUpdated": "Status updated",
+    "capaLinked": "CAPA created and linked",
+    "enterResponse": "Please enter supplier response",
+    "enterResolution": "Please enter resolution summary"
+  },
+  "empty": {
+    "noResponse": "No response yet",
+    "notLinked": "Not linked"
+  },
+  "severity": {
+    "normal": "一般"
+  },
+  "linked": {
+    "linked8D": "Linked 8D:"
+  },
+  "validation": {
+    "supplierRequired": "Please select supplier",
+    "descriptionRequired": "Please enter description"
+  }
+}

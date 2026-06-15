@@ -1,0 +1,346 @@
+{
+  "page": {
+    "title": "客户质量",
+    "complaintDetailTitle": "客诉详情",
+    "rmaDetailTitle": "RMA详情"
+  },
+  "kpi": {
+    "customers": "客户数",
+    "openComplaints": "开放客诉",
+    "overdueComplaints": "超期客诉",
+    "rmaCount": "RMA 数",
+    "impactQty": "影响数量",
+    "spcCpk": "SPC CPK",
+    "warrantyCost": "保修费用",
+    "customerSatisfaction": "客户满意度",
+    "customerAudit": "客户审核",
+    "auditCount": "{{count}} 次",
+    "findingCount": "发现项 {{count}}",
+    "total": "总计",
+    "planned": "已计划",
+    "inProgress": "进行中",
+    "completed": "已完成",
+    "openFindings": "未关闭发现项",
+    "majorNc": "严重不符合",
+    "confirmed": "已确认",
+    "pendingConfirmation": "待确认",
+    "confirmedFindings": "已确认发现项",
+    "pendingConfirmations": "待确认发现项"
+  },
+  "tabs": {
+    "overview": "概览",
+    "complaints": "客诉",
+    "rma": "RMA",
+    "profile": "档案",
+    "shipments": "发运记录",
+    "findings": "发现项",
+    "findingsWithCount": "发现项 ({{count}})",
+    "confirmation": "确认凭证"
+  },
+  "actions": {
+    "myTodos": "我的待办",
+    "newCustomer": "新建客户",
+    "newComplaint": "新建客诉",
+    "newRma": "新建 RMA",
+    "newShipment": "新增发运",
+    "handle": "处理",
+    "analyze": "分析",
+    "createScar": "创建SCAR",
+    "viewScar": "查看SCAR",
+    "investigate": "调查",
+    "markResponded": "已回复",
+    "updateLinks": "更新关联",
+    "markActionPending": "等待措施",
+    "startAudit": "开始审核",
+    "completeAudit": "完成审核",
+    "backToList": "返回列表",
+    "startRectification": "开始整改",
+    "customerConfirm": "客户确认",
+    "uploadConfirmationLetter": "上传审核级确认函",
+    "addAttachment": "添加附件"
+  },
+  "table": {
+    "operations": "操作",
+    "customer": {
+      "risk": "风险",
+      "code": "客户编号",
+      "name": "客户名称"
+    },
+    "complaint": {
+      "no": "编号",
+      "severity": "严重度",
+      "batchNo": "批次",
+      "status": "状态",
+      "dueDate": "期限",
+      "description": "描述"
+    },
+    "rma": {
+      "no": "编号",
+      "returnQty": "退货数",
+      "batchNo": "批次",
+      "status": "状态",
+      "responsibility": "责任",
+      "defectType": "不良类型"
+    },
+    "shipment": {
+      "date": "日期",
+      "quantity": "数量",
+      "batchNo": "批次号",
+      "destination": "目的地"
+    },
+    "audit": {
+      "no": "编号",
+      "customerName": "客户名称",
+      "customerType": "客户类型",
+      "auditMode": "审核方式",
+      "auditScope": "审核范围",
+      "plannedDate": "计划日期",
+      "status": "状态"
+    },
+    "finding": {
+      "clause": "条款",
+      "type": "类型",
+      "description": "描述",
+      "rootCause": "根本原因",
+      "correctiveAction": "纠正措施",
+      "status": "状态",
+      "customerConfirm": "客户确认",
+      "capa": "CAPA"
+    }
+  },
+  "form": {
+    "customer": {
+      "customerCode": "客户编号",
+      "name": "客户名称",
+      "segment": "行业",
+      "contactName": "联系人",
+      "contactEmail": "邮箱",
+      "contactPhone": "电话",
+      "ppmTarget": "PPM 目标",
+      "annualShipmentQty": "默认年发运量",
+      "notes": "备注"
+    },
+    "complaint": {
+      "complaintNo": "客诉编号",
+      "category": "分类",
+      "severity": "严重等级",
+      "productId": "产品号",
+      "batchNo": "批次号",
+      "serialNumber": "序列号",
+      "impactQty": "影响数量",
+      "occurredDate": "发生日期",
+      "receivedDate": "接收日期",
+      "dueDate": "期限",
+      "defectDesc": "投诉描述",
+      "supplierResponsibility": "供应商责任",
+      "preliminaryResponse": "初步回复",
+      "rootCause": "根因",
+      "correctiveAction": "纠正措施"
+    },
+    "rma": {
+      "rmaNo": "RMA 编号",
+      "complaintId": "关联客诉",
+      "productId": "产品号",
+      "batchNo": "批次号",
+      "serialNumber": "序列号",
+      "returnQty": "退货数量",
+      "defectType": "不良类型",
+      "responsibility": "责任判定",
+      "trackingNumber": "物流单号",
+      "receivedDate": "接收日期",
+      "analysisResult": "分析结果",
+      "correctiveAction": "纠正措施"
+    },
+    "scar": {
+      "supplier": "责任供应商",
+      "selectSupplier": "选择供应商",
+      "supplierRequired": "请选择供应商",
+      "description": "问题描述",
+      "requestedAction": "要求措施",
+      "dueDate": "截止日期"
+    },
+    "shipment": {
+      "shipmentDate": "发运日期",
+      "quantity": "数量",
+      "batchNo": "批次号",
+      "destination": "目的地",
+      "notes": "备注"
+    },
+    "audit": {
+      "customerName": "客户名称",
+      "customerNamePlaceholder": "如 Tesla、BYD",
+      "customerType": "客户类型",
+      "selectCustomerType": "选择客户类型",
+      "auditMode": "审核方式",
+      "selectAuditMode": "选择审核方式",
+      "auditScope": "审核范围",
+      "auditCriteria": "审核准则",
+      "plannedDate": "计划日期",
+      "leadAuditor": "审核组长",
+      "selectLeadAuditor": "选择审核组长",
+      "validation": {
+        "customerNameRequired": "请输入客户名称",
+        "customerTypeRequired": "请选择客户类型",
+        "auditScopeRequired": "请输入审核范围",
+        "auditCriteriaRequired": "请输入审核准则",
+        "plannedDateRequired": "请选择日期"
+      }
+    },
+    "finding": {
+      "findingType": "发现类型",
+      "clauseRef": "条款号",
+      "clauseRefPlaceholder": "如 8.5.1",
+      "description": "不符合描述",
+      "rootCause": "根本原因",
+      "correction": "纠正",
+      "correctiveAction": "纠正措施",
+      "dueDate": "截止日期"
+    },
+    "confirm": {
+      "confirmationDate": "确认日期"
+    },
+    "attachments": {
+      "fileName": "文件名称",
+      "fileLink": "文件链接"
+    },
+    "links": {
+      "complaintId": "关联客诉 ID",
+      "capaRefId": "关联 CAPA ID",
+      "fmeaRefId": "关联 FMEA ID",
+      "eightDNo": "新建 8D 编号",
+      "eightDPlaceholder": "如 8D-2026-010"
+    }
+  },
+  "detail": {
+    "customerCode": "客户编号：",
+    "segment": "行业：",
+    "ppmTarget": "PPM 目标：",
+    "annualShipmentQty": "默认年发运量：",
+    "contactName": "联系人：",
+    "audit": {
+      "customerName": "客户名称",
+      "customerType": "客户类型",
+      "auditMode": "审核方式",
+      "auditScope": "审核范围",
+      "plannedDate": "计划日期",
+      "auditCriteria": "审核准则"
+    }
+  },
+  "sections": {
+    "linksAndEvidence": "关联与证据",
+    "auditConfirmationAttachments": "审核确认附件："
+  },
+  "modal": {
+    "newCustomer": "新建客户",
+    "newComplaint": "新建客诉",
+    "newRma": "新建 RMA",
+    "createScar": "创建 SCAR",
+    "editShipment": "编辑发运记录",
+    "newShipment": "新增发运记录",
+    "newAudit": "新建客户审核",
+    "editFinding": "编辑发现项",
+    "newFinding": "新增发现项",
+    "customerConfirm": "客户确认整改完成",
+    "uploadConfirmationLetter": "上传审核级确认函"
+  },
+  "status": {
+    "complaint": {
+      "open": "已接收",
+      "investigating": "调查中",
+      "responded": "已回复",
+      "closed": "已关闭",
+      "cancelled": "已取消"
+    },
+    "rma": {
+      "open": "已登记",
+      "analysis": "分析中",
+      "action_pending": "等待措施",
+      "closed": "已关闭",
+      "cancelled": "已取消"
+    },
+    "audit": {
+      "planned": "已计划",
+      "in_progress": "进行中",
+      "completed": "已完成",
+      "cancelled": "已取消"
+    },
+    "finding": {
+      "open": "已开立",
+      "in_progress": "整改中",
+      "closed": "已关闭"
+    },
+    "confirmed": "已确认",
+    "pendingConfirmation": "待确认"
+  },
+  "category": {
+    "safety": "安全",
+    "function": "功能",
+    "appearance": "外观",
+    "delivery": "交付"
+  },
+  "severity": {
+    "fatal": "致命",
+    "serious": "严重",
+    "general": "一般",
+    "minor": "轻微"
+  },
+  "responsibility": {
+    "supplier": "供应商",
+    "internal": "自制",
+    "transport": "运输",
+    "customer_misuse": "客户误用",
+    "unknown": "未知"
+  },
+  "customerType": {
+    "OEM": "OEM",
+    "Tier 1": "Tier 1",
+    "Tier 2": "Tier 2",
+    "other": "其他",
+    "其他": "其他"
+  },
+  "auditMode": {
+    "on_site": "现场",
+    "remote": "远程"
+  },
+  "findingType": {
+    "major_nc": "严重不符合",
+    "minor_nc": "一般不符合",
+    "ofi": "改进机会",
+    "observation": "观察项"
+  },
+  "messages": {
+    "loadDataFailed": "客户质量数据加载失败",
+    "loadShipmentsFailed": "加载发运记录失败",
+    "scarCreateSuccess": "SCAR 创建成功",
+    "scarCreateFailed": "SCAR 创建失败",
+    "customerCreateSuccess": "客户创建成功",
+    "customerCreateFailed": "客户创建失败",
+    "complaintCreateSuccess": "客诉创建成功",
+    "complaintCreateFailed": "客诉创建失败",
+    "rmaCreateSuccess": "RMA 创建成功",
+    "rmaCreateFailed": "RMA 创建失败",
+    "selectCustomerAndProductLine": "请先选择客户和产品线",
+    "confirmDeleteShipment": "删除 {{date}} 的发运记录？",
+    "loadComplaintFailed": "客诉加载失败",
+    "investigationStarted": "已进入调查",
+    "markedResponded": "已标记回复",
+    "cancelled": "已取消",
+    "closed": "已关闭",
+    "linksUpdated": "关联已更新",
+    "linksUpdateFailed": "关联失败",
+    "rmaLoadFailed": "RMA 加载失败",
+    "analysisStarted": "已进入分析",
+    "markedActionPending": "已标记等待措施",
+    "loadFailed": "加载失败",
+    "createAuditSuccess": "创建成功",
+    "createAuditFailed": "创建失败",
+    "confirmCloseFinding": "确认关闭？需满足所有关闭条件",
+    "confirmCreateCapa": "是否创建 CAPA？",
+    "capaCreated": "CAPA 已创建",
+    "capaCreateFailed": "创建 CAPA 失败",
+    "confirmSuccess": "确认成功",
+    "confirmFailed": "确认失败",
+    "auditConfirmSuccess": "审核确认成功",
+    "auditConfirmFailed": "审核确认失败"
+  }
+}

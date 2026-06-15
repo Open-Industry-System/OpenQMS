@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Input, Button, Typography, Empty } from "antd";
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { GraphNode } from "../../types";
@@ -18,11 +19,11 @@ interface PDiagramData {
   noise_factors: string[];
 }
 
-const SECTION_CONFIG: { key: keyof PDiagramData; label: string; color: string }[] = [
-  { key: "inputs", label: "输入信号", color: "#1890ff" },
-  { key: "outputs", label: "输出响应", color: "#52c41a" },
-  { key: "controls", label: "控制因素", color: "#fa8c16" },
-  { key: "noise_factors", label: "噪声因素", color: "#ff4d4f" },
+const SECTION_CONFIG: { key: keyof PDiagramData; i18nKey: string; color: string }[] = [
+  { key: "inputs", i18nKey: "inputs", color: "#1890ff" },
+  { key: "outputs", i18nKey: "outputs", color: "#52c41a" },
+  { key: "controls", i18nKey: "controls", color: "#fa8c16" },
+  { key: "noise_factors", i18nKey: "noise_factors", color: "#ff4d4f" },
 ];
 
 const EMPTY_P_DIAGRAM: PDiagramData = {
@@ -37,6 +38,7 @@ export default function ParameterDiagram({
   onUpdateNode,
   isViewer,
 }: ParameterDiagramProps) {
+  const { t } = useTranslation("dfmea");
   const [pDiagram, setPDiagram] = useState<PDiagramData>(EMPTY_P_DIAGRAM);
   const nodeIdRef = useRef<string | null>(null);
 
@@ -90,7 +92,7 @@ export default function ParameterDiagram({
   if (!node) {
     return (
       <div style={{ textAlign: "center", padding: 40 }}>
-        <Empty description="请在左侧结构树中选择一个零部件节点" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description={t("parameterDiagram.selectNode")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       </div>
     );
   }
@@ -99,7 +101,7 @@ export default function ParameterDiagram({
     <div>
       <div style={{ marginBottom: 16 }}>
         <Text strong style={{ fontSize: 16 }}>
-          参数图 (P-Diagram): {node.name}
+          {t("parameterDiagram.title", { name: node.name })}
         </Text>
       </div>
 
@@ -118,7 +120,7 @@ export default function ParameterDiagram({
             }}
           >
             <Text strong style={{ color: section.color }}>
-              {section.label}
+              {t(`parameterDiagram.sections.${section.i18nKey}`)}
             </Text>
             <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
               ({pDiagram[section.key].length})
@@ -129,7 +131,7 @@ export default function ParameterDiagram({
           <div style={{ paddingLeft: 12 }}>
             {pDiagram[section.key].length === 0 && (
               <Text type="secondary" style={{ fontSize: 12, fontStyle: "italic" }}>
-                暂无项目
+                {t("parameterDiagram.noItems")}
               </Text>
             )}
             {pDiagram[section.key].map((item, index) => (
@@ -139,7 +141,7 @@ export default function ParameterDiagram({
               >
                 <Input
                   value={item}
-                  placeholder={`${section.label} ${index + 1}`}
+                  placeholder={`${t(`parameterDiagram.sections.${section.i18nKey}`)} ${index + 1}`}
                   disabled={isViewer}
                   onChange={(e) => updateItem(section.key, index, e.target.value)}
                   size="small"
@@ -167,7 +169,7 @@ export default function ParameterDiagram({
               onClick={() => addItem(section.key)}
               style={{ marginLeft: 12, marginTop: 4 }}
             >
-              添加
+              {t("parameterDiagram.add")}
             </Button>
           )}
         </div>

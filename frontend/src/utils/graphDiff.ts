@@ -20,7 +20,7 @@ export interface EdgeChange {
 export interface GraphDiff {
   nodeChanges: NodeChange[];
   edgeChanges: EdgeChange[];
-  conflictingFields: NodeChange[];  // 双方都修改的字段
+  conflictingFields: NodeChange[];  // fields modified by both sides
 }
 
 /**

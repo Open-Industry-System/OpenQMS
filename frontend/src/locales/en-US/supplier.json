@@ -1,4 +1,5 @@
 {
+  "supplier": "Supplier",
   "status": {
     "pending_review": "Pending Review",
     "audit_required": "Audit Required",

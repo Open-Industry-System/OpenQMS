@@ -143,7 +143,8 @@ function findRecommendedActions(
 /** Create the nodes and edges for a new row */
 export function createRowNodes(
   functionNodeId: string,
-  fmeaType: string
+  fmeaType: string,
+  t: (key: string) => string
 ): {
   newNodes: GraphNode[];
   newEdges: GraphEdge[];
@@ -156,11 +157,13 @@ export function createRowNodes(
   const pcId = `n${ts}_pc`;
   const dcId = `n${ts}_dc`;
 
+  const isDfmea = fmeaType === "DFMEA";
+
   const newNodes: GraphNode[] = [
     {
       id: fmId,
       type: "FailureMode",
-      name: "新失效模式",
+      name: t("newFailureMode"),
       severity: 0,
       occurrence: 0,
       detection: 0,
@@ -168,7 +171,7 @@ export function createRowNodes(
     {
       id: feId,
       type: "FailureEffect",
-      name: "新失效影响",
+      name: t("newFailureEffect"),
       severity: 0,
       occurrence: 0,
       detection: 0,
@@ -176,7 +179,7 @@ export function createRowNodes(
     {
       id: fcId,
       type: "FailureCause",
-      name: "新失效起因",
+      name: t("newFailureCause"),
       severity: 0,
       occurrence: 0,
       detection: 0,
@@ -184,7 +187,7 @@ export function createRowNodes(
     {
       id: pcId,
       type: "PreventionControl",
-      name: fmeaType === "DFMEA" ? "现行设计预防控制" : "现行过程预防控制",
+      name: isDfmea ? t("designPreventionControl") : t("processPreventionControl"),
       severity: 0,
       occurrence: 0,
       detection: 0,
@@ -192,7 +195,7 @@ export function createRowNodes(
     {
       id: dcId,
       type: "DetectionControl",
-      name: fmeaType === "DFMEA" ? "现行设计探测控制" : "现行过程探测控制",
+      name: isDfmea ? t("designDetectionControl") : t("processDetectionControl"),
       severity: 0,
       occurrence: 0,
       detection: 0,

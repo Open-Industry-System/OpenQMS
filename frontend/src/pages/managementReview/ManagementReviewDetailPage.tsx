@@ -11,58 +11,34 @@ import {
 } from "../../api/managementReview";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
+import { useTranslation } from "react-i18next";
 import type { ManagementReview, ReviewOutput } from "../../types";
 import ManagementReviewReportPanel from "./ManagementReviewReportPanel";
+import {
+  useReviewStatusMap,
+  useReviewStatusColor,
+  useCategoryLabels,
+  useOutputStatusMap,
+  useOutputStatusColor,
+  useDataSources,
+} from "./useOptions";
 
 const { TextArea } = Input;
 
-const statusMap: Record<string, { color: string; label: string }> = {
-  draft: { color: "blue", label: "草稿" },
-  data_collected: { color: "cyan", label: "数据已汇总" },
-  in_review: { color: "orange", label: "评审中" },
-  closed: { color: "green", label: "已关闭" },
-};
-
-const categoryLabels: Record<string, string> = {
-  improvement_opportunity: "改进机会",
-  system_change: "体系变更",
-  resource_need: "资源需求",
-};
-
-const outputStatusMap: Record<string, { color: string; label: string }> = {
-  pending: { color: "default", label: "待处理" },
-  in_progress: { color: "processing", label: "进行中" },
-  completed: { color: "warning", label: "待验证" },
-  verified: { color: "success", label: "已验证" },
-};
-
-const autoDataSources = [
-  { key: "quality_goals", title: "2. 质量目标实现程度" },
-  { key: "internal_audits", title: "3. 审核结果" },
-  { key: "capa_stats", title: "4. 不合格与纠正措施" },
-  { key: "fmea_risks", title: "5. FMEA 风险分析" },
-  { key: "spc_capability", title: "6. SPC 过程能力" },
-  { key: "supplier_performance", title: "7. 外部供方绩效" },
-  { key: "previous_review_actions", title: "1. 以往管理评审措施落实" },
-];
-
-const manualTextSources = [
-  { key: "external_factors", title: "8. 内外部因素变化" },
-  { key: "resource_adequacy", title: "9. 资源充分性" },
-];
-
-const manualRichSources = [
-  { key: "customer_satisfaction", title: "10. 顾客满意与反馈" },
-  { key: "equipment_monitoring", title: "11. 监视测量结果(设备)" },
-  { key: "copq", title: "12. 不良质量成本" },
-  { key: "manufacturing_feasibility", title: "13. 制造可行性评估" },
-];
-
 export default function ManagementReviewDetailPage() {
+  const { t } = useTranslation("managementReview");
+  const { t: tc } = useTranslation("common");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
+
+  const reviewStatusMap = useReviewStatusMap();
+  const reviewStatusColor = useReviewStatusColor();
+  const categoryLabels = useCategoryLabels();
+  const outputStatusMap = useOutputStatusMap();
+  const outputStatusColor = useOutputStatusColor();
+  const { autoDataSources, manualTextSources, manualRichSources } = useDataSources();
 
   const [review, setReview] = useState<ManagementReview | null>(null);
   const [outputs, setOutputs] = useState<ReviewOutput[]>([]);
@@ -101,9 +77,9 @@ export default function ManagementReviewDetailPage() {
     try {
       const updated = await action();
       setReview(updated);
-      message.success("操作成功");
+      message.success(tc("messages.operationSuccess"));
     } catch (e: unknown) {
-      message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "操作失败");
+      message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
@@ -114,10 +90,8 @@ export default function ManagementReviewDetailPage() {
     setReview(updated);
   };
 
-  // Data package collapse items
   const dataPackageItems: { key: string; label: React.ReactNode; children: React.ReactNode }[] = [];
 
-  // Auto data sources
   if (review.data_package) {
     for (const src of autoDataSources) {
       const data = review.data_package[src.key];
@@ -132,12 +106,11 @@ export default function ManagementReviewDetailPage() {
               </Descriptions.Item>
             ))}
           </Descriptions>
-        ) : <span style={{ color: "#999" }}>暂无数据</span>,
+        ) : <span style={{ color: "#999" }}>{t("dataSource.noData")}</span>,
       });
     }
   }
 
-  // Manual text sources
   for (const src of manualTextSources) {
     dataPackageItems.push({
       key: src.key,
@@ -148,23 +121,22 @@ export default function ManagementReviewDetailPage() {
           defaultValue={String(manualInputs[src.key] || "")}
           disabled={isClosed || !canEdit('management_review')}
           onBlur={(e) => handleSaveManualInput(src.key, e.target.value)}
-          placeholder="请输入..."
+          placeholder={t("sectionEditor.placeholder")}
         />
       ),
     });
   }
 
-  // Manual rich sources (placeholder modules) — CRITICAL: parse existing, merge, save as object
   for (const src of manualRichSources) {
     const existing = manualInputs[src.key];
     const parsed = typeof existing === "string" ? JSON.parse(existing) : (typeof existing === "object" && existing !== null ? existing : {});
     const summary = (parsed as { summary?: string })?.summary || "";
     dataPackageItems.push({
       key: src.key,
-      label: <>{src.title} <Tag color="orange">手动录入</Tag></>,
+      label: <>{src.title} <Tag color="orange">{t("dataSource.manualTag")}</Tag></>,
       children: (
         <Space direction="vertical" style={{ width: "100%" }}>
-          <Tag color="blue">待模块上线后自动切换</Tag>
+          <Tag color="blue">{t("dataSource.pendingModule")}</Tag>
           <TextArea
             rows={3}
             defaultValue={summary}
@@ -173,59 +145,58 @@ export default function ManagementReviewDetailPage() {
               const val = { ...parsed, summary: e.target.value };
               handleSaveManualInput(src.key, val);
             }}
-            placeholder="请输入汇总文字..."
+            placeholder={t("sectionEditor.placeholder")}
           />
         </Space>
       ),
     });
   }
 
-  // Output table columns
   const outputColumns = [
     {
-      title: "类别", dataIndex: "category", width: 120,
+      title: t("table.category"), dataIndex: "category", width: 120,
       render: (c: string) => categoryLabels[c] || c,
     },
-    { title: "描述", dataIndex: "description" },
+    { title: t("table.description"), dataIndex: "description" },
     {
-      title: "截止日期", dataIndex: "due_date", width: 120,
+      title: t("table.dueDate"), dataIndex: "due_date", width: 120,
       render: (v: string | null) => v || "-",
     },
     {
-      title: "状态", dataIndex: "status", width: 100,
+      title: t("table.status"), dataIndex: "status", width: 100,
       render: (st: string) => {
-        const info = outputStatusMap[st] || { color: "default", label: st };
+        const info = outputStatusMap[st] ? { color: outputStatusColor[st], label: outputStatusMap[st] } : { color: "default", label: st };
         return <Tag color={info.color}>{info.label}</Tag>;
       },
     },
     {
-      title: "操作", width: 200,
+      title: t("table.operations"), width: 200,
       render: (_: unknown, record: ReviewOutput) => (
         <Space>
           {!isClosed && record.status === "pending" && (
             <Button size="small" onClick={async () => {
               await updateOutput(id!, record.output_id, { status: "in_progress" });
               fetchData();
-            }}>开始</Button>
+            }}>{t("actions.start")}</Button>
           )}
           {!isClosed && record.status === "in_progress" && (
             <Button size="small" type="primary" onClick={async () => {
               await updateOutput(id!, record.output_id, { status: "completed" });
               fetchData();
-            }}>完成</Button>
+            }}>{t("actions.complete")}</Button>
           )}
           {record.status === "completed" && canApprove('management_review') && (
             <Button size="small" type="primary" onClick={() => {
               setActiveOutput(record);
               setVerifyModalOpen(true);
-            }}>验证</Button>
+            }}>{t("actions.verify")}</Button>
           )}
           {!isClosed && (
-            <Popconfirm title="确认删除?" onConfirm={async () => {
+            <Popconfirm title={t("confirm.deleteOutput")} onConfirm={async () => {
               await deleteOutput(id!, record.output_id);
               fetchData();
             }}>
-              <Button size="small" danger>删除</Button>
+              <Button size="small" danger>{tc("actions.delete")}</Button>
             </Popconfirm>
           )}
         </Space>
@@ -235,57 +206,54 @@ export default function ManagementReviewDetailPage() {
 
   return (
     <Space direction="vertical" style={{ width: "100%" }} size="large">
-      {/* Basic info */}
       <Card
         title={
           <Space>
             <span>{review.doc_no}</span>
-            <Tag color={statusMap[s]?.color}>{statusMap[s]?.label}</Tag>
+            <Tag color={reviewStatusColor[s]}>{reviewStatusMap[s]}</Tag>
           </Space>
         }
         extra={
           <Space>
             {s === "draft" && !!canEdit('management_review') && (
-              <Button type="primary" onClick={() => handleTransition(() => collectData(id!))}>汇总数据</Button>
+              <Button type="primary" onClick={() => handleTransition(() => collectData(id!))}>{t("actions.collectData")}</Button>
             )}
             {s === "data_collected" && !!canEdit('management_review') && (
               <>
-                <Button onClick={() => handleTransition(() => refreshData(id!))}>刷新数据</Button>
-                <Button onClick={() => handleTransition(() => backToDraft(id!))}>返回草稿</Button>
-                <Button type="primary" onClick={() => handleTransition(() => startReview(id!))}>开始评审</Button>
+                <Button onClick={() => handleTransition(() => refreshData(id!))}>{t("actions.refreshData")}</Button>
+                <Button onClick={() => handleTransition(() => backToDraft(id!))}>{t("actions.backToDraft")}</Button>
+                <Button type="primary" onClick={() => handleTransition(() => startReview(id!))}>{t("actions.startReview")}</Button>
               </>
             )}
             {s === "in_review" && canApprove('management_review') && (
-              <Button type="primary" onClick={() => handleTransition(() => closeReview(id!))}>关闭评审</Button>
+              <Button type="primary" onClick={() => handleTransition(() => closeReview(id!))}>{t("actions.closeReview")}</Button>
             )}
             {s === "closed" && canApprove('management_review') && (
-              <Popconfirm title="确认重新打开?" onConfirm={() => handleTransition(() => reopenReview(id!))}>
-                <Button>重新打开</Button>
+              <Popconfirm title={t("confirm.reopenReview")} onConfirm={() => handleTransition(() => reopenReview(id!))}>
+                <Button>{t("actions.reopenReview")}</Button>
               </Popconfirm>
             )}
-            <Button onClick={() => navigate("/management-reviews")}>返回列表</Button>
+            <Button onClick={() => navigate("/management-reviews")}>{tc("actions.back")}</Button>
           </Space>
         }
       >
         <Descriptions column={2}>
-          <Descriptions.Item label="评审主题">{review.title}</Descriptions.Item>
-          <Descriptions.Item label="评审日期">{review.review_date}</Descriptions.Item>
-          <Descriptions.Item label="实际日期">{review.actual_date || "-"}</Descriptions.Item>
-          <Descriptions.Item label="产品线">{review.product_line_code || "全厂"}</Descriptions.Item>
-          <Descriptions.Item label="地点">{review.location || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.title")}>{review.title}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.reviewDate")}>{review.review_date}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.actualDate")}>{review.actual_date || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.productLine")}>{review.product_line_code || t("descriptions.allPlants")}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.location")}>{review.location || "-"}</Descriptions.Item>
         </Descriptions>
       </Card>
 
-      {/* Data package */}
       {(s === "data_collected" || s === "in_review" || s === "closed") && (
-        <Card title="评审输入数据包">
+        <Card title={t("card.dataPackage")}>
           <Collapse items={dataPackageItems} />
         </Card>
       )}
 
-      {/* Meeting minutes */}
       {(s === "in_review" || s === "closed") && (
-        <Card title="会议纪要">
+        <Card title={t("card.meetingMinutes")}>
           <TextArea
             rows={6}
             defaultValue={review.meeting_minutes || ""}
@@ -295,29 +263,26 @@ export default function ManagementReviewDetailPage() {
               const updated = await updateManagementReview(id, { meeting_minutes: e.target.value });
               setReview(updated);
             }}
-            placeholder="请输入评审会议纪要..."
+            placeholder={t("sectionEditor.placeholder")}
           />
         </Card>
       )}
 
-      {/* Outputs */}
       {(s === "in_review" || s === "closed") && (
         <Card
-          title="评审输出措施"
+          title={t("card.outputs")}
           extra={!isClosed && !!canEdit('management_review') ? (
-            <Button type="primary" onClick={() => setOutputModalOpen(true)}>添加措施</Button>
+            <Button type="primary" onClick={() => setOutputModalOpen(true)}>{t("actions.addOutput")}</Button>
           ) : undefined}
         >
           <Table rowKey="output_id" columns={outputColumns} dataSource={outputs} pagination={false} size="small" />
         </Card>
       )}
 
-      {/* Management Review Report */}
       <ManagementReviewReportPanel review={review} onReviewChange={setReview} />
 
-      {/* Add output modal */}
       <Modal
-        title="添加措施"
+        title={t("modal.addOutput")}
         open={outputModalOpen}
         onCancel={() => setOutputModalOpen(false)}
         onOk={async () => {
@@ -329,25 +294,24 @@ export default function ManagementReviewDetailPage() {
         }}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="category" label="类别" rules={[{ required: true }]}>
+          <Form.Item name="category" label={t("form.category")} rules={[{ required: true }]}>
             <Select>
-              <Select.Option value="improvement_opportunity">改进机会</Select.Option>
-              <Select.Option value="system_change">体系变更</Select.Option>
-              <Select.Option value="resource_need">资源需求</Select.Option>
+              <Select.Option value="improvement_opportunity">{categoryLabels.improvement_opportunity}</Select.Option>
+              <Select.Option value="system_change">{categoryLabels.system_change}</Select.Option>
+              <Select.Option value="resource_need">{categoryLabels.resource_need}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="description" label="描述" rules={[{ required: true }]}>
+          <Form.Item name="description" label={t("form.description")} rules={[{ required: true }]}>
             <TextArea rows={3} />
           </Form.Item>
-          <Form.Item name="due_date" label="截止日期">
+          <Form.Item name="due_date" label={t("form.dueDate")}>
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
         </Form>
       </Modal>
 
-      {/* Verify output modal */}
       <Modal
-        title="效果验证"
+        title={t("modal.effectVerification")}
         open={verifyModalOpen}
         onCancel={() => { setVerifyModalOpen(false); setActiveOutput(null); }}
         onOk={async () => {
@@ -362,8 +326,8 @@ export default function ManagementReviewDetailPage() {
         }}
       >
         <Form form={verifyForm} layout="vertical">
-          <Form.Item name="verification_notes" label="验证结论" rules={[{ required: true }]}>
-            <TextArea rows={3} placeholder="请输入效果验证结论..." />
+          <Form.Item name="verification_notes" label={t("form.verificationNotes")} rules={[{ required: true }]}>
+            <TextArea rows={3} placeholder={t("sectionEditor.placeholder")} />
           </Form.Item>
         </Form>
       </Modal>

@@ -13,6 +13,41 @@
     "rework": "Send Back for Rework",
     "resubmit": "Resubmit"
   },
+  "list": {
+    "title": "FMEA Management",
+    "newFMEA": "New FMEA",
+    "columns": {
+      "documentNo": "Document No.",
+      "title": "Title",
+      "type": "Type",
+      "status": "Status",
+      "version": "Version",
+      "updatedAt": "Updated At",
+      "actions": "Actions"
+    },
+    "type": {
+      "PFMEA": "PFMEA",
+      "DFMEA": "DFMEA"
+    },
+    "typeOption": {
+      "pfmea": "PFMEA - Process Failure Mode and Effects Analysis",
+      "dfmea": "DFMEA - Design Failure Mode and Effects Analysis"
+    }
+  },
+  "create": {
+    "title": "New FMEA",
+    "defaultTitle": "New DFMEA",
+    "type": "FMEA Type",
+    "typeRequired": "Please select an FMEA type",
+    "documentNo": "Document No.",
+    "documentNoRequired": "Please enter a document no.",
+    "documentNoPlaceholder": "e.g. PFMEA-2026-001",
+    "titleLabel": "Title",
+    "titleRequired": "Please enter a title",
+    "titlePlaceholder": "e.g. SMT Soldering PFMEA",
+    "problemDescription": "Problem Description (optional)",
+    "problemDescriptionPlaceholder": "Briefly describe the process step or focus (optional, used for smart recommendations)"
+  },
   "editor": {
     "title": "Editor",
     "failureAnalysis": "Failure Analysis",
@@ -76,7 +111,7 @@
     "addRow": "Add Row",
     "selectFunctionFirst": "Please select a function/process node on the left first",
     "noData": "No data",
-    "startAnalysisHint": "Select a function node on the left and click \\\"Add Row\\\" to start analysis",
+    "startAnalysisHint": "Select a function node on the left and click \"Add Row\" to start analysis",
     "footer": "S=Severity O=Occurrence D=Detection | RPN=Risk Priority Number | AP=Action Priority (H=High M=Medium L=Low) | ' = revised rating"
   },
   "messages": {
@@ -111,6 +146,9 @@
     "versionCompare": "Version Compare",
     "noGraphData": "No graph data",
     "traceImpact": "Trace Impact",
-    "traceCause": "Trace Cause"
+    "traceCause": "Trace Cause",
+    "createSuccess": "FMEA created successfully",
+    "createFailed": "Failed to create FMEA",
+    "dfmeaCreateSuccess": "DFMEA created successfully"
   }
 }
