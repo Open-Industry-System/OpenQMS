@@ -1,40 +1,23 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
-import zhCommon from "../locales/zh-CN/common.json";
-import zhLogin from "../locales/zh-CN/login.json";
-import zhLayout from "../locales/zh-CN/layout.json";
-import zhValidation from "../locales/zh-CN/validation.json";
-import zhFmea from "../locales/zh-CN/fmea.json";
-import zhSupplier from "../locales/zh-CN/supplier.json";
-import enCommon from "../locales/en-US/common.json";
-import enLogin from "../locales/en-US/login.json";
-import enLayout from "../locales/en-US/layout.json";
-import enValidation from "../locales/en-US/validation.json";
-import enFmea from "../locales/en-US/fmea.json";
-import enSupplier from "../locales/en-US/supplier.json";
+
+const modules = import.meta.glob<{ default: Record<string, unknown> }>(
+  "../locales/**/*.json",
+  { eager: true, import: "default" }
+);
+
+const resources: Record<string, Record<string, Record<string, unknown>>> = {};
+for (const [path, content] of Object.entries(modules)) {
+  const match = path.match(/\/locales\/([^/]+)\/([^/]+)\.json$/);
+  if (!match) continue;
+  const [, lng, ns] = match;
+  if (!resources[lng]) resources[lng] = {};
+  resources[lng][ns] = content;
+}
 
 export const SUPPORTED_LANGUAGES = ["zh-CN", "en-US"] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
-
-const resources = {
-  "zh-CN": {
-    common: zhCommon,
-    login: zhLogin,
-    layout: zhLayout,
-    validation: zhValidation,
-    fmea: zhFmea,
-    supplier: zhSupplier,
-  },
-  "en-US": {
-    common: enCommon,
-    login: enLogin,
-    layout: enLayout,
-    validation: enValidation,
-    fmea: enFmea,
-    supplier: enSupplier,
-  },
-};
 
 i18n
   .use(LanguageDetector)
@@ -52,7 +35,7 @@ i18n
       escapeValue: false,
     },
     defaultNS: "common",
-    ns: ["common", "login", "layout", "validation", "fmea", "supplier"],
+    ns: Object.keys(resources["zh-CN"] || {}),
     react: {
       useSuspense: false,
     },
