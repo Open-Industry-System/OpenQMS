@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Input, Dropdown, Tag, Spin, Alert, Typography, Radio } from "antd";
 import { BulbOutlined, StarOutlined, SettingOutlined, GlobalOutlined } from "@ant-design/icons";
 import { getRecommendations, type Suggestion, type RecommendResponse } from "../../api/recommendation";
@@ -28,6 +29,7 @@ export default function SmartSuggestionDropdown({
   onChange,
   scope: externalScope,
 }: SmartSuggestionDropdownProps) {
+  const { t } = useTranslation("dfmea");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -48,18 +50,19 @@ export default function SmartSuggestionDropdown({
       const href = `/fmea/${item.source_fmea_id}?tab=graph&highlightNode=${item.source_node_id}`;
       return (
         <span style={{ fontSize: 11, color: "#52c41a" }}>
-          来自 <a href={href} target="_blank" rel="noopener" style={{ color: "#52c41a", textDecoration: "underline" }}>{item.source_document_no}</a>
+          {t("smartSuggestion.from")}{" "}
+          <a href={href} target="_blank" rel="noopener" style={{ color: "#52c41a", textDecoration: "underline" }}>{item.source_document_no}</a>
           {item.source_product_line_code && ` · ${item.source_product_line_code}`}
           {item.source_product_line_name && `（${item.source_product_line_name}）`}
-          {item.similarity_score !== undefined && ` · 相似度 ${(item.similarity_score * 100).toFixed(0)}%`}
+          {item.similarity_score !== undefined && ` · ${t("smartSuggestion.similarity", { score: (item.similarity_score * 100).toFixed(0) })}`}
         </span>
       );
     }
     if (item.source === "rule") {
-      return <span style={{ fontSize: 11, color: "#1890ff" }}>规则引擎</span>;
+      return <span style={{ fontSize: 11, color: "#1890ff" }}>{t("smartSuggestion.ruleEngine")}</span>;
     }
     if (item.source === "llm") {
-      return <span style={{ fontSize: 11, color: "#722ed1" }}>AI 生成</span>;
+      return <span style={{ fontSize: 11, color: "#722ed1" }}>{t("smartSuggestion.aiGenerated")}</span>;
     }
     return null;
   };
@@ -98,11 +101,11 @@ export default function SmartSuggestionDropdown({
         if (e instanceof Error && e.name === "AbortError") return; // ignore aborts
         const err = e as { response?: { status?: number }; message?: string };
         if (err?.response?.status === 429) {
-          setError("请求过于频繁，请稍后重试");
+          setError(t("smartSuggestion.tooFrequent"));
         } else if (err?.response?.status === 403) {
-          setError("无权限使用推荐功能");
+          setError(t("smartSuggestion.noPermission"));
         } else {
-          setError("推荐服务暂不可用");
+          setError(t("smartSuggestion.serviceUnavailable"));
         }
         setSuggestions([]);
         setOpen(true);  // show error in dropdown
@@ -110,7 +113,7 @@ export default function SmartSuggestionDropdown({
         setLoading(false);
       }
     },
-    [fmeaId, triggerType, context, scope]
+    [fmeaId, triggerType, context, scope, t]
   );
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -158,13 +161,16 @@ export default function SmartSuggestionDropdown({
   }, []);
 
   const confidenceLabel = (c: number) => {
-    if (c >= 0.7) return <Tag color="green">高</Tag>;
-    if (c >= 0.4) return <Tag color="orange">中</Tag>;
-    return <Tag color="default">低</Tag>;
+    if (c >= 0.7) return <Tag color="green">{t("smartSuggestion.confidence.high")}</Tag>;
+    if (c >= 0.4) return <Tag color="orange">{t("smartSuggestion.confidence.medium")}</Tag>;
+    return <Tag color="default">{t("smartSuggestion.confidence.low")}</Tag>;
   };
 
   const sourceIcon = (s: string) =>
     s === "llm" ? <StarOutlined style={{ color: "#722ed1" }} /> : <SettingOutlined style={{ color: "#1890ff" }} />;
+
+  const scopeLabel = (s: "global" | "current_product_line") =>
+    s === "global" ? t("smartSuggestion.scopeGlobal") : t("smartSuggestion.scopeLocal");
 
   const dropdownContent = (
     <div style={{ width: 360, background: "#fff", borderRadius: 4, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
@@ -172,11 +178,11 @@ export default function SmartSuggestionDropdown({
         <Alert type="error" message={error} banner style={{ fontSize: 12 }} />
       )}
       {fallback && (
-        <Alert type="warning" message="AI 建议暂不可用，已使用规则引擎" banner style={{ fontSize: 12 }} />
+        <Alert type="warning" message={t("smartSuggestion.aiUnavailable")} banner style={{ fontSize: 12 }} />
       )}
       {!llmAvailable && (
         <Text type="secondary" style={{ display: "block", padding: "4px 12px", fontSize: 12 }}>
-          仅规则引擎模式
+          {t("smartSuggestion.ruleOnlyMode")}
         </Text>
       )}
       <div style={{ padding: "4px 12px", borderBottom: "1px solid #f0f0f0" }}>
@@ -186,17 +192,17 @@ export default function SmartSuggestionDropdown({
           disabled={!hasKgPermission}
           size="small"
         >
-          <Radio.Button value="global"><GlobalOutlined /> 全局经验</Radio.Button>
-          <Radio.Button value="current_product_line">仅当前产品线</Radio.Button>
+          <Radio.Button value="global"><GlobalOutlined /> {t("smartSuggestion.global")}</Radio.Button>
+          <Radio.Button value="current_product_line">{t("smartSuggestion.currentProductLine")}</Radio.Button>
         </Radio.Group>
         {!hasKgPermission && (
           <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
-            （无全局权限，仅当前产品线）
+            {t("smartSuggestion.noGlobalPermission")}
           </Text>
         )}
         {effectiveScope !== scope && (
           <Text type="warning" style={{ fontSize: 11, marginLeft: 8 }}>
-            实际范围：{effectiveScope === "global" ? "全局" : "仅当前产品线"}
+            {t("smartSuggestion.actualScope", { scope: scopeLabel(effectiveScope) })}
           </Text>
         )}
       </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Row, Col, Card, Table, Tag, DatePicker, Button, Spin } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { Line, Pie } from "@ant-design/charts";
 import { getQualityDashboard, exportQualityDashboard } from "../../../api/supplier";
 import { useProductLineStore } from "../../../store/productLineStore";
@@ -9,6 +10,8 @@ import type { QualityDashboardResponse } from "../../../types";
 const { RangePicker } = DatePicker;
 
 export default function DashboardView() {
+  const { t } = useTranslation("supplier");
+  const { t: tc } = useTranslation("common");
   const [data, setData] = useState<QualityDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState<[string, string] | null>(null);
@@ -79,11 +82,11 @@ export default function DashboardView() {
   };
 
   const rankingColumns = [
-    { title: "排名", width: 60, render: (_: unknown, __: unknown, idx: number) => idx + 1 },
-    { title: "供应商编号", dataIndex: "supplier_no", key: "supplier_no" },
-    { title: "供应商名称", dataIndex: "name", key: "name" },
+    { title: t("quality.column.rank"), width: 60, render: (_: unknown, __: unknown, idx: number) => idx + 1 },
+    { title: t("list.column.supplierNo"), dataIndex: "supplier_no", key: "supplier_no" },
+    { title: t("quality.column.supplierName"), dataIndex: "name", key: "name" },
     {
-      title: "评级",
+      title: t("quality.column.grade"),
       dataIndex: "grade",
       key: "grade",
       render: (grade: string) => {
@@ -98,19 +101,19 @@ export default function DashboardView() {
       render: (ppm: number) => ppm.toLocaleString(undefined, { maximumFractionDigits: 0 }),
     },
     {
-      title: "批次合格率",
+      title: t("quality.column.batchAcceptanceRate"),
       dataIndex: "batch_acceptance_rate",
       key: "batch_acceptance_rate",
       render: (rate: number) => `${(rate * 100).toFixed(1)}%`,
     },
     {
-      title: "交付准时率",
+      title: t("quality.column.deliveryRate"),
       dataIndex: "delivery_rate",
       key: "delivery_rate",
       render: (rate: number) => `${(rate * 100).toFixed(1)}%`,
     },
     {
-      title: "未关闭SCAR",
+      title: t("quality.column.openScar"),
       dataIndex: "open_scar_count",
       key: "open_scar_count",
       render: (count: number) => <Tag color={count > 0 ? "error" : "success"}>{count}</Tag>,
@@ -130,14 +133,14 @@ export default function DashboardView() {
           }}
         />
         <Button icon={<DownloadOutlined />} onClick={handleExport}>
-          导出报表
+          {t("quality.exportReport")}
         </Button>
       </div>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div style={{ fontSize: 14, color: "#888" }}>供应商总数</div>
+            <div style={{ fontSize: 14, color: "#888" }}>{t("quality.kpi.totalSuppliers")}</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: "#1677ff" }}>
               {data.kpi.total_suppliers}
             </div>
@@ -145,7 +148,7 @@ export default function DashboardView() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div style={{ fontSize: 14, color: "#888" }}>整体PPM</div>
+            <div style={{ fontSize: 14, color: "#888" }}>{t("quality.kpi.overallPpm")}</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: "#52c41a" }}>
               {data.kpi.overall_ppm.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </div>
@@ -153,7 +156,7 @@ export default function DashboardView() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div style={{ fontSize: 14, color: "#888" }}>批次合格率</div>
+            <div style={{ fontSize: 14, color: "#888" }}>{t("quality.kpi.batchAcceptanceRate")}</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: "#52c41a" }}>
               {(data.kpi.batch_acceptance_rate * 100).toFixed(1)}%
             </div>
@@ -161,7 +164,7 @@ export default function DashboardView() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div style={{ fontSize: 14, color: "#888" }}>未关闭SCAR</div>
+            <div style={{ fontSize: 14, color: "#888" }}>{t("quality.kpi.openScar")}</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: "#faad14" }}>
               {data.kpi.open_scar_count}
             </div>
@@ -171,30 +174,30 @@ export default function DashboardView() {
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} lg={12}>
-          <Card title="PPM 趋势">
+          <Card title={t("quality.charts.ppmTrend")}>
             {data.ppm_trend.length > 0 ? (
               <Line {...ppmTrendConfig} />
             ) : (
               <div style={{ textAlign: "center", padding: "60px 0", color: "#888" }}>
-                暂无数据
+                {tc("empty.data")}
               </div>
             )}
           </Card>
         </Col>
         <Col xs={24} lg={12}>
-          <Card title="评级分布">
+          <Card title={t("quality.charts.gradeDistribution")}>
             {Object.values(data.grade_distribution).some((v) => v > 0) ? (
               <Pie {...gradeDistConfig} />
             ) : (
               <div style={{ textAlign: "center", padding: "60px 0", color: "#888" }}>
-                暂无数据
+                {tc("empty.data")}
               </div>
             )}
           </Card>
         </Col>
       </Row>
 
-      <Card title="供应商排名 (Top 20)" style={{ marginTop: 16 }}>
+      <Card title={t("quality.rankingTitle")} style={{ marginTop: 16 }}>
         <Table
           dataSource={data.ranking}
           columns={rankingColumns}

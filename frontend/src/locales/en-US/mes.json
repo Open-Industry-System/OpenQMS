@@ -1,0 +1,129 @@
+{
+  "yes": "Yes",
+  "no": "No",
+  "dashboard": {
+    "title": "MES Dashboard",
+    "errors": {
+      "loadFailed": "Failed to load MES dashboard"
+    },
+    "stats": {
+      "runningEquipment": "Running Equipment",
+      "downEquipment": "Down Equipment",
+      "plannedOutput": "Planned Output",
+      "actualOutput": "Actual Output"
+    },
+    "equipmentStatus": "Equipment Status",
+    "equipmentStatusLabels": {
+      "running": "Running",
+      "idle": "Idle",
+      "down": "Down",
+      "changeover": "Changeover"
+    },
+    "columns": {
+      "equipmentName": "Equipment Name",
+      "status": "Status",
+      "availability": "Availability (%)",
+      "performance": "Performance (%)",
+      "quality": "Quality (%)",
+      "oee": "OEE (%)"
+    }
+  },
+  "orders": {
+    "title": "Production Orders",
+    "filterPlaceholder": "Filter status",
+    "status": {
+      "planned": "Planned",
+      "inProgress": "In Progress",
+      "completed": "Completed",
+      "closed": "Closed"
+    },
+    "columns": {
+      "orderNo": "Order No.",
+      "productModel": "Product Model",
+      "plannedQty": "Planned Qty",
+      "actualQty": "Actual Qty",
+      "status": "Status",
+      "startedAt": "Started At",
+      "completedAt": "Completed At"
+    },
+    "messages": {
+      "loadFailed": "Failed to load production orders"
+    }
+  },
+  "scrap": {
+    "title": "Defect Records",
+    "filterPlaceholder": "Filter defect type",
+    "defectType": {
+      "scrap": "Scrap",
+      "rework": "Rework",
+      "reject": "Reject"
+    },
+    "columns": {
+      "externalId": "External ID",
+      "defectType": "Defect Type",
+      "defectCategory": "Defect Category",
+      "defectQty": "Defect Qty",
+      "totalQty": "Total Qty",
+      "defectRate": "Defect Rate (%)",
+      "defectDescription": "Defect Description",
+      "recordedAt": "Recorded At"
+    },
+    "messages": {
+      "loadFailed": "Failed to load defect records"
+    }
+  },
+  "connections": {
+    "title": "MES Connection Management",
+    "create": "New Connection",
+    "edit": "Edit",
+    "test": "Test",
+    "sync": "Sync",
+    "delete": "Delete",
+    "columns": {
+      "name": "Connection Name",
+      "type": "Type",
+      "status": "Status",
+      "productLine": "Product Line",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "modal": {
+      "createTitle": "New Connection",
+      "editTitle": "Edit Connection"
+    },
+    "form": {
+      "name": "Connection Name",
+      "nameRequired": "Please enter the connection name",
+      "namePlaceholder": "e.g. Line A MES",
+      "connectorType": "Connector Type",
+      "connectorTypeRequired": "Please select a connector type",
+      "productLineCode": "Product Line Code",
+      "productLineCodePlaceholder": "e.g. DC-DC-100"
+    },
+    "connector": {
+      "mock": "Mock - Simulated Data",
+      "rest": "REST API"
+    },
+    "deleteConfirm": {
+      "title": "Confirm Delete",
+      "content": "Are you sure you want to delete connection \"{{name}}\"?"
+    },
+    "messages": {
+      "loadFailed": "Failed to load connection list",
+      "createSuccess": "Connection created successfully",
+      "createFailed": "Create failed",
+      "updateSuccess": "Connection updated successfully",
+      "updateFailed": "Update failed",
+      "deleteSuccess": "Deleted successfully",
+      "deleteFailed": "Delete failed",
+      "testSuccess": "Connection test successful",
+      "testFailed": "Connection test failed",
+      "testFailedWithError": "Connection test failed: {{error}}",
+      "syncTriggered": "Sync triggered, will start in the background within 30 seconds",
+      "syncFailed": "Failed to trigger sync"
+    }
+  }
+}

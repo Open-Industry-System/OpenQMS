@@ -1,0 +1,190 @@
+{
+  "pageTitle": {
+    "list": "内部审核管理",
+    "detail": "内部审核详情"
+  },
+  "stats": {
+    "annualPrograms": "年度方案数",
+    "plannedAudits": "待执行审核",
+    "openFindings": "开放发现项",
+    "majorNc": "严重不符合项",
+    "totalFindings": "发现项总数",
+    "minorNc": "一般不符合",
+    "ofi": "改进机会",
+    "unclosed": "未关闭"
+  },
+  "auditType": {
+    "system": "体系",
+    "process": "过程",
+    "product": "产品"
+  },
+  "status": {
+    "audit": {
+      "planned": "待执行",
+      "in_progress": "进行中",
+      "completed": "已完成",
+      "cancelled": "已取消"
+    },
+    "finding": {
+      "open": "开放",
+      "in_progress": "处理中",
+      "verified": "已验证",
+      "closed": "已关闭"
+    }
+  },
+  "findingType": {
+    "major_nc": "严重不符合",
+    "minor_nc": "一般不符合",
+    "ofi": "改进机会",
+    "observation": "观察项"
+  },
+  "resultOptions": {
+    "conform": {
+      "value": "符合",
+      "label": "符合"
+    },
+    "nonConform": {
+      "value": "不符合",
+      "label": "不符合"
+    },
+    "notApplicable": {
+      "value": "不适用",
+      "label": "不适用"
+    }
+  },
+  "table": {
+    "planNo": "计划编号",
+    "auditType": "类型",
+    "auditScope": "审核范围",
+    "plannedDate": "计划日期",
+    "leadAuditor": "审核组长",
+    "status": "状态",
+    "findingCount": "发现项数",
+    "operations": "操作",
+    "serialNo": "序号",
+    "clause": "条款",
+    "question": "检查问题",
+    "result": "结果",
+    "evidence": "证据",
+    "note": "备注",
+    "clauseRef": "条款编号",
+    "description": "描述",
+    "dueDate": "截止日期",
+    "capa": "CAPA"
+  },
+  "actions": {
+    "newProgram": "新建方案",
+    "newPlan": "新建计划",
+    "auditorManagement": "审核员管理",
+    "viewDetail": "查看详情",
+    "start": "开始",
+    "complete": "完成",
+    "addChecklistItem": "添加检查项",
+    "addFinding": "添加发现项",
+    "printReport": "打印报告",
+    "viewCapa": "查看CAPA",
+    "createCapa": "创建CAPA",
+    "closeFinding": "关闭"
+  },
+  "form": {
+    "year": "年度",
+    "auditType": "审核类型",
+    "scope": "审核范围",
+    "criteria": "审核准则",
+    "program": "所属方案",
+    "plannedDate": "计划日期",
+    "leadAuditor": "审核组长",
+    "actualDate": "实际日期",
+    "teamMembers": "审核组员",
+    "clauseRef": "条款编号",
+    "findingType": "发现项类型",
+    "description": "描述",
+    "dueDate": "截止日期"
+  },
+  "placeholder": {
+    "year": "如 2026",
+    "auditType": "选择审核类型",
+    "scope": "描述审核覆盖的范围",
+    "criteria": "如 ISO 9001, IATF 16949 等",
+    "program": "选择审核方案",
+    "plannedDate": "选择计划日期",
+    "leadAuditor": "选择审核组长",
+    "selectResult": "选择结果",
+    "evidence": "输入证据",
+    "note": "输入备注",
+    "clauseRef": "如 4.1, 8.5.1",
+    "findingType": "选择类型",
+    "description": "描述发现的问题"
+  },
+  "modal": {
+    "newProgram": "新建方案",
+    "newPlan": "新建计划",
+    "addFinding": "添加发现项"
+  },
+  "drawer": {
+    "auditorManagement": "审核员管理"
+  },
+  "auditorTable": {
+    "username": "用户名",
+    "displayName": "显示名",
+    "qualifications": "资格类型",
+    "lastQualificationDate": "最近资格日期"
+  },
+  "prompt": {
+    "qualifications": "资格类型（逗号分隔）:"
+  },
+  "tabs": {
+    "all": "全部",
+    "planned": "待执行",
+    "in_progress": "进行中",
+    "completed": "已完成",
+    "checklist": "检查表",
+    "findings": "发现项",
+    "report": "审核报告"
+  },
+  "report": {
+    "findingDistribution": "发现项分布",
+    "findingList": "发现项清单",
+    "statusLabel": "状态",
+    "dueLabel": "截止",
+    "noFindings": "暂无发现项"
+  },
+  "card": {
+    "basicInfo": "基本信息"
+  },
+  "messages": {
+    "loadPlansFailed": "加载审核计划失败",
+    "loadFindingsFailed": "加载发现项失败",
+    "programCreated": "方案创建成功",
+    "planCreated": "计划创建成功",
+    "auditStarted": "审核已开始",
+    "auditCompleted": "审核已完成",
+    "planCancelled": "计划已取消",
+    "auditorUpdated": "审核员信息已更新",
+    "updateFailed": "更新失败",
+    "saveFailed": "保存失败",
+    "addFailed": "添加失败",
+    "deleteFailed": "删除失败",
+    "findingCreated": "发现项已创建",
+    "findingClosed": "发现项已关闭",
+    "capaCreated": "CAPA 已创建: {{documentNo}}",
+    "createCapaFailed": "创建 CAPA 失败"
+  },
+  "confirm": {
+    "cancel": "确认取消？"
+  },
+  "empty": {
+    "noFinding": "暂无发现项"
+  },
+  "validation": {
+    "yearRequired": "请输入年度",
+    "auditTypeRequired": "请选择审核类型",
+    "scopeRequired": "请输入审核范围",
+    "criteriaRequired": "请输入审核准则",
+    "programRequired": "请选择方案",
+    "plannedDateRequired": "请选择计划日期",
+    "leadAuditorRequired": "请选择审核组长",
+    "findingTypeRequired": "请选择发现项类型",
+    "descriptionRequired": "请输入描述"
+  }
+}

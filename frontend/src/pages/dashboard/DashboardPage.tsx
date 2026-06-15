@@ -16,6 +16,7 @@ import {
 } from "../../api/dashboard";
 import { useProductLineStore } from "../../store/productLineStore";
 import { usePermission } from "../../hooks/usePermission";
+import { useTranslation } from "react-i18next";
 import type {
   WidgetLayoutItem,
   DashboardLayoutConfig,
@@ -58,6 +59,8 @@ const { Title } = Typography;
 
 export default function DashboardPage() {
   const productLine = useProductLineStore((s) => s.selected);
+  const { t } = useTranslation("dashboard");
+  const { t: tc } = useTranslation("common");
   const { canEdit, canView } = usePermission();
   const canEditDashboard = canEdit("dashboard");
 
@@ -84,11 +87,11 @@ export default function DashboardPage() {
       setData(widgetsResp);
     } catch (e) {
       console.error("Dashboard fetch error:", e);
-      message.error("仪表盘加载失败");
+      message.error(t("messages.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [productLine]);
+  }, [productLine, t]);
 
   useEffect(() => {
     fetchData();
@@ -106,13 +109,13 @@ export default function DashboardPage() {
       setLayout(editLayout);
       setIsEditing(false);
       setEditLayout(null);
-      message.success("布局已保存");
+      message.success(t("messages.saveSuccess"));
       // Re-fetch only widget data for the new layout types, no loading flicker
       const widgetTypes = [...new Set(editLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch {
-      message.error("保存失败");
+      message.error(t("messages.saveFailed"));
     }
   };
 
@@ -127,13 +130,13 @@ export default function DashboardPage() {
       await saveDashboardLayout({ lg: resetLayout });
       setLayout(resetLayout);
       setEditLayout(resetLayout);
-      message.success("已恢复默认布局");
+      message.success(t("messages.resetSuccess"));
       // Re-fetch only widget data for default layout types, no loading flicker
       const widgetTypes = [...new Set(resetLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch {
-      message.error("恢复失败");
+      message.error(t("messages.resetFailed"));
     }
   };
 
@@ -157,28 +160,28 @@ export default function DashboardPage() {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>质量仪表盘</Title>
+        <Title level={4} style={{ margin: 0 }}>{t("page.title")}</Title>
         <Space>
           {isEditing ? (
             <>
               <Button icon={<CheckOutlined />} type="primary" onClick={handleSave}>
-                完成
+                {t("actions.done")}
               </Button>
               <Button icon={<CloseOutlined />} onClick={handleCancel}>
-                取消
+                {tc("actions.cancel")}
               </Button>
               <Button icon={<RollbackOutlined />} onClick={handleReset}>
-                恢复默认
+                {t("actions.resetDefault")}
               </Button>
             </>
           ) : (
             <>
               <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
-                刷新
+                {tc("actions.refresh")}
               </Button>
               {canEditDashboard && (
                 <Button icon={<EditOutlined />} onClick={handleEdit}>
-                  编辑布局
+                  {t("actions.editLayout")}
                 </Button>
               )}
             </>

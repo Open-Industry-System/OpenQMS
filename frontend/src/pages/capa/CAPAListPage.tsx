@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Tag, Typography, Modal, Form, Input, Select, DatePicker, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { listCAPAs, createCAPA } from "../../api/capa";
 import type { CAPAReport } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -10,17 +11,14 @@ import dayjs from "dayjs";
 const { Title } = Typography;
 
 const severityColors: Record<string, string> = {
-  "致命": "red", "严重": "orange", "一般": "blue", "轻微": "default",
+  fatal: "red", serious: "orange", general: "blue", minor: "default",
 };
 
-const statusLabels: Record<string, string> = {
-  D1_TEAM: "D1 团队组建", D2_DESCRIPTION: "D2 问题描述",
-  D3_INTERIM: "D3 临时措施", D4_ROOT_CAUSE: "D4 根因分析",
-  D5_CORRECTION: "D5 永久措施", D6_VERIFICATION: "D6 实施验证",
-  D7_PREVENTION: "D7 预防复发", D8_CLOSURE: "D8 关闭", ARCHIVED: "已归档",
-};
+const severityOptions = ["fatal", "serious", "general", "minor"];
 
 export default function CAPAListPage() {
+  const { t } = useTranslation("capa");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [data, setData] = useState<CAPAReport[]>([]);
   const [total, setTotal] = useState(0);
@@ -58,34 +56,34 @@ export default function CAPAListPage() {
         severity: values.severity,
         due_date: values.due_date?.format("YYYY-MM-DD"),
       });
-      message.success("8D 报告创建成功");
+      message.success(tc("messages.operationSuccess"));
       setModalOpen(false);
       form.resetFields();
       navigate(`/capa/${capa.report_id}`, { state: { showLessonsLearned: true, problemDescription: values.problem_description } });
-    } catch { message.error("创建失败"); }
+    } catch { message.error(tc("messages.operationFailed")); }
   };
 
   const columns = [
-    { title: "报告编号", dataIndex: "document_no", key: "document_no", width: 150 },
-    { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
+    { title: t("fields.documentNo"), dataIndex: "document_no", key: "document_no", width: 150 },
+    { title: t("fields.title"), dataIndex: "title", key: "title", ellipsis: true },
     {
-      title: "当前步骤", dataIndex: "status", key: "status", width: 140,
-      render: (s: string) => <Tag color="processing">{statusLabels[s] || s}</Tag>,
+      title: t("fields.currentStep"), dataIndex: "status", key: "status", width: 140,
+      render: (s: string) => <Tag color="processing">{t(`status.${s}`, s)}</Tag>,
     },
     {
-      title: "严重等级", dataIndex: "severity", key: "severity", width: 90,
-      render: (s: string) => <Tag color={severityColors[s] || "default"}>{s}</Tag>,
+      title: t("fields.severity"), dataIndex: "severity", key: "severity", width: 90,
+      render: (s: string) => <Tag color={severityColors[s] || "default"}>{t(`severity.${s}`, s)}</Tag>,
     },
-    { title: "期限", dataIndex: "due_date", key: "due_date", width: 110, render: (v: string | null) => v || "-" },
+    { title: t("fields.dueDate"), dataIndex: "due_date", key: "due_date", width: 110, render: (v: string | null) => v || "-" },
     {
-      title: "更新时间", dataIndex: "updated_at", key: "updated_at", width: 170,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      title: t("fields.createdAt"), dataIndex: "updated_at", key: "updated_at", width: 170,
+      render: (v: string) => new Date(v).toLocaleString(),
     },
     {
-      title: "操作", key: "actions", width: 80,
+      title: tc("table.operations"), key: "actions", width: 80,
       render: (_: unknown, record: CAPAReport) => (
         <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/capa/${record.report_id}`)}>
-          处理
+          {t("actions.handle")}
         </Button>
       ),
     },
@@ -94,28 +92,28 @@ export default function CAPAListPage() {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>8D / CAPA</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>新建 8D</Button>
+        <Title level={4} style={{ margin: 0 }}>{t("title")}</Title>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>{t("actions.create")}</Button>
       </div>
       <Table columns={columns} dataSource={data} rowKey="report_id" loading={loading}
         pagination={{ current: page, total, pageSize: 20, onChange: (p) => { setPage(p); fetchData(p); } }}
       />
-      <Modal title="新建 8D 报告" open={modalOpen} onOk={() => form.submit()} onCancel={() => setModalOpen(false)}>
+      <Modal title={t("actions.create")} open={modalOpen} onOk={() => form.submit()} onCancel={() => setModalOpen(false)}>
         <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Form.Item name="document_no" label="报告编号" rules={[{ required: true }]}>
-            <Input placeholder="如 8D-2026-001" />
+          <Form.Item name="document_no" label={t("fields.documentNo")} rules={[{ required: true }]}>
+            <Input placeholder="8D-2026-001" />
           </Form.Item>
-          <Form.Item name="title" label="标题" rules={[{ required: true }]}>
-            <Input placeholder="如 焊接不良客诉" />
+          <Form.Item name="title" label={t("fields.title")} rules={[{ required: true }]}>
+            <Input placeholder={t("fields.title")} />
           </Form.Item>
-          <Form.Item name="severity" label="严重等级" initialValue="一般">
-            <Select options={["致命", "严重", "一般", "轻微"].map((v) => ({ value: v, label: v }))} />
+          <Form.Item name="severity" label={t("fields.severity")} initialValue="general">
+            <Select options={severityOptions.map((v) => ({ value: v, label: t(`severity.${v}`) }))} />
           </Form.Item>
-          <Form.Item name="due_date" label="完成期限">
+          <Form.Item name="due_date" label={t("fields.dueDate")}>
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
-          <Form.Item name="problem_description" label="问题描述（可选）">
-            <Input.TextArea rows={2} placeholder="简述问题现象（可选，用于智能推荐）" />
+          <Form.Item name="problem_description" label={t("fields.problemDescription")}>
+            <Input.TextArea rows={2} placeholder={t("fields.problemDescription")} />
           </Form.Item>
         </Form>
       </Modal>

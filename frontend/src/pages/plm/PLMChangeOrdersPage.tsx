@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Table, Button, Tag, Typography, App } from "antd";
 import { ThunderboltOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { getPLMChangeOrders, triggerImpactAnalysis } from "../../api/plm";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { PLMChangeOrder } from "../../types/plm";
@@ -17,13 +18,18 @@ const statusColors: Record<string, string> = {
   cancelled: "red",
 };
 
-const changeTypeLabels: Record<string, string> = {
-  ECN: "工程变更通知",
-  ECR: "工程变更请求",
-  SCN: "供应商变更通知",
-};
+function useChangeTypeLabels() {
+  const { t } = useTranslation("plm");
+  return useMemo(() => ({
+    ECN: t("changeOrders.changeType.ECN"),
+    ECR: t("changeOrders.changeType.ECR"),
+    SCN: t("changeOrders.changeType.SCN"),
+  }), [t]);
+}
 
 export default function PLMChangeOrdersPage() {
+  const { t } = useTranslation("plm");
+  const changeTypeLabels = useChangeTypeLabels();
   const { message } = App.useApp();
   const { canEdit } = usePermission();
   const canEditPlm = canEdit("plm");
@@ -41,7 +47,7 @@ export default function PLMChangeOrdersPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载变更单列表失败"))
+      .catch(() => message.error(t("changeOrders.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -55,9 +61,9 @@ export default function PLMChangeOrdersPage() {
     setImpactLoading((prev) => ({ ...prev, [changeId]: true }));
     try {
       await triggerImpactAnalysis(changeId);
-      message.success("影响分析已触发");
+      message.success(t("changeOrders.messages.impactAnalysisTriggered"));
     } catch {
-      message.error("触发影响分析失败");
+      message.error(t("changeOrders.messages.impactAnalysisFailed"));
     } finally {
       setImpactLoading((prev) => ({ ...prev, [changeId]: false }));
     }
@@ -66,23 +72,23 @@ export default function PLMChangeOrdersPage() {
   const columns = useMemo(
     () => {
       const baseColumns = [
-        { title: "变更编号", dataIndex: "change_number", key: "change_number", width: 160 },
-        { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
+        { title: t("changeOrders.columns.changeNumber"), dataIndex: "change_number", key: "change_number", width: 160 },
+        { title: t("changeOrders.columns.title"), dataIndex: "title", key: "title", ellipsis: true },
         {
-          title: "变更类型",
+          title: t("changeOrders.columns.changeType"),
           dataIndex: "change_type",
           key: "change_type",
           width: 130,
-          render: (t: string) => changeTypeLabels[t] || t,
+          render: (type: string) => changeTypeLabels[type as keyof typeof changeTypeLabels] || type,
         },
         {
-          title: "状态",
+          title: t("changeOrders.columns.status"),
           dataIndex: "status",
           key: "status",
           width: 100,
           render: (s: string) => <Tag color={statusColors[s] || "default"}>{s}</Tag>,
         },
-        { title: "优先级", dataIndex: "priority", key: "priority", width: 80 },
+        { title: t("changeOrders.columns.priority"), dataIndex: "priority", key: "priority", width: 80 },
       ];
 
       if (!canEditPlm) return baseColumns;
@@ -90,7 +96,7 @@ export default function PLMChangeOrdersPage() {
       return [
         ...baseColumns,
         {
-          title: "操作",
+          title: t("changeOrders.columns.actions"),
           key: "actions",
           width: 160,
           render: (_: unknown, record: PLMChangeOrder) => (
@@ -101,20 +107,20 @@ export default function PLMChangeOrdersPage() {
               loading={impactLoading[record.change_id]}
               onClick={() => handleImpactAnalysis(record.change_id)}
             >
-              影响分析
+              {t("changeOrders.impactAnalysis")}
             </Button>
           ),
         },
       ];
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canEditPlm, impactLoading],
+    [canEditPlm, impactLoading, t, changeTypeLabels],
   );
 
   return (
     <div>
       <Title level={4} style={{ marginBottom: 16 }}>
-        PLM 变更单管理
+        {t("changeOrders.title")}
       </Title>
 
       <Table

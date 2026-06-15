@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Table, Tag, Button, Typography, App, Space, Input, Tabs, Modal, Select,
 } from "antd";
+import { useTranslation } from "react-i18next";
 import {
   fetchERPSuppliers,
   fetchERPCustomers,
@@ -34,16 +35,19 @@ const linkStatusColor = (v: string) => {
   }
 };
 
-const linkStatusLabel = (v: string) => {
-  switch (v) {
-    case "linked": return "已关联";
-    case "pending": return "待关联";
-    case "unlinked": return "未关联";
-    default: return v;
-  }
-};
+function useLinkStatusLabel() {
+  const { t } = useTranslation("erp");
+  return useMemo(() => ({
+    linked: t("masterData.linkStatus.linked"),
+    pending: t("masterData.linkStatus.pending"),
+    unlinked: t("masterData.linkStatus.unlinked"),
+  }), [t]);
+}
 
 function SuppliersTab() {
+  const { t } = useTranslation("erp");
+  const { t: tc } = useTranslation("common");
+  const linkStatusLabel = useLinkStatusLabel();
   const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPSupplier[]>([]);
@@ -63,7 +67,7 @@ function SuppliersTab() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载供应商失败"))
+      .catch(() => message.error(t("masterData.suppliers.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -81,7 +85,7 @@ function SuppliersTab() {
         resp.items.map((s) => ({ id: s.supplier_id, name: `${s.supplier_no} - ${s.name}` })),
       );
     } catch {
-      message.error("加载供应商列表失败");
+      message.error(t("masterData.suppliers.messages.loadListFailed"));
     } finally {
       setSuppliersLoading(false);
     }
@@ -91,46 +95,46 @@ function SuppliersTab() {
     if (!linkingRecord || !selectedSupplierId) return;
     try {
       await linkERPSupplier(linkingRecord.erp_supplier_id, selectedSupplierId);
-      message.success("关联成功");
+      message.success(t("masterData.suppliers.messages.linkSuccess"));
       setLinkModalOpen(false);
       fetchData(page);
     } catch {
-      message.error("关联失败");
+      message.error(t("masterData.suppliers.messages.linkFailed"));
     }
   };
 
   const handleUnlink = async (record: ERPSupplier) => {
     try {
       await unlinkERPSupplier(record.erp_supplier_id);
-      message.success("取消关联成功");
+      message.success(t("masterData.suppliers.messages.unlinkSuccess"));
       fetchData(page);
     } catch {
-      message.error("取消关联失败");
+      message.error(t("masterData.suppliers.messages.unlinkFailed"));
     }
   };
 
   const columns = [
-    { title: "供应商编码", dataIndex: "supplier_code", key: "supplier_code", width: 140 },
-    { title: "名称", dataIndex: "name", key: "name", ellipsis: true },
-    { title: "状态", dataIndex: "status", key: "status", width: 100, render: (v: string) => <Tag>{v}</Tag> },
+    { title: t("masterData.columns.supplierCode"), dataIndex: "supplier_code", key: "supplier_code", width: 140 },
+    { title: t("masterData.columns.name"), dataIndex: "name", key: "name", ellipsis: true },
+    { title: t("masterData.columns.status"), dataIndex: "status", key: "status", width: 100, render: (v: string) => <Tag>{v}</Tag> },
     {
-      title: "关联状态",
+      title: t("masterData.columns.linkStatus"),
       dataIndex: "link_status",
       key: "link_status",
       width: 110,
-      render: (v: string) => <Tag color={linkStatusColor(v)}>{linkStatusLabel(v)}</Tag>,
+      render: (v: string) => <Tag color={linkStatusColor(v)}>{linkStatusLabel[v as keyof typeof linkStatusLabel] || v}</Tag>,
     },
     {
-      title: "操作",
+      title: t("masterData.columns.actions"),
       key: "actions",
       width: 140,
       render: (_: unknown, record: ERPSupplier) => (
         <Space size={4}>
           {record.link_status !== "linked" && (
-            <Button type="link" size="small" onClick={() => openLinkModal(record)}>关联</Button>
+            <Button type="link" size="small" onClick={() => openLinkModal(record)}>{t("masterData.suppliers.link")}</Button>
           )}
           {record.link_status === "linked" && (
-            <Button type="link" size="small" danger onClick={() => handleUnlink(record)}>取消关联</Button>
+            <Button type="link" size="small" danger onClick={() => handleUnlink(record)}>{t("masterData.suppliers.unlink")}</Button>
           )}
         </Space>
       ),
@@ -152,20 +156,20 @@ function SuppliersTab() {
         }}
       />
       <Modal
-        title="关联 OpenQMS 供应商"
+        title={t("masterData.suppliers.linkModal.title")}
         open={linkModalOpen}
         onOk={handleLink}
         onCancel={() => setLinkModalOpen(false)}
         okButtonProps={{ disabled: !selectedSupplierId }}
-        okText="确认关联"
-        cancelText="取消"
+        okText={t("masterData.suppliers.linkModal.okText")}
+        cancelText={tc("actions.cancel")}
       >
         <p style={{ marginBottom: 12 }}>
-          选择要关联的 OpenQMS 供应商：
+          {t("masterData.suppliers.linkModal.description")}
         </p>
         <Select
           style={{ width: "100%" }}
-          placeholder="请选择供应商"
+          placeholder={t("masterData.suppliers.linkModal.placeholder")}
           loading={suppliersLoading}
           value={selectedSupplierId}
           onChange={setSelectedSupplierId}
@@ -181,6 +185,9 @@ function SuppliersTab() {
 // ─── Customers Tab ───
 
 function CustomersTab() {
+  const { t } = useTranslation("erp");
+  const { t: tc } = useTranslation("common");
+  const linkStatusLabel = useLinkStatusLabel();
   const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPCustomer[]>([]);
@@ -200,7 +207,7 @@ function CustomersTab() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载客户失败"))
+      .catch(() => message.error(t("masterData.customers.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -218,7 +225,7 @@ function CustomersTab() {
         resp.items.map((c) => ({ id: c.customer_id, name: `${c.customer_code} - ${c.name}` })),
       );
     } catch {
-      message.error("加载客户列表失败");
+      message.error(t("masterData.customers.messages.loadListFailed"));
     } finally {
       setCustomersLoading(false);
     }
@@ -228,46 +235,46 @@ function CustomersTab() {
     if (!linkingRecord || !selectedCustomerId) return;
     try {
       await linkERPCustomer(linkingRecord.erp_customer_id, selectedCustomerId);
-      message.success("关联成功");
+      message.success(t("masterData.customers.messages.linkSuccess"));
       setLinkModalOpen(false);
       fetchData(page);
     } catch {
-      message.error("关联失败");
+      message.error(t("masterData.customers.messages.linkFailed"));
     }
   };
 
   const handleUnlink = async (record: ERPCustomer) => {
     try {
       await unlinkERPCustomer(record.erp_customer_id);
-      message.success("取消关联成功");
+      message.success(t("masterData.customers.messages.unlinkSuccess"));
       fetchData(page);
     } catch {
-      message.error("取消关联失败");
+      message.error(t("masterData.customers.messages.unlinkFailed"));
     }
   };
 
   const columns = [
-    { title: "客户编码", dataIndex: "customer_code", key: "customer_code", width: 140 },
-    { title: "名称", dataIndex: "name", key: "name", ellipsis: true },
-    { title: "状态", dataIndex: "status", key: "status", width: 100, render: (v: string) => <Tag>{v}</Tag> },
+    { title: t("masterData.columns.customerCode"), dataIndex: "customer_code", key: "customer_code", width: 140 },
+    { title: t("masterData.columns.name"), dataIndex: "name", key: "name", ellipsis: true },
+    { title: t("masterData.columns.status"), dataIndex: "status", key: "status", width: 100, render: (v: string) => <Tag>{v}</Tag> },
     {
-      title: "关联状态",
+      title: t("masterData.columns.linkStatus"),
       dataIndex: "link_status",
       key: "link_status",
       width: 110,
-      render: (v: string) => <Tag color={linkStatusColor(v)}>{linkStatusLabel(v)}</Tag>,
+      render: (v: string) => <Tag color={linkStatusColor(v)}>{linkStatusLabel[v as keyof typeof linkStatusLabel] || v}</Tag>,
     },
     {
-      title: "操作",
+      title: t("masterData.columns.actions"),
       key: "actions",
       width: 140,
       render: (_: unknown, record: ERPCustomer) => (
         <Space size={4}>
           {record.link_status !== "linked" && (
-            <Button type="link" size="small" onClick={() => openLinkModal(record)}>关联</Button>
+            <Button type="link" size="small" onClick={() => openLinkModal(record)}>{t("masterData.customers.link")}</Button>
           )}
           {record.link_status === "linked" && (
-            <Button type="link" size="small" danger onClick={() => handleUnlink(record)}>取消关联</Button>
+            <Button type="link" size="small" danger onClick={() => handleUnlink(record)}>{t("masterData.customers.unlink")}</Button>
           )}
         </Space>
       ),
@@ -289,20 +296,20 @@ function CustomersTab() {
         }}
       />
       <Modal
-        title="关联 OpenQMS 客户"
+        title={t("masterData.customers.linkModal.title")}
         open={linkModalOpen}
         onOk={handleLink}
         onCancel={() => setLinkModalOpen(false)}
         okButtonProps={{ disabled: !selectedCustomerId }}
-        okText="确认关联"
-        cancelText="取消"
+        okText={t("masterData.customers.linkModal.okText")}
+        cancelText={tc("actions.cancel")}
       >
         <p style={{ marginBottom: 12 }}>
-          选择要关联的 OpenQMS 客户：
+          {t("masterData.customers.linkModal.description")}
         </p>
         <Select
           style={{ width: "100%" }}
-          placeholder="请选择客户"
+          placeholder={t("masterData.customers.linkModal.placeholder")}
           loading={customersLoading}
           value={selectedCustomerId}
           onChange={setSelectedCustomerId}
@@ -318,6 +325,7 @@ function CustomersTab() {
 // ─── Materials Tab ───
 
 function MaterialsTab() {
+  const { t } = useTranslation("erp");
   const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPMaterial[]>([]);
@@ -343,7 +351,7 @@ function MaterialsTab() {
           setTotal(res.total);
         }
       })
-      .catch(() => message.error("加载物料失败"))
+      .catch(() => message.error(t("masterData.materials.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -356,33 +364,35 @@ function MaterialsTab() {
     fetchData(1, value, productLine);
   };
 
+  const boolTag = (v: boolean) => v ? <Tag color="blue">{t("yes")}</Tag> : t("no");
+
   const columns = [
-    { title: "物料编码", dataIndex: "material_code", key: "material_code", width: 140 },
-    { title: "名称", dataIndex: "name", key: "name", ellipsis: true },
-    { title: "规格", dataIndex: "specification", key: "specification", width: 140, render: (v: string | null) => v || "—" },
-    { title: "单位", dataIndex: "unit", key: "unit", width: 70, render: (v: string | null) => v || "—" },
+    { title: t("masterData.columns.materialCode"), dataIndex: "material_code", key: "material_code", width: 140 },
+    { title: t("masterData.columns.name"), dataIndex: "name", key: "name", ellipsis: true },
+    { title: t("masterData.columns.specification"), dataIndex: "specification", key: "specification", width: 140, render: (v: string | null) => v || "—" },
+    { title: t("masterData.columns.unit"), dataIndex: "unit", key: "unit", width: 70, render: (v: string | null) => v || "—" },
     {
-      title: "采购件",
+      title: t("masterData.columns.isPurchased"),
       dataIndex: "is_purchased",
       key: "is_purchased",
       width: 80,
-      render: (v: boolean) => v ? <Tag color="blue">是</Tag> : "否",
+      render: (v: boolean) => boolTag(v),
     },
     {
-      title: "自制件",
+      title: t("masterData.columns.isManufactured"),
       dataIndex: "is_manufactured",
       key: "is_manufactured",
       width: 80,
-      render: (v: boolean) => v ? <Tag color="green">是</Tag> : "否",
+      render: (v: boolean) => boolTag(v),
     },
-    { title: "状态", dataIndex: "status", key: "status", width: 90, render: (v: string) => <Tag>{v}</Tag> },
+    { title: t("masterData.columns.status"), dataIndex: "status", key: "status", width: 90, render: (v: string) => <Tag>{v}</Tag> },
   ];
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
         <Input.Search
-          placeholder="搜索物料编码或名称"
+          placeholder={t("masterData.searchPlaceholder")}
           allowClear
           onSearch={handleSearch}
           style={{ width: 280 }}
@@ -406,14 +416,19 @@ function MaterialsTab() {
 
 // ─── Locations Tab ───
 
-const locationTypeLabel: Record<string, string> = {
-  warehouse: "仓库",
-  zone: "库区",
-  bin: "库位",
-  line: "产线",
-};
+function useLocationTypeLabel() {
+  const { t } = useTranslation("erp");
+  return useMemo(() => ({
+    warehouse: t("masterData.locationType.warehouse"),
+    zone: t("masterData.locationType.zone"),
+    bin: t("masterData.locationType.bin"),
+    line: t("masterData.locationType.line"),
+  }), [t]);
+}
 
 function LocationsTab() {
+  const { t } = useTranslation("erp");
+  const locationTypeLabel = useLocationTypeLabel();
   const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPLocation[]>([]);
@@ -428,30 +443,32 @@ function LocationsTab() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载库位失败"))
+      .catch(() => message.error(t("masterData.locations.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => { fetchData(1, productLine); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
+  const boolTag = (v: boolean) => v ? <Tag color="green">{t("yes")}</Tag> : <Tag color="red">{t("no")}</Tag>;
+
   const columns = [
-    { title: "库位编码", dataIndex: "location_code", key: "location_code", width: 140 },
-    { title: "仓库编码", dataIndex: "warehouse_code", key: "warehouse_code", width: 120, render: (v: string | null) => v || "—" },
-    { title: "库区编码", dataIndex: "zone_code", key: "zone_code", width: 120, render: (v: string | null) => v || "—" },
+    { title: t("masterData.columns.locationCode"), dataIndex: "location_code", key: "location_code", width: 140 },
+    { title: t("masterData.columns.warehouseCode"), dataIndex: "warehouse_code", key: "warehouse_code", width: 120, render: (v: string | null) => v || "—" },
+    { title: t("masterData.columns.zoneCode"), dataIndex: "zone_code", key: "zone_code", width: 120, render: (v: string | null) => v || "—" },
     {
-      title: "类型",
+      title: t("masterData.columns.type"),
       dataIndex: "location_type",
       key: "location_type",
       width: 100,
-      render: (v: string) => <Tag>{locationTypeLabel[v] || v}</Tag>,
+      render: (v: string) => <Tag>{locationTypeLabel[v as keyof typeof locationTypeLabel] || v}</Tag>,
     },
     {
-      title: "启用",
+      title: t("masterData.columns.enabled"),
       dataIndex: "is_enabled",
       key: "is_enabled",
       width: 80,
-      render: (v: boolean) => v ? <Tag color="green">是</Tag> : <Tag color="red">否</Tag>,
+      render: (v: boolean) => boolTag(v),
     },
   ];
 
@@ -473,19 +490,20 @@ function LocationsTab() {
 
 // ─── Main Page ───
 
-const tabItems = [
-  { key: "suppliers", label: "供应商", children: <SuppliersTab /> },
-  { key: "customers", label: "客户", children: <CustomersTab /> },
-  { key: "materials", label: "物料", children: <MaterialsTab /> },
-  { key: "locations", label: "库位", children: <LocationsTab /> },
-];
-
 export default function ERPMasterDataPage() {
+  const { t } = useTranslation("erp");
   const [activeTab, setActiveTab] = useState("suppliers");
+
+  const tabItems = [
+    { key: "suppliers", label: t("masterData.tabs.suppliers"), children: <SuppliersTab /> },
+    { key: "customers", label: t("masterData.tabs.customers"), children: <CustomersTab /> },
+    { key: "materials", label: t("masterData.tabs.materials"), children: <MaterialsTab /> },
+    { key: "locations", label: t("masterData.tabs.locations"), children: <LocationsTab /> },
+  ];
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>ERP 主数据</Title>
+      <Title level={4} style={{ marginBottom: 16 }}>{t("masterData.title")}</Title>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}

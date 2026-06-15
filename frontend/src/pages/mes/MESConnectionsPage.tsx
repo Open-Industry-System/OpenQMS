@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Table, Button, Tag, Typography, Modal, Form, Input, Select, App, Space,
 } from "antd";
@@ -6,6 +6,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import {
   listConnections, createConnection, updateConnection, deleteConnection,
   testConnection, manualSync,
@@ -14,12 +15,9 @@ import type { MESConnection, MESConnectionCreate } from "../../types/mes";
 
 const { Title } = Typography;
 
-const typeLabels: Record<string, string> = {
-  mock: "Mock",
-  rest: "REST API",
-};
-
 export default function MESConnectionsPage() {
+  const { t } = useTranslation("mes");
+  const { t: tc } = useTranslation("common");
   const { message, modal: modalConfirm } = App.useApp();
   const [data, setData] = useState<MESConnection[]>([]);
   const [total, setTotal] = useState(0);
@@ -29,6 +27,11 @@ export default function MESConnectionsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form] = Form.useForm();
 
+  const connectorOptions = useMemo(() => [
+    { value: "mock", label: t("connections.connector.mock") },
+    { value: "rest", label: t("connections.connector.rest") },
+  ], [t]);
+
   const fetchData = (p: number = page) => {
     setLoading(true);
     listConnections(p, 20)
@@ -36,7 +39,7 @@ export default function MESConnectionsPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载连接列表失败"))
+      .catch(() => message.error(t("connections.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -48,12 +51,12 @@ export default function MESConnectionsPage() {
   const handleCreate = async (values: MESConnectionCreate) => {
     try {
       await createConnection(values);
-      message.success("连接创建成功");
+      message.success(t("connections.messages.createSuccess"));
       setModalOpen(false);
       form.resetFields();
       fetchData(1);
     } catch {
-      message.error("创建失败");
+      message.error(t("connections.messages.createFailed"));
     }
   };
 
@@ -61,27 +64,27 @@ export default function MESConnectionsPage() {
     if (!editingId) return;
     try {
       await updateConnection(editingId, values);
-      message.success("连接更新成功");
+      message.success(t("connections.messages.updateSuccess"));
       setModalOpen(false);
       setEditingId(null);
       form.resetFields();
       fetchData(page);
     } catch {
-      message.error("更新失败");
+      message.error(t("connections.messages.updateFailed"));
     }
   };
 
   const handleDelete = (id: string, name: string) => {
     modalConfirm.confirm({
-      title: "确认删除",
-      content: `确定删除连接 "${name}" 吗？`,
+      title: t("connections.deleteConfirm.title"),
+      content: t("connections.deleteConfirm.content", { name }),
       onOk: async () => {
         try {
           await deleteConnection(id);
-          message.success("删除成功");
+          message.success(t("connections.messages.deleteSuccess"));
           fetchData(page);
         } catch {
-          message.error("删除失败");
+          message.error(t("connections.messages.deleteFailed"));
         }
       },
     });
@@ -91,21 +94,21 @@ export default function MESConnectionsPage() {
     try {
       const res = await testConnection(id);
       if (res.ok) {
-        message.success("连接测试成功");
+        message.success(t("connections.messages.testSuccess"));
       } else {
-        message.error(`连接测试失败: ${res.error || "Unknown error"}`);
+        message.error(t("connections.messages.testFailedWithError", { error: res.error || "Unknown error" }));
       }
     } catch {
-      message.error("连接测试失败");
+      message.error(t("connections.messages.testFailed"));
     }
   };
 
   const handleSync = async (id: string) => {
     try {
       await manualSync(id);
-      message.success("同步已触发，后台将在 30 秒内开始执行");
+      message.success(t("connections.messages.syncTriggered"));
     } catch {
-      message.error("同步触发失败");
+      message.error(t("connections.messages.syncFailed"));
     }
   };
 
@@ -126,34 +129,37 @@ export default function MESConnectionsPage() {
   };
 
   const columns = [
-    { title: "连接名称", dataIndex: "name", key: "name", ellipsis: true },
+    { title: t("connections.columns.name"), dataIndex: "name", key: "name", ellipsis: true },
     {
-      title: "类型",
+      title: t("connections.columns.type"),
       dataIndex: "connector_type",
       key: "connector_type",
       width: 100,
-      render: (t: string) => typeLabels[t] || t,
+      render: (type: string) => {
+        const option = connectorOptions.find((o) => o.value === type);
+        return option?.label || type;
+      },
     },
     {
-      title: "状态",
+      title: t("connections.columns.status"),
       dataIndex: "is_active",
       key: "is_active",
       width: 80,
       render: (active: boolean) => (
         <Tag color={active ? "success" : "error"}>
-          {active ? "正常" : "停用"}
+          {active ? t("connections.status.active") : t("connections.status.inactive")}
         </Tag>
       ),
     },
     {
-      title: "产线",
+      title: t("connections.columns.productLine"),
       dataIndex: "product_line_code",
       key: "product_line_code",
       width: 120,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "操作",
+      title: t("connections.columns.actions"),
       key: "actions",
       width: 220,
       render: (_: unknown, record: MESConnection) => (
@@ -164,7 +170,7 @@ export default function MESConnectionsPage() {
             icon={<EditOutlined />}
             onClick={() => openEdit(record)}
           >
-            编辑
+            {tc("actions.edit")}
           </Button>
           <Button
             type="link"
@@ -172,7 +178,7 @@ export default function MESConnectionsPage() {
             icon={<ApiOutlined />}
             onClick={() => handleTest(record.connection_id)}
           >
-            测试
+            {t("connections.test")}
           </Button>
           <Button
             type="link"
@@ -180,7 +186,7 @@ export default function MESConnectionsPage() {
             icon={<SyncOutlined />}
             onClick={() => handleSync(record.connection_id)}
           >
-            同步
+            {t("connections.sync")}
           </Button>
           <Button
             type="link"
@@ -189,7 +195,7 @@ export default function MESConnectionsPage() {
             icon={<DeleteOutlined />}
             onClick={() => handleDelete(record.connection_id, record.name)}
           >
-            删除
+            {tc("actions.delete")}
           </Button>
         </Space>
       ),
@@ -199,9 +205,9 @@ export default function MESConnectionsPage() {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>MES 连接管理</Title>
+        <Title level={4} style={{ margin: 0 }}>{t("connections.title")}</Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新建连接
+          {t("connections.create")}
         </Button>
       </div>
 
@@ -222,7 +228,7 @@ export default function MESConnectionsPage() {
       />
 
       <Modal
-        title={editingId ? "编辑连接" : "新建连接"}
+        title={editingId ? t("connections.modal.editTitle") : t("connections.modal.createTitle")}
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => {
@@ -238,25 +244,20 @@ export default function MESConnectionsPage() {
         >
           <Form.Item
             name="name"
-            label="连接名称"
-            rules={[{ required: true, message: "请输入连接名称" }]}
+            label={t("connections.form.name")}
+            rules={[{ required: true, message: t("connections.form.nameRequired") }]}
           >
-            <Input placeholder="如 产线A-MES" />
+            <Input placeholder={t("connections.form.namePlaceholder")} />
           </Form.Item>
           <Form.Item
             name="connector_type"
-            label="连接器类型"
-            rules={[{ required: true, message: "请选择连接器类型" }]}
+            label={t("connections.form.connectorType")}
+            rules={[{ required: true, message: t("connections.form.connectorTypeRequired") }]}
           >
-            <Select
-              options={[
-                { value: "mock", label: "Mock - 模拟数据" },
-                { value: "rest", label: "REST API" },
-              ]}
-            />
+            <Select options={connectorOptions} />
           </Form.Item>
-          <Form.Item name="product_line_code" label="产线代码">
-            <Input placeholder="如 DC-DC-100" />
+          <Form.Item name="product_line_code" label={t("connections.form.productLineCode")}>
+            <Input placeholder={t("connections.form.productLineCodePlaceholder")} />
           </Form.Item>
         </Form>
       </Modal>

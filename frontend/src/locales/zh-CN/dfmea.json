@@ -1,0 +1,261 @@
+{
+  "wizard": {
+    "title": "DFMEA 生成向导",
+    "steps": [
+      "5T范围 (第一步)",
+      "结构分析 (第二步)",
+      "功能分析 (第三步)",
+      "失效分析 (第四步)",
+      "风险分析 (第五步)",
+      "优化 (第六步)",
+      "确认 (第七步)"
+    ],
+    "scope": {
+      "title": "5T 范围定义",
+      "description": "请填写 DFMEA 分析的 5T 范围信息。",
+      "team": "团队",
+      "timeframe": "时间范围",
+      "tool": "工具",
+      "task": "任务",
+      "trend": "趋势"
+    },
+    "structure": {
+      "title": "结构分析",
+      "description": "构建系统 → 子系统 → 零部件 → 设计参数的层级结构，或添加接口节点连接不同分支。",
+      "addSystem": "添加系统",
+      "addInterface": "添加接口",
+      "addChild": "+ {{type}}",
+      "delete": "删除",
+      "empty": "点击上方按钮添加系统节点",
+      "newSystem": "新系统",
+      "newInterface": "新接口"
+    },
+    "typeLabels": {
+      "System": "系统",
+      "Subsystem": "子系统",
+      "Component": "零部件",
+      "DesignParameter": "设计参数",
+      "Interface": "接口"
+    },
+    "function": {
+      "title": "功能分析",
+      "description": "为每个零部件定义功能、技术要求和规格参数。",
+      "functionDesc": "功能描述",
+      "requirement": "技术要求",
+      "specification": "规格参数"
+    },
+    "failure": {
+      "title": "失效分析",
+      "description": "为每个功能定义失效模式、影响和原因。系统将基于功能描述自动推荐失效模式。",
+      "recommended": "推荐",
+      "autoRecommend": "基于功能自动推荐：",
+      "failureMode": "失效模式",
+      "failureEffect": "失效影响",
+      "failureCause": "失效原因",
+      "addFailureMode": "+ 添加失效模式",
+      "delete": "删除",
+      "newFailureMode": "新失效模式"
+    },
+    "risk": {
+      "title": "风险分析",
+      "description": "为每个失效链评估严重度(S)、发生度(O)、探测度(D)。",
+      "s": "S",
+      "o": "O",
+      "d": "D",
+      "rpn": "RPN",
+      "ap": "AP",
+      "mustOptimize": "必须优化"
+    },
+    "optimization": {
+      "title": "优化措施",
+      "noOptimization": "无需强制优化",
+      "noOptimizationHint": "所有失效模式 AP 均不为 H，当前风险可接受。",
+      "mustOptimize": "以下 {{count}} 项 AP=H，必须采取优化措施：",
+      "preventionPlaceholder": "预防措施",
+      "detectionPlaceholder": "探测措施"
+    },
+    "confirm": {
+      "title": "确认创建",
+      "structureNodes": "结构节点: {{count}} 个",
+      "functionNodes": "功能节点: {{count}} 个",
+      "failureChains": "失效链: {{count}} 条",
+      "totalNodes": "总节点: {{count}} 个",
+      "totalEdges": "总边: {{count}} 条",
+      "description": "确认后将创建 DFMEA 文档并进入编辑器，你可以在编辑器中继续完善细节。"
+    },
+    "buttons": {
+      "cancel": "取消",
+      "prev": "上一步",
+      "next": "下一步",
+      "finish": "完成"
+    }
+  },
+  "inlineRecommendations": {
+    "title": "智能推荐",
+    "types": {
+      "failureModeSuggestion": "失效模式建议",
+      "failureEffectSuggestion": "失效影响建议",
+      "failureCauseSuggestion": "失效原因建议",
+      "apAnalysis": "AP分析",
+      "preventionSuggestion": "预防措施建议",
+      "detectionSuggestion": "探测措施建议"
+    },
+    "apply": "采用"
+  },
+  "smartSuggestion": {
+    "global": "全局经验",
+    "currentProductLine": "仅当前产品线",
+    "noGlobalPermission": "（无全局权限，仅当前产品线）",
+    "actualScope": "实际范围：{{scope}}",
+    "scopeGlobal": "全局",
+    "scopeLocal": "仅当前产品线",
+    "ruleEngine": "规则引擎",
+    "aiGenerated": "AI 生成",
+    "from": "来自",
+    "similarity": "相似度 {{score}}%",
+    "confidence": {
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    },
+    "tooFrequent": "请求过于频繁，请稍后重试",
+    "noPermission": "无权限使用推荐功能",
+    "serviceUnavailable": "推荐服务暂不可用",
+    "aiUnavailable": "AI 建议暂不可用，已使用规则引擎",
+    "ruleOnlyMode": "仅规则引擎模式"
+  },
+  "structureTree": {
+    "addSystem": "添加系统",
+    "typeLabels": {
+      "System": "系统",
+      "Subsystem": "子系统",
+      "Component": "零部件"
+    },
+    "empty": "暂无结构节点",
+    "editNode": "编辑节点",
+    "addNode": "添加节点",
+    "type": "类型",
+    "name": "名称",
+    "description": "描述",
+    "namePlaceholder": "如 BMS / BMU / LTC6811",
+    "descriptionPlaceholder": "可选描述"
+  },
+  "parameterDiagram": {
+    "selectNode": "请在左侧结构树中选择一个零部件节点",
+    "title": "参数图 (P-Diagram): {{name}}",
+    "sections": {
+      "inputs": "输入信号",
+      "outputs": "输出响应",
+      "controls": "控制因素",
+      "noise_factors": "噪声因素"
+    },
+    "noItems": "暂无项目",
+    "add": "添加"
+  },
+  "rules": {
+    "optimizationHint": {
+      "H": "高优先级：必须采取优化措施以降低严重度(S)或发生度(O)，或提高探测度(D)。建议设计变更或增加冗余。",
+      "M": "中优先级：建议采取优化措施，重点改进探测手段或降低发生度。",
+      "L": "低优先级：当前风险可接受，可保持现有控制措施，持续监控即可。"
+    },
+    "defaultEffects": ["功能降级", "系统性能下降"],
+    "defaultCauses": ["零部件老化", "环境因素", "制造缺陷"],
+    "fallbackPatterns": [
+      "{{functionDesc}}失效",
+      "无法{{functionDesc}}",
+      "{{functionDesc}}精度不足",
+      "{{functionDesc}}延迟"
+    ],
+    "measureBases": {
+      "H": {
+        "prevention": ["冗余设计（双通道/备份）", "选用更高可靠性等级元器件", "降额设计", "失效安全设计"],
+        "detection": ["在线实时监测", "自诊断功能", "出厂100%功能测试"]
+      },
+      "M": {
+        "prevention": ["优化设计参数", "增加防错结构", "选用成熟工艺"],
+        "detection": ["定期功能测试", "过程巡检", "来料检验"]
+      },
+      "L": {
+        "prevention": ["标准化设计", "选用合格供应商物料"],
+        "detection": ["常规检验", "用户反馈跟踪"]
+      }
+    },
+    "modeRegex": {
+      "acquisition": "采集|检测|监测|识别",
+      "sealing": "密封|封闭|泄漏",
+      "connection": "连接|接合|固定|接触"
+    },
+    "modeSpecific": {
+      "acquisition": {
+        "prevention": ["传感器冗余布置", "信号滤波设计"],
+        "detection": ["传感器信号校验", "标定周期缩短"]
+      },
+      "sealing": {
+        "prevention": ["双重密封结构", "密封槽优化设计"],
+        "detection": ["气密性测试", "泄漏监测"]
+      },
+      "connection": {
+        "prevention": ["防松结构设计", "镀金/镀银处理"],
+        "detection": ["接触电阻测试", "振动试验验证"]
+      }
+    },
+    "verbPatterns": [
+      { "verb": "采集", "patterns": ["无法采集", "采集失效", "采集精度不足", "采集延迟"] },
+      { "verb": "收集", "patterns": ["无法收集", "收集失效", "收集不完整", "收集延迟"] },
+      { "verb": "获取", "patterns": ["无法获取", "获取失效", "获取不完整", "获取延迟"] },
+      { "verb": "传输", "patterns": ["无法传输", "传输失效", "传输失真", "传输延迟"] },
+      { "verb": "发送", "patterns": ["无法发送", "发送失效", "发送失真", "发送延迟"] },
+      { "verb": "传递", "patterns": ["无法传递", "传递失效", "传递失真", "传递延迟"] },
+      { "verb": "控制", "patterns": ["无法控制", "控制失效", "控制精度不足", "控制响应慢"] },
+      { "verb": "调节", "patterns": ["无法调节", "调节失效", "调节精度不足", "调节响应慢"] },
+      { "verb": "调控", "patterns": ["无法调控", "调控失效", "调控精度不足", "调控响应慢"] },
+      { "verb": "检测", "patterns": ["无法检测", "检测失效", "检测精度不足", "误检测"] },
+      { "verb": "监测", "patterns": ["无法监测", "监测失效", "监测精度不足", "误监测"] },
+      { "verb": "识别", "patterns": ["无法识别", "识别失效", "识别精度不足", "误识别"] },
+      { "verb": "保护", "patterns": ["保护失效", "无法保护", "保护不足", "保护误动作"] },
+      { "verb": "防护", "patterns": ["防护失效", "无法防护", "防护不足", "防护误动作"] },
+      { "verb": "隔离", "patterns": ["隔离失效", "无法隔离", "隔离不足", "隔离误动作"] },
+      { "verb": "显示", "patterns": ["无法显示", "显示失效", "显示错误", "显示延迟"] },
+      { "verb": "指示", "patterns": ["无法指示", "指示失效", "指示错误", "指示延迟"] },
+      { "verb": "反馈", "patterns": ["无法反馈", "反馈失效", "反馈错误", "反馈延迟"] },
+      { "verb": "存储", "patterns": ["无法存储", "存储失效", "存储丢失", "存储容量不足"] },
+      { "verb": "保存", "patterns": ["无法保存", "保存失效", "保存丢失", "保存容量不足"] },
+      { "verb": "记录", "patterns": ["无法记录", "记录失效", "记录丢失", "记录容量不足"] },
+      { "verb": "供电", "patterns": ["无法供电", "供电失效", "供电不足", "供电不稳定"] },
+      { "verb": "供能", "patterns": ["无法供能", "供能失效", "供能不足", "供能不稳定"] },
+      { "verb": "驱动", "patterns": ["无法驱动", "驱动失效", "驱动力不足", "驱动不稳定"] },
+      { "verb": "连接", "patterns": ["连接失效", "无法连接", "连接松动", "接触不良"] },
+      { "verb": "接合", "patterns": ["接合失效", "无法接合", "接合松动", "接合不良"] },
+      { "verb": "固定", "patterns": ["固定失效", "无法固定", "固定松动", "固定不良"] },
+      { "verb": "密封", "patterns": ["密封失效", "无法密封", "密封不良", "泄漏"] },
+      { "verb": "封闭", "patterns": ["封闭失效", "无法封闭", "封闭不良", "泄漏"] }
+    ],
+    "failureChains": [
+      {
+        "key": "无法采集",
+        "effects": ["系统数据缺失", "控制决策错误", "功能降级"],
+        "causes": ["传感器故障", "信号干扰", "线路断路", "接口氧化"]
+      },
+      {
+        "key": "采集精度不足",
+        "effects": ["控制偏差", "系统性能下降", "误报警"],
+        "causes": ["传感器老化", "校准漂移", "温度影响", "电磁干扰"]
+      },
+      {
+        "key": "无法控制",
+        "effects": ["系统失控", "设备损坏", "安全风险"],
+        "causes": ["执行器故障", "控制算法缺陷", "反馈信号丢失", "电源异常"]
+      },
+      {
+        "key": "密封失效",
+        "effects": ["介质泄漏", "环境污染", "设备腐蚀", "安全风险"],
+        "causes": ["密封件老化", "安装不当", "材料选型错误", "温度超限"]
+      },
+      {
+        "key": "连接失效",
+        "effects": ["电路断开", "信号中断", "功能丧失", "系统停机"],
+        "causes": ["接触不良", "焊接缺陷", "振动疲劳", "腐蚀"]
+      }
+    ]
+  }
+}

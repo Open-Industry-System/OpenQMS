@@ -1,29 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card, Table, Tag, Space, Input, Select, Row, Col, Statistic, App, Button,
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { AqlRecommendation } from '../../types';
 import { listAqlRecommendations } from '../../api/iqcAql';
 import AqlRecommendationDrawer from '../../components/iqc/AqlRecommendationDrawer';
 
-const DIRECTION_MAP: Record<string, { label: string; color: string; emoji: string }> = {
-  tighten: { label: '加严', color: 'orange', emoji: '🔴' },
-  reduce: { label: '放宽', color: 'green', emoji: '🟢' },
-  freeze: { label: '冻结', color: 'red', emoji: '🔵' },
-  keep: { label: '保持', color: 'default', emoji: '' },
-};
-
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: '待审批', color: 'orange' },
-  forwarded: { label: '已转交', color: 'blue' },
-  approved: { label: '已批准', color: 'green' },
-  effective: { label: '已生效', color: 'green' },
-  rejected: { label: '已拒绝', color: 'red' },
-  expired: { label: '已过期', color: 'default' },
-};
-
 export default function AqlOptimizationPage() {
+  const { t } = useTranslation('iqc');
+  const { t: tc } = useTranslation('common');
   const { message } = App.useApp();
 
   const [data, setData] = useState<AqlRecommendation[]>([]);
@@ -42,6 +29,28 @@ export default function AqlOptimizationPage() {
   // KPI counts derived from data (we'll compute from what we have)
   const [kpiData, setKpiData] = useState<AqlRecommendation[]>([]);
 
+  const directionMap = useMemo<Record<string, { label: string; color: string; emoji: string }>>(
+    () => ({
+      tighten: { label: t('status.recDirection.tighten'), color: 'orange', emoji: '🔴' },
+      reduce: { label: t('status.recDirection.reduce'), color: 'green', emoji: '🟢' },
+      freeze: { label: t('status.recDirection.freeze'), color: 'red', emoji: '🔵' },
+      keep: { label: t('status.recDirection.keep'), color: 'default', emoji: '' },
+    }),
+    [t]
+  );
+
+  const statusMap = useMemo<Record<string, { label: string; color: string }>>(
+    () => ({
+      pending: { label: t('status.recStatus.pending'), color: 'orange' },
+      forwarded: { label: t('status.recStatus.forwarded'), color: 'blue' },
+      approved: { label: t('status.recStatus.approved'), color: 'green' },
+      effective: { label: t('status.recStatus.effective'), color: 'green' },
+      rejected: { label: t('status.recStatus.rejected'), color: 'red' },
+      expired: { label: t('status.recStatus.expired'), color: 'default' },
+    }),
+    [t]
+  );
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -53,7 +62,7 @@ export default function AqlOptimizationPage() {
       setData(resp.items);
       setTotal(resp.total);
     } catch {
-      message.error('加载建议列表失败');
+      message.error(t('messages.loadRecommendationListFailed'));
     } finally {
       setLoading(false);
     }
@@ -84,113 +93,116 @@ export default function AqlOptimizationPage() {
   const approvedCount = kpiData.filter((r) => r.status === 'approved' || r.status === 'effective').length;
   const rejectedCount = kpiData.filter((r) => r.status === 'rejected').length;
 
-  const columns = [
-    {
-      title: '供应商名称',
-      dataIndex: 'supplier_id',
-      width: 140,
-      render: (v: string) => v || '—',
-    },
-    {
-      title: '物料号',
-      dataIndex: 'material_id',
-      width: 140,
-      render: (v: string) => v || '—',
-    },
-    {
-      title: '当前AQL',
-      dataIndex: 'current_aql',
-      width: 90,
-    },
-    {
-      title: '建议AQL',
-      dataIndex: 'recommended_aql',
-      width: 90,
-    },
-    {
-      title: '方向',
-      dataIndex: 'direction',
-      width: 90,
-      render: (dir: string) => {
-        const cfg = DIRECTION_MAP[dir];
-        if (!cfg) return dir;
-        return <Tag color={cfg.color}>{cfg.emoji} {cfg.label}</Tag>;
+  const columns = useMemo(
+    () => [
+      {
+        title: t('table.supplierName'),
+        dataIndex: 'supplier_id',
+        width: 140,
+        render: (v: string) => v || '—',
       },
-    },
-    {
-      title: '触发规则',
-      dataIndex: 'trigger_rules',
-      width: 180,
-      render: (rules: { rule_id: string; reason: string }[]) => (
-        <Space size={4} wrap>
-          {rules.map((r) => <Tag key={r.rule_id}>{r.rule_id}</Tag>)}
-        </Space>
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      width: 90,
-      render: (status: string) => {
-        const cfg = STATUS_MAP[status];
-        return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
+      {
+        title: t('table.materialId'),
+        dataIndex: 'material_id',
+        width: 140,
+        render: (v: string) => v || '—',
       },
-    },
-  ];
+      {
+        title: t('table.currentAql'),
+        dataIndex: 'current_aql',
+        width: 90,
+      },
+      {
+        title: t('table.recommendedAql'),
+        dataIndex: 'recommended_aql',
+        width: 90,
+      },
+      {
+        title: t('table.direction'),
+        dataIndex: 'direction',
+        width: 90,
+        render: (dir: string) => {
+          const cfg = directionMap[dir];
+          if (!cfg) return dir;
+          return <Tag color={cfg.color}>{cfg.emoji} {cfg.label}</Tag>;
+        },
+      },
+      {
+        title: t('table.triggerRules'),
+        dataIndex: 'trigger_rules',
+        width: 180,
+        render: (rules: { rule_id: string; reason: string }[]) => (
+          <Space size={4} wrap>
+            {rules.map((r) => <Tag key={r.rule_id}>{r.rule_id}</Tag>)}
+          </Space>
+        ),
+      },
+      {
+        title: t('table.status'),
+        dataIndex: 'status',
+        width: 90,
+        render: (status: string) => {
+          const cfg = statusMap[status];
+          return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
+        },
+      },
+    ],
+    [t, directionMap, statusMap]
+  );
 
   return (
     <div>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card><Statistic title="待审批" value={pendingCount} valueStyle={{ color: '#faad14' }} /></Card>
+          <Card><Statistic title={t('stats.pendingApproval')} value={pendingCount} valueStyle={{ color: '#faad14' }} /></Card>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="今日生成" value={todayCount} /></Card>
+          <Card><Statistic title={t('stats.generatedToday')} value={todayCount} /></Card>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="已批准" value={approvedCount} valueStyle={{ color: '#52c41a' }} /></Card>
+          <Card><Statistic title={t('stats.approvedCount')} value={approvedCount} valueStyle={{ color: '#52c41a' }} /></Card>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="已拒绝" value={rejectedCount} valueStyle={{ color: '#ff4d4f' }} /></Card>
+          <Card><Statistic title={t('stats.rejectedCountRec')} value={rejectedCount} valueStyle={{ color: '#ff4d4f' }} /></Card>
         </Col>
       </Row>
 
       <Card
-        title="AQL优化建议"
+        title={t('pageTitle.recommendationList')}
         extra={
           <Button icon={<ReloadOutlined />} onClick={() => { fetchData(); fetchKpi(); }}>
-            刷新
+            {tc('actions.refresh')}
           </Button>
         }
       >
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
-            placeholder="状态"
+            placeholder={t('placeholder.selectStatus')}
             allowClear
             style={{ width: 120 }}
             value={filterStatus}
             onChange={(v) => { setFilterStatus(v || undefined); setPage(1); }}
           >
-            <Select.Option value="pending">待审批</Select.Option>
-            <Select.Option value="forwarded">已转交</Select.Option>
-            <Select.Option value="approved">已批准</Select.Option>
-            <Select.Option value="effective">已生效</Select.Option>
-            <Select.Option value="rejected">已拒绝</Select.Option>
-            <Select.Option value="expired">已过期</Select.Option>
+            <Select.Option value="pending">{t('status.recStatus.pending')}</Select.Option>
+            <Select.Option value="forwarded">{t('status.recStatus.forwarded')}</Select.Option>
+            <Select.Option value="approved">{t('status.recStatus.approved')}</Select.Option>
+            <Select.Option value="effective">{t('status.recStatus.effective')}</Select.Option>
+            <Select.Option value="rejected">{t('status.recStatus.rejected')}</Select.Option>
+            <Select.Option value="expired">{t('status.recStatus.expired')}</Select.Option>
           </Select>
           <Select
-            placeholder="方向"
+            placeholder={t('placeholder.selectDirection')}
             allowClear
             style={{ width: 120 }}
             value={filterDirection}
             onChange={(v) => { setFilterDirection(v || undefined); setPage(1); }}
           >
-            <Select.Option value="tighten">加严</Select.Option>
-            <Select.Option value="reduce">放宽</Select.Option>
-            <Select.Option value="freeze">冻结</Select.Option>
+            <Select.Option value="tighten">{t('status.recDirection.tighten')}</Select.Option>
+            <Select.Option value="reduce">{t('status.recDirection.reduce')}</Select.Option>
+            <Select.Option value="freeze">{t('status.recDirection.freeze')}</Select.Option>
           </Select>
           <Input
-            placeholder="供应商ID"
+            placeholder={t('placeholder.supplierId')}
             allowClear
             style={{ width: 200 }}
             value={filterSupplier}

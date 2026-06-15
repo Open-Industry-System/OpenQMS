@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Row, Col, Card, Statistic, Tag, Typography, Spin, App,
   Button, Space,
@@ -9,6 +9,7 @@ import {
   WarningOutlined, LinkOutlined,
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { fetchERPDashboard } from "../../api/erp";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { ERPDashboardData } from "../../types/erp";
@@ -22,25 +23,27 @@ const syncStatusColors: Record<string, string> = {
   pending: "warning",
 };
 
-const syncStatusLabels: Record<string, string> = {
-  completed: "已完成",
-  failed: "失败",
-  running: "同步中",
-  pending: "待同步",
-};
-
 export default function ERPDashboardPage() {
+  const { t } = useTranslation("erp");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<ERPDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const syncStatusLabels: Record<string, string> = useMemo(() => ({
+    completed: t("syncStatus.completed"),
+    failed: t("syncStatus.failed"),
+    running: t("syncStatus.running"),
+    pending: t("syncStatus.pending"),
+  }), [t]);
+
   useEffect(() => {
     fetchERPDashboard()
       .then(setData)
-      .catch(() => message.error("加载 ERP 看板数据失败"))
+      .catch(() => message.error(t("dashboard.errors.loadFailed")))
       .finally(() => setLoading(false));
-  }, [productLine, message]);
+  }, [productLine, message, t]);
 
   if (loading) {
     return (
@@ -51,18 +54,18 @@ export default function ERPDashboardPage() {
   }
 
   if (!data) {
-    return <div style={{ padding: 24 }}>加载失败</div>;
+    return <div style={{ padding: 24 }}>{t("dashboard.loadFailed")}</div>;
   }
 
   return (
     <div>
       <Title level={4} style={{ marginBottom: 24 }}>
-        ERP 集成看板
+        {t("dashboard.title")}
       </Title>
 
       {/* Sync Health */}
       <Card
-        title="同步健康"
+        title={t("dashboard.syncHealth")}
         style={{ marginBottom: 16 }}
         extra={
           <Space>
@@ -78,7 +81,7 @@ export default function ERPDashboardPage() {
         }
       >
         {data.sync_health.length === 0 ? (
-          <span style={{ color: "#999" }}>暂无同步数据</span>
+          <span style={{ color: "#999" }}>{tc("empty.data")}</span>
         ) : (
           <Row gutter={[16, 8]}>
             {data.sync_health.map((s) => (
@@ -86,7 +89,7 @@ export default function ERPDashboardPage() {
                 <Statistic
                   title={s.data_type}
                   value={s.last_sync
-                    ? new Date(s.last_sync).toLocaleString("zh-CN")
+                    ? new Date(s.last_sync).toLocaleString()
                     : "—"}
                   valueStyle={{ fontSize: 14 }}
                 />
@@ -107,7 +110,7 @@ export default function ERPDashboardPage() {
           } else if (kpi.status === "warning") {
             icon = <WarningOutlined />;
             color = "#faad14";
-          } else if (kpi.label.includes("成本") || kpi.label.includes("COQ")) {
+          } else if (kpi.label.toLowerCase().includes("cost") || kpi.label.includes("COQ")) {
             icon = <DollarOutlined />;
           }
 
@@ -129,9 +132,9 @@ export default function ERPDashboardPage() {
       {/* COQ Summary */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} lg={12}>
-          <Card title="COQ 成本摘要（本月）">
+          <Card title={t("dashboard.coqSummary")}>
             {Object.keys(data.coq_summary).length === 0 ? (
-              <span style={{ color: "#999" }}>暂无数据</span>
+              <span style={{ color: "#999" }}>{tc("empty.data")}</span>
             ) : (
               <Row gutter={[16, 16]}>
                 {Object.entries(data.coq_summary).map(([cat, amount]) => (
@@ -151,19 +154,19 @@ export default function ERPDashboardPage() {
 
         {/* Quick Links */}
         <Col xs={24} lg={12}>
-          <Card title="快速入口">
+          <Card title={t("dashboard.quickLinks")}>
             <Space direction="vertical" style={{ width: "100%" }} size={8}>
               <Link to="/erp/connections">
-                <Button icon={<LinkOutlined />} block>连接管理</Button>
+                <Button icon={<LinkOutlined />} block>{t("dashboard.links.connections")}</Button>
               </Link>
               <Link to="/erp/master-data">
-                <Button icon={<SyncOutlined />} block>主数据管理</Button>
+                <Button icon={<SyncOutlined />} block>{t("dashboard.links.masterData")}</Button>
               </Link>
               <Link to="/erp/supply-chain">
-                <Button icon={<WarningOutlined />} block>供应链管理</Button>
+                <Button icon={<WarningOutlined />} block>{t("dashboard.links.supplyChain")}</Button>
               </Link>
               <Link to="/erp/traceability">
-                <Button block>批次追溯</Button>
+                <Button block>{t("dashboard.links.traceability")}</Button>
               </Link>
             </Space>
           </Card>

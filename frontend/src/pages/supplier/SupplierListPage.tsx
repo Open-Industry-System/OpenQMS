@@ -27,6 +27,7 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { Supplier, SupplierStats, SupplierExpiryAlert } from "../../types";
@@ -47,17 +48,23 @@ import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
 
 const { Option } = Select;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending_review: { label: "待审核", color: "orange" },
-  audit_required: { label: "需审核", color: "blue" },
-  approved: { label: "已批准", color: "green" },
-  rejected: { label: "已拒绝", color: "red" },
-  suspended: { label: "已暂停", color: "default" },
-};
+function useStatusMap(): Record<string, { label: string; color: string }> {
+  const { t } = useTranslation("supplier");
+  return {
+    pending_review: { label: t("status.pending_review"), color: "orange" },
+    audit_required: { label: t("status.audit_required"), color: "blue" },
+    approved: { label: t("status.approved"), color: "green" },
+    rejected: { label: t("status.rejected"), color: "red" },
+    suspended: { label: t("status.suspended"), color: "default" },
+  };
+}
 
 export default function SupplierListPage() {
+  const { t } = useTranslation("supplier");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const statusMap = useStatusMap();
   const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
 
@@ -104,7 +111,7 @@ export default function SupplierListPage() {
       setSuppliers(resp.items);
       setTotal(resp.total);
     } catch {
-      message.error("加载供应商列表失败");
+      message.error(t("list.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -132,7 +139,7 @@ export default function SupplierListPage() {
       const alerts = await getExpiryAlerts(90);
       setExpiryAlerts(alerts);
     } catch {
-      message.error("加载证书到期提醒失败");
+      message.error(t("list.loadExpiryAlertsFailed"));
     } finally {
       setExpiryLoading(false);
     }
@@ -141,41 +148,41 @@ export default function SupplierListPage() {
   const handleApprove = async (id: string) => {
     try {
       await approveSupplier(id);
-      message.success("已批准供应商");
+      message.success(t("list.approveSuccess"));
       fetchSuppliers();
       fetchStats();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
   const handleReject = (id: string) => {
     reasonInputRef.current = "";
     Modal.confirm({
-      title: "拒绝供应商",
+      title: t("list.rejectSupplierTitle"),
       content: (
         <Input.TextArea
           rows={3}
-          placeholder="请输入拒绝原因"
+          placeholder={t("messages.enterRejectReason")}
           onChange={(e) => {
             reasonInputRef.current = e.target.value;
           }}
         />
       ),
-      okText: "确认拒绝",
-      cancelText: "取消",
+      okText: t("messages.confirmReject"),
+      cancelText: tc("actions.cancel"),
       okButtonProps: { danger: true },
       onOk: async () => {
-        const reason = reasonInputRef.current || "不符合供应商资质要求";
+        const reason = reasonInputRef.current || t("list.defaultRejectReason");
         try {
           await rejectSupplier(id, reason);
-          message.success("已拒绝供应商");
+          message.success(t("list.rejectSuccess"));
           fetchSuppliers();
           fetchStats();
         } catch (e: unknown) {
           const err = e as { response?: { data?: { detail?: string } } };
-          message.error(err.response?.data?.detail || "操作失败");
+          message.error(err.response?.data?.detail || tc("messages.operationFailed"));
         }
       },
     });
@@ -184,41 +191,41 @@ export default function SupplierListPage() {
   const handleConfirmApproved = async (id: string) => {
     try {
       await confirmApproved(id);
-      message.success("已确认批准");
+      message.success(t("messages.confirmApproveSuccess"));
       fetchSuppliers();
       fetchStats();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
   const handleSuspend = (id: string) => {
     reasonInputRef.current = "";
     Modal.confirm({
-      title: "暂停供应商",
+      title: t("list.suspendSupplierTitle"),
       content: (
         <Input.TextArea
           rows={3}
-          placeholder="请输入暂停原因"
+          placeholder={t("messages.enterSuspendReason")}
           onChange={(e) => {
             reasonInputRef.current = e.target.value;
           }}
         />
       ),
-      okText: "确认暂停",
-      cancelText: "取消",
+      okText: t("messages.confirmSuspend"),
+      cancelText: tc("actions.cancel"),
       okButtonProps: { danger: true },
       onOk: async () => {
-        const reason = reasonInputRef.current || "供应商质量问题，暂停合作";
+        const reason = reasonInputRef.current || t("list.defaultSuspendReason");
         try {
           await suspendSupplier(id, reason);
-          message.success("已暂停供应商");
+          message.success(t("list.suspendSuccess"));
           fetchSuppliers();
           fetchStats();
         } catch (e: unknown) {
           const err = e as { response?: { data?: { detail?: string } } };
-          message.error(err.response?.data?.detail || "操作失败");
+          message.error(err.response?.data?.detail || tc("messages.operationFailed"));
         }
       },
     });
@@ -227,44 +234,44 @@ export default function SupplierListPage() {
   const handleReinstate = async (id: string) => {
     try {
       await reinstateSupplier(id);
-      message.success("已恢复供应商");
+      message.success(t("list.resumeSuccess"));
       fetchSuppliers();
       fetchStats();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
   const columns = [
     {
-      title: "编号",
+      title: t("list.column.supplierNo"),
       dataIndex: "supplier_no",
       width: 160,
       render: (no: string) => <span style={{ fontFamily: "monospace" }}>{no}</span>,
     },
     {
-      title: "简称",
+      title: t("detail.shortName"),
       dataIndex: "short_name",
       width: 140,
     },
     {
-      title: "供货范围",
+      title: t("detail.productScope"),
       dataIndex: "product_scope",
       ellipsis: true,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "状态",
+      title: t("list.column.status"),
       dataIndex: "status",
       width: 100,
       render: (status: string) => {
-        const cfg = STATUS_MAP[status];
+        const cfg = statusMap[status];
         return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
       },
     },
     {
-      title: "操作",
+      title: tc("table.operations"),
       width: 260,
       render: (_: unknown, record: Supplier) => (
         <Space size="small" wrap>
@@ -273,12 +280,12 @@ export default function SupplierListPage() {
             icon={<EyeOutlined />}
             onClick={() => navigate(`/suppliers/${record.supplier_id}`)}
           >
-            查看
+            {tc("actions.view")}
           </Button>
           {canApprove('supplier') && record.status === "pending_review" && (
-            <Popconfirm title="确认批准该供应商？" onConfirm={() => handleApprove(record.supplier_id)}>
+            <Popconfirm title={t("messages.confirmApproveSupplier")} onConfirm={() => handleApprove(record.supplier_id)}>
               <Button size="small" type="primary" icon={<CheckCircleOutlined />}>
-                批准
+                {t("messages.approve")}
               </Button>
             </Popconfirm>
           )}
@@ -289,13 +296,13 @@ export default function SupplierListPage() {
               icon={<CloseCircleOutlined />}
               onClick={() => handleReject(record.supplier_id)}
             >
-              拒绝
+              {t("messages.reject")}
             </Button>
           )}
           {canApprove('supplier') && record.status === "audit_required" && (
-            <Popconfirm title="确认审核通过并批准？" onConfirm={() => handleConfirmApproved(record.supplier_id)}>
+            <Popconfirm title={t("messages.confirmAuditApprove")} onConfirm={() => handleConfirmApproved(record.supplier_id)}>
               <Button size="small" type="primary" icon={<CheckCircleOutlined />}>
-                确认批准
+                {t("messages.confirmApprove")}
               </Button>
             </Popconfirm>
           )}
@@ -306,13 +313,13 @@ export default function SupplierListPage() {
               icon={<StopOutlined />}
               onClick={() => handleSuspend(record.supplier_id)}
             >
-              暂停
+              {t("messages.suspend")}
             </Button>
           )}
           {canApprove('supplier') && record.status === "suspended" && (
-            <Popconfirm title="确认恢复该供应商？" onConfirm={() => handleReinstate(record.supplier_id)}>
+            <Popconfirm title={t("messages.confirmResumeSupplier")} onConfirm={() => handleReinstate(record.supplier_id)}>
               <Button size="small" icon={<RollbackOutlined />}>
-                恢复
+                {t("messages.resume")}
               </Button>
             </Popconfirm>
           )}
@@ -326,13 +333,13 @@ export default function SupplierListPage() {
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
           <Card>
-            <Statistic title="供应商总数" value={stats.total_count} />
+            <Statistic title={t("list.stats.total")} value={stats.total_count} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
             <Statistic
-              title="待审核"
+              title={t("status.pending_review")}
               value={stats.pending_review_count}
               valueStyle={{ color: "#fa8c16" }}
             />
@@ -341,7 +348,7 @@ export default function SupplierListPage() {
         <Col span={6}>
           <Card>
             <Statistic
-              title="已批准"
+              title={t("status.approved")}
               value={stats.approved_count}
               valueStyle={{ color: "#52c41a" }}
             />
@@ -354,7 +361,7 @@ export default function SupplierListPage() {
             hoverable
           >
             <Statistic
-              title="证书30天到期"
+              title={t("list.stats.certExpiry30d")}
               value={stats.cert_expiry_30d_count}
               valueStyle={stats.cert_expiry_30d_count > 0 ? { color: "#ff4d4f" } : undefined}
             />
@@ -363,7 +370,7 @@ export default function SupplierListPage() {
       </Row>
 
       <Card
-        title="供应商管理"
+        title={t("list.title")}
         extra={
           <Space>
             {canEdit('supplier') && (
@@ -372,27 +379,27 @@ export default function SupplierListPage() {
                 icon={<PlusOutlined />}
                 onClick={() => navigate("/suppliers/new")}
               >
-                新增供应商
+                {t("list.addSupplier")}
               </Button>
             )}
             <Button icon={<DownloadOutlined />} onClick={() => exportSuppliers({
               search: filterName || undefined,
               status: filterStatus,
             })}>
-              导出
+              {tc("actions.export")}
             </Button>
             <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-              导入
+              {tc("actions.import")}
             </Button>
             <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              刷新
+              {tc("actions.refresh")}
             </Button>
           </Space>
         }
       >
         <Space style={{ marginBottom: 16 }} wrap>
           <Input
-            placeholder="搜索名称 / 简称"
+            placeholder={t("list.searchPlaceholder")}
             allowClear
             style={{ width: 220 }}
             value={filterName}
@@ -400,20 +407,20 @@ export default function SupplierListPage() {
             onPressEnter={handleQuery}
           />
           <Select
-            placeholder="状态"
+            placeholder={t("list.statusPlaceholder")}
             allowClear
             style={{ width: 140 }}
             value={filterStatus}
             onChange={(v) => setFilterStatus(v || undefined)}
           >
-            <Option value="pending_review">待审核</Option>
-            <Option value="audit_required">需审核</Option>
-            <Option value="approved">已批准</Option>
-            <Option value="rejected">已拒绝</Option>
-            <Option value="suspended">已暂停</Option>
+            <Option value="pending_review">{t("status.pending_review")}</Option>
+            <Option value="audit_required">{t("status.audit_required")}</Option>
+            <Option value="approved">{t("status.approved")}</Option>
+            <Option value="rejected">{t("status.rejected")}</Option>
+            <Option value="suspended">{t("status.suspended")}</Option>
           </Select>
           <Button type="primary" onClick={handleQuery}>
-            查询
+            {tc("actions.search")}
           </Button>
         </Space>
 
@@ -436,7 +443,7 @@ export default function SupplierListPage() {
       </Card>
 
       <Drawer
-        title="证书到期提醒（90天内）"
+        title={t("list.expiryDrawerTitle")}
         open={expiryDrawerOpen}
         onClose={() => setExpiryDrawerOpen(false)}
         width={640}
@@ -448,33 +455,33 @@ export default function SupplierListPage() {
           pagination={false}
           columns={[
             {
-              title: "供应商",
+              title: t("list.column.supplier"),
               dataIndex: "supplier_short_name",
               width: 120,
               render: (v: string, record: SupplierExpiryAlert) => v || record.supplier_name,
             },
             {
-              title: "证书类型",
+              title: t("table.certType"),
               dataIndex: "cert_type",
               width: 120,
             },
             {
-              title: "证书编号",
+              title: t("table.certNo"),
               dataIndex: "cert_no",
               ellipsis: true,
             },
             {
-              title: "到期日",
+              title: t("table.expiryDate"),
               dataIndex: "expiry_date",
               width: 110,
             },
             {
-              title: "剩余天数",
+              title: t("list.column.daysRemaining"),
               dataIndex: "days_remaining",
               width: 90,
               render: (days: number) => (
                 <span style={{ color: days <= 30 ? "#ff4d4f" : undefined, fontWeight: days <= 30 ? 600 : undefined }}>
-                  {days}天
+                  {t("messages.daysLeft", { days })}
                 </span>
               ),
             },
@@ -488,7 +495,7 @@ export default function SupplierListPage() {
         onImported={() => fetchSuppliers()}
         importFn={(file) => importSuppliers(file)}
         templateDownloadFn={downloadSupplierImportTemplate}
-        hint="每行包含: 名称*, 简称*, 联系人, 电话, 邮箱, 地址, 供货范围"
+        hint={t("list.importHint")}
       />
     </div>
   );

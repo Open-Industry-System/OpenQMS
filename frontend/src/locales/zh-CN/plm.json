@@ -1,0 +1,186 @@
+{
+  "yes": "是",
+  "no": "否",
+  "dashboard": {
+    "title": "PLM 集成看板",
+    "errors": {
+      "loadFailed": "加载 PLM 看板数据失败"
+    },
+    "stats": {
+      "totalParts": "零件总数",
+      "bomItems": "BOM 条目",
+      "pendingECNs": "待处理 ECN",
+      "pendingSCs": "待处理特殊特性"
+    },
+    "recentChanges": "最近变更",
+    "columns": {
+      "changeNumber": "变更编号",
+      "title": "标题",
+      "changeType": "变更类型",
+      "status": "状态",
+      "priority": "优先级",
+      "updatedAt": "更新时间"
+    }
+  },
+  "parts": {
+    "title": "PLM 零件列表",
+    "searchPlaceholder": "搜索零件号或名称",
+    "columns": {
+      "partNumber": "零件号",
+      "name": "名称",
+      "revision": "版本",
+      "status": "状态",
+      "safetyRelated": "安全件",
+      "keyCharacteristic": "关键特性",
+      "actions": "操作"
+    },
+    "actions": {
+      "detail": "详情",
+      "bom": "BOM",
+      "importFMEA": "导入 FMEA",
+      "confirmSC": "确认SC"
+    },
+    "drawer": {
+      "title": "零件详情",
+      "labels": {
+        "partNumber": "零件号",
+        "name": "名称",
+        "revision": "版本",
+        "status": "状态",
+        "material": "材质",
+        "specification": "规格",
+        "safetyRelated": "安全件",
+        "keyCharacteristic": "关键特性",
+        "externalId": "外部 ID",
+        "productLineCode": "产线代码",
+        "updatedAt": "PLM 更新时间"
+      }
+    },
+    "bom": {
+      "modalTitle": "BOM：{{partNumber}}",
+      "partRevision": "零件版本",
+      "partRevisionRequired": "请输入零件版本",
+      "bomRevision": "BOM 版本",
+      "bomRevisionRequired": "请输入 BOM 版本",
+      "query": "查询 BOM",
+      "columns": {
+        "parentPartNumber": "父零件号",
+        "parentRevision": "父版本",
+        "childPartNumber": "子零件号",
+        "childRevision": "子版本",
+        "quantity": "数量",
+        "level": "层级",
+        "bomRevision": "BOM 版本"
+      },
+      "import": {
+        "fmeaId": "FMEA ID",
+        "fmeaIdRequired": "请输入 FMEA ID",
+        "overwrite": "覆盖已有节点",
+        "import": "导入 FMEA"
+      }
+    },
+    "sc": {
+      "modalTitle": "确认特殊特性：{{partNumber}}",
+      "characteristicType": "特性类型",
+      "characteristicTypeRequired": "请选择特性类型",
+      "safety": "安全特性",
+      "key": "关键特性",
+      "fmeaId": "FMEA ID",
+      "fmeaIdRequired": "请输入 FMEA ID",
+      "nodeId": "节点 ID",
+      "nodeIdRequired": "请输入节点 ID",
+      "okText": "确认",
+      "cancelText": "取消"
+    },
+    "messages": {
+      "loadFailed": "加载零件列表失败",
+      "queryBomFailed": "查询 BOM 失败",
+      "importFMEASuccess": "BOM 已导入 FMEA",
+      "importFMEAFailed": "导入 FMEA 失败",
+      "scConfirmed": "特殊特性已确认",
+      "scConfirmFailed": "确认特殊特性失败"
+    }
+  },
+  "changeOrders": {
+    "title": "PLM 变更单管理",
+    "impactAnalysis": "影响分析",
+    "changeType": {
+      "ECN": "ECN",
+      "ECR": "ECR",
+      "SCN": "SCN"
+    },
+    "columns": {
+      "changeNumber": "变更编号",
+      "title": "标题",
+      "changeType": "变更类型",
+      "status": "状态",
+      "priority": "优先级",
+      "actions": "操作"
+    },
+    "messages": {
+      "loadFailed": "加载变更单列表失败",
+      "impactAnalysisTriggered": "影响分析已触发",
+      "impactAnalysisFailed": "触发影响分析失败"
+    }
+  },
+  "connections": {
+    "title": "PLM 连接管理",
+    "create": "新建连接",
+    "edit": "编辑",
+    "test": "测试",
+    "sync": "同步",
+    "delete": "删除",
+    "columns": {
+      "name": "连接名称",
+      "type": "类型",
+      "productLineCode": "产线代码",
+      "status": "状态",
+      "createdAt": "创建时间",
+      "actions": "操作"
+    },
+    "status": {
+      "active": "正常",
+      "inactive": "停用"
+    },
+    "modal": {
+      "createTitle": "新建连接",
+      "editTitle": "编辑连接"
+    },
+    "form": {
+      "name": "连接名称",
+      "nameRequired": "请输入连接名称",
+      "namePlaceholder": "如 PLM-Teamcenter-01",
+      "connectorType": "连接器类型",
+      "connectorTypeRequired": "请选择连接器类型",
+      "productLineCode": "产线代码",
+      "productLineCodeRequired": "请输入产线代码",
+      "productLineCodePlaceholder": "如 DC-DC-100",
+      "port": "端口号",
+      "portPlaceholder": "如 8080"
+    },
+    "connector": {
+      "mock": "Mock - 模拟数据",
+      "rest": "REST API - 未实现",
+      "siemens_tc": "Siemens Teamcenter - 未实现",
+      "dassault_enovia": "Dassault ENOVIA - 未实现",
+      "ptc_windchill": "PTC Windchill - 未实现"
+    },
+    "deleteConfirm": {
+      "title": "确认删除",
+      "content": "确定删除连接 \"{{name}}\" 吗？"
+    },
+    "messages": {
+      "loadFailed": "加载连接列表失败",
+      "createSuccess": "连接创建成功",
+      "createFailed": "创建失败",
+      "updateSuccess": "连接更新成功",
+      "updateFailed": "更新失败",
+      "deleteSuccess": "删除成功",
+      "deleteFailed": "删除失败",
+      "testSuccess": "连接测试成功，读取 {{count}} 个物料",
+      "testFailed": "连接测试失败",
+      "syncTriggered": "同步已触发，共 {{count}} 个任务",
+      "syncFailed": "同步触发失败"
+    }
+  }
+}

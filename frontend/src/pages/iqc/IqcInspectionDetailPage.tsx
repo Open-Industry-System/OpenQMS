@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   Button,
@@ -22,6 +22,7 @@ import {
   CheckCircleOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { IqcInspection } from "../../types";
@@ -39,20 +40,6 @@ import {
 const { Option } = Select;
 const { TextArea } = Input;
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: "待检验", color: "orange" },
-  inspecting: { label: "检验中", color: "blue" },
-  judged: { label: "已判定", color: "cyan" },
-  closed: { label: "已关闭", color: "default" },
-};
-
-const RESULT_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: "待定", color: "default" },
-  accepted: { label: "合格", color: "green" },
-  rejected: { label: "拒收", color: "red" },
-  concession: { label: "让步接收", color: "gold" },
-};
-
 function statusToStep(status: string): number {
   switch (status) {
     case "pending":
@@ -69,6 +56,8 @@ function statusToStep(status: string): number {
 }
 
 export default function IqcInspectionDetailPage() {
+  const { t } = useTranslation("iqc");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -80,6 +69,26 @@ export default function IqcInspectionDetailPage() {
   const [itemForm] = Form.useForm();
   const [judgeForm] = Form.useForm();
 
+  const statusMap = useMemo<Record<string, { label: string; color: string }>>(
+    () => ({
+      pending: { label: t("status.inspection.pending"), color: "orange" },
+      inspecting: { label: t("status.inspection.inspecting"), color: "blue" },
+      judged: { label: t("status.inspection.judged"), color: "cyan" },
+      closed: { label: t("status.inspection.closed"), color: "default" },
+    }),
+    [t]
+  );
+
+  const resultMap = useMemo<Record<string, { label: string; color: string }>>(
+    () => ({
+      pending: { label: t("status.result.pending"), color: "default" },
+      accepted: { label: t("status.result.accepted"), color: "green" },
+      rejected: { label: t("status.result.rejected"), color: "red" },
+      concession: { label: t("status.result.concession"), color: "gold" },
+    }),
+    [t]
+  );
+
   const fetchInspection = useCallback(async () => {
     if (!id) return;
     setLoading(true);
@@ -87,11 +96,11 @@ export default function IqcInspectionDetailPage() {
       const data = await getInspection(id);
       setInspection(data);
     } catch {
-      message.error("加载检验单失败");
+      message.error(t("messages.loadInspectionFailed"));
     } finally {
       setLoading(false);
     }
-  }, [id, message]);
+  }, [id, message, t]);
 
   useEffect(() => {
     fetchInspection();
@@ -101,11 +110,11 @@ export default function IqcInspectionDetailPage() {
     if (!id) return;
     try {
       await startInspection(id);
-      message.success("检验已开始");
+      message.success(t("messages.inspectionStarted"));
       fetchInspection();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
@@ -113,11 +122,11 @@ export default function IqcInspectionDetailPage() {
     if (!id) return;
     try {
       await updateInspectionItems(id, values.items as Record<string, unknown>[]);
-      message.success("检验项目已更新");
+      message.success(t("messages.itemsUpdated"));
       fetchInspection();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
@@ -130,11 +139,11 @@ export default function IqcInspectionDetailPage() {
         defect_description: (values.defect_description as string) || null,
         sample_qty: (values.sample_qty as number) || null,
       });
-      message.success("判定已提交");
+      message.success(t("messages.judgementSubmitted"));
       fetchInspection();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
@@ -142,11 +151,11 @@ export default function IqcInspectionDetailPage() {
     if (!id) return;
     try {
       await closeInspection(id);
-      message.success("检验单已关闭");
+      message.success(t("messages.inspectionClosed"));
       fetchInspection();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
@@ -154,7 +163,7 @@ export default function IqcInspectionDetailPage() {
     if (!id) return;
     try {
       const result = await triggerScar(id);
-      message.success("SCAR已触发");
+      message.success(t("messages.scarTriggered"));
       if (result.linked_scar_id) {
         navigate(`/scars/${result.linked_scar_id}`);
       } else {
@@ -162,7 +171,7 @@ export default function IqcInspectionDetailPage() {
       }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
@@ -170,177 +179,176 @@ export default function IqcInspectionDetailPage() {
     if (!id) return;
     try {
       await requestReinspect(id);
-      message.success("复检申请已提交");
+      message.success(t("messages.reinspectRequested"));
       fetchInspection();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
   const handleConcession = async () => {
     if (!id) return;
     try {
-      await approveConcession(id, "让步接收");
-      message.success("让步接收已批准");
+      await approveConcession(id, t("status.result.concession"));
+      message.success(t("messages.concessionApproved"));
       fetchInspection();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
-  const itemColumns = [
-    { title: "序号", dataIndex: "sort_order", width: 60 },
-    { title: "类别", dataIndex: "category", width: 100 },
-    { title: "项目名称", dataIndex: "item_name", width: 200 },
-    { title: "检验类型", dataIndex: "inspect_type", width: 100 },
-    { title: "规格上限", dataIndex: "spec_upper", width: 100, render: (v: number | null) => v ?? "—" },
-    { title: "规格下限", dataIndex: "spec_lower", width: 100, render: (v: number | null) => v ?? "—" },
-    { title: "样本量", dataIndex: "sample_size", width: 80, render: (v: number | null) => v ?? "—" },
-    { title: "Ac", dataIndex: "accept_no", width: 60, render: (v: number | null) => v ?? "—" },
-    { title: "Re", dataIndex: "reject_no", width: 60, render: (v: number | null) => v ?? "—" },
-    { title: "缺陷数", dataIndex: "defect_qty", width: 80 },
-    {
-      title: "结果",
-      dataIndex: "result",
-      width: 100,
-      render: (result: string) => {
-        const cfg = RESULT_MAP[result] || { label: result, color: "default" };
-        return <Tag color={cfg.color}>{cfg.label}</Tag>;
+  const itemColumns = useMemo(
+    () => [
+      { title: t("table.sortOrder"), dataIndex: "sort_order", width: 60 },
+      { title: t("table.category"), dataIndex: "category", width: 100 },
+      { title: t("table.itemName"), dataIndex: "item_name", width: 200 },
+      { title: t("table.inspectType"), dataIndex: "inspect_type", width: 100 },
+      { title: t("table.specUpper"), dataIndex: "spec_upper", width: 100, render: (v: number | null) => v ?? "—" },
+      { title: t("table.specLower"), dataIndex: "spec_lower", width: 100, render: (v: number | null) => v ?? "—" },
+      { title: t("table.sampleSize"), dataIndex: "sample_size", width: 80, render: (v: number | null) => v ?? "—" },
+      { title: t("table.acceptNo"), dataIndex: "accept_no", width: 60, render: (v: number | null) => v ?? "—" },
+      { title: t("table.rejectNo"), dataIndex: "reject_no", width: 60, render: (v: number | null) => v ?? "—" },
+      { title: t("table.defectQty"), dataIndex: "defect_qty", width: 80 },
+      {
+        title: t("table.result"),
+        dataIndex: "result",
+        width: 100,
+        render: (result: string) => {
+          const cfg = resultMap[result] || { label: result, color: "default" };
+          return <Tag color={cfg.color}>{cfg.label}</Tag>;
+        },
       },
-    },
-    { title: "备注", dataIndex: "remark", ellipsis: true, render: (v: string | null) => v || "—" },
-  ];
+      { title: t("table.remark"), dataIndex: "remark", ellipsis: true, render: (v: string | null) => v || "—" },
+    ],
+    [t, resultMap]
+  );
 
   if (!inspection) {
-    return <div>加载中...</div>;
+    return <div>{tc("messages.loading")}</div>;
   }
 
   return (
     <div>
       <Space style={{ marginBottom: 16 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/iqc/inspections")}>
-          返回列表
+          {t("actions.backToList")}
         </Button>
         {inspection.status === "pending" && canEdit('iqc') && (
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>
-            开始检验
+            {t("actions.startInspection")}
           </Button>
         )}
         {inspection.status === "judged" && canEdit('iqc') && (
           <Button type="primary" onClick={handleClose}>
-            关闭检验单
+            {t("actions.closeInspection")}
           </Button>
         )}
         {inspection.status === "judged" && inspection.inspection_result === "rejected" && canEdit('iqc') && (
           <>
             <Button danger onClick={handleTriggerScar}>
-              触发SCAR
+              {t("actions.triggerScar")}
             </Button>
-            <Button onClick={handleReinspect}>申请复检</Button>
+            <Button onClick={handleReinspect}>{t("actions.requestReinspect")}</Button>
             {canApprove('iqc') && (
-              <Button onClick={handleConcession}>让步接收</Button>
+              <Button onClick={handleConcession}>{t("actions.approveConcession")}</Button>
             )}
           </>
         )}
       </Space>
 
-      <Card title="检验单信息" loading={loading}>
+      <Card title={t("detail.inspectionInfo")} loading={loading}>
         <Steps current={statusToStep(inspection.status)} style={{ marginBottom: 24 }}>
-          <Steps.Step title="待检验" />
-          <Steps.Step title="检验中" />
-          <Steps.Step title="已判定" />
-          <Steps.Step title="已关闭" />
+          <Steps.Step title={t("steps.pending")} />
+          <Steps.Step title={t("steps.inspecting")} />
+          <Steps.Step title={t("steps.judged")} />
+          <Steps.Step title={t("steps.closed")} />
         </Steps>
 
         <Descriptions bordered column={3}>
-          <Descriptions.Item label="检验单号">{inspection.inspection_no}</Descriptions.Item>
-          <Descriptions.Item label="物料号">{inspection.part_no || "—"}</Descriptions.Item>
-          <Descriptions.Item label="物料名称">{inspection.part_name || "—"}</Descriptions.Item>
-          <Descriptions.Item label="批号">{inspection.lot_no || "—"}</Descriptions.Item>
-          <Descriptions.Item label="批量">{inspection.lot_qty || "—"}</Descriptions.Item>
-          <Descriptions.Item label="样本量">{inspection.sample_qty || "—"}</Descriptions.Item>
-          <Descriptions.Item label="检验模式">
-            {inspection.inspection_mode === "quick" ? "快速检验" : "详细检验"}
+          <Descriptions.Item label={t("table.inspectionNo")}>{inspection.inspection_no}</Descriptions.Item>
+          <Descriptions.Item label={t("table.partNo")}>{inspection.part_no || "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("table.partName")}>{inspection.part_name || "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("table.lotNo")}>{inspection.lot_no || "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("table.lotQty")}>{inspection.lot_qty || "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("table.sampleSize")}>{inspection.sample_qty || "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("table.inspectionMode")}>
+            {inspection.inspection_mode === "quick" ? t("inspectionMode.quick") : t("inspectionMode.detailed")}
           </Descriptions.Item>
-          <Descriptions.Item label="状态">
-            <Tag color={STATUS_MAP[inspection.status]?.color}>
-              {STATUS_MAP[inspection.status]?.label}
+          <Descriptions.Item label={t("table.status")}>
+            <Tag color={statusMap[inspection.status]?.color}>
+              {statusMap[inspection.status]?.label}
             </Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="检验结果">
-            <Tag color={RESULT_MAP[inspection.inspection_result]?.color}>
-              {RESULT_MAP[inspection.inspection_result]?.label}
+          <Descriptions.Item label={t("table.inspectionResult")}>
+            <Tag color={resultMap[inspection.inspection_result]?.color}>
+              {resultMap[inspection.inspection_result]?.label}
             </Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="AQL等级">{inspection.aql_level || "—"}</Descriptions.Item>
-          <Descriptions.Item label="检验水平">{inspection.inspection_level || "—"}</Descriptions.Item>
-          <Descriptions.Item label="代码字">{inspection.code_letter || "—"}</Descriptions.Item>
-          <Descriptions.Item label="Ac">{inspection.accept_number ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Re">{inspection.reject_number ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="缺陷数">{inspection.defect_qty}</Descriptions.Item>
-          <Descriptions.Item label="检验日期">{inspection.inspection_date || "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.aqlLevel")}>{inspection.aql_level || "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.inspectionLevel")}>{inspection.inspection_level || "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.codeLetter")}>{inspection.code_letter || "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.acceptNo")}>{inspection.accept_number ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.rejectNo")}>{inspection.reject_number ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("table.defectQty")}>{inspection.defect_qty}</Descriptions.Item>
+          <Descriptions.Item label={t("table.inspectionDate")}>{inspection.inspection_date || "—"}</Descriptions.Item>
         </Descriptions>
       </Card>
 
       <Divider />
 
       {inspection.status === "inspecting" && canEdit('iqc') && (
-        <Card title="录入检验结果">
+        <Card title={t("detail.enterResults")}>
           <Form form={itemForm} onFinish={handleUpdateItems} layout="vertical">
             <Form.Item
               name="items"
-              rules={[{ required: true, message: "请录入检验项目结果" }]}
+              rules={[{ required: true, message: t("validation.enterResultJson") }]}
             >
               <TextArea
                 rows={6}
-                placeholder={`请输入检验项目结果，JSON格式：
-[
-  {"item_id": "...", "defect_qty": 0, "result": "accepted", "remark": ""},
-  ...
-]`}
+                placeholder={t("placeholder.resultJson")}
               />
             </Form.Item>
             <Button type="primary" htmlType="submit">
-              提交结果
+              {t("form.submitResult")}
             </Button>
           </Form>
         </Card>
       )}
 
       {inspection.status === "inspecting" && canEdit('iqc') && (
-        <Card title="判定" style={{ marginTop: 16 }}>
+        <Card title={t("detail.judgement")} style={{ marginTop: 16 }}>
           <Form form={judgeForm} onFinish={handleJudge} layout="vertical">
             <Row gutter={16}>
               <Col span={8}>
                 <Form.Item
                   name="inspection_result"
-                  label="检验结果"
+                  label={t("form.inspectionResult")}
                   rules={[{ required: true }]}
                 >
-                  <Select placeholder="选择结果">
-                    <Option value="accepted">合格</Option>
-                    <Option value="rejected">拒收</Option>
+                  <Select placeholder={t("placeholder.selectResult")}>
+                    <Option value="accepted">{t("status.result.accepted")}</Option>
+                    <Option value="rejected">{t("status.result.rejected")}</Option>
                   </Select>
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name="defect_qty" label="缺陷数" initialValue={0}>
+                <Form.Item name="defect_qty" label={t("form.defectQty")} initialValue={0}>
                   <InputNumber min={0} style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name="sample_qty" label="实际样本量">
+                <Form.Item name="sample_qty" label={t("form.sampleQty")}>
                   <InputNumber min={0} style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
             </Row>
-            <Form.Item name="defect_description" label="缺陷描述">
+            <Form.Item name="defect_description" label={t("form.defectDescription")}>
               <TextArea rows={3} />
             </Form.Item>
             <Button type="primary" htmlType="submit" icon={<CheckCircleOutlined />}>
-              提交判定
+              {t("form.submitJudgement")}
             </Button>
           </Form>
         </Card>
@@ -348,7 +356,7 @@ export default function IqcInspectionDetailPage() {
 
       <Divider />
 
-      <Card title="检验项目">
+      <Card title={t("detail.inspectionItems")}>
         <Table
           rowKey="item_id"
           columns={itemColumns}

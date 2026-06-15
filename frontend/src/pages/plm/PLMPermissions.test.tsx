@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { App } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as plmApi from "../../api/plm";
+import i18n from "../../i18n";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
 import PLMChangeOrdersPage from "./PLMChangeOrdersPage";
@@ -27,7 +28,7 @@ const changeOrder = {
   connection_id: "conn-1",
   external_id: "co-ext-1",
   change_number: "ECN-001",
-  title: "替换关键物料",
+  title: "Replace key material",
   description: null,
   change_type: "ECN",
   status: "open",
@@ -96,9 +97,11 @@ function renderWithApp(ui: React.ReactElement) {
 }
 
 describe("PLM page permissions", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     localStorage.clear();
+    localStorage.setItem("openqms_locale", "en-US");
+    await i18n.changeLanguage("en-US");
     useProductLineStore.setState({ selected: null });
     vi.mocked(plmApi.getPLMConnections).mockResolvedValue({
       items: [connection],
@@ -146,10 +149,10 @@ describe("PLM page permissions", () => {
     renderWithApp(<PLMConnectionsPage />);
 
     await screen.findByText("Mock PLM");
-    expect(screen.queryByText("编辑")).not.toBeInTheDocument();
-    expect(screen.queryByText("测试")).not.toBeInTheDocument();
-    expect(screen.queryByText("同步")).not.toBeInTheDocument();
-    expect(screen.queryByText("删除")).not.toBeInTheDocument();
+    expect(screen.queryByText("Edit")).not.toBeInTheDocument();
+    expect(screen.queryByText("Test")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sync")).not.toBeInTheDocument();
+    expect(screen.queryByText("Delete")).not.toBeInTheDocument();
   });
 
   it("lets PLM editors edit, test, and sync connections but not delete them", async () => {
@@ -158,10 +161,10 @@ describe("PLM page permissions", () => {
     renderWithApp(<PLMConnectionsPage />);
 
     await screen.findByText("Mock PLM");
-    expect(screen.getByText("编辑")).toBeInTheDocument();
-    expect(screen.getByText("测试")).toBeInTheDocument();
-    expect(screen.getByText("同步")).toBeInTheDocument();
-    expect(screen.queryByText("删除")).not.toBeInTheDocument();
+    expect(screen.getByText("Edit")).toBeInTheDocument();
+    expect(screen.getByText("Test")).toBeInTheDocument();
+    expect(screen.getByText("Sync")).toBeInTheDocument();
+    expect(screen.queryByText("Delete")).not.toBeInTheDocument();
   });
 
   it("shows connection delete action only to PLM admins", async () => {
@@ -170,7 +173,7 @@ describe("PLM page permissions", () => {
     renderWithApp(<PLMConnectionsPage />);
 
     await screen.findByText("Mock PLM");
-    expect(screen.getByText("删除")).toBeInTheDocument();
+    expect(screen.getByText("Delete")).toBeInTheDocument();
   });
 
   it("hides impact analysis from PLM viewers", async () => {
@@ -180,7 +183,7 @@ describe("PLM page permissions", () => {
 
     await screen.findByText("ECN-001");
     await waitFor(() => {
-      expect(screen.queryByText("影响分析")).not.toBeInTheDocument();
+      expect(screen.queryByText("Impact Analysis")).not.toBeInTheDocument();
     });
   });
 
@@ -190,7 +193,7 @@ describe("PLM page permissions", () => {
     renderWithApp(<PLMChangeOrdersPage />);
 
     await screen.findByText("ECN-001");
-    expect(screen.getByText("影响分析")).toBeInTheDocument();
+    expect(screen.getByText("Impact Analysis")).toBeInTheDocument();
   });
 
   it("allows PLM viewers to view BOM but hides import and SC confirmation", async () => {
@@ -201,8 +204,8 @@ describe("PLM page permissions", () => {
 
     await screen.findByText("Part 1");
     expect(screen.getByText("BOM")).toBeInTheDocument();
-    expect(screen.queryByText("导入 FMEA")).not.toBeInTheDocument();
-    expect(screen.queryByText("确认SC")).not.toBeInTheDocument();
+    expect(screen.queryByText("Import FMEA")).not.toBeInTheDocument();
+    expect(screen.queryByText("Confirm SC")).not.toBeInTheDocument();
   });
 
   it("shows BOM/import/SC actions to users with PLM edit and SC create when pending link exists", async () => {
@@ -213,8 +216,8 @@ describe("PLM page permissions", () => {
 
     await screen.findByText("Part 1");
     expect(screen.getByText("BOM")).toBeInTheDocument();
-    expect(screen.getByText("导入 FMEA")).toBeInTheDocument();
-    expect(screen.getByText("确认SC")).toBeInTheDocument();
+    expect(screen.getByText("Import FMEA")).toBeInTheDocument();
+    expect(screen.getByText("Confirm SC")).toBeInTheDocument();
   });
 
   it("hides SC action from PLM editors without SC create permission", async () => {
@@ -225,8 +228,8 @@ describe("PLM page permissions", () => {
 
     await screen.findByText("Part 1");
     expect(screen.getByText("BOM")).toBeInTheDocument();
-    expect(screen.getByText("导入 FMEA")).toBeInTheDocument();
-    expect(screen.queryByText("确认SC")).not.toBeInTheDocument();
+    expect(screen.getByText("Import FMEA")).toBeInTheDocument();
+    expect(screen.queryByText("Confirm SC")).not.toBeInTheDocument();
   });
 
   it("hides SC action once link is confirmed even if part flag remains true", async () => {
@@ -241,8 +244,8 @@ describe("PLM page permissions", () => {
 
     await screen.findByText("Part 1");
     expect(screen.getByText("BOM")).toBeInTheDocument();
-    expect(screen.getByText("导入 FMEA")).toBeInTheDocument();
-    expect(screen.queryByText("确认SC")).not.toBeInTheDocument();
+    expect(screen.getByText("Import FMEA")).toBeInTheDocument();
+    expect(screen.queryByText("Confirm SC")).not.toBeInTheDocument();
   });
 
   it("resets parts pagination to page 1 when product line changes", async () => {
@@ -282,11 +285,11 @@ describe("PLM page permissions", () => {
     renderWithApp(<PLMPartsPage />);
 
     await screen.findByText("Part 1");
-    fireEvent.click(screen.getByText("导入 FMEA"));
+    fireEvent.click(screen.getByText("Import FMEA"));
 
-    const modal = await screen.findByRole("dialog", { name: "BOM：P-1" });
-    const revisionInput = within(modal).getByLabelText("零件版本");
-    const bomRevisionInput = within(modal).getByLabelText("BOM 版本");
+    const modal = await screen.findByRole("dialog", { name: "BOM: P-1" });
+    const revisionInput = within(modal).getByLabelText("Part Revision");
+    const bomRevisionInput = within(modal).getByLabelText("BOM Revision");
     const fmeaInput = within(modal).getByLabelText("FMEA ID");
 
     expect(revisionInput).toHaveValue("B");
@@ -294,7 +297,7 @@ describe("PLM page permissions", () => {
     fireEvent.change(revisionInput, { target: { value: "C" } });
     fireEvent.change(bomRevisionInput, { target: { value: "BOM-C" } });
     fireEvent.change(fmeaInput, { target: { value: "fmea-2" } });
-    fireEvent.click(within(modal).getByRole("button", { name: "导入 FMEA" }));
+    fireEvent.click(within(modal).getByRole("button", { name: "Import FMEA" }));
 
     await waitFor(() => {
       expect(plmApi.importBOMToFMEA).toHaveBeenCalledWith(

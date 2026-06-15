@@ -37,8 +37,8 @@ describe("useAIDraft", () => {
 
   it("stores draft on success", async () => {
     const fakeResp = {
-      content: "问题陈述：测试",
-      structured_data: { problem_statement: "测试" },
+      content: "Problem statement: test",
+      structured_data: { problem_statement: "test" },
       request_id: "abc",
       step: "d2",
     };
@@ -57,7 +57,7 @@ describe("useAIDraft", () => {
 
   it("handles 409 as warning", async () => {
     mockGenerateDraft.mockRejectedValue({
-      response: { status: 409, data: { detail: "需先完成前置步骤" } },
+      response: { status: 409, data: { detail: "Please complete the prerequisite steps first" } },
     });
 
     const { result } = renderHook(() => useAIDraft());
@@ -66,7 +66,7 @@ describe("useAIDraft", () => {
       result.current.generate("report-1", "d3", "structured");
     });
 
-    expect(result.current.error).toBe("需先完成前置步骤");
+    expect(result.current.error).toBe("Please complete the prerequisite steps or check the report status");
     expect(result.current.errorLevel).toBe("warning");
   });
 

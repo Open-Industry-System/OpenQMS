@@ -1,0 +1,186 @@
+{
+  "yes": "Yes",
+  "no": "No",
+  "dashboard": {
+    "title": "PLM Dashboard",
+    "errors": {
+      "loadFailed": "Failed to load PLM dashboard data"
+    },
+    "stats": {
+      "totalParts": "Total Parts",
+      "bomItems": "BOM Items",
+      "pendingECNs": "Pending ECNs",
+      "pendingSCs": "Pending Special Characteristics"
+    },
+    "recentChanges": "Recent Changes",
+    "columns": {
+      "changeNumber": "Change No.",
+      "title": "Title",
+      "changeType": "Change Type",
+      "status": "Status",
+      "priority": "Priority",
+      "updatedAt": "Updated At"
+    }
+  },
+  "parts": {
+    "title": "PLM Parts",
+    "searchPlaceholder": "Search by part number or name",
+    "columns": {
+      "partNumber": "Part Number",
+      "name": "Name",
+      "revision": "Revision",
+      "status": "Status",
+      "safetyRelated": "Safety Related",
+      "keyCharacteristic": "Key Characteristic",
+      "actions": "Actions"
+    },
+    "actions": {
+      "detail": "Detail",
+      "bom": "BOM",
+      "importFMEA": "Import FMEA",
+      "confirmSC": "Confirm SC"
+    },
+    "drawer": {
+      "title": "Part Detail",
+      "labels": {
+        "partNumber": "Part Number",
+        "name": "Name",
+        "revision": "Revision",
+        "status": "Status",
+        "material": "Material",
+        "specification": "Specification",
+        "safetyRelated": "Safety Related",
+        "keyCharacteristic": "Key Characteristic",
+        "externalId": "External ID",
+        "productLineCode": "Product Line Code",
+        "updatedAt": "PLM Updated At"
+      }
+    },
+    "bom": {
+      "modalTitle": "BOM: {{partNumber}}",
+      "partRevision": "Part Revision",
+      "partRevisionRequired": "Please enter the part revision",
+      "bomRevision": "BOM Revision",
+      "bomRevisionRequired": "Please enter the BOM revision",
+      "query": "Query BOM",
+      "columns": {
+        "parentPartNumber": "Parent Part Number",
+        "parentRevision": "Parent Revision",
+        "childPartNumber": "Child Part Number",
+        "childRevision": "Child Revision",
+        "quantity": "Quantity",
+        "level": "Level",
+        "bomRevision": "BOM Revision"
+      },
+      "import": {
+        "fmeaId": "FMEA ID",
+        "fmeaIdRequired": "Please enter the FMEA ID",
+        "overwrite": "Overwrite existing nodes",
+        "import": "Import FMEA"
+      }
+    },
+    "sc": {
+      "modalTitle": "Confirm Special Characteristic: {{partNumber}}",
+      "characteristicType": "Characteristic Type",
+      "characteristicTypeRequired": "Please select a characteristic type",
+      "safety": "Safety",
+      "key": "Key",
+      "fmeaId": "FMEA ID",
+      "fmeaIdRequired": "Please enter the FMEA ID",
+      "nodeId": "Node ID",
+      "nodeIdRequired": "Please enter the node ID",
+      "okText": "Confirm",
+      "cancelText": "Cancel"
+    },
+    "messages": {
+      "loadFailed": "Failed to load parts",
+      "queryBomFailed": "Failed to query BOM",
+      "importFMEASuccess": "BOM imported to FMEA",
+      "importFMEAFailed": "Failed to import to FMEA",
+      "scConfirmed": "Special characteristic confirmed",
+      "scConfirmFailed": "Failed to confirm special characteristic"
+    }
+  },
+  "changeOrders": {
+    "title": "PLM Change Orders",
+    "impactAnalysis": "Impact Analysis",
+    "changeType": {
+      "ECN": "ECN",
+      "ECR": "ECR",
+      "SCN": "SCN"
+    },
+    "columns": {
+      "changeNumber": "Change No.",
+      "title": "Title",
+      "changeType": "Change Type",
+      "status": "Status",
+      "priority": "Priority",
+      "actions": "Actions"
+    },
+    "messages": {
+      "loadFailed": "Failed to load change orders",
+      "impactAnalysisTriggered": "Impact analysis triggered",
+      "impactAnalysisFailed": "Failed to trigger impact analysis"
+    }
+  },
+  "connections": {
+    "title": "PLM Connection Management",
+    "create": "New Connection",
+    "edit": "Edit",
+    "test": "Test",
+    "sync": "Sync",
+    "delete": "Delete",
+    "columns": {
+      "name": "Connection Name",
+      "type": "Type",
+      "productLineCode": "Product Line Code",
+      "status": "Status",
+      "createdAt": "Created At",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "modal": {
+      "createTitle": "New Connection",
+      "editTitle": "Edit Connection"
+    },
+    "form": {
+      "name": "Connection Name",
+      "nameRequired": "Please enter the connection name",
+      "namePlaceholder": "e.g. PLM-Teamcenter-01",
+      "connectorType": "Connector Type",
+      "connectorTypeRequired": "Please select a connector type",
+      "productLineCode": "Product Line Code",
+      "productLineCodeRequired": "Please enter the product line code",
+      "productLineCodePlaceholder": "e.g. DC-DC-100",
+      "port": "Port",
+      "portPlaceholder": "e.g. 8080"
+    },
+    "connector": {
+      "mock": "Mock - Simulated Data",
+      "rest": "REST API - Not implemented",
+      "siemens_tc": "Siemens Teamcenter - Not implemented",
+      "dassault_enovia": "Dassault ENOVIA - Not implemented",
+      "ptc_windchill": "PTC Windchill - Not implemented"
+    },
+    "deleteConfirm": {
+      "title": "Confirm Delete",
+      "content": "Are you sure you want to delete connection \"{{name}}\"?"
+    },
+    "messages": {
+      "loadFailed": "Failed to load connection list",
+      "createSuccess": "Connection created successfully",
+      "createFailed": "Create failed",
+      "updateSuccess": "Connection updated successfully",
+      "updateFailed": "Update failed",
+      "deleteSuccess": "Deleted successfully",
+      "deleteFailed": "Delete failed",
+      "testSuccess": "Connection test successful, read {{count}} parts",
+      "testFailed": "Connection test failed",
+      "syncTriggered": "Sync triggered, {{count}} jobs in total",
+      "syncFailed": "Failed to trigger sync"
+    }
+  }
+}

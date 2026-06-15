@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   Table,
   Tag,
@@ -9,6 +9,7 @@ import {
   Col,
   App,
 } from "antd";
+import { useTranslation } from "react-i18next";
 import {
   fetchERPSalesOrders,
   fetchERPShipments,
@@ -37,13 +38,6 @@ const linkStatusColors: Record<string, string> = {
   error: "red",
 };
 
-const costCategoryLabels: Record<string, string> = {
-  prevention: "预防成本",
-  appraisal: "鉴定成本",
-  internal_failure: "内部损失",
-  external_failure: "外部损失",
-};
-
 const costCategoryColors: Record<string, string> = {
   prevention: "#52c41a",
   appraisal: "#1890ff",
@@ -51,9 +45,20 @@ const costCategoryColors: Record<string, string> = {
   external_failure: "#f5222d",
 };
 
+function useCostCategoryLabels() {
+  const { t } = useTranslation("erp");
+  return useMemo(() => ({
+    prevention: t("salesAndCost.costCategory.prevention"),
+    appraisal: t("salesAndCost.costCategory.appraisal"),
+    internal_failure: t("salesAndCost.costCategory.internalFailure"),
+    external_failure: t("salesAndCost.costCategory.externalFailure"),
+  }), [t]);
+}
+
 /* ─── Sales Orders Tab ─── */
 
 function SalesOrdersTab() {
+  const { t } = useTranslation("erp");
   const { message } = App.useApp();
   const [data, setData] = useState<ERPSalesOrder[]>([]);
   const [total, setTotal] = useState(0);
@@ -69,10 +74,10 @@ function SalesOrdersTab() {
           setData(res.items);
           setTotal(res.total);
         })
-        .catch(() => message.error("加载销售订单失败"))
+        .catch(() => message.error(t("salesAndCost.messages.loadSalesOrdersFailed")))
         .finally(() => setLoading(false));
     },
-    [message],
+    [message, t],
   );
 
   useEffect(() => {
@@ -81,40 +86,40 @@ function SalesOrdersTab() {
 
   const columns = [
     {
-      title: "销售订单号",
+      title: t("salesAndCost.columns.soNumber"),
       dataIndex: "so_number",
       key: "so_number",
       width: 160,
     },
     {
-      title: "行号",
+      title: t("salesAndCost.columns.lineNumber"),
       dataIndex: "line_number",
       key: "line_number",
       width: 80,
     },
     {
-      title: "客户编码",
+      title: t("salesAndCost.columns.customerCode"),
       dataIndex: "customer_code",
       key: "customer_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "物料编码",
+      title: t("salesAndCost.columns.materialCode"),
       dataIndex: "material_code",
       key: "material_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "数量",
+      title: t("salesAndCost.columns.quantity"),
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
       render: (v: number | null) => v?.toLocaleString() ?? "—",
     },
     {
-      title: "单价",
+      title: t("salesAndCost.columns.unitPrice"),
       dataIndex: "unit_price",
       key: "unit_price",
       width: 100,
@@ -122,7 +127,7 @@ function SalesOrdersTab() {
         v != null ? `¥${v.toFixed(2)}` : "—",
     },
     {
-      title: "状态",
+      title: t("salesAndCost.columns.status"),
       dataIndex: "status",
       key: "status",
       width: 100,
@@ -131,7 +136,7 @@ function SalesOrdersTab() {
       ),
     },
     {
-      title: "交货日期",
+      title: t("salesAndCost.columns.deliveryDate"),
       dataIndex: "delivery_date",
       key: "delivery_date",
       width: 120,
@@ -161,6 +166,7 @@ function SalesOrdersTab() {
 /* ─── Shipments Tab ─── */
 
 function ShipmentsTab() {
+  const { t } = useTranslation("erp");
   const { message } = App.useApp();
   const [data, setData] = useState<ERPShipment[]>([]);
   const [total, setTotal] = useState(0);
@@ -176,10 +182,10 @@ function ShipmentsTab() {
           setData(res.items);
           setTotal(res.total);
         })
-        .catch(() => message.error("加载发货记录失败"))
+        .catch(() => message.error(t("salesAndCost.messages.loadShipmentsFailed")))
         .finally(() => setLoading(false));
     },
-    [message],
+    [message, t],
   );
 
   useEffect(() => {
@@ -188,48 +194,48 @@ function ShipmentsTab() {
 
   const columns = [
     {
-      title: "发货单号",
+      title: t("salesAndCost.columns.shipmentNumber"),
       dataIndex: "shipment_number",
       key: "shipment_number",
       width: 140,
     },
     {
-      title: "客户编码",
+      title: t("salesAndCost.columns.customerCode"),
       dataIndex: "customer_code",
       key: "customer_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "物料编码",
+      title: t("salesAndCost.columns.materialCode"),
       dataIndex: "material_code",
       key: "material_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "批次号",
+      title: t("salesAndCost.columns.lotNo"),
       dataIndex: "lot_no",
       key: "lot_no",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "数量",
+      title: t("salesAndCost.columns.quantity"),
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
       render: (v: number | null) => v?.toLocaleString() ?? "—",
     },
     {
-      title: "发货日期",
+      title: t("salesAndCost.columns.shipmentDate"),
       dataIndex: "shipment_date",
       key: "shipment_date",
       width: 120,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "关联状态",
+      title: t("salesAndCost.columns.linkStatus"),
       dataIndex: "link_status",
       key: "link_status",
       width: 100,
@@ -261,6 +267,8 @@ function ShipmentsTab() {
 /* ─── Cost Records Tab ─── */
 
 function CostRecordsTab() {
+  const { t } = useTranslation("erp");
+  const costCategoryLabels = useCostCategoryLabels();
   const { message } = App.useApp();
   const [data, setData] = useState<ERPCostRecord[]>([]);
   const [total, setTotal] = useState(0);
@@ -276,10 +284,10 @@ function CostRecordsTab() {
           setData(res.items);
           setTotal(res.total);
         })
-        .catch(() => message.error("加载成本记录失败"))
+        .catch(() => message.error(t("salesAndCost.messages.loadCostRecordsFailed")))
         .finally(() => setLoading(false));
     },
-    [message],
+    [message, t],
   );
 
   useEffect(() => {
@@ -295,48 +303,48 @@ function CostRecordsTab() {
 
   const columns = [
     {
-      title: "成本类别",
+      title: t("salesAndCost.columns.costCategory"),
       dataIndex: "cost_category",
       key: "cost_category",
       width: 120,
-      render: (v: string) => costCategoryLabels[v] || v,
+      render: (v: string) => costCategoryLabels[v as keyof typeof costCategoryLabels] || v,
     },
     {
-      title: "成本类型",
+      title: t("salesAndCost.columns.costType"),
       dataIndex: "cost_type",
       key: "cost_type",
       width: 140,
     },
     {
-      title: "金额",
+      title: t("salesAndCost.columns.amount"),
       dataIndex: "amount",
       key: "amount",
       width: 120,
-      render: (v: number) => `¥${v.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`,
+      render: (v: number) => `¥${v.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
     },
     {
-      title: "货币",
+      title: t("salesAndCost.columns.currency"),
       dataIndex: "currency",
       key: "currency",
       width: 80,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "期间",
+      title: t("salesAndCost.columns.period"),
       dataIndex: "period_month",
       key: "period_month",
       width: 100,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "来源单据",
+      title: t("salesAndCost.columns.sourceDocument"),
       dataIndex: "source_document_no",
       key: "source_document_no",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "描述",
+      title: t("salesAndCost.columns.description"),
       dataIndex: "description",
       key: "description",
       ellipsis: true,
@@ -350,7 +358,7 @@ function CostRecordsTab() {
         {Object.entries(coqSummary).map(([cat, amount]) => (
           <Col key={cat} span={6}>
             <Statistic
-              title={costCategoryLabels[cat] || cat}
+              title={costCategoryLabels[cat as keyof typeof costCategoryLabels] || cat}
               value={amount}
               prefix="¥"
               precision={2}
@@ -381,20 +389,21 @@ function CostRecordsTab() {
 /* ─── Main Page ─── */
 
 export default function ERPSalesAndCostPage() {
+  const { t } = useTranslation("erp");
   const [activeTab, setActiveTab] = useState("sales_orders");
 
   return (
     <div>
       <Title level={4} style={{ marginBottom: 16 }}>
-        销售与成本
+        {t("salesAndCost.title")}
       </Title>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         items={[
-          { key: "sales_orders", label: "销售订单", children: <SalesOrdersTab /> },
-          { key: "shipments", label: "发货记录", children: <ShipmentsTab /> },
-          { key: "cost_records", label: "成本记录", children: <CostRecordsTab /> },
+          { key: "sales_orders", label: t("salesAndCost.tabs.salesOrders"), children: <SalesOrdersTab /> },
+          { key: "shipments", label: t("salesAndCost.tabs.shipments"), children: <ShipmentsTab /> },
+          { key: "cost_records", label: t("salesAndCost.tabs.costRecords"), children: <CostRecordsTab /> },
         ]}
       />
     </div>

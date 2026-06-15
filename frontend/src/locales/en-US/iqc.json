@@ -1,0 +1,256 @@
+{
+  "status": {
+    "inspection": {
+      "pending": "Pending",
+      "inspecting": "Inspecting",
+      "judged": "Judged",
+      "closed": "Closed"
+    },
+    "result": {
+      "pending": "Pending",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "concession": "Concession"
+    },
+    "profileState": {
+      "normal": "Normal",
+      "tightened": "Tightened",
+      "reduced": "Reduced",
+      "frozen": "Frozen"
+    },
+    "recDirection": {
+      "tighten": "Tighten",
+      "reduce": "Reduce",
+      "freeze": "Freeze",
+      "keep": "Keep"
+    },
+    "recStatus": {
+      "pending": "Pending",
+      "forwarded": "Forwarded",
+      "approved": "Approved",
+      "effective": "Effective",
+      "rejected": "Rejected",
+      "expired": "Expired"
+    },
+    "approvalLevel": {
+      "manager": "Manager",
+      "engineer": "Engineer"
+    },
+    "yes": "Yes",
+    "no": "No"
+  },
+  "messages": {
+    "loadInspectionListFailed": "Failed to load inspection list",
+    "loadInspectionFailed": "Failed to load inspection",
+    "loadMaterialListFailed": "Failed to load material list",
+    "loadProfileListFailed": "Failed to load profile list",
+    "loadRecommendationListFailed": "Failed to load recommendation list",
+    "loadConfigFailed": "Failed to load configuration",
+    "inspectionStarted": "Inspection started",
+    "itemsUpdated": "Inspection items updated",
+    "judgementSubmitted": "Judgement submitted",
+    "inspectionClosed": "Inspection closed",
+    "scarTriggered": "SCAR triggered",
+    "reinspectRequested": "Re-inspection requested",
+    "concessionApproved": "Concession approved",
+    "materialUpdated": "Material updated",
+    "materialCreated": "Material created",
+    "materialDeleted": "Material deleted",
+    "profileCreated": "Profile created",
+    "configSaved": "Configuration saved",
+    "configReset": "Configuration reset",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "submittedToManager": "Submitted to manager",
+    "enterRejectReason": "Please enter rejection reason",
+    "adminOnly": "Only administrators can access this page",
+    "profileNotFound": "Profile not found"
+  },
+  "pageTitle": {
+    "inspectionList": "Incoming Inspection",
+    "materialList": "Material Management",
+    "profileList": "AQL Profile Management",
+    "recommendationList": "AQL Optimization Recommendations",
+    "aqlConfig": "AQL Rule Parameter Configuration"
+  },
+  "stats": {
+    "totalInspections": "Total Inspections",
+    "acceptedCount": "Accepted Count",
+    "rejectedCount": "Rejected Count",
+    "acceptanceRate": "Acceptance Rate",
+    "pendingApproval": "Pending Approval",
+    "generatedToday": "Generated Today",
+    "approvedCount": "Approved Count",
+    "rejectedCountRec": "Rejected Count"
+  },
+  "table": {
+    "inspectionNo": "Inspection No.",
+    "partNo": "Part No.",
+    "partName": "Part Name",
+    "lotNo": "Lot No.",
+    "lotQty": "Lot Qty",
+    "inspectionMode": "Inspection Mode",
+    "status": "Status",
+    "inspectionResult": "Inspection Result",
+    "inspectionDate": "Inspection Date",
+    "operations": "Actions",
+    "sortOrder": "No.",
+    "category": "Category",
+    "itemName": "Item Name",
+    "inspectType": "Inspect Type",
+    "specUpper": "Spec Upper",
+    "specLower": "Spec Lower",
+    "sampleSize": "Sample Size",
+    "acceptNo": "Ac",
+    "rejectNo": "Re",
+    "defectQty": "Defect Qty",
+    "result": "Result",
+    "remark": "Remark",
+    "specification": "Specification",
+    "type": "Type",
+    "defaultAql": "Default AQL",
+    "defaultInspectionLevel": "Default Inspection Level",
+    "unit": "Unit",
+    "supplier": "Supplier",
+    "materialId": "Material ID",
+    "baseAql": "Base AQL",
+    "currentAql": "Current AQL",
+    "state": "State",
+    "frozenUntil": "Frozen Until",
+    "effectiveFrom": "Effective From",
+    "recommendedAql": "Recommended AQL",
+    "direction": "Direction",
+    "triggerRules": "Trigger Rules",
+    "createdAt": "Created Time",
+    "supplierName": "Supplier Name"
+  },
+  "detail": {
+    "inspectionInfo": "Inspection Info",
+    "enterResults": "Enter Inspection Results",
+    "judgement": "Judgement",
+    "inspectionItems": "Inspection Items",
+    "inspectionStats": "Inspection Statistics",
+    "supplierPerformance": "Supplier Performance",
+    "qualityTrend": "Quality Trend",
+    "historyRecommendations": "History Recommendations"
+  },
+  "form": {
+    "inspectionResult": "Inspection Result",
+    "defectQty": "Defect Qty",
+    "sampleQty": "Actual Sample Qty",
+    "defectDescription": "Defect Description",
+    "selectResult": "Select result",
+    "submitResult": "Submit Results",
+    "submitJudgement": "Submit Judgement",
+    "partNo": "Part No.",
+    "partName": "Part Name",
+    "specification": "Specification",
+    "materialType": "Material Type",
+    "defaultAql": "Default AQL",
+    "defaultInspectionLevel": "Default Inspection Level",
+    "unit": "Unit",
+    "supplierId": "Supplier ID",
+    "materialId": "Material ID",
+    "baseAql": "Base AQL",
+    "currentAql": "Current AQL",
+    "productLine": "Product Line",
+    "minAql": "Min AQL",
+    "maxAql": "Max AQL",
+    "inspectionLevel": "Inspection Level"
+  },
+  "actions": {
+    "newInspection": "New Inspection",
+    "newMaterial": "New Material",
+    "importMaterial": "Import Material",
+    "newProfile": "New Profile",
+    "backToList": "Back to List",
+    "startInspection": "Start Inspection",
+    "closeInspection": "Close Inspection",
+    "triggerScar": "Trigger SCAR",
+    "requestReinspect": "Request Re-inspection",
+    "approveConcession": "Concession",
+    "approve": "Approve",
+    "submitToManager": "Submit to Manager",
+    "confirmReject": "Confirm Reject",
+    "resetConfig": "Restore Default"
+  },
+  "placeholder": {
+    "inspectionSearch": "Inspection No. / Part No. / Lot No.",
+    "materialSearch": "Search part no. / part name",
+    "productLine": "Product line",
+    "productLineWithGlobal": "Product line (global default)",
+    "supplierId": "Supplier ID",
+    "selectStatus": "Status",
+    "selectResult": "Select result",
+    "selectDirection": "Direction",
+    "selectInspectionLevel": "Select inspection level",
+    "partNoExample": "e.g. RES-0805-10K",
+    "partNameExample": "e.g. 0805 SMD Resistor 10KΩ",
+    "specExample": "e.g. ±1% 1/8W",
+    "aqlExample": "e.g. 0.65",
+    "unitExample": "e.g. pcs, kg, m",
+    "resultJson": "Please enter inspection item results in JSON format:\n[\n  {\"item_id\": \"...\", \"defect_qty\": 0, \"result\": \"accepted\", \"remark\": \"\"},\n  ...\n]"
+  },
+  "modal": {
+    "newMaterial": "New Material",
+    "editMaterial": "Edit Material",
+    "newProfile": "New AQL Profile",
+    "resetConfigTitle": "Reset Configuration",
+    "resetConfigContent": "Are you sure you want to restore all configurations to default? This action cannot be undone."
+  },
+  "drawer": {
+    "recommendationDetail": "Recommendation Detail"
+  },
+  "chart": {
+    "noTrendData": "No trend data",
+    "trendChartPlaceholder": "Trend Chart (@ant-design/charts required)",
+    "snapshotCount": "{{count}} snapshot data points"
+  },
+  "import": {
+    "materialHint": "Each row: Part No.*, Name*, Spec, Type, Default AQL, Inspection Level, Unit, Product Line"
+  },
+  "steps": {
+    "pending": "Pending",
+    "inspecting": "Inspecting",
+    "judged": "Judged",
+    "closed": "Closed"
+  },
+  "inspectionMode": {
+    "quick": "Quick",
+    "detailed": "Detailed"
+  },
+  "materialType": {
+    "raw": "Raw Material",
+    "component": "Component",
+    "part": "Part",
+    "other": "Other"
+  },
+  "descriptions": {
+    "aqlLevel": "AQL Level",
+    "inspectionLevel": "Inspection Level",
+    "codeLetter": "Code Letter",
+    "acceptNo": "Ac",
+    "rejectNo": "Re",
+    "totalBatches": "Total Batches",
+    "consecutiveAccepted": "Consecutive Accepted",
+    "consecutiveRejected": "Consecutive Rejected",
+    "last30dBatches": "30-Day Batches",
+    "last30dPpm": "30-Day PPM",
+    "last90dPpm": "90-Day PPM",
+    "supplierRating": "Supplier Rating",
+    "openScar": "Open SCAR",
+    "safetyDefect": "Safety Defect",
+    "linkedComplaint": "Linked Complaint",
+    "calculatedState": "Calculated State"
+  },
+  "validation": {
+    "enterPartNo": "Please enter part no.",
+    "enterPartName": "Please enter part name.",
+    "enterSupplierId": "Please enter supplier ID",
+    "enterMaterialId": "Please enter material ID",
+    "enterBaseAql": "Please enter base AQL",
+    "enterCurrentAql": "Please enter current AQL",
+    "enterProductLine": "Please enter product line",
+    "enterResultJson": "Please enter inspection item results"
+  }
+}

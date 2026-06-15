@@ -1,4 +1,5 @@
 import { Modal, Button, Space } from "antd";
+import { useTranslation } from "react-i18next";
 
 interface AIDraftPreviewProps {
   open: boolean;
@@ -15,24 +16,27 @@ export default function AIDraftPreview({
   onReplace,
   onAppend,
 }: AIDraftPreviewProps) {
+  const { t } = useTranslation("capa");
+  const { t: tc } = useTranslation("common");
+
   return (
     <Modal
       open={open}
-      title="AI 草稿预览"
+      title={t("draft.previewTitle")}
       onCancel={onClose}
       footer={
         <Space>
-          <Button onClick={onClose}>取消</Button>
-          <Button onClick={onAppend}>追加</Button>
+          <Button onClick={onClose}>{tc("actions.cancel")}</Button>
+          <Button onClick={onAppend}>{t("draft.append")}</Button>
           <Button type="primary" onClick={onReplace}>
-            替换
+            {t("draft.replace")}
           </Button>
         </Space>
       }
       width={700}
     >
       <p style={{ color: "#999", marginBottom: 8 }}>
-        此为 AI 生成的草稿，请审核后再使用
+        {t("draft.warning")}
       </p>
       <pre
         style={{

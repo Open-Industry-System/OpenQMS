@@ -4,7 +4,7 @@ export type WidgetCategory = "kpi" | "alert" | "chart" | "list" | "ai";
 
 export interface WidgetMeta {
   type: string;
-  name: string;
+  nameKey: string;
   category: WidgetCategory;
   defaultSize: { w: number; h: number };
   minSize: { w: number; h: number };

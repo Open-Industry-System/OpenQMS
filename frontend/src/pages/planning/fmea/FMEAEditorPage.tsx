@@ -491,7 +491,7 @@ export default function FMEAEditorPage() {
       message.warning(t("table.selectFunctionFirst"));
       return;
     }
-    const { newNodes, newEdges } = createRowNodes(selectedFunctionId, fmea.fmea_type);
+    const { newNodes, newEdges } = createRowNodes(selectedFunctionId, fmea.fmea_type, t);
     setNodes((prev) => [...prev, ...newNodes]);
     setEdges((prev) => [...prev, ...newEdges]);
   // eslint-disable-next-line react-hooks/exhaustive-deps

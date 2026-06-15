@@ -1,0 +1,9 @@
+{
+  "newFailureMode": "新失效模式",
+  "newFailureEffect": "新失效影响",
+  "newFailureCause": "新失效起因",
+  "designPreventionControl": "现行设计预防控制",
+  "designDetectionControl": "现行设计探测控制",
+  "processPreventionControl": "现行过程预防控制",
+  "processDetectionControl": "现行过程探测控制"
+}

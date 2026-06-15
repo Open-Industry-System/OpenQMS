@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   Table,
@@ -20,6 +20,7 @@ import {
   DeleteOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { IqcMaterial } from "../../types";
@@ -29,6 +30,8 @@ import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
 const { Option } = Select;
 
 export default function IqcMaterialListPage() {
+  const { t } = useTranslation("iqc");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const _user = useAuthStore((s) => s.user);
   const { canEdit, isAdmin } = usePermission();
@@ -54,11 +57,11 @@ export default function IqcMaterialListPage() {
       setMaterials(resp.items);
       setTotal(resp.total);
     } catch {
-      message.error("加载物料列表失败");
+      message.error(t("messages.loadMaterialListFailed"));
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, search, message]);
+  }, [page, pageSize, search, message, t]);
 
   useEffect(() => {
     fetchMaterials();
@@ -77,21 +80,21 @@ export default function IqcMaterialListPage() {
     setModalOpen(true);
   };
 
-  const handleOpenEdit = (mat: IqcMaterial) => {
+  const handleOpenEdit = useCallback((mat: IqcMaterial) => {
     setEditingMaterial(mat);
     form.setFieldsValue(mat);
     setModalOpen(true);
-  };
+  }, [form]);
 
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
       if (editingMaterial) {
         await updateMaterial(editingMaterial.material_id, values);
-        message.success("物料已更新");
+        message.success(t("messages.materialUpdated"));
       } else {
         await createMaterial(values);
-        message.success("物料已创建");
+        message.success(t("messages.materialCreated"));
       }
       setModalOpen(false);
       fetchMaterials();
@@ -103,123 +106,134 @@ export default function IqcMaterialListPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     try {
       await deleteMaterial(id);
-      message.success("物料已删除");
+      message.success(t("messages.materialDeleted"));
       fetchMaterials();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "删除失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed"));
     }
-  };
+  }, [t, message, fetchMaterials, tc]);
 
-  const columns = [
-    {
-      title: "物料号",
-      dataIndex: "part_no",
-      width: 140,
-      render: (no: string) => <span style={{ fontFamily: "monospace" }}>{no}</span>,
-    },
-    {
-      title: "物料名称",
-      dataIndex: "part_name",
-      ellipsis: true,
-    },
-    {
-      title: "规格",
-      dataIndex: "part_spec",
-      width: 160,
-      render: (v: string | null) => v || "—",
-    },
-    {
-      title: "类型",
-      dataIndex: "material_type",
-      width: 100,
-      render: (v: string) => <Tag>{v === "raw" ? "原材料" : v}</Tag>,
-    },
-    {
-      title: "默认AQL",
-      dataIndex: "default_aql",
-      width: 100,
-      render: (v: number | null) => v ?? "—",
-    },
-    {
-      title: "检验水平",
-      dataIndex: "default_inspection_level",
-      width: 100,
-      render: (v: string | null) => v || "—",
-    },
-    {
-      title: "单位",
-      dataIndex: "unit",
-      width: 80,
-      render: (v: string | null) => v || "—",
-    },
-    {
-      title: "状态",
-      dataIndex: "status",
-      width: 80,
-      render: (status: string) => (
-        <Tag color={status === "active" ? "green" : "default"}>
-          {status === "active" ? "启用" : "停用"}
-        </Tag>
-      ),
-    },
-    {
-      title: "操作",
-      width: 150,
-      render: (_: unknown, record: IqcMaterial) => (
-        <Space size="small">
-          {canEdit('iqc') && (
-            <Button
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => handleOpenEdit(record)}
-            >
-              编辑
-            </Button>
-          )}
-          {isAdmin && (
-            <Popconfirm
-              title="确认删除该物料？"
-              onConfirm={() => handleDelete(record.material_id)}
-            >
-              <Button size="small" danger icon={<DeleteOutlined />}>
-                删除
+  const columns = useMemo(
+    () => [
+      {
+        title: t("table.partNo"),
+        dataIndex: "part_no",
+        width: 140,
+        render: (no: string) => <span style={{ fontFamily: "monospace" }}>{no}</span>,
+      },
+      {
+        title: t("table.partName"),
+        dataIndex: "part_name",
+        ellipsis: true,
+      },
+      {
+        title: t("table.specification"),
+        dataIndex: "part_spec",
+        width: 160,
+        render: (v: string | null) => v || "—",
+      },
+      {
+        title: t("table.type"),
+        dataIndex: "material_type",
+        width: 100,
+        render: (v: string) => {
+          const labels: Record<string, string> = {
+            raw: t("materialType.raw"),
+            component: t("materialType.component"),
+            part: t("materialType.part"),
+            other: t("materialType.other"),
+          };
+          return <Tag>{labels[v] || v}</Tag>;
+        },
+      },
+      {
+        title: t("table.defaultAql"),
+        dataIndex: "default_aql",
+        width: 100,
+        render: (v: number | null) => v ?? "—",
+      },
+      {
+        title: t("table.defaultInspectionLevel"),
+        dataIndex: "default_inspection_level",
+        width: 100,
+        render: (v: string | null) => v || "—",
+      },
+      {
+        title: t("table.unit"),
+        dataIndex: "unit",
+        width: 80,
+        render: (v: string | null) => v || "—",
+      },
+      {
+        title: t("table.status"),
+        dataIndex: "status",
+        width: 80,
+        render: (status: string) => (
+          <Tag color={status === "active" ? "green" : "default"}>
+            {status === "active" ? tc("status.active") : tc("status.inactive")}
+          </Tag>
+        ),
+      },
+      {
+        title: t("table.operations"),
+        width: 150,
+        render: (_: unknown, record: IqcMaterial) => (
+          <Space size="small">
+            {canEdit('iqc') && (
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => handleOpenEdit(record)}
+              >
+                {tc("actions.edit")}
               </Button>
-            </Popconfirm>
-          )}
-        </Space>
-      ),
-    },
-  ];
+            )}
+            {isAdmin && (
+              <Popconfirm
+                title={t("list.confirmDeleteMaterial")}
+                onConfirm={() => handleDelete(record.material_id)}
+              >
+                <Button size="small" danger icon={<DeleteOutlined />}>
+                  {tc("actions.delete")}
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        ),
+      },
+    ],
+    [t, tc, canEdit, isAdmin, handleDelete, handleOpenEdit]
+  );
 
   return (
     <div>
       <Card
-        title="物料管理"
+        title={t("pageTitle.materialList")}
         extra={
           <Space>
             {canEdit('iqc') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
-                新增物料
+                {t("actions.newMaterial")}
               </Button>
             )}
             {canEdit('iqc') && (
               <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-                导入物料
+                {t("actions.importMaterial")}
               </Button>
             )}
             <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              刷新
+              {tc("actions.refresh")}
             </Button>
           </Space>
         }
       >
         <Space style={{ marginBottom: 16 }}>
           <Input
-            placeholder="搜索物料号 / 物料名称"
+            placeholder={t("placeholder.materialSearch")}
             allowClear
             style={{ width: 280 }}
             value={search}
@@ -227,7 +241,7 @@ export default function IqcMaterialListPage() {
             onPressEnter={handleQuery}
           />
           <Button type="primary" onClick={handleQuery}>
-            查询
+            {tc("actions.search")}
           </Button>
         </Space>
 
@@ -250,44 +264,44 @@ export default function IqcMaterialListPage() {
       </Card>
 
       <Modal
-        title={editingMaterial ? "编辑物料" : "新增物料"}
+        title={editingMaterial ? t("modal.editMaterial") : t("modal.newMaterial")}
         open={modalOpen}
         onOk={handleSubmit}
         onCancel={() => setModalOpen(false)}
-        okText="保存"
+        okText={tc("actions.save")}
         destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item
             name="part_no"
-            label="物料号"
-            rules={[{ required: true, message: "请输入物料号" }]}
+            label={t("form.partNo")}
+            rules={[{ required: true, message: t("validation.enterPartNo") }]}
           >
-            <Input disabled={!!editingMaterial} placeholder="如: RES-0805-10K" />
+            <Input disabled={!!editingMaterial} placeholder={t("placeholder.partNoExample")} />
           </Form.Item>
           <Form.Item
             name="part_name"
-            label="物料名称"
-            rules={[{ required: true, message: "请输入物料名称" }]}
+            label={t("form.partName")}
+            rules={[{ required: true, message: t("validation.enterPartName") }]}
           >
-            <Input placeholder="如: 0805贴片电阻 10KΩ" />
+            <Input placeholder={t("placeholder.partNameExample")} />
           </Form.Item>
-          <Form.Item name="part_spec" label="规格型号">
-            <Input placeholder="如: ±1% 1/8W" />
+          <Form.Item name="part_spec" label={t("form.specification")}>
+            <Input placeholder={t("placeholder.specExample")} />
           </Form.Item>
-          <Form.Item name="material_type" label="物料类型" initialValue="raw">
+          <Form.Item name="material_type" label={t("form.materialType")} initialValue="raw">
             <Select>
-              <Option value="raw">原材料</Option>
-              <Option value="component">元器件</Option>
-              <Option value="part">零件</Option>
-              <Option value="other">其他</Option>
+              <Option value="raw">{t("materialType.raw")}</Option>
+              <Option value="component">{t("materialType.component")}</Option>
+              <Option value="part">{t("materialType.part")}</Option>
+              <Option value="other">{t("materialType.other")}</Option>
             </Select>
           </Form.Item>
-          <Form.Item name="default_aql" label="默认AQL">
-            <InputNumber min={0} step={0.1} style={{ width: "100%" }} placeholder="如: 0.65" />
+          <Form.Item name="default_aql" label={t("form.defaultAql")}>
+            <InputNumber min={0} step={0.1} style={{ width: "100%" }} placeholder={t("placeholder.aqlExample")} />
           </Form.Item>
-          <Form.Item name="default_inspection_level" label="默认检验水平">
-            <Select allowClear placeholder="选择检验水平">
+          <Form.Item name="default_inspection_level" label={t("form.defaultInspectionLevel")}>
+            <Select allowClear placeholder={t("placeholder.selectInspectionLevel")}>
               <Option value="I">I</Option>
               <Option value="II">II</Option>
               <Option value="III">III</Option>
@@ -297,8 +311,8 @@ export default function IqcMaterialListPage() {
               <Option value="S-4">S-4</Option>
             </Select>
           </Form.Item>
-          <Form.Item name="unit" label="单位">
-            <Input placeholder="如: pcs, kg, m" />
+          <Form.Item name="unit" label={t("form.unit")}>
+            <Input placeholder={t("placeholder.unitExample")} />
           </Form.Item>
         </Form>
       </Modal>
@@ -309,7 +323,7 @@ export default function IqcMaterialListPage() {
         onImported={() => fetchMaterials()}
         importFn={(file) => importMaterials(file)}
         templateDownloadFn={downloadMaterialImportTemplate}
-        hint="每行: 物料号*, 名称*, 规格, 类型, 默认AQL, 检验水平, 单位, 产品线"
+        hint={t("import.materialHint")}
       />
     </div>
   );

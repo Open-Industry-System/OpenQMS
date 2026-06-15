@@ -7,6 +7,7 @@ import {
   PlusOutlined, FileTextOutlined, DeleteOutlined, TableOutlined,
   SafetyCertificateOutlined, ExclamationCircleOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import {
   listSCs, deleteSC, safetyConfirm, safetyDismiss,
 } from "../../../api/specialCharacteristic";
@@ -22,7 +23,33 @@ const msaStatusColors: Record<string, string> = {
   PENDING: "orange",
 };
 
+function useSCListLabels(t: (key: string) => string) {
+  const typeOptions = [
+    { value: "", label: t("filter.all") },
+    { value: "CC", label: t("scType.CC") },
+    { value: "SC", label: t("scType.SC") },
+  ];
+
+  const sourceOptions = [
+    { value: "", label: t("filter.all") },
+    { value: "DFMEA", label: t("sourceType.DFMEA") },
+    { value: "PFMEA", label: t("sourceType.PFMEA") },
+  ];
+
+  const approvalStatusOptions = [
+    { value: "", label: t("filter.all") },
+    { value: "pending", label: t("approvalStatus.pending") },
+    { value: "submitted", label: t("approvalStatus.submitted") },
+    { value: "approved", label: t("approvalStatus.approved") },
+    { value: "rejected", label: t("approvalStatus.rejected") },
+  ];
+
+  return { typeOptions, sourceOptions, approvalStatusOptions };
+}
+
 export default function SCListPage() {
+  const { t } = useTranslation("specialCharacteristic");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [data, setData] = useState<SpecialCharacteristic[]>([]);
   const [total, setTotal] = useState(0);
@@ -38,6 +65,8 @@ export default function SCListPage() {
 
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
+
+  const { typeOptions, sourceOptions, approvalStatusOptions } = useSCListLabels(t);
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -66,48 +95,48 @@ export default function SCListPage() {
   const handleDelete = async (id: string) => {
     try {
       await deleteSC(id);
-      message.success("删除成功");
+      message.success(tc("messages.deleteSuccess"));
       fetchData();
     } catch {
-      message.error("删除失败");
+      message.error(tc("messages.deleteFailed"));
     }
   };
 
   const handleSafetyConfirm = async (id: string) => {
     try {
       await safetyConfirm(id);
-      message.success("已确认为安全特性");
+      message.success(t("message.confirmSafetySuccess"));
       fetchData();
     } catch {
-      message.error("确认失败");
+      message.error(t("message.confirmSafetyFailed"));
     }
   };
 
   const handleSafetyDismiss = async (id: string) => {
     try {
       await safetyDismiss(id);
-      message.success("已忽略安全建议");
+      message.success(t("message.dismissSuccess"));
       fetchData();
     } catch {
-      message.error("忽略失败");
+      message.error(t("message.dismissFailed"));
     }
   };
 
   const columns = [
     {
-      title: "SC编号",
+      title: t("column.scCode"),
       dataIndex: "sc_code",
       key: "sc_code",
       width: 140,
     },
     {
-      title: "名称",
+      title: t("column.name"),
       dataIndex: "sc_name",
       key: "sc_name",
       ellipsis: true,
     },
     {
-      title: "类型",
+      title: t("column.type"),
       dataIndex: "sc_type",
       key: "sc_type",
       width: 100,
@@ -124,21 +153,21 @@ export default function SCListPage() {
       ),
     },
     {
-      title: "客户符号",
+      title: t("column.customerSymbol"),
       dataIndex: "customer_symbol",
       key: "customer_symbol",
       width: 100,
       render: (v: string | null) => v || "-",
     },
     {
-      title: "分类",
+      title: t("column.category"),
       dataIndex: "sc_category",
       key: "sc_category",
       width: 120,
-      render: (v: string | null) => v || "-",
+      render: (v: string | null) => (v ? t(`category.${v}`) : "-"),
     },
     {
-      title: "来源类型",
+      title: t("column.sourceType"),
       dataIndex: "source_type",
       key: "source_type",
       width: 100,
@@ -147,7 +176,7 @@ export default function SCListPage() {
       ),
     },
     {
-      title: "来源FMEA",
+      title: t("column.sourceFMEA"),
       dataIndex: "source_fmea_document_no",
       key: "source_fmea_document_no",
       width: 160,
@@ -165,7 +194,7 @@ export default function SCListPage() {
         ),
     },
     {
-      title: "MSA状态",
+      title: t("column.msaStatus"),
       dataIndex: "msa_status",
       key: "msa_status",
       width: 100,
@@ -174,7 +203,7 @@ export default function SCListPage() {
       ),
     },
     {
-      title: "操作",
+      title: t("column.actions"),
       key: "actions",
       width: 280,
       render: (_: unknown, record: SpecialCharacteristic) => (
@@ -184,25 +213,25 @@ export default function SCListPage() {
             icon={<FileTextOutlined />}
             onClick={() => navigate(`/special-characteristics/${record.sc_id}`)}
           >
-            查看
+            {tc("actions.view")}
           </Button>
           {record.is_safety_suggested && !record.is_safety_related && canEdit('special_characteristic') && (
             <>
               <Button type="link" size="small" onClick={() => handleSafetyConfirm(record.sc_id)}>
-                确认安全
+                {t("action.confirmSafety")}
               </Button>
               <Button type="link" size="small" danger onClick={() => handleSafetyDismiss(record.sc_id)}>
-                忽略
+                {t("action.dismiss")}
               </Button>
             </>
           )}
           {canEdit('special_characteristic') && (
             <Popconfirm
-              title="确认删除该特殊特性？"
+              title={tc("messages.confirmDelete")}
               onConfirm={() => handleDelete(record.sc_id)}
             >
               <Button type="link" danger icon={<DeleteOutlined />}>
-                删除
+                {tc("actions.delete")}
               </Button>
             </Popconfirm>
           )}
@@ -224,10 +253,10 @@ export default function SCListPage() {
         <Space>
           <Title level={4} style={{ margin: 0 }}>
             <TableOutlined style={{ marginRight: 8 }} />
-            特殊特性清单
+            {t("pageTitle.scList")}
           </Title>
           <Select
-            placeholder="类型筛选"
+            placeholder={t("filter.type")}
             allowClear
             style={{ width: 120 }}
             value={scTypeFilter || undefined}
@@ -236,12 +265,12 @@ export default function SCListPage() {
               setPage(1);
             }}
           >
-            <Select.Option value="">全部</Select.Option>
-            <Select.Option value="CC">CC</Select.Option>
-            <Select.Option value="SC">SC</Select.Option>
+            {typeOptions.map((opt) => (
+              <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
+            ))}
           </Select>
           <Select
-            placeholder="来源筛选"
+            placeholder={t("filter.source")}
             allowClear
             style={{ width: 140 }}
             value={sourceTypeFilter || undefined}
@@ -250,39 +279,37 @@ export default function SCListPage() {
               setPage(1);
             }}
           >
-            <Select.Option value="">全部</Select.Option>
-            <Select.Option value="DFMEA">DFMEA</Select.Option>
-            <Select.Option value="PFMEA">PFMEA</Select.Option>
+            {sourceOptions.map((opt) => (
+              <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
+            ))}
           </Select>
           <Switch
             checked={safetyRelatedOnly}
             onChange={(v) => { setSafetyRelatedOnly(v); setPage(1); }}
-            checkedChildren="安全相关"
-            unCheckedChildren="全部"
+            checkedChildren={t("filter.safetyRelated")}
+            unCheckedChildren={t("filter.all")}
           />
           <Select
-            placeholder="审批状态"
+            placeholder={t("filter.approvalStatus")}
             allowClear
             style={{ width: 120 }}
             value={approvalStatusFilter || undefined}
             onChange={(v) => { setApprovalStatusFilter(v || ""); setPage(1); }}
           >
-            <Select.Option value="">全部</Select.Option>
-            <Select.Option value="pending">待提交</Select.Option>
-            <Select.Option value="submitted">待审批</Select.Option>
-            <Select.Option value="approved">已批准</Select.Option>
-            <Select.Option value="rejected">已驳回</Select.Option>
+            {approvalStatusOptions.map((opt) => (
+              <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
+            ))}
           </Select>
           <Switch
             checked={suggestedOnly}
             onChange={(v) => { setSuggestedOnly(v); setPage(1); }}
-            checkedChildren="仅建议"
-            unCheckedChildren="全部"
+            checkedChildren={t("filter.suggestedOnly")}
+            unCheckedChildren={t("filter.all")}
           />
         </Space>
         {canEdit('special_characteristic') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/special-characteristics/new")}>
-            新建特殊特性
+            {t("pageTitle.newSC")}
           </Button>
         )}
       </div>

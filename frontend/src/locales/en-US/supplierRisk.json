@@ -1,0 +1,133 @@
+{
+  "page": {
+    "evaluateAll": "Evaluate All Now",
+    "evaluateSuccess": "Evaluation completed",
+    "evaluateFailed": "Evaluation failed",
+    "highRiskSuppliers": "High-Risk Suppliers",
+    "criticalRisk": "Critical Risk",
+    "openAlerts": "Open Alerts",
+    "avgRiskScore": "Average Risk Score",
+    "riskMatrixTitle": "Risk Matrix (Quality vs Delivery)",
+    "alertListTitle": "Alert List",
+    "noData": "No data"
+  },
+  "config": {
+    "rules": "Rule Configuration",
+    "channels": "Notification Channels"
+  },
+  "alert": {
+    "columns": {
+      "supplierNo": "Supplier No.",
+      "supplierName": "Supplier Name",
+      "riskLevel": "Risk Level",
+      "riskScore": "Risk Score",
+      "status": "Status",
+      "snapshotDate": "Snapshot Date",
+      "actions": "Actions"
+    },
+    "placeholder": {
+      "riskLevel": "Risk Level",
+      "status": "Status"
+    },
+    "handle": "Handle",
+    "riskLevels": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "statuses": {
+      "open": "Open",
+      "acknowledged": "Acknowledged",
+      "action_taken": "Action Taken",
+      "ignored": "Ignored",
+      "closed": "Closed"
+    }
+  },
+  "channel": {
+    "add": "Add Channel",
+    "addTitle": "Add Notification Channel",
+    "columns": {
+      "type": "Type",
+      "minRiskLevel": "Min Risk Level",
+      "enabled": "Enabled",
+      "actions": "Actions"
+    },
+    "types": {
+      "email": "Email",
+      "webhook": "Webhook"
+    },
+    "minRiskLevels": {
+      "high": "High",
+      "critical": "Critical"
+    },
+    "form": {
+      "type": "Type",
+      "minRiskLevel": "Min Risk Level",
+      "emailAddresses": "Email Addresses (comma separated)",
+      "webhookUrl": "Webhook URL",
+      "secret": "Signature Secret"
+    },
+    "placeholders": {
+      "emailAddresses": "a@b.com,c@d.com",
+      "webhookUrl": "https://hooks.example.com/..."
+    },
+    "messages": {
+      "created": "Created",
+      "createFailed": "Create failed",
+      "updateFailed": "Update failed",
+      "deleted": "Deleted",
+      "deleteFailed": "Delete failed"
+    }
+  },
+  "handleDrawer": {
+    "title": "Handle Alert — {{supplier_name}}",
+    "labels": {
+      "riskLevel": "Risk Level",
+      "totalScore": "Total Risk Score",
+      "qualityScore": "Quality Score",
+      "deliveryScore": "Delivery Score",
+      "complianceScore": "Compliance Score",
+      "currentStatus": "Current Status"
+    },
+    "notePlaceholder": "Handling notes (required when ignoring)",
+    "actions": {
+      "acknowledge": "Acknowledge",
+      "ignore": "Ignore",
+      "close": "Close",
+      "createScar": "Create SCAR",
+      "createCapa": "Create CAPA"
+    },
+    "messages": {
+      "ignoreReasonRequired": "Reason is required to ignore the alert",
+      "operationSuccess": "Operation successful",
+      "operationFailed": "Operation failed",
+      "scarCreated": "SCAR created",
+      "capaCreated": "CAPA created",
+      "createFailed": "Create failed"
+    }
+  },
+  "ruleConfig": {
+    "columns": {
+      "rule": "Rule",
+      "category": "Category",
+      "enabled": "Enabled",
+      "weight": "Weight",
+      "threshold": "Threshold"
+    },
+    "categories": {
+      "quality": "Quality",
+      "delivery": "Delivery",
+      "compliance": "Compliance"
+    },
+    "messages": {
+      "updateSuccess": "Updated",
+      "weightUpdated": "Weight updated",
+      "updateFailed": "Update failed"
+    }
+  },
+  "riskMatrix": {
+    "xAxis": "Quality Risk Score",
+    "yAxis": "Delivery Risk Score"
+  }
+}

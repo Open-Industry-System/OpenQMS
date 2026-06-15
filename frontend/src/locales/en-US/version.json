@@ -1,0 +1,80 @@
+{
+  "rollback": {
+    "title": "Confirm Version Rollback",
+    "descriptionTitle": "Version Rollback Notes",
+    "description": "Rolling back to version v{{major}}.{{minor}} will create a new minor version with the same content as the target version.",
+    "irreversible": "This operation cannot be undone. Please proceed with caution.",
+    "reasonLabel": "Rollback Reason",
+    "reasonRequired": "Please enter rollback reason",
+    "reasonPlaceholder": "Please explain why you need to roll back to this version...",
+    "success": "Version rolled back successfully",
+    "failed": "Rollback failed"
+  },
+  "create": {
+    "title": "Create Version",
+    "summaryLabel": "Change Summary",
+    "summaryRequired": "Please enter change summary",
+    "summaryPlaceholder": "Please describe the main content of this version change...",
+    "isMajor": "Major Version",
+    "major": "Major",
+    "minor": "Minor",
+    "success": "Version created successfully",
+    "failed": "Create failed"
+  },
+  "syncPreview": {
+    "title": "FMEA Sync Preview",
+    "source": "Sync Source",
+    "fmeaVersion": "FMEA Version: {{version}}",
+    "addCount": "Add: {{count}}",
+    "updateCount": "Update: {{count}}",
+    "deleteCount": "Delete: {{count}}",
+    "loadFailed": "Failed to load sync preview",
+    "selectAtLeastOne": "Please select at least one item to sync",
+    "syncSuccess": "Sync successful",
+    "syncFailed": "Sync failed",
+    "cancel": "Cancel",
+    "confirmSync": "Confirm Sync",
+    "loadPreviewFailed": "Failed to load preview",
+    "none": "None",
+    "columns": {
+      "action": "Action",
+      "stepNo": "Step No.",
+      "currentValue": "Current Value",
+      "fmeaNewValue": "FMEA New Value",
+      "mergedValue": "Merged Value"
+    },
+    "actions": {
+      "add": "Add",
+      "sync": "Update",
+      "delete": "Delete"
+    }
+  },
+  "compare": {
+    "versionCompare": "Version Compare",
+    "arrow": "→",
+    "all": "All ({{count}})",
+    "added": "Added ({{count}})",
+    "deleted": "Deleted ({{count}})",
+    "modified": "Modified ({{count}})",
+    "loadFailed": "Failed to load comparison data",
+    "noMatch": "No matching changes",
+    "addedTag": "Added",
+    "deletedTag": "Deleted",
+    "modifiedTag": "Modified"
+  },
+  "history": {
+    "majorOnly": "Major versions only",
+    "createVersion": "Create Version",
+    "noRecords": "No version records",
+    "view": "View",
+    "compare": "Compare",
+    "rollback": "Rollback",
+    "changeTypes": {
+      "submit": "Submit for Approval",
+      "approve": "Approved",
+      "manual": "Manual Create",
+      "rollback": "Version Rollback",
+      "fmea_sync": "FMEA Sync"
+    }
+  }
+}

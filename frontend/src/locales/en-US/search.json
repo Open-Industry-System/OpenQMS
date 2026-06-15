@@ -1,0 +1,17 @@
+{
+  "qa": {
+    "answerTitle": "💬 Answer",
+    "sourcesTitle": "Sources ({{count}})",
+    "relevance": "Relevance: {{score}}%",
+    "queryTime": "Query time: {{ms}}ms | LLM: {{available}}",
+    "placeholder": "Enter a natural language question to search historical quality records...",
+    "search": "Search",
+    "qa": "Q&A",
+    "switchToSearch": "Switch to search mode",
+    "switchToQa": "Switch to Q&A mode",
+    "filterType": "Filter type",
+    "resultsFound": "Found {{count}} results in {{ms}}ms",
+    "similarity": "Similarity: {{score}}% | Source: {{source}}",
+    "startSearch": "Enter a question to start searching"
+  }
+}

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Table, Tag, Typography, Select, App,
 } from "antd";
+import { useTranslation } from "react-i18next";
 import { listProductionOrders } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { MESProductionOrder } from "../../types/mes";
@@ -15,14 +16,19 @@ const statusColors: Record<string, string> = {
   closed: "default",
 };
 
-const statusLabels: Record<string, string> = {
-  planned: "计划中",
-  in_progress: "进行中",
-  completed: "已完成",
-  closed: "已关闭",
-};
+function useOrderStatusLabels() {
+  const { t } = useTranslation("mes");
+  return useMemo(() => ({
+    planned: t("orders.status.planned"),
+    in_progress: t("orders.status.inProgress"),
+    completed: t("orders.status.completed"),
+    closed: t("orders.status.closed"),
+  }), [t]);
+}
 
 export default function MESOrdersPage() {
+  const { t } = useTranslation("mes");
+  const statusLabels = useOrderStatusLabels();
   const { message } = App.useApp();
   const [data, setData] = useState<MESProductionOrder[]>([]);
   const [total, setTotal] = useState(0);
@@ -38,7 +44,7 @@ export default function MESOrdersPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载生产工单失败"))
+      .catch(() => message.error(t("orders.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -52,74 +58,74 @@ export default function MESOrdersPage() {
     setPage(1);
   };
 
+  const statusOptions = useMemo(
+    () => Object.entries(statusLabels).map(([value, label]) => ({ value, label })),
+    [statusLabels],
+  );
+
   const columns = [
-    { title: "工单号", dataIndex: "order_no", key: "order_no", width: 140 },
+    { title: t("orders.columns.orderNo"), dataIndex: "order_no", key: "order_no", width: 140 },
     {
-      title: "产品型号",
+      title: t("orders.columns.productModel"),
       dataIndex: "product_model",
       key: "product_model",
       ellipsis: true,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "计划数量",
+      title: t("orders.columns.plannedQty"),
       dataIndex: "planned_qty",
       key: "planned_qty",
       width: 100,
       render: (v: number | null) => v ?? "—",
     },
     {
-      title: "实际数量",
+      title: t("orders.columns.actualQty"),
       dataIndex: "actual_qty",
       key: "actual_qty",
       width: 100,
       render: (v: number | null) => v ?? "—",
     },
     {
-      title: "状态",
+      title: t("orders.columns.status"),
       dataIndex: "status",
       key: "status",
       width: 100,
       render: (s: string) => (
         <Tag color={statusColors[s] || "default"}>
-          {statusLabels[s] || s}
+          {statusLabels[s as keyof typeof statusLabels] || s}
         </Tag>
       ),
     },
     {
-      title: "开始时间",
+      title: t("orders.columns.startedAt"),
       dataIndex: "started_at",
       key: "started_at",
       width: 170,
       render: (v: string | null) =>
-        v ? new Date(v).toLocaleString("zh-CN") : "—",
+        v ? new Date(v).toLocaleString() : "—",
     },
     {
-      title: "完成时间",
+      title: t("orders.columns.completedAt"),
       dataIndex: "completed_at",
       key: "completed_at",
       width: 170,
       render: (v: string | null) =>
-        v ? new Date(v).toLocaleString("zh-CN") : "—",
+        v ? new Date(v).toLocaleString() : "—",
     },
   ];
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, alignItems: "center" }}>
-        <Title level={4} style={{ margin: 0 }}>生产工单</Title>
+        <Title level={4} style={{ margin: 0 }}>{t("orders.title")}</Title>
         <Select
-          placeholder="筛选状态"
+          placeholder={t("orders.filterPlaceholder")}
           allowClear
           style={{ width: 140 }}
           value={statusFilter || undefined}
           onChange={handleStatusChange}
-          options={[
-            { value: "planned", label: "计划中" },
-            { value: "in_progress", label: "进行中" },
-            { value: "completed", label: "已完成" },
-            { value: "closed", label: "已关闭" },
-          ]}
+          options={statusOptions}
         />
       </div>
 

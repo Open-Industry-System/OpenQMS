@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Dropdown, Spin } from "antd";
 import { OpenAIOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type { DraftFormat } from "../../types";
 
 const STORAGE_KEY = "openqms_ai_draft_preference";
@@ -33,6 +34,7 @@ export default function AIDraftButton({
   error,
   onGenerate,
 }: AIDraftButtonProps) {
+  const { t } = useTranslation("capa");
   const [format, setFormat] = useState<DraftFormat>(loadFormat);
 
   useEffect(() => {
@@ -42,12 +44,12 @@ export default function AIDraftButton({
   const items = [
     {
       key: "structured",
-      label: "结构化",
+      label: t("draft.formats.structured"),
       onClick: () => setFormat("structured"),
     },
     {
       key: "paragraph",
-      label: "段落",
+      label: t("draft.formats.paragraph"),
       onClick: () => setFormat("paragraph"),
     },
   ];
@@ -64,7 +66,7 @@ export default function AIDraftButton({
       menu={{ items }}
       title={error || undefined}
     >
-      {loading ? "草拟中..." : "AI草拟"}
+      {loading ? t("draft.drafting") : t("draft.button")}
     </Dropdown.Button>
   );
 }

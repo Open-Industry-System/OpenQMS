@@ -1,0 +1,80 @@
+{
+  "rollback": {
+    "title": "确认版本回退",
+    "descriptionTitle": "版本回退说明",
+    "description": "回退到版本 v{{major}}.{{minor}} 将创建一个新的次版本号，内容与目标版本相同。",
+    "irreversible": "此操作不可撤销，请谨慎操作。",
+    "reasonLabel": "回退原因",
+    "reasonRequired": "请输入回退原因",
+    "reasonPlaceholder": "请说明为什么需要回退到此版本...",
+    "success": "版本回退成功",
+    "failed": "回退失败"
+  },
+  "create": {
+    "title": "创建版本",
+    "summaryLabel": "变更摘要",
+    "summaryRequired": "请输入变更摘要",
+    "summaryPlaceholder": "请描述本次版本变更的主要内容...",
+    "isMajor": "主版本",
+    "major": "主",
+    "minor": "次",
+    "success": "版本创建成功",
+    "failed": "创建失败"
+  },
+  "syncPreview": {
+    "title": "FMEA 同步预览",
+    "source": "同步来源",
+    "fmeaVersion": "FMEA版本: {{version}}",
+    "addCount": "新增: {{count}}",
+    "updateCount": "更新: {{count}}",
+    "deleteCount": "删除: {{count}}",
+    "loadFailed": "无法加载同步预览",
+    "selectAtLeastOne": "请至少选择一项进行同步",
+    "syncSuccess": "同步成功",
+    "syncFailed": "同步失败",
+    "cancel": "取消",
+    "confirmSync": "确认同步",
+    "loadPreviewFailed": "无法加载预览",
+    "none": "无",
+    "columns": {
+      "action": "操作",
+      "stepNo": "工序号",
+      "currentValue": "当前值",
+      "fmeaNewValue": "FMEA新值",
+      "mergedValue": "合并值"
+    },
+    "actions": {
+      "add": "新增",
+      "sync": "更新",
+      "delete": "删除"
+    }
+  },
+  "compare": {
+    "versionCompare": "版本对比",
+    "arrow": "→",
+    "all": "全部 ({{count}})",
+    "added": "新增 ({{count}})",
+    "deleted": "删除 ({{count}})",
+    "modified": "修改 ({{count}})",
+    "loadFailed": "无法加载对比数据",
+    "noMatch": "无匹配变更",
+    "addedTag": "新增",
+    "deletedTag": "删除",
+    "modifiedTag": "修改"
+  },
+  "history": {
+    "majorOnly": "仅主版本",
+    "createVersion": "创建版本",
+    "noRecords": "暂无版本记录",
+    "view": "查看",
+    "compare": "对比",
+    "rollback": "回退",
+    "changeTypes": {
+      "submit": "提交审批",
+      "approve": "审批通过",
+      "manual": "手动创建",
+      "rollback": "版本回退",
+      "fmea_sync": "FMEA同步"
+    }
+  }
+}

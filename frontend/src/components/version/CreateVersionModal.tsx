@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Modal, Form, Input, Switch, message } from "antd";
+import { useTranslation } from "react-i18next";
 
 interface CreateVersionModalProps {
   open: boolean;
@@ -16,6 +17,7 @@ export default function CreateVersionModal({
   onClose,
   onSuccess,
 }: CreateVersionModalProps) {
+  const { t } = useTranslation("version");
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -44,11 +46,11 @@ export default function CreateVersionModal({
         });
       }
 
-      message.success("版本创建成功");
+      message.success(t("create.success"));
       onSuccess();
       onClose();
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "创建失败";
+      const errorMessage = err instanceof Error ? err.message : t("create.failed");
       message.error(errorMessage);
     } finally {
       setLoading(false);
@@ -58,7 +60,7 @@ export default function CreateVersionModal({
   return (
     <Modal
       open={open}
-      title="创建版本"
+      title={t("create.title")}
       onCancel={onClose}
       onOk={handleSubmit}
       confirmLoading={loading}
@@ -67,16 +69,16 @@ export default function CreateVersionModal({
       <Form form={form} layout="vertical">
         <Form.Item
           name="change_summary"
-          label="变更摘要"
-          rules={[{ required: true, message: "请输入变更摘要" }]}
+          label={t("create.summaryLabel")}
+          rules={[{ required: true, message: t("create.summaryRequired") }]}
         >
           <Input.TextArea
             rows={4}
-            placeholder="请描述本次版本变更的主要内容..."
+            placeholder={t("create.summaryPlaceholder")}
           />
         </Form.Item>
-        <Form.Item name="is_major" label="主版本" valuePropName="checked">
-          <Switch checkedChildren="主" unCheckedChildren="次" />
+        <Form.Item name="is_major" label={t("create.isMajor")} valuePropName="checked">
+          <Switch checkedChildren={t("create.major")} unCheckedChildren={t("create.minor")} />
         </Form.Item>
       </Form>
     </Modal>

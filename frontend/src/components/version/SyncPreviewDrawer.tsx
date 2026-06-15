@@ -9,6 +9,7 @@ import {
   message,
   Spin,
 } from "antd";
+import { useTranslation } from "react-i18next";
 import type { SyncPreviewItem, SyncPreviewResponse } from "../../types";
 
 interface SyncPreviewDrawerProps {
@@ -18,22 +19,30 @@ interface SyncPreviewDrawerProps {
   onSuccess: () => void;
 }
 
-const ACTION_CONFIG: Record<string, { label: string; color: string }> = {
-  add: { label: "新增", color: "green" },
-  sync: { label: "更新", color: "blue" },
-  delete: { label: "删除", color: "red" },
-};
-
 export default function SyncPreviewDrawer({
   open,
   cpId,
   onClose,
   onSuccess,
 }: SyncPreviewDrawerProps) {
+  const { t } = useTranslation("version");
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState<SyncPreviewResponse | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [syncing, setSyncing] = useState(false);
+
+  const getActionConfig = (action: string) => {
+    switch (action) {
+      case "add":
+        return { label: t("syncPreview.actions.add"), color: "green" };
+      case "sync":
+        return { label: t("syncPreview.actions.sync"), color: "blue" };
+      case "delete":
+        return { label: t("syncPreview.actions.delete"), color: "red" };
+      default:
+        return { label: action, color: "default" };
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -47,7 +56,6 @@ export default function SyncPreviewDrawer({
         const resp = await getSyncPreview(cpId);
         if (!cancelled) {
           setPreview(resp);
-          // Default: select all non-delete items
           const selectableKeys = resp.items
             .filter((item) => item.action !== "delete")
             .map((item) => item.item_id);
@@ -55,7 +63,7 @@ export default function SyncPreviewDrawer({
         }
       } catch {
         if (!cancelled) {
-          message.error("无法加载同步预览");
+          message.error(t("syncPreview.loadFailed"));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -66,11 +74,11 @@ export default function SyncPreviewDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, cpId]);
+  }, [open, cpId, t]);
 
   const handleSync = async () => {
     if (!selectedRowKeys.length) {
-      message.warning("请至少选择一项进行同步");
+      message.warning(t("syncPreview.selectAtLeastOne"));
       return;
     }
 
@@ -78,11 +86,11 @@ export default function SyncPreviewDrawer({
     try {
       const { applySyncFromFMEA } = await import("../../api/version");
       await applySyncFromFMEA(cpId, selectedRowKeys as string[]);
-      message.success("同步成功");
+      message.success(t("syncPreview.syncSuccess"));
       onSuccess();
       onClose();
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "同步失败";
+      const errorMessage = err instanceof Error ? err.message : t("syncPreview.syncFailed");
       message.error(errorMessage);
     } finally {
       setSyncing(false);
@@ -90,9 +98,9 @@ export default function SyncPreviewDrawer({
   };
 
   const formatDictValue = (val: Record<string, string | null> | null) => {
-    if (!val) return <span style={{ color: "#999" }}>无</span>;
+    if (!val) return <span style={{ color: "#999" }}>{t("syncPreview.none")}</span>;
     const entries = Object.entries(val).filter(([, v]) => v);
-    if (!entries.length) return <span style={{ color: "#999" }}>无</span>;
+    if (!entries.length) return <span style={{ color: "#999" }}>{t("syncPreview.none")}</span>;
     return (
       <div style={{ fontSize: 12, lineHeight: 1.6 }}>
         {entries.map(([k, v]) => (
@@ -104,37 +112,37 @@ export default function SyncPreviewDrawer({
 
   const columns = [
     {
-      title: "操作",
+      title: t("syncPreview.columns.action"),
       dataIndex: "action",
       key: "action",
       width: 80,
       render: (action: string) => {
-        const cfg = ACTION_CONFIG[action] || { label: action, color: "default" };
+        const cfg = getActionConfig(action);
         return <Tag color={cfg.color}>{cfg.label}</Tag>;
       },
     },
     {
-      title: "工序号",
+      title: t("syncPreview.columns.stepNo"),
       dataIndex: "step_no",
       key: "step_no",
       width: 100,
     },
     {
-      title: "当前值",
+      title: t("syncPreview.columns.currentValue"),
       dataIndex: "current_value",
       key: "current_value",
       width: 180,
       render: formatDictValue,
     },
     {
-      title: "FMEA新值",
+      title: t("syncPreview.columns.fmeaNewValue"),
       dataIndex: "fmea_new_value",
       key: "fmea_new_value",
       width: 180,
       render: formatDictValue,
     },
     {
-      title: "合并值",
+      title: t("syncPreview.columns.mergedValue"),
       dataIndex: "merged_value",
       key: "merged_value",
       width: 180,
@@ -145,19 +153,19 @@ export default function SyncPreviewDrawer({
   return (
     <Drawer
       open={open}
-      title="FMEA 同步预览"
+      title={t("syncPreview.title")}
       width={960}
       onClose={onClose}
       footer={
         <Space style={{ width: "100%", justifyContent: "flex-end" }}>
-          <Button onClick={onClose}>取消</Button>
+          <Button onClick={onClose}>{t("syncPreview.cancel")}</Button>
           <Button
             type="primary"
             onClick={handleSync}
             loading={syncing}
             disabled={!preview || selectedRowKeys.length === 0}
           >
-            确认同步
+            {t("syncPreview.confirmSync")}
           </Button>
         </Space>
       }
@@ -169,16 +177,16 @@ export default function SyncPreviewDrawer({
       ) : preview ? (
         <div>
           <Alert
-            message="同步来源"
+            message={t("syncPreview.source")}
             description={
               <div>
                 <p>
-                  FMEA版本: <strong>{preview.fmea_version}</strong>
+                  {t("syncPreview.fmeaVersion", { version: preview.fmea_version })}
                 </p>
                 <p style={{ marginTop: 4 }}>
-                  新增: <Tag color="green">{preview.summary.add_count}</Tag>
-                  更新: <Tag color="blue">{preview.summary.update_count}</Tag>
-                  删除: <Tag color="red">{preview.summary.delete_count}</Tag>
+                  {t("syncPreview.addCount", { count: preview.summary.add_count })}
+                  {t("syncPreview.updateCount", { count: preview.summary.update_count })}
+                  {t("syncPreview.deleteCount", { count: preview.summary.delete_count })}
                 </p>
               </div>
             }
@@ -203,7 +211,7 @@ export default function SyncPreviewDrawer({
         </div>
       ) : (
         <div style={{ textAlign: "center", padding: 40 }}>
-          无法加载预览
+          {t("syncPreview.loadPreviewFailed")}
         </div>
       )}
     </Drawer>

@@ -13,6 +13,41 @@
     "rework": "打回修改",
     "resubmit": "重新提交"
   },
+  "list": {
+    "title": "FMEA 管理",
+    "newFMEA": "新建 FMEA",
+    "columns": {
+      "documentNo": "文档编号",
+      "title": "标题",
+      "type": "类型",
+      "status": "状态",
+      "version": "版本",
+      "updatedAt": "更新时间",
+      "actions": "操作"
+    },
+    "type": {
+      "PFMEA": "PFMEA",
+      "DFMEA": "DFMEA"
+    },
+    "typeOption": {
+      "pfmea": "PFMEA - 过程失效模式与影响分析",
+      "dfmea": "DFMEA - 设计失效模式与影响分析"
+    }
+  },
+  "create": {
+    "title": "新建 FMEA",
+    "defaultTitle": "新DFMEA",
+    "type": "FMEA 类型",
+    "typeRequired": "请选择 FMEA 类型",
+    "documentNo": "文档编号",
+    "documentNoRequired": "请输入文档编号",
+    "documentNoPlaceholder": "如 PFMEA-2026-001",
+    "titleLabel": "标题",
+    "titleRequired": "请输入标题",
+    "titlePlaceholder": "如 SMT焊接工序PFMEA",
+    "problemDescription": "问题描述（可选）",
+    "problemDescriptionPlaceholder": "简述工艺步骤或关注点（可选，用于智能推荐）"
+  },
   "editor": {
     "title": "编辑器",
     "failureAnalysis": "失效分析",
@@ -111,6 +146,9 @@
     "versionCompare": "版本对比",
     "noGraphData": "暂无图谱数据",
     "traceImpact": "追溯影响",
-    "traceCause": "追溯原因"
+    "traceCause": "追溯原因",
+    "createSuccess": "FMEA 创建成功",
+    "createFailed": "创建失败",
+    "dfmeaCreateSuccess": "DFMEA 创建成功"
   }
 }

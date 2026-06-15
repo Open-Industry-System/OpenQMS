@@ -1,0 +1,138 @@
+{
+  "pageTitle": {
+    "list": "管理评审",
+    "detail": "管理评审详情"
+  },
+  "status": {
+    "review": {
+      "draft": "草稿",
+      "data_collected": "数据已汇总",
+      "in_review": "评审中",
+      "closed": "已关闭"
+    },
+    "report": {
+      "none": "未生成",
+      "draft": "草稿",
+      "final": "已定稿"
+    },
+    "output": {
+      "pending": "待处理",
+      "in_progress": "进行中",
+      "completed": "待验证",
+      "verified": "已验证"
+    }
+  },
+  "category": {
+    "improvement_opportunity": "改进机会",
+    "system_change": "体系变更",
+    "resource_need": "资源需求"
+  },
+  "dataSource": {
+    "previousReviewActions": "1. 以往管理评审措施落实",
+    "qualityGoals": "2. 质量目标实现程度",
+    "internalAudits": "3. 审核结果",
+    "capaStats": "4. 不合格与纠正措施",
+    "fmeaRisks": "5. FMEA 风险分析",
+    "spcCapability": "6. SPC 过程能力",
+    "supplierPerformance": "7. 外部供方绩效",
+    "externalFactors": "8. 内外部因素变化",
+    "resourceAdequacy": "9. 资源充分性",
+    "customerSatisfaction": "10. 顾客满意与反馈",
+    "equipmentMonitoring": "11. 监视测量结果(设备)",
+    "copq": "12. 不良质量成本",
+    "manufacturingFeasibility": "13. 制造可行性评估",
+    "manualTag": "手动录入",
+    "pendingModule": "待模块上线后自动切换",
+    "noData": "暂无数据"
+  },
+  "card": {
+    "dataPackage": "评审输入数据包",
+    "meetingMinutes": "会议纪要",
+    "outputs": "评审输出措施",
+    "report": "管理评审报告",
+    "historyVersions": "历史版本"
+  },
+  "table": {
+    "docNo": "编号",
+    "title": "主题",
+    "reviewDate": "评审日期",
+    "productLine": "产品线",
+    "category": "类别",
+    "description": "描述",
+    "dueDate": "截止日期",
+    "status": "状态",
+    "operations": "操作"
+  },
+  "actions": {
+    "newReview": "新建评审",
+    "collectData": "汇总数据",
+    "refreshData": "刷新数据",
+    "backToDraft": "返回草稿",
+    "startReview": "开始评审",
+    "closeReview": "关闭评审",
+    "reopenReview": "重新打开",
+    "addOutput": "添加措施",
+    "start": "开始",
+    "complete": "完成",
+    "verify": "验证",
+    "exportMarkdown": "导出 Markdown",
+    "generateReport": "AI 生成报告",
+    "regenerate": "重新生成",
+    "saveDraft": "保存草稿",
+    "finalize": "定稿归档",
+    "reopenEdit": "重新打开编辑",
+    "restoreDraft": "恢复为草稿",
+    "cancelPreview": "取消预览"
+  },
+  "form": {
+    "category": "类别",
+    "description": "描述",
+    "dueDate": "截止日期",
+    "verificationNotes": "验证结论"
+  },
+  "modal": {
+    "addOutput": "添加措施",
+    "effectVerification": "效果验证"
+  },
+  "report": {
+    "statusLabel": "报告状态：",
+    "noReportData": "暂无报告数据，请点击「AI 生成报告」开始初始化",
+    "previewingVersion": "正在预览历史版本 v{{version}}",
+    "restoreConfirmTitle": "恢复为草稿？",
+    "restoreConfirmContent": "将历史版本 v{{version}} 的内容恢复为当前草稿，当前草稿内容将被覆盖。",
+    "regenerateConfirmTitle": "确认重新生成？",
+    "regenerateConfirmContent": "重新生成将覆盖当前草稿中的人工编辑内容。"
+  },
+  "sectionEditor": {
+    "aiAnalysis": "AI 分析：",
+    "keyFindings": "关键发现：",
+    "recommendations": "改进建议：",
+    "placeholder": "在此输入人工编辑内容，导出时优先使用..."
+  },
+  "descriptions": {
+    "title": "评审主题",
+    "reviewDate": "评审日期",
+    "actualDate": "实际日期",
+    "productLine": "产品线",
+    "allPlants": "全厂",
+    "location": "地点"
+  },
+  "messages": {
+    "loadFailed": "加载失败",
+    "operationSuccess": "操作成功",
+    "collectFailed": "汇总数据失败",
+    "saveDraftSuccess": "草稿已保存",
+    "saveDraftFailed": "保存失败",
+    "finalizeSuccess": "报告已定稿归档",
+    "finalizeFailed": "定稿失败",
+    "reopenSuccess": "报告已重新打开",
+    "reopenFailed": "重新打开失败",
+    "exportFailed": "导出失败",
+    "generateFailed": "生成失败",
+    "restoreSuccess": "已恢复为草稿"
+  },
+  "confirm": {
+    "reopenReview": "确认重新打开?",
+    "deleteOutput": "确认删除?"
+  }
+}

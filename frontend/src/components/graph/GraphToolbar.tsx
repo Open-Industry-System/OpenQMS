@@ -8,6 +8,7 @@ import {
   BranchesOutlined,
   ApartmentOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 
 export type GraphLayout = "dagre" | "force" | "compact-box";
 
@@ -28,45 +29,46 @@ export default function GraphToolbar({
   onFitView,
   onDownload,
 }: GraphToolbarProps) {
+  const { t } = useTranslation("graph");
   return (
     <Space wrap>
-      <Tooltip title="层次布局">
+      <Tooltip title={t("toolbar.hierarchical")}>
         <Button
           icon={<ApartmentOutlined />}
           type={layout === "dagre" ? "primary" : "default"}
           onClick={() => onLayoutChange("dagre")}
         >
-          层次
+          {t("toolbar.hierarchical")}
         </Button>
       </Tooltip>
-      <Tooltip title="力导向布局">
+      <Tooltip title={t("toolbar.force")}>
         <Button
           icon={<BranchesOutlined />}
           type={layout === "force" ? "primary" : "default"}
           onClick={() => onLayoutChange("force")}
         >
-          力导向
+          {t("toolbar.force")}
         </Button>
       </Tooltip>
-      <Tooltip title="紧凑树">
+      <Tooltip title={t("toolbar.compactTree")}>
         <Button
           icon={<ColumnWidthOutlined />}
           type={layout === "compact-box" ? "primary" : "default"}
           onClick={() => onLayoutChange("compact-box")}
         >
-          紧凑树
+          {t("toolbar.compactTree")}
         </Button>
       </Tooltip>
-      <Tooltip title="放大">
+      <Tooltip title={t("toolbar.zoomIn")}>
         <Button icon={<ZoomInOutlined />} onClick={onZoomIn} />
       </Tooltip>
-      <Tooltip title="缩小">
+      <Tooltip title={t("toolbar.zoomOut")}>
         <Button icon={<ZoomOutOutlined />} onClick={onZoomOut} />
       </Tooltip>
-      <Tooltip title="适应画布">
+      <Tooltip title={t("toolbar.fitView")}>
         <Button icon={<FullscreenOutlined />} onClick={onFitView} />
       </Tooltip>
-      <Tooltip title="下载快照">
+      <Tooltip title={t("toolbar.download")}>
         <Button icon={<DownloadOutlined />} onClick={onDownload} />
       </Tooltip>
     </Space>

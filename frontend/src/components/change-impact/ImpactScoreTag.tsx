@@ -1,22 +1,24 @@
 import { Tag } from "antd";
+import { useTranslation } from "react-i18next";
 
 interface ImpactScoreTagProps {
   score: number;
 }
 
 export default function ImpactScoreTag({ score }: ImpactScoreTagProps) {
+  const { t } = useTranslation("changeImpact");
   let color: string;
   let label: string;
 
   if (score >= 7) {
     color = "red";
-    label = "高";
+    label = t("affectedNode.score.high");
   } else if (score >= 4) {
     color = "orange";
-    label = "中";
+    label = t("affectedNode.score.medium");
   } else {
     color = "green";
-    label = "低";
+    label = t("affectedNode.score.low");
   }
 
   return (

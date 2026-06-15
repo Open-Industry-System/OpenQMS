@@ -1,0 +1,109 @@
+{
+  "pageTitle": {
+    "ppapList": "PPAP 提交",
+    "newPPAP": "新建 PPAP"
+  },
+  "tab": {
+    "all": "全部",
+    "draft": "草稿",
+    "underReview": "审查中",
+    "approved": "已批准",
+    "rejected": "已驳回"
+  },
+  "status": {
+    "draft": "草稿",
+    "underReview": "审查中",
+    "approved": "已批准",
+    "rejected": "已驳回"
+  },
+  "elementStatus": {
+    "pending": "待审查",
+    "inReview": "审查中",
+    "approved": "已批准",
+    "notApplicable": "不适用"
+  },
+  "kpi": {
+    "total": "PPAP 总数",
+    "pending": "待审",
+    "approved": "已批准",
+    "rejected": "已驳回"
+  },
+  "column": {
+    "ppapNo": "PPAP编号",
+    "supplier": "供应商",
+    "partNo": "零件号",
+    "partName": "零件名称",
+    "submissionLevel": "提交等级",
+    "status": "状态",
+    "revision": "版本",
+    "createdAt": "创建时间",
+    "action": "操作"
+  },
+  "elementColumn": {
+    "no": "序号",
+    "elementName": "元素名称",
+    "required": "是否必须",
+    "status": "状态",
+    "reviewer": "审查人",
+    "reviewTime": "审查时间",
+    "file": "文件",
+    "notes": "备注",
+    "action": "操作"
+  },
+  "form": {
+    "supplier": "供应商",
+    "partNo": "零件号",
+    "partName": "零件名称",
+    "submissionLevel": "提交等级",
+    "customerName": "客户名称",
+    "productLine": "产品线"
+  },
+  "placeholder": {
+    "searchSupplier": "搜索供应商"
+  },
+  "label": {
+    "required": "是",
+    "notRequired": "—",
+    "version": "版本 {{revision}}",
+    "status": "状态",
+    "ppapInfo": "PPAP 信息",
+    "rejectionReason": "驳回原因",
+    "elements": "18 元素",
+    "filePath": "文件路径",
+    "notes": "备注",
+    "submissionDate": "提交日期"
+  },
+  "level": {
+    "1": "Level 1",
+    "2": "Level 2",
+    "3": "Level 3",
+    "4": "Level 4",
+    "5": "Level 5"
+  },
+  "action": {
+    "submitForReview": "提交审查",
+    "approve": "批准",
+    "reject": "驳回",
+    "resubmit": "重新提交",
+    "delete": "删除",
+    "view": "查看",
+    "editElement": "编辑元素"
+  },
+  "modal": {
+    "rejectTitle": "驳回 PPAP",
+    "rejectPlaceholder": "请输入驳回原因",
+    "editElementTitle": "编辑元素: {{name}}"
+  },
+  "message": {
+    "createSuccess": "PPAP 创建成功",
+    "statusUpdated": "状态更新成功",
+    "elementUpdated": "元素已更新",
+    "deleted": "PPAP 已删除",
+    "enterRejectReason": "请输入驳回原因",
+    "deleteConfirmTitle": "确认删除",
+    "deleteConfirmContent": "确定要删除此 PPAP 提交吗？此操作不可撤销。",
+    "selectSupplier": "请选择供应商",
+    "enterPartNo": "请输入零件号",
+    "enterPartName": "请输入零件名称"
+  }
+}

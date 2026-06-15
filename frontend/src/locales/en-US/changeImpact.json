@@ -1,0 +1,46 @@
+{
+  "page": {
+    "title": "Change Impact Analysis",
+    "history": "Analysis History",
+    "detail": "Analysis Detail",
+    "selectHint": "Please select a history record on the left to view details"
+  },
+  "report": {
+    "changeInfo": "Change Information",
+    "nodeName": "Node Name",
+    "type": "Type",
+    "changeType": "Change Type",
+    "changeTypeAttribute": "Attribute",
+    "changeTypeStructure": "Structure",
+    "field": "Field",
+    "newValue": "New Value",
+    "impactScore": "Impact Score",
+    "affectedNodesCount": "Affected Nodes",
+    "failureModeCount": "FailureMode Count",
+    "apUpgradedCount": "AP Upgraded Count",
+    "affectedNodes": "Affected Nodes",
+    "viewInGraph": "View in Graph"
+  },
+  "historyTable": {
+    "time": "Time",
+    "nodeName": "Node Name",
+    "changeType": "Change Type",
+    "impactScore": "Impact Score",
+    "affectedCount": "Affected Count"
+  },
+  "affectedNode": {
+    "none": "No affected nodes",
+    "path": "Path",
+    "riskChange": "Risk Change",
+    "hops": "{{count}} hops",
+    "score": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    }
+  },
+  "messages": {
+    "loadHistoryFailed": "Failed to load history",
+    "loadDetailFailed": "Failed to load details"
+  }
+}

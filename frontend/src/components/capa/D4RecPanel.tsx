@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App } from "antd";
-import { CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
+import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App } from "antd";import { CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { getD4Recommendations } from "../../api/capa";
 import type { D4Recommendation } from "../../types";
 
@@ -13,6 +13,7 @@ interface D4RecPanelProps {
 }
 
 export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPanelProps) {
+  const { t } = useTranslation("capa");
   const { message } = App.useApp();
   const [recommendations, setRecommendations] = useState<D4Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -22,7 +23,7 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
     setLoading(true);
     getD4Recommendations(capaId)
       .then((res) => setRecommendations(res.items))
-      .catch(() => message.error("加载 D4 推荐失败"))
+      .catch(() => message.error(t("d4.loadFailed")))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capaId]);
@@ -34,10 +35,10 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         description={
           <span>
-            暂无推荐
+            {t("d4.empty")}
             <br />
             <Text type="secondary" style={{ fontSize: 12 }}>
-              提示：完善 D2 问题描述可提升语义匹配效果
+              {t("d4.hint")}
             </Text>
           </span>
         }
@@ -78,10 +79,10 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
                     size="small"
                     icon={<CheckOutlined />}
                     disabled={!canAdopt}
-                    title={!canAdopt ? "只读用户无法采纳" : undefined}
+                    title={!canAdopt ? t("d4.readonlyTooltip") : undefined}
                     onClick={() => onAdopt(item.failure_cause_name)}
                   >
-                    采纳
+                    {t("d4.adopt")}
                   </Button>,
                   !isSkipped && (
                     <Button
@@ -91,7 +92,7 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
                       icon={<CloseOutlined />}
                       onClick={() => setSkipped(new Set(skipped).add(key))}
                     >
-                      跳过
+                      {t("d4.skip")}
                     </Button>
                   ),
                 ]}
@@ -120,15 +121,15 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
   return (
     <Card
       size="small"
-      title={<Space><SearchOutlined />D4 根因推荐</Space>}
+      title={<Space><SearchOutlined />{t("d4.title")}</Space>}
       style={{ marginBottom: 16 }}
-      extra={<Text type="secondary" style={{ fontSize: 12 }}>基于 D2 问题描述和关联 FMEA 分析</Text>}
+      extra={<Text type="secondary" style={{ fontSize: 12 }}>{t("d4.subtitle")}</Text>}
     >
-      {renderGroup("关联 FMEA", groups.linked)}
-      {renderGroup("语义匹配", groups.semantic)}
-      {renderGroup("历史 CAPA", groups.historical)}
-      {renderGroup("智能建议", groups.llm)}
-      {renderGroup("规则引擎建议", groups.rule)}
+      {renderGroup(t("d4.groups.linked"), groups.linked)}
+      {renderGroup(t("d4.groups.semantic"), groups.semantic)}
+      {renderGroup(t("d4.groups.historical"), groups.historical)}
+      {renderGroup(t("d4.groups.llm"), groups.llm)}
+      {renderGroup(t("d4.groups.rule"), groups.rule)}
     </Card>
   );
 }

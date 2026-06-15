@@ -4,10 +4,12 @@ import { SearchOutlined, BarChartOutlined, FireOutlined, LinkOutlined, RobotOutl
 import SemanticSearchTab from "./SemanticSearchTab";
 import { useNavigate } from "react-router-dom";
 import { useProductLineStore } from "../../store/productLineStore";
+import { useTranslation } from "react-i18next";
 import { searchSimilarNodes, getCrossFmeaStats } from "../../api/graph";
 import type { SimilarNode, CrossFmeaStats } from "../../api/graph";
 
 export default function KnowledgeGraphPage() {
+  const { t } = useTranslation("graph");
   const navigate = useNavigate();
   const { selected: productLineCode } = useProductLineStore();
   const [activeTab, setActiveTab] = useState("overview");
@@ -42,10 +44,10 @@ export default function KnowledgeGraphPage() {
   };
 
   const riskColumns = [
-    { title: "失效模式", dataIndex: "name", key: "name" },
+    { title: t("search.columns.name"), dataIndex: "name", key: "name" },
     { title: "RPN", dataIndex: "rpn", key: "rpn", width: 80 },
     {
-      title: "来源 FMEA",
+      title: t("search.columns.sourceFmea"),
       dataIndex: "document_no",
       key: "document_no",
       render: (v: string, record: { node_id: string; fmea_id: string }) => (
@@ -59,24 +61,24 @@ export default function KnowledgeGraphPage() {
       ),
     },
     {
-      title: "操作",
+      title: t("search.columns.action"),
       key: "action",
       render: (_: unknown, record: { node_id: string; fmea_id: string }) => (
         <Button
           size="small"
           onClick={() => navigate(`/fmea/${record.fmea_id}?tab=graph&highlightNode=${record.node_id}`)}
         >
-          查看图谱
+          {t("search.viewGraph")}
         </Button>
       ),
     },
   ];
 
   const searchColumns = [
-    { title: "名称", dataIndex: "name", key: "name" },
-    { title: "类型", dataIndex: "type", key: "type", width: 120 },
+    { title: t("search.columns.name"), dataIndex: "name", key: "name" },
+    { title: t("search.columns.type"), dataIndex: "type", key: "type", width: 120 },
     {
-      title: "来源 FMEA",
+      title: t("search.columns.sourceFmea"),
       dataIndex: "document_no",
       key: "document_no",
       render: (v: string, record: { node_id: string; fmea_id: string }) => (
@@ -89,14 +91,14 @@ export default function KnowledgeGraphPage() {
       ),
     },
     {
-      title: "操作",
+      title: t("search.columns.action"),
       key: "action",
       render: (_: unknown, record: { node_id: string; fmea_id: string }) => (
         <Button
           size="small"
           onClick={() => navigate(`/fmea/${record.fmea_id}?tab=graph&highlightNode=${record.node_id}`)}
         >
-          查看
+          {t("search.view")}
         </Button>
       ),
     },
@@ -105,7 +107,7 @@ export default function KnowledgeGraphPage() {
   if (!productLineCode) {
     return (
       <Card>
-        <Empty description="请先选择产品线" />
+        <Empty description={t("search.selectProductLine")} />
       </Card>
     );
   }
@@ -113,39 +115,39 @@ export default function KnowledgeGraphPage() {
   const tabItems = [
     {
       key: "overview",
-      label: <span><BarChartOutlined /> 总览 / 风险地图</span>,
+      label: <span><BarChartOutlined /> {t("page.overview")}</span>,
       children: statsLoading ? (
         <Spin size="large" style={{ display: "block", margin: "60px auto" }} />
       ) : stats ? (
         <Space direction="vertical" size="large" style={{ width: "100%" }}>
           <Row gutter={16}>
             <Col span={6}>
-              <Card><Statistic title="FMEA 总数" value={stats.total_fmeas} /></Card>
+              <Card><Statistic title={t("overview.totalFmeas")} value={stats.total_fmeas} /></Card>
             </Col>
             <Col span={6}>
-              <Card><Statistic title="节点总数" value={stats.total_nodes} /></Card>
+              <Card><Statistic title={t("overview.totalNodes")} value={stats.total_nodes} /></Card>
             </Col>
             <Col span={6}>
               <Card>
                 <Statistic
-                  title="高优先级失效模式 (AP=H)"
+                  title={t("overview.highApNodes")}
                   value={stats.high_ap_nodes?.length || 0}
                   prefix={<FireOutlined style={{ color: "#ff4d4f" }} />}
                 />
               </Card>
             </Col>
             <Col span={6}>
-              <Card><Statistic title="平均 RPN" value={stats.avg_rpn || 0} precision={1} /></Card>
+              <Card><Statistic title={t("overview.avgRpn")} value={stats.avg_rpn || 0} precision={1} /></Card>
             </Col>
           </Row>
-          <Card title="AP 分布">
+          <Card title={t("overview.apDistribution")}>
             <Space size="large">
-              <Tag color="red">高 (H): {stats.ap_distribution?.H || 0}</Tag>
-              <Tag color="orange">中 (M): {stats.ap_distribution?.M || 0}</Tag>
-              <Tag color="green">低 (L): {stats.ap_distribution?.L || 0}</Tag>
+              <Tag color="red">{t("overview.apHighCount", { count: stats.ap_distribution?.H || 0 })}</Tag>
+              <Tag color="orange">{t("overview.apMediumCount", { count: stats.ap_distribution?.M || 0 })}</Tag>
+              <Tag color="green">{t("overview.apLowCount", { count: stats.ap_distribution?.L || 0 })}</Tag>
             </Space>
           </Card>
-          <Card title="高优先级失效模式 Top 10" extra={<Tag color="red">AP = H (高优先级)</Tag>}>
+          <Card title={t("overview.topHighAp")} extra={<Tag color="red">{t("overview.topHighApExtra")}</Tag>}>
             <Table
               dataSource={stats.high_ap_nodes || []}
               columns={riskColumns}
@@ -154,7 +156,7 @@ export default function KnowledgeGraphPage() {
               size="small"
             />
           </Card>
-          <Card title="节点类型分布">
+          <Card title={t("overview.nodeTypeDistribution")}>
             <Space wrap>
               {Object.entries(stats.node_type_distribution || {}).map(([type, count]) => (
                 <Tag key={type}>{type}: {count}</Tag>
@@ -163,23 +165,23 @@ export default function KnowledgeGraphPage() {
           </Card>
         </Space>
       ) : (
-        <Empty description="暂无统计数据" />
+        <Empty description={t("search.noStats")} />
       ),
     },
     {
       key: "search",
-      label: <span><SearchOutlined /> 历史关键词搜索</span>,
+      label: <span><SearchOutlined /> {t("page.keywordSearch")}</span>,
       children: (
         <>
           <Space style={{ marginBottom: 16 }}>
             <Select value={searchType} onChange={setSearchType} style={{ width: 140 }}>
-              <Select.Option value="FailureMode">失效模式</Select.Option>
-              <Select.Option value="FailureCause">失效原因</Select.Option>
-              <Select.Option value="FailureEffect">失效影响</Select.Option>
-              <Select.Option value="Function">功能</Select.Option>
+              <Select.Option value="FailureMode">{t("search.failureMode")}</Select.Option>
+              <Select.Option value="FailureCause">{t("search.failureCause")}</Select.Option>
+              <Select.Option value="FailureEffect">{t("search.failureEffect")}</Select.Option>
+              <Select.Option value="Function">{t("search.function")}</Select.Option>
             </Select>
             <Input.Search
-              placeholder="输入关键词搜索..."
+              placeholder={t("search.placeholder")}
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
               onSearch={handleSearch}
@@ -200,14 +202,14 @@ export default function KnowledgeGraphPage() {
     },
     {
       key: "semantic",
-      label: <span><RobotOutlined /> 语义搜索</span>,
+      label: <span><RobotOutlined /> {t("page.semanticSearch")}</span>,
       children: <SemanticSearchTab />,
     },
   ];
 
   return (
     <div>
-      <h2>知识图谱</h2>
+      <h2>{t("page.title")}</h2>
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
     </div>
   );

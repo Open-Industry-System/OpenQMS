@@ -1,0 +1,190 @@
+{
+  "pageTitle": {
+    "list": "Internal Audit Management",
+    "detail": "Internal Audit Detail"
+  },
+  "stats": {
+    "annualPrograms": "Annual Programs",
+    "plannedAudits": "Planned Audits",
+    "openFindings": "Open Findings",
+    "majorNc": "Major NCs",
+    "totalFindings": "Total Findings",
+    "minorNc": "Minor NCs",
+    "ofi": "OFIs",
+    "unclosed": "Unclosed"
+  },
+  "auditType": {
+    "system": "System",
+    "process": "Process",
+    "product": "Product"
+  },
+  "status": {
+    "audit": {
+      "planned": "Planned",
+      "in_progress": "In Progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "finding": {
+      "open": "Open",
+      "in_progress": "In Progress",
+      "verified": "Verified",
+      "closed": "Closed"
+    }
+  },
+  "findingType": {
+    "major_nc": "Major NC",
+    "minor_nc": "Minor NC",
+    "ofi": "OFI",
+    "observation": "Observation"
+  },
+  "resultOptions": {
+    "conform": {
+      "value": "符合",
+      "label": "Conform"
+    },
+    "nonConform": {
+      "value": "不符合",
+      "label": "Non-conform"
+    },
+    "notApplicable": {
+      "value": "不适用",
+      "label": "N/A"
+    }
+  },
+  "table": {
+    "planNo": "Plan No.",
+    "auditType": "Type",
+    "auditScope": "Audit Scope",
+    "plannedDate": "Planned Date",
+    "leadAuditor": "Lead Auditor",
+    "status": "Status",
+    "findingCount": "Findings",
+    "operations": "Actions",
+    "serialNo": "No.",
+    "clause": "Clause",
+    "question": "Question",
+    "result": "Result",
+    "evidence": "Evidence",
+    "note": "Note",
+    "clauseRef": "Clause Ref.",
+    "description": "Description",
+    "dueDate": "Due Date",
+    "capa": "CAPA"
+  },
+  "actions": {
+    "newProgram": "New Program",
+    "newPlan": "New Plan",
+    "auditorManagement": "Auditor Management",
+    "viewDetail": "View Detail",
+    "start": "Start",
+    "complete": "Complete",
+    "addChecklistItem": "Add Checklist Item",
+    "addFinding": "Add Finding",
+    "printReport": "Print Report",
+    "viewCapa": "View CAPA",
+    "createCapa": "Create CAPA",
+    "closeFinding": "Close"
+  },
+  "form": {
+    "year": "Year",
+    "auditType": "Audit Type",
+    "scope": "Audit Scope",
+    "criteria": "Audit Criteria",
+    "program": "Program",
+    "plannedDate": "Planned Date",
+    "leadAuditor": "Lead Auditor",
+    "actualDate": "Actual Date",
+    "teamMembers": "Team Members",
+    "clauseRef": "Clause Ref.",
+    "findingType": "Finding Type",
+    "description": "Description",
+    "dueDate": "Due Date"
+  },
+  "placeholder": {
+    "year": "e.g. 2026",
+    "auditType": "Select audit type",
+    "scope": "Describe the audit coverage",
+    "criteria": "e.g. ISO 9001, IATF 16949",
+    "program": "Select audit program",
+    "plannedDate": "Select planned date",
+    "leadAuditor": "Select lead auditor",
+    "selectResult": "Select result",
+    "evidence": "Enter evidence",
+    "note": "Enter note",
+    "clauseRef": "e.g. 4.1, 8.5.1",
+    "findingType": "Select type",
+    "description": "Describe the finding"
+  },
+  "modal": {
+    "newProgram": "New Program",
+    "newPlan": "New Plan",
+    "addFinding": "Add Finding"
+  },
+  "drawer": {
+    "auditorManagement": "Auditor Management"
+  },
+  "auditorTable": {
+    "username": "Username",
+    "displayName": "Display Name",
+    "qualifications": "Qualifications",
+    "lastQualificationDate": "Last Qualification Date"
+  },
+  "prompt": {
+    "qualifications": "Qualification types (comma separated):"
+  },
+  "tabs": {
+    "all": "All",
+    "planned": "Planned",
+    "in_progress": "In Progress",
+    "completed": "Completed",
+    "checklist": "Checklist",
+    "findings": "Findings",
+    "report": "Audit Report"
+  },
+  "report": {
+    "findingDistribution": "Finding Distribution",
+    "findingList": "Finding List",
+    "statusLabel": "Status",
+    "dueLabel": "Due",
+    "noFindings": "No findings"
+  },
+  "card": {
+    "basicInfo": "Basic Information"
+  },
+  "messages": {
+    "loadPlansFailed": "Failed to load audit plans",
+    "loadFindingsFailed": "Failed to load findings",
+    "programCreated": "Program created successfully",
+    "planCreated": "Plan created successfully",
+    "auditStarted": "Audit started",
+    "auditCompleted": "Audit completed",
+    "planCancelled": "Plan cancelled",
+    "auditorUpdated": "Auditor information updated",
+    "updateFailed": "Update failed",
+    "saveFailed": "Save failed",
+    "addFailed": "Add failed",
+    "deleteFailed": "Delete failed",
+    "findingCreated": "Finding created",
+    "findingClosed": "Finding closed",
+    "capaCreated": "CAPA created: {{documentNo}}",
+    "createCapaFailed": "Failed to create CAPA"
+  },
+  "confirm": {
+    "cancel": "Confirm cancel?"
+  },
+  "empty": {
+    "noFinding": "No findings"
+  },
+  "validation": {
+    "yearRequired": "Please enter year",
+    "auditTypeRequired": "Please select audit type",
+    "scopeRequired": "Please enter audit scope",
+    "criteriaRequired": "Please enter audit criteria",
+    "programRequired": "Please select program",
+    "plannedDateRequired": "Please select planned date",
+    "leadAuditorRequired": "Please select lead auditor",
+    "findingTypeRequired": "Please select finding type",
+    "descriptionRequired": "Please enter description"
+  }
+}

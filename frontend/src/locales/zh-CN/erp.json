@@ -1,0 +1,271 @@
+{
+  "yes": "是",
+  "no": "否",
+  "dashboard": {
+    "title": "ERP 集成看板",
+    "syncHealth": "同步健康",
+    "noSyncData": "暂无同步数据",
+    "coqSummary": "COQ 成本摘要（本月）",
+    "quickLinks": "快速入口",
+    "links": {
+      "connections": "连接管理",
+      "masterData": "主数据管理",
+      "supplyChain": "供应链管理",
+      "traceability": "批次追溯"
+    },
+    "loadFailed": "加载失败",
+    "errors": {
+      "loadFailed": "加载 ERP 看板数据失败"
+    }
+  },
+  "syncStatus": {
+    "completed": "已完成",
+    "failed": "失败",
+    "running": "同步中",
+    "pending": "待同步"
+  },
+  "masterData": {
+    "title": "ERP 主数据",
+    "searchPlaceholder": "搜索物料编码或名称",
+    "tabs": {
+      "suppliers": "供应商",
+      "customers": "客户",
+      "materials": "物料",
+      "locations": "库位"
+    },
+    "linkStatus": {
+      "linked": "已关联",
+      "pending": "待关联",
+      "unlinked": "未关联"
+    },
+    "locationType": {
+      "warehouse": "仓库",
+      "zone": "库区",
+      "bin": "库位",
+      "line": "产线"
+    },
+    "columns": {
+      "supplierCode": "供应商编码",
+      "customerCode": "客户编码",
+      "materialCode": "物料编码",
+      "locationCode": "库位编码",
+      "warehouseCode": "仓库编码",
+      "zoneCode": "库区编码",
+      "name": "名称",
+      "status": "状态",
+      "linkStatus": "关联状态",
+      "actions": "操作",
+      "specification": "规格",
+      "unit": "单位",
+      "isPurchased": "采购件",
+      "isManufactured": "自制件",
+      "type": "类型",
+      "enabled": "启用"
+    },
+    "suppliers": {
+      "link": "关联",
+      "unlink": "取消关联",
+      "linkModal": {
+        "title": "关联 OpenQMS 供应商",
+        "description": "选择要关联的 OpenQMS 供应商：",
+        "placeholder": "请选择供应商",
+        "okText": "确认关联"
+      },
+      "messages": {
+        "loadFailed": "加载供应商失败",
+        "loadListFailed": "加载供应商列表失败",
+        "linkSuccess": "关联成功",
+        "unlinkSuccess": "取消关联成功",
+        "linkFailed": "关联失败",
+        "unlinkFailed": "取消关联失败"
+      }
+    },
+    "customers": {
+      "link": "关联",
+      "unlink": "取消关联",
+      "linkModal": {
+        "title": "关联 OpenQMS 客户",
+        "description": "选择要关联的 OpenQMS 客户：",
+        "placeholder": "请选择客户",
+        "okText": "确认关联"
+      },
+      "messages": {
+        "loadFailed": "加载客户失败",
+        "loadListFailed": "加载客户列表失败",
+        "linkSuccess": "关联成功",
+        "unlinkSuccess": "取消关联成功",
+        "linkFailed": "关联失败",
+        "unlinkFailed": "取消关联失败"
+      }
+    },
+    "materials": {
+      "messages": {
+        "loadFailed": "加载物料失败"
+      }
+    },
+    "locations": {
+      "messages": {
+        "loadFailed": "加载库位失败"
+      }
+    }
+  },
+  "connections": {
+    "title": "ERP 连接管理",
+    "create": "新建连接",
+    "edit": "编辑",
+    "test": "测试",
+    "sync": "同步",
+    "delete": "删除",
+    "columns": {
+      "name": "连接名称",
+      "type": "类型",
+      "productLineCode": "产线代码",
+      "status": "状态",
+      "createdAt": "创建时间",
+      "actions": "操作"
+    },
+    "status": {
+      "active": "正常",
+      "inactive": "停用"
+    },
+    "modal": {
+      "createTitle": "新建连接",
+      "editTitle": "编辑连接"
+    },
+    "form": {
+      "name": "连接名称",
+      "nameRequired": "请输入连接名称",
+      "namePlaceholder": "如 ERP-SAP-01",
+      "connectorType": "连接器类型",
+      "connectorTypeRequired": "请选择连接器类型",
+      "productLineCode": "产线代码",
+      "productLineCodeRequired": "请输入产线代码",
+      "productLineCodePlaceholder": "如 DC-DC-100",
+      "baseUrl": "Base URL",
+      "baseUrlPlaceholder": "如 https://erp.example.com/api",
+      "port": "端口号",
+      "portPlaceholder": "如 8080",
+      "apiKey": "API Key",
+      "apiKeyPlaceholder": "API 密钥"
+    },
+    "connector": {
+      "mock": "Mock - 模拟数据",
+      "rest": "REST API",
+      "notImplemented": "{{name}} - 未实现"
+    },
+    "deleteConfirm": {
+      "title": "确认删除",
+      "content": "确定删除连接 \"{{name}}\" 吗？"
+    },
+    "messages": {
+      "loadFailed": "加载连接列表失败",
+      "createSuccess": "连接创建成功",
+      "createFailed": "创建失败",
+      "updateSuccess": "连接更新成功",
+      "updateFailed": "更新失败",
+      "deleteSuccess": "删除成功",
+      "deleteFailed": "删除失败",
+      "testSuccess": "连接测试成功",
+      "testFailed": "连接测试失败",
+      "syncTriggered": "同步已触发，后台将在 30 秒内开始执行",
+      "syncFailed": "同步触发失败"
+    }
+  },
+  "salesAndCost": {
+    "title": "销售与成本",
+    "tabs": {
+      "salesOrders": "销售订单",
+      "shipments": "发货记录",
+      "costRecords": "成本记录"
+    },
+    "columns": {
+      "soNumber": "销售订单号",
+      "lineNumber": "行号",
+      "customerCode": "客户编码",
+      "materialCode": "物料编码",
+      "quantity": "数量",
+      "unitPrice": "单价",
+      "status": "状态",
+      "deliveryDate": "交货日期",
+      "shipmentNumber": "发货单号",
+      "lotNo": "批次号",
+      "shipmentDate": "发货日期",
+      "linkStatus": "关联状态",
+      "costCategory": "成本类别",
+      "costType": "成本类型",
+      "amount": "金额",
+      "currency": "货币",
+      "period": "期间",
+      "sourceDocument": "来源单据",
+      "description": "描述"
+    },
+    "costCategory": {
+      "prevention": "预防成本",
+      "appraisal": "鉴定成本",
+      "internalFailure": "内部损失",
+      "externalFailure": "外部损失"
+    },
+    "messages": {
+      "loadSalesOrdersFailed": "加载销售订单失败",
+      "loadShipmentsFailed": "加载发货记录失败",
+      "loadCostRecordsFailed": "加载成本记录失败"
+    }
+  },
+  "supplyChain": {
+    "title": "ERP 供应链",
+    "tabs": {
+      "purchaseOrders": "采购订单",
+      "inventory": "库存余额"
+    },
+    "poStatus": {
+      "draft": "草稿",
+      "submitted": "已提交",
+      "confirmed": "已确认",
+      "partiallyReceived": "部分收货",
+      "received": "已收货",
+      "closed": "已关闭"
+    },
+    "inventoryStatus": {
+      "available": "可用",
+      "restricted": "受限",
+      "blocked": "冻结",
+      "inInspection": "检验中"
+    },
+    "filterStatusPlaceholder": "筛选状态",
+    "filterDefectPlaceholder": "筛选不良类型",
+    "columns": {
+      "poNumber": "采购单号",
+      "lineNumber": "行号",
+      "supplierCode": "供应商编码",
+      "materialCode": "物料编码",
+      "quantity": "数量",
+      "receivedQuantity": "已收货",
+      "lotNo": "批次号",
+      "status": "状态",
+      "deliveryDate": "交货日期",
+      "locationCode": "库位编码",
+      "supplierLotNo": "供应商批次号",
+      "unit": "单位",
+      "inventoryStatus": "库存状态"
+    },
+    "messages": {
+      "loadPurchaseOrdersFailed": "加载采购订单失败",
+      "loadInventoryFailed": "加载库存余额失败"
+    }
+  },
+  "traceability": {
+    "title": "批次追溯",
+    "lotPlaceholder": "输入批次号",
+    "direction": {
+      "forward": "正向（原料 → 客户）",
+      "backward": "反向（客户 → 原料）"
+    },
+    "search": "查询",
+    "nodes": "追溯节点",
+    "edges": "追溯关系",
+    "noData": "未找到追溯数据",
+    "errors": {
+      "queryFailed": "追溯查询失败"
+    }
+  }
+}

@@ -1,0 +1,261 @@
+{
+  "wizard": {
+    "title": "DFMEA Generation Wizard",
+    "steps": [
+      "5T Scope (Step 1)",
+      "Structure Analysis (Step 2)",
+      "Function Analysis (Step 3)",
+      "Failure Analysis (Step 4)",
+      "Risk Analysis (Step 5)",
+      "Optimization (Step 6)",
+      "Confirm Creation (Step 7)"
+    ],
+    "scope": {
+      "title": "5T Scope Definition",
+      "description": "Please fill in the 5T scope information for the DFMEA analysis.",
+      "team": "Team",
+      "timeframe": "Timeframe",
+      "tool": "Tool",
+      "task": "Task",
+      "trend": "Trend"
+    },
+    "structure": {
+      "title": "Structure Analysis",
+      "description": "Build the hierarchy of System → Subsystem → Component → Design Parameter, or add interface nodes to connect different branches.",
+      "addSystem": "Add System",
+      "addInterface": "Add Interface",
+      "addChild": "+ {{type}}",
+      "delete": "Delete",
+      "empty": "Click the button above to add a system node",
+      "newSystem": "New System",
+      "newInterface": "New Interface"
+    },
+    "typeLabels": {
+      "System": "System",
+      "Subsystem": "Subsystem",
+      "Component": "Component",
+      "DesignParameter": "Design Parameter",
+      "Interface": "Interface"
+    },
+    "function": {
+      "title": "Function Analysis",
+      "description": "Define function, technical requirement, and specification parameters for each component.",
+      "functionDesc": "Function Description",
+      "requirement": "Technical Requirement",
+      "specification": "Specification Parameter"
+    },
+    "failure": {
+      "title": "Failure Analysis",
+      "description": "Define failure mode, effect, and cause for each function. The system will automatically recommend failure modes based on the function description.",
+      "recommended": "Recommended",
+      "autoRecommend": "Auto-recommended based on function:",
+      "failureMode": "Failure Mode",
+      "failureEffect": "Failure Effect",
+      "failureCause": "Failure Cause",
+      "addFailureMode": "+ Add Failure Mode",
+      "delete": "Delete",
+      "newFailureMode": "New Failure Mode"
+    },
+    "risk": {
+      "title": "Risk Analysis",
+      "description": "Evaluate Severity (S), Occurrence (O), and Detection (D) for each failure chain.",
+      "s": "S",
+      "o": "O",
+      "d": "D",
+      "rpn": "RPN",
+      "ap": "AP",
+      "mustOptimize": "Must optimize"
+    },
+    "optimization": {
+      "title": "Optimization Measures",
+      "noOptimization": "No Mandatory Optimization",
+      "noOptimizationHint": "All failure modes have AP other than H; current risk is acceptable.",
+      "mustOptimize": "The following {{count}} items have AP=H and require optimization measures:",
+      "preventionPlaceholder": "Prevention measure",
+      "detectionPlaceholder": "Detection measure"
+    },
+    "confirm": {
+      "title": "Confirm Creation",
+      "structureNodes": "Structure nodes: {{count}}",
+      "functionNodes": "Function nodes: {{count}}",
+      "failureChains": "Failure chains: {{count}}",
+      "totalNodes": "Total nodes: {{count}}",
+      "totalEdges": "Total edges: {{count}}",
+      "description": "After confirmation, a DFMEA document will be created and the editor will open. You can continue to refine details in the editor."
+    },
+    "buttons": {
+      "cancel": "Cancel",
+      "prev": "Previous",
+      "next": "Next",
+      "finish": "Finish"
+    }
+  },
+  "inlineRecommendations": {
+    "title": "Smart Recommendations",
+    "types": {
+      "failureModeSuggestion": "Failure Mode Suggestion",
+      "failureEffectSuggestion": "Failure Effect Suggestion",
+      "failureCauseSuggestion": "Failure Cause Suggestion",
+      "apAnalysis": "AP Analysis",
+      "preventionSuggestion": "Prevention Measure Suggestion",
+      "detectionSuggestion": "Detection Measure Suggestion"
+    },
+    "apply": "Apply"
+  },
+  "smartSuggestion": {
+    "global": "Global Experience",
+    "currentProductLine": "Current Product Line Only",
+    "noGlobalPermission": "(No global permission, current product line only)",
+    "actualScope": "Actual scope: {{scope}}",
+    "scopeGlobal": "Global",
+    "scopeLocal": "Current Product Line Only",
+    "ruleEngine": "Rule Engine",
+    "aiGenerated": "AI Generated",
+    "from": "From",
+    "similarity": "Similarity {{score}}%",
+    "confidence": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "tooFrequent": "Too many requests, please try again later",
+    "noPermission": "No permission to use recommendations",
+    "serviceUnavailable": "Recommendation service unavailable",
+    "aiUnavailable": "AI suggestions unavailable, rule engine fallback used",
+    "ruleOnlyMode": "Rule engine only mode"
+  },
+  "structureTree": {
+    "addSystem": "Add System",
+    "typeLabels": {
+      "System": "System",
+      "Subsystem": "Subsystem",
+      "Component": "Component"
+    },
+    "empty": "No structure nodes",
+    "editNode": "Edit Node",
+    "addNode": "Add Node",
+    "type": "Type",
+    "name": "Name",
+    "description": "Description",
+    "namePlaceholder": "e.g. BMS / BMU / LTC6811",
+    "descriptionPlaceholder": "Optional description"
+  },
+  "parameterDiagram": {
+    "selectNode": "Please select a component node from the structure tree on the left",
+    "title": "P-Diagram: {{name}}",
+    "sections": {
+      "inputs": "Input Signals",
+      "outputs": "Output Responses",
+      "controls": "Control Factors",
+      "noise_factors": "Noise Factors"
+    },
+    "noItems": "No items",
+    "add": "Add"
+  },
+  "rules": {
+    "optimizationHint": {
+      "H": "High priority: optimization measures must be taken to reduce Severity (S) or Occurrence (O), or improve Detection (D). Design changes or redundancy are recommended.",
+      "M": "Medium priority: optimization measures are recommended, focusing on improving detection means or reducing occurrence.",
+      "L": "Low priority: current risk is acceptable; maintain existing controls and continue monitoring."
+    },
+    "defaultEffects": ["Function degradation", "System performance decline"],
+    "defaultCauses": ["Component aging", "Environmental factors", "Manufacturing defects"],
+    "fallbackPatterns": [
+      "{{functionDesc}}失效",
+      "无法{{functionDesc}}",
+      "{{functionDesc}}精度不足",
+      "{{functionDesc}}延迟"
+    ],
+    "measureBases": {
+      "H": {
+        "prevention": ["Redundant design (dual channel / backup)", "Select higher reliability components", "Derating design", "Fail-safe design"],
+        "detection": ["Online real-time monitoring", "Self-diagnosis function", "100% functional test at delivery"]
+      },
+      "M": {
+        "prevention": ["Optimize design parameters", "Add mistake-proofing structure", "Select mature process"],
+        "detection": ["Periodic functional test", "Process patrol inspection", "Incoming inspection"]
+      },
+      "L": {
+        "prevention": ["Standardized design", "Select qualified supplier materials"],
+        "detection": ["Routine inspection", "User feedback tracking"]
+      }
+    },
+    "modeRegex": {
+      "acquisition": "采集|检测|监测|识别",
+      "sealing": "密封|封闭|泄漏",
+      "connection": "连接|接合|固定|接触"
+    },
+    "modeSpecific": {
+      "acquisition": {
+        "prevention": ["Sensor redundant layout", "Signal filtering design"],
+        "detection": ["Sensor signal validation", "Shorten calibration cycle"]
+      },
+      "sealing": {
+        "prevention": ["Double sealing structure", "Optimize sealing groove design"],
+        "detection": ["Air tightness test", "Leakage monitoring"]
+      },
+      "connection": {
+        "prevention": ["Anti-loosening structure design", "Gold/silver plating treatment"],
+        "detection": ["Contact resistance test", "Vibration test verification"]
+      }
+    },
+    "verbPatterns": [
+      { "verb": "采集", "patterns": ["无法采集", "采集失效", "采集精度不足", "采集延迟"] },
+      { "verb": "收集", "patterns": ["无法收集", "收集失效", "收集不完整", "收集延迟"] },
+      { "verb": "获取", "patterns": ["无法获取", "获取失效", "获取不完整", "获取延迟"] },
+      { "verb": "传输", "patterns": ["无法传输", "传输失效", "传输失真", "传输延迟"] },
+      { "verb": "发送", "patterns": ["无法发送", "发送失效", "发送失真", "发送延迟"] },
+      { "verb": "传递", "patterns": ["无法传递", "传递失效", "传递失真", "传递延迟"] },
+      { "verb": "控制", "patterns": ["无法控制", "控制失效", "控制精度不足", "控制响应慢"] },
+      { "verb": "调节", "patterns": ["无法调节", "调节失效", "调节精度不足", "调节响应慢"] },
+      { "verb": "调控", "patterns": ["无法调控", "调控失效", "调控精度不足", "调控响应慢"] },
+      { "verb": "检测", "patterns": ["无法检测", "检测失效", "检测精度不足", "误检测"] },
+      { "verb": "监测", "patterns": ["无法监测", "监测失效", "监测精度不足", "误监测"] },
+      { "verb": "识别", "patterns": ["无法识别", "识别失效", "识别精度不足", "误识别"] },
+      { "verb": "保护", "patterns": ["保护失效", "无法保护", "保护不足", "保护误动作"] },
+      { "verb": "防护", "patterns": ["防护失效", "无法防护", "防护不足", "防护误动作"] },
+      { "verb": "隔离", "patterns": ["隔离失效", "无法隔离", "隔离不足", "隔离误动作"] },
+      { "verb": "显示", "patterns": ["无法显示", "显示失效", "显示错误", "显示延迟"] },
+      { "verb": "指示", "patterns": ["无法指示", "指示失效", "指示错误", "指示延迟"] },
+      { "verb": "反馈", "patterns": ["无法反馈", "反馈失效", "反馈错误", "反馈延迟"] },
+      { "verb": "存储", "patterns": ["无法存储", "存储失效", "存储丢失", "存储容量不足"] },
+      { "verb": "保存", "patterns": ["无法保存", "保存失效", "保存丢失", "保存容量不足"] },
+      { "verb": "记录", "patterns": ["无法记录", "记录失效", "记录丢失", "记录容量不足"] },
+      { "verb": "供电", "patterns": ["无法供电", "供电失效", "供电不足", "供电不稳定"] },
+      { "verb": "供能", "patterns": ["无法供能", "供能失效", "供能不足", "供能不稳定"] },
+      { "verb": "驱动", "patterns": ["无法驱动", "驱动失效", "驱动力不足", "驱动不稳定"] },
+      { "verb": "连接", "patterns": ["连接失效", "无法连接", "连接松动", "接触不良"] },
+      { "verb": "接合", "patterns": ["接合失效", "无法接合", "接合松动", "接合不良"] },
+      { "verb": "固定", "patterns": ["固定失效", "无法固定", "固定松动", "固定不良"] },
+      { "verb": "密封", "patterns": ["密封失效", "无法密封", "密封不良", "泄漏"] },
+      { "verb": "封闭", "patterns": ["封闭失效", "无法封闭", "封闭不良", "泄漏"] }
+    ],
+    "failureChains": [
+      {
+        "key": "无法采集",
+        "effects": ["系统数据缺失", "控制决策错误", "功能降级"],
+        "causes": ["传感器故障", "信号干扰", "线路断路", "接口氧化"]
+      },
+      {
+        "key": "采集精度不足",
+        "effects": ["控制偏差", "系统性能下降", "误报警"],
+        "causes": ["传感器老化", "校准漂移", "温度影响", "电磁干扰"]
+      },
+      {
+        "key": "无法控制",
+        "effects": ["系统失控", "设备损坏", "安全风险"],
+        "causes": ["执行器故障", "控制算法缺陷", "反馈信号丢失", "电源异常"]
+      },
+      {
+        "key": "密封失效",
+        "effects": ["介质泄漏", "环境污染", "设备腐蚀", "安全风险"],
+        "causes": ["密封件老化", "安装不当", "材料选型错误", "温度超限"]
+      },
+      {
+        "key": "连接失效",
+        "effects": ["电路断开", "信号中断", "功能丧失", "系统停机"],
+        "causes": ["接触不良", "焊接缺陷", "振动疲劳", "腐蚀"]
+      }
+    ]
+  }
+}

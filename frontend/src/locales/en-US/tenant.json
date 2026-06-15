@@ -1,0 +1,12 @@
+{
+  "deactivated": {
+    "title": "Tenant Deactivated",
+    "subtitle": "Your tenant account has been deactivated. Data is retained but inaccessible.",
+    "backToLogin": "Back to Login"
+  },
+  "suspended": {
+    "title": "Tenant Suspended",
+    "subtitle": "Your tenant account has been suspended. Please contact the administrator.",
+    "backToLogin": "Back to Login"
+  }
+}

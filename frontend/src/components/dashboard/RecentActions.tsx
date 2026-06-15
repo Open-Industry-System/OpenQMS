@@ -1,15 +1,11 @@
 import { useCallback } from "react";
 import { List, Skeleton, Typography, Button, theme } from "antd";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import type { DashboardRecentAction } from "../../types";
-import { relativeTime } from "../../utils/relativeTime";
+import { useRelativeTime } from "../../utils/relativeTime";
 
 const { Text } = Typography;
-
-const typeMap: Record<string, { label: string; path: string }> = {
-  fmea_documents: { label: "FMEA", path: "/fmea" },
-  capa_eightd: { label: "CAPA", path: "/capa" },
-};
 
 interface RecentActionsProps {
   data: DashboardRecentAction[];
@@ -24,8 +20,21 @@ export default function RecentActions({
   error,
   onRetry,
 }: RecentActionsProps) {
+  const { t } = useTranslation("dashboard");
   const navigate = useNavigate();
   const { token } = theme.useToken();
+  const relativeTime = useRelativeTime();
+
+  const getTypeMap = (tableName: string): { label: string; path: string } | undefined => {
+    switch (tableName) {
+      case "fmea_documents":
+        return { label: t("recentActions.types.fmeaDocuments"), path: "/fmea" };
+      case "capa_eightd":
+        return { label: t("recentActions.types.capaEightd"), path: "/capa" };
+      default:
+        return undefined;
+    }
+  };
 
   const handleNavigate = useCallback(
     (path: string) => {
@@ -57,10 +66,10 @@ export default function RecentActions({
   if (error) {
     return (
       <div style={{ padding: "12px 0", textAlign: "center" }}>
-        <Text type="secondary">加载失败</Text>
+        <Text type="secondary">{t("riskList.loadFailed")}</Text>
         <div style={{ marginTop: 8 }}>
           <Button size="small" onClick={onRetry}>
-            重试
+            {t("riskList.retry")}
           </Button>
         </div>
       </div>
@@ -70,7 +79,7 @@ export default function RecentActions({
   if (data.length === 0) {
     return (
       <div style={{ padding: "12px 0", textAlign: "center" }}>
-        <Text type="secondary">暂无操作记录</Text>
+        <Text type="secondary">{t("recentActions.empty")}</Text>
       </div>
     );
   }
@@ -79,7 +88,7 @@ export default function RecentActions({
     <List
       dataSource={data}
       renderItem={(item) => {
-        const mapped = typeMap[item.table_name];
+        const mapped = getTypeMap(item.table_name);
         const label = mapped?.label ?? item.table_name;
         const path = mapped?.path ?? "";
         const navigateTo = path ? `${path}/${item.record_id}` : "";

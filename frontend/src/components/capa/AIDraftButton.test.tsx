@@ -7,22 +7,22 @@ describe("AIDraftButton", () => {
     localStorage.clear();
   });
 
-  it("renders AI草拟 button", () => {
+  it("renders AI Draft button", () => {
     const onGenerate = vi.fn();
     render(<AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />);
-    expect(screen.getByText("AI草拟")).toBeInTheDocument();
+    expect(screen.getByText("AI Draft")).toBeInTheDocument();
   });
 
   it("shows loading state", () => {
     const onGenerate = vi.fn();
     render(<AIDraftButton loading={true} tempUnavailable={false} onGenerate={onGenerate} />);
-    expect(screen.getByText("草拟中...")).toBeInTheDocument();
+    expect(screen.getByText("Drafting...")).toBeInTheDocument();
   });
 
   it("calls onGenerate with structured format by default", () => {
     const onGenerate = vi.fn();
     render(<AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />);
-    fireEvent.click(screen.getByText("AI草拟"));
+    fireEvent.click(screen.getByText("AI Draft"));
     expect(onGenerate).toHaveBeenCalledWith("structured");
   });
 
@@ -31,7 +31,7 @@ describe("AIDraftButton", () => {
     const onGenerate = vi.fn();
 
     render(<AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />);
-    fireEvent.click(screen.getByText("AI草拟"));
+    fireEvent.click(screen.getByText("AI Draft"));
 
     expect(onGenerate).toHaveBeenCalledWith("paragraph");
   });
@@ -41,7 +41,7 @@ describe("AIDraftButton", () => {
     const onGenerate = vi.fn();
 
     render(<AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />);
-    fireEvent.click(screen.getByText("AI草拟"));
+    fireEvent.click(screen.getByText("AI Draft"));
 
     expect(onGenerate).toHaveBeenCalledWith("structured");
   });
@@ -49,7 +49,7 @@ describe("AIDraftButton", () => {
   it("persists format to localStorage with correct schema", () => {
     const onGenerate = vi.fn();
     render(<AIDraftButton loading={false} tempUnavailable={false} onGenerate={onGenerate} />);
-    fireEvent.click(screen.getByText("AI草拟"));
+    fireEvent.click(screen.getByText("AI Draft"));
 
     const stored = JSON.parse(localStorage.getItem("openqms_ai_draft_preference")!);
     expect(stored).toEqual({ format: "structured" });
@@ -58,16 +58,16 @@ describe("AIDraftButton", () => {
   it("is disabled when tempUnavailable", () => {
     const onGenerate = vi.fn();
     render(<AIDraftButton loading={false} tempUnavailable={true} onGenerate={onGenerate} />);
-    const btn = screen.getByText("AI草拟").closest("button");
+    const btn = screen.getByText("AI Draft").closest("button");
     expect(btn).toBeDisabled();
   });
 
   it("shows danger style when error is present", () => {
     const onGenerate = vi.fn();
     render(
-      <AIDraftButton loading={false} tempUnavailable={false} error="出错了" onGenerate={onGenerate} />
+      <AIDraftButton loading={false} tempUnavailable={false} error="Something went wrong" onGenerate={onGenerate} />
     );
-    const btn = screen.getByText("AI草拟").closest("button");
-    expect(btn?.title).toBe("出错了");
+    const btn = screen.getByText("AI Draft").closest("button");
+    expect(btn?.title).toBe("Something went wrong");
   });
 });

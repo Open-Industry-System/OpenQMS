@@ -4,7 +4,7 @@ import type { ActiveUser, EditingArea, CollaborationState } from "../types/colla
 
 const HEARTBEAT_INTERVAL = 15000;      // 15s normal
 const EDITING_INTERVAL = 8000;         // 8s when editing
-const BLURRED_INTERVAL = 30000;        // 30s when tab not focused
+const BLURRED_INTERVAL = 30000;        // 30s when tab blurred
 
 export function useCollaboration(
   documentType: string,
@@ -61,14 +61,14 @@ export function useCollaboration(
     editingAreaRef.current = area;
     setCurrentUserEditing(true);
     sendHeartbeat();
-    schedule();  // 立即切换到 editing 间隔（8s）
+    schedule();  // switch to editing interval immediately (8s)
   }, [sendHeartbeat, schedule]);
 
   const stopEditing = useCallback(() => {
     editingAreaRef.current = null;
     setCurrentUserEditing(false);
     sendHeartbeat();
-    schedule();  // 切回 viewing 间隔（15s）
+    schedule();  // switch back to viewing interval (15s)
   }, [sendHeartbeat, schedule]);
 
   // Setup intervals
@@ -77,7 +77,7 @@ export function useCollaboration(
 
     schedule();
 
-    // Immediate first fetch
+    // immediate first fetch
     fetchActiveUsers();
 
     const handleVisibility = () => {

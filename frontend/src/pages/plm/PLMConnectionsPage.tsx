@@ -7,6 +7,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import {
   getPLMConnections, createPLMConnection, updatePLMConnection,
   deletePLMConnection, testPLMConnection, syncPLMConnection,
@@ -16,15 +17,9 @@ import { usePermission } from "../../hooks/usePermission";
 
 const { Title } = Typography;
 
-const typeLabels: Record<string, string> = {
-  mock: "Mock",
-  rest: "REST API",
-  siemens_tc: "Siemens Teamcenter",
-  dassault_enovia: "Dassault ENOVIA",
-  ptc_windchill: "PTC Windchill",
-};
-
 export default function PLMConnectionsPage() {
+  const { t } = useTranslation("plm");
+  const { t: tc } = useTranslation("common");
   const { message, modal: modalConfirm } = App.useApp();
   const { canCreate, canEdit, canAdmin } = usePermission();
   const canCreatePlm = canCreate("plm");
@@ -40,6 +35,14 @@ export default function PLMConnectionsPage() {
   const [testLoading, setTestLoading] = useState<Record<string, boolean>>({});
   const [syncLoading, setSyncLoading] = useState<Record<string, boolean>>({});
 
+  const connectorOptions = useMemo(() => [
+    { value: "mock", label: t("connections.connector.mock") },
+    { value: "rest", label: t("connections.connector.rest"), disabled: true },
+    { value: "siemens_tc", label: t("connections.connector.siemens_tc"), disabled: true },
+    { value: "dassault_enovia", label: t("connections.connector.dassault_enovia"), disabled: true },
+    { value: "ptc_windchill", label: t("connections.connector.ptc_windchill"), disabled: true },
+  ], [t]);
+
   const fetchData = (p: number = page) => {
     setLoading(true);
     getPLMConnections(p, 20)
@@ -47,7 +50,7 @@ export default function PLMConnectionsPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载连接列表失败"))
+      .catch(() => message.error(t("connections.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -62,12 +65,12 @@ export default function PLMConnectionsPage() {
     if (config_port) config.port = config_port;
     try {
       await createPLMConnection({ ...rest, config });
-      message.success("连接创建成功");
+      message.success(t("connections.messages.createSuccess"));
       setModalOpen(false);
       form.resetFields();
       fetchData(1);
     } catch {
-      message.error("创建失败");
+      message.error(t("connections.messages.createFailed"));
     }
   };
 
@@ -82,27 +85,27 @@ export default function PLMConnectionsPage() {
     }
     try {
       await updatePLMConnection(editingId, payload);
-      message.success("连接更新成功");
+      message.success(t("connections.messages.updateSuccess"));
       setModalOpen(false);
       setEditingId(null);
       form.resetFields();
       fetchData(page);
     } catch {
-      message.error("更新失败");
+      message.error(t("connections.messages.updateFailed"));
     }
   };
 
   const handleDelete = (id: string, name: string) => {
     modalConfirm.confirm({
-      title: "确认删除",
-      content: `确定删除连接 "${name}" 吗？`,
+      title: t("connections.deleteConfirm.title"),
+      content: t("connections.deleteConfirm.content", { name }),
       onOk: async () => {
         try {
           await deletePLMConnection(id);
-          message.success("删除成功");
+          message.success(t("connections.messages.deleteSuccess"));
           fetchData(page);
         } catch {
-          message.error("删除失败");
+          message.error(t("connections.messages.deleteFailed"));
         }
       },
     });
@@ -113,12 +116,12 @@ export default function PLMConnectionsPage() {
     try {
       const res = await testPLMConnection(id);
       if (res.status === "ok") {
-        message.success(`连接测试成功，读取 ${res.parts_count ?? 0} 个物料`);
+        message.success(t("connections.messages.testSuccess", { count: res.parts_count ?? 0 }));
       } else {
-        message.error(res.error ? `连接测试失败: ${res.error}` : "连接测试失败");
+        message.error(res.error ? `${t("connections.messages.testFailed")}: ${res.error}` : t("connections.messages.testFailed"));
       }
     } catch {
-      message.error("连接测试失败");
+      message.error(t("connections.messages.testFailed"));
     } finally {
       setTestLoading((prev) => ({ ...prev, [id]: false }));
     }
@@ -128,9 +131,9 @@ export default function PLMConnectionsPage() {
     setSyncLoading((prev) => ({ ...prev, [id]: true }));
     try {
       const res = await syncPLMConnection(id);
-      message.success(`同步已触发，共 ${res.synced_jobs} 个任务`);
+      message.success(t("connections.messages.syncTriggered", { count: res.synced_jobs }));
     } catch {
-      message.error("同步触发失败");
+      message.error(t("connections.messages.syncFailed"));
     } finally {
       setSyncLoading((prev) => ({ ...prev, [id]: false }));
     }
@@ -154,41 +157,44 @@ export default function PLMConnectionsPage() {
   };
 
   const columns = useMemo(() => [
-    { title: "连接名称", dataIndex: "name", key: "name", ellipsis: true },
+    { title: t("connections.columns.name"), dataIndex: "name", key: "name", ellipsis: true },
     {
-      title: "类型",
+      title: t("connections.columns.type"),
       dataIndex: "connector_type",
       key: "connector_type",
       width: 140,
-      render: (t: string) => typeLabels[t] || t,
+      render: (type: string) => {
+        const option = connectorOptions.find((o) => o.value === type);
+        return option?.label || type;
+      },
     },
     {
-      title: "产线代码",
+      title: t("connections.columns.productLineCode"),
       dataIndex: "product_line_code",
       key: "product_line_code",
       width: 120,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "状态",
+      title: t("connections.columns.status"),
       dataIndex: "is_active",
       key: "is_active",
       width: 80,
       render: (active: boolean) => (
         <Tag color={active ? "success" : "error"}>
-          {active ? "正常" : "停用"}
+          {active ? t("connections.status.active") : t("connections.status.inactive")}
         </Tag>
       ),
     },
     {
-      title: "创建时间",
+      title: t("connections.columns.createdAt"),
       dataIndex: "created_at",
       key: "created_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      render: (v: string) => new Date(v).toLocaleString(),
     },
     {
-      title: "操作",
+      title: t("connections.columns.actions"),
       key: "actions",
       width: 260,
       render: (_: unknown, record: PLMConnection) => (
@@ -200,7 +206,7 @@ export default function PLMConnectionsPage() {
               icon={<EditOutlined />}
               onClick={() => openEdit(record)}
             >
-              编辑
+              {tc("actions.edit")}
             </Button>
           )}
           {canEditPlm && (
@@ -212,7 +218,7 @@ export default function PLMConnectionsPage() {
                 loading={testLoading[record.connection_id]}
                 onClick={() => handleTest(record.connection_id)}
               >
-                测试
+                {t("connections.test")}
               </Button>
               <Button
                 type="link"
@@ -221,7 +227,7 @@ export default function PLMConnectionsPage() {
                 loading={syncLoading[record.connection_id]}
                 onClick={() => handleSync(record.connection_id)}
               >
-                同步
+                {t("connections.sync")}
               </Button>
             </>
           )}
@@ -233,14 +239,14 @@ export default function PLMConnectionsPage() {
               icon={<DeleteOutlined />}
               onClick={() => handleDelete(record.connection_id, record.name)}
             >
-              删除
+              {tc("actions.delete")}
             </Button>
           )}
         </Space>
       ),
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [canEditPlm, canAdminPlm, testLoading, syncLoading]);
+  ], [canEditPlm, canAdminPlm, testLoading, syncLoading, t, tc, connectorOptions]);
 
   return (
     <div>
@@ -252,11 +258,11 @@ export default function PLMConnectionsPage() {
         }}
       >
         <Title level={4} style={{ margin: 0 }}>
-          PLM 连接管理
+          {t("connections.title")}
         </Title>
         {canCreatePlm && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建连接
+            {t("connections.create")}
           </Button>
         )}
       </div>
@@ -278,7 +284,7 @@ export default function PLMConnectionsPage() {
       />
 
       <Modal
-        title={editingId ? "编辑连接" : "新建连接"}
+        title={editingId ? t("connections.modal.editTitle") : t("connections.modal.createTitle")}
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => {
@@ -294,37 +300,29 @@ export default function PLMConnectionsPage() {
         >
           <Form.Item
             name="name"
-            label="连接名称"
-            rules={[{ required: true, message: "请输入连接名称" }]}
+            label={t("connections.form.name")}
+            rules={[{ required: true, message: t("connections.form.nameRequired") }]}
           >
-            <Input placeholder="如 PLM-Teamcenter-01" />
+            <Input placeholder={t("connections.form.namePlaceholder")} />
           </Form.Item>
           <Form.Item
             name="connector_type"
-            label="连接器类型"
-            rules={[{ required: true, message: "请选择连接器类型" }]}
+            label={t("connections.form.connectorType")}
+            rules={[{ required: true, message: t("connections.form.connectorTypeRequired") }]}
           >
-            <Select
-              options={[
-                { value: "mock", label: "Mock - 模拟数据" },
-                { value: "rest", label: "REST API - 未实现", disabled: true },
-                { value: "siemens_tc", label: "Siemens Teamcenter - 未实现", disabled: true },
-                { value: "dassault_enovia", label: "Dassault ENOVIA - 未实现", disabled: true },
-                { value: "ptc_windchill", label: "PTC Windchill - 未实现", disabled: true },
-              ]}
-            />
+            <Select options={connectorOptions} />
           </Form.Item>
           <Form.Item
             name="product_line_code"
-            label="产线代码"
-            rules={[{ required: true, message: "请输入产线代码" }]}
+            label={t("connections.form.productLineCode")}
+            rules={[{ required: true, message: t("connections.form.productLineCodeRequired") }]}
           >
-            <Input placeholder="如 DC-DC-100" />
+            <Input placeholder={t("connections.form.productLineCodePlaceholder")} />
           </Form.Item>
-          <Form.Item name="config_port" label="端口号">
+          <Form.Item name="config_port" label={t("connections.form.port")}>
             <InputNumber
               style={{ width: "100%" }}
-              placeholder="如 8080"
+              placeholder={t("connections.form.portPlaceholder")}
               min={1}
               max={65535}
             />

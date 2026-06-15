@@ -7,6 +7,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import {
   fetchERPConnections, createERPConnection, updateERPConnection,
   deleteERPConnection, testERPConnection, triggerERPSync,
@@ -16,16 +17,9 @@ import { usePermission } from "../../hooks/usePermission";
 
 const { Title } = Typography;
 
-const typeLabels: Record<string, string> = {
-  mock: "Mock",
-  rest: "REST API",
-  sap: "SAP",
-  oracle_ebs: "Oracle EBS",
-  kingdee: "金蝶",
-  yonyou: "用友",
-};
-
 export default function ERPConnectionsPage() {
+  const { t } = useTranslation("erp");
+  const { t: tc } = useTranslation("common");
   const { message, modal: modalConfirm } = App.useApp();
   const { canCreate, canEdit, canAdmin } = usePermission();
   const canCreateErp = canCreate("erp");
@@ -42,6 +36,15 @@ export default function ERPConnectionsPage() {
   const [syncLoading, setSyncLoading] = useState<Record<string, boolean>>({});
   const [connectorType, setConnectorType] = useState<string | null>(null);
 
+  const connectorOptions = useMemo(() => [
+    { value: "mock", label: t("connections.connector.mock") },
+    { value: "rest", label: t("connections.connector.rest") },
+    { value: "sap", label: t("connections.connector.notImplemented", { name: "SAP" }), disabled: true },
+    { value: "oracle_ebs", label: t("connections.connector.notImplemented", { name: "Oracle EBS" }), disabled: true },
+    { value: "kingdee", label: t("connections.connector.notImplemented", { name: "Kingdee" }), disabled: true },
+    { value: "yonyou", label: t("connections.connector.notImplemented", { name: "Yonyou" }), disabled: true },
+  ], [t]);
+
   const fetchData = (p: number = page) => {
     setLoading(true);
     fetchERPConnections(p, 20)
@@ -49,7 +52,7 @@ export default function ERPConnectionsPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载连接列表失败"))
+      .catch(() => message.error(t("connections.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -73,13 +76,13 @@ export default function ERPConnectionsPage() {
     if (config_api_key) config.api_key = config_api_key;
     try {
       await createERPConnection({ ...rest, config });
-      message.success("连接创建成功");
+      message.success(t("connections.messages.createSuccess"));
       setModalOpen(false);
       form.resetFields();
       setConnectorType(null);
       fetchData(1);
     } catch {
-      message.error("创建失败");
+      message.error(t("connections.messages.createFailed"));
     }
   };
 
@@ -99,28 +102,28 @@ export default function ERPConnectionsPage() {
     if (config_api_key) config.api_key = config_api_key;
     try {
       await updateERPConnection(editingId, { ...rest, config });
-      message.success("连接更新成功");
+      message.success(t("connections.messages.updateSuccess"));
       setModalOpen(false);
       setEditingId(null);
       form.resetFields();
       setConnectorType(null);
       fetchData(page);
     } catch {
-      message.error("更新失败");
+      message.error(t("connections.messages.updateFailed"));
     }
   };
 
   const handleDelete = (id: string, name: string) => {
     modalConfirm.confirm({
-      title: "确认删除",
-      content: `确定删除连接 "${name}" 吗？`,
+      title: t("connections.deleteConfirm.title"),
+      content: t("connections.deleteConfirm.content", { name }),
       onOk: async () => {
         try {
           await deleteERPConnection(id);
-          message.success("删除成功");
+          message.success(t("connections.messages.deleteSuccess"));
           fetchData(page);
         } catch {
-          message.error("删除失败");
+          message.error(t("connections.messages.deleteFailed"));
         }
       },
     });
@@ -131,12 +134,12 @@ export default function ERPConnectionsPage() {
     try {
       const res = await testERPConnection(id);
       if (res.success) {
-        message.success("连接测试成功");
+        message.success(t("connections.messages.testSuccess"));
       } else {
-        message.error(res.message ? `连接测试失败: ${res.message}` : "连接测试失败");
+        message.error(res.message ? `${t("connections.messages.testFailed")}: ${res.message}` : t("connections.messages.testFailed"));
       }
     } catch {
-      message.error("连接测试失败");
+      message.error(t("connections.messages.testFailed"));
     } finally {
       setTestLoading((prev) => ({ ...prev, [id]: false }));
     }
@@ -146,9 +149,9 @@ export default function ERPConnectionsPage() {
     setSyncLoading((prev) => ({ ...prev, [id]: true }));
     try {
       await triggerERPSync(id);
-      message.success("同步已触发，后台将在 30 秒内开始执行");
+      message.success(t("connections.messages.syncTriggered"));
     } catch {
-      message.error("同步触发失败");
+      message.error(t("connections.messages.syncFailed"));
     } finally {
       setSyncLoading((prev) => ({ ...prev, [id]: false }));
     }
@@ -179,41 +182,44 @@ export default function ERPConnectionsPage() {
   const showRestConfig = connectorType === "rest";
 
   const columns = useMemo(() => [
-    { title: "连接名称", dataIndex: "name", key: "name", ellipsis: true },
+    { title: t("connections.columns.name"), dataIndex: "name", key: "name", ellipsis: true },
     {
-      title: "类型",
+      title: t("connections.columns.type"),
       dataIndex: "connector_type",
       key: "connector_type",
       width: 140,
-      render: (t: string) => typeLabels[t] || t,
+      render: (type: string) => {
+        const option = connectorOptions.find((o) => o.value === type);
+        return option?.label || type;
+      },
     },
     {
-      title: "产线代码",
+      title: t("connections.columns.productLineCode"),
       dataIndex: "product_line_code",
       key: "product_line_code",
       width: 120,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "状态",
+      title: t("connections.columns.status"),
       dataIndex: "is_active",
       key: "is_active",
       width: 80,
       render: (active: boolean) => (
         <Tag color={active ? "success" : "error"}>
-          {active ? "正常" : "停用"}
+          {active ? t("connections.status.active") : t("connections.status.inactive")}
         </Tag>
       ),
     },
     {
-      title: "创建时间",
+      title: t("connections.columns.createdAt"),
       dataIndex: "created_at",
       key: "created_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      render: (v: string) => new Date(v).toLocaleString(),
     },
     {
-      title: "操作",
+      title: t("connections.columns.actions"),
       key: "actions",
       width: 260,
       render: (_: unknown, record: ERPConnection) => (
@@ -225,7 +231,7 @@ export default function ERPConnectionsPage() {
               icon={<EditOutlined />}
               onClick={() => openEdit(record)}
             >
-              编辑
+              {tc("actions.edit")}
             </Button>
           )}
           {canEditErp && (
@@ -237,7 +243,7 @@ export default function ERPConnectionsPage() {
                 loading={testLoading[record.connection_id]}
                 onClick={() => handleTest(record.connection_id)}
               >
-                测试
+                {t("connections.test")}
               </Button>
               <Button
                 type="link"
@@ -246,7 +252,7 @@ export default function ERPConnectionsPage() {
                 loading={syncLoading[record.connection_id]}
                 onClick={() => handleSync(record.connection_id)}
               >
-                同步
+                {t("connections.sync")}
               </Button>
             </>
           )}
@@ -258,14 +264,14 @@ export default function ERPConnectionsPage() {
               icon={<DeleteOutlined />}
               onClick={() => handleDelete(record.connection_id, record.name)}
             >
-              删除
+              {tc("actions.delete")}
             </Button>
           )}
         </Space>
       ),
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [canEditErp, canAdminErp, testLoading, syncLoading]);
+  ], [canEditErp, canAdminErp, testLoading, syncLoading, t, tc, connectorOptions]);
 
   return (
     <div>
@@ -277,11 +283,11 @@ export default function ERPConnectionsPage() {
         }}
       >
         <Title level={4} style={{ margin: 0 }}>
-          ERP 连接管理
+          {t("connections.title")}
         </Title>
         {canCreateErp && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建连接
+            {t("connections.create")}
           </Button>
         )}
       </div>
@@ -303,7 +309,7 @@ export default function ERPConnectionsPage() {
       />
 
       <Modal
-        title={editingId ? "编辑连接" : "新建连接"}
+        title={editingId ? t("connections.modal.editTitle") : t("connections.modal.createTitle")}
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => {
@@ -320,50 +326,43 @@ export default function ERPConnectionsPage() {
         >
           <Form.Item
             name="name"
-            label="连接名称"
-            rules={[{ required: true, message: "请输入连接名称" }]}
+            label={t("connections.form.name")}
+            rules={[{ required: true, message: t("connections.form.nameRequired") }]}
           >
-            <Input placeholder="如 ERP-SAP-01" />
+            <Input placeholder={t("connections.form.namePlaceholder")} />
           </Form.Item>
           <Form.Item
             name="connector_type"
-            label="连接器类型"
-            rules={[{ required: true, message: "请选择连接器类型" }]}
+            label={t("connections.form.connectorType")}
+            rules={[{ required: true, message: t("connections.form.connectorTypeRequired") }]}
           >
             <Select
               onChange={(v) => setConnectorType(v)}
-              options={[
-                { value: "mock", label: "Mock - 模拟数据" },
-                { value: "rest", label: "REST API" },
-                { value: "sap", label: "SAP - 未实现", disabled: true },
-                { value: "oracle_ebs", label: "Oracle EBS - 未实现", disabled: true },
-                { value: "kingdee", label: "金蝶 - 未实现", disabled: true },
-                { value: "yonyou", label: "用友 - 未实现", disabled: true },
-              ]}
+              options={connectorOptions}
             />
           </Form.Item>
           <Form.Item
             name="product_line_code"
-            label="产线代码"
-            rules={[{ required: true, message: "请输入产线代码" }]}
+            label={t("connections.form.productLineCode")}
+            rules={[{ required: true, message: t("connections.form.productLineCodeRequired") }]}
           >
-            <Input placeholder="如 DC-DC-100" />
+            <Input placeholder={t("connections.form.productLineCodePlaceholder")} />
           </Form.Item>
           {showRestConfig && (
             <>
-              <Form.Item name="config_base_url" label="Base URL">
-                <Input placeholder="如 https://erp.example.com/api" />
+              <Form.Item name="config_base_url" label={t("connections.form.baseUrl")}>
+                <Input placeholder={t("connections.form.baseUrlPlaceholder")} />
               </Form.Item>
-              <Form.Item name="config_port" label="端口号">
+              <Form.Item name="config_port" label={t("connections.form.port")}>
                 <InputNumber
                   style={{ width: "100%" }}
-                  placeholder="如 8080"
+                  placeholder={t("connections.form.portPlaceholder")}
                   min={1}
                   max={65535}
                 />
               </Form.Item>
-              <Form.Item name="config_api_key" label="API Key">
-                <Input.Password placeholder="API 密钥" />
+              <Form.Item name="config_api_key" label={t("connections.form.apiKey")}>
+                <Input.Password placeholder={t("connections.form.apiKeyPlaceholder")} />
               </Form.Item>
             </>
           )}

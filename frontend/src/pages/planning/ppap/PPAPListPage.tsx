@@ -2,17 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Table, Tag, Tabs, Button, Select, Space, Modal, Form, Input, InputNumber, message, Card, Row, Col } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { listPPAPs, createPPAP } from "../../../api/ppap";
 import { listSuppliers } from "../../../api/supplier";
 import type { PPAPSubmission, PPAPListResponse, Supplier } from "../../../types";
-
-const STATUS_TABS = [
-  { key: "all", label: "全部" },
-  { key: "draft", label: "草稿" },
-  { key: "under_review", label: "审查中" },
-  { key: "approved", label: "已批准" },
-  { key: "rejected", label: "已驳回" },
-];
 
 const STATUS_MAP: Record<string, string | undefined> = {
   all: undefined,
@@ -22,29 +15,43 @@ const STATUS_MAP: Record<string, string | undefined> = {
   rejected: "rejected",
 };
 
-export const STATUS_COLORS: Record<string, string> = {
-  draft: "default",
-  under_review: "processing",
-  approved: "success",
-  rejected: "error",
-};
+export function usePPAPLabels(t: (key: string) => string) {
+  const statusTabs = [
+    { key: "all", label: t("tab.all") },
+    { key: "draft", label: t("tab.draft") },
+    { key: "under_review", label: t("tab.underReview") },
+    { key: "approved", label: t("tab.approved") },
+    { key: "rejected", label: t("tab.rejected") },
+  ];
 
-export const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
-  under_review: "审查中",
-  approved: "已批准",
-  rejected: "已驳回",
-};
+  const statusColors: Record<string, string> = {
+    draft: "default",
+    under_review: "processing",
+    approved: "success",
+    rejected: "error",
+  };
 
-export const LEVEL_LABELS: Record<number, string> = {
-  1: "Level 1",
-  2: "Level 2",
-  3: "Level 3",
-  4: "Level 4",
-  5: "Level 5",
-};
+  const statusLabels: Record<string, string> = {
+    draft: t("status.draft"),
+    under_review: t("status.underReview"),
+    approved: t("status.approved"),
+    rejected: t("status.rejected"),
+  };
+
+  const levelLabels: Record<number, string> = {
+    1: t("level.1"),
+    2: t("level.2"),
+    3: t("level.3"),
+    4: t("level.4"),
+    5: t("level.5"),
+  };
+
+  return { statusTabs, statusColors, statusLabels, levelLabels };
+}
 
 export default function PPAPListPage() {
+  const { t } = useTranslation("ppap");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const [data, setData] = useState<PPAPListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,6 +62,8 @@ export default function PPAPListPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [form] = Form.useForm();
   const [kpis, setKpis] = useState({ total: 0, pending: 0, approved: 0, rejected: 0 });
+
+  const { statusTabs, statusColors, statusLabels, levelLabels } = usePPAPLabels(t);
 
   const loadData = async () => {
     setLoading(true);
@@ -86,37 +95,37 @@ export default function PPAPListPage() {
       submission_level: (values.submission_level as number) || 3,
       customer_name: values.customer_name as string | undefined,
     });
-    message.success("PPAP 创建成功");
+    message.success(t("message.createSuccess"));
     setCreateOpen(false);
     form.resetFields();
     loadData();
   };
 
   const columns = [
-    { title: "PPAP编号", dataIndex: "ppap_no", key: "ppap_no" },
-    { title: "供应商", dataIndex: "supplier_name", key: "supplier_name", render: (v: string | null) => v || "-" },
-    { title: "零件号", dataIndex: "part_no", key: "part_no" },
-    { title: "零件名称", dataIndex: "part_name", key: "part_name" },
+    { title: t("column.ppapNo"), dataIndex: "ppap_no", key: "ppap_no" },
+    { title: t("column.supplier"), dataIndex: "supplier_name", key: "supplier_name", render: (v: string | null) => v || "-" },
+    { title: t("column.partNo"), dataIndex: "part_no", key: "part_no" },
+    { title: t("column.partName"), dataIndex: "part_name", key: "part_name" },
     {
-      title: "提交等级",
+      title: t("column.submissionLevel"),
       dataIndex: "submission_level",
       key: "submission_level",
-      render: (v: number) => <Tag>{LEVEL_LABELS[v] || v}</Tag>,
+      render: (v: number) => <Tag>{levelLabels[v] || v}</Tag>,
     },
     {
-      title: "状态",
+      title: t("column.status"),
       dataIndex: "status",
       key: "status",
-      render: (s: string) => <Tag color={STATUS_COLORS[s]}>{STATUS_LABELS[s] || s}</Tag>,
+      render: (s: string) => <Tag color={statusColors[s]}>{statusLabels[s] || s}</Tag>,
     },
-    { title: "版本", dataIndex: "revision", key: "revision" },
-    { title: "创建时间", dataIndex: "created_at", key: "created_at", render: (v: string) => v?.split("T")[0] || "-" },
+    { title: t("column.revision"), dataIndex: "revision", key: "revision" },
+    { title: t("column.createdAt"), dataIndex: "created_at", key: "created_at", render: (v: string) => v?.split("T")[0] || "-" },
     {
-      title: "操作",
+      title: t("column.action"),
       key: "action",
       render: (_: unknown, record: PPAPSubmission) => (
         <Button type="link" onClick={() => navigate(`/ppap/${record.submission_id}`)}>
-          查看
+          {tc("actions.view")}
         </Button>
       ),
     },
@@ -125,20 +134,20 @@ export default function PPAPListPage() {
   return (
     <div>
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>PPAP 总数</div><div style={{ fontSize: 24, fontWeight: 600 }}>{kpis.total}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>待审</div><div style={{ fontSize: 24, fontWeight: 600, color: "#1677ff" }}>{kpis.pending}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>已批准</div><div style={{ fontSize: 24, fontWeight: 600, color: "#52c41a" }}>{kpis.approved}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>已驳回</div><div style={{ fontSize: 24, fontWeight: 600, color: "#ff4d4f" }}>{kpis.rejected}</div></Card></Col>
+        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>{t("kpi.total")}</div><div style={{ fontSize: 24, fontWeight: 600 }}>{kpis.total}</div></Card></Col>
+        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>{t("kpi.pending")}</div><div style={{ fontSize: 24, fontWeight: 600, color: "#1677ff" }}>{kpis.pending}</div></Card></Col>
+        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>{t("kpi.approved")}</div><div style={{ fontSize: 24, fontWeight: 600, color: "#52c41a" }}>{kpis.approved}</div></Card></Col>
+        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>{t("kpi.rejected")}</div><div style={{ fontSize: 24, fontWeight: 600, color: "#ff4d4f" }}>{kpis.rejected}</div></Card></Col>
       </Row>
 
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={STATUS_TABS} />
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={statusTabs} />
         <Space>
           <Select
             allowClear
             showSearch
             filterOption={false}
-            placeholder="筛选供应商"
+            placeholder={t("placeholder.searchSupplier")}
             style={{ width: 160 }}
             onSearch={async (search) => {
               const res = search ? await listSuppliers({ search, page_size: 20 }) : await listSuppliers({ page_size: 20 });
@@ -148,7 +157,7 @@ export default function PPAPListPage() {
             options={suppliers.map((s) => ({ value: s.supplier_id, label: s.name }))}
           />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建 PPAP
+            {t("pageTitle.newPPAP")}
           </Button>
         </Space>
       </div>
@@ -167,14 +176,14 @@ export default function PPAPListPage() {
       />
 
       <Modal
-        title="新建 PPAP"
+        title={t("pageTitle.newPPAP")}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => form.submit()}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={handleCreate} initialValues={{ submission_level: 3 }}>
-          <Form.Item name="supplier_id" label="供应商" rules={[{ required: true, message: "请选择供应商" }]}>
+          <Form.Item name="supplier_id" label={t("form.supplier")} rules={[{ required: true, message: t("message.selectSupplier") }]}>
             <Select
               showSearch
               filterOption={false}
@@ -183,19 +192,19 @@ export default function PPAPListPage() {
                 setSuppliers(res.items);
               }}
               options={suppliers.map((s) => ({ value: s.supplier_id, label: `${s.supplier_no} - ${s.name}` }))}
-              placeholder="搜索供应商"
+              placeholder={t("placeholder.searchSupplier")}
             />
           </Form.Item>
-          <Form.Item name="part_no" label="零件号" rules={[{ required: true, message: "请输入零件号" }]}>
+          <Form.Item name="part_no" label={t("form.partNo")} rules={[{ required: true, message: t("message.enterPartNo") }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="part_name" label="零件名称" rules={[{ required: true, message: "请输入零件名称" }]}>
+          <Form.Item name="part_name" label={t("form.partName")} rules={[{ required: true, message: t("message.enterPartName") }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="submission_level" label="提交等级" rules={[{ required: true }]}>
+          <Form.Item name="submission_level" label={t("form.submissionLevel")} rules={[{ required: true }]}>
             <InputNumber min={1} max={5} style={{ width: "100%" }} />
           </Form.Item>
-          <Form.Item name="customer_name" label="客户名称">
+          <Form.Item name="customer_name" label={t("form.customerName")}>
             <Input />
           </Form.Item>
         </Form>

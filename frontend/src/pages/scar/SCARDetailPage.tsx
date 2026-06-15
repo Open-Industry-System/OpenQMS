@@ -2,14 +2,20 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, Tag, Button, Space, Descriptions, Input, Modal, message, Spin, Row, Col } from "antd";
+import { useTranslation } from "react-i18next";
 import { getSCAR, transitionSCAR, linkCAPA } from "../../api/scar";
 import { createCAPA, getCAPA } from "../../api/capa";
-import { STATUS_COLORS, STATUS_LABELS, SOURCE_LABELS } from "./SCARListPage";
+import { STATUS_COLORS, useSCARStatusMap, useSCARSourceMap } from "./useOptions";
 import type { SupplierSCAR } from "../../types";
 
 export default function SCARDetailPage() {
+  const { t } = useTranslation("scar");
+  const { t: tc } = useTranslation("common");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const statusMap = useSCARStatusMap();
+  const sourceMap = useSCARSourceMap();
+
   const [scar, setScar] = useState<SupplierSCAR | null>(null);
   const [loading, setLoading] = useState(true);
   const [respondModalOpen, setRespondModalOpen] = useState(false);
@@ -44,19 +50,19 @@ export default function SCARDetailPage() {
   const doTransition = async (action: string, extra?: Record<string, string>) => {
     if (!id) return;
     await transitionSCAR(id, { action, ...extra } as Parameters<typeof transitionSCAR>[1]);
-    message.success("状态更新成功");
+    message.success(t("messages.statusUpdated"));
     load();
   };
 
   const handleRespond = async () => {
-    if (!responseText.trim()) { message.warning("请输入供应商回复"); return; }
+    if (!responseText.trim()) { message.warning(t("messages.enterResponse")); return; }
     await doTransition("respond", { supplier_response: responseText });
     setRespondModalOpen(false);
     setResponseText("");
   };
 
   const handleClose = async () => {
-    if (!resolutionText.trim()) { message.warning("请输入解决摘要"); return; }
+    if (!resolutionText.trim()) { message.warning(t("messages.enterResolution")); return; }
     await doTransition("close", { resolution_summary: resolutionText });
     setCloseModalOpen(false);
     setResolutionText("");
@@ -69,12 +75,12 @@ export default function SCARDetailPage() {
     const capa = await createCAPA({
       title: `${scar.scar_no} — ${scar.description.slice(0, 50)}`,
       document_no: `8D-${seq}`,
-      severity: "一般",
+      severity: t("severity.normal"),
       due_date: scar.due_date || undefined,
       product_line_code: scar.product_line_code || "DC-DC-100",
     });
     await linkCAPA(id, { capa_ref_id: capa.report_id });
-    message.success("CAPA 创建并关联成功");
+    message.success(t("messages.capaLinked"));
     setCapaModalOpen(false);
     load();
   };
@@ -86,18 +92,18 @@ export default function SCARDetailPage() {
   const actionButtons = () => {
     const btns: ReactNode[] = [];
     if (scar.status === "open") {
-      btns.push(<Button key="start" type="primary" onClick={() => doTransition("start")}>开始处理</Button>);
+      btns.push(<Button key="start" type="primary" onClick={() => doTransition("start")}>{t("actions.start")}</Button>);
     }
     if (scar.status === "in_progress") {
-      btns.push(<Button key="respond" type="primary" onClick={() => setRespondModalOpen(true)}>提交回复</Button>);
+      btns.push(<Button key="respond" type="primary" onClick={() => setRespondModalOpen(true)}>{t("actions.respond")}</Button>);
     }
     if (scar.status === "responded") {
-      btns.push(<Button key="verify" type="primary" onClick={() => doTransition("verify")}>验证通过</Button>);
-      btns.push(<Button key="reject" danger onClick={() => doTransition("reject")}>退回</Button>);
+      btns.push(<Button key="verify" type="primary" onClick={() => doTransition("verify")}>{t("actions.verify")}</Button>);
+      btns.push(<Button key="reject" danger onClick={() => doTransition("reject")}>{t("actions.reject")}</Button>);
     }
     if (scar.status === "verified") {
-      btns.push(<Button key="close" type="primary" onClick={() => setCloseModalOpen(true)}>关闭</Button>);
-      btns.push(<Button key="reopen" onClick={() => doTransition("reopen")}>重新打开</Button>);
+      btns.push(<Button key="close" type="primary" onClick={() => setCloseModalOpen(true)}>{t("actions.close")}</Button>);
+      btns.push(<Button key="reopen" onClick={() => doTransition("reopen")}>{t("actions.reopen")}</Button>);
     }
     return btns;
   };
@@ -109,7 +115,7 @@ export default function SCARDetailPage() {
           <Col>
             <Space>
               <span style={{ fontSize: 20, fontWeight: 600 }}>{scar.scar_no}</span>
-              <Tag color={STATUS_COLORS[scar.status]}>{STATUS_LABELS[scar.status]}</Tag>
+              <Tag color={STATUS_COLORS[scar.status]}>{statusMap[scar.status]}</Tag>
             </Space>
           </Col>
           <Col>
@@ -118,60 +124,57 @@ export default function SCARDetailPage() {
         </Row>
       </Card>
 
-      <Card title="SCAR 信息" style={{ marginBottom: 16 }}>
+      <Card title={t("card.scarInfo")} style={{ marginBottom: 16 }}>
         <Descriptions column={2} bordered size="small">
-          <Descriptions.Item label="供应商">{scar.supplier_name || scar.supplier_id}</Descriptions.Item>
-          <Descriptions.Item label="来源">{SOURCE_LABELS[scar.source_type] || scar.source_type}</Descriptions.Item>
-          <Descriptions.Item label="产品线">{scar.product_line_code || "-"}</Descriptions.Item>
-          <Descriptions.Item label="发出日期">{scar.issued_date || "-"}</Descriptions.Item>
-          <Descriptions.Item label="到期日">{scar.due_date || "-"}</Descriptions.Item>
-          <Descriptions.Item label="关闭日期">{scar.closed_date || "-"}</Descriptions.Item>
-          <Descriptions.Item label="问题描述" span={2}>{scar.description}</Descriptions.Item>
-          <Descriptions.Item label="要求措施" span={2}>{scar.requested_action || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.supplier")}>{scar.supplier_name || scar.supplier_id}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.source")}>{sourceMap[scar.source_type] || scar.source_type}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.productLine")}>{scar.product_line_code || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.issuedDate")}>{scar.issued_date || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.dueDate")}>{scar.due_date || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.closedDate")}>{scar.closed_date || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.description")} span={2}>{scar.description}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.requestedAction")} span={2}>{scar.requested_action || "-"}</Descriptions.Item>
         </Descriptions>
       </Card>
 
-      <Card title="供应商回复" style={{ marginBottom: 16 }}>
+      <Card title={t("card.supplierResponse")} style={{ marginBottom: 16 }}>
         {scar.supplier_response ? (
           <div style={{ whiteSpace: "pre-wrap" }}>{scar.supplier_response}</div>
         ) : (
-          <div style={{ color: "#999" }}>暂无回复</div>
+          <div style={{ color: "#999" }}>{t("empty.noResponse")}</div>
         )}
       </Card>
 
-      <Card title="CAPA 关联" style={{ marginBottom: 16 }}>
+      <Card title={t("card.capaLink")} style={{ marginBottom: 16 }}>
         {scar.capa_ref_id && capaInfo ? (
           <Space>
-            <span>已关联 8D: <strong>{capaInfo.document_no}</strong></span>
+            <span>{t("linked.linked8D")} <strong>{capaInfo.document_no}</strong></span>
             <Tag>{capaInfo.status}</Tag>
-            <Button type="link" onClick={() => navigate(`/capa/${scar.capa_ref_id}`)}>查看</Button>
+            <Button type="link" onClick={() => navigate(`/capa/${scar.capa_ref_id}`)}>{tc("actions.view")}</Button>
           </Space>
         ) : (
-          <Button type="dashed" onClick={() => setCapaModalOpen(true)}>创建关联 8D</Button>
+          <Button type="dashed" onClick={() => setCapaModalOpen(true)}>{t("actions.createLinked8D")}</Button>
         )}
       </Card>
 
       {scar.resolution_summary && (
-        <Card title="解决摘要">
+        <Card title={t("card.resolutionSummary")}>
           <div style={{ whiteSpace: "pre-wrap" }}>{scar.resolution_summary}</div>
         </Card>
       )}
 
-      {/* Respond Modal */}
-      <Modal title="提交供应商回复" open={respondModalOpen} onCancel={() => setRespondModalOpen(false)} onOk={handleRespond}>
-        <Input.TextArea rows={4} value={responseText} onChange={(e) => setResponseText(e.target.value)} placeholder="请输入供应商回复内容" />
+      <Modal title={t("modal.submitResponse")} open={respondModalOpen} onCancel={() => setRespondModalOpen(false)} onOk={handleRespond}>
+        <Input.TextArea rows={4} value={responseText} onChange={(e) => setResponseText(e.target.value)} placeholder={t("placeholder.supplierResponse")} />
       </Modal>
 
-      {/* Close Modal */}
-      <Modal title="关闭 SCAR" open={closeModalOpen} onCancel={() => setCloseModalOpen(false)} onOk={handleClose}>
-        <Input.TextArea rows={4} value={resolutionText} onChange={(e) => setResolutionText(e.target.value)} placeholder="请输入解决摘要" />
+      <Modal title={t("modal.closeScar")} open={closeModalOpen} onCancel={() => setCloseModalOpen(false)} onOk={handleClose}>
+        <Input.TextArea rows={4} value={resolutionText} onChange={(e) => setResolutionText(e.target.value)} placeholder={t("placeholder.resolutionSummary")} />
       </Modal>
 
-      {/* Create CAPA Modal */}
-      <Modal title="创建关联 8D" open={capaModalOpen} onCancel={() => setCapaModalOpen(false)} onOk={handleCreateCAPA} confirmLoading={false}>
-        <p>将基于 SCAR 信息创建新的 8D/CAPA 记录并自动关联。</p>
-        <p>SCAR: {scar.scar_no}</p>
-        <p>描述: {scar.description.slice(0, 100)}...</p>
+      <Modal title={t("modal.createLinked8D")} open={capaModalOpen} onCancel={() => setCapaModalOpen(false)} onOk={handleCreateCAPA} confirmLoading={false}>
+        <p>{t("modal.createLinked8DContent")}</p>
+        <p>{t("modal.scarLabel")} {scar.scar_no}</p>
+        <p>{t("modal.descriptionLabel")} {scar.description.slice(0, 100)}...</p>
       </Modal>
     </div>
   );

@@ -1,0 +1,93 @@
+{
+  "page": {
+    "title": "知识图谱",
+    "overview": "总览 / 风险地图",
+    "keywordSearch": "历史关键词搜索",
+    "semanticSearch": "语义搜索"
+  },
+  "toolbar": {
+    "hierarchical": "层次",
+    "force": "力导向",
+    "compactTree": "紧凑树",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "fitView": "适应画布",
+    "download": "下载快照"
+  },
+  "legend": {
+    "title": "图例",
+    "system": "系统",
+    "processItem": "过程项",
+    "subsystem": "子系统",
+    "processStep": "工序",
+    "component": "零部件",
+    "processWorkElement": "工作要素",
+    "function": "功能",
+    "failureMode": "失效模式",
+    "failureEffect": "失效影响",
+    "failureCause": "失效原因",
+    "preventionControl": "预防控制",
+    "detectionControl": "探测控制",
+    "recommendedAction": "建议措施"
+  },
+  "nodeDetail": {
+    "title": "节点详情",
+    "nodeId": "节点 ID",
+    "nodeType": "节点类型",
+    "severity": "严重度 (S)",
+    "occurrence": "发生度 (O)",
+    "detection": "探测度 (D)",
+    "rpn": "RPN",
+    "rpnFormula": "{{s}} × {{o}} × {{d}} = {{rpn}}",
+    "ap": "行动优先级 (AP)",
+    "nodeValue": "(节点值: {{value}})",
+    "revisedSeverity": "修订严重度",
+    "revisedOccurrence": "修订发生度",
+    "revisedDetection": "修订探测度",
+    "status": "状态",
+    "responsible": "责任人",
+    "dueDate": "截止日期",
+    "apHigh": "高 (H)",
+    "apMedium": "中 (M)",
+    "apLow": "低 (L)",
+    "apUnrated": "未评级"
+  },
+  "overview": {
+    "totalFmeas": "FMEA 总数",
+    "totalNodes": "节点总数",
+    "highApNodes": "高优先级失效模式 (AP=H)",
+    "avgRpn": "平均 RPN",
+    "apDistribution": "AP 分布",
+    "apHighCount": "高 (H): {{count}}",
+    "apMediumCount": "中 (M): {{count}}",
+    "apLowCount": "低 (L): {{count}}",
+    "topHighAp": "高优先级失效模式 Top 10",
+    "topHighApExtra": "AP = H (高优先级)",
+    "nodeTypeDistribution": "节点类型分布"
+  },
+  "search": {
+    "placeholder": "输入关键词搜索...",
+    "entityTypes": {
+      "fmeaNode": "FMEA 节点",
+      "capa": "CAPA",
+      "auditFinding": "审核发现",
+      "complaint": "客诉",
+      "scar": "SCAR",
+      "rma": "RMA"
+    },
+    "columns": {
+      "name": "名称",
+      "type": "类型",
+      "sourceFmea": "来源 FMEA",
+      "action": "操作"
+    },
+    "viewGraph": "查看图谱",
+    "view": "查看",
+    "selectProductLine": "请先选择产品线",
+    "noStats": "暂无统计数据",
+    "failureMode": "失效模式",
+    "failureCause": "失效原因",
+    "failureEffect": "失效影响",
+    "function": "功能"
+  }
+}

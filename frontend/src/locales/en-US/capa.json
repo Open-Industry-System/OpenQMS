@@ -1,0 +1,208 @@
+{
+  "title": "8D / CAPA",
+  "actions": {
+    "create": "Create 8D",
+    "back": "Back",
+    "advance": "Advance",
+    "linkFMEA": "Link FMEA",
+    "changeFMEA": "Change FMEA Link",
+    "undoChange": "Undo Change",
+    "addMember": "Add Member",
+    "handle": "Process",
+    "viewDetail": "View Detail"
+  },
+  "status": {
+    "D1_TEAM": "D1 Team Formation",
+    "D2_DESCRIPTION": "D2 Problem Description",
+    "D3_INTERIM": "D3 Interim Containment",
+    "D4_ROOT_CAUSE": "D4 Root Cause Analysis",
+    "D5_CORRECTION": "D5 Permanent Corrective Action",
+    "D6_VERIFICATION": "D6 Implementation Verification",
+    "D7_PREVENTION": "D7 Prevent Recurrence",
+    "D8_CLOSURE": "D8 Closure",
+    "ARCHIVED": "Archived"
+  },
+  "steps": {
+    "d1": "D1 Team Formation",
+    "d2": "D2 Problem Description",
+    "d3": "D3 Interim Containment",
+    "d4": "D4 Root Cause Analysis",
+    "d5": "D5 Permanent Corrective Action",
+    "d6": "D6 Implementation Verification",
+    "d7": "D7 Prevent Recurrence",
+    "d8": "D8 Closure"
+  },
+  "fields": {
+    "documentNo": "Report No.",
+    "title": "Title",
+    "currentStep": "Current Step",
+    "severity": "Severity",
+    "dueDate": "Due Date",
+    "relatedFMEA": "Related FMEA",
+    "createdAt": "Created At",
+    "problemDescription": "Problem Description (Optional)",
+    "d2Label": "5W2H Problem Description",
+    "d3Label": "Interim Containment",
+    "d4Label": "Root Cause Analysis (5Why / Fishbone)",
+    "d5Label": "Permanent Corrective Action",
+    "d6Label": "Effect Verification",
+    "d7Label": "Prevent Recurrence",
+    "d8Label": "Closure Confirmation"
+  },
+  "messages": {
+    "createSuccess": "8D report created",
+    "saveFailed": "Save failed",
+    "advanceSuccess": "Advanced to next step",
+    "advanceFailed": "Advance failed",
+    "linkFMEASuccess": "FMEA linked",
+    "linkFMEAFailed": "Link failed",
+    "enterName": "Please enter a name",
+    "memberExists": "Member already exists",
+    "capaNotFound": "8D report not found",
+    "reportArchived": "Report archived",
+    "undoSuccess": "AI change undone",
+    "searchTimeout": "Search timeout, please use the recommendation feature later during editing",
+    "searchFailed": "Failed to search lessons learned"
+  },
+  "detail": {
+    "currentStepDetails": "Current Step Details",
+    "reportInfo": "Report Info",
+    "notSet": "Not set",
+    "notLinked": "Not linked",
+    "linkedFMEA": "Linked FMEA"
+  },
+  "team": {
+    "name": "Member Name",
+    "role": "Project Role",
+    "namePlaceholder": "Member name",
+    "roles": {
+      "quality_engineer": "Quality Engineer",
+      "process_engineer": "Process Engineer",
+      "rd_engineer": "R&D Engineer",
+      "project_manager": "Project Manager",
+      "production_supervisor": "Production Supervisor"
+    }
+  },
+  "severity": {
+    "fatal": "Fatal",
+    "serious": "Serious",
+    "general": "General",
+    "minor": "Minor"
+  },
+  "fmea": {
+    "linked": "Linked FMEA",
+    "selectTitle": "Select Related FMEA",
+    "searchPlaceholder": "Search FMEA document",
+    "failureModeSuffix": " (Failure Mode)"
+  },
+  "d4": {
+    "title": "D4 Root Cause Recommendations",
+    "subtitle": "Based on D2 description and linked FMEA analysis",
+    "empty": "No recommendations",
+    "hint": "Tip: Improving the D2 problem description can enhance semantic matching.",
+    "groups": {
+      "linked": "Linked FMEA",
+      "semantic": "Semantic Match",
+      "historical": "Historical CAPA",
+      "llm": "AI Suggestions",
+      "rule": "Rule Engine Suggestions"
+    },
+    "adopt": "Adopt",
+    "skip": "Skip",
+    "readonlyTooltip": "Read-only users cannot adopt",
+    "loadFailed": "Failed to load D4 recommendations"
+  },
+  "d5": {
+    "title": "D5 Corrective Action Recommendations",
+    "controls": "FMEA Existing Controls ({{count}})",
+    "suggestions": "General Suggestions ({{count}})",
+    "controlTypes": {
+      "prevention": "Prevention",
+      "detection": "Detection"
+    },
+    "categories": {
+      "预防措施": "Preventive",
+      "纠正措施": "Corrective"
+    },
+    "defaultBasis": "System recommendation",
+    "loadFailed": "Failed to load D5 recommendations",
+    "adopt": "Adopt",
+    "skip": "Skip",
+    "readonlyTooltip": "Read-only users cannot adopt"
+  },
+  "d7": {
+    "title": "Prevent Recurrence Reminder",
+    "linkedNodes": "Linked FMEA Nodes",
+    "similarNodes": "Similar Failure Modes in Same Product Line",
+    "empty": "No related FMEA recommendations",
+    "jump": "Jump",
+    "autoFill": "Auto-fill",
+    "updated": "Updated",
+    "skipped": "Skipped",
+    "needsNew": "New needed",
+    "existing": "Existing: {{name}}",
+    "autoFillTooltipUpdate": "Update existing prevention control",
+    "autoFillTooltipNew": "Add new prevention control node",
+    "autoFillDisabledNoCause": "No cause node, please handle manually",
+    "autoFillDisabledNoD5": "No D5 measure to fill",
+    "autoFillSuccess": "Prevention control auto-filled",
+    "autoFillFailed": "Auto-fill failed",
+    "loadFailed": "Failed to load recommendations",
+    "matchSource": {
+      "linked": "Linked",
+      "similar": "Similar"
+    },
+    "skipDialogTitle": "The following FMEA nodes are not confirmed",
+    "skipDialogDescription": "The following recommended FMEA nodes have not been marked as \"Updated\" or \"No Update Needed\":",
+    "causeLabel": "Cause: ",
+    "skipReasonLabel": "To skip, please enter a reason (optional):",
+    "skipReasonPlaceholder": "Skip reason (optional)",
+    "skipReasonEmpty": "No reason provided",
+    "skipConfirm": "Confirm Skip and Advance"
+  },
+  "draft": {
+    "button": "AI Draft",
+    "drafting": "Drafting...",
+    "previewTitle": "AI Draft Preview",
+    "warning": "This is an AI-generated draft; please review before using.",
+    "replace": "Replace",
+    "append": "Append",
+    "cancel": "Cancel",
+    "formats": {
+      "structured": "Structured",
+      "paragraph": "Paragraph"
+    },
+    "errors": {
+      "400": "Request ID format error",
+      "409": "Please complete the prerequisite steps or check the report status",
+      "422": "AI output format abnormal, please retry",
+      "429": "AI draft calls too frequent, please try again later",
+      "503": "AI feature temporarily unavailable",
+      "504": "AI response timeout, please retry",
+      "default": "AI service exception, please try again later"
+    }
+  },
+  "lessons": {
+    "title": "Historical Lessons Learned",
+    "fromCache": "(from cache)",
+    "skipEdit": "Skip, edit directly",
+    "loading": "Retrieving related lessons learned...",
+    "empty": "No related lessons learned found, start creating!",
+    "description": "Based on the current document, we found the following related experience for your reference",
+    "sections": {
+      "highlights": "Recommended Attention ({{count}})",
+      "fmea": "FMEA Related Experience ({{count}})",
+      "capa": "8D Rectification Experience ({{count}})",
+      "audit": "Audit Findings ({{count}})"
+    },
+    "card": {
+      "confidence": "Confidence {{value}}%",
+      "rootCause": "Root cause: ",
+      "action": "Action: ",
+      "basis": "Basis: "
+    }
+  },
+  "relatedCapa": {
+    "title": "Related CAPA"
+  }
+}
