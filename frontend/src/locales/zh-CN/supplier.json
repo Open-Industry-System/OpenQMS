@@ -31,6 +31,7 @@
     "newSupplier": "新建供应商",
     "confirmDeleteCert": "确认删除此证书？",
     "confirmApproveSupplier": "确认批准该供应商？",
+    "confirmAuditApprove": "确认审核通过并批准？",
     "confirmResumeSupplier": "确认恢复与该供应商的合作？",
     "rejectReason": "拒绝原因",
     "suspendReason": "暂停合作原因",
@@ -143,5 +144,33 @@
   "modal": {
     "addCert": "添加证书",
     "editCert": "编辑证书"
+  },
+  "list": {
+    "title": "供应商管理",
+    "addSupplier": "新增供应商",
+    "searchPlaceholder": "搜索名称 / 简称",
+    "statusPlaceholder": "状态",
+    "loadFailed": "加载供应商列表失败",
+    "loadExpiryAlertsFailed": "加载证书到期提醒失败",
+    "approveSuccess": "已批准供应商",
+    "rejectSuccess": "已拒绝供应商",
+    "suspendSuccess": "已暂停供应商",
+    "resumeSuccess": "已恢复供应商",
+    "rejectSupplierTitle": "拒绝供应商",
+    "suspendSupplierTitle": "暂停供应商",
+    "defaultRejectReason": "不符合供应商资质要求",
+    "defaultSuspendReason": "供应商质量问题，暂停合作",
+    "expiryDrawerTitle": "证书到期提醒（90天内）",
+    "importHint": "每行包含: 名称*, 简称*, 联系人, 电话, 邮箱, 地址, 供货范围",
+    "stats": {
+      "total": "供应商总数",
+      "certExpiry30d": "证书30天到期"
+    },
+    "column": {
+      "supplierNo": "编号",
+      "status": "状态",
+      "supplier": "供应商",
+      "daysRemaining": "剩余天数"
+    }
   }
 }

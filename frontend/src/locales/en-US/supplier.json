@@ -31,6 +31,7 @@
     "newSupplier": "New Supplier",
     "confirmDeleteCert": "Confirm delete this certificate?",
     "confirmApproveSupplier": "Confirm approve this supplier?",
+    "confirmAuditApprove": "Confirm audit pass and approve?",
     "confirmResumeSupplier": "Confirm resume cooperation with this supplier?",
     "rejectReason": "Rejection Reason",
     "suspendReason": "Suspension Reason",
@@ -143,5 +144,33 @@
   "modal": {
     "addCert": "Add Certificate",
     "editCert": "Edit Certificate"
+  },
+  "list": {
+    "title": "Supplier Management",
+    "addSupplier": "Add Supplier",
+    "searchPlaceholder": "Search name / short name",
+    "statusPlaceholder": "Status",
+    "loadFailed": "Failed to load supplier list",
+    "loadExpiryAlertsFailed": "Failed to load certificate expiry alerts",
+    "approveSuccess": "Supplier approved",
+    "rejectSuccess": "Supplier rejected",
+    "suspendSuccess": "Supplier suspended",
+    "resumeSuccess": "Supplier resumed",
+    "rejectSupplierTitle": "Reject Supplier",
+    "suspendSupplierTitle": "Suspend Supplier",
+    "defaultRejectReason": "Does not meet supplier qualification requirements",
+    "defaultSuspendReason": "Supplier quality issue, suspend cooperation",
+    "expiryDrawerTitle": "Certificate Expiry Alerts (within 90 days)",
+    "importHint": "Each row contains: Name*, Short Name*, Contact, Phone, Email, Address, Product Scope",
+    "stats": {
+      "total": "Total Suppliers",
+      "certExpiry30d": "Certs Expiring in 30 Days"
+    },
+    "column": {
+      "supplierNo": "No.",
+      "status": "Status",
+      "supplier": "Supplier",
+      "daysRemaining": "Days Left"
+    }
   }
 }
