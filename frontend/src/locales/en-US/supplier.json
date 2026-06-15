@@ -172,5 +172,55 @@
       "supplier": "Supplier",
       "daysRemaining": "Days Left"
     }
+  },
+  "quality": {
+    "tabs": {
+      "dashboard": "Dashboard",
+      "detail": "Supplier Detail",
+      "compare": "Compare",
+      "stats": "Quality Stats",
+      "certificates": "Certificates",
+      "evalHistory": "Evaluation History"
+    },
+    "exportReport": "Export Report",
+    "rankingTitle": "Supplier Ranking (Top 20)",
+    "kpi": {
+      "totalSuppliers": "Total Suppliers",
+      "overallPpm": "Overall PPM",
+      "batchAcceptanceRate": "Batch Acceptance Rate",
+      "openScar": "Open SCAR",
+      "totalScore": "Total Score",
+      "ppm": "PPM",
+      "totalInspections": "Total Inspections",
+      "acceptedCount": "Accepted Count",
+      "scarCount": "SCAR Count"
+    },
+    "charts": {
+      "ppmTrend": "PPM Trend",
+      "gradeDistribution": "Grade Distribution",
+      "ppmTrendMonthly": "PPM Monthly Trend",
+      "acceptanceTrend": "Acceptance Rate Trend"
+    },
+    "column": {
+      "rank": "Rank",
+      "supplierName": "Supplier Name",
+      "grade": "Grade",
+      "batchAcceptanceRate": "Batch Acceptance Rate",
+      "deliveryRate": "Delivery On-Time Rate",
+      "openScar": "Open SCAR",
+      "quality": "Quality",
+      "delivery": "Delivery",
+      "service": "Service",
+      "score": "Score",
+      "evalType": "Type",
+      "totalScore": "Total Score"
+    },
+    "compare": {
+      "placeholder": "Select 2-4 suppliers to compare",
+      "radarTitle": "Radar Comparison",
+      "tableTitle": "Metric Comparison",
+      "metric": "Metric",
+      "empty": "Please select at least 2 suppliers"
+    }
   }
 }

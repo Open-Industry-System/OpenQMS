@@ -172,5 +172,55 @@
       "supplier": "供应商",
       "daysRemaining": "剩余天数"
     }
+  },
+  "quality": {
+    "tabs": {
+      "dashboard": "汇总看板",
+      "detail": "供应商详情",
+      "compare": "对比分析",
+      "stats": "质量统计",
+      "certificates": "资质证书",
+      "evalHistory": "评价历史"
+    },
+    "exportReport": "导出报表",
+    "rankingTitle": "供应商排名 (Top 20)",
+    "kpi": {
+      "totalSuppliers": "供应商总数",
+      "overallPpm": "整体PPM",
+      "batchAcceptanceRate": "批次合格率",
+      "openScar": "未关闭SCAR",
+      "totalScore": "综合得分",
+      "ppm": "PPM",
+      "totalInspections": "检验批次",
+      "acceptedCount": "合格批次",
+      "scarCount": "SCAR总数"
+    },
+    "charts": {
+      "ppmTrend": "PPM 趋势",
+      "gradeDistribution": "评级分布",
+      "ppmTrendMonthly": "PPM 月度趋势",
+      "acceptanceTrend": "批次合格率趋势"
+    },
+    "column": {
+      "rank": "排名",
+      "supplierName": "供应商名称",
+      "grade": "评级",
+      "batchAcceptanceRate": "批次合格率",
+      "deliveryRate": "交付准时率",
+      "openScar": "未关闭SCAR",
+      "quality": "质量",
+      "delivery": "交付",
+      "service": "服务",
+      "score": "分数",
+      "evalType": "类型",
+      "totalScore": "总分"
+    },
+    "compare": {
+      "placeholder": "选择2-4家供应商进行对比",
+      "radarTitle": "雷达图对比",
+      "tableTitle": "指标明细对比",
+      "metric": "指标",
+      "empty": "请选择至少2家供应商"
+    }
   }
 }
