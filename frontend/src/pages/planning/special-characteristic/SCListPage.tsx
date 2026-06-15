@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Table, Button, Tag, Typography, Space, Select, Popconfirm, App, Switch,
+  Table, Button, Space, Select, Popconfirm, App, Switch,
 } from "antd";
 import {
   PlusOutlined, FileTextOutlined, DeleteOutlined, TableOutlined,
@@ -14,38 +14,15 @@ import {
 import type { SpecialCharacteristic } from "../../../types";
 import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
+import { PageShell, DataCard, StatusBadge } from "../../../components/design";
 
-const { Title } = Typography;
-
-const msaStatusColors: Record<string, string> = {
-  PASS: "green",
-  FAIL: "red",
-  PENDING: "orange",
+const scTypeVariant = (t: string): string => (t === "CC" ? "error" : "warning");
+const sourceTypeVariant = (t: string): string => (t === "DFMEA" ? "info" : "success");
+const msaStatusVariant = (s: string): string => {
+  if (s === "PASS") return "success";
+  if (s === "FAIL") return "error";
+  return "warning";
 };
-
-function useSCListLabels(t: (key: string) => string) {
-  const typeOptions = [
-    { value: "", label: t("filter.all") },
-    { value: "CC", label: t("scType.CC") },
-    { value: "SC", label: t("scType.SC") },
-  ];
-
-  const sourceOptions = [
-    { value: "", label: t("filter.all") },
-    { value: "DFMEA", label: t("sourceType.DFMEA") },
-    { value: "PFMEA", label: t("sourceType.PFMEA") },
-  ];
-
-  const approvalStatusOptions = [
-    { value: "", label: t("filter.all") },
-    { value: "pending", label: t("approvalStatus.pending") },
-    { value: "submitted", label: t("approvalStatus.submitted") },
-    { value: "approved", label: t("approvalStatus.approved") },
-    { value: "rejected", label: t("approvalStatus.rejected") },
-  ];
-
-  return { typeOptions, sourceOptions, approvalStatusOptions };
-}
 
 export default function SCListPage() {
   const { t } = useTranslation("specialCharacteristic");
@@ -65,8 +42,6 @@ export default function SCListPage() {
 
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
-
-  const { typeOptions, sourceOptions, approvalStatusOptions } = useSCListLabels(t);
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -142,7 +117,7 @@ export default function SCListPage() {
       width: 100,
       render: (t: string, record: SpecialCharacteristic) => (
         <Space>
-          <Tag color={t === "CC" ? "red" : "gold"}>{t}</Tag>
+          <StatusBadge status={scTypeVariant(t)}>{t}</StatusBadge>
           {record.is_safety_related && (
             <SafetyCertificateOutlined style={{ color: "#ff4d4f", fontSize: 16 }} />
           )}
@@ -172,7 +147,7 @@ export default function SCListPage() {
       key: "source_type",
       width: 100,
       render: (t: string) => (
-        <Tag color={t === "DFMEA" ? "blue" : "green"}>{t}</Tag>
+        <StatusBadge status={sourceTypeVariant(t)}>{t}</StatusBadge>
       ),
     },
     {
@@ -199,7 +174,7 @@ export default function SCListPage() {
       key: "msa_status",
       width: 100,
       render: (s: string) => (
-        <Tag color={msaStatusColors[s] || "default"}>{s}</Tag>
+        <StatusBadge status={msaStatusVariant(s)}>{s}</StatusBadge>
       ),
     },
     {
@@ -218,16 +193,16 @@ export default function SCListPage() {
           {record.is_safety_suggested && !record.is_safety_related && canEdit('special_characteristic') && (
             <>
               <Button type="link" size="small" onClick={() => handleSafetyConfirm(record.sc_id)}>
-                {t("action.confirmSafety")}
+                {t("actions.confirmSafety")}
               </Button>
               <Button type="link" size="small" danger onClick={() => handleSafetyDismiss(record.sc_id)}>
-                {t("action.dismiss")}
+                {t("actions.dismiss")}
               </Button>
             </>
           )}
           {canEdit('special_characteristic') && (
             <Popconfirm
-              title={tc("messages.confirmDelete")}
+              title={t("confirm.delete")}
               onConfirm={() => handleDelete(record.sc_id)}
             >
               <Button type="link" danger icon={<DeleteOutlined />}>
@@ -241,20 +216,22 @@ export default function SCListPage() {
   ];
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
-        <Space>
-          <Title level={4} style={{ margin: 0 }}>
-            <TableOutlined style={{ marginRight: 8 }} />
-            {t("pageTitle.scList")}
-          </Title>
+    <PageShell
+      title={<>
+        <TableOutlined style={{ marginRight: 8 }} />
+        {t("pageTitle.scList")}
+      </>}
+      subtitle={t("pageTitle.scListSubtitle")}
+      actions={
+        canEdit('special_characteristic') && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/special-characteristics/new")}>
+            {t("actions.new")}
+          </Button>
+        )
+      }
+    >
+      <DataCard title={t("list.title")}>
+        <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder={t("filter.type")}
             allowClear
@@ -265,9 +242,9 @@ export default function SCListPage() {
               setPage(1);
             }}
           >
-            {typeOptions.map((opt) => (
-              <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
-            ))}
+            <Select.Option value="">{t("filter.all")}</Select.Option>
+            <Select.Option value="CC">CC</Select.Option>
+            <Select.Option value="SC">SC</Select.Option>
           </Select>
           <Select
             placeholder={t("filter.source")}
@@ -279,9 +256,9 @@ export default function SCListPage() {
               setPage(1);
             }}
           >
-            {sourceOptions.map((opt) => (
-              <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
-            ))}
+            <Select.Option value="">{t("filter.all")}</Select.Option>
+            <Select.Option value="DFMEA">DFMEA</Select.Option>
+            <Select.Option value="PFMEA">PFMEA</Select.Option>
           </Select>
           <Switch
             checked={safetyRelatedOnly}
@@ -296,9 +273,11 @@ export default function SCListPage() {
             value={approvalStatusFilter || undefined}
             onChange={(v) => { setApprovalStatusFilter(v || ""); setPage(1); }}
           >
-            {approvalStatusOptions.map((opt) => (
-              <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
-            ))}
+            <Select.Option value="">{t("filter.all")}</Select.Option>
+            <Select.Option value="pending">{t("approvalStatus.pending")}</Select.Option>
+            <Select.Option value="submitted">{t("approvalStatus.submitted")}</Select.Option>
+            <Select.Option value="approved">{t("approvalStatus.approved")}</Select.Option>
+            <Select.Option value="rejected">{t("approvalStatus.rejected")}</Select.Option>
           </Select>
           <Switch
             checked={suggestedOnly}
@@ -307,18 +286,13 @@ export default function SCListPage() {
             unCheckedChildren={t("filter.all")}
           />
         </Space>
-        {canEdit('special_characteristic') && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/special-characteristics/new")}>
-            {t("pageTitle.newSC")}
-          </Button>
-        )}
-      </div>
 
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="sc_id"
-        loading={loading}
+        <Table
+          className="qf-table"
+          columns={columns}
+          dataSource={data}
+          rowKey="sc_id"
+          loading={loading}
         pagination={{
           current: page,
           total,
@@ -329,6 +303,7 @@ export default function SCListPage() {
           },
         }}
       />
-    </div>
+      </DataCard>
+    </PageShell>
   );
 }

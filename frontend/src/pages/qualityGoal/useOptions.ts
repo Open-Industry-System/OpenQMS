@@ -11,10 +11,10 @@ export function useLevelMap(): Record<number, { label: string; color: string; ic
 
 export function useStatusColor(): Record<string, string> {
   return {
-    draft: "default",
-    pending: "gold",
+    draft: "draft",
+    pending: "warning",
     active: "success",
-    archived: "default",
+    archived: "closed",
   };
 }
 
@@ -33,7 +33,7 @@ export function useAchievementMap(): Record<string, { label: string; color: stri
   return {
     achieved: { label: t("achievement.achieved"), color: "success", prefix: "✅" },
     not_achieved: { label: t("achievement.not_achieved"), color: "error", prefix: "🔴" },
-    pending: { label: t("achievement.pending"), color: "default", prefix: "⏳" },
+    pending: { label: t("achievement.pending"), color: "draft", prefix: "⏳" },
   };
 }
 

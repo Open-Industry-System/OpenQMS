@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Button, Tag, Typography, Modal, Form, Input, Popconfirm, App } from "antd";
+import { Table, Button, Modal, Form, Input, Popconfirm, App, Tag } from "antd";
 import { PlusOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../../utils/dateTime";
@@ -12,8 +12,9 @@ import type { ValidationSummary } from "../../../types/cpValidation";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
-
-const { Title } = Typography;
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
 const statusColors: Record<string, string> = {
   draft: "blue",
@@ -130,7 +131,7 @@ export default function ControlPlanListPage() {
       dataIndex: "status",
       key: "status",
       width: 100,
-      render: (s: string) => <Tag color={statusColors[s] || "default"}>{statusLabels[s] || s}</Tag>,
+      render: (s: string) => <StatusBadge status={s === "approved" ? "success" : "info"}>{statusLabels[s] || s}</StatusBadge>,
     },
     { title: t("column.version"), dataIndex: "version", key: "version", width: 80, render: (v: number) => `v${v}` },
     {
@@ -162,31 +163,35 @@ export default function ControlPlanListPage() {
   ];
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>{t("pageTitle.controlPlanList")}</Title>
-        {canEdit('planning') && (
+    <PageShell
+      title={t("pageTitle.controlPlanList")}
+      subtitle={t("pageTitle.controlPlanListSubtitle")}
+      actions={
+        canEdit('planning') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
             {t("button.newControlPlan")}
           </Button>
-        )}
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="cp_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p);
-          },
-        }}
-      />
+        )
+      }
+    >
+      <DataCard title={t("card.controlPlanList")} noPadding>
+        <Table
+          className="qf-table"
+          columns={columns}
+          dataSource={data}
+          rowKey="cp_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p);
+            },
+          }}
+        />
+      </DataCard>
 
       <Modal
         title={t("pageTitle.newControlPlan")}
@@ -203,6 +208,6 @@ export default function ControlPlanListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

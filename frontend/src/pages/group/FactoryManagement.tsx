@@ -4,6 +4,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { listFactories, createFactory, updateFactory, deactivateFactory, type Factory } from "../../api/group";
+import { PageShell, DataCard } from "../../components/design";
 
 export default function FactoryManagementPage() {
   const { t } = useTranslation("group");
@@ -93,19 +94,22 @@ export default function FactoryManagementPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <h2>{t("factoryManagement.title")}</h2>
+    <PageShell
+      title={t("factoryManagement.title")}
+      actions={
         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>{tc("actions.create")}</Button>
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={factories}
-        rowKey="id"
-        loading={loading}
-        pagination={false}
-      />
+      }
+    >
+      <DataCard title={t("factoryManagement.listTitle")}>
+        <Table
+          columns={columns}
+          dataSource={factories}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          className="qf-table"
+        />
+      </DataCard>
 
       <Modal
         title={editItem ? t("factoryManagement.editFactory") : t("factoryManagement.newFactory")}
@@ -133,6 +137,6 @@ export default function FactoryManagementPage() {
           )}
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

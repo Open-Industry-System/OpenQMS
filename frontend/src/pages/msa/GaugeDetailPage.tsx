@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import {
   Card,
   Button,
-  Tag,
   Space,
   Form,
   Input,
@@ -23,6 +21,7 @@ import {
   PlusOutlined,
   EditOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
@@ -34,6 +33,7 @@ import {
   createCalibration,
 } from "../../api/msa";
 import dayjs from "dayjs";
+import { PageShell, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 const { Text } = Typography;
@@ -178,7 +178,7 @@ export default function GaugeDetailPage() {
 
   const statusInfo = {
     label: statusLabel(gauge.status),
-    color: gauge.status === "active" ? "green" : gauge.status === "inactive" ? "default" : gauge.status === "calibrating" ? "blue" : "red",
+    status: gauge.status === "active" ? "success" : gauge.status === "inactive" ? "draft" : gauge.status === "calibrating" ? "info" : "error",
   };
 
   const calColumns = [
@@ -191,7 +191,7 @@ export default function GaugeDetailPage() {
       title: t("gauge.calibration.result"),
       dataIndex: "result",
       render: (v: string) => (
-        <Tag color={v === "pass" ? "green" : "red"}>{v === "pass" ? t("gauge.calibration.pass") : t("gauge.calibration.fail")}</Tag>
+        <StatusBadge status={v === "pass" ? "success" : "error"}>{v === "pass" ? t("gauge.calibration.pass") : t("gauge.calibration.fail")}</StatusBadge>
       ),
     },
     { title: t("gauge.calibration.certificate_no"), dataIndex: "certificate_no", render: (v: string | null) => v || "—" },
@@ -207,7 +207,7 @@ export default function GaugeDetailPage() {
   const tabItems = [
     {
       key: "info",
-      label: t("study.tabs.info"),
+      label: tc("actions.detail"),
       children: (
         <Card
           extra={
@@ -279,7 +279,7 @@ export default function GaugeDetailPage() {
                       <Option value="IQC">{t("gauge.department.IQC")}</Option>
                       <Option value="PQC">{t("gauge.department.PQC")}</Option>
                       <Option value="OQC">{t("gauge.department.OQC")}</Option>
-                      <Option value={t("gauge.department.labValue")}>{t("gauge.department.lab")}</Option>
+                      <Option value="实验室">{t("gauge.department.lab")}</Option>
                     </Select>
                   </Form.Item>
                 </Col>
@@ -348,7 +348,7 @@ export default function GaugeDetailPage() {
               <Col span={12}>
                 <Text type="secondary">{t("gauge.fields.status")}</Text>
                 <div>
-                  <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
+                  <StatusBadge status={statusInfo.status}>{statusInfo.label}</StatusBadge>
                 </div>
               </Col>
               <Col span={12}>
@@ -378,6 +378,7 @@ export default function GaugeDetailPage() {
           }
         >
           <Table
+            className="qf-table"
             loading={calsLoading}
             dataSource={cals}
             rowKey="calibration_id"
@@ -391,15 +392,15 @@ export default function GaugeDetailPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/gauges")}>
-          {tc("actions.back")}
-        </Button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>{gauge.name}</h2>
-        <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
-      </div>
-
+    <PageShell
+      title={
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/gauges")}>{tc("actions.back")}</Button>
+          <span style={{ fontSize: 20, fontWeight: 600, color: "var(--qf-text-primary)" }}>{gauge.name}</span>
+        </Space>
+      }
+      subtitle={<StatusBadge status={statusInfo.status}>{statusInfo.label}</StatusBadge>}
+    >
       <Tabs items={tabItems} />
 
       <Modal
@@ -419,14 +420,14 @@ export default function GaugeDetailPage() {
           <Form.Item
             label={t("gauge.calibration.date")}
             name="calibration_date"
-            rules={[{ required: true }]}
+            rules={[{ required: true, message: tc("messages.confirmOperation") }]}
           >
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
           <Form.Item
             label={t("gauge.calibration.result")}
             name="result"
-            rules={[{ required: true }]}
+            rules={[{ required: true, message: tc("messages.confirmOperation") }]}
             initialValue="pass"
           >
             <Select>
@@ -448,6 +449,6 @@ export default function GaugeDetailPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

@@ -66,6 +66,7 @@ def compute_bias(study: BiasStudy, measurements: list[BiasMeasurement]) -> BiasR
     conclusion = "可接受" if abs(bias_percent) < 5 and p_value > 0.05 else "不可接受"
     return BiasResult(
         study_id=study.study_id,
+        factory_id=study.factory_id,
         mean=mean_val,
         bias=bias,
         bias_percent=bias_percent,

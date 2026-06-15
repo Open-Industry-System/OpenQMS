@@ -3,6 +3,10 @@
     "list": "Management Review",
     "detail": "Management Review Detail"
   },
+  "pageSubtitle": {
+    "list": "Management Quality Review Plans",
+    "detail": ""
+  },
   "status": {
     "review": {
       "draft": "Draft",

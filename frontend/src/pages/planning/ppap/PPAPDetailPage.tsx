@@ -1,17 +1,26 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Card, Tag, Button, Space, Descriptions, Modal, Input, Select, message, Spin, Row, Col, Table } from "antd";
+import { Button, Space, Descriptions, Modal, Input, Select, message, Spin, Table, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { getPPAP, updatePPAPElement, transitionPPAP, deletePPAP } from "../../../api/ppap";
 import { usePPAPLabels } from "./PPAPListPage";
 import type { PPAPSubmission, PPAPElement } from "../../../types";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
-const ELEMENT_STATUS_COLORS: Record<string, string> = {
-  pending: "default",
-  in_review: "processing",
-  approved: "success",
-  not_applicable: "default",
+const elementStatusVariant = (s: string): string => {
+  if (s === "approved") return "success";
+  if (s === "in_review") return "warning";
+  return "info";
+};
+
+const ppapStatusVariant = (s: string): string => {
+  if (s === "approved") return "success";
+  if (s === "rejected") return "error";
+  if (s === "under_review") return "warning";
+  return "info";
 };
 
 function useElementLabels(t: (key: string) => string) {
@@ -146,7 +155,7 @@ export default function PPAPDetailPage() {
       dataIndex: "status",
       key: "status",
       width: 100,
-      render: (s: string) => <Tag color={ELEMENT_STATUS_COLORS[s]}>{elementStatusLabels[s] || s}</Tag>,
+      render: (s: string) => <StatusBadge status={elementStatusVariant(s)}>{elementStatusLabels[s] || s}</StatusBadge>,
     },
     { title: t("elementColumn.reviewer"), dataIndex: "reviewed_by", key: "reviewed_by", width: 100, render: (v: string | null) => v || "-" },
     { title: t("elementColumn.reviewTime"), dataIndex: "reviewed_at", key: "reviewed_at", width: 160, render: (v: string | null) => v ? v.split(".")[0].replace("T", " ") : "-" },
@@ -163,23 +172,18 @@ export default function PPAPDetailPage() {
   ];
 
   return (
-    <div>
-      <Card style={{ marginBottom: 16 }}>
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Space>
-              <span style={{ fontSize: 20, fontWeight: 600 }}>{ppap.ppap_no}</span>
-              <Tag color={statusColors[ppap.status]}>{statusLabels[ppap.status]}</Tag>
-              <span style={{ color: "#999" }}>{t("label.version", { revision: ppap.revision })}</span>
-            </Space>
-          </Col>
-          <Col>
-            <Space>{actionButtons()}</Space>
-          </Col>
-        </Row>
-      </Card>
-
-      <Card title={t("label.ppapInfo")} style={{ marginBottom: 16 }}>
+    <PageShell
+      title={
+        <Space size={12}>
+          <span>{ppap.ppap_no}</span>
+          <StatusBadge status={ppapStatusVariant(ppap.status)}>{statusLabels[ppap.status]}</StatusBadge>
+          <span style={{ color: "#999" }}>{t("label.version", { revision: ppap.revision })}</span>
+        </Space>
+      }
+      subtitle={t("pageTitle.ppapDetailSubtitle")}
+      actions={<Space>{actionButtons()}</Space>}
+    >
+      <DataCard title={t("label.ppapInfo")} style={{ marginBottom: 16 }}>
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label={t("column.supplier")}>{ppap.supplier_name || ppap.supplier_id}</Descriptions.Item>
           <Descriptions.Item label={t("column.partNo")}>{ppap.part_no}</Descriptions.Item>
@@ -190,16 +194,17 @@ export default function PPAPDetailPage() {
           <Descriptions.Item label={t("label.submissionDate")}>{ppap.submission_date || "-"}</Descriptions.Item>
           <Descriptions.Item label={t("label.notes")} span={2}>{ppap.notes || "-"}</Descriptions.Item>
         </Descriptions>
-      </Card>
+      </DataCard>
 
       {ppap.status === "rejected" && ppap.rejection_reason && (
-        <Card title={t("label.rejectionReason")} style={{ marginBottom: 16, borderColor: "#ff4d4f" }}>
+        <DataCard title={t("label.rejectionReason")} style={{ marginBottom: 16, borderColor: "#ff4d4f" }}>
           <div style={{ color: "#ff4d4f", whiteSpace: "pre-wrap" }}>{ppap.rejection_reason}</div>
-        </Card>
+        </DataCard>
       )}
 
-      <Card title={t("label.elements")}>
+      <DataCard title={t("label.elements")}>
         <Table
+          className="qf-table"
           dataSource={ppap.elements}
           columns={elementColumns}
           rowKey="element_id"
@@ -207,7 +212,7 @@ export default function PPAPDetailPage() {
           size="small"
           rowClassName={(record) => !record.required ? "ppap-row-optional" : ""}
         />
-      </Card>
+      </DataCard>
 
       {/* Reject Modal */}
       <Modal title={t("modal.rejectTitle")} open={rejectModalOpen} onCancel={() => setRejectModalOpen(false)} onOk={handleReject}>
@@ -239,6 +244,6 @@ export default function PPAPDetailPage() {
           <Input.TextArea rows={2} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder={t("label.notes")} />
         </div>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

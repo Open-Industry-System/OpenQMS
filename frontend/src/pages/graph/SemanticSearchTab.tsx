@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { Input, Button, Select, Card, Tag, Space, Spin, Empty, Typography, Tooltip } from "antd";
+import { Input, Button, Select, Tag, Space, Spin, Empty, Typography, Tooltip } from "antd";
 import { SearchOutlined, RobotOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -7,6 +7,7 @@ import { semanticSearch, askQuestion } from "../../api/search";
 import type { SearchResultItem, QAResponse } from "../../api/search";
 import QAAnswer from "../../components/search/QAAnswer";
 import { useProductLineStore } from "../../store/productLineStore";
+import DataCard from "../../components/design/DataCard";
 
 const { Text } = Typography;
 
@@ -141,12 +142,11 @@ export default function SemanticSearchTab() {
             {t("qa.resultsFound", { count: results.length, ms: queryTime })}
           </Text>
           {results.map((item) => (
-            <Card
+            <DataCard
               key={item.entity_id + item.entity_field + (item.node_id || "")}
-              hoverable={!!getEntityRoute(item)}
+              title={null}
               style={{ marginBottom: 8, cursor: getEntityRoute(item) ? "pointer" : "default" }}
               onClick={() => handleResultClick(item)}
-              size="small"
             >
               <Space>
                 <Tag color={ENTITY_COLORS[item.entity_type] || "default"}>
@@ -171,7 +171,7 @@ export default function SemanticSearchTab() {
                   {t("qa.similarity", { score: (item.score * 100).toFixed(0), source: item.source })}
                 </Text>
               </div>
-            </Card>
+            </DataCard>
           ))}
         </>
       )}

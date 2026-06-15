@@ -61,6 +61,7 @@ def compute_attribute(study: AttributeStudy, measurements: list[AttributeMeasure
 
     return AttributeResult(
         study_id=study.study_id,
+        factory_id=study.factory_id,
         effectiveness=effectiveness,
         miss_rate=miss_rate,
         false_alarm_rate=false_alarm_rate,

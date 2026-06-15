@@ -521,7 +521,7 @@ async def list_production_orders(
     if status:
         query = query.where(MESProductionOrder.status == status)
     query = _apply_scope_filters(query, MESProductionOrder, scope)
-    query = query.order_by(MESProductionOrder.created_at.desc())
+    query = query.order_by(MESProductionOrder.started_at.desc())
 
     # Count query
     count_query = select(func.count()).select_from(query.subquery())

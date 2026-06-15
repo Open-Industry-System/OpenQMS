@@ -1,6 +1,7 @@
 {
   "page": {
-    "title": "质量仪表盘"
+    "title": "质量仪表盘",
+    "subtitle": "全局质量态势 · KPI · 预警 · 近期动态"
   },
   "actions": {
     "editLayout": "编辑布局",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Card, Table, Badge, Space, Select, Button, Modal, Form, Input, InputNumber, App,
+  Table, Badge, Space, Select, Button, Modal, Form, Input, InputNumber, App,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import type { AqlProfile } from '../../types';
 import { listAqlProfiles, createAqlProfile } from '../../api/iqcAql';
 import { useAuthStore } from '../../store/authStore';
+import { PageShell, DataCard } from '../../components/design';
 
 export default function AqlProfileListPage() {
   const { t } = useTranslation('iqc');
@@ -128,20 +129,20 @@ export default function AqlProfileListPage() {
   );
 
   return (
-    <div>
-      <Card
-        title={t('pageTitle.profileList')}
-        extra={
-          <Space>
-            {(isAdmin || isEngineer) && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                {t('actions.newProfile')}
-              </Button>
-            )}
-            <Button icon={<ReloadOutlined />} onClick={fetchData}>{tc('actions.refresh')}</Button>
-          </Space>
-        }
-      >
+    <PageShell
+      title={t('pageTitle.profileList')}
+      actions={
+        <Space>
+          {(isAdmin || isEngineer) && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              {t('actions.newProfile')}
+            </Button>
+          )}
+          <Button icon={<ReloadOutlined />} onClick={fetchData}>{tc('actions.refresh')}</Button>
+        </Space>
+      }
+    >
+      <DataCard title={null}>
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder={t('placeholder.selectStatus')}
@@ -165,6 +166,7 @@ export default function AqlProfileListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="profile_id"
           columns={columns}
           dataSource={data}
@@ -181,7 +183,7 @@ export default function AqlProfileListPage() {
             onChange: (p, ps) => { setPage(p); setPageSize(ps || 20); },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Modal
         title={t('modal.newProfile')}
@@ -222,6 +224,6 @@ export default function AqlProfileListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

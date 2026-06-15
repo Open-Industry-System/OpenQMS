@@ -3,7 +3,6 @@ import {
   Card,
   Table,
   Button,
-  Tag,
   Space,
   Input,
   Select,
@@ -45,6 +44,9 @@ import {
   downloadSupplierImportTemplate,
 } from "../../api/supplier";
 import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 
 const { Option } = Select;
 
@@ -267,7 +269,7 @@ export default function SupplierListPage() {
       width: 100,
       render: (status: string) => {
         const cfg = statusMap[status];
-        return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
+        return <StatusBadge status={status}>{cfg?.label || status}</StatusBadge>;
       },
     },
     {
@@ -329,74 +331,71 @@ export default function SupplierListPage() {
   ];
 
   return (
-    <div>
+    <PageShell
+      title={t("list.title")}
+      subtitle={t("list.subtitle")}
+      actions={
+        <Space>
+          {canEdit('supplier') && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/suppliers/new")}>
+              {t("list.addSupplier")}
+            </Button>
+          )}
+          <Button icon={<DownloadOutlined />} onClick={() => exportSuppliers({
+            search: filterName || undefined,
+            status: filterStatus,
+          })}>
+            {tc("actions.export")}
+          </Button>
+          <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+            {tc("actions.import")}
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
+            {tc("actions.refresh")}
+          </Button>
+        </Space>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic title={t("list.stats.total")} value={stats.total_count} />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic
               title={t("status.pending_review")}
               value={stats.pending_review_count}
               valueStyle={{ color: "#fa8c16" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={null}>
             <Statistic
               title={t("status.approved")}
               value={stats.approved_count}
               valueStyle={{ color: "#52c41a" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card
+          <DataCard
+            title={null}
             style={{ cursor: "pointer" }}
             onClick={handleOpenExpiryDrawer}
-            hoverable
           >
             <Statistic
               title={t("list.stats.certExpiry30d")}
               value={stats.cert_expiry_30d_count}
               valueStyle={stats.cert_expiry_30d_count > 0 ? { color: "#ff4d4f" } : undefined}
             />
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
-        title={t("list.title")}
-        extra={
-          <Space>
-            {canEdit('supplier') && (
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => navigate("/suppliers/new")}
-              >
-                {t("list.addSupplier")}
-              </Button>
-            )}
-            <Button icon={<DownloadOutlined />} onClick={() => exportSuppliers({
-              search: filterName || undefined,
-              status: filterStatus,
-            })}>
-              {tc("actions.export")}
-            </Button>
-            <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-              {tc("actions.import")}
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              {tc("actions.refresh")}
-            </Button>
-          </Space>
-        }
-      >
+      <DataCard title={t("list.title")}>
         <Space style={{ marginBottom: 16 }} wrap>
           <Input
             placeholder={t("list.searchPlaceholder")}
@@ -425,6 +424,7 @@ export default function SupplierListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="supplier_id"
           columns={columns}
           dataSource={suppliers}
@@ -440,7 +440,7 @@ export default function SupplierListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Drawer
         title={t("list.expiryDrawerTitle")}
@@ -449,6 +449,7 @@ export default function SupplierListPage() {
         width={640}
       >
         <Table
+          className="qf-table"
           rowKey="cert_id"
           dataSource={expiryAlerts}
           loading={expiryLoading}
@@ -497,6 +498,6 @@ export default function SupplierListPage() {
         templateDownloadFn={downloadSupplierImportTemplate}
         hint={t("list.importHint")}
       />
-    </div>
+    </PageShell>
   );
 }

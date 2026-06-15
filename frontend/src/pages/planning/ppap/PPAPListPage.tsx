@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tag, Tabs, Button, Select, Space, Modal, Form, Input, InputNumber, message, Card, Row, Col } from "antd";
+import { Table, Tabs, Button, Select, Modal, Form, Input, InputNumber, message, Row, Col, Tag, Space } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { listPPAPs, createPPAP } from "../../../api/ppap";
 import { listSuppliers } from "../../../api/supplier";
 import type { PPAPSubmission, PPAPListResponse, Supplier } from "../../../types";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
 const STATUS_MAP: Record<string, string | undefined> = {
   all: undefined,
@@ -48,6 +51,13 @@ export function usePPAPLabels(t: (key: string) => string) {
 
   return { statusTabs, statusColors, statusLabels, levelLabels };
 }
+
+const statusVariant = (s: string): string => {
+  if (s === "approved") return "success";
+  if (s === "rejected") return "error";
+  if (s === "under_review") return "warning";
+  return "info";
+};
 
 export default function PPAPListPage() {
   const { t } = useTranslation("ppap");
@@ -110,13 +120,13 @@ export default function PPAPListPage() {
       title: t("column.submissionLevel"),
       dataIndex: "submission_level",
       key: "submission_level",
-      render: (v: number) => <Tag>{levelLabels[v] || v}</Tag>,
+      render: (v: number) => <StatusBadge status="info">{levelLabels[v] || v}</StatusBadge>,
     },
     {
       title: t("column.status"),
       dataIndex: "status",
       key: "status",
-      render: (s: string) => <Tag color={statusColors[s]}>{statusLabels[s] || s}</Tag>,
+      render: (s: string) => <StatusBadge status={statusVariant(s)}>{statusLabels[s] || s}</StatusBadge>,
     },
     { title: t("column.revision"), dataIndex: "revision", key: "revision" },
     { title: t("column.createdAt"), dataIndex: "created_at", key: "created_at", render: (v: string) => v?.split("T")[0] || "-" },
@@ -132,48 +142,56 @@ export default function PPAPListPage() {
   ];
 
   return (
-    <div>
+    <PageShell
+      title={t("pageTitle.ppapManagement")}
+      subtitle={t("pageTitle.ppapManagementSubtitle")}
+      actions={
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+          {t("pageTitle.newPPAP")}
+        </Button>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>{t("kpi.total")}</div><div style={{ fontSize: 24, fontWeight: 600 }}>{kpis.total}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>{t("kpi.pending")}</div><div style={{ fontSize: 24, fontWeight: 600, color: "#1677ff" }}>{kpis.pending}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>{t("kpi.approved")}</div><div style={{ fontSize: 24, fontWeight: 600, color: "#52c41a" }}>{kpis.approved}</div></Card></Col>
-        <Col span={6}><Card size="small"><div style={{ color: "#999" }}>{t("kpi.rejected")}</div><div style={{ fontSize: 24, fontWeight: 600, color: "#ff4d4f" }}>{kpis.rejected}</div></Card></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>{t("kpi.total")}</div><div style={{ fontSize: 24, fontWeight: 600 }}>{kpis.total}</div></DataCard></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>{t("kpi.pending")}</div><div style={{ fontSize: 24, fontWeight: 600, color: "#1677ff" }}>{kpis.pending}</div></DataCard></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>{t("kpi.approved")}</div><div style={{ fontSize: 24, fontWeight: 600, color: "#52c41a" }}>{kpis.approved}</div></DataCard></Col>
+        <Col span={6}><DataCard title={null}><div style={{ color: "#999" }}>{t("kpi.rejected")}</div><div style={{ fontSize: 24, fontWeight: 600, color: "#ff4d4f" }}>{kpis.rejected}</div></DataCard></Col>
       </Row>
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={statusTabs} />
-        <Space>
-          <Select
-            allowClear
-            showSearch
-            filterOption={false}
-            placeholder={t("placeholder.searchSupplier")}
-            style={{ width: 160 }}
-            onSearch={async (search) => {
-              const res = search ? await listSuppliers({ search, page_size: 20 }) : await listSuppliers({ page_size: 20 });
-              setSuppliers(res.items);
-            }}
-            onChange={(v) => { setSupplierId(v); setPage(1); }}
-            options={suppliers.map((s) => ({ value: s.supplier_id, label: s.name }))}
-          />
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            {t("pageTitle.newPPAP")}
-          </Button>
-        </Space>
-      </div>
+      <DataCard title={t("card.ppapList")}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+          <Tabs activeKey={activeTab} onChange={setActiveTab} items={statusTabs} />
+          <Space>
+            <Select
+              allowClear
+              showSearch
+              filterOption={false}
+              placeholder={t("placeholder.searchSupplier")}
+              style={{ width: 160 }}
+              onSearch={async (search) => {
+                const res = search ? await listSuppliers({ search, page_size: 20 }) : await listSuppliers({ page_size: 20 });
+                setSuppliers(res.items);
+              }}
+              onChange={(v) => { setSupplierId(v); setPage(1); }}
+              options={suppliers.map((s) => ({ value: s.supplier_id, label: s.name }))}
+            />
+          </Space>
+        </div>
 
-      <Table
-        dataSource={data?.items || []}
-        columns={columns}
-        rowKey="submission_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          pageSize: 20,
-          total: data?.total || 0,
-          onChange: setPage,
-        }}
-      />
+        <Table
+          className="qf-table"
+          dataSource={data?.items || []}
+          columns={columns}
+          rowKey="submission_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            pageSize: 20,
+            total: data?.total || 0,
+            onChange: setPage,
+          }}
+        />
+      </DataCard>
 
       <Modal
         title={t("pageTitle.newPPAP")}
@@ -209,6 +227,6 @@ export default function PPAPListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

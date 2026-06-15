@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { Table, Spin, Typography, Tag } from "antd";
+import { Table, Spin, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { getSharedSuppliers, type SharedSupplierResponse } from "../../api/group";
 import { usePermission } from "../../hooks/usePermission";
-
-const { Title } = Typography;
+import { PageShell, DataCard } from "../../components/design";
 
 export default function GroupSuppliersPage() {
   const { canView } = usePermission();
@@ -73,18 +72,20 @@ export default function GroupSuppliersPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <Title level={3}>{t("suppliers.title")}</Title>
-      {loading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 48 }}><Spin size="large" /></div>
-      ) : (
-        <Table
-          columns={columns}
-          dataSource={suppliers}
-          rowKey="name"
-          pagination={{ pageSize: 20 }}
-        />
-      )}
-    </div>
+    <PageShell title={t("suppliers.title")}>
+      <DataCard title={t("suppliers.listTitle")}>
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: 48 }}><Spin size="large" /></div>
+        ) : (
+          <Table
+            columns={columns}
+            dataSource={suppliers}
+            rowKey="name"
+            pagination={{ pageSize: 20 }}
+            className="qf-table"
+          />
+        )}
+      </DataCard>
+    </PageShell>
   );
 }

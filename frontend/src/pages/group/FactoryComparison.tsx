@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { Table, Spin, Typography } from "antd";
+import { Table, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { getFactoryComparison, type FactoryComparisonResponse } from "../../api/group";
 import { usePermission } from "../../hooks/usePermission";
-
-const { Title } = Typography;
+import { PageShell, DataCard } from "../../components/design";
 
 export default function FactoryComparisonPage() {
   const { canView } = usePermission();
@@ -46,15 +45,17 @@ export default function FactoryComparisonPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <Title level={3}>{t("factoryComparison.title")}</Title>
-      <Table
-        columns={columns}
-        dataSource={data.factories}
-        rowKey="factory_id"
-        scroll={{ x: "max-content" }}
-        pagination={false}
-      />
-    </div>
+    <PageShell title={t("factoryComparison.title")}>
+      <DataCard title={t("factoryComparison.metricsTitle")}>
+        <Table
+          columns={columns}
+          dataSource={data.factories}
+          rowKey="factory_id"
+          scroll={{ x: "max-content" }}
+          pagination={false}
+          className="qf-table"
+        />
+      </DataCard>
+    </PageShell>
   );
 }

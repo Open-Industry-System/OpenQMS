@@ -1,33 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
-  Table, Tag, Typography, Select, App,
+  Table, Select, App,
 } from "antd";
 import { useTranslation } from "react-i18next";
-import { formatDateTime } from "../../utils/dateTime";
 import { listScrapRecords } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { MESScrapRecord } from "../../types/mes";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
+import { formatDateTime } from "../../utils/dateTime";
 
-const { Title } = Typography;
-
-const defectColors: Record<string, string> = {
-  scrap: "red",
-  rework: "orange",
+const defectVariant: Record<string, string> = {
+  scrap: "error",
+  rework: "warning",
   reject: "error",
 };
 
-function useDefectLabels() {
-  const { t } = useTranslation("mes");
-  return useMemo(() => ({
-    scrap: t("scrap.defectType.scrap"),
-    rework: t("scrap.defectType.rework"),
-    reject: t("scrap.defectType.reject"),
-  }), [t]);
-}
-
 export default function MESScrapPage() {
   const { t } = useTranslation("mes");
-  const defectLabels = useDefectLabels();
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [data, setData] = useState<MESScrapRecord[]>([]);
   const [total, setTotal] = useState(0);
@@ -36,6 +26,18 @@ export default function MESScrapPage() {
   const [defectFilter, setDefectFilter] = useState<string>("");
   const productLine = useProductLineStore((s) => s.selected);
 
+  const defectLabels = useMemo(() => ({
+    scrap: t("scrap.defectType.scrap", "报废"),
+    rework: t("scrap.defectType.rework", "返工"),
+    reject: t("scrap.defectType.reject", "拒收"),
+  }), [t]);
+
+  const defectFilterOptions = useMemo(() => [
+    { value: "scrap", label: t("scrap.defectType.scrap", "报废") },
+    { value: "rework", label: t("scrap.defectType.rework", "返工") },
+    { value: "reject", label: t("scrap.defectType.reject", "拒收") },
+  ], [t]);
+
   const fetchData = (p: number = page, currentDefectType?: string, plCode?: string | null) => {
     setLoading(true);
     listScrapRecords(p, 20, plCode || undefined, currentDefectType || undefined)
@@ -43,7 +45,7 @@ export default function MESScrapPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error(t("scrap.messages.loadFailed")))
+      .catch(() => message.error(t("scrap.messages.loadFailed", "加载不良记录失败")))
       .finally(() => setLoading(false));
   };
 
@@ -57,45 +59,40 @@ export default function MESScrapPage() {
     setPage(1);
   };
 
-  const defectOptions = useMemo(
-    () => Object.entries(defectLabels).map(([value, label]) => ({ value, label })),
-    [defectLabels],
-  );
-
-  const columns = [
-    { title: t("scrap.columns.externalId"), dataIndex: "external_id", key: "external_id", width: 140 },
+  const columns = useMemo(() => [
+    { title: t("scrap.columns.externalId", "外部ID"), dataIndex: "external_id", key: "external_id", width: 140 },
     {
-      title: t("scrap.columns.defectType"),
+      title: t("scrap.columns.defectType", "不良类型"),
       dataIndex: "defect_type",
       key: "defect_type",
       width: 100,
-      render: (type: string) => (
-        <Tag color={defectColors[type] || "default"}>
-          {defectLabels[type as keyof typeof defectLabels] || type}
-        </Tag>
+      render: (dt: string) => (
+        <StatusBadge status={defectVariant[dt] || dt}>
+          {defectLabels[dt as keyof typeof defectLabels] || dt}
+        </StatusBadge>
       ),
     },
     {
-      title: t("scrap.columns.defectCategory"),
+      title: t("scrap.columns.defectCategory", "不良分类"),
       dataIndex: "defect_category",
       key: "defect_category",
       width: 120,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("scrap.columns.defectQty"),
+      title: t("scrap.columns.defectQty", "不良数量"),
       dataIndex: "defect_qty",
       key: "defect_qty",
       width: 100,
     },
     {
-      title: t("scrap.columns.totalQty"),
+      title: t("scrap.columns.totalQty", "总数量"),
       dataIndex: "total_qty",
       key: "total_qty",
       width: 100,
     },
     {
-      title: t("scrap.columns.defectRate"),
+      title: t("scrap.columns.defectRate", "不良率 (%)"),
       key: "defect_rate",
       width: 110,
       render: (_: unknown, record: MESScrapRecord) => {
@@ -106,50 +103,54 @@ export default function MESScrapPage() {
       },
     },
     {
-      title: t("scrap.columns.defectDescription"),
+      title: t("scrap.columns.defectDescription", "不良描述"),
       dataIndex: "defect_description",
       key: "defect_description",
       ellipsis: true,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("scrap.columns.recordedAt"),
+      title: t("scrap.columns.recordedAt", "记录时间"),
       dataIndex: "recorded_at",
       key: "recorded_at",
       width: 170,
       render: (v: string) => formatDateTime(v),
     },
-  ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [t, defectLabels]);
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, alignItems: "center" }}>
-        <Title level={4} style={{ margin: 0 }}>{t("scrap.title")}</Title>
+    <PageShell
+      title={t("scrap.title", "不良记录")}
+      actions={
         <Select
-          placeholder={t("scrap.filterPlaceholder")}
+          placeholder={t("scrap.filterPlaceholder", "筛选不良类型")}
           allowClear
           style={{ width: 140 }}
           value={defectFilter || undefined}
           onChange={handleDefectChange}
-          options={defectOptions}
+          options={defectFilterOptions}
         />
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="scrap_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p, defectFilter || undefined, productLine);
-          },
-        }}
-      />
-    </div>
+      }
+    >
+      <DataCard title={t("scrap.title", "不良记录")}>
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="scrap_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p, defectFilter || undefined, productLine);
+            },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
+    </PageShell>
   );
 }

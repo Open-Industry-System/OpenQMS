@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Card, Form, Input, Select, Button, App, Row, Col, Space, Spin } from 'antd';
+import { Form, Input, Select, Button, App, Row, Col, Space, Spin } from 'antd';
 import { RestOutlined, SaveOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { AqlConfig } from '../../types';
 import { listAqlConfigs, updateAqlConfig, resetAqlConfigs } from '../../api/iqcAql';
 import { useAuthStore } from '../../store/authStore';
+import { PageShell, DataCard } from '../../components/design';
 
 export default function AqlConfigPage() {
   const { t } = useTranslation('iqc');
@@ -41,7 +42,13 @@ export default function AqlConfigPage() {
   }, [productLine]);
 
   if (!isAdmin) {
-    return <Card><div style={{ textAlign: 'center', padding: 48, color: '#999' }}>{t('messages.adminOnly')}</div></Card>;
+    return (
+      <PageShell title={t('pageTitle.aqlConfig')}>
+        <DataCard title="">
+          <div style={{ textAlign: 'center', padding: 48, color: '#999' }}>{t('messages.adminOnly')}</div>
+        </DataCard>
+      </PageShell>
+    );
   }
 
   const handleSave = async () => {
@@ -78,8 +85,9 @@ export default function AqlConfigPage() {
   };
 
   return (
-    <Card title={t('pageTitle.aqlConfig')} extra={
-      <Space>
+    <PageShell
+      title={t('pageTitle.aqlConfig')}
+      actions={
         <Select
           placeholder={t('placeholder.productLineWithGlobal')}
           allowClear
@@ -89,39 +97,41 @@ export default function AqlConfigPage() {
         >
           <Select.Option value="DC-DC-100">DC-DC-100</Select.Option>
         </Select>
-      </Space>
-    }>
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /></div>
-      ) : (
-        <Form form={form} layout="vertical">
-          <Row gutter={16}>
-            {configs.map((c) => (
-              <Col span={8} key={c.config_key}>
-                <Form.Item
-                  name={c.config_key}
-                  label={
-                    <span>
-                      {c.config_key}
-                      {c.description && <span style={{ color: '#999', fontSize: 12, marginLeft: 4 }}>({c.description})</span>}
-                    </span>
-                  }
-                >
-                  <Input disabled={!c.is_editable} />
-                </Form.Item>
-              </Col>
-            ))}
-          </Row>
-          <Space style={{ marginTop: 16 }}>
-            <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
-              {tc('actions.save')}
-            </Button>
-            <Button icon={<RestOutlined />} onClick={handleReset}>
-              {t('actions.resetConfig')}
-            </Button>
-          </Space>
-        </Form>
-      )}
-    </Card>
+      }
+    >
+      <DataCard title="">
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /></div>
+        ) : (
+          <Form form={form} layout="vertical">
+            <Row gutter={16}>
+              {configs.map((c) => (
+                <Col span={8} key={c.config_key}>
+                  <Form.Item
+                    name={c.config_key}
+                    label={
+                      <span>
+                        {c.config_key}
+                        {c.description && <span style={{ color: '#999', fontSize: 12, marginLeft: 4 }}>({c.description})</span>}
+                      </span>
+                    }
+                  >
+                    <Input disabled={!c.is_editable} />
+                  </Form.Item>
+                </Col>
+              ))}
+            </Row>
+            <Space style={{ marginTop: 16 }}>
+              <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
+                {tc('actions.save')}
+              </Button>
+              <Button icon={<RestOutlined />} onClick={handleReset}>
+                {t('actions.resetConfig')}
+              </Button>
+            </Space>
+          </Form>
+        )}
+      </DataCard>
+    </PageShell>
   );
 }

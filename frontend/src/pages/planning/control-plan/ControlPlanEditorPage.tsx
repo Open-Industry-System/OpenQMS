@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Button, Space, Tag, Typography, Input, Table, Card, Row, Col,
-  App, Spin, Select, Alert, Tooltip, Tabs, Modal,
+  Button, Space, Typography, Input, Table, Row, Col,
+  App, Spin, Select, Alert, Tooltip, Tabs, Modal, Tag,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, PlusOutlined, DeleteOutlined,
@@ -32,8 +32,11 @@ import RollbackConfirmModal from "../../../components/version/RollbackConfirmMod
 import VersionCompareView from "../../../components/version/VersionCompareView";
 import SyncPreviewDrawer from "../../../components/version/SyncPreviewDrawer";
 import ValidationPanel from "../../../components/control-plan/ValidationPanel";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 function createBlankItem(sortOrder: number): ControlPlanItem {
   return {
@@ -517,7 +520,7 @@ export default function ControlPlanEditorPage() {
             />
             {outOfSync && (
               <Tooltip title={t("staleAlert.nodeChanged")}>
-                <Tag color="warning">!</Tag>
+                <StatusBadge status="warning">!</StatusBadge>
               </Tooltip>
             )}
           </div>
@@ -668,28 +671,16 @@ export default function ControlPlanEditorPage() {
   const currentStatus = cp?.status || "draft";
 
   return (
-    <div>
+    <PageShell
+      title={isNew ? t("pageTitle.newControlPlan") : title || t("pageTitle.controlPlanDetail")}
+      subtitle={`${t("column.status")}：${statusLabels[currentStatus] || currentStatus}`}
+      actions={
+        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/control-plans")}>
+          {tc("actions.back")}
+        </Button>
+      }
+    >
       <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
-
-      {/* Top bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/control-plans")}>
-            {tc("actions.back")}
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            {isNew ? t("pageTitle.newControlPlan") : title || t("pageTitle.controlPlanDetail")}
-          </Title>
-        </Space>
-        <Space>
-          <Text>
-            {t("column.status")}：
-            <Tag color={currentStatus === "approved" ? "green" : "blue"}>
-              {statusLabels[currentStatus] || currentStatus}
-            </Tag>
-          </Text>
-        </Space>
-      </div>
 
       {/* Stale alert */}
       {staleAlert.visible && (
@@ -773,7 +764,7 @@ export default function ControlPlanEditorPage() {
       </Space>
 
       {/* Header info card */}
-      <Card title={t("card.basicInfo")} style={{ marginBottom: 16 }}>
+      <DataCard title={t("card.basicInfo")} style={{ marginBottom: 16 }}>
         <Row gutter={24}>
           <Col span={12}>
             <div style={{ marginBottom: 12 }}>
@@ -870,11 +861,12 @@ export default function ControlPlanEditorPage() {
             </div>
           </Col>
         </Row>
-      </Card>
+      </DataCard>
 
       {/* Items table */}
-      <Card title={t("card.controlPlanContent")}>
+      <DataCard title={t("card.controlPlanContent")}>
         <Table
+          className="qf-table"
           columns={columns}
           dataSource={items}
           rowKey="item_id"
@@ -890,7 +882,7 @@ export default function ControlPlanEditorPage() {
             ) : null
           }
         />
-      </Card>
+      </DataCard>
 
       {/* Import modal */}
       {!isNew && id && (
@@ -1008,6 +1000,6 @@ export default function ControlPlanEditorPage() {
           </Modal>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

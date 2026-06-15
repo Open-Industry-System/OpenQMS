@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tag, Tabs, Button, Space, Modal, Form, Input, DatePicker, message, Card, Row, Col } from "antd";
+import { Table, Tabs, Button, Space, Modal, Form, Input, DatePicker, message, Row, Col, Tag } from "antd";
 import { PlusOutlined, ProjectOutlined, ClockCircleOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { listAPQPProjects, createAPQPProject, getAPQPProjectStats } from "../../../api/apqp";
 import type { APQPProject, APQPListResponse, APQPProjectStats } from "../../../types";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
 const PHASE_COLORS: Record<number, string> = {
   1: "blue",
@@ -16,7 +19,7 @@ const PHASE_COLORS: Record<number, string> = {
 
 function KPICard({ title, value, icon, color }: { title: string; value: number; icon: React.ReactNode; color: string }) {
   return (
-    <Card size="small">
+    <DataCard title={null}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ fontSize: 24, color }}>{icon}</div>
         <div>
@@ -24,7 +27,7 @@ function KPICard({ title, value, icon, color }: { title: string; value: number; 
           <div style={{ fontSize: 24, fontWeight: 600 }}>{value}</div>
         </div>
       </div>
-    </Card>
+    </DataCard>
   );
 }
 
@@ -59,6 +62,18 @@ function useAPQPLabels(t: (key: string) => string) {
 
   return { projectStatusTabs, phaseNames, projectStatusLabels, phaseStatusRender };
 }
+
+const phaseVariant = (phase: number): string => (phase === 5 ? "success" : "info");
+const projectStatusVariant = (status: string): string => {
+  if (status === "completed") return "success";
+  if (status === "active") return "warning";
+  return "info";
+};
+const phaseStatusVariant = (status: string): string => {
+  if (status === "completed") return "success";
+  if (status === "pending_approval") return "warning";
+  return "info";
+};
 
 export default function APQPListPage() {
   const { t } = useTranslation("apqp");
@@ -127,13 +142,17 @@ export default function APQPListPage() {
       title: t("column.currentPhase"),
       dataIndex: "current_phase",
       key: "current_phase",
-      render: (p: number) => <Tag color={PHASE_COLORS[p]}>{phaseNames[p]}</Tag>,
+      render: (p: number) => <StatusBadge status={phaseVariant(p)}>{phaseNames[p]}</StatusBadge>,
     },
     {
       title: t("column.phaseStatus"),
       dataIndex: "phase_status",
       key: "phase_status",
-      render: (s: string | null) => phaseStatusRender(s),
+      render: (s: string | null) => {
+        if (!s) return "-";
+        const labels: Record<string, string> = { pending_approval: t("phaseStatus.pendingApproval"), in_progress: t("phaseStatus.inProgress"), completed: t("phaseStatus.completed") };
+        return <StatusBadge status={phaseStatusVariant(s)}>{labels[s] || s}</StatusBadge>;
+      },
     },
     {
       title: t("column.targetSOP"),
@@ -149,10 +168,9 @@ export default function APQPListPage() {
       title: t("column.projectStatus"),
       dataIndex: "project_status",
       key: "project_status",
-      render: (s: string) => {
-        const colors: Record<string, string> = { active: "processing", completed: "success", cancelled: "default" };
-        return <Tag color={colors[s]}>{projectStatusLabels[s] || s}</Tag>;
-      },
+      render: (s: string) => (
+        <StatusBadge status={projectStatusVariant(s)}>{projectStatusLabels[s] || s}</StatusBadge>
+      ),
     },
     {
       title: t("column.action"),
@@ -164,7 +182,15 @@ export default function APQPListPage() {
   ];
 
   return (
-    <div>
+    <PageShell
+      title={t("pageTitle.apqpProjectManagement")}
+      subtitle={t("pageTitle.apqpProjectManagementSubtitle")}
+      actions={
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+          {t("pageTitle.newAPQPProject")}
+        </Button>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={4}><KPICard title={t("kpi.active")} value={stats?.active_count ?? 0} icon={<ProjectOutlined />} color="#1677ff" /></Col>
         <Col span={4}><KPICard title={t("kpi.pendingApproval")} value={stats?.pending_approval_count ?? 0} icon={<ClockCircleOutlined />} color="#fa8c16" /></Col>
@@ -172,25 +198,22 @@ export default function APQPListPage() {
         <Col span={4}><KPICard title={t("kpi.overdue")} value={stats?.overdue_count ?? 0} icon={<ExclamationCircleOutlined />} color="#ff4d4f" /></Col>
       </Row>
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Tabs activeKey={activeTab} onChange={(k) => { setActiveTab(k); setPage(1); }} items={projectStatusTabs} />
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          {t("pageTitle.newAPQPProject")}
-        </Button>
-      </div>
-
-      <Table
-        dataSource={data?.items || []}
-        columns={columns}
-        rowKey="project_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          pageSize: 20,
-          total: data?.total || 0,
-          onChange: setPage,
-        }}
-      />
+      <DataCard title={t("card.projectList")}>
+        <Tabs activeKey={activeTab} onChange={(k) => { setActiveTab(k); setPage(1); }} items={projectStatusTabs} style={{ marginBottom: 16 }} />
+        <Table
+          className="qf-table"
+          dataSource={data?.items || []}
+          columns={columns}
+          rowKey="project_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            pageSize: 20,
+            total: data?.total || 0,
+            onChange: setPage,
+          }}
+        />
+      </DataCard>
 
       <Modal
         title={t("pageTitle.newAPQPProject")}
@@ -237,6 +260,6 @@ export default function APQPListPage() {
           </Space>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

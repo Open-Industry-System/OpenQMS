@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Card, Row, Col, Statistic, Descriptions, Table, Tag, App, Spin } from 'antd';
+import { Row, Col, Statistic, Descriptions, Table, Tag, App, Spin } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { AqlProfile, AqlQualitySnapshot, AqlRecommendation } from '../../types';
 import { listAqlProfiles, getAqlQualitySnapshot, listAqlRecommendations } from '../../api/iqcAql';
 import AqlQualityChart from '../../components/iqc/AqlQualityChart';
+import { PageShell, DataCard, StatusBadge } from '../../components/design';
+import { formatDateTime } from '../../utils/dateTime';
 
 export default function AqlProfileDetailPage() {
   const { t, i18n } = useTranslation('iqc');
@@ -63,13 +65,9 @@ export default function AqlProfileDetailPage() {
     });
   }, [supplierId, materialId]);
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /></div>;
-  if (!profile) return <Card><div style={{ textAlign: 'center', padding: 24, color: '#999' }}>{t('messages.profileNotFound')}</div></Card>;
+  const stateCfg = profile ? (stateMap[profile.state] || { label: profile.state, status: 'default' as const }) : null;
 
-  const stateCfg = stateMap[profile.state] || { label: profile.state, status: 'default' as const };
-
-  const formatDate = (v: string | null) => v ? new Date(v).toLocaleDateString(i18n.language) : '—';
-  const formatDateTime = (v: string) => v ? new Date(v).toLocaleString(i18n.language) : '—';
+  const formatDate = (v: string | null) => v ? new Date(v).toLocaleDateString(i18n.language || 'zh-CN') : '—';
 
   const recColumns = [
     { title: t('table.recommendedAql'), dataIndex: 'recommended_aql', width: 90 },
@@ -88,73 +86,91 @@ export default function AqlProfileDetailPage() {
         return <Tag color={cfg?.color}>{cfg?.label || s}</Tag>;
       },
     },
-    { title: t('table.createdAt'), dataIndex: 'created_at', width: 160, render: formatDateTime },
+    { title: t('table.createdAt'), dataIndex: 'created_at', width: 160, render: (v: string) => formatDateTime(v) },
   ];
 
   return (
-    <div>
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={6}>
-          <Card><Statistic title={t('table.baseAql')} value={profile.base_aql} /></Card>
-        </Col>
-        <Col span={6}>
-          <Card><Statistic title={t('table.currentAql')} value={profile.current_aql} /></Card>
-        </Col>
-        <Col span={6}>
-          <Card><Statistic title={t('table.state')} value={stateCfg.label} /></Card>
-        </Col>
-        <Col span={6}>
-          <Card><Statistic title={t('table.effectiveFrom')} value={formatDate(profile.effective_from)} /></Card>
-        </Col>
-      </Row>
+    <PageShell title={t('pageTitle.profileDetail')}>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /></div>
+      ) : !profile ? (
+        <DataCard title={null}>
+          <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>{t('messages.profileNotFound')}</div>
+        </DataCard>
+      ) : (
+        <>
+          <Row gutter={16} style={{ marginBottom: 24 }}>
+            <Col span={6}>
+              <DataCard title={null}><Statistic title={t('table.baseAql')} value={profile.base_aql} /></DataCard>
+            </Col>
+            <Col span={6}>
+              <DataCard title={null}><Statistic title={t('table.currentAql')} value={profile.current_aql} /></DataCard>
+            </Col>
+            <Col span={6}>
+              <DataCard title={null}>
+                <Statistic title={t('table.state')} value={stateCfg?.label || profile.state} />
+              </DataCard>
+            </Col>
+            <Col span={6}>
+              <DataCard title={null}>
+                <Statistic
+                  title={t('table.effectiveFrom')}
+                  value={formatDate(profile.effective_from)}
+                />
+              </DataCard>
+            </Col>
+          </Row>
 
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={12}>
-          <Card title={t('detail.inspectionStats')} size="small">
-            {snapshot ? (
-              <Descriptions column={1} bordered size="small">
-                <Descriptions.Item label={t('descriptions.totalBatches')}>{snapshot.total_batches}</Descriptions.Item>
-                <Descriptions.Item label={t('descriptions.consecutiveAccepted')}>{snapshot.consecutive_accepted}</Descriptions.Item>
-                <Descriptions.Item label={t('descriptions.consecutiveRejected')}>{snapshot.consecutive_rejected}</Descriptions.Item>
-                <Descriptions.Item label={t('descriptions.last30dBatches')}>{snapshot.last_30d_batch_count}</Descriptions.Item>
-                <Descriptions.Item label={t('descriptions.last30dPpm')}>{snapshot.last_30d_ppm ?? '—'}</Descriptions.Item>
-                <Descriptions.Item label={t('descriptions.last90dPpm')}>{snapshot.last_90d_ppm ?? '—'}</Descriptions.Item>
-              </Descriptions>
-            ) : (
-              <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>{tc('empty.data')}</div>
-            )}
-          </Card>
-        </Col>
-        <Col span={12}>
-          <Card title={t('detail.supplierPerformance')} size="small">
-            {snapshot ? (
-              <Descriptions column={1} bordered size="small">
-                <Descriptions.Item label={t('descriptions.supplierRating')}>{snapshot.supplier_rating || '—'}</Descriptions.Item>
-                <Descriptions.Item label={t('descriptions.openScar')}>{snapshot.open_scar_count}</Descriptions.Item>
-                <Descriptions.Item label={t('descriptions.safetyDefect')}>{snapshot.has_safety_defect ? t('status.yes') : t('status.no')}</Descriptions.Item>
-                <Descriptions.Item label={t('descriptions.linkedComplaint')}>{snapshot.linked_customer_complaint ? t('status.yes') : t('status.no')}</Descriptions.Item>
-                <Descriptions.Item label={t('descriptions.calculatedState')}>{snapshot.calculated_state || '—'}</Descriptions.Item>
-              </Descriptions>
-            ) : (
-              <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>{tc('empty.data')}</div>
-            )}
-          </Card>
-        </Col>
-      </Row>
+          <Row gutter={16} style={{ marginBottom: 24 }}>
+            <Col span={12}>
+              <DataCard title={t('detail.inspectionStats')}>
+                {snapshot ? (
+                  <Descriptions column={1} bordered size="small">
+                    <Descriptions.Item label={t('descriptions.totalBatches')}>{snapshot.total_batches}</Descriptions.Item>
+                    <Descriptions.Item label={t('descriptions.consecutiveAccepted')}>{snapshot.consecutive_accepted}</Descriptions.Item>
+                    <Descriptions.Item label={t('descriptions.consecutiveRejected')}>{snapshot.consecutive_rejected}</Descriptions.Item>
+                    <Descriptions.Item label={t('descriptions.last30dBatches')}>{snapshot.last_30d_batch_count}</Descriptions.Item>
+                    <Descriptions.Item label={t('descriptions.last30dPpm')}>{snapshot.last_30d_ppm ?? '—'}</Descriptions.Item>
+                    <Descriptions.Item label={t('descriptions.last90dPpm')}>{snapshot.last_90d_ppm ?? '—'}</Descriptions.Item>
+                  </Descriptions>
+                ) : (
+                  <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>{tc('empty.data')}</div>
+                )}
+              </DataCard>
+            </Col>
+            <Col span={12}>
+              <DataCard title={t('detail.supplierPerformance')}>
+                {snapshot ? (
+                  <Descriptions column={1} bordered size="small">
+                    <Descriptions.Item label={t('descriptions.supplierRating')}>{snapshot.supplier_rating || '—'}</Descriptions.Item>
+                    <Descriptions.Item label={t('descriptions.openScar')}>{snapshot.open_scar_count}</Descriptions.Item>
+                    <Descriptions.Item label={t('descriptions.safetyDefect')}>{snapshot.has_safety_defect ? t('status.yes') : t('status.no')}</Descriptions.Item>
+                    <Descriptions.Item label={t('descriptions.linkedComplaint')}>{snapshot.linked_customer_complaint ? t('status.yes') : t('status.no')}</Descriptions.Item>
+                    <Descriptions.Item label={t('descriptions.calculatedState')}>{snapshot.calculated_state || '—'}</Descriptions.Item>
+                  </Descriptions>
+                ) : (
+                  <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>{tc('empty.data')}</div>
+                )}
+              </DataCard>
+            </Col>
+          </Row>
 
-      <Card title={t('detail.qualityTrend')} style={{ marginBottom: 24 }}>
-        <AqlQualityChart snapshots={snapshot ? [snapshot] : []} />
-      </Card>
+          <DataCard title={t('detail.qualityTrend')} style={{ marginBottom: 24 }}>
+            <AqlQualityChart snapshots={snapshot ? [snapshot] : []} />
+          </DataCard>
 
-      <Card title={t('detail.historyRecommendations')}>
-        <Table
-          rowKey="recommendation_id"
-          columns={recColumns}
-          dataSource={recommendations}
-          pagination={false}
-          size="small"
-        />
-      </Card>
-    </div>
+          <DataCard title={t('detail.historyRecommendations')}>
+            <Table
+              className="qf-table"
+              rowKey="recommendation_id"
+              columns={recColumns}
+              dataSource={recommendations}
+              pagination={false}
+              size="small"
+            />
+          </DataCard>
+        </>
+      )}
+    </PageShell>
   );
 }

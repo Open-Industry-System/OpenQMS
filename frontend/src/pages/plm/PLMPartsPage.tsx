@@ -1,10 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
-import { formatDateTime } from "../../utils/dateTime";
 import {
   Table,
   Input,
   Button,
-  Typography,
   Tag,
   Drawer,
   Descriptions,
@@ -24,13 +22,12 @@ import {
 } from "../../api/plm";
 import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import type {
   PLMPart,
   PLMBOMTreeNode,
   PLMPartConfirmSCRequest,
 } from "../../types/plm";
-
-const { Title } = Typography;
 
 export default function PLMPartsPage() {
   const { t } = useTranslation("plm");
@@ -167,10 +164,6 @@ export default function PLMPartsPage() {
     }
   };
 
-  const boolText = (v: boolean) => (v ? t("yes") : t("no"));
-  const boolTag = (v: boolean) => (v ? <Tag color="red">{t("yes")}</Tag> : t("no"));
-  const boolTagOrange = (v: boolean) => (v ? <Tag color="orange">{t("yes")}</Tag> : t("no"));
-
   const columns = [
     { title: t("parts.columns.partNumber"), dataIndex: "part_number", key: "part_number", width: 160 },
     { title: t("parts.columns.name"), dataIndex: "name", key: "name", ellipsis: true },
@@ -180,21 +173,21 @@ export default function PLMPartsPage() {
       dataIndex: "status",
       key: "status",
       width: 100,
-      render: (s: string) => <Tag>{s}</Tag>,
+      render: (s: string) => <StatusBadge status={s}>{s}</StatusBadge>,
     },
     {
       title: t("parts.columns.safetyRelated"),
       dataIndex: "is_safety_related",
       key: "is_safety_related",
       width: 80,
-      render: (v: boolean) => boolTag(v),
+      render: (v: boolean) => (v ? <Tag color="red">{tc("yes")}</Tag> : tc("no")),
     },
     {
       title: t("parts.columns.keyCharacteristic"),
       dataIndex: "is_key_characteristic",
       key: "is_key_characteristic",
       width: 80,
-      render: (v: boolean) => boolTagOrange(v),
+      render: (v: boolean) => (v ? <Tag color="orange">{tc("yes")}</Tag> : tc("no")),
     },
     {
       title: t("parts.columns.actions"),
@@ -204,13 +197,13 @@ export default function PLMPartsPage() {
         const hasPendingScLink = getPendingScLinks(record).length > 0;
         return (
           <Space size={4}>
-            <Button type="link" size="small" onClick={() => setDrawerPart(record)}>{t("parts.actions.detail")}</Button>
-            <Button type="link" size="small" onClick={() => openBomModal(record)}>{t("parts.actions.bom")}</Button>
+            <Button type="link" size="small" onClick={() => setDrawerPart(record)}>{tc("actions.details")}</Button>
+            <Button type="link" size="small" onClick={() => openBomModal(record)}>BOM</Button>
             {canEditPlm && (
-              <Button type="link" size="small" onClick={() => openBomModal(record)}>{t("parts.actions.importFMEA")}</Button>
+              <Button type="link" size="small" onClick={() => openBomModal(record)}>{t("parts.importFMEA")}</Button>
             )}
             {canEditPlm && canCreateSc && hasPendingScLink && (
-              <Button type="link" size="small" onClick={() => openScModal(record)}>{t("parts.actions.confirmSC")}</Button>
+              <Button type="link" size="small" onClick={() => openScModal(record)}>{t("parts.confirmSC")}</Button>
             )}
           </Space>
         );
@@ -219,79 +212,73 @@ export default function PLMPartsPage() {
   ];
 
   const bomColumns = [
-    { title: t("parts.bom.columns.parentPartNumber"), dataIndex: "parent_part_number", key: "parent_part_number" },
-    { title: t("parts.bom.columns.parentRevision"), dataIndex: "parent_revision", key: "parent_revision", width: 90 },
-    { title: t("parts.bom.columns.childPartNumber"), dataIndex: "child_part_number", key: "child_part_number" },
-    { title: t("parts.bom.columns.childRevision"), dataIndex: "child_revision", key: "child_revision", width: 90 },
-    { title: t("parts.bom.columns.quantity"), dataIndex: "quantity", key: "quantity", width: 90 },
-    { title: t("parts.bom.columns.level"), dataIndex: "level", key: "level", width: 80 },
-    { title: t("parts.bom.columns.bomRevision"), dataIndex: "bom_revision", key: "bom_revision", width: 100 },
+    { title: t("bom.columns.parentPartNumber"), dataIndex: "parent_part_number", key: "parent_part_number" },
+    { title: t("bom.columns.parentRevision"), dataIndex: "parent_revision", key: "parent_revision", width: 90 },
+    { title: t("bom.columns.childPartNumber"), dataIndex: "child_part_number", key: "child_part_number" },
+    { title: t("bom.columns.childRevision"), dataIndex: "child_revision", key: "child_revision", width: 90 },
+    { title: t("bom.columns.quantity"), dataIndex: "quantity", key: "quantity", width: 90 },
+    { title: t("bom.columns.level"), dataIndex: "level", key: "level", width: 80 },
+    { title: t("bom.columns.bomRevision"), dataIndex: "bom_revision", key: "bom_revision", width: 100 },
   ];
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: 16,
-          alignItems: "center",
-        }}
-      >
-        <Title level={4} style={{ margin: 0 }}>
-          {t("parts.title")}
-        </Title>
+    <PageShell
+      title={t("parts.title")}
+      actions={
         <Input.Search
           placeholder={t("parts.searchPlaceholder")}
           allowClear
           onSearch={handleSearch}
           style={{ width: 280 }}
         />
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="part_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p, search, productLine);
-          },
-        }}
-      />
+      }
+    >
+      <DataCard title={t("parts.listTitle")}>
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="part_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p, search, productLine);
+            },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
 
       <Drawer
-        title={t("parts.drawer.title")}
+        title={t("parts.drawerTitle")}
         open={!!drawerPart}
         onClose={() => setDrawerPart(null)}
         width={520}
       >
         {drawerPart && (
           <Descriptions bordered column={1} size="small">
-            <Descriptions.Item label={t("parts.drawer.labels.partNumber")}>{drawerPart.part_number}</Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.name")}>{drawerPart.name}</Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.revision")}>{drawerPart.revision}</Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.status")}>{drawerPart.status}</Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.material")}>{drawerPart.material || "—"}</Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.specification")}>{drawerPart.specification || "—"}</Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.safetyRelated")}>
-              {boolText(drawerPart.is_safety_related)}
+            <Descriptions.Item label={t("parts.drawer.partNumber")}>{drawerPart.part_number}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.name")}>{drawerPart.name}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.revision")}>{drawerPart.revision}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.status")}>{drawerPart.status}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.material")}>{drawerPart.material || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.specification")}>{drawerPart.specification || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.safetyRelated")}>
+              {drawerPart.is_safety_related ? tc("yes") : tc("no")}
             </Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.keyCharacteristic")}>
-              {boolText(drawerPart.is_key_characteristic)}
+            <Descriptions.Item label={t("parts.drawer.keyCharacteristic")}>
+              {drawerPart.is_key_characteristic ? tc("yes") : tc("no")}
             </Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.externalId")}>{drawerPart.external_id}</Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.productLineCode")}>
+            <Descriptions.Item label={t("parts.drawer.externalId")}>{drawerPart.external_id}</Descriptions.Item>
+            <Descriptions.Item label={t("parts.drawer.productLine")}>
               {drawerPart.product_line_code || "—"}
             </Descriptions.Item>
-            <Descriptions.Item label={t("parts.drawer.labels.updatedAt")}>
+            <Descriptions.Item label={t("parts.drawer.updatedAt")}>
               {drawerPart.source_updated_at
-                ? formatDateTime(drawerPart.source_updated_at)
+                ? new Date(drawerPart.source_updated_at).toLocaleString("zh-CN")
                 : "—"}
             </Descriptions.Item>
           </Descriptions>
@@ -299,21 +286,21 @@ export default function PLMPartsPage() {
       </Drawer>
 
       <Modal
-        title={bomPart ? t("parts.bom.modalTitle", { partNumber: bomPart.part_number }) : t("parts.actions.bom")}
+        title={bomPart ? `${t("bom.title")}：${bomPart.part_number}` : t("bom.title")}
         open={!!bomPart}
         onCancel={() => setBomPart(null)}
         footer={null}
         width={900}
       >
         <Form form={bomQueryForm} layout="inline" style={{ marginBottom: 16 }}>
-          <Form.Item name="revision" label={t("parts.bom.partRevision")} rules={[{ required: true, message: t("parts.bom.partRevisionRequired") }]}>
+          <Form.Item name="revision" label={t("bom.partRevision")} rules={[{ required: true, message: t("bom.partRevisionRequired") }]}>
             <Input style={{ width: 120 }} />
           </Form.Item>
-          <Form.Item name="bom_revision" label={t("parts.bom.bomRevision")} rules={[{ required: true, message: t("parts.bom.bomRevisionRequired") }]}>
+          <Form.Item name="bom_revision" label={t("bom.bomRevision")} rules={[{ required: true, message: t("bom.bomRevisionRequired") }]}>
             <Input style={{ width: 120 }} />
           </Form.Item>
           <Form.Item>
-            <Button onClick={queryBom} loading={bomLoading}>{t("parts.bom.query")}</Button>
+            <Button onClick={queryBom} loading={bomLoading}>{t("bom.query")}</Button>
           </Form.Item>
         </Form>
         <Table
@@ -326,45 +313,45 @@ export default function PLMPartsPage() {
         />
         {canEditPlm && (
           <Form form={bomImportForm} layout="inline" style={{ marginTop: 16 }}>
-            <Form.Item name="fmea_id" label={t("parts.bom.import.fmeaId")} rules={[{ required: true, message: t("parts.bom.import.fmeaIdRequired") }]}>
+            <Form.Item name="fmea_id" label={t("bom.fmeaId")} rules={[{ required: true, message: t("bom.fmeaIdRequired") }]}>
               <Input style={{ width: 260 }} />
             </Form.Item>
             <Form.Item name="overwrite" valuePropName="checked">
-              <Checkbox>{t("parts.bom.import.overwrite")}</Checkbox>
+              <Checkbox>{t("bom.overwrite")}</Checkbox>
             </Form.Item>
             <Form.Item>
-              <Button type="primary" onClick={handleImportBom} loading={bomLoading}>{t("parts.bom.import.import")}</Button>
+              <Button type="primary" onClick={handleImportBom} loading={bomLoading}>{t("bom.import")}</Button>
             </Form.Item>
           </Form>
         )}
       </Modal>
 
       <Modal
-        title={scPart ? t("parts.sc.modalTitle", { partNumber: scPart.part_number }) : t("parts.actions.confirmSC")}
+        title={scPart ? `${t("sc.confirmTitle")}：${scPart.part_number}` : t("sc.confirmTitle")}
         open={!!scPart}
         onCancel={() => setScPart(null)}
         onOk={handleConfirmSc}
         confirmLoading={scLoading}
-        okText={t("parts.sc.okText")}
+        okText={tc("actions.confirm")}
         cancelText={tc("actions.cancel")}
       >
         <Form form={scForm} layout="vertical">
-          <Form.Item name="characteristic_type" label={t("parts.sc.characteristicType")} rules={[{ required: true, message: t("parts.sc.characteristicTypeRequired") }]}>
+          <Form.Item name="characteristic_type" label={t("sc.characteristicType")} rules={[{ required: true, message: t("sc.characteristicTypeRequired") }]}>
             <Select
               options={(scPart ? getPendingScLinks(scPart) : []).map((link) => ({
                 value: link.characteristic_type,
-                label: link.characteristic_type === "safety" ? t("parts.sc.safety") : t("parts.sc.key"),
+                label: link.characteristic_type === "safety" ? t("sc.safety") : t("sc.key"),
               }))}
             />
           </Form.Item>
-          <Form.Item name="fmea_id" label={t("parts.sc.fmeaId")} rules={[{ required: true, message: t("parts.sc.fmeaIdRequired") }]}>
+          <Form.Item name="fmea_id" label={t("sc.fmeaId")} rules={[{ required: true, message: t("sc.fmeaIdRequired") }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="node_id" label={t("parts.sc.nodeId")} rules={[{ required: true, message: t("parts.sc.nodeIdRequired") }]}>
+          <Form.Item name="node_id" label={t("sc.nodeId")} rules={[{ required: true, message: t("sc.nodeIdRequired") }]}>
             <Input />
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

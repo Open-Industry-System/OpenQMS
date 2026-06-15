@@ -1,6 +1,6 @@
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
-import "./i18n";
+import "./styles/design-system.css";
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -57,5 +57,5 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         </AntdApp>
       </I18nConfigProvider>
     </BrowserRouter>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

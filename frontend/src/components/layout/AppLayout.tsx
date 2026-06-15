@@ -1,6 +1,6 @@
 import { useState, useEffect, ReactNode, useMemo } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import { Layout, Menu, Button, Avatar, Dropdown, Space, Select, Segmented, Tooltip } from "antd";
+import { Layout, Menu, Button, Avatar, Dropdown, Space, Select, Segmented, Tooltip, Badge } from "antd";
 import type { MenuProps } from "antd";
 import {
   DashboardOutlined,
@@ -331,10 +331,62 @@ export default function AppLayout() {
     || (factoryScope?.accessible_factory_ids?.length ?? 0) > 1;
 
   return (
-    <Layout style={{ minHeight: "100vh" }}>
-      <Sider trigger={null} collapsible collapsed={collapsed} width={240} collapsedWidth={72}>
-        <div style={{ height: 64, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {!collapsed && <span style={{ fontSize: 18, fontWeight: 600 }}>OpenQMS</span>}
+    <Layout style={{ minHeight: "100vh", background: "var(--qf-bg-base)" }}>
+      <Sider
+        trigger={null}
+        collapsible
+        collapsed={collapsed}
+        width={240}
+        collapsedWidth={72}
+        style={{
+          background: "var(--qf-bg-panel)",
+          borderRight: "1px solid var(--qf-border)",
+          boxShadow: "var(--qf-shadow-md)",
+          zIndex: 10,
+        }}
+      >
+        <div
+          style={{
+            height: 64,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderBottom: "1px solid var(--qf-border)",
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              background: "linear-gradient(135deg, var(--qf-cyan), #00b8d4)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 700,
+              fontSize: 14,
+              color: "#0b0d12",
+              boxShadow: "0 0 12px rgba(0, 229, 255, 0.35)",
+              fontFamily: "var(--qf-font-mono)",
+              flexShrink: 0,
+            }}
+          >
+            Q
+          </div>
+          {!collapsed && (
+            <span
+              style={{
+                fontFamily: "var(--qf-font-display)",
+                fontSize: 18,
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                color: "var(--qf-text-primary)",
+              }}
+            >
+              OpenQMS
+            </span>
+          )}
         </div>
         <Menu
           mode="inline"
@@ -347,16 +399,43 @@ export default function AppLayout() {
             if (key.startsWith("grp:")) return;
             navigate(key);
           }}
-          style={{ height: "calc(100vh - 64px)" }}
+          className="qf-menu"
+          style={{
+            background: "transparent",
+            borderRight: 0,
+            padding: "8px 0",
+          }}
+          theme="dark"
         />
       </Sider>
-      <Layout>
-        <Header style={{ padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff" }}>
+      <Layout style={{ background: "var(--qf-bg-base)" }}>
+        <Header
+          style={{
+            height: 64,
+            padding: "0 24px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "var(--qf-bg-panel)",
+            borderBottom: "1px solid var(--qf-border)",
+            position: "sticky",
+            top: 0,
+            zIndex: 9,
+          }}
+        >
           <Tooltip title={collapsed ? t("header.expandMenu") : t("header.collapseMenu")}>
             <Button
               type="text"
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setCollapsed(!collapsed)}
+              style={{
+                color: "var(--qf-text-secondary)",
+                width: 36,
+                height: 36,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
             />
           </Tooltip>
           <Space size="middle">
@@ -369,7 +448,10 @@ export default function AppLayout() {
               >
                 {factories.map((f) => (
                   <Select.Option key={f.id} value={f.id}>
-                    {f.code} - {f.name}
+                    <span style={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-cyan)", marginRight: 8 }}>
+                      {f.code}
+                    </span>
+                    {f.name}
                   </Select.Option>
                 ))}
               </Select>
@@ -383,7 +465,10 @@ export default function AppLayout() {
             >
                 {productLines.map((pl) => (
                   <Select.Option key={pl.code} value={pl.code}>
-                    {pl.code} - {pl.name}
+                    <span style={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-cyan)", marginRight: 8 }}>
+                      {pl.code}
+                    </span>
+                    {pl.name}
                   </Select.Option>
                 ))}
               </Select>
@@ -393,21 +478,32 @@ export default function AppLayout() {
                 items: [
                   {
                     key: "logout",
-                    icon: <LogoutOutlined />,
+                    icon: <LogoutOutlined style={{ color: "var(--qf-red)" }} />,
                     label: t("header.logout"),
                     onClick: () => { logout(); navigate("/login"); },
                   },
                 ],
               }}
             >
-              <Space style={{ cursor: "pointer" }}>
-                <Avatar icon={<UserOutlined />} />
-                <span>{user?.display_name || user?.username}</span>
+              <Space style={{ cursor: "pointer", padding: "4px 8px", borderRadius: 8 }}>
+                <Badge dot color="var(--qf-green)" offset={[-2, 24]}>
+                  <Avatar
+                    icon={<UserOutlined />}
+                    style={{
+                      background: "var(--qf-bg-elevated)",
+                      color: "var(--qf-cyan)",
+                      border: "1px solid var(--qf-border)",
+                    }}
+                  />
+                </Badge>
+                <span style={{ color: "var(--qf-text-primary)", fontWeight: 500 }}>
+                  {user?.display_name || user?.username}
+                </span>
               </Space>
             </Dropdown>
           </Space>
         </Header>
-        <Content style={{ padding: 24 }}>
+        <Content style={{ padding: 24, background: "var(--qf-bg-base)" }}>
           <Outlet />
         </Content>
       </Layout>

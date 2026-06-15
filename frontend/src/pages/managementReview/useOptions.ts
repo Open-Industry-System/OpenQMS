@@ -2,10 +2,10 @@ import { useTranslation } from "react-i18next";
 
 export function useReviewStatusColor(): Record<string, string> {
   return {
-    draft: "blue",
-    data_collected: "cyan",
-    in_review: "orange",
-    closed: "green",
+    draft: "info",
+    data_collected: "info",
+    in_review: "warning",
+    closed: "success",
   };
 }
 
@@ -21,9 +21,9 @@ export function useReviewStatusMap(): Record<string, string> {
 
 export function useReportStatusColor(): Record<string, string> {
   return {
-    none: "default",
-    draft: "blue",
-    final: "green",
+    none: "info",
+    draft: "info",
+    final: "success",
   };
 }
 
@@ -38,8 +38,8 @@ export function useReportStatusMap(): Record<string, string> {
 
 export function useOutputStatusColor(): Record<string, string> {
   return {
-    pending: "default",
-    in_progress: "processing",
+    pending: "info",
+    in_progress: "warning",
     completed: "warning",
     verified: "success",
   };

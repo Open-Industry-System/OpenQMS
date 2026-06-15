@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import {
-  Card,
   Table,
   Button,
-  Tag,
   Space,
   Input,
   Select,
@@ -21,24 +18,21 @@ import {
   EyeOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { MsaStudyOverview } from "../../types";
 import { listMsaStudies, deleteGrrStudy, deleteBiasStudy, deleteLinearityStudy, deleteStabilityStudy, deleteAttributeStudy } from "../../api/msa";
 import dayjs from "dayjs";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
-interface TypeMapping {
-  backend: string;
-  route: string;
-}
-
 export default function MsaStudyListPage() {
+  const navigate = useNavigate();
   const { t } = useTranslation("msa");
   const { t: tc } = useTranslation("common");
-  const navigate = useNavigate();
   const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
 
@@ -56,10 +50,26 @@ export default function MsaStudyListPage() {
   const [createForm] = Form.useForm();
   const [_creating, _setCreating] = useState(false);
 
-  const typeMapping = t("study.typeMapping", { returnObjects: true }) as TypeMapping[];
-  const routeOfType = (type: string) => typeMapping.find((m) => m.backend === type)?.route || "grr";
-  const typeLabel = (type: string) => t(`study.type.${routeOfType(type)}`, { defaultValue: type });
   const statusLabel = (status: string) => t(`study.status.${status}`, { defaultValue: status });
+  const statusVariant = (status: string): string => {
+    switch (status) {
+      case "completed": return "success";
+      case "ongoing": return "warning";
+      case "draft": return "info";
+      default: return "info";
+    }
+  };
+  const typeLabel = (type: string) => t(`study.type.${type}`, { defaultValue: type });
+  const typeVariant = (type: string): string => {
+    switch (type) {
+      case "GRR": return "info";
+      case "偏倚": return "normal";
+      case "线性": return "warning";
+      case "稳定性": return "rework";
+      case "计数型": return "success";
+      default: return "draft";
+    }
+  };
 
   const fetchStudies = useCallback(async () => {
     setLoading(true);
@@ -94,14 +104,13 @@ export default function MsaStudyListPage() {
   const handleDelete = async (record: MsaStudyOverview) => {
     try {
       const typeMap: Record<string, (id: string) => Promise<void>> = {
-        grr: deleteGrrStudy,
-        bias: deleteBiasStudy,
-        linearity: deleteLinearityStudy,
-        stability: deleteStabilityStudy,
-        attribute: deleteAttributeStudy,
+        GRR: deleteGrrStudy,
+        偏倚: deleteBiasStudy,
+        线性: deleteLinearityStudy,
+        稳定性: deleteStabilityStudy,
+        计数型: deleteAttributeStudy,
       };
-      const route = routeOfType(record.type);
-      const fn = typeMap[route];
+      const fn = typeMap[record.type];
       if (!fn) return;
       await fn(record.study_id);
       message.success(t("study.deleteSuccess"));
@@ -113,7 +122,14 @@ export default function MsaStudyListPage() {
   };
 
   const typeToRoute = (type: string): string => {
-    return routeOfType(type);
+    switch (type) {
+      case "GRR": return "grr";
+      case "偏倚": return "bias";
+      case "线性": return "linearity";
+      case "稳定性": return "stability";
+      case "计数型": return "attribute";
+      default: return "grr";
+    }
   };
 
   const columns = [
@@ -121,16 +137,14 @@ export default function MsaStudyListPage() {
       title: t("study.columns.studyNo"),
       dataIndex: "study_no",
       width: 160,
-      render: (no: string) => <span style={{ fontFamily: "monospace" }}>{no}</span>,
+      render: (no: string) => <span className="qf-mono">{no}</span>,
     },
     {
       title: t("study.columns.type"),
       dataIndex: "type",
       width: 90,
       render: (type: string) => {
-        const route = routeOfType(type);
-        const color = route === "grr" ? "blue" : route === "bias" ? "cyan" : route === "linearity" ? "purple" : route === "stability" ? "orange" : "green";
-        return <Tag color={color}>{typeLabel(type)}</Tag>;
+        return <StatusBadge status={typeVariant(type)}>{typeLabel(type)}</StatusBadge>;
       },
     },
     { title: t("study.columns.title"), dataIndex: "title" },
@@ -144,8 +158,7 @@ export default function MsaStudyListPage() {
       dataIndex: "status",
       width: 100,
       render: (status: string) => {
-        const color = status === "draft" ? "default" : status === "ongoing" ? "processing" : "success";
-        return <Tag color={color}>{statusLabel(status)}</Tag>;
+        return <StatusBadge status={statusVariant(status)}>{statusLabel(status)}</StatusBadge>;
       },
     },
     {
@@ -183,43 +196,58 @@ export default function MsaStudyListPage() {
 
   const counts = {
     grr: studies.filter((s) => s.type === "GRR").length,
-    bias: studies.filter((s) => s.type === typeMapping.find((m) => m.route === "bias")?.backend).length,
-    linearity: studies.filter((s) => s.type === typeMapping.find((m) => m.route === "linearity")?.backend).length,
-    stability: studies.filter((s) => s.type === typeMapping.find((m) => m.route === "stability")?.backend).length,
-    attribute: studies.filter((s) => s.type === typeMapping.find((m) => m.route === "attribute")?.backend).length,
+    bias: studies.filter((s) => s.type === "偏倚").length,
+    linearity: studies.filter((s) => s.type === "线性").length,
+    stability: studies.filter((s) => s.type === "稳定性").length,
+    attribute: studies.filter((s) => s.type === "计数型").length,
   };
 
   return (
-    <div>
+    <PageShell title={t("study.title")} subtitle={t("title")}>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={4}>
-          <Card>
-            <Statistic title={t("study.counts.grr")} value={counts.grr} valueStyle={{ color: "#1890ff" }} />
-          </Card>
+          <DataCard title={t("study.counts.grr")} noPadding>
+            <Statistic
+              value={counts.grr}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-cyan)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={5}>
-          <Card>
-            <Statistic title={t("study.counts.bias")} value={counts.bias} valueStyle={{ color: "#13c2c2" }} />
-          </Card>
+          <DataCard title={t("study.counts.bias")} noPadding>
+            <Statistic
+              value={counts.bias}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-blue)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={5}>
-          <Card>
-            <Statistic title={t("study.counts.linearity")} value={counts.linearity} valueStyle={{ color: "#722ed1" }} />
-          </Card>
+          <DataCard title={t("study.counts.linearity")} noPadding>
+            <Statistic
+              value={counts.linearity}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-purple)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={5}>
-          <Card>
-            <Statistic title={t("study.counts.stability")} value={counts.stability} valueStyle={{ color: "#fa8c16" }} />
-          </Card>
+          <DataCard title={t("study.counts.stability")} noPadding>
+            <Statistic
+              value={counts.stability}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-amber)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={5}>
-          <Card>
-            <Statistic title={t("study.counts.attribute")} value={counts.attribute} valueStyle={{ color: "#52c41a" }} />
-          </Card>
+          <DataCard title={t("study.counts.attribute")} noPadding>
+            <Statistic
+              value={counts.attribute}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
+            />
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
+      <DataCard
         title={t("study.title")}
         extra={
           <Space>
@@ -253,9 +281,11 @@ export default function MsaStudyListPage() {
               setPage(1);
             }}
           >
-                {typeMapping.map((m) => (
-              <Option key={m.backend} value={m.backend}>{typeLabel(m.backend)}</Option>
-            ))}
+            <Option value="GRR">{t("study.type.grr")}</Option>
+            <Option value="偏倚">{t("study.type.bias")}</Option>
+            <Option value="线性">{t("study.type.linearity")}</Option>
+            <Option value="稳定性">{t("study.type.stability")}</Option>
+            <Option value="计数型">{t("study.type.attribute")}</Option>
           </Select>
           <Select
             placeholder={t("study.columns.status")}
@@ -277,6 +307,7 @@ export default function MsaStudyListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="study_id"
           columns={columns}
           dataSource={studies}
@@ -292,7 +323,7 @@ export default function MsaStudyListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Modal
         title={t("study.new")}
@@ -306,8 +337,8 @@ export default function MsaStudyListPage() {
       >
         <Form form={createForm} layout="vertical">
           <Form.Item label={t("study.selectType")} name="study_type" rules={[{ required: true }]}>
-            <Select placeholder={t("study.selectType")}>
-              <Option value="grr">{t("study.type.grr")}（GRR）</Option>
+            <Select placeholder={t("study.placeholders.selectType", { defaultValue: "选择研究类型" })}>
+              <Option value="grr">{t("study.type.grr")}（{t("study.method.average_range")}）</Option>
               <Option value="bias">{t("study.type.bias")}</Option>
               <Option value="linearity">{t("study.type.linearity")}</Option>
               <Option value="stability">{t("study.type.stability")}</Option>
@@ -330,6 +361,6 @@ export default function MsaStudyListPage() {
           </Button>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

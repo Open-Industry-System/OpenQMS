@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import {
-  Card,
   Table,
   Button,
-  Tag,
   Space,
   Input,
   Select,
@@ -24,18 +21,20 @@ import {
   EditOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { usePermission } from "../../hooks/usePermission";
 import type { Gauge } from "../../types";
 import { listGauges, getExpiringGauges, createGauge, deleteGauge } from "../../api/msa";
 import dayjs from "dayjs";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
 export default function GaugeListPage() {
+  const navigate = useNavigate();
   const { t } = useTranslation("msa");
   const { t: tc } = useTranslation("common");
-  const navigate = useNavigate();
   const { canEdit } = usePermission();
 
   const [gauges, setGauges] = useState<Gauge[]>([]);
@@ -55,6 +54,17 @@ export default function GaugeListPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalForm] = Form.useForm();
   const [saving, setSaving] = useState(false);
+
+  const statusLabel = (status: string) => t(`gauge.status.${status}`, { defaultValue: status });
+  const statusVariant = (status: string) => {
+    switch (status) {
+      case "active": return "success";
+      case "inactive": return "draft";
+      case "calibrating": return "info";
+      case "scrapped": return "error";
+      default: return "draft";
+    }
+  };
 
   const fetchGauges = useCallback(async () => {
     setLoading(true);
@@ -135,7 +145,7 @@ export default function GaugeListPage() {
       title: t("gauge.columns.gaugeNo"),
       dataIndex: "gauge_no",
       width: 160,
-      render: (no: string) => <span style={{ fontFamily: "monospace" }}>{no}</span>,
+      render: (no: string) => <span className="qf-mono">{no}</span>,
     },
     { title: t("gauge.columns.name"), dataIndex: "name", width: 180 },
     { title: t("gauge.columns.model"), dataIndex: "model", render: (v: string | null) => v || "—" },
@@ -145,24 +155,22 @@ export default function GaugeListPage() {
       dataIndex: "status",
       width: 100,
       render: (status: string) => {
-        const label = t(`gauge.status.${status}`, { defaultValue: status });
-        const color = status === "active" ? "green" : status === "inactive" ? "default" : status === "calibrating" ? "blue" : "red";
-        return <Tag color={color}>{label}</Tag>;
+        return <StatusBadge status={statusVariant(status)}>{statusLabel(status)}</StatusBadge>;
       },
     },
     {
       title: t("gauge.columns.nextCalibration"),
       dataIndex: "next_calibration_date",
-      width: 120,
+      width: 140,
       render: (v: string | null) => {
         if (!v) return "—";
         const days = dayjs(v).diff(dayjs(), "day");
         const isExpiringSoon = days <= 30;
         return (
-          <span style={isExpiringSoon ? { color: "#ff4d4f", fontWeight: 500 } : {}}>
+          <span style={isExpiringSoon ? { color: "var(--qf-red)", fontWeight: 500 } : {}}>
             {dayjs(v).format("YYYY-MM-DD")}
-            {isExpiringSoon && days >= 0 && <span style={{ marginLeft: 4, fontSize: 12 }}>({t("gauge.columns.days", { days })})</span>}
-            {days < 0 && <span style={{ marginLeft: 4, fontSize: 12 }}>({t("gauge.expired")})</span>}
+            {isExpiringSoon && days >= 0 && <span style={{ marginLeft: 4, fontSize: 12 }}>({days}{t("gauge.columns.days", { days })})</span>}
+            {days < 0 && <span style={{ marginLeft: 4, fontSize: 12, color: "var(--qf-red)" }}>({t("gauge.expired")})</span>}
           </span>
         );
       },
@@ -204,35 +212,49 @@ export default function GaugeListPage() {
   ];
 
   return (
-    <div>
+    <PageShell title={t("gauge.title")} subtitle={t("title")}>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card>
-            <Statistic title={t("gauge.total")} value={total} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic title={t("gauge.active")} value={activeCount} valueStyle={{ color: "#52c41a" }} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic title={t("gauge.inactiveOrOther")} value={total - activeCount} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card style={{ cursor: "pointer" }} onClick={handleOpenExpiryDrawer} hoverable>
+          <DataCard title={t("gauge.total")} noPadding>
             <Statistic
-              title={t("gauge.expiring30Days")}
-              value={expiringCount}
-              valueStyle={expiringCount > 0 ? { color: "#ff4d4f" } : undefined}
+              value={total}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-primary)" }}
             />
-          </Card>
+          </DataCard>
+        </Col>
+        <Col span={6}>
+          <DataCard title={t("gauge.active")} noPadding>
+            <Statistic
+              value={activeCount}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
+            />
+          </DataCard>
+        </Col>
+        <Col span={6}>
+          <DataCard title={t("gauge.inactiveOrOther")} noPadding>
+            <Statistic
+              value={total - activeCount}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-secondary)" }}
+            />
+          </DataCard>
+        </Col>
+        <Col span={6}>
+          <DataCard
+            title={t("gauge.expiring30Days")}
+            noPadding
+            elevated={expiringCount > 0}
+            style={{ cursor: "pointer" }}
+            onClick={handleOpenExpiryDrawer}
+          >
+            <Statistic
+              value={expiringCount}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: expiringCount > 0 ? "var(--qf-red)" : "var(--qf-text-primary)" }}
+            />
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
+      <DataCard
         title={t("gauge.title")}
         extra={
           <Space>
@@ -284,7 +306,7 @@ export default function GaugeListPage() {
             <Option value="IQC">{t("gauge.department.IQC")}</Option>
             <Option value="PQC">{t("gauge.department.PQC")}</Option>
             <Option value="OQC">{t("gauge.department.OQC")}</Option>
-            <Option value={t("gauge.department.labValue")}>{t("gauge.department.lab")}</Option>
+            <Option value="实验室">{t("gauge.department.labValue")}</Option>
           </Select>
           <Button type="primary" onClick={() => setPage(1)}>
             {tc("actions.search")}
@@ -292,6 +314,7 @@ export default function GaugeListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="gauge_id"
           columns={columns}
           dataSource={gauges}
@@ -307,7 +330,7 @@ export default function GaugeListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Drawer
         title={t("gauge.expiryDrawerTitle")}
@@ -316,12 +339,13 @@ export default function GaugeListPage() {
         width={640}
       >
         <Table
+          className="qf-table"
           rowKey="gauge_id"
           dataSource={expiryGauges}
           loading={expiryLoading}
           pagination={false}
           columns={[
-            { title: t("gauge.columns.gaugeNo"), dataIndex: "gauge_no", width: 140 },
+            { title: t("gauge.columns.gaugeNo"), dataIndex: "gauge_no", width: 140, render: (v: string) => <span className="qf-mono">{v}</span> },
             { title: t("gauge.columns.name"), dataIndex: "name" },
             {
               title: t("gauge.columns.expiryDate"),
@@ -333,8 +357,8 @@ export default function GaugeListPage() {
               render: (_: unknown, record: Gauge) => {
                 const days = dayjs(record.next_calibration_date).diff(dayjs(), "day");
                 return (
-                  <span style={{ color: days <= 7 ? "#ff4d4f" : undefined, fontWeight: days <= 7 ? 600 : undefined }}>
-                    {t("gauge.columns.days", { days })}
+                  <span style={{ color: days <= 7 ? "var(--qf-red)" : undefined, fontWeight: days <= 7 ? 600 : undefined }}>
+                    {days}{t("gauge.columns.days", { days })}
                   </span>
                 );
               },
@@ -355,12 +379,13 @@ export default function GaugeListPage() {
         okText={tc("actions.save")}
         cancelText={tc("actions.cancel")}
         destroyOnHidden
+        okButtonProps={{ className: "qf-btn-primary" }}
       >
         <Form form={modalForm} layout="vertical">
-          <Form.Item label={t("gauge.fields.gauge_no")} name="gauge_no" rules={[{ required: true }]}>
+          <Form.Item label={t("gauge.fields.gauge_no")} name="gauge_no" rules={[{ required: true, message: tc("messages.confirmOperation") }]}>
             <Input />
           </Form.Item>
-          <Form.Item label={t("gauge.fields.name")} name="name" rules={[{ required: true }]}>
+          <Form.Item label={t("gauge.fields.name")} name="name" rules={[{ required: true, message: tc("messages.confirmOperation") }]}>
             <Input />
           </Form.Item>
           <Form.Item label={t("gauge.fields.model")} name="model">
@@ -373,14 +398,14 @@ export default function GaugeListPage() {
             <Input type="number" />
           </Form.Item>
           <Form.Item label={t("gauge.fields.measuring_range")} name="measuring_range">
-            <Input placeholder="0-150mm" />
+            <Input placeholder={t("gauge.placeholders.measuring_range", { defaultValue: "如: 0-150mm" })} />
           </Form.Item>
           <Form.Item label={t("gauge.fields.department")} name="department">
-            <Select allowClear placeholder={t("gauge.columns.department")}>
+            <Select allowClear placeholder={t("gauge.placeholders.selectDepartment", { defaultValue: "选择部门" })}>
               <Option value="IQC">{t("gauge.department.IQC")}</Option>
               <Option value="PQC">{t("gauge.department.PQC")}</Option>
               <Option value="OQC">{t("gauge.department.OQC")}</Option>
-              <Option value={t("gauge.department.labValue")}>{t("gauge.department.lab")}</Option>
+              <Option value="实验室">{t("gauge.department.labValue")}</Option>
             </Select>
           </Form.Item>
           <Form.Item label={t("gauge.fields.location")} name="location">
@@ -394,6 +419,6 @@ export default function GaugeListPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

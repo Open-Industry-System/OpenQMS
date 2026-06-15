@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Card, Tag, Button, Space, Descriptions, Input, Modal, message, Spin, Row, Col, Steps, Timeline } from "antd";
+import { Button, Space, Descriptions, Input, Modal, message, Spin, Steps, Timeline } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../../utils/dateTime";
@@ -9,6 +9,9 @@ import { getAPQPProject, updateAPQPProject, transitionAPQPProject } from "../../
 import type { APQPProject, APQPProjectUpdate } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
+import PageShell from "../../../components/design/PageShell";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 
 const PROJECT_STATUS_COLORS: Record<string, string> = {
   active: "processing",
@@ -40,6 +43,18 @@ function useAPQPDetailLabels(t: (key: string) => string) {
 
   return { phaseNames, projectStatusLabels, phaseStatusLabel };
 }
+
+const projectStatusVariant = (s: string): string => {
+  if (s === "completed") return "success";
+  if (s === "active") return "warning";
+  return "info";
+};
+
+const phaseStatusVariant = (s: string): string => {
+  if (s === "pending_approval") return "warning";
+  if (s === "completed") return "success";
+  return "info";
+};
 
 export default function APQPDetailPage() {
   const { t } = useTranslation("apqp");
@@ -151,45 +166,39 @@ export default function APQPDetailPage() {
   };
 
   return (
-    <div>
-      {/* Header */}
-      <Card style={{ marginBottom: 16 }}>
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Space>
-              <span style={{ fontSize: 20, fontWeight: 600 }}>{project.project_code}</span>
-              <span style={{ fontSize: 16 }}>{project.project_name}</span>
-              <Tag color={PROJECT_STATUS_COLORS[project.project_status]}>
-                {projectStatusLabels[project.project_status]}
-              </Tag>
-            </Space>
-          </Col>
-          <Col>
-            <Space>
-              {canEdit('planning') && project.project_status === "active" && (
-                <Button icon={<EditOutlined />} onClick={() => {
-                  setEditForm({
-                    project_name: project.project_name,
-                    product_name: project.product_name,
-                    customer_name: project.customer_name || "",
-                    description: project.description || "",
-                    dfmea_id: project.dfmea_id || "",
-                    pfmea_id: project.pfmea_id || "",
-                    control_plan_id: project.control_plan_id || "",
-                    ppap_submission_id: project.ppap_submission_id || "",
-                  });
-                  setEditOpen(true);
-                }}>
-                  {tc("actions.edit")}
-                </Button>
-              )}
-            </Space>
-          </Col>
-        </Row>
-      </Card>
-
+    <PageShell
+      title={
+        <Space size={12}>
+          <span>{project.project_code}</span>
+          <span>{project.project_name}</span>
+          <StatusBadge status={projectStatusVariant(project.project_status)}>
+            {projectStatusLabels[project.project_status]}
+          </StatusBadge>
+        </Space>
+      }
+      subtitle={t("pageTitle.apqpProjectDetail")}
+      actions={
+        canEdit('planning') && project.project_status === "active" ? (
+          <Button icon={<EditOutlined />} onClick={() => {
+            setEditForm({
+              project_name: project.project_name,
+              product_name: project.product_name,
+              customer_name: project.customer_name || "",
+              description: project.description || "",
+              dfmea_id: project.dfmea_id || "",
+              pfmea_id: project.pfmea_id || "",
+              control_plan_id: project.control_plan_id || "",
+              ppap_submission_id: project.ppap_submission_id || "",
+            });
+            setEditOpen(true);
+          }}>
+            {tc("actions.edit")}
+          </Button>
+        ) : undefined
+      }
+    >
       {/* Project Info */}
-      <Card title={t("card.projectInfo")} style={{ marginBottom: 16 }}>
+      <DataCard title={t("card.projectInfo")} style={{ marginBottom: 16 }}>
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label={t("label.projectCode")}>{project.project_code}</Descriptions.Item>
           <Descriptions.Item label={t("label.projectName")}>{project.project_name}</Descriptions.Item>
@@ -201,22 +210,24 @@ export default function APQPDetailPage() {
           <Descriptions.Item label={t("label.createdAt")}>{project.created_at ? formatDateTime(project.created_at) : "-"}</Descriptions.Item>
           <Descriptions.Item label={t("label.description")} span={2}>{project.description || "-"}</Descriptions.Item>
         </Descriptions>
-      </Card>
+      </DataCard>
 
       {/* Phase Progress */}
-      <Card title={t("card.phaseProgress")} style={{ marginBottom: 16 }}>
+      <DataCard title={t("card.phaseProgress")} style={{ marginBottom: 16 }}>
         <Steps items={stepItems} current={project.current_phase - 1} status={project.phase_status === "pending_approval" ? "error" : undefined} />
-      </Card>
+      </DataCard>
 
       {/* Current Phase Actions */}
       {project.project_status === "active" && (
-        <Card title={t("card.phaseActions")} style={{ marginBottom: 16 }}>
+        <DataCard title={t("card.phaseActions")} style={{ marginBottom: 16 }}>
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label={t("label.currentPhase")}>
-              <Tag color="blue">{t("phase.phaseNName", { phase: project.current_phase, name: phaseNames[project.current_phase] })}</Tag>
+              <StatusBadge status="info">{t("phase.phaseNName", { phase: project.current_phase, name: phaseNames[project.current_phase] })}</StatusBadge>
             </Descriptions.Item>
             <Descriptions.Item label={t("label.phaseStatus")}>
-              {project.phase_status === "pending_approval" ? <Tag color="orange">{t("phaseStatus.pendingApproval")}</Tag> : <Tag color="blue">{t("phaseStatus.inProgress")}</Tag>}
+              <StatusBadge status={phaseStatusVariant(project.phase_status || "")}>
+                {project.phase_status === "pending_approval" ? t("phaseStatus.pendingApproval") : t("phaseStatus.inProgress")}
+              </StatusBadge>
             </Descriptions.Item>
           </Descriptions>
           <div style={{ marginTop: 12 }}>
@@ -229,11 +240,11 @@ export default function APQPDetailPage() {
             />
             <Space>{actionButtons()}</Space>
           </div>
-        </Card>
+        </DataCard>
       )}
 
       {/* Cross-module Links */}
-      <Card title={t("card.deliverables")} style={{ marginBottom: 16 }}>
+      <DataCard title={t("card.deliverables")} style={{ marginBottom: 16 }}>
         <Descriptions column={1} bordered size="small">
           <Descriptions.Item label={t("label.dfmeaPhase2")}>
             {project.dfmea_id ? (
@@ -267,10 +278,10 @@ export default function APQPDetailPage() {
             ) : <span style={{ color: "#999" }}>{t("label.notLinked")}</span>}
           </Descriptions.Item>
         </Descriptions>
-      </Card>
+      </DataCard>
 
       {/* Phase Timeline */}
-      <Card title={t("card.phaseTimeline")} style={{ marginBottom: 16 }}>
+      <DataCard title={t("card.phaseTimeline")} style={{ marginBottom: 16 }}>
         <Timeline
           items={[1, 2, 3, 4, 5].map((phase) => {
             const completedAt = (project as unknown as Record<string, string | null>)[`phase_${phase}_completed_at`];
@@ -285,11 +296,11 @@ export default function APQPDetailPage() {
             };
           })}
         />
-      </Card>
+      </DataCard>
 
       {/* Gate History */}
       {project.gate_history && project.gate_history.length > 0 && (
-        <Card title={t("card.gateHistory")}>
+        <DataCard title={t("card.gateHistory")}>
           <Timeline
             items={project.gate_history.map((entry) => ({
               color: entry.action === "approve" ? "green" : entry.action === "reject" ? "red" : "blue",
@@ -310,7 +321,7 @@ export default function APQPDetailPage() {
               ),
             }))}
           />
-        </Card>
+        </DataCard>
       )}
 
       {/* Edit Modal */}
@@ -356,6 +367,6 @@ export default function APQPDetailPage() {
           </div>
         </div>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

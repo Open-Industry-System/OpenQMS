@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Card,
   Button,
   Tag,
   Space,
@@ -15,6 +14,7 @@ import {
   InputNumber,
   Descriptions,
   Divider,
+  Spin,
 } from "antd";
 import {
   ArrowLeftOutlined,
@@ -36,6 +36,7 @@ import {
   requestReinspect,
   approveConcession,
 } from "../../api/iqc";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -230,76 +231,81 @@ export default function IqcInspectionDetailPage() {
   }
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/iqc/inspections")}>
-          {t("actions.backToList")}
-        </Button>
-        {inspection.status === "pending" && canEdit('iqc') && (
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>
-            {t("actions.startInspection")}
+    <PageShell
+      title={t("detail.inspectionInfo")}
+      actions={
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/iqc/inspections")}>
+            {t("actions.backToList")}
           </Button>
-        )}
-        {inspection.status === "judged" && canEdit('iqc') && (
-          <Button type="primary" onClick={handleClose}>
-            {t("actions.closeInspection")}
-          </Button>
-        )}
-        {inspection.status === "judged" && inspection.inspection_result === "rejected" && canEdit('iqc') && (
-          <>
-            <Button danger onClick={handleTriggerScar}>
-              {t("actions.triggerScar")}
+          {inspection.status === "pending" && canEdit('iqc') && (
+            <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>
+              {t("actions.startInspection")}
             </Button>
-            <Button onClick={handleReinspect}>{t("actions.requestReinspect")}</Button>
-            {canApprove('iqc') && (
-              <Button onClick={handleConcession}>{t("actions.approveConcession")}</Button>
-            )}
-          </>
-        )}
-      </Space>
+          )}
+          {inspection.status === "judged" && canEdit('iqc') && (
+            <Button type="primary" onClick={handleClose}>
+              {t("actions.closeInspection")}
+            </Button>
+          )}
+          {inspection.status === "judged" && inspection.inspection_result === "rejected" && canEdit('iqc') && (
+            <>
+              <Button danger onClick={handleTriggerScar}>
+                {t("actions.triggerScar")}
+              </Button>
+              <Button onClick={handleReinspect}>{t("actions.requestReinspect")}</Button>
+              {canApprove('iqc') && (
+                <Button onClick={handleConcession}>{t("actions.approveConcession")}</Button>
+              )}
+            </>
+          )}
+        </Space>
+      }
+    >
+      <DataCard title={t("detail.inspectionInfo")}>
+        <Spin spinning={loading}>
+          <Steps current={statusToStep(inspection.status)} style={{ marginBottom: 24 }}>
+            <Steps.Step title={t("steps.pending")} />
+            <Steps.Step title={t("steps.inspecting")} />
+            <Steps.Step title={t("steps.judged")} />
+            <Steps.Step title={t("steps.closed")} />
+          </Steps>
 
-      <Card title={t("detail.inspectionInfo")} loading={loading}>
-        <Steps current={statusToStep(inspection.status)} style={{ marginBottom: 24 }}>
-          <Steps.Step title={t("steps.pending")} />
-          <Steps.Step title={t("steps.inspecting")} />
-          <Steps.Step title={t("steps.judged")} />
-          <Steps.Step title={t("steps.closed")} />
-        </Steps>
-
-        <Descriptions bordered column={3}>
-          <Descriptions.Item label={t("table.inspectionNo")}>{inspection.inspection_no}</Descriptions.Item>
-          <Descriptions.Item label={t("table.partNo")}>{inspection.part_no || "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("table.partName")}>{inspection.part_name || "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("table.lotNo")}>{inspection.lot_no || "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("table.lotQty")}>{inspection.lot_qty || "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("table.sampleSize")}>{inspection.sample_qty || "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("table.inspectionMode")}>
-            {inspection.inspection_mode === "quick" ? t("inspectionMode.quick") : t("inspectionMode.detailed")}
-          </Descriptions.Item>
-          <Descriptions.Item label={t("table.status")}>
-            <Tag color={statusMap[inspection.status]?.color}>
-              {statusMap[inspection.status]?.label}
-            </Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label={t("table.inspectionResult")}>
-            <Tag color={resultMap[inspection.inspection_result]?.color}>
-              {resultMap[inspection.inspection_result]?.label}
-            </Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label={t("descriptions.aqlLevel")}>{inspection.aql_level || "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("descriptions.inspectionLevel")}>{inspection.inspection_level || "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("descriptions.codeLetter")}>{inspection.code_letter || "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("descriptions.acceptNo")}>{inspection.accept_number ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("descriptions.rejectNo")}>{inspection.reject_number ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("table.defectQty")}>{inspection.defect_qty}</Descriptions.Item>
-          <Descriptions.Item label={t("table.inspectionDate")}>{inspection.inspection_date || "—"}</Descriptions.Item>
-        </Descriptions>
-      </Card>
+          <Descriptions bordered column={3}>
+            <Descriptions.Item label={t("table.inspectionNo")}>{inspection.inspection_no}</Descriptions.Item>
+            <Descriptions.Item label={t("table.partNo")}>{inspection.part_no || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("table.partName")}>{inspection.part_name || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("table.lotNo")}>{inspection.lot_no || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("table.lotQty")}>{inspection.lot_qty || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("table.sampleSize")}>{inspection.sample_qty || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("table.inspectionMode")}>
+              {inspection.inspection_mode === "quick" ? t("inspectionMode.quick") : t("inspectionMode.detailed")}
+            </Descriptions.Item>
+            <Descriptions.Item label={t("table.status")}>
+              <Tag color={statusMap[inspection.status]?.color}>
+                {statusMap[inspection.status]?.label}
+              </Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label={t("table.inspectionResult")}>
+              <Tag color={resultMap[inspection.inspection_result]?.color}>
+                {resultMap[inspection.inspection_result]?.label}
+              </Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.aqlLevel")}>{inspection.aql_level || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.inspectionLevel")}>{inspection.inspection_level || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.codeLetter")}>{inspection.code_letter || "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.acceptNo")}>{inspection.accept_number ?? "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.rejectNo")}>{inspection.reject_number ?? "—"}</Descriptions.Item>
+            <Descriptions.Item label={t("table.defectQty")}>{inspection.defect_qty}</Descriptions.Item>
+            <Descriptions.Item label={t("table.inspectionDate")}>{inspection.inspection_date || "—"}</Descriptions.Item>
+          </Descriptions>
+        </Spin>
+      </DataCard>
 
       <Divider />
 
       {inspection.status === "inspecting" && canEdit('iqc') && (
-        <Card title={t("detail.enterResults")}>
+        <DataCard title={t("detail.enterResults")}>
           <Form form={itemForm} onFinish={handleUpdateItems} layout="vertical">
             <Form.Item
               name="items"
@@ -314,11 +320,11 @@ export default function IqcInspectionDetailPage() {
               {t("form.submitResult")}
             </Button>
           </Form>
-        </Card>
+        </DataCard>
       )}
 
       {inspection.status === "inspecting" && canEdit('iqc') && (
-        <Card title={t("detail.judgement")} style={{ marginTop: 16 }}>
+        <DataCard title={t("detail.judgement")} style={{ marginTop: 16 }}>
           <Form form={judgeForm} onFinish={handleJudge} layout="vertical">
             <Row gutter={16}>
               <Col span={8}>
@@ -351,20 +357,21 @@ export default function IqcInspectionDetailPage() {
               {t("form.submitJudgement")}
             </Button>
           </Form>
-        </Card>
+        </DataCard>
       )}
 
       <Divider />
 
-      <Card title={t("detail.inspectionItems")}>
+      <DataCard title={t("detail.inspectionItems")}>
         <Table
+          className="qf-table"
           rowKey="item_id"
           columns={itemColumns}
           dataSource={inspection.items || []}
           scroll={{ x: 1200 }}
           pagination={false}
         />
-      </Card>
-    </div>
+      </DataCard>
+    </PageShell>
   );
 }

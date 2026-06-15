@@ -42,6 +42,7 @@ def compute_linearity(study: LinearityStudy, measurements: list[LinearityMeasure
 
     return LinearityResult(
         study_id=study.study_id,
+        factory_id=study.factory_id,
         slope=slope,
         intercept=intercept,
         r_squared=r_squared,

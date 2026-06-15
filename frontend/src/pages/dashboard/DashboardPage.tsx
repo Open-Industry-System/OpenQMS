@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Button, Typography, Space, message } from "antd";
+import { Button, Space, App } from "antd";
 import {
   EditOutlined,
   CheckOutlined,
@@ -7,6 +7,7 @@ import {
   ReloadOutlined,
   RollbackOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import DashboardGrid from "../../components/dashboard/DashboardGrid";
 import WidgetLibraryPanel from "../../components/dashboard/WidgetLibraryPanel";
 import {
@@ -16,7 +17,7 @@ import {
 } from "../../api/dashboard";
 import { useProductLineStore } from "../../store/productLineStore";
 import { usePermission } from "../../hooks/usePermission";
-import { useTranslation } from "react-i18next";
+import { PageShell } from "../../components/design";
 import type {
   WidgetLayoutItem,
   DashboardLayoutConfig,
@@ -55,12 +56,11 @@ function createEmptyData(): DashboardWidgetsData {
   };
 }
 
-const { Title } = Typography;
-
 export default function DashboardPage() {
-  const productLine = useProductLineStore((s) => s.selected);
   const { t } = useTranslation("dashboard");
   const { t: tc } = useTranslation("common");
+  const { message } = App.useApp();
+  const productLine = useProductLineStore((s) => s.selected);
   const { canEdit, canView } = usePermission();
   const canEditDashboard = canEdit("dashboard");
 
@@ -72,7 +72,6 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardWidgetsData>(createEmptyData);
   const [loading, setLoading] = useState(true);
 
-  // Fetch layout first, then fetch widgets based on returned layout types
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -87,11 +86,11 @@ export default function DashboardPage() {
       setData(widgetsResp);
     } catch (e) {
       console.error("Dashboard fetch error:", e);
-      message.error(t("messages.loadFailed"));
+      message.error(t("messages.loadFailed", "仪表盘加载失败"));
     } finally {
       setLoading(false);
     }
-  }, [productLine, t]);
+  }, [productLine, t, message]);
 
   useEffect(() => {
     fetchData();
@@ -109,13 +108,12 @@ export default function DashboardPage() {
       setLayout(editLayout);
       setIsEditing(false);
       setEditLayout(null);
-      message.success(t("messages.saveSuccess"));
-      // Re-fetch only widget data for the new layout types, no loading flicker
+      message.success(t("messages.saveSuccess", "布局已保存"));
       const widgetTypes = [...new Set(editLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch {
-      message.error(t("messages.saveFailed"));
+      message.error(t("messages.saveFailed", "保存失败"));
     }
   };
 
@@ -130,13 +128,12 @@ export default function DashboardPage() {
       await saveDashboardLayout({ lg: resetLayout });
       setLayout(resetLayout);
       setEditLayout(resetLayout);
-      message.success(t("messages.resetSuccess"));
-      // Re-fetch only widget data for default layout types, no loading flicker
+      message.success(t("messages.resetSuccess", "已恢复默认布局"));
       const widgetTypes = [...new Set(resetLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch {
-      message.error(t("messages.resetFailed"));
+      message.error(t("messages.resetFailed", "恢复失败"));
     }
   };
 
@@ -157,43 +154,41 @@ export default function DashboardPage() {
 
   const currentLayout = isEditing && editLayout ? editLayout : layout;
 
-  return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>{t("page.title")}</Title>
-        <Space>
-          {isEditing ? (
-            <>
-              <Button icon={<CheckOutlined />} type="primary" onClick={handleSave}>
-                {t("actions.done")}
-              </Button>
-              <Button icon={<CloseOutlined />} onClick={handleCancel}>
-                {tc("actions.cancel")}
-              </Button>
-              <Button icon={<RollbackOutlined />} onClick={handleReset}>
-                {t("actions.resetDefault")}
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
-                {tc("actions.refresh")}
-              </Button>
-              {canEditDashboard && (
-                <Button icon={<EditOutlined />} onClick={handleEdit}>
-                  {t("actions.editLayout")}
-                </Button>
-              )}
-            </>
-          )}
-        </Space>
-      </div>
+  const actions = isEditing ? (
+    <Space>
+      <Button icon={<CheckOutlined />} type="primary" onClick={handleSave}>
+        {t("actions.done", "完成")}
+      </Button>
+      <Button icon={<CloseOutlined />} onClick={handleCancel}>
+        {tc("actions.cancel", "取消")}
+      </Button>
+      <Button icon={<RollbackOutlined />} onClick={handleReset}>
+        {t("actions.resetDefault", "恢复默认")}
+      </Button>
+    </Space>
+  ) : (
+    <Space>
+      <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
+        {tc("actions.refresh", "刷新")}
+      </Button>
+      {canEditDashboard && (
+        <Button icon={<EditOutlined />} onClick={handleEdit}>
+          {t("actions.editLayout", "编辑布局")}
+        </Button>
+      )}
+    </Space>
+  );
 
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {isEditing && (
-          <WidgetLibraryPanel onAddWidget={handleAddWidget} />
-        )}
-        <div style={{ flex: 1, overflow: "auto", padding: "0 8px" }}>
+  return (
+    <PageShell
+      title={t("page.title", "质量仪表盘")}
+      subtitle={t("page.subtitle", "全局质量态势 · KPI · 预警 · 近期动态")}
+      actions={actions}
+      fullHeight
+    >
+      <div style={{ flex: 1, display: "flex", overflow: "hidden", margin: "0 -24px -24px" }}>
+        {isEditing && <WidgetLibraryPanel onAddWidget={handleAddWidget} />}
+        <div style={{ flex: 1, overflow: "auto", padding: "0 8px 24px" }}>
           <DashboardGrid
             layout={currentLayout}
             data={data}
@@ -207,6 +202,6 @@ export default function DashboardPage() {
           />
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

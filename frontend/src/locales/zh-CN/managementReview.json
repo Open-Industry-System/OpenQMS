@@ -3,6 +3,10 @@
     "list": "管理评审",
     "detail": "管理评审详情"
   },
+  "pageSubtitle": {
+    "list": "管理层质量评审计划",
+    "detail": ""
+  },
   "status": {
     "review": {
       "draft": "草稿",

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Table, Button, Tag, Typography, Modal, Form, Input, Select, App, Space,
+  Table, Button, Modal, Form, Input, Select, App, Space,
   InputNumber,
 } from "antd";
 import {
@@ -8,15 +8,21 @@ import {
   SyncOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { formatDateTime } from "../../utils/dateTime";
 import {
   getPLMConnections, createPLMConnection, updatePLMConnection,
   deletePLMConnection, testPLMConnection, syncPLMConnection,
 } from "../../api/plm";
 import type { PLMConnection, PLMConnectionCreate, PLMConnectionUpdate } from "../../types/plm";
 import { usePermission } from "../../hooks/usePermission";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
+const typeLabels: Record<string, string> = {
+  mock: "Mock",
+  rest: "REST API",
+  siemens_tc: "Siemens Teamcenter",
+  dassault_enovia: "Dassault ENOVIA",
+  ptc_windchill: "PTC Windchill",
+};
 
 export default function PLMConnectionsPage() {
   const { t } = useTranslation("plm");
@@ -182,9 +188,9 @@ export default function PLMConnectionsPage() {
       key: "is_active",
       width: 80,
       render: (active: boolean) => (
-        <Tag color={active ? "success" : "error"}>
+        <StatusBadge status={active ? "ok" : "error"}>
           {active ? t("connections.status.active") : t("connections.status.inactive")}
-        </Tag>
+        </StatusBadge>
       ),
     },
     {
@@ -192,7 +198,7 @@ export default function PLMConnectionsPage() {
       dataIndex: "created_at",
       key: "created_at",
       width: 170,
-      render: (v: string) => formatDateTime(v),
+      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
     },
     {
       title: t("connections.columns.actions"),
@@ -250,42 +256,37 @@ export default function PLMConnectionsPage() {
   ], [canEditPlm, canAdminPlm, testLoading, syncLoading, t, tc, connectorOptions]);
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: 16,
-        }}
-      >
-        <Title level={4} style={{ margin: 0 }}>
-          {t("connections.title")}
-        </Title>
-        {canCreatePlm && (
+    <PageShell
+      title={t("connections.title")}
+      actions={
+        canCreatePlm && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            {t("connections.create")}
+            {t("connections.new")}
           </Button>
-        )}
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="connection_id"
-        loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p);
-          },
-        }}
-      />
+        )
+      }
+    >
+      <DataCard title={t("connections.listTitle")}>
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="connection_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p);
+            },
+          }}
+          className="qf-table"
+        />
+      </DataCard>
 
       <Modal
-        title={editingId ? t("connections.modal.editTitle") : t("connections.modal.createTitle")}
+        title={editingId ? t("connections.editTitle") : t("connections.newTitle")}
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => {
@@ -330,6 +331,6 @@ export default function PLMConnectionsPage() {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

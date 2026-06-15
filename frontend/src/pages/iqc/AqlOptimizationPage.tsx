@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Card, Table, Tag, Space, Input, Select, Row, Col, Statistic, App, Button,
+  Table, Tag, Space, Input, Select, Row, Col, Statistic, App, Button,
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { AqlRecommendation } from '../../types';
 import { listAqlRecommendations } from '../../api/iqcAql';
 import AqlRecommendationDrawer from '../../components/iqc/AqlRecommendationDrawer';
+import { PageShell, DataCard, StatusBadge } from '../../components/design';
 
 export default function AqlOptimizationPage() {
   const { t } = useTranslation('iqc');
@@ -151,30 +152,38 @@ export default function AqlOptimizationPage() {
   );
 
   return (
-    <div>
+    <PageShell
+      title={t('pageTitle.aqlOptimization')}
+      actions={
+        <Button icon={<ReloadOutlined />} onClick={() => { fetchData(); fetchKpi(); }}>
+          {tc('actions.refresh')}
+        </Button>
+      }
+    >
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card><Statistic title={t('stats.pendingApproval')} value={pendingCount} valueStyle={{ color: '#faad14' }} /></Card>
+          <DataCard title="">
+            <Statistic title={t('stats.pendingApproval')} value={pendingCount} valueStyle={{ color: '#faad14' }} />
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card><Statistic title={t('stats.generatedToday')} value={todayCount} /></Card>
+          <DataCard title="">
+            <Statistic title={t('stats.generatedToday')} value={todayCount} />
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card><Statistic title={t('stats.approvedCount')} value={approvedCount} valueStyle={{ color: '#52c41a' }} /></Card>
+          <DataCard title="">
+            <Statistic title={t('stats.approvedCount')} value={approvedCount} valueStyle={{ color: '#52c41a' }} />
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card><Statistic title={t('stats.rejectedCountRec')} value={rejectedCount} valueStyle={{ color: '#ff4d4f' }} /></Card>
+          <DataCard title="">
+            <Statistic title={t('stats.rejectedCountRec')} value={rejectedCount} valueStyle={{ color: '#ff4d4f' }} />
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
-        title={t('pageTitle.recommendationList')}
-        extra={
-          <Button icon={<ReloadOutlined />} onClick={() => { fetchData(); fetchKpi(); }}>
-            {tc('actions.refresh')}
-          </Button>
-        }
-      >
+      <DataCard title="">
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder={t('placeholder.selectStatus')}
@@ -212,6 +221,7 @@ export default function AqlOptimizationPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="recommendation_id"
           columns={columns}
           dataSource={data}
@@ -228,7 +238,7 @@ export default function AqlOptimizationPage() {
             onChange: (p, ps) => { setPage(p); setPageSize(ps || 20); },
           }}
         />
-      </Card>
+      </DataCard>
 
       <AqlRecommendationDrawer
         open={drawerOpen}
@@ -236,6 +246,6 @@ export default function AqlOptimizationPage() {
         onClose={() => setDrawerOpen(false)}
         onAction={() => { setDrawerOpen(false); fetchData(); fetchKpi(); }}
       />
-    </div>
+    </PageShell>
   );
 }

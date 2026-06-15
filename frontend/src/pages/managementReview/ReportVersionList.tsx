@@ -1,4 +1,7 @@
-import { List, Tag } from "antd";
+import { List } from "antd";
+import { useTranslation } from "react-i18next";
+import { StatusBadge } from "../../components/design";
+import { formatDateTime } from "../../utils/dateTime";
 import type { ReviewReportVersion } from "../../types";
 
 interface Props {
@@ -8,6 +11,8 @@ interface Props {
 }
 
 export default function ReportVersionList({ versions, selectedId, onSelect }: Props) {
+  const { t } = useTranslation("managementReview");
+
   return (
     <List
       size="small"
@@ -17,9 +22,9 @@ export default function ReportVersionList({ versions, selectedId, onSelect }: Pr
           style={{ cursor: "pointer", background: selectedId === v.report_id ? "#e6f7ff" : undefined }}
           onClick={() => onSelect(v)}
         >
-          <Tag color="green">v{v.version_no}</Tag>
+          <StatusBadge status="success">{`v${v.version_no}`}</StatusBadge>
           <span style={{ fontSize: 12 }}>
-            {v.finalized_at ? new Date(v.finalized_at).toLocaleDateString() : "-"}
+            {v.finalized_at ? formatDateTime(v.finalized_at) : "-"}
           </span>
         </List.Item>
       )}

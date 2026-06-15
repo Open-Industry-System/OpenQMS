@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Table, Button, Tag, Typography, Modal, Form, Input, Select, App } from "antd";
+import { Table, Button, Tag, Form, Input, Select, Modal, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { listFMEAs, createFMEA, updateFMEA } from "../../../api/fmea";
@@ -9,20 +9,19 @@ import GenerationWizard from "../../../components/dfmea/GenerationWizard";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
+import { PageShell, StatusBadge } from "../../../components/design";
 
-const { Title } = Typography;
-
-const statusColors: Record<string, string> = {
-  draft: "default",
-  in_review: "processing",
-  approved: "success",
-  rework: "warning",
-  archived: "default",
+const typeLabels: Record<string, string> = {
+  PFMEA: "PFMEA",
+  DFMEA: "DFMEA",
 };
 
-const typeColors: Record<string, string> = {
-  PFMEA: "blue",
-  DFMEA: "green",
+const statusLabels: Record<string, string> = {
+  draft: "草稿",
+  in_review: "审核中",
+  approved: "已批准",
+  rework: "返工中",
+  archived: "已归档",
 };
 
 export default function FMEAListPage() {
@@ -41,19 +40,6 @@ export default function FMEAListPage() {
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
   const [searchParams] = useSearchParams();
-
-  const statusLabels: Record<string, string> = {
-    draft: t("status.draft"),
-    in_review: t("status.in_review"),
-    approved: t("status.approved"),
-    rework: t("status.rework"),
-    archived: t("status.archived"),
-  };
-
-  const typeLabels: Record<string, string> = {
-    PFMEA: t("list.type.PFMEA"),
-    DFMEA: t("list.type.DFMEA"),
-  };
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -75,7 +61,7 @@ export default function FMEAListPage() {
 
   useEffect(() => {
     fetchData(1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine, searchParams]);
 
   const handleCreate = async (values: { title: string; document_no: string; fmea_type: string; problem_description?: string }) => {
@@ -115,23 +101,39 @@ export default function FMEAListPage() {
   };
 
   const columns = [
-    { title: t("list.columns.documentNo"), dataIndex: "document_no", key: "document_no", width: 150 },
+    {
+      title: t("list.columns.documentNo"),
+      dataIndex: "document_no",
+      key: "document_no",
+      width: 150,
+      render: (v: string) => <span style={{ fontFamily: "var(--qf-font-mono)" }}>{v}</span>,
+    },
     { title: t("list.columns.title"), dataIndex: "title", key: "title", ellipsis: true },
     {
       title: t("list.columns.type"),
       dataIndex: "fmea_type",
       key: "fmea_type",
-      width: 80,
-      render: (type: string) => <Tag color={typeColors[type] || "default"}>{typeLabels[type] || type}</Tag>,
+      width: 90,
+      render: (t: string) => (
+        <Tag style={{ background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
+          {typeLabels[t] || t}
+        </Tag>
+      ),
     },
     {
       title: t("list.columns.status"),
       dataIndex: "status",
       key: "status",
-      width: 100,
-      render: (s: string) => <Tag color={statusColors[s] || "default"}>{statusLabels[s] || s}</Tag>,
+      width: 110,
+      render: (s: string) => <StatusBadge status={s}>{statusLabels[s] || s}</StatusBadge>,
     },
-    { title: t("list.columns.version"), dataIndex: "version", key: "version", width: 60, render: (v: number) => `v${v}` },
+    {
+      title: t("list.columns.version"),
+      dataIndex: "version",
+      key: "version",
+      width: 70,
+      render: (v: number) => <span className="qf-mono">v{v}</span>,
+    },
     {
       title: t("list.columns.updatedAt"),
       dataIndex: "updated_at",
@@ -143,31 +145,24 @@ export default function FMEAListPage() {
       title: t("list.columns.actions"),
       key: "actions",
       width: 100,
-      render: (_: unknown, record: FMEADocument) =>
-        canEdit('fmea') ? (
-          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
-            {tc("actions.edit")}
-          </Button>
-        ) : (
-          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
-            {tc("actions.view")}
-          </Button>
-        ),
+      render: (_: unknown, record: FMEADocument) => (
+        <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
+          {canEdit('fmea') ? tc("actions.edit") : tc("actions.view")}
+        </Button>
+      ),
     },
   ];
 
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>{t("list.title")}</Title>
-        {canEdit('fmea') && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-            {t("list.newFMEA")}
-          </Button>
-        )}
-      </div>
+  const actions = canEdit('fmea') ? (
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+      {t("list.newFMEA")}
+    </Button>
+  ) : null;
 
+  return (
+    <PageShell title={t("list.title")} subtitle="失效模式与影响分析 · PFMEA / DFMEA" actions={actions}>
       <Table
+        className="qf-table"
         columns={columns}
         dataSource={data}
         rowKey="fmea_id"
@@ -188,6 +183,7 @@ export default function FMEAListPage() {
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => setModalOpen(false)}
+        okButtonProps={{ className: "qf-btn-primary" }}
       >
         <Form form={form} layout="vertical" onFinish={handleCreate} initialValues={{ fmea_type: "PFMEA" }}>
           <Form.Item name="fmea_type" label={t("create.type")} rules={[{ required: true, message: t("create.typeRequired") }]}>
@@ -215,6 +211,6 @@ export default function FMEAListPage() {
         onCancel={() => setWizardOpen(false)}
         onComplete={handleWizardComplete}
       />
-    </div>
+    </PageShell>
   );
 }

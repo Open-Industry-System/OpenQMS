@@ -187,6 +187,7 @@ class MESIngestionService:
                     event_type="spc_alarm",
                     connection_id=conn.connection_id,
                     payload=payload,
+                    factory_id=conn.factory_id,
                 )
                 db.add(outbox)
 
@@ -422,12 +423,16 @@ class MESSyncService:
     ) -> None:
         """Create 4 pending sync jobs for a connection. Caller commits."""
         data_types = ["production_orders", "equipment_status", "scrap_records", "measurements"]
+        # Get factory_id from the connection
+        conn = await db.get(MESConnection, connection_id)
+        factory_id = conn.factory_id if conn else None
         for dt in data_types:
             job = MESSyncJob(
                 connection_id=connection_id,
                 data_type=dt,
                 status="pending",
                 next_run_at=datetime.now(UTC),
+                factory_id=factory_id,
             )
             db.add(job)
         await db.flush()
@@ -717,13 +722,15 @@ class MESPushService:
 
     @staticmethod
     async def push_event(
-        db: AsyncSession, event_type: str, connection_id: uuid.UUID, payload: dict
+        db: AsyncSession, event_type: str, connection_id: uuid.UUID, payload: dict,
+        factory_id: uuid.UUID | None = None,
     ) -> MESPushOutbox:
         """Create outbox record with status='pending'. Caller commits."""
         outbox = MESPushOutbox(
             event_type=event_type,
             connection_id=connection_id,
             payload=payload,
+            factory_id=factory_id,
             status="pending",
         )
         db.add(outbox)

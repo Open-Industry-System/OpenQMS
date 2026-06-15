@@ -3,6 +3,10 @@
     "list": "Internal Audit Management",
     "detail": "Internal Audit Detail"
   },
+  "pageSubtitle": {
+    "list": "Annual Audit Plans & Execution Tracking",
+    "detail": "Internal Audit Plan Details"
+  },
   "stats": {
     "annualPrograms": "Annual Programs",
     "plannedAudits": "Planned Audits",

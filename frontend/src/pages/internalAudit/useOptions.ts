@@ -11,10 +11,10 @@ export function useAuditTypeMap(): Record<string, string> {
 
 export function useAuditStatusColor(): Record<string, string> {
   return {
-    planned: "blue",
-    in_progress: "orange",
-    completed: "green",
-    cancelled: "gray",
+    planned: "info",
+    in_progress: "warning",
+    completed: "success",
+    cancelled: "info",
   };
 }
 
@@ -31,19 +31,19 @@ export function useAuditStatusMap(): Record<string, string> {
 export function useFindingTypeMap(): Record<string, { label: string; color: string }> {
   const { t } = useTranslation("internalAudit");
   return {
-    major_nc: { label: t("findingType.major_nc"), color: "red" },
-    minor_nc: { label: t("findingType.minor_nc"), color: "orange" },
-    ofi: { label: t("findingType.ofi"), color: "blue" },
-    observation: { label: t("findingType.observation"), color: "default" },
+    major_nc: { label: t("findingType.major_nc"), color: "error" },
+    minor_nc: { label: t("findingType.minor_nc"), color: "warning" },
+    ofi: { label: t("findingType.ofi"), color: "info" },
+    observation: { label: t("findingType.observation"), color: "info" },
   };
 }
 
 export function useFindingStatusMap(): Record<string, { label: string; color: string }> {
   const { t } = useTranslation("internalAudit");
   return {
-    open: { label: t("status.finding.open"), color: "red" },
-    in_progress: { label: t("status.finding.in_progress"), color: "processing" },
-    verified: { label: t("status.finding.verified"), color: "blue" },
+    open: { label: t("status.finding.open"), color: "error" },
+    in_progress: { label: t("status.finding.in_progress"), color: "warning" },
+    verified: { label: t("status.finding.verified"), color: "info" },
     closed: { label: t("status.finding.closed"), color: "success" },
   };
 }

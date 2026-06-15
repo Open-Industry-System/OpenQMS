@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Row, Col, Card, Table, Tag, DatePicker, Button, Spin } from "antd";
+import { Row, Col, Table, Tag, DatePicker, Button, Spin } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Line, Pie } from "@ant-design/charts";
+import { DataCard, StatusBadge } from "../../../components/design";
 import { getQualityDashboard, exportQualityDashboard } from "../../../api/supplier";
 import { useProductLineStore } from "../../../store/productLineStore";
 import type { QualityDashboardResponse } from "../../../types";
@@ -116,7 +117,7 @@ export default function DashboardView() {
       title: t("quality.column.openScar"),
       dataIndex: "open_scar_count",
       key: "open_scar_count",
-      render: (count: number) => <Tag color={count > 0 ? "error" : "success"}>{count}</Tag>,
+      render: (count: number) => <StatusBadge status={count > 0 ? "open" : "closed"}>{count}</StatusBadge>,
     },
   ];
 
@@ -139,42 +140,42 @@ export default function DashboardView() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <DataCard title={null}>
             <div style={{ fontSize: 14, color: "#888" }}>{t("quality.kpi.totalSuppliers")}</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: "#1677ff" }}>
               {data.kpi.total_suppliers}
             </div>
-          </Card>
+          </DataCard>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <DataCard title={null}>
             <div style={{ fontSize: 14, color: "#888" }}>{t("quality.kpi.overallPpm")}</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: "#52c41a" }}>
               {data.kpi.overall_ppm.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </div>
-          </Card>
+          </DataCard>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <DataCard title={null}>
             <div style={{ fontSize: 14, color: "#888" }}>{t("quality.kpi.batchAcceptanceRate")}</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: "#52c41a" }}>
               {(data.kpi.batch_acceptance_rate * 100).toFixed(1)}%
             </div>
-          </Card>
+          </DataCard>
         </Col>
         <Col xs={24} sm={12} lg={6}>
-          <Card>
+          <DataCard title={null}>
             <div style={{ fontSize: 14, color: "#888" }}>{t("quality.kpi.openScar")}</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: "#faad14" }}>
               {data.kpi.open_scar_count}
             </div>
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} lg={12}>
-          <Card title={t("quality.charts.ppmTrend")}>
+          <DataCard title={t("quality.charts.ppmTrend")}>
             {data.ppm_trend.length > 0 ? (
               <Line {...ppmTrendConfig} />
             ) : (
@@ -182,10 +183,10 @@ export default function DashboardView() {
                 {tc("empty.data")}
               </div>
             )}
-          </Card>
+          </DataCard>
         </Col>
         <Col xs={24} lg={12}>
-          <Card title={t("quality.charts.gradeDistribution")}>
+          <DataCard title={t("quality.charts.gradeDistribution")}>
             {Object.values(data.grade_distribution).some((v) => v > 0) ? (
               <Pie {...gradeDistConfig} />
             ) : (
@@ -193,19 +194,20 @@ export default function DashboardView() {
                 {tc("empty.data")}
               </div>
             )}
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 
-      <Card title={t("quality.rankingTitle")} style={{ marginTop: 16 }}>
+      <DataCard title={t("quality.rankingTitle")} style={{ marginTop: 16 }}>
         <Table
+          className="qf-table"
           dataSource={data.ranking}
           columns={rankingColumns}
           rowKey="supplier_id"
           pagination={false}
           size="small"
         />
-      </Card>
+      </DataCard>
     </div>
   );
 }

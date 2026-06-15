@@ -1,10 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useTranslation } from "react-i18next";
 import {
-  Card,
   Button,
-  Tag,
-  Space,
   Form,
   Input,
   Select,
@@ -27,8 +23,10 @@ import {
   CalculatorOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import type {
   GrrStudy,
   BiasStudy,
@@ -91,15 +89,28 @@ import dayjs from "dayjs";
 
 const { Option } = Select;
 
+const statusToVariant = (status: string): string => {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "ongoing":
+      return "warning";
+    case "draft":
+      return "info";
+    default:
+      return "info";
+  }
+};
+
 type StudyType = "grr" | "bias" | "linearity" | "stability" | "attribute";
 type Study = GrrStudy | BiasStudy | LinearityStudy | StabilityStudy | AttributeStudy;
 type Result = GrrResult | BiasResult | LinearityResult | StabilityResult | AttributeResult;
 
 export default function StudyDetailPage() {
-  const { t } = useTranslation("msa");
-  const { t: tc } = useTranslation("common");
   const { type, id } = useParams<{ type: StudyType; id: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation("msa");
+  const { t: tc } = useTranslation("common");
   const { user: _user } = useAuthStore();
 
   const isNew = id === "new";
@@ -123,9 +134,6 @@ export default function StudyDetailPage() {
   const [completing, setCompleting] = useState(false);
 
   const studyType = type as StudyType;
-
-  const statusLabel = (status: string) => t(`study.status.${status}`, { defaultValue: status });
-  const statusColor = (status: string) => status === "draft" ? "default" : status === "ongoing" ? "processing" : "success";
 
   const loadGauges = useCallback(async () => {
     try {
@@ -487,8 +495,21 @@ export default function StudyDetailPage() {
   };
 
   const typeLabel = useMemo(() => {
-    return t(`study.type.${studyType}`, { defaultValue: studyType.toUpperCase() });
+    switch (studyType) {
+      case "grr":
+        return t("study.type.grr");
+      case "bias":
+        return t("study.type.bias");
+      case "linearity":
+        return t("study.type.linearity");
+      case "stability":
+        return t("study.type.stability");
+      case "attribute":
+        return t("study.type.attribute");
+    }
   }, [studyType, t]);
+
+  const statusLabel = (status: string) => t(`study.status.${status}`, { defaultValue: status });
 
   if (loading) {
     return (
@@ -501,25 +522,26 @@ export default function StudyDetailPage() {
   // ─── Create form ───
   if (isNew) {
     return (
-      <div style={{ padding: 24 }}>
-        <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
-            {tc("actions.back")}
-          </Button>
-          <h2 style={{ margin: 0, fontSize: 20 }}>
-            {t("study.detail.newTitle", { type: typeLabel })}
-          </h2>
-        </div>
-        <Card>
+      <PageShell
+        title={
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
+              {tc("actions.back")}
+            </Button>
+            <span>{t("study.detail.newTitle", { type: typeLabel })}</span>
+          </div>
+        }
+      >
+        <DataCard title={null}>
           <Form form={infoForm} layout="vertical">
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item label={t("study.fields.title")} name="title" rules={[{ required: true }]}>
+                <Form.Item label={t("study.fields.title")} name="title" rules={[{ required: true, message: tc("messages.confirmOperation") }]}>
                   <Input />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item label={t("study.fields.characteristic_name")} name="characteristic_name" rules={[{ required: true }]}>
+                <Form.Item label={t("study.fields.characteristic_name")} name="characteristic_name" rules={[{ required: true, message: tc("messages.confirmOperation") }]}>
                   <Input />
                 </Form.Item>
               </Col>
@@ -680,20 +702,22 @@ export default function StudyDetailPage() {
             )}
             <Form.Item>
               <Button type="primary" loading={saving} onClick={handleSaveInfo}>
-                {t("study.detail.newTitle", { type: typeLabel })}
+                {t("study.new")}
               </Button>
             </Form.Item>
           </Form>
-        </Card>
-      </div>
+        </DataCard>
+      </PageShell>
     );
   }
 
   if (!study) {
-    return <div style={{ padding: 24 }}>{t("study.detail.notFound")}</div>;
+    return (
+      <PageShell title={t("study.detail.notFound")}>
+        <div>{t("study.detail.notFound")}</div>
+      </PageShell>
+    );
   }
-
-  const statusInfo = { label: statusLabel(study.status), color: statusColor(study.status) };
 
   // ─── Measurement editors ───
 
@@ -725,19 +749,11 @@ export default function StudyDetailPage() {
       setMeasurements(next);
     };
 
-    const commonColumns = [
-      {
-        title: tc("actions.delete"),
-        render: (_: unknown, __: unknown, idx: number) => (
-          <Button size="small" danger onClick={() => removeRow(idx)}>{tc("actions.delete")}</Button>
-        ),
-      },
-    ];
-
     if (studyType === "grr") {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -755,7 +771,9 @@ export default function StudyDetailPage() {
               { title: t("study.measurementColumns.value"), dataIndex: "value", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].value as number} onChange={(v) => updateRow(idx, "value", v)} size="small" style={{ width: 100 }} />
               )},
-              ...commonColumns,
+              { title: t("study.measurementColumns.actions"), render: (_: unknown, __: unknown, idx: number) => (
+                <Button size="small" danger onClick={() => removeRow(idx)}>{tc("actions.delete")}</Button>
+              )},
             ]}
           />
           <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
@@ -767,6 +785,7 @@ export default function StudyDetailPage() {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -778,7 +797,9 @@ export default function StudyDetailPage() {
               { title: t("study.measurementColumns.value"), dataIndex: "value", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].value as number} onChange={(v) => updateRow(idx, "value", v)} size="small" style={{ width: 120 }} />
               )},
-              ...commonColumns,
+              { title: t("study.measurementColumns.actions"), render: (_: unknown, __: unknown, idx: number) => (
+                <Button size="small" danger onClick={() => removeRow(idx)}>{tc("actions.delete")}</Button>
+              )},
             ]}
           />
           <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
@@ -790,6 +811,7 @@ export default function StudyDetailPage() {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -801,10 +823,12 @@ export default function StudyDetailPage() {
               { title: t("study.measurementColumns.reference_value"), dataIndex: "reference_value", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].reference_value as number} onChange={(v) => updateRow(idx, "reference_value", v)} size="small" style={{ width: 120 }} />
               )},
-              { title: t("study.measurementColumns.value"), dataIndex: "measured_value", render: (_: unknown, __: unknown, idx: number) => (
+              { title: t("study.measurementColumns.measured_value"), dataIndex: "measured_value", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].measured_value as number} onChange={(v) => updateRow(idx, "measured_value", v)} size="small" style={{ width: 120 }} />
               )},
-              ...commonColumns,
+              { title: t("study.measurementColumns.actions"), render: (_: unknown, __: unknown, idx: number) => (
+                <Button size="small" danger onClick={() => removeRow(idx)}>{tc("actions.delete")}</Button>
+              )},
             ]}
           />
           <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
@@ -816,6 +840,7 @@ export default function StudyDetailPage() {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -833,7 +858,9 @@ export default function StudyDetailPage() {
               { title: t("study.measurementColumns.sample_range"), dataIndex: "sample_range", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber value={measurements[idx].sample_range as number} onChange={(v) => updateRow(idx, "sample_range", v)} size="small" style={{ width: 100 }} />
               )},
-              ...commonColumns,
+              { title: t("study.measurementColumns.actions"), render: (_: unknown, __: unknown, idx: number) => (
+                <Button size="small" danger onClick={() => removeRow(idx)}>{tc("actions.delete")}</Button>
+              )},
             ]}
           />
           <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
@@ -845,6 +872,7 @@ export default function StudyDetailPage() {
       return (
         <div>
           <Table
+            className="qf-table"
             dataSource={measurements.map((m, i) => ({ ...m, key: i }))}
             pagination={false}
             size="small"
@@ -858,20 +886,22 @@ export default function StudyDetailPage() {
               )},
               { title: t("study.measurementColumns.known_standard"), dataIndex: "known_standard", render: (_: unknown, __: unknown, idx: number) => (
                 <Select value={measurements[idx].known_standard as string} onChange={(v) => updateRow(idx, "known_standard", v)} size="small" style={{ width: 90 }}>
-                  <Option value={t("study.dataValues.pass")}>{t("study.measurementColumns.pass")}</Option>
-                  <Option value={t("study.dataValues.fail")}>{t("study.measurementColumns.fail")}</Option>
+                  <Option value="合格">{t("study.measurementColumns.pass")}</Option>
+                  <Option value="不合格">{t("study.measurementColumns.fail")}</Option>
                 </Select>
               )},
               { title: t("study.measurementColumns.appraiser_decision"), dataIndex: "appraiser_decision", render: (_: unknown, __: unknown, idx: number) => (
                 <Select value={measurements[idx].appraiser_decision as string} onChange={(v) => updateRow(idx, "appraiser_decision", v)} size="small" style={{ width: 90 }}>
-                  <Option value={t("study.dataValues.pass")}>{t("study.measurementColumns.pass")}</Option>
-                  <Option value={t("study.dataValues.fail")}>{t("study.measurementColumns.fail")}</Option>
+                  <Option value="合格">{t("study.measurementColumns.pass")}</Option>
+                  <Option value="不合格">{t("study.measurementColumns.fail")}</Option>
                 </Select>
               )},
               { title: t("study.measurementColumns.trial_no"), dataIndex: "trial_no", render: (_: unknown, __: unknown, idx: number) => (
                 <InputNumber min={1} value={measurements[idx].trial_no as number} onChange={(v) => updateRow(idx, "trial_no", v)} size="small" style={{ width: 60 }} />
               )},
-              ...commonColumns,
+              { title: t("study.measurementColumns.actions"), render: (_: unknown, __: unknown, idx: number) => (
+                <Button size="small" danger onClick={() => removeRow(idx)}>{tc("actions.delete")}</Button>
+              )},
             ]}
           />
           <Button style={{ marginTop: 12 }} onClick={addRow} size="small">{t("study.measurementColumns.addRow")}</Button>
@@ -984,10 +1014,11 @@ export default function StudyDetailPage() {
       key: "info",
       label: t("study.tabs.info"),
       children: (
-        <Card
+        <DataCard
+          title={null}
           extra={
             canEdit('msa') && (
-              <Space>
+              <div style={{ display: "flex", gap: 8 }}>
                 {editing ? (
                   <>
                     <Button onClick={() => setEditing(false)}>{tc("actions.cancel")}</Button>
@@ -1000,7 +1031,7 @@ export default function StudyDetailPage() {
                     {tc("actions.edit")}
                   </Button>
                 )}
-              </Space>
+              </div>
             )
           }
         >
@@ -1046,21 +1077,21 @@ export default function StudyDetailPage() {
           ) : (
             <Descriptions bordered column={2}>
               <Descriptions.Item label={t("study.columns.studyNo")}>{study.study_no}</Descriptions.Item>
-              <Descriptions.Item label={t("study.fields.title")}>{study.title}</Descriptions.Item>
+              <Descriptions.Item label={t("study.columns.title")}>{study.title}</Descriptions.Item>
               <Descriptions.Item label={t("study.fields.characteristic_name")}>{study.characteristic_name}</Descriptions.Item>
               <Descriptions.Item label={t("study.fields.gauge_id")}>
                 {gauges.find((g) => g.gauge_id === study.gauge_id)?.name ?? "—"}
               </Descriptions.Item>
               <Descriptions.Item label={t("study.columns.status")}>
-                <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
+                <StatusBadge status={statusToVariant(study.status)}>{statusLabel(study.status)}</StatusBadge>
               </Descriptions.Item>
-              <Descriptions.Item label={t("study.fields.study_date")}>
+              <Descriptions.Item label={t("study.columns.studyDate")}>
                 {study.study_date ? dayjs(study.study_date).format("YYYY-MM-DD") : "—"}
               </Descriptions.Item>
               {studyType === "grr" && (
                 <>
                   <Descriptions.Item label={t("study.fields.method")}>{(study as GrrStudy).method}</Descriptions.Item>
-                  <Descriptions.Item label={t("study.measurementColumns.appraiser_name")}>
+                  <Descriptions.Item label={t("study.fields.appraiser_count") + "/" + t("study.fields.part_count") + "/" + t("study.fields.trial_count")}>
                     {(study as GrrStudy).appraiser_count} / {(study as GrrStudy).part_count} / {(study as GrrStudy).trial_count}
                   </Descriptions.Item>
                 </>
@@ -1078,7 +1109,6 @@ export default function StudyDetailPage() {
               )}
               {studyType === "stability" && (
                 <>
-                  <Descriptions.Item label={t("study.fields.reference_value")}>{(study as StabilityStudy).reference_value}</Descriptions.Item>
                   <Descriptions.Item label={t("study.fields.subgroup_size")}>{(study as StabilityStudy).subgroup_size}</Descriptions.Item>
                 </>
               )}
@@ -1090,36 +1120,38 @@ export default function StudyDetailPage() {
               )}
             </Descriptions>
           )}
-        </Card>
+        </DataCard>
       ),
     },
     {
       key: "measurements",
       label: t("study.tabs.measurements"),
       children: (
-        <Card
+        <DataCard
+          title={null}
           extra={
             canEdit('msa') && study.status !== "completed" && (
-              <Space>
+              <div style={{ display: "flex", gap: 8 }}>
                 <Button loading={measSaving} onClick={handleSaveMeasurements} icon={<SaveOutlined />}>
                   {t("study.actions.saveMeasurements")}
                 </Button>
-              </Space>
+              </div>
             )
           }
         >
           {renderMeasurementsEditor()}
-        </Card>
+        </DataCard>
       ),
     },
     {
       key: "results",
       label: t("study.tabs.results"),
       children: (
-        <Card
+        <DataCard
+          title={null}
           extra={
             canEdit('msa') && study.status !== "completed" && (
-              <Space>
+              <div style={{ display: "flex", gap: 8 }}>
                 <Button loading={resultLoading} onClick={handleCompute} icon={<CalculatorOutlined />} type="primary">
                   {t("study.actions.compute")}
                 </Button>
@@ -1133,27 +1165,30 @@ export default function StudyDetailPage() {
                     </Button>
                   </>
                 )}
-              </Space>
+              </div>
             )
           }
         >
           {renderResults()}
-        </Card>
+        </DataCard>
       ),
     },
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
-          {tc("actions.back")}
-        </Button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>{study.title}</h2>
-        <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
-        <Tag>{typeLabel}</Tag>
-      </div>
+    <PageShell
+      title={
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/studies")}>
+            {tc("actions.back")}
+          </Button>
+          <span>{study.title}</span>
+          <StatusBadge status={statusToVariant(study.status)}>{statusLabel(study.status)}</StatusBadge>
+          <StatusBadge status="info">{typeLabel}</StatusBadge>
+        </div>
+      }
+    >
       <Tabs items={tabItems} />
-    </div>
+    </PageShell>
   );
 }

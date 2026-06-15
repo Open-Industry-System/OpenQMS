@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Drawer, List, Tag, Button, message, Badge } from "antd";
+import { Drawer, List, Button, message, Badge } from "antd";
 import { HistoryOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
+import StatusBadge from "../../components/design/StatusBadge";
 import type { ControlLimitSnapshot } from "../../types/spc";
 import { getSnapshots, activateSnapshot } from "../../api/spc";
 
@@ -64,7 +65,7 @@ const VersionPanel: React.FC<VersionPanelProps> = ({ icId, onActivated }) => {
               style={{ background: snap.is_active ? "#f0f5ff" : undefined, borderRadius: 4 }}
               actions={[
                 snap.is_active ? (
-                  <Tag color="blue">{t("versionPanel.current")}</Tag>
+                  <StatusBadge status="info">{t("versionPanel.current")}</StatusBadge>
                 ) : (
                   <Button size="small" onClick={() => handleActivate(snap.snapshot_id)}>
                     {t("versionPanel.activate")}

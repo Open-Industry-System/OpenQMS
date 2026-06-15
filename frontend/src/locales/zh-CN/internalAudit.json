@@ -3,6 +3,10 @@
     "list": "内部审核管理",
     "detail": "内部审核详情"
   },
+  "pageSubtitle": {
+    "list": "年度审核计划与执行跟踪",
+    "detail": "内部审核计划详情"
+  },
   "stats": {
     "annualPrograms": "年度方案数",
     "plannedAudits": "待执行审核",

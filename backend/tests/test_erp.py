@@ -110,6 +110,23 @@ async def erp_admin(erp_db: AsyncSession) -> User:
         erp_db.add(role)
         await erp_db.flush()
 
+    # Ensure the system user exists (FK requirement for created_by on auto-imports)
+    from app.config import SYSTEM_USER_ID
+    sys_user = await erp_db.get(User, SYSTEM_USER_ID)
+    if sys_user is None:
+        sys_user = User(
+            user_id=SYSTEM_USER_ID,
+            username="system",
+            display_name="System",
+            password_hash="system",
+            role_id=role.id,
+            legacy_role="admin",
+            is_active=True,
+            factory_id=DEFAULT_FACTORY_ID,
+        )
+        erp_db.add(sys_user)
+        await erp_db.flush()
+
     user = User(
         user_id=uuid.uuid4(),
         username=f"test_admin_{uuid.uuid4().hex[:8]}",
@@ -459,6 +476,7 @@ class TestDAGGating:
             data_type="suppliers",
             status="pending",
             next_run_at=past,
+            factory_id=conn.factory_id,
         )
         erp_db.add(job)
 
@@ -468,6 +486,7 @@ class TestDAGGating:
             data_type="purchase_orders",
             status="pending",
             next_run_at=past,
+            factory_id=conn.factory_id,
         )
         erp_db.add(job2)
         await erp_db.flush()
@@ -493,6 +512,7 @@ class TestDAGGating:
                 data_type=dt,
                 status="completed",
                 next_run_at=datetime.now(timezone.utc),
+                factory_id=conn.factory_id,
             )
             erp_db.add(job)
 
@@ -502,6 +522,7 @@ class TestDAGGating:
             data_type="purchase_orders",
             status="pending",
             next_run_at=datetime.now(timezone.utc),
+            factory_id=conn.factory_id,
         )
         erp_db.add(job)
         await erp_db.flush()

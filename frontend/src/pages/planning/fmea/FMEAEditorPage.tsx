@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import {
-  Button, Space, Tag, Typography, Input, Select, Table, Card, Tabs,
+  Button, Space, Tag, Typography, Input, Select, Table, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
   Descriptions, Divider, Modal, Radio,
 } from "antd";
@@ -10,6 +10,7 @@ import {
   CheckOutlined, UndoOutlined, PlusOutlined, DeleteOutlined,
   HistoryOutlined, RadarChartOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
 import type { FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse } from "../../../types";
@@ -41,9 +42,9 @@ import { CollaborationBar, ActiveUserIndicator, ConflictResolutionModal } from "
 import { diffGraphs } from "../../../utils/graphDiff";
 import type { ConflictInfo } from "../../../types/collaboration";
 import type { GraphDiff } from "../../../utils/graphDiff";
-import { useTranslation } from "react-i18next";
+import { PageShell, DataCard, StatusBadge } from "../../../components/design";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 function useStatusLabels(): Record<string, string> {
   const { t } = useTranslation("fmea");
@@ -488,7 +489,7 @@ export default function FMEAEditorPage() {
 
   const addRow = useCallback(() => {
     if (!selectedFunctionId || !fmea) {
-      message.warning(t("table.selectFunctionFirst"));
+      message.warning(t("messages.selectFunctionFirst"));
       return;
     }
     const { newNodes, newEdges } = createRowNodes(selectedFunctionId, fmea.fmea_type, t);
@@ -542,38 +543,38 @@ export default function FMEAEditorPage() {
   const functionNodes = fmea ? getFunctionNodes(nodes, fmea.fmea_type) : [];
 
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
-  if (!fmea) return <Empty description={t("messages.fmeaNotFound")} />;
+  if (!fmea) return <Empty description={t("messages.notFound")} />;
 
   const isDFMEA = fmea.fmea_type === "DFMEA";
 
     const columns = [
     {
-      title: t("table.processFunction"),
+      title: t("editor.columns.function"),
       key: "function",
-      width: 140,
+      width: 200,
       fixed: "left" as const,
       render: (_: unknown, row: FMEARow) => {
         const funcNode = nodeMap.get(row.functionNodeId);
         return (
           <div
             tabIndex={0}
-            style={{ outline: "none" }}
+            style={{ outline: "none", minWidth: 180 }}
           >
-            <div style={{ fontWeight: 600, fontSize: 12 }}>{funcNode?.name || "-"}</div>
+            <div style={{ fontWeight: 600, fontSize: 13, lineHeight: "1.5" }}>{funcNode?.name || "-"}</div>
             {funcNode?.specification && (
-              <Text type="secondary" style={{ fontSize: 10 }}>{funcNode.specification}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{funcNode.specification}</Text>
             )}
             {funcNode?.requirement && (
-              <div><Text type="secondary" style={{ fontSize: 10, color: "#8c8c8c" }}>{funcNode.requirement}</Text></div>
+              <div><Text type="secondary" style={{ fontSize: 12 }}>{funcNode.requirement}</Text></div>
             )}
           </div>
         );
       },
     },
     {
-      title: t("table.failureMode"),
+      title: t("editor.columns.failureMode"),
       key: "failureMode",
-      width: 130,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         const node = nodeMap.get(row.failureModeNodeId);
         return (
@@ -592,9 +593,9 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: t("table.failureEffect"),
+      title: t("editor.columns.failureEffect"),
       key: "failureEffect",
-      width: 140,
+      width: 200,
       render: (_: unknown, row: FMEARow) => {
         if (!row.failureEffectNodeId) return "-";
         const node = nodeMap.get(row.failureEffectNodeId);
@@ -615,7 +616,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={t("table.severity")}>{t("table.severityShort")}</Tooltip>,
+      title: <Tooltip title={t("editor.tooltips.severity")}>S</Tooltip>,
       key: "severity",
       width: 60,
       align: "center" as const,
@@ -645,7 +646,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={t("table.class")}>{t("table.classShort")}</Tooltip>,
+      title: <Tooltip title={isDFMEA ? t("editor.tooltips.filterCode") : t("editor.tooltips.classification")}>Class</Tooltip>,
       key: "class",
       width: 70,
       align: "center" as const,
@@ -666,9 +667,9 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: t("table.failureCause"),
+      title: t("editor.columns.failureCause"),
       key: "failureCause",
-      width: 140,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         if (!row.failureCauseNodeId) return "-";
         const node = nodeMap.get(row.failureCauseNodeId);
@@ -691,7 +692,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={t("table.occurrence")}>{t("table.occurrenceShort")}</Tooltip>,
+      title: <Tooltip title={t("editor.tooltips.occurrence")}>O</Tooltip>,
       key: "occurrence",
       width: 60,
       align: "center" as const,
@@ -721,9 +722,9 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: t("table.preventionControl"),
+      title: t("editor.columns.preventionControl"),
       key: "preventionControl",
-      width: 140,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         const nodeId = row.preventionControlIds[0];
         if (!nodeId) return "-";
@@ -749,9 +750,9 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: t("table.detectionControl"),
+      title: t("editor.columns.detectionControl"),
       key: "detectionControl",
-      width: 140,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         const nodeId = row.detectionControlIds[0];
         if (!nodeId) return "-";
@@ -776,7 +777,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={t("table.detection")}>{t("table.detectionShort")}</Tooltip>,
+      title: <Tooltip title={t("editor.tooltips.detection")}>D</Tooltip>,
       key: "detection",
       width: 60,
       align: "center" as const,
@@ -806,7 +807,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={t("table.rpn")}>{t("table.rpnShort")}</Tooltip>,
+      title: <Tooltip title={t("editor.tooltips.rpn")}>RPN</Tooltip>,
       key: "rpn",
       width: 60,
       align: "center" as const,
@@ -820,17 +821,28 @@ export default function FMEAEditorPage() {
         const d = detectionNode?.detection || 0;
         const rpn = s * o * d;
 
-        const _bgColor = rpn >= 100 ? "#ff4d4f" : rpn >= 50 ? "#fa8c16" : rpn > 0 ? "#52c41a" : "#d9d9d9";
+        const rpnColor = rpn >= 100 ? "var(--qf-red)" : rpn >= 50 ? "var(--qf-amber)" : rpn > 0 ? "var(--qf-green)" : "var(--qf-text-tertiary)";
+        const rpnBg = rpn >= 100 ? "var(--qf-red-dim)" : rpn >= 50 ? "var(--qf-amber-dim)" : rpn > 0 ? "var(--qf-green-dim)" : "rgba(139, 147, 167, 0.1)";
         return (
-          <Tag color={rpn >= 100 ? "red" : rpn >= 50 ? "orange" : rpn > 0 ? "green" : "default"}
-            style={{ fontWeight: 700, fontSize: 13, minWidth: 48, textAlign: "center" }}>
+          <Tag
+            style={{
+              background: rpnBg,
+              color: rpnColor,
+              borderColor: rpnColor,
+              fontWeight: 700,
+              fontSize: 13,
+              minWidth: 48,
+              textAlign: "center",
+              fontFamily: "var(--qf-font-mono)",
+            }}
+          >
             {rpn || 0}
           </Tag>
         );
       },
     },
     {
-      title: <Tooltip title={t("table.ap")}>{t("table.apShort")}</Tooltip>,
+      title: <Tooltip title={t("editor.tooltips.ap")}>AP</Tooltip>,
       key: "ap",
       width: 55,
       align: "center" as const,
@@ -846,22 +858,22 @@ export default function FMEAEditorPage() {
 
         if (!ap) return <Text type="secondary">-</Text>;
         const apColors: Record<string, { bg: string; text: string }> = {
-          H: { bg: "#fff1f0", text: "#cf1322" },
-          M: { bg: "#fff7e6", text: "#d46b08" },
-          L: { bg: "#f6ffed", text: "#389e0d" },
+          H: { bg: "var(--qf-red-dim)", text: "var(--qf-red)" },
+          M: { bg: "var(--qf-amber-dim)", text: "var(--qf-amber)" },
+          L: { bg: "var(--qf-green-dim)", text: "var(--qf-green)" },
         };
         const c = apColors[ap];
         return (
-          <Tag style={{ background: c.bg, color: c.text, borderColor: c.text, fontWeight: 700, fontSize: 13, minWidth: 36, textAlign: "center" }}>
+          <Tag style={{ background: c.bg, color: c.text, borderColor: c.text, fontWeight: 700, fontSize: 13, minWidth: 36, textAlign: "center", fontFamily: "var(--qf-font-mono)" }}>
             {ap}
           </Tag>
         );
       },
     },
     {
-      title: t("table.recommendedAction"),
+      title: t("editor.columns.recommendedAction"),
       key: "recommendedAction",
-      width: 140,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         if (row.recommendedActionIds.length === 0) {
           return (
@@ -875,7 +887,7 @@ export default function FMEAEditorPage() {
                 const newNode: GraphNode = {
                   id: raId,
                   type: "RecommendedAction",
-                  name: t("table.newRecommendedAction"),
+                  name: t("editor.newAction"),
                   severity: 0,
                   occurrence: 0,
                   detection: 0,
@@ -886,7 +898,7 @@ export default function FMEAEditorPage() {
                 setEdges((prev) => [...prev, newEdge]);
               }}
             >
-              {t("table.addRecommendedAction")}
+              + {t("editor.add")}
             </Button>
           );
         }
@@ -915,9 +927,9 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: t("table.responsibility"),
+      title: t("editor.columns.responsibility"),
       key: "responsibility",
-      width: 120,
+      width: 150,
       render: (_: unknown, row: FMEARow) => {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
@@ -925,7 +937,7 @@ export default function FMEAEditorPage() {
           <div>
             <Input
               size="small"
-              placeholder={t("table.responsiblePlaceholder")}
+              placeholder={t("editor.placeholders.responsible")}
               value={node?.responsible || ""}
               disabled={!canEdit('fmea')}
               style={{ marginBottom: 4 }}
@@ -933,7 +945,7 @@ export default function FMEAEditorPage() {
             />
             <Input
               size="small"
-              placeholder={t("table.dueDatePlaceholder")}
+              placeholder={t("editor.placeholders.dueDate")}
               value={node?.due_date || ""}
               disabled={!canEdit('fmea')}
               onChange={(e) => updateNode(row.recommendedActionIds[0], "due_date", e.target.value)}
@@ -943,16 +955,16 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: t("table.actionsTaken"),
+      title: t("editor.columns.actionsTaken"),
       key: "actionsTaken",
-      width: 130,
+      width: 180,
       render: (_: unknown, row: FMEARow) => {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
         return (
           <Input.TextArea
             value={node?.action_taken || ""}
-            rows={2}
+            autoSize={{ minRows: 2, maxRows: 4 }}
             disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "action_taken", e.target.value)}
           />
@@ -960,7 +972,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={t("table.revisedSeverity")}>{t("table.revisedSeverityShort")}</Tooltip>,
+      title: <Tooltip title={t("editor.tooltips.revisedSeverity")}>S'</Tooltip>,
       key: "revisedSeverity",
       width: 55,
       align: "center" as const,
@@ -981,7 +993,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={t("table.revisedOccurrence")}>{t("table.revisedOccurrenceShort")}</Tooltip>,
+      title: <Tooltip title={t("editor.tooltips.revisedOccurrence")}>O'</Tooltip>,
       key: "revisedOccurrence",
       width: 55,
       align: "center" as const,
@@ -1002,7 +1014,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={t("table.revisedDetection")}>{t("table.revisedDetectionShort")}</Tooltip>,
+      title: <Tooltip title={t("editor.tooltips.revisedDetection")}>D'</Tooltip>,
       key: "revisedDetection",
       width: 55,
       align: "center" as const,
@@ -1023,7 +1035,7 @@ export default function FMEAEditorPage() {
       },
     },
     {
-      title: <Tooltip title={t("table.revisedRpn")}>{t("table.revisedRpnShort")}</Tooltip>,
+      title: <Tooltip title={t("editor.tooltips.revisedRpn")}>RPN'</Tooltip>,
       key: "revisedRpn",
       width: 60,
       align: "center" as const,
@@ -1034,10 +1046,21 @@ export default function FMEAEditorPage() {
         const o = node?.revised_occurrence || 0;
         const d = node?.revised_detection || 0;
         const rpn = s * o * d;
-        const _bgColor = rpn >= 100 ? "#ff4d4f" : rpn >= 50 ? "#fa8c16" : rpn > 0 ? "#52c41a" : "#d9d9d9";
+        const rpnColor = rpn >= 100 ? "var(--qf-red)" : rpn >= 50 ? "var(--qf-amber)" : rpn > 0 ? "var(--qf-green)" : "var(--qf-text-tertiary)";
+        const rpnBg = rpn >= 100 ? "var(--qf-red-dim)" : rpn >= 50 ? "var(--qf-amber-dim)" : rpn > 0 ? "var(--qf-green-dim)" : "rgba(139, 147, 167, 0.1)";
         return (
-          <Tag color={rpn >= 100 ? "red" : rpn >= 50 ? "orange" : rpn > 0 ? "green" : "default"}
-            style={{ fontWeight: 700, fontSize: 13, minWidth: 48, textAlign: "center" }}>
+          <Tag
+            style={{
+              background: rpnBg,
+              color: rpnColor,
+              borderColor: rpnColor,
+              fontWeight: 700,
+              fontSize: 13,
+              minWidth: 48,
+              textAlign: "center",
+              fontFamily: "var(--qf-font-mono)",
+            }}
+          >
             {rpn || 0}
           </Tag>
         );
@@ -1049,7 +1072,7 @@ export default function FMEAEditorPage() {
       width: 40,
       fixed: "right" as const,
       render: (_: unknown, row: FMEARow) => (
-        <Popconfirm title={t("table.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
+        <Popconfirm title={t("editor.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
           <Button type="text" danger size="small" disabled={!canEdit('fmea')} icon={<DeleteOutlined />} />
         </Popconfirm>
       ),
@@ -1057,19 +1080,20 @@ export default function FMEAEditorPage() {
   ];
 
   return (
-    <div>
-      <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
-
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/fmea")}>{tc("actions.back")}</Button>
-          <Title level={4} style={{ margin: 0 }}>{fmea.title}</Title>
-          <Tag color={isDFMEA ? "green" : "blue"}>{isDFMEA ? "DFMEA" : "PFMEA"}</Tag>
-          <Tag>{statusLabels[fmea.status] || fmea.status}</Tag>
-          <Text type="secondary">{fmea.document_no} v{fmea.version}</Text>
-        </Space>
-        <Space>
+    <PageShell
+      title={
+        <>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/fmea")}>{t("actions.back")}</Button>
+          <span>{fmea.title}</span>
+          <StatusBadge status={isDFMEA ? "normal" : "info"}>{isDFMEA ? "DFMEA" : "PFMEA"}</StatusBadge>
+          <StatusBadge status={fmea.status}>{statusLabels[fmea.status] || fmea.status}</StatusBadge>
+          <span style={{ color: "var(--qf-text-secondary)", fontFamily: "var(--qf-font-mono)", fontSize: 14 }}>
+            {fmea.document_no} · v{fmea.version}
+          </span>
+        </>
+      }
+      actions={
+        <>
           {nextTransitions[fmea.status]
             ?.filter((trans) => {
               if (!canEdit('fmea')) return false;
@@ -1077,46 +1101,57 @@ export default function FMEAEditorPage() {
               return true;
             })
             ?.map((trans) => (
-              <Popconfirm key={trans.target} title={`${tc("actions.confirm")} ${trans.label}？`} onConfirm={() => handleTransition(trans.target)}>
+              <Popconfirm key={trans.target} title={`${t("actions.confirm")}${trans.label}？`} onConfirm={() => handleTransition(trans.target)}>
                 <Button icon={trans.icon}>{trans.label}</Button>
               </Popconfirm>
             ))}
           {canEdit('fmea') && (
-            <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>{tc("actions.save")}</Button>
+            <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>{t("actions.save")}</Button>
           )}
-        </Space>
-      </div>
+        </>
+      }
+    >
+      <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
 
       {/* FMEA Header Info */}
-      <Card size="small" style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          marginBottom: 16,
+          padding: "14px 18px",
+          background: "var(--qf-bg-panel)",
+          border: "1px solid var(--qf-border)",
+          borderRadius: "var(--qf-radius-lg)",
+        }}
+      >
         <Descriptions size="small" column={4}>
-          <Descriptions.Item label={isDFMEA ? t("header.system") : t("header.processItem")}>
+          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{isDFMEA ? t("header.system") : t("header.processItem")}</span>}>
             {structureNodes.find((n) => n.type === (isDFMEA ? "System" : "ProcessItem"))?.name || "-"}
           </Descriptions.Item>
-          <Descriptions.Item label={isDFMEA ? t("header.designResponsibility") : t("header.processResponsibility")}>
-            <Input size="small" placeholder={t("header.departmentPlaceholder")} style={{ width: 150 }} disabled={!canEdit('fmea')} />
+          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{isDFMEA ? t("header.designResponsibility") : t("header.processResponsibility")}</span>}>
+            <Input size="small" placeholder={t("header.responsibilityPlaceholder")} style={{ width: 150 }} disabled={!canEdit('fmea')} />
           </Descriptions.Item>
-          <Descriptions.Item label={t("header.fmeaNumber")}>{fmea.document_no}</Descriptions.Item>
-          <Descriptions.Item label={t("header.keyDate")}>
+          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{t("header.fmeaNo")}</span>}>
+            <span style={{ fontFamily: "var(--qf-font-mono)" }}>{fmea.document_no}</span>
+          </Descriptions.Item>
+          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{t("header.keyDate")}</span>}>
             <Input size="small" placeholder={t("header.datePlaceholder")} style={{ width: 100 }} disabled={!canEdit('fmea')} />
           </Descriptions.Item>
         </Descriptions>
-      </Card>
+      </div>
 
       <Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }} items={[
-        { key: "editor", label: t("editor.title"), children: <>
+        { key: "editor", label: t("tabs.editor"), children: <>
           <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }} items={[
-            { key: "failure", label: t("editor.failureAnalysis"), children: <>
+            { key: "failure", label: t("tabs.failureAnalysis"), children: <>
           <Row gutter={16}>
             {/* Left: Structure/Function Tree */}
-            <Col span={5}>
-          <Card
-            title={isDFMEA ? t("table.structureFunctionTitle") : t("table.processFunctionTitle")}
-            size="small"
+            <Col span={6}>
+          <DataCard
+            title={isDFMEA ? t("tabs.structureFunction") : t("tabs.processFunction")}
             extra={
               canEdit('fmea') && (
                 <Button size="small" icon={<PlusOutlined />} onClick={addRow} disabled={!selectedFunctionId}>
-                  {t("table.addRow")}
+                  {t("editor.addRow")}
                 </Button>
               )
             }
@@ -1129,80 +1164,92 @@ export default function FMEAEditorPage() {
                   ? 24
                   : 0;
               const hasRows = rowsByFunction[node.id]?.length > 0;
+              const isSelected = selectedFunctionId === node.id;
               return (
                 <div
                   key={node.id}
                   onClick={() => setSelectedFunctionId(node.id)}
                   style={{
-                    padding: "5px 10px",
-                    marginBottom: 4,
+                    padding: "8px 12px",
+                    marginBottom: 6,
                     marginLeft: indent,
-                    borderRadius: 4,
+                    borderRadius: 6,
                     cursor: "pointer",
-                    background: selectedFunctionId === node.id ? "#e6f4ff" : isStructure ? "#fafafa" : "#fff",
-                    border: selectedFunctionId === node.id ? "1px solid #1677FF" : "1px solid #f0f0f0",
-                    fontSize: 12,
+                    background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
+                    border: isSelected ? "1px solid var(--qf-cyan)" : "1px solid var(--qf-border)",
+                    fontSize: 13,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
+                    transition: "background 0.2s, border-color 0.2s",
+                    color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = "var(--qf-bg-hover)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)";
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: isStructure ? 600 : 400 }}>{node.name}</div>
-                    {node.process_number && <Text type="secondary" style={{ fontSize: 10 }}>{node.process_number}</Text>}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: isStructure ? 600 : 400, lineHeight: "1.5", wordBreak: "break-all" }}>{node.name}</div>
+                    {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
                   </div>
                   {hasRows && (
-                    <Tag color="processing" style={{ fontSize: 10, marginLeft: 4, lineHeight: "16px" }}>
+                    <Tag style={{ fontSize: 10, marginLeft: 8, lineHeight: "16px", flexShrink: 0, background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
                       {rowsByFunction[node.id].length}
                     </Tag>
                   )}
                 </div>
               );
             })}
-            {functionNodes.length === 0 && <Empty description={t("table.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-          </Card>
+            {functionNodes.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+          </DataCard>
         </Col>
 
         {/* Right: FMEA Table */}
-        <Col span={19}>
-          <Card
+        <Col span={18}>
+          <DataCard
             title={
               <span style={{ fontSize: 14 }}>
-                {isDFMEA ? t("table.dfmeaTitle") : t("table.pfmeaTitle")}
+                {isDFMEA ? t("editor.dfmeaTitle") : t("editor.pfmeaTitle")}
               </span>
             }
-            size="small"
-            styles={{ body: { padding: "8px 0" } }}
+            noPadding
           >
-            <Table
-              dataSource={rows}
-              columns={columns}
-              rowKey="key"
-              size="small"
-              pagination={false}
-              scroll={{ x: 1700, y: 520 }}
-              bordered
-              rowClassName={(row: FMEARow) => {
-                const classes = [];
-                if (selectedFunctionId && row.functionNodeId === selectedFunctionId) classes.push("fmea-row-highlight");
-                if (severityWarnings.includes(row.failureModeNodeId)) classes.push("severity-warning-row");
-                if (row.key === highlightedRowKey) classes.push("highlighted-row");
-                return classes.join(" ");
-              }}
-            />
-            {rows.length === 0 && (
-              <div style={{ textAlign: "center", padding: 40 }}>
-                <Text type="secondary">{t("table.startAnalysisHint")}</Text>
-              </div>
-            )}
-          </Card>
+            <div style={{ padding: "8px 0" }}>
+              <Table
+                dataSource={rows}
+                columns={columns}
+                rowKey="key"
+                size="small"
+                pagination={false}
+                scroll={{ x: 2400, y: 540 }}
+                bordered
+                className="qf-table fmea-editor-table"
+                style={{ fontSize: 13 }}
+                rowClassName={(row: FMEARow) => {
+                  const classes = [];
+                  if (selectedFunctionId && row.functionNodeId === selectedFunctionId) classes.push("fmea-row-highlight");
+                  if (severityWarnings.includes(row.failureModeNodeId)) classes.push("severity-warning-row");
+                  if (row.key === highlightedRowKey) classes.push("highlighted-row");
+                  return classes.join(" ");
+                }}
+              />
+              {rows.length === 0 && (
+                <div style={{ textAlign: "center", padding: 40 }}>
+                  <Text type="secondary">{t("editor.selectFunctionHint")}</Text>
+                </div>
+              )}
+            </div>
+          </DataCard>
         </Col>
       </Row>
         </>},
-            { key: "structure", label: t("editor.structureAnalysis"), children: <>
+            { key: "structure", label: t("tabs.structureAnalysis"), children: <>
           <Row gutter={16}>
             <Col span={8}>
-              <Card title={t("editor.structureTree")} size="small">
+              <DataCard title={t("tabs.structureTree")}>
                 <StructureTree
                   nodes={nodes}
                   edges={edges}
@@ -1211,10 +1258,10 @@ export default function FMEAEditorPage() {
                   isViewer={!canEdit('fmea')}
                   onSelectNode={(node) => setSelectedStructureNode(node)}
                 />
-              </Card>
+              </DataCard>
             </Col>
             <Col span={16}>
-              <Card title={t("editor.nodeDetail")} size="small">
+              <DataCard title={t("tabs.nodeDetails")}>
                 <ParameterDiagram
                   node={selectedStructureNode}
                   onUpdateNode={(nodeId, updates) => {
@@ -1222,40 +1269,54 @@ export default function FMEAEditorPage() {
                   }}
                   isViewer={!canEdit('fmea')}
                 />
-              </Card>
+              </DataCard>
             </Col>
           </Row>
         </>},
           ]} />
 
       <style>{`
+        .fmea-editor-table .ant-table-cell {
+          white-space: normal !important;
+          word-break: break-all;
+          vertical-align: top;
+          padding: 10px 12px !important;
+        }
+        .fmea-editor-table .ant-input,
+        .fmea-editor-table .ant-select,
+        .fmea-editor-table .ant-select-selector {
+          font-size: 13px;
+        }
+        .fmea-editor-table .ant-input::placeholder {
+          font-size: 12px;
+        }
         .fmea-row-highlight td {
-          background-color: #e6f4ff !important;
+          background-color: rgba(0, 229, 255, 0.08) !important;
           transition: background-color 0.2s;
         }
         .fmea-row-highlight td:first-child {
-          border-left: 3px solid #1677ff !important;
+          border-left: 3px solid var(--qf-cyan) !important;
         }
         .severity-warning-row td {
-          background-color: #fffbe6 !important;
+          background-color: rgba(255, 184, 0, 0.08) !important;
         }
         .severity-warning-row td:first-child {
-          border-left: 3px solid #faad14 !important;
+          border-left: 3px solid var(--qf-amber) !important;
         }
         .highlighted-row td {
-          background-color: #fffbe6 !important;
+          background-color: rgba(255, 184, 0, 0.12) !important;
         }
         .highlighted-row td:first-child {
-          border-left: 3px solid #faad14 !important;
+          border-left: 3px solid var(--qf-amber) !important;
         }
       `}</style>
 
       <Divider />
       <Text type="secondary" style={{ fontSize: 11 }}>
-        {t("table.footer")}
+        {t("editor.footerLegend")}
       </Text>
         </>},
-        { key: "graph", label: t("editor.graph"), children: <>
+        { key: "graph", label: t("tabs.graph"), children: <>
           <div style={{ display: "flex", gap: 16, height: "calc(100vh - 240px)" }}>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
               <GraphToolbar
@@ -1293,8 +1354,8 @@ export default function FMEAEditorPage() {
                     onOpenChange={setContextMenuOpen}
                     menu={{
                       items: [
-                        { key: "impact", label: t("messages.traceImpact") },
-                        { key: "cause", label: t("messages.traceCause") },
+                        { key: "impact", label: t("graph.traceImpact") },
+                        { key: "cause", label: t("graph.traceCause") },
                       ],
                       onClick: ({ key }) => {
                         setContextMenuOpen(false);
@@ -1319,22 +1380,22 @@ export default function FMEAEditorPage() {
               <GraphLegend />
               {highlightNodes.length > 0 && (
                 <Button onClick={() => { setHighlightNodes([]); setDimOthers(false); }}>
-                  {t("messages.clearHighlight")}
+                  {t("graph.clearHighlight")}
                 </Button>
               )}
-              <Card title={t("messages.changeImpactAnalysis")} size="small">
+              <DataCard title={t("changeImpact.title")}>
                 <Space direction="vertical" style={{ width: "100%" }}>
-                  <Text type="secondary">{t("messages.changeImpactDescription")}</Text>
+                  <Text type="secondary">{t("changeImpact.description")}</Text>
                   <Button
                     type="primary"
                     icon={<RadarChartOutlined />}
                     onClick={() => { setImpactModalOpen(true); setImpactResult(null); }}
                     disabled={!canEdit("fmea") || !selectedGraphNode}
                   >
-                    {t("messages.analyzeImpactScope")}
+                    {t("changeImpact.analyze")}
                   </Button>
                 </Space>
-              </Card>
+              </DataCard>
             </div>
           </div>
           <NodeDetailDrawer
@@ -1345,17 +1406,17 @@ export default function FMEAEditorPage() {
             allEdges={graphDataRef.current?.edges}
           />
           <Modal
-            title={t("messages.changeImpactAnalysis")}
+            title={t("changeImpact.modalTitle")}
             open={impactModalOpen}
             onCancel={() => setImpactModalOpen(false)}
             width={800}
             footer={
               impactResult ? (
-                <Button onClick={() => setImpactModalOpen(false)}>{t("messages.close")}</Button>
+                <Button onClick={() => setImpactModalOpen(false)}>{t("actions.close")}</Button>
               ) : (
                 <>
-                  <Button onClick={() => setImpactModalOpen(false)}>{t("messages.cancel")}</Button>
-                  <Button type="primary" onClick={handleAnalyzeImpact} loading={impactLoading}>{t("messages.executeAnalysis")}</Button>
+                  <Button onClick={() => setImpactModalOpen(false)}>{t("actions.cancel")}</Button>
+                  <Button type="primary" onClick={handleAnalyzeImpact} loading={impactLoading}>{t("changeImpact.execute")}</Button>
                 </>
               )
             }
@@ -1374,20 +1435,20 @@ export default function FMEAEditorPage() {
                   value={impactForm.change_type}
                   onChange={(e) => setImpactForm({ ...impactForm, change_type: e.target.value })}
                 >
-                  <Radio.Button value="attribute">{t("messages.attributeChange")}</Radio.Button>
-                  <Radio.Button value="structural">{t("messages.structuralChange")}</Radio.Button>
+                  <Radio.Button value="attribute">{t("changeImpact.attribute")}</Radio.Button>
+                  <Radio.Button value="structural">{t("changeImpact.structural")}</Radio.Button>
                 </Radio.Group>
                 {impactForm.change_type === "attribute" && (
                   <>
-                    <Input placeholder={t("messages.fieldNamePlaceholder")} value={impactForm.field_name} onChange={(e) => setImpactForm({ ...impactForm, field_name: e.target.value })} />
-                    <Input placeholder={t("messages.newValuePlaceholder")} value={impactForm.new_value} onChange={(e) => setImpactForm({ ...impactForm, new_value: e.target.value })} />
+                    <Input placeholder={t("changeImpact.fieldPlaceholder")} value={impactForm.field_name} onChange={(e) => setImpactForm({ ...impactForm, field_name: e.target.value })} />
+                    <Input placeholder={t("changeImpact.valuePlaceholder")} value={impactForm.new_value} onChange={(e) => setImpactForm({ ...impactForm, new_value: e.target.value })} />
                   </>
                 )}
               </Space>
             )}
           </Modal>
         </>},
-        { key: "related-capa", label: t("editor.relatedCapa"), children: <>
+        { key: "related-capa", label: t("tabs.relatedCapa"), children: <>
           {selectedFunctionId ? (
             <RelatedCAPAList
               fmeaId={fmea!.fmea_id}
@@ -1395,18 +1456,18 @@ export default function FMEAEditorPage() {
             />
           ) : (
             <Typography.Text type="secondary">
-              {t("messages.selectFailureMode")}
+              {t("messages.selectFailureModeFirst")}
             </Typography.Text>
           )}
         </>},
-        { key: "history", label: <span><HistoryOutlined /> {t("editor.history")}</span>, children: <>
+        { key: "history", label: <span><HistoryOutlined /> {t("tabs.versionHistory")}</span>, children: <>
           <VersionHistoryTab
             documentId={id!}
             documentType="fmea"
             canCreate={canEdit('fmea')}
             canRollback={canApprove('fmea')}
             isDraft={fmea.status === "draft"}
-            onViewSnapshot={(major, minor) => message.info(t("messages.viewSnapshot", { version: `${major}.${minor}` }))}
+            onViewSnapshot={(major, minor) => message.info(t("messages.viewSnapshot", { major, minor }))}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
             onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}
@@ -1432,7 +1493,7 @@ export default function FMEAEditorPage() {
       {compareState && (
         <Modal
           open={!!compareState}
-          title={t("messages.versionCompare")}
+          title={t("version.compareTitle")}
           width={900}
           footer={null}
           onCancel={() => setCompareState(null)}
@@ -1474,6 +1535,6 @@ export default function FMEAEditorPage() {
           }
         }}
       />
-    </div>
+    </PageShell>
   );
 }

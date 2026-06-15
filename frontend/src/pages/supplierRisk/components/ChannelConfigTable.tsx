@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { Table, Button, Modal, Form, Input, Select, Switch, message, Popconfirm, Tag } from "antd";
+import { Table, Button, Modal, Form, Input, Select, Switch, message, Popconfirm } from "antd";
 import { useTranslation } from "react-i18next";
 import type { NotificationChannel } from "../../../types";
 import { riskAlertApi } from "../../../api/supplierRisk";
+import { StatusBadge } from "../../../components/design";
 
 const ChannelConfigTable: React.FC = () => {
   const { t } = useTranslation("supplierRisk");
@@ -72,9 +73,7 @@ const ChannelConfigTable: React.FC = () => {
       title: t("channel.columns.type"),
       dataIndex: "channel_type",
       render: (v: string) => (
-        <Tag color={v === "email" ? "blue" : "green"}>
-          {TYPE_LABELS[v] || v}
-        </Tag>
+        <StatusBadge status={v}>{TYPE_LABELS[v] || v}</StatusBadge>
       ),
     },
     {
@@ -118,6 +117,7 @@ const ChannelConfigTable: React.FC = () => {
         columns={columns}
         dataSource={data}
         loading={loading}
+        className="qf-table"
       />
       <Modal
         title={t("channel.addTitle")}

@@ -5,7 +5,7 @@ import { formatDateTime } from "../../utils/dateTime";
 import {
   Button, Space, Tag, Typography, Tabs, Card, Input,
   DatePicker, Table, App, Spin, Row, Col,
-  Switch, Divider, Badge, Statistic, Empty,
+  Switch, Divider, Statistic, Empty,
 } from "antd";
 import {
   ArrowLeftOutlined, LockOutlined, UnlockOutlined,
@@ -37,22 +37,21 @@ import type {
 } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
+import { PageShell, StatusBadge } from "../../components/design";
 
 const { Title, Text } = Typography;
 
-const RULE_KEYS = ["rule1", "rule2", "rule3", "rule4", "rule5", "rule6", "rule7", "rule8"];
-
-const severityColors: Record<string, string> = {
-  critical: "red",
-  major: "orange",
-  minor: "blue",
+const severityStatus: Record<string, string> = {
+  critical: "fatal",
+  major: "error",
+  minor: "info",
 };
 
-function getGradeColor(grade: string): string {
-  if (grade.startsWith("A")) return "green";
-  if (grade.startsWith("B")) return "blue";
-  if (grade.startsWith("C")) return "orange";
-  return "red";
+function getGradeStatus(grade: string): string {
+  if (grade.startsWith("A")) return "success";
+  if (grade.startsWith("B")) return "info";
+  if (grade.startsWith("C")) return "warning";
+  return "error";
 }
 
 export default function SPCDetailPage() {
@@ -426,7 +425,9 @@ export default function SPCDetailPage() {
       key: "severity",
       width: 100,
       render: (s: string) => (
-        <Tag color={severityColors[s] || "default"}>{t(`detail.alarm.severityLevels.${s}`, { defaultValue: s })}</Tag>
+        <StatusBadge status={severityStatus[s] || "draft"}>
+          {t(`detail.alarm.severityLevels.${s}`, { defaultValue: s })}
+        </StatusBadge>
       ),
     },
     {
@@ -435,10 +436,9 @@ export default function SPCDetailPage() {
       key: "status",
       width: 100,
       render: (s: string) => (
-        <Badge
-          status={s === "open" ? "error" : s === "acknowledged" ? "warning" : "success"}
-          text={t(`detail.alarm.statuses.${s}`, { defaultValue: s })}
-        />
+        <StatusBadge status={s === "open" ? "error" : s === "acknowledged" ? "warning" : "success"}>
+          {t(`detail.alarm.statuses.${s}`, { defaultValue: s })}
+        </StatusBadge>
       ),
     },
     {
@@ -446,7 +446,7 @@ export default function SPCDetailPage() {
       dataIndex: "linked_capa_id",
       key: "linked_capa_id",
       width: 120,
-      render: (v: string | undefined) => v || "-",
+      render: (v: string | undefined) => <span style={{ fontFamily: "var(--qf-font-mono)" }}>{v || "-"}</span>,
     },
     {
       title: t("detail.alarm.linkedFmea"),
@@ -455,9 +455,13 @@ export default function SPCDetailPage() {
       width: 120,
       render: (_: unknown, record: SPCAlarm) =>
         record.confirmed_fmea_id ? (
-          <Tag color="blue">{t("detail.alarm.linked")}</Tag>
+          <Tag style={{ background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
+            {t("detail.alarm.linked")}
+          </Tag>
         ) : (
-          <Tag color="default">{t("detail.alarm.notLinked")}</Tag>
+          <Tag style={{ background: "var(--qf-bg-hover)", color: "var(--qf-text-secondary)", borderColor: "var(--qf-border)" }}>
+            {t("detail.alarm.notLinked")}
+          </Tag>
         ),
     },
     {
@@ -517,36 +521,32 @@ export default function SPCDetailPage() {
     );
   }
 
+  const headerTags = (
+    <Space>
+      <Tag style={{ background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>{ic.ic_code}</Tag>
+      <Tag style={{ background: "var(--qf-bg-hover)", color: "var(--qf-text-secondary)", borderColor: "var(--qf-border)" }}>{chartTypeLabel(ic.chart_type)}</Tag>
+      {chartData?.active_snapshot && (
+        <Tag style={{ background: "var(--qf-blue-dim)", color: "var(--qf-blue)", borderColor: "var(--qf-blue)" }}>
+          {t("detail.limitManagement.version")} v{chartData.active_snapshot.version_no}
+        </Tag>
+      )}
+      <StatusBadge status={ic.control_limits_locked ? "success" : "warning"}>
+        {ic.control_limits_locked ? t("detail.limitManagement.locked") : t("detail.limitManagement.auto")}
+      </StatusBadge>
+    </Space>
+  );
+
   return (
-    <div>
-      {/* Top bar */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
+    <PageShell
+      title={
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/spc")}>
-            {t("detail.back")}
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            {ic.characteristic_name}
-          </Title>
-          <Tag color="blue">{ic.ic_code}</Tag>
-          <Tag>{chartTypeLabel(ic.chart_type)}</Tag>
-          {chartData?.active_snapshot && (
-            <Tag color="blue" style={{ marginLeft: 8 }}>{t("detail.limitManagement.version")} v{chartData.active_snapshot.version_no}</Tag>
-          )}
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/spc")}>{tc("actions.back")}</Button>
+          <Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{ic.characteristic_name}</Title>
         </Space>
-        <Space>
-          <Tag color={ic.control_limits_locked ? "green" : "orange"}>
-            {ic.control_limits_locked ? t("detail.limitManagement.locked") : t("detail.limitManagement.auto")}
-          </Tag>
-        </Space>
-      </div>
+      }
+      subtitle={headerTags}
+      fullHeight
+    >
 
       <Tabs
         activeKey={activeTab}
@@ -605,7 +605,7 @@ export default function SPCDetailPage() {
                   </Card>
 
                   <Card title={t("detail.rules.title")} size="small" style={{ marginTop: 16 }}>
-                    {RULE_KEYS.map((key) => (
+                    {["rule1", "rule2", "rule3", "rule4", "rule5", "rule6", "rule7", "rule8"].map((key) => (
                       <div
                         key={key}
                         style={{
@@ -637,19 +637,52 @@ export default function SPCDetailPage() {
                 <div>
                   <Row gutter={16} style={{ marginBottom: 24 }}>
                     <Col>
-                      <Tag color={getGradeColor(capability.grade)} style={{ fontSize: 18, padding: "8px 16px" }}>
+                      <StatusBadge status={getGradeStatus(capability.grade)} style={{ fontSize: 14, padding: "6px 12px" }}>
                         {t("detail.capability.grade", { grade: capability.grade })}
-                      </Tag>
+                      </StatusBadge>
                     </Col>
                   </Row>
                   <Row gutter={[16, 16]}>
-                    {["cp", "cpk", "pp", "ppk", "cm", "cmk", "theoretical_ppm", "actual_ppm"].map((k) => (
-                      <Col span={6} key={k}>
-                        <Card>
-                          <Statistic title={t(`detail.capability.${k}`)} value={(capability as any)[k]} precision={3} />
-                        </Card>
-                      </Col>
-                    ))}
+                    <Col span={6}>
+                      <Card>
+                        <Statistic title={t("detail.capability.cp")} value={capability.cp} precision={3} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card>
+                        <Statistic title={t("detail.capability.cpk")} value={capability.cpk} precision={3} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card>
+                        <Statistic title={t("detail.capability.pp")} value={capability.pp} precision={3} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card>
+                        <Statistic title={t("detail.capability.ppk")} value={capability.ppk} precision={3} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card>
+                        <Statistic title={t("detail.capability.cm")} value={capability.cm} precision={3} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card>
+                        <Statistic title={t("detail.capability.cmk")} value={capability.cmk} precision={3} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card>
+                        <Statistic title={t("detail.capability.theoretical_ppm")} value={capability.theoretical_ppm} precision={2} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card>
+                        <Statistic title={t("detail.capability.actual_ppm")} value={capability.actual_ppm} precision={2} />
+                      </Card>
+                    </Col>
                   </Row>
                   <Card title={t("detail.capability.advice")} style={{ marginTop: 16 }}>
                     <Text>{capability.advice}</Text>
@@ -837,6 +870,7 @@ export default function SPCDetailPage() {
             label: t("detail.tabs.alarms"),
             children: (
               <Table
+                className="qf-table"
                 columns={alarmColumns}
                 dataSource={alarms}
                 rowKey="alarm_id"
@@ -864,6 +898,6 @@ export default function SPCDetailPage() {
         }}
         onConfirmed={fetchAll}
       />
-    </div>
+    </PageShell>
   );
 }

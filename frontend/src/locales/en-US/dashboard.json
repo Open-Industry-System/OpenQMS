@@ -1,6 +1,7 @@
 {
   "page": {
-    "title": "Quality Dashboard"
+    "title": "Quality Dashboard",
+    "subtitle": "Global Quality Status · KPI · Alerts · Recent Activity"
   },
   "actions": {
     "editLayout": "Edit Layout",

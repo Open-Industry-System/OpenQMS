@@ -51,6 +51,9 @@ import {
   reinstateSupplier,
 } from "../../api/supplier";
 import { listAuditPlans } from "../../api/audit";
+import PageShell from "../../components/design/PageShell";
+import DataCard from "../../components/design/DataCard";
+import StatusBadge from "../../components/design/StatusBadge";
 import dayjs from "dayjs";
 
 const { Option } = Select;
@@ -332,7 +335,7 @@ export default function SupplierDetailPage() {
       setEvalSaving(true);
       const payload = { ...values };
       await createEvaluation(id, payload);
-        message.success(t("messages.evalSubmitSuccess"));
+      message.success(t("messages.evalSubmitSuccess"));
       evalForm.resetFields();
       evalForm.setFieldsValue({ quality_score: 80, delivery_score: 80, service_score: 80 });
       setEvalPreview(calcBaseScore(80, 80, 80));
@@ -658,6 +661,7 @@ export default function SupplierDetailPage() {
           }
         >
           <Table
+            className="qf-table"
             loading={certsLoading}
             dataSource={certs}
             rowKey="cert_id"
@@ -883,7 +887,7 @@ export default function SupplierDetailPage() {
               onClick={() => navigate(`/customer-quality/complaints/${item.id}`)}
             >
               <List.Item.Meta title={item.no} />
-              <Tag>{item.status}</Tag>
+              <StatusBadge status={["open", "investigating"].includes(item.status) ? "warning" : item.status === "closed" ? "success" : "info"}>{item.status}</StatusBadge>
             </List.Item>
           )}
         />
@@ -902,7 +906,7 @@ export default function SupplierDetailPage() {
               onClick={() => navigate(`/iqc/inspections/${item.id}`)}
             >
               <List.Item.Meta title={item.no} />
-              <Tag color="error">{item.result}</Tag>
+              <StatusBadge status="error">{item.result}</StatusBadge>
             </List.Item>
           )}
         />
@@ -921,7 +925,7 @@ export default function SupplierDetailPage() {
               onClick={() => navigate(`/scars/${item.id}`)}
             >
               <List.Item.Meta title={item.no} />
-              <Tag>{item.status}</Tag>
+              <StatusBadge status={item.status}>{item.status}</StatusBadge>
             </List.Item>
           )}
         />
@@ -930,84 +934,50 @@ export default function SupplierDetailPage() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Button
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate("/suppliers")}
-        >
-          {t("messages.back")}
-        </Button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>{isNew ? t("messages.newSupplier") : supplier!.name}</h2>
-        {!isNew && <Tag color={statusInfo.color}>{statusInfo.label}</Tag>}
-        {!isNew && supplier && canApprove('supplier') && (
-          <Space style={{ marginLeft: "auto" }}>
-            {supplier.status === "pending_review" && (
-              <>
-                <Button
-                  type="primary"
-                  loading={transitioning}
-                  onClick={handleApprove}
-                >
-                  {t("messages.approve")}
-                </Button>
-                <Button
-                  danger
-                  loading={transitioning}
-                  onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}
-                >
-                  {t("messages.reject")}
-                </Button>
-              </>
-            )}
-            {supplier.status === "audit_required" && (
-              <>
-                <Popconfirm
-                  title={t("messages.confirmApproveSupplier")}
-                  onConfirm={handleConfirmApproved}
-                  okText={tc("actions.confirm")}
-                  cancelText={tc("actions.cancel")}
-                >
-                  <Button type="primary" loading={transitioning}>
-                    {t("messages.confirmApprove")}
-                  </Button>
-                </Popconfirm>
-                <Button
-                  danger
-                  loading={transitioning}
-                  onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}
-                >
-                  {t("messages.reject")}
-                </Button>
-              </>
-            )}
-            {supplier.status === "approved" && (
-              <Button
-                danger
-                loading={transitioning}
-                onClick={() => { setSuspendReason(""); setSuspendModalVisible(true); }}
-              >
-                {t("messages.suspend")}
-              </Button>
-            )}
-            {supplier.status === "suspended" && (
-              <Popconfirm
-                title={t("messages.confirmResumeSupplier")}
-                onConfirm={handleReinstate}
-                okText={tc("actions.confirm")}
-                cancelText={tc("actions.cancel")}
-              >
-                <Button type="primary" loading={transitioning}>
-                  {t("messages.resume")}
-                </Button>
-              </Popconfirm>
-            )}
+    <PageShell
+      title={
+        isNew ? t("messages.newSupplier") : (
+          <Space size={12}>
+            {supplier!.name}
+            <StatusBadge status={statusInfo.color}>{statusInfo.label}</StatusBadge>
           </Space>
-        )}
-      </div>
-
-      {/* Approval progress bar */}
+        )
+      }
+      subtitle={isNew ? undefined : supplier!.supplier_no}
+      actions={
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/suppliers")}>
+            {t("messages.back")}
+          </Button>
+          {!isNew && supplier && canApprove('supplier') && (
+            <>
+              {supplier.status === "pending_review" && (
+                <>
+                  <Button type="primary" loading={transitioning} onClick={handleApprove}>{t("messages.approve")}</Button>
+                  <Button danger loading={transitioning} onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}>{t("messages.reject")}</Button>
+                </>
+              )}
+              {supplier.status === "audit_required" && (
+                <>
+                  <Popconfirm title={t("messages.confirmApproveSupplier")} onConfirm={handleConfirmApproved} okText={tc("actions.confirm")} cancelText={tc("actions.cancel")}>
+                    <Button type="primary" loading={transitioning}>{t("messages.confirmApprove")}</Button>
+                  </Popconfirm>
+                  <Button danger loading={transitioning} onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}>{t("messages.reject")}</Button>
+                </>
+              )}
+              {supplier.status === "approved" && (
+                <Button danger loading={transitioning} onClick={() => { setSuspendReason(""); setSuspendModalVisible(true); }}>{t("messages.suspend")}</Button>
+              )}
+              {supplier.status === "suspended" && (
+                <Popconfirm title={t("messages.confirmResumeSupplier")} onConfirm={handleReinstate} okText={tc("actions.confirm")} cancelText={tc("actions.cancel")}>
+                  <Button type="primary" loading={transitioning}>{t("messages.resume")}</Button>
+                </Popconfirm>
+              )}
+            </>
+          )}
+        </Space>
+      }
+    >
       {!isNew && (
         <Card style={{ marginBottom: 16 }}>
           <Steps
@@ -1034,7 +1004,9 @@ export default function SupplierDetailPage() {
       )}
 
       {/* Tabs */}
-      <Tabs items={isNew ? tabItems.filter(t => t.key === "info") : tabItems} />
+      <DataCard title={t("tabs.supplierDetail")} noPadding>
+        <Tabs items={isNew ? tabItems.filter(t => t.key === "info") : tabItems} />
+      </DataCard>
 
       {/* Certification Modal */}
       {!certModalOpen && (
@@ -1122,6 +1094,6 @@ export default function SupplierDetailPage() {
           onChange={(e) => setSuspendReason(e.target.value)}
         />
       </Modal>
-    </div>
+    </PageShell>
   );
 }

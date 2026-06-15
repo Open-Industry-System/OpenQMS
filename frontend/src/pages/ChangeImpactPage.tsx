@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { App, Card, Col, Row, Typography } from "antd";
-import { useTranslation } from "react-i18next";
+import { App, Col, Row, Spin, Typography } from "antd";
 import { ChangeHistoryTable, ImpactReportPanel } from "../components/change-impact";
 import { listAllChangeImpacts, getChangeImpact } from "../api/changeImpact";
 import type { ChangeImpactAnalysis, PaginatedChangeImpactResponse } from "../api/changeImpact";
+import { useTranslation } from "react-i18next";
+import { PageShell, DataCard } from "../components/design";
 
 export default function ChangeImpactPage() {
   const { t } = useTranslation("changeImpact");
@@ -43,24 +44,25 @@ export default function ChangeImpactPage() {
   };
 
   return (
-    <div style={{ padding: 24 }}>
-      <Typography.Title level={3}>{t("page.title")}</Typography.Title>
+    <PageShell title={t("page.title")}>
       <Row gutter={16}>
         <Col span={10}>
-          <Card title={t("page.history")} loading={loading}>
-            <ChangeHistoryTable data={history} onSelect={handleSelect} />
-          </Card>
+          <DataCard title={t("page.history")} noPadding>
+            <Spin spinning={loading}>
+              <ChangeHistoryTable data={history} onSelect={handleSelect} />
+            </Spin>
+          </DataCard>
         </Col>
         <Col span={14}>
-          <Card title={t("page.detail")}>
+          <DataCard title={t("page.detail")}>
             {selected ? (
               <ImpactReportPanel analysis={selected} onViewGraph={handleViewGraph} />
             ) : (
               <Typography.Text type="secondary">{t("page.selectHint")}</Typography.Text>
             )}
-          </Card>
+          </DataCard>
         </Col>
       </Row>
-    </div>
+    </PageShell>
   );
 }

@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Card,
   Table,
   Button,
   Tag,
@@ -22,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { usePermission } from "../../hooks/usePermission";
 import type { IqcInspection, IqcStats } from "../../types";
 import { listInspections, getIqcStats } from "../../api/iqc";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
@@ -118,7 +118,7 @@ export default function IqcInspectionListPage() {
         title: t("table.inspectionNo"),
         dataIndex: "inspection_no",
         width: 160,
-        render: (no: string) => <span style={{ fontFamily: "monospace" }}>{no}</span>,
+        render: (no: string) => <span className="qf-mono">{no}</span>,
       },
       {
         title: t("table.partNo"),
@@ -157,7 +157,7 @@ export default function IqcInspectionListPage() {
         width: 100,
         render: (status: string) => {
           const cfg = statusMap[status];
-          return <Tag color={cfg?.color}>{cfg?.label || status}</Tag>;
+          return <StatusBadge status={cfg?.color || "draft"}>{cfg?.label || status}</StatusBadge>;
         },
       },
       {
@@ -166,7 +166,7 @@ export default function IqcInspectionListPage() {
         width: 100,
         render: (result: string) => {
           const cfg = resultMap[result];
-          return <Tag color={cfg?.color}>{cfg?.label || result}</Tag>;
+          return <StatusBadge status={cfg?.color || "draft"}>{cfg?.label || result}</StatusBadge>;
         },
       },
       {
@@ -193,44 +193,45 @@ export default function IqcInspectionListPage() {
   );
 
   return (
-    <div>
+    <PageShell title={t("pageTitle.inspectionList")} subtitle={t("subtitle.inspectionList")}>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card>
-            <Statistic title={t("stats.totalInspections")} value={stats.total_inspections} />
-          </Card>
+          <DataCard title={t("stats.totalInspections")} noPadding>
+            <Statistic
+              value={stats.total_inspections}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-primary)" }}
+            />
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={t("stats.acceptedCount")} noPadding>
             <Statistic
-              title={t("stats.acceptedCount")}
               value={stats.accepted_count}
-              valueStyle={{ color: "#52c41a" }}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={t("stats.rejectedCount")} noPadding>
             <Statistic
-              title={t("stats.rejectedCount")}
               value={stats.rejected_count}
-              valueStyle={{ color: "#ff4d4f" }}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-red)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={t("stats.acceptanceRate")} noPadding>
             <Statistic
-              title={t("stats.acceptanceRate")}
               value={stats.acceptance_rate}
               suffix="%"
               precision={1}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-cyan)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 
-      <Card
+      <DataCard
         title={t("pageTitle.inspectionList")}
         extra={
           <Space>
@@ -287,6 +288,7 @@ export default function IqcInspectionListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="inspection_id"
           columns={columns}
           dataSource={inspections}
@@ -302,7 +304,7 @@ export default function IqcInspectionListPage() {
             },
           }}
         />
-      </Card>
-    </div>
+      </DataCard>
+    </PageShell>
   );
 }

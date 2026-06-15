@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { App, Button, Card, DatePicker, Form, Input, InputNumber, Select, Space, Tag, Typography } from "antd";
+import { App, Button, DatePicker, Form, Input, InputNumber, Select, Space } from "antd";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import {
@@ -16,9 +16,21 @@ import {
 } from "../../api/customerQuality";
 import type { RMARecord } from "../../types";
 import { usePermission } from "../../hooks/usePermission";
-import { useResponsibilityOptions, useRmaStatusMap } from "./useOptions";
+import { DataCard, PageShell, StatusBadge } from "../../components/design";
 
-const { Title } = Typography;
+const rmaStatusVariant = (status: string) => {
+  switch (status) {
+    case "closed":
+      return "closed";
+    case "cancelled":
+      return "reject";
+    case "open":
+    case "analysis":
+    case "action_pending":
+    default:
+      return "pending";
+  }
+};
 
 export default function RMADetailPage() {
   const { t } = useTranslation("customerQuality");
@@ -29,11 +41,8 @@ export default function RMADetailPage() {
   const [form] = Form.useForm();
   const [linkForm] = Form.useForm();
   const [data, setData] = useState<RMARecord | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const { canEdit, canApprove } = usePermission();
-
-  const statusMap = useRmaStatusMap();
-  const responsibilityOptions = useResponsibilityOptions();
 
   const load = async () => {
     if (!id) return;
@@ -51,7 +60,7 @@ export default function RMADetailPage() {
         fmea_ref_id: rma.fmea_ref_id,
       });
     } catch {
-      message.error(t("messages.rmaLoadFailed"));
+      message.error(t("messages.rmaLoadFailed", "RMA 加载失败"));
     } finally {
       setLoading(false);
     }
@@ -68,9 +77,9 @@ export default function RMADetailPage() {
         received_date: values.received_date ? (values.received_date as dayjs.Dayjs).format("YYYY-MM-DD") : null,
       });
       setData(updated);
-      message.success(tc("messages.saveSuccess"));
+      message.success(tc("messages.saveSuccess", "已保存"));
     } catch {
-      message.error(tc("messages.saveFailed"));
+      message.error(tc("messages.saveFailed", "保存失败"));
     }
   };
 
@@ -81,7 +90,7 @@ export default function RMADetailPage() {
       message.success(success);
       await load();
     } catch {
-      message.error(tc("messages.operationFailed"));
+      message.error(tc("messages.operationFailed", "操作失败"));
     }
   };
 
@@ -91,61 +100,69 @@ export default function RMADetailPage() {
       if (values.complaint_id) await linkRMAComplaint(id, values.complaint_id);
       if (values.capa_ref_id) await linkRMACAPA(id, values.capa_ref_id);
       if (values.fmea_ref_id) await linkRMAFMEA(id, values.fmea_ref_id);
-      message.success(t("messages.linksUpdated"));
+      message.success(t("messages.linksUpdated", "关联已更新"));
       await load();
     } catch {
-      message.error(t("messages.linksUpdateFailed"));
+      message.error(t("messages.linksUpdateFailed", "关联失败"));
     }
   };
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+    <PageShell
+      title={
         <Space>
-          <Button onClick={() => navigate("/customer-quality")}>{tc("actions.back")}</Button>
-          <Title level={4} style={{ margin: 0 }}>{data?.rma_no || t("page.rmaDetailTitle")}</Title>
-          {data && <Tag>{statusMap[data.status] || data.status}</Tag>}
+          <Button onClick={() => navigate("/customer-quality")}>{tc("actions.back", "返回")}</Button>
+          <span>{data?.rma_no || t("page.rmaDetailTitle", "RMA详情")}</span>
+          {data && <StatusBadge status={rmaStatusVariant(data.status)}>{t(`status.rma.${data.status}`, data.status)}</StatusBadge>}
         </Space>
-        {canEdit('customer_quality') && data && (
+      }
+      actions={
+        canEdit('customer_quality') && data ? (
           <Space>
-            <Button onClick={() => runAction(() => startRMAAnalysis(data.rma_id), t("messages.analysisStarted"))}>{t("actions.analyze")}</Button>
-            <Button onClick={() => runAction(() => markRMAActionPending(data.rma_id), t("messages.markedActionPending"))}>{t("actions.markActionPending")}</Button>
-            <Button onClick={() => runAction(() => cancelRMA(data.rma_id), t("messages.cancelled"))}>{tc("actions.cancel")}</Button>
-            {canApprove('customer_quality') && <Button type="primary" onClick={() => runAction(() => closeRMA(data.rma_id), t("messages.closed"))}>{tc("actions.close")}</Button>}
+            <Button onClick={() => runAction(() => startRMAAnalysis(data.rma_id), t("messages.analysisStarted", "已进入分析"))}>{t("actions.analyze", "分析")}</Button>
+            <Button onClick={() => runAction(() => markRMAActionPending(data.rma_id), t("messages.markedActionPending", "已标记等待措施"))}>{t("actions.markActionPending", "等待措施")}</Button>
+            <Button onClick={() => runAction(() => cancelRMA(data.rma_id), t("messages.cancelled", "已取消"))}>{tc("actions.cancel", "取消")}</Button>
+            {canApprove('customer_quality') && <Button type="primary" onClick={() => runAction(() => closeRMA(data.rma_id), t("messages.closed", "已关闭"))}>{tc("actions.close", "关闭")}</Button>}
           </Space>
-        )}
-      </div>
-
+        ) : null
+      }
+    >
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
-        <Card loading={loading}>
+        <DataCard title={t("form.rma.rmaNo", "RMA 信息")}>
           <Form form={form} layout="vertical" onFinish={save} disabled={!canEdit('customer_quality')}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-              <Form.Item name="product_id" label={t("form.rma.productId")}><Input /></Form.Item>
-              <Form.Item name="batch_no" label={t("form.rma.batchNo")}><Input /></Form.Item>
-              <Form.Item name="serial_number" label={t("form.rma.serialNumber")}><Input /></Form.Item>
-              <Form.Item name="return_qty" label={t("form.rma.returnQty")}><InputNumber style={{ width: "100%" }} min={1} /></Form.Item>
-              <Form.Item name="defect_type" label={t("form.rma.defectType")}><Input /></Form.Item>
-              <Form.Item name="responsibility" label={t("form.rma.responsibility")}><Select allowClear options={responsibilityOptions} /></Form.Item>
-              <Form.Item name="tracking_number" label={t("form.rma.trackingNumber")}><Input /></Form.Item>
-              <Form.Item name="received_date" label={t("form.rma.receivedDate")}><DatePicker style={{ width: "100%" }} /></Form.Item>
+              <Form.Item name="product_id" label={t("form.rma.productId", "产品号")}><Input /></Form.Item>
+              <Form.Item name="batch_no" label={t("form.rma.batchNo", "批次号")}><Input /></Form.Item>
+              <Form.Item name="serial_number" label={t("form.rma.serialNumber", "序列号")}><Input /></Form.Item>
+              <Form.Item name="return_qty" label={t("form.rma.returnQty", "退货数量")}><InputNumber style={{ width: "100%" }} min={1} /></Form.Item>
+              <Form.Item name="defect_type" label={t("form.rma.defectType", "不良类型")}><Input /></Form.Item>
+              <Form.Item name="responsibility" label={t("form.rma.responsibility", "责任判定")}><Select allowClear options={[
+                { value: "supplier", label: t("responsibility.supplier", "供应商") },
+                { value: "internal", label: t("responsibility.internal", "自制") },
+                { value: "transport", label: t("responsibility.transport", "运输") },
+                { value: "customer_misuse", label: t("responsibility.customer_misuse", "客户误用") },
+                { value: "unknown", label: t("responsibility.unknown", "未知") },
+              ]} /></Form.Item>
+              <Form.Item name="tracking_number" label={t("form.rma.trackingNumber", "物流单号")}><Input /></Form.Item>
+              <Form.Item name="received_date" label={t("form.rma.receivedDate", "接收日期")}><DatePicker style={{ width: "100%" }} /></Form.Item>
             </div>
-            <Form.Item name="analysis_result" label={t("form.rma.analysisResult")}><Input.TextArea rows={4} /></Form.Item>
-            <Form.Item name="corrective_action" label={t("form.rma.correctiveAction")}><Input.TextArea rows={4} /></Form.Item>
-            {canEdit('customer_quality') && <Button type="primary" htmlType="submit">{tc("actions.save")}</Button>}
+            <Form.Item name="analysis_result" label={t("form.rma.analysisResult", "分析结果")}><Input.TextArea rows={4} /></Form.Item>
+            <Form.Item name="corrective_action" label={t("form.rma.correctiveAction", "纠正措施")}><Input.TextArea rows={4} /></Form.Item>
+            {canEdit('customer_quality') && <Button type="primary" htmlType="submit">{tc("actions.save", "保存")}</Button>}
           </Form>
-        </Card>
-        <Card title={t("sections.linksAndEvidence")}>
+        </DataCard>
+        <DataCard title={t("sections.linksAndEvidence", "关联与证据")}>
           <Form form={linkForm} layout="vertical" onFinish={handleLinks} disabled={!canEdit('customer_quality')}>
-            <Form.Item name="complaint_id" label={t("form.links.complaintId")}><Input /></Form.Item>
-            <Form.Item name="capa_ref_id" label={t("form.links.capaRefId")}><Input /></Form.Item>
-            <Form.Item name="fmea_ref_id" label={t("form.links.fmeaRefId")}><Input /></Form.Item>
-            {canEdit('customer_quality') && <Button type="primary" htmlType="submit">{t("actions.updateLinks")}</Button>}
+            <Form.Item name="complaint_id" label={t("form.links.complaintId", "关联客诉 ID")}><Input /></Form.Item>
+            <Form.Item name="capa_ref_id" label={t("form.links.capaRefId", "关联 CAPA ID")}><Input /></Form.Item>
+            <Form.Item name="fmea_ref_id" label={t("form.links.fmeaRefId", "关联 FMEA ID")}><Input /></Form.Item>
+            {canEdit('customer_quality') && <Button type="primary" htmlType="submit">{t("actions.updateLinks", "更新关联")}</Button>}
           </Form>
           <pre style={{ marginTop: 16, whiteSpace: "pre-wrap" }}>
             {JSON.stringify(data?.attachments || [], null, 2)}
           </pre>
-        </Card>
+        </DataCard>
       </div>
-    </div>
+    </PageShell>
   );
 }

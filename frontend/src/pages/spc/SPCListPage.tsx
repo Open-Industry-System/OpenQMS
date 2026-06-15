@@ -3,8 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../utils/dateTime";
 import {
-  Table, Button, Tag, Typography, Modal, Form, Input, Select,
-  Popconfirm, App, Card, Row, Col, Statistic, Space, Alert,
+  Table, Button, Modal, Form, Input, Select,
+  Popconfirm, App, Row, Col, Statistic, Space, Alert,
 } from "antd";
 import {
   PlusOutlined, FileTextOutlined, DeleteOutlined,
@@ -19,8 +19,7 @@ import type { InspectionCharacteristic } from "../../types";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
-
-const { Title } = Typography;
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 export default function SPCListPage() {
   const { t } = useTranslation("spc");
@@ -60,7 +59,7 @@ export default function SPCListPage() {
 
   useEffect(() => {
     fetchData(1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
   const handleCreate = async (values: {
@@ -126,12 +125,14 @@ export default function SPCListPage() {
       dataIndex: "spec_upper",
       key: "spec_upper",
       width: 100,
+      render: (v: number) => <span className="qf-mono">{v}</span>,
     },
     {
       title: t("list.columns.spec_lower"),
       dataIndex: "spec_lower",
       key: "spec_lower",
       width: 100,
+      render: (v: number) => <span className="qf-mono">{v}</span>,
     },
     {
       title: t("list.columns.control_limits_locked"),
@@ -139,9 +140,9 @@ export default function SPCListPage() {
       key: "control_limits_locked",
       width: 120,
       render: (locked: boolean) => (
-        <Tag color={locked ? "green" : "orange"}>
+        <StatusBadge status={locked ? "approved" : "warning"}>
           {locked ? t("list.limitStatus.locked") : t("list.limitStatus.auto")}
-        </Tag>
+        </StatusBadge>
       ),
     },
     {
@@ -176,71 +177,69 @@ export default function SPCListPage() {
     },
   ];
 
+  const actions = canEdit('spc') ? (
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+      {t("list.newCharacteristic")}
+    </Button>
+  ) : null;
+
   return (
-    <div>
+    <PageShell title={t("list.title")} subtitle={t("list.title")} actions={actions}>
       {/* KPI Cards */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
+      <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <Card>
+          <DataCard title={t("list.totalCharacteristics")} noPadding>
             <Statistic
-              title={t("list.totalCharacteristics")}
               value={totalCount}
-              prefix={<AreaChartOutlined />}
+              prefix={<AreaChartOutlined style={{ color: "var(--qf-cyan)" }} />}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-primary)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={t("list.lockedLimits")} noPadding>
             <Statistic
-              title={t("list.lockedLimits")}
               value={lockedCount}
-              prefix={<BarChartOutlined />}
+              prefix={<BarChartOutlined style={{ color: "var(--qf-green)" }} />}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={t("list.unlockedLimits")} noPadding>
             <Statistic
-              title={t("list.unlockedLimits")}
               value={totalCount - lockedCount}
-              prefix={<AlertOutlined />}
+              prefix={<AlertOutlined style={{ color: "var(--qf-amber)" }} />}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-amber)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
         <Col span={6}>
-          <Card>
+          <DataCard title={t("list.newBatchesThisWeek")} noPadding>
             <Statistic
-              title={t("list.newBatchesThisWeek")}
               value="-"
-              prefix={<BarChartOutlined />}
+              prefix={<BarChartOutlined style={{ color: "var(--qf-text-tertiary)" }} />}
+              valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-tertiary)" }}
             />
-          </Card>
+          </DataCard>
         </Col>
       </Row>
 
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-        <Space>
-          <Title level={4} style={{ margin: 0 }}>{t("list.title")}</Title>
-          <Input.Search
-            placeholder={t("list.searchPlaceholder")}
-            allowClear
-            onSearch={(v) => {
-              setSearchProcess(v);
-              setPage(1);
-              fetchData(1);
-            }}
-            style={{ width: 240 }}
-          />
-        </Space>
-        {canEdit('spc') && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-            {t("list.newCharacteristic")}
-          </Button>
-        )}
-      </div>
+      <Space style={{ marginBottom: 16 }}>
+        <Input.Search
+          placeholder={t("list.searchPlaceholder")}
+          allowClear
+          onSearch={(v) => {
+            setSearchProcess(v);
+            setPage(1);
+            fetchData(1);
+          }}
+          style={{ width: 240 }}
+        />
+      </Space>
 
       <Table
+        className="qf-table"
         columns={columns}
         dataSource={data}
         rowKey="ic_id"
@@ -262,6 +261,7 @@ export default function SPCListPage() {
         onOk={() => form.submit()}
         onCancel={() => setModalOpen(false)}
         width={560}
+        okButtonProps={{ className: "qf-btn-primary" }}
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
           <Form.Item
@@ -333,6 +333,6 @@ export default function SPCListPage() {
           </Row>
         </Form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

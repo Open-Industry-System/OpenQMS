@@ -24,6 +24,7 @@
     "back": "返回",
     "more": "更多",
     "create": "创建",
+    "complete": "完成",
     "update": "更新",
     "import": "导入",
     "export": "导出",
@@ -64,6 +65,8 @@
   "table": {
     "noData": "暂无数据",
     "operations": "操作",
+    "status": "状态",
+    "type": "类型",
     "selectAll": "全选",
     "selected": "已选择 {{count}} 项",
     "total": "共 {{total}} 条"
@@ -78,6 +81,8 @@
     "deleteFailed": "删除失败",
     "operationSuccess": "操作成功",
     "operationFailed": "操作失败",
+    "updateSuccess": "更新成功",
+    "loadFailed": "加载失败",
     "confirmDelete": "确认删除？",
     "confirmOperation": "确认执行此操作？",
     "loading": "加载中...",

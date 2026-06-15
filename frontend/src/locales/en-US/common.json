@@ -24,6 +24,7 @@
     "back": "Back",
     "more": "More",
     "create": "Create",
+    "complete": "Done",
     "update": "Update",
     "import": "Import",
     "export": "Export",
@@ -64,6 +65,8 @@
   "table": {
     "noData": "No data",
     "operations": "Actions",
+    "status": "Status",
+    "type": "Type",
     "selectAll": "Select All",
     "selected": "{{count}} selected",
     "total": "Total {{total}} items"
@@ -78,6 +81,8 @@
     "deleteFailed": "Delete failed",
     "operationSuccess": "Operation successful",
     "operationFailed": "Operation failed",
+    "updateSuccess": "Updated successfully",
+    "loadFailed": "Failed to load",
     "confirmDelete": "Confirm delete?",
     "confirmOperation": "Confirm this operation?",
     "loading": "Loading...",

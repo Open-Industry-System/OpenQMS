@@ -1,14 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { Table, Switch, InputNumber, message, Tag } from "antd";
+import { Table, Switch, InputNumber, message } from "antd";
 import { useTranslation } from "react-i18next";
 import type { SupplierRiskConfig } from "../../../types";
 import { riskAlertApi } from "../../../api/supplierRisk";
-
-const CATEGORY_COLORS: Record<string, string> = {
-  quality: "blue",
-  delivery: "green",
-  compliance: "purple",
-};
+import { StatusBadge } from "../../../components/design";
 
 const RuleConfigTable: React.FC = () => {
   const { t } = useTranslation("supplierRisk");
@@ -61,7 +56,7 @@ const RuleConfigTable: React.FC = () => {
       dataIndex: "category",
       width: 100,
       render: (v: string) => (
-        <Tag color={CATEGORY_COLORS[v]}>{CATEGORY_LABELS[v] || v}</Tag>
+        <StatusBadge status={v}>{CATEGORY_LABELS[v] || v}</StatusBadge>
       ),
     },
     {
@@ -104,6 +99,7 @@ const RuleConfigTable: React.FC = () => {
       loading={loading}
       pagination={false}
       size="small"
+      className="qf-table"
     />
   );
 };

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Button, Tag, Typography, Card, Form, Input, Select, Switch, App,
+  Button, Typography, Form, Input, Select, Switch, App,
   Spin, Row, Col, Descriptions, Space, Timeline, Collapse,
 } from "antd";
 import {
@@ -10,7 +10,6 @@ import {
   CheckCircleOutlined, CloseCircleOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { formatDateTime } from "../../../utils/dateTime";
 import {
   getSC, updateSC, createSC,
   safetySubmit, safetyApprove, safetyReject, safetyCancel,
@@ -18,38 +17,24 @@ import {
 import type { SpecialCharacteristic } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
+import { PageShell, DataCard, StatusBadge } from "../../../components/design";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { TextArea } = Input;
 
-function useSCDetailLabels(t: (key: string) => string) {
-  const typeOptions = [
-    { value: "CC", label: t("scType.critical") },
-    { value: "SC", label: t("scType.significant") },
-  ];
-
-  const categoryOptions = [
-    { value: "product", label: t("category.product") },
-    { value: "process", label: t("category.process") },
-  ];
-
-  const approvalStatusLabel = (status: string) => {
-    if (status === "pending") return t("approvalStatus.pending");
-    if (status === "submitted") return t("approvalStatus.submitted");
-    if (status === "approved") return t("approvalStatus.approved");
-    if (status === "rejected") return t("approvalStatus.rejected");
-    return status;
-  };
-
-  const approvalStatusColor = (status: string) => {
-    if (status === "approved") return "green";
-    if (status === "rejected") return "red";
-    if (status === "submitted") return "blue";
-    return "orange";
-  };
-
-  return { typeOptions, categoryOptions, approvalStatusLabel, approvalStatusColor };
-}
+const scTypeVariant = (t: string): string => (t === "CC" ? "error" : "warning");
+const sourceTypeVariant = (t: string): string => (t === "DFMEA" ? "info" : "success");
+const msaStatusVariant = (s: string): string => {
+  if (s === "PASS") return "success";
+  if (s === "FAIL") return "error";
+  return "warning";
+};
+const safetyStatusVariant = (s: string): string => {
+  if (s === "approved") return "success";
+  if (s === "rejected") return "error";
+  if (s === "submitted") return "warning";
+  return "info";
+};
 
 export default function SCDetailPage() {
   const { t } = useTranslation("specialCharacteristic");
@@ -68,8 +53,6 @@ export default function SCDetailPage() {
 
   const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
-
-  const { typeOptions, categoryOptions, approvalStatusLabel, approvalStatusColor } = useSCDetailLabels(t);
 
   useEffect(() => {
     if (!id || isNew) { setLoading(false); return; }
@@ -193,65 +176,48 @@ export default function SCDetailPage() {
   }
 
   return (
-    <div>
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
-        <Space>
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate("/special-characteristics")}
-          >
-            {t("action.backToList")}
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            {isNew ? t("pageTitle.newSC") : `${sc!.sc_code} - ${sc!.sc_name}`}
-          </Title>
-          {!isNew && (
-            <Tag color={sc!.sc_type === "CC" ? "red" : "gold"}>
-              {sc!.sc_type}
-            </Tag>
-          )}
-        </Space>
-      </div>
-
+    <PageShell
+      title={
+        isNew ? t("pageTitle.new") : (
+          <Space size={12}>
+            {`${sc!.sc_code} - ${sc!.sc_name}`}
+            <StatusBadge status={scTypeVariant(sc!.sc_type)}>{sc!.sc_type}</StatusBadge>
+          </Space>
+        )
+      }
+      subtitle={isNew ? undefined : `${t("productLine")}：${sc!.product_line_code}`}
+      actions={
+        <Button
+          icon={<ArrowLeftOutlined />}
+          onClick={() => navigate("/special-characteristics")}
+        >
+          {t("actions.backToList")}
+        </Button>
+      }
+    >
       <Row gutter={16}>
         {/* Left: Read-only info (edit mode only) */}
         {!isNew && (
           <Col span={10}>
-            <Card title={t("card.basicInfo")} style={{ marginBottom: 16 }}>
+            <DataCard title={t("basicInfo.title")} style={{ marginBottom: 16 }}>
               <Descriptions column={1} size="small">
-                <Descriptions.Item label={t("label.scCode")}>
+                <Descriptions.Item label={t("basicInfo.scCode")}>
                   {sc!.sc_code}
                 </Descriptions.Item>
-                <Descriptions.Item label={t("label.type")}>
-                  <span
-                    style={{
-                      backgroundColor: sc!.sc_type === "CC" ? "#fff1f0" : "#fffbe6",
-                      padding: "2px 8px",
-                      borderRadius: 4,
-                    }}
-                  >
-                    <Tag color={sc!.sc_type === "CC" ? "red" : "gold"}>
-                      {sc!.sc_type === "CC" ? t("scType.critical") : t("scType.significant")}
-                    </Tag>
-                  </span>
+                <Descriptions.Item label={t("basicInfo.type")}>
+                  <StatusBadge status={scTypeVariant(sc!.sc_type)}>
+                    {sc!.sc_type === "CC" ? t("scType.critical") : t("scType.significant")}
+                  </StatusBadge>
                 </Descriptions.Item>
-                <Descriptions.Item label={t("label.productLine")}>
+                <Descriptions.Item label={t("basicInfo.productLine")}>
                   {sc!.product_line_code}
                 </Descriptions.Item>
-                <Descriptions.Item label={t("label.sourceType")}>
-                  <Tag color={sc!.source_type === "DFMEA" ? "blue" : "green"}>
+                <Descriptions.Item label={t("basicInfo.sourceType")}>
+                  <StatusBadge status={sourceTypeVariant(sc!.source_type)}>
                     {sc!.source_type}
-                  </Tag>
+                  </StatusBadge>
                 </Descriptions.Item>
-                <Descriptions.Item label={t("label.sourceFMEADoc")}>
+                <Descriptions.Item label={t("basicInfo.sourceFmea")}>
                   {sc!.source_fmea_document_no ? (
                     <Button
                       type="link"
@@ -265,10 +231,10 @@ export default function SCDetailPage() {
                     "-"
                   )}
                 </Descriptions.Item>
-                <Descriptions.Item label={t("label.sourceNodeId")}>
+                <Descriptions.Item label={t("basicInfo.sourceNodeId")}>
                   <Text copyable>{sc!.source_node_id}</Text>
                 </Descriptions.Item>
-                <Descriptions.Item label={t("label.parentSC")}>
+                <Descriptions.Item label={t("basicInfo.parentSc")}>
                   {sc!.parent_sc_id ? (
                     <Button
                       type="link"
@@ -283,50 +249,42 @@ export default function SCDetailPage() {
                     "-"
                   )}
                 </Descriptions.Item>
-                <Descriptions.Item label={t("label.msaStatus")}>
-                  <Tag
-                    color={
-                      sc!.msa_status === "PASS"
-                        ? "green"
-                        : sc!.msa_status === "FAIL"
-                        ? "red"
-                        : "orange"
-                    }
-                  >
+                <Descriptions.Item label={t("basicInfo.msaStatus")}>
+                  <StatusBadge status={msaStatusVariant(sc!.msa_status)}>
                     {sc!.msa_status}
-                  </Tag>
+                  </StatusBadge>
                 </Descriptions.Item>
               </Descriptions>
-            </Card>
+            </DataCard>
 
             {/* Source FMEA info */}
             {sc!.source_fmea_title && (
-              <Card title={t("card.sourceFMEAInfo")}>
+              <DataCard title={t("sourceFmea.title")}>
                 <Descriptions column={1} size="small">
-                  <Descriptions.Item label={t("label.fmeaTitle")}>
+                  <Descriptions.Item label={t("sourceFmea.fmeaTitle")}>
                     {sc!.source_fmea_title}
                   </Descriptions.Item>
-                  <Descriptions.Item label={t("label.sourceFMEADoc")}>
+                  <Descriptions.Item label={t("sourceFmea.documentNo")}>
                     {sc!.source_fmea_document_no}
                   </Descriptions.Item>
-                  <Descriptions.Item label={t("label.viewFMEA")}>
+                  <Descriptions.Item label={t("sourceFmea.viewFmea")}>
                     <Button
                       type="primary"
                       size="small"
                       onClick={() => navigate(`/fmea/${sc!.source_fmea_id}`)}
                     >
-                      {t("label.viewFMEA")}
+                      {t("sourceFmea.openEditor")}
                     </Button>
                   </Descriptions.Item>
                 </Descriptions>
-              </Card>
+              </DataCard>
             )}
           </Col>
         )}
 
         {/* Right: Editable form */}
         <Col span={isNew ? 24 : 14}>
-          <Card title={isNew ? t("card.createInfo") : t("card.editInfo")}>
+          <DataCard title={isNew ? t("createInfo.title") : t("editInfo.title")}>
             <Form
               form={form}
               layout="vertical"
@@ -337,12 +295,11 @@ export default function SCDetailPage() {
                 <Form.Item
                   name="sc_type"
                   label={t("form.scType")}
-                  rules={[{ required: true, message: t("message.selectType") }]}
+                  rules={[{ required: true, message: t("form.scTypeRequired") }]}
                 >
-                  <Select placeholder={t("placeholder.selectType")}>
-                    {typeOptions.map((opt) => (
-                      <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
-                    ))}
+                  <Select placeholder={t("form.selectPlaceholder")}>
+                    <Select.Option value="CC">{t("scType.critical")}</Select.Option>
+                    <Select.Option value="SC">{t("scType.significant")}</Select.Option>
                   </Select>
                 </Form.Item>
               )}
@@ -350,34 +307,33 @@ export default function SCDetailPage() {
               <Form.Item
                 name="sc_name"
                 label={t("form.scName")}
-                rules={[{ required: true, message: t("message.enterName") }]}
+                rules={[{ required: true, message: t("form.scNameRequired") }]}
               >
-                <Input placeholder={t("placeholder.scName")} />
+                <Input placeholder={t("form.scNamePlaceholder")} />
               </Form.Item>
 
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item name="sc_category" label={t("form.scCategory")}>
-                    <Select placeholder={t("placeholder.selectType")} allowClear>
-                      {categoryOptions.map((opt) => (
-                        <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
-                      ))}
+                  <Form.Item name="sc_category" label={t("form.category")}>
+                    <Select placeholder={t("form.selectPlaceholder")} allowClear>
+                      <Select.Option value="product">{t("category.product")}</Select.Option>
+                      <Select.Option value="process">{t("category.process")}</Select.Option>
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col span={12}>
                   <Form.Item name="customer_symbol" label={t("form.customerSymbol")}>
-                    <Input placeholder={t("placeholder.customerSymbol")} />
+                    <Input placeholder={t("form.customerSymbolPlaceholder")} />
                   </Form.Item>
                 </Col>
               </Row>
 
               <Form.Item name="spec_requirement" label={t("form.specRequirement")}>
-                <TextArea rows={4} placeholder={t("placeholder.specRequirement")} />
+                <TextArea rows={4} placeholder={t("form.specRequirementPlaceholder")} />
               </Form.Item>
 
               <Form.Item name="sop_ref" label={t("form.sopRef")}>
-                <Input placeholder={t("placeholder.sopRef")} />
+                <Input placeholder={t("form.sopRefPlaceholder")} />
               </Form.Item>
 
               <Row gutter={16}>
@@ -392,7 +348,7 @@ export default function SCDetailPage() {
                 </Col>
                 <Col span={16}>
                   <Form.Item name="supplier_code" label={t("form.supplierCode")}>
-                    <Input placeholder={t("placeholder.supplierCode")} />
+                    <Input placeholder={t("form.supplierCodePlaceholder")} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -405,12 +361,12 @@ export default function SCDetailPage() {
                     icon={<SaveOutlined />}
                     loading={saving}
                   >
-                    {tc("actions.save")}
+                    {t("actions.save")}
                   </Button>
                 </Form.Item>
               )}
             </Form>
-          </Card>
+          </DataCard>
 
           {/* Safety Characteristic Panel */}
           {!isNew && sc && (
@@ -423,18 +379,21 @@ export default function SCDetailPage() {
                 header={
                   <Space>
                     <SafetyCertificateOutlined style={{ color: "#ff4d4f" }} />
-                    <span>{t("card.safetyCharacteristic")}</span>
+                    <span>{t("safety.title")}</span>
                     {sc.safety_approval_status && (
-                      <Tag color={approvalStatusColor(sc.safety_approval_status)}>
-                        {approvalStatusLabel(sc.safety_approval_status)}
-                      </Tag>
+                      <StatusBadge status={safetyStatusVariant(sc.safety_approval_status)}>
+                        {sc.safety_approval_status === "pending" && t("approvalStatus.pending")}
+                        {sc.safety_approval_status === "submitted" && t("approvalStatus.submitted")}
+                        {sc.safety_approval_status === "approved" && t("approvalStatus.approved")}
+                        {sc.safety_approval_status === "rejected" && t("approvalStatus.rejected")}
+                      </StatusBadge>
                     )}
                   </Space>
                 }
                 key="safety"
               >
                 <Space direction="vertical" style={{ width: "100%" }}>
-                  <Form.Item label={t("label.safetyRelated")}>
+                  <Form.Item label={t("safety.safetyRelated")}>
                     <Switch
                       checked={sc.is_safety_related}
                       onChange={handleSafetyToggle}
@@ -444,6 +403,7 @@ export default function SCDetailPage() {
 
                   {sc.is_safety_related && (
                     <>
+                      <StatusBadge status="info">{t("safety.autoSwitchHint")}</StatusBadge>
                       <Form
                         form={safetyForm}
                         layout="vertical"
@@ -452,21 +412,21 @@ export default function SCDetailPage() {
                       >
                         <Form.Item
                           name="safety_regulation_ref"
-                          label={t("label.safetyRegulationRef")}
-                          rules={[{ required: true, message: t("message.enterRegulationRef") }]}
+                          label={t("safety.regulationRef")}
+                          rules={[{ required: true, message: t("safety.regulationRefRequired") }]}
                         >
-                          <Input placeholder={t("placeholder.safetyRegulationRef")} />
+                          <Input placeholder={t("safety.regulationRefPlaceholder")} />
                         </Form.Item>
                         <Form.Item
                           name="safety_verification_method"
-                          label={t("label.safetyVerificationMethod")}
-                          rules={[{ required: true, message: t("message.enterVerificationMethod") }]}
+                          label={t("safety.verificationMethod")}
+                          rules={[{ required: true, message: t("safety.verificationMethodRequired") }]}
                         >
-                          <TextArea rows={3} placeholder={t("placeholder.safetyVerificationMethod")} />
+                          <TextArea rows={3} placeholder={t("safety.verificationMethodPlaceholder")} />
                         </Form.Item>
                         {sc.safety_approval_status === "pending" && !!canEdit('special_characteristic') && (
                           <Button type="primary" htmlType="submit" loading={approvalLoading}>
-                            {t("label.submitForApproval")}
+                            {t("safety.submitApproval")}
                           </Button>
                         )}
                       </Form>
@@ -477,21 +437,21 @@ export default function SCDetailPage() {
                           items={[
                             {
                               dot: <ExclamationCircleOutlined style={{ color: "#faad14" }} />,
-                              children: t("timeline.pending"),
+                              children: t("timeline.pendingDescription"),
                               color: sc.safety_approval_status === "pending" ? "blue" : "gray",
                             },
                             {
                               dot: <SafetyCertificateOutlined style={{ color: "#1677ff" }} />,
-                              children: t("timeline.submitted", { time: sc.safety_submitted_at ? formatDateTime(sc.safety_submitted_at) : "-" }),
+                              children: `${t("timeline.submitted")}：${sc.safety_submitted_at ? new Date(sc.safety_submitted_at).toLocaleString() : "-"}`,
                               color: sc.safety_approval_status === "submitted" ? "blue" : "gray",
                             },
                             sc.safety_approval_status === "approved" ? {
                               dot: <CheckCircleOutlined style={{ color: "#52c41a" }} />,
-                              children: t("timeline.approved", { time: sc.safety_approved_at ? formatDateTime(sc.safety_approved_at) : "-" }),
+                              children: `${t("timeline.approved")}：${sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-"}`,
                               color: "green",
                             } : sc.safety_approval_status === "rejected" ? {
                               dot: <CloseCircleOutlined style={{ color: "#ff4d4f" }} />,
-                              children: t("timeline.rejected", { time: sc.safety_approved_at ? formatDateTime(sc.safety_approved_at) : "-", comment: sc.safety_approval_comment ? `（${sc.safety_approval_comment}）` : "" }),
+                              children: `${t("timeline.rejected")}：${sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-"}${sc.safety_approval_comment ? `（${sc.safety_approval_comment}）` : ""}`,
                               color: "red",
                             } : {
                               dot: <SafetyCertificateOutlined />,
@@ -506,10 +466,10 @@ export default function SCDetailPage() {
                       {sc.safety_approval_status === "submitted" && canApprove('special_characteristic') && (
                         <Space>
                           <Button type="primary" onClick={handleSafetyApprove} loading={approvalLoading}>
-                            {tc("actions.approve")}
+                            {t("actions.approve")}
                           </Button>
                           <Button danger onClick={handleSafetyReject} loading={approvalLoading}>
-                            {tc("actions.reject")}
+                            {t("actions.reject")}
                           </Button>
                         </Space>
                       )}
@@ -521,6 +481,6 @@ export default function SCDetailPage() {
           )}
         </Col>
       </Row>
-    </div>
+    </PageShell>
   );
 }

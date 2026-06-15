@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Tag, Typography, Space, App, Card, Row, Col, Statistic, Button } from "antd";
+import { Table, Tag, Typography, App, Row, Col, Statistic, Button } from "antd";
 import { ApartmentOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getMatrix } from "../../../api/specialCharacteristic";
 import type { MatrixRow } from "../../../types";
 import { useProductLineStore } from "../../../store/productLineStore";
+import { PageShell, DataCard, StatusBadge } from "../../../components/design";
 
 const { Title } = Typography;
 
-const msaStatusColors: Record<string, string> = {
-  PASS: "green",
-  FAIL: "red",
-  PENDING: "orange",
+const scTypeVariant = (t: string): string => (t === "CC" ? "error" : "warning");
+const msaStatusVariant = (s: string): string => {
+  if (s === "PASS") return "success";
+  if (s === "FAIL") return "error";
+  return "warning";
 };
 
 export default function SCMatrixPage() {
@@ -101,12 +103,9 @@ export default function SCMatrixPage() {
       key: "sc_type",
       width: 80,
       render: (t: string, record: MatrixRow) => (
-        <Tag
-          color={t === "CC" ? "red" : "gold"}
-          style={{ backgroundColor: record.is_safety_related ? "#fff2f0" : undefined }}
-        >
-          {t}
-        </Tag>
+        <span style={{ backgroundColor: record.is_safety_related ? "rgba(255,71,87,0.12)" : undefined, borderRadius: 4, display: "inline-block" }}>
+          <StatusBadge status={scTypeVariant(t)}>{t}</StatusBadge>
+        </span>
       ),
     },
     {
@@ -162,9 +161,9 @@ export default function SCMatrixPage() {
           );
         }
         return (
-          <Tag color={msaStatusColors[status] || "default"}>
+          <StatusBadge status={msaStatusVariant(status)}>
             {status}
-          </Tag>
+          </StatusBadge>
         );
       },
     },
@@ -184,44 +183,39 @@ export default function SCMatrixPage() {
   ];
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
-        <Space>
-          <Title level={4} style={{ margin: 0 }}>
-            <ApartmentOutlined style={{ marginRight: 8 }} />
-            {t("pageTitle.scMatrix")}
-          </Title>
-        </Space>
-      </div>
+    <PageShell
+      title={
+        <>
+          <ApartmentOutlined style={{ marginRight: 8 }} />
+          {t("pageTitle.scMatrix")}
+        </>
+      }
+      subtitle={t("pageTitle.scMatrixSubtitle")}
+    >
+      <DataCard title={t("matrix.title")} noPadding>
+        <Table
+          className="qf-table"
+          columns={columns}
+          dataSource={data}
+          rowKey="sc_id"
+          loading={loading}
+          pagination={false}
+          size="middle"
+          scroll={{ x: 900 }}
+        />
+      </DataCard>
 
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="sc_id"
-        loading={loading}
-        pagination={false}
-        size="middle"
-        scroll={{ x: 900 }}
-      />
-
-      <Card style={{ marginTop: 16 }}>
+      <DataCard title={t("coverage.title")} style={{ marginTop: 16 }}>
         <Title level={5} style={{ marginBottom: 16 }}>
-          {t("matrix.coverageStats")}
+          {t("coverage.statsTitle")}
         </Title>
         <Row gutter={16}>
           <Col span={4}>
-            <Statistic title={t("matrix.total")} value={total} />
+            <Statistic title={t("coverage.total")} value={total} />
           </Col>
           <Col span={4}>
             <Statistic
-              title={t("matrix.dfmeaCoverage")}
+              title={t("coverage.dfmea")}
               value={pct(dfmeaCount)}
               suffix="%"
               valueStyle={{
@@ -231,7 +225,7 @@ export default function SCMatrixPage() {
           </Col>
           <Col span={4}>
             <Statistic
-              title={t("matrix.pfmeaCoverage")}
+              title={t("coverage.pfmea")}
               value={pct(pfmeaCount)}
               suffix="%"
               valueStyle={{
@@ -241,7 +235,7 @@ export default function SCMatrixPage() {
           </Col>
           <Col span={4}>
             <Statistic
-              title={t("matrix.cpCoverage")}
+              title={t("coverage.cp")}
               value={pct(cpCount)}
               suffix="%"
               valueStyle={{
@@ -251,7 +245,7 @@ export default function SCMatrixPage() {
           </Col>
           <Col span={4}>
             <Statistic
-              title={t("matrix.msaPass")}
+              title={t("coverage.msa")}
               value={pct(msaPassCount)}
               suffix="%"
               valueStyle={{
@@ -261,7 +255,7 @@ export default function SCMatrixPage() {
           </Col>
           <Col span={4}>
             <Statistic
-              title={t("matrix.sopCoverage")}
+              title={t("coverage.sop")}
               value={pct(sopCount)}
               suffix="%"
               valueStyle={{
@@ -270,7 +264,7 @@ export default function SCMatrixPage() {
             />
           </Col>
         </Row>
-      </Card>
-    </div>
+      </DataCard>
+    </PageShell>
   );
 }

@@ -16,7 +16,7 @@ export async function listAqlProfiles(params?: {
   page?: number;
   page_size?: number;
 }) {
-  const { data } = await client.get('/api/iqc/aql-profiles', { params });
+  const { data } = await client.get('/iqc/aql-profiles', { params });
   return data;
 }
 
@@ -30,7 +30,7 @@ export async function createAqlProfile(payload: {
   max_aql?: number;
   inspection_level?: string;
 }) {
-  const { data } = await client.post('/api/iqc/aql-profiles', payload);
+  const { data } = await client.post('/iqc/aql-profiles', payload);
   return data as AqlProfile;
 }
 
@@ -63,7 +63,7 @@ export async function listAqlRecommendations(params?: {
   page?: number;
   page_size?: number;
 }) {
-  const { data } = await client.get('/api/iqc/aql-recommendations', { params });
+  const { data } = await client.get('/iqc/aql-recommendations', { params });
   return data;
 }
 
@@ -103,12 +103,12 @@ export async function markRecommendationExpired(recommendationId: string) {
 }
 
 export async function triggerAqlEvaluation(payload: { supplier_id: string; material_id: string }) {
-  const { data } = await client.post('/api/iqc/aql-recommendations/trigger', payload);
+  const { data } = await client.post('/iqc/aql-recommendations/trigger', payload);
   return data;
 }
 
 export async function previewAqlRecommendation(payload: { supplier_id: string; material_id: string }) {
-  const { data } = await client.post('/api/iqc/aql-recommendations/preview', payload);
+  const { data } = await client.post('/iqc/aql-recommendations/preview', payload);
   return data as AqlPreviewResult;
 }
 
@@ -127,7 +127,7 @@ export async function getAqlQualitySnapshotTrend(supplierId: string, materialId:
 // ── Config ──
 
 export async function listAqlConfigs(productLineCode?: string) {
-  const { data } = await client.get('/api/iqc/aql-config', { params: { product_line_code: productLineCode } });
+  const { data } = await client.get('/iqc/aql-config', { params: { product_line_code: productLineCode } });
   return data as AqlConfig[];
 }
 
@@ -137,6 +137,6 @@ export async function updateAqlConfig(configKey: string, payload: { config_value
 }
 
 export async function resetAqlConfigs() {
-  const { data } = await client.post('/api/iqc/aql-config/reset');
+  const { data } = await client.post('/iqc/aql-config/reset');
   return data;
 }

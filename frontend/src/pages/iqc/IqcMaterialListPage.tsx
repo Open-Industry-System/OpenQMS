@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Card,
   Table,
   Button,
   Tag,
@@ -26,6 +25,7 @@ import { usePermission } from "../../hooks/usePermission";
 import type { IqcMaterial } from "../../types";
 import { listMaterials, createMaterial, updateMaterial, deleteMaterial, importMaterials, downloadMaterialImportTemplate } from "../../api/iqc";
 import ImportExcelDialog from "../../components/shared/ImportExcelDialog";
+import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
@@ -147,7 +147,7 @@ export default function IqcMaterialListPage() {
             part: t("materialType.part"),
             other: t("materialType.other"),
           };
-          return <Tag>{labels[v] || v}</Tag>;
+          return <StatusBadge status="info">{labels[v] || v}</StatusBadge>;
         },
       },
       {
@@ -173,9 +173,9 @@ export default function IqcMaterialListPage() {
         dataIndex: "status",
         width: 80,
         render: (status: string) => (
-          <Tag color={status === "active" ? "green" : "default"}>
+          <StatusBadge status={status === "active" ? "closed" : "normal"}>
             {status === "active" ? tc("status.active") : tc("status.inactive")}
-          </Tag>
+          </StatusBadge>
         ),
       },
       {
@@ -210,27 +210,27 @@ export default function IqcMaterialListPage() {
   );
 
   return (
-    <div>
-      <Card
-        title={t("pageTitle.materialList")}
-        extra={
-          <Space>
-            {canEdit('iqc') && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
-                {t("actions.newMaterial")}
-              </Button>
-            )}
-            {canEdit('iqc') && (
-              <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-                {t("actions.importMaterial")}
-              </Button>
-            )}
-            <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              {tc("actions.refresh")}
+    <PageShell
+      title={t("pageTitle.materialList")}
+      actions={
+        <Space>
+          {canEdit('iqc') && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
+              {t("actions.newMaterial")}
             </Button>
-          </Space>
-        }
-      >
+          )}
+          {canEdit('iqc') && (
+            <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+              {t("actions.importMaterial")}
+            </Button>
+          )}
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
+            {tc("actions.refresh")}
+          </Button>
+        </Space>
+      }
+    >
+      <DataCard title={t("pageTitle.materialList")}>
         <Space style={{ marginBottom: 16 }}>
           <Input
             placeholder={t("placeholder.materialSearch")}
@@ -246,6 +246,7 @@ export default function IqcMaterialListPage() {
         </Space>
 
         <Table
+          className="qf-table"
           rowKey="material_id"
           columns={columns}
           dataSource={materials}
@@ -261,7 +262,7 @@ export default function IqcMaterialListPage() {
             },
           }}
         />
-      </Card>
+      </DataCard>
 
       <Modal
         title={editingMaterial ? t("modal.editMaterial") : t("modal.newMaterial")}
@@ -325,6 +326,6 @@ export default function IqcMaterialListPage() {
         templateDownloadFn={downloadMaterialImportTemplate}
         hint={t("import.materialHint")}
       />
-    </div>
+    </PageShell>
   );
 }

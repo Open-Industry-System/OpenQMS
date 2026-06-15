@@ -1,16 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Table, Tag, Button, Space, Select } from "antd";
+import { Table, Button, Space, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import type { SupplierRiskAlert } from "../../../types";
 import { riskAlertApi } from "../../../api/supplierRisk";
 import HandleAlertDrawer from "./HandleAlertDrawer";
-
-const RISK_COLORS: Record<string, string> = {
-  low: "green",
-  medium: "gold",
-  high: "orange",
-  critical: "red",
-};
+import { StatusBadge } from "../../../components/design";
 
 interface Props {
   productLineCode?: string | null;
@@ -75,11 +69,11 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
       title: t("alert.columns.riskLevel"),
       dataIndex: "risk_level",
       render: (v: string) => (
-        <Tag color={RISK_COLORS[v]}>{RISK_LABELS[v] || v}</Tag>
+        <StatusBadge status={v}>{RISK_LABELS[v] || v}</StatusBadge>
       ),
     },
     { title: t("alert.columns.riskScore"), dataIndex: "risk_score", sorter: true },
-    { title: t("alert.columns.status"), dataIndex: "status", render: (v: string) => STATUS_LABELS[v] || v },
+    { title: t("alert.columns.status"), dataIndex: "status", render: (v: string) => <StatusBadge status={v}>{STATUS_LABELS[v] || v}</StatusBadge> },
     { title: t("alert.columns.snapshotDate"), dataIndex: "snapshot_date" },
     {
       title: tc("table.operations"),
@@ -144,8 +138,9 @@ const AlertTable: React.FC<Props> = ({ productLineCode, onRefresh }) => {
           total,
           pageSize: 20,
           onChange: setPage,
-          showTotal: (totalCount) => tc("pagination.total", { total: totalCount }),
+          showTotal: (t) => tc("pagination.total", { total: t }),
         }}
+        className="qf-table"
       />
       <HandleAlertDrawer
         alert={selectedAlert}

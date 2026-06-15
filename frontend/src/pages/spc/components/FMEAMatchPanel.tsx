@@ -1,12 +1,14 @@
 // frontend/src/pages/spc/components/FMEAMatchPanel.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Modal, Card, Button, Tag, Space, Typography, Spin, Empty, Alert,
+  Modal, Button, Space, Typography, Spin, Empty, Alert,
 } from "antd";
 import {
   LinkOutlined, SearchOutlined, CheckCircleOutlined,
 } from "@ant-design/icons";
+import DataCard from "../../../components/design/DataCard";
+import StatusBadge from "../../../components/design/StatusBadge";
 import { getFMEAMatchRecommendations, confirmFMEAAssociation } from "../../../api/spc";
 import type { FMEAMatch, FMEAMatchResponse } from "../../../types";
 
@@ -17,13 +19,14 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   onCreateCAPA: () => void;
-  onConfirmed?: () => void;
+  onConfirmed?: () => void; // 确认成功后回调，父组件可刷新列表
 }
 
 export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA, onConfirmed }: Props) {
   const { t } = useTranslation("spc");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<FMEAMatchResponse | null>(null);
+  // 选中键使用 `${fmea_id}:${node_id}` 组合，避免跨 FMEA 节点 ID 冲突
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,16 +71,16 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
     r => `${r.fmea_id}:${r.node_id}` === selectedKey
   );
 
-  const sourceInfo = (source: string): { text: string; icon: React.ReactNode; color: string } => {
+  const sourceInfo = (source: string): { text: string; icon: ReactNode; status: string } => {
     switch (source) {
       case "control_plan":
-        return { text: t("fmeaMatch.source.control_plan"), icon: <LinkOutlined />, color: "blue" };
+        return { text: t("fmeaMatch.source.control_plan"), icon: <LinkOutlined />, status: "info" };
       case "process_name":
-        return { text: t("fmeaMatch.source.process_name"), icon: <SearchOutlined />, color: "orange" };
+        return { text: t("fmeaMatch.source.process_name"), icon: <SearchOutlined />, status: "warning" };
       case "characteristic_name":
-        return { text: t("fmeaMatch.source.characteristic_name"), icon: <SearchOutlined />, color: "orange" };
+        return { text: t("fmeaMatch.source.characteristic_name"), icon: <SearchOutlined />, status: "warning" };
       default:
-        return { text: source, icon: <SearchOutlined />, color: "default" };
+        return { text: source, icon: <SearchOutlined />, status: "info" };
     }
   };
 
@@ -122,9 +125,9 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
             const source = sourceInfo(rec.match_source);
             const isSelected = `${rec.fmea_id}:${rec.node_id}` === selectedKey;
             return (
-              <Card
+              <DataCard
                 key={`${rec.fmea_id}:${rec.node_id}`}
-                size="small"
+                title={null}
                 style={{
                   borderColor: isSelected ? "#1890ff" : undefined,
                   background: isSelected ? "#e6f7ff" : undefined,
@@ -132,10 +135,10 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
               >
                 <Space direction="vertical" style={{ width: "100%" }}>
                   <Space>
-                    <Tag icon={source.icon} color={source.color}>
-                      {source.text}
-                    </Tag>
-                    <Tag>{t("fmeaMatch.matchScore", { score: Math.round(rec.match_score * 100) })}</Tag>
+                    <StatusBadge status={source?.status || "info"}>
+                      {source?.icon} {source?.text}
+                    </StatusBadge>
+                    <StatusBadge status="info">{t("fmeaMatch.matchScore", { score: Math.round(rec.match_score * 100) })}</StatusBadge>
                   </Space>
 
                   <Title level={5} style={{ margin: 0 }}>
@@ -169,7 +172,7 @@ export default function FMEAMatchPanel({ alarmId, visible, onClose, onCreateCAPA
                     </Button>
                   </Space>
                 </Space>
-              </Card>
+              </DataCard>
             );
           })}
         </Space>
