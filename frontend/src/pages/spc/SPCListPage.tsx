@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import {
   Table, Button, Modal, Form, Input, Select,
   Popconfirm, App, Row, Col, Statistic, Space, Alert,
@@ -19,17 +21,10 @@ import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
-const chartTypeLabels: Record<string, string> = {
-  xbar_r: "X-bar R（均值-极差图）",
-  imr: "I-MR（单值移动极差图）",
-  histogram: "直方图",
-  p: "P图（不合格率）",
-  np: "NP图（不合格品数）",
-  c: "C图（缺陷数）",
-  u: "U图（单位缺陷数）",
-};
-
 export default function SPCListPage() {
+  const { t } = useTranslation("spc");
+  const { t: tc } = useTranslation("common");
+  const { t: tv } = useTranslation("validation");
   const { message } = App.useApp();
   const [data, setData] = useState<InspectionCharacteristic[]>([]);
   const [total, setTotal] = useState(0);
@@ -44,6 +39,8 @@ export default function SPCListPage() {
   const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
+
+  const chartTypeLabel = (type: string) => t(`chartType.${type}`, { defaultValue: type });
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -81,22 +78,22 @@ export default function SPCListPage() {
           ? 0
           : values.subgroup_size || (values.chart_type === "xbar_r" ? 5 : 1),
       });
-      message.success("检验特性创建成功");
+      message.success(t("list.createSuccess"));
       setModalOpen(false);
       form.resetFields();
       navigate(`/spc/${ic.ic_id}`);
     } catch {
-      message.error("创建失败");
+      message.error(t("list.createFailed"));
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
       await deleteInspectionCharacteristic(id);
-      message.success("删除成功");
+      message.success(t("list.deleteSuccess"));
       fetchData();
     } catch {
-      message.error("删除失败");
+      message.error(t("list.deleteFailed"));
     }
   };
 
@@ -105,58 +102,58 @@ export default function SPCListPage() {
 
   const columns = [
     {
-      title: "特性名称",
+      title: t("list.columns.characteristic_name"),
       dataIndex: "characteristic_name",
       key: "characteristic_name",
       ellipsis: true,
     },
     {
-      title: "过程名称",
+      title: t("list.columns.process_name"),
       dataIndex: "process_name",
       key: "process_name",
       width: 140,
     },
     {
-      title: "控制图类型",
+      title: t("list.columns.chart_type"),
       dataIndex: "chart_type",
       key: "chart_type",
       width: 120,
-      render: (t: string) => chartTypeLabels[t] || t,
+      render: (t: string) => chartTypeLabel(t),
     },
     {
-      title: "规格上限",
+      title: t("list.columns.spec_upper"),
       dataIndex: "spec_upper",
       key: "spec_upper",
       width: 100,
       render: (v: number) => <span className="qf-mono">{v}</span>,
     },
     {
-      title: "规格下限",
+      title: t("list.columns.spec_lower"),
       dataIndex: "spec_lower",
       key: "spec_lower",
       width: 100,
       render: (v: number) => <span className="qf-mono">{v}</span>,
     },
     {
-      title: "控制限状态",
+      title: t("list.columns.control_limits_locked"),
       dataIndex: "control_limits_locked",
       key: "control_limits_locked",
       width: 120,
       render: (locked: boolean) => (
         <StatusBadge status={locked ? "approved" : "warning"}>
-          {locked ? "已锁定" : "自动计算"}
+          {locked ? t("list.limitStatus.locked") : t("list.limitStatus.auto")}
         </StatusBadge>
       ),
     },
     {
-      title: "更新时间",
+      title: t("list.columns.updated_at"),
       dataIndex: "updated_at",
       key: "updated_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      render: (v: string) => formatDateTime(v),
     },
     {
-      title: "操作",
+      title: tc("table.operations"),
       key: "actions",
       width: 160,
       render: (_: unknown, record: InspectionCharacteristic) => (
@@ -166,12 +163,12 @@ export default function SPCListPage() {
             icon={<FileTextOutlined />}
             onClick={() => navigate(`/spc/${record.ic_id}`)}
           >
-            查看
+            {t("list.view")}
           </Button>
           {canEdit('spc') && (
-            <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.ic_id)}>
+            <Popconfirm title={t("list.confirmDelete")} onConfirm={() => handleDelete(record.ic_id)}>
               <Button type="link" danger icon={<DeleteOutlined />}>
-                删除
+                {tc("actions.delete")}
               </Button>
             </Popconfirm>
           )}
@@ -182,16 +179,16 @@ export default function SPCListPage() {
 
   const actions = canEdit('spc') ? (
     <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-      新建检验特性
+      {t("list.newCharacteristic")}
     </Button>
   ) : null;
 
   return (
-    <PageShell title="SPC 控制图" subtitle="统计过程控制 · 检验特性与管制图" actions={actions}>
+    <PageShell title={t("list.title")} subtitle={t("list.title")} actions={actions}>
       {/* KPI Cards */}
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <DataCard title="检验特性总数" noPadding>
+          <DataCard title={t("list.totalCharacteristics")} noPadding>
             <Statistic
               value={totalCount}
               prefix={<AreaChartOutlined style={{ color: "var(--qf-cyan)" }} />}
@@ -200,7 +197,7 @@ export default function SPCListPage() {
           </DataCard>
         </Col>
         <Col span={6}>
-          <DataCard title="控制限已锁定" noPadding>
+          <DataCard title={t("list.lockedLimits")} noPadding>
             <Statistic
               value={lockedCount}
               prefix={<BarChartOutlined style={{ color: "var(--qf-green)" }} />}
@@ -209,7 +206,7 @@ export default function SPCListPage() {
           </DataCard>
         </Col>
         <Col span={6}>
-          <DataCard title="未锁定控制限" noPadding>
+          <DataCard title={t("list.unlockedLimits")} noPadding>
             <Statistic
               value={totalCount - lockedCount}
               prefix={<AlertOutlined style={{ color: "var(--qf-amber)" }} />}
@@ -218,7 +215,7 @@ export default function SPCListPage() {
           </DataCard>
         </Col>
         <Col span={6}>
-          <DataCard title="本周新增批次" noPadding>
+          <DataCard title={t("list.newBatchesThisWeek")} noPadding>
             <Statistic
               value="-"
               prefix={<BarChartOutlined style={{ color: "var(--qf-text-tertiary)" }} />}
@@ -230,7 +227,7 @@ export default function SPCListPage() {
 
       <Space style={{ marginBottom: 16 }}>
         <Input.Search
-          placeholder="搜索过程名称"
+          placeholder={t("list.searchPlaceholder")}
           allowClear
           onSearch={(v) => {
             setSearchProcess(v);
@@ -259,7 +256,7 @@ export default function SPCListPage() {
       />
 
       <Modal
-        title="新建检验特性"
+        title={t("list.newCharacteristic")}
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => setModalOpen(false)}
@@ -269,49 +266,49 @@ export default function SPCListPage() {
         <Form form={form} layout="vertical" onFinish={handleCreate}>
           <Form.Item
             name="process_name"
-            label="过程名称"
-            rules={[{ required: true, message: "请输入过程名称" }]}
+            label={t("list.form.process_name")}
+            rules={[{ required: true, message: tv("required", { field: t("list.form.process_name") }) }]}
           >
-            <Input placeholder="如 SMT焊接" />
+            <Input placeholder={t("list.form.processPlaceholder")} />
           </Form.Item>
           <Form.Item
             name="characteristic_name"
-            label="特性名称"
-            rules={[{ required: true, message: "请输入特性名称" }]}
+            label={t("list.form.characteristic_name")}
+            rules={[{ required: true, message: tv("required", { field: t("list.form.characteristic_name") }) }]}
           >
-            <Input placeholder="如 焊点高度" />
+            <Input placeholder={t("list.form.characteristicPlaceholder")} />
           </Form.Item>
           <Form.Item
             name="chart_type"
-            label="控制图类型"
+            label={t("list.form.chart_type")}
             initialValue="xbar_r"
             rules={[{ required: true }]}
           >
             <Select onChange={(v) => setCreateChartType(v)}>
-              <Select.Option value="xbar_r">X-bar R（均值-极差图）</Select.Option>
-              <Select.Option value="imr">I-MR（单值移动极差图）</Select.Option>
-              <Select.Option value="p">P图（不合格率）</Select.Option>
-              <Select.Option value="np">NP图（不合格品数）</Select.Option>
-              <Select.Option value="c">C图（缺陷数）</Select.Option>
-              <Select.Option value="u">U图（单位缺陷数）</Select.Option>
+              <Select.Option value="xbar_r">{chartTypeLabel("xbar_r")}</Select.Option>
+              <Select.Option value="imr">{chartTypeLabel("imr")}</Select.Option>
+              <Select.Option value="p">{chartTypeLabel("p")}</Select.Option>
+              <Select.Option value="np">{chartTypeLabel("np")}</Select.Option>
+              <Select.Option value="c">{chartTypeLabel("c")}</Select.Option>
+              <Select.Option value="u">{chartTypeLabel("u")}</Select.Option>
             </Select>
           </Form.Item>
           {!["p", "np", "c", "u"].includes(createChartType) && (
-            <Form.Item name="subgroup_size" label="子组大小" initialValue={5}>
+            <Form.Item name="subgroup_size" label={t("list.form.subgroup_size")} initialValue={5}>
               <Input type="number" min={1} />
             </Form.Item>
           )}
           {["np", "c"].includes(createChartType) && (
             <Form.Item>
-              <Alert type="info" showIcon message="使用 NP图/C图 时，每批次样本量需保持固定一致" />
+              <Alert type="info" showIcon message={t("list.form.fixedSampleAlert")} />
             </Form.Item>
           )}
           <Row gutter={16}>
             <Col span={8}>
               <Form.Item
                 name="spec_lower"
-                label="规格下限"
-                rules={[{ required: true, message: "必填" }]}
+                label={t("list.form.spec_lower")}
+                rules={[{ required: true, message: tv("required", { field: t("list.form.spec_lower") }) }]}
               >
                 <Input type="number" step="0.01" />
               </Form.Item>
@@ -319,8 +316,8 @@ export default function SPCListPage() {
             <Col span={8}>
               <Form.Item
                 name="spec_upper"
-                label="规格上限"
-                rules={[{ required: true, message: "必填" }]}
+                label={t("list.form.spec_upper")}
+                rules={[{ required: true, message: tv("required", { field: t("list.form.spec_upper") }) }]}
               >
                 <Input type="number" step="0.01" />
               </Form.Item>
@@ -328,7 +325,7 @@ export default function SPCListPage() {
             <Col span={8}>
               <Form.Item
                 name="target_value"
-                label="目标值"
+                label={t("list.form.target_value")}
               >
                 <Input type="number" step="0.01" />
               </Form.Item>

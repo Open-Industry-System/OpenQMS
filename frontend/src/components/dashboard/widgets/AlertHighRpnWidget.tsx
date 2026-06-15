@@ -1,20 +1,22 @@
 import { Card, List, Button, Tag } from "antd";
 import { WarningOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type { WidgetProps } from "./types";
 
 export default function AlertHighRpnWidget({ data, loading, error, onRetry }: WidgetProps) {
+  const { t } = useTranslation("dashboard");
   const items = data.alerts?.high_rpn_fmeas ?? [];
 
   return (
     <Card
-      title={<><WarningOutlined /> 高 RPN FMEA Top5</>}
+      title={<><WarningOutlined /> {t("widget.highRpnFmeaTop5")}</>}
       size="small"
       loading={loading}
     >
       {error ? (
-        <Button onClick={onRetry} size="small">重试</Button>
+        <Button onClick={onRetry} size="small">{t("riskList.retry")}</Button>
       ) : items.length === 0 ? (
-        <span style={{ color: "#999" }}>暂无高 RPN 项</span>
+        <span style={{ color: "#999" }}>{t("alert.empty.highRpn")}</span>
       ) : (
         <List
           size="small"

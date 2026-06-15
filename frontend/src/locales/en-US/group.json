@@ -1,0 +1,83 @@
+{
+  "noPermission": "You do not have group management permission",
+  "dashboard": {
+    "title": "Group Dashboard",
+    "openFMEA": "Open FMEA",
+    "openCAPA": "Open CAPA",
+    "overdueCAPA": "Overdue CAPA",
+    "spcAlarms": "SPC Alarms",
+    "pendingIQC": "Pending IQC",
+    "openSCAR": "Open SCAR",
+    "factoryData": "Factory Data",
+    "factoryCardTitle": "{{factory_code}} - {{factory_name}}"
+  },
+  "suppliers": {
+    "title": "Shared Suppliers",
+    "columns": {
+      "name": "Supplier Name",
+      "shortName": "Short Name",
+      "unifiedCreditCode": "Unified Credit Code",
+      "industry": "Industry",
+      "evaluations": "Factory Evaluations"
+    },
+    "evaluationTag": "{{factory_code}}: {{grade}}({{score}})"
+  },
+  "factoryManagement": {
+    "title": "Factory Management",
+    "createFactory": "Create Factory",
+    "editFactory": "Edit Factory",
+    "newFactory": "New Factory",
+    "columns": {
+      "code": "Factory Code",
+      "name": "Factory Name",
+      "location": "Location",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "form": {
+      "code": "Factory Code",
+      "name": "Factory Name",
+      "location": "Location",
+      "isActive": "Active"
+    },
+    "placeholders": {
+      "code": "e.g. BJ-01",
+      "name": "e.g. Beijing Factory",
+      "location": "e.g. Chaoyang, Beijing"
+    },
+    "rules": {
+      "codeRequired": "Please enter the factory code",
+      "nameRequired": "Please enter the factory name"
+    },
+    "messages": {
+      "loadFailed": "Failed to load factory list",
+      "updateSuccess": "Updated successfully",
+      "createSuccess": "Created successfully",
+      "deactivateSuccess": "Deactivated",
+      "deactivateFailed": "Failed to deactivate"
+    },
+    "confirmDeactivate": "Are you sure you want to deactivate this factory?",
+    "deactivate": "Deactivate"
+  },
+  "factoryComparison": {
+    "title": "Factory Comparison",
+    "columns": {
+      "code": "Factory Code",
+      "name": "Factory Name"
+    }
+  },
+  "audits": {
+    "title": "Cross-Factory Audits",
+    "columns": {
+      "programNo": "Program No.",
+      "auditType": "Audit Type",
+      "status": "Status",
+      "factories": "Factories",
+      "findingCount": "Findings"
+    }
+  }
+}

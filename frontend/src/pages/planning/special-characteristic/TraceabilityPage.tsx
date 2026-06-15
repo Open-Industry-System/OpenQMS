@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Typography, Select, Space, Timeline, Empty, Spin, Alert } from 'antd';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   SafetyOutlined,
   FileTextOutlined,
@@ -56,6 +57,7 @@ interface TraceabilityChain {
 }
 
 export default function TraceabilityPage() {
+  const { t } = useTranslation('specialCharacteristic');
   const [scList, setScList] = useState<SpecialCharacteristic[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [chain, setChain] = useState<TraceabilityChain | null>(null);
@@ -79,13 +81,13 @@ export default function TraceabilityPage() {
   }, [selectedId]);
 
   return (
-    <PageShell title="特殊特性贯穿追踪">
+    <PageShell title={t('pageTitle.scTraceability')}>
       <DataCard title={null} style={{ marginBottom: 24 }}>
         <Space>
-          <Text strong>选择特殊特性：</Text>
+          <Text strong>{t('traceability.selectSC')}：</Text>
           <Select
             style={{ width: 360 }}
-            placeholder="选择一个 CC / SC 特性"
+            placeholder={t('traceability.placeholder')}
             allowClear
             value={selectedId}
             onChange={setSelectedId}
@@ -102,7 +104,7 @@ export default function TraceabilityPage() {
       {loading && <Spin size="large" style={{ display: 'block', margin: '40px auto' }} />}
 
       {!loading && selectedId && !chain && (
-        <Alert type="warning" message="无法获取追溯链" showIcon />
+        <Alert type="warning" message={t('traceability.loadFailed')} showIcon />
       )}
 
       {!loading && chain && (
@@ -115,7 +117,7 @@ export default function TraceabilityPage() {
               <Title level={5} style={{ margin: 0 }}>{chain.sc_code} - {chain.sc_name}</Title>
             </Space>
             <div style={{ marginTop: 8 }}>
-              <Text type="secondary">规格要求：</Text> {chain.spec_requirement || '—'}
+              <Text type="secondary">{t('traceability.specRequirement')}：</Text> {chain.spec_requirement || '—'}
             </div>
           </DataCard>
 
@@ -126,7 +128,7 @@ export default function TraceabilityPage() {
                 dot: <SafetyOutlined style={{ fontSize: 18 }} />,
                 color: 'blue',
                 children: (
-                  <DataCard title="FMEA 来源" style={{ marginBottom: 16 }}>
+                  <DataCard title={t('traceability.fmeaSource')} style={{ marginBottom: 16 }}>
                     {chain.fmea_source ? (
                       <div>
                         <Link to={`/fmea/${chain.fmea_source.fmea_id}`}>
@@ -135,11 +137,11 @@ export default function TraceabilityPage() {
                         <Text type="secondary"> — {chain.fmea_source.title}</Text>
                         <div style={{ marginTop: 8 }}>
                           <StatusBadge status="info">{chain.fmea_source.fmea_type}</StatusBadge>
-                          <Text>节点: {chain.fmea_source.node_name} ({chain.fmea_source.node_type})</Text>
+                          <Text>{t('traceability.step')}: {chain.fmea_source.node_name} ({chain.fmea_source.node_type})</Text>
                         </div>
                         {chain.fmea_source.connected_failure_modes.length > 0 && (
                           <div style={{ marginTop: 8 }}>
-                            <Text type="secondary">关联失效模式：</Text>
+                            <Text type="secondary">{t('traceability.relatedFailureModes')}：</Text>
                             {chain.fmea_source.connected_failure_modes.map((fm) => (
                               <StatusBadge key={fm.id} status="info" style={{ marginTop: 4 }}>
                                 {fm.name}
@@ -149,7 +151,7 @@ export default function TraceabilityPage() {
                         )}
                       </div>
                     ) : (
-                      <Text type="secondary">未关联 FMEA 来源</Text>
+                      <Text type="secondary">{t('traceability.notLinkedFMEA')}</Text>
                     )}
                   </DataCard>
                 ),
@@ -158,7 +160,7 @@ export default function TraceabilityPage() {
                 dot: <FileTextOutlined style={{ fontSize: 18 }} />,
                 color: 'green',
                 children: (
-                  <DataCard title="控制计划" style={{ marginBottom: 16 }}>
+                  <DataCard title={t('traceability.controlPlan')} style={{ marginBottom: 16 }}>
                     {chain.control_plan_items.length > 0 ? (
                       <div>
                         {chain.control_plan_items.map((item) => (
@@ -166,17 +168,17 @@ export default function TraceabilityPage() {
                             <Text strong>{item.cp_document_no}</Text>
                             <Text type="secondary"> — {item.cp_title}</Text>
                             <div style={{ marginTop: 4 }}>
-                              <StatusBadge status="info">步骤 {item.step_no}</StatusBadge>
+                              <StatusBadge status="info">{t('traceability.step')} {item.step_no}</StatusBadge>
                               <Text> {item.process_name} / {item.characteristic_no}</Text>
                             </div>
                             <div style={{ marginTop: 4 }}>
-                              <Text type="secondary">规格：</Text> {item.specification_tolerance}
+                              <Text type="secondary">{t('traceability.specification')}：</Text> {item.specification_tolerance}
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <Text type="secondary">未在控制计划中引用</Text>
+                      <Text type="secondary">{t('traceability.notInControlPlan')}</Text>
                     )}
                   </DataCard>
                 ),
@@ -185,8 +187,8 @@ export default function TraceabilityPage() {
                 dot: <ExperimentOutlined style={{ fontSize: 18 }} />,
                 color: 'orange',
                 children: (
-                  <DataCard title="MSA 分析" style={{ marginBottom: 16 }}>
-                    <Text type="secondary">量具与测量系统分析（通过量具台账管理）</Text>
+                  <DataCard title={t('traceability.msaAnalysis')} style={{ marginBottom: 16 }}>
+                    <Text type="secondary">{t('traceability.msaDescription')}</Text>
                   </DataCard>
                 ),
               },
@@ -194,7 +196,7 @@ export default function TraceabilityPage() {
                 dot: <BarChartOutlined style={{ fontSize: 18 }} />,
                 color: 'purple',
                 children: (
-                  <DataCard title="SPC 监控">
+                  <DataCard title={t('traceability.spcMonitor')}>
                     {chain.spc_characteristics.length > 0 ? (
                       <div>
                         {chain.spc_characteristics.map((ic) => (
@@ -202,7 +204,7 @@ export default function TraceabilityPage() {
                             <Text strong>{ic.characteristic_name}</Text>
                             <StatusBadge status="info" style={{ marginLeft: 8 }}>{ic.chart_type}</StatusBadge>
                             <div style={{ marginTop: 4 }}>
-                              {ic.spec_target !== null && <Text>目标值: {ic.spec_target} </Text>}
+                              {ic.spec_target !== null && <Text>{t('traceability.targetValue')}: {ic.spec_target} </Text>}
                               {ic.spec_upper !== null && <Text>USL: {ic.spec_upper} </Text>}
                               {ic.spec_lower !== null && <Text>LSL: {ic.spec_lower}</Text>}
                             </div>
@@ -210,7 +212,7 @@ export default function TraceabilityPage() {
                         ))}
                       </div>
                     ) : (
-                      <Text type="secondary">未关联 SPC 检验特性</Text>
+                      <Text type="secondary">{t('traceability.notLinkedSPC')}</Text>
                     )}
                   </DataCard>
                 ),
@@ -221,7 +223,7 @@ export default function TraceabilityPage() {
       )}
 
       {!selectedId && !loading && (
-        <Empty description="请选择一个特殊特性以查看其贯穿追踪链" />
+        <Empty description={t('traceability.emptyHint')} />
       )}
     </PageShell>
   );

@@ -1,4 +1,5 @@
 import { Avatar, Badge, Tooltip } from "antd";
+import { useTranslation } from "react-i18next";
 import type { ActiveUser } from "../../types/collaboration";
 
 interface CollaborationBarProps {
@@ -7,13 +8,14 @@ interface CollaborationBarProps {
 }
 
 export default function CollaborationBar({ activeUsers, isSyncing }: CollaborationBarProps) {
+  const { t } = useTranslation("collaboration");
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 16px", borderBottom: "1px solid #f0f0f0" }}>
       <Avatar.Group max={{ count: 5 }}>
         {activeUsers.map((u) => (
           <Tooltip
             key={u.user_id}
-            title={`${u.user_name} (${u.action === "editing" ? "编辑中" : "查看中"})`}
+            title={`${u.user_name} (${u.action === "editing" ? t("bar.editing") : t("bar.viewing")})`}
           >
             <Avatar
               style={{
@@ -28,13 +30,13 @@ export default function CollaborationBar({ activeUsers, isSyncing }: Collaborati
       </Avatar.Group>
       <span style={{ fontSize: 13, color: "#595959" }}>
         {activeUsers.length === 0
-          ? "仅你一人"
-          : `${activeUsers.length} 人在线`}
+          ? t("bar.onlyYou")
+          : t("bar.onlineCount", { count: activeUsers.length })}
       </span>
       {!isSyncing && (
         <Badge
           status="warning"
-          text={<span style={{ fontSize: 12 }}>协同状态同步失败</span>}
+          text={<span style={{ fontSize: 12 }}>{t("bar.syncFailed")}</span>}
         />
       )}
     </div>

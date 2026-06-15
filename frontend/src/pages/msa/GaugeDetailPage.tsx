@@ -21,6 +21,7 @@ import {
   PlusOutlined,
   EditOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
@@ -37,14 +38,9 @@ import { PageShell, StatusBadge } from "../../components/design";
 const { Option } = Select;
 const { Text } = Typography;
 
-const STATUS_MAP: Record<string, { label: string; status: string }> = {
-  active: { label: "在用", status: "success" },
-  inactive: { label: "闲置", status: "draft" },
-  calibrating: { label: "校准中", status: "info" },
-  scrapped: { label: "报废", status: "error" },
-};
-
 export default function GaugeDetailPage() {
+  const { t } = useTranslation("msa");
+  const { t: tc } = useTranslation("common");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user: _user } = useAuthStore();
@@ -63,6 +59,8 @@ export default function GaugeDetailPage() {
   const [calForm] = Form.useForm();
   const [calSaving, setCalSaving] = useState(false);
 
+  const statusLabel = (status: string) => t(`gauge.status.${status}`, { defaultValue: status });
+
   const loadGauge = useCallback(async () => {
     if (!id) return;
     setLoading(true);
@@ -70,11 +68,11 @@ export default function GaugeDetailPage() {
       const g = await getGauge(id);
       setGauge(g);
     } catch {
-      message.error("加载量具信息失败");
+      message.error(t("gauge.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, t]);
 
   const loadCals = useCallback(async () => {
     if (!id) return;
@@ -83,11 +81,11 @@ export default function GaugeDetailPage() {
       const data = await listCalibrations(id);
       setCals(data);
     } catch {
-      message.error("加载校准记录失败");
+      message.error(t("gauge.calibration.loadFailed"));
     } finally {
       setCalsLoading(false);
     }
-  }, [id]);
+  }, [id, t]);
 
   useEffect(() => {
     Promise.all([loadGauge(), loadCals()]);
@@ -127,10 +125,10 @@ export default function GaugeDetailPage() {
       const updated = await updateGauge(id, payload);
       setGauge(updated);
       setEditing(false);
-      message.success("保存成功");
+      message.success(t("gauge.saveSuccess"));
     } catch (err: unknown) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error("保存失败");
+      message.error(t("gauge.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -153,14 +151,14 @@ export default function GaugeDetailPage() {
           ? values.next_calibration_date.format("YYYY-MM-DD")
           : null,
       });
-      message.success("校准记录已添加");
+      message.success(t("gauge.calibration.addSuccess"));
       setCalModalOpen(false);
       calForm.resetFields();
       await loadCals();
       await loadGauge();
     } catch (err: unknown) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error("保存失败");
+      message.error(t("gauge.saveFailed"));
     } finally {
       setCalSaving(false);
     }
@@ -175,29 +173,32 @@ export default function GaugeDetailPage() {
   }
 
   if (!gauge) {
-    return <div style={{ padding: 24 }}>量具不存在</div>;
+    return <div style={{ padding: 24 }}>{t("gauge.notFound")}</div>;
   }
 
-  const statusInfo = STATUS_MAP[gauge.status] ?? { label: gauge.status, status: "draft" };
+  const statusInfo = {
+    label: statusLabel(gauge.status),
+    status: gauge.status === "active" ? "success" : gauge.status === "inactive" ? "draft" : gauge.status === "calibrating" ? "info" : "error",
+  };
 
   const calColumns = [
     {
-      title: "校准日期",
+      title: t("gauge.calibration.date"),
       dataIndex: "calibration_date",
       render: (v: string) => dayjs(v).format("YYYY-MM-DD"),
     },
     {
-      title: "结果",
+      title: t("gauge.calibration.result"),
       dataIndex: "result",
       render: (v: string) => (
-        <StatusBadge status={v === "pass" ? "success" : "error"}>{v === "pass" ? "合格" : "不合格"}</StatusBadge>
+        <StatusBadge status={v === "pass" ? "success" : "error"}>{v === "pass" ? t("gauge.calibration.pass") : t("gauge.calibration.fail")}</StatusBadge>
       ),
     },
-    { title: "证书编号", dataIndex: "certificate_no", render: (v: string | null) => v || "—" },
-    { title: "校准人", dataIndex: "calibrated_by", render: (v: string | null) => v || "—" },
-    { title: "备注", dataIndex: "notes", render: (v: string | null) => v || "—" },
+    { title: t("gauge.calibration.certificate_no"), dataIndex: "certificate_no", render: (v: string | null) => v || "—" },
+    { title: t("gauge.calibration.calibrated_by"), dataIndex: "calibrated_by", render: (v: string | null) => v || "—" },
+    { title: t("gauge.calibration.notes"), dataIndex: "notes", render: (v: string | null) => v || "—" },
     {
-      title: "下次校准",
+      title: t("gauge.calibration.next_date"),
       dataIndex: "next_calibration_date",
       render: (v: string | null) => (v ? dayjs(v).format("YYYY-MM-DD") : "—"),
     },
@@ -206,7 +207,7 @@ export default function GaugeDetailPage() {
   const tabItems = [
     {
       key: "info",
-      label: "基本信息",
+      label: tc("actions.detail"),
       children: (
         <Card
           extra={
@@ -214,14 +215,14 @@ export default function GaugeDetailPage() {
               <Space>
                 {editing ? (
                   <>
-                    <Button onClick={handleCancelEdit}>取消</Button>
+                    <Button onClick={handleCancelEdit}>{tc("actions.cancel")}</Button>
                     <Button type="primary" loading={saving} onClick={handleSaveInfo}>
-                      保存
+                      {tc("actions.save")}
                     </Button>
                   </>
                 ) : (
                   <Button icon={<EditOutlined />} onClick={() => setEditing(true)}>
-                    编辑
+                    {tc("actions.edit")}
                   </Button>
                 )}
               </Space>
@@ -232,75 +233,75 @@ export default function GaugeDetailPage() {
             <Form form={infoForm} layout="vertical">
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item label="量具编号" name="gauge_no" rules={[{ required: true }]}>
+                  <Form.Item label={t("gauge.fields.gauge_no")} name="gauge_no" rules={[{ required: true }]}>
                     <Input />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item label="名称" name="name" rules={[{ required: true }]}>
+                  <Form.Item label={t("gauge.fields.name")} name="name" rules={[{ required: true }]}>
                     <Input />
                   </Form.Item>
                 </Col>
               </Row>
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item label="型号" name="model">
+                  <Form.Item label={t("gauge.fields.model")} name="model">
                     <Input />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item label="制造商" name="manufacturer">
+                  <Form.Item label={t("gauge.fields.manufacturer")} name="manufacturer">
                     <Input />
                   </Form.Item>
                 </Col>
               </Row>
               <Row gutter={16}>
                 <Col span={8}>
-                  <Form.Item label="分辨力" name="resolution">
+                  <Form.Item label={t("gauge.fields.resolution")} name="resolution">
                     <Input type="number" />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="测量范围" name="measuring_range">
+                  <Form.Item label={t("gauge.fields.measuring_range")} name="measuring_range">
                     <Input />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="校准周期（天）" name="calibration_cycle_days">
+                  <Form.Item label={t("gauge.fields.calibration_cycle_days")} name="calibration_cycle_days">
                     <Input type="number" />
                   </Form.Item>
                 </Col>
               </Row>
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item label="部门" name="department">
+                  <Form.Item label={t("gauge.fields.department")} name="department">
                     <Select allowClear>
-                      <Option value="IQC">IQC</Option>
-                      <Option value="PQC">PQC</Option>
-                      <Option value="OQC">OQC</Option>
-                      <Option value="实验室">实验室</Option>
+                      <Option value="IQC">{t("gauge.department.IQC")}</Option>
+                      <Option value="PQC">{t("gauge.department.PQC")}</Option>
+                      <Option value="OQC">{t("gauge.department.OQC")}</Option>
+                      <Option value="实验室">{t("gauge.department.lab")}</Option>
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item label="存放位置" name="location">
+                  <Form.Item label={t("gauge.fields.location")} name="location">
                     <Input />
                   </Form.Item>
                 </Col>
               </Row>
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item label="状态" name="status">
+                  <Form.Item label={t("gauge.fields.status")} name="status">
                     <Select>
-                      <Option value="active">在用</Option>
-                      <Option value="inactive">闲置</Option>
-                      <Option value="calibrating">校准中</Option>
-                      <Option value="scrapped">报废</Option>
+                      <Option value="active">{t("gauge.status.active")}</Option>
+                      <Option value="inactive">{t("gauge.status.inactive")}</Option>
+                      <Option value="calibrating">{t("gauge.status.calibrating")}</Option>
+                      <Option value="scrapped">{t("gauge.status.scrapped")}</Option>
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item label="下次校准日期" name="next_calibration_date">
+                  <Form.Item label={t("gauge.fields.next_calibration_date")} name="next_calibration_date">
                     <DatePicker style={{ width: "100%" }} />
                   </Form.Item>
                 </Col>
@@ -309,53 +310,53 @@ export default function GaugeDetailPage() {
           ) : (
             <Row gutter={[16, 8]}>
               <Col span={12}>
-                <Text type="secondary">量具编号</Text>
+                <Text type="secondary">{t("gauge.fields.gauge_no")}</Text>
                 <div>{gauge.gauge_no}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">名称</Text>
+                <Text type="secondary">{t("gauge.fields.name")}</Text>
                 <div>{gauge.name}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">型号</Text>
+                <Text type="secondary">{t("gauge.fields.model")}</Text>
                 <div>{gauge.model ?? "—"}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">制造商</Text>
+                <Text type="secondary">{t("gauge.fields.manufacturer")}</Text>
                 <div>{gauge.manufacturer ?? "—"}</div>
               </Col>
               <Col span={8}>
-                <Text type="secondary">分辨力</Text>
+                <Text type="secondary">{t("gauge.fields.resolution")}</Text>
                 <div>{gauge.resolution ?? "—"}</div>
               </Col>
               <Col span={8}>
-                <Text type="secondary">测量范围</Text>
+                <Text type="secondary">{t("gauge.fields.measuring_range")}</Text>
                 <div>{gauge.measuring_range ?? "—"}</div>
               </Col>
               <Col span={8}>
-                <Text type="secondary">校准周期</Text>
-                <div>{gauge.calibration_cycle_days ? `${gauge.calibration_cycle_days}天` : "—"}</div>
+                <Text type="secondary">{t("gauge.fields.calibration_cycle_days")}</Text>
+                <div>{gauge.calibration_cycle_days ? `${gauge.calibration_cycle_days}${t("gauge.columns.days", { days: gauge.calibration_cycle_days })}` : "—"}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">部门</Text>
+                <Text type="secondary">{t("gauge.fields.department")}</Text>
                 <div>{gauge.department ?? "—"}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">存放位置</Text>
+                <Text type="secondary">{t("gauge.fields.location")}</Text>
                 <div>{gauge.location ?? "—"}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">状态</Text>
+                <Text type="secondary">{t("gauge.fields.status")}</Text>
                 <div>
                   <StatusBadge status={statusInfo.status}>{statusInfo.label}</StatusBadge>
                 </div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">下次校准</Text>
+                <Text type="secondary">{t("gauge.fields.next_calibration_date")}</Text>
                 <div>{gauge.next_calibration_date ?? "—"}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">创建时间</Text>
+                <Text type="secondary">{t("gauge.createdAt")}</Text>
                 <div>{dayjs(gauge.created_at).format("YYYY-MM-DD HH:mm")}</div>
               </Col>
             </Row>
@@ -365,13 +366,13 @@ export default function GaugeDetailPage() {
     },
     {
       key: "calibrations",
-      label: "校准记录",
+      label: t("gauge.calibration.title"),
       children: (
         <Card
           extra={
             canEdit('msa') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCalModalOpen(true)}>
-                添加记录
+                {t("gauge.calibration.add")}
               </Button>
             )
           }
@@ -394,7 +395,7 @@ export default function GaugeDetailPage() {
     <PageShell
       title={
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/gauges")}>返回</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/msa/gauges")}>{tc("actions.back")}</Button>
           <span style={{ fontSize: 20, fontWeight: 600, color: "var(--qf-text-primary)" }}>{gauge.name}</span>
         </Space>
       }
@@ -403,7 +404,7 @@ export default function GaugeDetailPage() {
       <Tabs items={tabItems} />
 
       <Modal
-        title="添加校准记录"
+        title={t("gauge.calibration.add")}
         open={calModalOpen}
         onCancel={() => {
           setCalModalOpen(false);
@@ -411,39 +412,39 @@ export default function GaugeDetailPage() {
         }}
         onOk={handleCalSave}
         confirmLoading={calSaving}
-        okText="保存"
-        cancelText="取消"
+        okText={tc("actions.save")}
+        cancelText={tc("actions.cancel")}
         destroyOnHidden
       >
         <Form form={calForm} layout="vertical">
           <Form.Item
-            label="校准日期"
+            label={t("gauge.calibration.date")}
             name="calibration_date"
-            rules={[{ required: true, message: "请选择日期" }]}
+            rules={[{ required: true, message: tc("messages.confirmOperation") }]}
           >
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
           <Form.Item
-            label="结果"
+            label={t("gauge.calibration.result")}
             name="result"
-            rules={[{ required: true, message: "请选择结果" }]}
+            rules={[{ required: true, message: tc("messages.confirmOperation") }]}
             initialValue="pass"
           >
             <Select>
-              <Option value="pass">合格</Option>
-              <Option value="fail">不合格</Option>
+              <Option value="pass">{t("gauge.calibration.pass")}</Option>
+              <Option value="fail">{t("gauge.calibration.fail")}</Option>
             </Select>
           </Form.Item>
-          <Form.Item label="证书编号" name="certificate_no">
+          <Form.Item label={t("gauge.calibration.certificate_no")} name="certificate_no">
             <Input />
           </Form.Item>
-          <Form.Item label="校准人" name="calibrated_by">
+          <Form.Item label={t("gauge.calibration.calibrated_by")} name="calibrated_by">
             <Input />
           </Form.Item>
-          <Form.Item label="备注" name="notes">
+          <Form.Item label={t("gauge.calibration.notes")} name="notes">
             <Input.TextArea rows={2} />
           </Form.Item>
-          <Form.Item label="下次校准日期" name="next_calibration_date">
+          <Form.Item label={t("gauge.calibration.next_date")} name="next_calibration_date">
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
         </Form>

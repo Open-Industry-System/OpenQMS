@@ -1,0 +1,213 @@
+{
+  "title": "SPC Control Chart",
+  "list": {
+    "title": "SPC Control Charts",
+    "totalCharacteristics": "Total Inspection Characteristics",
+    "lockedLimits": "Limits Locked",
+    "unlockedLimits": "Limits Auto-calculated",
+    "newBatchesThisWeek": "New Batches This Week",
+    "newCharacteristic": "New Inspection Characteristic",
+    "searchPlaceholder": "Search process name",
+    "view": "View",
+    "confirmDelete": "Confirm delete?",
+    "columns": {
+      "characteristic_name": "Characteristic Name",
+      "process_name": "Process Name",
+      "chart_type": "Chart Type",
+      "spec_upper": "USL",
+      "spec_lower": "LSL",
+      "control_limits_locked": "Control Limit Status",
+      "updated_at": "Updated At"
+    },
+    "limitStatus": {
+      "locked": "Locked",
+      "auto": "Auto-calculated"
+    },
+    "form": {
+      "process_name": "Process Name",
+      "processPlaceholder": "e.g. SMT Soldering",
+      "characteristic_name": "Characteristic Name",
+      "characteristicPlaceholder": "e.g. Solder Height",
+      "chart_type": "Chart Type",
+      "subgroup_size": "Subgroup Size",
+      "spec_lower": "LSL",
+      "spec_upper": "USL",
+      "target_value": "Target Value",
+      "fixedSampleAlert": "When using NP/C chart, the sample size per batch must remain fixed and consistent."
+    },
+    "createSuccess": "Inspection characteristic created",
+    "createFailed": "Failed to create",
+    "deleteSuccess": "Deleted successfully",
+    "deleteFailed": "Failed to delete"
+  },
+  "chartType": {
+    "xbar_r": "X-bar R (Mean-Range)",
+    "imr": "I-MR (Individual-Moving Range)",
+    "histogram": "Histogram",
+    "p": "P Chart (Defective Rate)",
+    "np": "NP Chart (Defective Count)",
+    "c": "C Chart (Defect Count)",
+    "u": "U Chart (Defects per Unit)"
+  },
+  "detail": {
+    "back": "Back",
+    "notFound": "Inspection characteristic not found",
+    "loadFailed": "Failed to load data",
+    "lockSuccess": "Control limits locked",
+    "unlockSuccess": "Control limits unlocked",
+    "operationFailed": "Operation failed",
+    "ruleUpdateSuccess": "Rule settings updated",
+    "ruleUpdateFailed": "Failed to update rules",
+    "sampleEntrySuccess": "Sample entered successfully",
+    "sampleEntryFailed": "Failed to enter sample",
+    "batchNoRequired": "Please enter batch number",
+    "inspectedCountRequired": "Inspected count must be greater than 0",
+    "defectCountNonNegative": "Defect count cannot be negative",
+    "defectCountExceeds": "Defect count cannot exceed inspected count",
+    "sampleValueRequired": "Please enter at least one sample value",
+    "alarmAckSuccess": "Alarm acknowledged",
+    "alarmAckFailed": "Failed to acknowledge",
+    "capaCreateSuccess": "8D created: {{docNo}}",
+    "capaCreateFailed": "Failed to create 8D",
+    "tabs": {
+      "chart": "Control Chart",
+      "capability": "Process Capability",
+      "data": "Data Entry",
+      "alarms": "Alarm Records"
+    },
+    "basicInfo": {
+      "title": "Basic Information",
+      "process_name": "Process Name",
+      "characteristic_name": "Characteristic Name",
+      "spec_upper": "USL",
+      "spec_lower": "LSL",
+      "target_value": "Target Value",
+      "subgroup_size": "Subgroup Size"
+    },
+    "limitManagement": {
+      "title": "Control Limit Management",
+      "lock": "Lock Control Limits",
+      "unlock": "Unlock Control Limits",
+      "version": "Control Limit Version",
+      "locked": "Control limits locked",
+      "auto": "Control limits auto-calculated"
+    },
+    "rules": {
+      "title": "Alarm Rules",
+      "rule1": "Rule 1: Beyond control limits",
+      "rule2": "Rule 2: 9 consecutive points on same side",
+      "rule3": "Rule 3: 6 consecutive points increasing/decreasing",
+      "rule4": "Rule 4: 14 consecutive points alternating up/down",
+      "rule5": "Rule 5: 2 of 3 consecutive points in Zone A",
+      "rule6": "Rule 6: 4 of 5 consecutive points outside Zone B",
+      "rule7": "Rule 7: 15 consecutive points in Zone C",
+      "rule8": "Rule 8: 8 consecutive points outside Zone C"
+    },
+    "capability": {
+      "grade": "Grade: {{grade}}",
+      "cp": "Cp",
+      "cpk": "Cpk",
+      "pp": "Pp",
+      "ppk": "Ppk",
+      "cm": "Cm",
+      "cmk": "Cmk",
+      "theoretical_ppm": "Theoretical PPM",
+      "actual_ppm": "Actual PPM",
+      "advice": "Analysis Advice",
+      "empty": "Insufficient data for process capability analysis (at least 2 batches/sample data required)"
+    },
+    "dataEntry": {
+      "single": "Single Batch",
+      "batch": "Batch Import",
+      "history": "History",
+      "batchNo": "Batch No",
+      "batchPlaceholder": "e.g. BATCH-20260521-001",
+      "sampledAt": "Sampled At",
+      "attributeEntry": "Attribute Data Entry",
+      "inspectedCount": "Inspected Count n",
+      "defectCount": "Defective/Defect Count",
+      "sampleValues": "Sample Values (recommended {{size}})",
+      "addSample": "Add Sample",
+      "submitBatch": "Submit Batch",
+      "uploadExcel": "Upload Excel Batch Import",
+      "templateHintVariable": "Each row: Batch No*, Sampled At*, Sample Value 1{{extra}}",
+      "templateHintAttribute": "Each row: Batch No*, Sampled At*, Inspected Count, Defect Count"
+    },
+    "history": {
+      "index": "Index",
+      "batchNo": "Batch No",
+      "sampledAt": "Sampled At",
+      "xValue": "Mean / X",
+      "rValue": "Range / MR",
+      "alarm": "Alarm",
+      "normal": "Normal",
+      "rule": "Rule {{rules}}"
+    },
+    "alarm": {
+      "ruleNo": "Rule No",
+      "triggeredAt": "Triggered At",
+      "severity": "Severity",
+      "status": "Status",
+      "linkedCapa": "Linked 8D",
+      "linkedFmea": "Linked FMEA",
+      "confirm": "Acknowledge",
+      "viewFmea": "View FMEA Recommendations",
+      "createCapa": "Create 8D",
+      "linked": "Linked",
+      "notLinked": "Not Linked",
+      "severityLevels": {
+        "critical": "Critical",
+        "major": "Major",
+        "minor": "Minor"
+      },
+      "statuses": {
+        "open": "Open",
+        "acknowledged": "Acknowledged",
+        "closed": "Closed"
+      }
+    },
+    "chart": {
+      "xbarTitle": "X-bar Chart",
+      "iTitle": "I Chart (Individual)",
+      "rTitle": "R Chart (Range)",
+      "mrTitle": "MR Chart (Moving Range)",
+      "statisticValue": "Statistic",
+      "ucl": "UCL",
+      "lcl": "LCL",
+      "cl": "CL"
+    }
+  },
+  "versionPanel": {
+    "title": "Control Limit Versions",
+    "button": "Version Management",
+    "current": "Current",
+    "activate": "Set Current",
+    "loadFailed": "Failed to load version list",
+    "activateSuccess": "Control limit version switched",
+    "activateFailed": "Failed to switch",
+    "empty": "No locked control limit versions"
+  },
+  "fmeaMatch": {
+    "title": "FMEA Association Recommendations",
+    "cancel": "Cancel",
+    "createCapa": "Create CAPA 8D",
+    "summary": "SPC Alarm: {{icCode}} | Process: {{processName}} | Characteristic: {{characteristicName}}",
+    "loadFailed": "Failed to fetch recommendations",
+    "confirmFailed": "Failed to confirm association",
+    "empty": "No associated FMEA failure modes found",
+    "refresh": "Refresh",
+    "loading": "Loading recommendations...",
+    "matchScore": "Match {{score}}%",
+    "path": "Path: {{path}}",
+    "failureCauses": "Failure Causes: {{causes}}",
+    "controls": "Controls: {{count}}",
+    "selected": "Selected: {{name}}",
+    "source": {
+      "control_plan": "Control Plan Link",
+      "process_name": "Process Name Match",
+      "characteristic_name": "Characteristic Name Match",
+      "select": "Select this association",
+      "selected": "Selected"
+    }
+  }
+}

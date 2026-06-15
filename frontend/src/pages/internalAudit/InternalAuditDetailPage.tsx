@@ -30,6 +30,7 @@ import {
   LinkOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { AuditPlan, AuditFinding, AuditChecklistItem, User } from "../../types";
@@ -45,21 +46,16 @@ import {
   createCAPAFromFinding,
 } from "../../api/audit";
 import { listUsers } from "../../api/auth";
+import dayjs from "dayjs";
+import { formatDateTime } from "../../utils/dateTime";
 import PageShell from "../../components/design/PageShell";
 import DataCard from "../../components/design/DataCard";
 import StatusBadge from "../../components/design/StatusBadge";
-import dayjs from "dayjs";
+import { useAuditStatusMap, useFindingTypeMap, useFindingStatusMap, useResultOptions } from "./useOptions";
 
 const { Option } = Select;
 const { TextArea } = Input;
 const { Text } = Typography;
-
-const STATUS_MAP: Record<string, { label: string }> = {
-  planned: { label: "待执行" },
-  in_progress: { label: "进行中" },
-  completed: { label: "已完成" },
-  cancelled: { label: "已取消" },
-};
 
 const statusVariant = (s: string): string => {
   if (s === "completed") return "success";
@@ -68,32 +64,18 @@ const statusVariant = (s: string): string => {
   return "info";
 };
 
-const FINDING_TYPE_MAP: Record<string, { label: string; variant: string }> = {
-  major_nc: { label: "严重不符合", variant: "error" },
-  minor_nc: { label: "一般不符合", variant: "warning" },
-  ofi: { label: "改进机会", variant: "info" },
-  observation: { label: "观察项", variant: "info" },
-};
-
-const FINDING_STATUS_MAP: Record<string, { label: string; variant: string }> = {
-  open: { label: "开放", variant: "error" },
-  in_progress: { label: "处理中", variant: "warning" },
-  verified: { label: "已验证", variant: "info" },
-  closed: { label: "已关闭", variant: "success" },
-};
-
-const RESULT_OPTIONS = [
-  { value: "符合", label: "符合" },
-  { value: "不符合", label: "不符合" },
-  { value: "不适用", label: "不适用" },
-];
-
 export default function InternalAuditDetailPage() {
+  const { t } = useTranslation("internalAudit");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
+  const STATUS_MAP = useAuditStatusMap();
+  const FINDING_TYPE_MAP = useFindingTypeMap();
+  const FINDING_STATUS_MAP = useFindingStatusMap();
+  const RESULT_OPTIONS = useResultOptions();
 
   const [plan, setPlan] = useState<AuditPlan | null>(null);
   const [_loading, setLoading] = useState(false);
@@ -116,7 +98,7 @@ export default function InternalAuditDetailPage() {
       const p = await getAuditPlan(id);
       setPlan(p);
     } catch {
-      message.error("加载审核计划失败");
+      message.error(t("messages.loadPlansFailed", "加载审核计划失败"));
     } finally {
       setLoading(false);
     }
@@ -130,7 +112,7 @@ export default function InternalAuditDetailPage() {
       const resp = await listAuditFindings({ audit_id: id, page_size: 1000 });
       setFindings(resp.items);
     } catch {
-      message.error("加载发现项失败");
+      message.error(t("messages.loadFindingsFailed", "加载发现项失败"));
     } finally {
       setFindingsLoading(false);
     }
@@ -153,10 +135,10 @@ export default function InternalAuditDetailPage() {
       if (isCancelled || !chartRef.current) return;
       chartInstance = echarts.init(chartRef.current);
       const data = [
-        { value: findings.filter((f) => f.finding_type === "major_nc").length, name: "严重不符合" },
-        { value: findings.filter((f) => f.finding_type === "minor_nc").length, name: "一般不符合" },
-        { value: findings.filter((f) => f.finding_type === "ofi").length, name: "改进机会" },
-        { value: findings.filter((f) => f.finding_type === "observation").length, name: "观察项" },
+        { value: findings.filter((f) => f.finding_type === "major_nc").length, name: t("findingType.major_nc", "严重不符合") },
+        { value: findings.filter((f) => f.finding_type === "minor_nc").length, name: t("findingType.minor_nc", "一般不符合") },
+        { value: findings.filter((f) => f.finding_type === "ofi").length, name: t("findingType.ofi", "改进机会") },
+        { value: findings.filter((f) => f.finding_type === "observation").length, name: t("findingType.observation", "观察项") },
       ].filter((d) => d.value > 0);
       chartInstance.setOption({
         tooltip: { trigger: "item" },
@@ -181,7 +163,7 @@ export default function InternalAuditDetailPage() {
         chartInstance.dispose();
       }
     };
-  }, [findings]);
+  }, [findings, t]);
 
   const handleUpdateInfo = async (values: Record<string, unknown>) => {
     if (!id) return;
@@ -197,12 +179,12 @@ export default function InternalAuditDetailPage() {
           return { user_id: uid, username: u?.username || "" };
         }) || [],
       });
-      message.success("更新成功");
+      message.success(tc("messages.saveSuccess", "更新成功"));
       setInfoEditing(false);
       fetchPlan();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "更新失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "更新失败"));
     }
   };
 
@@ -210,11 +192,11 @@ export default function InternalAuditDetailPage() {
     if (!id) return;
     try {
       await startAuditPlan(id);
-      message.success("审核已开始");
+      message.success(t("messages.auditStarted", "审核已开始"));
       fetchPlan();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "操作失败"));
     }
   };
 
@@ -222,11 +204,11 @@ export default function InternalAuditDetailPage() {
     if (!id) return;
     try {
       await completeAuditPlan(id);
-      message.success("审核已完成");
+      message.success(t("messages.auditCompleted", "审核已完成"));
       fetchPlan();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "操作失败"));
     }
   };
 
@@ -234,11 +216,11 @@ export default function InternalAuditDetailPage() {
     if (!id) return;
     try {
       await cancelAuditPlan(id);
-      message.success("审核已取消");
+      message.success(t("messages.planCancelled", "审核已取消"));
       fetchPlan();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "操作失败"));
     }
   };
 
@@ -251,7 +233,7 @@ export default function InternalAuditDetailPage() {
       setPlan({ ...plan, checklist: newChecklist });
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "保存失败");
+      message.error(err.response?.data?.detail || tc("messages.saveFailed", "保存失败"));
     }
   };
 
@@ -271,7 +253,7 @@ export default function InternalAuditDetailPage() {
       setPlan({ ...plan, checklist: newChecklist });
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "添加失败");
+      message.error(err.response?.data?.detail || tc("messages.addFailed", "添加失败"));
     }
   };
 
@@ -283,7 +265,7 @@ export default function InternalAuditDetailPage() {
       setPlan({ ...plan, checklist: newChecklist });
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "删除失败");
+      message.error(err.response?.data?.detail || tc("messages.deleteFailed", "删除失败"));
     }
   };
 
@@ -303,35 +285,35 @@ export default function InternalAuditDetailPage() {
         customer_confirmation_date: null,
         customer_confirmation_attachments: [],
       });
-      message.success("发现项已创建");
+      message.success(t("messages.findingCreated", "发现项已创建"));
       setFindingModalOpen(false);
       findingForm.resetFields();
       fetchFindings();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "创建失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "创建失败"));
     }
   };
 
   const handleCloseFinding = async (findingId: string) => {
     try {
       await closeAuditFinding(findingId);
-      message.success("发现项已关闭");
+      message.success(t("messages.findingClosed", "发现项已关闭"));
       fetchFindings();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "关闭失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "关闭失败"));
     }
   };
 
   const handleCreateCAPA = async (findingId: string) => {
     try {
       const resp = await createCAPAFromFinding(findingId);
-      message.success(`CAPA 已创建: ${resp.document_no}`);
+      message.success(t("messages.capaCreated", "CAPA 已创建: {{documentNo}}", { documentNo: resp.document_no }));
       fetchFindings();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "创建 CAPA 失败");
+      message.error(err.response?.data?.detail || t("messages.createCapaFailed", "创建 CAPA 失败"));
     }
   };
 
@@ -343,9 +325,9 @@ export default function InternalAuditDetailPage() {
     return (
       <div style={{ padding: 24 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/internal-audits")}>
-          返回列表
+          {tc("actions.back", "返回列表")}
         </Button>
-        <div style={{ marginTop: 24 }}>加载中...</div>
+        <div style={{ marginTop: 24 }}>{tc("status.loading", "加载中")}...</div>
       </div>
     );
   }
@@ -361,28 +343,28 @@ export default function InternalAuditDetailPage() {
       title={
         <Space size={12}>
           {plan.audit_id.slice(0, 8).toUpperCase()}
-          <StatusBadge status={statusVariant(plan.status)}>{STATUS_MAP[plan.status]?.label}</StatusBadge>
+          <StatusBadge status={statusVariant(plan.status)}>{STATUS_MAP[plan.status]}</StatusBadge>
         </Space>
       }
-      subtitle="内部审核计划详情"
+      subtitle={t("pageSubtitle.detail", "内部审核计划详情")}
       actions={
         <Space wrap>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/internal-audits")}>返回列表</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/internal-audits")}>{tc("actions.back", "返回列表")}</Button>
           {plan.status === "planned" && canEdit('audit') && (
-            <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>开始</Button>
+            <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>{t("actions.start", "开始")}</Button>
           )}
           {plan.status === "in_progress" && canEdit('audit') && (
-            <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleComplete}>完成</Button>
+            <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleComplete}>{t("actions.complete", "完成")}</Button>
           )}
           {plan.status === "planned" && canEdit('audit') && (
-            <Popconfirm title="确认取消？" onConfirm={handleCancel}>
-              <Button danger icon={<StopOutlined />}>取消</Button>
+            <Popconfirm title={t("confirm.cancel", "确认取消？")} onConfirm={handleCancel}>
+              <Button danger icon={<StopOutlined />}>{tc("actions.cancel", "取消")}</Button>
             </Popconfirm>
           )}
         </Space>
       }
     >
-      <DataCard title="基本信息"
+      <DataCard title={t("card.basicInfo", "基本信息")}
         extra={
           canEdit('audit') && (
             <Button
@@ -403,7 +385,7 @@ export default function InternalAuditDetailPage() {
                 }
               }}
             >
-              {infoEditing ? "保存" : "编辑"}
+              {infoEditing ? tc("actions.save", "保存") : tc("actions.edit", "编辑")}
             </Button>
           )
         }
@@ -413,30 +395,30 @@ export default function InternalAuditDetailPage() {
           <Form form={infoForm} layout="vertical" onFinish={handleUpdateInfo}>
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item name="audit_scope" label="审核范围" rules={[{ required: true }]}>
+                <Form.Item name="audit_scope" label={t("form.scope", "审核范围")} rules={[{ required: true }]}>
                   <TextArea rows={2} />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="audit_criteria" label="审核准则" rules={[{ required: true }]}>
+                <Form.Item name="audit_criteria" label={t("form.criteria", "审核准则")} rules={[{ required: true }]}>
                   <TextArea rows={2} />
                 </Form.Item>
               </Col>
             </Row>
             <Row gutter={16}>
               <Col span={8}>
-                <Form.Item name="planned_date" label="计划日期">
+                <Form.Item name="planned_date" label={t("form.plannedDate", "计划日期")}>
                   <DatePicker style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name="actual_date" label="实际日期">
+                <Form.Item name="actual_date" label={t("form.actualDate", "实际日期")}>
                   <DatePicker style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name="lead_auditor" label="审核组长">
-                  <Select placeholder="选择审核组长" allowClear>
+                <Form.Item name="lead_auditor" label={t("form.leadAuditor", "审核组长")}>
+                  <Select placeholder={t("placeholder.leadAuditor", "选择审核组长")} allowClear>
                     {users.map((u) => (
                       <Option key={u.user_id} value={u.user_id}>
                         {u.display_name || u.username}
@@ -448,8 +430,8 @@ export default function InternalAuditDetailPage() {
             </Row>
             <Row gutter={16}>
               <Col span={24}>
-                <Form.Item name="team_members" label="审核组员">
-                  <Select mode="multiple" placeholder="选择组员" allowClear>
+                <Form.Item name="team_members" label={t("form.teamMembers", "审核组员")}>
+                  <Select mode="multiple" placeholder={t("form.teamMembers", "选择组员")} allowClear>
                     {users.map((u) => (
                       <Option key={u.user_id} value={u.user_id}>
                         {u.display_name || u.username}
@@ -463,23 +445,23 @@ export default function InternalAuditDetailPage() {
         ) : (
           <Row gutter={24}>
             <Col span={6}>
-              <Text type="secondary">审核范围</Text>
+              <Text type="secondary">{t("form.scope", "审核范围")}</Text>
               <div>{plan.audit_scope}</div>
             </Col>
             <Col span={6}>
-              <Text type="secondary">审核准则</Text>
+              <Text type="secondary">{t("form.criteria", "审核准则")}</Text>
               <div>{plan.audit_criteria}</div>
             </Col>
             <Col span={4}>
-              <Text type="secondary">计划日期</Text>
+              <Text type="secondary">{t("form.plannedDate", "计划日期")}</Text>
               <div>{plan.planned_date}</div>
             </Col>
             <Col span={4}>
-              <Text type="secondary">实际日期</Text>
-              <div>{plan.actual_date || "—"}</div>
+              <Text type="secondary">{t("form.actualDate", "实际日期")}</Text>
+              <div>{plan.actual_date ? formatDateTime(plan.actual_date) : "—"}</div>
             </Col>
             <Col span={4}>
-              <Text type="secondary">审核组长</Text>
+              <Text type="secondary">{t("form.leadAuditor", "审核组长")}</Text>
               <div>
                 {plan.lead_auditor
                   ? users.find((u) => u.user_id === plan.lead_auditor)?.display_name ||
@@ -492,19 +474,19 @@ export default function InternalAuditDetailPage() {
         )}
       </DataCard>
 
-      <DataCard title="审核详情" noPadding>
+      <DataCard title={t("card.basicInfo", "审核详情")} noPadding>
         <Tabs
           defaultActiveKey="checklist"
           items={[
           {
             key: "checklist",
-            label: "检查表",
+            label: t("tabs.checklist", "检查表"),
             children: (
               <Card
                 extra={
                   canEdit('audit') && (
                     <Button type="primary" icon={<PlusOutlined />} onClick={handleAddChecklistItem}>
-                      添加检查项
+                      {t("actions.addChecklistItem", "添加检查项")}
                     </Button>
                   )
                 }
@@ -517,17 +499,17 @@ export default function InternalAuditDetailPage() {
                   size="small"
                   scroll={{ x: 1200 }}
                   columns={[
-                    { title: "序号", dataIndex: "item_no", width: 60 },
-                    { title: "条款", dataIndex: "clause", width: 120 },
-                    { title: "检查问题", dataIndex: "question", ellipsis: true },
+                    { title: t("table.serialNo", "序号"), dataIndex: "item_no", width: 60 },
+                    { title: t("table.clause", "条款"), dataIndex: "clause", width: 120 },
+                    { title: t("table.question", "检查问题"), dataIndex: "question", ellipsis: true },
                     {
-                      title: "结果",
+                      title: t("table.result", "结果"),
                       dataIndex: "result",
                       width: 120,
                       render: (value: string, _record: AuditChecklistItem, index: number) => (
                         <Select
                           value={value || undefined}
-                          placeholder="选择结果"
+                          placeholder={t("placeholder.selectResult", "选择结果")}
                           style={{ width: "100%" }}
                           allowClear
                           disabled={!canEdit('audit')}
@@ -542,31 +524,31 @@ export default function InternalAuditDetailPage() {
                       ),
                     },
                     {
-                      title: "证据",
+                      title: t("table.evidence", "证据"),
                       dataIndex: "evidence",
                       render: (value: string, _record: AuditChecklistItem, index: number) => (
                         <Input
                           value={value}
-                          placeholder="输入证据"
+                          placeholder={t("placeholder.evidence", "输入证据")}
                           disabled={!canEdit('audit')}
                           onChange={(e) => handleChecklistChange(index, "evidence", e.target.value)}
                         />
                       ),
                     },
                     {
-                      title: "备注",
+                      title: t("table.note", "备注"),
                       dataIndex: "note",
                       render: (value: string, _record: AuditChecklistItem, index: number) => (
                         <Input
                           value={value}
-                          placeholder="输入备注"
+                          placeholder={t("placeholder.note", "输入备注")}
                           disabled={!canEdit('audit')}
                           onChange={(e) => handleChecklistChange(index, "note", e.target.value)}
                         />
                       ),
                     },
                     {
-                      title: "操作",
+                      title: tc("table.operations", "操作"),
                       width: 80,
                       render: (_: unknown, _record: AuditChecklistItem, index: number) =>
                         canEdit('audit') ? (
@@ -581,13 +563,13 @@ export default function InternalAuditDetailPage() {
           },
           {
             key: "findings",
-            label: "发现项",
+            label: t("tabs.findings", "发现项"),
             children: (
               <Card
                 extra={
                   canEdit('audit') && (
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => setFindingModalOpen(true)}>
-                      添加发现项
+                      {t("actions.addFinding", "添加发现项")}
                     </Button>
                   )
                 }
@@ -600,29 +582,29 @@ export default function InternalAuditDetailPage() {
                   pagination={false}
                   size="small"
                   columns={[
-                    { title: "条款", dataIndex: "clause_ref", width: 100, render: (v: string | null) => v || "—" },
+                    { title: t("table.clauseRef", "条款"), dataIndex: "clause_ref", width: 100, render: (v: string | null) => v || "—" },
                     {
-                      title: "类型",
+                      title: t("table.auditType", "类型"),
                       dataIndex: "finding_type",
                       width: 100,
                       render: (type: string) => {
                         const cfg = FINDING_TYPE_MAP[type];
-                        return <StatusBadge status={cfg?.variant || "info"}>{cfg?.label}</StatusBadge>;
+                        return <StatusBadge status={cfg?.color === "red" ? "error" : cfg?.color === "orange" ? "warning" : "info"}>{cfg?.label}</StatusBadge>;
                       },
                     },
-                    { title: "描述", dataIndex: "description", ellipsis: true },
+                    { title: t("table.description", "描述"), dataIndex: "description", ellipsis: true },
                     {
-                      title: "状态",
+                      title: t("table.status", "状态"),
                       dataIndex: "status",
                       width: 90,
                       render: (status: string) => {
                         const cfg = FINDING_STATUS_MAP[status];
-                        return <StatusBadge status={cfg?.variant || "info"}>{cfg?.label}</StatusBadge>;
+                        return <StatusBadge status={cfg?.color === "red" ? "error" : cfg?.color === "success" ? "success" : cfg?.color === "processing" ? "warning" : "info"}>{cfg?.label}</StatusBadge>;
                       },
                     },
-                    { title: "截止日期", dataIndex: "due_date", width: 110, render: (v: string | null) => v || "—" },
+                    { title: t("table.dueDate", "截止日期"), dataIndex: "due_date", width: 110, render: (v: string | null) => v ? formatDateTime(v) : "—" },
                     {
-                      title: "CAPA",
+                      title: t("table.capa", "CAPA"),
                       width: 120,
                       render: (_: unknown, record: AuditFinding) =>
                         record.capa_ref_id ? (
@@ -633,25 +615,25 @@ export default function InternalAuditDetailPage() {
                             onClick={() => navigate(`/capa/${record.capa_ref_id}`)}
                             style={{ padding: 0 }}
                           >
-                            查看CAPA
+                            {t("actions.viewCapa", "查看CAPA")}
                           </Button>
                         ) : (
-                          <StatusBadge status="info">未关联</StatusBadge>
+                          <StatusBadge status="info">{tc("status.pending", "未关联")}</StatusBadge>
                         ),
                     },
                     {
-                      title: "操作",
+                      title: tc("table.operations", "操作"),
                       width: 200,
                       render: (_: unknown, record: AuditFinding) => (
                         <Space size="small">
                           {record.status !== "closed" && canEdit('audit') && (
                             <Button size="small" icon={<CheckCircleOutlined />} onClick={() => handleCloseFinding(record.finding_id)}>
-                              关闭
+                              {t("actions.closeFinding", "关闭")}
                             </Button>
                           )}
                           {!record.capa_ref_id && canEdit('audit') && (
                             <Button size="small" onClick={() => handleCreateCAPA(record.finding_id)}>
-                              创建CAPA
+                              {t("actions.createCapa", "创建CAPA")}
                             </Button>
                           )}
                         </Space>
@@ -664,65 +646,65 @@ export default function InternalAuditDetailPage() {
           },
           {
             key: "report",
-            label: "审核报告",
+            label: t("tabs.report", "审核报告"),
             children: (
               <>
                 <Space style={{ marginBottom: 16 }}>
                   <Button icon={<PrinterOutlined />} onClick={handlePrint}>
-                    打印报告
+                    {t("actions.printReport", "打印报告")}
                   </Button>
                 </Space>
 
                 <Row gutter={16} style={{ marginBottom: 24 }}>
                   <Col span={4}>
                     <Card>
-                      <Statistic title="发现项总数" value={findings.length} />
+                      <Statistic title={t("stats.totalFindings", "发现项总数")} value={findings.length} />
                     </Card>
                   </Col>
                   <Col span={5}>
                     <Card>
-                      <Statistic title="严重不符合" value={majorCount} valueStyle={{ color: "#ff4d4f" }} />
+                      <Statistic title={t("stats.majorNc", "严重不符合")} value={majorCount} valueStyle={{ color: "#ff4d4f" }} />
                     </Card>
                   </Col>
                   <Col span={5}>
                     <Card>
-                      <Statistic title="一般不符合" value={minorCount} valueStyle={{ color: "#faad14" }} />
+                      <Statistic title={t("stats.minorNc", "一般不符合")} value={minorCount} valueStyle={{ color: "#faad14" }} />
                     </Card>
                   </Col>
                   <Col span={5}>
                     <Card>
-                      <Statistic title="改进机会" value={ofiCount} valueStyle={{ color: "#1890ff" }} />
+                      <Statistic title={t("stats.ofi", "改进机会")} value={ofiCount} valueStyle={{ color: "#1890ff" }} />
                     </Card>
                   </Col>
                   <Col span={5}>
                     <Card>
-                      <Statistic title="未关闭" value={openCount} valueStyle={{ color: openCount > 0 ? "#ff4d4f" : "#52c41a" }} />
+                      <Statistic title={t("stats.unclosed", "未关闭")} value={openCount} valueStyle={{ color: openCount > 0 ? "#ff4d4f" : "#52c41a" }} />
                     </Card>
                   </Col>
                 </Row>
 
                 <Row gutter={24}>
                   <Col span={12}>
-                    <Card title="发现项分布">
+                    <Card title={t("report.findingDistribution", "发现项分布")}>
                       <div ref={chartRef} style={{ width: "100%", height: 300 }} />
                     </Card>
                   </Col>
                   <Col span={12}>
-                    <Card title="发现项清单">
+                    <Card title={t("report.findingList", "发现项清单")}>
                       {findings.length === 0 ? (
-                        <Text type="secondary">暂无发现项</Text>
+                        <Text type="secondary">{t("report.noFindings", "暂无发现项")}</Text>
                       ) : (
                         <Space direction="vertical" style={{ width: "100%" }}>
                           {findings.map((f) => (
                             <div key={f.finding_id} style={{ padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>
                               <Space>
-                                <StatusBadge status={FINDING_TYPE_MAP[f.finding_type]?.variant || "info"}>{FINDING_TYPE_MAP[f.finding_type]?.label}</StatusBadge>
+                                <StatusBadge status={FINDING_TYPE_MAP[f.finding_type]?.color === "red" ? "error" : FINDING_TYPE_MAP[f.finding_type]?.color === "orange" ? "warning" : "info"}>{FINDING_TYPE_MAP[f.finding_type]?.label}</StatusBadge>
                                 <Text strong>{f.clause_ref || "—"}</Text>
                               </Space>
                               <div style={{ marginTop: 4 }}>{f.description}</div>
                               <div style={{ marginTop: 4 }}>
                                 <Text type="secondary" style={{ fontSize: 12 }}>
-                                  状态: {FINDING_STATUS_MAP[f.status]?.label} | 截止: {f.due_date || "—"}
+                                  {t("report.statusLabel", "状态")}: {FINDING_STATUS_MAP[f.status]?.label} | {t("report.dueLabel", "截止")}: {f.due_date ? formatDateTime(f.due_date) : "—"}
                                 </Text>
                               </div>
                             </div>
@@ -740,7 +722,7 @@ export default function InternalAuditDetailPage() {
       </DataCard>
 
       <Modal
-        title="添加发现项"
+        title={t("modal.addFinding", "添加发现项")}
         open={findingModalOpen}
         onCancel={() => {
           setFindingModalOpen(false);
@@ -750,21 +732,21 @@ export default function InternalAuditDetailPage() {
         width={560}
       >
         <Form form={findingForm} layout="vertical" onFinish={handleCreateFinding}>
-          <Form.Item name="clause_ref" label="条款编号">
-            <Input placeholder="如 4.1, 8.5.1" />
+          <Form.Item name="clause_ref" label={t("form.clauseRef", "条款编号")}>
+            <Input placeholder={t("placeholder.clauseRef", "如 4.1, 8.5.1")} />
           </Form.Item>
-          <Form.Item name="finding_type" label="发现项类型" rules={[{ required: true }]}>
-            <Select placeholder="选择类型">
-              <Option value="major_nc">严重不符合</Option>
-              <Option value="minor_nc">一般不符合</Option>
-              <Option value="ofi">改进机会</Option>
-              <Option value="observation">观察项</Option>
+          <Form.Item name="finding_type" label={t("form.findingType", "发现项类型")} rules={[{ required: true }]}>
+            <Select placeholder={t("placeholder.findingType", "选择类型")}>
+              <Option value="major_nc">{t("findingType.major_nc", "严重不符合")}</Option>
+              <Option value="minor_nc">{t("findingType.minor_nc", "一般不符合")}</Option>
+              <Option value="ofi">{t("findingType.ofi", "改进机会")}</Option>
+              <Option value="observation">{t("findingType.observation", "观察项")}</Option>
             </Select>
           </Form.Item>
-          <Form.Item name="description" label="描述" rules={[{ required: true }]}>
-            <TextArea rows={3} placeholder="描述发现的问题" />
+          <Form.Item name="description" label={t("form.description", "描述")} rules={[{ required: true }]}>
+            <TextArea rows={3} placeholder={t("placeholder.description", "描述发现的问题")} />
           </Form.Item>
-          <Form.Item name="due_date" label="截止日期">
+          <Form.Item name="due_date" label={t("form.dueDate", "截止日期")}>
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
         </Form>

@@ -1,4 +1,5 @@
 import { Badge } from "antd";
+import { useTranslation } from "react-i18next";
 import type { ActiveUser, EditingArea } from "../../types/collaboration";
 
 interface ActiveUserIndicatorProps {
@@ -14,6 +15,7 @@ export default function ActiveUserIndicator({
   field,
   nodeId,
 }: ActiveUserIndicatorProps) {
+  const { t } = useTranslation("collaboration");
   const editors = activeUsers.filter((u) => {
     if (u.action !== "editing" || !u.editing_area) return false;
     const area = u.editing_area as EditingArea;
@@ -33,7 +35,7 @@ export default function ActiveUserIndicator({
   return (
     <span style={{ fontSize: 11, color: "#52c41a", marginLeft: 4, whiteSpace: "nowrap" }}>
       <Badge color="green" style={{ marginRight: 4 }} />
-      {editors.map((e) => e.user_name).join("、")} 正在编辑
+      {t("activeUser.editing", { users: editors.map((e) => e.user_name).join(", ") })}
     </span>
   );
 }

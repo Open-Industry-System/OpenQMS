@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Drawer, List, Button, message, Badge } from "antd";
 import { HistoryOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -12,6 +13,7 @@ interface VersionPanelProps {
 }
 
 const VersionPanel: React.FC<VersionPanelProps> = ({ icId, onActivated }) => {
+  const { t } = useTranslation("spc");
   const [open, setOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<ControlLimitSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
@@ -22,7 +24,7 @@ const VersionPanel: React.FC<VersionPanelProps> = ({ icId, onActivated }) => {
       const data = await getSnapshots(icId);
       setSnapshots(data);
     } catch {
-      message.error("加载版本列表失败");
+      message.error(t("versionPanel.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -36,21 +38,21 @@ const VersionPanel: React.FC<VersionPanelProps> = ({ icId, onActivated }) => {
   const handleActivate = async (snapshotId: string) => {
     try {
       await activateSnapshot(icId, snapshotId);
-      message.success("已切换控制限版本");
+      message.success(t("versionPanel.activateSuccess"));
       fetchSnapshots();
       onActivated();
     } catch {
-      message.error("切换失败");
+      message.error(t("versionPanel.activateFailed"));
     }
   };
 
   return (
     <>
       <Button icon={<HistoryOutlined />} onClick={() => setOpen(true)}>
-        版本管理
+        {t("versionPanel.button")}
       </Button>
       <Drawer
-        title="控制限版本"
+        title={t("versionPanel.title")}
         open={open}
         onClose={() => setOpen(false)}
         width={400}
@@ -63,10 +65,10 @@ const VersionPanel: React.FC<VersionPanelProps> = ({ icId, onActivated }) => {
               style={{ background: snap.is_active ? "#f0f5ff" : undefined, borderRadius: 4 }}
               actions={[
                 snap.is_active ? (
-                  <StatusBadge status="info">当前</StatusBadge>
+                  <StatusBadge status="info">{t("versionPanel.current")}</StatusBadge>
                 ) : (
                   <Button size="small" onClick={() => handleActivate(snap.snapshot_id)}>
-                    设为当前
+                    {t("versionPanel.activate")}
                   </Button>
                 ),
               ]}
@@ -87,7 +89,7 @@ const VersionPanel: React.FC<VersionPanelProps> = ({ icId, onActivated }) => {
               />
             </List.Item>
           )}
-          locale={{ emptyText: "暂无锁定的控制限版本" }}
+          locale={{ emptyText: t("versionPanel.empty") }}
         />
       </Drawer>
     </>

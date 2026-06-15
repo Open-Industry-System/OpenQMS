@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   Table, Row, Col, Card, Statistic, App,
 } from "antd";
@@ -6,6 +6,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined,
   ScheduleOutlined, CarryOutOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { getMESDashboard } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { MESDashboardData, MESEquipmentSummary } from "../../types/mes";
@@ -18,24 +19,25 @@ const statusVariant: Record<string, string> = {
   changeover: "warning",
 };
 
-const statusLabels: Record<string, string> = {
-  running: "运行中",
-  idle: "待机",
-  down: "停机",
-  changeover: "换模中",
-};
-
 export default function MESDashboardPage() {
+  const { t } = useTranslation("mes");
   const { message } = App.useApp();
   const [data, setData] = useState<MESDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const productLine = useProductLineStore((s) => s.selected);
 
+  const statusLabels = useMemo(() => ({
+    running: t("dashboard.equipmentStatusLabels.running", "运行中"),
+    idle: t("dashboard.equipmentStatusLabels.idle", "待机"),
+    down: t("dashboard.equipmentStatusLabels.down", "停机"),
+    changeover: t("dashboard.equipmentStatusLabels.changeover", "换模中"),
+  }), [t]);
+
   const fetchData = (plCode?: string | null) => {
     setLoading(true);
     getMESDashboard(plCode || undefined)
       .then((res) => setData(res))
-      .catch(() => message.error("加载 MES 仪表盘失败"))
+      .catch(() => message.error(t("dashboard.errors.loadFailed", "加载 MES 仪表盘失败")))
       .finally(() => setLoading(false));
   };
 
@@ -44,27 +46,27 @@ export default function MESDashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
 
-  const columns = [
+  const columns = useMemo(() => [
     {
-      title: "设备名称",
+      title: t("dashboard.columns.equipmentName", "设备名称"),
       dataIndex: "equipment_name",
       key: "equipment_name",
       render: (v: string | null, record: MESEquipmentSummary) =>
         v || record.equipment_code,
     },
     {
-      title: "状态",
+      title: t("dashboard.columns.status", "状态"),
       dataIndex: "status",
       key: "status",
       width: 100,
       render: (s: string) => (
         <StatusBadge status={statusVariant[s] || s}>
-          {statusLabels[s] || s}
+          {statusLabels[s as keyof typeof statusLabels] || s}
         </StatusBadge>
       ),
     },
     {
-      title: "可用率 (%)",
+      title: t("dashboard.columns.availability", "可用率 (%)"),
       dataIndex: "availability",
       key: "availability",
       width: 110,
@@ -72,7 +74,7 @@ export default function MESDashboardPage() {
         v !== null ? `${v.toFixed(1)}%` : "—",
     },
     {
-      title: "性能 (%)",
+      title: t("dashboard.columns.performance", "性能 (%)"),
       dataIndex: "performance",
       key: "performance",
       width: 100,
@@ -80,7 +82,7 @@ export default function MESDashboardPage() {
         v !== null ? `${v.toFixed(1)}%` : "—",
     },
     {
-      title: "质量 (%)",
+      title: t("dashboard.columns.quality", "质量 (%)"),
       dataIndex: "quality",
       key: "quality",
       width: 100,
@@ -88,22 +90,22 @@ export default function MESDashboardPage() {
         v !== null ? `${v.toFixed(1)}%` : "—",
     },
     {
-      title: "OEE (%)",
+      title: t("dashboard.columns.oee", "OEE (%)"),
       dataIndex: "oee",
       key: "oee",
       width: 100,
       render: (v: number | null) =>
         v !== null ? `${v.toFixed(1)}%` : "—",
     },
-  ];
+  ], [t, statusLabels]);
 
   return (
-    <PageShell title="MES 仪表盘">
+    <PageShell title={t("dashboard.title", "MES 仪表盘")}>
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={12} lg={6}>
           <Card loading={loading}>
             <Statistic
-              title="运行设备"
+              title={t("dashboard.stats.runningEquipment", "运行设备")}
               value={data?.running_count ?? 0}
               valueStyle={{ color: "#52c41a" }}
               prefix={<CheckCircleOutlined />}
@@ -113,7 +115,7 @@ export default function MESDashboardPage() {
         <Col xs={24} sm={12} lg={6}>
           <Card loading={loading}>
             <Statistic
-              title="停机设备"
+              title={t("dashboard.stats.downEquipment", "停机设备")}
               value={data?.down_count ?? 0}
               valueStyle={{ color: "#ff4d4f" }}
               prefix={<CloseCircleOutlined />}
@@ -123,7 +125,7 @@ export default function MESDashboardPage() {
         <Col xs={24} sm={12} lg={6}>
           <Card loading={loading}>
             <Statistic
-              title="计划产量"
+              title={t("dashboard.stats.plannedOutput", "计划产量")}
               value={data?.total_planned ?? 0}
               prefix={<ScheduleOutlined />}
             />
@@ -132,7 +134,7 @@ export default function MESDashboardPage() {
         <Col xs={24} sm={12} lg={6}>
           <Card loading={loading}>
             <Statistic
-              title="实际产量"
+              title={t("dashboard.stats.actualOutput", "实际产量")}
               value={data?.total_actual ?? 0}
               prefix={<CarryOutOutlined />}
             />
@@ -140,7 +142,7 @@ export default function MESDashboardPage() {
         </Col>
       </Row>
 
-      <DataCard title="设备状态">
+      <DataCard title={t("dashboard.equipmentStatus", "设备状态")}>
         <Table
           columns={columns}
           dataSource={data?.equipment_summary ?? []}

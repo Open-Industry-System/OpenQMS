@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   Table,
   Tabs,
@@ -7,6 +7,7 @@ import {
   Col,
   App,
 } from "antd";
+import { useTranslation } from "react-i18next";
 import {
   fetchERPSalesOrders,
   fetchERPShipments,
@@ -34,13 +35,6 @@ const linkStatusVariant: Record<string, string> = {
   error: "error",
 };
 
-const costCategoryLabels: Record<string, string> = {
-  prevention: "预防成本",
-  appraisal: "鉴定成本",
-  internal_failure: "内部损失",
-  external_failure: "外部损失",
-};
-
 const costCategoryColors: Record<string, string> = {
   prevention: "#52c41a",
   appraisal: "#1890ff",
@@ -51,6 +45,7 @@ const costCategoryColors: Record<string, string> = {
 /* ─── Sales Orders Tab ─── */
 
 function SalesOrdersTab() {
+  const { t } = useTranslation("erp");
   const { message } = App.useApp();
   const [data, setData] = useState<ERPSalesOrder[]>([]);
   const [total, setTotal] = useState(0);
@@ -66,10 +61,10 @@ function SalesOrdersTab() {
           setData(res.items);
           setTotal(res.total);
         })
-        .catch(() => message.error("加载销售订单失败"))
+        .catch(() => message.error(t("salesAndCost.salesOrders.errors.loadFailed", "加载销售订单失败")))
         .finally(() => setLoading(false));
     },
-    [message],
+    [message, t],
   );
 
   useEffect(() => {
@@ -78,40 +73,40 @@ function SalesOrdersTab() {
 
   const columns = [
     {
-      title: "销售订单号",
+      title: t("salesAndCost.salesOrders.columns.soNumber", "销售订单号"),
       dataIndex: "so_number",
       key: "so_number",
       width: 160,
     },
     {
-      title: "行号",
+      title: t("salesAndCost.salesOrders.columns.lineNumber", "行号"),
       dataIndex: "line_number",
       key: "line_number",
       width: 80,
     },
     {
-      title: "客户编码",
+      title: t("salesAndCost.salesOrders.columns.customerCode", "客户编码"),
       dataIndex: "customer_code",
       key: "customer_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "物料编码",
+      title: t("salesAndCost.salesOrders.columns.materialCode", "物料编码"),
       dataIndex: "material_code",
       key: "material_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "数量",
+      title: t("salesAndCost.salesOrders.columns.quantity", "数量"),
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
       render: (v: number | null) => v?.toLocaleString() ?? "—",
     },
     {
-      title: "单价",
+      title: t("salesAndCost.salesOrders.columns.unitPrice", "单价"),
       dataIndex: "unit_price",
       key: "unit_price",
       width: 100,
@@ -119,7 +114,7 @@ function SalesOrdersTab() {
         v != null ? `¥${v.toFixed(2)}` : "—",
     },
     {
-      title: "状态",
+      title: t("salesAndCost.salesOrders.columns.status", "状态"),
       dataIndex: "status",
       key: "status",
       width: 100,
@@ -128,7 +123,7 @@ function SalesOrdersTab() {
       ),
     },
     {
-      title: "交货日期",
+      title: t("salesAndCost.salesOrders.columns.deliveryDate", "交货日期"),
       dataIndex: "delivery_date",
       key: "delivery_date",
       width: 120,
@@ -137,7 +132,7 @@ function SalesOrdersTab() {
   ];
 
   return (
-    <DataCard title="销售订单">
+    <DataCard title={t("salesAndCost.salesOrders.cardTitle", "销售订单")}>
       <Table
         className="qf-table"
         columns={columns}
@@ -161,6 +156,7 @@ function SalesOrdersTab() {
 /* ─── Shipments Tab ─── */
 
 function ShipmentsTab() {
+  const { t } = useTranslation("erp");
   const { message } = App.useApp();
   const [data, setData] = useState<ERPShipment[]>([]);
   const [total, setTotal] = useState(0);
@@ -176,10 +172,10 @@ function ShipmentsTab() {
           setData(res.items);
           setTotal(res.total);
         })
-        .catch(() => message.error("加载发货记录失败"))
+        .catch(() => message.error(t("salesAndCost.shipments.errors.loadFailed", "加载发货记录失败")))
         .finally(() => setLoading(false));
     },
-    [message],
+    [message, t],
   );
 
   useEffect(() => {
@@ -188,48 +184,48 @@ function ShipmentsTab() {
 
   const columns = [
     {
-      title: "发货单号",
+      title: t("salesAndCost.shipments.columns.shipmentNumber", "发货单号"),
       dataIndex: "shipment_number",
       key: "shipment_number",
       width: 140,
     },
     {
-      title: "客户编码",
+      title: t("salesAndCost.shipments.columns.customerCode", "客户编码"),
       dataIndex: "customer_code",
       key: "customer_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "物料编码",
+      title: t("salesAndCost.shipments.columns.materialCode", "物料编码"),
       dataIndex: "material_code",
       key: "material_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "批次号",
+      title: t("salesAndCost.shipments.columns.lotNo", "批次号"),
       dataIndex: "lot_no",
       key: "lot_no",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "数量",
+      title: t("salesAndCost.shipments.columns.quantity", "数量"),
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
       render: (v: number | null) => v?.toLocaleString() ?? "—",
     },
     {
-      title: "发货日期",
+      title: t("salesAndCost.shipments.columns.shipmentDate", "发货日期"),
       dataIndex: "shipment_date",
       key: "shipment_date",
       width: 120,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "关联状态",
+      title: t("salesAndCost.shipments.columns.linkStatus", "关联状态"),
       dataIndex: "link_status",
       key: "link_status",
       width: 100,
@@ -240,7 +236,7 @@ function ShipmentsTab() {
   ];
 
   return (
-    <DataCard title="发货记录">
+    <DataCard title={t("salesAndCost.shipments.cardTitle", "发货记录")}>
       <Table
         className="qf-table"
         columns={columns}
@@ -264,12 +260,20 @@ function ShipmentsTab() {
 /* ─── Cost Records Tab ─── */
 
 function CostRecordsTab() {
+  const { t } = useTranslation("erp");
   const { message } = App.useApp();
   const [data, setData] = useState<ERPCostRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const productLine = useProductLineStore((s) => s.selected);
+
+  const costCategoryLabels = useMemo((): Record<string, string> => ({
+    prevention: t("salesAndCost.costRecords.categories.prevention", "预防成本"),
+    appraisal: t("salesAndCost.costRecords.categories.appraisal", "鉴定成本"),
+    internal_failure: t("salesAndCost.costRecords.categories.internalFailure", "内部损失"),
+    external_failure: t("salesAndCost.costRecords.categories.externalFailure", "外部损失"),
+  }), [t]);
 
   const fetchData = useCallback(
     (p: number, plCode?: string | null) => {
@@ -279,10 +283,10 @@ function CostRecordsTab() {
           setData(res.items);
           setTotal(res.total);
         })
-        .catch(() => message.error("加载成本记录失败"))
+        .catch(() => message.error(t("salesAndCost.costRecords.errors.loadFailed", "加载成本记录失败")))
         .finally(() => setLoading(false));
     },
-    [message],
+    [message, t],
   );
 
   useEffect(() => {
@@ -298,48 +302,48 @@ function CostRecordsTab() {
 
   const columns = [
     {
-      title: "成本类别",
+      title: t("salesAndCost.costRecords.columns.category", "成本类别"),
       dataIndex: "cost_category",
       key: "cost_category",
       width: 120,
       render: (v: string) => costCategoryLabels[v] || v,
     },
     {
-      title: "成本类型",
+      title: t("salesAndCost.costRecords.columns.type", "成本类型"),
       dataIndex: "cost_type",
       key: "cost_type",
       width: 140,
     },
     {
-      title: "金额",
+      title: t("salesAndCost.costRecords.columns.amount", "金额"),
       dataIndex: "amount",
       key: "amount",
       width: 120,
       render: (v: number) => `¥${v.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`,
     },
     {
-      title: "货币",
+      title: t("salesAndCost.costRecords.columns.currency", "货币"),
       dataIndex: "currency",
       key: "currency",
       width: 80,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "期间",
+      title: t("salesAndCost.costRecords.columns.period", "期间"),
       dataIndex: "period_month",
       key: "period_month",
       width: 100,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "来源单据",
+      title: t("salesAndCost.costRecords.columns.sourceDocument", "来源单据"),
       dataIndex: "source_document_no",
       key: "source_document_no",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "描述",
+      title: t("salesAndCost.costRecords.columns.description", "描述"),
       dataIndex: "description",
       key: "description",
       ellipsis: true,
@@ -348,7 +352,7 @@ function CostRecordsTab() {
   ];
 
   return (
-    <DataCard title="成本记录">
+    <DataCard title={t("salesAndCost.costRecords.cardTitle", "成本记录")}>
       <Row gutter={16} style={{ marginBottom: 16 }}>
         {Object.entries(coqSummary).map(([cat, amount]) => (
           <Col key={cat} span={6}>
@@ -385,17 +389,18 @@ function CostRecordsTab() {
 /* ─── Main Page ─── */
 
 export default function ERPSalesAndCostPage() {
+  const { t } = useTranslation("erp");
   const [activeTab, setActiveTab] = useState("sales_orders");
 
   return (
-    <PageShell title="销售与成本">
+    <PageShell title={t("salesAndCost.title", "销售与成本")}>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         items={[
-          { key: "sales_orders", label: "销售订单", children: <SalesOrdersTab /> },
-          { key: "shipments", label: "发货记录", children: <ShipmentsTab /> },
-          { key: "cost_records", label: "成本记录", children: <CostRecordsTab /> },
+          { key: "sales_orders", label: t("salesAndCost.tabs.salesOrders", "销售订单"), children: <SalesOrdersTab /> },
+          { key: "shipments", label: t("salesAndCost.tabs.shipments", "发货记录"), children: <ShipmentsTab /> },
+          { key: "cost_records", label: t("salesAndCost.tabs.costRecords", "成本记录"), children: <CostRecordsTab /> },
         ]}
       />
     </PageShell>

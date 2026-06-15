@@ -21,7 +21,7 @@ class CAPAEightD(Base):
         UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(20), default="D1_TEAM")
-    severity: Mapped[str] = mapped_column(String(20), default="一般")
+    severity: Mapped[str] = mapped_column(String(20), default="general")
     d1_team: Mapped[dict] = mapped_column(JSONB, default=lambda: [])
     d2_description: Mapped[str | None] = mapped_column(Text)
     d3_interim: Mapped[str | None] = mapped_column(Text)

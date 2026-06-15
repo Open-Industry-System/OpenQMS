@@ -1,0 +1,113 @@
+{
+  "pageTitle": {
+    "list": "Quality Goals"
+  },
+  "pageSubtitle": {
+    "list": "QMS Quality Goal Management · Goal Setting · Approval · Achievement Tracking"
+  },
+  "status": {
+    "draft": "Draft",
+    "pending": "Pending Approval",
+    "active": "Active",
+    "archived": "Archived"
+  },
+  "level": {
+    "1": "Company",
+    "2": "Product Line",
+    "3": "Process"
+  },
+  "achievement": {
+    "achieved": "Achieved",
+    "not_achieved": "Not Achieved",
+    "pending": "Pending Entry"
+  },
+  "period": {
+    "monthly": { "value": "月度", "label": "Monthly" },
+    "quarterly": { "value": "季度", "label": "Quarterly" },
+    "yearly": { "value": "年度", "label": "Yearly" }
+  },
+  "stats": {
+    "totalGoals": "Total Goals",
+    "active": "Active",
+    "pendingApproval": "Pending Approval",
+    "achievementRate": "Achievement Rate"
+  },
+  "card": {
+    "goalList": "Quality Goal List"
+  },
+  "tabs": {
+    "all": "All",
+    "pendingMe": "Pending My Approval",
+    "my": "My Goals",
+    "draft": "Draft"
+  },
+  "table": {
+    "name": "Indicator Name",
+    "progress": "Progress & Achievement",
+    "target": "Target",
+    "actual": "Actual",
+    "period": "Period",
+    "owner": "Owner",
+    "status": "Status",
+    "operations": "Actions"
+  },
+  "actions": {
+    "newGoal": "New Goal",
+    "updateValue": "Update Value",
+    "archive": "Archive",
+    "withdraw": "Withdraw"
+  },
+  "form": {
+    "level": "Level",
+    "parentGoal": "Parent Goal",
+    "productLine": "Product Line",
+    "name": "Indicator Name",
+    "targetValue": "Target Value",
+    "unit": "Unit",
+    "period": "Period",
+    "owner": "Owner",
+    "description": "Description"
+  },
+  "placeholder": {
+    "rejectReason": "Enter rejection reason",
+    "productLine": "e.g. DC-DC-100",
+    "name": "e.g. Customer Complaint Rate",
+    "targetValue": "e.g. ≤500 or ≥90%",
+    "unit": "e.g. PPM, %",
+    "parentGoal": "Select parent goal (not required for company level)",
+    "selectLevel": "Select level",
+    "selectPeriod": "Select period",
+    "selectOwner": "Select owner"
+  },
+  "modal": {
+    "newGoal": "New Quality Goal",
+    "editGoal": "Edit Quality Goal",
+    "rejectReason": "Rejection Reason"
+  },
+  "validation": {
+    "levelRequired": "Please select level",
+    "nameRequired": "Please enter indicator name",
+    "targetValueRequired": "Please enter target value",
+    "unitRequired": "Please enter unit",
+    "periodRequired": "Please select period",
+    "ownerRequired": "Please select owner"
+  },
+  "messages": {
+    "loadFailed": "Failed to load data",
+    "createSuccess": "Created successfully",
+    "updateSuccess": "Updated successfully",
+    "deleteSuccess": "Deleted successfully",
+    "submitSuccess": "Submitted for approval",
+    "withdrawSuccess": "Withdrawn",
+    "approveSuccess": "Approved",
+    "rejectSuccess": "Rejected",
+    "archiveSuccess": "Archived",
+    "actualValueUpdated": "Actual value updated",
+    "operationFailed": "Operation failed",
+    "updateFailed": "Update failed",
+    "deleteFailed": "Delete failed"
+  },
+  "prompt": {
+    "actualValue": "Please enter actual value:"
+  }
+}

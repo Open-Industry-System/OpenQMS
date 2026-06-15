@@ -26,6 +26,7 @@ import {
   EditOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
@@ -46,21 +47,9 @@ import {
 } from "../../api/qualityGoal";
 import { listUsers } from "../../api/auth";
 import type { User } from "../../types";
+import { useLevelMap, useStatusMap, useStatusColor, useAchievementMap, usePeriodOptions } from "./useOptions";
 
 const { Option } = Select;
-
-const LEVEL_MAP: Record<number, { label: string; color: string; icon: string }> = {
-  1: { label: "公司级", color: "blue", icon: "🏢" },
-  2: { label: "产品线级", color: "green", icon: "🏭" },
-  3: { label: "过程级", color: "orange", icon: "🔧" },
-};
-
-const STATUS_MAP: Record<string, { label: string; status: string }> = {
-  draft: { label: "草稿", status: "draft" },
-  pending: { label: "待审批", status: "warning" },
-  active: { label: "生效中", status: "success" },
-  archived: { label: "已停用", status: "closed" },
-};
 
 function parseTargetValue(value: string): { operator: string; threshold: number } {
   const v = value.trim();
@@ -92,10 +81,17 @@ function getProgressPercent(target: string, actual: string | null): number {
 }
 
 export default function QualityGoalListPage() {
+  const { t } = useTranslation("qualityGoal");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const user = useAuthStore((s) => s.user);
   const { canEdit, canApprove } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
+  const LEVEL_MAP = useLevelMap();
+  const STATUS_MAP = useStatusMap();
+  const STATUS_COLOR = useStatusColor();
+  const ACHIEVEMENT_MAP = useAchievementMap();
+  const PERIOD_OPTIONS = usePeriodOptions();
 
   const [goals, setGoals] = useState<QualityGoal[]>([]);
   const [loading, setLoading] = useState(false);
@@ -148,7 +144,7 @@ export default function QualityGoalListPage() {
       setTotal(resp.total);
       setStats(s);
     } catch {
-      message.error("加载数据失败");
+      message.error(t("messages.loadFailed", "加载数据失败"));
     } finally {
       setLoading(false);
     }
@@ -198,7 +194,7 @@ export default function QualityGoalListPage() {
           owner_id: values.owner_id as string,
           description: values.description as string | null,
         });
-        message.success("更新成功");
+        message.success(t("messages.updateSuccess", "更新成功"));
       } else {
         await createQualityGoal({
           parent_id: (values.parent_id as string) || null,
@@ -211,57 +207,57 @@ export default function QualityGoalListPage() {
           owner_id: values.owner_id as string,
           description: (values.description as string) || null,
         });
-        message.success("创建成功");
+        message.success(t("messages.createSuccess", "创建成功"));
       }
       setModalOpen(false);
       fetchGoals();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "操作失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "操作失败"));
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
       await deleteQualityGoal(id);
-      message.success("删除成功");
+      message.success(t("messages.deleteSuccess", "删除成功"));
       fetchGoals();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "删除失败");
+      message.error(err.response?.data?.detail || t("messages.deleteFailed", "删除失败"));
     }
   };
 
   const handleSubmitForApproval = async (id: string) => {
     try {
       await submitQualityGoal(id);
-      message.success("已提交审批");
+      message.success(t("messages.submitSuccess", "已提交审批"));
       fetchGoals();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "提交失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "提交失败"));
     }
   };
 
   const handleWithdraw = async (id: string) => {
     try {
       await withdrawQualityGoal(id);
-      message.success("已撤回");
+      message.success(t("messages.withdrawSuccess", "已撤回"));
       fetchGoals();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "撤回失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "撤回失败"));
     }
   };
 
   const handleApprove = async (id: string) => {
     try {
       await approveQualityGoal(id);
-      message.success("审批通过");
+      message.success(t("messages.approveSuccess", "审批通过"));
       fetchGoals();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "审批失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "审批失败"));
     }
   };
 
@@ -269,36 +265,36 @@ export default function QualityGoalListPage() {
     if (!rejectingGoalId || !rejectReason.trim()) return;
     try {
       await rejectQualityGoal(rejectingGoalId, rejectReason);
-      message.success("已驳回");
+      message.success(t("messages.rejectSuccess", "已驳回"));
       setRejectModalOpen(false);
       setRejectReason("");
       setRejectingGoalId(null);
       fetchGoals();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "驳回失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "驳回失败"));
     }
   };
 
   const handleArchive = async (id: string) => {
     try {
       await archiveQualityGoal(id);
-      message.success("已停用");
+      message.success(t("messages.archiveSuccess", "已停用"));
       fetchGoals();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "停用失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "停用失败"));
     }
   };
 
   const handleUpdateActual = async (id: string, value: string) => {
     try {
       await updateActualValue(id, value);
-      message.success("实际值已更新");
+      message.success(t("messages.actualValueUpdated", "实际值已更新"));
       fetchGoals();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "更新失败");
+      message.error(err.response?.data?.detail || tc("messages.operationFailed", "更新失败"));
     }
   };
 
@@ -308,7 +304,7 @@ export default function QualityGoalListPage() {
 
   const columns = [
     {
-      title: "指标名称",
+      title: t("table.name", "指标名称"),
       dataIndex: "name",
       render: (_: string, record: QualityGoal) => (
         <div>
@@ -323,14 +319,14 @@ export default function QualityGoalListPage() {
       ),
     },
     {
-      title: "进度与达成",
+      title: t("table.progress", "进度与达成"),
       render: (_: unknown, record: QualityGoal) => {
         const achievement = checkAchievement(record.target_value, record.actual_value);
         const percent = getProgressPercent(record.target_value, record.actual_value);
         return (
           <div>
             <div style={{ fontSize: 12, color: "var(--qf-text-secondary)" }}>
-              目标: {record.target_value} | 实际: {record.actual_value || "—"}
+              {t("table.target", "目标")}: {record.target_value} | {t("table.actual", "实际")}: {record.actual_value || "—"}
             </div>
             {record.actual_value && (
               <div style={{ marginTop: 4 }}>
@@ -360,21 +356,21 @@ export default function QualityGoalListPage() {
               </div>
             )}
             <div style={{ marginTop: 4 }}>
-              {achievement === "achieved" && <StatusBadge status="success">已达成</StatusBadge>}
-              {achievement === "not_achieved" && <StatusBadge status="error">未达成</StatusBadge>}
-              {achievement === "pending" && <StatusBadge status="draft">待录入</StatusBadge>}
+              {achievement === "achieved" && <StatusBadge status={ACHIEVEMENT_MAP.achieved.color}>{ACHIEVEMENT_MAP.achieved.label}</StatusBadge>}
+              {achievement === "not_achieved" && <StatusBadge status={ACHIEVEMENT_MAP.not_achieved.color}>{ACHIEVEMENT_MAP.not_achieved.label}</StatusBadge>}
+              {achievement === "pending" && <StatusBadge status={ACHIEVEMENT_MAP.pending.color}>{ACHIEVEMENT_MAP.pending.label}</StatusBadge>}
             </div>
           </div>
         );
       },
     },
     {
-      title: "周期",
+      title: t("table.period", "周期"),
       dataIndex: "period",
       width: 80,
     },
     {
-      title: "责任人",
+      title: t("table.owner", "责任人"),
       dataIndex: "owner_id",
       width: 120,
       render: (ownerId: string) => {
@@ -383,16 +379,16 @@ export default function QualityGoalListPage() {
       },
     },
     {
-      title: "状态",
+      title: t("table.status", "状态"),
       dataIndex: "status",
       width: 100,
       render: (status: string) => {
         const cfg = STATUS_MAP[status];
-        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label}</StatusBadge>;
+        return <StatusBadge status={STATUS_COLOR[status] || "default"}>{cfg}</StatusBadge>;
       },
     },
     {
-      title: "操作",
+      title: tc("table.operations", "操作"),
       width: 240,
       render: (_: unknown, record: QualityGoal) => {
         const isOwner = record.owner_id === user?.user_id;
@@ -401,15 +397,15 @@ export default function QualityGoalListPage() {
             {record.status === "draft" && canEdit('quality_goal') && (
               <>
                 <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
-                  编辑
+                  {tc("actions.edit", "编辑")}
                 </Button>
-                <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.goal_id)}>
+                <Popconfirm title={tc("messages.confirmDelete", "确认删除？")} onConfirm={() => handleDelete(record.goal_id)}>
                   <Button size="small" danger icon={<DeleteOutlined />}>
-                    删除
+                    {tc("actions.delete", "删除")}
                   </Button>
                 </Popconfirm>
                 <Button size="small" type="primary" icon={<SendOutlined />} onClick={() => handleSubmitForApproval(record.goal_id)}>
-                  提交
+                  {tc("actions.submit", "提交")}
                 </Button>
               </>
             )}
@@ -417,13 +413,13 @@ export default function QualityGoalListPage() {
               <>
                 {canEdit('quality_goal') && isOwner && (
                   <Button size="small" icon={<RollbackOutlined />} onClick={() => handleWithdraw(record.goal_id)}>
-                    撤回
+                    {t("actions.withdraw", "撤回")}
                   </Button>
                 )}
                 {canApprove('quality_goal') && (
                   <>
                     <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => handleApprove(record.goal_id)}>
-                      通过
+                      {tc("actions.approve", "通过")}
                     </Button>
                     <Button
                       size="small"
@@ -434,7 +430,7 @@ export default function QualityGoalListPage() {
                         setRejectModalOpen(true);
                       }}
                     >
-                      驳回
+                      {tc("actions.reject", "驳回")}
                     </Button>
                   </>
                 )}
@@ -443,23 +439,23 @@ export default function QualityGoalListPage() {
             {record.status === "active" && (
               <>
                 {canEdit('quality_goal') && (
-                  <Tooltip title="更新实际值">
+                  <Tooltip title={t("actions.updateValue", "更新实际值")}>
                     <Button
                       size="small"
                       icon={<EditOutlined />}
                       onClick={() => {
-                        const value = prompt("请输入实际值:", record.actual_value || "");
+                        const value = prompt(t("prompt.actualValue", "请输入实际值:"), record.actual_value || "");
                         if (value !== null) handleUpdateActual(record.goal_id, value);
                       }}
                     >
-                      更新值
+                      {t("actions.updateValue", "更新值")}
                     </Button>
                   </Tooltip>
                 )}
                 {canApprove('quality_goal') && (
-                  <Popconfirm title="确认停用？" onConfirm={() => handleArchive(record.goal_id)}>
+                  <Popconfirm title={tc("messages.confirmDelete", "确认停用？")} onConfirm={() => handleArchive(record.goal_id)}>
                     <Button size="small" icon={<InboxOutlined />}>
-                      停用
+                      {t("actions.archive", "停用")}
                     </Button>
                   </Popconfirm>
                 )}
@@ -473,28 +469,27 @@ export default function QualityGoalListPage() {
 
   return (
     <PageShell
-      title="质量目标"
-      subtitle="QMS 质量目标管理 · 目标设定 · 审批 · 达成跟踪"
+      title={t("pageTitle.list", "质量目标")}
+      subtitle={t("pageSubtitle.list", "QMS 质量目标管理 · 目标设定 · 审批 · 达成跟踪")}
       actions={
         canEdit('quality_goal') ? (
           <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-            新建目标
+            {t("actions.newGoal", "新建目标")}
           </Button>
         ) : null
       }
     >
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <DataCard title="目标总数" noPadding>
+          <DataCard title={t("stats.totalGoals", "目标总数")} noPadding>
             <Statistic
-              title="目标总数"
               value={total}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-primary)" }}
             />
           </DataCard>
         </Col>
         <Col span={6}>
-          <DataCard title="生效中" noPadding>
+          <DataCard title={t("stats.active", "生效中")} noPadding>
             <Statistic
               value={activeCount}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
@@ -502,7 +497,7 @@ export default function QualityGoalListPage() {
           </DataCard>
         </Col>
         <Col span={6}>
-          <DataCard title="待审批" noPadding>
+          <DataCard title={t("stats.pendingApproval", "待审批")} noPadding>
             <Statistic
               value={pendingCount}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-amber)" }}
@@ -510,7 +505,7 @@ export default function QualityGoalListPage() {
           </DataCard>
         </Col>
         <Col span={6}>
-          <DataCard title="达成率" noPadding>
+          <DataCard title={t("stats.achievementRate", "达成率")} noPadding>
             <Statistic
               value={`${achievementRate}%`}
               valueStyle={{
@@ -522,15 +517,15 @@ export default function QualityGoalListPage() {
         </Col>
       </Row>
 
-      <DataCard title="质量目标列表">
+      <DataCard title={t("card.goalList", "质量目标列表")}>
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
           items={[
-            { label: "全部", key: "all" },
-            ...(canApprove('quality_goal') ? [{ label: "待我审批", key: "pending" }] : []),
-            { label: "我的目标", key: "my" },
-            ...(canEdit('quality_goal') ? [{ label: "草稿", key: "draft" }] : []),
+            { label: t("tabs.all", "全部"), key: "all" },
+            ...(canApprove('quality_goal') ? [{ label: t("tabs.pendingMe", "待我审批"), key: "pending" }] : []),
+            { label: t("tabs.my", "我的目标"), key: "my" },
+            ...(canEdit('quality_goal') ? [{ label: t("tabs.draft", "草稿"), key: "draft" }] : []),
           ]}
         />
         <Table
@@ -552,26 +547,28 @@ export default function QualityGoalListPage() {
       </DataCard>
 
       <Modal
-        title={editingGoal ? "编辑质量目标" : "新建质量目标"}
+        title={editingGoal ? t("modal.editGoal", "编辑质量目标") : t("modal.newGoal", "新建质量目标")}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
         width={600}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmitForm}>
-          <Form.Item name="level" label="层级" rules={[{ required: true }]}>
+          <Form.Item name="level" label={t("form.level", "层级")} rules={[{ required: true, message: t("validation.levelRequired", "请选择层级") }]}>
             <Select
-              placeholder="选择层级"
+              placeholder={t("placeholder.selectLevel", "选择层级")}
               disabled={!!editingGoal}
               onChange={(value) => loadParentGoals(value as number)}
             >
-              <Option value={1}>🏢 公司级</Option>
-              <Option value={2}>🏭 产品线级</Option>
-              <Option value={3}>🔧 过程级</Option>
+              {Object.entries(LEVEL_MAP).map(([key, val]) => (
+                <Option key={key} value={Number(key)}>
+                  {val.icon} {val.label}
+                </Option>
+              ))}
             </Select>
           </Form.Item>
-          <Form.Item name="parent_id" label="父目标">
-            <Select placeholder="选择父目标（公司级无需选择）" allowClear disabled={!!editingGoal}>
+          <Form.Item name="parent_id" label={t("form.parentGoal", "父目标")}>
+            <Select placeholder={t("placeholder.parentGoal", "选择父目标（公司级无需选择）")} allowClear disabled={!!editingGoal}>
               {parentGoals.map((g) => (
                 <Option key={g.goal_id} value={g.goal_id}>
                   {g.name}
@@ -579,27 +576,27 @@ export default function QualityGoalListPage() {
               ))}
             </Select>
           </Form.Item>
-          <Form.Item name="product_line_code" label="产品线">
-            <Input placeholder="如 DC-DC-100" />
+          <Form.Item name="product_line_code" label={t("form.productLine", "产品线")}>
+            <Input placeholder={t("placeholder.productLine", "如 DC-DC-100")} />
           </Form.Item>
-          <Form.Item name="name" label="指标名称" rules={[{ required: true }]}>
-            <Input placeholder="如 客户投诉率" />
+          <Form.Item name="name" label={t("form.name", "指标名称")} rules={[{ required: true, message: t("validation.nameRequired", "请输入指标名称") }]}>
+            <Input placeholder={t("placeholder.name", "如 客户投诉率")} />
           </Form.Item>
-          <Form.Item name="target_value" label="目标值" rules={[{ required: true }]}>
-            <Input placeholder="如 ≤500 或 ≥90%" />
+          <Form.Item name="target_value" label={t("form.targetValue", "目标值")} rules={[{ required: true, message: t("validation.targetValueRequired", "请输入目标值") }]}>
+            <Input placeholder={t("placeholder.targetValue", "如 ≤500 或 ≥90%")} />
           </Form.Item>
-          <Form.Item name="unit" label="单位" rules={[{ required: true }]}>
-            <Input placeholder="如 PPM、%" />
+          <Form.Item name="unit" label={t("form.unit", "单位")} rules={[{ required: true, message: t("validation.unitRequired", "请输入单位") }]}>
+            <Input placeholder={t("placeholder.unit", "如 PPM、%")} />
           </Form.Item>
-          <Form.Item name="period" label="周期" rules={[{ required: true }]}>
-            <Select placeholder="选择周期">
-              <Option value="月度">月度</Option>
-              <Option value="季度">季度</Option>
-              <Option value="年度">年度</Option>
+          <Form.Item name="period" label={t("form.period", "周期")} rules={[{ required: true, message: t("validation.periodRequired", "请选择周期") }]}>
+            <Select placeholder={t("placeholder.selectPeriod", "选择周期")}>
+              {PERIOD_OPTIONS.map((o) => (
+                <Option key={o.value} value={o.value}>{o.label}</Option>
+              ))}
             </Select>
           </Form.Item>
-          <Form.Item name="owner_id" label="责任人" rules={[{ required: true }]}>
-            <Select placeholder="选择责任人">
+          <Form.Item name="owner_id" label={t("form.owner", "责任人")} rules={[{ required: true, message: t("validation.ownerRequired", "请选择责任人") }]}>
+            <Select placeholder={t("placeholder.selectOwner", "选择责任人")}>
               {users.map((u) => (
                 <Option key={u.user_id} value={u.user_id}>
                   {u.display_name || u.username}
@@ -607,14 +604,14 @@ export default function QualityGoalListPage() {
               ))}
             </Select>
           </Form.Item>
-          <Form.Item name="description" label="说明">
+          <Form.Item name="description" label={t("form.description", "说明")}>
             <Input.TextArea rows={3} />
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title="驳回理由"
+        title={t("modal.rejectReason", "驳回理由")}
         open={rejectModalOpen}
         onCancel={() => {
           setRejectModalOpen(false);
@@ -625,7 +622,7 @@ export default function QualityGoalListPage() {
       >
         <Input.TextArea
           rows={4}
-          placeholder="请输入驳回理由"
+          placeholder={t("placeholder.rejectReason", "请输入驳回理由")}
           value={rejectReason}
           onChange={(e) => setRejectReason(e.target.value)}
         />

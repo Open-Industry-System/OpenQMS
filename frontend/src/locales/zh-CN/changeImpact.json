@@ -1,0 +1,46 @@
+{
+  "page": {
+    "title": "变更影响分析",
+    "history": "分析历史",
+    "detail": "分析详情",
+    "selectHint": "请选择左侧历史记录查看详情"
+  },
+  "report": {
+    "changeInfo": "变更信息",
+    "nodeName": "节点名",
+    "type": "类型",
+    "changeType": "变更类型",
+    "changeTypeAttribute": "属性",
+    "changeTypeStructure": "结构",
+    "field": "字段",
+    "newValue": "新值",
+    "impactScore": "影响评分",
+    "affectedNodesCount": "受影响节点数",
+    "failureModeCount": "FailureMode 数",
+    "apUpgradedCount": "AP 升级数",
+    "affectedNodes": "受影响节点",
+    "viewInGraph": "在图谱中查看"
+  },
+  "historyTable": {
+    "time": "时间",
+    "nodeName": "节点名",
+    "changeType": "变更类型",
+    "impactScore": "影响评分",
+    "affectedCount": "受影响节点数"
+  },
+  "affectedNode": {
+    "none": "无受影响节点",
+    "path": "路径",
+    "riskChange": "风险变更",
+    "hops": "{{count}} 跳",
+    "score": {
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    }
+  },
+  "messages": {
+    "loadHistoryFailed": "加载历史失败",
+    "loadDetailFailed": "获取详情失败"
+  }
+}

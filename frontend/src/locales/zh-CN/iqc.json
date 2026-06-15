@@ -1,0 +1,256 @@
+{
+  "status": {
+    "inspection": {
+      "pending": "待检验",
+      "inspecting": "检验中",
+      "judged": "已判定",
+      "closed": "已关闭"
+    },
+    "result": {
+      "pending": "待定",
+      "accepted": "合格",
+      "rejected": "拒收",
+      "concession": "让步接收"
+    },
+    "profileState": {
+      "normal": "正常",
+      "tightened": "加严",
+      "reduced": "放宽",
+      "frozen": "冻结"
+    },
+    "recDirection": {
+      "tighten": "加严",
+      "reduce": "放宽",
+      "freeze": "冻结",
+      "keep": "保持"
+    },
+    "recStatus": {
+      "pending": "待审批",
+      "forwarded": "已转交",
+      "approved": "已批准",
+      "effective": "已生效",
+      "rejected": "已拒绝",
+      "expired": "已过期"
+    },
+    "approvalLevel": {
+      "manager": "经理",
+      "engineer": "工程师"
+    },
+    "yes": "是",
+    "no": "否"
+  },
+  "messages": {
+    "loadInspectionListFailed": "加载检验单列表失败",
+    "loadInspectionFailed": "加载检验单失败",
+    "loadMaterialListFailed": "加载物料列表失败",
+    "loadProfileListFailed": "加载档案列表失败",
+    "loadRecommendationListFailed": "加载建议列表失败",
+    "loadConfigFailed": "加载配置失败",
+    "inspectionStarted": "检验已开始",
+    "itemsUpdated": "检验项目已更新",
+    "judgementSubmitted": "判定已提交",
+    "inspectionClosed": "检验单已关闭",
+    "scarTriggered": "SCAR已触发",
+    "reinspectRequested": "复检申请已提交",
+    "concessionApproved": "让步接收已批准",
+    "materialUpdated": "物料已更新",
+    "materialCreated": "物料已创建",
+    "materialDeleted": "物料已删除",
+    "profileCreated": "档案创建成功",
+    "configSaved": "配置保存成功",
+    "configReset": "配置已重置",
+    "approved": "已批准",
+    "rejected": "已拒绝",
+    "submittedToManager": "已提交经理",
+    "enterRejectReason": "请填写拒绝原因",
+    "adminOnly": "仅管理员可访问此页面",
+    "profileNotFound": "未找到档案"
+  },
+  "pageTitle": {
+    "inspectionList": "来料检验",
+    "materialList": "物料管理",
+    "profileList": "AQL档案管理",
+    "recommendationList": "AQL优化建议",
+    "aqlConfig": "AQL规则参数配置"
+  },
+  "stats": {
+    "totalInspections": "检验单总数",
+    "acceptedCount": "合格数",
+    "rejectedCount": "拒收数",
+    "acceptanceRate": "合格率",
+    "pendingApproval": "待审批",
+    "generatedToday": "今日生成",
+    "approvedCount": "已批准",
+    "rejectedCountRec": "已拒绝"
+  },
+  "table": {
+    "inspectionNo": "检验单号",
+    "partNo": "物料号",
+    "partName": "物料名称",
+    "lotNo": "批号",
+    "lotQty": "批量",
+    "inspectionMode": "检验模式",
+    "status": "状态",
+    "inspectionResult": "检验结果",
+    "inspectionDate": "检验日期",
+    "operations": "操作",
+    "sortOrder": "序号",
+    "category": "类别",
+    "itemName": "项目名称",
+    "inspectType": "检验类型",
+    "specUpper": "规格上限",
+    "specLower": "规格下限",
+    "sampleSize": "样本量",
+    "acceptNo": "Ac",
+    "rejectNo": "Re",
+    "defectQty": "缺陷数",
+    "result": "结果",
+    "remark": "备注",
+    "specification": "规格",
+    "type": "类型",
+    "defaultAql": "默认AQL",
+    "defaultInspectionLevel": "检验水平",
+    "unit": "单位",
+    "supplier": "供应商",
+    "materialId": "物料号",
+    "baseAql": "基准AQL",
+    "currentAql": "当前AQL",
+    "state": "状态",
+    "frozenUntil": "冻结截止",
+    "effectiveFrom": "生效日期",
+    "recommendedAql": "建议AQL",
+    "direction": "方向",
+    "triggerRules": "触发规则",
+    "createdAt": "创建时间",
+    "supplierName": "供应商名称"
+  },
+  "detail": {
+    "inspectionInfo": "检验单信息",
+    "enterResults": "录入检验结果",
+    "judgement": "判定",
+    "inspectionItems": "检验项目",
+    "inspectionStats": "检验统计",
+    "supplierPerformance": "供应商表现",
+    "qualityTrend": "质量趋势",
+    "historyRecommendations": "历史建议"
+  },
+  "form": {
+    "inspectionResult": "检验结果",
+    "defectQty": "缺陷数",
+    "sampleQty": "实际样本量",
+    "defectDescription": "缺陷描述",
+    "selectResult": "选择结果",
+    "submitResult": "提交结果",
+    "submitJudgement": "提交判定",
+    "partNo": "物料号",
+    "partName": "物料名称",
+    "specification": "规格型号",
+    "materialType": "物料类型",
+    "defaultAql": "默认AQL",
+    "defaultInspectionLevel": "默认检验水平",
+    "unit": "单位",
+    "supplierId": "供应商ID",
+    "materialId": "物料ID",
+    "baseAql": "基准AQL",
+    "currentAql": "当前AQL",
+    "productLine": "产品线",
+    "minAql": "最小AQL",
+    "maxAql": "最大AQL",
+    "inspectionLevel": "检验水平"
+  },
+  "actions": {
+    "newInspection": "新建检验单",
+    "newMaterial": "新增物料",
+    "importMaterial": "导入物料",
+    "newProfile": "新建档案",
+    "backToList": "返回列表",
+    "startInspection": "开始检验",
+    "closeInspection": "关闭检验单",
+    "triggerScar": "触发SCAR",
+    "requestReinspect": "申请复检",
+    "approveConcession": "让步接收",
+    "approve": "批准",
+    "submitToManager": "提交经理",
+    "confirmReject": "确认拒绝",
+    "resetConfig": "恢复默认"
+  },
+  "placeholder": {
+    "inspectionSearch": "检验单号 / 物料号 / 批号",
+    "materialSearch": "搜索物料号 / 物料名称",
+    "productLine": "产品线",
+    "productLineWithGlobal": "产品线（全局默认）",
+    "supplierId": "供应商ID",
+    "selectStatus": "状态",
+    "selectResult": "选择结果",
+    "selectDirection": "方向",
+    "selectInspectionLevel": "选择检验水平",
+    "partNoExample": "如：RES-0805-10K",
+    "partNameExample": "如：0805贴片电阻 10KΩ",
+    "specExample": "如：±1% 1/8W",
+    "aqlExample": "如：0.65",
+    "unitExample": "如：pcs, kg, m",
+    "resultJson": "请输入检验项目结果，JSON格式：\n[\n  {\"item_id\": \"...\", \"defect_qty\": 0, \"result\": \"accepted\", \"remark\": \"\"},\n  ...\n]"
+  },
+  "modal": {
+    "newMaterial": "新增物料",
+    "editMaterial": "编辑物料",
+    "newProfile": "新建AQL档案",
+    "resetConfigTitle": "重置配置",
+    "resetConfigContent": "确定要将所有配置恢复为默认值吗？此操作不可撤销。"
+  },
+  "drawer": {
+    "recommendationDetail": "建议详情"
+  },
+  "chart": {
+    "noTrendData": "暂无趋势数据",
+    "trendChartPlaceholder": "趋势图（需要安装 @ant-design/charts）",
+    "snapshotCount": "共 {{count}} 个快照数据点"
+  },
+  "import": {
+    "materialHint": "每行：物料号*, 名称*, 规格, 类型, 默认AQL, 检验水平, 单位, 产品线"
+  },
+  "steps": {
+    "pending": "待检验",
+    "inspecting": "检验中",
+    "judged": "已判定",
+    "closed": "已关闭"
+  },
+  "inspectionMode": {
+    "quick": "快速检验",
+    "detailed": "详细检验"
+  },
+  "materialType": {
+    "raw": "原材料",
+    "component": "元器件",
+    "part": "零件",
+    "other": "其他"
+  },
+  "descriptions": {
+    "aqlLevel": "AQL等级",
+    "inspectionLevel": "检验水平",
+    "codeLetter": "代码字",
+    "acceptNo": "Ac",
+    "rejectNo": "Re",
+    "totalBatches": "总批次数",
+    "consecutiveAccepted": "连续合格",
+    "consecutiveRejected": "连续不合格",
+    "last30dBatches": "30天批次",
+    "last30dPpm": "30天PPM",
+    "last90dPpm": "90天PPM",
+    "supplierRating": "供应商评级",
+    "openScar": "未关闭SCAR",
+    "safetyDefect": "安全缺陷",
+    "linkedComplaint": "关联客诉",
+    "calculatedState": "计算状态"
+  },
+  "validation": {
+    "enterPartNo": "请输入物料号",
+    "enterPartName": "请输入物料名称",
+    "enterSupplierId": "请输入供应商ID",
+    "enterMaterialId": "请输入物料ID",
+    "enterBaseAql": "请输入基准AQL",
+    "enterCurrentAql": "请输入当前AQL",
+    "enterProductLine": "请输入产品线",
+    "enterResultJson": "请录入检验项目结果"
+  }
+}

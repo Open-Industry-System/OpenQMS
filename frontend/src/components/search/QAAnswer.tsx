@@ -1,4 +1,5 @@
 import { Card, List, Tag, Typography } from "antd";
+import { useTranslation } from "react-i18next";
 import type { QAResponse } from "../../api/search";
 
 const { Paragraph, Text } = Typography;
@@ -8,14 +9,15 @@ interface Props {
 }
 
 export default function QAAnswer({ data }: Props) {
+  const { t } = useTranslation("search");
   return (
     <div>
-      <Card title="💬 回答" style={{ marginBottom: 16 }}>
+      <Card title={t("qa.answerTitle")} style={{ marginBottom: 16 }}>
         <Paragraph style={{ whiteSpace: "pre-wrap" }}>{data.answer}</Paragraph>
       </Card>
 
       {data.sources.length > 0 && (
-        <Card title={`引用来源 (${data.sources.length})`} size="small">
+        <Card title={t("qa.sourcesTitle", { count: data.sources.length })} size="small">
           <List
             dataSource={data.sources}
             renderItem={(item, index) => (
@@ -31,7 +33,7 @@ export default function QAAnswer({ data }: Props) {
                     ? item.chunk_text.slice(0, 100) + "..."
                     : item.chunk_text}
                   <Text type="secondary" style={{ marginLeft: 8 }}>
-                    相关度: {(item.relevance_score * 100).toFixed(0)}%
+                    {t("qa.relevance", { score: (item.relevance_score * 100).toFixed(0) })}
                   </Text>
                 </Text>
               </List.Item>
@@ -42,7 +44,7 @@ export default function QAAnswer({ data }: Props) {
 
       <div style={{ marginTop: 8 }}>
         <Text type="secondary">
-          查询耗时: {data.query_time_ms}ms | LLM: {data.llm_available ? "✅" : "❌"}
+          {t("qa.queryTime", { ms: data.query_time_ms, available: data.llm_available ? "✅" : "❌" })}
         </Text>
       </div>
     </div>

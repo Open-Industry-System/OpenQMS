@@ -1,0 +1,210 @@
+{
+  "title": "8D / CAPA",
+  "actions": {
+    "create": "新建 8D",
+    "back": "返回",
+    "advance": "推进下一步",
+    "linkFMEA": "关联 FMEA",
+    "changeFMEA": "更换 FMEA 关联",
+    "undoChange": "撤销修改",
+    "addMember": "添加成员",
+    "handle": "处理",
+    "viewDetail": "查看详情"
+  },
+  "status": {
+    "D1_TEAM": "D1 团队组建",
+    "D2_DESCRIPTION": "D2 问题描述",
+    "D3_INTERIM": "D3 临时措施",
+    "D4_ROOT_CAUSE": "D4 根因分析",
+    "D5_CORRECTION": "D5 永久措施",
+    "D6_VERIFICATION": "D6 实施验证",
+    "D7_PREVENTION": "D7 预防复发",
+    "D8_CLOSURE": "D8 关闭",
+    "ARCHIVED": "已归档"
+  },
+  "steps": {
+    "d1": "D1 团队组建",
+    "d2": "D2 问题描述",
+    "d3": "D3 临时措施",
+    "d4": "D4 根因分析",
+    "d5": "D5 永久措施",
+    "d6": "D6 实施验证",
+    "d7": "D7 预防复发",
+    "d8": "D8 关闭"
+  },
+  "fields": {
+    "documentNo": "报告编号",
+    "title": "标题",
+    "currentStep": "当前步骤",
+    "severity": "严重等级",
+    "dueDate": "期限",
+    "relatedFMEA": "关联 FMEA",
+    "createdAt": "创建时间",
+    "problemDescription": "问题描述（可选）",
+    "d2Label": "5W2H 问题描述",
+    "d3Label": "临时遏制措施",
+    "d4Label": "根因分析 (5Why / 鱼骨图)",
+    "d5Label": "永久纠正措施",
+    "d6Label": "效果验证",
+    "d7Label": "预防复发措施",
+    "d8Label": "关闭确认"
+  },
+  "messages": {
+    "createSuccess": "8D 报告创建成功",
+    "saveFailed": "保存失败",
+    "advanceSuccess": "已推进到下一步",
+    "advanceFailed": "推进失败",
+    "linkFMEASuccess": "已关联 FMEA",
+    "linkFMEAFailed": "关联失败",
+    "enterName": "请输入姓名",
+    "memberExists": "成员已存在",
+    "capaNotFound": "8D 报告未找到",
+    "reportArchived": "报告已归档",
+    "undoSuccess": "已撤销 AI 修改",
+    "searchTimeout": "检索超时，请稍后在编辑过程中使用推荐功能",
+    "searchFailed": "检索经验教训失败"
+  },
+  "detail": {
+    "currentStepDetails": "当前步骤详情",
+    "reportInfo": "报告信息",
+    "notSet": "未设定",
+    "notLinked": "未关联",
+    "linkedFMEA": "已关联 FMEA"
+  },
+  "team": {
+    "name": "成员姓名",
+    "role": "项目职责",
+    "namePlaceholder": "成员姓名",
+    "roles": {
+      "quality_engineer": "质量工程师",
+      "process_engineer": "工艺工程师",
+      "rd_engineer": "研发工程师",
+      "project_manager": "项目经理",
+      "production_supervisor": "生产主管"
+    }
+  },
+  "severity": {
+    "fatal": "致命",
+    "serious": "严重",
+    "general": "一般",
+    "minor": "轻微"
+  },
+  "fmea": {
+    "linked": "已关联 FMEA",
+    "selectTitle": "选择关联的 FMEA",
+    "searchPlaceholder": "搜索 FMEA 文档",
+    "failureModeSuffix": " (失效模式)"
+  },
+  "d4": {
+    "title": "D4 根因推荐",
+    "subtitle": "基于 D2 问题描述和关联 FMEA 分析",
+    "empty": "暂无推荐",
+    "hint": "提示：完善 D2 问题描述可提升语义匹配效果",
+    "groups": {
+      "linked": "关联 FMEA",
+      "semantic": "语义匹配",
+      "historical": "历史 CAPA",
+      "llm": "智能建议",
+      "rule": "规则引擎建议"
+    },
+    "adopt": "采纳",
+    "skip": "跳过",
+    "readonlyTooltip": "只读用户无法采纳",
+    "loadFailed": "加载 D4 推荐失败"
+  },
+  "d5": {
+    "title": "D5 纠正措施推荐",
+    "controls": "FMEA 已有控制措施 ({{count}})",
+    "suggestions": "通用建议 ({{count}})",
+    "controlTypes": {
+      "prevention": "预防",
+      "detection": "探测"
+    },
+    "categories": {
+      "预防措施": "预防措施",
+      "纠正措施": "纠正措施"
+    },
+    "defaultBasis": "系统推荐",
+    "loadFailed": "加载 D5 推荐失败",
+    "adopt": "采纳",
+    "skip": "跳过",
+    "readonlyTooltip": "只读用户无法采纳"
+  },
+  "d7": {
+    "title": "预防复发提示",
+    "linkedNodes": "已关联 FMEA 节点",
+    "similarNodes": "同产品线相似失效模式",
+    "empty": "暂无相关 FMEA 推荐",
+    "jump": "跳转",
+    "autoFill": "自动填充",
+    "updated": "已更新",
+    "skipped": "已跳过",
+    "needsNew": "需新增",
+    "existing": "已有: {{name}}",
+    "autoFillTooltipUpdate": "更新已有预防控制",
+    "autoFillTooltipNew": "新增预防控制节点",
+    "autoFillDisabledNoCause": "无原因节点，请手动处理",
+    "autoFillDisabledNoD5": "无 D5 措施可填充",
+    "autoFillSuccess": "已自动填充预防措施",
+    "autoFillFailed": "自动填充失败",
+    "loadFailed": "加载推荐失败",
+    "matchSource": {
+      "linked": "已关联",
+      "similar": "相似"
+    },
+    "skipDialogTitle": "以下 FMEA 节点尚未确认",
+    "skipDialogDescription": "以下推荐的 FMEA 节点尚未标记为\"已更新\"或\"无需更新\"：",
+    "causeLabel": "原因: ",
+    "skipReasonLabel": "如需跳过，请填写理由（可选）：",
+    "skipReasonPlaceholder": "跳过理由（可选）",
+    "skipReasonEmpty": "未填写理由",
+    "skipConfirm": "确认跳过并推进"
+  },
+  "draft": {
+    "button": "AI 草拟",
+    "drafting": "草拟中...",
+    "previewTitle": "AI 草稿预览",
+    "warning": "此为 AI 生成的草稿，请审核后再使用",
+    "replace": "替换",
+    "append": "追加",
+    "cancel": "取消",
+    "formats": {
+      "structured": "结构化",
+      "paragraph": "段落"
+    },
+    "errors": {
+      "400": "请求 ID 格式错误",
+      "409": "请先完成前置步骤或检查报告状态",
+      "422": "AI 输出格式异常，请重试",
+      "429": "AI 草拟调用过于频繁，请稍后再试",
+      "503": "AI 功能暂时不可用",
+      "504": "AI 响应超时，请重试",
+      "default": "AI 服务异常，请稍后重试"
+    }
+  },
+  "lessons": {
+    "title": "历史经验教训",
+    "fromCache": "(来自缓存)",
+    "skipEdit": "跳过，直接编辑",
+    "loading": "正在检索相关经验教训...",
+    "empty": "未找到相关经验教训，开始创建吧！",
+    "description": "基于当前文档，我们找到了以下相关经验，供您参考",
+    "sections": {
+      "highlights": "推荐关注 ({{count}})",
+      "fmea": "FMEA 相关经验 ({{count}})",
+      "capa": "8D 整改经验 ({{count}})",
+      "audit": "审核发现 ({{count}})"
+    },
+    "card": {
+      "confidence": "置信度 {{value}}%",
+      "rootCause": "根因: ",
+      "action": "措施: ",
+      "basis": "推荐依据: "
+    }
+  },
+  "relatedCapa": {
+    "title": "关联 CAPA"
+  },
+  "subtitle": "客诉与质量问题闭环追踪",
+  "listTitle": "8D 报告列表"
+}

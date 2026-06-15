@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button, Space, Descriptions, Input, Modal, message, Spin } from "antd";
+import { useTranslation } from "react-i18next";
 import { getSCAR, transitionSCAR, linkCAPA } from "../../api/scar";
 import { createCAPA, getCAPA } from "../../api/capa";
 import { STATUS_LABELS, SOURCE_LABELS } from "./SCARListPage";
@@ -17,6 +18,8 @@ const statusVariant = (s: string): string => {
 };
 
 export default function SCARDetailPage() {
+  const { t } = useTranslation("scar");
+  const { t: tc } = useTranslation("common");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [scar, setScar] = useState<SupplierSCAR | null>(null);
@@ -53,19 +56,19 @@ export default function SCARDetailPage() {
   const doTransition = async (action: string, extra?: Record<string, string>) => {
     if (!id) return;
     await transitionSCAR(id, { action, ...extra } as Parameters<typeof transitionSCAR>[1]);
-    message.success("状态更新成功");
+    message.success(t("messages.statusUpdated", "状态更新成功"));
     load();
   };
 
   const handleRespond = async () => {
-    if (!responseText.trim()) { message.warning("请输入供应商回复"); return; }
+    if (!responseText.trim()) { message.warning(t("messages.enterResponse", "请输入供应商回复")); return; }
     await doTransition("respond", { supplier_response: responseText });
     setRespondModalOpen(false);
     setResponseText("");
   };
 
   const handleClose = async () => {
-    if (!resolutionText.trim()) { message.warning("请输入解决摘要"); return; }
+    if (!resolutionText.trim()) { message.warning(t("messages.enterResolution", "请输入解决摘要")); return; }
     await doTransition("close", { resolution_summary: resolutionText });
     setCloseModalOpen(false);
     setResolutionText("");
@@ -78,12 +81,12 @@ export default function SCARDetailPage() {
     const capa = await createCAPA({
       title: `${scar.scar_no} — ${scar.description.slice(0, 50)}`,
       document_no: `8D-${seq}`,
-      severity: "一般",
+      severity: t("severity.normal", "一般"),
       due_date: scar.due_date || undefined,
       product_line_code: scar.product_line_code || "DC-DC-100",
     });
     await linkCAPA(id, { capa_ref_id: capa.report_id });
-    message.success("CAPA 创建并关联成功");
+    message.success(t("messages.capaLinked", "CAPA 创建并关联成功"));
     setCapaModalOpen(false);
     load();
   };
@@ -95,18 +98,18 @@ export default function SCARDetailPage() {
   const actionButtons = () => {
     const btns: ReactNode[] = [];
     if (scar.status === "open") {
-      btns.push(<Button key="start" type="primary" onClick={() => doTransition("start")}>开始处理</Button>);
+      btns.push(<Button key="start" type="primary" onClick={() => doTransition("start")}>{t("actions.start", "开始处理")}</Button>);
     }
     if (scar.status === "in_progress") {
-      btns.push(<Button key="respond" type="primary" onClick={() => setRespondModalOpen(true)}>提交回复</Button>);
+      btns.push(<Button key="respond" type="primary" onClick={() => setRespondModalOpen(true)}>{t("actions.respond", "提交回复")}</Button>);
     }
     if (scar.status === "responded") {
-      btns.push(<Button key="verify" type="primary" onClick={() => doTransition("verify")}>验证通过</Button>);
-      btns.push(<Button key="reject" danger onClick={() => doTransition("reject")}>退回</Button>);
+      btns.push(<Button key="verify" type="primary" onClick={() => doTransition("verify")}>{t("actions.verify", "验证通过")}</Button>);
+      btns.push(<Button key="reject" danger onClick={() => doTransition("reject")}>{t("actions.reject", "退回")}</Button>);
     }
     if (scar.status === "verified") {
-      btns.push(<Button key="close" type="primary" onClick={() => setCloseModalOpen(true)}>关闭</Button>);
-      btns.push(<Button key="reopen" onClick={() => doTransition("reopen")}>重新打开</Button>);
+      btns.push(<Button key="close" type="primary" onClick={() => setCloseModalOpen(true)}>{t("actions.close", "关闭")}</Button>);
+      btns.push(<Button key="reopen" onClick={() => doTransition("reopen")}>{t("actions.reopen", "重新打开")}</Button>);
     }
     return btns;
   };
@@ -119,63 +122,63 @@ export default function SCARDetailPage() {
           <StatusBadge status={statusVariant(scar.status)}>{STATUS_LABELS[scar.status]}</StatusBadge>
         </Space>
       }
-      subtitle="供应商纠正措施请求详情"
+      subtitle={t("pageTitle.detail", "供应商纠正措施请求详情")}
       actions={<Space>{actionButtons()}</Space>}
     >
-      <DataCard title="SCAR 信息">
+      <DataCard title={t("card.scarInfo", "SCAR 信息")}>
         <Descriptions column={2} bordered size="small">
-          <Descriptions.Item label="供应商">{scar.supplier_name || scar.supplier_id}</Descriptions.Item>
-          <Descriptions.Item label="来源">{SOURCE_LABELS[scar.source_type] || scar.source_type}</Descriptions.Item>
-          <Descriptions.Item label="产品线">{scar.product_line_code || "-"}</Descriptions.Item>
-          <Descriptions.Item label="发出日期">{scar.issued_date || "-"}</Descriptions.Item>
-          <Descriptions.Item label="到期日">{scar.due_date || "-"}</Descriptions.Item>
-          <Descriptions.Item label="关闭日期">{scar.closed_date || "-"}</Descriptions.Item>
-          <Descriptions.Item label="问题描述" span={2}>{scar.description}</Descriptions.Item>
-          <Descriptions.Item label="要求措施" span={2}>{scar.requested_action || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.supplier", "供应商")}>{scar.supplier_name || scar.supplier_id}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.source", "来源")}>{SOURCE_LABELS[scar.source_type] || scar.source_type}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.productLine", "产品线")}>{scar.product_line_code || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.issuedDate", "发出日期")}>{scar.issued_date || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.dueDate", "到期日")}>{scar.due_date || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.closedDate", "关闭日期")}>{scar.closed_date || "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.description", "问题描述")} span={2}>{scar.description}</Descriptions.Item>
+          <Descriptions.Item label={t("descriptions.requestedAction", "要求措施")} span={2}>{scar.requested_action || "-"}</Descriptions.Item>
         </Descriptions>
       </DataCard>
 
-      <DataCard title="供应商回复">
+      <DataCard title={t("card.supplierResponse", "供应商回复")}>
         {scar.supplier_response ? (
           <div style={{ whiteSpace: "pre-wrap" }}>{scar.supplier_response}</div>
         ) : (
-          <div style={{ color: "#999" }}>暂无回复</div>
+          <div style={{ color: "#999" }}>{t("empty.noResponse", "暂无回复")}</div>
         )}
       </DataCard>
 
-      <DataCard title="CAPA 关联">
+      <DataCard title={t("card.capaLink", "CAPA 关联")}>
         {scar.capa_ref_id && capaInfo ? (
           <Space>
-            <span>已关联 8D: <strong>{capaInfo.document_no}</strong></span>
+            <span>{t("linked.linked8D", "已关联 8D:")} <strong>{capaInfo.document_no}</strong></span>
             <StatusBadge status={statusVariant(capaInfo.status)}>{capaInfo.status}</StatusBadge>
-            <Button type="link" onClick={() => navigate(`/capa/${scar.capa_ref_id}`)}>查看</Button>
+            <Button type="link" onClick={() => navigate(`/capa/${scar.capa_ref_id}`)}>{tc("actions.view", "查看")}</Button>
           </Space>
         ) : (
-          <Button type="dashed" onClick={() => setCapaModalOpen(true)}>创建关联 8D</Button>
+          <Button type="dashed" onClick={() => setCapaModalOpen(true)}>{t("actions.createLinked8D", "创建关联 8D")}</Button>
         )}
       </DataCard>
 
       {scar.resolution_summary && (
-        <DataCard title="解决摘要">
+        <DataCard title={t("card.resolutionSummary", "解决摘要")}>
           <div style={{ whiteSpace: "pre-wrap" }}>{scar.resolution_summary}</div>
         </DataCard>
       )}
 
       {/* Respond Modal */}
-      <Modal title="提交供应商回复" open={respondModalOpen} onCancel={() => setRespondModalOpen(false)} onOk={handleRespond}>
-        <Input.TextArea rows={4} value={responseText} onChange={(e) => setResponseText(e.target.value)} placeholder="请输入供应商回复内容" />
+      <Modal title={t("modal.submitResponse", "提交供应商回复")} open={respondModalOpen} onCancel={() => setRespondModalOpen(false)} onOk={handleRespond}>
+        <Input.TextArea rows={4} value={responseText} onChange={(e) => setResponseText(e.target.value)} placeholder={t("placeholder.supplierResponse", "请输入供应商回复内容")} />
       </Modal>
 
       {/* Close Modal */}
-      <Modal title="关闭 SCAR" open={closeModalOpen} onCancel={() => setCloseModalOpen(false)} onOk={handleClose}>
-        <Input.TextArea rows={4} value={resolutionText} onChange={(e) => setResolutionText(e.target.value)} placeholder="请输入解决摘要" />
+      <Modal title={t("modal.closeScar", "关闭 SCAR")} open={closeModalOpen} onCancel={() => setCloseModalOpen(false)} onOk={handleClose}>
+        <Input.TextArea rows={4} value={resolutionText} onChange={(e) => setResolutionText(e.target.value)} placeholder={t("placeholder.resolutionSummary", "请输入解决摘要")} />
       </Modal>
 
       {/* Create CAPA Modal */}
-      <Modal title="创建关联 8D" open={capaModalOpen} onCancel={() => setCapaModalOpen(false)} onOk={handleCreateCAPA} confirmLoading={false}>
-        <p>将基于 SCAR 信息创建新的 8D/CAPA 记录并自动关联。</p>
-        <p>SCAR: {scar.scar_no}</p>
-        <p>描述: {scar.description.slice(0, 100)}...</p>
+      <Modal title={t("modal.createLinked8D", "创建关联 8D")} open={capaModalOpen} onCancel={() => setCapaModalOpen(false)} onOk={handleCreateCAPA} confirmLoading={false}>
+        <p>{t("modal.createLinked8DContent", "将基于 SCAR 信息创建新的 8D/CAPA 记录并自动关联。")}</p>
+        <p>{t("modal.scarLabel", "SCAR:")} {scar.scar_no}</p>
+        <p>{t("modal.descriptionLabel", "描述:")} {scar.description.slice(0, 100)}...</p>
       </Modal>
     </PageShell>
   );

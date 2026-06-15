@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Button, Space, message } from "antd";
+import { Button, Space, App } from "antd";
 import {
   EditOutlined,
   CheckOutlined,
@@ -7,6 +7,7 @@ import {
   ReloadOutlined,
   RollbackOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import DashboardGrid from "../../components/dashboard/DashboardGrid";
 import WidgetLibraryPanel from "../../components/dashboard/WidgetLibraryPanel";
 import {
@@ -56,6 +57,9 @@ function createEmptyData(): DashboardWidgetsData {
 }
 
 export default function DashboardPage() {
+  const { t } = useTranslation("dashboard");
+  const { t: tc } = useTranslation("common");
+  const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const { canEdit, canView } = usePermission();
   const canEditDashboard = canEdit("dashboard");
@@ -82,11 +86,11 @@ export default function DashboardPage() {
       setData(widgetsResp);
     } catch (e) {
       console.error("Dashboard fetch error:", e);
-      message.error("仪表盘加载失败");
+      message.error(t("messages.loadFailed", "仪表盘加载失败"));
     } finally {
       setLoading(false);
     }
-  }, [productLine]);
+  }, [productLine, t, message]);
 
   useEffect(() => {
     fetchData();
@@ -104,12 +108,12 @@ export default function DashboardPage() {
       setLayout(editLayout);
       setIsEditing(false);
       setEditLayout(null);
-      message.success("布局已保存");
+      message.success(t("messages.saveSuccess", "布局已保存"));
       const widgetTypes = [...new Set(editLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch {
-      message.error("保存失败");
+      message.error(t("messages.saveFailed", "保存失败"));
     }
   };
 
@@ -124,12 +128,12 @@ export default function DashboardPage() {
       await saveDashboardLayout({ lg: resetLayout });
       setLayout(resetLayout);
       setEditLayout(resetLayout);
-      message.success("已恢复默认布局");
+      message.success(t("messages.resetSuccess", "已恢复默认布局"));
       const widgetTypes = [...new Set(resetLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch {
-      message.error("恢复失败");
+      message.error(t("messages.resetFailed", "恢复失败"));
     }
   };
 
@@ -153,23 +157,23 @@ export default function DashboardPage() {
   const actions = isEditing ? (
     <Space>
       <Button icon={<CheckOutlined />} type="primary" onClick={handleSave}>
-        完成
+        {t("actions.done", "完成")}
       </Button>
       <Button icon={<CloseOutlined />} onClick={handleCancel}>
-        取消
+        {tc("actions.cancel", "取消")}
       </Button>
       <Button icon={<RollbackOutlined />} onClick={handleReset}>
-        恢复默认
+        {t("actions.resetDefault", "恢复默认")}
       </Button>
     </Space>
   ) : (
     <Space>
       <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
-        刷新
+        {tc("actions.refresh", "刷新")}
       </Button>
       {canEditDashboard && (
         <Button icon={<EditOutlined />} onClick={handleEdit}>
-          编辑布局
+          {t("actions.editLayout", "编辑布局")}
         </Button>
       )}
     </Space>
@@ -177,8 +181,8 @@ export default function DashboardPage() {
 
   return (
     <PageShell
-      title="质量仪表盘"
-      subtitle="全局质量态势 · KPI · 预警 · 近期动态"
+      title={t("page.title", "质量仪表盘")}
+      subtitle={t("page.subtitle", "全局质量态势 · KPI · 预警 · 近期动态")}
       actions={actions}
       fullHeight
     >

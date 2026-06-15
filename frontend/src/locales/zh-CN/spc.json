@@ -1,0 +1,213 @@
+{
+  "title": "SPC 控制图",
+  "list": {
+    "title": "SPC 控制图",
+    "totalCharacteristics": "检验特性总数",
+    "lockedLimits": "控制限已锁定",
+    "unlockedLimits": "未锁定控制限",
+    "newBatchesThisWeek": "本周新增批次",
+    "newCharacteristic": "新建检验特性",
+    "searchPlaceholder": "搜索过程名称",
+    "view": "查看",
+    "confirmDelete": "确认删除？",
+    "columns": {
+      "characteristic_name": "特性名称",
+      "process_name": "过程名称",
+      "chart_type": "控制图类型",
+      "spec_upper": "规格上限",
+      "spec_lower": "规格下限",
+      "control_limits_locked": "控制限状态",
+      "updated_at": "更新时间"
+    },
+    "limitStatus": {
+      "locked": "已锁定",
+      "auto": "自动计算"
+    },
+    "form": {
+      "process_name": "过程名称",
+      "processPlaceholder": "如 SMT焊接",
+      "characteristic_name": "特性名称",
+      "characteristicPlaceholder": "如 焊点高度",
+      "chart_type": "控制图类型",
+      "subgroup_size": "子组大小",
+      "spec_lower": "规格下限",
+      "spec_upper": "规格上限",
+      "target_value": "目标值",
+      "fixedSampleAlert": "使用 NP图/C图 时，每批次样本量需保持固定一致"
+    },
+    "createSuccess": "检验特性创建成功",
+    "createFailed": "创建失败",
+    "deleteSuccess": "删除成功",
+    "deleteFailed": "删除失败"
+  },
+  "chartType": {
+    "xbar_r": "X-bar R（均值-极差图）",
+    "imr": "I-MR（单值移动极差图）",
+    "histogram": "直方图",
+    "p": "P图（不合格率）",
+    "np": "NP图（不合格品数）",
+    "c": "C图（缺陷数）",
+    "u": "U图（单位缺陷数）"
+  },
+  "detail": {
+    "back": "返回",
+    "notFound": "检验特性未找到",
+    "loadFailed": "加载数据失败",
+    "lockSuccess": "控制限已锁定",
+    "unlockSuccess": "控制限已解锁",
+    "operationFailed": "操作失败",
+    "ruleUpdateSuccess": "规则设置已更新",
+    "ruleUpdateFailed": "更新失败",
+    "sampleEntrySuccess": "样本录入成功",
+    "sampleEntryFailed": "录入失败",
+    "batchNoRequired": "请输入批次号",
+    "inspectedCountRequired": "检验数量必须大于0",
+    "defectCountNonNegative": "不合格品数/缺陷数不能为负数",
+    "defectCountExceeds": "不合格品数/缺陷数不能大于检验数量",
+    "sampleValueRequired": "请输入至少一个样本值",
+    "alarmAckSuccess": "告警已确认",
+    "alarmAckFailed": "确认失败",
+    "capaCreateSuccess": "8D 已创建: {{docNo}}",
+    "capaCreateFailed": "创建 8D 失败",
+    "tabs": {
+      "chart": "控制图",
+      "capability": "过程能力",
+      "data": "数据录入",
+      "alarms": "告警记录"
+    },
+    "basicInfo": {
+      "title": "基本信息",
+      "process_name": "过程名称",
+      "characteristic_name": "特性名称",
+      "spec_upper": "规格上限",
+      "spec_lower": "规格下限",
+      "target_value": "目标值",
+      "subgroup_size": "子组大小"
+    },
+    "limitManagement": {
+      "title": "控制限管理",
+      "lock": "锁定控制限",
+      "unlock": "解锁控制限",
+      "version": "控制限版本",
+      "locked": "控制限已锁定",
+      "auto": "控制限自动计算"
+    },
+    "rules": {
+      "title": "判异规则",
+      "rule1": "规则1: 超出控制限",
+      "rule2": "规则2: 连续9点同侧",
+      "rule3": "规则3: 连续6点递增/递减",
+      "rule4": "规则4: 连续14点上下交替",
+      "rule5": "规则5: 连续3点中有2点在A区",
+      "rule6": "规则6: 连续5点中有4点在B区外",
+      "rule7": "规则7: 连续15点在C区内",
+      "rule8": "规则8: 连续8点在C区外"
+    },
+    "capability": {
+      "grade": "等级: {{grade}}",
+      "cp": "Cp",
+      "cpk": "Cpk",
+      "pp": "Pp",
+      "ppk": "Ppk",
+      "cm": "Cm",
+      "cmk": "Cmk",
+      "theoretical_ppm": "理论 PPM",
+      "actual_ppm": "实际 PPM",
+      "advice": "分析建议",
+      "empty": "数据不足，无法进行过程能力分析（需要至少2个批次/样本数据）"
+    },
+    "dataEntry": {
+      "single": "单批录入",
+      "batch": "批量导入",
+      "history": "历史数据",
+      "batchNo": "批次号",
+      "batchPlaceholder": "如 BATCH-20260521-001",
+      "sampledAt": "采样时间",
+      "attributeEntry": "属性数据录入",
+      "inspectedCount": "检验数量 n",
+      "defectCount": "不合格品数/缺陷数",
+      "sampleValues": "样本值 (建议 {{size}} 个)",
+      "addSample": "添加样本",
+      "submitBatch": "提交批次",
+      "uploadExcel": "上传 Excel 批量导入",
+      "templateHintVariable": "每行: 批次号*, 采样时间*, 样本值1{{extra}}",
+      "templateHintAttribute": "每行: 批次号*, 采样时间*, 检验数, 缺陷数"
+    },
+    "history": {
+      "index": "序号",
+      "batchNo": "批次号",
+      "sampledAt": "采样时间",
+      "xValue": "均值/X值",
+      "rValue": "极差/MR值",
+      "alarm": "告警",
+      "normal": "正常",
+      "rule": "规则 {{rules}}"
+    },
+    "alarm": {
+      "ruleNo": "规则编号",
+      "triggeredAt": "触发时间",
+      "severity": "严重等级",
+      "status": "状态",
+      "linkedCapa": "关联 8D",
+      "linkedFmea": "关联 FMEA",
+      "confirm": "确认",
+      "viewFmea": "查看 FMEA 推荐",
+      "createCapa": "创建 8D",
+      "linked": "已关联",
+      "notLinked": "未关联",
+      "severityLevels": {
+        "critical": "严重",
+        "major": "主要",
+        "minor": "轻微"
+      },
+      "statuses": {
+        "open": "未处理",
+        "acknowledged": "已确认",
+        "closed": "已关闭"
+      }
+    },
+    "chart": {
+      "xbarTitle": "X-bar 图",
+      "iTitle": "I 图 (单值图)",
+      "rTitle": "R 图 (极差图)",
+      "mrTitle": "MR 图 (移动极差图)",
+      "statisticValue": "统计值",
+      "ucl": "UCL",
+      "lcl": "LCL",
+      "cl": "CL"
+    }
+  },
+  "versionPanel": {
+    "title": "控制限版本",
+    "button": "版本管理",
+    "current": "当前",
+    "activate": "设为当前",
+    "loadFailed": "加载版本列表失败",
+    "activateSuccess": "已切换控制限版本",
+    "activateFailed": "切换失败",
+    "empty": "暂无锁定的控制限版本"
+  },
+  "fmeaMatch": {
+    "title": "FMEA 关联推荐",
+    "cancel": "取消",
+    "createCapa": "创建 CAPA 8D",
+    "summary": "SPC告警: {{icCode}} | 工序: {{processName}} | 特性: {{characteristicName}}",
+    "loadFailed": "获取推荐失败，请重试",
+    "confirmFailed": "确认关联失败",
+    "empty": "未找到关联的 FMEA 失效模式",
+    "refresh": "刷新",
+    "loading": "加载推荐中...",
+    "matchScore": "匹配度 {{score}}%",
+    "path": "路径: {{path}}",
+    "failureCauses": "失效原因: {{causes}}",
+    "controls": "控制措施: {{count}}项",
+    "selected": "已选择: {{name}}",
+    "source": {
+      "control_plan": "控制计划关联",
+      "process_name": "工序名称匹配",
+      "characteristic_name": "特性名称匹配",
+      "select": "选择此关联",
+      "selected": "已选择"
+    }
+  }
+}

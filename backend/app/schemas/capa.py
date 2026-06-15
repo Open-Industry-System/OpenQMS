@@ -7,7 +7,7 @@ from pydantic import BaseModel
 class CAPACreate(BaseModel):
     title: str
     document_no: str
-    severity: str = "一般"
+    severity: str = "general"
     due_date: date | None = None
     product_line_code: str = "DC-DC-100"
 

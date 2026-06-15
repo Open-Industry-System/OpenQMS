@@ -7,6 +7,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import {
   fetchERPConnections, createERPConnection, updateERPConnection,
   deleteERPConnection, testERPConnection, triggerERPSync,
@@ -14,6 +15,7 @@ import {
 import type { ERPConnection } from "../../types/erp";
 import { usePermission } from "../../hooks/usePermission";
 import { PageShell, DataCard, StatusBadge } from "../../components/design";
+import { formatDateTime } from "../../utils/dateTime";
 
 const typeLabels: Record<string, string> = {
   mock: "Mock",
@@ -25,6 +27,8 @@ const typeLabels: Record<string, string> = {
 };
 
 export default function ERPConnectionsPage() {
+  const { t } = useTranslation("erp");
+  const { t: tc } = useTranslation("common");
   const { message, modal: modalConfirm } = App.useApp();
   const { canCreate, canEdit, canAdmin } = usePermission();
   const canCreateErp = canCreate("erp");
@@ -41,6 +45,15 @@ export default function ERPConnectionsPage() {
   const [syncLoading, setSyncLoading] = useState<Record<string, boolean>>({});
   const [connectorType, setConnectorType] = useState<string | null>(null);
 
+  const connectorOptions = useMemo(() => [
+    { value: "mock", label: t("connections.connector.mock", "Mock - 模拟数据") },
+    { value: "rest", label: t("connections.connector.rest", "REST API") },
+    { value: "sap", label: t("connections.connector.sap", "SAP - 未实现"), disabled: true },
+    { value: "oracle_ebs", label: t("connections.connector.oracle_ebs", "Oracle EBS - 未实现"), disabled: true },
+    { value: "kingdee", label: t("connections.connector.kingdee", "金蝶 - 未实现"), disabled: true },
+    { value: "yonyou", label: t("connections.connector.yonyou", "用友 - 未实现"), disabled: true },
+  ], [t]);
+
   const fetchData = (p: number = page) => {
     setLoading(true);
     fetchERPConnections(p, 20)
@@ -48,7 +61,7 @@ export default function ERPConnectionsPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error("加载连接列表失败"))
+      .catch(() => message.error(t("connections.messages.loadFailed", "加载连接列表失败")))
       .finally(() => setLoading(false));
   };
 
@@ -72,13 +85,13 @@ export default function ERPConnectionsPage() {
     if (config_api_key) config.api_key = config_api_key;
     try {
       await createERPConnection({ ...rest, config });
-      message.success("连接创建成功");
+      message.success(t("connections.messages.createSuccess", "连接创建成功"));
       setModalOpen(false);
       form.resetFields();
       setConnectorType(null);
       fetchData(1);
     } catch {
-      message.error("创建失败");
+      message.error(t("connections.messages.createFailed", "创建失败"));
     }
   };
 
@@ -98,28 +111,28 @@ export default function ERPConnectionsPage() {
     if (config_api_key) config.api_key = config_api_key;
     try {
       await updateERPConnection(editingId, { ...rest, config });
-      message.success("连接更新成功");
+      message.success(t("connections.messages.updateSuccess", "连接更新成功"));
       setModalOpen(false);
       setEditingId(null);
       form.resetFields();
       setConnectorType(null);
       fetchData(page);
     } catch {
-      message.error("更新失败");
+      message.error(t("connections.messages.updateFailed", "更新失败"));
     }
   };
 
   const handleDelete = (id: string, name: string) => {
     modalConfirm.confirm({
-      title: "确认删除",
-      content: `确定删除连接 "${name}" 吗？`,
+      title: t("connections.deleteConfirm.title", "确认删除"),
+      content: t("connections.deleteConfirm.content", '确定删除连接 "{{name}}" 吗？', { name }),
       onOk: async () => {
         try {
           await deleteERPConnection(id);
-          message.success("删除成功");
+          message.success(t("connections.messages.deleteSuccess", "删除成功"));
           fetchData(page);
         } catch {
-          message.error("删除失败");
+          message.error(t("connections.messages.deleteFailed", "删除失败"));
         }
       },
     });
@@ -130,12 +143,14 @@ export default function ERPConnectionsPage() {
     try {
       const res = await testERPConnection(id);
       if (res.success) {
-        message.success("连接测试成功");
+        message.success(t("connections.messages.testSuccess", "连接测试成功"));
       } else {
-        message.error(res.message ? `连接测试失败: ${res.message}` : "连接测试失败");
+        message.error(res.message
+          ? t("connections.messages.testFailedWithMsg", "连接测试失败: {{message}}", { message: res.message })
+          : t("connections.messages.testFailed", "连接测试失败"));
       }
     } catch {
-      message.error("连接测试失败");
+      message.error(t("connections.messages.testFailed", "连接测试失败"));
     } finally {
       setTestLoading((prev) => ({ ...prev, [id]: false }));
     }
@@ -145,9 +160,9 @@ export default function ERPConnectionsPage() {
     setSyncLoading((prev) => ({ ...prev, [id]: true }));
     try {
       await triggerERPSync(id);
-      message.success("同步已触发，后台将在 30 秒内开始执行");
+      message.success(t("connections.messages.syncTriggered", "同步已触发，后台将在 30 秒内开始执行"));
     } catch {
-      message.error("同步触发失败");
+      message.error(t("connections.messages.syncFailed", "同步触发失败"));
     } finally {
       setSyncLoading((prev) => ({ ...prev, [id]: false }));
     }
@@ -178,41 +193,41 @@ export default function ERPConnectionsPage() {
   const showRestConfig = connectorType === "rest";
 
   const columns = useMemo(() => [
-    { title: "连接名称", dataIndex: "name", key: "name", ellipsis: true },
+    { title: t("connections.columns.name", "连接名称"), dataIndex: "name", key: "name", ellipsis: true },
     {
-      title: "类型",
+      title: t("connections.columns.type", "类型"),
       dataIndex: "connector_type",
       key: "connector_type",
       width: 140,
-      render: (t: string) => typeLabels[t] || t,
+      render: (v: string) => typeLabels[v] || v,
     },
     {
-      title: "产线代码",
+      title: t("connections.columns.productLine", "产线代码"),
       dataIndex: "product_line_code",
       key: "product_line_code",
       width: 120,
       render: (v: string | null) => v || "—",
     },
     {
-      title: "状态",
+      title: t("connections.columns.status", "状态"),
       dataIndex: "is_active",
       key: "is_active",
       width: 80,
       render: (active: boolean) => (
         <StatusBadge status={active ? "ok" : "error"}>
-          {active ? "正常" : "停用"}
+          {active ? t("connections.status.active", "正常") : t("connections.status.inactive", "停用")}
         </StatusBadge>
       ),
     },
     {
-      title: "创建时间",
+      title: t("connections.columns.createdAt", "创建时间"),
       dataIndex: "created_at",
       key: "created_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      render: (v: string) => formatDateTime(v),
     },
     {
-      title: "操作",
+      title: tc("table.operations", "操作"),
       key: "actions",
       width: 260,
       render: (_: unknown, record: ERPConnection) => (
@@ -224,7 +239,7 @@ export default function ERPConnectionsPage() {
               icon={<EditOutlined />}
               onClick={() => openEdit(record)}
             >
-              编辑
+              {tc("actions.edit", "编辑")}
             </Button>
           )}
           {canEditErp && (
@@ -236,7 +251,7 @@ export default function ERPConnectionsPage() {
                 loading={testLoading[record.connection_id]}
                 onClick={() => handleTest(record.connection_id)}
               >
-                测试
+                {t("connections.actions.test", "测试")}
               </Button>
               <Button
                 type="link"
@@ -245,7 +260,7 @@ export default function ERPConnectionsPage() {
                 loading={syncLoading[record.connection_id]}
                 onClick={() => handleSync(record.connection_id)}
               >
-                同步
+                {t("connections.actions.sync", "同步")}
               </Button>
             </>
           )}
@@ -257,27 +272,27 @@ export default function ERPConnectionsPage() {
               icon={<DeleteOutlined />}
               onClick={() => handleDelete(record.connection_id, record.name)}
             >
-              删除
+              {tc("actions.delete", "删除")}
             </Button>
           )}
         </Space>
       ),
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [canEditErp, canAdminErp, testLoading, syncLoading]);
+  ], [canEditErp, canAdminErp, testLoading, syncLoading, t, tc]);
 
   return (
     <PageShell
-      title="ERP 连接管理"
+      title={t("connections.title", "ERP 连接管理")}
       actions={
         canCreateErp && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建连接
+            {t("connections.actions.create", "新建连接")}
           </Button>
         )
       }
     >
-      <DataCard title="连接列表">
+      <DataCard title={t("connections.cardTitle", "连接列表")}>
         <Table
           columns={columns}
           dataSource={data}
@@ -297,7 +312,7 @@ export default function ERPConnectionsPage() {
       </DataCard>
 
       <Modal
-        title={editingId ? "编辑连接" : "新建连接"}
+        title={editingId ? t("connections.modal.editTitle", "编辑连接") : t("connections.modal.createTitle", "新建连接")}
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => {
@@ -314,50 +329,43 @@ export default function ERPConnectionsPage() {
         >
           <Form.Item
             name="name"
-            label="连接名称"
-            rules={[{ required: true, message: "请输入连接名称" }]}
+            label={t("connections.form.name", "连接名称")}
+            rules={[{ required: true, message: t("connections.form.nameRequired", "请输入连接名称") }]}
           >
-            <Input placeholder="如 ERP-SAP-01" />
+            <Input placeholder={t("connections.form.namePlaceholder", "如 ERP-SAP-01")} />
           </Form.Item>
           <Form.Item
             name="connector_type"
-            label="连接器类型"
-            rules={[{ required: true, message: "请选择连接器类型" }]}
+            label={t("connections.form.connectorType", "连接器类型")}
+            rules={[{ required: true, message: t("connections.form.connectorTypeRequired", "请选择连接器类型") }]}
           >
             <Select
               onChange={(v) => setConnectorType(v)}
-              options={[
-                { value: "mock", label: "Mock - 模拟数据" },
-                { value: "rest", label: "REST API" },
-                { value: "sap", label: "SAP - 未实现", disabled: true },
-                { value: "oracle_ebs", label: "Oracle EBS - 未实现", disabled: true },
-                { value: "kingdee", label: "金蝶 - 未实现", disabled: true },
-                { value: "yonyou", label: "用友 - 未实现", disabled: true },
-              ]}
+              options={connectorOptions}
             />
           </Form.Item>
           <Form.Item
             name="product_line_code"
-            label="产线代码"
-            rules={[{ required: true, message: "请输入产线代码" }]}
+            label={t("connections.form.productLineCode", "产线代码")}
+            rules={[{ required: true, message: t("connections.form.productLineCodeRequired", "请输入产线代码") }]}
           >
-            <Input placeholder="如 DC-DC-100" />
+            <Input placeholder={t("connections.form.productLineCodePlaceholder", "如 DC-DC-100")} />
           </Form.Item>
           {showRestConfig && (
             <>
               <Form.Item name="config_base_url" label="Base URL">
-                <Input placeholder="如 https://erp.example.com/api" />
+                <Input placeholder={t("connections.form.baseUrlPlaceholder", "如 https://erp.example.com/api")} />
               </Form.Item>
-              <Form.Item name="config_port" label="端口号">
+              <Form.Item name="config_port" label={t("connections.form.port", "端口号")}>
                 <InputNumber
                   style={{ width: "100%" }}
-                  placeholder="如 8080"
+                  placeholder={t("connections.form.portPlaceholder", "如 8080")}
                   min={1}
                   max={65535}
                 />
               </Form.Item>
               <Form.Item name="config_api_key" label="API Key">
-                <Input.Password placeholder="API 密钥" />
+                <Input.Password placeholder={t("connections.form.apiKeyPlaceholder", "API 密钥")} />
               </Form.Item>
             </>
           )}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Modal, Select, Table, Button, App } from "antd"
 import type { TableRowSelection } from "antd/es/table/interface"
+import { useTranslation } from "react-i18next"
 import { listFMEAs } from "../../api/fmea"
 import { importFromFMEA } from "../../api/controlPlan"
 import type { FMEADocument, GraphNode } from "../../types"
@@ -19,6 +20,8 @@ interface StepRow {
 }
 
 export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: Props) {
+  const { t } = useTranslation("controlPlan")
+  const { t: tc } = useTranslation("common")
   const { message } = App.useApp();
   const [fmeas, setFmeas] = useState<FMEADocument[]>([])
   const [selectedFmeaId, setSelectedFmeaId] = useState<string | null>(null)
@@ -42,7 +45,7 @@ export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: 
         setFmeas(pfmeas)
       })
       .catch(() => {
-        message.error("加载 PFMEA 列表失败")
+        message.error(t("importModal.loadFailed"))
       })
       .finally(() => {
         setLoadingFmeas(false)
@@ -73,7 +76,7 @@ export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: 
 
   const handleOk = async () => {
     if (!selectedFmeaId) {
-      message.warning("请先选择 PFMEA")
+      message.warning(t("importModal.selectFirst"))
       return
     }
 
@@ -84,11 +87,11 @@ export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: 
     setImporting(true)
     try {
       await importFromFMEA(cpId, selectedFmeaId, selectedStepNos.length > 0 ? selectedStepNos : undefined)
-      message.success("导入成功")
+      message.success(t("importModal.importSuccess"))
       onSuccess()
       onClose()
     } catch (e: any) {
-      message.error(e.response?.data?.detail || "导入失败")
+      message.error(e.response?.data?.detail || t("importModal.importFailed"))
     } finally {
       setImporting(false)
     }
@@ -103,12 +106,12 @@ export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: 
 
   const columns = [
     {
-      title: "工序号",
+      title: t("importModal.processNo"),
       dataIndex: "process_number",
       key: "process_number",
     },
     {
-      title: "工序名称",
+      title: t("importModal.processName"),
       dataIndex: "name",
       key: "name",
     },
@@ -116,13 +119,13 @@ export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: 
 
   return (
     <Modal
-      title="从 PFMEA 导入"
+      title={t("importModal.title")}
       open={open}
       onCancel={onClose}
       width={700}
       footer={[
         <Button key="cancel" onClick={onClose}>
-          取消
+          {tc("actions.cancel")}
         </Button>,
         <Button
           key="ok"
@@ -130,14 +133,14 @@ export default function ImportFromFMEAModal({ cpId, open, onClose, onSuccess }: 
           loading={importing}
           onClick={handleOk}
         >
-          确定
+          {tc("actions.confirm")}
         </Button>,
       ]}
     >
       <div style={{ marginBottom: 16 }}>
         <Select
           style={{ width: "100%" }}
-          placeholder="选择已批准的 PFMEA"
+          placeholder={t("importModal.selectPFMEA")}
           loading={loadingFmeas}
           value={selectedFmeaId}
           onChange={handleSelectFMEA}

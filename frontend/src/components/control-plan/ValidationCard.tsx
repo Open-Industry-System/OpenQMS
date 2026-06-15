@@ -5,15 +5,10 @@ import {
   InfoCircleOutlined,
   UndoOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type { ValidationResult } from "../../types/cpValidation";
 
 const { Text } = Typography;
-
-const severityConfig = {
-  error: { color: "red", icon: <CloseCircleOutlined />, label: "错误" },
-  warning: { color: "orange", icon: <ExclamationCircleOutlined />, label: "警告" },
-  info: { color: "blue", icon: <InfoCircleOutlined />, label: "提示" },
-};
 
 interface Props {
   result: ValidationResult;
@@ -24,6 +19,14 @@ interface Props {
 }
 
 export default function ValidationCard({ result, onReject, onResolve, onReopen, loading }: Props) {
+  const { t } = useTranslation("controlPlan");
+
+  const severityConfig = {
+    error: { color: "red", icon: <CloseCircleOutlined />, label: t("validation.errorLabel") },
+    warning: { color: "orange", icon: <ExclamationCircleOutlined />, label: t("validation.warningLabel") },
+    info: { color: "blue", icon: <InfoCircleOutlined />, label: t("validation.infoLabel") },
+  };
+
   const config = severityConfig[result.severity] || severityConfig.info;
 
   return (
@@ -45,7 +48,7 @@ export default function ValidationCard({ result, onReject, onResolve, onReopen, 
           {result.suggestion && (
             <div style={{ marginTop: 4, padding: 6, background: "#f6ffed", borderRadius: 4 }}>
               <Text type="success" style={{ fontSize: 12 }}>
-                建议: {result.suggestion}
+                {t("validation.suggestion")}: {result.suggestion}
               </Text>
             </div>
           )}
@@ -53,20 +56,20 @@ export default function ValidationCard({ result, onReject, onResolve, onReopen, 
             {result.status === "open" && (
               <Space size="small">
                 <Button size="small" onClick={() => onResolve(result.finding_id)} loading={loading}>
-                  标记已解决
+                  {t("validation.markResolved")}
                 </Button>
                 <Button size="small" danger onClick={() => onReject(result.finding_id)} loading={loading}>
-                  忽略
+                  {t("validation.ignore")}
                 </Button>
               </Space>
             )}
             {result.status === "rejected" && (
               <Button size="small" icon={<UndoOutlined />} onClick={() => onReopen(result.finding_id)} loading={loading}>
-                恢复
+                {t("validation.restore")}
               </Button>
             )}
             {result.status === "resolved" && (
-              <Tag color="green">已解决</Tag>
+              <Tag color="green">{t("validation.resolvedTag")}</Tag>
             )}
           </div>
         </div>

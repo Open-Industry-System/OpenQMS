@@ -1,10 +1,12 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Steps, Form, Input,
   Select, App, Spin, Empty, Row, Col, Table, Divider, Modal,
 } from "antd";
 import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
 import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
@@ -26,13 +28,6 @@ import { PageShell, StatusBadge, DataCard } from "../../components/design";
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
-const stepItems = [
-  { title: "D1 团队组建" }, { title: "D2 问题描述" },
-  { title: "D3 临时措施" }, { title: "D4 根因分析" },
-  { title: "D5 永久措施" }, { title: "D6 实施验证" },
-  { title: "D7 预防复发" }, { title: "D8 关闭" },
-];
-
 const stepIndex: Record<string, number> = {
   D1_TEAM: 0, D2_DESCRIPTION: 1, D3_INTERIM: 2, D4_ROOT_CAUSE: 3,
   D5_CORRECTION: 4, D6_VERIFICATION: 5, D7_PREVENTION: 6, D8_CLOSURE: 7, ARCHIVED: 8,
@@ -46,6 +41,8 @@ const severityMap: Record<string, string> = {
 };
 
 export default function CAPADetailPage() {
+  const { t } = useTranslation("capa");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -60,13 +57,35 @@ export default function CAPADetailPage() {
 
   const [localData, setLocalData] = useState<Record<string, any>>({});
   const [newMemberName, setNewMemberName] = useState("");
-  const [newMemberRole, setNewMemberRole] = useState("质量工程师");
+  const [newMemberRole, setNewMemberRole] = useState("quality_engineer");
 
   const location = useLocation();
   const [lessonsModalOpen, setLessonsModalOpen] = useState(false);
   const [lessonsLoading, setLessonsLoading] = useState(false);
   const [lessonsData, setLessonsData] = useState<LessonsLearnedResponse | null>(null);
   const lessonsShownRef = useRef(false);
+
+  const stepItems = useMemo(
+    () => [
+      { title: t("steps.d1", "D1 团队组建") },
+      { title: t("steps.d2", "D2 问题描述") },
+      { title: t("steps.d3", "D3 临时措施") },
+      { title: t("steps.d4", "D4 根因分析") },
+      { title: t("steps.d5", "D5 永久措施") },
+      { title: t("steps.d6", "D6 实施验证") },
+      { title: t("steps.d7", "D7 预防复发") },
+      { title: t("steps.d8", "D8 关闭") },
+    ],
+    [t]
+  );
+
+  const roleOptions = [
+    { value: "quality_engineer", label: t("team.roles.quality_engineer", "质量工程师") },
+    { value: "process_engineer", label: t("team.roles.process_engineer", "工艺工程师") },
+    { value: "rd_engineer", label: t("team.roles.rd_engineer", "研发工程师") },
+    { value: "project_manager", label: t("team.roles.project_manager", "项目经理") },
+    { value: "production_supervisor", label: t("team.roles.production_supervisor", "生产主管") },
+  ];
 
   useEffect(() => {
     if (location.state?.showLessonsLearned && !lessonsShownRef.current) {
@@ -79,7 +98,7 @@ export default function CAPADetailPage() {
         controller.abort();
         setLessonsLoading(false);
         setLessonsModalOpen(false);
-        message.warning("检索超时，请稍后在编辑过程中使用推荐功能");
+        message.warning(t("messages.searchTimeout", "检索超时，请稍后在编辑过程中使用推荐功能"));
       }, 10000);
 
       const problemDescription = location.state?.problemDescription;
@@ -96,7 +115,7 @@ export default function CAPADetailPage() {
         .catch((err) => {
           clearTimeout(timeoutId);
           if (!axios.isCancel(err)) {
-            message.error("检索经验教训失败");
+            message.error(t("messages.searchFailed", "检索经验教训失败"));
           }
           setLessonsLoading(false);
         });
@@ -181,7 +200,7 @@ export default function CAPADetailPage() {
       const updated = await updateCAPA(id, { [field]: value });
       setCapa(updated);
     } catch (e) {
-      message.error("保存失败");
+      message.error(tc("messages.saveFailed", "保存失败"));
       if (throwOnError) throw e;
     } finally {
       setSaving(false);
@@ -239,7 +258,7 @@ export default function CAPADetailPage() {
     if (prev !== undefined) {
       setLocalData((p) => ({ ...p, [field]: prev }));
       handleUpdate(field, prev);
-      message.success("已撤销 AI 修改");
+      message.success(t("messages.undoSuccess", "已撤销 AI 修改"));
     }
   };
 
@@ -258,7 +277,7 @@ export default function CAPADetailPage() {
               icon={<UndoOutlined />}
               onClick={() => handleUndo(field)}
             >
-              撤销修改
+              {t("actions.undoChange", "撤销修改")}
             </Button>
           )}
           {showAIButton && (
@@ -283,10 +302,10 @@ export default function CAPADetailPage() {
     try {
       const updated = await advanceCAPA(id);
       setCapa(updated);
-      message.success("已推进到下一步");
+      message.success(t("messages.advanceSuccess", "已推进到下一步"));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || "推进失败");
+      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
     }
   };
 
@@ -298,7 +317,7 @@ export default function CAPADetailPage() {
     const skipReasonsList = d7UnconfirmedItems.map((item) => ({
       fmea_id: item.fmea_id,
       node_id: item.failure_mode_node_id,
-      reason: globalReason || "未填写理由",
+      reason: globalReason || t("d7.skipReasonEmpty", "未填写理由"),
     }));
 
     try {
@@ -306,12 +325,12 @@ export default function CAPADetailPage() {
         d7_skip_reasons: skipReasonsList.length > 0 ? skipReasonsList : undefined,
       });
       setCapa(updated);
-      message.success("已推进到下一步");
+      message.success(t("messages.advanceSuccess", "已推进到下一步"));
       setD7SkipReasons({});
       setD7UnconfirmedItems([]);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || "推进失败");
+      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
     }
   };
 
@@ -321,29 +340,29 @@ export default function CAPADetailPage() {
       const updated = await linkFMEA(id, fmeaId);
       setCapa(updated);
       setLinkModal(false);
-      message.success("已关联 FMEA");
-    } catch { message.error("关联失败"); }
+      message.success(t("messages.linkFMEASuccess", "已关联 FMEA"));
+    } catch { message.error(t("messages.linkFMEAFailed", "关联失败")); }
   };
 
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
-  if (!capa) return <Empty description="8D 报告未找到" />;
+  if (!capa) return <Empty description={t("messages.capaNotFound", "8D 报告未找到")} />;
 
   const actions = (
     <Space>
       {capa.fmea_ref_id && (
         <Tag style={{ background: "var(--qf-green-dim)", color: "var(--qf-green)", borderColor: "var(--qf-green)" }} icon={<LinkOutlined />}>
-          已关联 FMEA
+          {t("fmea.linked", "已关联 FMEA")}
         </Tag>
       )}
       <RelatedFMEALink fmeaRefId={capa.fmea_ref_id ?? null} fmeaNodeId={capa.fmea_node_id ?? null} />
       {canEdit('capa') && (
         <Button icon={<LinkOutlined />} onClick={() => setLinkModal(true)}>
-          {capa.fmea_ref_id ? "更换FMEA关联" : "关联FMEA"}
+          {capa.fmea_ref_id ? t("fmea.changeFMEA", "更换FMEA关联") : t("fmea.linkFMEA", "关联FMEA")}
         </Button>
       )}
       {capa.status !== "ARCHIVED" && capa.status !== "D8_CLOSURE" && (!["D7_PREVENTION", "D8_CLOSURE"].includes(capa.status) || canApprove('capa')) && canEdit('capa') && (
         <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance}>
-          推进下一步
+          {t("actions.advance", "推进下一步")}
         </Button>
       )}
     </Space>
@@ -358,7 +377,7 @@ export default function CAPADetailPage() {
 
   return (
     <PageShell
-      title={<Space><Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/capa")}>返回</Button><Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{capa.title}</Title></Space>}
+      title={<Space><Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/capa")}>{tc("actions.back", "返回")}</Button><Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{capa.title}</Title></Space>}
       subtitle={subtitle}
       actions={actions}
     >
@@ -366,7 +385,7 @@ export default function CAPADetailPage() {
 
       <Row gutter={16}>
         <Col span={16}>
-          <DataCard title="当前步骤详情">
+          <DataCard title={t("detail.currentStepDetails", "当前步骤详情")}>
             {capa.status === "D1_TEAM" && (
               <div>
                 <Table
@@ -376,10 +395,10 @@ export default function CAPADetailPage() {
                   size="small"
                   pagination={false}
                   columns={[
-                    { title: "成员姓名", dataIndex: "name", key: "name" },
-                    { title: "项目职责", dataIndex: "role", key: "role" },
+                    { title: t("team.name", "成员姓名"), dataIndex: "name", key: "name" },
+                    { title: t("team.role", "项目职责"), dataIndex: "role", key: "role" },
                     {
-                      title: "操作",
+                      title: tc("table.operations", "操作"),
                       key: "action",
                       width: 80,
                       render: (_, record: any) => (
@@ -402,7 +421,7 @@ export default function CAPADetailPage() {
                 {canEdit('capa') && (
                   <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
                     <Input
-                      placeholder="成员姓名"
+                      placeholder={t("team.namePlaceholder", "成员姓名")}
                       value={newMemberName}
                       onChange={(e) => setNewMemberName(e.target.value)}
                       style={{ width: 150 }}
@@ -411,27 +430,21 @@ export default function CAPADetailPage() {
                       value={newMemberRole}
                       onChange={(val) => setNewMemberRole(val)}
                       style={{ width: 150 }}
-                      options={[
-                        { value: "质量工程师", label: "质量工程师" },
-                        { value: "工艺工程师", label: "工艺工程师" },
-                        { value: "研发工程师", label: "研发工程师" },
-                        { value: "项目经理", label: "项目经理" },
-                        { value: "生产主管", label: "生产主管" },
-                      ]}
+                      options={roleOptions}
                     />
                     <Button
                       type="primary"
                       icon={<PlusOutlined />}
                       onClick={() => {
                         if (!newMemberName.trim()) {
-                          message.warning("请输入姓名");
+                          message.warning(t("messages.enterName", "请输入姓名"));
                           return;
                         }
                         const exists = (localData.d1_team || []).some(
                           (m: any) => m.name === newMemberName.trim()
                         );
                         if (exists) {
-                          message.warning("成员已存在");
+                          message.warning(t("messages.memberExists", "成员已存在"));
                           return;
                         }
                         const newTeam = [
@@ -442,7 +455,7 @@ export default function CAPADetailPage() {
                         setNewMemberName("");
                       }}
                     >
-                      添加成员
+                      {t("actions.addMember", "添加成员")}
                     </Button>
                   </div>
                 )}
@@ -451,7 +464,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D2_DESCRIPTION" && (
               <Form layout="vertical">
-                <Form.Item label={renderLabelWithDraft("d2", "5W2H 问题描述")}>
+                <Form.Item label={renderLabelWithDraft("d2", t("fields.d2Label", "5W2H 问题描述"))}>
                   <TextArea
                     rows={6}
                     disabled={!canEdit('capa')}
@@ -466,7 +479,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D3_INTERIM" && (
               <Form layout="vertical">
-                <Form.Item label={renderLabelWithDraft("d3", "临时遏制措施")}>
+                <Form.Item label={renderLabelWithDraft("d3", t("fields.d3Label", "临时遏制措施"))}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
@@ -491,7 +504,7 @@ export default function CAPADetailPage() {
                   }}
                 />
                 <Form layout="vertical">
-                  <Form.Item label={renderLabelWithDraft("d4", "根因分析 (5Why / 鱼骨图)")}>
+                  <Form.Item label={renderLabelWithDraft("d4", t("fields.d4Label", "根因分析 (5Why / 鱼骨图)"))}>
                     <TextArea
                       rows={6}
                       disabled={!canEdit('capa')}
@@ -517,7 +530,7 @@ export default function CAPADetailPage() {
                   }}
                 />
                 <Form layout="vertical">
-                  <Form.Item label={renderLabelWithDraft("d5", "永久纠正措施")}>
+                  <Form.Item label={renderLabelWithDraft("d5", t("fields.d5Label", "永久纠正措施"))}>
                     <TextArea
                       rows={4}
                       disabled={!canEdit('capa')}
@@ -532,7 +545,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D6_VERIFICATION" && (
               <Form layout="vertical">
-                <Form.Item label={renderLabelWithDraft("d6", "效果验证")}>
+                <Form.Item label={renderLabelWithDraft("d6", t("fields.d6Label", "效果验证"))}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
@@ -547,7 +560,7 @@ export default function CAPADetailPage() {
             {capa.status === "D7_PREVENTION" && (
               <>
                 <Form layout="vertical">
-                  <Form.Item label={renderLabelWithDraft("d7", "预防复发措施")}>
+                  <Form.Item label={renderLabelWithDraft("d7", t("fields.d7Label", "预防复发措施"))}>
                     <TextArea
                       rows={4}
                       disabled={!canEdit('capa')}
@@ -571,7 +584,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D8_CLOSURE" && (
               <Form layout="vertical">
-                <Form.Item label={renderLabelWithDraft("d8", "关闭确认")}>
+                <Form.Item label={renderLabelWithDraft("d8", t("fields.d8Label", "关闭确认"))}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
@@ -583,25 +596,25 @@ export default function CAPADetailPage() {
               </Form>
             )}
 
-            {capa.status === "ARCHIVED" && <Empty description="报告已归档" />}
+            {capa.status === "ARCHIVED" && <Empty description={t("messages.reportArchived", "报告已归档")} />}
           </DataCard>
         </Col>
 
         <Col span={8}>
-          <DataCard title="报告信息">
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>编号:</Text> <span style={{ fontFamily: "var(--qf-font-mono)" }}>{capa.document_no}</span></p>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>严重等级:</Text> <StatusBadge status={severityMap[capa.severity] || "warning"}>{capa.severity}</StatusBadge></p>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>期限:</Text> {capa.due_date || "未设定"}</p>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>关联 FMEA:</Text> {capa.fmea_ref_id || "未关联"}</p>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>创建时间:</Text> {new Date(capa.created_at).toLocaleString("zh-CN")}</p>
+          <DataCard title={t("detail.reportInfo", "报告信息")}>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.documentNo", "编号")}:</Text> <span style={{ fontFamily: "var(--qf-font-mono)" }}>{capa.document_no}</span></p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.severity", "严重等级")}:</Text> <StatusBadge status={severityMap[capa.severity] || "warning"}>{capa.severity}</StatusBadge></p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.dueDate", "期限")}:</Text> {capa.due_date || t("detail.notSet", "未设定")}</p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedFMEA", "关联 FMEA")}:</Text> {capa.fmea_ref_id || t("detail.notLinked", "未关联")}</p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.createdAt", "创建时间")}:</Text> {formatDateTime(capa.created_at)}</p>
           </DataCard>
 
           {linkModal && canEdit('capa') && (
-            <DataCard title="选择关联的 FMEA" style={{ marginTop: 16 }}>
+            <DataCard title={t("fmea.selectTitle", "选择关联的 FMEA")} style={{ marginTop: 16 }}>
               <Select
                 showSearch
                 style={{ width: "100%" }}
-                placeholder="搜索 FMEA 文档"
+                placeholder={t("fmea.searchPlaceholder", "搜索 FMEA 文档")}
                 filterOption={(input, option) =>
                   (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
                 }
@@ -611,34 +624,34 @@ export default function CAPADetailPage() {
                 }))}
                 onChange={(val) => handleLinkFMEA(val)}
               />
-              <Button style={{ marginTop: 8 }} onClick={() => setLinkModal(false)}>取消</Button>
+              <Button style={{ marginTop: 8 }} onClick={() => setLinkModal(false)}>{tc("actions.cancel", "取消")}</Button>
             </DataCard>
           )}
         </Col>
       </Row>
 
       <Modal
-        title="⚠️ 以下 FMEA 节点尚未确认"
+        title={t("d7.skipDialogTitle", "⚠️ 以下 FMEA 节点尚未确认")}
         open={d7SkipDialogOpen}
         onOk={handleD7SkipConfirm}
         onCancel={() => setD7SkipDialogOpen(false)}
-        okText="确认跳过并推进"
-        cancelText="取消"
+        okText={t("d7.skipConfirm", "确认跳过并推进")}
+        cancelText={tc("actions.cancel", "取消")}
         width={600}
       >
-        <p>以下推荐的 FMEA 节点尚未标记为"已更新"或"无需更新"：</p>
+        <p>{t("d7.skipDialogDescription", "以下推荐的 FMEA 节点尚未标记为「已更新」或「无需更新」：")}</p>
         <ul>
           {d7UnconfirmedItems.map((item) => (
             <li key={item.failure_mode_node_id}>
               {item.failure_mode_name}
-              {item.failure_cause_node_id && ` (原因: ${item.failure_cause_node_id})`}
+              {item.failure_cause_node_id && ` (${t("d7.causeLabel", "原因")}: ${item.failure_cause_node_id})`}
             </li>
           ))}
         </ul>
-        <p>如需跳过，请填写理由（可选）：</p>
+        <p>{t("d7.skipReasonLabel", "如需跳过，请填写理由（可选）：")}</p>
         <Input.TextArea
           rows={3}
-          placeholder="跳过理由（可选）"
+          placeholder={t("d7.skipReasonPlaceholder", "跳过理由（可选）")}
           value={d7SkipReasons["__global__"] || ""}
           onChange={(e) =>
             setD7SkipReasons({ ...d7SkipReasons, __global__: e.target.value })

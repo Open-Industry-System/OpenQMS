@@ -2,13 +2,14 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button, Space, Typography, Input, Table, Row, Col,
-  App, Spin, Select, Alert, Tooltip, Tabs, Modal,
+  App, Spin, Select, Alert, Tooltip, Tabs, Modal, Tag,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, PlusOutlined, DeleteOutlined,
   ImportOutlined, CheckCircleOutlined, ExclamationCircleOutlined,
   SyncOutlined, HistoryOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import {
   getControlPlan, createControlPlan, updateControlPlan,
   checkStaleItems, approveControlPlan, syncCSRToControlPlan,
@@ -37,29 +38,6 @@ import StatusBadge from "../../../components/design/StatusBadge";
 
 const { Text } = Typography;
 
-const phaseOptions = [
-  { value: "sample", label: "样件" },
-  { value: "trial", label: "试生产" },
-  { value: "production", label: "生产" },
-];
-
-const _phaseLabels: Record<string, string> = {
-  sample: "样件",
-  trial: "试生产",
-  production: "生产",
-};
-
-const statusLabels: Record<string, string> = {
-  draft: "草稿",
-  approved: "已批准",
-};
-
-const specialClassOptions = [
-  { value: "", label: "-" },
-  { value: "CC", label: "CC" },
-  { value: "SC", label: "SC" },
-];
-
 function createBlankItem(sortOrder: number): ControlPlanItem {
   return {
     item_id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -81,11 +59,36 @@ function createBlankItem(sortOrder: number): ControlPlanItem {
   };
 }
 
+function useControlPlanOptions(t: (key: string) => string) {
+  const phaseOptions = [
+    { value: "sample", label: t("phase.sample") },
+    { value: "trial", label: t("phase.trial") },
+    { value: "production", label: t("phase.production") },
+  ];
+
+  const statusLabels: Record<string, string> = {
+    draft: t("status.draft"),
+    approved: t("status.approved"),
+  };
+
+  const specialClassOptions = [
+    { value: "", label: t("specialClass.none") },
+    { value: "CC", label: t("specialClass.CC") },
+    { value: "SC", label: t("specialClass.SC") },
+  ];
+
+  return { phaseOptions, statusLabels, specialClassOptions };
+}
+
 export default function ControlPlanEditorPage() {
+  const { t } = useTranslation("controlPlan");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isNew = id === "new";
+
+  const { phaseOptions, statusLabels, specialClassOptions } = useControlPlanOptions(t);
 
   const [cp, setCp] = useState<ControlPlan | null>(null);
   const [loading, setLoading] = useState(!isNew);
@@ -160,7 +163,7 @@ export default function ControlPlanEditorPage() {
         }
       })
       .catch(() => {
-        message.error("加载控制计划失败");
+        message.error(t("message.loadFailed"));
       })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -184,11 +187,11 @@ export default function ControlPlanEditorPage() {
 
   const handleSave = async () => {
     if (!title.trim()) {
-      message.warning("请输入标题");
+      message.warning(t("message.enterTitle"));
       return;
     }
     if (!documentNo.trim()) {
-      message.warning("请输入文档编号");
+      message.warning(t("message.enterDocumentNo"));
       return;
     }
 
@@ -210,7 +213,7 @@ export default function ControlPlanEditorPage() {
         if (items.length > 0) {
           await updateControlPlan(created.cp_id, { items });
         }
-        message.success("创建成功");
+        message.success(tc("messages.saveSuccess"));
         navigate(`/control-plans/${created.cp_id}`);
       } else if (id) {
         const saveData = {
@@ -231,7 +234,7 @@ export default function ControlPlanEditorPage() {
           });
           setCp(updated);
           baseItemsRef.current = JSON.parse(JSON.stringify(items));
-          message.success("保存成功");
+          message.success(tc("messages.saveSuccess"));
         } catch (e: unknown) {
           const err = e as { response?: { status?: number; data?: { detail?: string | object } } };
           if (err.response?.status === 409) {
@@ -264,7 +267,7 @@ export default function ControlPlanEditorPage() {
         }
       }
     } catch (e: any) {
-      message.error(e.response?.data?.detail || (isNew ? "创建失败" : "保存失败"));
+      message.error(e.response?.data?.detail || (isNew ? t("message.createFailed") : t("message.saveFailed")));
     } finally {
       setSaving(false);
     }
@@ -297,13 +300,13 @@ export default function ControlPlanEditorPage() {
       setCp(updated);
       baseItemsRef.current = JSON.parse(JSON.stringify(items));
       setConflictVisible(false);
-      message.success("强制保存成功");
+      message.success(t("conflict.forceSaveSuccess"));
     } catch (e: unknown) {
       const err = e as { response?: { status?: number; data?: { detail?: string } } };
       if (err.response?.status === 409) {
-        message.error("文档又被修改了，请刷新后重试");
+        message.error(t("conflict.documentModified"));
       } else {
-        message.error("强制保存失败");
+        message.error(t("conflict.forceSaveFailed"));
       }
     }
   };
@@ -316,11 +319,11 @@ export default function ControlPlanEditorPage() {
         const stepNos = result.stale_items.map((s) => s.step_no).filter(Boolean);
         setStaleAlert({ visible: true, stepNos });
       } else {
-        message.success("未检测到 PFMEA 变更");
+        message.success(t("staleAlert.noChange"));
         setStaleAlert({ visible: false, stepNos: [] });
       }
     } catch {
-      message.error("检查失败");
+      message.error(t("message.checkFailed"));
     }
   };
 
@@ -329,9 +332,9 @@ export default function ControlPlanEditorPage() {
     try {
       const updated = await approveControlPlan(id);
       setCp(updated);
-      message.success("批准成功");
+      message.success(t("message.approveSuccess"));
     } catch (e: any) {
-      message.error(e.response?.data?.detail || "批准失败");
+      message.error(e.response?.data?.detail || t("message.approveFailed"));
     }
   };
 
@@ -341,9 +344,9 @@ export default function ControlPlanEditorPage() {
       const refreshed = await getControlPlan(id);
       setCp(refreshed);
       setItems(refreshed.items || []);
-      message.success("导入成功");
+      message.success(t("importModal.importSuccess"));
     } catch {
-      message.error("刷新数据失败");
+      message.error(t("message.refreshFailed"));
     }
   };
 
@@ -363,9 +366,9 @@ export default function ControlPlanEditorPage() {
       setCp(refreshed);
       setCsrSyncOpen(false);
       setCsrCustomerIds([]);
-      message.success("CSR 同步成功");
+      message.success(t("message.syncSuccess"));
     } catch (e: any) {
-      message.error(e.response?.data?.detail || "CSR 同步失败");
+      message.error(e.response?.data?.detail || t("message.syncFailed"));
     } finally {
       setCsrSyncing(false);
     }
@@ -373,7 +376,7 @@ export default function ControlPlanEditorPage() {
 
   const columns = [
     {
-      title: "零件/过程编号",
+      title: t("column.stepNo"),
       dataIndex: "step_no",
       key: "step_no",
       width: 120,
@@ -396,7 +399,7 @@ export default function ControlPlanEditorPage() {
       ),
     },
     {
-      title: "过程名称/操作描述",
+      title: t("column.processName"),
       dataIndex: "process_name",
       key: "process_name",
       width: 160,
@@ -419,7 +422,7 @@ export default function ControlPlanEditorPage() {
       ),
     },
     {
-      title: "设备/工装/夹具",
+      title: t("column.equipment"),
       dataIndex: "equipment",
       key: "equipment",
       width: 140,
@@ -433,10 +436,10 @@ export default function ControlPlanEditorPage() {
       ),
     },
     {
-      title: "特性",
+      title: t("column.characteristic"),
       children: [
         {
-          title: "特性编号",
+          title: t("column.characteristicNo"),
           dataIndex: "characteristic_no",
           key: "characteristic_no",
           width: 100,
@@ -450,7 +453,7 @@ export default function ControlPlanEditorPage() {
           ),
         },
         {
-          title: "产品特性",
+          title: t("column.productCharacteristic"),
           dataIndex: "product_characteristic",
           key: "product_characteristic",
           width: 140,
@@ -473,7 +476,7 @@ export default function ControlPlanEditorPage() {
           ),
         },
         {
-          title: "过程特性",
+          title: t("column.processCharacteristic"),
           dataIndex: "process_characteristic",
           key: "process_characteristic",
           width: 140,
@@ -498,7 +501,7 @@ export default function ControlPlanEditorPage() {
       ],
     },
     {
-      title: "特殊特性分类",
+      title: t("column.specialClass"),
       dataIndex: "special_class",
       key: "special_class",
       width: 130,
@@ -516,7 +519,7 @@ export default function ControlPlanEditorPage() {
               style={{ width: 80 }}
             />
             {outOfSync && (
-              <Tooltip title="节点特性已变更，建议同步">
+              <Tooltip title={t("staleAlert.nodeChanged")}>
                 <StatusBadge status="warning">!</StatusBadge>
               </Tooltip>
             )}
@@ -525,7 +528,7 @@ export default function ControlPlanEditorPage() {
       },
     },
     {
-      title: "产品/过程/规格/公差",
+      title: t("column.specificationTolerance"),
       dataIndex: "specification_tolerance",
       key: "specification_tolerance",
       width: 160,
@@ -539,10 +542,10 @@ export default function ControlPlanEditorPage() {
       ),
     },
     {
-      title: "方法",
+      title: t("column.method"),
       children: [
         {
-          title: "评价/测量技术",
+          title: t("column.evaluationMethod"),
           dataIndex: "evaluation_method",
           key: "evaluation_method",
           width: 140,
@@ -558,10 +561,10 @@ export default function ControlPlanEditorPage() {
       ],
     },
     {
-      title: "样本",
+      title: t("column.sample"),
       children: [
         {
-          title: "样本大小",
+          title: t("column.sampleSize"),
           dataIndex: "sample_size",
           key: "sample_size",
           width: 100,
@@ -575,7 +578,7 @@ export default function ControlPlanEditorPage() {
           ),
         },
         {
-          title: "样本频次",
+          title: t("column.sampleFrequency"),
           dataIndex: "sample_frequency",
           key: "sample_frequency",
           width: 100,
@@ -591,7 +594,7 @@ export default function ControlPlanEditorPage() {
       ],
     },
     {
-      title: "控制方法",
+      title: t("column.controlMethod"),
       dataIndex: "control_method",
       key: "control_method",
       width: 140,
@@ -614,7 +617,7 @@ export default function ControlPlanEditorPage() {
       ),
     },
     {
-      title: "反应计划",
+      title: t("column.reactionPlan"),
       dataIndex: "reaction_plan",
       key: "reaction_plan",
       width: 140,
@@ -637,7 +640,7 @@ export default function ControlPlanEditorPage() {
       ),
     },
     {
-      title: "操作",
+      title: t("column.actions"),
       key: "actions",
       width: 80,
       fixed: "right" as const,
@@ -650,7 +653,7 @@ export default function ControlPlanEditorPage() {
             icon={<DeleteOutlined />}
             onClick={() => removeItem(index)}
           >
-            删除
+            {tc("actions.delete")}
           </Button>
         ) : null
       ),
@@ -669,11 +672,11 @@ export default function ControlPlanEditorPage() {
 
   return (
     <PageShell
-      title={isNew ? "新建控制计划" : title || "控制计划详情"}
-      subtitle={`状态：${statusLabels[currentStatus] || currentStatus}`}
+      title={isNew ? t("pageTitle.newControlPlan") : title || t("pageTitle.controlPlanDetail")}
+      subtitle={`${t("column.status")}：${statusLabels[currentStatus] || currentStatus}`}
       actions={
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/control-plans")}>
-          返回
+          {tc("actions.back")}
         </Button>
       }
     >
@@ -687,7 +690,7 @@ export default function ControlPlanEditorPage() {
           icon={<ExclamationCircleOutlined />}
           closable
           onClose={() => setStaleAlert({ visible: false, stepNos: [] })}
-          message={`关联的 PFMEA 已发生变更，以下行可能已过期：${staleAlert.stepNos.join(", ")}，建议重新导入或手动核对。`}
+          message={t("staleAlert.message", { steps: staleAlert.stepNos.join(", ") })}
           style={{ marginBottom: 16 }}
         />
       )}
@@ -695,12 +698,12 @@ export default function ControlPlanEditorPage() {
       {/* Sync pending banner */}
       {cp?.sync_pending && (
         <Alert
-          message="关联的 FMEA 已更新（当前 CP 基于较旧版本），建议同步更新"
+          message={t("staleAlert.syncPending")}
           type="warning"
           showIcon
           action={
             <Button size="small" icon={<SyncOutlined />} onClick={() => setSyncDrawerOpen(true)}>
-              立即同步
+              {t("staleAlert.syncNow")}
             </Button>
           }
           style={{ marginBottom: 16 }}
@@ -708,7 +711,7 @@ export default function ControlPlanEditorPage() {
       )}
 
       <Tabs activeKey={outerTab} onChange={setOuterTab} items={[
-        { key: "editor", label: "编辑器", children: <>
+        { key: "editor", label: t("pageTitle.controlPlanEditor"), children: <>
 
       {/* Action buttons */}
       <Space style={{ marginBottom: 16 }}>
@@ -719,16 +722,16 @@ export default function ControlPlanEditorPage() {
           onClick={handleSave}
           disabled={!canEdit}
         >
-          保存
+          {tc("actions.save")}
         </Button>
         {!isNew && canEdit && (
           <Button icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
-            从 PFMEA 导入
+            {t("button.importFromPFMEA")}
           </Button>
         )}
         {!isNew && (
           <Button icon={<ExclamationCircleOutlined />} onClick={handleCheckStale}>
-            检查 PFMEA 变更
+            {t("button.checkPFMEAChange")}
           </Button>
         )}
         {!isNew && canEdit && syncStatus.some((s) => s.is_out_of_sync) && (
@@ -738,121 +741,121 @@ export default function ControlPlanEditorPage() {
               try {
                 if (!id) return;
                 await syncToCP(id);
-                message.success("同步成功");
+                message.success(t("message.syncSuccess"));
                 getCPSyncStatus(id).then((res) => setSyncStatus(res.items)).catch(() => {});
               } catch {
-                message.error("同步失败");
+                message.error(t("message.syncFailed"));
               }
             }}
           >
-            同步特殊特性
+            {t("button.syncSpecialCharacteristics")}
           </Button>
         )}
         {!isNew && canApprove('planning') && currentStatus !== "approved" && (
           <Button icon={<CheckCircleOutlined />} onClick={handleApprove}>
-            批准
+            {tc("actions.approve")}
           </Button>
         )}
         {!isNew && canEdit && (
           <Button icon={<SyncOutlined />} onClick={handleOpenCsrSync}>
-            同步 CSR
+            {t("button.syncCSR")}
           </Button>
         )}
       </Space>
 
       {/* Header info card */}
-      <DataCard title="基本信息" style={{ marginBottom: 16 }}>
+      <DataCard title={t("card.basicInfo")} style={{ marginBottom: 16 }}>
         <Row gutter={24}>
           <Col span={12}>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">标题</Text>
+              <Text type="secondary">{t("form.title")}</Text>
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 disabled={!canEdit}
-                placeholder="控制计划标题"
+                placeholder={t("placeholder.title")}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">编号</Text>
+              <Text type="secondary">{t("form.documentNo")}</Text>
               <Input
                 value={documentNo}
                 onChange={(e) => setDocumentNo(e.target.value)}
                 disabled={!isNew || !canEdit}
-                placeholder="如 CP-2026-001"
+                placeholder={t("placeholder.documentNo")}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">零件编号</Text>
+              <Text type="secondary">{t("form.partNo")}</Text>
               <Input
                 value={partNo}
                 onChange={(e) => setPartNo(e.target.value)}
                 disabled={!canEdit}
-                placeholder="零件编号"
+                placeholder={t("placeholder.partNo")}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">零件名称</Text>
+              <Text type="secondary">{t("form.partName")}</Text>
               <Input
                 value={partName}
                 onChange={(e) => setPartName(e.target.value)}
                 disabled={!canEdit}
-                placeholder="零件名称"
+                placeholder={t("placeholder.partName")}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">联系人</Text>
+              <Text type="secondary">{t("form.contactInfo")}</Text>
               <Input
                 value={contactInfo}
                 onChange={(e) => setContactInfo(e.target.value)}
                 disabled={!canEdit}
-                placeholder="联系人信息"
+                placeholder={t("placeholder.contactInfo")}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">核心小组</Text>
+              <Text type="secondary">{t("form.coreGroup")}</Text>
               <Input
                 value={coreGroup}
                 onChange={(e) => setCoreGroup(e.target.value)}
                 disabled={!canEdit}
-                placeholder="核心小组成员"
+                placeholder={t("placeholder.coreGroup")}
               />
             </div>
           </Col>
           <Col span={12}>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">组织/工厂</Text>
+              <Text type="secondary">{t("form.orgFactory")}</Text>
               <Input
                 value={orgFactory}
                 onChange={(e) => setOrgFactory(e.target.value)}
                 disabled={!canEdit}
-                placeholder="组织/工厂"
+                placeholder={t("placeholder.orgFactory")}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">图纸版本</Text>
+              <Text type="secondary">{t("form.drawingRev")}</Text>
               <Input
                 value={drawingRev}
                 onChange={(e) => setDrawingRev(e.target.value)}
                 disabled={!canEdit}
-                placeholder="图纸版本"
+                placeholder={t("placeholder.drawingRev")}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">阶段</Text>
+              <Text type="secondary">{t("form.phase")}</Text>
               <Select
                 value={phase}
                 onChange={(value) => setPhase(value)}
                 options={phaseOptions}
                 disabled={!canEdit}
                 style={{ width: "100%" }}
-                placeholder="选择阶段"
+                placeholder={t("placeholder.selectPhase")}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">关联 PFMEA</Text>
+              <Text type="secondary">{t("form.relatedPFMEA")}</Text>
               <Input
-                value={cp?.fmea_ref_id || "未关联"}
+                value={cp?.fmea_ref_id || t("form.notAssociated")}
                 disabled
               />
             </div>
@@ -861,7 +864,7 @@ export default function ControlPlanEditorPage() {
       </DataCard>
 
       {/* Items table */}
-      <DataCard title="控制计划内容">
+      <DataCard title={t("card.controlPlanContent")}>
         <Table
           className="qf-table"
           columns={columns}
@@ -874,7 +877,7 @@ export default function ControlPlanEditorPage() {
           footer={() =>
             canEdit ? (
               <Button type="dashed" icon={<PlusOutlined />} onClick={addItem} block>
-                新增行
+                {t("button.addRow")}
               </Button>
             ) : null
           }
@@ -891,14 +894,14 @@ export default function ControlPlanEditorPage() {
         />
       )}
         </>},
-        { key: "history", label: <span><HistoryOutlined /> 版本历史</span>, children: (
+        { key: "history", label: <span><HistoryOutlined /> {t("pageTitle.versionHistory")}</span>, children: (
           <VersionHistoryTab
             documentId={id!}
             documentType="cp"
             canCreate={canEditPerm('planning')}
             canRollback={canApprove('planning')}
             isDraft={currentStatus === "draft"}
-            onViewSnapshot={(major, minor) => message.info(`查看版本 v${major}.${minor} 快照（功能开发中）`)}
+            onViewSnapshot={(major, minor) => message.info(`${t("button.viewSnapshot")} v${major}.${minor}`)}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
             onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}
@@ -932,7 +935,7 @@ export default function ControlPlanEditorPage() {
           {compareState && (
             <Modal
               open={!!compareState}
-              title="版本对比"
+              title={t("pageTitle.versionCompare")}
               width={900}
               footer={null}
               onCancel={() => setCompareState(null)}
@@ -970,7 +973,7 @@ export default function ControlPlanEditorPage() {
           />
 
           <Modal
-            title="同步客户特殊要求 (CSR)"
+            title={t("csrModal.title")}
             open={csrSyncOpen}
             onOk={handleCsrSync}
             onCancel={() => { setCsrSyncOpen(false); setCsrCustomerIds([]); }}
@@ -978,11 +981,11 @@ export default function ControlPlanEditorPage() {
             okButtonProps={{ disabled: csrCustomerIds.length === 0 }}
           >
             <Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-              选择客户，将其 CSR 列表同步到控制计划的客户要求字段。已有的手动条目会被保留。
+              {t("csrModal.description")}
             </Text>
             <Select
               mode="multiple"
-              placeholder="选择客户"
+              placeholder={t("csrModal.selectCustomers")}
               style={{ width: "100%" }}
               value={csrCustomerIds}
               onChange={setCsrCustomerIds}
@@ -991,7 +994,7 @@ export default function ControlPlanEditorPage() {
             />
             {cp?.customer_requirements && cp.customer_requirements.length > 0 && (
               <div style={{ marginTop: 12 }}>
-                <Text type="secondary">当前已有 {cp.customer_requirements.length} 条客户要求</Text>
+                <Text type="secondary">{t("csrModal.currentRequirements", { count: cp.customer_requirements.length })}</Text>
               </div>
             )}
           </Modal>

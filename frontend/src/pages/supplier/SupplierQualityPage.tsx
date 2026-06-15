@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Tabs } from "antd";
+import { useTranslation } from "react-i18next";
 import { BarChartOutlined, UserOutlined, SwapOutlined } from "@ant-design/icons";
 import { PageShell } from "../../components/design";
 import DashboardView from "./components/DashboardView";
@@ -7,6 +8,7 @@ import SupplierDetailView from "./components/SupplierDetailView";
 import CompareView from "./components/CompareView";
 
 export default function SupplierQualityPage() {
+  const { t } = useTranslation("supplier");
   const [activeTab, setActiveTab] = useState("dashboard");
 
   return (
@@ -20,7 +22,7 @@ export default function SupplierQualityPage() {
             label: (
               <span>
                 <BarChartOutlined />
-                汇总看板
+                {t("quality.tabs.dashboard")}
               </span>
             ),
             children: <DashboardView />,
@@ -30,7 +32,7 @@ export default function SupplierQualityPage() {
             label: (
               <span>
                 <UserOutlined />
-                供应商详情
+                {t("quality.tabs.detail")}
               </span>
             ),
             children: <SupplierDetailView />,
@@ -40,7 +42,7 @@ export default function SupplierQualityPage() {
             label: (
               <span>
                 <SwapOutlined />
-                对比分析
+                {t("quality.tabs.compare")}
               </span>
             ),
             children: <CompareView />,

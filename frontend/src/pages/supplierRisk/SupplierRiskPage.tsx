@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Row, Col, Statistic, Button } from "antd";
 import { WarningOutlined, AlertOutlined, ReloadOutlined } from "@ant-design/icons";
 import { message } from "antd";
+import { useTranslation } from "react-i18next";
 import RiskMatrixChart from "./components/RiskMatrixChart";
 import AlertTable from "./components/AlertTable";
 import { riskAlertApi } from "../../api/supplierRisk";
@@ -10,6 +11,8 @@ import { PageShell, DataCard } from "../../components/design";
 import type { RiskDashboard } from "../../types";
 
 const SupplierRiskPage: React.FC = () => {
+  const { t } = useTranslation("supplierRisk");
+  const { t: tc } = useTranslation("common");
   const [dashboard, setDashboard] = useState<RiskDashboard | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const selected = useProductLineStore((s) => s.selected);
@@ -32,10 +35,10 @@ const SupplierRiskPage: React.FC = () => {
     setEvaluating(true);
     try {
       await riskAlertApi.evaluateAll();
-      message.success("全量评估完成");
+      message.success(t("page.evaluateSuccess"));
       fetchDashboard();
     } catch {
-      message.error("评估失败");
+      message.error(t("page.evaluateFailed"));
     } finally {
       setEvaluating(false);
     }
@@ -43,10 +46,10 @@ const SupplierRiskPage: React.FC = () => {
 
   return (
     <PageShell
-      title="供应商风险"
+      title={t("page.title")}
       actions={
         <Button type="primary" icon={<ReloadOutlined />} loading={evaluating} onClick={evaluateAll}>
-          立即评估全部
+          {t("page.evaluateAll")}
         </Button>
       }
     >
@@ -54,7 +57,7 @@ const SupplierRiskPage: React.FC = () => {
         <Col span={6}>
           <DataCard title={null}>
             <Statistic
-              title="高风险供应商"
+              title={t("page.highRiskSuppliers")}
               value={dashboard?.high_risk_count ?? 0}
               prefix={<WarningOutlined />}
               valueStyle={{ color: "#fa8c16" }}
@@ -64,7 +67,7 @@ const SupplierRiskPage: React.FC = () => {
         <Col span={6}>
           <DataCard title={null}>
             <Statistic
-              title="极高风险"
+              title={t("page.criticalRisk")}
               value={dashboard?.critical_risk_count ?? 0}
               prefix={<AlertOutlined />}
               valueStyle={{ color: "#f5222d" }}
@@ -73,25 +76,25 @@ const SupplierRiskPage: React.FC = () => {
         </Col>
         <Col span={6}>
           <DataCard title={null}>
-            <Statistic title="开放预警" value={dashboard?.open_alert_count ?? 0} />
+            <Statistic title={t("page.openAlerts")} value={dashboard?.open_alert_count ?? 0} />
           </DataCard>
         </Col>
         <Col span={6}>
           <DataCard title={null}>
-            <Statistic title="平均风险分" value={dashboard?.avg_risk_score ?? 0} precision={1} />
+            <Statistic title={t("page.avgRiskScore")} value={dashboard?.avg_risk_score ?? 0} precision={1} />
           </DataCard>
         </Col>
       </Row>
 
-      <DataCard title="风险矩阵（质量 vs 交付）" style={{ marginBottom: 24 }}>
+      <DataCard title={t("page.riskMatrixTitle")} style={{ marginBottom: 24 }}>
         {dashboard && dashboard.supplier_risk_points.length > 0 ? (
           <RiskMatrixChart data={dashboard.supplier_risk_points} />
         ) : (
-          <div style={{ textAlign: "center", padding: 48, color: "#999" }}>暂无数据</div>
+          <div style={{ textAlign: "center", padding: 48, color: "#999" }}>{tc("empty.data")}</div>
         )}
       </DataCard>
 
-      <DataCard title="预警列表">
+      <DataCard title={t("page.alertListTitle")}>
         <AlertTable productLineCode={selected} onRefresh={fetchDashboard} />
       </DataCard>
     </PageShell>

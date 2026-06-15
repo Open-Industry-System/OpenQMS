@@ -1,4 +1,5 @@
 import { Drawer, Descriptions, Tag, Space } from "antd";
+import { useTranslation } from "react-i18next";
 import type { GraphNode, GraphEdge } from "../../api/graph";
 import { calculateAP } from "../../utils/fmea";
 
@@ -6,16 +7,16 @@ interface NodeDetailDrawerProps {
   node: GraphNode | null;
   visible: boolean;
   onClose: () => void;
-  /** 提供完整图数据用于 FailureMode 的 RPN 行级计算（与风险地图口径一致） */
+  /** Provides full graph data for FailureMode RPN row-level calculation (consistent with risk map). */
   allNodes?: GraphNode[];
   allEdges?: GraphEdge[];
 }
 
-function apTag(ap: string | undefined) {
-  if (ap === "H") return <Tag color="red">高 (H)</Tag>;
-  if (ap === "M") return <Tag color="orange">中 (M)</Tag>;
-  if (ap === "L") return <Tag color="green">低 (L)</Tag>;
-  return <Tag>未评级</Tag>;
+function apTag(ap: string | undefined, t: (key: string) => string) {
+  if (ap === "H") return <Tag color="red">{t("nodeDetail.apHigh")}</Tag>;
+  if (ap === "M") return <Tag color="orange">{t("nodeDetail.apMedium")}</Tag>;
+  if (ap === "L") return <Tag color="green">{t("nodeDetail.apLow")}</Tag>;
+  return <Tag>{t("nodeDetail.apUnrated")}</Tag>;
 }
 
 function computeFailureModeRPN(
@@ -25,18 +26,18 @@ function computeFailureModeRPN(
 ): { s: number; o: number; d: number; rpn: number; ap: string } {
   const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
 
-  // S: 第一个 FailureEffect
+  // S: first FailureEffect
   const effectEdge = allEdges.find((e) => e.source === fmId && e.label === "EFFECT_OF");
   const effect = effectEdge ? nodeMap.get(effectEdge.target) : null;
   const s = (effect?.properties.severity as number) ?? 0;
 
-  // D helper: 第一个 DetectionControl
+  // D helper: first DetectionControl
   const firstDet = (sourceId: string): number => {
     const detEdge = allEdges.find((e) => e.source === sourceId && e.label === "DETECTED_BY");
     return detEdge ? ((nodeMap.get(detEdge.target)?.properties.detection as number) ?? 0) : 0;
   };
 
-  // 按 cause 逐行计算 RPN，取最大真实行
+  // Calculate RPN per cause and take the maximum real row
   const causeEdges = allEdges.filter((e) => e.target === fmId && e.label === "CAUSE_OF");
   let bestRPN = 0;
   let bestO = 0;
@@ -70,12 +71,13 @@ export default function NodeDetailDrawer({
   allNodes,
   allEdges,
 }: NodeDetailDrawerProps) {
+  const { t } = useTranslation("graph");
   if (!node) return null;
 
   const p = node.properties;
 
-  // FailureMode: 按行计算 RPN（与风险地图口径一致）
-  // 其他节点：直接用节点属性
+  // FailureMode: calculate RPN per row (consistent with risk map)
+  // Other nodes: use node properties directly
   const isFailureMode = node.label === "FailureMode";
   const rpnData =
     isFailureMode && allNodes && allEdges
@@ -89,55 +91,55 @@ export default function NodeDetailDrawer({
   const computedAP = rpnData?.ap ?? (s > 0 && o > 0 && d > 0 ? calculateAP(s, o, d) : "");
 
   return (
-    <Drawer title={p.name || "节点详情"} open={visible} onClose={onClose} width={400}>
+    <Drawer title={p.name || t("nodeDetail.title")} open={visible} onClose={onClose} width={400}>
       <Descriptions column={1} size="small" bordered>
-        <Descriptions.Item label="节点 ID">{node.id}</Descriptions.Item>
-        <Descriptions.Item label="节点类型">
+        <Descriptions.Item label={t("nodeDetail.nodeId")}>{node.id}</Descriptions.Item>
+        <Descriptions.Item label={t("nodeDetail.nodeType")}>
           <Tag>{node.label}</Tag>
         </Descriptions.Item>
         {s > 0 && (
-          <Descriptions.Item label="严重度 (S)">{String(s)}</Descriptions.Item>
+          <Descriptions.Item label={t("nodeDetail.severity")}>{String(s)}</Descriptions.Item>
         )}
         {o > 0 && (
-          <Descriptions.Item label="发生度 (O)">{String(o)}</Descriptions.Item>
+          <Descriptions.Item label={t("nodeDetail.occurrence")}>{String(o)}</Descriptions.Item>
         )}
         {d > 0 && (
-          <Descriptions.Item label="探测度 (D)">{String(d)}</Descriptions.Item>
+          <Descriptions.Item label={t("nodeDetail.detection")}>{String(d)}</Descriptions.Item>
         )}
         {rpn > 0 && (
-          <Descriptions.Item label="RPN">
-            {s} × {o} × {d} = <strong>{rpn}</strong>
+          <Descriptions.Item label={t("nodeDetail.rpn")}>
+            {t("nodeDetail.rpnFormula", { s, o, d, rpn })}
           </Descriptions.Item>
         )}
         {computedAP && (
-          <Descriptions.Item label="行动优先级 (AP)">
+          <Descriptions.Item label={t("nodeDetail.ap")}>
             <Space>
-              {apTag(computedAP)}
+              {apTag(computedAP, t)}
               {p.ap && p.ap !== computedAP && (
                 <span style={{ fontSize: 12, color: "#888" }}>
-                  (节点值: {String(p.ap)})
+                  {t("nodeDetail.nodeValue", { value: String(p.ap) })}
                 </span>
               )}
             </Space>
           </Descriptions.Item>
         )}
         {p.revised_severity !== undefined && (
-          <Descriptions.Item label="修订严重度">{String(p.revised_severity)}</Descriptions.Item>
+          <Descriptions.Item label={t("nodeDetail.revisedSeverity")}>{String(p.revised_severity)}</Descriptions.Item>
         )}
         {p.revised_occurrence !== undefined && (
-          <Descriptions.Item label="修订发生度">{String(p.revised_occurrence)}</Descriptions.Item>
+          <Descriptions.Item label={t("nodeDetail.revisedOccurrence")}>{String(p.revised_occurrence)}</Descriptions.Item>
         )}
         {p.revised_detection !== undefined && (
-          <Descriptions.Item label="修订探测度">{String(p.revised_detection)}</Descriptions.Item>
+          <Descriptions.Item label={t("nodeDetail.revisedDetection")}>{String(p.revised_detection)}</Descriptions.Item>
         )}
         {p.status !== undefined && p.status !== "" && (
-          <Descriptions.Item label="状态">{String(p.status)}</Descriptions.Item>
+          <Descriptions.Item label={t("nodeDetail.status")}>{String(p.status)}</Descriptions.Item>
         )}
         {p.responsible !== undefined && p.responsible !== "" && (
-          <Descriptions.Item label="责任人">{String(p.responsible)}</Descriptions.Item>
+          <Descriptions.Item label={t("nodeDetail.responsible")}>{String(p.responsible)}</Descriptions.Item>
         )}
         {p.due_date !== undefined && p.due_date !== "" && (
-          <Descriptions.Item label="截止日期">{String(p.due_date)}</Descriptions.Item>
+          <Descriptions.Item label={t("nodeDetail.dueDate")}>{String(p.due_date)}</Descriptions.Item>
         )}
       </Descriptions>
     </Drawer>

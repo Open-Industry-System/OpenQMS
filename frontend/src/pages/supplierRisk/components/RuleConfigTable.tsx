@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { Table, Switch, InputNumber, message } from "antd";
+import { useTranslation } from "react-i18next";
 import type { SupplierRiskConfig } from "../../../types";
 import { riskAlertApi } from "../../../api/supplierRisk";
 import { StatusBadge } from "../../../components/design";
 
-const CATEGORY_LABELS: Record<string, string> = {
-  quality: "质量",
-  delivery: "交付",
-  compliance: "合规",
-};
-
 const RuleConfigTable: React.FC = () => {
+  const { t } = useTranslation("supplierRisk");
   const [data, setData] = useState<SupplierRiskConfig[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const CATEGORY_LABELS: Record<string, string> = {
+    quality: t("ruleConfig.categories.quality"),
+    delivery: t("ruleConfig.categories.delivery"),
+    compliance: t("ruleConfig.categories.compliance"),
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -31,26 +33,26 @@ const RuleConfigTable: React.FC = () => {
   const toggleEnabled = async (record: SupplierRiskConfig, enabled: boolean) => {
     try {
       await riskAlertApi.updateConfig(record.config_id, { enabled });
-      message.success("已更新");
+      message.success(t("ruleConfig.messages.updateSuccess"));
       fetchData();
     } catch {
-      message.error("更新失败");
+      message.error(t("ruleConfig.messages.updateFailed"));
     }
   };
 
   const updateWeight = async (record: SupplierRiskConfig, weight: number) => {
     try {
       await riskAlertApi.updateConfig(record.config_id, { weight });
-      message.success("权重已更新");
+      message.success(t("ruleConfig.messages.weightUpdated"));
     } catch {
-      message.error("更新失败");
+      message.error(t("ruleConfig.messages.updateFailed"));
     }
   };
 
   const columns = [
-    { title: "规则", dataIndex: "rule_id", width: 80 },
+    { title: t("ruleConfig.columns.rule"), dataIndex: "rule_id", width: 80 },
     {
-      title: "类别",
+      title: t("ruleConfig.columns.category"),
       dataIndex: "category",
       width: 100,
       render: (v: string) => (
@@ -58,7 +60,7 @@ const RuleConfigTable: React.FC = () => {
       ),
     },
     {
-      title: "启用",
+      title: t("ruleConfig.columns.enabled"),
       dataIndex: "enabled",
       width: 80,
       render: (v: boolean, record: SupplierRiskConfig) => (
@@ -66,7 +68,7 @@ const RuleConfigTable: React.FC = () => {
       ),
     },
     {
-      title: "权重",
+      title: t("ruleConfig.columns.weight"),
       dataIndex: "weight",
       width: 100,
       render: (v: number, record: SupplierRiskConfig) => (
@@ -81,7 +83,7 @@ const RuleConfigTable: React.FC = () => {
       ),
     },
     {
-      title: "阈值",
+      title: t("ruleConfig.columns.threshold"),
       dataIndex: "thresholds",
       render: (v: Record<string, unknown>) => (
         <span style={{ fontSize: 12 }}>{JSON.stringify(v)}</span>

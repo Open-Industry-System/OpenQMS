@@ -1,0 +1,9 @@
+{
+  "newFailureMode": "New Failure Mode",
+  "newFailureEffect": "New Failure Effect",
+  "newFailureCause": "New Failure Cause",
+  "designPreventionControl": "Current Design Prevention Control",
+  "designDetectionControl": "Current Design Detection Control",
+  "processPreventionControl": "Current Process Prevention Control",
+  "processDetectionControl": "Current Process Detection Control"
+}

@@ -1,14 +1,27 @@
 import React, { useState, useEffect } from "react";
 import { Table, Button, Modal, Form, Input, Select, Switch, message, Popconfirm } from "antd";
+import { useTranslation } from "react-i18next";
 import type { NotificationChannel } from "../../../types";
 import { riskAlertApi } from "../../../api/supplierRisk";
 import { StatusBadge } from "../../../components/design";
 
 const ChannelConfigTable: React.FC = () => {
+  const { t } = useTranslation("supplierRisk");
+  const { t: tc } = useTranslation("common");
   const [data, setData] = useState<NotificationChannel[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
+
+  const TYPE_LABELS: Record<string, string> = {
+    email: t("channel.types.email"),
+    webhook: t("channel.types.webhook"),
+  };
+
+  const MIN_RISK_LEVEL_LABELS: Record<string, string> = {
+    high: t("channel.minRiskLevels.high"),
+    critical: t("channel.minRiskLevels.critical"),
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -27,12 +40,12 @@ const ChannelConfigTable: React.FC = () => {
   const createChannel = async (values: Record<string, unknown>) => {
     try {
       await riskAlertApi.createChannel(values);
-      message.success("已创建");
+      message.success(t("channel.messages.created"));
       setModalOpen(false);
       form.resetFields();
       fetchData();
     } catch {
-      message.error("创建失败");
+      message.error(t("channel.messages.createFailed"));
     }
   };
 
@@ -41,49 +54,49 @@ const ChannelConfigTable: React.FC = () => {
       await riskAlertApi.updateChannel(record.channel_id, { enabled });
       fetchData();
     } catch {
-      message.error("更新失败");
+      message.error(t("channel.messages.updateFailed"));
     }
   };
 
   const deleteChannel = async (id: string) => {
     try {
       await riskAlertApi.deleteChannel(id);
-      message.success("已删除");
+      message.success(t("channel.messages.deleted"));
       fetchData();
     } catch {
-      message.error("删除失败");
+      message.error(t("channel.messages.deleteFailed"));
     }
   };
 
   const columns = [
     {
-      title: "类型",
+      title: t("channel.columns.type"),
       dataIndex: "channel_type",
       render: (v: string) => (
-        <StatusBadge status={v}>{v === "email" ? "邮件" : "Webhook"}</StatusBadge>
+        <StatusBadge status={v}>{TYPE_LABELS[v] || v}</StatusBadge>
       ),
     },
     {
-      title: "最低风险等级",
+      title: t("channel.columns.minRiskLevel"),
       dataIndex: "min_risk_level",
-      render: (v: string) => ({ high: "高", critical: "极高" }[v] || v),
+      render: (v: string) => MIN_RISK_LEVEL_LABELS[v] || v,
     },
     {
-      title: "启用",
+      title: t("channel.columns.enabled"),
       dataIndex: "enabled",
       render: (v: boolean, record: NotificationChannel) => (
         <Switch checked={v} onChange={(val) => toggleEnabled(record, val)} />
       ),
     },
     {
-      title: "操作",
+      title: tc("table.operations"),
       render: (_: unknown, record: NotificationChannel) => (
         <Popconfirm
-          title="确定删除?"
+          title={tc("messages.confirmDelete")}
           onConfirm={() => deleteChannel(record.channel_id)}
         >
           <Button size="small" danger>
-            删除
+            {tc("actions.delete")}
           </Button>
         </Popconfirm>
       ),
@@ -97,7 +110,7 @@ const ChannelConfigTable: React.FC = () => {
         onClick={() => setModalOpen(true)}
         style={{ marginBottom: 16 }}
       >
-        添加渠道
+        {t("channel.add")}
       </Button>
       <Table
         rowKey="channel_id"
@@ -107,7 +120,7 @@ const ChannelConfigTable: React.FC = () => {
         className="qf-table"
       />
       <Modal
-        title="添加通知渠道"
+        title={t("channel.addTitle")}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
@@ -115,25 +128,25 @@ const ChannelConfigTable: React.FC = () => {
         <Form form={form} onFinish={createChannel} layout="vertical">
           <Form.Item
             name="channel_type"
-            label="类型"
+            label={t("channel.form.type")}
             rules={[{ required: true }]}
           >
             <Select
               options={[
-                { value: "email", label: "邮件" },
-                { value: "webhook", label: "Webhook" },
+                { value: "email", label: TYPE_LABELS.email },
+                { value: "webhook", label: TYPE_LABELS.webhook },
               ]}
             />
           </Form.Item>
           <Form.Item
             name="min_risk_level"
-            label="最低风险等级"
+            label={t("channel.form.minRiskLevel")}
             initialValue="high"
           >
             <Select
               options={[
-                { value: "high", label: "高" },
-                { value: "critical", label: "极高" },
+                { value: "high", label: MIN_RISK_LEVEL_LABELS.high },
+                { value: "critical", label: MIN_RISK_LEVEL_LABELS.critical },
               ]}
             />
           </Form.Item>
@@ -145,23 +158,23 @@ const ChannelConfigTable: React.FC = () => {
               getFieldValue("channel_type") === "email" ? (
                 <Form.Item
                   name={["config", "addresses"]}
-                  label="邮件地址（逗号分隔）"
+                  label={t("channel.form.emailAddresses")}
                   rules={[{ required: true }]}
                 >
-                  <Input placeholder="a@b.com,c@d.com" />
+                  <Input placeholder={t("channel.placeholders.emailAddresses")} />
                 </Form.Item>
               ) : getFieldValue("channel_type") === "webhook" ? (
                 <>
                   <Form.Item
                     name={["config", "url"]}
-                    label="Webhook URL"
+                    label={t("channel.form.webhookUrl")}
                     rules={[{ required: true }]}
                   >
-                    <Input placeholder="https://hooks.example.com/..." />
+                    <Input placeholder={t("channel.placeholders.webhookUrl")} />
                   </Form.Item>
                   <Form.Item
                     name={["config", "secret"]}
-                    label="签名密钥"
+                    label={t("channel.form.secret")}
                     rules={[{ required: true }]}
                   >
                     <Input.Password />

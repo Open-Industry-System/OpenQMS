@@ -1,21 +1,23 @@
 import { Result, Button } from "antd";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/design";
 
 export default function TenantSuspended() {
   const navigate = useNavigate();
+  const { t } = useTranslation("tenant");
   return (
     <PageShell
-      title="租户已暂停"
+      title={t("suspended.title")}
       actions={
         <Button type="primary" onClick={() => navigate("/login")}>
-          返回登录
+          {t("suspended.backToLogin")}
         </Button>
       }
     >
       <Result
         status="warning"
-        subTitle="您的租户账户已被暂停，请联系管理员。"
+        subTitle={t("suspended.subtitle")}
       />
     </PageShell>
   );

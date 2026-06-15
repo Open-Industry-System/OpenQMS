@@ -1,0 +1,162 @@
+{
+  "pageTitle": {
+    "controlPlanList": "控制计划",
+    "controlPlanEditor": "控制计划编辑器",
+    "controlPlanDetail": "控制计划详情",
+    "newControlPlan": "新建控制计划",
+    "versionHistory": "版本历史",
+    "versionCompare": "版本对比"
+  },
+  "button": {
+    "newControlPlan": "新建控制计划",
+    "importFromPFMEA": "从 PFMEA 导入",
+    "checkPFMEAChange": "检查 PFMEA 变更",
+    "syncSpecialCharacteristics": "同步特殊特性",
+    "syncCSR": "同步 CSR",
+    "addRow": "新增行",
+    "openFMEAEditor": "打开 FMEA 编辑器",
+    "viewSnapshot": "查看快照"
+  },
+  "phase": {
+    "sample": "样件",
+    "trial": "试生产",
+    "production": "生产"
+  },
+  "status": {
+    "draft": "草稿",
+    "approved": "已批准"
+  },
+  "column": {
+    "documentNo": "编号",
+    "title": "标题",
+    "validationStatus": "校验状态",
+    "phase": "阶段",
+    "status": "状态",
+    "version": "版本",
+    "updatedAt": "更新时间",
+    "actions": "操作",
+    "stepNo": "零件/过程编号",
+    "processName": "过程名称/操作描述",
+    "equipment": "设备/工装/夹具",
+    "characteristic": "特性",
+    "characteristicNo": "特性编号",
+    "productCharacteristic": "产品特性",
+    "processCharacteristic": "过程特性",
+    "specialClass": "特殊特性分类",
+    "specificationTolerance": "产品/过程/规格/公差",
+    "method": "方法",
+    "evaluationMethod": "评价/测量技术",
+    "sample": "样本",
+    "sampleSize": "样本大小",
+    "sampleFrequency": "样本频次",
+    "controlMethod": "控制方法",
+    "reactionPlan": "反应计划"
+  },
+  "form": {
+    "documentNo": "文档编号",
+    "title": "标题",
+    "partNo": "零件编号",
+    "partName": "零件名称",
+    "contactInfo": "联系人",
+    "coreGroup": "核心小组",
+    "orgFactory": "组织/工厂",
+    "drawingRev": "图纸版本",
+    "phase": "阶段",
+    "relatedPFMEA": "关联 PFMEA",
+    "notAssociated": "未关联"
+  },
+  "placeholder": {
+    "documentNo": "如 CP-2026-001",
+    "title": "如 SMT焊接控制计划",
+    "partNo": "零件编号",
+    "partName": "零件名称",
+    "contactInfo": "联系人信息",
+    "coreGroup": "核心小组成员",
+    "orgFactory": "组织/工厂",
+    "drawingRev": "图纸版本",
+    "selectPhase": "选择阶段"
+  },
+  "validation": {
+    "title": "智能校验",
+    "validating": "校验中...",
+    "revalidate": "重新校验",
+    "noResults": "暂无校验结果",
+    "loadFailed": "加载校验结果失败",
+    "triggerFailed": "触发校验失败",
+    "operationFailed": "操作失败",
+    "total": "共 {{total}} 项",
+    "errors": "{{count}} 错误",
+    "warnings": "{{count}} 警告",
+    "infos": "{{count}} 提示",
+    "pending": "{{count}} 待处理",
+    "resolved": "{{count}} 已解决",
+    "rejected": "{{count}} 已忽略",
+    "errorLabel": "错误",
+    "warningLabel": "警告",
+    "infoLabel": "提示",
+    "markResolved": "标记已解决",
+    "ignore": "忽略",
+    "restore": "恢复",
+    "resolvedTag": "已解决",
+    "suggestion": "建议",
+    "notValidated": "未校验",
+    "errorsPending": "{{count}} 个错误待处理",
+    "warningsPending": "{{count}} 个警告",
+    "allPassed": "全部通过"
+  },
+  "importModal": {
+    "title": "从 PFMEA 导入",
+    "selectPFMEA": "选择已批准的 PFMEA",
+    "processNo": "工序号",
+    "processName": "工序名称",
+    "loadFailed": "加载 PFMEA 列表失败",
+    "selectFirst": "请先选择 PFMEA",
+    "importSuccess": "导入成功",
+    "importFailed": "导入失败"
+  },
+  "csrModal": {
+    "title": "同步客户特殊要求 (CSR)",
+    "description": "选择客户，将其 CSR 列表同步到控制计划的客户要求字段。已有的手动条目会被保留。",
+    "selectCustomers": "选择客户",
+    "currentRequirements": "当前已有 {{count}} 条客户要求"
+  },
+  "staleAlert": {
+    "message": "关联的 PFMEA 已发生变更，以下行可能已过期：{{steps}}，建议重新导入或手动核对。",
+    "syncPending": "关联的 FMEA 已更新（当前 CP 基于较旧版本），建议同步更新",
+    "syncNow": "立即同步",
+    "noChange": "未检测到 PFMEA 变更",
+    "nodeChanged": "节点特性已变更，建议同步"
+  },
+  "conflict": {
+    "forceSaveSuccess": "强制保存成功",
+    "forceSaveFailed": "强制保存失败",
+    "documentModified": "文档又被修改了，请刷新后重试"
+  },
+  "card": {
+    "basicInfo": "基本信息",
+    "controlPlanContent": "控制计划内容",
+    "customerRequirements": "客户要求"
+  },
+  "specialClass": {
+    "none": "-",
+    "CC": "CC",
+    "SC": "SC"
+  },
+  "message": {
+    "createSuccess": "控制计划创建成功",
+    "createFailed": "创建失败",
+    "deleteSuccess": "删除成功",
+    "deleteFailed": "删除失败",
+    "saveSuccess": "保存成功",
+    "saveFailed": "保存失败",
+    "loadFailed": "加载控制计划失败",
+    "approveSuccess": "批准成功",
+    "approveFailed": "批准失败",
+    "checkFailed": "检查失败",
+    "syncSuccess": "同步成功",
+    "syncFailed": "同步失败",
+    "refreshFailed": "刷新数据失败",
+    "enterTitle": "请输入标题",
+    "enterDocumentNo": "请输入文档编号"
+  }
+}

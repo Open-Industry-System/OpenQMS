@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { Table, Spin } from "antd";
+import { useTranslation } from "react-i18next";
 import { getFactoryComparison, type FactoryComparisonResponse } from "../../api/group";
 import { usePermission } from "../../hooks/usePermission";
 import { PageShell, DataCard } from "../../components/design";
 
 export default function FactoryComparisonPage() {
   const { canView } = usePermission();
+  const { t } = useTranslation("group");
+  const { t: tc } = useTranslation("common");
   const [data, setData] = useState<FactoryComparisonResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -19,7 +22,7 @@ export default function FactoryComparisonPage() {
   }, [canView]);
 
   if (!canView("group")) {
-    return <div style={{ padding: 24 }}>您没有集团管理权限</div>;
+    return <div style={{ padding: 24 }}>{t("noPermission")}</div>;
   }
 
   if (loading) {
@@ -27,12 +30,12 @@ export default function FactoryComparisonPage() {
   }
 
   if (!data) {
-    return <div style={{ padding: 24 }}>暂无数据</div>;
+    return <div style={{ padding: 24 }}>{tc("empty.data")}</div>;
   }
 
   const columns = [
-    { title: "工厂编码", dataIndex: "factory_code", key: "factory_code", fixed: "left" as const, width: 100 },
-    { title: "工厂名称", dataIndex: "factory_name", key: "factory_name", fixed: "left" as const, width: 150 },
+    { title: t("factoryComparison.columns.code"), dataIndex: "factory_code", key: "factory_code", fixed: "left" as const, width: 100 },
+    { title: t("factoryComparison.columns.name"), dataIndex: "factory_name", key: "factory_name", fixed: "left" as const, width: 150 },
     ...data.metric_names.map((name) => ({
       title: name,
       key: name,
@@ -42,8 +45,8 @@ export default function FactoryComparisonPage() {
   ];
 
   return (
-    <PageShell title="工厂对比">
-      <DataCard title="对比指标">
+    <PageShell title={t("factoryComparison.title")}>
+      <DataCard title={t("factoryComparison.metricsTitle")}>
         <Table
           columns={columns}
           dataSource={data.factories}

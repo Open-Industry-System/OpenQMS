@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Table, Tag, Typography, App, Row, Col, Statistic, Button } from "antd";
 import { ApartmentOutlined, CheckCircleOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { getMatrix } from "../../../api/specialCharacteristic";
 import type { MatrixRow } from "../../../types";
 import { useProductLineStore } from "../../../store/productLineStore";
-import PageShell from "../../../components/design/PageShell";
-import DataCard from "../../../components/design/DataCard";
-import StatusBadge from "../../../components/design/StatusBadge";
+import { PageShell, DataCard, StatusBadge } from "../../../components/design";
 
 const { Title } = Typography;
 
@@ -19,6 +18,7 @@ const msaStatusVariant = (s: string): string => {
 };
 
 export default function SCMatrixPage() {
+  const { t } = useTranslation("specialCharacteristic");
   const { message } = App.useApp();
   const navigate = useNavigate();
   const [data, setData] = useState<MatrixRow[]>([]);
@@ -29,7 +29,7 @@ export default function SCMatrixPage() {
     setLoading(true);
     getMatrix(productLine || undefined)
       .then((res) => setData(res.characteristics))
-      .catch(() => message.error("加载矩阵数据失败"))
+      .catch(() => message.error(t("message.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -72,7 +72,7 @@ export default function SCMatrixPage() {
 
   const columns = [
     {
-      title: "SC编号",
+      title: t("column.scCode"),
       dataIndex: "sc_code",
       key: "sc_code",
       width: 130,
@@ -92,13 +92,13 @@ export default function SCMatrixPage() {
       ),
     },
     {
-      title: "名称",
+      title: t("column.name"),
       dataIndex: "sc_name",
       key: "sc_name",
       ellipsis: true,
     },
     {
-      title: "类型",
+      title: t("column.type"),
       dataIndex: "sc_type",
       key: "sc_type",
       width: 80,
@@ -109,41 +109,41 @@ export default function SCMatrixPage() {
       ),
     },
     {
-      title: "客户符号",
+      title: t("column.customerSymbol"),
       dataIndex: "customer_symbol",
       key: "customer_symbol",
       width: 100,
       render: (v: string | null) => v || "-",
     },
     {
-      title: "DFMEA",
+      title: t("matrixColumn.dfmea"),
       dataIndex: "has_dfmea",
       key: "dfmea",
       width: 90,
       align: "center" as const,
       render: (_: boolean, record: MatrixRow) =>
-        renderLinkCell(record.has_dfmea, record.dfmea_link, "DFMEA"),
+        renderLinkCell(record.has_dfmea, record.dfmea_link, t("matrixColumn.dfmea")),
     },
     {
-      title: "PFMEA",
+      title: t("matrixColumn.pfmea"),
       dataIndex: "has_pfmea",
       key: "pfmea",
       width: 90,
       align: "center" as const,
       render: (_: boolean, record: MatrixRow) =>
-        renderLinkCell(record.has_pfmea, record.pfmea_link, "PFMEA"),
+        renderLinkCell(record.has_pfmea, record.pfmea_link, t("matrixColumn.pfmea")),
     },
     {
-      title: "CP",
+      title: t("matrixColumn.cp"),
       dataIndex: "has_cp",
       key: "cp",
       width: 70,
       align: "center" as const,
       render: (_: boolean, record: MatrixRow) =>
-        renderLinkCell(record.has_cp, record.cp_link, "CP"),
+        renderLinkCell(record.has_cp, record.cp_link, t("matrixColumn.cp")),
     },
     {
-      title: "MSA",
+      title: t("matrixColumn.msa"),
       dataIndex: "msa_status",
       key: "msa",
       width: 100,
@@ -168,7 +168,7 @@ export default function SCMatrixPage() {
       },
     },
     {
-      title: "SOP",
+      title: t("matrixColumn.sop"),
       dataIndex: "has_sop",
       key: "sop",
       width: 70,
@@ -187,12 +187,12 @@ export default function SCMatrixPage() {
       title={
         <>
           <ApartmentOutlined style={{ marginRight: 8 }} />
-          特殊特性覆盖矩阵
+          {t("pageTitle.scMatrix")}
         </>
       }
-      subtitle="CC/SC 跨文档覆盖状态"
+      subtitle={t("pageTitle.scMatrixSubtitle")}
     >
-      <DataCard title="覆盖矩阵" noPadding>
+      <DataCard title={t("matrix.title")} noPadding>
         <Table
           className="qf-table"
           columns={columns}
@@ -205,17 +205,17 @@ export default function SCMatrixPage() {
         />
       </DataCard>
 
-      <DataCard title="覆盖率统计" style={{ marginTop: 16 }}>
+      <DataCard title={t("coverage.title")} style={{ marginTop: 16 }}>
         <Title level={5} style={{ marginBottom: 16 }}>
-          覆盖率统计
+          {t("coverage.statsTitle")}
         </Title>
         <Row gutter={16}>
           <Col span={4}>
-            <Statistic title="特性总数" value={total} />
+            <Statistic title={t("coverage.total")} value={total} />
           </Col>
           <Col span={4}>
             <Statistic
-              title="DFMEA覆盖"
+              title={t("coverage.dfmea")}
               value={pct(dfmeaCount)}
               suffix="%"
               valueStyle={{
@@ -225,7 +225,7 @@ export default function SCMatrixPage() {
           </Col>
           <Col span={4}>
             <Statistic
-              title="PFMEA覆盖"
+              title={t("coverage.pfmea")}
               value={pct(pfmeaCount)}
               suffix="%"
               valueStyle={{
@@ -235,7 +235,7 @@ export default function SCMatrixPage() {
           </Col>
           <Col span={4}>
             <Statistic
-              title="CP覆盖"
+              title={t("coverage.cp")}
               value={pct(cpCount)}
               suffix="%"
               valueStyle={{
@@ -245,7 +245,7 @@ export default function SCMatrixPage() {
           </Col>
           <Col span={4}>
             <Statistic
-              title="MSA通过"
+              title={t("coverage.msa")}
               value={pct(msaPassCount)}
               suffix="%"
               valueStyle={{
@@ -255,7 +255,7 @@ export default function SCMatrixPage() {
           </Col>
           <Col span={4}>
             <Statistic
-              title="SOP覆盖"
+              title={t("coverage.sop")}
               value={pct(sopCount)}
               suffix="%"
               valueStyle={{

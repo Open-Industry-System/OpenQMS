@@ -6,6 +6,7 @@ import {
   FileTextOutlined,
   SafetyOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { getPLMDashboard } from "../../api/plm";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { PLMDashboard, PLMChangeOrder } from "../../types/plm";
@@ -21,6 +22,7 @@ const statusVariant: Record<string, string> = {
 };
 
 export default function PLMDashboardPage() {
+  const { t } = useTranslation("plm");
   const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<PLMDashboard | null>(null);
@@ -29,7 +31,7 @@ export default function PLMDashboardPage() {
   useEffect(() => {
     getPLMDashboard({ product_line_code: productLine || undefined })
       .then(setData)
-      .catch(() => message.error("加载 PLM 看板数据失败"))
+      .catch(() => message.error(t("dashboard.errors.loadFailed")))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
@@ -43,11 +45,11 @@ export default function PLMDashboardPage() {
   }
 
   const recentColumns = [
-    { title: "变更编号", dataIndex: "change_number", key: "change_number", width: 160 },
-    { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
-    { title: "变更类型", dataIndex: "change_type", key: "change_type", width: 120 },
+    { title: t("dashboard.columns.changeNumber"), dataIndex: "change_number", key: "change_number", width: 160 },
+    { title: t("dashboard.columns.title"), dataIndex: "title", key: "title", ellipsis: true },
+    { title: t("dashboard.columns.changeType"), dataIndex: "change_type", key: "change_type", width: 120 },
     {
-      title: "状态",
+      title: t("dashboard.columns.status"),
       dataIndex: "status",
       key: "status",
       width: 100,
@@ -55,9 +57,9 @@ export default function PLMDashboardPage() {
         <StatusBadge status={statusVariant[s] || s}>{s}</StatusBadge>
       ),
     },
-    { title: "优先级", dataIndex: "priority", key: "priority", width: 80 },
+    { title: t("dashboard.columns.priority"), dataIndex: "priority", key: "priority", width: 80 },
     {
-      title: "更新时间",
+      title: t("dashboard.columns.updatedAt"),
       dataIndex: "source_updated_at",
       key: "source_updated_at",
       width: 170,
@@ -66,12 +68,12 @@ export default function PLMDashboardPage() {
   ];
 
   return (
-    <PageShell title="PLM 集成看板">
+    <PageShell title={t("dashboard.title")}>
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} lg={6}>
           <DataCard title={null}>
             <Statistic
-              title="零件总数"
+              title={t("dashboard.stats.totalParts")}
               value={data?.part_count ?? 0}
               prefix={<InboxOutlined />}
             />
@@ -80,7 +82,7 @@ export default function PLMDashboardPage() {
         <Col xs={24} sm={12} lg={6}>
           <DataCard title={null}>
             <Statistic
-              title="BOM 条目"
+              title={t("dashboard.stats.bomItems")}
               value={data?.bom_count ?? 0}
               prefix={<ApartmentOutlined />}
             />
@@ -89,7 +91,7 @@ export default function PLMDashboardPage() {
         <Col xs={24} sm={12} lg={6}>
           <DataCard title={null}>
             <Statistic
-              title="待处理 ECN"
+              title={t("dashboard.stats.pendingECNs")}
               value={data?.pending_ecn_count ?? 0}
               prefix={<FileTextOutlined />}
               valueStyle={{ color: (data?.pending_ecn_count ?? 0) > 0 ? "#faad14" : undefined }}
@@ -99,7 +101,7 @@ export default function PLMDashboardPage() {
         <Col xs={24} sm={12} lg={6}>
           <DataCard title={null}>
             <Statistic
-              title="待处理特殊特性"
+              title={t("dashboard.stats.pendingSCs")}
               value={data?.pending_sc_count ?? 0}
               prefix={<SafetyOutlined />}
               valueStyle={{ color: (data?.pending_sc_count ?? 0) > 0 ? "#ff4d4f" : undefined }}
@@ -108,7 +110,7 @@ export default function PLMDashboardPage() {
         </Col>
       </Row>
 
-      <DataCard title="最近变更">
+      <DataCard title={t("dashboard.recentChanges")}>
         <Table<PLMChangeOrder>
           columns={recentColumns}
           dataSource={data?.recent_changes ?? []}

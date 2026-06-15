@@ -2,11 +2,14 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Form, Input, Button, Typography, App } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
+import LanguageSwitcher from "../../components/LanguageSwitcher";
 
 const { Title, Text } = Typography;
 
 export default function LoginPage() {
+  const { t } = useTranslation("login");
   const [loading, setLoading] = useState(false);
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
@@ -16,10 +19,10 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(values.username, values.password);
-      message.success("登录成功");
+      message.success(t("loginSuccess"));
       navigate("/dashboard", { replace: true });
     } catch {
-      message.error("用户名或密码错误");
+      message.error(t("loginError"));
     } finally {
       setLoading(false);
     }
@@ -135,19 +138,19 @@ export default function LoginPage() {
               OpenQMS
             </Title>
             <Text style={{ color: "var(--qf-text-secondary)", fontSize: 13 }}>
-              智能质量管理平台 · 精密熔炉
+              {t("subtitle")}
             </Text>
           </div>
 
           <Form onFinish={onFinish} size="large" layout="vertical">
             <Form.Item
               name="username"
-              rules={[{ required: true, message: "请输入用户名" }]}
+              rules={[{ required: true, message: t("usernameRequired") }]}
               style={{ marginBottom: 20 }}
             >
               <Input
                 prefix={<UserOutlined style={{ color: "var(--qf-cyan)", marginRight: 8 }} />}
-                placeholder="用户名"
+                placeholder={t("username")}
                 style={{
                   background: "var(--qf-bg-input)",
                   borderColor: "var(--qf-border)",
@@ -158,12 +161,12 @@ export default function LoginPage() {
             </Form.Item>
             <Form.Item
               name="password"
-              rules={[{ required: true, message: "请输入密码" }]}
+              rules={[{ required: true, message: t("passwordRequired") }]}
               style={{ marginBottom: 28 }}
             >
               <Input.Password
                 prefix={<LockOutlined style={{ color: "var(--qf-cyan)", marginRight: 8 }} />}
-                placeholder="密码"
+                placeholder={t("password")}
                 style={{
                   background: "var(--qf-bg-input)",
                   borderColor: "var(--qf-border)",
@@ -187,7 +190,7 @@ export default function LoginPage() {
                 }}
                 className="qf-btn-primary"
               >
-                登录
+                {t("login")}
               </Button>
             </Form.Item>
           </Form>
@@ -202,8 +205,12 @@ export default function LoginPage() {
               fontFamily: "var(--qf-font-mono)",
             }}
           >
-            默认账号 admin / Admin@2026
+            {t("defaultAccount")}
           </Text>
+        </div>
+
+        <div style={{ textAlign: "center", marginTop: 16 }}>
+          <LanguageSwitcher />
         </div>
 
         <Text
@@ -215,7 +222,7 @@ export default function LoginPage() {
             marginTop: 16,
           }}
         >
-          © OpenQMS · 中国制造质量操作系统
+          {t("footer")}
         </Text>
       </div>
     </div>

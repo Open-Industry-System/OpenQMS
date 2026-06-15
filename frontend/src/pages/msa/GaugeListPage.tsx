@@ -21,6 +21,7 @@ import {
   EditOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { usePermission } from "../../hooks/usePermission";
 import type { Gauge } from "../../types";
@@ -30,15 +31,10 @@ import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
-const STATUS_MAP: Record<string, { label: string; status: string }> = {
-  active: { label: "在用", status: "success" },
-  inactive: { label: "闲置", status: "draft" },
-  calibrating: { label: "校准中", status: "info" },
-  scrapped: { label: "报废", status: "error" },
-};
-
 export default function GaugeListPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation("msa");
+  const { t: tc } = useTranslation("common");
   const { canEdit } = usePermission();
 
   const [gauges, setGauges] = useState<Gauge[]>([]);
@@ -59,6 +55,17 @@ export default function GaugeListPage() {
   const [modalForm] = Form.useForm();
   const [saving, setSaving] = useState(false);
 
+  const statusLabel = (status: string) => t(`gauge.status.${status}`, { defaultValue: status });
+  const statusVariant = (status: string) => {
+    switch (status) {
+      case "active": return "success";
+      case "inactive": return "draft";
+      case "calibrating": return "info";
+      case "scrapped": return "error";
+      default: return "draft";
+    }
+  };
+
   const fetchGauges = useCallback(async () => {
     setLoading(true);
     try {
@@ -70,11 +77,11 @@ export default function GaugeListPage() {
       setGauges(resp.items);
       setTotal(resp.total);
     } catch {
-      message.error("加载量具列表失败");
+      message.error(t("gauge.listLoadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, filterSearch, filterStatus, filterDepartment]);
+  }, [page, pageSize, filterSearch, filterStatus, filterDepartment, t]);
 
   useEffect(() => {
     fetchGauges();
@@ -87,7 +94,7 @@ export default function GaugeListPage() {
       const resp = await getExpiringGauges(30);
       setExpiryGauges(resp.items);
     } catch {
-      message.error("加载到期提醒失败");
+      message.error(t("gauge.expiryLoadFailed"));
     } finally {
       setExpiryLoading(false);
     }
@@ -96,11 +103,11 @@ export default function GaugeListPage() {
   const handleDelete = async (id: string) => {
     try {
       await deleteGauge(id);
-      message.success("量具已删除");
+      message.success(t("gauge.deleteSuccess"));
       fetchGauges();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "删除失败");
+      message.error(err.response?.data?.detail || t("gauge.deleteFailed"));
     }
   };
 
@@ -114,13 +121,13 @@ export default function GaugeListPage() {
           ? values.next_calibration_date.format("YYYY-MM-DD")
           : null,
       });
-      message.success("量具已创建");
+      message.success(t("gauge.createSuccess"));
       setModalOpen(false);
       modalForm.resetFields();
       fetchGauges();
     } catch (err: unknown) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error("创建失败");
+      message.error(t("gauge.createFailed"));
     } finally {
       setSaving(false);
     }
@@ -135,25 +142,24 @@ export default function GaugeListPage() {
 
   const columns = [
     {
-      title: "量具编号",
+      title: t("gauge.columns.gaugeNo"),
       dataIndex: "gauge_no",
       width: 160,
       render: (no: string) => <span className="qf-mono">{no}</span>,
     },
-    { title: "名称", dataIndex: "name", width: 180 },
-    { title: "型号", dataIndex: "model", render: (v: string | null) => v || "—" },
-    { title: "部门", dataIndex: "department", width: 120, render: (v: string | null) => v || "—" },
+    { title: t("gauge.columns.name"), dataIndex: "name", width: 180 },
+    { title: t("gauge.columns.model"), dataIndex: "model", render: (v: string | null) => v || "—" },
+    { title: t("gauge.columns.department"), dataIndex: "department", width: 120, render: (v: string | null) => v || "—" },
     {
-      title: "状态",
+      title: t("gauge.columns.status"),
       dataIndex: "status",
       width: 100,
       render: (status: string) => {
-        const cfg = STATUS_MAP[status];
-        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label || status}</StatusBadge>;
+        return <StatusBadge status={statusVariant(status)}>{statusLabel(status)}</StatusBadge>;
       },
     },
     {
-      title: "下次校准",
+      title: t("gauge.columns.nextCalibration"),
       dataIndex: "next_calibration_date",
       width: 140,
       render: (v: string | null) => {
@@ -163,14 +169,14 @@ export default function GaugeListPage() {
         return (
           <span style={isExpiringSoon ? { color: "var(--qf-red)", fontWeight: 500 } : {}}>
             {dayjs(v).format("YYYY-MM-DD")}
-            {isExpiringSoon && days >= 0 && <span style={{ marginLeft: 4, fontSize: 12 }}>({days}天)</span>}
-            {days < 0 && <span style={{ marginLeft: 4, fontSize: 12, color: "var(--qf-red)" }}>(已过期)</span>}
+            {isExpiringSoon && days >= 0 && <span style={{ marginLeft: 4, fontSize: 12 }}>({days}{t("gauge.columns.days", { days })})</span>}
+            {days < 0 && <span style={{ marginLeft: 4, fontSize: 12, color: "var(--qf-red)" }}>({t("gauge.expired")})</span>}
           </span>
         );
       },
     },
     {
-      title: "操作",
+      title: tc("table.operations"),
       width: 200,
       render: (_: unknown, record: Gauge) => (
         <Space size="small">
@@ -179,7 +185,7 @@ export default function GaugeListPage() {
             icon={<EyeOutlined />}
             onClick={() => navigate(`/msa/gauges/${record.gauge_id}`)}
           >
-            查看
+            {tc("actions.view")}
           </Button>
           {canEdit('msa') && (
             <>
@@ -188,7 +194,7 @@ export default function GaugeListPage() {
                 icon={<EditOutlined />}
                 onClick={() => navigate(`/msa/gauges/${record.gauge_id}`)}
               >
-                编辑
+                {tc("actions.edit")}
               </Button>
               <Button
                 size="small"
@@ -196,7 +202,7 @@ export default function GaugeListPage() {
                 icon={<DeleteOutlined />}
                 onClick={() => handleDelete(record.gauge_id)}
               >
-                删除
+                {tc("actions.delete")}
               </Button>
             </>
           )}
@@ -206,10 +212,10 @@ export default function GaugeListPage() {
   ];
 
   return (
-    <PageShell title="量具管理" subtitle="MSA 测量系统分析 · 量具台账与校准跟踪">
+    <PageShell title={t("gauge.title")} subtitle={t("title")}>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
-          <DataCard title="量具总数" noPadding>
+          <DataCard title={t("gauge.total")} noPadding>
             <Statistic
               value={total}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-primary)" }}
@@ -217,7 +223,7 @@ export default function GaugeListPage() {
           </DataCard>
         </Col>
         <Col span={6}>
-          <DataCard title="在用" noPadding>
+          <DataCard title={t("gauge.active")} noPadding>
             <Statistic
               value={activeCount}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
@@ -225,7 +231,7 @@ export default function GaugeListPage() {
           </DataCard>
         </Col>
         <Col span={6}>
-          <DataCard title="闲置/其他" noPadding>
+          <DataCard title={t("gauge.inactiveOrOther")} noPadding>
             <Statistic
               value={total - activeCount}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-text-secondary)" }}
@@ -234,7 +240,7 @@ export default function GaugeListPage() {
         </Col>
         <Col span={6}>
           <DataCard
-            title="30天内到期"
+            title={t("gauge.expiring30Days")}
             noPadding
             elevated={expiringCount > 0}
             style={{ cursor: "pointer" }}
@@ -249,23 +255,23 @@ export default function GaugeListPage() {
       </Row>
 
       <DataCard
-        title="量具台账"
+        title={t("gauge.title")}
         extra={
           <Space>
             {canEdit('msa') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-                新增量具
+                {t("gauge.new")}
               </Button>
             )}
             <Button icon={<ReloadOutlined />} onClick={fetchGauges}>
-              刷新
+              {tc("actions.refresh")}
             </Button>
           </Space>
         }
       >
         <Space style={{ marginBottom: 16 }} wrap>
           <Input
-            placeholder="搜索编号 / 名称"
+            placeholder={t("gauge.searchPlaceholder")}
             allowClear
             style={{ width: 220 }}
             value={filterSearch}
@@ -273,7 +279,7 @@ export default function GaugeListPage() {
             onPressEnter={() => setPage(1)}
           />
           <Select
-            placeholder="状态"
+            placeholder={t("gauge.columns.status")}
             allowClear
             style={{ width: 140 }}
             value={filterStatus}
@@ -282,13 +288,13 @@ export default function GaugeListPage() {
               setPage(1);
             }}
           >
-            <Option value="active">在用</Option>
-            <Option value="inactive">闲置</Option>
-            <Option value="calibrating">校准中</Option>
-            <Option value="scrapped">报废</Option>
+            <Option value="active">{t("gauge.status.active")}</Option>
+            <Option value="inactive">{t("gauge.status.inactive")}</Option>
+            <Option value="calibrating">{t("gauge.status.calibrating")}</Option>
+            <Option value="scrapped">{t("gauge.status.scrapped")}</Option>
           </Select>
           <Select
-            placeholder="部门"
+            placeholder={t("gauge.columns.department")}
             allowClear
             style={{ width: 140 }}
             value={filterDepartment}
@@ -297,13 +303,13 @@ export default function GaugeListPage() {
               setPage(1);
             }}
           >
-            <Option value="IQC">IQC</Option>
-            <Option value="PQC">PQC</Option>
-            <Option value="OQC">OQC</Option>
-            <Option value="实验室">实验室</Option>
+            <Option value="IQC">{t("gauge.department.IQC")}</Option>
+            <Option value="PQC">{t("gauge.department.PQC")}</Option>
+            <Option value="OQC">{t("gauge.department.OQC")}</Option>
+            <Option value="实验室">{t("gauge.department.labValue")}</Option>
           </Select>
           <Button type="primary" onClick={() => setPage(1)}>
-            查询
+            {tc("actions.search")}
           </Button>
         </Space>
 
@@ -327,7 +333,7 @@ export default function GaugeListPage() {
       </DataCard>
 
       <Drawer
-        title="量具校准到期提醒（30天内）"
+        title={t("gauge.expiryDrawerTitle")}
         open={expiryDrawerOpen}
         onClose={() => setExpiryDrawerOpen(false)}
         width={640}
@@ -339,20 +345,20 @@ export default function GaugeListPage() {
           loading={expiryLoading}
           pagination={false}
           columns={[
-            { title: "编号", dataIndex: "gauge_no", width: 140, render: (v: string) => <span className="qf-mono">{v}</span> },
-            { title: "名称", dataIndex: "name" },
+            { title: t("gauge.columns.gaugeNo"), dataIndex: "gauge_no", width: 140, render: (v: string) => <span className="qf-mono">{v}</span> },
+            { title: t("gauge.columns.name"), dataIndex: "name" },
             {
-              title: "到期日",
+              title: t("gauge.columns.expiryDate"),
               dataIndex: "next_calibration_date",
               render: (v: string) => dayjs(v).format("YYYY-MM-DD"),
             },
             {
-              title: "剩余天数",
+              title: t("gauge.columns.remainingDays"),
               render: (_: unknown, record: Gauge) => {
                 const days = dayjs(record.next_calibration_date).diff(dayjs(), "day");
                 return (
                   <span style={{ color: days <= 7 ? "var(--qf-red)" : undefined, fontWeight: days <= 7 ? 600 : undefined }}>
-                    {days}天
+                    {days}{t("gauge.columns.days", { days })}
                   </span>
                 );
               },
@@ -362,7 +368,7 @@ export default function GaugeListPage() {
       </Drawer>
 
       <Modal
-        title="新增量具"
+        title={t("gauge.new")}
         open={modalOpen}
         onCancel={() => {
           setModalOpen(false);
@@ -370,45 +376,45 @@ export default function GaugeListPage() {
         }}
         onOk={handleCreate}
         confirmLoading={saving}
-        okText="保存"
-        cancelText="取消"
+        okText={tc("actions.save")}
+        cancelText={tc("actions.cancel")}
         destroyOnHidden
         okButtonProps={{ className: "qf-btn-primary" }}
       >
         <Form form={modalForm} layout="vertical">
-          <Form.Item label="量具编号" name="gauge_no" rules={[{ required: true, message: "请输入编号" }]}>
+          <Form.Item label={t("gauge.fields.gauge_no")} name="gauge_no" rules={[{ required: true, message: tc("messages.confirmOperation") }]}>
             <Input />
           </Form.Item>
-          <Form.Item label="名称" name="name" rules={[{ required: true, message: "请输入名称" }]}>
+          <Form.Item label={t("gauge.fields.name")} name="name" rules={[{ required: true, message: tc("messages.confirmOperation") }]}>
             <Input />
           </Form.Item>
-          <Form.Item label="型号" name="model">
+          <Form.Item label={t("gauge.fields.model")} name="model">
             <Input />
           </Form.Item>
-          <Form.Item label="制造商" name="manufacturer">
+          <Form.Item label={t("gauge.fields.manufacturer")} name="manufacturer">
             <Input />
           </Form.Item>
-          <Form.Item label="分辨力" name="resolution">
+          <Form.Item label={t("gauge.fields.resolution")} name="resolution">
             <Input type="number" />
           </Form.Item>
-          <Form.Item label="测量范围" name="measuring_range">
-            <Input placeholder="如: 0-150mm" />
+          <Form.Item label={t("gauge.fields.measuring_range")} name="measuring_range">
+            <Input placeholder={t("gauge.placeholders.measuring_range", { defaultValue: "如: 0-150mm" })} />
           </Form.Item>
-          <Form.Item label="部门" name="department">
-            <Select allowClear placeholder="选择部门">
-              <Option value="IQC">IQC</Option>
-              <Option value="PQC">PQC</Option>
-              <Option value="OQC">OQC</Option>
-              <Option value="实验室">实验室</Option>
+          <Form.Item label={t("gauge.fields.department")} name="department">
+            <Select allowClear placeholder={t("gauge.placeholders.selectDepartment", { defaultValue: "选择部门" })}>
+              <Option value="IQC">{t("gauge.department.IQC")}</Option>
+              <Option value="PQC">{t("gauge.department.PQC")}</Option>
+              <Option value="OQC">{t("gauge.department.OQC")}</Option>
+              <Option value="实验室">{t("gauge.department.labValue")}</Option>
             </Select>
           </Form.Item>
-          <Form.Item label="存放位置" name="location">
+          <Form.Item label={t("gauge.fields.location")} name="location">
             <Input />
           </Form.Item>
-          <Form.Item label="校准周期（天）" name="calibration_cycle_days">
+          <Form.Item label={t("gauge.fields.calibration_cycle_days")} name="calibration_cycle_days">
             <Input type="number" />
           </Form.Item>
-          <Form.Item label="下次校准日期" name="next_calibration_date">
+          <Form.Item label={t("gauge.fields.next_calibration_date")} name="next_calibration_date">
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
         </Form>

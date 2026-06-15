@@ -100,8 +100,8 @@ class AuditPlanCreate(BaseModel):
     def validate_customer_type(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        if v not in ("OEM", "Tier 1", "Tier 2", "其他"):
-            raise ValueError('customer_type must be one of "OEM", "Tier 1", "Tier 2", "其他"')
+        if v not in ("OEM", "Tier 1", "Tier 2", "other"):
+            raise ValueError('customer_type must be one of "OEM", "Tier 1", "Tier 2", "other"')
         return v
 
 

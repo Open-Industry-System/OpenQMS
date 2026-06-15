@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { Select, Table, Tag, Row, Col, Empty, Spin } from "antd";
+import { useTranslation } from "react-i18next";
 import { Radar } from "@ant-design/charts";
 import { DataCard, StatusBadge } from "../../../components/design";
 import { getSupplierCompare, listSuppliers } from "../../../api/supplier";
 import type { SupplierCompareResponse, Supplier } from "../../../types";
 
 export default function CompareView() {
+  const { t } = useTranslation("supplier");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [compareData, setCompareData] = useState<SupplierCompareResponse | null>(null);
@@ -32,21 +34,21 @@ export default function CompareView() {
   const radarConfig = compareData
     ? {
         data: compareData.suppliers.flatMap((s) => [
-          { item: "质量", user: s.name, value: s.quality_score },
-          { item: "交付", user: s.name, value: s.delivery_score },
-          { item: "服务", user: s.name, value: s.service_score },
+          { item: t("quality.column.quality"), user: s.name, value: s.quality_score },
+          { item: t("quality.column.delivery"), user: s.name, value: s.delivery_score },
+          { item: t("quality.column.service"), user: s.name, value: s.service_score },
           { item: "PPM", user: s.name, value: 100 - Math.min(s.ppm / 200, 100) },
           { item: "SCAR", user: s.name, value: 100 - s.open_scar_count * 10 },
         ]),
         xField: "item",
         yField: "value",
         seriesField: "user",
-        meta: { value: { alias: "分数", min: 0, max: 100 } },
+        meta: { value: { alias: t("quality.column.score"), min: 0, max: 100 } },
       }
     : null;
 
   const compareColumns = [
-    { title: "指标", dataIndex: "metric" },
+    { title: t("quality.compare.metric"), dataIndex: "metric" },
     ...selectedIds.map((id) => {
       const s = compareData?.suppliers.find((x) => x.supplier_id === id);
       return {
@@ -60,7 +62,7 @@ export default function CompareView() {
     ? [
         {
           key: "grade",
-          metric: "评级",
+          metric: t("quality.column.grade"),
           ...Object.fromEntries(
             compareData.suppliers.map((s) => [s.supplier_id, <Tag color={gradeColors[s.grade]} key={s.supplier_id}>{s.grade}</Tag>])
           ),
@@ -72,21 +74,21 @@ export default function CompareView() {
         },
         {
           key: "acceptance",
-          metric: "批次合格率",
+          metric: t("quality.column.batchAcceptanceRate"),
           ...Object.fromEntries(
             compareData.suppliers.map((s) => [s.supplier_id, `${(s.batch_acceptance_rate * 100).toFixed(1)}%`])
           ),
         },
         {
           key: "delivery",
-          metric: "交付准时率",
+          metric: t("quality.column.deliveryRate"),
           ...Object.fromEntries(
             compareData.suppliers.map((s) => [s.supplier_id, `${(s.delivery_rate * 100).toFixed(1)}%`])
           ),
         },
         {
           key: "scar",
-          metric: "开放SCAR",
+          metric: t("quality.column.openScar"),
           ...Object.fromEntries(
             compareData.suppliers.map((s) => [
               s.supplier_id,
@@ -105,7 +107,7 @@ export default function CompareView() {
             <Select
               mode="multiple"
               style={{ width: "100%" }}
-              placeholder="选择2-4家供应商进行对比"
+              placeholder={t("quality.compare.placeholder")}
               maxTagCount={4}
               filterOption={false}
               onSearch={loadSuppliers}
@@ -131,12 +133,12 @@ export default function CompareView() {
       ) : compareData ? (
         <Row gutter={16}>
           <Col span={12}>
-            <DataCard title="雷达图对比">
+            <DataCard title={t("quality.compare.radarTitle")}>
               <Radar {...radarConfig!} />
             </DataCard>
           </Col>
           <Col span={12}>
-            <DataCard title="指标明细对比">
+            <DataCard title={t("quality.compare.tableTitle")}>
               <Table
                 className="qf-table"
                 dataSource={compareTableData}
@@ -148,7 +150,7 @@ export default function CompareView() {
           </Col>
         </Row>
       ) : (
-        <Empty description="请选择至少2家供应商" />
+        <Empty description={t("quality.compare.empty")} />
       )}
     </div>
   );

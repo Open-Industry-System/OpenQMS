@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Table, Button, Modal, Form, Input, Popconfirm, App } from "antd";
+import { Table, Button, Modal, Form, Input, Popconfirm, App, Tag } from "antd";
 import { PlusOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../../utils/dateTime";
 import { listControlPlans, createControlPlan, deleteControlPlan } from "../../../api/controlPlan";
 import { batchValidationSummaries } from "../../../api/cpValidation";
 import ValidationBadge from "../../../components/control-plan/ValidationBadge";
@@ -14,18 +16,14 @@ import PageShell from "../../../components/design/PageShell";
 import DataCard from "../../../components/design/DataCard";
 import StatusBadge from "../../../components/design/StatusBadge";
 
-const phaseLabels: Record<string, string> = {
-  sample: "样件",
-  trial: "试生产",
-  production: "生产",
-};
-
-const statusLabels: Record<string, string> = {
-  draft: "草稿",
-  approved: "已批准",
+const statusColors: Record<string, string> = {
+  draft: "blue",
+  approved: "green",
 };
 
 export default function ControlPlanListPage() {
+  const { t } = useTranslation("controlPlan");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [data, setData] = useState<ControlPlan[]>([]);
   const [total, setTotal] = useState(0);
@@ -38,6 +36,17 @@ export default function ControlPlanListPage() {
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
   const [validationMap, setValidationMap] = useState<Record<string, ValidationSummary>>({});
+
+  const phaseLabels: Record<string, string> = {
+    sample: t("phase.sample"),
+    trial: t("phase.trial"),
+    production: t("phase.production"),
+  };
+
+  const statusLabels: Record<string, string> = {
+    draft: t("status.draft"),
+    approved: t("status.approved"),
+  };
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -71,30 +80,30 @@ export default function ControlPlanListPage() {
   const handleCreate = async (values: { title: string; document_no: string }) => {
     try {
       const cp = await createControlPlan(values);
-      message.success("控制计划创建成功");
+      message.success(t("message.createSuccess"));
       setModalOpen(false);
       form.resetFields();
       navigate(`/control-plans/${cp.cp_id}`);
     } catch {
-      message.error("创建失败");
+      message.error(t("message.createFailed"));
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
       await deleteControlPlan(id);
-      message.success("删除成功");
+      message.success(tc("messages.deleteSuccess"));
       fetchData();
     } catch {
-      message.error("删除失败");
+      message.error(tc("messages.deleteFailed"));
     }
   };
 
   const columns = [
-    { title: "编号", dataIndex: "document_no", key: "document_no", width: 150 },
-    { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
+    { title: t("column.documentNo"), dataIndex: "document_no", key: "document_no", width: 150 },
+    { title: t("column.title"), dataIndex: "title", key: "title", ellipsis: true },
     {
-      title: "校验状态",
+      title: t("column.validationStatus"),
       key: "validation",
       width: 80,
       align: "center" as const,
@@ -111,40 +120,40 @@ export default function ControlPlanListPage() {
       },
     },
     {
-      title: "阶段",
+      title: t("column.phase"),
       dataIndex: "phase",
       key: "phase",
       width: 100,
       render: (p: string) => phaseLabels[p] || p,
     },
     {
-      title: "状态",
+      title: t("column.status"),
       dataIndex: "status",
       key: "status",
       width: 100,
       render: (s: string) => <StatusBadge status={s === "approved" ? "success" : "info"}>{statusLabels[s] || s}</StatusBadge>,
     },
-    { title: "版本", dataIndex: "version", key: "version", width: 80, render: (v: number) => `v${v}` },
+    { title: t("column.version"), dataIndex: "version", key: "version", width: 80, render: (v: number) => `v${v}` },
     {
-      title: "更新时间",
+      title: t("column.updatedAt"),
       dataIndex: "updated_at",
       key: "updated_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      render: (v: string) => formatDateTime(v),
     },
     {
-      title: "操作",
+      title: t("column.actions"),
       key: "actions",
       width: 160,
       render: (_: unknown, record: ControlPlan) => (
         <>
           <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/control-plans/${record.cp_id}`)}>
-            编辑
+            {tc("actions.edit")}
           </Button>
           {canEdit('planning') && (
-            <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.cp_id)}>
+            <Popconfirm title={tc("messages.confirmDelete")} onConfirm={() => handleDelete(record.cp_id)}>
               <Button type="link" danger icon={<DeleteOutlined />}>
-                删除
+                {tc("actions.delete")}
               </Button>
             </Popconfirm>
           )}
@@ -155,47 +164,47 @@ export default function ControlPlanListPage() {
 
   return (
     <PageShell
-      title="控制计划"
-      subtitle="CP 清单与完整性校验"
+      title={t("pageTitle.controlPlanList")}
+      subtitle={t("pageTitle.controlPlanListSubtitle")}
       actions={
         canEdit('planning') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-            新建控制计划
+            {t("button.newControlPlan")}
           </Button>
         )
       }
     >
-      <DataCard title="控制计划列表" noPadding>
+      <DataCard title={t("card.controlPlanList")} noPadding>
         <Table
           className="qf-table"
           columns={columns}
           dataSource={data}
           rowKey="cp_id"
           loading={loading}
-        pagination={{
-          current: page,
-          total,
-          pageSize: 20,
-          onChange: (p) => {
-            setPage(p);
-            fetchData(p);
-          },
-        }}
-      />
+          pagination={{
+            current: page,
+            total,
+            pageSize: 20,
+            onChange: (p) => {
+              setPage(p);
+              fetchData(p);
+            },
+          }}
+        />
       </DataCard>
 
       <Modal
-        title="新建控制计划"
+        title={t("pageTitle.newControlPlan")}
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => setModalOpen(false)}
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Form.Item name="document_no" label="文档编号" rules={[{ required: true, message: "请输入文档编号" }]}>
-            <Input placeholder="如 CP-2026-001" />
+          <Form.Item name="document_no" label={t("form.documentNo")} rules={[{ required: true, message: t("message.enterDocumentNo") }]}>
+            <Input placeholder={t("placeholder.documentNo")} />
           </Form.Item>
-          <Form.Item name="title" label="标题" rules={[{ required: true, message: "请输入标题" }]}>
-            <Input placeholder="如 SMT焊接控制计划" />
+          <Form.Item name="title" label={t("form.title")} rules={[{ required: true, message: t("message.enterTitle") }]}>
+            <Input placeholder={t("placeholder.title")} />
           </Form.Item>
         </Form>
       </Modal>

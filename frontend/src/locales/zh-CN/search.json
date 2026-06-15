@@ -1,0 +1,17 @@
+{
+  "qa": {
+    "answerTitle": "💬 回答",
+    "sourcesTitle": "引用来源 ({{count}})",
+    "relevance": "相关度: {{score}}%",
+    "queryTime": "查询耗时: {{ms}}ms | LLM: {{available}}",
+    "placeholder": "输入自然语言问题，搜索历史质量记录...",
+    "search": "搜索",
+    "qa": "问答",
+    "switchToSearch": "切换到搜索模式",
+    "switchToQa": "切换到问答模式",
+    "filterType": "筛选类型",
+    "resultsFound": "找到 {{count}} 条结果，耗时 {{ms}}ms",
+    "similarity": "相似度: {{score}}% | 来源: {{source}}",
+    "startSearch": "输入问题开始搜索"
+  }
+}

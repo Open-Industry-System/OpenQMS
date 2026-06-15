@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Tag, Form, Input, Select, Modal, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { listFMEAs, createFMEA, updateFMEA } from "../../../api/fmea";
 import type { FMEADocument, GraphNode, GraphEdge } from "../../../types";
 import GenerationWizard from "../../../components/dfmea/GenerationWizard";
@@ -24,6 +25,8 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function FMEAListPage() {
+  const { t, i18n } = useTranslation("fmea");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [data, setData] = useState<FMEADocument[]>([]);
   const [total, setTotal] = useState(0);
@@ -69,45 +72,45 @@ export default function FMEAListPage() {
     }
     try {
       const fmea = await createFMEA(values);
-      message.success("FMEA 创建成功");
+      message.success(t("messages.createSuccess"));
       setModalOpen(false);
       form.resetFields();
       navigate(`/fmea/${fmea.fmea_id}`, { state: { showLessonsLearned: true, problemDescription: values.problem_description } });
     } catch {
-      message.error("创建失败");
+      message.error(t("messages.createFailed"));
     }
   };
 
   const handleWizardComplete = async (skeleton: { nodes: GraphNode[]; edges: GraphEdge[] }) => {
     try {
       const fmea = await createFMEA({
-        title: form.getFieldValue("title") || "新DFMEA",
+        title: form.getFieldValue("title") || t("create.defaultTitle"),
         document_no: form.getFieldValue("document_no") || `DFMEA-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`,
         fmea_type: "DFMEA",
       });
       await updateFMEA(fmea.fmea_id, {
         graph_data: { nodes: skeleton.nodes, edges: skeleton.edges },
       });
-      message.success("DFMEA 创建成功");
+      message.success(t("messages.dfmeaCreateSuccess"));
       setWizardOpen(false);
       form.resetFields();
       navigate(`/fmea/${fmea.fmea_id}`, { state: { showLessonsLearned: true, problemDescription: undefined } });
     } catch {
-      message.error("创建失败");
+      message.error(t("messages.createFailed"));
     }
   };
 
   const columns = [
     {
-      title: "文档编号",
+      title: t("list.columns.documentNo"),
       dataIndex: "document_no",
       key: "document_no",
       width: 150,
       render: (v: string) => <span style={{ fontFamily: "var(--qf-font-mono)" }}>{v}</span>,
     },
-    { title: "标题", dataIndex: "title", key: "title", ellipsis: true },
+    { title: t("list.columns.title"), dataIndex: "title", key: "title", ellipsis: true },
     {
-      title: "类型",
+      title: t("list.columns.type"),
       dataIndex: "fmea_type",
       key: "fmea_type",
       width: 90,
@@ -118,33 +121,33 @@ export default function FMEAListPage() {
       ),
     },
     {
-      title: "状态",
+      title: t("list.columns.status"),
       dataIndex: "status",
       key: "status",
       width: 110,
       render: (s: string) => <StatusBadge status={s}>{statusLabels[s] || s}</StatusBadge>,
     },
     {
-      title: "版本",
+      title: t("list.columns.version"),
       dataIndex: "version",
       key: "version",
       width: 70,
       render: (v: number) => <span className="qf-mono">v{v}</span>,
     },
     {
-      title: "更新时间",
+      title: t("list.columns.updatedAt"),
       dataIndex: "updated_at",
       key: "updated_at",
       width: 180,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      render: (v: string) => new Date(v).toLocaleString(i18n.language || "zh-CN"),
     },
     {
-      title: "操作",
+      title: t("list.columns.actions"),
       key: "actions",
       width: 100,
       render: (_: unknown, record: FMEADocument) => (
         <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
-          {canEdit('fmea') ? "编辑" : "查看"}
+          {canEdit('fmea') ? tc("actions.edit") : tc("actions.view")}
         </Button>
       ),
     },
@@ -152,12 +155,12 @@ export default function FMEAListPage() {
 
   const actions = canEdit('fmea') ? (
     <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-      新建 FMEA
+      {t("list.newFMEA")}
     </Button>
   ) : null;
 
   return (
-    <PageShell title="FMEA 管理" subtitle="失效模式与影响分析 · PFMEA / DFMEA" actions={actions}>
+    <PageShell title={t("list.title")} subtitle="失效模式与影响分析 · PFMEA / DFMEA" actions={actions}>
       <Table
         className="qf-table"
         columns={columns}
@@ -176,29 +179,29 @@ export default function FMEAListPage() {
       />
 
       <Modal
-        title="新建 FMEA"
+        title={t("create.title")}
         open={modalOpen}
         onOk={() => form.submit()}
         onCancel={() => setModalOpen(false)}
         okButtonProps={{ className: "qf-btn-primary" }}
       >
         <Form form={form} layout="vertical" onFinish={handleCreate} initialValues={{ fmea_type: "PFMEA" }}>
-          <Form.Item name="fmea_type" label="FMEA 类型" rules={[{ required: true, message: "请选择 FMEA 类型" }]}>
+          <Form.Item name="fmea_type" label={t("create.type")} rules={[{ required: true, message: t("create.typeRequired") }]}>
             <Select
               options={[
-                { value: "PFMEA", label: "PFMEA - 过程失效模式分析" },
-                { value: "DFMEA", label: "DFMEA - 设计失效模式分析" },
+                { value: "PFMEA", label: t("list.typeOption.pfmea") },
+                { value: "DFMEA", label: t("list.typeOption.dfmea") },
               ]}
             />
           </Form.Item>
-          <Form.Item name="document_no" label="文档编号" rules={[{ required: true, message: "请输入文档编号" }]}>
-            <Input placeholder="如 PFMEA-2026-001" />
+          <Form.Item name="document_no" label={t("create.documentNo")} rules={[{ required: true, message: t("create.documentNoRequired") }]}>
+            <Input placeholder={t("create.documentNoPlaceholder")} />
           </Form.Item>
-          <Form.Item name="title" label="标题" rules={[{ required: true, message: "请输入标题" }]}>
-            <Input placeholder="如 SMT焊接工序PFMEA" />
+          <Form.Item name="title" label={t("create.titleLabel")} rules={[{ required: true, message: t("create.titleRequired") }]}>
+            <Input placeholder={t("create.titlePlaceholder")} />
           </Form.Item>
-          <Form.Item name="problem_description" label="问题描述（可选）">
-            <Input.TextArea rows={2} placeholder="简述工艺步骤或关注点（可选，用于智能推荐）" />
+          <Form.Item name="problem_description" label={t("create.problemDescription")}>
+            <Input.TextArea rows={2} placeholder={t("create.problemDescriptionPlaceholder")} />
           </Form.Item>
         </Form>
       </Modal>

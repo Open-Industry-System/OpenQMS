@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Card, Button, Spin, Empty, Collapse, Tag, Typography } from "antd";
 import { EyeOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type { LessonsLearnedResponse, LessonCard } from "../../types";
 
 const { Text } = Typography;
@@ -14,6 +15,8 @@ interface Props {
 }
 
 export default function LessonsLearnedModal({ open, loading, data, onClose, onViewDetail }: Props) {
+  const { t } = useTranslation("capa");
+  const { t: tc } = useTranslation("common");
   const [activeKeys, setActiveKeys] = useState<string[]>(["highlights"]);
 
   useEffect(() => {
@@ -43,17 +46,17 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
             {card.source_document_no} · {card.source_product_line}
             {card.severity && <Tag style={{ marginLeft: 8 }}>{card.severity}</Tag>}
             <Tag color={card.same_product_line ? "red" : "orange"} style={{ marginLeft: 8 }}>
-              置信度 {Math.round(card.confidence * 100)}%
+              {t("lessons.card.confidence", { value: Math.round(card.confidence * 100) })}
             </Tag>
           </div>
           {(card.root_cause || card.action) && (
             <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-              {card.root_cause && <div>根因: {card.root_cause}</div>}
-              {card.action && <div>措施: {card.action}</div>}
+              {card.root_cause && <div>{t("lessons.card.rootCause")}{card.root_cause}</div>}
+              {card.action && <div>{t("lessons.card.action")}{card.action}</div>}
             </div>
           )}
           <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>
-            推荐依据: {card.match_reason}
+            {t("lessons.card.basis")}{card.match_reason}
           </div>
         </div>
         <Button
@@ -62,7 +65,7 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
           icon={<EyeOutlined />}
           onClick={() => onViewDetail(card)}
         >
-          查看详情
+          {t("actions.viewDetail")}
         </Button>
       </div>
     </Card>
@@ -71,23 +74,23 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
   const collapseItems = [
     {
       key: "highlights",
-      label: `⚠️ 推荐关注 (${data?.highlights.length || 0})`,
-      children: data?.highlights.map((c, i) => renderCard(c, i)) || <Empty description="无高匹配项" />,
+      label: t("lessons.sections.highlights", { count: data?.highlights.length || 0 }),
+      children: data?.highlights.map((c, i) => renderCard(c, i)) || <Empty description={tc("empty.data")} />,
     },
     {
       key: "fmea",
-      label: `📋 FMEA 相关经验 (${data?.categories.fmea.length || 0})`,
-      children: data?.categories.fmea.map((c, i) => renderCard(c, i)) || <Empty description="无" />,
+      label: t("lessons.sections.fmea", { count: data?.categories.fmea.length || 0 }),
+      children: data?.categories.fmea.map((c, i) => renderCard(c, i)) || <Empty description={tc("empty.data")} />,
     },
     {
       key: "capa",
-      label: `🔧 8D 整改经验 (${data?.categories.capa.length || 0})`,
-      children: data?.categories.capa.map((c, i) => renderCard(c, i)) || <Empty description="无" />,
+      label: t("lessons.sections.capa", { count: data?.categories.capa.length || 0 }),
+      children: data?.categories.capa.map((c, i) => renderCard(c, i)) || <Empty description={tc("empty.data")} />,
     },
     {
       key: "audit",
-      label: `✅ 审核发现 (${data?.categories.audit.length || 0})`,
-      children: data?.categories.audit.map((c, i) => renderCard(c, i)) || <Empty description="无" />,
+      label: t("lessons.sections.audit", { count: data?.categories.audit.length || 0 }),
+      children: data?.categories.audit.map((c, i) => renderCard(c, i)) || <Empty description={tc("empty.data")} />,
     },
   ].filter(item => {
     if (item.key === "highlights") return true;
@@ -107,9 +110,9 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
       open={open}
       title={
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>💡 历史经验教训</span>
+          <span>{t("lessons.title")}</span>
           <span style={{ fontSize: 12, color: "#888" }}>
-            {data?.cached ? "(来自缓存)" : ""}
+            {data?.cached ? t("lessons.fromCache") : ""}
           </span>
         </div>
       }
@@ -117,7 +120,7 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
       footer={
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <Button type="primary" onClick={onClose}>
-            跳过，直接编辑
+            {t("lessons.skipEdit")}
           </Button>
         </div>
       }
@@ -129,18 +132,18 @@ export default function LessonsLearnedModal({ open, loading, data, onClose, onVi
         <div style={{ textAlign: "center", padding: 40 }}>
           <Spin size="large" />
           <div style={{ marginTop: 16, color: "#888" }}>
-            正在检索相关经验教训...
+            {t("lessons.loading")}
           </div>
         </div>
       ) : !hasAnyResults ? (
         <Empty
-          description="未找到相关经验教训，开始创建吧！"
+          description={t("lessons.empty")}
           style={{ padding: 40 }}
         />
       ) : (
         <>
           <Text type="secondary" style={{ display: "block", marginBottom: 16 }}>
-            基于当前文档，我们找到了以下相关经验，供您参考
+            {t("lessons.description")}
           </Text>
           <Collapse
             activeKey={activeKeys}

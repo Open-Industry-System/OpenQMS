@@ -1,0 +1,126 @@
+{
+  "page": {
+    "title": "质量仪表盘",
+    "subtitle": "全局质量态势 · KPI · 预警 · 近期动态"
+  },
+  "actions": {
+    "editLayout": "编辑布局",
+    "done": "完成",
+    "resetDefault": "恢复默认"
+  },
+  "messages": {
+    "loadFailed": "仪表盘加载失败",
+    "saveSuccess": "布局已保存",
+    "saveFailed": "保存失败",
+    "resetSuccess": "已恢复默认布局",
+    "resetFailed": "恢复失败"
+  },
+  "widgetLibrary": {
+    "title": "组件库",
+    "searchPlaceholder": "搜索组件...",
+    "category": {
+      "kpi": "KPI 指标",
+      "alert": "预警提醒",
+      "chart": "图表分析",
+      "list": "列表",
+      "ai": "AI/高级分析"
+    }
+  },
+  "widget": {
+    "unknown": "未知组件",
+    "pendingActions": "待办事项",
+    "overdueTasks": "超期任务",
+    "highRiskItems": "高风险项",
+    "monthTrend": "本月新增 FMEA",
+    "highRpnFmeaTop5": "高 RPN FMEA Top5",
+    "overdueCapaTop5": "超期 CAPA Top5",
+    "highPpmSuppliersTop5": "PPM 超标供应商 Top5",
+    "recentActions": "最近操作",
+    "spcAbnormalCount": "SPC 异常点数",
+    "capabilitySummary": "过程能力摘要",
+    "gaugeExpiry": "量具到期提醒",
+    "iqcPendingInspections": "IQC 待检批次",
+    "equipmentStatus": "设备状态概览",
+    "supplierPpmTrend": "供应商 PPM 趋势",
+    "qualityTrendAi": "质量趋势 AI 解读"
+  },
+  "kpi": {
+    "loading": "加载中...",
+    "loadFailed": "加载失败，点击重试",
+    "currentValue": "当前值 {{value}}",
+    "normal": "正常",
+    "warning": "警告",
+    "danger": "危险",
+    "noData": "暂无",
+    "subtitle": {
+      "gaugeExpiry": "30天内到期",
+      "spcAbnormal": "近7天"
+    }
+  },
+  "equipment": {
+    "running": "运行中",
+    "down": "停机",
+    "idle": "空闲"
+  },
+  "spc": {
+    "count": "监控项数",
+    "avgCpk": "平均 CPK"
+  },
+  "alert": {
+    "empty": {
+      "highRpn": "暂无高 RPN 项",
+      "overdueCapa": "暂无超期 CAPA",
+      "highPpm": "暂无超标供应商",
+      "supplierPpm": "暂无数据"
+    },
+    "overdueDays": "超期 {{days}} 天",
+    "ppmValue": "{{ppm}} PPM"
+  },
+  "recentActions": {
+    "columns": {
+      "action": "操作",
+      "object": "对象",
+      "time": "时间"
+    },
+    "empty": "暂无操作记录",
+    "types": {
+      "fmeaDocuments": "FMEA",
+      "capaEightd": "CAPA"
+    }
+  },
+  "riskList": {
+    "empty": "暂无待处置事项，当前无超期或高风险项",
+    "loadFailed": "加载失败",
+    "retry": "重试",
+    "goApprove": "前往审批",
+    "goFollowUp": "前往跟进",
+    "goView": "前往查看",
+    "supplierPpmExceeded": "供应商 PPM 超标",
+    "overdueDays": "超期 {{days}} 天",
+    "overdueDaysTag": "{{days}}天"
+  },
+  "relativeTime": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}}分钟前",
+    "hoursAgo": "{{count}}小时前",
+    "yesterday": "昨天"
+  },
+  "qualityTrend": {
+    "keyEvidence": "关键证据",
+    "suggestedActions": "建议动作",
+    "aiInterpret": "AI 深度解读",
+    "aiUnavailable": "未配置 LLM 或数据不足时不可用",
+    "aiError": "AI 解读暂不可用，请稍后重试",
+    "dataUpdated": "数据已更新，点击重新生成 AI 解读",
+    "noTrendData": "暂无趋势数据",
+    "omittedModules": "当前视图缺少模块权限，已忽略：{{modules}}",
+    "confidence": "置信度",
+    "cached": "缓存",
+    "yes": "是",
+    "no": "否",
+    "trend": "趋势",
+    "evidenceFormat": "{{label}}: {{value}}（趋势：{{trend}}）",
+    "actionFormat": "[{{priority}}] {{text}}",
+    "confidenceFormat": "置信度：{{confidence}}，缓存：{{cached}}"
+  }
+}

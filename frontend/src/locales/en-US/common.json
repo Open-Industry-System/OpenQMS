@@ -1,0 +1,91 @@
+{
+  "language": {
+    "zh": "中文",
+    "en": "English",
+    "switch": "Switch Language"
+  },
+  "app": {
+    "title": "OpenQMS - Intelligent Quality Management Platform"
+  },
+  "actions": {
+    "save": "Save",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View",
+    "search": "Search",
+    "reset": "Reset",
+    "loading": "Loading",
+    "confirm": "Confirm",
+    "close": "Close",
+    "add": "Add",
+    "refresh": "Refresh",
+    "back": "Back",
+    "more": "More",
+    "create": "Create",
+    "complete": "Done",
+    "update": "Update",
+    "import": "Import",
+    "export": "Export",
+    "download": "Download",
+    "upload": "Upload",
+    "filter": "Filter",
+    "sort": "Sort",
+    "copy": "Copy",
+    "move": "Move",
+    "archive": "Archive",
+    "approve": "Approve",
+    "reject": "Reject",
+    "revoke": "Revoke",
+    "send": "Send",
+    "print": "Print",
+    "preview": "Preview",
+    "detail": "Detail",
+    "settings": "Settings"
+  },
+  "status": {
+    "success": "Success",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info",
+    "pending": "Pending",
+    "processing": "Processing",
+    "completed": "Completed",
+    "failed": "Failed",
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "empty": {
+    "data": "No data",
+    "description": "No relevant data",
+    "search": "No matching results",
+    "select": "Please select from the left"
+  },
+  "table": {
+    "noData": "No data",
+    "operations": "Actions",
+    "status": "Status",
+    "type": "Type",
+    "selectAll": "Select All",
+    "selected": "{{count}} selected",
+    "total": "Total {{total}} items"
+  },
+  "pagination": {
+    "total": "Total {{total}} items"
+  },
+  "messages": {
+    "saveSuccess": "Saved successfully",
+    "saveFailed": "Save failed",
+    "deleteSuccess": "Deleted successfully",
+    "deleteFailed": "Delete failed",
+    "operationSuccess": "Operation successful",
+    "operationFailed": "Operation failed",
+    "updateSuccess": "Updated successfully",
+    "loadFailed": "Failed to load",
+    "confirmDelete": "Confirm delete?",
+    "confirmOperation": "Confirm this operation?",
+    "loading": "Loading...",
+    "noPermission": "No permission to perform this operation"
+  }
+}

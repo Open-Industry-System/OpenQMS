@@ -18,6 +18,7 @@ import {
   EyeOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
@@ -28,22 +29,10 @@ import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
-const TYPE_MAP: Record<string, { label: string; status: string }> = {
-  GRR: { label: "GRR", status: "info" },
-  偏倚: { label: "偏倚", status: "normal" },
-  线性: { label: "线性", status: "warning" },
-  稳定性: { label: "稳定性", status: "rework" },
-  计数型: { label: "计数型", status: "success" },
-};
-
-const STATUS_MAP: Record<string, { label: string; status: string }> = {
-  draft: { label: "草稿", status: "draft" },
-  ongoing: { label: "进行中", status: "warning" },
-  completed: { label: "已完成", status: "success" },
-};
-
 export default function MsaStudyListPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation("msa");
+  const { t: tc } = useTranslation("common");
   const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
 
@@ -60,6 +49,27 @@ export default function MsaStudyListPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createForm] = Form.useForm();
   const [_creating, _setCreating] = useState(false);
+
+  const statusLabel = (status: string) => t(`study.status.${status}`, { defaultValue: status });
+  const statusVariant = (status: string): string => {
+    switch (status) {
+      case "completed": return "success";
+      case "ongoing": return "warning";
+      case "draft": return "info";
+      default: return "info";
+    }
+  };
+  const typeLabel = (type: string) => t(`study.type.${type}`, { defaultValue: type });
+  const typeVariant = (type: string): string => {
+    switch (type) {
+      case "GRR": return "info";
+      case "偏倚": return "normal";
+      case "线性": return "warning";
+      case "稳定性": return "rework";
+      case "计数型": return "success";
+      default: return "draft";
+    }
+  };
 
   const fetchStudies = useCallback(async () => {
     setLoading(true);
@@ -81,11 +91,11 @@ export default function MsaStudyListPage() {
       setStudies(items);
       setTotal(resp.total);
     } catch {
-      message.error("加载研究列表失败");
+      message.error(t("study.listLoadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, filterSearch, filterType, filterStatus]);
+  }, [page, pageSize, filterSearch, filterType, filterStatus, t]);
 
   useEffect(() => {
     fetchStudies();
@@ -103,11 +113,11 @@ export default function MsaStudyListPage() {
       const fn = typeMap[record.type];
       if (!fn) return;
       await fn(record.study_id);
-      message.success("研究已删除");
+      message.success(t("study.deleteSuccess"));
       fetchStudies();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err.response?.data?.detail || "删除失败");
+      message.error(err.response?.data?.detail || t("study.deleteFailed"));
     }
   };
 
@@ -124,43 +134,41 @@ export default function MsaStudyListPage() {
 
   const columns = [
     {
-      title: "研究编号",
+      title: t("study.columns.studyNo"),
       dataIndex: "study_no",
       width: 160,
       render: (no: string) => <span className="qf-mono">{no}</span>,
     },
     {
-      title: "类型",
+      title: t("study.columns.type"),
       dataIndex: "type",
       width: 90,
       render: (type: string) => {
-        const cfg = TYPE_MAP[type];
-        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label || type}</StatusBadge>;
+        return <StatusBadge status={typeVariant(type)}>{typeLabel(type)}</StatusBadge>;
       },
     },
-    { title: "标题", dataIndex: "title" },
+    { title: t("study.columns.title"), dataIndex: "title" },
     {
-      title: "关联量具",
+      title: t("study.columns.gauge"),
       dataIndex: "gauge_name",
       render: (v: string | null) => v || "—",
     },
     {
-      title: "状态",
+      title: t("study.columns.status"),
       dataIndex: "status",
       width: 100,
       render: (status: string) => {
-        const cfg = STATUS_MAP[status];
-        return <StatusBadge status={cfg?.status || "draft"}>{cfg?.label || status}</StatusBadge>;
+        return <StatusBadge status={statusVariant(status)}>{statusLabel(status)}</StatusBadge>;
       },
     },
     {
-      title: "研究日期",
+      title: t("study.columns.studyDate"),
       dataIndex: "study_date",
       width: 120,
       render: (v: string | null) => (v ? dayjs(v).format("YYYY-MM-DD") : "—"),
     },
     {
-      title: "操作",
+      title: tc("table.operations"),
       width: 160,
       render: (_: unknown, record: MsaStudyOverview) => (
         <Space size="small">
@@ -169,7 +177,7 @@ export default function MsaStudyListPage() {
             icon={<EyeOutlined />}
             onClick={() => navigate(`/msa/studies/${typeToRoute(record.type)}/${record.study_id}`)}
           >
-            查看
+            {tc("actions.view")}
           </Button>
           {canEdit('msa') && (
             <Button
@@ -178,7 +186,7 @@ export default function MsaStudyListPage() {
               icon={<DeleteOutlined />}
               onClick={() => handleDelete(record)}
             >
-              删除
+              {tc("actions.delete")}
             </Button>
           )}
         </Space>
@@ -195,10 +203,10 @@ export default function MsaStudyListPage() {
   };
 
   return (
-    <PageShell title="MSA 研究管理" subtitle="测量系统分析 · GRR / 偏倚 / 线性 / 稳定性 / 计数型">
+    <PageShell title={t("study.title")} subtitle={t("title")}>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={4}>
-          <DataCard title="GRR" noPadding>
+          <DataCard title={t("study.counts.grr")} noPadding>
             <Statistic
               value={counts.grr}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-cyan)" }}
@@ -206,7 +214,7 @@ export default function MsaStudyListPage() {
           </DataCard>
         </Col>
         <Col span={5}>
-          <DataCard title="偏倚" noPadding>
+          <DataCard title={t("study.counts.bias")} noPadding>
             <Statistic
               value={counts.bias}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-blue)" }}
@@ -214,7 +222,7 @@ export default function MsaStudyListPage() {
           </DataCard>
         </Col>
         <Col span={5}>
-          <DataCard title="线性" noPadding>
+          <DataCard title={t("study.counts.linearity")} noPadding>
             <Statistic
               value={counts.linearity}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-purple)" }}
@@ -222,7 +230,7 @@ export default function MsaStudyListPage() {
           </DataCard>
         </Col>
         <Col span={5}>
-          <DataCard title="稳定性" noPadding>
+          <DataCard title={t("study.counts.stability")} noPadding>
             <Statistic
               value={counts.stability}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-amber)" }}
@@ -230,7 +238,7 @@ export default function MsaStudyListPage() {
           </DataCard>
         </Col>
         <Col span={5}>
-          <DataCard title="计数型" noPadding>
+          <DataCard title={t("study.counts.attribute")} noPadding>
             <Statistic
               value={counts.attribute}
               valueStyle={{ fontFamily: "var(--qf-font-mono)", color: "var(--qf-green)" }}
@@ -240,23 +248,23 @@ export default function MsaStudyListPage() {
       </Row>
 
       <DataCard
-        title="研究列表"
+        title={t("study.title")}
         extra={
           <Space>
             {canEdit('msa') && (
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-                新建研究
+                {t("study.new")}
               </Button>
             )}
             <Button icon={<ReloadOutlined />} onClick={fetchStudies}>
-              刷新
+              {tc("actions.refresh")}
             </Button>
           </Space>
         }
       >
         <Space style={{ marginBottom: 16 }} wrap>
           <Input
-            placeholder="搜索编号 / 标题 / 量具"
+            placeholder={t("study.searchPlaceholder")}
             allowClear
             style={{ width: 220 }}
             value={filterSearch}
@@ -264,7 +272,7 @@ export default function MsaStudyListPage() {
             onPressEnter={() => setPage(1)}
           />
           <Select
-            placeholder="类型"
+            placeholder={t("study.columns.type")}
             allowClear
             style={{ width: 120 }}
             value={filterType}
@@ -273,14 +281,14 @@ export default function MsaStudyListPage() {
               setPage(1);
             }}
           >
-            <Option value="GRR">GRR</Option>
-            <Option value="偏倚">偏倚</Option>
-            <Option value="线性">线性</Option>
-            <Option value="稳定性">稳定性</Option>
-            <Option value="计数型">计数型</Option>
+            <Option value="GRR">{t("study.type.grr")}</Option>
+            <Option value="偏倚">{t("study.type.bias")}</Option>
+            <Option value="线性">{t("study.type.linearity")}</Option>
+            <Option value="稳定性">{t("study.type.stability")}</Option>
+            <Option value="计数型">{t("study.type.attribute")}</Option>
           </Select>
           <Select
-            placeholder="状态"
+            placeholder={t("study.columns.status")}
             allowClear
             style={{ width: 120 }}
             value={filterStatus}
@@ -289,12 +297,12 @@ export default function MsaStudyListPage() {
               setPage(1);
             }}
           >
-            <Option value="draft">草稿</Option>
-            <Option value="ongoing">进行中</Option>
-            <Option value="completed">已完成</Option>
+            <Option value="draft">{t("study.status.draft")}</Option>
+            <Option value="ongoing">{t("study.status.ongoing")}</Option>
+            <Option value="completed">{t("study.status.completed")}</Option>
           </Select>
           <Button type="primary" onClick={() => setPage(1)}>
-            查询
+            {tc("actions.search")}
           </Button>
         </Space>
 
@@ -318,7 +326,7 @@ export default function MsaStudyListPage() {
       </DataCard>
 
       <Modal
-        title="新建 MSA 研究"
+        title={t("study.new")}
         open={createModalOpen}
         onCancel={() => {
           setCreateModalOpen(false);
@@ -328,13 +336,13 @@ export default function MsaStudyListPage() {
         destroyOnHidden
       >
         <Form form={createForm} layout="vertical">
-          <Form.Item label="研究类型" name="study_type" rules={[{ required: true }]}>
-            <Select placeholder="选择研究类型">
-              <Option value="grr">GRR（重复性与再现性）</Option>
-              <Option value="bias">偏倚</Option>
-              <Option value="linearity">线性</Option>
-              <Option value="stability">稳定性</Option>
-              <Option value="attribute">计数型</Option>
+          <Form.Item label={t("study.selectType")} name="study_type" rules={[{ required: true }]}>
+            <Select placeholder={t("study.placeholders.selectType", { defaultValue: "选择研究类型" })}>
+              <Option value="grr">{t("study.type.grr")}（{t("study.method.average_range")}）</Option>
+              <Option value="bias">{t("study.type.bias")}</Option>
+              <Option value="linearity">{t("study.type.linearity")}</Option>
+              <Option value="stability">{t("study.type.stability")}</Option>
+              <Option value="attribute">{t("study.type.attribute")}</Option>
             </Select>
           </Form.Item>
           <Button
@@ -343,13 +351,13 @@ export default function MsaStudyListPage() {
             onClick={() => {
               const type = createForm.getFieldValue("study_type");
               if (!type) {
-                message.error("请选择研究类型");
+                message.error(t("study.selectTypeRequired"));
                 return;
               }
               navigate(`/msa/studies/${type}/new`);
             }}
           >
-            下一步
+            {t("study.next")}
           </Button>
         </Form>
       </Modal>

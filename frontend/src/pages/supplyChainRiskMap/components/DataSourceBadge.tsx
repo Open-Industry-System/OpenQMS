@@ -1,19 +1,18 @@
 import React from "react";
 import { StatusBadge } from "../../../components/design";
+import { useTranslation } from "react-i18next";
 
-const SOURCE_VARIANTS: Record<string, { label: string; status: string }> = {
-  risk_evaluation: { label: "风险评分", status: "info" },
-  erp_po: { label: "ERP", status: "success" },
-  supplier_evaluation_fallback: { label: "供应商评价", status: "warning" },
-  iqc_inspection: { label: "IQC", status: "info" },
-  missing: { label: "无数据", status: "info" },
-};
+const DataSourceBadge: React.FC<{ source: string }> = ({ source }) => {
+  const { t } = useTranslation("supplyChainRiskMap");
 
-interface DataSourceBadgeProps {
-  source: string;
-}
+  const SOURCE_VARIANTS: Record<string, { label: string; status: string }> = {
+    risk_evaluation: { label: t("dataSource.risk_evaluation"), status: "info" },
+    erp_po: { label: t("dataSource.erp_po"), status: "success" },
+    supplier_evaluation_fallback: { label: t("dataSource.supplier_evaluation_fallback"), status: "warning" },
+    iqc_inspection: { label: t("dataSource.iqc_inspection"), status: "info" },
+    missing: { label: t("dataSource.missing"), status: "info" },
+  };
 
-const DataSourceBadge: React.FC<DataSourceBadgeProps> = ({ source }) => {
   const config = SOURCE_VARIANTS[source] ?? SOURCE_VARIANTS.missing;
   return <StatusBadge status={config.status} style={{ fontSize: 10, lineHeight: "16px" }}>{config.label}</StatusBadge>;
 };

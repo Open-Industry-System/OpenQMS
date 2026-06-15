@@ -1,0 +1,93 @@
+{
+  "page": {
+    "title": "Knowledge Graph",
+    "overview": "Overview / Risk Map",
+    "keywordSearch": "Historical Keyword Search",
+    "semanticSearch": "Semantic Search"
+  },
+  "toolbar": {
+    "hierarchical": "Hierarchical",
+    "force": "Force",
+    "compactTree": "Compact Tree",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out",
+    "fitView": "Fit View",
+    "download": "Download Snapshot"
+  },
+  "legend": {
+    "title": "Legend",
+    "system": "System",
+    "processItem": "Process Item",
+    "subsystem": "Subsystem",
+    "processStep": "Process Step",
+    "component": "Component",
+    "processWorkElement": "Work Element",
+    "function": "Function",
+    "failureMode": "Failure Mode",
+    "failureEffect": "Failure Effect",
+    "failureCause": "Failure Cause",
+    "preventionControl": "Prevention Control",
+    "detectionControl": "Detection Control",
+    "recommendedAction": "Recommended Action"
+  },
+  "nodeDetail": {
+    "title": "Node Detail",
+    "nodeId": "Node ID",
+    "nodeType": "Node Type",
+    "severity": "Severity (S)",
+    "occurrence": "Occurrence (O)",
+    "detection": "Detection (D)",
+    "rpn": "RPN",
+    "rpnFormula": "{{s}} × {{o}} × {{d}} = {{rpn}}",
+    "ap": "Action Priority (AP)",
+    "nodeValue": "(Node value: {{value}})",
+    "revisedSeverity": "Revised Severity",
+    "revisedOccurrence": "Revised Occurrence",
+    "revisedDetection": "Revised Detection",
+    "status": "Status",
+    "responsible": "Responsible",
+    "dueDate": "Due Date",
+    "apHigh": "High (H)",
+    "apMedium": "Medium (M)",
+    "apLow": "Low (L)",
+    "apUnrated": "Unrated"
+  },
+  "overview": {
+    "totalFmeas": "Total FMEAs",
+    "totalNodes": "Total Nodes",
+    "highApNodes": "High Priority Failure Modes (AP=H)",
+    "avgRpn": "Average RPN",
+    "apDistribution": "AP Distribution",
+    "apHighCount": "High (H): {{count}}",
+    "apMediumCount": "Medium (M): {{count}}",
+    "apLowCount": "Low (L): {{count}}",
+    "topHighAp": "Top 10 High Priority Failure Modes",
+    "topHighApExtra": "AP = H (High Priority)",
+    "nodeTypeDistribution": "Node Type Distribution"
+  },
+  "search": {
+    "placeholder": "Enter keyword to search...",
+    "entityTypes": {
+      "fmeaNode": "FMEA Node",
+      "capa": "CAPA",
+      "auditFinding": "Audit Finding",
+      "complaint": "Complaint",
+      "scar": "SCAR",
+      "rma": "RMA"
+    },
+    "columns": {
+      "name": "Name",
+      "type": "Type",
+      "sourceFmea": "Source FMEA",
+      "action": "Action"
+    },
+    "viewGraph": "View Graph",
+    "view": "View",
+    "selectProductLine": "Please select a product line first",
+    "noStats": "No statistics data",
+    "failureMode": "Failure Mode",
+    "failureCause": "Failure Cause",
+    "failureEffect": "Failure Effect",
+    "function": "Function"
+  }
+}

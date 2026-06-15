@@ -17,6 +17,10 @@ class SpecialCharacteristic(Base):
             "safety_approval_status IN ('pending', 'submitted', 'approved', 'rejected') OR safety_approval_status IS NULL",
             name="ck_safety_approval_status",
         ),
+        CheckConstraint(
+            "sc_category IN ('product', 'process') OR sc_category IS NULL",
+            name="ck_sc_category",
+        ),
     )
 
     sc_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

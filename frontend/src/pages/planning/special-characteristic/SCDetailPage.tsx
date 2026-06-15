@@ -9,6 +9,7 @@ import {
   SafetyCertificateOutlined, ExclamationCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import {
   getSC, updateSC, createSC,
   safetySubmit, safetyApprove, safetyReject, safetyCancel,
@@ -16,9 +17,7 @@ import {
 import type { SpecialCharacteristic } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
-import PageShell from "../../../components/design/PageShell";
-import DataCard from "../../../components/design/DataCard";
-import StatusBadge from "../../../components/design/StatusBadge";
+import { PageShell, DataCard, StatusBadge } from "../../../components/design";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -38,6 +37,8 @@ const safetyStatusVariant = (s: string): string => {
 };
 
 export default function SCDetailPage() {
+  const { t } = useTranslation("specialCharacteristic");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -74,7 +75,7 @@ export default function SCDetailPage() {
         });
         setSafetyPanelOpen(data.is_safety_related || data.is_safety_suggested);
       })
-      .catch(() => message.error("加载特殊特性失败"))
+      .catch(() => message.error(t("message.loadFailed")))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isNew]);
@@ -84,16 +85,16 @@ export default function SCDetailPage() {
     try {
       if (isNew) {
         const created = await createSC(values);
-        message.success("创建成功");
+        message.success(t("message.createSuccess"));
         navigate(`/special-characteristics/${created.sc_id}`, { replace: true });
       } else {
         if (!id) return;
         const updated = await updateSC(id, values);
         setSc(updated);
-        message.success("保存成功");
+        message.success(t("message.saveSuccess"));
       }
     } catch {
-      message.error(isNew ? "创建失败" : "保存失败");
+      message.error(isNew ? t("message.createFailed") : t("message.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -103,16 +104,16 @@ export default function SCDetailPage() {
     if (!sc || !id || isNew) return;
     if (!checked) {
       if (!canApprove('special_characteristic')) {
-        message.error("仅管理员或经理可取消安全标记");
+        message.error(t("message.adminOnlyCancel"));
         return;
       }
       try {
         const updated = await safetyCancel(id);
         setSc(updated);
         setSafetyPanelOpen(false);
-        message.success("已取消安全标记");
+        message.success(t("message.cancelSafetySuccess"));
       } catch {
-        message.error("取消失败");
+        message.error(t("message.cancelFailed"));
       }
       return;
     }
@@ -126,9 +127,9 @@ export default function SCDetailPage() {
     try {
       const updated = await safetySubmit(id, values);
       setSc(updated);
-      message.success("安全特性已提交审批");
+      message.success(t("message.safetySubmitted"));
     } catch (err: any) {
-      message.error(err.response?.data?.detail || "提交失败");
+      message.error(err.response?.data?.detail || t("message.submitFailed"));
     } finally {
       setApprovalLoading(false);
     }
@@ -140,9 +141,9 @@ export default function SCDetailPage() {
     try {
       const updated = await safetyApprove(id);
       setSc(updated);
-      message.success("已批准");
+      message.success(t("message.approved"));
     } catch {
-      message.error("审批失败");
+      message.error(t("message.approveFailed"));
     } finally {
       setApprovalLoading(false);
     }
@@ -152,11 +153,11 @@ export default function SCDetailPage() {
     if (!id || isNew || !canApprove('special_characteristic')) return;
     setApprovalLoading(true);
     try {
-      const updated = await safetyReject(id, "审批驳回");
+      const updated = await safetyReject(id, t("action.reject"));
       setSc(updated);
-      message.success("已驳回");
+      message.success(t("message.rejected"));
     } catch {
-      message.error("驳回失败");
+      message.error(t("message.rejectFailed"));
     } finally {
       setApprovalLoading(false);
     }
@@ -171,26 +172,26 @@ export default function SCDetailPage() {
   }
 
   if (!isNew && !sc) {
-    return <div>未找到特殊特性</div>;
+    return <div>{t("message.notFound")}</div>;
   }
 
   return (
     <PageShell
       title={
-        isNew ? "新建特殊特性" : (
+        isNew ? t("pageTitle.new") : (
           <Space size={12}>
             {`${sc!.sc_code} - ${sc!.sc_name}`}
             <StatusBadge status={scTypeVariant(sc!.sc_type)}>{sc!.sc_type}</StatusBadge>
           </Space>
         )
       }
-      subtitle={isNew ? undefined : `产品线：${sc!.product_line_code}`}
+      subtitle={isNew ? undefined : `${t("productLine")}：${sc!.product_line_code}`}
       actions={
         <Button
           icon={<ArrowLeftOutlined />}
           onClick={() => navigate("/special-characteristics")}
         >
-          返回列表
+          {t("actions.backToList")}
         </Button>
       }
     >
@@ -198,25 +199,25 @@ export default function SCDetailPage() {
         {/* Left: Read-only info (edit mode only) */}
         {!isNew && (
           <Col span={10}>
-            <DataCard title="基本信息" style={{ marginBottom: 16 }}>
+            <DataCard title={t("basicInfo.title")} style={{ marginBottom: 16 }}>
               <Descriptions column={1} size="small">
-                <Descriptions.Item label="SC编号">
+                <Descriptions.Item label={t("basicInfo.scCode")}>
                   {sc!.sc_code}
                 </Descriptions.Item>
-                <Descriptions.Item label="类型">
+                <Descriptions.Item label={t("basicInfo.type")}>
                   <StatusBadge status={scTypeVariant(sc!.sc_type)}>
-                    {sc!.sc_type === "CC" ? "关键特性 (CC)" : "重要特性 (SC)"}
+                    {sc!.sc_type === "CC" ? t("scType.critical") : t("scType.significant")}
                   </StatusBadge>
                 </Descriptions.Item>
-                <Descriptions.Item label="产品线">
+                <Descriptions.Item label={t("basicInfo.productLine")}>
                   {sc!.product_line_code}
                 </Descriptions.Item>
-                <Descriptions.Item label="来源类型">
+                <Descriptions.Item label={t("basicInfo.sourceType")}>
                   <StatusBadge status={sourceTypeVariant(sc!.source_type)}>
                     {sc!.source_type}
                   </StatusBadge>
                 </Descriptions.Item>
-                <Descriptions.Item label="来源FMEA文档">
+                <Descriptions.Item label={t("basicInfo.sourceFmea")}>
                   {sc!.source_fmea_document_no ? (
                     <Button
                       type="link"
@@ -230,10 +231,10 @@ export default function SCDetailPage() {
                     "-"
                   )}
                 </Descriptions.Item>
-                <Descriptions.Item label="来源节点ID">
+                <Descriptions.Item label={t("basicInfo.sourceNodeId")}>
                   <Text copyable>{sc!.source_node_id}</Text>
                 </Descriptions.Item>
-                <Descriptions.Item label="父级特性">
+                <Descriptions.Item label={t("basicInfo.parentSc")}>
                   {sc!.parent_sc_id ? (
                     <Button
                       type="link"
@@ -248,7 +249,7 @@ export default function SCDetailPage() {
                     "-"
                   )}
                 </Descriptions.Item>
-                <Descriptions.Item label="MSA状态">
+                <Descriptions.Item label={t("basicInfo.msaStatus")}>
                   <StatusBadge status={msaStatusVariant(sc!.msa_status)}>
                     {sc!.msa_status}
                   </StatusBadge>
@@ -258,21 +259,21 @@ export default function SCDetailPage() {
 
             {/* Source FMEA info */}
             {sc!.source_fmea_title && (
-              <DataCard title="来源FMEA信息">
+              <DataCard title={t("sourceFmea.title")}>
                 <Descriptions column={1} size="small">
-                  <Descriptions.Item label="FMEA标题">
+                  <Descriptions.Item label={t("sourceFmea.fmeaTitle")}>
                     {sc!.source_fmea_title}
                   </Descriptions.Item>
-                  <Descriptions.Item label="文档编号">
+                  <Descriptions.Item label={t("sourceFmea.documentNo")}>
                     {sc!.source_fmea_document_no}
                   </Descriptions.Item>
-                  <Descriptions.Item label="查看FMEA">
+                  <Descriptions.Item label={t("sourceFmea.viewFmea")}>
                     <Button
                       type="primary"
                       size="small"
                       onClick={() => navigate(`/fmea/${sc!.source_fmea_id}`)}
                     >
-                      打开FMEA编辑器
+                      {t("sourceFmea.openEditor")}
                     </Button>
                   </Descriptions.Item>
                 </Descriptions>
@@ -283,7 +284,7 @@ export default function SCDetailPage() {
 
         {/* Right: Editable form */}
         <Col span={isNew ? 24 : 14}>
-          <DataCard title={isNew ? "创建信息" : "编辑信息"}>
+          <DataCard title={isNew ? t("createInfo.title") : t("editInfo.title")}>
             <Form
               form={form}
               layout="vertical"
@@ -293,65 +294,61 @@ export default function SCDetailPage() {
               {isNew && (
                 <Form.Item
                   name="sc_type"
-                  label="特性类型"
-                  rules={[{ required: true, message: "请选择特性类型" }]}
+                  label={t("form.scType")}
+                  rules={[{ required: true, message: t("form.scTypeRequired") }]}
                 >
-                  <Select placeholder="请选择">
-                    <Select.Option value="CC">关键特性 (CC)</Select.Option>
-                    <Select.Option value="SC">重要特性 (SC)</Select.Option>
+                  <Select placeholder={t("form.selectPlaceholder")}>
+                    <Select.Option value="CC">{t("scType.critical")}</Select.Option>
+                    <Select.Option value="SC">{t("scType.significant")}</Select.Option>
                   </Select>
                 </Form.Item>
               )}
 
               <Form.Item
                 name="sc_name"
-                label="特性名称"
-                rules={[{ required: true, message: "请输入特性名称" }]}
+                label={t("form.scName")}
+                rules={[{ required: true, message: t("form.scNameRequired") }]}
               >
-                <Input placeholder="请输入特性名称" />
+                <Input placeholder={t("form.scNamePlaceholder")} />
               </Form.Item>
 
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item name="sc_category" label="特性分类">
-                    <Select placeholder="请选择" allowClear>
-                      <Select.Option value="产品特性">
-                        产品特性
-                      </Select.Option>
-                      <Select.Option value="过程特性">
-                        过程特性
-                      </Select.Option>
+                  <Form.Item name="sc_category" label={t("form.category")}>
+                    <Select placeholder={t("form.selectPlaceholder")} allowClear>
+                      <Select.Option value="product">{t("category.product")}</Select.Option>
+                      <Select.Option value="process">{t("category.process")}</Select.Option>
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item name="customer_symbol" label="客户符号">
-                    <Input placeholder="客户特殊符号标识" />
+                  <Form.Item name="customer_symbol" label={t("form.customerSymbol")}>
+                    <Input placeholder={t("form.customerSymbolPlaceholder")} />
                   </Form.Item>
                 </Col>
               </Row>
 
-              <Form.Item name="spec_requirement" label="规格要求">
-                <TextArea rows={4} placeholder="请输入规格要求" />
+              <Form.Item name="spec_requirement" label={t("form.specRequirement")}>
+                <TextArea rows={4} placeholder={t("form.specRequirementPlaceholder")} />
               </Form.Item>
 
-              <Form.Item name="sop_ref" label="SOP参考">
-                <Input placeholder="SOP文档编号" />
+              <Form.Item name="sop_ref" label={t("form.sopRef")}>
+                <Input placeholder={t("form.sopRefPlaceholder")} />
               </Form.Item>
 
               <Row gutter={16}>
                 <Col span={8}>
                   <Form.Item
                     name="is_supplier_shared"
-                    label="供应商共享"
+                    label={t("form.supplierShared")}
                     valuePropName="checked"
                   >
                     <Switch />
                   </Form.Item>
                 </Col>
                 <Col span={16}>
-                  <Form.Item name="supplier_code" label="供应商代码">
-                    <Input placeholder="供应商代码" />
+                  <Form.Item name="supplier_code" label={t("form.supplierCode")}>
+                    <Input placeholder={t("form.supplierCodePlaceholder")} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -364,7 +361,7 @@ export default function SCDetailPage() {
                     icon={<SaveOutlined />}
                     loading={saving}
                   >
-                    保存
+                    {t("actions.save")}
                   </Button>
                 </Form.Item>
               )}
@@ -382,13 +379,13 @@ export default function SCDetailPage() {
                 header={
                   <Space>
                     <SafetyCertificateOutlined style={{ color: "#ff4d4f" }} />
-                    <span>安全特性</span>
+                    <span>{t("safety.title")}</span>
                     {sc.safety_approval_status && (
                       <StatusBadge status={safetyStatusVariant(sc.safety_approval_status)}>
-                        {sc.safety_approval_status === "pending" && "待提交"}
-                        {sc.safety_approval_status === "submitted" && "待审批"}
-                        {sc.safety_approval_status === "approved" && "已批准"}
-                        {sc.safety_approval_status === "rejected" && "已驳回"}
+                        {sc.safety_approval_status === "pending" && t("approvalStatus.pending")}
+                        {sc.safety_approval_status === "submitted" && t("approvalStatus.submitted")}
+                        {sc.safety_approval_status === "approved" && t("approvalStatus.approved")}
+                        {sc.safety_approval_status === "rejected" && t("approvalStatus.rejected")}
                       </StatusBadge>
                     )}
                   </Space>
@@ -396,7 +393,7 @@ export default function SCDetailPage() {
                 key="safety"
               >
                 <Space direction="vertical" style={{ width: "100%" }}>
-                  <Form.Item label="安全相关">
+                  <Form.Item label={t("safety.safetyRelated")}>
                     <Switch
                       checked={sc.is_safety_related}
                       onChange={handleSafetyToggle}
@@ -406,7 +403,7 @@ export default function SCDetailPage() {
 
                   {sc.is_safety_related && (
                     <>
-                      <StatusBadge status="info">待模块上线后自动切换</StatusBadge>
+                      <StatusBadge status="info">{t("safety.autoSwitchHint")}</StatusBadge>
                       <Form
                         form={safetyForm}
                         layout="vertical"
@@ -415,21 +412,21 @@ export default function SCDetailPage() {
                       >
                         <Form.Item
                           name="safety_regulation_ref"
-                          label="安全法规引用"
-                          rules={[{ required: true, message: "请输入法规引用" }]}
+                          label={t("safety.regulationRef")}
+                          rules={[{ required: true, message: t("safety.regulationRefRequired") }]}
                         >
-                          <Input placeholder="例：UN ECE R100, GB/T 18384" />
+                          <Input placeholder={t("safety.regulationRefPlaceholder")} />
                         </Form.Item>
                         <Form.Item
                           name="safety_verification_method"
-                          label="安全验证方法"
-                          rules={[{ required: true, message: "请输入验证方法" }]}
+                          label={t("safety.verificationMethod")}
+                          rules={[{ required: true, message: t("safety.verificationMethodRequired") }]}
                         >
-                          <TextArea rows={3} placeholder="例：100% 高压绝缘测试" />
+                          <TextArea rows={3} placeholder={t("safety.verificationMethodPlaceholder")} />
                         </Form.Item>
                         {sc.safety_approval_status === "pending" && !!canEdit('special_characteristic') && (
                           <Button type="primary" htmlType="submit" loading={approvalLoading}>
-                            提交审批
+                            {t("safety.submitApproval")}
                           </Button>
                         )}
                       </Form>
@@ -440,25 +437,25 @@ export default function SCDetailPage() {
                           items={[
                             {
                               dot: <ExclamationCircleOutlined style={{ color: "#faad14" }} />,
-                              children: "待提交：填写安全信息并提交审批",
+                              children: t("timeline.pendingDescription"),
                               color: sc.safety_approval_status === "pending" ? "blue" : "gray",
                             },
                             {
                               dot: <SafetyCertificateOutlined style={{ color: "#1677ff" }} />,
-                              children: `已提交：${sc.safety_submitted_at ? new Date(sc.safety_submitted_at).toLocaleString() : "-"}`,
+                              children: `${t("timeline.submitted")}：${sc.safety_submitted_at ? new Date(sc.safety_submitted_at).toLocaleString() : "-"}`,
                               color: sc.safety_approval_status === "submitted" ? "blue" : "gray",
                             },
                             sc.safety_approval_status === "approved" ? {
                               dot: <CheckCircleOutlined style={{ color: "#52c41a" }} />,
-                              children: `已批准：${sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-"}`,
+                              children: `${t("timeline.approved")}：${sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-"}`,
                               color: "green",
                             } : sc.safety_approval_status === "rejected" ? {
                               dot: <CloseCircleOutlined style={{ color: "#ff4d4f" }} />,
-                              children: `已驳回：${sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-"}${sc.safety_approval_comment ? `（${sc.safety_approval_comment}）` : ""}`,
+                              children: `${t("timeline.rejected")}：${sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-"}${sc.safety_approval_comment ? `（${sc.safety_approval_comment}）` : ""}`,
                               color: "red",
                             } : {
                               dot: <SafetyCertificateOutlined />,
-                              children: "审批结果",
+                              children: t("timeline.result"),
                               color: "gray",
                             },
                           ].filter(Boolean) as any}
@@ -469,10 +466,10 @@ export default function SCDetailPage() {
                       {sc.safety_approval_status === "submitted" && canApprove('special_characteristic') && (
                         <Space>
                           <Button type="primary" onClick={handleSafetyApprove} loading={approvalLoading}>
-                            批准
+                            {t("actions.approve")}
                           </Button>
                           <Button danger onClick={handleSafetyReject} loading={approvalLoading}>
-                            驳回
+                            {t("actions.reject")}
                           </Button>
                         </Space>
                       )}

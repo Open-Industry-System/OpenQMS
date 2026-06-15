@@ -1,0 +1,27 @@
+{
+  "conflict": {
+    "title": "保存冲突",
+    "documentChanged": "文档已被他人修改",
+    "changedBy": "{{user}} 保存了更改",
+    "changedByOther": "文档在您编辑期间已被其他用户保存",
+    "changesCount": "对方修改了 {{count}} 处内容",
+    "conflictsCount": "{{count}} 处冲突",
+    "added": "新增 {{type}} {{name}}",
+    "removed": "删除 {{type}} {{name}}",
+    "modified": "修改 {{type}} {{name}} 的 {{field}}",
+    "conflictTag": "冲突",
+    "moreChanges": "还有 {{count}} 处修改...",
+    "refresh": "放弃我的更改，刷新页面",
+    "forceSave": "强制保存（覆盖对方更改）"
+  },
+  "bar": {
+    "editing": "编辑中",
+    "viewing": "查看中",
+    "onlyYou": "仅你一人",
+    "onlineCount": "{{count}} 人在线",
+    "syncFailed": "协同状态同步失败"
+  },
+  "activeUser": {
+    "editing": "{{users}} 正在编辑"
+  }
+}

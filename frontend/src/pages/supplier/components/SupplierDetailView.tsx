@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Tabs, Table, Tag, Spin, Row, Col } from "antd";
+import { useTranslation } from "react-i18next";
 import { Line } from "@ant-design/charts";
 import { useParams } from "react-router-dom";
 import { DataCard } from "../../../components/design";
@@ -7,6 +8,7 @@ import { getSupplierQualityDetail, listCertifications, listEvaluations } from ".
 import type { SupplierQualityDetailResponse, SupplierCertification, SupplierEvaluation } from "../../../types";
 
 export default function SupplierDetailView() {
+  const { t } = useTranslation("supplier");
   const { supplierId } = useParams<{ supplierId: string }>();
   const [data, setData] = useState<SupplierQualityDetailResponse | null>(null);
   const [certifications, setCertifications] = useState<SupplierCertification[]>([]);
@@ -70,7 +72,7 @@ export default function SupplierDetailView() {
             <h2 style={{ margin: 0 }}>
               {data.supplier.name}
               <Tag color={gradeColors[data.stats.grade]} style={{ marginLeft: 8 }}>
-                {data.stats.grade}级
+                {t("detail.grade", { grade: data.stats.grade })}
               </Tag>
             </h2>
             <div style={{ color: "#888" }}>{data.supplier.supplier_no}</div>
@@ -78,19 +80,19 @@ export default function SupplierDetailView() {
           <Col>
             <Row gutter={24}>
               <Col style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 12, color: "#888" }}>综合得分</div>
+                <div style={{ fontSize: 12, color: "#888" }}>{t("quality.kpi.totalScore")}</div>
                 <div style={{ fontSize: 24, fontWeight: 700, color: "#1677ff" }}>
                   {data.stats.total_score.toFixed(0)}
                 </div>
               </Col>
               <Col style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 12, color: "#888" }}>质量得分</div>
+                <div style={{ fontSize: 12, color: "#888" }}>{t("detail.qualityScore")}</div>
                 <div style={{ fontSize: 24, fontWeight: 700 }}>
                   {data.stats.quality_score.toFixed(0)}
                 </div>
               </Col>
               <Col style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 12, color: "#888" }}>交付得分</div>
+                <div style={{ fontSize: 12, color: "#888" }}>{t("detail.deliveryScore")}</div>
                 <div style={{ fontSize: 24, fontWeight: 700 }}>
                   {data.stats.delivery_score.toFixed(0)}
                 </div>
@@ -102,12 +104,12 @@ export default function SupplierDetailView() {
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
-          <DataCard title="PPM 月度趋势">
+          <DataCard title={t("quality.charts.ppmTrendMonthly")}>
             <Line {...ppmTrendConfig} />
           </DataCard>
         </Col>
         <Col span={12}>
-          <DataCard title="批次合格率趋势">
+          <DataCard title={t("quality.charts.acceptanceTrend")}>
             <Line {...acceptanceTrendConfig} />
           </DataCard>
         </Col>
@@ -118,35 +120,35 @@ export default function SupplierDetailView() {
           items={[
             {
               key: "stats",
-              label: "质量统计",
+              label: t("quality.tabs.stats"),
               children: (
                 <Row gutter={[16, 16]}>
                   <Col span={6}>
-                    <div style={{ fontSize: 12, color: "#888" }}>PPM</div>
+                    <div style={{ fontSize: 12, color: "#888" }}>{t("quality.kpi.ppm")}</div>
                     <div style={{ fontSize: 20, fontWeight: 600 }}>
                       {data.stats.ppm.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                     </div>
                   </Col>
                   <Col span={6}>
-                    <div style={{ fontSize: 12, color: "#888" }}>批次合格率</div>
+                    <div style={{ fontSize: 12, color: "#888" }}>{t("quality.kpi.batchAcceptanceRate")}</div>
                     <div style={{ fontSize: 20, fontWeight: 600 }}>
                       {(data.stats.batch_acceptance_rate * 100).toFixed(1)}%
                     </div>
                   </Col>
                   <Col span={6}>
-                    <div style={{ fontSize: 12, color: "#888" }}>检验批次</div>
+                    <div style={{ fontSize: 12, color: "#888" }}>{t("quality.kpi.totalInspections")}</div>
                     <div style={{ fontSize: 20, fontWeight: 600 }}>{data.stats.total_inspections}</div>
                   </Col>
                   <Col span={6}>
-                    <div style={{ fontSize: 12, color: "#888" }}>合格批次</div>
+                    <div style={{ fontSize: 12, color: "#888" }}>{t("quality.kpi.acceptedCount")}</div>
                     <div style={{ fontSize: 20, fontWeight: 600 }}>{data.stats.accepted_count}</div>
                   </Col>
                   <Col span={6}>
-                    <div style={{ fontSize: 12, color: "#888" }}>SCAR总数</div>
+                    <div style={{ fontSize: 12, color: "#888" }}>{t("quality.kpi.scarCount")}</div>
                     <div style={{ fontSize: 20, fontWeight: 600 }}>{data.stats.scar_count}</div>
                   </Col>
                   <Col span={6}>
-                    <div style={{ fontSize: 12, color: "#888" }}>未关闭SCAR</div>
+                    <div style={{ fontSize: 12, color: "#888" }}>{t("quality.kpi.openScar")}</div>
                     <div style={{ fontSize: 20, fontWeight: 600, color: data.stats.open_scar_count > 0 ? "#ff4d4f" : undefined }}>
                       {data.stats.open_scar_count}
                     </div>
@@ -156,16 +158,16 @@ export default function SupplierDetailView() {
             },
             {
               key: "certifications",
-              label: "资质证书",
+              label: t("quality.tabs.certificates"),
               children: (
                 <Table
                   className="qf-table"
                   dataSource={certifications}
                   columns={[
-                    { title: "证书类型", dataIndex: "cert_type" },
-                    { title: "证书编号", dataIndex: "cert_no" },
-                    { title: "颁发机构", dataIndex: "issued_by" },
-                    { title: "有效期", dataIndex: "expiry_date" },
+                    { title: t("table.certType"), dataIndex: "cert_type" },
+                    { title: t("table.certNo"), dataIndex: "cert_no" },
+                    { title: t("table.issuedBy"), dataIndex: "issued_by" },
+                    { title: t("table.expiryDate"), dataIndex: "expiry_date" },
                   ]}
                   rowKey="cert_id"
                   pagination={false}
@@ -175,18 +177,18 @@ export default function SupplierDetailView() {
             },
             {
               key: "evaluations",
-              label: "评价历史",
+              label: t("quality.tabs.evalHistory"),
               children: (
                 <Table
                   className="qf-table"
                   dataSource={evaluations}
                   columns={[
-                    { title: "评价周期", dataIndex: "eval_period" },
-                    { title: "类型", dataIndex: "eval_type" },
-                    { title: "评级", dataIndex: "grade", render: (g: string) => <Tag color={gradeColors[g]}>{g}</Tag> },
-                    { title: "总分", dataIndex: "total_score" },
-                    { title: "质量", dataIndex: "quality_score" },
-                    { title: "交付", dataIndex: "delivery_score" },
+                    { title: t("form.evalPeriod"), dataIndex: "eval_period" },
+                    { title: t("quality.column.evalType"), dataIndex: "eval_type" },
+                    { title: t("quality.column.grade"), dataIndex: "grade", render: (g: string) => <Tag color={gradeColors[g]}>{g}</Tag> },
+                    { title: t("quality.column.totalScore"), dataIndex: "total_score" },
+                    { title: t("detail.qualityScore"), dataIndex: "quality_score" },
+                    { title: t("detail.deliveryScore"), dataIndex: "delivery_score" },
                   ]}
                   rowKey="eval_id"
                   pagination={false}

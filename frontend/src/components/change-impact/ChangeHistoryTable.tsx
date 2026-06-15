@@ -1,4 +1,6 @@
 import { Table } from "antd";
+import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import type { ChangeImpactAnalysis } from "../../api/changeImpact";
 import ImpactScoreTag from "./ImpactScoreTag";
 
@@ -13,6 +15,7 @@ export default function ChangeHistoryTable({
   loading,
   onSelect,
 }: ChangeHistoryTableProps) {
+  const { t } = useTranslation("changeImpact");
   return (
     <Table
       rowKey="id"
@@ -24,31 +27,31 @@ export default function ChangeHistoryTable({
       })}
       columns={[
         {
-          title: "时间",
+          title: t("historyTable.time"),
           dataIndex: "created_at",
           key: "created_at",
-          render: (value: string) => new Date(value).toLocaleString("zh-CN"),
+          render: (value: string) => formatDateTime(value),
         },
         {
-          title: "节点名",
+          title: t("historyTable.nodeName"),
           dataIndex: "node_name",
           key: "node_name",
         },
         {
-          title: "变更类型",
+          title: t("historyTable.changeType"),
           dataIndex: "change_type",
           key: "change_type",
           render: (value: string) =>
-            value === "attribute" ? "属性" : "结构",
+            value === "attribute" ? t("report.changeTypeAttribute") : t("report.changeTypeStructure"),
         },
         {
-          title: "影响评分",
+          title: t("historyTable.impactScore"),
           dataIndex: "impact_score",
           key: "impact_score",
           render: (value: number) => <ImpactScoreTag score={value} />,
         },
         {
-          title: "受影响节点数",
+          title: t("historyTable.affectedCount"),
           key: "affected_count",
           render: (_: unknown, record: ChangeImpactAnalysis) =>
             record.impact_result?.summary?.total_affected ?? 0,

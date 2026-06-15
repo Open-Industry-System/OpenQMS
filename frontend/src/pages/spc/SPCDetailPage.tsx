@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import {
   Button, Space, Tag, Typography, Tabs, Card, Input,
   DatePicker, Table, App, Spin, Row, Col,
@@ -39,43 +41,10 @@ import { PageShell, StatusBadge } from "../../components/design";
 
 const { Title, Text } = Typography;
 
-const ruleLabels: Record<string, string> = {
-  rule1: "规则1: 超出控制限",
-  rule2: "规则2: 连续9点同侧",
-  rule3: "规则3: 连续6点递增/递减",
-  rule4: "规则4: 连续14点上下交替",
-  rule5: "规则5: 连续3点中有2点在A区",
-  rule6: "规则6: 连续5点中有4点在B区外",
-  rule7: "规则7: 连续15点在C区内",
-  rule8: "规则8: 连续8点在C区外",
-};
-
 const severityStatus: Record<string, string> = {
   critical: "fatal",
   major: "error",
   minor: "info",
-};
-
-const severityLabels: Record<string, string> = {
-  critical: "严重",
-  major: "主要",
-  minor: "轻微",
-};
-
-const statusLabels: Record<string, string> = {
-  open: "未处理",
-  acknowledged: "已确认",
-  closed: "已关闭",
-};
-
-const chartTypeLabels: Record<string, string> = {
-  xbar_r: "X-bar R",
-  imr: "I-MR",
-  histogram: "直方图",
-  p: "P图",
-  np: "NP图",
-  c: "C图",
-  u: "U图",
 };
 
 function getGradeStatus(grade: string): string {
@@ -86,6 +55,8 @@ function getGradeStatus(grade: string): string {
 }
 
 export default function SPCDetailPage() {
+  const { t } = useTranslation("spc");
+  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -119,6 +90,8 @@ export default function SPCDetailPage() {
   const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
 
+  const chartTypeLabel = (type: string) => t(`chartType.${type}`, { defaultValue: type });
+
   const fetchAll = async () => {
     if (!id) return;
     setRefreshing(true);
@@ -138,7 +111,7 @@ export default function SPCDetailPage() {
       setAlarms(alarmRes.items);
       setAlarmTotal(alarmRes.total);
     } catch {
-      message.error("加载数据失败");
+      message.error(t("detail.loadFailed"));
     } finally {
       setRefreshing(false);
       setLoading(false);
@@ -181,7 +154,7 @@ export default function SPCDetailPage() {
 
     const mainOption: echarts.EChartsOption = {
       title: {
-        text: chartData.chart_type === "xbar_r" ? "X-bar 图" : "I 图 (单值图)",
+        text: chartData.chart_type === "xbar_r" ? t("detail.chart.xbarTitle") : t("detail.chart.iTitle"),
         left: "center",
         textStyle: { fontSize: 14 },
       },
@@ -195,7 +168,7 @@ export default function SPCDetailPage() {
       yAxis: { type: "value", scale: true },
       series: [
         {
-          name: "统计值",
+          name: t("detail.chart.statisticValue"),
           type: "line",
           data: mainSeries,
           symbol: "circle",
@@ -206,13 +179,13 @@ export default function SPCDetailPage() {
               silent: true,
               data: [
                 ...(chartData.limits.ucl !== undefined
-                  ? [{ yAxis: chartData.limits.ucl, name: "UCL", lineStyle: { color: "#ff4d4f" } }]
+                  ? [{ yAxis: chartData.limits.ucl, name: t("detail.chart.ucl"), lineStyle: { color: "#ff4d4f" } }]
                   : []),
                 ...(chartData.limits.lcl !== undefined
-                  ? [{ yAxis: chartData.limits.lcl, name: "LCL", lineStyle: { color: "#ff4d4f" } }]
+                  ? [{ yAxis: chartData.limits.lcl, name: t("detail.chart.lcl"), lineStyle: { color: "#ff4d4f" } }]
                   : []),
                 ...(chartData.limits.cl !== undefined
-                  ? [{ yAxis: chartData.limits.cl, name: "CL", lineStyle: { color: "#52c41a", type: "dashed" as const } }]
+                  ? [{ yAxis: chartData.limits.cl, name: t("detail.chart.cl"), lineStyle: { color: "#52c41a", type: "dashed" as const } }]
                   : []),
               ],
               label: { formatter: "{b}: {c}" },
@@ -220,21 +193,21 @@ export default function SPCDetailPage() {
           }),
         },
         ...(isVariableLimit && chartData.limits.ucl_list ? [{
-          name: "UCL",
+          name: t("detail.chart.ucl"),
           type: "line" as const,
           data: chartData.limits.ucl_list,
           lineStyle: { color: "#ff4d4f", type: "dashed" as const },
           symbol: "none",
         }] : []),
         ...(isVariableLimit && chartData.limits.lcl_list ? [{
-          name: "LCL",
+          name: t("detail.chart.lcl"),
           type: "line" as const,
           data: chartData.limits.lcl_list,
           lineStyle: { color: "#ff4d4f", type: "dashed" as const },
           symbol: "none",
         }] : []),
         ...(isVariableLimit && chartData.limits.cl !== undefined ? [{
-          name: "CL",
+          name: t("detail.chart.cl"),
           type: "line" as const,
           data: chartData.data_points.map(() => chartData.limits.cl),
           lineStyle: { color: "#52c41a", type: "dashed" as const },
@@ -253,7 +226,7 @@ export default function SPCDetailPage() {
 
     const subOption: echarts.EChartsOption = {
       title: {
-        text: chartData.chart_type === "xbar_r" ? "R 图 (极差图)" : "MR 图 (移动极差图)",
+        text: chartData.chart_type === "xbar_r" ? t("detail.chart.rTitle") : t("detail.chart.mrTitle"),
         left: "center",
         textStyle: { fontSize: 14 },
       },
@@ -276,13 +249,13 @@ export default function SPCDetailPage() {
             silent: true,
             data: [
               ...(chartData.limits.r_ucl !== undefined
-                ? [{ yAxis: chartData.limits.r_ucl, name: "R_UCL", lineStyle: { color: "#ff4d4f" } }]
+                ? [{ yAxis: chartData.limits.r_ucl, name: `R_${t("detail.chart.ucl")}`, lineStyle: { color: "#ff4d4f" } }]
                 : []),
               ...(chartData.limits.r_lcl !== undefined
-                ? [{ yAxis: chartData.limits.r_lcl, name: "R_LCL", lineStyle: { color: "#ff4d4f" } }]
+                ? [{ yAxis: chartData.limits.r_lcl, name: `R_${t("detail.chart.lcl")}`, lineStyle: { color: "#ff4d4f" } }]
                 : []),
               ...(chartData.limits.r_cl !== undefined
-                ? [{ yAxis: chartData.limits.r_cl, name: "R_CL", lineStyle: { color: "#52c41a", type: "dashed" as const } }]
+                ? [{ yAxis: chartData.limits.r_cl, name: `R_${t("detail.chart.cl")}`, lineStyle: { color: "#52c41a", type: "dashed" as const } }]
                 : []),
             ],
             label: { formatter: "{b}: {c}" },
@@ -302,7 +275,7 @@ export default function SPCDetailPage() {
     return () => {
       window.removeEventListener("resize", handleResize);
     };
-  }, [chartData, activeTab]);
+  }, [chartData, activeTab, t]);
 
   // Cleanup chart instances on unmount
   useEffect(() => {
@@ -319,10 +292,10 @@ export default function SPCDetailPage() {
     try {
       const updated = await lockControlLimits(id, !ic.control_limits_locked);
       setIc(updated);
-      message.success(updated.control_limits_locked ? "控制限已锁定" : "控制限已解锁");
+      message.success(updated.control_limits_locked ? t("detail.lockSuccess") : t("detail.unlockSuccess"));
       fetchAll();
     } catch {
-      message.error("操作失败");
+      message.error(t("detail.operationFailed"));
     }
   };
 
@@ -332,16 +305,16 @@ export default function SPCDetailPage() {
     try {
       const updated = await updateInspectionCharacteristic(id, { rules_config: newConfig });
       setIc(updated);
-      message.success("规则设置已更新");
+      message.success(t("detail.ruleUpdateSuccess"));
     } catch {
-      message.error("更新失败");
+      message.error(t("detail.ruleUpdateFailed"));
     }
   };
 
   const handleAddSample = async () => {
     if (!id) return;
     if (!batchNo.trim()) {
-      message.warning("请输入批次号");
+      message.warning(t("detail.batchNoRequired"));
       return;
     }
     const isAttribute = ["p", "np", "c", "u"].includes(ic?.chart_type || "");
@@ -349,15 +322,15 @@ export default function SPCDetailPage() {
       const n = parseInt(inspectedCount, 10);
       const d = parseInt(defectCount, 10);
       if (isNaN(n) || n <= 0) {
-        message.warning("检验数量必须大于0");
+        message.warning(t("detail.inspectedCountRequired"));
         return;
       }
       if (isNaN(d) || d < 0) {
-        message.warning("不合格品数/缺陷数不能为负数");
+        message.warning(t("detail.defectCountNonNegative"));
         return;
       }
       if (d > n) {
-        message.warning("不合格品数/缺陷数不能大于检验数量");
+        message.warning(t("detail.defectCountExceeds"));
         return;
       }
       try {
@@ -367,13 +340,13 @@ export default function SPCDetailPage() {
           inspected_count: n,
           defect_count: d,
         });
-        message.success("样本录入成功");
+        message.success(t("detail.sampleEntrySuccess"));
         setBatchNo("");
         setInspectedCount("");
         setDefectCount("");
         fetchAll();
       } catch {
-        message.error("录入失败");
+        message.error(t("detail.sampleEntryFailed"));
       }
       return;
     }
@@ -381,7 +354,7 @@ export default function SPCDetailPage() {
       .map((v) => parseFloat(v))
       .filter((v) => !isNaN(v));
     if (values.length === 0) {
-      message.warning("请输入至少一个样本值");
+      message.warning(t("detail.sampleValueRequired"));
       return;
     }
     try {
@@ -390,32 +363,32 @@ export default function SPCDetailPage() {
         sampled_at: sampledAt ? sampledAt.format("YYYY-MM-DDTHH:mm:ss") : dayjs().format("YYYY-MM-DDTHH:mm:ss"),
         values,
       });
-      message.success("样本录入成功");
+      message.success(t("detail.sampleEntrySuccess"));
       setBatchNo("");
       setSampleValues([""]);
       fetchAll();
     } catch {
-      message.error("录入失败");
+      message.error(t("detail.sampleEntryFailed"));
     }
   };
 
   const handleAcknowledge = async (alarmId: string) => {
     try {
       await acknowledgeAlarm(alarmId);
-      message.success("告警已确认");
+      message.success(t("detail.alarmAckSuccess"));
       fetchAll();
     } catch {
-      message.error("确认失败");
+      message.error(t("detail.alarmAckFailed"));
     }
   };
 
   const handleCreateCAPA = async (alarmId: string) => {
     try {
       const result = await createCAPAFromAlarm(alarmId);
-      message.success(`8D 已创建: ${result.document_number}`);
+      message.success(t("detail.capaCreateSuccess", { docNo: result.document_number }));
       fetchAll();
     } catch {
-      message.error("创建 8D 失败");
+      message.error(t("detail.capaCreateFailed"));
     }
   };
 
@@ -438,55 +411,61 @@ export default function SPCDetailPage() {
   const subgroupSize = ic?.subgroup_size || 5;
 
   const alarmColumns = [
-    { title: "规则编号", dataIndex: "rule_no", key: "rule_no", width: 90 },
+    { title: t("detail.alarm.ruleNo"), dataIndex: "rule_no", key: "rule_no", width: 90 },
     {
-      title: "触发时间",
+      title: t("detail.alarm.triggeredAt"),
       dataIndex: "triggered_at",
       key: "triggered_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      render: (v: string) => formatDateTime(v),
     },
     {
-      title: "严重等级",
+      title: t("detail.alarm.severity"),
       dataIndex: "severity",
       key: "severity",
       width: 100,
       render: (s: string) => (
-        <StatusBadge status={severityStatus[s] || "draft"}>{severityLabels[s] || s}</StatusBadge>
+        <StatusBadge status={severityStatus[s] || "draft"}>
+          {t(`detail.alarm.severityLevels.${s}`, { defaultValue: s })}
+        </StatusBadge>
       ),
     },
     {
-      title: "状态",
+      title: t("detail.alarm.status"),
       dataIndex: "status",
       key: "status",
       width: 100,
       render: (s: string) => (
         <StatusBadge status={s === "open" ? "error" : s === "acknowledged" ? "warning" : "success"}>
-          {statusLabels[s] || s}
+          {t(`detail.alarm.statuses.${s}`, { defaultValue: s })}
         </StatusBadge>
       ),
     },
     {
-      title: "关联 8D",
+      title: t("detail.alarm.linkedCapa"),
       dataIndex: "linked_capa_id",
       key: "linked_capa_id",
       width: 120,
       render: (v: string | undefined) => <span style={{ fontFamily: "var(--qf-font-mono)" }}>{v || "-"}</span>,
     },
     {
-      title: "关联 FMEA",
+      title: t("detail.alarm.linkedFmea"),
       dataIndex: "confirmed_fmea_id",
       key: "confirmed_fmea_id",
       width: 120,
       render: (_: unknown, record: SPCAlarm) =>
         record.confirmed_fmea_id ? (
-          <Tag style={{ background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>已关联</Tag>
+          <Tag style={{ background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
+            {t("detail.alarm.linked")}
+          </Tag>
         ) : (
-          <Tag style={{ background: "var(--qf-bg-hover)", color: "var(--qf-text-secondary)", borderColor: "var(--qf-border)" }}>未关联</Tag>
+          <Tag style={{ background: "var(--qf-bg-hover)", color: "var(--qf-text-secondary)", borderColor: "var(--qf-border)" }}>
+            {t("detail.alarm.notLinked")}
+          </Tag>
         ),
     },
     {
-      title: "操作",
+      title: tc("table.operations"),
       key: "actions",
       width: 240,
       render: (_: unknown, record: SPCAlarm) => (
@@ -497,7 +476,7 @@ export default function SPCDetailPage() {
               icon={<CheckCircleOutlined />}
               onClick={() => handleAcknowledge(record.alarm_id)}
             >
-              确认
+              {t("detail.alarm.confirm")}
             </Button>
           )}
           <Button
@@ -508,7 +487,7 @@ export default function SPCDetailPage() {
               setFmeaMatchPanelOpen(true);
             }}
           >
-            查看 FMEA 推荐
+            {t("detail.alarm.viewFmea")}
           </Button>
           {!record.linked_capa_id && canEdit('spc') && (
             <Button
@@ -517,7 +496,7 @@ export default function SPCDetailPage() {
               icon={<ExclamationCircleOutlined />}
               onClick={() => handleCreateCAPA(record.alarm_id)}
             >
-              创建 8D
+              {t("detail.alarm.createCapa")}
             </Button>
           )}
         </Space>
@@ -536,8 +515,8 @@ export default function SPCDetailPage() {
   if (!ic) {
     return (
       <div style={{ textAlign: "center", padding: 64 }}>
-        <Title level={4}>检验特性未找到</Title>
-        <Button onClick={() => navigate("/spc")}>返回列表</Button>
+        <Title level={4}>{t("detail.notFound")}</Title>
+        <Button onClick={() => navigate("/spc")}>{tc("actions.back")}</Button>
       </div>
     );
   }
@@ -545,12 +524,14 @@ export default function SPCDetailPage() {
   const headerTags = (
     <Space>
       <Tag style={{ background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>{ic.ic_code}</Tag>
-      <Tag style={{ background: "var(--qf-bg-hover)", color: "var(--qf-text-secondary)", borderColor: "var(--qf-border)" }}>{chartTypeLabels[ic.chart_type] || ic.chart_type}</Tag>
+      <Tag style={{ background: "var(--qf-bg-hover)", color: "var(--qf-text-secondary)", borderColor: "var(--qf-border)" }}>{chartTypeLabel(ic.chart_type)}</Tag>
       {chartData?.active_snapshot && (
-        <Tag style={{ background: "var(--qf-blue-dim)", color: "var(--qf-blue)", borderColor: "var(--qf-blue)" }}>控制限 v{chartData.active_snapshot.version_no}</Tag>
+        <Tag style={{ background: "var(--qf-blue-dim)", color: "var(--qf-blue)", borderColor: "var(--qf-blue)" }}>
+          {t("detail.limitManagement.version")} v{chartData.active_snapshot.version_no}
+        </Tag>
       )}
       <StatusBadge status={ic.control_limits_locked ? "success" : "warning"}>
-        {ic.control_limits_locked ? "控制限已锁定" : "控制限自动计算"}
+        {ic.control_limits_locked ? t("detail.limitManagement.locked") : t("detail.limitManagement.auto")}
       </StatusBadge>
     </Space>
   );
@@ -559,7 +540,7 @@ export default function SPCDetailPage() {
     <PageShell
       title={
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/spc")}>返回</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/spc")}>{tc("actions.back")}</Button>
           <Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{ic.characteristic_name}</Title>
         </Space>
       }
@@ -573,7 +554,7 @@ export default function SPCDetailPage() {
         items={[
           {
             key: "chart",
-            label: "控制图",
+            label: t("detail.tabs.chart"),
             children: (
               <Row gutter={16}>
                 <Col span={18}>
@@ -585,28 +566,28 @@ export default function SPCDetailPage() {
                   </Card>
                 </Col>
                 <Col span={6}>
-                  <Card title="基本信息" size="small">
+                  <Card title={t("detail.basicInfo.title")} size="small">
                     <p>
-                      <Text type="secondary">过程名称:</Text> {ic.process_name}
+                      <Text type="secondary">{t("detail.basicInfo.process_name")}:</Text> {ic.process_name}
                     </p>
                     <p>
-                      <Text type="secondary">特性名称:</Text> {ic.characteristic_name}
+                      <Text type="secondary">{t("detail.basicInfo.characteristic_name")}:</Text> {ic.characteristic_name}
                     </p>
                     <p>
-                      <Text type="secondary">规格上限:</Text> {ic.spec_upper}
+                      <Text type="secondary">{t("detail.basicInfo.spec_upper")}:</Text> {ic.spec_upper}
                     </p>
                     <p>
-                      <Text type="secondary">规格下限:</Text> {ic.spec_lower}
+                      <Text type="secondary">{t("detail.basicInfo.spec_lower")}:</Text> {ic.spec_lower}
                     </p>
                     <p>
-                      <Text type="secondary">目标值:</Text> {ic.target_value ?? "-"}
+                      <Text type="secondary">{t("detail.basicInfo.target_value")}:</Text> {ic.target_value ?? "-"}
                     </p>
                     <p>
-                      <Text type="secondary">子组大小:</Text> {ic.subgroup_size}
+                      <Text type="secondary">{t("detail.basicInfo.subgroup_size")}:</Text> {ic.subgroup_size}
                     </p>
                   </Card>
 
-                  <Card title="控制限管理" size="small" style={{ marginTop: 16 }}>
+                  <Card title={t("detail.limitManagement.title")} size="small" style={{ marginTop: 16 }}>
                     <Button
                       type={ic.control_limits_locked ? "default" : "primary"}
                       icon={ic.control_limits_locked ? <UnlockOutlined /> : <LockOutlined />}
@@ -614,7 +595,7 @@ export default function SPCDetailPage() {
                       disabled={!canEdit('spc')}
                       block
                     >
-                      {ic.control_limits_locked ? "解锁控制限" : "锁定控制限"}
+                      {ic.control_limits_locked ? t("detail.limitManagement.unlock") : t("detail.limitManagement.lock")}
                     </Button>
                     {id && (
                       <div style={{ marginTop: 8 }}>
@@ -623,8 +604,8 @@ export default function SPCDetailPage() {
                     )}
                   </Card>
 
-                  <Card title="判异规则" size="small" style={{ marginTop: 16 }}>
-                    {Object.entries(ruleLabels).map(([key, label]) => (
+                  <Card title={t("detail.rules.title")} size="small" style={{ marginTop: 16 }}>
+                    {["rule1", "rule2", "rule3", "rule4", "rule5", "rule6", "rule7", "rule8"].map((key) => (
                       <div
                         key={key}
                         style={{
@@ -634,7 +615,7 @@ export default function SPCDetailPage() {
                           marginBottom: 8,
                         }}
                       >
-                        <Text style={{ fontSize: 12 }}>{label}</Text>
+                        <Text style={{ fontSize: 12 }}>{t(`detail.rules.${key}`)}</Text>
                         <Switch
                           size="small"
                           checked={!!ic.rules_config[key]}
@@ -651,59 +632,59 @@ export default function SPCDetailPage() {
           ...(!["p", "np", "c", "u"].includes(ic?.chart_type || "") ? [
             {
               key: "capability",
-              label: "过程能力",
+              label: t("detail.tabs.capability"),
               children: capability ? (
                 <div>
                   <Row gutter={16} style={{ marginBottom: 24 }}>
                     <Col>
                       <StatusBadge status={getGradeStatus(capability.grade)} style={{ fontSize: 14, padding: "6px 12px" }}>
-                        等级: {capability.grade}
+                        {t("detail.capability.grade", { grade: capability.grade })}
                       </StatusBadge>
                     </Col>
                   </Row>
                   <Row gutter={[16, 16]}>
                     <Col span={6}>
                       <Card>
-                        <Statistic title="Cp" value={capability.cp} precision={3} />
+                        <Statistic title={t("detail.capability.cp")} value={capability.cp} precision={3} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card>
-                        <Statistic title="Cpk" value={capability.cpk} precision={3} />
+                        <Statistic title={t("detail.capability.cpk")} value={capability.cpk} precision={3} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card>
-                        <Statistic title="Pp" value={capability.pp} precision={3} />
+                        <Statistic title={t("detail.capability.pp")} value={capability.pp} precision={3} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card>
-                        <Statistic title="Ppk" value={capability.ppk} precision={3} />
+                        <Statistic title={t("detail.capability.ppk")} value={capability.ppk} precision={3} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card>
-                        <Statistic title="Cm" value={capability.cm} precision={3} />
+                        <Statistic title={t("detail.capability.cm")} value={capability.cm} precision={3} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card>
-                        <Statistic title="Cmk" value={capability.cmk} precision={3} />
+                        <Statistic title={t("detail.capability.cmk")} value={capability.cmk} precision={3} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card>
-                        <Statistic title="理论 PPM" value={capability.theoretical_ppm} precision={2} />
+                        <Statistic title={t("detail.capability.theoretical_ppm")} value={capability.theoretical_ppm} precision={2} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card>
-                        <Statistic title="实际 PPM" value={capability.actual_ppm} precision={2} />
+                        <Statistic title={t("detail.capability.actual_ppm")} value={capability.actual_ppm} precision={2} />
                       </Card>
                     </Col>
                   </Row>
-                  <Card title="分析建议" style={{ marginTop: 16 }}>
+                  <Card title={t("detail.capability.advice")} style={{ marginTop: 16 }}>
                     <Text>{capability.advice}</Text>
                   </Card>
                 </div>
@@ -711,7 +692,7 @@ export default function SPCDetailPage() {
                 <Spin size="large" style={{ display: "block", margin: "64px auto" }} />
               ) : (
                 <Empty
-                  description="数据不足，无法进行过程能力分析（需要至少2个批次/样本数据）"
+                  description={t("detail.capability.empty")}
                   style={{ margin: "64px auto" }}
                 />
               ),
@@ -719,27 +700,27 @@ export default function SPCDetailPage() {
           ] : []),
           {
             key: "data",
-            label: "数据录入",
+            label: t("detail.tabs.data"),
             children: (
               <Tabs
                 type="card"
                 items={[
                   {
                     key: "single",
-                    label: "单批录入",
+                    label: t("detail.dataEntry.single"),
                     children: (
-                      <Card title="录入新批次">
+                      <Card title={t("detail.dataEntry.single")}>
                         <Row gutter={16} style={{ marginBottom: 16 }}>
                           <Col span={8}>
-                            <Text type="secondary">批次号</Text>
+                            <Text type="secondary">{t("detail.dataEntry.batchNo")}</Text>
                             <Input
                               value={batchNo}
                               onChange={(e) => setBatchNo(e.target.value)}
-                              placeholder="如 BATCH-20260521-001"
+                              placeholder={t("detail.dataEntry.batchPlaceholder")}
                             />
                           </Col>
                           <Col span={8}>
-                            <Text type="secondary">采样时间</Text>
+                            <Text type="secondary">{t("detail.dataEntry.sampledAt")}</Text>
                             <DatePicker
                               showTime
                               style={{ width: "100%" }}
@@ -750,7 +731,7 @@ export default function SPCDetailPage() {
                         </Row>
                         {["p", "np", "c", "u"].includes(ic?.chart_type || "") ? (
                           <>
-                            <Divider orientation="left">属性数据录入</Divider>
+                            <Divider orientation="left">{t("detail.dataEntry.attributeEntry")}</Divider>
                             <Row gutter={[8, 8]}>
                               <Col span={6}>
                                 <Input
@@ -758,7 +739,7 @@ export default function SPCDetailPage() {
                                   min={1}
                                   value={inspectedCount}
                                   onChange={(e) => setInspectedCount(e.target.value)}
-                                  addonBefore="检验数量 n"
+                                  addonBefore={t("detail.dataEntry.inspectedCount")}
                                 />
                               </Col>
                               <Col span={6}>
@@ -767,7 +748,7 @@ export default function SPCDetailPage() {
                                   min={0}
                                   value={defectCount}
                                   onChange={(e) => setDefectCount(e.target.value)}
-                                  addonBefore="不合格品数/缺陷数"
+                                  addonBefore={t("detail.dataEntry.defectCount")}
                                 />
                               </Col>
                             </Row>
@@ -775,7 +756,7 @@ export default function SPCDetailPage() {
                         ) : (
                           <>
                             <Divider orientation="left">
-                              样本值 (建议 {subgroupSize} 个)
+                              {t("detail.dataEntry.sampleValues", { size: subgroupSize })}
                             </Divider>
                             <Row gutter={[8, 8]}>
                               {sampleValues.map((val, idx) => (
@@ -806,11 +787,11 @@ export default function SPCDetailPage() {
                         <div style={{ marginTop: 16 }}>
                           {!["p", "np", "c", "u"].includes(ic?.chart_type || "") && (
                             <Button icon={<PlusOutlined />} onClick={addSampleInput} style={{ marginRight: 8 }}>
-                              添加样本
+                              {t("detail.dataEntry.addSample")}
                             </Button>
                           )}
                           <Button type="primary" onClick={handleAddSample} disabled={!canEdit('spc')}>
-                            提交批次
+                            {t("detail.dataEntry.submitBatch")}
                           </Button>
                         </div>
                       </Card>
@@ -818,11 +799,11 @@ export default function SPCDetailPage() {
                   },
                   {
                     key: "batch",
-                    label: "批量导入",
+                    label: t("detail.dataEntry.batch"),
                     children: (
                       <Card>
                         <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-                          上传 Excel 批量导入
+                          {t("detail.dataEntry.uploadExcel")}
                         </Button>
                         <ImportExcelDialog
                           open={importOpen}
@@ -831,15 +812,15 @@ export default function SPCDetailPage() {
                           importFn={(file) => importSamples(id!, file)}
                           templateDownloadFn={() => downloadSampleImportTemplate(id!)}
                           hint={ic?.chart_type === "xbar_r" || ic?.chart_type === "imr"
-                            ? `每行: 批次号*, 采样时间*, 样本值1${ic?.chart_type === "xbar_r" ? ", 样本值2, ..." : ""}`
-                            : "每行: 批次号*, 采样时间*, 检验数, 缺陷数"}
+                            ? t("detail.dataEntry.templateHintVariable", { extra: ic?.chart_type === "xbar_r" ? ", Sample Value 2, ..." : "" })
+                            : t("detail.dataEntry.templateHintAttribute")}
                         />
                       </Card>
                     ),
                   },
                   {
                     key: "history",
-                    label: "历史数据",
+                    label: t("detail.dataEntry.history"),
                     children: (
                       <Card>
                         <Table
@@ -848,31 +829,31 @@ export default function SPCDetailPage() {
                           size="small"
                           pagination={{ pageSize: 20 }}
                           columns={[
-                            { title: "序号", dataIndex: "batch_index", width: 70 },
-                            { title: "批次号", dataIndex: "batch_no" },
+                            { title: t("detail.history.index"), dataIndex: "batch_index", width: 70 },
+                            { title: t("detail.history.batchNo"), dataIndex: "batch_no" },
                             {
-                              title: "采样时间",
+                              title: t("detail.history.sampledAt"),
                               dataIndex: "sampled_at",
-                              render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+                              render: (v: string) => formatDateTime(v),
                             },
                             {
-                              title: "均值/X值",
+                              title: t("detail.history.xValue"),
                               dataIndex: "x_value",
                               render: (v: number | undefined) => v?.toFixed(3) ?? "-",
                             },
                             {
-                              title: "极差/MR值",
+                              title: t("detail.history.rValue"),
                               dataIndex: "r_value",
                               render: (v: number | undefined) => v?.toFixed(3) ?? "-",
                             },
                             {
-                              title: "告警",
+                              title: t("detail.history.alarm"),
                               dataIndex: "alarm_flags",
                               render: (flags: number[]) =>
                                 flags.length > 0 ? (
-                                  <Tag color="red">规则 {flags.join(", ")}</Tag>
+                                  <Tag color="red">{t("detail.history.rule", { rules: flags.join(", ") })}</Tag>
                                 ) : (
-                                  <Tag color="green">正常</Tag>
+                                  <Tag color="green">{t("detail.history.normal")}</Tag>
                                 ),
                             },
                           ]}
@@ -886,9 +867,10 @@ export default function SPCDetailPage() {
           },
           {
             key: "alarms",
-            label: "告警记录",
+            label: t("detail.tabs.alarms"),
             children: (
               <Table
+                className="qf-table"
                 columns={alarmColumns}
                 dataSource={alarms}
                 rowKey="alarm_id"

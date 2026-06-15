@@ -1,0 +1,271 @@
+{
+  "yes": "Yes",
+  "no": "No",
+  "dashboard": {
+    "title": "ERP Dashboard",
+    "syncHealth": "Sync Health",
+    "noSyncData": "No sync data",
+    "coqSummary": "COQ Summary (This Month)",
+    "quickLinks": "Quick Links",
+    "links": {
+      "connections": "Connection Management",
+      "masterData": "Master Data",
+      "supplyChain": "Supply Chain",
+      "traceability": "Lot Traceability"
+    },
+    "loadFailed": "Load failed",
+    "errors": {
+      "loadFailed": "Failed to load ERP dashboard data"
+    }
+  },
+  "syncStatus": {
+    "completed": "Completed",
+    "failed": "Failed",
+    "running": "Syncing",
+    "pending": "Pending"
+  },
+  "masterData": {
+    "title": "ERP Master Data",
+    "searchPlaceholder": "Search by material code or name",
+    "tabs": {
+      "suppliers": "Suppliers",
+      "customers": "Customers",
+      "materials": "Materials",
+      "locations": "Locations"
+    },
+    "linkStatus": {
+      "linked": "Linked",
+      "pending": "Pending",
+      "unlinked": "Not Linked"
+    },
+    "locationType": {
+      "warehouse": "Warehouse",
+      "zone": "Zone",
+      "bin": "Bin",
+      "line": "Line"
+    },
+    "columns": {
+      "supplierCode": "Supplier Code",
+      "customerCode": "Customer Code",
+      "materialCode": "Material Code",
+      "locationCode": "Location Code",
+      "warehouseCode": "Warehouse Code",
+      "zoneCode": "Zone Code",
+      "name": "Name",
+      "status": "Status",
+      "linkStatus": "Link Status",
+      "actions": "Actions",
+      "specification": "Specification",
+      "unit": "Unit",
+      "isPurchased": "Purchased",
+      "isManufactured": "Manufactured",
+      "type": "Type",
+      "enabled": "Enabled"
+    },
+    "suppliers": {
+      "link": "Link",
+      "unlink": "Unlink",
+      "linkModal": {
+        "title": "Link OpenQMS Supplier",
+        "description": "Select the OpenQMS supplier to link:",
+        "placeholder": "Please select a supplier",
+        "okText": "Confirm Link"
+      },
+      "messages": {
+        "loadFailed": "Failed to load suppliers",
+        "loadListFailed": "Failed to load supplier list",
+        "linkSuccess": "Linked successfully",
+        "unlinkSuccess": "Unlinked successfully",
+        "linkFailed": "Link failed",
+        "unlinkFailed": "Unlink failed"
+      }
+    },
+    "customers": {
+      "link": "Link",
+      "unlink": "Unlink",
+      "linkModal": {
+        "title": "Link OpenQMS Customer",
+        "description": "Select the OpenQMS customer to link:",
+        "placeholder": "Please select a customer",
+        "okText": "Confirm Link"
+      },
+      "messages": {
+        "loadFailed": "Failed to load customers",
+        "loadListFailed": "Failed to load customer list",
+        "linkSuccess": "Linked successfully",
+        "unlinkSuccess": "Unlinked successfully",
+        "linkFailed": "Link failed",
+        "unlinkFailed": "Unlink failed"
+      }
+    },
+    "materials": {
+      "messages": {
+        "loadFailed": "Failed to load materials"
+      }
+    },
+    "locations": {
+      "messages": {
+        "loadFailed": "Failed to load locations"
+      }
+    }
+  },
+  "connections": {
+    "title": "ERP Connection Management",
+    "create": "New Connection",
+    "edit": "Edit",
+    "test": "Test",
+    "sync": "Sync",
+    "delete": "Delete",
+    "columns": {
+      "name": "Connection Name",
+      "type": "Type",
+      "productLineCode": "Product Line Code",
+      "status": "Status",
+      "createdAt": "Created At",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "modal": {
+      "createTitle": "New Connection",
+      "editTitle": "Edit Connection"
+    },
+    "form": {
+      "name": "Connection Name",
+      "nameRequired": "Please enter the connection name",
+      "namePlaceholder": "e.g. ERP-SAP-01",
+      "connectorType": "Connector Type",
+      "connectorTypeRequired": "Please select a connector type",
+      "productLineCode": "Product Line Code",
+      "productLineCodeRequired": "Please enter the product line code",
+      "productLineCodePlaceholder": "e.g. DC-DC-100",
+      "baseUrl": "Base URL",
+      "baseUrlPlaceholder": "e.g. https://erp.example.com/api",
+      "port": "Port",
+      "portPlaceholder": "e.g. 8080",
+      "apiKey": "API Key",
+      "apiKeyPlaceholder": "API Key"
+    },
+    "connector": {
+      "mock": "Mock - Simulated Data",
+      "rest": "REST API",
+      "notImplemented": "{{name}} - Not implemented"
+    },
+    "deleteConfirm": {
+      "title": "Confirm Delete",
+      "content": "Are you sure you want to delete connection \"{{name}}\"?"
+    },
+    "messages": {
+      "loadFailed": "Failed to load connection list",
+      "createSuccess": "Connection created successfully",
+      "createFailed": "Create failed",
+      "updateSuccess": "Connection updated successfully",
+      "updateFailed": "Update failed",
+      "deleteSuccess": "Deleted successfully",
+      "deleteFailed": "Delete failed",
+      "testSuccess": "Connection test successful",
+      "testFailed": "Connection test failed",
+      "syncTriggered": "Sync triggered, will start in the background within 30 seconds",
+      "syncFailed": "Failed to trigger sync"
+    }
+  },
+  "salesAndCost": {
+    "title": "Sales & Cost",
+    "tabs": {
+      "salesOrders": "Sales Orders",
+      "shipments": "Shipments",
+      "costRecords": "Cost Records"
+    },
+    "columns": {
+      "soNumber": "SO No.",
+      "lineNumber": "Line No.",
+      "customerCode": "Customer Code",
+      "materialCode": "Material Code",
+      "quantity": "Quantity",
+      "unitPrice": "Unit Price",
+      "status": "Status",
+      "deliveryDate": "Delivery Date",
+      "shipmentNumber": "Shipment No.",
+      "lotNo": "Lot No.",
+      "shipmentDate": "Shipment Date",
+      "linkStatus": "Link Status",
+      "costCategory": "Cost Category",
+      "costType": "Cost Type",
+      "amount": "Amount",
+      "currency": "Currency",
+      "period": "Period",
+      "sourceDocument": "Source Document",
+      "description": "Description"
+    },
+    "costCategory": {
+      "prevention": "Prevention Cost",
+      "appraisal": "Appraisal Cost",
+      "internalFailure": "Internal Loss",
+      "externalFailure": "External Loss"
+    },
+    "messages": {
+      "loadSalesOrdersFailed": "Failed to load sales orders",
+      "loadShipmentsFailed": "Failed to load shipments",
+      "loadCostRecordsFailed": "Failed to load cost records"
+    }
+  },
+  "supplyChain": {
+    "title": "ERP Supply Chain",
+    "tabs": {
+      "purchaseOrders": "Purchase Orders",
+      "inventory": "Inventory Balances"
+    },
+    "poStatus": {
+      "draft": "Draft",
+      "submitted": "Submitted",
+      "confirmed": "Confirmed",
+      "partiallyReceived": "Partially Received",
+      "received": "Received",
+      "closed": "Closed"
+    },
+    "inventoryStatus": {
+      "available": "Available",
+      "restricted": "Restricted",
+      "blocked": "Blocked",
+      "inInspection": "In Inspection"
+    },
+    "filterStatusPlaceholder": "Filter status",
+    "filterDefectPlaceholder": "Filter defect type",
+    "columns": {
+      "poNumber": "PO No.",
+      "lineNumber": "Line No.",
+      "supplierCode": "Supplier Code",
+      "materialCode": "Material Code",
+      "quantity": "Quantity",
+      "receivedQuantity": "Received",
+      "lotNo": "Lot No.",
+      "status": "Status",
+      "deliveryDate": "Delivery Date",
+      "locationCode": "Location Code",
+      "supplierLotNo": "Supplier Lot No.",
+      "unit": "Unit",
+      "inventoryStatus": "Inventory Status"
+    },
+    "messages": {
+      "loadPurchaseOrdersFailed": "Failed to load purchase orders",
+      "loadInventoryFailed": "Failed to load inventory balances"
+    }
+  },
+  "traceability": {
+    "title": "Lot Traceability",
+    "lotPlaceholder": "Enter lot number",
+    "direction": {
+      "forward": "Forward (Raw Material → Customer)",
+      "backward": "Backward (Customer → Raw Material)"
+    },
+    "search": "Search",
+    "nodes": "Traceability Nodes",
+    "edges": "Traceability Relationships",
+    "noData": "No traceability data found",
+    "errors": {
+      "queryFailed": "Traceability query failed"
+    }
+  }
+}

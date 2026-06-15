@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Space, Select } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { usePermission } from "../../hooks/usePermission";
 import { useProductLineStore } from "../../store/productLineStore";
 import { listManagementReviews } from "../../api/managementReview";
@@ -9,19 +10,17 @@ import type { ManagementReview } from "../../types";
 import PageShell from "../../components/design/PageShell";
 import DataCard from "../../components/design/DataCard";
 import StatusBadge from "../../components/design/StatusBadge";
-
-const statusMap: Record<string, { label: string; variant: string }> = {
-  draft: { label: "草稿", variant: "info" },
-  data_collected: { label: "数据已汇总", variant: "info" },
-  in_review: { label: "评审中", variant: "warning" },
-  closed: { label: "已关闭", variant: "success" },
-};
+import { useReviewStatusMap, useReviewStatusColor } from "./useOptions";
 
 export default function ManagementReviewListPage() {
+  const { t } = useTranslation("managementReview");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { canEdit } = usePermission();
   const { selected: selectedPL } = useProductLineStore();
+  const statusMap = useReviewStatusMap();
+  const statusColor = useReviewStatusColor();
 
   const [data, setData] = useState<ManagementReview[]>([]);
   const [total, setTotal] = useState(0);
@@ -55,47 +54,46 @@ export default function ManagementReviewListPage() {
   }, [page, statusFilter, selectedPL]);
 
   const columns = [
-    { title: "编号", dataIndex: "doc_no", key: "doc_no", width: 140 },
-    { title: "主题", dataIndex: "title", key: "title" },
-    { title: "评审日期", dataIndex: "review_date", key: "review_date", width: 120 },
+    { title: t("table.docNo", "编号"), dataIndex: "doc_no", key: "doc_no", width: 140 },
+    { title: t("table.title", "主题"), dataIndex: "title", key: "title" },
+    { title: t("table.reviewDate", "评审日期"), dataIndex: "review_date", key: "review_date", width: 120 },
     {
-      title: "状态", dataIndex: "status", key: "status", width: 120,
+      title: t("table.status", "状态"), dataIndex: "status", key: "status", width: 120,
       render: (s: string) => {
-        const info = statusMap[s] || { variant: "info", label: s };
-        return <StatusBadge status={info.variant}>{info.label}</StatusBadge>;
+        return <StatusBadge status={statusColor[s] || "info"}>{statusMap[s] || s}</StatusBadge>;
       },
     },
     {
-      title: "产品线", dataIndex: "product_line_code", key: "product_line_code", width: 120,
-      render: (v: string | null) => v || "全厂",
+      title: t("table.productLine", "产品线"), dataIndex: "product_line_code", key: "product_line_code", width: 120,
+      render: (v: string | null) => v || t("descriptions.allPlants", "全厂"),
     },
     {
-      title: "操作", key: "action", width: 80,
+      title: tc("table.operations", "操作"), key: "action", width: 80,
       render: (_: unknown, record: ManagementReview) => (
-        <Button type="link" onClick={() => navigate(`/management-reviews/${record.review_id}`)}>查看</Button>
+        <Button type="link" onClick={() => navigate(`/management-reviews/${record.review_id}`)}>{tc("actions.view", "查看")}</Button>
       ),
     },
   ];
 
   return (
     <PageShell
-      title="管理评审"
-      subtitle="管理层质量评审计划"
+      title={t("pageTitle.list", "管理评审")}
+      subtitle={t("pageSubtitle.list", "管理层质量评审计划")}
       actions={
         canEdit('management_review') && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/management-reviews/new")}>新建评审</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/management-reviews/new")}>{t("actions.newReview", "新建评审")}</Button>
         )
       }
     >
-      <DataCard title="评审清单">
+      <DataCard title={t("card.reviewList", "评审清单")}>
         <Space style={{ marginBottom: 16 }}>
           <Select
-            allowClear placeholder="状态筛选" style={{ width: 150 }}
+            allowClear placeholder={t("filter.statusPlaceholder", "状态筛选")} style={{ width: 150 }}
             value={statusFilter}
             onChange={(v) => { setStatusFilter(v); setPage(1); }}
           >
             {Object.entries(statusMap).map(([k, v]) => (
-              <Select.Option key={k} value={k}>{v.label}</Select.Option>
+              <Select.Option key={k} value={k}>{v}</Select.Option>
             ))}
           </Select>
         </Space>

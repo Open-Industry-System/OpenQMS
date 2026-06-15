@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Card,
   Button,
+  Tag,
   Space,
   Form,
   Input,
@@ -28,6 +29,7 @@ import {
   EditOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import type { Supplier, SupplierCertification, SupplierEvaluation, AuditPlan } from "../../types";
@@ -58,26 +60,22 @@ const { Option } = Select;
 const { TextArea } = Input;
 const { Text } = Typography;
 
-const STATUS_MAP: Record<string, { label: string }> = {
-  pending_review: { label: "待审核" },
-  audit_required: { label: "需审核" },
-  approved: { label: "已批准" },
-  rejected: { label: "已拒绝" },
-  suspended: { label: "已暂停" },
-};
+function useStatusMap(): Record<string, { label: string; color: string }> {
+  const { t } = useTranslation("supplier");
+  return {
+    pending_review: { label: t("status.pending_review"), color: "default" },
+    audit_required: { label: t("status.audit_required"), color: "processing" },
+    approved: { label: t("status.approved"), color: "success" },
+    rejected: { label: t("status.rejected"), color: "error" },
+    suspended: { label: t("status.suspended"), color: "warning" },
+  };
+}
 
-const statusVariant = (status: string): string => {
-  if (status === "approved") return "success";
-  if (status === "rejected") return "error";
-  if (status === "suspended") return "warning";
-  return "info";
-};
-
-const gradeVariant = (g: string): string => {
-  if (g === "A") return "success";
-  if (g === "B") return "info";
-  if (g === "C") return "warning";
-  return "error";
+const GRADE_COLORS: Record<string, string> = {
+  A: "green",
+  B: "blue",
+  C: "orange",
+  D: "red",
 };
 
 function statusToStep(status: string): number {
@@ -110,6 +108,9 @@ export default function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user: _user } = useAuthStore();
+  const { t } = useTranslation("supplier");
+  const { t: tc } = useTranslation("common");
+  const STATUS_MAP = useStatusMap();
 
   const { canEdit, canApprove } = usePermission();
 
@@ -154,7 +155,7 @@ export default function SupplierDetailPage() {
       const s = await getSupplier(id);
       setSupplier(s);
     } catch {
-      message.error("加载供应商信息失败");
+      message.error(t("messages.loadSupplierFailed"));
     } finally {
       setLoading(false);
     }
@@ -168,7 +169,7 @@ export default function SupplierDetailPage() {
       const data = await listCertifications(id);
       setCerts(data);
     } catch {
-      message.error("加载证书失败");
+      message.error(t("messages.loadCertificatesFailed"));
     } finally {
       setCertsLoading(false);
     }
@@ -182,7 +183,7 @@ export default function SupplierDetailPage() {
       const data = await listEvaluations(id);
       setEvals(data);
     } catch {
-      message.error("加载绩效评价失败");
+      message.error(t("messages.loadEvaluationsFailed"));
     } finally {
       setEvalsLoading(false);
     }
@@ -235,18 +236,18 @@ export default function SupplierDetailPage() {
       setSaving(true);
       if (isNew) {
         const created = await createSupplier(values);
-        message.success("供应商创建成功");
+        message.success(t("messages.createSuccess"));
         navigate(`/suppliers/${created.supplier_id}`, { replace: true });
       } else {
         const updated = await updateSupplier(id!, values);
         setSupplier(updated);
         setEditing(false);
-        message.success("保存成功");
+        message.success(t("messages.saveSuccess"));
       }
     } catch (err: unknown) {
       if (err && typeof err === "object" && "errorFields" in err) return;
       console.error(err);
-      message.error(isNew ? "创建失败" : "保存失败");
+      message.error(isNew ? t("messages.createFailed") : t("messages.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -290,17 +291,17 @@ export default function SupplierDetailPage() {
       };
       if (certEditing) {
         await updateCertification(id, certEditing.cert_id, payload);
-        message.success("证书已更新");
+        message.success(t("messages.certUpdateSuccess"));
       } else {
         await createCertification(id, payload);
-        message.success("证书已添加");
+        message.success(t("messages.certAddSuccess"));
       }
       setCertModalOpen(false);
       await loadCerts();
     } catch (err: unknown) {
       if (err && typeof err === "object" && "errorFields" in err) return; // Ant Design form validation error
       console.error(err);
-      message.error("保存证书失败");
+      message.error(t("messages.certSaveFailed"));
     } finally {
       setCertSaving(false);
     }
@@ -310,10 +311,10 @@ export default function SupplierDetailPage() {
     if (!id) return;
     try {
       await deleteCertification(id, certId);
-      message.success("证书已删除");
+      message.success(t("messages.certDeleteSuccess"));
       await loadCerts();
     } catch {
-      message.error("删除证书失败");
+      message.error(t("messages.certDeleteFailed"));
     }
   };
 
@@ -334,7 +335,7 @@ export default function SupplierDetailPage() {
       setEvalSaving(true);
       const payload = { ...values };
       await createEvaluation(id, payload);
-      message.success("评价已提交");
+      message.success(t("messages.evalSubmitSuccess"));
       evalForm.resetFields();
       evalForm.setFieldsValue({ quality_score: 80, delivery_score: 80, service_score: 80 });
       setEvalPreview(calcBaseScore(80, 80, 80));
@@ -342,7 +343,7 @@ export default function SupplierDetailPage() {
     } catch (err: unknown) {
       if (err && typeof err === "object" && "errorFields" in err) return; // Ant Design form validation error
       console.error(err);
-      message.error("提交评价失败");
+      message.error(t("messages.evalSubmitFailed"));
     } finally {
       setEvalSaving(false);
     }
@@ -353,10 +354,10 @@ export default function SupplierDetailPage() {
     setTransitioning(true);
     try {
       await approveSupplier(id);
-      message.success("已批准准入");
+      message.success(t("messages.approveSuccess"));
       loadSupplier();
     } catch {
-      message.error("操作失败");
+      message.error(t("messages.operationFailed"));
     } finally {
       setTransitioning(false);
     }
@@ -367,12 +368,12 @@ export default function SupplierDetailPage() {
     setTransitioning(true);
     try {
       await rejectSupplier(id, rejectReason);
-      message.success("已拒绝");
+      message.success(t("messages.rejectSuccess"));
       setRejectModalVisible(false);
       setRejectReason("");
       loadSupplier();
     } catch {
-      message.error("操作失败");
+      message.error(t("messages.operationFailed"));
     } finally {
       setTransitioning(false);
     }
@@ -383,10 +384,10 @@ export default function SupplierDetailPage() {
     setTransitioning(true);
     try {
       await confirmApproved(id);
-      message.success("已确认批准");
+      message.success(t("messages.confirmApproveSuccess"));
       loadSupplier();
     } catch {
-      message.error("操作失败");
+      message.error(t("messages.operationFailed"));
     } finally {
       setTransitioning(false);
     }
@@ -397,12 +398,12 @@ export default function SupplierDetailPage() {
     setTransitioning(true);
     try {
       await suspendSupplier(id, suspendReason);
-      message.success("已暂停合作");
+      message.success(t("messages.suspendSuccess"));
       setSuspendModalVisible(false);
       setSuspendReason("");
       loadSupplier();
     } catch {
-      message.error("操作失败");
+      message.error(t("messages.operationFailed"));
     } finally {
       setTransitioning(false);
     }
@@ -413,10 +414,10 @@ export default function SupplierDetailPage() {
     setTransitioning(true);
     try {
       await reinstateSupplier(id);
-      message.success("已恢复合作");
+      message.success(t("messages.resumeSuccess"));
       loadSupplier();
     } catch {
-      message.error("操作失败");
+      message.error(t("messages.operationFailed"));
     } finally {
       setTransitioning(false);
     }
@@ -431,26 +432,26 @@ export default function SupplierDetailPage() {
   }
 
   if (!supplier && !isNew) {
-    return <div style={{ padding: 24 }}>供应商不存在</div>;
+    return <div style={{ padding: 24 }}>{t("messages.supplierNotFound")}</div>;
   }
 
   const statusInfo = supplier
     ? (STATUS_MAP[supplier.status] ?? { label: supplier.status, color: "default" })
-    : { label: "新建", color: "processing" };
+    : { label: t("messages.new"), color: "processing" };
 
   // Cert table columns
   const certColumns = [
-    { title: "证书类型", dataIndex: "cert_type", key: "cert_type" },
-    { title: "证书编号", dataIndex: "cert_no", key: "cert_no" },
-    { title: "颁发机构", dataIndex: "issued_by", key: "issued_by" },
+    { title: t("table.certType"), dataIndex: "cert_type", key: "cert_type" },
+    { title: t("table.certNo"), dataIndex: "cert_no", key: "cert_no" },
+    { title: t("table.issuedBy"), dataIndex: "issued_by", key: "issued_by" },
     {
-      title: "颁发日期",
+      title: t("table.issueDate"),
       dataIndex: "issue_date",
       key: "issue_date",
       render: (v: string | null) => (v ? dayjs(v).format("YYYY-MM-DD") : "-"),
     },
     {
-      title: "到期日期",
+      title: t("table.expiryDate"),
       dataIndex: "expiry_date",
       key: "expiry_date",
       render: (v: string | null) => {
@@ -461,9 +462,9 @@ export default function SupplierDetailPage() {
           <span style={isExpiringSoon ? { color: "red", fontWeight: 500 } : {}}>
             {dayjs(v).format("YYYY-MM-DD")}
             {isExpiringSoon && daysLeft >= 0 && (
-              <span style={{ marginLeft: 4, fontSize: 12 }}>({daysLeft}天)</span>
+              <span style={{ marginLeft: 4, fontSize: 12 }}>({t("messages.daysLeft", { days: daysLeft })})</span>
             )}
-            {daysLeft < 0 && <span style={{ marginLeft: 4, fontSize: 12 }}>(已过期)</span>}
+            {daysLeft < 0 && <span style={{ marginLeft: 4, fontSize: 12 }}>({t("messages.expired")})</span>}
           </span>
         );
       },
@@ -471,7 +472,7 @@ export default function SupplierDetailPage() {
     ...(canEdit('supplier')
       ? [
           {
-            title: "操作",
+            title: t("table.operations"),
             key: "action",
             render: (_: unknown, record: SupplierCertification) => (
               <Space>
@@ -480,14 +481,14 @@ export default function SupplierDetailPage() {
                   icon={<EditOutlined />}
                   onClick={() => openCertModal(record)}
                 >
-                  编辑
+                  {t("table.edit")}
                 </Button>
                 <Popconfirm
-                  title="确认删除此证书？"
+                  title={t("messages.confirmDeleteCert")}
                   onConfirm={() => handleDeleteCert(record.cert_id)}
                 >
                   <Button size="small" danger icon={<DeleteOutlined />}>
-                    删除
+                    {t("table.delete")}
                   </Button>
                 </Popconfirm>
               </Space>
@@ -500,7 +501,7 @@ export default function SupplierDetailPage() {
   const tabItems = [
     {
       key: "info",
-      label: "基本信息",
+      label: t("tabs.basicInfo"),
       children: (
         <Card
           extra={
@@ -508,14 +509,14 @@ export default function SupplierDetailPage() {
               <Space>
                 {editing ? (
                   <>
-                    <Button onClick={handleCancelEdit}>取消</Button>
+                    <Button onClick={handleCancelEdit}>{tc("actions.cancel")}</Button>
                     <Button type="primary" loading={saving} onClick={handleSaveInfo}>
-                      保存
+                      {tc("actions.save")}
                     </Button>
                   </>
                 ) : (
                   <Button icon={<EditOutlined />} onClick={() => setEditing(true)}>
-                    编辑
+                    {t("table.edit")}
                   </Button>
                 )}
               </Space>
@@ -533,7 +534,7 @@ export default function SupplierDetailPage() {
                 color: "red",
               }}
             >
-              <strong>拒绝原因：</strong>
+              <strong>{t("messages.rejectReason")}：</strong>
               {supplier.reject_reason}
             </div>
           )}
@@ -541,42 +542,42 @@ export default function SupplierDetailPage() {
             <Form form={infoForm} layout="vertical">
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item label="供应商名称" name="name" rules={[{ required: true, message: "请输入名称" }]}>
+                  <Form.Item label={t("form.supplierName")} name="name" rules={[{ required: true, message: t("form.enterName") }]}>
                     <Input />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item label="简称" name="short_name" rules={[{ required: true, message: "请输入简称" }]}>
+                  <Form.Item label={t("form.shortName")} name="short_name" rules={[{ required: true, message: t("form.enterShortName") }]}>
                     <Input />
                   </Form.Item>
                 </Col>
               </Row>
               <Row gutter={16}>
                 <Col span={8}>
-                  <Form.Item label="联系人" name="contact_name">
+                  <Form.Item label={t("form.contactName")} name="contact_name">
                     <Input />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="联系电话" name="contact_phone">
+                  <Form.Item label={t("form.contactPhone")} name="contact_phone">
                     <Input />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
-                  <Form.Item label="联系邮箱" name="contact_email">
+                  <Form.Item label={t("form.contactEmail")} name="contact_email">
                     <Input />
                   </Form.Item>
                 </Col>
               </Row>
-              <Form.Item label="地址" name="address">
+              <Form.Item label={t("form.address")} name="address">
                 <Input />
               </Form.Item>
-              <Form.Item label="产品范围" name="product_scope">
+              <Form.Item label={t("form.productScope")} name="product_scope">
                 <TextArea rows={3} />
               </Form.Item>
               {supplier?.status === "audit_required" && (
-                <Form.Item label="审核计划" name="audit_plan_id">
-                  <Select allowClear placeholder="选择审核计划">
+                <Form.Item label={t("form.auditPlan")} name="audit_plan_id">
+                  <Select allowClear placeholder={t("form.selectAuditPlan")}>
                     {auditPlans.map((p) => (
                       <Option key={p.audit_id} value={p.audit_id}>
                         {p.plan_no}
@@ -589,52 +590,52 @@ export default function SupplierDetailPage() {
           ) : supplier && (
             <Row gutter={[16, 8]}>
               <Col span={12}>
-                <Text type="secondary">供应商编号</Text>
+                <Text type="secondary">{t("detail.supplierNo")}</Text>
                 <div>{supplier.supplier_no}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">供应商名称</Text>
+                <Text type="secondary">{t("detail.supplierName")}</Text>
                 <div>{supplier.name}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">简称</Text>
+                <Text type="secondary">{t("detail.shortName")}</Text>
                 <div>{supplier.short_name}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">联系人</Text>
+                <Text type="secondary">{t("detail.contactName")}</Text>
                 <div>{supplier.contact_name ?? "-"}</div>
               </Col>
               <Col span={8}>
-                <Text type="secondary">联系电话</Text>
+                <Text type="secondary">{t("detail.contactPhone")}</Text>
                 <div>{supplier.contact_phone ?? "-"}</div>
               </Col>
               <Col span={8}>
-                <Text type="secondary">联系邮箱</Text>
+                <Text type="secondary">{t("detail.contactEmail")}</Text>
                 <div>{supplier.contact_email ?? "-"}</div>
               </Col>
               <Col span={24}>
-                <Text type="secondary">地址</Text>
+                <Text type="secondary">{t("detail.address")}</Text>
                 <div>{supplier.address ?? "-"}</div>
               </Col>
               <Col span={24}>
-                <Text type="secondary">产品范围</Text>
+                <Text type="secondary">{t("detail.productScope")}</Text>
                 <div style={{ whiteSpace: "pre-wrap" }}>{supplier.product_scope ?? "-"}</div>
               </Col>
               {supplier?.status === "audit_required" && (
                 <Col span={24}>
-                  <Text type="secondary">审核计划</Text>
+                  <Text type="secondary">{t("detail.auditPlan")}</Text>
                   <div>
                     {auditPlans.find((p) => p.audit_id === supplier.audit_plan_id)?.plan_no ??
-                      (supplier.audit_plan_id ? supplier.audit_plan_id : "未指定")}
+                      (supplier.audit_plan_id ? supplier.audit_plan_id : t("messages.notSpecified"))}
                   </div>
                 </Col>
               )}
               <Col span={12}>
-                <Text type="secondary">创建时间</Text>
+                <Text type="secondary">{t("detail.createdAt")}</Text>
                 <div>{dayjs(supplier.created_at).format("YYYY-MM-DD HH:mm")}</div>
               </Col>
               <Col span={12}>
-                <Text type="secondary">更新时间</Text>
+                <Text type="secondary">{t("detail.updatedAt")}</Text>
                 <div>{dayjs(supplier.updated_at).format("YYYY-MM-DD HH:mm")}</div>
               </Col>
             </Row>
@@ -644,7 +645,7 @@ export default function SupplierDetailPage() {
     },
     {
       key: "certs",
-      label: "资质证书",
+      label: t("tabs.certificates"),
       children: (
         <Card
           extra={
@@ -654,7 +655,7 @@ export default function SupplierDetailPage() {
                 icon={<PlusOutlined />}
                 onClick={() => openCertModal()}
               >
-                添加证书
+                {t("modal.addCert")}
               </Button>
             )
           }
@@ -681,18 +682,18 @@ export default function SupplierDetailPage() {
     },
     {
       key: "evals",
-      label: "绩效评价",
+      label: t("tabs.evaluations"),
       children: (
         <Row gutter={24}>
           {/* Left: history list */}
           <Col span={12}>
-            <Card title="历史评价记录" size="small">
+            <Card title={t("detail.evalHistory")} size="small">
               {evalsLoading ? (
                 <div style={{ textAlign: "center", padding: 40 }}>
                   <Spin />
                 </div>
               ) : evals.length === 0 ? (
-                <div style={{ textAlign: "center", color: "#999", padding: 40 }}>暂无评价记录</div>
+                <div style={{ textAlign: "center", color: "#999", padding: 40 }}>{t("messages.noEvalRecords")}</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   {evals.map((ev) => (
@@ -702,49 +703,49 @@ export default function SupplierDetailPage() {
                       title={
                         <Space>
                           <span>{ev.eval_period}</span>
-                          <StatusBadge status={gradeVariant(ev.grade)}>{ev.grade} 级</StatusBadge>
+                          <Tag color={GRADE_COLORS[ev.grade]}>{t("detail.grade", { grade: ev.grade })}</Tag>
                           <span style={{ fontWeight: 400, color: "#666" }}>
-                            综合得分：{ev.total_score}
+                            {t("detail.totalScore", { score: ev.total_score })}
                           </span>
-                          <StatusBadge status="info">{ev.eval_type === "quarterly" ? "季度评价" : "年度评价"}</StatusBadge>
+                          <Tag>{ev.eval_type === "quarterly" ? t("form.quarterly") : t("form.annual")}</Tag>
                         </Space>
                       }
                     >
                       <Row gutter={16}>
                         <Col span={8}>
-                          <Text type="secondary">质量得分</Text>
+                          <Text type="secondary">{t("detail.qualityScore")}</Text>
                           <div>{ev.quality_score}</div>
                         </Col>
                         <Col span={8}>
-                          <Text type="secondary">交付得分</Text>
+                          <Text type="secondary">{t("detail.deliveryScore")}</Text>
                           <div>{ev.delivery_score}</div>
                         </Col>
                         <Col span={8}>
-                          <Text type="secondary">服务得分</Text>
+                          <Text type="secondary">{t("detail.serviceScore")}</Text>
                           <div>{ev.service_score}</div>
                         </Col>
                         <Col span={8}>
-                          <Text type="secondary">评价时间</Text>
+                          <Text type="secondary">{t("detail.evalTime")}</Text>
                           <div>{dayjs(ev.created_at).format("YYYY-MM-DD")}</div>
                         </Col>
                         {(ev.capa_count > 0 || ev.finding_count > 0 || ev.premium_freight_count > 0 || ev.customer_disruption_count > 0) && (
                           <>
                             <Col span={8}>
-                              <Text type="secondary">CAPA数量</Text>
+                              <Text type="secondary">{t("detail.capaCount")}</Text>
                               <div>{ev.capa_count}</div>
                             </Col>
                             <Col span={8}>
-                              <Text type="secondary">发现问题数</Text>
+                              <Text type="secondary">{t("detail.findingCount")}</Text>
                               <div>{ev.finding_count}</div>
                             </Col>
                             {(ev.premium_freight_count > 0 || ev.customer_disruption_count > 0) && (
                               <>
                                 <Col span={8}>
-                                  <Text type="secondary">超额运费</Text>
+                                  <Text type="secondary">{t("detail.premiumFreight")}</Text>
                                   <div>{ev.premium_freight_count}</div>
                                 </Col>
                                 <Col span={8}>
-                                  <Text type="secondary">客户干扰</Text>
+                                  <Text type="secondary">{t("detail.customerDisruption")}</Text>
                                   <div>{ev.customer_disruption_count}</div>
                                 </Col>
                               </>
@@ -753,7 +754,7 @@ export default function SupplierDetailPage() {
                         )}
                         {ev.notes && (
                           <Col span={24}>
-                            <Text type="secondary">备注</Text>
+                            <Text type="secondary">{t("detail.remarks")}</Text>
                             <div>{ev.notes}</div>
                           </Col>
                         )}
@@ -768,7 +769,7 @@ export default function SupplierDetailPage() {
           {/* Right: inline create form */}
           {canEdit('supplier') && (
             <Col span={12}>
-              <Card title="新建评价" size="small">
+              <Card title={t("detail.newEvaluation")} size="small">
                 <Form
                   form={evalForm}
                   layout="vertical"
@@ -782,63 +783,63 @@ export default function SupplierDetailPage() {
                   <Row gutter={16}>
                     <Col span={12}>
                       <Form.Item
-                        label="评价周期"
+                        label={t("form.evalPeriod")}
                         name="eval_period"
-                        rules={[{ required: true, message: "请输入评价周期" }]}
+                        rules={[{ required: true, message: t("form.enterEvalPeriod") }]}
                       >
-                        <Input placeholder="如: 2026-Q1" />
+                        <Input placeholder={t("form.evalPeriodPlaceholder")} />
                       </Form.Item>
                     </Col>
                     <Col span={12}>
                       <Form.Item
-                        label="评价类型"
+                        label={t("form.evalType")}
                         name="eval_type"
-                        rules={[{ required: true, message: "请选择评价类型" }]}
+                        rules={[{ required: true, message: t("form.selectEvalType") }]}
                       >
                         <Select>
-                          <Option value="quarterly">季度评价</Option>
-                          <Option value="annual">年度评价</Option>
+                          <Option value="quarterly">{t("form.quarterly")}</Option>
+                          <Option value="annual">{t("form.annual")}</Option>
                         </Select>
                       </Form.Item>
                     </Col>
                   </Row>
 
-                  <Form.Item label={`质量得分 (${evalForm.getFieldValue("quality_score") ?? 80})`} name="quality_score">
+                  <Form.Item label={t("form.qualityScore", { score: evalForm.getFieldValue("quality_score") ?? 80 })} name="quality_score">
                     <Slider min={0} max={100} />
                   </Form.Item>
-                  <Form.Item label={`交付得分 (${evalForm.getFieldValue("delivery_score") ?? 80})`} name="delivery_score">
+                  <Form.Item label={t("form.deliveryScore", { score: evalForm.getFieldValue("delivery_score") ?? 80 })} name="delivery_score">
                     <Slider min={0} max={100} />
                   </Form.Item>
-                  <Form.Item label={`服务得分 (${evalForm.getFieldValue("service_score") ?? 80})`} name="service_score">
+                  <Form.Item label={t("form.serviceScore", { score: evalForm.getFieldValue("service_score") ?? 80 })} name="service_score">
                     <Slider min={0} max={100} />
                   </Form.Item>
 
                   <Row gutter={16}>
                     <Col span={12}>
-                      <Form.Item label="CAPA数量" name="capa_count" initialValue={0}>
+                      <Form.Item label={t("form.capaCount")} name="capa_count" initialValue={0}>
                         <InputNumber min={0} style={{ width: "100%" }} />
                       </Form.Item>
                     </Col>
                     <Col span={12}>
-                      <Form.Item label="发现问题数" name="finding_count" initialValue={0}>
+                      <Form.Item label={t("form.findingCount")} name="finding_count" initialValue={0}>
                         <InputNumber min={0} style={{ width: "100%" }} />
                       </Form.Item>
                     </Col>
                   </Row>
                   <Row gutter={16}>
                     <Col span={12}>
-                      <Form.Item label="超额运费次数" name="premium_freight_count" initialValue={0}>
+                      <Form.Item label={t("form.premiumFreightCount")} name="premium_freight_count" initialValue={0}>
                         <InputNumber min={0} style={{ width: "100%" }} />
                       </Form.Item>
                     </Col>
                     <Col span={12}>
-                      <Form.Item label="客户干扰次数" name="customer_disruption_count" initialValue={0}>
+                      <Form.Item label={t("form.customerDisruptionCount")} name="customer_disruption_count" initialValue={0}>
                         <InputNumber min={0} style={{ width: "100%" }} />
                       </Form.Item>
                     </Col>
                   </Row>
 
-                  <Form.Item label="备注" name="notes">
+                  <Form.Item label={t("form.notes")} name="notes">
                     <TextArea rows={2} />
                   </Form.Item>
 
@@ -852,7 +853,7 @@ export default function SupplierDetailPage() {
                         marginBottom: 12,
                       }}
                     >
-                      预计得分（不含系统扣分）：<strong>{evalPreview}</strong>
+                      {t("messages.estimatedScore")}<strong>{evalPreview}</strong>
                     </div>
                   )}
 
@@ -863,7 +864,7 @@ export default function SupplierDetailPage() {
                       onClick={handleEvalSave}
                       block
                     >
-                      提交评价
+                      {t("detail.submitEvaluation")}
                     </Button>
                   </Form.Item>
                 </Form>
@@ -875,11 +876,11 @@ export default function SupplierDetailPage() {
     },
     {
       key: "complaints",
-      label: `客诉 (${relatedData.complaints.length})`,
+      label: t("tabs.complaints", { count: relatedData.complaints.length }),
       children: (
         <List
           dataSource={relatedData.complaints}
-          locale={{ emptyText: "无关联客诉" }}
+          locale={{ emptyText: t("messages.noRelatedComplaints") }}
           renderItem={(item) => (
             <List.Item
               style={{ cursor: "pointer" }}
@@ -894,11 +895,11 @@ export default function SupplierDetailPage() {
     },
     {
       key: "iqc",
-      label: `IQC 不合格 (${relatedData.iqc_rejects.length})`,
+      label: t("tabs.iqcRejects", { count: relatedData.iqc_rejects.length }),
       children: (
         <List
           dataSource={relatedData.iqc_rejects}
-          locale={{ emptyText: "无 IQC 不合格记录" }}
+          locale={{ emptyText: t("messages.noIqcRejectRecords") }}
           renderItem={(item) => (
             <List.Item
               style={{ cursor: "pointer" }}
@@ -913,18 +914,18 @@ export default function SupplierDetailPage() {
     },
     {
       key: "scars",
-      label: `SCAR (${relatedData.scars.length})`,
+      label: t("tabs.scars", { count: relatedData.scars.length }),
       children: (
         <List
           dataSource={relatedData.scars}
-          locale={{ emptyText: "无 SCAR 记录" }}
+          locale={{ emptyText: t("messages.noScarRecords") }}
           renderItem={(item) => (
             <List.Item
               style={{ cursor: "pointer" }}
               onClick={() => navigate(`/scars/${item.id}`)}
             >
               <List.Item.Meta title={item.no} />
-              <StatusBadge status={statusVariant(item.status)}>{item.status}</StatusBadge>
+              <StatusBadge status={item.status}>{item.status}</StatusBadge>
             </List.Item>
           )}
         />
@@ -935,10 +936,10 @@ export default function SupplierDetailPage() {
   return (
     <PageShell
       title={
-        isNew ? "新建供应商" : (
+        isNew ? t("messages.newSupplier") : (
           <Space size={12}>
             {supplier!.name}
-            <StatusBadge status={statusVariant(supplier!.status)}>{statusInfo.label}</StatusBadge>
+            <StatusBadge status={statusInfo.color}>{statusInfo.label}</StatusBadge>
           </Space>
         )
       }
@@ -946,30 +947,30 @@ export default function SupplierDetailPage() {
       actions={
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/suppliers")}>
-            返回
+            {t("messages.back")}
           </Button>
           {!isNew && supplier && canApprove('supplier') && (
             <>
               {supplier.status === "pending_review" && (
                 <>
-                  <Button type="primary" loading={transitioning} onClick={handleApprove}>批准准入</Button>
-                  <Button danger loading={transitioning} onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}>拒绝</Button>
+                  <Button type="primary" loading={transitioning} onClick={handleApprove}>{t("messages.approve")}</Button>
+                  <Button danger loading={transitioning} onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}>{t("messages.reject")}</Button>
                 </>
               )}
               {supplier.status === "audit_required" && (
                 <>
-                  <Popconfirm title="确认批准该供应商？" onConfirm={handleConfirmApproved} okText="确认" cancelText="取消">
-                    <Button type="primary" loading={transitioning}>确认批准</Button>
+                  <Popconfirm title={t("messages.confirmApproveSupplier")} onConfirm={handleConfirmApproved} okText={tc("actions.confirm")} cancelText={tc("actions.cancel")}>
+                    <Button type="primary" loading={transitioning}>{t("messages.confirmApprove")}</Button>
                   </Popconfirm>
-                  <Button danger loading={transitioning} onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}>拒绝</Button>
+                  <Button danger loading={transitioning} onClick={() => { setRejectReason(""); setRejectModalVisible(true); }}>{t("messages.reject")}</Button>
                 </>
               )}
               {supplier.status === "approved" && (
-                <Button danger loading={transitioning} onClick={() => { setSuspendReason(""); setSuspendModalVisible(true); }}>暂停合作</Button>
+                <Button danger loading={transitioning} onClick={() => { setSuspendReason(""); setSuspendModalVisible(true); }}>{t("messages.suspend")}</Button>
               )}
               {supplier.status === "suspended" && (
-                <Popconfirm title="确认恢复与该供应商的合作？" onConfirm={handleReinstate} okText="确认" cancelText="取消">
-                  <Button type="primary" loading={transitioning}>恢复合作</Button>
+                <Popconfirm title={t("messages.confirmResumeSupplier")} onConfirm={handleReinstate} okText={tc("actions.confirm")} cancelText={tc("actions.cancel")}>
+                  <Button type="primary" loading={transitioning}>{t("messages.resume")}</Button>
                 </Popconfirm>
               )}
             </>
@@ -987,9 +988,9 @@ export default function SupplierDetailPage() {
                 : "process"
             }
             items={[
-              { title: "待审核" },
-              { title: "产品审核" },
-              { title: supplier!.status === "rejected" ? "已拒绝" : "已批准" },
+              { title: t("messages.pending") },
+              { title: t("messages.productAudit") },
+              { title: supplier!.status === "rejected" ? t("messages.rejected") : t("messages.approved") },
             ]}
           />
         </Card>
@@ -1003,7 +1004,7 @@ export default function SupplierDetailPage() {
       )}
 
       {/* Tabs */}
-      <DataCard title="供应商详情" noPadding>
+      <DataCard title={t("tabs.supplierDetail")} noPadding>
         <Tabs items={isNew ? tabItems.filter(t => t.key === "info") : tabItems} />
       </DataCard>
 
@@ -1014,41 +1015,41 @@ export default function SupplierDetailPage() {
         </div>
       )}
       <Modal
-        title={certEditing ? "编辑证书" : "添加证书"}
+        title={certEditing ? t("modal.editCert") : t("modal.addCert")}
         open={certModalOpen}
         onCancel={() => setCertModalOpen(false)}
         onOk={handleCertSave}
         confirmLoading={certSaving}
-        okText="保存"
-        cancelText="取消"
+        okText={tc("actions.save")}
+        cancelText={tc("actions.cancel")}
         destroyOnHidden
       >
         <Form form={certForm} layout="vertical">
           <Form.Item
-            label="证书类型"
+            label={t("form.certType")}
             name="cert_type"
-            rules={[{ required: true, message: "请输入证书类型" }]}
+            rules={[{ required: true, message: t("form.enterCertType") }]}
           >
-            <Input placeholder="如: ISO 9001, IATF 16949" />
+            <Input placeholder={t("form.certTypePlaceholder")} />
           </Form.Item>
           <Form.Item
-            label="证书编号"
+            label={t("form.certNo")}
             name="cert_no"
-            rules={[{ required: true, message: "请输入证书编号" }]}
+            rules={[{ required: true, message: t("form.enterCertNo") }]}
           >
             <Input />
           </Form.Item>
-          <Form.Item label="颁发机构" name="issued_by">
+          <Form.Item label={t("form.issuedBy")} name="issued_by">
             <Input />
           </Form.Item>
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item label="颁发日期" name="issue_date">
+              <Form.Item label={t("form.issueDate")} name="issue_date">
                 <DatePicker style={{ width: "100%" }} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="到期日期" name="expiry_date">
+              <Form.Item label={t("form.expiryDate")} name="expiry_date">
                 <DatePicker style={{ width: "100%" }} />
               </Form.Item>
             </Col>
@@ -1058,18 +1059,18 @@ export default function SupplierDetailPage() {
 
       {/* Reject Modal */}
       <Modal
-        title="拒绝原因"
+        title={t("messages.rejectReason")}
         open={rejectModalVisible}
         onCancel={() => setRejectModalVisible(false)}
         onOk={handleReject}
         confirmLoading={transitioning}
-        okText="确认拒绝"
-        cancelText="取消"
+        okText={t("messages.confirmReject")}
+        cancelText={tc("actions.cancel")}
         okButtonProps={{ danger: true }}
       >
         <TextArea
           rows={4}
-          placeholder="请输入拒绝原因"
+          placeholder={t("messages.enterRejectReason")}
           value={rejectReason}
           onChange={(e) => setRejectReason(e.target.value)}
         />
@@ -1077,18 +1078,18 @@ export default function SupplierDetailPage() {
 
       {/* Suspend Modal */}
       <Modal
-        title="暂停合作原因"
+        title={t("messages.suspendReason")}
         open={suspendModalVisible}
         onCancel={() => setSuspendModalVisible(false)}
         onOk={handleSuspend}
         confirmLoading={transitioning}
-        okText="确认暂停"
-        cancelText="取消"
+        okText={t("messages.confirmSuspend")}
+        cancelText={tc("actions.cancel")}
         okButtonProps={{ danger: true }}
       >
         <TextArea
           rows={4}
-          placeholder="请输入暂停原因"
+          placeholder={t("messages.enterSuspendReason")}
           value={suspendReason}
           onChange={(e) => setSuspendReason(e.target.value)}
         />

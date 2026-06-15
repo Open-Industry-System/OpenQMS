@@ -1,0 +1,109 @@
+{
+  "pageTitle": {
+    "ppapList": "PPAP Submissions",
+    "newPPAP": "New PPAP"
+  },
+  "tab": {
+    "all": "All",
+    "draft": "Draft",
+    "underReview": "Under Review",
+    "approved": "Approved",
+    "rejected": "Rejected"
+  },
+  "status": {
+    "draft": "Draft",
+    "underReview": "Under Review",
+    "approved": "Approved",
+    "rejected": "Rejected"
+  },
+  "elementStatus": {
+    "pending": "Pending",
+    "inReview": "In Review",
+    "approved": "Approved",
+    "notApplicable": "Not Applicable"
+  },
+  "kpi": {
+    "total": "Total PPAP",
+    "pending": "Pending",
+    "approved": "Approved",
+    "rejected": "Rejected"
+  },
+  "column": {
+    "ppapNo": "PPAP No.",
+    "supplier": "Supplier",
+    "partNo": "Part No.",
+    "partName": "Part Name",
+    "submissionLevel": "Submission Level",
+    "status": "Status",
+    "revision": "Revision",
+    "createdAt": "Created At",
+    "action": "Action"
+  },
+  "elementColumn": {
+    "no": "No.",
+    "elementName": "Element Name",
+    "required": "Required",
+    "status": "Status",
+    "reviewer": "Reviewer",
+    "reviewTime": "Reviewed At",
+    "file": "File",
+    "notes": "Notes",
+    "action": "Action"
+  },
+  "form": {
+    "supplier": "Supplier",
+    "partNo": "Part No.",
+    "partName": "Part Name",
+    "submissionLevel": "Submission Level",
+    "customerName": "Customer Name",
+    "productLine": "Product Line"
+  },
+  "placeholder": {
+    "searchSupplier": "Search supplier"
+  },
+  "label": {
+    "required": "Yes",
+    "notRequired": "—",
+    "version": "Revision {{revision}}",
+    "status": "Status",
+    "ppapInfo": "PPAP Info",
+    "rejectionReason": "Rejection Reason",
+    "elements": "18 Elements",
+    "filePath": "File Path",
+    "notes": "Notes",
+    "submissionDate": "Submission Date"
+  },
+  "level": {
+    "1": "Level 1",
+    "2": "Level 2",
+    "3": "Level 3",
+    "4": "Level 4",
+    "5": "Level 5"
+  },
+  "action": {
+    "submitForReview": "Submit for Review",
+    "approve": "Approve",
+    "reject": "Reject",
+    "resubmit": "Resubmit",
+    "delete": "Delete",
+    "view": "View",
+    "editElement": "Edit Element"
+  },
+  "modal": {
+    "rejectTitle": "Reject PPAP",
+    "rejectPlaceholder": "Please enter rejection reason",
+    "editElementTitle": "Edit Element: {{name}}"
+  },
+  "message": {
+    "createSuccess": "PPAP created successfully",
+    "statusUpdated": "Status updated",
+    "elementUpdated": "Element updated",
+    "deleted": "PPAP deleted",
+    "enterRejectReason": "Please enter rejection reason",
+    "deleteConfirmTitle": "Confirm Delete",
+    "deleteConfirmContent": "Are you sure you want to delete this PPAP submission? This action cannot be undone.",
+    "selectSupplier": "Please select a supplier",
+    "enterPartNo": "Please enter part number",
+    "enterPartName": "Please enter part name"
+  }
+}

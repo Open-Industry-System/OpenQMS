@@ -1,0 +1,118 @@
+{
+  "pageTitle": {
+    "apqpProjects": "APQP 项目",
+    "newAPQPProject": "新建 APQP 项目",
+    "projectDetail": "项目详情",
+    "editProject": "编辑项目"
+  },
+  "tab": {
+    "all": "全部",
+    "active": "进行中",
+    "completed": "已完成",
+    "cancelled": "已取消"
+  },
+  "phase": {
+    "1": "策划与定义",
+    "2": "产品设计与开发",
+    "3": "过程设计与开发",
+    "4": "产品与过程确认",
+    "5": "量产启动与反馈",
+    "phaseN": "Phase {{phase}}",
+    "phaseNName": "Phase {{phase}} — {{name}}"
+  },
+  "projectStatus": {
+    "active": "进行中",
+    "completed": "已完成",
+    "cancelled": "已取消"
+  },
+  "phaseStatus": {
+    "pendingApproval": "待审批",
+    "inProgress": "进行中",
+    "completed": "已完成"
+  },
+  "kpi": {
+    "active": "进行中",
+    "pendingApproval": "待审批",
+    "completed": "已完成",
+    "overdue": "逾期"
+  },
+  "column": {
+    "projectCode": "项目编号",
+    "projectName": "项目名称",
+    "product": "产品",
+    "customer": "客户",
+    "currentPhase": "当前阶段",
+    "phaseStatus": "阶段状态",
+    "targetSOP": "目标SOP",
+    "projectStatus": "项目状态",
+    "action": "操作"
+  },
+  "form": {
+    "projectName": "项目名称",
+    "productName": "产品名称",
+    "productLine": "产品线",
+    "customerName": "客户名称",
+    "description": "描述",
+    "targetSOPDate": "目标SOP日期",
+    "dfmea": "DFMEA",
+    "pfmea": "PFMEA",
+    "controlPlan": "控制计划",
+    "ppap": "PPAP"
+  },
+  "placeholder": {
+    "productLine": "例: DC-DC-100",
+    "fmeaOptional": "FMEA ID（可选，v1 文本输入）",
+    "cpOptional": "CP ID（可选，v1 文本输入）",
+    "ppapOptional": "PPAP ID（可选，v1 文本输入）"
+  },
+  "card": {
+    "projectInfo": "项目信息",
+    "phaseProgress": "阶段进度",
+    "phaseActions": "阶段操作",
+    "deliverables": "关联交付物",
+    "phaseTimeline": "阶段时间线",
+    "gateHistory": "门控审批记录"
+  },
+  "label": {
+    "projectCode": "项目编号",
+    "projectName": "项目名称",
+    "product": "产品",
+    "productLine": "产品线",
+    "customer": "客户",
+    "targetSOP": "目标SOP",
+    "createdBy": "创建人",
+    "createdAt": "创建时间",
+    "description": "描述",
+    "currentPhase": "当前阶段",
+    "phaseStatus": "阶段状态",
+    "view": "查看",
+    "notLinked": "未关联",
+    "gateComment": "门控审批意见（可选）",
+    "dfmeaPhase2": "DFMEA（Phase 2）",
+    "pfmeaPhase3": "PFMEA（Phase 3）",
+    "controlPlanPhase3": "控制计划（Phase 3）",
+    "ppapPhase4": "PPAP（Phase 4）",
+    "overdue": "⚠"
+  },
+  "action": {
+    "submitForApproval": "提交审批",
+    "approveGate": "审批通过",
+    "rejectGate": "驳回",
+    "cancelProject": "取消项目",
+    "gateSubmitted": "提交审批",
+    "gateApproved": "审批通过",
+    "gateRejected": "驳回"
+  },
+  "progress": {
+    "subModules": "子模块进度"
+  },
+  "message": {
+    "createSuccess": "项目创建成功",
+    "updateSuccess": "更新成功",
+    "operationSuccess": "操作成功",
+    "notCompleted": "未完成",
+    "enterName": "请输入项目名称",
+    "enterProductName": "请输入产品名称",
+    "enterProductLine": "请输入产品线"
+  }
+}

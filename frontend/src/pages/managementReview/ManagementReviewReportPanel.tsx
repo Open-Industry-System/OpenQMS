@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button, Space, Collapse, Spin, message, Modal, Empty, Alert } from "antd";
+import { useTranslation } from "react-i18next";
 import {
   generateReport, saveReportDraft, finalizeReport, reopenReport,
   listReportVersions, exportReport,
@@ -14,20 +15,20 @@ import type {
 } from "../../types";
 import ReportSectionEditor from "./ReportSectionEditor";
 import ReportVersionList from "./ReportVersionList";
+import { useReportStatusMap, useReportStatusColor } from "./useOptions";
 
 interface Props {
   review: ManagementReview;
   onReviewChange: (review: ManagementReview) => void;
 }
 
-const statusMap: Record<string, { color: string; label: string }> = {
-  none: { color: "default", label: "未生成" },
-  draft: { color: "blue", label: "草稿" },
-  final: { color: "green", label: "已定稿" },
-};
-
 export default function ManagementReviewReportPanel({ review, onReviewChange }: Props) {
+  const { t } = useTranslation("managementReview");
+  const { t: tc } = useTranslation("common");
   const { canCreate, canApprove } = usePermission();
+  const statusMap = useReportStatusMap();
+  const statusColor = useReportStatusColor();
+
   const [report, setReport] = useState<ManagementReviewReport | null>(review.generated_report);
   const [versions, setVersions] = useState<ReviewReportVersion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -54,8 +55,8 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
   const handleGenerate = async () => {
     if (review.report_status === "draft" && report) {
       Modal.confirm({
-        title: "确认重新生成？",
-        content: "重新生成将覆盖当前草稿中的人工编辑内容。",
+        title: t("report.regenerateConfirmTitle", "确认重新生成？"),
+        content: t("report.regenerateConfirmContent", "重新生成将覆盖当前草稿中的人工编辑内容。"),
         onOk: async () => {
           await doGenerate();
         },
@@ -71,9 +72,9 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
       const data = await generateReport(review.review_id);
       setReport(data.generated_report);
       onReviewChange({ ...review, report_status: data.report_status, generated_report: data.generated_report });
-      message.success("报告生成成功");
+      message.success(tc("messages.operationSuccess", "报告生成成功"));
     } catch (e: any) {
-      message.error(e.response?.data?.detail || "生成失败");
+      message.error(e.response?.data?.detail || tc("messages.operationFailed", "生成失败"));
     } finally {
       setLoading(false);
     }
@@ -85,9 +86,9 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
       const data = await saveReportDraft(review.review_id, report);
       setReport(data.generated_report);
       onReviewChange({ ...review, report_status: data.report_status, generated_report: data.generated_report });
-      message.success("草稿已保存");
+      message.success(t("messages.saveDraftSuccess", "草稿已保存"));
     } catch (e: any) {
-      message.error(e.response?.data?.detail || "保存失败");
+      message.error(e.response?.data?.detail || tc("messages.saveFailed", "保存失败"));
     }
   };
 
@@ -96,9 +97,9 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
       const version = await finalizeReport(review.review_id);
       setVersions((prev) => [version, ...prev]);
       onReviewChange({ ...review, report_status: "final" });
-      message.success("报告已定稿归档");
+      message.success(t("messages.finalizeSuccess", "报告已定稿归档"));
     } catch (e: any) {
-      message.error(e.response?.data?.detail || "定稿失败");
+      message.error(e.response?.data?.detail || t("messages.finalizeFailed", "定稿失败"));
     }
   };
 
@@ -106,9 +107,9 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
     try {
       const data = await reopenReport(review.review_id);
       onReviewChange({ ...review, report_status: data.report_status });
-      message.success("报告已重新打开");
+      message.success(t("messages.reopenSuccess", "报告已重新打开"));
     } catch (e: any) {
-      message.error(e.response?.data?.detail || "重新打开失败");
+      message.error(e.response?.data?.detail || t("messages.reopenFailed", "重新打开失败"));
     }
   };
 
@@ -123,7 +124,7 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      message.error(e.response?.data?.detail || "导出失败");
+      message.error(e.response?.data?.detail || tc("messages.operationFailed", "导出失败"));
     }
   };
 
@@ -149,36 +150,36 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
   const handleRestorePreview = () => {
     if (!previewVersion) return;
     Modal.confirm({
-      title: "恢复为草稿？",
-      content: `将历史版本 v${previewVersion.version_no} 的内容恢复为当前草稿，当前草稿内容将被覆盖。`,
+      title: t("report.restoreConfirmTitle", "恢复为草稿？"),
+      content: t("report.restoreConfirmContent", "将历史版本 v{{version}} 的内容恢复为当前草稿，当前草稿内容将被覆盖。", { version: previewVersion.version_no }),
       onOk: () => {
         setReport(previewVersion.content);
         setPreviewVersion(null);
-        message.success("已恢复为草稿");
+        message.success(t("messages.restoreSuccess", "已恢复为草稿"));
       },
     });
   };
 
   return (
-    <DataCard title="管理评审报告">
+    <DataCard title={t("card.report", "管理评审报告")}>
       <Space direction="vertical" style={{ width: "100%" }}>
         <Space>
-          <span>报告状态：<StatusBadge status={review.report_status}>{statusMap[review.report_status]?.label}</StatusBadge></span>
+          <span>{t("report.statusLabel", "报告状态：")}<StatusBadge status={statusColor[review.report_status] || "default"}>{statusMap[review.report_status]}</StatusBadge></span>
           {!readOnly && canCreate("management_review") && (
             <Button type="primary" onClick={handleGenerate} loading={loading}>
-              {report ? "重新生成" : "AI 生成报告"}
+              {report ? t("actions.regenerate", "重新生成") : t("actions.generateReport", "AI 生成报告")}
             </Button>
           )}
           {!readOnly && canCreate("management_review") && report && (
-            <Button onClick={handleSave}>保存草稿</Button>
+            <Button onClick={handleSave}>{t("actions.saveDraft", "保存草稿")}</Button>
           )}
           {review.report_status === "draft" && canApprove("management_review") && report && (
-            <Button type="primary" danger onClick={handleFinalize}>定稿归档</Button>
+            <Button type="primary" danger onClick={handleFinalize}>{t("actions.finalize", "定稿归档")}</Button>
           )}
           {review.report_status === "final" && canApprove("management_review") && review.status !== "closed" && (
-            <Button onClick={handleReopen}>重新打开编辑</Button>
+            <Button onClick={handleReopen}>{t("actions.reopenEdit", "重新打开编辑")}</Button>
           )}
-          {report && <Button onClick={handleExport}>导出 Markdown</Button>}
+          {report && <Button onClick={handleExport}>{t("actions.exportMarkdown", "导出 Markdown")}</Button>}
         </Space>
 
         <div style={{ display: "flex", gap: 16 }}>
@@ -186,15 +187,15 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
             {previewVersion ? (
               <Spin spinning={loading}>
                 <Alert
-                  message={`正在预览历史版本 v${previewVersion.version_no}`}
+                  message={t("report.previewingVersion", "正在预览历史版本 v{{version}}", { version: previewVersion.version_no })}
                   type="info"
                   showIcon
                   action={
                     <Space>
                       {!readOnly && canCreate("management_review") && (
-                        <Button size="small" onClick={handleRestorePreview}>恢复为草稿</Button>
+                        <Button size="small" onClick={handleRestorePreview}>{t("actions.restoreDraft", "恢复为草稿")}</Button>
                       )}
-                      <Button size="small" onClick={() => setPreviewVersion(null)}>取消预览</Button>
+                      <Button size="small" onClick={() => setPreviewVersion(null)}>{t("actions.cancelPreview", "取消预览")}</Button>
                     </Space>
                   }
                   style={{ marginBottom: 12 }}
@@ -216,12 +217,12 @@ export default function ManagementReviewReportPanel({ review, onReviewChange }: 
                 <Collapse items={collapseItems} />
               </Spin>
             ) : (
-              <Empty description="暂无报告数据，请点击「AI 生成报告」开始初始化" />
+              <Empty description={t("report.noReportData", "暂无报告数据，请点击「AI 生成报告」开始初始化")} />
             )}
           </div>
           {versions.length > 0 && (
             <div style={{ width: 240 }}>
-              <DataCard title="历史版本" noPadding>
+              <DataCard title={t("card.historyVersions", "历史版本")} noPadding>
                 <ReportVersionList
                   versions={versions}
                   onSelect={(v) => setPreviewVersion(v)}

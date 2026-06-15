@@ -27,10 +27,10 @@ vi.mock("../../api/fmea", () => ({
 
 const mockCapa = {
   report_id: "test-report-id",
-  title: "测试 8D 报告标题",
+  title: "Test CAPA Report",
   document_no: "8D-2026-001",
   status: "D2_DESCRIPTION",
-  severity: "致命",
+  severity: "fatal",
   product_line_code: "DC-DC-100",
   fmea_ref_id: null,
   fmea_node_id: null,
@@ -83,7 +83,7 @@ describe("CAPADetailPage AI draft integration", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("AI草拟")).toBeInTheDocument();
+      expect(screen.getByText("AI Draft")).toBeInTheDocument();
     });
   });
 
@@ -107,9 +107,9 @@ describe("CAPADetailPage AI draft integration", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("5W2H 问题描述")).toBeInTheDocument();
+      expect(screen.getByText("5W2H Problem Description")).toBeInTheDocument();
     });
-    expect(screen.queryByText("AI草拟")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI Draft")).not.toBeInTheDocument();
   });
 
   it("hides AI draft button when user lacks edit permission", async () => {
@@ -132,9 +132,9 @@ describe("CAPADetailPage AI draft integration", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("5W2H 问题描述")).toBeInTheDocument();
+      expect(screen.getByText("5W2H Problem Description")).toBeInTheDocument();
     });
-    expect(screen.queryByText("AI草拟")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI Draft")).not.toBeInTheDocument();
   });
 
   it("shows draft preview modal after successful generation", async () => {
@@ -155,23 +155,21 @@ describe("CAPADetailPage AI draft integration", () => {
       llm_provider: "test",
     });
     vi.mocked(draftApi.generateDraft).mockResolvedValue({
-      content: "AI 生成的问题陈述内容",
-      structured_data: { problem_statement: "AI 生成的问题陈述内容" },
+      content: "AI generated problem statement content",
+      structured_data: { problem_statement: "AI generated problem statement content" },
       request_id: "test-req-id",
       step: "d2",
     });
 
     renderPage();
 
-    // Wait for page to load and button to appear
-    const aiBtn = await screen.findByText("AI草拟");
+    const aiBtn = await screen.findByText("AI Draft");
     fireEvent.click(aiBtn);
 
-    // Wait for the preview modal to appear
     await waitFor(() => {
-      expect(screen.getByText("AI 草稿预览")).toBeInTheDocument();
+      expect(screen.getByText("AI Draft Preview")).toBeInTheDocument();
     });
-    expect(screen.getByText("AI 生成的问题陈述内容")).toBeInTheDocument();
+    expect(screen.getByText("AI generated problem statement content")).toBeInTheDocument();
   });
 
   it("shows undo button after replacing draft content", async () => {
@@ -185,7 +183,7 @@ describe("CAPADetailPage AI draft integration", () => {
       token: "test-token",
     });
 
-    const capaWithContent = { ...mockCapa, d2_description: "原始内容" };
+    const capaWithContent = { ...mockCapa, d2_description: "Original content" };
     vi.mocked(capaApi.getCAPA).mockResolvedValue(capaWithContent as any);
     vi.mocked(capaApi.updateCAPA).mockResolvedValue(capaWithContent as any);
     vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
@@ -193,7 +191,7 @@ describe("CAPADetailPage AI draft integration", () => {
       llm_provider: "test",
     });
     vi.mocked(draftApi.generateDraft).mockResolvedValue({
-      content: "AI 替换内容",
+      content: "AI replacement content",
       structured_data: null,
       request_id: "test-req-id",
       step: "d2",
@@ -201,21 +199,18 @@ describe("CAPADetailPage AI draft integration", () => {
 
     renderPage();
 
-    // Wait for page and generate
-    const aiBtn = await screen.findByText("AI草拟");
+    const aiBtn = await screen.findByText("AI Draft");
     fireEvent.click(aiBtn);
 
-    // Wait for preview and click replace
     await waitFor(() => {
-      expect(screen.getByText("AI 草稿预览")).toBeInTheDocument();
+      expect(screen.getByText("AI Draft Preview")).toBeInTheDocument();
     });
 
-    const replaceBtn = screen.getByRole("button", { name: /替换|替 换/ });
+    const replaceBtn = screen.getByRole("button", { name: /Replace|Re place/ });
     fireEvent.click(replaceBtn);
 
-    // After replace, undo button should appear
     await waitFor(() => {
-      expect(screen.getByText("撤销修改")).toBeInTheDocument();
+      expect(screen.getByText("Undo Change")).toBeInTheDocument();
     });
   });
 });

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Modal, Upload, Button, Table, message, Space, Typography } from "antd";
 import { InboxOutlined, DownloadOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type { UploadFile } from "antd/es/upload";
 import type { ImportResult, ImportRowError } from "../../utils/excel";
 
@@ -24,8 +25,10 @@ export default function ImportExcelDialog({
   importFn,
   templateDownloadFn,
   hint,
-  title = "批量导入",
+  title,
 }: ImportExcelDialogProps) {
+  const { t } = useTranslation("shared");
+  const { t: tc } = useTranslation("common");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<ImportRowError[]>([]);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -38,12 +41,12 @@ export default function ImportExcelDialog({
       if (result.errors && result.errors.length > 0) {
         setErrors(result.errors);
       } else {
-        message.success(`成功导入 ${result.imported_count} 条记录`);
+        message.success(t("import.success", { count: result.imported_count }));
         onImported(result.imported_count);
         handleClose();
       }
     } catch {
-      message.error("导入失败，请检查文件格式");
+      message.error(t("import.failed"));
     } finally {
       setLoading(false);
     }
@@ -62,14 +65,14 @@ export default function ImportExcelDialog({
   };
 
   const errorColumns = [
-    { title: "行号", dataIndex: "row", key: "row", width: 80 },
-    { title: "字段", dataIndex: "field", key: "field", width: 120 },
-    { title: "错误信息", dataIndex: "message", key: "message" },
+    { title: t("import.columns.row"), dataIndex: "row", key: "row", width: 80 },
+    { title: t("import.columns.field"), dataIndex: "field", key: "field", width: 120 },
+    { title: t("import.columns.message"), dataIndex: "message", key: "message" },
   ];
 
   return (
     <Modal
-      title={title}
+      title={title || t("import.title")}
       open={open}
       onCancel={handleClose}
       footer={null}
@@ -86,8 +89,8 @@ export default function ImportExcelDialog({
             style={{ marginBottom: 16 }}
           />
           <Space>
-            <Button onClick={() => { setErrors([]); setFileList([]); }}>重新选择文件</Button>
-            <Button onClick={handleClose}>取消</Button>
+            <Button onClick={() => { setErrors([]); setFileList([]); }}>{t("import.reselect")}</Button>
+            <Button onClick={handleClose}>{tc("actions.cancel")}</Button>
           </Space>
         </>
       ) : (
@@ -97,7 +100,7 @@ export default function ImportExcelDialog({
             fileList={fileList}
             beforeUpload={(file) => {
               if (file.size > 10 * 1024 * 1024) {
-                message.error("文件超过 10MB 限制");
+                message.error(t("import.fileTooLarge"));
                 return Upload.LIST_IGNORE;
               }
               handleUpload(file);
@@ -110,12 +113,12 @@ export default function ImportExcelDialog({
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
             </p>
-            <p className="ant-upload-text">点击或拖拽 .xlsx 文件到此区域上传</p>
+            <p className="ant-upload-text">{t("import.dragText")}</p>
             {hint && <p className="ant-upload-hint">{hint}</p>}
           </Dragger>
           <div style={{ marginTop: 12, textAlign: "center" }}>
             <Link onClick={handleDownloadTemplate}>
-              <DownloadOutlined /> 下载导入模板
+              <DownloadOutlined /> {t("import.downloadTemplate")}
             </Link>
           </div>
         </>

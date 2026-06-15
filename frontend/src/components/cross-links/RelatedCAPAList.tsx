@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { List, Tag, Typography } from "antd";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import client from "../../api/client";
 
 interface RelatedCAPA {
@@ -18,6 +19,7 @@ export default function RelatedCAPAList({
   fmeaNodeId?: string;
 }) {
   const navigate = useNavigate();
+  const { t } = useTranslation("capa");
   const [items, setItems] = useState<RelatedCAPA[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -36,7 +38,7 @@ export default function RelatedCAPAList({
   return (
     <List
       size="small"
-      header={<Typography.Text strong>关联 CAPA</Typography.Text>}
+      header={<Typography.Text strong>{t("relatedCapa.title")}</Typography.Text>}
       loading={loading}
       dataSource={items}
       renderItem={(item) => (

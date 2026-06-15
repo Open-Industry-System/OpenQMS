@@ -1,5 +1,6 @@
 import { List } from "antd";
 import { StatusBadge } from "../../components/design";
+import { formatDateTime } from "../../utils/dateTime";
 import type { ReviewReportVersion } from "../../types";
 
 interface Props {
@@ -18,9 +19,9 @@ export default function ReportVersionList({ versions, selectedId, onSelect }: Pr
           style={{ cursor: "pointer", background: selectedId === v.report_id ? "#e6f7ff" : undefined }}
           onClick={() => onSelect(v)}
         >
-          <StatusBadge status="success">v{v.version_no}</StatusBadge>
+          <StatusBadge status="success">{`v${v.version_no}`}</StatusBadge>
           <span style={{ fontSize: 12 }}>
-            {v.finalized_at ? new Date(v.finalized_at).toLocaleDateString() : "-"}
+            {v.finalized_at ? formatDateTime(v.finalized_at) : "-"}
           </span>
         </List.Item>
       )}

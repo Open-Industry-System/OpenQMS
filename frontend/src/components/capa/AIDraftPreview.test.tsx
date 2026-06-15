@@ -5,33 +5,32 @@ import AIDraftPreview from "./AIDraftPreview";
 describe("AIDraftPreview", () => {
   it("renders when open", () => {
     render(
-      <AIDraftPreview open={true} content="测试内容" onClose={vi.fn()} onReplace={vi.fn()} onAppend={vi.fn()} />
+      <AIDraftPreview open={true} content="Test content" onClose={vi.fn()} onReplace={vi.fn()} onAppend={vi.fn()} />
     );
-    expect(screen.getByText("AI 草稿预览")).toBeInTheDocument();
-    expect(screen.getByText("测试内容")).toBeInTheDocument();
+    expect(screen.getByText("AI Draft Preview")).toBeInTheDocument();
+    expect(screen.getByText("Test content")).toBeInTheDocument();
   });
 
   it("does not render when closed", () => {
     render(
-      <AIDraftPreview open={false} content="测试内容" onClose={vi.fn()} onReplace={vi.fn()} onAppend={vi.fn()} />
+      <AIDraftPreview open={false} content="Test content" onClose={vi.fn()} onReplace={vi.fn()} onAppend={vi.fn()} />
     );
-    expect(screen.queryByText("AI 草稿预览")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI Draft Preview")).not.toBeInTheDocument();
   });
 
   it("shows warning about AI-generated content", () => {
     render(
-      <AIDraftPreview open={true} content="内容" onClose={vi.fn()} onReplace={vi.fn()} onAppend={vi.fn()} />
+      <AIDraftPreview open={true} content="Content" onClose={vi.fn()} onReplace={vi.fn()} onAppend={vi.fn()} />
     );
-    expect(screen.getByText(/AI 生成的草稿/)).toBeInTheDocument();
+    expect(screen.getByText(/AI-generated draft/)).toBeInTheDocument();
   });
 
   it("calls onReplace when replace button clicked", () => {
     const onReplace = vi.fn();
     render(
-      <AIDraftPreview open={true} content="内容" onClose={vi.fn()} onReplace={onReplace} onAppend={vi.fn()} />
+      <AIDraftPreview open={true} content="Content" onClose={vi.fn()} onReplace={onReplace} onAppend={vi.fn()} />
     );
-    // Ant Design inserts spaces in button text: "替 换"
-    const replaceBtn = screen.getByRole("button", { name: /替换|替 换/ });
+    const replaceBtn = screen.getByRole("button", { name: /Replace|Re place/ });
     fireEvent.click(replaceBtn);
     expect(onReplace).toHaveBeenCalledOnce();
   });
@@ -39,9 +38,9 @@ describe("AIDraftPreview", () => {
   it("calls onAppend when append button clicked", () => {
     const onAppend = vi.fn();
     render(
-      <AIDraftPreview open={true} content="内容" onClose={vi.fn()} onReplace={vi.fn()} onAppend={onAppend} />
+      <AIDraftPreview open={true} content="Content" onClose={vi.fn()} onReplace={vi.fn()} onAppend={onAppend} />
     );
-    const appendBtn = screen.getByRole("button", { name: /追加|追 加/ });
+    const appendBtn = screen.getByRole("button", { name: /Append|Ap pend/ });
     fireEvent.click(appendBtn);
     expect(onAppend).toHaveBeenCalledOnce();
   });
@@ -49,9 +48,9 @@ describe("AIDraftPreview", () => {
   it("calls onClose when cancel button clicked", () => {
     const onClose = vi.fn();
     render(
-      <AIDraftPreview open={true} content="内容" onClose={onClose} onReplace={vi.fn()} onAppend={vi.fn()} />
+      <AIDraftPreview open={true} content="Content" onClose={onClose} onReplace={vi.fn()} onAppend={vi.fn()} />
     );
-    const cancelBtn = screen.getByRole("button", { name: /取消|取 消/ });
+    const cancelBtn = screen.getByRole("button", { name: /Cancel|Can cel/ });
     fireEvent.click(cancelBtn);
     expect(onClose).toHaveBeenCalledOnce();
   });

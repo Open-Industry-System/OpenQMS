@@ -1,4 +1,5 @@
 import { Badge, Tooltip } from "antd";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   errorCount: number;
@@ -8,14 +9,16 @@ interface Props {
 }
 
 export default function ValidationBadge({ errorCount, warningCount, total: _total, validated }: Props) {
+  const { t } = useTranslation("controlPlan");
+
   if (!validated) {
-    return <Tooltip title="未校验"><Badge status="default" /></Tooltip>;
+    return <Tooltip title={t("validation.notValidated")}><Badge status="default" /></Tooltip>;
   }
   if (errorCount > 0) {
-    return <Tooltip title={`${errorCount} 个错误待处理`}><Badge status="error" /></Tooltip>;
+    return <Tooltip title={t("validation.errorsPending", { count: errorCount })}><Badge status="error" /></Tooltip>;
   }
   if (warningCount > 0) {
-    return <Tooltip title={`${warningCount} 个警告`}><Badge status="warning" /></Tooltip>;
+    return <Tooltip title={t("validation.warningsPending", { count: warningCount })}><Badge status="warning" /></Tooltip>;
   }
-  return <Tooltip title="全部通过"><Badge status="success" /></Tooltip>;
+  return <Tooltip title={t("validation.allPassed")}><Badge status="success" /></Tooltip>;
 }

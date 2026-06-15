@@ -495,7 +495,7 @@ async def seed():
         # CAPA reports
         capa1 = CAPAEightD(
             document_no="8D-2026-001", title="焊接不良客诉",
-            status="D4_ROOT_CAUSE", severity="严重",
+            status="D4_ROOT_CAUSE", severity="serious",
             d1_team=[{"name": "张三", "role": "质量工程师"}, {"name": "李四", "role": "工艺工程师"}],
             d2_description="客户反馈PCB组件焊接不良，影响数量500pcs",
             d3_interim="已隔离不良批次，100%加检",
@@ -506,7 +506,7 @@ async def seed():
         )
         capa2 = CAPAEightD(
             document_no="8D-2026-002", title="注塑尺寸超差",
-            status="D1_TEAM", severity="一般",
+            status="D1_TEAM", severity="general",
             d1_team=[],
             due_date=date(2026, 6, 15),
             created_by=engineer.user_id,
@@ -615,7 +615,7 @@ async def seed():
                 "sc_name": "空载转速偏差",
                 "sc_type": "CC",
                 "customer_symbol": "🛡️",
-                "sc_category": "产品特性",
+                "sc_category": "product",
                 "spec_requirement": "空载转速 3500±50 RPM",
                 "source_fmea_id": fmea1.fmea_id,
                 "source_node_id": "psf_1",
@@ -631,7 +631,7 @@ async def seed():
                 "sc_name": "压装扭矩",
                 "sc_type": "SC",
                 "customer_symbol": "(S)",
-                "sc_category": "过程特性",
+                "sc_category": "process",
                 "spec_requirement": "压装扭矩 25±2 Nm",
                 "source_fmea_id": fmea1.fmea_id,
                 "source_node_id": "wef_1",

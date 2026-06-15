@@ -2,6 +2,19 @@ import { describe, it, expect } from "vitest";
 import { buildRows, createRowNodes } from "./fmeaTable";
 import type { GraphNode, GraphEdge } from "../types";
 
+const mockT = (key: string) => {
+  const map: Record<string, string> = {
+    newFailureMode: "New Failure Mode",
+    newFailureEffect: "New Failure Effect",
+    newFailureCause: "New Failure Cause",
+    designPreventionControl: "Current Design Prevention Control",
+    designDetectionControl: "Current Design Detection Control",
+    processPreventionControl: "Current Process Prevention Control",
+    processDetectionControl: "Current Process Detection Control",
+  };
+  return map[key] ?? key;
+};
+
 describe("buildRows", () => {
   it("builds one row per cause", () => {
     const nodes: GraphNode[] = [
@@ -47,7 +60,7 @@ describe("buildRows", () => {
 
 describe("createRowNodes", () => {
   it("creates expected nodes and edges for PFMEA", () => {
-    const result = createRowNodes("fn1", "PFMEA");
+    const result = createRowNodes("fn1", "PFMEA", mockT);
     expect(result.newNodes).toHaveLength(5);
     expect(result.newEdges).toHaveLength(5);
     expect(result.row.functionNodeId).toBe("fn1");
@@ -57,9 +70,9 @@ describe("createRowNodes", () => {
   });
 
   it("creates expected nodes and edges for DFMEA", () => {
-    const result = createRowNodes("sys1", "DFMEA");
+    const result = createRowNodes("sys1", "DFMEA", mockT);
     expect(result.newNodes).toHaveLength(5);
     const prevention = result.newNodes.find((n) => n.type === "PreventionControl");
-    expect(prevention?.name).toContain("设计");
+    expect(prevention?.name).toContain("Design");
   });
 });

@@ -1,0 +1,80 @@
+{
+  "page": {
+    "title": "Supply Chain Risk Map",
+    "emptyDescription": "No data; please generate a snapshot first"
+  },
+  "toolbar": {
+    "allProductLines": "All Product Lines",
+    "refresh": "Refresh Data",
+    "export": "Export",
+    "snapshotSuccess": "Generated {{count}} snapshots",
+    "snapshotFailed": "Snapshot generation failed",
+    "exportFailed": "Export failed"
+  },
+  "export": {
+    "csv": "CSV",
+    "excel": "Excel",
+    "failed": "Export failed"
+  },
+  "detail": {
+    "selectSupplier": "Select a supplier to view details",
+    "period": "Period",
+    "trendHeader": "Trend (Last 6 Periods)",
+    "riskIndex": "Risk Index: {{index}}",
+    "dimensions": {
+      "risk_score": "Risk Score",
+      "quality_score": "Quality Score",
+      "delivery_score": "Delivery Score",
+      "compliance_score": "Compliance Score",
+      "erp_on_time_rate": "ERP On-Time Rate",
+      "purchase_amount_pct": "Purchase Amount %",
+      "open_scar_count": "Open SCAR",
+      "ppm_value": "PPM"
+    },
+    "trendColumns": {
+      "period": "Period",
+      "risk": "Risk",
+      "quality": "Quality",
+      "delivery": "Delivery",
+      "compliance": "Compliance"
+    }
+  },
+  "comparison": {
+    "selectMultiple": "Select 2 or more suppliers to compare",
+    "title": "Supplier Comparison",
+    "dimension": "Dimension",
+    "dimensions": {
+      "risk_score": "Risk Score",
+      "quality_score": "Quality Score",
+      "delivery_score": "Delivery Score",
+      "compliance_score": "Compliance Score",
+      "erp_on_time_rate": "ERP On-Time Rate",
+      "purchase_amount_pct": "Purchase Amount %",
+      "open_scar_count": "Open SCAR",
+      "ppm_value": "PPM"
+    }
+  },
+  "detailPanel": {
+    "clickSupplier": "Click a supplier to view details"
+  },
+  "heatmap": {
+    "tooltipSource": "Source: {{source}}",
+    "columns": {
+      "risk_score": "Risk Score",
+      "quality_score": "Quality Score",
+      "delivery_score": "Delivery Score",
+      "compliance_score": "Compliance Score",
+      "erp_on_time_rate": "ERP On-Time Rate",
+      "purchase_amount_pct": "Purchase Amount %",
+      "open_scar_count": "Open SCAR",
+      "ppm_value": "PPM"
+    }
+  },
+  "dataSource": {
+    "risk_evaluation": "Risk Evaluation",
+    "erp_po": "ERP",
+    "supplier_evaluation_fallback": "Supplier Evaluation",
+    "iqc_inspection": "IQC",
+    "missing": "No Data"
+  }
+}

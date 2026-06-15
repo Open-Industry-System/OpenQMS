@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import ReactECharts from "echarts-for-react";
+import { useTranslation } from "react-i18next";
 import type { HeatmapResponse, HeatmapColumn, HeatmapCell } from "../../../types";
 
 interface RiskHeatmapProps {
@@ -31,9 +32,22 @@ function getCellColor(cell: HeatmapCell, col: HeatmapColumn): string {
 }
 
 const RiskHeatmap: React.FC<RiskHeatmapProps> = ({ data, onSupplierClick }) => {
+  const { t } = useTranslation("supplyChainRiskMap");
+
   const option = useMemo(() => {
+    const COLUMN_LABELS: Record<string, string> = {
+      risk_score: t("heatmap.columns.risk_score"),
+      quality_score: t("heatmap.columns.quality_score"),
+      delivery_score: t("heatmap.columns.delivery_score"),
+      compliance_score: t("heatmap.columns.compliance_score"),
+      erp_on_time_rate: t("heatmap.columns.erp_on_time_rate"),
+      purchase_amount_pct: t("heatmap.columns.purchase_amount_pct"),
+      open_scar_count: t("heatmap.columns.open_scar_count"),
+      ppm_value: t("heatmap.columns.ppm_value"),
+    };
+
     const yData = data.rows.map((r) => r.supplier_name);
-    const xData = data.columns.map((c) => c.label);
+    const xData = data.columns.map((c) => COLUMN_LABELS[c.key] ?? c.label);
 
     const seriesData: Array<[number, number, number, string]> = [];
     data.rows.forEach((row, yIdx) => {
@@ -49,7 +63,7 @@ const RiskHeatmap: React.FC<RiskHeatmapProps> = ({ data, onSupplierClick }) => {
           const col = data.columns[params.data[0]];
           const cell = row?.cells[params.data[0]];
           if (!cell) return "";
-          return `<strong>${row.supplier_name}</strong><br/>${col.label}: ${cell.value ?? "N/A"}${cell.diff != null ? ` (Δ${cell.diff > 0 ? "+" : ""}${cell.diff.toFixed(1)})` : ""}<br/>来源: ${cell.source}`;
+          return `<strong>${row.supplier_name}</strong><br/>${COLUMN_LABELS[col.key] ?? col.label}: ${cell.value ?? "N/A"}${cell.diff != null ? ` (Δ${cell.diff > 0 ? "+" : ""}${cell.diff.toFixed(1)})` : ""}<br/>${t("heatmap.tooltipSource", { source: cell.source })}`;
         },
       },
       grid: { top: 40, right: 20, bottom: 60, left: 120 },
@@ -73,7 +87,7 @@ const RiskHeatmap: React.FC<RiskHeatmapProps> = ({ data, onSupplierClick }) => {
         emphasis: { itemStyle: { borderColor: "#1890ff", borderWidth: 2 } },
       }],
     };
-  }, [data]);
+  }, [data, t]);
 
   return (
     <ReactECharts
