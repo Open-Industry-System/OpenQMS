@@ -10,6 +10,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../../utils/dateTime";
 import {
   getSC, updateSC, createSC,
   safetySubmit, safetyApprove, safetyReject, safetyCancel,
@@ -481,16 +482,16 @@ export default function SCDetailPage() {
                             },
                             {
                               dot: <SafetyCertificateOutlined style={{ color: "#1677ff" }} />,
-                              children: t("timeline.submitted", { time: sc.safety_submitted_at ? new Date(sc.safety_submitted_at).toLocaleString() : "-" }),
+                              children: t("timeline.submitted", { time: sc.safety_submitted_at ? formatDateTime(sc.safety_submitted_at) : "-" }),
                               color: sc.safety_approval_status === "submitted" ? "blue" : "gray",
                             },
                             sc.safety_approval_status === "approved" ? {
                               dot: <CheckCircleOutlined style={{ color: "#52c41a" }} />,
-                              children: t("timeline.approved", { time: sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-" }),
+                              children: t("timeline.approved", { time: sc.safety_approved_at ? formatDateTime(sc.safety_approved_at) : "-" }),
                               color: "green",
                             } : sc.safety_approval_status === "rejected" ? {
                               dot: <CloseCircleOutlined style={{ color: "#ff4d4f" }} />,
-                              children: t("timeline.rejected", { time: sc.safety_approved_at ? new Date(sc.safety_approved_at).toLocaleString() : "-", comment: sc.safety_approval_comment ? `（${sc.safety_approval_comment}）` : "" }),
+                              children: t("timeline.rejected", { time: sc.safety_approved_at ? formatDateTime(sc.safety_approved_at) : "-", comment: sc.safety_approval_comment ? `（${sc.safety_approval_comment}）` : "" }),
                               color: "red",
                             } : {
                               dot: <SafetyCertificateOutlined />,

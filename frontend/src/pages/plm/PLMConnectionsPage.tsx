@@ -8,6 +8,7 @@ import {
   SyncOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import {
   getPLMConnections, createPLMConnection, updatePLMConnection,
   deletePLMConnection, testPLMConnection, syncPLMConnection,
@@ -191,7 +192,7 @@ export default function PLMConnectionsPage() {
       dataIndex: "created_at",
       key: "created_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
     {
       title: t("connections.columns.actions"),

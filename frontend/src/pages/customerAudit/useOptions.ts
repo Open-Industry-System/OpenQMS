@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { CUSTOMER_TYPE_MAP } from "./constants";
 
 export function useAuditStatusMap(): Record<string, string> {
   const { t } = useTranslation("customerQuality");
@@ -71,8 +70,4 @@ export function useCustomerTypeLabel() {
     if (!value) return "-";
     return t([`customerType.${value}`, value]);
   };
-}
-
-export function useCustomerTypeReverseMap(): Record<string, string> {
-  return Object.fromEntries(Object.entries(CUSTOMER_TYPE_MAP).map(([k, v]) => [v, k]));
 }

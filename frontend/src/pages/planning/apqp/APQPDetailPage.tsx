@@ -4,6 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Card, Tag, Button, Space, Descriptions, Input, Modal, message, Spin, Row, Col, Steps, Timeline } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../../utils/dateTime";
 import { getAPQPProject, updateAPQPProject, transitionAPQPProject } from "../../../api/apqp";
 import type { APQPProject, APQPProjectUpdate } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
@@ -197,7 +198,7 @@ export default function APQPDetailPage() {
           <Descriptions.Item label={t("label.customer")}>{project.customer_name || "-"}</Descriptions.Item>
           <Descriptions.Item label={t("label.targetSOP")}>{project.target_sop_date || "-"}</Descriptions.Item>
           <Descriptions.Item label={t("label.createdBy")}>{project.created_by_name}</Descriptions.Item>
-          <Descriptions.Item label={t("label.createdAt")}>{project.created_at ? new Date(project.created_at).toLocaleString() : "-"}</Descriptions.Item>
+          <Descriptions.Item label={t("label.createdAt")}>{project.created_at ? formatDateTime(project.created_at) : "-"}</Descriptions.Item>
           <Descriptions.Item label={t("label.description")} span={2}>{project.description || "-"}</Descriptions.Item>
         </Descriptions>
       </Card>
@@ -298,7 +299,7 @@ export default function APQPDetailPage() {
                     {t("phase.phaseN", { phase: entry.phase })} — {entry.action === "approve" ? t("action.gateApproved") : entry.action === "reject" ? t("action.gateRejected") : t("action.gateSubmitted")}
                   </strong>
                   <span style={{ marginLeft: 8, color: "#999", fontSize: 12 }}>
-                    by {entry.user_name} · {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ""}
+                    by {entry.user_name} · {entry.timestamp ? formatDateTime(entry.timestamp) : ""}
                   </span>
                   {entry.comments && (
                     <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>

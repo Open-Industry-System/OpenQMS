@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import {
   Table, Button, Tag, Typography, Modal, Form, Input, Select,
   Popconfirm, App, Card, Row, Col, Statistic, Space, Alert,
@@ -148,7 +149,7 @@ export default function SPCListPage() {
       dataIndex: "updated_at",
       key: "updated_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
     {
       title: tc("table.operations"),

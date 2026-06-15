@@ -3,6 +3,7 @@ import {
   Table, Tag, Typography, Select, App,
 } from "antd";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import { listScrapRecords } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { MESScrapRecord } from "../../types/mes";
@@ -116,7 +117,7 @@ export default function MESScrapPage() {
       dataIndex: "recorded_at",
       key: "recorded_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
   ];
 

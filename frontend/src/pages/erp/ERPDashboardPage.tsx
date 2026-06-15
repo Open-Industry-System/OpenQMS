@@ -10,6 +10,7 @@ import {
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import { fetchERPDashboard } from "../../api/erp";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { ERPDashboardData } from "../../types/erp";
@@ -89,7 +90,7 @@ export default function ERPDashboardPage() {
                 <Statistic
                   title={s.data_type}
                   value={s.last_sync
-                    ? new Date(s.last_sync).toLocaleString()
+                    ? formatDateTime(s.last_sync)
                     : "—"}
                   valueStyle={{ fontSize: 14 }}
                 />

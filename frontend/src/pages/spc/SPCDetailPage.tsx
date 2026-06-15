@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import {
   Button, Space, Tag, Typography, Tabs, Card, Input,
   DatePicker, Table, App, Spin, Row, Col,
@@ -417,7 +418,7 @@ export default function SPCDetailPage() {
       dataIndex: "triggered_at",
       key: "triggered_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
     {
       title: t("detail.alarm.severity"),
@@ -800,7 +801,7 @@ export default function SPCDetailPage() {
                             {
                               title: t("detail.history.sampledAt"),
                               dataIndex: "sampled_at",
-                              render: (v: string) => new Date(v).toLocaleString(),
+                              render: (v: string) => formatDateTime(v),
                             },
                             {
                               title: t("detail.history.xValue"),

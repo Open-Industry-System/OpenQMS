@@ -16,6 +16,7 @@ import { darkTheme } from "./utils/darkTheme";
 
 function updateHtmlLang(lang: string) {
   document.documentElement.lang = lang === "zh-CN" ? "zh-CN" : "en";
+  document.title = i18n.t("app.title");
 }
 
 function I18nConfigProvider({ children }: { children: React.ReactNode }) {

@@ -1,5 +1,6 @@
 import { Table } from "antd";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import type { ChangeImpactAnalysis } from "../../api/changeImpact";
 import ImpactScoreTag from "./ImpactScoreTag";
 
@@ -29,7 +30,7 @@ export default function ChangeHistoryTable({
           title: t("historyTable.time"),
           dataIndex: "created_at",
           key: "created_at",
-          render: (value: string) => new Date(value).toLocaleString(),
+          render: (value: string) => formatDateTime(value),
         },
         {
           title: t("historyTable.nodeName"),

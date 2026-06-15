@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { formatDateTime } from "../../utils/dateTime";
 import {
   Table,
   Input,
@@ -290,7 +291,7 @@ export default function PLMPartsPage() {
             </Descriptions.Item>
             <Descriptions.Item label={t("parts.drawer.labels.updatedAt")}>
               {drawerPart.source_updated_at
-                ? new Date(drawerPart.source_updated_at).toLocaleString()
+                ? formatDateTime(drawerPart.source_updated_at)
                 : "—"}
             </Descriptions.Item>
           </Descriptions>

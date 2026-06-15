@@ -23,7 +23,6 @@ import {
   useCustomerTypeLabel,
   useCustomerTypeOptions,
 } from "./useOptions";
-import { CUSTOMER_TYPE_MAP } from "./constants";
 
 const { Option } = Select;
 
@@ -80,7 +79,7 @@ export default function CustomerAuditListPage() {
       const values = await form.validateFields();
       await createCustomerAudit({
         ...values,
-        customer_type: CUSTOMER_TYPE_MAP[values.customer_type],
+        customer_type: values.customer_type,
         planned_date: values.planned_date.format("YYYY-MM-DD"),
         product_line_code: currentProductLine,
       });

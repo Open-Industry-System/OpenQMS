@@ -6,6 +6,7 @@ import {
 } from "antd";
 import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
 import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
@@ -598,7 +599,7 @@ export default function CAPADetailPage() {
             <p><Text strong>{t("detail.severity")}</Text> <Tag color="red">{t(`severity.${capa.severity}`, capa.severity)}</Tag></p>
             <p><Text strong>{t("detail.dueDate")}</Text> {capa.due_date || t("detail.notSet")}</p>
             <p><Text strong>{t("detail.relatedFMEA")}</Text> {capa.fmea_ref_id || t("detail.notLinked")}</p>
-            <p><Text strong>{t("detail.createdAt")}</Text> {new Date(capa.created_at).toLocaleString()}</p>
+            <p><Text strong>{t("detail.createdAt")}</Text> {formatDateTime(capa.created_at)}</p>
           </Card>
 
           {linkModal && canEdit('capa') && (

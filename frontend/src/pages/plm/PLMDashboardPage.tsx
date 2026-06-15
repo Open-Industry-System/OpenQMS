@@ -7,6 +7,7 @@ import {
   SafetyOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import { getPLMDashboard } from "../../api/plm";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { PLMDashboard, PLMChangeOrder } from "../../types/plm";
@@ -53,7 +54,7 @@ export default function PLMDashboardPage() {
       dataIndex: "source_updated_at",
       key: "source_updated_at",
       width: 170,
-      render: (v: string | null) => (v ? new Date(v).toLocaleString() : "—"),
+      render: (v: string | null) => (v ? formatDateTime(v) : "—"),
     },
   ];
 

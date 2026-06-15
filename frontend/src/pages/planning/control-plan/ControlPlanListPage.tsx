@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Table, Button, Tag, Typography, Modal, Form, Input, Popconfirm, App } from "antd";
 import { PlusOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../../utils/dateTime";
 import { listControlPlans, createControlPlan, deleteControlPlan } from "../../../api/controlPlan";
 import { batchValidationSummaries } from "../../../api/cpValidation";
 import ValidationBadge from "../../../components/control-plan/ValidationBadge";
@@ -137,7 +138,7 @@ export default function ControlPlanListPage() {
       dataIndex: "updated_at",
       key: "updated_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
     {
       title: t("column.actions"),

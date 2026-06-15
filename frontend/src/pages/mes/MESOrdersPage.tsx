@@ -3,6 +3,7 @@ import {
   Table, Tag, Typography, Select, App,
 } from "antd";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../utils/dateTime";
 import { listProductionOrders } from "../../api/mes";
 import { useProductLineStore } from "../../store/productLineStore";
 import type { MESProductionOrder } from "../../types/mes";
@@ -103,7 +104,7 @@ export default function MESOrdersPage() {
       key: "started_at",
       width: 170,
       render: (v: string | null) =>
-        v ? new Date(v).toLocaleString() : "—",
+        v ? formatDateTime(v) : "—",
     },
     {
       title: t("orders.columns.completedAt"),
@@ -111,7 +112,7 @@ export default function MESOrdersPage() {
       key: "completed_at",
       width: 170,
       render: (v: string | null) =>
-        v ? new Date(v).toLocaleString() : "—",
+        v ? formatDateTime(v) : "—",
     },
   ];
 

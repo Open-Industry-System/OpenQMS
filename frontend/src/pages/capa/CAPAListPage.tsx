@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { listCAPAs, createCAPA } from "../../api/capa";
 import type { CAPAReport } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
+import { formatDateTime } from "../../utils/dateTime";
 import dayjs from "dayjs";
 
 const { Title } = Typography;
@@ -77,7 +78,7 @@ export default function CAPAListPage() {
     { title: t("fields.dueDate"), dataIndex: "due_date", key: "due_date", width: 110, render: (v: string | null) => v || "-" },
     {
       title: t("fields.createdAt"), dataIndex: "updated_at", key: "updated_at", width: 170,
-      render: (v: string) => new Date(v).toLocaleString(),
+      render: (v: string) => formatDateTime(v),
     },
     {
       title: tc("table.operations"), key: "actions", width: 80,

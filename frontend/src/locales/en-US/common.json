@@ -4,6 +4,9 @@
     "en": "English",
     "switch": "Switch Language"
   },
+  "app": {
+    "title": "OpenQMS - Intelligent Quality Management Platform"
+  },
   "actions": {
     "save": "Save",
     "submit": "Submit",
