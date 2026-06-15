@@ -2,6 +2,9 @@
   "pageTitle": {
     "list": "质量目标列表"
   },
+  "pageSubtitle": {
+    "list": "QMS 质量目标管理 · 目标设定 · 审批 · 达成跟踪"
+  },
   "status": {
     "draft": "草稿",
     "pending": "待审批",
@@ -28,6 +31,9 @@
     "active": "生效中",
     "pendingApproval": "待审批",
     "achievementRate": "达成率"
+  },
+  "card": {
+    "goalList": "质量目标列表"
   },
   "tabs": {
     "all": "全部",

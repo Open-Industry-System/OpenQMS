@@ -154,7 +154,9 @@
     "noFindings": "暂无发现项"
   },
   "card": {
-    "basicInfo": "基本信息"
+    "basicInfo": "基本信息",
+    "auditDetail": "审核详情",
+    "auditPlans": "审核计划"
   },
   "messages": {
     "loadPlansFailed": "加载审核计划失败",

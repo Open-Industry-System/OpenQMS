@@ -17,7 +17,6 @@ const defectVariant: Record<string, string> = {
 
 export default function MESScrapPage() {
   const { t } = useTranslation("mes");
-  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [data, setData] = useState<MESScrapRecord[]>([]);
   const [total, setTotal] = useState(0);
@@ -116,7 +115,6 @@ export default function MESScrapPage() {
       width: 170,
       render: (v: string) => formatDateTime(v),
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [t, defectLabels]);
 
   return (

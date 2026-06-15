@@ -78,17 +78,17 @@ export default function ManagementReviewListPage() {
   return (
     <PageShell
       title={t("pageTitle.list", "管理评审")}
-      subtitle={t("pageTitle.list", "管理层质量评审计划")}
+      subtitle={t("pageSubtitle.list", "管理层质量评审计划")}
       actions={
         canEdit('management_review') && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/management-reviews/new")}>{t("actions.newReview", "新建评审")}</Button>
         )
       }
     >
-      <DataCard title={t("card.dataPackage", "评审清单")}>
+      <DataCard title={t("card.reviewList", "评审清单")}>
         <Space style={{ marginBottom: 16 }}>
           <Select
-            allowClear placeholder={t("table.status", "状态筛选")} style={{ width: 150 }}
+            allowClear placeholder={t("filter.statusPlaceholder", "状态筛选")} style={{ width: 150 }}
             value={statusFilter}
             onChange={(v) => { setStatusFilter(v); setPage(1); }}
           >

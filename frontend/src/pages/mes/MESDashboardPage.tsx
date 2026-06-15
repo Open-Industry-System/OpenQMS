@@ -21,7 +21,6 @@ const statusVariant: Record<string, string> = {
 
 export default function MESDashboardPage() {
   const { t } = useTranslation("mes");
-  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [data, setData] = useState<MESDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,7 +97,6 @@ export default function MESDashboardPage() {
       render: (v: number | null) =>
         v !== null ? `${v.toFixed(1)}%` : "—",
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [t, statusLabels]);
 
   return (

@@ -154,7 +154,9 @@
     "noFindings": "No findings"
   },
   "card": {
-    "basicInfo": "Basic Information"
+    "basicInfo": "Basic Information",
+    "auditDetail": "Audit Details",
+    "auditPlans": "Audit Plans"
   },
   "messages": {
     "loadPlansFailed": "Failed to load audit plans",

@@ -1,6 +1,7 @@
 import { useState, useEffect, ReactNode, useMemo } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import { Layout, Menu, Button, Avatar, Dropdown, Space, Select, Segmented, Tooltip, Badge } from "antd";
+import { Layout, Menu, Button, Avatar, Dropdown, Space, Select, Tooltip, Badge } from "antd";
+import LanguageSwitcher from "../LanguageSwitcher";
 import type { MenuProps } from "antd";
 import {
   DashboardOutlined,
@@ -33,7 +34,6 @@ import {
   HeatMapOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import i18n from "../../i18n";
 import { useAuthStore } from "../../store/authStore";
 import { useProductLineStore } from "../../store/productLineStore";
 import { usePermission } from "../../hooks/usePermission";
@@ -280,18 +280,6 @@ function filterMenuByPermission(
     .filter((item): item is MenuItem => item !== null);
 }
 
-function LanguageSwitcher() {
-  return (
-    <Segmented
-      value={i18n.language}
-      onChange={(value) => i18n.changeLanguage(value as string)}
-      options={[
-        { label: "中文", value: "zh-CN" },
-        { label: "English", value: "en-US" },
-      ]}
-    />
-  );
-}
 
 export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);

@@ -18,7 +18,6 @@ const statusVariant: Record<string, string> = {
 
 export default function MESOrdersPage() {
   const { t } = useTranslation("mes");
-  const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [data, setData] = useState<MESProductionOrder[]>([]);
   const [total, setTotal] = useState(0);
@@ -110,7 +109,6 @@ export default function MESOrdersPage() {
       width: 170,
       render: (v: string | null) => v ? formatDateTime(v) : "—",
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [t, statusLabels]);
 
   return (

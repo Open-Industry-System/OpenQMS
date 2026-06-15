@@ -470,7 +470,7 @@ export default function QualityGoalListPage() {
   return (
     <PageShell
       title={t("pageTitle.list", "质量目标")}
-      subtitle={t("pageTitle.list", "QMS 质量目标管理 · 目标设定 · 审批 · 达成跟踪")}
+      subtitle={t("pageSubtitle.list", "QMS 质量目标管理 · 目标设定 · 审批 · 达成跟踪")}
       actions={
         canEdit('quality_goal') ? (
           <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
@@ -517,7 +517,7 @@ export default function QualityGoalListPage() {
         </Col>
       </Row>
 
-      <DataCard title={t("table.name", "质量目标列表")}>
+      <DataCard title={t("card.goalList", "质量目标列表")}>
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}

@@ -346,7 +346,7 @@ export default function InternalAuditDetailPage() {
           <StatusBadge status={statusVariant(plan.status)}>{STATUS_MAP[plan.status]}</StatusBadge>
         </Space>
       }
-      subtitle={t("pageTitle.detail", "内部审核计划详情")}
+      subtitle={t("pageSubtitle.detail", "内部审核计划详情")}
       actions={
         <Space wrap>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/internal-audits")}>{tc("actions.back", "返回列表")}</Button>

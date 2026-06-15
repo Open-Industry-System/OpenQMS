@@ -50,7 +50,7 @@ import { listUsers } from "../../api/auth";
 import PageShell from "../../components/design/PageShell";
 import DataCard from "../../components/design/DataCard";
 import StatusBadge from "../../components/design/StatusBadge";
-import { useAuditTypeMap, useAuditStatusMap, useAuditStatusColor } from "./useOptions";
+import { useAuditTypeMap, useAuditStatusMap } from "./useOptions";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -74,7 +74,6 @@ export default function InternalAuditListPage() {
   const { canEdit, isAdmin } = usePermission();
   const TYPE_MAP = useAuditTypeMap();
   const STATUS_MAP = useAuditStatusMap();
-  const STATUS_COLOR = useAuditStatusColor();
 
   const [plans, setPlans] = useState<AuditPlan[]>([]);
   const [loading, setLoading] = useState(false);
@@ -345,7 +344,7 @@ export default function InternalAuditListPage() {
   return (
     <PageShell
       title={t("pageTitle.list", "内部审核管理")}
-      subtitle={t("pageTitle.list", "年度审核计划与执行跟踪")}
+      subtitle={t("pageSubtitle.list", "年度审核计划与执行跟踪")}
       actions={
         <Space>
           {canEdit('audit') && (
@@ -390,7 +389,7 @@ export default function InternalAuditListPage() {
         </Col>
       </Row>
 
-      <DataCard title={t("table.planNo", "审核计划")}>
+      <DataCard title={t("card.auditPlans", "审核计划")}>
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder={t("placeholder.year", "选择年份")}

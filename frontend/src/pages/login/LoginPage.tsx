@@ -4,6 +4,7 @@ import { Form, Input, Button, Typography, App } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
+import LanguageSwitcher from "../../components/LanguageSwitcher";
 
 const { Title, Text } = Typography;
 
@@ -206,6 +207,10 @@ export default function LoginPage() {
           >
             {t("defaultAccount")}
           </Text>
+        </div>
+
+        <div style={{ textAlign: "center", marginTop: 16 }}>
+          <LanguageSwitcher />
         </div>
 
         <Text

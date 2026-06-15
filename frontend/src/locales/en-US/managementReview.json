@@ -7,6 +7,9 @@
     "list": "Management Quality Review Plans",
     "detail": ""
   },
+  "filter": {
+    "statusPlaceholder": "Filter by status"
+  },
   "status": {
     "review": {
       "draft": "Draft",
@@ -54,7 +57,8 @@
     "meetingMinutes": "Meeting Minutes",
     "outputs": "Review Outputs & Actions",
     "report": "Management Review Report",
-    "historyVersions": "History Versions"
+    "historyVersions": "History Versions",
+    "reviewList": "Review List"
   },
   "table": {
     "docNo": "Doc No.",

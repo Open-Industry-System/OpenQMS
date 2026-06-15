@@ -1,5 +1,4 @@
 import { List } from "antd";
-import { useTranslation } from "react-i18next";
 import { StatusBadge } from "../../components/design";
 import { formatDateTime } from "../../utils/dateTime";
 import type { ReviewReportVersion } from "../../types";
@@ -11,8 +10,6 @@ interface Props {
 }
 
 export default function ReportVersionList({ versions, selectedId, onSelect }: Props) {
-  const { t } = useTranslation("managementReview");
-
   return (
     <List
       size="small"

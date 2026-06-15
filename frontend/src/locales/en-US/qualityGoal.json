@@ -2,6 +2,9 @@
   "pageTitle": {
     "list": "Quality Goals"
   },
+  "pageSubtitle": {
+    "list": "QMS Quality Goal Management · Goal Setting · Approval · Achievement Tracking"
+  },
   "status": {
     "draft": "Draft",
     "pending": "Pending Approval",
@@ -28,6 +31,9 @@
     "active": "Active",
     "pendingApproval": "Pending Approval",
     "achievementRate": "Achievement Rate"
+  },
+  "card": {
+    "goalList": "Quality Goal List"
   },
   "tabs": {
     "all": "All",
