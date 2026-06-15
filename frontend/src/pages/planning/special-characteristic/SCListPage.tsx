@@ -164,7 +164,7 @@ export default function SCListPage() {
       dataIndex: "sc_category",
       key: "sc_category",
       width: 120,
-      render: (v: string | null) => v || "-",
+      render: (v: string | null) => (v ? t(`category.${v}`) : "-"),
     },
     {
       title: t("column.sourceType"),

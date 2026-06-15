@@ -28,8 +28,8 @@ function useSCDetailLabels(t: (key: string) => string) {
   ];
 
   const categoryOptions = [
-    { value: "产品特性", label: t("category.product") },
-    { value: "过程特性", label: t("category.process") },
+    { value: "product", label: t("category.product") },
+    { value: "process", label: t("category.process") },
   ];
 
   const approvalStatusLabel = (status: string) => {

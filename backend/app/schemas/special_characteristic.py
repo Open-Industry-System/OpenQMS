@@ -9,7 +9,7 @@ class SCCreate(BaseModel):
     sc_name: str
     sc_type: Literal["CC", "SC"]
     customer_symbol: str | None = None
-    sc_category: str | None = None
+    sc_category: Literal["product", "process"] | None = None
     spec_requirement: str | None = None
     source_fmea_id: uuid.UUID | None = None
     source_node_id: str | None = None
@@ -20,7 +20,7 @@ class SCCreate(BaseModel):
 
 class SCUpdate(BaseModel):
     sc_name: str | None = None
-    sc_category: str | None = None
+    sc_category: Literal["product", "process"] | None = None
     spec_requirement: str | None = None
     sop_ref: str | None = None
     customer_symbol: str | None = None
@@ -38,7 +38,7 @@ class SCResponse(BaseModel):
     sc_name: str
     sc_type: str
     customer_symbol: str | None = None
-    sc_category: str | None = None
+    sc_category: Literal["product", "process"] | None = None
     spec_requirement: str | None = None
     parent_sc_id: uuid.UUID | None = None
     source_fmea_id: uuid.UUID | None = None
