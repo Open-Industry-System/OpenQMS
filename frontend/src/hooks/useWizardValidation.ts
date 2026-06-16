@@ -46,10 +46,10 @@ export function useWizardValidation(nodes: GraphNode[], edges: GraphEdge[]): Ste
     });
 
     const warnings: number[] = [];
-    // Push 1-indexed step numbers to match i18n keys step3/4/5Incomplete
-    if (components.length > 0 && !step3Complete) warnings.push(3);
-    if (functions.length > 0 && !step4Complete) warnings.push(4);
-    if (rows.length > 0 && !step5Complete) warnings.push(5);
+    // Push 0-based step indices: page renders step${w + 1}Incomplete, sidebar checks warnings.includes(i)
+    if (components.length > 0 && !step3Complete) warnings.push(2);
+    if (functions.length > 0 && !step4Complete) warnings.push(3);
+    if (rows.length > 0 && !step5Complete) warnings.push(4);
 
     return { step3Complete, step4Complete, step5Complete, warnings };
   }, [nodes, edges]);
