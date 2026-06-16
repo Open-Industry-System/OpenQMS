@@ -14,6 +14,7 @@
 - **入口：** 保持 FMEAListPage 的创建 Modal 不变。用户选择 DFMEA 类型并提交后，`createFMEA()` 创建 draft 文档（后端自动注入初始 System 节点），然后 `navigate('/fmea/wizard/{id}')` 进入向导页面
 - **草稿恢复：** 列表中 `status=draft` 的 DFMEA 行显示"草稿"标签，点击跳转 `/fmea/wizard/{id}` 继续向导（而非直接进入编辑器）；非 draft 状态的 DFMEA 点击仍跳转 `/fmea/{id}` 编辑器
 - **退出：** 顶部"返回列表"按钮回到 `/fmea`；完成向导后跳转 `/fmea/{id}` 编辑器
+- **退出确认：** 点击"返回列表"时，如果文档仅有初始 System 节点（即用户未填写任何实质内容），弹确认对话框"当前草稿为空，确定要放弃吗？确定后草稿将被删除"。如果用户确认放弃，调用 `DELETE /fmea/{id}` 删除空草稿后返回列表；如果已有实质内容，直接返回列表（草稿保留）
 
 ## 2. 页面布局
 
@@ -47,7 +48,7 @@
 2. **步骤导航** — 竖直 Ant `Steps`，已完成步骤显示 ✓ 可点击跳回修改，当前步骤高亮
 
 **右侧内容区三部分：**
-1. **引导卡片** — 每步顶部，可折叠，默认展开。含目的、填写要点、示例
+1. **引导卡片** — 每步顶部，可折叠，默认展开。含目的、填写要点、示例。折叠状态持久化到 localStorage key `dfmea_wizard_card_collapsed`，用户手动折叠后切换步骤保持折叠状态
 2. **步骤表单** — 从现有 GenerationWizard 迁移的核心内容
 3. **底部导航** — 上一步/下一步按钮，最后一步为"完成"
 
@@ -82,18 +83,23 @@ Modal创建 → POST /fmea/ → draft文档(含初始System节点) → 进入向
 
 ### 向导数据序列化到 graph_data
 
-现有 `FMEADocument.graph_data` 为 `{ nodes: [], edges: [] }` JSONB。`GraphNodeSchema` 定义了严格的节点字段（`id`, `type`, `name`, `severity`, `occurrence`, `detection`, `requirement`, `specification` 等），5T 范围信息（team/timeframe/tool/task/trend）不属于这些字段，不能直接放入节点。
+现有 `FMEADocument.graph_data` 为 `{ nodes: [], edges: [] }` JSONB。`GraphNodeSchema` 定义了严格的节点字段（`id`, `type`, `name`, `severity`, `occurrence`, `detection`, `requirement`, `specification` 等），5T 范围信息（team/timeframe/tool/task/trend）不属于这些字段。
 
-**解决方案：5T 范围数据存入前端 localStorage，不写入 graph_data。** 理由：
-- 5T 信息是向导上下文，不是图结构的一部分，不应污染 graph_data
-- localStorage 按文档 ID 存储，跨标签页可用，向导完成后可清理
-- 避免后端 `GraphNodeSchema` 校验失败
+**解决方案：5T 范围数据存入 `graph_data` 根属性 `wizardScope`，不放入 nodes 数组。** 理由：
+- 存入 localStorage 无法跨设备恢复草稿（核心需求），也不与文档数据一同持久化
+- 存入 nodes 数组（`type: "WizardScope"`）会污染图可视化（GraphCanvas 渲染孤立节点）和统计过滤（所有 `getStructureNodes` / `getFunctionNodes` 等需加 `.filter(n => n.type !== 'WizardScope')`）
+- JSONB 允许任意根属性，利用 PostgreSQL JSONB 灵活性在 `graph_data` 根层存储 `wizardScope`
+
+需要的小改动：
+- **后端** `GraphDataSchema` 添加 `wizardScope: WizardScopeSchema | None = None` 可选字段
+- **前端** `GraphData` 类型添加 `wizardScope?: { team?: string; timeframe?: string; tool?: string; task?: string; trend?: string }`
+- 编辑器加载 graph_data 时忽略 `wizardScope`（现有代码只读 `nodes`/`edges`，零影响）
 
 向导数据映射到 graph_data：
 
 | 步骤数据 | 映射方式 |
 |---------|---------|
-| 5T范围 | 前端 localStorage（key: `dfmea_wizard_scope_{fmea_id}`），不写入 graph_data |
+| 5T范围 | `graph_data.wizardScope` 根属性（跨设备可恢复，不污染 nodes） |
 | 结构树 | System/Subsystem/Component/Interface 节点 + 对应边（已有字段） |
 | 功能 | ProcessWorkElementFunction 节点 + HAS_FUNCTION 边（已有字段） |
 | 失效链 | FailureMode/FailureEffect/FailureCause 节点 + 对应边（已有字段） |
@@ -109,6 +115,8 @@ Modal创建 → POST /fmea/ → draft文档(含初始System节点) → 进入向
 - **手动"保存草稿"**：显式 PUT，按钮显示"保存中..."→"已保存 ✓"，2秒后恢复
 - **409 冲突处理**：若 PUT 返回 `lock_version_mismatch` 错误（极罕见，单人操作向导时不应发生），弹提示"数据已被其他会话修改，请刷新页面后重试"，不自动合并
 - **防抖策略**：步骤切换和手动保存共用 `useRef` 标记 + 500ms debounce。步骤切换时设置"脏"标记并启动 debounce 计时器，计时器到期后发起 PUT。手动保存立即取消 debounce 并直接发起 PUT。避免短时间内多次切换步骤导致重复请求
+- **请求队列化**：PUT 请求串行执行。前一次 PUT 返回并更新本地 `lock_version` 后，才发起下一次 PUT。避免并发 PUT 导致乐观锁冲突。实现：`useRef<Promise>` 追踪进行中的请求，新的 PUT 链接到前一个 Promise 的 `.then()`
+- **按钮状态**：PUT 发送期间"下一步"/"完成"按钮显示 loading 状态（Ant `Button` 的 `loading` 属性），防止用户快速连续点击。保存按钮同步显示"保存中..."
 - **乐观更新**：前端状态先更新，PUT 异步发出。失败时弹 message 提示"保存失败，请重试"，不回滚前端状态（避免用户正在编辑时数据闪烁）
 - **离开页面**：`beforeunload` 事件弹浏览器确认（无法保证 PUT 完成），有脏数据时提示用户先保存
 - **完成向导**：最终 PUT 保留所有 graph_data 节点，跳转 `/fmea/{id}` 编辑器，编辑器已有 `draft → in_review` 状态机
@@ -134,6 +142,12 @@ Modal创建 → POST /fmea/ → draft文档(含初始System节点) → 进入向
 > **示例：** 系统: BMS → 子系统: BMU / 充电管理 → 零部件: LTC6811 / MOSFET
 
 **表单：** 复用现有结构树编辑，但在左侧面板大区域展示而非 Modal 内小区域
+
+**级联删除：** 删除结构节点时必须级联清理所有下游关联节点。依赖链为 Component → Function → FailureMode → (FailureEffect, FailureCause) → (PreventionControl, DetectionControl)。删除逻辑：
+1. 找到被删节点的所有出边，收集目标节点 ID
+2. 递归遍历：对每个下游节点，查找仅由被删路径可达的节点（即没有其他入边的节点）
+3. 将这些孤立节点及其关联边一并移除
+4. 共享控制节点（被多个 FailureCause 引用）不删除，仅删除边
 
 ### Step 3 — 功能分析
 
@@ -185,6 +199,17 @@ Modal创建 → POST /fmea/ → draft文档(含初始System节点) → 进入向
 
 **表单：** 汇总统计（结构节点数、功能节点数、失效链数、总节点数、总边数）+ "完成并进入编辑器"按钮
 
+### 步骤完整性校验
+
+当用户回退修改已完成步骤后，后续步骤需标记"待补全"状态：
+
+- **步骤导航图标：** 已完成步骤默认显示 ✓。若回退修改导致后续步骤数据不完整，受影响步骤显示 ⚠（黄色警告图标），提示用户需要补全
+- **校验规则：**
+  - Step 3（功能分析）待补全：存在 Component 节点没有通过 `HAS_FUNCTION` 边连接 Function 节点
+  - Step 4（失效分析）待补全：存在 Function 节点没有通过 `HAS_FAILURE_MODE` 边连接 FailureMode 节点
+  - Step 5（风险分析）待补全：存在 FailureMode 节点的 S/O/D 值为 0
+- **Step 7 完成限制：** "完成并进入编辑器"按钮在校验不通过时置为 disabled，显示红色提示文字说明哪些步骤需要补全。用户仍可手动保存草稿，但不能完成向导
+
 ## 5. 实现要点
 
 ### 新增文件
@@ -192,7 +217,7 @@ Modal创建 → POST /fmea/ → draft文档(含初始System节点) → 进入向
 - `frontend/src/components/dfmea/WizardGuidanceCard.tsx` — 可折叠引导卡片组件
 - `frontend/src/components/dfmea/WizardStructureTree.tsx` — 左侧结构树+步骤导航面板
 
-### 修改文件
+- `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx` — 加载文档时检查 `fmea_type === "DFMEA" && status === "draft"`，自动跳转 `/fmea/wizard/{id}`
 - `frontend/src/App.tsx` — 新增 `/fmea/wizard/:id` 路由
 - `frontend/src/pages/planning/fmea/FMEAListPage.tsx` — DFMEA 创建后跳转向导页面而非打开 Modal
 - `frontend/src/locales/zh-CN/dfmea.json` — 新增引导卡片文案
@@ -203,6 +228,6 @@ Modal创建 → POST /fmea/ → draft文档(含初始System节点) → 进入向
 - `frontend/src/components/dfmea/GenerationWizard.tsx` — 步骤表单逻辑迁移到新页面组件，原 Modal 保留
 - `frontend/src/types/index.ts` — GraphNode/GraphEdge 类型
 
-### 后端改动
-- 无。现有 `POST /fmea/` 创建 draft（自动注入初始 System 节点）+ `PUT /fmea/{id}` 更新 graph_data（带 lock_version 乐观锁）已满足需求
-- 5T 范围数据存储在前端 localStorage 中，不写入 graph_data，避免 `GraphNodeSchema` 校验问题
+### 后端改动（小）
+- `backend/app/schemas/fmea.py` — `GraphDataSchema` 添加 `wizardScope: WizardScopeSchema | None = None` 可选字段，`WizardScopeSchema` 包含 `team/timeframe/tool/task/trend` 五个可选字符串字段
+- 现有 `POST /fmea/`（创建 draft 含初始 System 节点）和 `PUT /fmea/{id}`（带 lock_version 乐观锁）无需其他改动
