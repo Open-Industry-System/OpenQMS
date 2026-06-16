@@ -124,7 +124,11 @@ export default function FMEAListPage() {
       key: "actions",
       width: 100,
       render: (_: unknown, record: FMEADocument) => {
-        const targetPath = record.fmea_type === "DFMEA" && record.status === "draft"
+        // Only send incomplete DFMEA drafts back to the wizard; completed drafts (wizard_completed)
+        // open directly in the editor, matching FMEAEditorPage's redirect guard.
+        const isIncompleteDraft = record.fmea_type === "DFMEA" && record.status === "draft"
+          && !record.graph_data?.wizardScope?.wizard_completed;
+        const targetPath = isIncompleteDraft
           ? `/fmea/wizard/${record.fmea_id}`
           : `/fmea/${record.fmea_id}`;
         return (

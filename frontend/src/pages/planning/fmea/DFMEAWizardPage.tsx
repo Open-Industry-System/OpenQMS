@@ -40,13 +40,10 @@ export default function DFMEAWizardPage() {
   useEffect(() => { edgesRef.current = edges; }, [edges]);
   useEffect(() => { scopeRef.current = wizardScope; }, [wizardScope]);
 
-  /** Lightweight hash — captures node identity + name + type + edges + scope. */
+  /** Stable hash of the full persisted state — captures every editable field
+   *  (name, type, requirement, specification, S/O/D, optimization, scope). */
   const computeHash = (n: GraphNode[], e: GraphEdge[], s: WizardScope) =>
-    JSON.stringify({
-      nodes: n.map(x => x.id + ':' + x.name + ':' + x.type),
-      edges: e.map(x => x.source + '->' + x.target + ':' + x.type),
-      scope: s,
-    });
+    JSON.stringify({ nodes: n, edges: e, scope: s });
 
   // Load FMEA document
   useEffect(() => {
@@ -267,15 +264,19 @@ export default function DFMEAWizardPage() {
       const fmId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_fm`;
       const feId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_fe`;
       const fcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_fc`;
+      const dcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_dc`;
       const newNodes: GraphNode[] = [
         { id: fmId, type: 'FailureMode', name: mode || t('wizard.failure.newFailureMode'), severity: 0, occurrence: 0, detection: 0 },
         { id: feId, type: 'FailureEffect', name: effect || '', severity: 0, occurrence: 0, detection: 0 },
         { id: fcId, type: 'FailureCause', name: cause || '', severity: 0, occurrence: 0, detection: 0 },
+        // DetectionControl created up-front so Step 4 D is editable and AP is computable.
+        { id: dcId, type: 'DetectionControl', name: t('wizard.optimization.detectionPlaceholder'), severity: 0, occurrence: 0, detection: 0 },
       ];
       const newEdges: GraphEdge[] = [
         { source: funcId, target: fmId, type: 'HAS_FAILURE_MODE' },
         { source: fmId, target: feId, type: 'EFFECT_OF' },
         { source: fcId, target: fmId, type: 'CAUSE_OF' },
+        { source: fcId, target: dcId, type: 'DETECTED_BY' },
       ];
       updateGraphData([...nodes, ...newNodes], [...edges, ...newEdges]);
     };

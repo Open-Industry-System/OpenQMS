@@ -64,7 +64,8 @@
       "d": "D",
       "rpn": "RPN",
       "ap": "AP",
-      "mustOptimize": "Must optimize"
+      "mustOptimize": "Must optimize",
+      "empty": "No failure chains yet — create them in the Failure Analysis step first"
     },
     "optimization": {
       "title": "Optimization Measures",

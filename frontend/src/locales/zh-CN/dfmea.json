@@ -64,7 +64,8 @@
       "d": "D",
       "rpn": "RPN",
       "ap": "AP",
-      "mustOptimize": "必须优化"
+      "mustOptimize": "必须优化",
+      "empty": "暂无失效链，请先在失效分析步骤中创建"
     },
     "optimization": {
       "title": "优化措施",
