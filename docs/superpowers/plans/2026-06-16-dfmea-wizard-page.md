@@ -1,4 +1,4 @@
-# DFMEA Wizard Page Implementation Plan (v3 — revised)
+# DFMEA Wizard Page Implementation Plan (v4 — revised)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -110,6 +110,34 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
     ))
     await db.delete(fmea)
     await db.commit()
+```
+
+Additionally, add a `delete_fmea_projection` method to `GraphProjectionService` in `backend/app/services/graph_projection_service.py`:
+
+```python
+async def delete_fmea_projection(self, fmea_id: uuid.UUID) -> None:
+    """Delete all nodes and edges for a FMEA document from the Neo4j projection."""
+    async with self.driver.session() as session:
+        # Delete all edges with this fmea_id
+        await session.run(
+            "MATCH (n:FMEANode {fmea_id: $fmea_id}) DETACH DELETE n",
+            fmea_id=str(fmea_id)
+        )
+        # Delete any remaining orphaned nodes
+        await session.run(
+            "MATCH (n) WHERE n.fmea_id = $fmea_id DETACH DELETE n",
+            fmea_id=str(fmea_id)
+        )
+```
+
+And update the graph sync worker in `backend/app/services/graph_sync_worker.py` to handle the `fmea.deleted` event by calling `delete_fmea_projection` instead of `sync_fmea_to_neo4j`:
+
+```python
+# In the event processing loop, add a branch for "fmea.deleted":
+if event_type == "fmea.deleted":
+    await projection_service.delete_fmea_projection(aggregate_id)
+else:
+    await projection_service.sync_fmea_to_neo4j(aggregate_id)
 ```
 
 ### 1c: Add DELETE endpoint
@@ -1063,13 +1091,16 @@ This task creates the page shell, data loading, save integration, step navigatio
 ```tsx
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Space, Modal, Spin, Typography, message } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
+import { Button, Space, Modal, Spin, Typography, message, Input, InputNumber, Card, Tag, Empty, Table, Result } from 'antd';
+import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined, WarningOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { getFMEA, deleteFMEA } from '../../../api/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { useWizardValidation } from '../../../hooks/useWizardValidation';
+import { useDfmeaRules } from '../../../utils/dfmeaRules';
+import { buildRows } from '../../../utils/fmeaTable';
+import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
 import WizardGuidanceCard from '../../../components/dfmea/WizardGuidanceCard';
 
@@ -1088,19 +1119,27 @@ export default function DFMEAWizardPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const completedSteps = useRef(new Set<number>());
   const dirtyRef = useRef(false);
-  const lastSavedTimestamp = useRef(0);
+  const lastSavedDataHash = useRef('');
 
   const { saveStatus, setLockVersion, debouncedSave, immediateSave } = useWizardSave({ fmeaId: fmeaId! });
   const validation = useWizardValidation(nodes, edges);
   const dfmeaRules = useDfmeaRules();
 
-  // Track when save succeeds so beforeunload can skip warning if saved recently
+  // Compute a hash of current graph data to compare against last saved state
+  const currentDataHash = useCallback(() => {
+    return JSON.stringify({
+      nodes: nodes.map(n => n.id + ':' + n.name + ':' + n.type),
+      edges: edges.map(e => e.source + '->' + e.target + ':' + e.type),
+      scope: wizardScope,
+    });
+  }, [nodes, edges, wizardScope]);
+
+  // Clear dirty when saved data matches current data
   useEffect(() => {
     if (saveStatus === 'saved') {
-      lastSavedTimestamp.current = Date.now();
-      dirtyRef.current = false;
+      lastSavedDataHash.current = currentDataHash();
     }
-  }, [saveStatus]);
+  }, [saveStatus, currentDataHash]);
 
   // Load FMEA document
   useEffect(() => {
@@ -1123,11 +1162,10 @@ export default function DFMEAWizardPage() {
     });
   }, [fmeaId, navigate, setLockVersion]);
 
-  // beforeunload warning — only warn if there are unsaved changes saved more than 3s ago
+  // beforeunload warning — only warn if current data differs from last saved data
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      const hasUnsavedChanges = dirtyRef.current && (Date.now() - lastSavedTimestamp.current > 3000);
-      if (hasUnsavedChanges) {
+      if (dirtyRef.current && currentDataHash() !== lastSavedDataHash.current) {
         e.preventDefault();
       }
     };
@@ -1226,9 +1264,9 @@ export default function DFMEAWizardPage() {
         <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
           <WizardGuidanceCard stepIndex={currentStep} />
 
-          {/* Step content placeholder — will be filled in Tasks 10-12 */}
+          {/* Step content — renderers added in Tasks 10-12 */}
           <div style={{ minHeight: 300 }}>
-            {STEP_RENDERERS[currentStep]?.()}
+            {STEP_RENDERERS[currentStep]?.() || <div />}
           </div>
 
           {/* Bottom navigation */}
@@ -1274,6 +1312,21 @@ Run: `cd /Users/sam/Documents/Code/OpenQMS/frontend && npx tsc --noEmit 2>&1 | h
 ```bash
 git add frontend/src/pages/planning/fmea/DFMEAWizardPage.tsx
 git commit -m "feat(dfmea-wizard): add DFMEAWizardPage shell with load/save/validation"
+```
+
+**Important:** The `STEP_RENDERERS` map starts with placeholder empty renderers. Each Task 10-12 fills in the actual content:
+
+```tsx
+// Placeholder — Tasks 10-12 replace these with real implementations
+const STEP_RENDERERS: Record<number, () => React.ReactNode> = {
+  0: () => <div />,
+  1: () => <div />,
+  2: () => <div />,
+  3: () => <div />,
+  4: () => <div />,
+  5: () => <div />,
+  6: () => <div />,
+};
 ```
 
 ---
@@ -1464,11 +1517,110 @@ const renderStep3 = () => {
     updateGraphData([...nodes, ...newNodes], [...edges, ...newEdges]);
   };
 
-  // ... render per-function cards with Input fields for mode/effect/cause
-  // ... add smart recommendation buttons using generateFailureModes(funcName)
-  // ... delete button removes the failure chain nodes and edges
+  const handleDeleteFailureChain = (failureModeId: string) => {
+    // Remove FailureMode, its FailureEffect, and connected FailureCause → PreventionControl/DetectionControl
+    // Uses the same cascade logic but scoped to a single failure chain
+    const toDelete = new Set<string>([failureModeId]);
+    const edgesToDelete = new Set<string>();
+
+    // Find FailureEffect (outgoing EFFECT_OF)
+    for (const e of edges) {
+      if (e.source === failureModeId && e.type === 'EFFECT_OF') {
+        toDelete.add(e.target);
+        edgesToDelete.add(`${e.source}->${e.target}->${e.type}`);
+      }
+    }
+
+    // Find FailureCause (incoming CAUSE_OF)
+    for (const e of edges) {
+      if (e.target === failureModeId && e.type === 'CAUSE_OF') {
+        toDelete.add(e.source);
+        edgesToDelete.add(`${e.source}->${e.target}->${e.type}`);
+        // Find PreventionControl and DetectionControl from this cause
+        for (const e2 of edges) {
+          if (e2.source === e.source && (e2.type === 'PREVENTED_BY' || e2.type === 'DETECTED_BY')) {
+            // Only delete control nodes that are ONLY connected to this cause
+            const otherParents = edges.filter(e3 => e3.target === e2.target && e3.source !== e.source);
+            if (otherParents.length === 0) {
+              toDelete.add(e2.target);
+            }
+            edgesToDelete.add(`${e2.source}->${e2.target}->${e2.type}`);
+          }
+        }
+      }
+    }
+
+    // Remove edges targeting deleted nodes
+    for (const e of edges) {
+      if (toDelete.has(e.source) || toDelete.has(e.target)) {
+        edgesToDelete.add(`${e.source}->${e.target}->${e.type}`);
+      }
+    }
+
+    const filteredNodes = nodes.filter(n => !toDelete.has(n.id));
+    const filteredEdges = edges.filter(e => !edgesToDelete.has(`${e.source}->${e.target}->${e.type}`));
+    updateGraphData(filteredNodes, filteredEdges);
+  };
+
+  const handleUpdateNodeField = (nodeId: string, field: string, value: string) => {
+    updateGraphData(nodes.map(n => n.id === nodeId ? { ...n, [field]: value } : n), edges);
+  };
+
+  return (
+    <div>
+      {functions.map(func => {
+        // Find FailureMode nodes connected to this function
+        const fmEdges = edges.filter(e => e.source === func.id && e.type === 'HAS_FAILURE_MODE');
+        const fmNodes = fmEdges.map(e => nodes.find(n => n.id === e.target)).filter(Boolean) as GraphNode[];
+        const suggestedModes = generateFailureModes(func.name);
+
+        return (
+          <Card key={func.id} size="small" title={func.name} style={{ marginBottom: 12 }}>
+            {fmNodes.length === 0 && suggestedModes.length > 0 && (
+              <div style={{ marginBottom: 8, padding: 8, background: '#f6ffed', borderRadius: 4 }}>
+                <Tag color="green">{t('wizard.failure.recommended')}</Tag>
+                <span style={{ fontSize: 12 }}> {t('wizard.failure.autoRecommend')}</span>
+                <Space size={4} style={{ marginTop: 4 }}>
+                  {suggestedModes.slice(0, 3).map(mode => (
+                    <Button key={mode} size="small" onClick={() => {
+                      const chain = suggestFailureChain(mode);
+                      handleAddFailure(func.id, mode, chain.effects[0] || '', chain.causes[0] || '');
+                    }}>{mode}</Button>
+                  ))}
+                </Space>
+              </div>
+            )}
+            {fmNodes.map(fmNode => {
+              // Find this FM's FailureEffect (outgoing EFFECT_OF)
+              const effectEdge = edges.find(e => e.source === fmNode.id && e.type === 'EFFECT_OF');
+              const effectNode = effectEdge ? nodes.find(n => n.id === effectEdge!.target) : null;
+              // Find this FM's FailureCause (incoming CAUSE_OF)
+              const causeEdges = edges.filter(e => e.target === fmNode.id && e.type === 'CAUSE_OF');
+              const causeNodes = causeEdges.map(e => nodes.find(n => n.id === e.source)).filter(Boolean) as GraphNode[];
+
+              return (
+                <div key={fmNode.id} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Input size="small" value={fmNode.name} addonBefore={t('wizard.failure.failureMode')}
+                      onChange={e => handleUpdateNodeField(fmNode.id, 'name', e.target.value)} />
+                    <Input size="small" value={effectNode?.name || ''} addonBefore={t('wizard.failure.failureEffect')}
+                      onChange={e => effectNode && handleUpdateNodeField(effectNode.id, 'name', e.target.value)} />
+                    {causeNodes.map(causeNode => (
+                      <Input key={causeNode.id} size="small" value={causeNode.name} addonBefore={t('wizard.failure.failureCause')}
+                        onChange={e => handleUpdateNodeField(causeNode.id, 'name', e.target.value)} />
+                    ))}
+                    <Button size="small" danger onClick={() => handleDeleteFailureChain(fmNode.id)}>{t('wizard.failure.delete')}</Button>
+                  </Space>
+                </div>
+              );
+            })}
+            <Button size="small" type="dashed" onClick={() => handleAddFailure(func.id)}>{t('wizard.failure.addFailureMode')}</Button>
+          </Card>
+        );
+      })}
+    </div>
+  );
 };
-```
 
 - [ ] **Step 1: Add step content for steps 2 and 3**
 
@@ -1548,7 +1700,7 @@ Shows only AP=H failure chains. For each, renders prevention and detection measu
 
 ```tsx
 const renderStep5 = () => {
-  const { suggestMeasures } = dfmeaRules;
+  const { suggestMeasures, analyzeRisk } = dfmeaRules;
   const rows = buildRows(nodes, edges);
   const nodeMap = new Map(nodes.map(n => [n.id, n]));
   const highRiskRows = rows.filter(r => {
@@ -1568,7 +1720,7 @@ const renderStep5 = () => {
     const causeId = row.failureCauseNodeId;
     if (!causeId) return;
 
-    const newNodes = [...nodes];
+    let newNodes = [...nodes];
     const newEdges = [...edges];
 
     if (type === 'prevention') {
@@ -1761,9 +1913,14 @@ git add -A && git commit -m "fix(dfmea-wizard): integration test fixes"
 
 ---
 
-## Self-Review Checklist (v2)
+## Self-Review Checklist (v4)
 
 - [x] **Spec coverage:** All sections covered — routes (Task 13), layout (Task 9), save mechanism (Task 4), step content (Tasks 10-12), validation (Task 5), cascade delete (Task 3), wizardScope (Tasks 1-2), i18n (Task 8), guidance cards (Task 6), sidebar (Task 7), editor redirect (Task 13), exit confirmation (Task 9)
-- [x] **Placeholder scan:** No TBD/TODO/fill-in-later. All code blocks contain complete implementations. Tasks 10-12 describe what to implement but reference existing `GenerationWizard.tsx` patterns.
-- [x] **Type consistency:** `WizardScope` defined in Task 2, used in Tasks 4 and 9. `lock_version` added to `FMEAResponse` (Task 1) and `FMEADocument` (Task 2). `deleteFMEA` API (Task 2) matches backend DELETE endpoint (Task 1). `useWizardSave` returns `SaveStatus` (Task 4), used in Task 9. `useWizardValidation` uses `buildRows` (Task 5), imported correctly. `cascadeDeleteStructureNode` signature matches Task 9/10 usage. `WizardSidebar` accepts `edges` prop (Task 7), passed in Task 9.
-- [x] **Blocking issues fixed:** (1) `lock_version` added to `FMEAResponse`, (2) DELETE endpoint added to backend, (3) serial save queue fixed with proper chaining, (4) Step 5 validation uses `buildRows` + graph model S/O/D mapping, (5) cascade delete has unit tests, (6) Task 9 split into Tasks 9-12, (7) `WizardSidebar` receives edges and uses proper tree builder, (8) i18n JSON is valid merge format
+- [x] **Placeholder scan:** No TBD/TODO/fill-in-later. All code blocks contain complete implementations. Step 3 failure analysis has full render code with handleAddFailure, handleDeleteFailureChain, and smart recommendations. Step 5 optimization has full PreventionControl/DetectionControl creation code.
+- [x] **Type consistency:** `WizardScope` uses `wizard_completed` (not `_completed`), defined in both backend (Task 1) and frontend (Task 2). `lock_version` added to `FMEAResponse` (Task 1). `deleteFMEA` API (Task 2) matches backend DELETE endpoint (Task 1). `useWizardSave` returns `boolean` from `immediateSave` (Task 4). `useWizardValidation` uses `buildRows` (Task 5). `cascadeDeleteStructureNode` correctly handles root node deletion and CAUSE_OF edge direction (Task 3). `useDfmeaRules()` called at top level, not in render functions (Task 12 fix). `STEP_RENDERERS` placeholder defined in Task 9 with empty renderers. All imports listed in Task 9.
+- [x] **Redirect loop fix:** `wizard_completed` flag prevents editor from redirecting completed wizards back. Editor only redirects if `wizardScope.wizard_completed` is absent or falsy (Task 13).
+- [x] **Dirty flag fix:** Uses hash-based comparison. `currentDataHash()` computes hash of current nodes/edges/wizardScope. `lastSavedDataHash` set on successful save. `beforeunload` only warns if `currentDataHash() !== lastSavedDataHash.current`.
+- [x] **Cascade delete root node:** Root node `nodeId` always added to `nodeIdsToDelete`. External parent check only applies to descendant nodes.
+- [x] **Step 2 edge types:** Uses `CHILD_EDGE_TYPE` mapping matching StructureTree.tsx: System→HAS_PROCESS_STEP, Subsystem→HAS_WORK_ELEMENT.
+- [x] **Neo4j projection cleanup:** `delete_fmea` service includes audit log and outbox event. `GraphProjectionService` gets `delete_fmea_projection` method. Worker handles `fmea.deleted` event type.
+- [x] **TypeScript compilation:** `let newNodes` instead of `const newNodes` in Task 12 optimization step. All imports present in Task 9.
