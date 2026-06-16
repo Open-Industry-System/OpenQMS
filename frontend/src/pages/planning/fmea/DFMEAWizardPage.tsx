@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Space, Modal, Spin, Typography, message } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
+import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty } from 'antd';
+import { ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { getFMEA, deleteFMEA } from '../../../api/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
@@ -138,10 +138,82 @@ export default function DFMEAWizardPage() {
     error: t('wizard.page.saveError'),
   };
 
-  // Placeholder — Tasks 10-12 insert real renderStep0..renderStep6 above this map
+  // Step 0 — 5T Scope
+  const renderStep0 = () => (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <Input placeholder={t('wizard.scope.team')} value={wizardScope.team || ''}
+        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, team: e.target.value })} />
+      <Input placeholder={t('wizard.scope.timeframe')} value={wizardScope.timeframe || ''}
+        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, timeframe: e.target.value })} />
+      <Input placeholder={t('wizard.scope.tool')} value={wizardScope.tool || ''}
+        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, tool: e.target.value })} />
+      <Input placeholder={t('wizard.scope.task')} value={wizardScope.task || ''}
+        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, task: e.target.value })} />
+      <Input placeholder={t('wizard.scope.trend')} value={wizardScope.trend || ''}
+        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, trend: e.target.value })} />
+    </div>
+  );
+
+  // Step 1 — Structure Analysis
+  const renderStep1 = () => {
+    const structureNodes = nodes.filter(n => ['System', 'Subsystem', 'Component', 'Interface', 'DesignParameter'].includes(n.type));
+    const CHILD_TYPE: Record<string, string> = { System: 'Subsystem', Subsystem: 'Component' };
+    const CHILD_EDGE_TYPE: Record<string, string> = { System: 'HAS_PROCESS_STEP', Subsystem: 'HAS_WORK_ELEMENT' };
+
+    const handleAddNode = (type: string, parentId?: string) => {
+      const newNode: GraphNode = {
+        id: `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${type.toLowerCase()}`,
+        type, name: t(`wizard.typeLabels.${type}`, { defaultValue: type }),
+        severity: 0, occurrence: 0, detection: 0,
+        ...(type === 'Interface' ? { interface_type: 'physical' } : {}),
+      };
+      const newEdges = parentId
+        ? [...edges, { source: parentId, target: newNode.id, type: CHILD_EDGE_TYPE[nodes.find(n => n.id === parentId)?.type || 'System'] || 'HAS_PROCESS_STEP' }]
+        : edges;
+      updateGraphData([...nodes, newNode], newEdges);
+    };
+
+    const handleDeleteNode = (nodeId: string) => {
+      const result = cascadeDeleteStructureNode(nodeId, nodes, edges);
+      updateGraphData(result.nodes, result.edges);
+    };
+
+    const handleRenameNode = (nodeId: string, name: string) => {
+      updateGraphData(nodes.map(n => n.id === nodeId ? { ...n, name } : n), edges);
+    };
+
+    const typeLabel = (type: string) => t(`wizard.typeLabels.${type}`, { defaultValue: type });
+    const TYPE_COLORS: Record<string, string> = { System: 'red', Subsystem: 'orange', Component: 'green', Interface: 'purple', DesignParameter: 'blue' };
+
+    return (
+      <div>
+        <Space style={{ marginBottom: 12 }}>
+          <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddNode('System')}>{t('wizard.structure.addSystem')}</Button>
+          <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddNode('Interface')}>{t('wizard.structure.addInterface')}</Button>
+        </Space>
+        {structureNodes.length === 0 && <Empty description={t('wizard.structure.empty')} />}
+        {structureNodes.map(node => (
+          <Card key={node.id} size="small" style={{ marginBottom: 8, marginLeft: node.type === 'Subsystem' ? 20 : node.type === 'Component' ? 40 : 0 }}>
+            <Space>
+              <Tag color={TYPE_COLORS[node.type]}>{typeLabel(node.type)}</Tag>
+              <Input size="small" value={node.name} style={{ width: 200 }}
+                onChange={e => handleRenameNode(node.id, e.target.value)} />
+              {CHILD_TYPE[node.type] && (
+                <Button size="small" onClick={() => handleAddNode(CHILD_TYPE[node.type], node.id)}>
+                  + {typeLabel(CHILD_TYPE[node.type])}
+                </Button>
+              )}
+              <Button size="small" danger onClick={() => handleDeleteNode(node.id)}>{t('wizard.structure.delete')}</Button>
+            </Space>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
   const STEP_RENDERERS: Record<number, () => React.ReactNode> = {
-    0: () => <div />,
-    1: () => <div />,
+    0: renderStep0,
+    1: renderStep1,
     2: () => <div />,
     3: () => <div />,
     4: () => <div />,
