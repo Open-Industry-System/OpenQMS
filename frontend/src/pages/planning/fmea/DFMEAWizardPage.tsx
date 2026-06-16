@@ -211,11 +211,180 @@ export default function DFMEAWizardPage() {
     );
   };
 
+  // Step 2 — Function Analysis
+  const renderStep2 = () => {
+    const components = nodes.filter(n => n.type === 'Component');
+    if (components.length === 0) return <Empty description={t('wizard.function.title') + ' — ' + t('wizard.structure.empty')} />;
+
+    const handleAddFunction = (compId: string) => {
+      const funcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_func`;
+      const funcNode: GraphNode = {
+        id: funcId, type: 'ProcessWorkElementFunction', name: '',
+        requirement: '', specification: '', severity: 0, occurrence: 0, detection: 0,
+      };
+      updateGraphData([...nodes, funcNode], [...edges, { source: compId, target: funcId, type: 'HAS_FUNCTION' }]);
+    };
+
+    const handleUpdateFunction = (funcId: string, field: 'name' | 'requirement' | 'specification', value: string) => {
+      updateGraphData(nodes.map(n => n.id === funcId ? { ...n, [field]: value } : n), edges);
+    };
+
+    return (
+      <div>
+        {components.map(comp => {
+          const funcEdges = edges.filter(e => e.source === comp.id && e.type === 'HAS_FUNCTION');
+          const funcNodes = funcEdges.map(e => nodes.find(n => n.id === e.target)).filter(Boolean) as GraphNode[];
+          return (
+            <Card key={comp.id} size="small" title={comp.name} style={{ marginBottom: 12 }}>
+              {funcNodes.map(fn => (
+                <div key={fn.id} style={{ marginBottom: 8 }}>
+                  <Input placeholder={t('wizard.function.functionDesc')} value={fn.name}
+                    onChange={e => handleUpdateFunction(fn.id, 'name', e.target.value)} style={{ marginBottom: 4 }} />
+                  <Input placeholder={t('wizard.function.requirement')} value={fn.requirement || ''}
+                    onChange={e => handleUpdateFunction(fn.id, 'requirement', e.target.value)} style={{ marginBottom: 4 }} />
+                  <Input placeholder={t('wizard.function.specification')} value={fn.specification || ''}
+                    onChange={e => handleUpdateFunction(fn.id, 'specification', e.target.value)} />
+                </div>
+              ))}
+              <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => handleAddFunction(comp.id)}>
+                {t('wizard.failure.addFailureMode').replace('失效模式', '功能')}
+              </Button>
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Step 3 — Failure Analysis
+  const renderStep3 = () => {
+    const { generateFailureModes, suggestFailureChain } = dfmeaRules;
+    const functions = nodes.filter(n => ['ProcessWorkElementFunction', 'ProcessItemFunction', 'ProcessStepFunction'].includes(n.type));
+
+    if (functions.length === 0) return <Empty description={t('wizard.failure.title') + ' — ' + t('wizard.function.title')} />;
+
+    const handleAddFailure = (funcId: string, mode?: string, effect?: string, cause?: string) => {
+      const fmId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_fm`;
+      const feId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_fe`;
+      const fcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_fc`;
+      const newNodes: GraphNode[] = [
+        { id: fmId, type: 'FailureMode', name: mode || t('wizard.failure.newFailureMode'), severity: 0, occurrence: 0, detection: 0 },
+        { id: feId, type: 'FailureEffect', name: effect || '', severity: 0, occurrence: 0, detection: 0 },
+        { id: fcId, type: 'FailureCause', name: cause || '', severity: 0, occurrence: 0, detection: 0 },
+      ];
+      const newEdges: GraphEdge[] = [
+        { source: funcId, target: fmId, type: 'HAS_FAILURE_MODE' },
+        { source: fmId, target: feId, type: 'EFFECT_OF' },
+        { source: fcId, target: fmId, type: 'CAUSE_OF' },
+      ];
+      updateGraphData([...nodes, ...newNodes], [...edges, ...newEdges]);
+    };
+
+    const handleDeleteFailureChain = (failureModeId: string) => {
+      const toDelete = new Set<string>([failureModeId]);
+      const edgesToDelete = new Set<string>();
+
+      // Find FailureEffect (outgoing EFFECT_OF)
+      for (const e of edges) {
+        if (e.source === failureModeId && e.type === 'EFFECT_OF') {
+          toDelete.add(e.target);
+          edgesToDelete.add(`${e.source}->${e.target}->${e.type}`);
+        }
+      }
+
+      // Find FailureCause (incoming CAUSE_OF)
+      for (const e of edges) {
+        if (e.target === failureModeId && e.type === 'CAUSE_OF') {
+          toDelete.add(e.source);
+          edgesToDelete.add(`${e.source}->${e.target}->${e.type}`);
+          // Find PreventionControl and DetectionControl from this cause
+          for (const e2 of edges) {
+            if (e2.source === e.source && (e2.type === 'PREVENTED_BY' || e2.type === 'DETECTED_BY')) {
+              // Only delete control nodes that are ONLY connected to this cause
+              const otherParents = edges.filter(e3 => e3.target === e2.target && e3.source !== e.source);
+              if (otherParents.length === 0) {
+                toDelete.add(e2.target);
+              }
+              edgesToDelete.add(`${e2.source}->${e2.target}->${e2.type}`);
+            }
+          }
+        }
+      }
+
+      // Remove edges targeting deleted nodes
+      for (const e of edges) {
+        if (toDelete.has(e.source) || toDelete.has(e.target)) {
+          edgesToDelete.add(`${e.source}->${e.target}->${e.type}`);
+        }
+      }
+
+      const filteredNodes = nodes.filter(n => !toDelete.has(n.id));
+      const filteredEdges = edges.filter(e => !edgesToDelete.has(`${e.source}->${e.target}->${e.type}`));
+      updateGraphData(filteredNodes, filteredEdges);
+    };
+
+    const handleUpdateNodeField = (nodeId: string, field: string, value: string) => {
+      updateGraphData(nodes.map(n => n.id === nodeId ? { ...n, [field]: value } : n), edges);
+    };
+
+    return (
+      <div>
+        {functions.map(func => {
+          const fmEdges = edges.filter(e => e.source === func.id && e.type === 'HAS_FAILURE_MODE');
+          const fmNodes = fmEdges.map(e => nodes.find(n => n.id === e.target)).filter(Boolean) as GraphNode[];
+          const suggestedModes = generateFailureModes(func.name);
+
+          return (
+            <Card key={func.id} size="small" title={func.name} style={{ marginBottom: 12 }}>
+              {fmNodes.length === 0 && suggestedModes.length > 0 && (
+                <div style={{ marginBottom: 8, padding: 8, background: '#f6ffed', borderRadius: 4 }}>
+                  <Tag color="green">{t('wizard.failure.recommended')}</Tag>
+                  <span style={{ fontSize: 12 }}> {t('wizard.failure.autoRecommend')}</span>
+                  <Space size={4} style={{ marginTop: 4 }}>
+                    {suggestedModes.slice(0, 3).map(mode => (
+                      <Button key={mode} size="small" onClick={() => {
+                        const chain = suggestFailureChain(mode);
+                        handleAddFailure(func.id, mode, chain.effects[0] || '', chain.causes[0] || '');
+                      }}>{mode}</Button>
+                    ))}
+                  </Space>
+                </div>
+              )}
+              {fmNodes.map(fmNode => {
+                const effectEdge = edges.find(e => e.source === fmNode.id && e.type === 'EFFECT_OF');
+                const effectNode = effectEdge ? nodes.find(n => n.id === effectEdge!.target) : null;
+                const causeEdges = edges.filter(e => e.target === fmNode.id && e.type === 'CAUSE_OF');
+                const causeNodes = causeEdges.map(e => nodes.find(n => n.id === e.source)).filter(Boolean) as GraphNode[];
+
+                return (
+                  <div key={fmNode.id} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Input size="small" value={fmNode.name} addonBefore={t('wizard.failure.failureMode')}
+                        onChange={e => handleUpdateNodeField(fmNode.id, 'name', e.target.value)} />
+                      <Input size="small" value={effectNode?.name || ''} addonBefore={t('wizard.failure.failureEffect')}
+                        onChange={e => effectNode && handleUpdateNodeField(effectNode.id, 'name', e.target.value)} />
+                      {causeNodes.map(causeNode => (
+                        <Input key={causeNode.id} size="small" value={causeNode.name} addonBefore={t('wizard.failure.failureCause')}
+                          onChange={e => handleUpdateNodeField(causeNode.id, 'name', e.target.value)} />
+                      ))}
+                      <Button size="small" danger onClick={() => handleDeleteFailureChain(fmNode.id)}>{t('wizard.failure.delete')}</Button>
+                    </Space>
+                  </div>
+                );
+              })}
+              <Button size="small" type="dashed" onClick={() => handleAddFailure(func.id)}>{t('wizard.failure.addFailureMode')}</Button>
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
+
   const STEP_RENDERERS: Record<number, () => React.ReactNode> = {
     0: renderStep0,
     1: renderStep1,
-    2: () => <div />,
-    3: () => <div />,
+    2: renderStep2,
+    3: renderStep3,
     4: () => <div />,
     5: () => <div />,
     6: () => <div />,
