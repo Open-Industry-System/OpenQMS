@@ -52,7 +52,7 @@ class WizardScopeSchema(BaseModel):
     tool: str | None = None
     task: str | None = None
     trend: str | None = None
-    _completed: bool | None = None  # Set True when wizard finishes; prevents editor redirect loop
+    wizard_completed: bool | None = None  # Set True when wizard finishes; prevents editor redirect loop
 
 
 class GraphDataSchema(BaseModel):
@@ -174,7 +174,7 @@ export interface WizardScope {
   tool?: string;
   task?: string;
   trend?: string;
-  _completed?: boolean;  // True when wizard has finished; prevents editor redirect loop
+  wizard_completed?: boolean;  // True when wizard has finished; prevents editor redirect loop
 }
 ```
 
@@ -275,6 +275,16 @@ export function cascadeDeleteStructureNode(
   const nodeIdsToDelete = new Set<string>();
   const edgeKeysToDelete = new Set<string>();
 
+  // The root node being deleted is always removed, regardless of parents
+  nodeIdsToDelete.add(nodeId);
+
+  // Remove all edges connected to the root node
+  for (const e of edges) {
+    if (e.source === nodeId || e.target === nodeId) {
+      edgeKeysToDelete.add(`${e.source}->${e.target}->${e.type}`);
+    }
+  }
+
   // BFS downstream from nodeId, following forward edges
   // and also discovering FailureCauses via CAUSE_OF (reversed)
   const downstream = new Set<string>();
@@ -282,6 +292,16 @@ export function cascadeDeleteStructureNode(
   while (queue.length > 0) {
     const current = queue.shift()!;
     if (downstream.has(current)) continue;
+    // Skip the root — it's already handled above
+    if (current === nodeId) {
+      // Still traverse its children
+      for (const e of edges) {
+        if (e.source === current && FORWARD_EDGE_TYPES.has(e.type)) {
+          queue.push(e.target);
+        }
+      }
+      continue;
+    }
     downstream.add(current);
 
     // Follow forward outgoing edges from this node
@@ -296,21 +316,23 @@ export function cascadeDeleteStructureNode(
     if (node && node.type === 'FailureMode') {
       for (const e of edges) {
         if (e.target === current && e.type === 'CAUSE_OF') {
-          queue.push(e.source); // FailureCause is upstream in semantics but downstream in deletion
+          queue.push(e.source);
         }
       }
     }
   }
 
-  // For each downstream node, check if it has incoming edges from OUTSIDE the set.
-  // If yes, it's shared — keep it, only remove edges from inside the set.
+  // For each downstream node (not the root), check if it has incoming edges
+  // from OUTSIDE the deletion set. If yes, it's shared — keep it, only remove
+  // edges from inside the set.
   for (const id of downstream) {
     const hasExternalParent = edges.some(
-      e => e.target === id && !downstream.has(e.source) &&
+      e => e.target === id && !downstream.has(e.source) && e.source !== nodeId &&
          (FORWARD_EDGE_TYPES.has(e.type) || e.type === 'CAUSE_OF')
     );
 
     if (!hasExternalParent) {
+      // No external parent — this node is orphaned, delete it
       nodeIdsToDelete.add(id);
     }
 
@@ -319,14 +341,13 @@ export function cascadeDeleteStructureNode(
       if (e.source === id && downstream.has(e.target) && FORWARD_EDGE_TYPES.has(e.type)) {
         edgeKeysToDelete.add(`${e.source}->${e.target}->${e.type}`);
       }
-      // CAUSE_OF edges where cause is in set and fm is in set
       if (e.type === 'CAUSE_OF' && e.source === id && downstream.has(e.target)) {
         edgeKeysToDelete.add(`${e.source}->${e.target}->${e.type}`);
       }
     }
   }
 
-  // Also remove all edges targeting deleted nodes from outside
+  // Also remove all edges connected to deleted nodes
   for (const e of edges) {
     if (nodeIdsToDelete.has(e.source) || nodeIdsToDelete.has(e.target)) {
       edgeKeysToDelete.add(`${e.source}->${e.target}->${e.type}`);
@@ -467,22 +488,16 @@ export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 export function useWizardSave({ fmeaId }: UseWizardSaveOptions) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const lockVersionRef = useRef<number>(0);
-  const queueTailRef = useRef<Promise<void>>(Promise.resolve());
+  const queueTailRef = useRef<Promise<boolean>>(Promise.resolve(false));
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onSavedRef = useRef<(() => void) | null>(null);
 
   const setLockVersion = useCallback((v: number) => {
     lockVersionRef.current = v;
   }, []);
 
-  /** Set a callback that fires when a save succeeds — used to clear dirtyRef */
-  const setOnSaved = useCallback((cb: (() => void) | null) => {
-    onSavedRef.current = cb;
-  }, []);
-
-  /** Serial save: enqueues after any in-flight save, returns when this save completes */
-  const enqueueSave = useCallback(async (graphData: GraphData, title?: string): Promise<void> => {
-    const doSave = async (): Promise<void> => {
+  /** Serial save: enqueues after any in-flight save, returns true on success */
+  const enqueueSave = useCallback(async (graphData: GraphData, title?: string): Promise<boolean> => {
+    const doSave = async (): Promise<boolean> => {
       try {
         setSaveStatus('saving');
         const resp = await updateFMEA(fmeaId, {
@@ -492,9 +507,8 @@ export function useWizardSave({ fmeaId }: UseWizardSaveOptions) {
         });
         lockVersionRef.current = resp.lock_version ?? resp.version;
         setSaveStatus('saved');
-        // Notify page that save succeeded (clears dirtyRef)
-        onSavedRef.current?.();
         setTimeout(() => setSaveStatus('idle'), 2000);
+        return true;
       } catch (err: any) {
         setSaveStatus('error');
         if (err?.response?.status === 409 || String(err?.response?.data?.detail).includes('lock_version')) {
@@ -502,6 +516,7 @@ export function useWizardSave({ fmeaId }: UseWizardSaveOptions) {
         } else {
           message.error('保存失败，请重试');
         }
+        return false;
       }
     };
 
@@ -512,7 +527,7 @@ export function useWizardSave({ fmeaId }: UseWizardSaveOptions) {
     return newTail;
   }, [fmeaId]);
 
-  /** Debounced save: 500ms delay, cancels previous timer */
+  /** Debounced save: 500ms delay, cancels previous timer. Returns void (fire-and-forget). */
   const debouncedSave = useCallback((graphData: GraphData, title?: string) => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -522,19 +537,18 @@ export function useWizardSave({ fmeaId }: UseWizardSaveOptions) {
     }, 500);
   }, [enqueueSave]);
 
-  /** Immediate save: cancels debounce, saves right away */
-  const immediateSave = useCallback(async (graphData: GraphData, title?: string) => {
+  /** Immediate save: cancels debounce, saves right away. Returns true on success. */
+  const immediateSave = useCallback(async (graphData: GraphData, title?: string): Promise<boolean> => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
-    await enqueueSave(graphData, title);
+    return await enqueueSave(graphData, title);
   }, [enqueueSave]);
 
   return {
     saveStatus,
     setLockVersion,
-    setOnSaved,
     debouncedSave,
     immediateSave,
   };
@@ -1074,14 +1088,19 @@ export default function DFMEAWizardPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const completedSteps = useRef(new Set<number>());
   const dirtyRef = useRef(false);
+  const lastSavedTimestamp = useRef(0);
 
-  const { saveStatus, setLockVersion, setOnSaved, debouncedSave, immediateSave } = useWizardSave({ fmeaId: fmeaId! });
+  const { saveStatus, setLockVersion, debouncedSave, immediateSave } = useWizardSave({ fmeaId: fmeaId! });
   const validation = useWizardValidation(nodes, edges);
+  const dfmeaRules = useDfmeaRules();
 
-  // Wire up dirtyRef clearing on successful save
+  // Track when save succeeds so beforeunload can skip warning if saved recently
   useEffect(() => {
-    setOnSaved(() => () => { dirtyRef.current = false; });
-  }, [setOnSaved]);
+    if (saveStatus === 'saved') {
+      lastSavedTimestamp.current = Date.now();
+      dirtyRef.current = false;
+    }
+  }, [saveStatus]);
 
   // Load FMEA document
   useEffect(() => {
@@ -1104,10 +1123,11 @@ export default function DFMEAWizardPage() {
     });
   }, [fmeaId, navigate, setLockVersion]);
 
-  // beforeunload warning
+  // beforeunload warning — only warn if there are unsaved changes saved more than 3s ago
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (dirtyRef.current) {
+      const hasUnsavedChanges = dirtyRef.current && (Date.now() - lastSavedTimestamp.current > 3000);
+      if (hasUnsavedChanges) {
         e.preventDefault();
       }
     };
@@ -1130,8 +1150,9 @@ export default function DFMEAWizardPage() {
 
   const handleFinish = async () => {
     // Mark wizard as completed so editor doesn't redirect back
-    const completedScope = { ...wizardScope, _completed: true as any };
-    await immediateSave({ nodes, edges, wizardScope: completedScope }, fmea?.title);
+    const completedScope = { ...wizardScope, wizard_completed: true };
+    const success = await immediateSave({ nodes, edges, wizardScope: completedScope }, fmea?.title);
+    if (!success) return; // Don't redirect if save failed
     dirtyRef.current = false;
     navigate(`/fmea/${fmeaId}`);
   };
@@ -1207,7 +1228,7 @@ export default function DFMEAWizardPage() {
 
           {/* Step content placeholder — will be filled in Tasks 10-12 */}
           <div style={{ minHeight: 300 }}>
-            {/* STEP_CONTENT_MAP[currentStep] will render here */}
+            {STEP_RENDERERS[currentStep]?.()}
           </div>
 
           {/* Bottom navigation */}
@@ -1291,6 +1312,7 @@ Render a list of structure nodes with add/delete/edit functionality. Uses `casca
 const renderStep1 = () => {
   const structureNodes = nodes.filter(n => ['System', 'Subsystem', 'Component', 'Interface', 'DesignParameter'].includes(n.type));
   const CHILD_TYPE: Record<string, string> = { System: 'Subsystem', Subsystem: 'Component' };
+  const CHILD_EDGE_TYPE: Record<string, string> = { System: 'HAS_PROCESS_STEP', Subsystem: 'HAS_WORK_ELEMENT' };
 
   const handleAddNode = (type: string, parentId?: string) => {
     const newNode: GraphNode = {
@@ -1299,7 +1321,9 @@ const renderStep1 = () => {
       severity: 0, occurrence: 0, detection: 0,
       ...(type === 'Interface' ? { interface_type: 'physical' } : {}),
     };
-    const newEdges = parentId ? [...edges, { source: parentId, target: newNode.id, type: 'HAS_PROCESS_STEP' }] : edges;
+    const newEdges = parentId
+      ? [...edges, { source: parentId, target: newNode.id, type: CHILD_EDGE_TYPE[nodes.find(n => n.id === parentId)?.type || 'System'] || 'HAS_PROCESS_STEP' }]
+      : edges;
     updateGraphData([...nodes, newNode], newEdges);
   };
 
@@ -1418,7 +1442,7 @@ For each Function node, render failure mode/effect/cause inputs with smart recom
 
 ```tsx
 const renderStep3 = () => {
-  const { generateFailureModes, suggestFailureChain } = useDfmeaRules();
+  const { generateFailureModes, suggestFailureChain } = dfmeaRules;
   const functions = nodes.filter(n => ['ProcessWorkElementFunction', 'ProcessItemFunction', 'ProcessStepFunction'].includes(n.type));
 
   if (functions.length === 0) return <Empty description="请先在第三步定义功能" />;
@@ -1470,7 +1494,7 @@ Renders a Table of failure chain rows using `buildRows`. S is on FailureEffect, 
 
 ```tsx
 const renderStep4 = () => {
-  const { analyzeRisk } = useDfmeaRules();
+  const { analyzeRisk } = dfmeaRules;
   const rows = buildRows(nodes, edges);
   const nodeMap = new Map(nodes.map(n => [n.id, n]));
 
@@ -1520,11 +1544,11 @@ const renderStep4 = () => {
 
 ### Step 5 — Optimization
 
-Shows only AP=H failure chains. For each, renders prevention and detection measure Input.TextArea. Creates PreventionControl and DetectionControl nodes.
+Shows only AP=H failure chains. For each, renders prevention and detection measure Input.TextArea. Creates or updates PreventionControl and DetectionControl nodes with proper edges.
 
 ```tsx
 const renderStep5 = () => {
-  const { suggestMeasures } = useDfmeaRules();
+  const { suggestMeasures } = dfmeaRules;
   const rows = buildRows(nodes, edges);
   const nodeMap = new Map(nodes.map(n => [n.id, n]));
   const highRiskRows = rows.filter(r => {
@@ -1540,10 +1564,67 @@ const renderStep5 = () => {
     return <Result icon={<CheckCircleOutlined />} title={t('wizard.optimization.noOptimization')} subTitle={t('wizard.optimization.noOptimizationHint')} />;
   }
 
-  // For each high-risk row, find or create PreventionControl/DetectionControl nodes
-  // Render Input.TextArea for prevention and detection measures
-  // Use suggestMeasures(failureModeName, 'H') for placeholder text
-  // ... (full implementation follows GenerationWizard's optimization step pattern)
+  const handleAddOptimization = (row: FMEARow, type: 'prevention' | 'detection', value: string) => {
+    const causeId = row.failureCauseNodeId;
+    if (!causeId) return;
+
+    const newNodes = [...nodes];
+    const newEdges = [...edges];
+
+    if (type === 'prevention') {
+      // Find existing PreventionControl for this cause, or create new
+      const existingPcIds = edges
+        .filter(e => e.source === causeId && e.type === 'PREVENTED_BY')
+        .map(e => e.target);
+      if (existingPcIds.length > 0) {
+        // Update name on existing node
+        newNodes = newNodes.map(n => n.id === existingPcIds[0] ? { ...n, name: value } : n);
+      } else {
+        const pcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_pc`;
+        newNodes.push({ id: pcId, type: 'PreventionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
+        newEdges.push({ source: causeId, target: pcId, type: 'PREVENTED_BY' });
+      }
+    } else {
+      // Find existing DetectionControl for this cause, or create new
+      const existingDcIds = edges
+        .filter(e => e.source === causeId && e.type === 'DETECTED_BY')
+        .map(e => e.target);
+      if (existingDcIds.length > 0) {
+        newNodes = newNodes.map(n => n.id === existingDcIds[0] ? { ...n, name: value } : n);
+      } else {
+        const dcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_dc`;
+        newNodes.push({ id: dcId, type: 'DetectionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
+        newEdges.push({ source: causeId, target: dcId, type: 'DETECTED_BY' });
+      }
+    }
+
+    updateGraphData(newNodes, newEdges);
+  };
+
+  return (
+    <div>
+      <Paragraph style={{ color: '#cf1322' }}>{t('wizard.optimization.mustOptimize', { count: highRiskRows.length })}</Paragraph>
+      {highRiskRows.map(r => {
+        const fm = nodeMap.get(r.failureModeNodeId);
+        const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+        const measures = suggestMeasures(fm?.name || '', 'H');
+        const causeId = r.failureCauseNodeId;
+        const existingPc = causeId ? edges.find(e => e.source === causeId && e.type === 'PREVENTED_BY') : null;
+        const existingDc = causeId ? edges.find(e => e.source === causeId && e.type === 'DETECTED_BY') : null;
+        const pcName = existingPc ? nodeMap.get(existingPc.target)?.name || '' : '';
+        const dcName = existingDc ? nodeMap.get(existingDc.target)?.name || '' : '';
+
+        return (
+          <Card key={r.key} size="small" title={fm?.name || 'Failure Mode'} style={{ marginBottom: 12 }}>
+            <Input.TextArea rows={2} placeholder={measures.prevention.join(' / ')} value={pcName}
+              onChange={e => handleAddOptimization(r, 'prevention', e.target.value)} style={{ marginBottom: 8 }} />
+            <Input.TextArea rows={2} placeholder={measures.detection.join(' / ')} value={dcName}
+              onChange={e => handleAddOptimization(r, 'detection', e.target.value)} />
+          </Card>
+        );
+      })}
+    </div>
+  );
 };
 ```
 
@@ -1627,11 +1708,11 @@ In `FMEAEditorPage.tsx`, add after the document load (around line 218):
 
 ```tsx
 // Only redirect DFMEAs that are draft AND haven't completed the wizard.
-// The wizard sets wizardScope._completed = true on finish, so we only
+// The wizard sets wizardScope.wizard_completed = true on finish, so we only
 // redirect if that flag is absent — preventing a redirect loop.
 if (doc.fmea_type === 'DFMEA' && doc.status === 'draft') {
   const wizardScope = doc.graph_data?.wizardScope;
-  if (!wizardScope || !wizardScope._completed) {
+  if (!wizardScope || !wizardScope.wizard_completed) {
     navigate(`/fmea/wizard/${doc.fmea_id}`, { replace: true });
     return;
   }
