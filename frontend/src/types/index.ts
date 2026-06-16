@@ -91,9 +91,19 @@ export interface GraphEdge {
   type: string;
 }
 
+export interface WizardScope {
+  team?: string;
+  timeframe?: string;
+  tool?: string;
+  task?: string;
+  trend?: string;
+  wizard_completed?: boolean;
+}
+
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  wizardScope?: WizardScope;
 }
 
 export interface FMEADocument {
