@@ -1,19 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty } from 'antd';
-import { ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, Table, InputNumber, Result } from 'antd';
+import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { getFMEA, deleteFMEA } from '../../../api/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { useWizardValidation } from '../../../hooks/useWizardValidation';
 import { useDfmeaRules } from '../../../utils/dfmeaRules';
-import { buildRows } from '../../../utils/fmeaTable';
+import { buildRows, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
 import WizardGuidanceCard from '../../../components/dfmea/WizardGuidanceCard';
 
-const { Title } = Typography;
+const { Title, Paragraph } = Typography;
 
 export default function DFMEAWizardPage() {
   const { id: fmeaId } = useParams<{ id: string }>();
@@ -380,14 +380,157 @@ export default function DFMEAWizardPage() {
     );
   };
 
+  // Step 4 — Risk Analysis (S/O/D)
+  const renderStep4 = () => {
+    const { analyzeRisk } = dfmeaRules;
+    const rows = buildRows(nodes, edges);
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+
+    if (rows.length === 0) return <Empty description={t('wizard.risk.empty')} />;
+
+    const handleUpdateRisk = (nodeId: string, field: 'severity' | 'occurrence' | 'detection', value: number) => {
+      updateGraphData(nodes.map(n => n.id === nodeId ? { ...n, [field]: value } : n), edges);
+    };
+
+    return (
+      <Table size="small" dataSource={rows} rowKey="key" pagination={false}
+        columns={[
+          { title: t('wizard.failure.failureMode'), dataIndex: 'key', width: 140, render: (_: unknown, r: FMEARow) => {
+            const fm = nodeMap.get(r.failureModeNodeId);
+            return fm?.name || '';
+          }},
+          { title: 'S', width: 60, render: (_: unknown, r: FMEARow) => {
+            const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
+            return <InputNumber size="small" min={1} max={10} value={effect?.severity || undefined}
+              style={{ width: 50 }} onChange={val => effect && handleUpdateRisk(effect.id, 'severity', val || 0)} />;
+          }},
+          { title: 'O', width: 60, render: (_: unknown, r: FMEARow) => {
+            const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+            return <InputNumber size="small" min={1} max={10} value={cause?.occurrence || undefined}
+              style={{ width: 50 }} onChange={val => cause && handleUpdateRisk(cause.id, 'occurrence', val || 0)} />;
+          }},
+          { title: 'D', width: 60, render: (_: unknown, r: FMEARow) => {
+            const dcId = r.detectionControlIds[0];
+            const dc = dcId ? nodeMap.get(dcId) : null;
+            return <InputNumber size="small" min={1} max={10} value={dc?.detection || undefined}
+              style={{ width: 50 }} onChange={val => dc && handleUpdateRisk(dc.id, 'detection', val || 0)} />;
+          }},
+          { title: 'AP', width: 80, render: (_: unknown, r: FMEARow) => {
+            const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
+            const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+            const dcId = r.detectionControlIds[0];
+            const dc = dcId ? nodeMap.get(dcId) : null;
+            const s = effect?.severity || 0, o = cause?.occurrence || 0, d = dc?.detection || 0;
+            const { ap } = analyzeRisk(s, o, d);
+            return <Tag color={ap === 'H' ? 'red' : ap === 'M' ? 'orange' : 'green'}>{ap || '-'}</Tag>;
+          }},
+        ]}
+      />
+    );
+  };
+
+  // Step 5 — Optimization
+  const renderStep5 = () => {
+    const { suggestMeasures, analyzeRisk } = dfmeaRules;
+    const rows = buildRows(nodes, edges);
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const highRiskRows = rows.filter(r => {
+      const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const dcId = r.detectionControlIds[0];
+      const dc = dcId ? nodeMap.get(dcId) : null;
+      const s = effect?.severity || 0, o = cause?.occurrence || 0, d = dc?.detection || 0;
+      return analyzeRisk(s, o, d).ap === 'H';
+    });
+
+    if (highRiskRows.length === 0) {
+      return <Result icon={<CheckCircleOutlined />} title={t('wizard.optimization.noOptimization')} subTitle={t('wizard.optimization.noOptimizationHint')} />;
+    }
+
+    const handleAddOptimization = (row: FMEARow, type: 'prevention' | 'detection', value: string) => {
+      const causeId = row.failureCauseNodeId;
+      if (!causeId) return;
+
+      let newNodes = [...nodes];
+      const newEdges = [...edges];
+
+      if (type === 'prevention') {
+        const existingPcIds = edges
+          .filter(e => e.source === causeId && e.type === 'PREVENTED_BY')
+          .map(e => e.target);
+        if (existingPcIds.length > 0) {
+          newNodes = newNodes.map(n => n.id === existingPcIds[0] ? { ...n, name: value } : n);
+        } else {
+          const pcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_pc`;
+          newNodes.push({ id: pcId, type: 'PreventionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
+          newEdges.push({ source: causeId, target: pcId, type: 'PREVENTED_BY' });
+        }
+      } else {
+        const existingDcIds = edges
+          .filter(e => e.source === causeId && e.type === 'DETECTED_BY')
+          .map(e => e.target);
+        if (existingDcIds.length > 0) {
+          newNodes = newNodes.map(n => n.id === existingDcIds[0] ? { ...n, name: value } : n);
+        } else {
+          const dcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_dc`;
+          newNodes.push({ id: dcId, type: 'DetectionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
+          newEdges.push({ source: causeId, target: dcId, type: 'DETECTED_BY' });
+        }
+      }
+
+      updateGraphData(newNodes, newEdges);
+    };
+
+    return (
+      <div>
+        <Paragraph style={{ color: '#cf1322' }}>{t('wizard.optimization.mustOptimize', { count: highRiskRows.length })}</Paragraph>
+        {highRiskRows.map(r => {
+          const fm = nodeMap.get(r.failureModeNodeId);
+          const measures = suggestMeasures(fm?.name || '', 'H');
+          const causeId = r.failureCauseNodeId;
+          const existingPc = causeId ? edges.find(e => e.source === causeId && e.type === 'PREVENTED_BY') : null;
+          const existingDc = causeId ? edges.find(e => e.source === causeId && e.type === 'DETECTED_BY') : null;
+          const pcName = existingPc ? nodeMap.get(existingPc.target)?.name || '' : '';
+          const dcName = existingDc ? nodeMap.get(existingDc.target)?.name || '' : '';
+
+          return (
+            <Card key={r.key} size="small" title={fm?.name || 'Failure Mode'} style={{ marginBottom: 12 }}>
+              <Input.TextArea rows={2} placeholder={measures.prevention.join(' / ')} value={pcName}
+                onChange={e => handleAddOptimization(r, 'prevention', e.target.value)} style={{ marginBottom: 8 }} />
+              <Input.TextArea rows={2} placeholder={measures.detection.join(' / ')} value={dcName}
+                onChange={e => handleAddOptimization(r, 'detection', e.target.value)} />
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Step 6 — Confirmation
+  const renderStep6 = () => {
+    const structCount = nodes.filter(n => ['System', 'Subsystem', 'Component'].includes(n.type)).length;
+    const funcCount = nodes.filter(n => n.type === 'ProcessWorkElementFunction').length;
+    const fmCount = nodes.filter(n => n.type === 'FailureMode').length;
+
+    return (
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <div>{t('wizard.confirm.structureNodes', { count: structCount })}</div>
+        <div>{t('wizard.confirm.functionNodes', { count: funcCount })}</div>
+        <div>{t('wizard.confirm.failureChains', { count: fmCount })}</div>
+        <div>{t('wizard.confirm.totalNodes', { count: nodes.length })}</div>
+        <div>{t('wizard.confirm.totalEdges', { count: edges.length })}</div>
+      </Card>
+    );
+  };
+
   const STEP_RENDERERS: Record<number, () => React.ReactNode> = {
     0: renderStep0,
     1: renderStep1,
     2: renderStep2,
     3: renderStep3,
-    4: () => <div />,
-    5: () => <div />,
-    6: () => <div />,
+    4: renderStep4,
+    5: renderStep5,
+    6: renderStep6,
   };
 
   if (loading) {
