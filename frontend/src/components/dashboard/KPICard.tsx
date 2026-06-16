@@ -101,7 +101,7 @@ export default function KPICard({
       }}
     >
       <Card
-        styles={{ body: { padding: "16px" } }}
+        styles={{ body: { padding: "12px" } }}
         style={{
           borderTop: `3px solid ${borderColor}`,
           borderRadius: token.borderRadiusLG,
@@ -121,18 +121,18 @@ export default function KPICard({
           <div style={{ flex: 1, minWidth: 0 }}>
             {loading ? (
               <>
-                <Skeleton.Input active size="small" style={{ width: 80, marginBottom: 8 }} />
-                <Skeleton.Input active size="large" style={{ width: 60, marginBottom: 4 }} />
+                <Skeleton.Input active size="small" style={{ width: 80, marginBottom: 4 }} />
+                <Skeleton.Input active size="large" style={{ width: 50, marginBottom: 2 }} />
                 <Skeleton.Input active size="small" style={{ width: 100 }} />
               </>
             ) : (
               <>
                 <Typography.Text
                   style={{
-                    fontSize: 14,
+                    fontSize: 12,
                     color: token.colorTextSecondary,
                     display: "block",
-                    marginBottom: 4,
+                    marginBottom: 2,
                   }}
                 >
                   {title}
@@ -141,7 +141,7 @@ export default function KPICard({
                 <Statistic
                   value={error ? "—" : value ?? 0}
                   valueStyle={{
-                    fontSize: 32,
+                    fontSize: 22,
                     fontWeight: 600,
                     color: error
                       ? token.colorTextDisabled
@@ -157,10 +157,10 @@ export default function KPICard({
 
                 <Typography.Text
                   style={{
-                    fontSize: 12,
+                    fontSize: 10,
                     color: token.colorTextTertiary,
                     display: "block",
-                    marginTop: 4,
+                    marginTop: 2,
                   }}
                 >
                   {error ? (
@@ -200,7 +200,7 @@ export default function KPICard({
               color: loading || error
                 ? token.colorTextDisabled
                 : getStatusColor(status, token) ?? token.colorTextSecondary,
-              fontSize: 24,
+              fontSize: 20,
               lineHeight: 1,
               flexShrink: 0,
             }}

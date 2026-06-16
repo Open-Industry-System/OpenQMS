@@ -41,6 +41,24 @@ const DEFAULT_LAYOUT: DashboardLayoutConfig = {
   ],
 };
 
+/** Detect overlapping or out-of-bounds widgets in the lg layout. */
+function isLayoutCorrupted(layout: WidgetLayoutItem[]): boolean {
+  for (const item of layout) {
+    if (item.x < 0 || item.y < 0 || item.w <= 0 || item.h <= 0) return true;
+    if (item.x + item.w > 12) return true;
+  }
+  for (let i = 0; i < layout.length; i++) {
+    for (let j = i + 1; j < layout.length; j++) {
+      const a = layout[i];
+      const b = layout[j];
+      const overlapX = a.x < b.x + b.w && a.x + a.w > b.x;
+      const overlapY = a.y < b.y + b.h && a.y + a.h > b.y;
+      if (overlapX && overlapY) return true;
+    }
+  }
+  return false;
+}
+
 function createEmptyData(): DashboardWidgetsData {
   return {
     kpi: {},
@@ -76,12 +94,16 @@ export default function DashboardPage() {
     setLoading(true);
     try {
       const layoutResp = await getDashboardLayout();
-      const validWidgets = (layoutResp.layout_config?.lg ?? DEFAULT_LAYOUT.lg).filter(
+      let loadedLayout = (layoutResp.layout_config?.lg ?? DEFAULT_LAYOUT.lg).filter(
         (item) => !!item.type
       );
-      setLayout(validWidgets);
+      if (isLayoutCorrupted(loadedLayout)) {
+        console.warn("Dashboard layout corrupted; resetting to default", loadedLayout);
+        loadedLayout = DEFAULT_LAYOUT.lg.map((item) => ({ ...item }));
+      }
+      setLayout(loadedLayout);
 
-      const widgetTypes = [...new Set(validWidgets.map((w) => w.type))];
+      const widgetTypes = [...new Set(loadedLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch (e) {
@@ -186,9 +208,9 @@ export default function DashboardPage() {
       actions={actions}
       fullHeight
     >
-      <div style={{ flex: 1, display: "flex", overflow: "hidden", margin: "0 -24px -24px" }}>
+      <div style={{ flex: 1, display: "flex", minWidth: 0 }}>
         {isEditing && <WidgetLibraryPanel onAddWidget={handleAddWidget} />}
-        <div style={{ flex: 1, overflow: "auto", padding: "0 8px 24px" }}>
+        <div style={{ flex: 1, minWidth: isEditing ? 1200 : 0, paddingBottom: 24 }}>
           <DashboardGrid
             layout={currentLayout}
             data={data}

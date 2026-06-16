@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Alert, Button, List, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, List, Space, Tag, Typography } from "antd";
+import { LineChartOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { WidgetProps } from "./types";
 import { interpretQualityTrend } from "../../../api/dashboard";
@@ -42,77 +43,91 @@ export default function QualityTrendAIWidget({ data, loading, error, onRetry }: 
     }
   };
 
-  if (loading) return <div>{t("kpi.loading")}</div>;
-  if (error) return <div>{t("kpi.loadFailed")} <Button size="small" onClick={onRetry}>{t("riskList.retry")}</Button></div>;
-  if (!summary) return <div>{t("qualityTrend.noTrendData")}</div>;
+  if (loading) return <Card title={<><LineChartOutlined /> {t("widget.qualityTrendAi")}</>} size="small" loading />;
+  if (error) return (
+    <Card title={<><LineChartOutlined /> {t("widget.qualityTrendAi")}</>} size="small">
+      <Button size="small" onClick={onRetry}>{t("riskList.retry")}</Button>
+    </Card>
+  );
+  if (!summary) return (
+    <Card title={<><LineChartOutlined /> {t("widget.qualityTrendAi")}</>} size="small">
+      <Typography.Text type="secondary">{t("qualityTrend.noTrendData")}</Typography.Text>
+    </Card>
+  );
 
   const riskLevel: QualityTrendRiskLevel = summary.risk_level ?? "insufficient_data";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <Space>
-        <Tag color={riskColor[riskLevel] ?? "default"}>{riskLevel}</Tag>
-        <Typography.Text strong>{summary.headline}</Typography.Text>
-      </Space>
+    <Card
+      title={<><LineChartOutlined /> {t("widget.qualityTrendAi")}</>}
+      size="small"
+      style={{ height: "100%" }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <Space>
+          <Tag color={riskColor[riskLevel] ?? "default"}>{riskLevel}</Tag>
+          <Typography.Text strong>{summary.headline}</Typography.Text>
+        </Space>
 
-      {summary.metadata?.omitted_modules && summary.metadata.omitted_modules.length > 0 && (
-        <Alert
-          type="info"
-          showIcon
-          message={t("qualityTrend.omittedModules", { modules: summary.metadata.omitted_modules.join(", ") })}
-        />
-      )}
-
-      <List
-        size="small"
-        header={<div>{t("qualityTrend.keyEvidence")}</div>}
-        dataSource={summary.evidence ?? []}
-        renderItem={(item) => (
-          <List.Item>
-            {t("qualityTrend.evidenceFormat", { label: item.label, value: item.value, trend: item.trend })}
-          </List.Item>
+        {summary.metadata?.omitted_modules && summary.metadata.omitted_modules.length > 0 && (
+          <Alert
+            type="info"
+            showIcon
+            message={t("qualityTrend.omittedModules", { modules: summary.metadata.omitted_modules.join(", ") })}
+          />
         )}
-      />
 
-      <List
-        size="small"
-        header={<div>{t("qualityTrend.suggestedActions")}</div>}
-        dataSource={summary.actions ?? []}
-        renderItem={(item) => (
-          <List.Item>
-            {t("qualityTrend.actionFormat", { priority: item.priority, text: item.text })}
-          </List.Item>
-        )}
-      />
-
-      <Space>
-        <Button type="primary" loading={busy} disabled={!summary.ai_available} onClick={handleInterpret}>
-          {t("qualityTrend.aiInterpret")}
-        </Button>
-        {!summary.ai_available && <Typography.Text type="secondary">{t("qualityTrend.aiUnavailable")}</Typography.Text>}
-      </Space>
-
-      {isStale && (
-        <Alert
-          type="warning"
-          showIcon
-          message={t("qualityTrend.dataUpdated")}
+        <List
+          size="small"
+          header={<div>{t("qualityTrend.keyEvidence")}</div>}
+          dataSource={summary.evidence ?? []}
+          renderItem={(item) => (
+            <List.Item>
+              {t("qualityTrend.evidenceFormat", { label: item.label, value: item.value, trend: item.trend })}
+            </List.Item>
+          )}
         />
-      )}
 
-      {aiError && <Alert type="error" showIcon message={aiError} />}
+        <List
+          size="small"
+          header={<div>{t("qualityTrend.suggestedActions")}</div>}
+          dataSource={summary.actions ?? []}
+          renderItem={(item) => (
+            <List.Item>
+              {t("qualityTrend.actionFormat", { priority: item.priority, text: item.text })}
+            </List.Item>
+          )}
+        />
 
-      {interpretation && (
-        <div style={{ marginTop: 8 }}>
-          <Typography.Paragraph>{interpretation.summary}</Typography.Paragraph>
-          <Typography.Text type="secondary">
-            {t("qualityTrend.confidenceFormat", {
-              confidence: interpretation.confidence,
-              cached: interpretation.cached ? t("qualityTrend.yes") : t("qualityTrend.no"),
-            })}
-          </Typography.Text>
-        </div>
-      )}
-    </div>
+        <Space>
+          <Button type="primary" loading={busy} disabled={!summary.ai_available} onClick={handleInterpret}>
+            {t("qualityTrend.aiInterpret")}
+          </Button>
+          {!summary.ai_available && <Typography.Text type="secondary">{t("qualityTrend.aiUnavailable")}</Typography.Text>}
+        </Space>
+
+        {isStale && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t("qualityTrend.dataUpdated")}
+          />
+        )}
+
+        {aiError && <Alert type="error" showIcon message={aiError} />}
+
+        {interpretation && (
+          <div style={{ marginTop: 8 }}>
+            <Typography.Paragraph>{interpretation.summary}</Typography.Paragraph>
+            <Typography.Text type="secondary">
+              {t("qualityTrend.confidenceFormat", {
+                confidence: interpretation.confidence,
+                cached: interpretation.cached ? t("qualityTrend.yes") : t("qualityTrend.no"),
+              })}
+            </Typography.Text>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }

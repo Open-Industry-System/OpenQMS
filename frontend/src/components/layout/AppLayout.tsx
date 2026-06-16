@@ -491,7 +491,7 @@ export default function AppLayout() {
             </Dropdown>
           </Space>
         </Header>
-        <Content style={{ padding: 24, background: "var(--qf-bg-base)" }}>
+        <Content style={{ padding: 24, background: "var(--qf-bg-base)", minWidth: 0 }}>
           <Outlet />
         </Content>
       </Layout>
