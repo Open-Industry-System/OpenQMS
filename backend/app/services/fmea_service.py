@@ -251,6 +251,30 @@ async def update_fmea(
     return fmea
 
 
+async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    fmea = await get_fmea(db, fmea_id)
+    if fmea is None:
+        raise ValueError("FMEA not found")
+    # Audit log for deletion
+    audit_log = AuditLog(
+        table_name="fmea_documents",
+        record_id=fmea_id,
+        action="DELETE",
+        changed_fields={"title": fmea.title, "document_no": fmea.document_no, "fmea_type": fmea.fmea_type},
+        operated_by=user_id,
+    )
+    db.add(audit_log)
+    # GraphSync outbox event for Neo4j projection cleanup
+    db.add(GraphSyncOutbox(
+        aggregate_type="fmea",
+        aggregate_id=fmea_id,
+        event_type="fmea.deleted",
+        payload={"product_line_code": fmea.product_line_code, "fmea_type": fmea.fmea_type},
+    ))
+    await db.delete(fmea)
+    await db.commit()
+
+
 async def transition_fmea(
     db: AsyncSession,
     fmea: FMEADocument,

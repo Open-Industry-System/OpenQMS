@@ -68,9 +68,19 @@ class GraphEdgeSchema(BaseModel):
     type: str
 
 
+class WizardScopeSchema(BaseModel):
+    team: str | None = None
+    timeframe: str | None = None
+    tool: str | None = None
+    task: str | None = None
+    trend: str | None = None
+    wizard_completed: bool | None = None  # Set True when wizard finishes; prevents editor redirect loop
+
+
 class GraphDataSchema(BaseModel):
     nodes: list[GraphNodeSchema] = []
     edges: list[GraphEdgeSchema] = []
+    wizardScope: WizardScopeSchema | None = None
 
 
 class FMEACreate(BaseModel):
@@ -96,6 +106,7 @@ class FMEAResponse(BaseModel):
     product_line_code: str
     status: str
     version: int
+    lock_version: int = 0
     graph_data: dict
     created_by: uuid.UUID | None = None
     created_at: datetime

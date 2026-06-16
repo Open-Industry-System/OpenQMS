@@ -88,6 +88,74 @@
       "prev": "Previous",
       "next": "Next",
       "finish": "Finish"
+    },
+    "page": {
+      "title": "DFMEA Generation Wizard",
+      "backToList": "Back to List",
+      "saveDraft": "Save Draft",
+      "saveSaving": "Saving...",
+      "saveSaved": "Saved ✓",
+      "saveError": "Save Failed",
+      "nextStep": "Next Step",
+      "prevStep": "Previous Step",
+      "finish": "Finish",
+      "completionWarning": "The following steps are incomplete and cannot be submitted:",
+      "step3Incomplete": "Function Analysis — some components have no functions defined",
+      "step4Incomplete": "Failure Analysis — some functions have no failure modes defined",
+      "step5Incomplete": "Risk Analysis — some failure chains have missing S/O/D ratings",
+      "confirmEmptyDraftTitle": "Discard Draft?",
+      "confirmEmptyDraft": "The current draft is empty and will be deleted upon confirmation.",
+      "confirmEmptyDraftOk": "Discard and Delete",
+      "confirmEmptyDraftCancel": "Continue Editing"
+    },
+    "guidance": {
+      "step0": {
+        "title": "Step 1: 5T Scope Definition",
+        "purpose": "Define the boundaries, team, and focus of the DFMEA analysis to ensure focused follow-up steps.",
+        "points": "The team should include cross-functional members from design, process, and quality; the task description should be specific to the product/system level.",
+        "example": "Team: BMS Design Group; Timeframe: 2026 Q1–Q3; Tool: FMEA worksheet; Task: DC-DC Converter DFMEA"
+      },
+      "step1": {
+        "title": "Step 2: Structure Analysis",
+        "purpose": "Decompose the product into a System → Subsystem → Component hierarchy.",
+        "points": "Keep hierarchy depth under 4 levels; each component should be an independently analyzable physical unit.",
+        "example": "System: BMS → Subsystem: BMU / Charging Mgmt → Component: LTC6811"
+      },
+      "step2": {
+        "title": "Step 3: Function Analysis",
+        "purpose": "Define the function, technical requirement, and specification parameter for each component.",
+        "points": "Describe functions in \"verb + noun\" format; technical requirements describe expected performance; specifications include tolerances.",
+        "example": "Component LTC6811 → Function: Acquire cell voltage → Requirement: Accurate acquisition → Specification: Accuracy ±2mV"
+      },
+      "step3": {
+        "title": "Step 4: Failure Analysis",
+        "purpose": "Identify failure modes, effects, and causes for each function to form complete failure chains.",
+        "points": "Failure mode = the opposite of the function; effects describe consequences to the system; causes should be specific enough for action.",
+        "example": "Function \"Acquire cell voltage\" → Failure mode: Insufficient acquisition accuracy → Effect: Control deviation → Cause: Sensor aging"
+      },
+      "step4": {
+        "title": "Step 5: Risk Analysis",
+        "purpose": "Evaluate Severity (S), Occurrence (O), and Detection (D) for each failure chain and calculate Action Priority (AP).",
+        "points": "S rates the severity of the failure effect (1–10); O rates the likelihood of the failure cause occurring (1–10); D rates the ability of current detection measures to discover the cause (1–10); AP is calculated automatically.",
+        "example": "S=8 + O=4 + D=3 → AP=H (Must optimize)"
+      },
+      "step5": {
+        "title": "Step 6: Optimization Measures",
+        "purpose": "Develop prevention and detection measures for failure chains with AP=H to reduce risk.",
+        "points": "Prevention measures reduce Occurrence (O); detection measures reduce Detection (D); Severity (S) can generally only be reduced through design changes.",
+        "example": "Prevention: Sensor redundant layout → O from 4 to 2; Detection: Online real-time monitoring → D from 3 to 2"
+      },
+      "step6": {
+        "title": "Step 7: Confirm Creation",
+        "purpose": "Review data completeness across all steps, then confirm to enter the formal editor.",
+        "points": "Check that the structure is complete, functions cover all components, failure chains have no gaps, and S/O/D ratings are filled in.",
+        "example": "Upon confirmation, a DFMEA document will be created and the editor will open"
+      },
+      "labelPurpose": "Purpose",
+      "labelPoints": "Key Points",
+      "labelExample": "Example",
+      "expand": "Expand",
+      "collapse": "Collapse"
     }
   },
   "inlineRecommendations": {

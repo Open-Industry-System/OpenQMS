@@ -88,6 +88,74 @@
       "prev": "上一步",
       "next": "下一步",
       "finish": "完成"
+    },
+    "page": {
+      "title": "DFMEA 生成向导",
+      "backToList": "返回列表",
+      "saveDraft": "保存草稿",
+      "saveSaving": "保存中...",
+      "saveSaved": "已保存 ✓",
+      "saveError": "保存失败",
+      "nextStep": "下一步",
+      "prevStep": "上一步",
+      "finish": "完成",
+      "completionWarning": "以下步骤尚未完成，无法提交：",
+      "step3Incomplete": "功能分析 — 存在零部件未定义功能",
+      "step4Incomplete": "失效分析 — 存在功能未定义失效模式",
+      "step5Incomplete": "风险分析 — 存在失效链 S/O/D 未填写",
+      "confirmEmptyDraftTitle": "确认放弃草稿？",
+      "confirmEmptyDraft": "当前草稿为空，确定后将被删除。",
+      "confirmEmptyDraftOk": "放弃并删除",
+      "confirmEmptyDraftCancel": "继续编辑"
+    },
+    "guidance": {
+      "step0": {
+        "title": "第一步：5T范围定义",
+        "purpose": "明确 DFMEA 分析的边界、团队和关注点，确保后续分析聚焦。",
+        "points": "团队应包含设计、工艺、质量等跨职能成员；任务描述要具体到产品/系统层级。",
+        "example": "团队：BMS设计组；时间范围：2026年Q1-Q3；工具：FMEA工作表；任务：DC-DC转换器DFMEA"
+      },
+      "step1": {
+        "title": "第二步：结构分析",
+        "purpose": "将产品分解为系统→子系统→零部件的层级结构。",
+        "points": "层级不宜超过4层；每个零部件应是可独立分析的物理单元。",
+        "example": "系统: BMS → 子系统: BMU / 充电管理 → 零部件: LTC6811"
+      },
+      "step2": {
+        "title": "第三步：功能分析",
+        "purpose": "为每个零部件定义功能、技术要求和规格参数。",
+        "points": "功能描述用"动词+名词"格式；技术要求描述期望性能；规格参数带公差。",
+        "example": "零部件 LTC6811 → 功能: 采集单体电压 → 要求: 准确采集 → 规格: 精度±2mV"
+      },
+      "step3": {
+        "title": "第四步：失效分析",
+        "purpose": "针对每个功能识别失效模式、影响和原因，形成完整失效链。",
+        "points": "失效模式 = 功能的反面；影响描述对系统的后果；原因要具体到可措施层面。",
+        "example": "功能"采集单体电压" → 失效模式: 采集精度不足 → 影响: 控制偏差 → 原因: 传感器老化"
+      },
+      "step4": {
+        "title": "第五步：风险分析",
+        "purpose": "为每条失效链评估严重度(S)、发生度(O)、探测度(D)，计算措施优先级(AP)。",
+        "points": "S评估失效影响的严重程度(1-10)；O评估失效原因发生的可能性(1-10)；D评估当前探测措施能发现原因的能力(1-10)；AP由系统自动计算。",
+        "example": "S=8 + O=4 + D=3 → AP=H(必须优化)"
+      },
+      "step5": {
+        "title": "第六步：优化措施",
+        "purpose": "对 AP=H 的失效链制定预防和探测措施，降低风险。",
+        "points": "预防措施降低发生度(O)；探测措施降低探测度(D)；严重度(S)通常只能通过设计变更降低。",
+        "example": "预防: 传感器冗余布置 → O从4降到2；探测: 在线实时监测 → D从3降到2"
+      },
+      "step6": {
+        "title": "第七步：确认创建",
+        "purpose": "检查所有步骤的数据完整性，确认后进入正式编辑器。",
+        "points": "检查结构是否完整、功能是否覆盖所有零部件、失效链是否有遗漏、S/O/D是否填写。",
+        "example": "确认后将创建 DFMEA 文档并进入编辑器"
+      },
+      "labelPurpose": "目的",
+      "labelPoints": "要点",
+      "labelExample": "示例",
+      "expand": "展开",
+      "collapse": "收起"
     }
   },
   "inlineRecommendations": {

@@ -156,6 +156,29 @@ async def update_fmea(
     return FMEAResponse.model_validate(fmea)
 
 
+@router.delete("/{fmea_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_fmea(
+    fmea_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
+    fmea = await fmea_service.get_fmea(db, fmea_id)
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.effective_factory_id and fmea.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="FMEA not found")
+    # Only allow deleting draft FMEAs
+    if fmea.status != "draft":
+        raise HTTPException(status_code=400, detail="只能删除草稿状态的FMEA")
+    await fmea_service.delete_fmea(db, fmea_id, scope.user.user_id)
+
+
 async def require_approve_permission(
     req: TransitionRequest,
     scope: RequestScope = Depends(get_request_scope),
