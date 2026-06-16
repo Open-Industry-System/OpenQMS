@@ -224,20 +224,11 @@ export interface GraphData {
 }
 ```
 
-Add `lock_version` to `FMEADocument` interface (around line 99):
+Add `lock_version` to the existing `FMEADocument` interface. Insert `lock_version: number;` after the `version` field (around line 99):
 
 ```typescript
-export interface FMEADocument {
-  fmea_id: string;
-  document_no: string;
-  title: string;
-  fmea_type: string;
-  product_line_code: string;
-  status: string;
-  version: number;
+// In the existing FMEADocument interface, add after `version: number;`:
   lock_version: number;
-  graph_data: GraphData;
-  // ... rest of existing fields
 ```
 
 ### 2b: Add deleteFMEA to API
