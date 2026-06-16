@@ -1,4 +1,4 @@
-# DFMEA Wizard Page Implementation Plan (v4 — revised)
+# DFMEA Wizard Page Implementation Plan (v4-fixed — revised)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -17,6 +17,8 @@
 | `backend/app/schemas/fmea.py` | Modify | Add `WizardScopeSchema`, `wizardScope` to `GraphDataSchema`, `lock_version` to `FMEAResponse` |
 | `backend/app/api/fmea.py` | Modify | Add `DELETE /{fmea_id}` endpoint |
 | `backend/app/services/fmea_service.py` | Modify | Add `delete_fmea` service function |
+| `backend/app/services/graph_projection_service.py` | Modify | Add `delete_fmea_projection` method to clean up Neo4j |
+| `backend/app/services/graph_sync_worker.py` | Modify | Branch on `fmea.deleted` event type |
 | `frontend/src/types/index.ts` | Modify | Add `WizardScope` interface, `wizardScope` to `GraphData`, `lock_version` to `FMEADocument` |
 | `frontend/src/api/fmea.ts` | Modify | Add `deleteFMEA` function |
 | `frontend/src/App.tsx` | Modify | Add `/fmea/wizard/:id` route + import |
@@ -40,6 +42,8 @@
 - Modify: `backend/app/schemas/fmea.py`
 - Modify: `backend/app/api/fmea.py`
 - Modify: `backend/app/services/fmea_service.py`
+- Modify: `backend/app/services/graph_projection_service.py`
+- Modify: `backend/app/services/graph_sync_worker.py`
 
 ### 1a: Add WizardScopeSchema, lock_version to FMEAResponse, and wizardScope to GraphDataSchema
 
@@ -112,33 +116,37 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
     await db.commit()
 ```
 
-Additionally, add a `delete_fmea_projection` method to `GraphProjectionService` in `backend/app/services/graph_projection_service.py`:
+Additionally, add a `delete_fmea_projection` method to `GraphProjectionService` in `backend/app/services/graph_projection_service.py`. Add it as a new method on the existing class, following the same `self._driver` + `session.execute_write(_tx)` pattern used by `sync_fmea_to_neo4j`:
 
 ```python
 async def delete_fmea_projection(self, fmea_id: uuid.UUID) -> None:
-    """Delete all nodes and edges for a FMEA document from the Neo4j projection."""
-    async with self.driver.session() as session:
-        # Delete all edges with this fmea_id
-        await session.run(
-            "MATCH (n:FMEANode {fmea_id: $fmea_id}) DETACH DELETE n",
-            fmea_id=str(fmea_id)
-        )
-        # Delete any remaining orphaned nodes
-        await session.run(
+    """从 Neo4j 删除该 FMEA 的所有投影节点（FMEA 行已从 PG 删除）。"""
+
+    async def _tx(tx):
+        result = await tx.run(
             "MATCH (n) WHERE n.fmea_id = $fmea_id DETACH DELETE n",
-            fmea_id=str(fmea_id)
+            {"fmea_id": str(fmea_id)},
         )
+        await result.consume()
+
+    async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+        await session.execute_write(_tx)
 ```
 
-And update the graph sync worker in `backend/app/services/graph_sync_worker.py` to handle the `fmea.deleted` event by calling `delete_fmea_projection` instead of `sync_fmea_to_neo4j`:
+And update the graph sync worker in `backend/app/services/graph_sync_worker.py` to handle the `fmea.deleted` event. In `run_worker()`, replace the `try` block body inside the task loop (lines 217-224) with:
 
 ```python
-# In the event processing loop, add a branch for "fmea.deleted":
-if event_type == "fmea.deleted":
-    await projection_service.delete_fmea_projection(aggregate_id)
+if task.event_type == "fmea.deleted":
+    await projection.delete_fmea_projection(task.aggregate_id)
+    logger.info(f"Deleted FMEA {task.aggregate_id} projection from Neo4j")
 else:
-    await projection_service.sync_fmea_to_neo4j(aggregate_id)
+    await projection.sync_fmea_to_neo4j(task.aggregate_id)
+    logger.info(f"Synced FMEA {task.aggregate_id} to Neo4j")
+async with get_tenant_aware_session() as db:
+    await _mark_completed(db, task.id)
 ```
+
+Note: `settings` must be imported at the top of `graph_projection_service.py` (it already is). `projection` and `task` are the existing local variable names in the worker loop.
 
 ### 1c: Add DELETE endpoint
 
@@ -179,8 +187,8 @@ Expected: All tests pass.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/app/schemas/fmea.py backend/app/services/fmea_service.py backend/app/api/fmea.py
-git commit -m "feat(dfmea-wizard): add WizardScopeSchema, lock_version in response, DELETE endpoint"
+git add backend/app/schemas/fmea.py backend/app/services/fmea_service.py backend/app/api/fmea.py backend/app/services/graph_projection_service.py backend/app/services/graph_sync_worker.py
+git commit -m "feat(dfmea-wizard): add WizardScopeSchema, lock_version, DELETE endpoint, Neo4j projection cleanup"
 ```
 
 ---
@@ -518,13 +526,21 @@ export function useWizardSave({ fmeaId }: UseWizardSaveOptions) {
   const lockVersionRef = useRef<number>(0);
   const queueTailRef = useRef<Promise<boolean>>(Promise.resolve(false));
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Hash of the last payload that was successfully saved — never reads live page state. */
+  const lastSavedHashRef = useRef<string>('');
 
   const setLockVersion = useCallback((v: number) => {
     lockVersionRef.current = v;
   }, []);
 
-  /** Serial save: enqueues after any in-flight save, returns true on success */
-  const enqueueSave = useCallback(async (graphData: GraphData, title?: string): Promise<boolean> => {
+  /** Serial save: enqueues after any in-flight save, returns true on success.
+   *  `dataHash` is the hash of the payload snapshot AT enqueue time. On success,
+   *  the hook writes `dataHash` into `lastSavedHashRef` — NOT the current page state. */
+  const enqueueSave = useCallback(async (
+    graphData: GraphData,
+    title?: string,
+    dataHash?: string,
+  ): Promise<boolean> => {
     const doSave = async (): Promise<boolean> => {
       try {
         setSaveStatus('saving');
@@ -534,6 +550,7 @@ export function useWizardSave({ fmeaId }: UseWizardSaveOptions) {
           lock_version: lockVersionRef.current,
         });
         lockVersionRef.current = resp.lock_version ?? resp.version;
+        if (dataHash) lastSavedHashRef.current = dataHash;
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 2000);
         return true;
@@ -556,22 +573,26 @@ export function useWizardSave({ fmeaId }: UseWizardSaveOptions) {
   }, [fmeaId]);
 
   /** Debounced save: 500ms delay, cancels previous timer. Returns void (fire-and-forget). */
-  const debouncedSave = useCallback((graphData: GraphData, title?: string) => {
+  const debouncedSave = useCallback((graphData: GraphData, title?: string, dataHash?: string) => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
     debounceTimerRef.current = setTimeout(() => {
-      enqueueSave(graphData, title);
+      enqueueSave(graphData, title, dataHash);
     }, 500);
   }, [enqueueSave]);
 
   /** Immediate save: cancels debounce, saves right away. Returns true on success. */
-  const immediateSave = useCallback(async (graphData: GraphData, title?: string): Promise<boolean> => {
+  const immediateSave = useCallback(async (
+    graphData: GraphData,
+    title?: string,
+    dataHash?: string,
+  ): Promise<boolean> => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
-    return await enqueueSave(graphData, title);
+    return await enqueueSave(graphData, title, dataHash);
   }, [enqueueSave]);
 
   return {
@@ -579,6 +600,7 @@ export function useWizardSave({ fmeaId }: UseWizardSaveOptions) {
     setLockVersion,
     debouncedSave,
     immediateSave,
+    lastSavedHashRef,
   };
 }
 ```
@@ -1118,67 +1140,71 @@ export default function DFMEAWizardPage() {
   const [wizardScope, setWizardScope] = useState<WizardScope>({});
   const [currentStep, setCurrentStep] = useState(0);
   const completedSteps = useRef(new Set<number>());
-  const dirtyRef = useRef(false);
-  const lastSavedDataHash = useRef('');
 
-  const { saveStatus, setLockVersion, debouncedSave, immediateSave } = useWizardSave({ fmeaId: fmeaId! });
+  const { saveStatus, setLockVersion, debouncedSave, immediateSave, lastSavedHashRef } = useWizardSave({ fmeaId: fmeaId! });
   const validation = useWizardValidation(nodes, edges);
   const dfmeaRules = useDfmeaRules();
 
-  // Compute a hash of current graph data to compare against last saved state
-  const currentDataHash = useCallback(() => {
-    return JSON.stringify({
-      nodes: nodes.map(n => n.id + ':' + n.name + ':' + n.type),
-      edges: edges.map(e => e.source + '->' + e.target + ':' + e.type),
-      scope: wizardScope,
-    });
-  }, [nodes, edges, wizardScope]);
+  // Refs for beforeunload handler — always hold latest values without re-registering listener
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  const scopeRef = useRef(wizardScope);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+  useEffect(() => { scopeRef.current = wizardScope; }, [wizardScope]);
 
-  // Clear dirty when saved data matches current data
-  useEffect(() => {
-    if (saveStatus === 'saved') {
-      lastSavedDataHash.current = currentDataHash();
-    }
-  }, [saveStatus, currentDataHash]);
+  /** Lightweight hash — captures node identity + name + type + edges + scope. */
+  const computeHash = (n: GraphNode[], e: GraphEdge[], s: WizardScope) =>
+    JSON.stringify({
+      nodes: n.map(x => x.id + ':' + x.name + ':' + x.type),
+      edges: e.map(x => x.source + '->' + x.target + ':' + x.type),
+      scope: s,
+    });
 
   // Load FMEA document
   useEffect(() => {
     if (!fmeaId) return;
     getFMEA(fmeaId).then(doc => {
-      // Draft DFMEAs should be in the wizard; if not draft, redirect to editor
       if (doc.fmea_type !== 'DFMEA') {
         navigate(`/fmea/${doc.fmea_id}`, { replace: true });
         return;
       }
+      const loadedNodes = doc.graph_data?.nodes || [];
+      const loadedEdges = doc.graph_data?.edges || [];
+      const loadedScope = doc.graph_data?.wizardScope || {};
       setFmea(doc);
-      setNodes(doc.graph_data?.nodes || []);
-      setEdges(doc.graph_data?.edges || []);
-      setWizardScope(doc.graph_data?.wizardScope || {});
+      setNodes(loadedNodes);
+      setEdges(loadedEdges);
+      setWizardScope(loadedScope);
       setLockVersion(doc.lock_version);
+      // Mark initial state as "clean" — hash captured at load time
+      lastSavedHashRef.current = computeHash(loadedNodes, loadedEdges, loadedScope);
       setLoading(false);
     }).catch(() => {
       message.error('加载失败');
       navigate('/fmea');
     });
-  }, [fmeaId, navigate, setLockVersion]);
+  }, [fmeaId, navigate, setLockVersion, lastSavedHashRef]);
 
-  // beforeunload warning — only warn if current data differs from last saved data
+  // beforeunload warning — compare live state hash vs last-successfully-saved hash
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (dirtyRef.current && currentDataHash() !== lastSavedDataHash.current) {
+      const hash = computeHash(nodesRef.current, edgesRef.current, scopeRef.current);
+      if (hash !== lastSavedHashRef.current) {
         e.preventDefault();
       }
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, []);
+  }, []); // lastSavedHashRef is a ref — always reads latest without re-registering
 
   const updateGraphData = useCallback((newNodes: GraphNode[], newEdges: GraphEdge[], newScope?: WizardScope) => {
     setNodes(newNodes);
     setEdges(newEdges);
     if (newScope !== undefined) setWizardScope(newScope);
-    dirtyRef.current = true;
-    debouncedSave({ nodes: newNodes, edges: newEdges, wizardScope: newScope ?? wizardScope }, fmea?.title);
+    // Compute hash at enqueue time — NOT at save-success time
+    const hash = computeHash(newNodes, newEdges, newScope ?? wizardScope);
+    debouncedSave({ nodes: newNodes, edges: newEdges, wizardScope: newScope ?? wizardScope }, fmea?.title, hash);
   }, [debouncedSave, wizardScope, fmea?.title]);
 
   const goToStep = useCallback((step: number) => {
@@ -1187,11 +1213,10 @@ export default function DFMEAWizardPage() {
   }, [currentStep]);
 
   const handleFinish = async () => {
-    // Mark wizard as completed so editor doesn't redirect back
     const completedScope = { ...wizardScope, wizard_completed: true };
-    const success = await immediateSave({ nodes, edges, wizardScope: completedScope }, fmea?.title);
-    if (!success) return; // Don't redirect if save failed
-    dirtyRef.current = false;
+    const hash = computeHash(nodes, edges, completedScope);
+    const success = await immediateSave({ nodes, edges, wizardScope: completedScope }, fmea?.title, hash);
+    if (!success) return;
     navigate(`/fmea/${fmeaId}`);
   };
 
@@ -1226,6 +1251,17 @@ export default function DFMEAWizardPage() {
     error: t('wizard.page.saveError'),
   };
 
+  // Placeholder — Tasks 10-12 insert real renderStep0..renderStep6 above this map
+  const STEP_RENDERERS: Record<number, () => React.ReactNode> = {
+    0: () => <div />,
+    1: () => <div />,
+    2: () => <div />,
+    3: () => <div />,
+    4: () => <div />,
+    5: () => <div />,
+    6: () => <div />,
+  };
+
   if (loading) {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><Spin size="large" /></div>;
   }
@@ -1240,7 +1276,10 @@ export default function DFMEAWizardPage() {
         <Space>
           <span aria-live="polite">{saveStatusLabel[saveStatus]}</span>
           <Button onClick={handleBackToList} icon={<ArrowLeftOutlined />}>{t('wizard.page.backToList')}</Button>
-          <Button type="primary" onClick={() => immediateSave({ nodes, edges, wizardScope }, fmea?.title)} loading={saveStatus === 'saving'}>
+          <Button type="primary" onClick={() => {
+            const hash = computeHash(nodes, edges, wizardScope);
+            immediateSave({ nodes, edges, wizardScope }, fmea?.title, hash);
+          }} loading={saveStatus === 'saving'}>
             {t('wizard.page.saveDraft')}
           </Button>
         </Space>
@@ -1314,20 +1353,7 @@ git add frontend/src/pages/planning/fmea/DFMEAWizardPage.tsx
 git commit -m "feat(dfmea-wizard): add DFMEAWizardPage shell with load/save/validation"
 ```
 
-**Important:** The `STEP_RENDERERS` map starts with placeholder empty renderers. Each Task 10-12 fills in the actual content:
-
-```tsx
-// Placeholder — Tasks 10-12 replace these with real implementations
-const STEP_RENDERERS: Record<number, () => React.ReactNode> = {
-  0: () => <div />,
-  1: () => <div />,
-  2: () => <div />,
-  3: () => <div />,
-  4: () => <div />,
-  5: () => <div />,
-  6: () => <div />,
-};
-```
+**Note:** The `STEP_RENDERERS` map is defined inside the component (after `saveStatusLabel`, before `if (loading)`). It starts with placeholder empty renderers. Each Task 10-12 inserts `renderStep0`–`renderStep6` functions ABOVE the map and updates the corresponding map entry. This ensures the render functions have access to component state (`nodes`, `edges`, `updateGraphData`, `t`, `dfmeaRules`).
 
 ---
 
@@ -1419,7 +1445,7 @@ const renderStep1 = () => {
 };
 ```
 
-Add these render functions to the `STEP_CONTENT_MAP` in DFMEAWizardPage and render them in the content area.
+Insert `renderStep0` and `renderStep1` ABOVE the `STEP_RENDERERS` map inside the component. Then update the map entries: `STEP_RENDERERS[0] = renderStep0` and `STEP_RENDERERS[1] = renderStep1`.
 
 - [ ] **Step 1: Add step content for steps 0 and 1**
 
@@ -1622,6 +1648,8 @@ const renderStep3 = () => {
   );
 };
 
+Insert `renderStep2` and `renderStep3` ABOVE the `STEP_RENDERERS` map inside the component. Then update `STEP_RENDERERS[2] = renderStep2` and `STEP_RENDERERS[3] = renderStep3`.
+
 - [ ] **Step 1: Add step content for steps 2 and 3**
 
 - [ ] **Step 2: Verify smart recommendations work**
@@ -1803,7 +1831,7 @@ const renderStep6 = () => {
 };
 ```
 
-Map all 7 steps to their render functions in the page:
+Insert `renderStep4`, `renderStep5`, and `renderStep6` ABOVE the `STEP_RENDERERS` map inside the component. Then update the map to point to all 7 render functions:
 
 ```tsx
 const STEP_RENDERERS: Record<number, () => React.ReactNode> = {
@@ -1816,6 +1844,8 @@ const STEP_RENDERERS: Record<number, () => React.ReactNode> = {
   6: renderStep6,
 };
 ```
+
+This replaces the placeholder map defined in Task 9.
 
 - [ ] **Step 1: Add step content for steps 4, 5, and 6**
 
@@ -1913,14 +1943,15 @@ git add -A && git commit -m "fix(dfmea-wizard): integration test fixes"
 
 ---
 
-## Self-Review Checklist (v4)
+## Self-Review Checklist (v4-fixed)
 
 - [x] **Spec coverage:** All sections covered — routes (Task 13), layout (Task 9), save mechanism (Task 4), step content (Tasks 10-12), validation (Task 5), cascade delete (Task 3), wizardScope (Tasks 1-2), i18n (Task 8), guidance cards (Task 6), sidebar (Task 7), editor redirect (Task 13), exit confirmation (Task 9)
 - [x] **Placeholder scan:** No TBD/TODO/fill-in-later. All code blocks contain complete implementations. Step 3 failure analysis has full render code with handleAddFailure, handleDeleteFailureChain, and smart recommendations. Step 5 optimization has full PreventionControl/DetectionControl creation code.
-- [x] **Type consistency:** `WizardScope` uses `wizard_completed` (not `_completed`), defined in both backend (Task 1) and frontend (Task 2). `lock_version` added to `FMEAResponse` (Task 1). `deleteFMEA` API (Task 2) matches backend DELETE endpoint (Task 1). `useWizardSave` returns `boolean` from `immediateSave` (Task 4). `useWizardValidation` uses `buildRows` (Task 5). `cascadeDeleteStructureNode` correctly handles root node deletion and CAUSE_OF edge direction (Task 3). `useDfmeaRules()` called at top level, not in render functions (Task 12 fix). `STEP_RENDERERS` placeholder defined in Task 9 with empty renderers. All imports listed in Task 9.
+- [x] **Type consistency:** `WizardScope` uses `wizard_completed` (not `_completed`), defined in both backend (Task 1) and frontend (Task 2). `lock_version` added to `FMEAResponse` (Task 1). `deleteFMEA` API (Task 2) matches backend DELETE endpoint (Task 1). `useWizardSave` returns `boolean` from `immediateSave` (Task 4). `useWizardValidation` uses `buildRows` (Task 5). `cascadeDeleteStructureNode` correctly handles root node deletion and CAUSE_OF edge direction (Task 3). `useDfmeaRules()` called at top level, not in render functions (Task 12 fix). `STEP_RENDERERS` placeholder defined inside the component in Task 9 with empty renderers. All imports listed in Task 9.
 - [x] **Redirect loop fix:** `wizard_completed` flag prevents editor from redirecting completed wizards back. Editor only redirects if `wizardScope.wizard_completed` is absent or falsy (Task 13).
-- [x] **Dirty flag fix:** Uses hash-based comparison. `currentDataHash()` computes hash of current nodes/edges/wizardScope. `lastSavedDataHash` set on successful save. `beforeunload` only warns if `currentDataHash() !== lastSavedDataHash.current`.
+- [x] **Dirty flag fix (hash-at-enqueue):** Payload hash computed at enqueue time, passed to `debouncedSave`/`immediateSave`. On success, hook writes THAT hash (not current page state) into `lastSavedHashRef`. Race-free: if save A (hash-A) completes while page is already at hash-B, `lastSavedHashRef` stays at hash-A and `beforeunload` correctly warns about B. `nodesRef`/`edgesRef`/`scopeRef` ensure `beforeunload` handler always reads fresh state without re-registering. `dirtyRef` removed entirely — dirty state is `computeHash(live) !== lastSavedHashRef.current`.
 - [x] **Cascade delete root node:** Root node `nodeId` always added to `nodeIdsToDelete`. External parent check only applies to descendant nodes.
 - [x] **Step 2 edge types:** Uses `CHILD_EDGE_TYPE` mapping matching StructureTree.tsx: System→HAS_PROCESS_STEP, Subsystem→HAS_WORK_ELEMENT.
-- [x] **Neo4j projection cleanup:** `delete_fmea` service includes audit log and outbox event. `GraphProjectionService` gets `delete_fmea_projection` method. Worker handles `fmea.deleted` event type.
+- [x] **Neo4j projection cleanup:** `delete_fmea` service includes audit log and outbox event (Task 1b). `delete_fmea_projection` uses `self._driver` (not `self.driver`), `settings.NEO4J_DATABASE`, and `session.execute_write(_tx)` pattern matching existing `sync_fmea_to_neo4j` (Task 1b). Worker branches on `task.event_type == "fmea.deleted"` using existing local variable names (`projection`, `task`) — no phantom `event_type`/`projection_service`/`aggregate_id` (Task 1b). Task 1 file list and commit command include `graph_projection_service.py` and `graph_sync_worker.py`.
+- [x] **STEP_RENDERERS scoping:** Map defined INSIDE the component (after `saveStatusLabel`, before `if (loading)`). Tasks 10-12 insert `renderStep0`–`renderStep6` ABOVE the map and update entries. Single name `STEP_RENDERERS` throughout (no `STEP_CONTENT_MAP`). All `renderStep*` functions have access to component state.
 - [x] **TypeScript compilation:** `let newNodes` instead of `const newNodes` in Task 12 optimization step. All imports present in Task 9.
