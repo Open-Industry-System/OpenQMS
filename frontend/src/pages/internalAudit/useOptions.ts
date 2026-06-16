@@ -50,9 +50,10 @@ export function useFindingStatusMap(): Record<string, { label: string; color: st
 
 export function useResultOptions(): { value: string; label: string }[] {
   const { t } = useTranslation("internalAudit");
+  // Values are backend data keys (Chinese), labels are localized
   return [
-    { value: t("resultOptions.conform.value"), label: t("resultOptions.conform.label") },
-    { value: t("resultOptions.nonConform.value"), label: t("resultOptions.nonConform.label") },
-    { value: t("resultOptions.notApplicable.value"), label: t("resultOptions.notApplicable.label") },
+    { value: "符合", label: t("resultOptions.conform.label") },
+    { value: "不符合", label: t("resultOptions.nonConform.label") },
+    { value: "不适用", label: t("resultOptions.notApplicable.label") },
   ];
 }

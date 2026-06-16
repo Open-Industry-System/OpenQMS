@@ -124,6 +124,14 @@
       "createdAt": "创建时间",
       "actions": "操作"
     },
+    "typeLabels": {
+      "mock": "Mock",
+      "rest": "REST API",
+      "sap": "SAP",
+      "oracle_ebs": "Oracle EBS",
+      "kingdee": "金蝶",
+      "yonyou": "用友"
+    },
     "status": {
       "active": "正常",
       "inactive": "停用"
@@ -151,6 +159,10 @@
     "connector": {
       "mock": "Mock - 模拟数据",
       "rest": "REST API",
+      "sap": "SAP - 未实现",
+      "oracle_ebs": "Oracle EBS - 未实现",
+      "kingdee": "金蝶 - 未实现",
+      "yonyou": "用友 - 未实现",
       "notImplemented": "{{name}} - 未实现"
     },
     "deleteConfirm": {

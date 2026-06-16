@@ -75,6 +75,7 @@ import GroupAuditsPage from "./pages/group/GroupAudits";
 import SupplyChainRiskMapPage from "./pages/supplyChainRiskMap/SupplyChainRiskMapPage";
 import TenantSuspended from "./pages/TenantSuspended";
 import TenantDeactivated from "./pages/TenantDeactivated";
+import AIConfigPage from "./pages/admin/AIConfigPage";
 
 function isTokenExpired(token: string): boolean {
   try {
@@ -209,6 +210,8 @@ export default function App() {
         <Route path="/group/comparison" element={<ProtectedRoute requiredModule="group"><FactoryComparisonPage /></ProtectedRoute>} />
         <Route path="/group/suppliers" element={<ProtectedRoute requiredModule="group"><GroupSuppliersPage /></ProtectedRoute>} />
         <Route path="/group/audits" element={<ProtectedRoute requiredModule="group"><GroupAuditsPage /></ProtectedRoute>} />
+        {/* Admin */}
+        <Route path="/admin/ai-config" element={<ProtectedRoute><AIConfigPage /></ProtectedRoute>} />
       </Route>
     </Routes>
   );

@@ -295,8 +295,7 @@
     "OEM": "OEM",
     "Tier 1": "Tier 1",
     "Tier 2": "Tier 2",
-    "other": "其他",
-    "其他": "其他"
+    "other": "其他"
   },
   "auditMode": {
     "on_site": "现场",

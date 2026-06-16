@@ -4,6 +4,8 @@ from typing import Protocol
 
 import httpx
 
+from app.config import settings as app_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,26 +76,33 @@ class OllamaEmbeddingProvider:
         await self._client.aclose()
 
 
-def create_embedding_provider() -> EmbeddingProvider | None:
-    """Factory function. Returns None if no embedding provider is configured."""
-    from app.config import settings
+def create_embedding_provider(config=None) -> EmbeddingProvider | None:
+    """Factory function. Returns None if no embedding provider is configured.
 
-    provider_name = settings.EMBEDDING_PROVIDER
+    `config` may be the global settings object or any object exposing the
+    uppercase env attributes (EMBEDDING_PROVIDER, LLM_PROVIDER, LLM_API_KEY,
+    EMBEDDING_MODEL, EMBEDDING_BASE_URL).
+    """
+    cfg = config or app_settings
+
+    provider_name = getattr(cfg, "EMBEDDING_PROVIDER", "") or getattr(cfg, "embedding_provider", "")
     if not provider_name:
-        provider_name = settings.LLM_PROVIDER
+        provider_name = getattr(cfg, "LLM_PROVIDER", "") or getattr(cfg, "llm_provider", "")
     if not provider_name:
         return None
 
     if provider_name == "openai":
-        if not settings.LLM_API_KEY:
+        api_key = getattr(cfg, "LLM_API_KEY", "") or getattr(cfg, "llm_api_key", "")
+        if not api_key:
             logger.warning("EMBEDDING_PROVIDER=openai but LLM_API_KEY not set")
             return None
-        model = settings.EMBEDDING_MODEL or "text-embedding-3-small"
-        return OpenAIEmbeddingProvider(api_key=settings.LLM_API_KEY, model=model)
+        model = getattr(cfg, "EMBEDDING_MODEL", "") or getattr(cfg, "embedding_model", "") or "text-embedding-3-small"
+        return OpenAIEmbeddingProvider(api_key=api_key, model=model)
 
     if provider_name == "ollama":
-        model = settings.EMBEDDING_MODEL or "nomic-embed-text"
-        return OllamaEmbeddingProvider(base_url=settings.EMBEDDING_BASE_URL, model=model)
+        model = getattr(cfg, "EMBEDDING_MODEL", "") or getattr(cfg, "embedding_model", "") or "nomic-embed-text"
+        base_url = getattr(cfg, "EMBEDDING_BASE_URL", "") or getattr(cfg, "embedding_base_url", "")
+        return OllamaEmbeddingProvider(base_url=base_url, model=model)
 
     logger.warning(f"Unsupported EMBEDDING_PROVIDER: {provider_name}")
     return None

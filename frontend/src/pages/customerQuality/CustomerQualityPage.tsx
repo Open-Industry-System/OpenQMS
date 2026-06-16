@@ -47,36 +47,37 @@ import StatusBadge from "../../components/design/StatusBadge";
 
 const { Title, Text } = Typography;
 
-const severityVariant = (s: string): string => {
-  if (s === "致命") return "error";
-  if (s === "严重") return "warning";
-  if (s === "轻微") return "info";
-  return "info";
-};
-
-const complaintStatusVariant = (s: string): string => {
-  if (s === "closed") return "success";
-  if (["open", "investigating"].includes(s)) return "warning";
-  if (s === "responded") return "info";
-  return "info";
-};
-
-const rmaStatusVariant = (s: string): string => {
-  if (s === "closed") return "success";
-  if (["open", "analysis", "action_pending"].includes(s)) return "warning";
-  return "info";
-};
-
-const riskVariant = (light: string): string => {
-  if (light === "red") return "error";
-  if (light === "yellow") return "warning";
-  return "success";
-};
-
 export default function CustomerQualityPage() {
   const { t } = useTranslation("customerQuality");
   const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
+
+  const severityKeyToVariant: Record<string, string> = {
+    fatal: "error", serious: "warning", general: "info", minor: "info",
+  };
+  const severityVariant = (s: string): string => {
+    const keyMap: Record<string, string> = { "致命": "fatal", "严重": "serious", "一般": "general", "轻微": "minor" };
+    return severityKeyToVariant[keyMap[s] || s] || "info";
+  };
+
+  const complaintStatusVariant = (s: string): string => {
+    if (s === "closed") return "success";
+    if (["open", "investigating"].includes(s)) return "warning";
+    if (s === "responded") return "info";
+    return "info";
+  };
+
+  const rmaStatusVariant = (s: string): string => {
+    if (s === "closed") return "success";
+    if (["open", "analysis", "action_pending"].includes(s)) return "warning";
+    return "info";
+  };
+
+  const riskVariant = (light: string): string => {
+    if (light === "red") return "error";
+    if (light === "yellow") return "warning";
+    return "success";
+  };
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const productLine = useProductLineStore((s) => s.selected);
@@ -296,10 +297,10 @@ export default function CustomerQualityPage() {
     }
     try {
       const severityMap: Record<string, string> = {
-        fatal: "致命",
-        serious: "严重",
-        general: "一般",
-        minor: "轻微",
+        fatal: t("severity.fatal"),
+        serious: t("severity.serious"),
+        general: t("severity.general"),
+        minor: t("severity.minor"),
       };
       const severityKey = values.severity as string;
       const complaint = await createComplaint({

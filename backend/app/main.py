@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.api.admin import permissions as admin_permissions_api
+from app.api.admin import ai_config as admin_ai_config_api
 from app.api.apqp import router as apqp_router
 from app.api.audit_finding import router as audit_finding_router
 from app.api.audit_plan import router as audit_plan_router
@@ -408,6 +409,7 @@ app.include_router(ppap_router)
 app.include_router(shipment_router)
 app.include_router(graph_router)
 app.include_router(admin_permissions_api.router)
+app.include_router(admin_ai_config_api.router)
 app.include_router(search_router)
 app.include_router(change_impact_router)
 app.include_router(collaboration_router)

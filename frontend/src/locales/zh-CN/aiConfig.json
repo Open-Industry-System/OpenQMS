@@ -1,0 +1,88 @@
+{
+  "title": "AI 模型配置",
+  "subtitle": "配置大语言模型与嵌入模型的运行时参数",
+  "notice": {
+    "title": "配置说明",
+    "description": "此页面的配置保存在数据库中，修改后立即生效。留空的字段将使用环境变量 (.env) 的默认值。"
+  },
+  "actions": {
+    "save": "保存配置",
+    "reload": "重新加载",
+    "test": "测试连接"
+  },
+  "sections": {
+    "llm": "大语言模型 (LLM)",
+    "embedding": "嵌入模型 (Embedding)",
+    "search": "搜索权重"
+  },
+  "fields": {
+    "llm_provider": {
+      "label": "LLM Provider",
+      "tooltip": "选择 LLM 服务商。留空则使用纯规则引擎模式（不调用 AI）。",
+      "placeholder": "选择提供商"
+    },
+    "llm_api_key": {
+      "label": "API Key",
+      "tooltip": "LLM 服务的 API 密钥。显示为 ******** 时表示已保存，留空表示不修改。",
+      "placeholder": "输入 API Key 或留空保持不变"
+    },
+    "llm_model": {
+      "label": "模型名称",
+      "tooltip": "使用的模型名称，例如 claude-sonnet-4-6、gpt-4o、qwen2.5:7b。留空使用默认值。",
+      "placeholder": "例如：claude-sonnet-4-6"
+    },
+    "llm_base_url": {
+      "label": "Base URL",
+      "tooltip": "仅 local provider 需要，例如 http://localhost:11434（Ollama）。",
+      "placeholder": "http://localhost:11434"
+    },
+    "llm_timeout": {
+      "label": "默认超时"
+    },
+    "capa_draft_llm_timeout": {
+      "label": "CAPA 起草超时"
+    },
+    "report_llm_timeout": {
+      "label": "报告生成超时"
+    },
+    "embedding_provider": {
+      "label": "Embedding Provider",
+      "tooltip": "留空则跟随 LLM Provider。",
+      "placeholder": "选择提供商"
+    },
+    "embedding_model": {
+      "label": "Embedding 模型",
+      "tooltip": "例如 text-embedding-3-small（OpenAI）、nomic-embed-text（Ollama）。",
+      "placeholder": "text-embedding-3-small"
+    },
+    "embedding_base_url": {
+      "label": "Embedding Base URL",
+      "tooltip": "仅 Ollama 需要。",
+      "placeholder": "http://localhost:11434"
+    },
+    "embedding_dimensions": {
+      "label": "向量维度",
+      "tooltip": "1536 for OpenAI, 768 for nomic-embed-text, 1024 for BGE-M3."
+    },
+    "search_vector_weight": {
+      "label": "向量搜索权重",
+      "tooltip": "RRF 混合搜索中向量搜索的权重（0-1）。"
+    },
+    "search_fulltext_weight": {
+      "label": "全文搜索权重",
+      "tooltip": "RRF 混合搜索中全文搜索的权重（0-1）。"
+    }
+  },
+  "messages": {
+    "loadFailed": "加载配置失败",
+    "saveSuccess": "配置已保存并生效",
+    "saveFailed": "保存配置失败",
+    "validationFailed": "表单验证失败，请检查输入",
+    "testFailed": "测试连接失败"
+  },
+  "testResult": {
+    "title": "连接测试结果",
+    "close": "关闭",
+    "hint": "测试使用当前表单中的配置（未保存也会测试）。若 API Key 显示为 ******** 则使用已保存的密钥。"
+  }
+}

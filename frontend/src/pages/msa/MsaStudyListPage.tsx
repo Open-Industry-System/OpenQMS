@@ -29,6 +29,15 @@ import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 const { Option } = Select;
 
+// Backend stores Chinese study type values; this map links them to English keys and routes.
+const MSA_TYPE_KEY: Record<string, string> = {
+  "GRR": "grr",
+  "偏倚": "bias",
+  "线性": "linearity",
+  "稳定性": "stability",
+  "计数型": "attribute",
+};
+
 export default function MsaStudyListPage() {
   const navigate = useNavigate();
   const { t } = useTranslation("msa");
@@ -61,14 +70,11 @@ export default function MsaStudyListPage() {
   };
   const typeLabel = (type: string) => t(`study.type.${type}`, { defaultValue: type });
   const typeVariant = (type: string): string => {
-    switch (type) {
-      case "GRR": return "info";
-      case "偏倚": return "normal";
-      case "线性": return "warning";
-      case "稳定性": return "rework";
-      case "计数型": return "success";
-      default: return "draft";
-    }
+    const key = MSA_TYPE_KEY[type] || type;
+    const variantMap: Record<string, string> = {
+      grr: "info", bias: "normal", linearity: "warning", stability: "rework", attribute: "success",
+    };
+    return variantMap[key] || "draft";
   };
 
   const fetchStudies = useCallback(async () => {
@@ -122,14 +128,7 @@ export default function MsaStudyListPage() {
   };
 
   const typeToRoute = (type: string): string => {
-    switch (type) {
-      case "GRR": return "grr";
-      case "偏倚": return "bias";
-      case "线性": return "linearity";
-      case "稳定性": return "stability";
-      case "计数型": return "attribute";
-      default: return "grr";
-    }
+    return MSA_TYPE_KEY[type] || "grr";
   };
 
   const columns = [
@@ -195,11 +194,11 @@ export default function MsaStudyListPage() {
   ];
 
   const counts = {
-    grr: studies.filter((s) => s.type === "GRR").length,
-    bias: studies.filter((s) => s.type === "偏倚").length,
-    linearity: studies.filter((s) => s.type === "线性").length,
-    stability: studies.filter((s) => s.type === "稳定性").length,
-    attribute: studies.filter((s) => s.type === "计数型").length,
+    grr: studies.filter((s) => MSA_TYPE_KEY[s.type] === "grr").length,
+    bias: studies.filter((s) => MSA_TYPE_KEY[s.type] === "bias").length,
+    linearity: studies.filter((s) => MSA_TYPE_KEY[s.type] === "linearity").length,
+    stability: studies.filter((s) => MSA_TYPE_KEY[s.type] === "stability").length,
+    attribute: studies.filter((s) => MSA_TYPE_KEY[s.type] === "attribute").length,
   };
 
   return (

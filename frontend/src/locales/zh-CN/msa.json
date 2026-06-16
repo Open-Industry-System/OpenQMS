@@ -71,6 +71,10 @@
       "addSuccess": "校准记录已添加",
       "pass": "合格",
       "fail": "不合格"
+    },
+    "placeholders": {
+      "measuring_range": "如: 0-150mm",
+      "selectDepartment": "选择部门"
     }
   },
   "study": {
@@ -156,7 +160,8 @@
       "selectGauge": "选择量具",
       "selectSpc": "选择SPC检验特性",
       "unit": "如: mm",
-      "selectMethod": "选择方法"
+      "selectMethod": "选择方法",
+      "selectType": "选择研究类型"
     },
     "method": {
       "average_range": "平均极差法",

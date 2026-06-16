@@ -53,7 +53,9 @@
     "factoryComparison": "Factory Comparison",
     "sharedSuppliers": "Shared Suppliers",
     "crossFactoryAudit": "Cross-factory Audit",
-    "factoryManagement": "Factory Management"
+    "factoryManagement": "Factory Management",
+    "admin": "System Admin",
+    "aiConfig": "AI Model Config"
   },
   "header": {
     "selectFactory": "Select Factory",

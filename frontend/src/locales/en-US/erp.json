@@ -124,6 +124,14 @@
       "createdAt": "Created At",
       "actions": "Actions"
     },
+    "typeLabels": {
+      "mock": "Mock",
+      "rest": "REST API",
+      "sap": "SAP",
+      "oracle_ebs": "Oracle EBS",
+      "kingdee": "Kingdee",
+      "yonyou": "Yonyou"
+    },
     "status": {
       "active": "Active",
       "inactive": "Inactive"
@@ -151,6 +159,10 @@
     "connector": {
       "mock": "Mock - Simulated Data",
       "rest": "REST API",
+      "sap": "SAP - Not implemented",
+      "oracle_ebs": "Oracle EBS - Not implemented",
+      "kingdee": "Kingdee - Not implemented",
+      "yonyou": "Yonyou - Not implemented",
       "notImplemented": "{{name}} - Not implemented"
     },
     "deleteConfirm": {

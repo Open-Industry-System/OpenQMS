@@ -46,3 +46,7 @@ export async function transitionFMEA(
   const resp = await client.post(`/fmea/${id}/transition`, { target_status });
   return resp.data;
 }
+
+export async function deleteFMEA(id: string): Promise<void> {
+  await client.delete(`/fmea/${id}`);
+}

@@ -69,6 +69,7 @@ from app.models.role import RoleDefinition, RolePermission, UserProductLine
 from app.models.spc import ControlLimitSnapshot, InspectionCharacteristic, SampleBatch, SampleValue, SPCAlarm
 from app.models.special_characteristic import SpecialCharacteristic
 from app.models.stability import StabilityMeasurement, StabilityResult, StabilityStudy
+from app.models.system_setting import SystemSetting
 from app.models.supplier import (
     Supplier,
     SupplierCertification,
@@ -167,6 +168,7 @@ __all__ = [
     "SupplierRiskAlert",
     "SupplierRiskConfig",
     "SupplierRiskNotificationChannel",
+    "SystemSetting",
     "Factory",
     "UserFactory",
     "GroupKPISnapshot",

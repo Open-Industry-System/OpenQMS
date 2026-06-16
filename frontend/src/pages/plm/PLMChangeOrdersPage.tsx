@@ -17,14 +17,14 @@ const statusVariant: Record<string, string> = {
   cancelled: "error",
 };
 
-const changeTypeLabels: Record<string, string> = {
-  ECN: "工程变更通知",
-  ECR: "工程变更请求",
-  SCN: "供应商变更通知",
-};
-
 export default function PLMChangeOrdersPage() {
   const { t } = useTranslation("plm");
+
+  const changeTypeLabels: Record<string, string> = {
+    ECN: t("changeOrders.changeType.ECN"),
+    ECR: t("changeOrders.changeType.ECR"),
+    SCN: t("changeOrders.changeType.SCN"),
+  };
   const { message } = App.useApp();
   const { canEdit } = usePermission();
   const canEditPlm = canEdit("plm");

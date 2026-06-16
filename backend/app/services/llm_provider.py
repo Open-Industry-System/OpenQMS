@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Protocol
 
-from app.config import settings
+from app.config import settings as app_settings
 
 logger = logging.getLogger(__name__)
 
@@ -72,18 +72,24 @@ class LocalProvider:
         return json.loads(text)
 
 
-def create_llm_provider() -> LLMProvider | None:
-    """Factory: create provider from env vars. Returns None if not configured."""
-    provider_name = settings.LLM_PROVIDER
+def create_llm_provider(config=None) -> LLMProvider | None:
+    """Factory: create provider from env vars or an explicit config object.
+
+    `config` should expose the uppercase env attributes: LLM_PROVIDER,
+    LLM_API_KEY, LLM_MODEL, LLM_BASE_URL. When omitted, the global app settings
+    are used.
+    """
+    cfg = config or app_settings
+    provider_name = getattr(cfg, "LLM_PROVIDER", "") or getattr(cfg, "llm_provider", "")
     if not provider_name:
         return None
 
-    api_key = settings.LLM_API_KEY
+    api_key = getattr(cfg, "LLM_API_KEY", "") or getattr(cfg, "llm_api_key", "")
     if not api_key and provider_name != "local":
         logger.warning("LLM_PROVIDER=%s requires LLM_API_KEY, falling back to rule-only mode", provider_name)
         return None
 
-    model = settings.LLM_MODEL
+    model = getattr(cfg, "LLM_MODEL", "") or getattr(cfg, "llm_model", "")
 
     try:
         if provider_name == "claude":
@@ -91,7 +97,7 @@ def create_llm_provider() -> LLMProvider | None:
         elif provider_name == "openai":
             return OpenAIProvider(api_key=api_key, model=model or "gpt-4o")
         elif provider_name == "local":
-            base_url = settings.LLM_BASE_URL
+            base_url = getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
             if not base_url:
                 logger.warning("LLM_PROVIDER=local requires LLM_BASE_URL, falling back to rule-only mode")
                 return None

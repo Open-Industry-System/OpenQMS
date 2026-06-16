@@ -173,35 +173,68 @@ export default function SmartSuggestionDropdown({
     s === "global" ? t("smartSuggestion.scopeGlobal") : t("smartSuggestion.scopeLocal");
 
   const dropdownContent = (
-    <div style={{ width: 360, background: "#fff", borderRadius: 4, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
+    <div
+      style={{
+        width: 360,
+        background: "var(--qf-bg-panel)",
+        border: "1px solid var(--qf-border-strong)",
+        borderRadius: "var(--qf-radius-md)",
+        boxShadow: "var(--qf-shadow-md)",
+        color: "var(--qf-text-primary)",
+      }}
+    >
       {error && (
-        <Alert type="error" message={error} banner style={{ fontSize: 12 }} />
+        <div
+          style={{
+            padding: "6px 12px",
+            fontSize: 12,
+            color: "var(--qf-red)",
+            background: "var(--qf-red-dim)",
+            borderBottom: "1px solid var(--qf-border)",
+          }}
+        >
+          {error}
+        </div>
       )}
       {fallback && (
-        <Alert type="warning" message={t("smartSuggestion.aiUnavailable")} banner style={{ fontSize: 12 }} />
+        <div
+          style={{
+            padding: "6px 12px",
+            fontSize: 12,
+            color: "var(--qf-amber)",
+            background: "var(--qf-amber-dim)",
+            borderBottom: "1px solid var(--qf-border)",
+          }}
+        >
+          {t("smartSuggestion.aiUnavailable")}
+        </div>
       )}
       {!llmAvailable && (
-        <Text type="secondary" style={{ display: "block", padding: "4px 12px", fontSize: 12 }}>
+        <Text
+          type="secondary"
+          style={{ display: "block", padding: "4px 12px", fontSize: 12, color: "var(--qf-text-secondary)" }}
+        >
           {t("smartSuggestion.ruleOnlyMode")}
         </Text>
       )}
-      <div style={{ padding: "4px 12px", borderBottom: "1px solid #f0f0f0" }}>
+      <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--qf-border)" }}>
         <Radio.Group
           value={scope}
           onChange={(e) => setScope(e.target.value)}
           disabled={!hasKgPermission}
           size="small"
+          className="qf-radio-group"
         >
           <Radio.Button value="global"><GlobalOutlined /> {t("smartSuggestion.global")}</Radio.Button>
           <Radio.Button value="current_product_line">{t("smartSuggestion.currentProductLine")}</Radio.Button>
         </Radio.Group>
         {!hasKgPermission && (
-          <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+          <Text type="secondary" style={{ fontSize: 11, marginLeft: 8, color: "var(--qf-text-tertiary)" }}>
             {t("smartSuggestion.noGlobalPermission")}
           </Text>
         )}
         {effectiveScope !== scope && (
-          <Text type="warning" style={{ fontSize: 11, marginLeft: 8 }}>
+          <Text type="warning" style={{ fontSize: 11, marginLeft: 8, color: "var(--qf-amber)" }}>
             {t("smartSuggestion.actualScope", { scope: scopeLabel(effectiveScope) })}
           </Text>
         )}
@@ -213,16 +246,19 @@ export default function SmartSuggestionDropdown({
           style={{
             padding: "8px 12px",
             cursor: "pointer",
-            background: i === selectedIndex ? "#f0f0f0" : "transparent",
-            borderBottom: i < suggestions.length - 1 ? "1px solid #f0f0f0" : "none",
+            background: i === selectedIndex ? "var(--qf-bg-hover)" : "transparent",
+            borderBottom: i < suggestions.length - 1 ? "1px solid var(--qf-divider)" : "none",
+            transition: "background var(--qf-transition-fast)",
           }}
+          onMouseEnter={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
+          onMouseLeave={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "transparent"; }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {sourceIcon(s.source)}
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13 }}>{s.name}</div>
+              <div style={{ fontSize: 13, color: "var(--qf-text-primary)" }}>{s.name}</div>
               {s.explanation && (
-                <Text type="secondary" style={{ fontSize: 11 }}>
+                <Text type="secondary" style={{ fontSize: 11, color: "var(--qf-text-secondary)" }}>
                   {s.explanation}
                 </Text>
               )}

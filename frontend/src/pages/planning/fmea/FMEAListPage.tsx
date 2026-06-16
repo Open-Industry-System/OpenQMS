@@ -11,23 +11,23 @@ import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
 import { PageShell, StatusBadge } from "../../../components/design";
 
-const typeLabels: Record<string, string> = {
-  PFMEA: "PFMEA",
-  DFMEA: "DFMEA",
-};
-
-const statusLabels: Record<string, string> = {
-  draft: "草稿",
-  in_review: "审核中",
-  approved: "已批准",
-  rework: "返工中",
-  archived: "已归档",
-};
-
 export default function FMEAListPage() {
   const { t, i18n } = useTranslation("fmea");
   const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
+
+  const typeLabels: Record<string, string> = {
+    PFMEA: "PFMEA",
+    DFMEA: "DFMEA",
+  };
+
+  const statusLabels: Record<string, string> = {
+    draft: t("status.draft"),
+    in_review: t("status.in_review"),
+    approved: t("status.approved"),
+    rework: t("status.rework"),
+    archived: t("status.archived"),
+  };
   const [data, setData] = useState<FMEADocument[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -160,7 +160,7 @@ export default function FMEAListPage() {
   ) : null;
 
   return (
-    <PageShell title={t("list.title")} subtitle="失效模式与影响分析 · PFMEA / DFMEA" actions={actions}>
+    <PageShell title={t("list.title")} subtitle={t("list.subtitle")} actions={actions}>
       <Table
         className="qf-table"
         columns={columns}

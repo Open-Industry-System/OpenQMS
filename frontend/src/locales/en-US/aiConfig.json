@@ -1,0 +1,88 @@
+{
+  "title": "AI Model Configuration",
+  "subtitle": "Configure runtime parameters for LLM and embedding providers",
+  "notice": {
+    "title": "Configuration Note",
+    "description": "Settings on this page are persisted in the database and take effect immediately. Empty fields will use environment variable (.env) defaults."
+  },
+  "actions": {
+    "save": "Save Config",
+    "reload": "Reload",
+    "test": "Test Connection"
+  },
+  "sections": {
+    "llm": "Large Language Model (LLM)",
+    "embedding": "Embedding Model",
+    "search": "Search Weights"
+  },
+  "fields": {
+    "llm_provider": {
+      "label": "LLM Provider",
+      "tooltip": "Choose an LLM provider. Leave empty for rule-engine-only mode (no AI calls).",
+      "placeholder": "Select provider"
+    },
+    "llm_api_key": {
+      "label": "API Key",
+      "tooltip": "API key for the LLM service. Displays as ******** when saved; leave empty to keep unchanged.",
+      "placeholder": "Enter API Key or leave empty to keep current"
+    },
+    "llm_model": {
+      "label": "Model Name",
+      "tooltip": "Model identifier, e.g., claude-sonnet-4-6, gpt-4o, qwen2.5:7b. Leave empty for provider default.",
+      "placeholder": "e.g., claude-sonnet-4-6"
+    },
+    "llm_base_url": {
+      "label": "Base URL",
+      "tooltip": "Required for local provider only, e.g., http://localhost:11434 (Ollama).",
+      "placeholder": "http://localhost:11434"
+    },
+    "llm_timeout": {
+      "label": "Default Timeout"
+    },
+    "capa_draft_llm_timeout": {
+      "label": "CAPA Draft Timeout"
+    },
+    "report_llm_timeout": {
+      "label": "Report Generation Timeout"
+    },
+    "embedding_provider": {
+      "label": "Embedding Provider",
+      "tooltip": "Leave empty to inherit from LLM Provider.",
+      "placeholder": "Select provider"
+    },
+    "embedding_model": {
+      "label": "Embedding Model",
+      "tooltip": "e.g., text-embedding-3-small (OpenAI), nomic-embed-text (Ollama).",
+      "placeholder": "text-embedding-3-small"
+    },
+    "embedding_base_url": {
+      "label": "Embedding Base URL",
+      "tooltip": "Required for Ollama only.",
+      "placeholder": "http://localhost:11434"
+    },
+    "embedding_dimensions": {
+      "label": "Vector Dimensions",
+      "tooltip": "1536 for OpenAI, 768 for nomic-embed-text, 1024 for BGE-M3."
+    },
+    "search_vector_weight": {
+      "label": "Vector Search Weight",
+      "tooltip": "Weight for vector search in RRF hybrid search (0-1)."
+    },
+    "search_fulltext_weight": {
+      "label": "Fulltext Search Weight",
+      "tooltip": "Weight for fulltext search in RRF hybrid search (0-1)."
+    }
+  },
+  "messages": {
+    "loadFailed": "Failed to load configuration",
+    "saveSuccess": "Configuration saved and applied",
+    "saveFailed": "Failed to save configuration",
+    "validationFailed": "Form validation failed, please check inputs",
+    "testFailed": "Connection test failed"
+  },
+  "testResult": {
+    "title": "Connection Test Result",
+    "close": "Close",
+    "hint": "The test uses the values currently in the form (even if unsaved). If the API Key shows ********, the saved key is used."
+  }
+}

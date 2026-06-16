@@ -17,18 +17,18 @@ import { usePermission } from "../../hooks/usePermission";
 import { PageShell, DataCard, StatusBadge } from "../../components/design";
 import { formatDateTime } from "../../utils/dateTime";
 
-const typeLabels: Record<string, string> = {
-  mock: "Mock",
-  rest: "REST API",
-  sap: "SAP",
-  oracle_ebs: "Oracle EBS",
-  kingdee: "金蝶",
-  yonyou: "用友",
-};
-
 export default function ERPConnectionsPage() {
   const { t } = useTranslation("erp");
   const { t: tc } = useTranslation("common");
+
+  const typeLabels: Record<string, string> = {
+    mock: t("connections.typeLabels.mock", "Mock"),
+    rest: t("connections.typeLabels.rest", "REST API"),
+    sap: t("connections.typeLabels.sap", "SAP"),
+    oracle_ebs: t("connections.typeLabels.oracle_ebs", "Oracle EBS"),
+    kingdee: t("connections.typeLabels.kingdee", "金蝶"),
+    yonyou: t("connections.typeLabels.yonyou", "用友"),
+  };
   const { message, modal: modalConfirm } = App.useApp();
   const { canCreate, canEdit, canAdmin } = usePermission();
   const canCreateErp = canCreate("erp");

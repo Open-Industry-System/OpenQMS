@@ -257,6 +257,14 @@ function useMenuItems(): MenuItem[] {
           { key: "/group/factories", icon: <BankOutlined />, label: t("menu.factoryManagement"), module: "group" },
         ],
       },
+      {
+        key: "grp:admin",
+        icon: <SettingOutlined />,
+        label: t("menu.admin"),
+        children: [
+          { key: "/admin/ai-config", icon: <SettingOutlined />, label: t("menu.aiConfig") },
+        ],
+      },
     ],
     [t]
   );

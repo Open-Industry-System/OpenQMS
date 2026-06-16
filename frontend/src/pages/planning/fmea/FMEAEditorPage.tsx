@@ -546,6 +546,7 @@ export default function FMEAEditorPage() {
   if (!fmea) return <Empty description={t("messages.notFound")} />;
 
   const isDFMEA = fmea.fmea_type === "DFMEA";
+  const rootStructureNode = structureNodes.find((n) => n.type === (isDFMEA ? "System" : "ProcessItem"));
 
     const columns = [
     {
@@ -1082,15 +1083,43 @@ export default function FMEAEditorPage() {
   return (
     <PageShell
       title={
-        <>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/fmea")}>{t("actions.back")}</Button>
-          <span>{fmea.title}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/fmea")}>{tc("actions.back")}</Button>
+          <span className="qf-display" style={{ fontSize: 20 }}>{fmea.title}</span>
+        </div>
+      }
+      subtitle={
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            padding: "6px 12px",
+            marginTop: 4,
+            background: "var(--qf-bg-elevated)",
+            border: "1px solid var(--qf-border)",
+            borderRadius: "var(--qf-radius-md)",
+            width: "fit-content",
+          }}
+        >
           <StatusBadge status={isDFMEA ? "normal" : "info"}>{isDFMEA ? "DFMEA" : "PFMEA"}</StatusBadge>
           <StatusBadge status={fmea.status}>{statusLabels[fmea.status] || fmea.status}</StatusBadge>
-          <span style={{ color: "var(--qf-text-secondary)", fontFamily: "var(--qf-font-mono)", fontSize: 14 }}>
-            {fmea.document_no} · v{fmea.version}
+          <span
+            style={{
+              color: "var(--qf-text-secondary)",
+              fontFamily: "var(--qf-font-mono)",
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span style={{ color: "var(--qf-cyan)" }}>{fmea.document_no}</span>
+            <span style={{ color: "var(--qf-border-strong)" }}>·</span>
+            <span>v{fmea.version}</span>
           </span>
-        </>
+        </div>
       }
       actions={
         <>
@@ -1111,32 +1140,43 @@ export default function FMEAEditorPage() {
         </>
       }
     >
-      <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} />
-
-      {/* FMEA Header Info */}
       <div
         style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
           marginBottom: 16,
-          padding: "14px 18px",
+          padding: "10px 14px",
           background: "var(--qf-bg-panel)",
           border: "1px solid var(--qf-border)",
           borderRadius: "var(--qf-radius-lg)",
         }}
       >
-        <Descriptions size="small" column={4}>
-          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{isDFMEA ? t("header.system") : t("header.processItem")}</span>}>
-            {structureNodes.find((n) => n.type === (isDFMEA ? "System" : "ProcessItem"))?.name || "-"}
-          </Descriptions.Item>
-          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{isDFMEA ? t("header.designResponsibility") : t("header.processResponsibility")}</span>}>
-            <Input size="small" placeholder={t("header.responsibilityPlaceholder")} style={{ width: 150 }} disabled={!canEdit('fmea')} />
-          </Descriptions.Item>
-          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{t("header.fmeaNo")}</span>}>
-            <span style={{ fontFamily: "var(--qf-font-mono)" }}>{fmea.document_no}</span>
-          </Descriptions.Item>
-          <Descriptions.Item label={<span style={{ color: "var(--qf-text-secondary)" }}>{t("header.keyDate")}</span>}>
-            <Input size="small" placeholder={t("header.datePlaceholder")} style={{ width: 100 }} disabled={!canEdit('fmea')} />
-          </Descriptions.Item>
-        </Descriptions>
+        <div style={{ flex: 1 }}>
+          <Descriptions size="small" column={4} styles={{ label: { color: "var(--qf-text-secondary)" } }}>
+            <Descriptions.Item label={isDFMEA ? t("header.system") : t("header.processItem")}>
+              {rootStructureNode ? (
+                <Input
+                  size="small"
+                  value={rootStructureNode.name}
+                  disabled={!canEdit('fmea')}
+                  style={{ width: 180 }}
+                  onChange={(e) => updateNode(rootStructureNode.id, "name", e.target.value)}
+                />
+              ) : (
+                "-"
+              )}
+            </Descriptions.Item>
+            <Descriptions.Item label={isDFMEA ? t("header.designResponsibility") : t("header.processResponsibility")}>
+              <Input size="small" placeholder={t("header.responsibilityPlaceholder")} style={{ width: 150 }} disabled={!canEdit('fmea')} />
+            </Descriptions.Item>
+            <Descriptions.Item label={t("header.keyDate")}>
+              <Input size="small" placeholder={t("header.datePlaceholder")} style={{ width: 120 }} disabled={!canEdit('fmea')} />
+            </Descriptions.Item>
+          </Descriptions>
+        </div>
+        <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} compact />
       </div>
 
       <Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }} items={[
