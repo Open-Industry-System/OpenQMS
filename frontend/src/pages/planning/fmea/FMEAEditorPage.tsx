@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams, useLocation } from "react-rout
 import {
   Button, Space, Tag, Typography, Input, Select, Table, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
-  Descriptions, Divider, Modal, Radio,
+  Descriptions, Divider, Modal, Radio, Form, Dropdown,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, SendOutlined,
@@ -21,6 +21,13 @@ import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
 import { buildRows, createRowNodes, type FMEARow } from "../../../utils/fmeaTable";
+import {
+  buildStructureTree,
+  createStructureChild,
+  STRUCTURE_CHILD_MAP,
+  type StructureChildAction,
+  type StructureTreeNode,
+} from "../../../utils/structureTree";
 import StructureTree from "../../../components/dfmea/StructureTree";
 import ParameterDiagram from "../../../components/dfmea/ParameterDiagram";
 import SmartSuggestionDropdown from "../../../components/dfmea/SmartSuggestionDropdown";
@@ -29,7 +36,6 @@ import CreateVersionModal from "../../../components/version/CreateVersionModal";
 import RollbackConfirmModal from "../../../components/version/RollbackConfirmModal";
 import VersionCompareView from "../../../components/version/VersionCompareView";
 import RelatedCAPAList from "../../../components/cross-links/RelatedCAPAList";
-import { Dropdown } from "antd";
 import { GraphCanvas, GraphToolbar, NodeDetailDrawer, GraphLegend } from "../../../components/graph";
 import type { GraphLayout, GraphCanvasRef } from "../../../components/graph";
 import type { GraphNode as APIGraphNode } from "../../../api/graph";
@@ -85,17 +91,6 @@ function getStructureNodes(nodes: GraphNode[], fmeaType: string): GraphNode[] {
   return nodes.filter((n) => ["ProcessItem", "ProcessStep", "ProcessWorkElement"].includes(n.type));
 }
 
-function getFunctionNodes(nodes: GraphNode[], fmeaType: string): GraphNode[] {
-  if (fmeaType === "DFMEA") {
-    return nodes.filter((n) =>
-      ["System", "Subsystem", "Component", "ProcessItemFunction", "ProcessStepFunction", "ProcessWorkElementFunction"].includes(n.type)
-    );
-  }
-  return nodes.filter((n) =>
-    ["ProcessItem", "ProcessStep", "ProcessWorkElement", "ProcessItemFunction", "ProcessStepFunction", "ProcessWorkElementFunction"].includes(n.type)
-  );
-}
-
 export default function FMEAEditorPage() {
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
@@ -111,6 +106,10 @@ export default function FMEAEditorPage() {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [selectedFunctionId, setSelectedFunctionId] = useState<string | null>(null);
+  const [addNodeOpen, setAddNodeOpen] = useState(false);
+  const [addNodeParent, setAddNodeParent] = useState<GraphNode | null>(null);
+  const [addNodeAction, setAddNodeAction] = useState<StructureChildAction | null>(null);
+  const [addNodeForm] = Form.useForm();
 
   const [searchParams] = useSearchParams();
   const highlightNodeId = searchParams.get("node");
@@ -507,6 +506,32 @@ export default function FMEAEditorPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFunctionId, fmea]);
 
+  const openAddNode = useCallback((parent: GraphNode, action: StructureChildAction) => {
+    setAddNodeParent(parent);
+    setAddNodeAction(action);
+    addNodeForm.resetFields();
+    setAddNodeOpen(true);
+  }, [addNodeForm]);
+
+  const submitAddNode = useCallback(() => {
+    addNodeForm.validateFields().then((values: { name: string; specification?: string; requirement?: string }) => {
+      if (!addNodeParent || !addNodeAction) return;
+      const { node, edge } = createStructureChild(
+        addNodeParent,
+        addNodeAction,
+        values.name,
+        values.specification,
+        values.requirement
+      );
+      setNodes((prev) => [...prev, node]);
+      setEdges((prev) => [...prev, edge]);
+      if (addNodeAction.kind === "function") {
+        setSelectedFunctionId(node.id);
+      }
+      setAddNodeOpen(false);
+    }).catch(() => { /* validation message shown by Form */ });
+  }, [addNodeParent, addNodeAction, addNodeForm]);
+
   const deleteRow = useCallback((row: FMEARow) => {
     // Only delete nodes that are NOT shared with other rows
     const otherRows = rows.filter((r) => r.key !== row.key);
@@ -549,7 +574,6 @@ export default function FMEAEditorPage() {
   }, [rows]);
 
   const structureNodes = fmea ? getStructureNodes(nodes, fmea.fmea_type) : [];
-  const functionNodes = fmea ? getFunctionNodes(nodes, fmea.fmea_type) : [];
 
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
   if (!fmea) return <Empty description={t("messages.notFound")} />;
@@ -1205,54 +1229,89 @@ export default function FMEAEditorPage() {
               )
             }
           >
-            {functionNodes.map((node) => {
-              const isStructure = ["ProcessItem", "ProcessStep", "ProcessWorkElement", "System", "Subsystem", "Component"].includes(node.type);
-              const indent = ["ProcessStep", "Subsystem", "ProcessStepFunction"].includes(node.type)
-                ? 12
-                : ["ProcessWorkElement", "Component", "ProcessWorkElementFunction"].includes(node.type)
-                  ? 24
-                  : 0;
-              const hasRows = rowsByFunction[node.id]?.length > 0;
-              const isSelected = selectedFunctionId === node.id;
-              return (
-                <div
-                  key={node.id}
-                  onClick={() => setSelectedFunctionId(node.id)}
-                  style={{
-                    padding: "8px 12px",
-                    marginBottom: 6,
-                    marginLeft: indent,
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
-                    border: isSelected ? "1px solid var(--qf-cyan)" : "1px solid var(--qf-border)",
-                    fontSize: 13,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    transition: "background 0.2s, border-color 0.2s",
-                    color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected) e.currentTarget.style.background = "var(--qf-bg-hover)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)";
-                  }}
-                >
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontWeight: isStructure ? 600 : 400, lineHeight: "1.5", wordBreak: "break-all" }}>{node.name}</div>
-                    {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
+            {(() => {
+              // buildStructureTree is type-agnostic — it inspects node.type and
+              // works for both PFMEA and DFMEA without needing fmea_type.
+              const tree = buildStructureTree(nodes, edges);
+              const renderTreeNode = (tn: StructureTreeNode) => {
+                const node = tn.node;
+                const isStructure = ["ProcessItem", "ProcessStep", "ProcessWorkElement", "System", "Subsystem", "Component"].includes(node.type);
+                const actions = canEdit('fmea') ? (STRUCTURE_CHILD_MAP[node.type] || []) : [];
+                const hasRows = rowsByFunction[node.id]?.length > 0;
+                const isSelected = selectedFunctionId === node.id;
+                return (
+                  <div key={node.id}>
+                    <div
+                      onClick={() => setSelectedFunctionId(node.id)}
+                      style={{
+                        padding: "8px 12px",
+                        marginBottom: 6,
+                        marginLeft: tn.depth * 14,
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
+                        border: isSelected ? "1px solid var(--qf-cyan)" : "1px solid var(--qf-border)",
+                        fontSize: 13,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        transition: "background 0.2s, border-color 0.2s",
+                        color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
+                      }}
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontWeight: isStructure ? 600 : 400, lineHeight: "1.5", wordBreak: "break-all" }}>{node.name}</div>
+                        {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
+                      </div>
+                      <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
+                        {hasRows && (
+                          <Tag style={{ fontSize: 10, lineHeight: "16px", background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
+                            {rowsByFunction[node.id].length}
+                          </Tag>
+                        )}
+                        {actions.length > 0 && (
+                          <Dropdown
+                            trigger={["click"]}
+                            menu={{
+                              items: actions.map((a) => ({
+                                key: a.childType,
+                                label: t(a.labelKey),
+                                // Stop the menu-item click from bubbling to the
+                                // outer row (which would select the parent node
+                                // and race the later setSelectedFunctionId on
+                                // function creation). openAddNode does not itself
+                                // change selection, so selection stays stable
+                                // until submit.
+                                onClick: ({ domEvent }) => {
+                                  domEvent.stopPropagation();
+                                  openAddNode(node, a);
+                                },
+                              })),
+                            }}
+                          >
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<PlusOutlined />}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </Dropdown>
+                        )}
+                      </Space>
+                    </div>
+                    {tn.children.map((c) => renderTreeNode(c))}
                   </div>
-                  {hasRows && (
-                    <Tag style={{ fontSize: 10, marginLeft: 8, lineHeight: "16px", flexShrink: 0, background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
-                      {rowsByFunction[node.id].length}
-                    </Tag>
-                  )}
-                </div>
+                );
+              };
+              return (
+                <>
+                  {tree.map((tn) => renderTreeNode(tn))}
+                  {tree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                </>
               );
-            })}
-            {functionNodes.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+            })()}
           </DataCard>
         </Col>
 
@@ -1564,6 +1623,29 @@ export default function FMEAEditorPage() {
         onRefresh={handleConflictRefresh}
         onForceSave={handleConflictForceSave}
       />
+      <Modal
+        title={t("editor.addNodeTitle")}
+        open={addNodeOpen}
+        onOk={submitAddNode}
+        onCancel={() => setAddNodeOpen(false)}
+        destroyOnHidden
+      >
+        <Form form={addNodeForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label={t("editor.nodeName")}
+            rules={[{ required: true, message: t("editor.nodeNamePlaceholder") }]}
+          >
+            <Input placeholder={t("editor.nodeNamePlaceholder")} />
+          </Form.Item>
+          <Form.Item name="specification" label={t("editor.specification")}>
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="requirement" label={t("editor.requirement")}>
+            <Input.TextArea rows={2} />
+          </Form.Item>
+        </Form>
+      </Modal>
       <LessonsLearnedModal
         open={lessonsModalOpen}
         loading={lessonsLoading}
