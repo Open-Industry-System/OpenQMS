@@ -80,7 +80,7 @@ grep 全前端确认：当前没有任何代码实际生成 `?risk=high` 或 `?p
 ### 3. 前端 API client
 
 文件：`frontend/src/api/fmea.ts`，`listFMEAs` 参数类型增加：
-- `fmea_type?: string`
+- `fmea_type?: "PFMEA" | "DFMEA"`（与后端 `Literal["PFMEA","DFMEA"]` 契约一致，不放宽为 `string`）
 - `search?: string`
 
 ### 4. 前端页面
@@ -169,7 +169,7 @@ grep 全前端确认：当前没有任何代码实际生成 `?risk=high` 或 `?p
   - `search` 含 `%`/`_` 通配符时按字面匹配（转义生效），不被当通配符
   - `high_rpn=True` + `fmea_type` 组合：先按 `fmea_type` SQL 过滤，再 Python 扫描 RPN，结果只含该类型的高 RPN 文档（验证"先 filter 再扫"，可用一个高 RPN 的 PFMEA + 一个高 RPN 的 DFMEA，传 `fmea_type="PFMEA"` 应只返回 PFMEA 那条）
   - `high_rpn=True` + `search` 组合：同理，先 SQL 过滤再扫
-- 运行后端测试：`cd backend && pytest tests/test_fmea_list_filter.py -x`
+- 运行后端测试：`cd backend && SECRET_KEY=test-secret-key pytest tests/test_fmea_list_filter.py -x`
 - 前端类型检查/构建：`cd frontend && npm run build`（tsc --noEmit + vite build）通过
 - 前端单测：新增 `frontend/src/pages/planning/fmea/FMEAListPage.test.tsx`（Vitest + Testing Library，仓库已配 `vitest` 命令且有多处 `*.test.tsx` 先例）。至少覆盖：
   - 从 `?risk=high` 进入 → 高风险 Switch 显示开启、请求带 `high_rpn`
