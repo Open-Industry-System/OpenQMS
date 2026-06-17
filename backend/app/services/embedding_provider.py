@@ -20,13 +20,15 @@ class EmbeddingProvider(Protocol):
 
 
 class OpenAIEmbeddingProvider:
-    def __init__(self, api_key: str, model: str = "text-embedding-3-small", base_url: str = ""):
+    def __init__(self, api_key: str, model: str = "text-embedding-3-small", base_url: str = "", dimensions: int = 1536):
         from openai import AsyncOpenAI
         # base_url lets OpenAI-compatible endpoints (an Ollama OpenAI shim, a
         # proxy, etc.) override the default api.openai.com target.
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
         self._model = model
-        self._dimensions = 1536
+        # dimensions is a reported property (used by the vector/storage layer);
+        # it must match the model's actual output dimensionality, not be hardcoded.
+        self._dimensions = dimensions
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         response = await self._client.embeddings.create(
@@ -106,7 +108,10 @@ def create_embedding_provider(config=None) -> EmbeddingProvider | None:
             getattr(cfg, "EMBEDDING_BASE_URL", "") or getattr(cfg, "embedding_base_url", "")
             or getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
         )
-        return OpenAIEmbeddingProvider(api_key=api_key, model=model, base_url=base_url)
+        dimensions = (
+            getattr(cfg, "EMBEDDING_DIMENSIONS", 0) or getattr(cfg, "embedding_dimensions", 0) or 1536
+        )
+        return OpenAIEmbeddingProvider(api_key=api_key, model=model, base_url=base_url, dimensions=dimensions)
 
     if provider_name == "ollama":
         model = getattr(cfg, "EMBEDDING_MODEL", "") or getattr(cfg, "embedding_model", "") or "nomic-embed-text"

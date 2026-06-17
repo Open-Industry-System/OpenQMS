@@ -160,3 +160,37 @@ class TestEmbeddingBaseUrlAndApiKey:
         provider = create_embedding_provider(cfg)
         assert provider is not None
         assert "openai.com" in str(provider._client.base_url)
+
+    def test_openai_dimensions_read_from_config(self):
+        """OpenAIEmbeddingProvider 的 dimensions 应取自 EMBEDDING_DIMENSIONS，而非硬编码 1536。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="openai",
+            EMBEDDING_API_KEY="sk-test",
+            EMBEDDING_MODEL="text-embedding-3-small",
+            EMBEDDING_BASE_URL="",
+            EMBEDDING_DIMENSIONS=768,
+            LLM_PROVIDER="",
+            LLM_API_KEY="",
+            LLM_BASE_URL="",
+        )
+        provider = create_embedding_provider(cfg)
+        assert provider is not None
+        assert provider.dimensions == 768, (
+            f"expected dimensions=768 from config, got {provider.dimensions}"
+        )
+
+    def test_openai_dimensions_defaults_to_1536(self):
+        """未配置 EMBEDDING_DIMENSIONS 时默认 1536。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="openai",
+            EMBEDDING_API_KEY="sk-test",
+            EMBEDDING_MODEL="text-embedding-3-small",
+            EMBEDDING_BASE_URL="",
+            EMBEDDING_DIMENSIONS=0,
+            LLM_PROVIDER="",
+            LLM_API_KEY="",
+            LLM_BASE_URL="",
+        )
+        provider = create_embedding_provider(cfg)
+        assert provider is not None
+        assert provider.dimensions == 1536
