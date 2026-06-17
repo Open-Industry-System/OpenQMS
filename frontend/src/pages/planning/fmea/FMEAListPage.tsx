@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Table, Button, Tag, Form, Input, Select, Modal, App } from "antd";
+import { Table, Button, Tag, Form, Input, Select, Switch, Space, Modal, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { listFMEAs, createFMEA } from "../../../api/fmea";
@@ -37,18 +37,40 @@ export default function FMEAListPage() {
   const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
   const productLine = useProductLineStore((s) => s.selected);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // 本地搜索框值：键入即时显示，仅 onSearch 时写 URL，避免输入滞后
+  const [searchInput, setSearchInput] = useState("");
+
+  // 统一筛选读取来源（受控控件初始值 + 请求组装共用），含旧参数回退
+  const filterStatus = searchParams.get("status")
+    ?? (searchParams.get("pending_approval") === "true" ? "in_review" : null);
+  // 运行时 normalize：只有 PFMEA/DFMEA 才传，避免 ?type=foo 发到后端触发 422
+  const rawType = searchParams.get("type");
+  const filterType = rawType === "PFMEA" || rawType === "DFMEA" ? rawType : null;
+  const filterHighRpn = searchParams.get("high_rpn") === "true"
+    || searchParams.get("risk") === "high";
+  const filterSearch = searchParams.get("search");
+
+  // 外部 URL 变化（初始化/后退/重置）时同步本地搜索框。
+  // 此 effect 只依赖 filterSearch、只更新本地 searchInput，绝不触发请求；
+  // 请求只由下面的 [productLine, searchParams] effect 触发。
+  // 勿把搜索输入变化接入请求——输入只改 searchInput，请求经 onSearch 写 URL 后由 searchParams 变化驱动。
+  useEffect(() => {
+    setSearchInput(filterSearch ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterSearch]);
 
   const fetchData = (p: number = page) => {
     setLoading(true);
-    const highRpn = searchParams.get("risk") === "high";
-    const pendingApproval = searchParams.get("pending_approval") === "true";
     listFMEAs({
       page: p,
       page_size: 20,
       product_line: productLine || undefined,
-      high_rpn: highRpn || undefined,
-      status: pendingApproval ? "in_review" : undefined,
+      status: filterStatus || undefined,
+      fmea_type: filterType || undefined,
+      high_rpn: filterHighRpn || undefined,
+      search: filterSearch || undefined,
     })
       .then((res) => {
         setData(res.items);
@@ -57,7 +79,40 @@ export default function FMEAListPage() {
       .finally(() => setLoading(false));
   };
 
+  // 写回 URL：空值/关闭态一律剔除参数（含旧参数），保持 URL 简洁
+  const updateFilters = (next: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams);
+    // 清掉旧兼容参数，统一用新名
+    params.delete("risk");
+    params.delete("pending_approval");
+    for (const [key, val] of Object.entries(next)) {
+      if (val) params.set(key, val);
+      else params.delete(key);
+    }
+    setSearchParams(params, { replace: true });
+    setPage(1);
+  };
+
+  const onStatusChange = (v: string | null) => updateFilters({ status: v ?? null });
+  const onTypeChange = (v: string | null) => updateFilters({ type: v ?? null });
+  const onHighRpnChange = (checked: boolean) => updateFilters({ high_rpn: checked ? "true" : null });
+  const onSearch = (value: string) => updateFilters({ search: value.trim() || null });
+
+  const onReset = () => {
+    const params = new URLSearchParams(searchParams);
+    params.delete("status");
+    params.delete("type");
+    params.delete("search");
+    params.delete("high_rpn");
+    params.delete("risk");
+    params.delete("pending_approval");
+    setSearchParams(params, { replace: true });
+    setSearchInput("");
+    setPage(1);
+  };
+
   useEffect(() => {
+    setPage(1);
     fetchData(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine, searchParams]);
@@ -148,6 +203,50 @@ export default function FMEAListPage() {
 
   return (
     <PageShell title={t("list.title")} subtitle={t("list.subtitle")} actions={actions}>
+      <Space style={{ marginBottom: 16 }} wrap>
+        <Select
+          style={{ width: 140 }}
+          allowClear
+          placeholder={t("filter.status")}
+          value={filterStatus || undefined}
+          onChange={onStatusChange}
+          options={[
+            { value: "draft", label: t("status.draft") },
+            { value: "in_review", label: t("status.in_review") },
+            { value: "approved", label: t("status.approved") },
+            { value: "rework", label: t("status.rework") },
+            { value: "archived", label: t("status.archived") },
+          ]}
+        />
+        <Select
+          style={{ width: 140 }}
+          allowClear
+          placeholder={t("filter.type")}
+          value={filterType || undefined}
+          onChange={onTypeChange}
+          options={[
+            { value: "PFMEA", label: "PFMEA" },
+            { value: "DFMEA", label: "DFMEA" },
+          ]}
+        />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <Switch
+            checked={filterHighRpn}
+            onChange={onHighRpnChange}
+            aria-label={t("filter.highRisk")}
+          />
+          {t("filter.highRisk")}
+        </span>
+        <Input.Search
+          style={{ width: 240 }}
+          allowClear
+          placeholder={t("filter.searchPlaceholder")}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onSearch={onSearch}
+        />
+        <Button onClick={onReset}>{t("filter.reset")}</Button>
+      </Space>
       <Table
         className="qf-table"
         columns={columns}
