@@ -103,10 +103,15 @@ grep 全前端确认：当前没有任何代码实际生成 `?risk=high` 或 `?p
   - `high_rpn`：`searchParams.get("high_rpn") === "true"`，若无则回退旧参数 `risk === "high"`
   - `fmea_type`：`searchParams.get("type")`
   - `search`：`searchParams.get("search")`
-- 受控控件（Select 的 `value`、Switch 的 `checked`、Input 的 `value`）初始值与变更值都从上述读取函数取，保证旧 URL 进入时控件也正确显示筛选态
+- 受控控件（Select 的 `value`、Switch 的 `checked`）初始值与变更值都从上述读取函数取，保证旧 URL 进入时控件也正确显示筛选态
+- **关键词搜索框单独用本地 state**（`searchInput`），不直接由 URL 值控制，避免输入滞后：
+  - 初始化与外部 URL 变化（如浏览器后退、重置）时，`useEffect` 把 `searchInput` 同步为 URL 的 `search` 值
+  - 用户键入时只更新 `searchInput`（即时显示），**不**写 URL、**不**触发请求
+  - 仅 `onSearch`（回车/点击搜索按钮）时，把 `searchInput` 写入 URL（`setSearchParams`）+ `setPage(1)`，由 `searchParams` 变化的 `useEffect` 触发请求
+  - 这样输入流畅、URL 仍是请求的单一事实来源，无防抖、无滞后
 - 任一筛选变化 → `setSearchParams` 写回 URL（参数名：`status`、`type`、`search`、`high_rpn`；**空值/关闭态一律剔除该参数，不写空串也不写 `false`**，保持 URL 简洁）+ **同时 `setPage(1)`**，再触发请求
 - **兼容旧参数**：仅在读取时一次性映射，写回时一律用新参数名（`risk` / `pending_approval` 不再写回）
-- **重置按钮**：清空 `status`/`type`/`search`/`high_rpn` 全部新参数，**并同时剔除残留的旧参数 `risk` / `pending_approval`**（防止从 `?risk=high` 进入后点重置仍残留），`setPage(1)` 并触发请求
+- **重置按钮**：清空 `status`/`type`/`search`/`high_rpn` 全部新参数，**并同时剔除残留的旧参数 `risk` / `pending_approval`**（防止从 `?risk=high` 进入后点重置仍残留），清空本地 `searchInput`，`setPage(1)` 并触发请求（URL 变化经 `useEffect` 触发）
 - 保留现有 `product_line` 由全局 store 注入的逻辑
 
 > 注意分页状态：现有 `useEffect` 只调用 `fetchData(1)` 不调用 `setPage(1)`，导致分页器 `current: page` 停在旧页、与实际第一页数据不一致。筛选变更时必须同时 `setPage(1)`。分页本身**不纳入 URL**（保持简单，仅筛选维度进 URL）。
@@ -155,7 +160,16 @@ grep 全前端确认：当前没有任何代码实际生成 `?risk=high` 或 `?p
 
 ## 验证
 
-- 后端：`cd backend && SECRET_KEY=test-secret-key pytest tests/test_fmea_state.py tests/test_spc_fmea_match.py -x`（仓库无根 `tests/`，后端测试在 `backend/tests/`；导入 `app.main` 需 `SECRET_KEY`，参考其他测试文件 `os.environ.setdefault` 写法）通过
+- 后端现有测试：`cd backend && SECRET_KEY=test-secret-key pytest tests/test_fmea_state.py tests/test_spc_fmea_match.py -x`（仓库无根 `tests/`，后端测试在 `backend/tests/`；导入 `app.main` 需 `SECRET_KEY`，`conftest.py` 已 `os.environ.setdefault`，直接 `pytest` 亦可）通过——回归保护
+- 后端新行为测试：新增 `backend/tests/test_fmea_list_filter.py`（标 `@pytest.mark.requires_db`，复用 `conftest.py` 的 `db`/`default_factory`/`admin_user` fixture，`factory_id=default_factory.id`）。直接调用 `list_fmeas(db, ...)`，每个用例插入若干 `FMEADocument`（不同 `fmea_type`/`document_no`/`title`/`graph_data`）后断言返回。至少覆盖：
+  - `fmea_type="PFMEA"` 精确过滤，只返回 PFMEA、排除 DFMEA
+  - `search` 按文档号匹配（大小写不敏感，如搜 `pfmea` 命中 `PFMEA-2026-001`）
+  - `search` 按标题匹配
+  - `search="   "`（纯空白）跳过 where，不缩小结果集（与无 search 一致）
+  - `search` 含 `%`/`_` 通配符时按字面匹配（转义生效），不被当通配符
+  - `high_rpn=True` + `fmea_type` 组合：先按 `fmea_type` SQL 过滤，再 Python 扫描 RPN，结果只含该类型的高 RPN 文档（验证"先 filter 再扫"，可用一个高 RPN 的 PFMEA + 一个高 RPN 的 DFMEA，传 `fmea_type="PFMEA"` 应只返回 PFMEA 那条）
+  - `high_rpn=True` + `search` 组合：同理，先 SQL 过滤再扫
+- 运行后端测试：`cd backend && pytest tests/test_fmea_list_filter.py -x`
 - 前端类型检查/构建：`cd frontend && npm run build`（tsc --noEmit + vite build）通过
 - 前端单测：新增 `frontend/src/pages/planning/fmea/FMEAListPage.test.tsx`（Vitest + Testing Library，仓库已配 `vitest` 命令且有多处 `*.test.tsx` 先例）。至少覆盖：
   - 从 `?risk=high` 进入 → 高风险 Switch 显示开启、请求带 `high_rpn`
