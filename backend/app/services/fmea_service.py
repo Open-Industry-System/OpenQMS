@@ -1,7 +1,8 @@
+import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,8 @@ async def list_fmeas(
     high_rpn: bool = False,
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
+    fmea_type: str | None = None,
+    search: str | None = None,
 ) -> tuple[list[FMEADocument], int]:
     query = select(FMEADocument)
     count_query = select(func.count(FMEADocument.fmea_id))
@@ -42,6 +45,19 @@ async def list_fmeas(
     if factory_id is not None:
         query = query.where(FMEADocument.factory_id == factory_id)
         count_query = count_query.where(FMEADocument.factory_id == factory_id)
+
+    if fmea_type:
+        query = query.where(FMEADocument.fmea_type == fmea_type)
+        count_query = count_query.where(FMEADocument.fmea_type == fmea_type)
+
+    if search and search.strip():
+        safe = re.sub(r"([%_\\])", r"\\\1", search.strip())
+        like_clause = or_(
+            FMEADocument.document_no.ilike(f"%{safe}%", escape="\\"),
+            FMEADocument.title.ilike(f"%{safe}%", escape="\\"),
+        )
+        query = query.where(like_clause)
+        count_query = count_query.where(like_clause)
 
     if high_rpn:
         from app.utils.fmea_graph import build_rpn_rows
