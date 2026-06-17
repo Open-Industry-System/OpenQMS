@@ -84,13 +84,20 @@ describe("STRUCTURE_CHILD_MAP", () => {
     });
   });
 
-  it("DFMEA System mirrors ProcessItem via shared action set", () => {
-    // System/Subsystem/Component share action definitions with their PFMEA peers
-    expect(STRUCTURE_CHILD_MAP["System"].map((a) => a.childType)).toEqual(
-      STRUCTURE_CHILD_MAP["ProcessItem"].map((a) => a.childType)
-    );
+  it("DFMEA layers mirror PFMEA layers semantically (same kind/edgeType pattern)", () => {
+    // System adds Subsystem (structure) + ProcessItemFunction (function)
     expect(STRUCTURE_CHILD_MAP["System"].find((a) => a.kind === "structure")?.childType).toBe("Subsystem");
+    expect(STRUCTURE_CHILD_MAP["System"].find((a) => a.kind === "structure")?.edgeType).toBe("HAS_PROCESS_STEP");
+    expect(STRUCTURE_CHILD_MAP["System"].find((a) => a.kind === "function")?.childType).toBe("ProcessItemFunction");
+    expect(STRUCTURE_CHILD_MAP["System"].find((a) => a.kind === "function")?.edgeType).toBe("HAS_FUNCTION");
+    // Subsystem adds Component (structure) + ProcessStepFunction (function)
     expect(STRUCTURE_CHILD_MAP["Subsystem"].find((a) => a.kind === "structure")?.childType).toBe("Component");
+    expect(STRUCTURE_CHILD_MAP["Subsystem"].find((a) => a.kind === "structure")?.edgeType).toBe("HAS_WORK_ELEMENT");
+    expect(STRUCTURE_CHILD_MAP["Subsystem"].find((a) => a.kind === "function")?.childType).toBe("ProcessStepFunction");
+    // Component (leaf) adds only a function
+    expect(STRUCTURE_CHILD_MAP["Component"].find((a) => a.kind === "function")?.childType).toBe("ProcessWorkElementFunction");
+    // ProcessItem adds ProcessStep (NOT Subsystem) — childType differs from System
+    expect(STRUCTURE_CHILD_MAP["ProcessItem"].find((a) => a.kind === "structure")?.childType).toBe("ProcessStep");
   });
 
   it("ProcessWorkElement can only add a function (leaf structure)", () => {
@@ -666,8 +673,8 @@ Replace the block from `{functionNodes.map((node) => {` through its closing `})}
                                 // function creation). openAddNode does not itself
                                 // change selection, so selection stays stable
                                 // until submit.
-                                onClick: (info: { domEvent: MouseEvent }) => {
-                                  info.domEvent.stopPropagation();
+                                onClick: ({ domEvent }) => {
+                                  domEvent.stopPropagation();
                                   openAddNode(node, a);
                                 },
                               })),
