@@ -274,7 +274,18 @@ async def recommend(
     has_kg = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
     effective_scope = "current_product_line" if (not has_kg and requested_scope == "global") else requested_scope
 
-    if len(request.context.get("function_description", request.context.get("failure_mode", ""))) < 2:
+    # Early-return when there is no usable anchor text. The anchor depends on
+    # the trigger type: failure_mode is derived from function_description, while
+    # effect/cause/measure/optimization are derived from failure_mode. input_text
+    # (what the user typed in the cell) is a last-resort fallback.
+    # NOTE: dict.get("k", default) returns the stored value even when it is "" —
+    # so we chain with `or` instead, otherwise an empty function_description key
+    # would gate effect/cause triggers even when failure_mode is filled.
+    if request.trigger_type == "failure_mode":
+        anchor = request.context.get("function_description") or request.context.get("input_text") or ""
+    else:
+        anchor = request.context.get("failure_mode") or request.context.get("input_text") or ""
+    if len(anchor) < 2:
         return RecommendResponse(
             suggestions=[], source="rule", cached=False,
             llm_available=False, graph_match_count=0,

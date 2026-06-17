@@ -237,7 +237,7 @@ class RuleEngine:
 
         return RuleResult(
             suggestions=[RuleSuggestion(name=h, confidence=0.6, explanation=f"AP={ap}") for h in hints],
-            quality="specific" if ap in ("H", "M") else "generic",
+            quality="generic",
         )
 
 
@@ -623,9 +623,15 @@ class RecommendationService:
     ) -> bool:
         """判断是否需要调用 LLM 补充建议。
 
-        条件：LLM 可用 + 没有高置信建议 + (建议数量不足 OR rule 结果是 generic)
+        调用 LLM 当：LLM 可用 且 (规则结果是 generic 即未针对具体失效模式，
+        或 既无高置信建议且数量不足)。
+        rule_quality 是"是否针对当前失效模式"的真实信号——measure/optimization
+        的规则结果常以 AP 分级给出通用模板(confidence 0.6 但质量 generic)，不应
+        因此阻止 LLM 给出针对性建议。
         """
-        return llm_available and not has_specific and (suggestion_count < 3 or rule_quality == "generic")
+        return llm_available and (
+            rule_quality == "generic" or (not has_specific and suggestion_count < 3)
+        )
 
     # -- Helpers --
 

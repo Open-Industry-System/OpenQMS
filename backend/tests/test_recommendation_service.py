@@ -145,10 +145,21 @@ def test_need_llm_no_llm_available():
 
 
 def test_need_llm_has_specific_suggestions():
-    """已有高置信建议时，不调用 LLM。"""
+    """已有针对性(specific)高置信建议时，不调用 LLM。"""
     assert RecommendationService._need_llm(
         llm_available=True,
         has_specific=True,
         suggestion_count=1,
-        rule_quality="generic",
+        rule_quality="specific",
     ) is False
+
+
+def test_need_llm_generic_quality_calls_llm_despite_high_confidence():
+    """规则质量为 generic（未针对具体失效模式，如 measure/optimization 的 AP 分级
+    通用模板）时，即便 confidence≥0.6(has_specific) 也应调用 LLM 给出针对性建议。"""
+    assert RecommendationService._need_llm(
+        llm_available=True,
+        has_specific=True,
+        suggestion_count=7,
+        rule_quality="generic",
+    ) is True
