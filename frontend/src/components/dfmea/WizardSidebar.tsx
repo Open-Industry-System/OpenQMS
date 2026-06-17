@@ -1,17 +1,19 @@
-import { Steps, Tree, Empty, Typography } from 'antd';
+import { Steps, Tree, Empty } from 'antd';
 import { WarningOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import type { ReactNode, CSSProperties } from 'react';
 import type { GraphNode, GraphEdge } from '../../types';
 
 const STRUCTURE_TYPES = ['System', 'Subsystem', 'Component', 'Interface', 'DesignParameter'];
 const VALID_EDGE_TYPES = new Set(['HAS_PROCESS_STEP', 'HAS_WORK_ELEMENT', 'HAS_PARAMETER']);
 
+// 结构节点类型颜色 — 使用设计系统 token，与工业暗色主题一致
 const TYPE_COLORS: Record<string, string> = {
-  System: '#f5222d',
-  Subsystem: '#fa8c16',
-  Component: '#52c41a',
-  Interface: '#722ed1',
-  DesignParameter: '#1890ff',
+  System: 'var(--qf-red)',
+  Subsystem: 'var(--qf-amber)',
+  Component: 'var(--qf-green)',
+  Interface: 'var(--qf-purple)',
+  DesignParameter: 'var(--qf-blue)',
 };
 
 interface WizardSidebarProps {
@@ -22,6 +24,33 @@ interface WizardSidebarProps {
   structureNodes: GraphNode[];
   edges: GraphEdge[];
   onNodeSelect?: (nodeId: string) => void;
+}
+
+/** 区块标题 — 复用设计系统的青色强调条（.qf-card__title::before 样式） */
+function SectionHeader({ children }: { children: ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      fontFamily: 'var(--qf-font-display)',
+      fontSize: 13,
+      fontWeight: 600,
+      color: 'var(--qf-text-primary)',
+      marginBottom: 10,
+      letterSpacing: '0.02em',
+    }}>
+      <span style={{
+        width: 3,
+        height: 14,
+        borderRadius: 2,
+        background: 'var(--qf-cyan)',
+        boxShadow: '0 0 8px var(--qf-cyan-glow)',
+        flexShrink: 0,
+      }} />
+      {children}
+    </div>
+  );
 }
 
 export default function WizardSidebar({
@@ -46,12 +75,12 @@ export default function WizardSidebar({
   ];
 
   const showStructure = currentStep >= 1;
-
   const treeData = buildTreeData(structureNodes, edges, t);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--qf-border)' }}>
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
+      {/* 结构树 */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px', minHeight: 0 }}>
         {currentStep === 0 ? (
           <Empty
             description={t('wizard.sidebar.structureHint', { defaultValue: '结构树将在第二步后出现' })}
@@ -59,9 +88,7 @@ export default function WizardSidebar({
           />
         ) : treeData && treeData.length > 0 ? (
           <>
-            <Typography.Text strong style={{ fontSize: 13, marginBottom: 8, display: 'block' }}>
-              {t('wizard.sidebar.structureTree', { defaultValue: '结构树' })}
-            </Typography.Text>
+            <SectionHeader>{t('wizard.sidebar.structureTree', { defaultValue: '结构树' })}</SectionHeader>
             <Tree
               treeData={treeData}
               defaultExpandAll
@@ -79,7 +106,9 @@ export default function WizardSidebar({
         )}
       </div>
 
-      <div style={{ borderTop: '1px solid var(--qf-border)', padding: '8px 12px' }}>
+      {/* 步骤导航 */}
+      <div style={{ borderTop: '1px solid var(--qf-divider)', padding: '12px 16px', flexShrink: 0 }}>
+        <SectionHeader>{t('wizard.sidebar.steps', { defaultValue: '步骤' })}</SectionHeader>
         <Steps
           direction="vertical"
           size="small"
@@ -93,7 +122,7 @@ export default function WizardSidebar({
                 : i === currentStep
                   ? 'process'
                   : 'wait',
-            icon: warnings.includes(i) ? <WarningOutlined style={{ color: '#faad14' }} /> : undefined,
+            icon: warnings.includes(i) ? <WarningOutlined style={{ color: 'var(--qf-amber)' }} /> : undefined,
           }))}
           onChange={(step) => {
             if (step < currentStep || completedSteps.has(step)) {
@@ -124,7 +153,7 @@ function buildTreeData(nodes: GraphNode[], edges: GraphEdge[], t: (key: string) 
     return {
       key: node.id,
       title: (
-        <span style={{ color: TYPE_COLORS[node.type] || '#333' }}>{node.name}</span>
+        <span style={{ color: TYPE_COLORS[node.type] || 'var(--qf-text-primary)' }}>{node.name}</span>
       ),
       children,
     };

@@ -560,7 +560,7 @@ export default function DFMEAWizardPage() {
       {/* Body */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Left sidebar */}
-        <div style={{ width: 280, flexShrink: 0, overflow: 'auto', background: '#fafafa' }}>
+        <div style={{ width: 280, flexShrink: 0, overflow: 'auto', background: 'var(--qf-bg-panel)' }}>
           <WizardSidebar
             currentStep={currentStep}
             onStepClick={goToStep}

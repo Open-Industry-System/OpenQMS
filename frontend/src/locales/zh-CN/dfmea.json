@@ -157,6 +157,12 @@
       "labelExample": "示例",
       "expand": "展开",
       "collapse": "收起"
+    },
+    "sidebar": {
+      "structureTree": "结构树",
+      "structureHint": "结构树将在第二步后出现",
+      "noStructure": "暂无结构节点",
+      "steps": "步骤"
     }
   },
   "inlineRecommendations": {

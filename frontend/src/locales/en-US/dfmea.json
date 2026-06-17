@@ -157,6 +157,12 @@
       "labelExample": "Example",
       "expand": "Expand",
       "collapse": "Collapse"
+    },
+    "sidebar": {
+      "structureTree": "Structure Tree",
+      "structureHint": "Structure tree appears after step 2",
+      "noStructure": "No structure nodes yet",
+      "steps": "Steps"
     }
   },
   "inlineRecommendations": {
