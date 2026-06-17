@@ -282,7 +282,8 @@ async def recommend(
         )
 
     llm = getattr(fastapi_request.app.state, "llm_provider", None)
-    service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo)
+    llm_timeout = getattr(fastapi_request.app.state, "llm_timeout", None)
+    service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo, llm_timeout=llm_timeout)
     result = await service.recommend(fmea_id, request, scope.user)
     await db.commit()
     return result

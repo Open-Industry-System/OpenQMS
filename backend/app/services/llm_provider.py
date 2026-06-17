@@ -10,6 +10,23 @@ logger = logging.getLogger(__name__)
 MAX_RESPONSE_BYTES = 10_240  # 10KB
 
 
+def _extract_json(text: str) -> dict:
+    """Parse JSON from an LLM response, tolerating ```json code fences.
+
+    Used when a model returns JSON without response_format enforcement (the
+    prompt already requests JSON); some models wrap output in fences.
+    """
+    text = (text or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return json.loads(text)
+
+
 class LLMProvider(Protocol):
     async def complete(self, prompt: str, response_schema: dict) -> dict: ...
 
@@ -41,15 +58,30 @@ class OpenAIProvider:
         self.model = model
 
     async def complete(self, prompt: str, response_schema: dict) -> dict:
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        text = response.choices[0].message.content
+        messages = [{"role": "user", "content": prompt}]
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                response_format={"type": "json_object"},
+            )
+        except Exception as e:
+            # Some OpenAI-compatible models/gateways (e.g. Volcengine Ark Coding
+            # Plan) reject response_format=json_object with a 400 like
+            # "json_object is not supported by this model". The prompt already
+            # requests JSON, so retry without the parameter.
+            if "json_object" in str(e) or "response_format" in str(e):
+                logger.info("LLM rejected response_format=json_object, retrying without it: %s", e)
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                )
+            else:
+                raise
+        text = response.choices[0].message.content or ""
         if len(text.encode()) > MAX_RESPONSE_BYTES:
             raise ValueError("LLM response too large")
-        return json.loads(text)
+        return _extract_json(text)
 
 
 class LocalProvider:

@@ -151,6 +151,25 @@ async def _rebuild_providers(db: AsyncSession, app_state: Any) -> None:
     config = await get_ai_config(db)
     snapshot = _build_snapshot(config.model_dump())
 
+    # get_ai_config() masks API keys ("********") before returning, but the
+    # providers need the *real* key. Re-read the raw stored values and put them
+    # back on the snapshot — otherwise every rebuilt provider authenticates with
+    # the literal string "********" and the gateway returns 401
+    # ("The API key format is incorrect"), silently forcing recommend() back to
+    # the rule engine. Env defaults still win when the DB value is empty.
+    result = await db.execute(
+        select(SystemSetting).where(
+            SystemSetting.key.in_(("llm_api_key", "embedding_api_key"))
+        )
+    )
+    raw_keys = {row.key: row.value for row in result.scalars().all()}
+    for key, attr in (("llm_api_key", "LLM_API_KEY"), ("embedding_api_key", "EMBEDDING_API_KEY")):
+        raw = raw_keys.get(key)
+        if raw:  # non-empty DB value overrides the masked placeholder
+            setattr(snapshot, attr, raw)
+        else:
+            setattr(snapshot, attr, _env_default(key) or "")
+
     # Close existing providers gracefully.
     old_llm = getattr(app_state, "llm_provider", None)
     old_emb = getattr(app_state, "embedding_provider", None)
@@ -180,6 +199,11 @@ async def _rebuild_providers(db: AsyncSession, app_state: Any) -> None:
     except Exception as e:
         logger.warning("Failed to recreate embedding provider: %s", e)
         app_state.embedding_provider = None
+
+    # Keep the persisted llm_timeout on app.state so the recommend path uses the
+    # admin-configured value instead of the env default (settings.LLM_TIMEOUT,
+    # which is frozen at startup and ignores /admin/ai-config changes).
+    app_state.llm_timeout = int(getattr(snapshot, "LLM_TIMEOUT", 5) or 5)
 
 
 @dataclass

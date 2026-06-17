@@ -246,34 +246,106 @@ class RuleEngine:
 # ---------------------------------------------------------------------------
 
 PROMPT_TEMPLATES = {
-    "failure_mode": """你是一位资深质量工程师，精通 AIAG-VDA FMEA 方法论。
+    "failure_mode": """你是资深质量工程师，精通 AIAG-VDA FMEA 方法论。
 
-当前上下文：
-- FMEA 类型: {fmea_type}
+【任务】为下方功能/工艺推荐 3-5 个「失效模式(FM)」。
+【FM 定义】功能未能按预期实现的方式。用技术术语描述，类型包括：功能丧失、功能退化、功能间歇、部分功能丧失、非预期功能、功能超范围、功能延迟。
+【方向约束】FM 描述的是"功能怎么坏了"，不是"后果(效应)"也不是"为什么坏(原因)"。
+
+【当前上下文】
+- FMEA 类型: {fmea_type}（DFMEA=设计, PFMEA=过程）
 - 产品线: {product_line}
-- 工艺步骤: {process_step}
+- 工艺步骤/结构要素: {process_step}
 - 功能描述: {function_description}
 
-历史相似 FMEA 中的失败模式：
+【历史相似案例】
 {historical_patterns}
 
-请根据以上信息，推荐 3-5 个可能的失败模式。
-要求：
-1. 具体、可操作，不要泛泛而谈
-2. 与当前工艺/功能直接相关
-3. 参考历史数据中的真实案例
+【示例（功能=采集单体电压）】
+失效模式: 采集精度不足 / 采集间歇中断 / 采集值漂移 / 无法采集
 
-返回 JSON 格式：
-{{"suggestions": [{{"name": "...", "confidence": 0.0-1.0, "explanation": "..."}}]}}
+【要求】具体、可操作、与当前功能直接相关，参考历史案例但不要照抄不相关的。
+返回 JSON：
+{{"suggestions": [{{"name": "失效模式描述", "confidence": 0.0-1.0, "explanation": "为何这是合理的失效模式"}}]}}
 """,
-    "failure_effect": """你是一位资深质量工程师。当前失效模式：{failure_mode}。
-请推荐 3-5 个可能的失效效应。返回 JSON：{{"suggestions": [{{"name": "...", "confidence": 0.0-1.0, "explanation": "..."}}]}}""",
-    "failure_cause": """你是一位资深质量工程师。当前失效模式：{failure_mode}。
-请推荐 3-5 个可能的失效原因。返回 JSON：{{"suggestions": [{{"name": "...", "confidence": 0.0-1.0, "explanation": "..."}}]}}""",
-    "measure": """你是一位资深质量工程师。当前失效模式：{failure_mode}，AP={ap}。
-请推荐预防措施和检测措施。返回 JSON：{{"suggestions": [{{"name": "...", "confidence": 0.0-1.0, "explanation": "..."}}]}}""",
-    "optimization": """你是一位资深质量工程师。失效模式：{failure_mode}，S={severity} O={occurrence} D={detection}。
-请推荐优化行动。返回 JSON：{{"suggestions": [{{"name": "...", "confidence": 0.0-1.0, "explanation": "..."}}]}}""",
+    "failure_effect": """你是资深质量工程师，精通 AIAG-VDA FMEA 方法论。
+
+【任务】为下方失效模式推荐 3-5 个「失效效应(FE)」。
+【FE 定义】失效模式产生的【后果】，描述对下一级集成产品、最终用户、法规的影响——即"用户/下游会注意到什么、体验到什么"。可含安全影响。一个 FM 可有多个 FE。
+【方向约束】FE 必须是失效的【后果】，不是失效本身、不是功能、更不是失效【原因】。
+  - 正确(效应): 密封泄漏导致介质外泄、焊缝强度下降引发断裂、控制决策偏差
+  - 错误(这些是原因，禁止输出): 密封件老化、传感器故障、扭矩不足、校准漂移
+
+【当前上下文】
+- FMEA 类型: {fmea_type}
+- 失效模式: {failure_mode}
+- 功能描述: {function_description}
+
+【示例（失效模式=焊缝气孔）】
+失效效应: 焊缝承载强度下降 / 介质泄漏引发安全风险 / 疲劳寿命缩短 / 应力集中导致裂纹扩展
+
+【要求】针对该失效模式的具体后果，避免"功能降级""性能下降"等空泛表述。
+返回 JSON：
+{{"suggestions": [{{"name": "失效效应描述", "confidence": 0.0-1.0, "explanation": "为何这是该失效模式的后果"}}]}}
+""",
+    "failure_cause": """你是资深质量工程师，精通 AIAG-VDA FMEA 方法论。
+
+【任务】为下方失效模式推荐 3-5 个「失效原因(FC)」。
+【FC 定义】失效模式【为什么会发生】的根本起因。来源：功能/性能设计不当、系统交互、随时间变化(疲劳/磨损/腐蚀/老化)、外部环境、制造/装配工艺、用户误操作、个体变化、软件问题。
+【方向约束】FC 必须是失效的【起因】，不是失效本身、不是功能、更不是失效【后果/效应】。
+  - 正确(原因): 密封件老化、传感器校准漂移、焊接电流不足、扭矩超差
+  - 错误(这些是效应，禁止输出): 介质泄漏、系统停机、安全风险、功能丧失
+
+【当前上下文】
+- FMEA 类型: {fmea_type}
+- 失效模式: {failure_mode}
+- 功能描述: {function_description}
+
+【示例（失效模式=焊缝气孔）】
+失效原因: 焊接电流不足 / 保护气体流量偏低 / 母材表面油污未清理 / 焊接速度过快
+
+【要求】针对该失效模式的具体可追溯起因，便于据此采取预防/检测措施，避免"环境因素""制造缺陷"等空泛表述。
+返回 JSON：
+{{"suggestions": [{{"name": "失效原因描述", "confidence": 0.0-1.0, "explanation": "为何这会引发该失效模式"}}]}}
+""",
+    "measure": """你是资深质量工程师，精通 AIAG-VDA FMEA 方法论。
+
+【任务】为下方失效模式推荐 3-5 个「措施」，区分预防控制(P)与探测控制(D)。
+【预防控制(P)】阻止失效模式或失效原因发生的设计/工艺手段（防止"发生"或"起因"）。
+【探测控制(D)】在交付前探测失效模式或失效原因的检验/测试手段（探测"已发生"或"已起因"）。
+【方向约束】措施必须可执行、可验证，与该失效模式直接相关。
+
+【当前上下文】
+- FMEA 类型: {fmea_type}
+- 失效模式: {failure_mode}
+- AP(行动优先级): {ap}
+
+【示例（失效模式=焊缝气孔, AP=H）】
+P: 焊接参数(电流/气流量)在线监控与闭环 / 焊前母材清洁度自动检验
+D: 焊后100% X射线探伤 / 焊缝气密性在线检测
+
+【要求】在 name 中用前缀「P:」或「D:」标注类型；explanation 说明为何针对该失效。
+返回 JSON：
+{{"suggestions": [{{"name": "P: 措施描述 或 D: 措施描述", "confidence": 0.0-1.0, "explanation": "为何针对该失效模式及为何属预防/探测"}}]}}
+""",
+    "optimization": """你是资深质量工程师，精通 AIAG-VDA FMEA 方法论。
+
+【任务】针对下方高风险失效模式，推荐 3-5 个「优化行动」，以降低风险。
+【优化行动】具体可执行的改进措施，目标是在 S(严重度)、O(频度)、D(探测度) 中至少一项上取得可量化改善，或明确职责与时限。
+【方向约束】行动须具体、可分配、可追踪，避免"加强管理""提高意识"等空泛表述。
+
+【当前上下文】
+- FMEA 类型: {fmea_type}
+- 失效模式: {failure_mode}
+- S(严重度)={severity}  O(频度)={occurrence}  D(探测度)={detection}
+
+【示例（失效模式=焊缝气孔, S=8 O=5 D=6）】
+优化行动: 引入焊接参数自适应闭环控制以降低O / 焊后增加X射线100%探伤工位以改善D / 更换低气孔倾向焊材以降低O
+
+【要求】每条 explanation 说明改善的是 S/O/D 中的哪一项及预期方向。
+返回 JSON：
+{{"suggestions": [{{"name": "优化行动描述", "confidence": 0.0-1.0, "explanation": "改善S/O/D中哪项及如何改善"}}]}}
+""",
 }
 
 
@@ -282,11 +354,15 @@ PROMPT_TEMPLATES = {
 # ---------------------------------------------------------------------------
 
 class RecommendationService:
-    def __init__(self, db: AsyncSession, llm_provider: LLMProvider | None, graph_repo: FMEAGraphRepository):
+    def __init__(self, db: AsyncSession, llm_provider: LLMProvider | None, graph_repo: FMEAGraphRepository, llm_timeout: int | None = None):
         self.db = db
         self.llm = llm_provider
         self.graph_repo = graph_repo
         self.rules = RuleEngine()
+        # llm_timeout comes from the persisted AI config (app.state.llm_timeout,
+        # kept in sync by _rebuild_providers). Fall back to the env-backed
+        # settings default when unset (e.g. tests / direct construction).
+        self.llm_timeout = llm_timeout or settings.LLM_TIMEOUT
 
     async def recommend(self, fmea_id: _uuid.UUID, request: RecommendRequest, user: User) -> RecommendResponse:
         from app.core.permissions import Module, PermissionLevel, get_user_permission
@@ -358,7 +434,7 @@ class RecommendationService:
                 prompt = self._build_prompt(request.trigger_type, llm_context)
                 llm_result = await asyncio.wait_for(
                     self.llm.complete(prompt, {}),
-                    timeout=settings.LLM_TIMEOUT,
+                    timeout=self.llm_timeout,
                 )
                 validated = SuggestionList.model_validate(llm_result)
                 llm_items = [
@@ -371,7 +447,7 @@ class RecommendationService:
                 source = "graph_enriched" if graph_suggestions else "hybrid"
             except Exception as e:
                 source = "graph" if graph_suggestions else "rule_fallback"
-                logger.warning("LLM failed, using rule+graph results: %s", e)
+                logger.warning("LLM failed, using rule+graph results: %s: %r", type(e).__name__, e)
         else:
             source = "graph" if graph_suggestions else "rule"
 
@@ -668,10 +744,16 @@ class RecommendationService:
 
     def _build_prompt(self, trigger_type: str, context: dict) -> str:
         template = PROMPT_TEMPLATES.get(trigger_type, "")
-        safe = {k: v for k, v in context.get("current_context", {}).items()}
+
+        class _SafeDict(dict):
+            """format_map helper: missing keys render as empty string instead
+            of raising KeyError (which would silently send an unfilled prompt)."""
+
+            def __missing__(self, key):
+                return ""
+
+        safe = _SafeDict()
+        safe.update({k: v for k, v in context.get("current_context", {}).items()})
         safe.update({k: v for k, v in context.items() if k != "current_context"})
         safe["historical_patterns"] = json.dumps(context.get("historical_patterns", []), ensure_ascii=False)
-        try:
-            return template.format(**safe)
-        except KeyError:
-            return template
+        return template.format_map(safe)
