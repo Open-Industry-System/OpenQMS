@@ -5,7 +5,7 @@
 
 ## 问题
 
-PFMEA/DFMEA 编辑页「失效分析」Tab 左侧"工序功能/结构功能"树,唯一按钮是「添加行」(`addRow`),它只在已选功能节点下新增失效分析行(FailureMode/Effect/Cause/Control),**不创建工序/功能节点本身**。
+PFMEA/DFMEA 编辑页「失效分析」Tab 左侧"工序功能/结构功能"树,唯一按钮是「添加行」(`addRow`),它只在当前选中的结构节点或功能节点下新增失效分析行(FailureMode/Effect/Cause/Control),**不创建工序/功能节点本身**。
 
 - PFMEA 无 wizard(仅 DFMEA 有)。新建 PFMEA 时后端只塞一个 `ProcessItem` 根节点(`fmea_service.py:117`),用户落地后无法手动加 ProcessStep / ProcessWorkElement / Function → 卡死。
 - 「结构分析」Tab 的 `StructureTree` 组件被硬编码为 DFMEA 专用(`STRUCTURE_TYPES = ["System","Subsystem","Component"]`,按钮文案「添加系统」),对 PFMEA 过滤为空,无法加 PFMEA 节点。
@@ -79,9 +79,9 @@ PFMEA/DFMEA 共用边类型与节点类型。结构链:
 
 ## 实现位置(全部在 `FMEAEditorPage.tsx`)
 
-- 提取两个小 helper,避免巨大页面里内联条件变脆:
-  - `STRUCTURE_CHILD_MAP`: 父 type → `{ childType, edgeType, labelKey }`,覆盖上表四类(结构子节点 / 功能节点 × 三层级)。
-  - `functionTypeFor(parentType)`: 父结构 type → 对应功能节点 type。
+- 提取一个小 helper,避免巨大页面里内联条件变脆:
+  - `STRUCTURE_CHILD_MAP`: 父 type → `child actions[]`,每个 action 为 `{ childType, edgeType, labelKey, kind }`(`kind` ∈ `structure` | `function`)。一个父 type 可有多个 action(如 ProcessStep 既有 `+工作要素` 又有 `+功能`),覆盖上表全部组合。
+  - `functionTypeFor(parentType)`: 父结构 type → 对应功能节点 type(供 `kind=function` 的 action 复用)。
 - 新增 `addStructureChild(parentNode, childKind)` 回调 + Modal state。
 - 在树节点 render 加 `Dropdown` 触发器。
 - 左侧树渲染改用按 edges 构建的递归(D1)。
