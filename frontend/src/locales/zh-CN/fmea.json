@@ -50,6 +50,14 @@
       "dfmea": "DFMEA - 设计失效模式与影响分析"
     }
   },
+  "filter": {
+    "all": "全部",
+    "status": "状态",
+    "type": "类型",
+    "highRisk": "高风险",
+    "searchPlaceholder": "搜索文档编号或标题",
+    "reset": "重置"
+  },
   "create": {
     "title": "新建 FMEA",
     "defaultTitle": "新DFMEA",

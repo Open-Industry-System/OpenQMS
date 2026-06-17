@@ -50,6 +50,14 @@
       "dfmea": "DFMEA - Design Failure Mode and Effects Analysis"
     }
   },
+  "filter": {
+    "all": "All",
+    "status": "Status",
+    "type": "Type",
+    "highRisk": "High Risk",
+    "searchPlaceholder": "Search document no. or title",
+    "reset": "Reset"
+  },
   "create": {
     "title": "New FMEA",
     "defaultTitle": "New DFMEA",
