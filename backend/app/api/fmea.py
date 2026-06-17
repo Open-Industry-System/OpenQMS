@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,8 @@ async def list_fmeas(
     status: str | None = None,
     product_line: str | None = None,
     high_rpn: bool = Query(False),
+    fmea_type: Literal["PFMEA", "DFMEA"] | None = None,
+    search: str | None = None,
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -48,6 +51,8 @@ async def list_fmeas(
         high_rpn=high_rpn,
         allowed_product_line_codes=allowed_pls,
         factory_id=scope.effective_factory_id,
+        fmea_type=fmea_type,
+        search=search,
     )
     return FMEAListResponse(
         items=[FMEAResponse.model_validate(f) for f in items],
