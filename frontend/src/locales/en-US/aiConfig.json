@@ -33,7 +33,7 @@
     },
     "llm_base_url": {
       "label": "Base URL",
-      "tooltip": "Required for local provider only, e.g., http://localhost:11434 (Ollama).",
+      "tooltip": "Required for local provider, e.g., http://localhost:11434 (Ollama). For the openai provider, set an OpenAI-compatible endpoint (e.g., https://api.deepseek.com); leave empty to use the official api.openai.com.",
       "placeholder": "http://localhost:11434"
     },
     "llm_timeout": {

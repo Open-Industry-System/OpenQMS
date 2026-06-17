@@ -33,7 +33,7 @@
     },
     "llm_base_url": {
       "label": "Base URL",
-      "tooltip": "仅 local provider 需要，例如 http://localhost:11434（Ollama）。",
+      "tooltip": "local provider 必填，如 http://localhost:11434（Ollama）。openai provider 可填 OpenAI 兼容端点（如 https://api.deepseek.com）；留空则使用官方 api.openai.com。",
       "placeholder": "http://localhost:11434"
     },
     "llm_timeout": {

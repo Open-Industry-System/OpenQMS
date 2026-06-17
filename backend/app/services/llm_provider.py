@@ -33,9 +33,11 @@ class ClaudeProvider:
 
 
 class OpenAIProvider:
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, base_url: str = ""):
         from openai import AsyncOpenAI
-        self.client = AsyncOpenAI(api_key=api_key)
+        # base_url lets OpenAI-compatible endpoints (DeepSeek, Azure OpenAI,
+        # OpenRouter, ...) override the default api.openai.com target.
+        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
         self.model = model
 
     async def complete(self, prompt: str, response_schema: dict) -> dict:
@@ -95,7 +97,8 @@ def create_llm_provider(config=None) -> LLMProvider | None:
         if provider_name == "claude":
             return ClaudeProvider(api_key=api_key, model=model or "claude-sonnet-4-6-20250514")
         elif provider_name == "openai":
-            return OpenAIProvider(api_key=api_key, model=model or "gpt-4o")
+            base_url = getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
+            return OpenAIProvider(api_key=api_key, model=model or "gpt-4o", base_url=base_url)
         elif provider_name == "local":
             base_url = getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
             if not base_url:
