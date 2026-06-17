@@ -35,6 +35,10 @@ export default function WizardGuidanceCard({ stepIndex }: WizardGuidanceCardProp
   const prefix = `wizard.guidance.step${stepIndex}`;
   const title = t(`${prefix}.title`);
 
+  // Per-field fill-in guidance (array of {name, desc}) — empty if absent
+  const fieldsRaw = t(`${prefix}.fields`, { returnObjects: true }) as unknown as { name: string; desc: string }[] | string;
+  const fields: { name: string; desc: string }[] = Array.isArray(fieldsRaw) ? fieldsRaw : [];
+
   return (
     <Card
       size="small"
@@ -66,6 +70,23 @@ export default function WizardGuidanceCard({ stepIndex }: WizardGuidanceCardProp
             <Text strong>{t('wizard.guidance.labelPoints')}：</Text>
             {t(`${prefix}.points`)}
           </Paragraph>
+
+          {fields.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <Paragraph style={{ marginBottom: 8 }}>
+                <Text strong>{t('wizard.guidance.labelFields')}：</Text>
+              </Paragraph>
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {fields.map((f, i) => (
+                  <li key={i} style={{ marginBottom: 6, lineHeight: 1.6 }}>
+                    <Text strong style={{ color: 'var(--qf-cyan)' }}>{f.name}</Text>
+                    <span style={{ color: 'var(--qf-text-secondary)' }}>：{f.desc}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <Paragraph type="secondary">
             <Text strong>{t('wizard.guidance.labelExample')}：</Text>
             {t(`${prefix}.example`)}
