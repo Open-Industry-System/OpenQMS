@@ -31,6 +31,7 @@ AI_CONFIG_KEYS = [
     "capa_draft_llm_timeout",
     "report_llm_timeout",
     "embedding_provider",
+    "embedding_api_key",
     "embedding_model",
     "embedding_base_url",
     "embedding_dimensions",
@@ -82,9 +83,11 @@ async def get_ai_config(db: AsyncSession) -> AIConfigOut:
             coerced = _env_default(key)
         values[key] = coerced
 
-    # Never expose the real API key to the frontend.
+    # Never expose the real API keys to the frontend.
     if values.get("llm_api_key"):
         values["llm_api_key"] = MASKED_VALUE
+    if values.get("embedding_api_key"):
+        values["embedding_api_key"] = MASKED_VALUE
 
     return AIConfigOut(**values)
 
@@ -105,7 +108,7 @@ async def update_ai_config(
         value = payload.get(key)
 
         # Keep existing API key when UI sends the masked sentinel.
-        if key == "llm_api_key" and value == MASKED_VALUE:
+        if key in ("llm_api_key", "embedding_api_key") and value == MASKED_VALUE:
             continue
 
         str_value = "" if value is None else str(value)
@@ -203,7 +206,7 @@ async def _build_effective_snapshot(
     payload = update.model_dump()
     for key in AI_CONFIG_KEYS:
         submitted = payload.get(key)
-        if key == "llm_api_key" and submitted == MASKED_VALUE:
+        if key in ("llm_api_key", "embedding_api_key") and submitted == MASKED_VALUE:
             # Keep the stored key (or env default).
             stored = _coerce(key, rows.get(key))
             effective[key] = stored if stored not in (None, "") else _env_default(key)

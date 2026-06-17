@@ -20,9 +20,11 @@ class EmbeddingProvider(Protocol):
 
 
 class OpenAIEmbeddingProvider:
-    def __init__(self, api_key: str, model: str = "text-embedding-3-small"):
+    def __init__(self, api_key: str, model: str = "text-embedding-3-small", base_url: str = ""):
         from openai import AsyncOpenAI
-        self._client = AsyncOpenAI(api_key=api_key)
+        # base_url lets OpenAI-compatible endpoints (an Ollama OpenAI shim, a
+        # proxy, etc.) override the default api.openai.com target.
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
         self._model = model
         self._dimensions = 1536
 
@@ -92,12 +94,19 @@ def create_embedding_provider(config=None) -> EmbeddingProvider | None:
         return None
 
     if provider_name == "openai":
-        api_key = getattr(cfg, "LLM_API_KEY", "") or getattr(cfg, "llm_api_key", "")
+        api_key = (
+            getattr(cfg, "EMBEDDING_API_KEY", "") or getattr(cfg, "embedding_api_key", "")
+            or getattr(cfg, "LLM_API_KEY", "") or getattr(cfg, "llm_api_key", "")
+        )
         if not api_key:
-            logger.warning("EMBEDDING_PROVIDER=openai but LLM_API_KEY not set")
+            logger.warning("EMBEDDING_PROVIDER=openai but no EMBEDDING_API_KEY or LLM_API_KEY set")
             return None
         model = getattr(cfg, "EMBEDDING_MODEL", "") or getattr(cfg, "embedding_model", "") or "text-embedding-3-small"
-        return OpenAIEmbeddingProvider(api_key=api_key, model=model)
+        base_url = (
+            getattr(cfg, "EMBEDDING_BASE_URL", "") or getattr(cfg, "embedding_base_url", "")
+            or getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
+        )
+        return OpenAIEmbeddingProvider(api_key=api_key, model=model, base_url=base_url)
 
     if provider_name == "ollama":
         model = getattr(cfg, "EMBEDDING_MODEL", "") or getattr(cfg, "embedding_model", "") or "nomic-embed-text"

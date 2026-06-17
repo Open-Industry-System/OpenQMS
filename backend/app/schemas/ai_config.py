@@ -13,6 +13,7 @@ class AIConfigOut(BaseModel):
     report_llm_timeout: int = Field(default=10, ge=1, le=120)
 
     embedding_provider: str = ""
+    embedding_api_key: str = ""  # masked when read from the backend
     embedding_model: str = ""
     embedding_base_url: str = ""
     embedding_dimensions: int = Field(default=1536, ge=1, le=4096)
@@ -33,6 +34,7 @@ class AIConfigUpdate(BaseModel):
     report_llm_timeout: int = Field(default=10, ge=1, le=120)
 
     embedding_provider: str = ""
+    embedding_api_key: str = ""  # send empty to keep current; send new value to update
     embedding_model: str = ""
     embedding_base_url: str = ""
     embedding_dimensions: int = Field(default=1536, ge=1, le=4096)

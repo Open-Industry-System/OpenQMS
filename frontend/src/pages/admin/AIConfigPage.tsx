@@ -173,6 +173,14 @@ export default function AIConfigPage() {
           </Form.Item>
 
           <Form.Item
+            name="embedding_api_key"
+            label={t("fields.embedding_api_key.label")}
+            tooltip={t("fields.embedding_api_key.tooltip")}
+          >
+            <Input.Password placeholder={t("fields.embedding_api_key.placeholder")} autoComplete="new-password" />
+          </Form.Item>
+
+          <Form.Item
             name="embedding_model"
             label={t("fields.embedding_model.label")}
             tooltip={t("fields.embedding_model.tooltip")}

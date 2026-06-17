@@ -50,6 +50,11 @@
       "tooltip": "留空则跟随 LLM Provider。",
       "placeholder": "选择提供商"
     },
+    "embedding_api_key": {
+      "label": "API Key",
+      "tooltip": "Embedding 服务的 API 密钥。显示为 ******** 表示已保存；留空则使用 LLM 的 API Key。",
+      "placeholder": "输入 API Key 或留空跟随 LLM"
+    },
     "embedding_model": {
       "label": "Embedding 模型",
       "tooltip": "例如 text-embedding-3-small（OpenAI）、nomic-embed-text（Ollama）。",
@@ -57,7 +62,7 @@
     },
     "embedding_base_url": {
       "label": "Embedding Base URL",
-      "tooltip": "仅 Ollama 需要。",
+      "tooltip": "ollama 必填，如 http://localhost:11434。openai provider 可填 OpenAI 兼容端点；留空则使用 LLM 的 Base URL。",
       "placeholder": "http://localhost:11434"
     },
     "embedding_dimensions": {

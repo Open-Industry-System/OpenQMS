@@ -9,6 +9,7 @@ export interface AIConfig {
   capa_draft_llm_timeout: number;
   report_llm_timeout: number;
   embedding_provider: string;
+  embedding_api_key: string;
   embedding_model: string;
   embedding_base_url: string;
   embedding_dimensions: number;

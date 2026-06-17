@@ -50,6 +50,11 @@
       "tooltip": "Leave empty to inherit from LLM Provider.",
       "placeholder": "Select provider"
     },
+    "embedding_api_key": {
+      "label": "API Key",
+      "tooltip": "API key for the embedding service. Shown as ******** when saved; leave empty to reuse the LLM API key.",
+      "placeholder": "Enter API key or leave empty to follow LLM"
+    },
     "embedding_model": {
       "label": "Embedding Model",
       "tooltip": "e.g., text-embedding-3-small (OpenAI), nomic-embed-text (Ollama).",
@@ -57,7 +62,7 @@
     },
     "embedding_base_url": {
       "label": "Embedding Base URL",
-      "tooltip": "Required for Ollama only.",
+      "tooltip": "Required for Ollama, e.g., http://localhost:11434. For the openai provider, set an OpenAI-compatible endpoint; leave empty to use the LLM Base URL.",
       "placeholder": "http://localhost:11434"
     },
     "embedding_dimensions": {
