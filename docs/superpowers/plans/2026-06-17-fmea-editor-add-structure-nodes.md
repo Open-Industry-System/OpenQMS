@@ -179,6 +179,25 @@ describe("buildStructureTree", () => {
     expect(tree.map((t) => t.node.id)).toEqual(["orphan1"]);
     expect(tree[0].children.map((c) => c.node.id)).toEqual(["orphan2"]);
   });
+
+  it("surfaces orphan function nodes (not attached to any structure) as fallback roots", () => {
+    // Historical data: a ProcessStepFunction with no HAS_FUNCTION parent, but
+    // carrying its own HAS_FAILURE_MODE row. It must NOT vanish from the panel.
+    const nodes: GraphNode[] = [
+      node("pi", "ProcessItem"),
+      node("orphanFn", "ProcessStepFunction"),
+      node("fm", "FailureMode"),
+    ];
+    const edges: GraphEdge[] = [
+      // orphanFn has NO incoming HAS_FUNCTION edge; only a failure mode
+      { source: "orphanFn", target: "fm", type: "HAS_FAILURE_MODE" },
+    ];
+    const tree = buildStructureTree(nodes, edges);
+    const ids = tree.map((t) => t.node.id);
+    expect(ids).toContain("pi");
+    expect(ids).toContain("orphanFn"); // fallback root, not lost
+    expect(tree.find((t) => t.node.id === "orphanFn")!.depth).toBe(0);
+  });
 });
 
 describe("createStructureChild", () => {
@@ -309,6 +328,15 @@ export interface StructureTreeNode {
   children: StructureTreeNode[];
 }
 
+/** Row-header node types: structures + their function nodes. Anything else
+ *  (FailureMode/Effect/Cause/Control) is never shown in the left panel. */
+const ROW_HEADER_TYPES = [
+  "ProcessItem", "System",
+  "ProcessStep", "Subsystem",
+  "ProcessWorkElement", "Component",
+  "ProcessItemFunction", "ProcessStepFunction", "ProcessWorkElementFunction",
+];
+
 /**
  * Build a structure+function tree from graph data.
  *
@@ -317,22 +345,23 @@ export interface StructureTreeNode {
  * (HAS_PROCESS_STEP / HAS_WORK_ELEMENT) then function children (HAS_FUNCTION).
  * Indentation/depth is derived from the tree, not from node type.
  *
- * If no proper structure root exists (e.g. legacy data), structure nodes that
- * are not children of another structure node are surfaced as flat roots so the
- * panel never blanks out.
+ * Fallback: after building from roots, any row-header node not reached by the
+ * traversal (e.g. a legacy ProcessStepFunction with no HAS_FUNCTION parent,
+ * but carrying its own HAS_FAILURE_MODE row) is appended as a flat depth-0
+ * root so it never disappears from the panel or becomes unselectable. This
+ * preserves the old flat `functionNodes.map` behavior for orphan nodes.
  */
 export function buildStructureTree(nodes: GraphNode[], edges: GraphEdge[]): StructureTreeNode[] {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const structureNodes = nodes.filter((n) => STRUCTURE_TYPES.includes(n.type));
 
-  // childIds[parentId] = list of {targetId, edgeType} for structure/function edges
   const childrenOf = (parentId: string, edgeType: string): string[] =>
     edges
       .filter((e) => e.source === parentId && e.type === edgeType)
       .map((e) => e.target)
       .filter((id) => nodeMap.has(id));
 
-  // Set of structure node ids that are a structural child of another structure node
+  // Structure node ids that are a structural child of another structure node.
   const structuralChildIds = new Set<string>();
   for (const e of edges) {
     if ((e.type === "HAS_PROCESS_STEP" || e.type === "HAS_WORK_ELEMENT") && nodeMap.has(e.target)) {
@@ -345,7 +374,14 @@ export function buildStructureTree(nodes: GraphNode[], edges: GraphEdge[]): Stru
     return !!n && STRUCTURE_TYPES.includes(n.type);
   };
 
-  const buildNode = (nodeId: string, depth: number): StructureTreeNode | null => {
+  const buildStructureChildOrFunction = (nodeId: string, depth: number): StructureTreeNode | null => {
+    const node = nodeMap.get(nodeId);
+    if (!node) return null;
+    if (isStructure(nodeId)) return buildStructureNode(nodeId, depth);
+    return { node, depth, children: [] }; // function node — leaf
+  };
+
+  const buildStructureNode = (nodeId: string, depth: number): StructureTreeNode | null => {
     const node = nodeMap.get(nodeId);
     if (!node || !isStructure(nodeId)) return null;
     const childIds: string[] = [];
@@ -358,21 +394,31 @@ export function buildStructureTree(nodes: GraphNode[], edges: GraphEdge[]): Stru
     return { node, depth, children };
   };
 
-  // For function children (leaves): build a leaf node with no further descent.
-  const buildStructureChildOrFunction = (nodeId: string, depth: number): StructureTreeNode | null => {
-    const node = nodeMap.get(nodeId);
-    if (!node) return null;
-    if (isStructure(nodeId)) {
-      return buildNode(nodeId, depth);
-    }
-    // function node — leaf
-    return { node, depth, children: [] };
-  };
-
   const roots = structureNodes.filter((n) => !structuralChildIds.has(n.id));
-  return roots
-    .map((r) => buildNode(r.id, 0))
+  const tree = roots
+    .map((r) => buildStructureNode(r.id, 0))
     .filter((r): r is StructureTreeNode => r !== null);
+
+  // Fallback: surface unreached row-header nodes as flat roots.
+  const visited = new Set<string>();
+  const collect = (tn: StructureTreeNode) => {
+    visited.add(tn.node.id);
+    tn.children.forEach(collect);
+  };
+  tree.forEach(collect);
+  for (const n of nodes) {
+    if (visited.has(n.id)) continue;
+    if (!ROW_HEADER_TYPES.includes(n.type)) continue;
+    if (isStructure(n.id)) {
+      const sub = buildStructureNode(n.id, 0);
+      if (sub) { tree.push(sub); collect(sub); }
+    } else {
+      tree.push({ node: n, depth: 0, children: [] });
+      visited.add(n.id);
+    }
+  }
+
+  return tree;
 }
 
 /**
@@ -505,7 +551,7 @@ import {
 } from "../../../utils/structureTree";
 ```
 
-Ensure `Dropdown`, `Modal`, `Form`, `Input` are imported from `antd`. `Dropdown` is already imported (line 32). Verify `Modal` and `Form` are in the destructured antd import (line 3-7: `Modal` is present; add `Form` and confirm `Input` present). Update the antd import block to include `Form`:
+Ensure `Dropdown`, `Modal`, `Form`, `Input` are imported from `antd`. There is an existing **standalone** `import { Dropdown } from "antd";` at line 32 — **delete it** and instead merge `Dropdown` + `Form` into the main destructured antd import (lines 3-7). Final main import block:
 
 ```typescript
 import {
@@ -515,7 +561,7 @@ import {
 } from "antd";
 ```
 
-Add `Form` to the existing list (it is currently used only via `impactForm` state, not the component — adding the component import is required for the new Modal).
+`Modal` is already present in the original list; `Input` is already present. Adding `Form` and `Dropdown` here and removing the standalone `Dropdown` import avoids a duplicate-import compile error.
 
 - [ ] **Step 2: Add state + form for the add-node Modal**
 
@@ -542,7 +588,7 @@ Handler (add after `addRow` useCallback):
 
   const submitAddNode = useCallback(() => {
     addNodeForm.validateFields().then((values: { name: string; specification?: string; requirement?: string }) => {
-      if (!addNodeParent || !addNodeAction || !fmea) return;
+      if (!addNodeParent || !addNodeAction) return;
       const { node, edge } = createStructureChild(
         addNodeParent,
         addNodeAction,
@@ -557,7 +603,7 @@ Handler (add after `addRow` useCallback):
       }
       setAddNodeOpen(false);
     }).catch(() => { /* validation message shown by Form */ });
-  }, [addNodeParent, addNodeAction, fmea, addNodeForm]);
+  }, [addNodeParent, addNodeAction, addNodeForm]);
 ```
 
 - [ ] **Step 3: Replace the flat `functionNodes.map` render with recursive tree render**
@@ -614,7 +660,16 @@ Replace the block from `{functionNodes.map((node) => {` through its closing `})}
                               items: actions.map((a) => ({
                                 key: a.childType,
                                 label: t(a.labelKey),
-                                onClick: () => openAddNode(node, a),
+                                // Stop the menu-item click from bubbling to the
+                                // outer row (which would select the parent node
+                                // and race the later setSelectedFunctionId on
+                                // function creation). openAddNode does not itself
+                                // change selection, so selection stays stable
+                                // until submit.
+                                onClick: (info: { domEvent: MouseEvent }) => {
+                                  info.domEvent.stopPropagation();
+                                  openAddNode(node, a);
+                                },
                               })),
                             }}
                           >
@@ -671,9 +726,16 @@ Add this Modal near the other modals (e.g. after the impact-analysis Modal close
       </Modal>
 ```
 
-- [ ] **Step 5: Remove now-unused `functionNodes`/`indent` logic if it becomes unused**
+- [ ] **Step 5: Remove now-unused flat-tree helpers**
 
-After the change, the old `functionNodes` const (line ~552 `const functionNodes = fmea ? getFunctionNodes(nodes, fmea.fmea_type) : [];`) and the helper `getFunctionNodes` may become unused. Check with the build in Step 6: if `tsc` reports unused-variable errors for `functionNodes`/`getFunctionNodes`, **leave `getFunctionNodes`** (it may still be referenced elsewhere — grep first: `grep -n "getFunctionNodes\|functionNodes" frontend/src/pages/planning/fmea/FMEAEditorPage.tsx`) and only remove a declaration that is truly unreferenced. Do not delete pre-existing dead code that predates this change unless it is the now-orphaned `indent` block (which is fully replaced). When unsure, keep it — `tsc --noUnusedLocals` is not enabled in this project (build uses `tsc -b`), so unused locals won't fail the build.
+The flat render is fully replaced by `buildStructureTree`. Make these explicit deletions (verified usage map below):
+
+- **Delete** `const functionNodes = fmea ? getFunctionNodes(nodes, fmea.fmea_type) : [];` (line ~552). Its only consumers were the old `functionNodes.map` (1208) and the `functionNodes.length === 0` Empty (1255), both replaced by the recursive render.
+- **Delete** the `getFunctionNodes` function definition (lines ~88-97). After removing `functionNodes`, grep confirms it has no other consumer:
+  `grep -n "getFunctionNodes" frontend/src/pages/planning/fmea/FMEAEditorPage.tsx` → should match only its own definition.
+- **Keep** `getStructureNodes` and `const structureNodes = ...` (line 551). `structureNodes` feeds `rootStructureNode` (line 558) which is used by the header Descriptions (line 1168-1174) and by the structure-analysis tab. Do NOT delete these.
+
+After deletion, the new render's `tree.length === 0` Empty (in Step 3) replaces the old `functionNodes.length === 0` check.
 
 - [ ] **Step 6: Build + lint**
 
@@ -700,8 +762,16 @@ git commit -m "feat(fmea): inline add structure/function nodes via edge-built tr
 
 - [ ] **Step 1: Full build + unit tests**
 
-Run: `cd frontend && npm run build && npm test -- --run`
-Expected: build succeeds; all vitest tests pass (including new `structureTree.test.ts`).
+Run: `cd frontend && npm run build`
+Expected: build succeeds (tsc + vite).
+
+Run: `cd frontend && npx vitest run src/utils/structureTree.test.ts`
+Expected: all new structureTree tests pass.
+
+Run: `cd frontend && npm run lint`
+Expected: no new errors in changed files.
+
+> The repo has test debt (CLAUDE.md notes many backend/FE tests need fixtures). If `npm test -- --run` (full suite) is run and fails on **pre-existing unrelated** tests, that is acceptable — record which tests failed and confirm they are unrelated to this change. The mandatory gates for this work are: `npm run build`, the new `structureTree.test.ts`, and `npm run lint`. Do not block on unrelated failures, but do not hide them either.
 
 - [ ] **Step 2: Manual PFMEA single-chain flow**
 
@@ -729,7 +799,7 @@ Expected: branches stay separate; selection scoped; persistence correct.
 
 - [ ] **Step 4: Manual DFMEA flow + addRow-on-structure compatibility (D2)**
 
-Create/​open a DFMEA:
+Create/​open a DFMEA. **Important:** draft DFMEAs that have not completed the wizard are auto-redirected to `/fmea/wizard/:id` (`FMEAEditorPage.tsx:215`). So either complete the wizard first (mark `wizard_completed`) or use an existing wizard-completed/approved DFMEA before testing in the editor.
 1. On `System`, `+` → 添加子系统; on Subsystem `+` → 添加组件; on Component `+` → 添加功能. Confirm nesting.
 2. **Compatibility check (D2):** select a structure node (e.g. Subsystem directly, no function) and click「添加行」. Confirm a FailureMode row can still be created under the structure node (no regression of the pre-existing behavior).
 3. Save + reopen. Confirm.
