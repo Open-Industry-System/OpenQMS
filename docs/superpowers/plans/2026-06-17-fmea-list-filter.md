@@ -45,18 +45,19 @@
 
 - [ ] **Step 1: 写失败测试 — fmea_type 精确过滤**
 
-Create `backend/tests/test_fmea_list_filter.py`. 隔离策略：每个测试用唯一的 `product_line_code`（非 FK，无需建 ProductLine 行）+ UUID 后缀 `document_no`，并把 `product_line=<该 code>` 传给 `list_fmeas`，使计数不受库中既有/种子数据污染；`factory_id` 用 `default_factory.id`（NOT NULL FK）。`db` fixture 会在测试后回滚，不残留。
+Create `backend/tests/test_fmea_list_filter.py`. 隔离策略：每个测试用唯一的 `product_line_code`（非 FK，无需建 ProductLine 行）+ UUID 后缀 `document_no`，并把 `product_line=<该 code>` 传给 `list_fmeas`，使计数不受库中既有/种子数据污染；`factory_id` 用 `default_factory.id`（NOT NULL FK）。
+
+**数据隔离依赖 `conftest.py` 的事务回滚**：`db` fixture 为每个测试函数开独立事务并回滚，且每测试用唯一 `product_line_code` 进一步限定范围，故 `assert total == N` 不受库中残留数据影响。不使用 `@pytest.mark.requires_db`——该 marker 在仓库 58 个测试文件中从未使用、且无关联 fixture/hook（只注册了名字），`db` fixture 已内置 DB 不可达时的 `pytest.skip`，声明 `db` 参数即可获得 skip 行为，与仓库现有写法一致。测试函数请求 `admin_user` fixture 以提供 `created_by`（`created_by` 当前 nullable 且 `list_fmeas` 不 JOIN user，但带上可防未来加 `joinedload(creator)` 时崩溃，亦与 `test_apqp_service.py` 的构造写法一致）。
 
 ```python
 """Tests for list_fmeas fmea_type / search / high_rpn combination filtering.
 
 Isolation: each test uses a unique product_line_code + UUID-suffixed document_no
 and passes product_line=<that code> to list_fmeas, so counts are independent of
-any pre-existing/seeded FMEA rows in the test database.
+any pre-existing/seeded FMEA rows in the test database. The `db` fixture rolls
+back each test's transaction.
 """
 import uuid
-
-import pytest
 
 from app.models.fmea import FMEADocument
 from app.services.fmea_service import list_fmeas
@@ -71,7 +72,8 @@ def _pl_code() -> str:
 
 def _make_doc(document_no: str, title: str, product_line_code: str,
               fmea_type: str = "PFMEA", graph_data: dict | None = None,
-              factory_id=uuid.UUID("00000000-0000-0000-0000-000000000001")):
+              factory_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+              created_by=uuid.UUID("00000000-0000-0000-0000-000000000002")):
     return FMEADocument(
         fmea_id=uuid.uuid4(),
         document_no=document_no,
@@ -79,16 +81,16 @@ def _make_doc(document_no: str, title: str, product_line_code: str,
         fmea_type=fmea_type,
         product_line_code=product_line_code,
         factory_id=factory_id,
+        created_by=created_by,
         status="draft",
         graph_data=graph_data or {"nodes": [], "edges": []},
     )
 
 
-@pytest.mark.requires_db
-async def test_fmea_type_filter(db, default_factory):
+async def test_fmea_type_filter(db, default_factory, admin_user):
     pl = _pl_code()
-    pfmea = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "过程 FMEA", pl, "PFMEA", factory_id=default_factory.id)
-    dfmea = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "设计 FMEA", pl, "DFMEA", factory_id=default_factory.id)
+    pfmea = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "过程 FMEA", pl, "PFMEA", factory_id=default_factory.id, created_by=admin_user.user_id)
+    dfmea = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "设计 FMEA", pl, "DFMEA", factory_id=default_factory.id, created_by=admin_user.user_id)
     db.add_all([pfmea, dfmea])
     await db.flush()
 
@@ -174,11 +176,10 @@ Expected: PASS
 Append to `backend/tests/test_fmea_list_filter.py`:
 
 ```python
-@pytest.mark.requires_db
-async def test_search_by_document_no_case_insensitive(db, default_factory):
+async def test_search_by_document_no_case_insensitive(db, default_factory, admin_user):
     pl = _pl_code()
-    a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "Alpha", pl, factory_id=default_factory.id)
-    b = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "Beta", pl, factory_id=default_factory.id)
+    a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "Alpha", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
+    b = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "Beta", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
     db.add_all([a, b])
     await db.flush()
 
@@ -199,11 +200,10 @@ Expected: PASS
 Append:
 
 ```python
-@pytest.mark.requires_db
-async def test_search_by_title(db, default_factory):
+async def test_search_by_title(db, default_factory, admin_user):
     pl = _pl_code()
-    a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "焊接工艺失效分析", pl, factory_id=default_factory.id)
-    b = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "Other", pl, factory_id=default_factory.id)
+    a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "焊接工艺失效分析", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
+    b = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "Other", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
     db.add_all([a, b])
     await db.flush()
 
@@ -224,11 +224,10 @@ Expected: PASS
 Append:
 
 ```python
-@pytest.mark.requires_db
-async def test_search_blank_skips_filter(db, default_factory):
+async def test_search_blank_skips_filter(db, default_factory, admin_user):
     pl = _pl_code()
-    a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "Alpha", pl, factory_id=default_factory.id)
-    b = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "Beta", pl, factory_id=default_factory.id)
+    a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "Alpha", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
+    b = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "Beta", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
     db.add_all([a, b])
     await db.flush()
 
@@ -248,11 +247,10 @@ Expected: PASS
 Append:
 
 ```python
-@pytest.mark.requires_db
-async def test_search_escapes_sql_wildcards(db, default_factory):
+async def test_search_escapes_sql_wildcards(db, default_factory, admin_user):
     pl = _pl_code()
-    a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "Alpha", pl, factory_id=default_factory.id)
-    b = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "100%_yield", pl, factory_id=default_factory.id)
+    a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "Alpha", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
+    b = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "100%_yield", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
     db.add_all([a, b])
     await db.flush()
 
@@ -271,16 +269,19 @@ Expected: PASS
 
 - [ ] **Step 14: 写测试 — high_rpn + fmea_type 先 SQL 过滤再 Python 扫描**
 
-Append. A high-RPN graph = S×O×D ≥ 100. Use S=8,O=3,D=6 → 144.
+Append. A high-RPN graph = S×O×D ≥ 100. Use S=8,O=3,D=6 → 144. 同时插入一个低 RPN 的 PFMEA（S=2,O=2,D=2 → 8 < 100）验证它被 `high_rpn=True` 排除，从而完整覆盖“先 SQL 过滤（按 fmea_type）再 Python 扫描（按 RPN）”。`build_rpn_rows` 从 FailureEffect 取 severity、FailureCause 取 occurrence、DetectionControl 取 detection（见 `app/utils/fmea_graph.py`），故低 RPN 图把三者都设为 2。 同时插入一个低 RPN 的 PFMEA（S=2,O=2,D=2 → 8 < 100）验证它被 `high_rpn=True` 排除，从而完整覆盖"先 SQL 过滤（按 fmea_type）再 Python 扫描（按 RPN）"。
+
+`build_rpn_rows` 从 FailureEffect 取 severity、FailureCause 取 occurrence、DetectionControl 取 detection（见 `app/utils/fmea_graph.py`），故低 RPN 图把三者都设为 2。
 
 ```python
-def _high_rpn_graph():
+def _graph(severity: int, occurrence: int, detection: int):
+    """A 3-node-per-role graph; build_rpn_rows yields S×O×D from these."""
     return {
         "nodes": [
             {"id": "fm_1", "type": "FailureMode", "name": "偏移"},
-            {"id": "fe_1", "type": "FailureEffect", "name": "焊接不良", "severity": 8},
-            {"id": "fc_1", "type": "FailureCause", "name": "吸嘴磨损", "occurrence": 3},
-            {"id": "dc_1", "type": "DetectionControl", "name": "AOI", "detection": 6},
+            {"id": "fe_1", "type": "FailureEffect", "name": "失效后果", "severity": severity},
+            {"id": "fc_1", "type": "FailureCause", "name": "原因", "occurrence": occurrence},
+            {"id": "dc_1", "type": "DetectionControl", "name": "探测", "detection": detection},
         ],
         "edges": [
             {"source": "fm_1", "target": "fe_1", "type": "EFFECT_OF"},
@@ -290,17 +291,26 @@ def _high_rpn_graph():
     }
 
 
-@pytest.mark.requires_db
-async def test_high_rpn_with_fmea_type_filters_first(db, default_factory):
+def _high_rpn_graph():
+    return _graph(8, 3, 6)  # 144 ≥ 100
+
+
+def _low_rpn_graph():
+    return _graph(2, 2, 2)  # 8 < 100
+
+
+async def test_high_rpn_with_fmea_type_filters_first(db, default_factory, admin_user):
     pl = _pl_code()
-    high_pfmea = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "High PFMEA", pl, "PFMEA", _high_rpn_graph(), default_factory.id)
-    high_dfmea = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "High DFMEA", pl, "DFMEA", _high_rpn_graph(), default_factory.id)
-    db.add_all([high_pfmea, high_dfmea])
+    high_pfmea = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "High PFMEA", pl, "PFMEA", _high_rpn_graph(), default_factory.id, created_by=admin_user.user_id)
+    high_dfmea = _make_doc(f"DFMEA-{uuid.uuid4().hex[:8]}", "High DFMEA", pl, "DFMEA", _high_rpn_graph(), default_factory.id, created_by=admin_user.user_id)
+    low_pfmea = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "Low PFMEA", pl, "PFMEA", _low_rpn_graph(), default_factory.id, created_by=admin_user.user_id)
+    db.add_all([high_pfmea, high_dfmea, low_pfmea])
     await db.flush()
 
     items, total = await list_fmeas(
         db, 1, 20, product_line=pl, factory_id=default_factory.id, high_rpn=True, fmea_type="PFMEA"
     )
+    # 只剩 PFMEA（fmea_type 过滤掉 DFMEA），再按 RPN 排除 low_pfmea
     assert total == 1
     assert items[0].fmea_type == "PFMEA"
     assert items[0].document_no == high_pfmea.document_no
@@ -316,11 +326,10 @@ Expected: PASS
 Append:
 
 ```python
-@pytest.mark.requires_db
-async def test_high_rpn_with_search_filters_first(db, default_factory):
+async def test_high_rpn_with_search_filters_first(db, default_factory, admin_user):
     pl = _pl_code()
-    h_a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "焊接失效", pl, "PFMEA", _high_rpn_graph(), default_factory.id)
-    h_b = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "Other", pl, "PFMEA", _high_rpn_graph(), default_factory.id)
+    h_a = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "焊接失效", pl, "PFMEA", _high_rpn_graph(), default_factory.id, created_by=admin_user.user_id)
+    h_b = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "Other", pl, "PFMEA", _high_rpn_graph(), default_factory.id, created_by=admin_user.user_id)
     db.add_all([h_a, h_b])
     await db.flush()
 
@@ -334,7 +343,7 @@ async def test_high_rpn_with_search_filters_first(db, default_factory):
 - [ ] **Step 17: 运行整个测试文件，确认全部通过**
 
 Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/test_fmea_list_filter.py -x`
-Expected: PASS (all 7 tests). 若数据库不可达，测试会被 `requires_db`+`db` fixture skip（符合预期），不算失败。
+Expected: PASS (all 7 tests). 若数据库不可达，测试会被 `db` fixture 内置的 `pytest.skip` 跳过（符合预期），不算失败。
 
 - [ ] **Step 18: 回归 — 跑现有 FMEA 相关测试**
 
@@ -1058,6 +1067,9 @@ git commit -m "test(fmea): cover list page filter URL sync + legacy param compat
 
 **Test-isolation & mock hygiene（审查反馈修复）:**
 - 后端测试用唯一 `product_line_code` + UUID `document_no`，`list_fmeas(..., product_line=pl)` 隔离计数，不依赖库为空 → Task 1 全部测试 ✓
+- 不用 `@pytest.mark.requires_db`（仓库 58 个测试文件从未使用、无关联 fixture/hook），`db` fixture 已内置 skip → Task 1 Step 1 ✓
+- 测试请求 `admin_user` fixture 并设 `created_by=admin_user.user_id`，防未来 `joinedload(creator)` 崩溃，与 `test_apqp_service.py` 一致 → Task 1 全部测试 ✓
+- high_rpn + fmea_type 测试含低 RPN 负例（S=2,O=2,D=2→8<100 被排除），完整覆盖"先 SQL 过滤再 Python 扫描" → Task 1 Step 14 ✓
 - 前端 `vi.hoisted` 定义 mock 函数，避免 hoist 后访问未初始化变量 → Task 6 Step 2 ✓
 - store mock 以 selector 方式执行（`selector({ selected: ... })`），匹配组件 `useProductLineStore((s)=>s.selected)` / `useAuthStore((s)=>s.user)` 调用 → Task 6 Step 2 ✓
 - 渲染包 `<App>`，满足页面 `App.useApp()` → Task 6 Step 2 ✓
