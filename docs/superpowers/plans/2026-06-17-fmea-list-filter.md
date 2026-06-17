@@ -908,7 +908,7 @@ beforeEach(() => {
 describe("FMEAListPage filters", () => {
   it("renders without crashing and requests first page", async () => {
     renderAt("/fmea");
-    expect(mocks.listFMEAs).toHaveBeenCalled();
+    await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
   });
 });
 ```
