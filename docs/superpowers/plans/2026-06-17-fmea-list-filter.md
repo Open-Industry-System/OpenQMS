@@ -638,7 +638,10 @@ After line 40 (the `useSearchParams` line) and before the existing `fetchData` (
     || searchParams.get("risk") === "high";
   const filterSearch = searchParams.get("search");
 
-  // 外部 URL 变化（初始化/后退/重置）时同步本地搜索框
+  // 外部 URL 变化（初始化/后退/重置）时同步本地搜索框。
+  // 此 effect 只依赖 filterSearch、只更新本地 searchInput，绝不触发请求；
+  // 请求只由下面的 [productLine, searchParams] effect 触发。
+  // 勿把搜索输入变化接入请求——输入只改 searchInput，请求经 onSearch 写 URL 后由 searchParams 变化驱动。
   useEffect(() => {
     setSearchInput(filterSearch ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -898,6 +901,7 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   mocks.listFMEAs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
 });
 
@@ -1009,8 +1013,9 @@ Expected: PASS。Input.Search 的 onSearch 在 Enter 时触发；若 keyDown 不
 Append:
 
 ```typescript
-  it("reset clears filters and requests unfiltered list", async () => {
-    renderAt("/fmea?status=draft&type=PFMEA&high_rpn=true&search=foo");
+  it("reset clears all filters incl. legacy params and requests unfiltered list", async () => {
+    // 初始 URL 同时含新参数与旧兼容参数 risk / pending_approval
+    renderAt("/fmea?status=draft&type=PFMEA&high_rpn=true&search=foo&risk=high&pending_approval=true");
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
 
     const resetBtn = screen.getByRole("button", { name: /reset|重置/i });
