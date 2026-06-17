@@ -9,6 +9,7 @@ import LoginPage from "./pages/login/LoginPage";
 import DashboardPage from "./pages/dashboard/DashboardPage";
 import FMEAListPage from "./pages/planning/fmea/FMEAListPage";
 import FMEAEditorPage from "./pages/planning/fmea/FMEAEditorPage";
+import DFMEAWizardPage from "./pages/planning/fmea/DFMEAWizardPage";
 import CAPAListPage from "./pages/capa/CAPAListPage";
 import CAPADetailPage from "./pages/capa/CAPADetailPage";
 import ControlPlanListPage from "./pages/planning/control-plan/ControlPlanListPage";
@@ -132,6 +133,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<ProtectedRoute requiredModule="dashboard"><DashboardPage /></ProtectedRoute>} />
         <Route path="/fmea" element={<ProtectedRoute requiredModule="fmea"><FMEAListPage /></ProtectedRoute>} />
+        <Route path="/fmea/wizard/:id" element={<ProtectedRoute requiredModule="fmea"><DFMEAWizardPage /></ProtectedRoute>} />
         <Route path="/fmea/:id" element={<ProtectedRoute requiredModule="fmea"><FMEAEditorPage /></ProtectedRoute>} />
         <Route path="/capa" element={<ProtectedRoute requiredModule="capa"><CAPAListPage /></ProtectedRoute>} />
         <Route path="/capa/:id" element={<ProtectedRoute requiredModule="capa"><CAPADetailPage /></ProtectedRoute>} />

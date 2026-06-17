@@ -3,9 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Tag, Form, Input, Select, Modal, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { listFMEAs, createFMEA, updateFMEA } from "../../../api/fmea";
-import type { FMEADocument, GraphNode, GraphEdge } from "../../../types";
-import GenerationWizard from "../../../components/dfmea/GenerationWizard";
+import { listFMEAs, createFMEA } from "../../../api/fmea";
+import type { FMEADocument } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { useProductLineStore } from "../../../store/productLineStore";
@@ -33,7 +32,6 @@ export default function FMEAListPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
-  const [wizardOpen, setWizardOpen] = useState(false);
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const _user = useAuthStore((s) => s.user);
@@ -65,36 +63,16 @@ export default function FMEAListPage() {
   }, [productLine, searchParams]);
 
   const handleCreate = async (values: { title: string; document_no: string; fmea_type: string; problem_description?: string }) => {
-    if (values.fmea_type === "DFMEA") {
-      setModalOpen(false);
-      setWizardOpen(true);
-      return;
-    }
     try {
       const fmea = await createFMEA(values);
       message.success(t("messages.createSuccess"));
       setModalOpen(false);
       form.resetFields();
-      navigate(`/fmea/${fmea.fmea_id}`, { state: { showLessonsLearned: true, problemDescription: values.problem_description } });
-    } catch {
-      message.error(t("messages.createFailed"));
-    }
-  };
-
-  const handleWizardComplete = async (skeleton: { nodes: GraphNode[]; edges: GraphEdge[] }) => {
-    try {
-      const fmea = await createFMEA({
-        title: form.getFieldValue("title") || t("create.defaultTitle"),
-        document_no: form.getFieldValue("document_no") || `DFMEA-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 1000)).padStart(3, "0")}`,
-        fmea_type: "DFMEA",
-      });
-      await updateFMEA(fmea.fmea_id, {
-        graph_data: { nodes: skeleton.nodes, edges: skeleton.edges },
-      });
-      message.success(t("messages.dfmeaCreateSuccess"));
-      setWizardOpen(false);
-      form.resetFields();
-      navigate(`/fmea/${fmea.fmea_id}`, { state: { showLessonsLearned: true, problemDescription: undefined } });
+      if (values.fmea_type === "DFMEA") {
+        navigate(`/fmea/wizard/${fmea.fmea_id}`);
+      } else {
+        navigate(`/fmea/${fmea.fmea_id}`, { state: { showLessonsLearned: true, problemDescription: values.problem_description } });
+      }
     } catch {
       message.error(t("messages.createFailed"));
     }
@@ -145,11 +123,20 @@ export default function FMEAListPage() {
       title: t("list.columns.actions"),
       key: "actions",
       width: 100,
-      render: (_: unknown, record: FMEADocument) => (
-        <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/fmea/${record.fmea_id}`)}>
-          {canEdit('fmea') ? tc("actions.edit") : tc("actions.view")}
-        </Button>
-      ),
+      render: (_: unknown, record: FMEADocument) => {
+        // Only send incomplete DFMEA drafts back to the wizard; completed drafts (wizard_completed)
+        // open directly in the editor, matching FMEAEditorPage's redirect guard.
+        const isIncompleteDraft = record.fmea_type === "DFMEA" && record.status === "draft"
+          && !record.graph_data?.wizardScope?.wizard_completed;
+        const targetPath = isIncompleteDraft
+          ? `/fmea/wizard/${record.fmea_id}`
+          : `/fmea/${record.fmea_id}`;
+        return (
+          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(targetPath)}>
+            {canEdit('fmea') ? tc("actions.edit") : tc("actions.view")}
+          </Button>
+        );
+      },
     },
   ];
 
@@ -205,12 +192,6 @@ export default function FMEAListPage() {
           </Form.Item>
         </Form>
       </Modal>
-
-      <GenerationWizard
-        open={wizardOpen}
-        onCancel={() => setWizardOpen(false)}
-        onComplete={handleWizardComplete}
-      />
     </PageShell>
   );
 }

@@ -212,6 +212,15 @@ export default function FMEAEditorPage() {
     if (!id) return;
     getFMEA(id)
       .then((doc) => {
+        // Redirect draft DFMEAs that haven't completed the wizard
+        if (
+          doc.fmea_type === "DFMEA" &&
+          doc.status === "draft" &&
+          !doc.graph_data?.wizardScope?.wizard_completed
+        ) {
+          navigate(`/fmea/wizard/${id}`, { replace: true });
+          return;
+        }
         setFmea(doc);
         const loadedNodes = doc.graph_data?.nodes || [];
         setNodes(loadedNodes);
