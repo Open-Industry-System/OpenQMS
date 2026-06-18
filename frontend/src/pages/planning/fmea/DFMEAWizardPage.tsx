@@ -26,9 +26,13 @@ export default function DFMEAWizardPage() {
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [wizardScope, setWizardScope] = useState<WizardScope>({});
   const [currentStep, setCurrentStep] = useState(0);
+  const [conflictOpen, setConflictOpen] = useState(false);
   const completedSteps = useRef(new Set<number>());
 
-  const { saveStatus, setLockVersion, debouncedSave, immediateSave, lastSavedHashRef } = useWizardSave({ fmeaId: fmeaId! });
+  const { saveStatus, setLockVersion, debouncedSave, immediateSave, lastSavedHashRef } = useWizardSave({
+    fmeaId: fmeaId!,
+    onConflict: () => setConflictOpen(true),
+  });
   const validation = useWizardValidation(nodes, edges);
   const dfmeaRules = useDfmeaRules();
 
@@ -100,7 +104,14 @@ export default function DFMEAWizardPage() {
     const completedScope = { ...wizardScope, wizard_completed: true };
     const hash = computeHash(nodes, edges, completedScope);
     const success = await immediateSave({ nodes, edges, wizardScope: completedScope }, fmea?.title, hash);
-    if (!success) return;
+    if (!success) {
+      // Save hook already surfaced the underlying error (conflict modal or
+      // error toast). Don't navigate — the finish did not persist.
+      if (saveStatus !== 'conflict') {
+        message.error(t('wizard.page.finishFailed'));
+      }
+      return;
+    }
     navigate(`/fmea/${fmeaId}`);
   };
 
@@ -133,6 +144,7 @@ export default function DFMEAWizardPage() {
     saving: t('wizard.page.saveSaving'),
     saved: t('wizard.page.saveSaved'),
     error: t('wizard.page.saveError'),
+    conflict: t('wizard.page.conflictTitle'),
   };
 
   // Step 0 — 5T Scope
@@ -607,6 +619,20 @@ export default function DFMEAWizardPage() {
           )}
         </div>
       </div>
+
+      <Modal
+        open={conflictOpen}
+        closable={false}
+        maskClosable={false}
+        title={t('wizard.page.conflictTitle')}
+        footer={[
+          <Button key="reload" type="primary" onClick={() => window.location.reload()}>
+            {t('wizard.page.conflictReload')}
+          </Button>,
+        ]}
+      >
+        {t('wizard.page.conflictContent')}
+      </Modal>
     </div>
   );
 }

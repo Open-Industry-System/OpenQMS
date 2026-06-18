@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.audit import AuditLog
 from app.models.fmea import FMEADocument
 from app.models.graph_sync_outbox import GraphSyncOutbox
-from app.services.embedding_outbox import enqueue_embedding
+from app.services.embedding_outbox import delete_embeddings_for_entity, enqueue_embedding
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import _create_fmea_version_no_commit
 from app.state_machines.fmea_state import FMEAState, can_transition
@@ -287,6 +287,10 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
         event_type="fmea.deleted",
         payload={"product_line_code": fmea.product_line_code, "fmea_type": fmea.fmea_type},
     ))
+    # document_embeddings has no FK to fmea_documents (denormalized
+    # entity_type/entity_id), so the row delete does not cascade — clean the
+    # FMEA's node embeddings explicitly, in the same transaction, BEFORE commit.
+    await delete_embeddings_for_entity(db, "fmea_node", fmea_id)
     await db.delete(fmea)
     await db.commit()
 
