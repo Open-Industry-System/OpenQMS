@@ -707,10 +707,12 @@ After the existing `const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id
   const rows = useMemo(() => buildRows(nodes, edges), [nodes, edges]);
 ```
 
-with:
+with this colocated FMEA-type block. Keep both PFMEA and DFMEA derived from the same optional `fmea?.fmea_type` value so render-time type semantics are not split across the file:
 
 ```ts
-  const isPFMEA = fmea?.fmea_type === "PFMEA";
+  const fmeaType = fmea?.fmea_type;
+  const isPFMEA = fmeaType === "PFMEA";
+  const isDFMEA = fmeaType === "DFMEA";
   const canDragSortStructure = isPFMEA && canEdit("fmea");
   const structureTree = useMemo(() => buildStructureTree(nodes, edges), [nodes, edges]);
   const structureRowHeaderOrder = useMemo(() => getStructureRowHeaderOrder(nodes, edges), [nodes, edges]);
@@ -720,7 +722,7 @@ with:
   );
 ```
 
-Later in the file, keep the existing FMEA type flag:
+Later in the file, delete the existing duplicate line after the `if (!fmea)` guard:
 
 ```ts
   const isDFMEA = fmea.fmea_type === "DFMEA";
@@ -857,6 +859,17 @@ const mocks = vi.hoisted(() => ({
   warning: vi.fn(),
 }));
 
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd");
+  return {
+    ...actual,
+    App: Object.assign(
+      ({ children }: { children: React.ReactNode }) => <>{children}</>,
+      { useApp: () => ({ message: { warning: mocks.warning, success: vi.fn(), error: vi.fn() }, modal: {}, notification: {} }) }
+    ),
+  };
+});
+
 vi.mock("../../../api/fmea", () => ({
   getFMEA: mocks.getFMEA,
   updateFMEA: mocks.updateFMEA,
@@ -954,6 +967,21 @@ vi.mock("react-i18next", () => ({
 
 const node = (id: string, type: string, name = id): GraphNode => ({ id, type, name, severity: 0, occurrence: 0, detection: 0 });
 
+function makeDataTransfer(): DataTransfer {
+  const data = new Map<string, string>();
+  return {
+    effectAllowed: "",
+    dropEffect: "",
+    setData: vi.fn((format: string, value: string) => data.set(format, value)),
+    getData: vi.fn((format: string) => data.get(format) || ""),
+    clearData: vi.fn((format?: string) => { format ? data.delete(format) : data.clear(); }),
+    setDragImage: vi.fn(),
+    files: [] as unknown as FileList,
+    items: [] as unknown as DataTransferItemList,
+    types: [],
+  } as unknown as DataTransfer;
+}
+
 function makeDoc(fmeaType: "PFMEA" | "DFMEA", nodes: GraphNode[], edges: GraphEdge[]): FMEADocument {
   return {
     fmea_id: "fmea-1",
@@ -975,7 +1003,7 @@ function makeDoc(fmeaType: "PFMEA" | "DFMEA", nodes: GraphNode[], edges: GraphEd
 
 function renderEditor() {
   return render(
-    <App message={{ warning: mocks.warning }}>
+    <App>
       <MemoryRouter initialEntries={["/fmea/fmea-1"]}>
         <Routes>
           <Route path="/fmea/:id" element={<FMEAEditorPage />} />
@@ -1036,6 +1064,58 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     expect(sub).toHaveAttribute("draggable", "false");
   });
 
+  it("reorders legal same-parent drops and keeps table rows in structure order", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [
+        node("pi", "ProcessItem", "过程"),
+        node("ps1", "ProcessStep", "OP10"),
+        node("fm1", "FailureMode", "失效1"),
+        node("ps2", "ProcessStep", "OP20"),
+        node("fm2", "FailureMode", "失效2"),
+      ],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+        { source: "ps1", target: "fm1", type: "HAS_FAILURE_MODE" },
+        { source: "ps2", target: "fm2", type: "HAS_FAILURE_MODE" },
+      ],
+    ));
+
+    renderEditor();
+
+    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
+    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
+    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 40,
+      right: 200,
+      width: 200,
+      height: 40,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(ps2, { dataTransfer });
+    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
+    fireEvent.drop(ps1, { clientY: 1, dataTransfer });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
+        "fmea-structure-node-pi",
+        "fmea-structure-node-ps2",
+        "fmea-structure-node-ps1",
+      ]);
+    });
+    expect(Array.from(document.querySelectorAll("tr[data-row-key]")).map((row) => row.getAttribute("data-row-key"))).toEqual([
+      "row_ps2_fm2",
+      "row_ps1_fm1",
+    ]);
+  });
+
   it("rejects an inside drop without reordering and shows a warning", async () => {
     mocks.getFMEA.mockResolvedValue(makeDoc(
       "PFMEA",
@@ -1062,9 +1142,10 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
       toJSON: () => ({}),
     } as DOMRect);
 
-    fireEvent.dragStart(ps2, { dataTransfer: new DataTransfer() });
-    fireEvent.dragOver(ps1, { clientY: 20, dataTransfer: new DataTransfer() });
-    fireEvent.drop(ps1, { clientY: 20, dataTransfer: new DataTransfer() });
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(ps2, { dataTransfer });
+    fireEvent.dragOver(ps1, { clientY: 20, dataTransfer });
+    fireEvent.drop(ps1, { clientY: 20, dataTransfer });
 
     await waitFor(() => expect(mocks.warning).toHaveBeenCalledWith("messages.sameLevelSortOnly"));
     expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
@@ -1074,37 +1155,6 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     ]);
   });
 });
-```
-
-If TypeScript rejects the `App message={{ warning: mocks.warning }}` prop because Ant Design's `App` component type changes, replace it with a module mock for `antd` that delegates to the real module and overrides `App.useApp`. Use this exact replacement near the other mocks:
-
-```ts
-vi.mock("antd", async () => {
-  const actual = await vi.importActual<typeof import("antd")>("antd");
-  return {
-    ...actual,
-    App: Object.assign(
-      ({ children }: { children: React.ReactNode }) => <>{children}</>,
-      { useApp: () => ({ message: { warning: mocks.warning, success: vi.fn(), error: vi.fn() }, modal: {}, notification: {} }) }
-    ),
-  };
-});
-```
-
-Then render without the `message` prop:
-
-```tsx
-function renderEditor() {
-  return render(
-    <App>
-      <MemoryRouter initialEntries={["/fmea/fmea-1"]}>
-        <Routes>
-          <Route path="/fmea/:id" element={<FMEAEditorPage />} />
-        </Routes>
-      </MemoryRouter>
-    </App>
-  );
-}
 ```
 
 - [ ] **Step 6: Run the new page test and verify it fails before wiring, then passes after wiring**
