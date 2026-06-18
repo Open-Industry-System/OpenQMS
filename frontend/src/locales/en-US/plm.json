@@ -24,6 +24,7 @@
   },
   "parts": {
     "title": "PLM Parts",
+    "listTitle": "Parts List",
     "searchPlaceholder": "Search by part number or name",
     "columns": {
       "partNumber": "Part Number",
