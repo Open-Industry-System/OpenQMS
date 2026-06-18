@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams, useLocation } from "react-rout
 import {
   Button, Space, Tag, Typography, Input, Select, Table, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
-  Descriptions, Divider, Modal, Radio, Form, Dropdown,
+  Divider, Modal, Radio, Form, Dropdown,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, SendOutlined,
@@ -24,6 +24,7 @@ import { buildRows, createRowNodes, type FMEARow } from "../../../utils/fmeaTabl
 import {
   buildStructureTree,
   createStructureChild,
+  deleteSubtree,
   STRUCTURE_CHILD_MAP,
   type StructureChildAction,
   type StructureTreeNode,
@@ -82,13 +83,6 @@ function useNextTransitions(): Record<string, { label: string; target: string; i
       { label: t("transition.resubmit"), target: "in_review", icon: <SendOutlined /> },
     ],
   };
-}
-
-function getStructureNodes(nodes: GraphNode[], fmeaType: string): GraphNode[] {
-  if (fmeaType === "DFMEA") {
-    return nodes.filter((n) => ["System", "Subsystem", "Component"].includes(n.type));
-  }
-  return nodes.filter((n) => ["ProcessItem", "ProcessStep", "ProcessWorkElement"].includes(n.type));
 }
 
 export default function FMEAEditorPage() {
@@ -532,6 +526,33 @@ export default function FMEAEditorPage() {
     }).catch(() => { /* validation message shown by Form */ });
   }, [addNodeParent, addNodeAction, addNodeForm]);
 
+  // Create a new top-level ProcessItem (PFMEA) / System (DFMEA) as a sibling root.
+  const addRootStructureNode = useCallback(() => {
+    if (!fmea) return;
+    const isDf = fmea.fmea_type === "DFMEA";
+    const id = `n${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const newNode: GraphNode = {
+      id,
+      type: isDf ? "System" : "ProcessItem",
+      name: t(isDf ? "editor.newSystem" : "editor.newProcessItem"),
+      severity: 0,
+      occurrence: 0,
+      detection: 0,
+    };
+    setNodes((prev) => [...prev, newNode]);
+    setSelectedFunctionId(id);
+  }, [fmea, t]);
+
+  // Cascade-delete a node, its structure/function descendants, and the failure
+  // rows beneath them. Shared controls still referenced by surviving rows are
+  // kept (see deleteSubtree).
+  const deleteSubtreeNode = useCallback((node: GraphNode) => {
+    const { nodes: nextNodes, edges: nextEdges } = deleteSubtree(nodes, edges, node.id);
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    if (selectedFunctionId === node.id) setSelectedFunctionId(null);
+  }, [nodes, edges, selectedFunctionId]);
+
   const deleteRow = useCallback((row: FMEARow) => {
     // Only delete nodes that are NOT shared with other rows
     const otherRows = rows.filter((r) => r.key !== row.key);
@@ -573,13 +594,10 @@ export default function FMEAEditorPage() {
     }));
   }, [rows]);
 
-  const structureNodes = fmea ? getStructureNodes(nodes, fmea.fmea_type) : [];
-
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
   if (!fmea) return <Empty description={t("messages.notFound")} />;
 
   const isDFMEA = fmea.fmea_type === "DFMEA";
-  const rootStructureNode = structureNodes.find((n) => n.type === (isDFMEA ? "System" : "ProcessItem"));
 
     const columns = [
     {
@@ -1173,42 +1191,7 @@ export default function FMEAEditorPage() {
         </>
       }
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 16,
-          marginBottom: 16,
-          padding: "10px 14px",
-          background: "var(--qf-bg-panel)",
-          border: "1px solid var(--qf-border)",
-          borderRadius: "var(--qf-radius-lg)",
-        }}
-      >
-        <div style={{ flex: 1 }}>
-          <Descriptions size="small" column={4} styles={{ label: { color: "var(--qf-text-secondary)" } }}>
-            <Descriptions.Item label={isDFMEA ? t("header.system") : t("header.processItem")}>
-              {rootStructureNode ? (
-                <Input
-                  size="small"
-                  value={rootStructureNode.name}
-                  disabled={!canEdit('fmea')}
-                  style={{ width: 180 }}
-                  onChange={(e) => updateNode(rootStructureNode.id, "name", e.target.value)}
-                />
-              ) : (
-                "-"
-              )}
-            </Descriptions.Item>
-            <Descriptions.Item label={isDFMEA ? t("header.designResponsibility") : t("header.processResponsibility")}>
-              <Input size="small" placeholder={t("header.responsibilityPlaceholder")} style={{ width: 150 }} disabled={!canEdit('fmea')} />
-            </Descriptions.Item>
-            <Descriptions.Item label={t("header.keyDate")}>
-              <Input size="small" placeholder={t("header.datePlaceholder")} style={{ width: 120 }} disabled={!canEdit('fmea')} />
-            </Descriptions.Item>
-          </Descriptions>
-        </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
         <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} compact />
       </div>
 
@@ -1223,8 +1206,8 @@ export default function FMEAEditorPage() {
             title={isDFMEA ? t("tabs.structureFunction") : t("tabs.processFunction")}
             extra={
               canEdit('fmea') && (
-                <Button size="small" icon={<PlusOutlined />} onClick={addRow} disabled={!selectedFunctionId}>
-                  {t("editor.addRow")}
+                <Button size="small" icon={<PlusOutlined />} onClick={addRootStructureNode}>
+                  {isDFMEA ? t("editor.newSystem") : t("editor.newProcessItem")}
                 </Button>
               )
             }
@@ -1262,7 +1245,24 @@ export default function FMEAEditorPage() {
                       onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
                     >
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontWeight: isStructure ? 600 : 400, lineHeight: "1.5", wordBreak: "break-all" }}>{node.name}</div>
+                        <Input
+                          variant="borderless"
+                          value={node.name}
+                          disabled={!canEdit('fmea')}
+                          onChange={(e) => updateNode(node.id, "name", e.target.value)}
+                          // Stop click/focus from racing the row's setSelectedFunctionId;
+                          // select explicitly on focus instead so editing a name also
+                          // selects its node (and drives the right-hand spreadsheet).
+                          onClick={(e) => e.stopPropagation()}
+                          onFocus={() => setSelectedFunctionId(node.id)}
+                          style={{
+                            padding: 0,
+                            background: "transparent",
+                            fontWeight: isStructure ? 600 : 400,
+                            lineHeight: "1.5",
+                            color: "inherit",
+                          }}
+                        />
                         {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
                       </div>
                       <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
@@ -1299,6 +1299,20 @@ export default function FMEAEditorPage() {
                             />
                           </Dropdown>
                         )}
+                        <Popconfirm
+                          title={t("editor.confirmDeleteNode")}
+                          onConfirm={() => deleteSubtreeNode(node)}
+                          onCancel={(e) => e?.stopPropagation()}
+                        >
+                          <Button
+                            size="small"
+                            type="text"
+                            danger
+                            disabled={!canEdit('fmea')}
+                            icon={<DeleteOutlined />}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </Popconfirm>
                       </Space>
                     </div>
                     {tn.children.map((c) => renderTreeNode(c))}
@@ -1322,6 +1336,13 @@ export default function FMEAEditorPage() {
               <span style={{ fontSize: 14 }}>
                 {isDFMEA ? t("editor.dfmeaTitle") : t("editor.pfmeaTitle")}
               </span>
+            }
+            extra={
+              canEdit('fmea') && (
+                <Button size="small" icon={<PlusOutlined />} onClick={addRow} disabled={!selectedFunctionId}>
+                  {t("editor.addRow")}
+                </Button>
+              )
             }
             noPadding
           >

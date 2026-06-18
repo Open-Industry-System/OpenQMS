@@ -4,6 +4,7 @@ import {
   functionTypeFor,
   buildStructureTree,
   createStructureChild,
+  deleteSubtree,
 } from "./structureTree";
 import type { GraphNode, GraphEdge } from "../types";
 
@@ -178,5 +179,98 @@ describe("createStructureChild", () => {
     expect(child.specification).toBeUndefined();
     expect(child.requirement).toBeUndefined();
     expect(edge).toEqual({ source: "pi", target: child.id, type: "HAS_PROCESS_STEP" });
+  });
+});
+
+describe("deleteSubtree", () => {
+  // Helper: build a PFMEA graph where pi1's subtree (ps1→we1→fn1) owns a failure
+  // row (fm1/fe1/fc1/pc1/dc1), and a second root pi2 owns ps2→fn2→fm2/fc2 whose
+  // cause fc2 shares pc1 with fc1.
+  const buildGraph = () => {
+    const nodes: GraphNode[] = [
+      node("pi1", "ProcessItem", "过程1"),
+      node("ps1", "ProcessStep", "OP10"),
+      node("we1", "ProcessWorkElement", "夹具定位"),
+      node("fn1", "ProcessWorkElementFunction", "固定功能"),
+      node("fm1", "FailureMode", "偏移"),
+      node("fe1", "FailureEffect", "尺寸超差"),
+      node("fc1", "FailureCause", "夹具磨损"),
+      node("pc1", "PreventionControl", "定期更换夹具"),
+      node("dc1", "DetectionControl", "首件检验"),
+      node("pi2", "ProcessItem", "过程2"),
+      node("ps2", "ProcessStep", "OP20"),
+      node("fn2", "ProcessStepFunction", "贴装功能"),
+      node("fm2", "FailureMode", "错件"),
+      node("fc2", "FailureCause", "上料错误"),
+    ];
+    const edges: GraphEdge[] = [
+      { source: "pi1", target: "ps1", type: "HAS_PROCESS_STEP" },
+      { source: "ps1", target: "we1", type: "HAS_WORK_ELEMENT" },
+      { source: "we1", target: "fn1", type: "HAS_FUNCTION" },
+      { source: "fn1", target: "fm1", type: "HAS_FAILURE_MODE" },
+      { source: "fm1", target: "fe1", type: "EFFECT_OF" },
+      { source: "fc1", target: "fm1", type: "CAUSE_OF" },
+      { source: "fc1", target: "pc1", type: "PREVENTED_BY" },
+      { source: "fc1", target: "dc1", type: "DETECTED_BY" },
+      { source: "pi2", target: "ps2", type: "HAS_PROCESS_STEP" },
+      { source: "ps2", target: "fn2", type: "HAS_FUNCTION" },
+      { source: "fn2", target: "fm2", type: "HAS_FAILURE_MODE" },
+      { source: "fc2", target: "fm2", type: "CAUSE_OF" },
+      { source: "fc2", target: "pc1", type: "PREVENTED_BY" }, // pc1 shared with fc2
+    ];
+    return { nodes, edges };
+  };
+
+  it("removes the node, its structure/function descendants, and their failure rows", () => {
+    const { nodes, edges } = buildGraph();
+    const res = deleteSubtree(nodes, edges, "ps1");
+    const ids = new Set(res.nodes.map((n) => n.id));
+    // subtree gone
+    expect(["ps1", "we1", "fn1", "fm1", "fe1", "fc1", "dc1"].every((id) => !ids.has(id))).toBe(true);
+    // sibling root + its row untouched (pc1 kept — shared, see next test)
+    expect(["pi2", "ps2", "fn2", "fm2", "fc2"].every((id) => ids.has(id))).toBe(true);
+    // no edge touches a deleted node
+    expect(res.edges.every((e) => ids.has(e.source) && ids.has(e.target))).toBe(true);
+    // the pi1 root itself remains (we deleted ps1, not pi1)
+    expect(ids.has("pi1")).toBe(true);
+  });
+
+  it("keeps shared control nodes still referenced by a surviving row", () => {
+    const { nodes, edges } = buildGraph();
+    const res = deleteSubtree(nodes, edges, "ps1");
+    const ids = new Set(res.nodes.map((n) => n.id));
+    // pc1 is referenced by fc2 (surviving row under pi2) → must be kept
+    expect(ids.has("pc1")).toBe(true);
+    // and its edge to fc2 survives
+    expect(res.edges.some((e) => e.source === "fc2" && e.target === "pc1" && e.type === "PREVENTED_BY")).toBe(true);
+    // but the edge from the deleted fc1 to pc1 is gone
+    expect(res.edges.some((e) => e.source === "fc1" && e.target === "pc1")).toBe(false);
+  });
+
+  it("deletes a shared control once no surviving row references it", () => {
+    const { nodes, edges } = buildGraph();
+    // Delete ps2 first (its row fc2 is the only other referencer of pc1)
+    const afterPs2 = deleteSubtree(nodes, edges, "ps2");
+    // Now pc1 is referenced only by fc1 (under pi1). Deleting ps1 should drop pc1.
+    const res = deleteSubtree(afterPs2.nodes, afterPs2.edges, "ps1");
+    const ids = new Set(res.nodes.map((n) => n.id));
+    expect(ids.has("pc1")).toBe(false);
+    expect(ids.has("pi1")).toBe(true); // pi1 root still there
+  });
+
+  it("deleting a whole root removes it and all descendants", () => {
+    const { nodes, edges } = buildGraph();
+    const res = deleteSubtree(nodes, edges, "pi1");
+    const ids = new Set(res.nodes.map((n) => n.id));
+    expect(["pi1", "ps1", "we1", "fn1", "fm1", "fe1", "fc1", "dc1"].every((id) => !ids.has(id))).toBe(true);
+    // pi2 subtree + shared pc1 (still referenced by fc2) remain
+    expect(["pi2", "ps2", "fn2", "fm2", "fc2", "pc1"].every((id) => ids.has(id))).toBe(true);
+  });
+
+  it("is a no-op for an unknown root id", () => {
+    const { nodes, edges } = buildGraph();
+    const res = deleteSubtree(nodes, edges, "does-not-exist");
+    expect(res.nodes).toBe(nodes);
+    expect(res.edges).toBe(edges);
   });
 });

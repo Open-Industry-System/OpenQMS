@@ -8,6 +8,7 @@
  * This module is pure (no React) so it can be unit-tested directly.
  */
 import type { GraphNode, GraphEdge } from "../types";
+import { buildRows } from "./fmeaTable";
 
 export type StructureKind = "structure" | "function";
 
@@ -206,4 +207,76 @@ export function createStructureChild(
   };
   const edge: GraphEdge = { source: parent.id, target: id, type: action.edgeType };
   return { node, edge };
+}
+
+/** Edge types that descend one level in the structure/function tree. */
+const SUBTREE_DESCENT_EDGES = new Set(["HAS_PROCESS_STEP", "HAS_WORK_ELEMENT", "HAS_FUNCTION"]);
+
+/**
+ * Cascade-delete a node and everything beneath it.
+ *
+ * Collects the structure/function subtree rooted at `rootId` (via descent edges),
+ * plus all failure-analysis rows attached to any function node in that subtree.
+ * Nodes shared with rows OUTSIDE the subtree (e.g. a control referenced by a
+ * surviving row) are kept — mirroring the shared-control rule used by row delete.
+ * Returns the filtered nodes/edges; the caller sets state from the result.
+ */
+export function deleteSubtree(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  rootId: string,
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  if (!nodes.some((n) => n.id === rootId)) return { nodes, edges };
+
+  // 1. Collect the structure/function subtree via descent edges (BFS).
+  const subtree = new Set<string>([rootId]);
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const e of edges) {
+      if (e.source === cur && SUBTREE_DESCENT_EDGES.has(e.type) && !subtree.has(e.target)) {
+        subtree.add(e.target);
+        queue.push(e.target);
+      }
+    }
+  }
+
+  // 2. Partition rows into subtree rows (deleted) vs surviving rows (kept).
+  const allRows = buildRows(nodes, edges);
+  const survivingRows = allRows.filter((r) => !subtree.has(r.functionNodeId));
+
+  // 3. Node ids still referenced by surviving rows must be kept.
+  const usedBySurvivors = new Set<string>();
+  for (const r of survivingRows) {
+    usedBySurvivors.add(r.failureModeNodeId);
+    if (r.failureEffectNodeId) usedBySurvivors.add(r.failureEffectNodeId);
+    if (r.failureCauseNodeId) usedBySurvivors.add(r.failureCauseNodeId);
+    r.preventionControlIds.forEach((id) => usedBySurvivors.add(id));
+    r.detectionControlIds.forEach((id) => usedBySurvivors.add(id));
+    r.recommendedActionIds.forEach((id) => usedBySurvivors.add(id));
+  }
+
+  // 4. Structure/function nodes in the subtree are always deleted; failure-
+  //    analysis nodes are deleted only if no surviving row references them.
+  const deleteIds = new Set<string>(subtree);
+  for (const r of allRows) {
+    if (!subtree.has(r.functionNodeId)) continue;
+    for (const id of [
+      r.failureModeNodeId,
+      r.failureEffectNodeId,
+      r.failureCauseNodeId,
+      ...r.preventionControlIds,
+      ...r.detectionControlIds,
+      ...r.recommendedActionIds,
+    ]) {
+      if (id && !usedBySurvivors.has(id)) deleteIds.add(id);
+    }
+  }
+
+  // 5. Drop deleted nodes and any edge touching them.
+  const nextNodes = nodes.filter((n) => !deleteIds.has(n.id));
+  const nextEdges = edges.filter(
+    (e) => !deleteIds.has(e.source) && !deleteIds.has(e.target),
+  );
+  return { nodes: nextNodes, edges: nextEdges };
 }
