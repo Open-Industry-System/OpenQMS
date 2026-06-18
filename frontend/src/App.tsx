@@ -87,13 +87,13 @@ function isTokenExpired(token: string): boolean {
   }
 }
 
-function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
+function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: React.ReactNode; requiredModule?: ModuleKey; requireAdmin?: boolean }) {
   const token = useAuthStore((s) => s.token);
   const _loading = useAuthStore((s) => s.loading);
   const fetchUser = useAuthStore((s) => s.fetchUser);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const { canView } = usePermission();
+  const { canView, isAdmin } = usePermission();
 
   useEffect(() => {
     if (token && !user) fetchUser();
@@ -113,6 +113,7 @@ function ProtectedRoute({ children, requiredModule }: { children: React.ReactNod
   }
 
   if (requiredModule && !canView(requiredModule)) return <Navigate to="/dashboard" replace />;
+  if (requireAdmin && !isAdmin) return <Navigate to="/dashboard" replace />;
 
   return <>{children}</>;
 }
@@ -213,7 +214,7 @@ export default function App() {
         <Route path="/group/suppliers" element={<ProtectedRoute requiredModule="group"><GroupSuppliersPage /></ProtectedRoute>} />
         <Route path="/group/audits" element={<ProtectedRoute requiredModule="group"><GroupAuditsPage /></ProtectedRoute>} />
         {/* Admin */}
-        <Route path="/admin/ai-config" element={<ProtectedRoute><AIConfigPage /></ProtectedRoute>} />
+        <Route path="/admin/ai-config" element={<ProtectedRoute requireAdmin><AIConfigPage /></ProtectedRoute>} />
       </Route>
     </Routes>
   );

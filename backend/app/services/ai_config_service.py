@@ -8,6 +8,7 @@ the global LLM and embedding provider instances so changes take effect immediate
 import asyncio
 import logging
 import time
+import uuid
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.audit import AuditLog
 from app.models.system_setting import SystemSetting
 from app.schemas.ai_config import AIConfigOut, AIConfigUpdate
 
@@ -103,16 +105,22 @@ async def update_ai_config(
     result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(AI_CONFIG_KEYS)))
     existing = {row.key: row for row in result.scalars().all()}
 
+    # API keys are security-sensitive: never persist the raw key value to the
+    # AuditLog. For these keys we only record whether the value changed.
+    _KEYS_NEVER_LOGGED = ("llm_api_key", "embedding_api_key")
+    changed_fields: dict[str, Any] = {}
+
     payload = update.model_dump()
     for key in AI_CONFIG_KEYS:
         value = payload.get(key)
 
         # Keep existing API key when UI sends the masked sentinel.
-        if key in ("llm_api_key", "embedding_api_key") and value == MASKED_VALUE:
+        if key in _KEYS_NEVER_LOGGED and value == MASKED_VALUE:
             continue
 
         str_value = "" if value is None else str(value)
         row = existing.get(key)
+        old_value = row.value if row is not None else None
         if row is None:
             row = SystemSetting(
                 key=key,
@@ -123,6 +131,26 @@ async def update_ai_config(
         else:
             row.value = str_value
         row.updated_by = user_id
+
+        # Record what changed (masked for secrets). A row is "changed" when its
+        # stored value differs from the new value, or when newly created.
+        if key in _KEYS_NEVER_LOGGED:
+            if row.value != old_value:
+                changed_fields[key] = "<changed>"
+            else:
+                changed_fields[key] = "<unchanged>"
+        elif str_value != old_value:
+            changed_fields[key] = {"old": old_value, "new": str_value}
+
+    # AuditLog: every CRUD writes one. record_id is a stable zero UUID because
+    # system_settings is a key-value table with no single owning row.
+    db.add(AuditLog(
+        table_name="system_settings",
+        record_id=uuid.UUID(int=0),
+        action="UPDATE",
+        changed_fields=changed_fields,
+        operated_by=user_id,
+    ))
 
     await db.commit()
 
@@ -200,10 +228,19 @@ async def _rebuild_providers(db: AsyncSession, app_state: Any) -> None:
         logger.warning("Failed to recreate embedding provider: %s", e)
         app_state.embedding_provider = None
 
-    # Keep the persisted llm_timeout on app.state so the recommend path uses the
-    # admin-configured value instead of the env default (settings.LLM_TIMEOUT,
-    # which is frozen at startup and ignores /admin/ai-config changes).
+    # Keep the persisted timeouts on app.state so the consumers (CAPA draft,
+    # management review report, FMEA recommend) use the admin-configured values
+    # instead of the env defaults (frozen at startup and ignoring /admin/ai-config
+    # changes). Fall back to the env default when the DB value is absent/invalid.
     app_state.llm_timeout = int(getattr(snapshot, "LLM_TIMEOUT", 5) or 5)
+    app_state.capa_draft_llm_timeout = int(
+        getattr(snapshot, "CAPA_DRAFT_LLM_TIMEOUT", settings.CAPA_DRAFT_LLM_TIMEOUT)
+        or settings.CAPA_DRAFT_LLM_TIMEOUT
+    )
+    app_state.report_llm_timeout = int(
+        getattr(snapshot, "REPORT_LLM_TIMEOUT", settings.REPORT_LLM_TIMEOUT)
+        or settings.REPORT_LLM_TIMEOUT
+    )
 
 
 @dataclass

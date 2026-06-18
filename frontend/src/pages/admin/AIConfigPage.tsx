@@ -44,7 +44,12 @@ export default function AIConfigPage() {
       if (error.errorFields) {
         message.error(t("messages.validationFailed"));
       } else {
-        message.error(t("messages.saveFailed"));
+        const detail = error?.response?.data?.detail;
+        if (typeof detail === "string" && detail) {
+          message.error(t("messages.saveFailedDetail", { detail }));
+        } else {
+          message.error(t("messages.saveFailed"));
+        }
       }
     } finally {
       setSaving(false);
@@ -79,7 +84,7 @@ export default function AIConfigPage() {
           ) : (
             <CloseCircleTwoTone twoToneColor="#ff4d4f" />
           )}
-          <Tag color={result.ok ? "success" : "error"}>{result.ok ? "成功" : "失败"}</Tag>
+          <Tag color={result.ok ? "success" : "error"}>{result.ok ? t("testResult.success") : t("testResult.fail")}</Tag>
           {result.latency_ms !== null && result.latency_ms !== undefined && (
             <span style={{ color: "var(--qf-text-secondary)", fontFamily: "var(--qf-font-mono)" }}>
               {result.latency_ms} ms
@@ -112,7 +117,7 @@ export default function AIConfigPage() {
             tooltip={t("fields.llm_provider.tooltip")}
           >
             <Select placeholder={t("fields.llm_provider.placeholder")} allowClear>
-              <Option value="">None (规则引擎模式)</Option>
+              <Option value="">{t("fields.llm_provider.noneOption")}</Option>
               <Option value="claude">Claude (Anthropic)</Option>
               <Option value="openai">OpenAI</Option>
               <Option value="local">Local (Ollama / vLLM)</Option>
@@ -154,7 +159,7 @@ export default function AIConfigPage() {
               <InputNumber min={1} max={120} style={{ width: 140 }} />
             </Form.Item>
             <span style={{ color: "var(--qf-text-secondary)", fontSize: 12, alignSelf: "flex-end", marginBottom: 24 }}>
-              秒
+              {t("fields.timeoutUnit")}
             </span>
           </Space>
         </Card>
@@ -166,7 +171,7 @@ export default function AIConfigPage() {
             tooltip={t("fields.embedding_provider.tooltip")}
           >
             <Select placeholder={t("fields.embedding_provider.placeholder")} allowClear>
-              <Option value="">跟随 LLM Provider</Option>
+              <Option value="">{t("fields.embedding_provider.followOption")}</Option>
               <Option value="openai">OpenAI</Option>
               <Option value="ollama">Ollama</Option>
             </Select>

@@ -19,7 +19,8 @@
     "llm_provider": {
       "label": "LLM Provider",
       "tooltip": "选择 LLM 服务商。留空则使用纯规则引擎模式（不调用 AI）。",
-      "placeholder": "选择提供商"
+      "placeholder": "选择提供商",
+      "noneOption": "无（规则引擎模式）"
     },
     "llm_api_key": {
       "label": "API Key",
@@ -45,10 +46,12 @@
     "report_llm_timeout": {
       "label": "报告生成超时"
     },
+    "timeoutUnit": "秒",
     "embedding_provider": {
       "label": "Embedding Provider",
       "tooltip": "留空则跟随 LLM Provider。",
-      "placeholder": "选择提供商"
+      "placeholder": "选择提供商",
+      "followOption": "跟随 LLM Provider"
     },
     "embedding_api_key": {
       "label": "API Key",
@@ -82,12 +85,15 @@
     "loadFailed": "加载配置失败",
     "saveSuccess": "配置已保存并生效",
     "saveFailed": "保存配置失败",
+    "saveFailedDetail": "保存配置失败：{{detail}}",
     "validationFailed": "表单验证失败，请检查输入",
     "testFailed": "测试连接失败"
   },
   "testResult": {
     "title": "连接测试结果",
     "close": "关闭",
-    "hint": "测试使用当前表单中的配置（未保存也会测试）。若 API Key 显示为 ******** 则使用已保存的密钥。"
+    "hint": "测试使用当前表单中的配置（未保存也会测试）。若 API Key 显示为 ******** 则使用已保存的密钥。",
+    "success": "成功",
+    "fail": "失败"
   }
 }

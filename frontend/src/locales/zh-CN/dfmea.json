@@ -53,6 +53,7 @@
       "failureEffect": "失效影响",
       "failureCause": "失效原因",
       "addFailureMode": "+ 添加失效模式",
+      "addFunction": "+ 添加功能",
       "delete": "删除",
       "newFailureMode": "新失效模式"
     },

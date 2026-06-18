@@ -19,6 +19,44 @@ interface SmartSuggestionDropdownProps {
   scope?: "global" | "current_product_line";
 }
 
+// Module-scope helpers (defined once, not re-created each render) so the
+// suggestion subtree doesn't remount on every keystroke.
+const SourceTag = ({ item, t }: { item: Suggestion; t: TFunc }) => {
+  if (item.source === "graph" && item.source_document_no) {
+    const href = `/fmea/${item.source_fmea_id}?tab=graph&highlightNode=${item.source_node_id}`;
+    return (
+      <span style={{ fontSize: 11, color: "#52c41a" }}>
+        {t("smartSuggestion.from")}{" "}
+        <a href={href} target="_blank" rel="noopener" style={{ color: "#52c41a", textDecoration: "underline" }}>{item.source_document_no}</a>
+        {item.source_product_line_code && ` · ${item.source_product_line_code}`}
+        {item.source_product_line_name && `（${item.source_product_line_name}）`}
+        {item.similarity_score !== undefined && ` · ${t("smartSuggestion.similarity", { score: (item.similarity_score * 100).toFixed(0) })}`}
+      </span>
+    );
+  }
+  if (item.source === "rule") {
+    return <span style={{ fontSize: 11, color: "#1890ff" }}>{t("smartSuggestion.ruleEngine")}</span>;
+  }
+  if (item.source === "llm") {
+    return <span style={{ fontSize: 11, color: "#722ed1" }}>{t("smartSuggestion.aiGenerated")}</span>;
+  }
+  return null;
+};
+
+const confidenceLabel = (c: number, t: TFunc) => {
+  if (c >= 0.7) return <Tag color="green">{t("smartSuggestion.confidence.high")}</Tag>;
+  if (c >= 0.4) return <Tag color="orange">{t("smartSuggestion.confidence.medium")}</Tag>;
+  return <Tag color="default">{t("smartSuggestion.confidence.low")}</Tag>;
+};
+
+const sourceIcon = (s: string) =>
+  s === "llm" ? <StarOutlined style={{ color: "#722ed1" }} /> : <SettingOutlined style={{ color: "#1890ff" }} />;
+
+const scopeLabel = (s: "global" | "current_product_line", t: TFunc) =>
+  s === "global" ? t("smartSuggestion.scopeGlobal") : t("smartSuggestion.scopeLocal");
+
+type TFunc = (key: string, opts?: Record<string, unknown>) => string;
+
 export default function SmartSuggestionDropdown({
   triggerType,
   context,
@@ -44,28 +82,6 @@ export default function SmartSuggestionDropdown({
 
   const { canView } = usePermission();
   const hasKgPermission = canView("knowledge_graph" as ModuleKey);
-
-  const SourceTag = ({ item }: { item: Suggestion }) => {
-    if (item.source === "graph" && item.source_document_no) {
-      const href = `/fmea/${item.source_fmea_id}?tab=graph&highlightNode=${item.source_node_id}`;
-      return (
-        <span style={{ fontSize: 11, color: "#52c41a" }}>
-          {t("smartSuggestion.from")}{" "}
-          <a href={href} target="_blank" rel="noopener" style={{ color: "#52c41a", textDecoration: "underline" }}>{item.source_document_no}</a>
-          {item.source_product_line_code && ` · ${item.source_product_line_code}`}
-          {item.source_product_line_name && `（${item.source_product_line_name}）`}
-          {item.similarity_score !== undefined && ` · ${t("smartSuggestion.similarity", { score: (item.similarity_score * 100).toFixed(0) })}`}
-        </span>
-      );
-    }
-    if (item.source === "rule") {
-      return <span style={{ fontSize: 11, color: "#1890ff" }}>{t("smartSuggestion.ruleEngine")}</span>;
-    }
-    if (item.source === "llm") {
-      return <span style={{ fontSize: 11, color: "#722ed1" }}>{t("smartSuggestion.aiGenerated")}</span>;
-    }
-    return null;
-  };
 
   const fetchSuggestions = useCallback(
     async (inputValue: string) => {
@@ -160,18 +176,6 @@ export default function SmartSuggestionDropdown({
     };
   }, []);
 
-  const confidenceLabel = (c: number) => {
-    if (c >= 0.7) return <Tag color="green">{t("smartSuggestion.confidence.high")}</Tag>;
-    if (c >= 0.4) return <Tag color="orange">{t("smartSuggestion.confidence.medium")}</Tag>;
-    return <Tag color="default">{t("smartSuggestion.confidence.low")}</Tag>;
-  };
-
-  const sourceIcon = (s: string) =>
-    s === "llm" ? <StarOutlined style={{ color: "#722ed1" }} /> : <SettingOutlined style={{ color: "#1890ff" }} />;
-
-  const scopeLabel = (s: "global" | "current_product_line") =>
-    s === "global" ? t("smartSuggestion.scopeGlobal") : t("smartSuggestion.scopeLocal");
-
   const dropdownContent = (
     <div
       style={{
@@ -235,13 +239,13 @@ export default function SmartSuggestionDropdown({
         )}
         {effectiveScope !== scope && (
           <Text type="warning" style={{ fontSize: 11, marginLeft: 8, color: "var(--qf-amber)" }}>
-            {t("smartSuggestion.actualScope", { scope: scopeLabel(effectiveScope) })}
+            {t("smartSuggestion.actualScope", { scope: scopeLabel(effectiveScope, t) })}
           </Text>
         )}
       </div>
       {suggestions.map((s, i) => (
         <div
-          key={i}
+          key={`${s.source}-${s.name}-${i}`}
           onClick={() => handleSelect(s)}
           style={{
             padding: "8px 12px",
@@ -262,9 +266,9 @@ export default function SmartSuggestionDropdown({
                   {s.explanation}
                 </Text>
               )}
-              <div><SourceTag item={s} /></div>
+              <div><SourceTag item={s} t={t} /></div>
             </div>
-            {confidenceLabel(s.confidence)}
+            {confidenceLabel(s.confidence, t)}
           </div>
         </div>
       ))}

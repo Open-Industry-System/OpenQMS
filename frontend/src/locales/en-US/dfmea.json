@@ -53,6 +53,7 @@
       "failureEffect": "Failure Effect",
       "failureCause": "Failure Cause",
       "addFailureMode": "+ Add Failure Mode",
+      "addFunction": "+ Add Function",
       "delete": "Delete",
       "newFailureMode": "New Failure Mode"
     },

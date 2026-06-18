@@ -19,7 +19,8 @@
     "llm_provider": {
       "label": "LLM Provider",
       "tooltip": "Choose an LLM provider. Leave empty for rule-engine-only mode (no AI calls).",
-      "placeholder": "Select provider"
+      "placeholder": "Select provider",
+      "noneOption": "None (rule-engine mode)"
     },
     "llm_api_key": {
       "label": "API Key",
@@ -45,10 +46,12 @@
     "report_llm_timeout": {
       "label": "Report Generation Timeout"
     },
+    "timeoutUnit": "seconds",
     "embedding_provider": {
       "label": "Embedding Provider",
       "tooltip": "Leave empty to inherit from LLM Provider.",
-      "placeholder": "Select provider"
+      "placeholder": "Select provider",
+      "followOption": "Follow LLM Provider"
     },
     "embedding_api_key": {
       "label": "API Key",
@@ -82,12 +85,15 @@
     "loadFailed": "Failed to load configuration",
     "saveSuccess": "Configuration saved and applied",
     "saveFailed": "Failed to save configuration",
+    "saveFailedDetail": "Failed to save configuration: {{detail}}",
     "validationFailed": "Form validation failed, please check inputs",
     "testFailed": "Connection test failed"
   },
   "testResult": {
     "title": "Connection Test Result",
     "close": "Close",
-    "hint": "The test uses the values currently in the form (even if unsaved). If the API Key shows ********, the saved key is used."
+    "hint": "The test uses the values currently in the form (even if unsaved). If the API Key shows ********, the saved key is used.",
+    "success": "Success",
+    "fail": "Failed"
   }
 }

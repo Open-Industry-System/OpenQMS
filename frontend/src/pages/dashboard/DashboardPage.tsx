@@ -105,17 +105,24 @@ export default function DashboardPage() {
 
       const widgetTypes = [...new Set(loadedLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
-      setData(widgetsResp);
+      return widgetsResp;
     } catch (e) {
       console.error("Dashboard fetch error:", e);
       message.error(t("messages.loadFailed", "仪表盘加载失败"));
+      return null;
     } finally {
       setLoading(false);
     }
   }, [productLine, t, message]);
 
   useEffect(() => {
-    fetchData();
+    let cancelled = false;
+    fetchData().then((widgetsResp) => {
+      // Drop the result if a later product-line switch superseded this fetch
+      // (resolved out of order) — prevents overwriting `data` with stale rows.
+      if (!cancelled && widgetsResp) setData(widgetsResp);
+    });
+    return () => { cancelled = true; };
   }, [fetchData]);
 
   const handleEdit = () => {

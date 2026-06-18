@@ -138,17 +138,19 @@ async def _enrich_with_llm(
     sections: list[dict],
     review: ManagementReview,
     llm_provider: "LLMProvider | None",
+    report_llm_timeout: int | None = None,
 ) -> tuple[list[dict], bool]:
     if llm_provider is None:
         return sections, False
 
+    timeout = report_llm_timeout or settings.REPORT_LLM_TIMEOUT
     llm_enriched = False
     for section in sections:
         try:
             prompt = _build_section_prompt(section, review)
             response = await asyncio.wait_for(
                 llm_provider.complete(prompt, LLM_SECTION_SCHEMA),
-                timeout=settings.REPORT_LLM_TIMEOUT,
+                timeout=timeout,
             )
             section["ai_analysis"] = str(response.get("analysis", "")).strip()
             section["findings"] = [str(x) for x in response.get("findings", []) if x]
@@ -179,9 +181,11 @@ async def _generate_executive_summary(
     sections: list[dict],
     review: ManagementReview,
     llm_provider: "LLMProvider | None",
+    report_llm_timeout: int | None = None,
 ) -> tuple[str, list[str]]:
     if llm_provider is None:
         return _fallback_executive_summary(review), []
+    timeout = report_llm_timeout or settings.REPORT_LLM_TIMEOUT
     try:
         response = await asyncio.wait_for(
             llm_provider.complete(
@@ -195,7 +199,7 @@ async def _generate_executive_summary(
                     "required": ["executive_summary", "overall_recommendations"],
                 },
             ),
-            timeout=settings.REPORT_LLM_TIMEOUT,
+            timeout=timeout,
         )
         return (
             str(response.get("executive_summary", "")).strip(),
@@ -218,6 +222,7 @@ async def generate_report(
     user: "User",
     llm_provider: "LLMProvider | None" = None,
     use_llm: bool = True,
+    report_llm_timeout: int | None = None,
 ) -> dict:
     if review.status == "closed":
         raise ValueError("cannot generate report for closed review")
@@ -229,12 +234,14 @@ async def generate_report(
     sections = _build_sections(review.data_package, review.manual_inputs)
     llm_enriched = False
     if use_llm and llm_provider is not None:
-        sections, llm_enriched = await _enrich_with_llm(sections, review, llm_provider)
+        sections, llm_enriched = await _enrich_with_llm(
+            sections, review, llm_provider, report_llm_timeout=report_llm_timeout
+        )
 
     executive_summary, overall_recommendations = "", []
     if use_llm and llm_provider is not None:
         executive_summary, overall_recommendations = await _generate_executive_summary(
-            sections, review, llm_provider
+            sections, review, llm_provider, report_llm_timeout=report_llm_timeout
         )
     else:
         executive_summary = _fallback_executive_summary(review)

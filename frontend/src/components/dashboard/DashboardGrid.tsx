@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import type { LayoutItem, ResponsiveLayouts } from "react-grid-layout/legacy";
 import type { WidgetLayoutItem, DashboardWidgetsData } from "./widgets/types";
@@ -94,7 +94,6 @@ export default function DashboardGrid({
   onRemoveWidget,
   onRetry,
 }: DashboardGridProps) {
-  const [currentBreakpoint, setCurrentBreakpoint] = useState<string>("lg");
 
   const layouts: ResponsiveLayouts = useMemo(() => {
     return {
@@ -118,7 +117,6 @@ export default function DashboardGrid({
       rowHeight={GRID_CONFIG.rowHeight}
       margin={GRID_CONFIG.margin}
       containerPadding={GRID_CONFIG.containerPadding}
-      onBreakpointChange={(bp: string) => setCurrentBreakpoint(bp)}
       compactType="vertical"
       isDraggable={canEdit}
       isResizable={canEdit}

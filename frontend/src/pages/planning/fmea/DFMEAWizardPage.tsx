@@ -171,7 +171,7 @@ export default function DFMEAWizardPage() {
 
     const handleAddNode = (type: string, parentId?: string) => {
       const newNode: GraphNode = {
-        id: `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${type.toLowerCase()}`,
+        id: `w${crypto.randomUUID()}_${type.toLowerCase()}`,
         type, name: t(`wizard.typeLabels.${type}`, { defaultValue: type }),
         severity: 0, occurrence: 0, detection: 0,
         ...(type === 'Interface' ? { interface_type: 'physical' } : {}),
@@ -194,6 +194,42 @@ export default function DFMEAWizardPage() {
     const typeLabel = (type: string) => t(`wizard.typeLabels.${type}`, { defaultValue: type });
     const TYPE_COLORS: Record<string, string> = { System: 'red', Subsystem: 'orange', Component: 'green', Interface: 'purple', DesignParameter: 'blue' };
 
+    // Derive depth from graph edges (System=0, Subsystem=1, Component=2) so
+    // every child — including Interface/DesignParameter, which carry no descent
+    // edge of their own — inherits its parent's depth + 1 instead of falling
+    // back to 0. Sort by depth so children render under their parents.
+    const childToParent: Record<string, string> = {};
+    for (const e of edges) {
+      if (e.type === 'HAS_PROCESS_STEP' || e.type === 'HAS_WORK_ELEMENT') {
+        childToParent[e.target] = e.source;
+      }
+    }
+    const depthOf = (id: string): number => {
+      let depth = 0;
+      let cur: string | undefined = id;
+      const guard = new Set<string>();
+      while (childToParent[cur] && !guard.has(cur)) {
+        guard.add(cur);
+        cur = childToParent[cur];
+        depth += 1;
+      }
+      return depth;
+    };
+    // Interface/DesignParameter attach to a structure node via HAS_PARAMETER —
+    // inherit that parent's depth + 1 so they indent under their host.
+    const paramParentOf: Record<string, string> = {};
+    for (const e of edges) {
+      if (e.type === 'HAS_PARAMETER') paramParentOf[e.target] = e.source;
+    }
+    const depthOfAny = (node: GraphNode): number => {
+      if (childToParent[node.id]) return depthOf(node.id);
+      if (paramParentOf[node.id]) return depthOf(paramParentOf[node.id]) + 1;
+      return 0;
+    };
+    const orderedStructureNodes = [...structureNodes].sort(
+      (a, b) => depthOfAny(a) - depthOfAny(b),
+    );
+
     return (
       <div>
         <Space style={{ marginBottom: 12 }}>
@@ -201,8 +237,8 @@ export default function DFMEAWizardPage() {
           <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddNode('Interface')}>{t('wizard.structure.addInterface')}</Button>
         </Space>
         {structureNodes.length === 0 && <Empty description={t('wizard.structure.empty')} />}
-        {structureNodes.map(node => (
-          <Card key={node.id} size="small" style={{ marginBottom: 8, marginLeft: node.type === 'Subsystem' ? 20 : node.type === 'Component' ? 40 : 0 }}>
+        {orderedStructureNodes.map(node => (
+          <Card key={node.id} size="small" style={{ marginBottom: 8, marginLeft: depthOfAny(node) * 20 }}>
             <Space>
               <Tag color={TYPE_COLORS[node.type]}>{typeLabel(node.type)}</Tag>
               <Input size="small" value={node.name} style={{ width: 200 }}
@@ -226,7 +262,7 @@ export default function DFMEAWizardPage() {
     if (components.length === 0) return <Empty description={t('wizard.function.title') + ' — ' + t('wizard.structure.empty')} />;
 
     const handleAddFunction = (compId: string) => {
-      const funcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_func`;
+      const funcId = `w${crypto.randomUUID()}_func`;
       const funcNode: GraphNode = {
         id: funcId, type: 'ProcessWorkElementFunction', name: '',
         requirement: '', specification: '', severity: 0, occurrence: 0, detection: 0,
@@ -256,7 +292,7 @@ export default function DFMEAWizardPage() {
                 </div>
               ))}
               <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => handleAddFunction(comp.id)}>
-                {t('wizard.failure.addFailureMode').replace('失效模式', '功能')}
+                {t('wizard.failure.addFunction')}
               </Button>
             </Card>
           );
@@ -273,10 +309,10 @@ export default function DFMEAWizardPage() {
     if (functions.length === 0) return <Empty description={t('wizard.failure.title') + ' — ' + t('wizard.function.title')} />;
 
     const handleAddFailure = (funcId: string, mode?: string, effect?: string, cause?: string) => {
-      const fmId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_fm`;
-      const feId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_fe`;
-      const fcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_fc`;
-      const dcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_dc`;
+      const fmId = `w${crypto.randomUUID()}_fm`;
+      const feId = `w${crypto.randomUUID()}_fe`;
+      const fcId = `w${crypto.randomUUID()}_fc`;
+      const dcId = `w${crypto.randomUUID()}_dc`;
       const newNodes: GraphNode[] = [
         { id: fmId, type: 'FailureMode', name: mode || t('wizard.failure.newFailureMode'), severity: 0, occurrence: 0, detection: 0 },
         { id: feId, type: 'FailureEffect', name: effect || '', severity: 0, occurrence: 0, detection: 0 },
@@ -293,47 +329,12 @@ export default function DFMEAWizardPage() {
       updateGraphData([...nodes, ...newNodes], [...edges, ...newEdges]);
     };
 
+    // Delete a failure chain (FailureMode + its Effects/Causes/Controls).
+    // cascadeDeleteStructureNode already BFS-follows EFFECT_OF + CAUSE_OF +
+    // PREVENTED_BY/DETECTED_BY and keeps controls referenced by surviving rows.
     const handleDeleteFailureChain = (failureModeId: string) => {
-      const toDelete = new Set<string>([failureModeId]);
-      const edgesToDelete = new Set<string>();
-
-      // Find FailureEffect (outgoing EFFECT_OF)
-      for (const e of edges) {
-        if (e.source === failureModeId && e.type === 'EFFECT_OF') {
-          toDelete.add(e.target);
-          edgesToDelete.add(`${e.source}->${e.target}->${e.type}`);
-        }
-      }
-
-      // Find FailureCause (incoming CAUSE_OF)
-      for (const e of edges) {
-        if (e.target === failureModeId && e.type === 'CAUSE_OF') {
-          toDelete.add(e.source);
-          edgesToDelete.add(`${e.source}->${e.target}->${e.type}`);
-          // Find PreventionControl and DetectionControl from this cause
-          for (const e2 of edges) {
-            if (e2.source === e.source && (e2.type === 'PREVENTED_BY' || e2.type === 'DETECTED_BY')) {
-              // Only delete control nodes that are ONLY connected to this cause
-              const otherParents = edges.filter(e3 => e3.target === e2.target && e3.source !== e.source);
-              if (otherParents.length === 0) {
-                toDelete.add(e2.target);
-              }
-              edgesToDelete.add(`${e2.source}->${e2.target}->${e2.type}`);
-            }
-          }
-        }
-      }
-
-      // Remove edges targeting deleted nodes
-      for (const e of edges) {
-        if (toDelete.has(e.source) || toDelete.has(e.target)) {
-          edgesToDelete.add(`${e.source}->${e.target}->${e.type}`);
-        }
-      }
-
-      const filteredNodes = nodes.filter(n => !toDelete.has(n.id));
-      const filteredEdges = edges.filter(e => !edgesToDelete.has(`${e.source}->${e.target}->${e.type}`));
-      updateGraphData(filteredNodes, filteredEdges);
+      const result = cascadeDeleteStructureNode(failureModeId, nodes, edges);
+      updateGraphData(result.nodes, result.edges);
     };
 
     const handleUpdateNodeField = (nodeId: string, field: string, value: string) => {
@@ -474,7 +475,7 @@ export default function DFMEAWizardPage() {
         if (existingPcIds.length > 0) {
           newNodes = newNodes.map(n => n.id === existingPcIds[0] ? { ...n, name: value } : n);
         } else {
-          const pcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_pc`;
+          const pcId = `w${crypto.randomUUID()}_pc`;
           newNodes.push({ id: pcId, type: 'PreventionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
           newEdges.push({ source: causeId, target: pcId, type: 'PREVENTED_BY' });
         }
@@ -485,7 +486,7 @@ export default function DFMEAWizardPage() {
         if (existingDcIds.length > 0) {
           newNodes = newNodes.map(n => n.id === existingDcIds[0] ? { ...n, name: value } : n);
         } else {
-          const dcId = `w${Date.now()}_${Math.random().toString(36).slice(2, 8)}_dc`;
+          const dcId = `w${crypto.randomUUID()}_dc`;
           newNodes.push({ id: dcId, type: 'DetectionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
           newEdges.push({ source: causeId, target: dcId, type: 'DETECTED_BY' });
         }

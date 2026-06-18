@@ -424,8 +424,11 @@ async def generate_report(
     _check_factory_access(review, scope)
     try:
         llm_provider = getattr(request.app.state, "llm_provider", None)
+        report_llm_timeout = getattr(request.app.state, "report_llm_timeout", None)
         content = await report_service.generate_report(
-            db, review, scope.user, llm_provider=llm_provider, use_llm=req.use_llm,
+            db, review, scope.user,
+            llm_provider=llm_provider, use_llm=req.use_llm,
+            report_llm_timeout=report_llm_timeout,
         )
         return schemas.management_review.ReportGenerateResponse(
             report_status=review.report_status,

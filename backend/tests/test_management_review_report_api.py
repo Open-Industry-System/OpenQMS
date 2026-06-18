@@ -128,7 +128,7 @@ async def test_permission_levels():
     mock_db.flush = AsyncMock()
     mock_db.refresh = AsyncMock()
 
-    async def mock_generate(db, review, user, llm_provider=None, use_llm=True):
+    async def mock_generate(db, review, user, llm_provider=None, use_llm=True, **kwargs):
         review.report_status = "draft"
         review.generated_report = _sample_report_content()
         return review.generated_report

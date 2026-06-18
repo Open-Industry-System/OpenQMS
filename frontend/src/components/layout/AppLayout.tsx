@@ -112,6 +112,8 @@ interface MenuItem {
   icon?: ReactNode;
   label: string;
   module?: ModuleKey;
+  /** Restrict to admin role (no module-level permission applies). */
+  adminOnly?: boolean;
   children?: MenuItem[];
 }
 
@@ -262,7 +264,7 @@ function useMenuItems(): MenuItem[] {
         icon: <SettingOutlined />,
         label: t("menu.admin"),
         children: [
-          { key: "/admin/ai-config", icon: <SettingOutlined />, label: t("menu.aiConfig") },
+          { key: "/admin/ai-config", icon: <SettingOutlined />, label: t("menu.aiConfig"), adminOnly: true },
         ],
       },
     ],
@@ -273,13 +275,18 @@ function useMenuItems(): MenuItem[] {
 function filterMenuByPermission(
   items: MenuItem[],
   canViewFn: (m: ModuleKey) => boolean,
+  isAdmin: boolean,
 ): MenuItem[] {
   return items
     .map((item) => {
-      if (!item.module) return item;
-      if (!canViewFn(item.module)) return null;
+      // Admin-only items (e.g. AI model config) are hidden from non-admins;
+      // the backend enforces require_admin regardless, but we hide the menu
+      // entry so non-admins don't see a link that 403s on click.
+      if (item.adminOnly && !isAdmin) return null;
+      if (!item.module && !item.adminOnly) return item;
+      if (item.module && !canViewFn(item.module)) return null;
       if (item.children) {
-        const filteredChildren = filterMenuByPermission(item.children, canViewFn);
+        const filteredChildren = filterMenuByPermission(item.children, canViewFn, isAdmin);
         if (filteredChildren.length === 0) return null;
         return { ...item, children: filteredChildren };
       }
@@ -300,7 +307,7 @@ export default function AppLayout() {
   const currentFactoryId = useAuthStore((s) => s.currentFactoryId);
   const setCurrentFactoryId = useAuthStore((s) => s.setCurrentFactoryId);
   const { productLines, selected, setSelected, load } = useProductLineStore();
-  const { canView } = usePermission();
+  const { canView, isAdmin } = usePermission();
   const { t } = useTranslation("layout");
   useEffect(() => { load(); }, [load]);
 
@@ -319,8 +326,8 @@ export default function AppLayout() {
   }, [selectedKey]);
 
   const visibleMenuItems = useMemo(
-    () => filterMenuByPermission(menuItems, canView),
-    [menuItems, canView]
+    () => filterMenuByPermission(menuItems, canView, isAdmin),
+    [menuItems, canView, isAdmin]
   );
 
   const showFactorySwitcher = factoryScope?.accessible_factory_ids === null

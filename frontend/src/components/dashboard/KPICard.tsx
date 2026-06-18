@@ -71,9 +71,11 @@ export default function KPICard({
     [clickable, retryable, handleClick]
   );
 
-  const borderColor = loading || error
+  const borderColor = loading
     ? token.colorBorderSecondary
-    : getStatusColor(status, token);
+    : error
+      ? token.colorError
+      : getStatusColor(status, token);
 
   const focusOutlineColor = token.colorPrimary;
 

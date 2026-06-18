@@ -53,8 +53,8 @@ export default function CollaborationBar({ activeUsers, isSyncing, compact }: Co
           >
             <Avatar
               style={{
-                backgroundColor: u.action === "editing" ? "#52c41a" : "#bfbfbf",
-                border: u.action === "editing" ? "2px solid #237804" : undefined,
+                backgroundColor: u.action === "editing" ? "var(--qf-green)" : "var(--qf-text-tertiary)",
+                border: u.action === "editing" ? "2px solid rgba(0, 214, 143, 0.5)" : undefined,
               }}
             >
               {u.user_name?.[0] || "?"}
@@ -62,7 +62,7 @@ export default function CollaborationBar({ activeUsers, isSyncing, compact }: Co
           </Tooltip>
         ))}
       </Avatar.Group>
-      <span style={{ fontSize: 13, color: "#595959" }}>
+      <span style={{ fontSize: 13, color: "var(--qf-text-secondary)" }}>
         {activeUsers.length === 0
           ? t("bar.onlyYou")
           : t("bar.onlineCount", { count: activeUsers.length })}
