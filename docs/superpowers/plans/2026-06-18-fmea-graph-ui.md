@@ -684,6 +684,23 @@ Inside the `GraphCanvas` component, immediately after `const graphRef = useRef<G
 
 - [ ] **Step 5: Use memoized graph data when creating G6**
 
+In `initGraph`, replace the existing update branch:
+
+```ts
+    if (graphRef.current) {
+      graphRef.current.setData(toG6Data(nodes, edges));
+      return;
+    }
+```
+
+with:
+
+```ts
+    if (graphRef.current) return;
+```
+
+The separate `[graphData]` effect below owns every data refresh after the graph instance exists. This avoids leaving a stale `toG6Data(nodes, edges)` call after `toG6Data` changes to require the translation function.
+
 Replace:
 
 ```ts
@@ -708,7 +725,7 @@ with:
   }, [layout, nodes]);
 ```
 
-Do not put `graphData`, `t`, or `i18n.language` in this dependency list. The existing effect that calls `initGraph()` destroys the graph in cleanup, so adding language-dependent values here would recreate the G6 instance and lose the current zoom/pan state.
+Do not put `graphData`, `t`, or `i18n.language` in this dependency list. The existing effect that calls `initGraph()` destroys the graph in cleanup, so adding language-dependent values here would recreate the G6 instance and lose the current zoom/pan state. This is an intentional exhaustive-deps exception: keep `initGraph` free of language-dependent data; the separate `useEffect([graphData])` below is the dependency-complete data refresh path.
 
 Immediately after the existing `useEffect(() => { initGraph(); ... }, [initGraph]);` block, add this separate data-refresh effect:
 
@@ -1064,6 +1081,6 @@ Expected: commit created only when verification required a fix.
 
 ## Self-Review Notes
 
-- Spec coverage: Tasks 1-2 cover enum coverage, i18n keys, and unknown fallback. Task 3 covers canvas translations, G6 label background using verified installed-package property names, node text overflow, dagre spacing, and language refresh through `setData()` without destroying the graph. Task 4 covers legend and drawer consistency. Task 5 covers build and manual language verification.
+- Spec coverage: Tasks 1-2 cover enum coverage, i18n keys, and unknown fallback. Task 3 covers canvas translations, G6 label background using verified installed-package property names, node text overflow, dagre spacing, language refresh through `setData()` without destroying the graph, and removal of the old stale `toG6Data(nodes, edges)` update path. Task 4 covers legend and drawer consistency. Task 5 covers build and manual language verification.
 - Placeholder scan: No task uses open-ended implementation instructions; every code-producing step includes exact code or exact replacement snippets.
 - Type consistency: The exported utility function names in Task 1 match imports and usage in Tasks 3-4.
