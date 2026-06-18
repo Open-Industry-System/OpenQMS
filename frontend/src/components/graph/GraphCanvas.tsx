@@ -1,7 +1,9 @@
-import { forwardRef, useEffect, useRef, useCallback, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useRef, useCallback, useImperativeHandle, useMemo } from "react";
 import { Graph } from "@antv/g6";
+import { useTranslation } from "react-i18next";
 import type { GraphNode, GraphEdge } from "../../api/graph";
 import type { GraphLayout } from "./GraphToolbar";
+import { getEdgeTypeKey, getNodeStyle } from "../../utils/graphPresentation";
 
 interface GraphCanvasProps {
   nodes: GraphNode[];
@@ -15,70 +17,60 @@ interface GraphCanvasProps {
   onNodeContextMenu?: (node: GraphNode, event: { clientX: number; clientY: number }) => void;
 }
 
-const NODE_TYPE_COLORS: Record<string, string> = {
-  System: "#1890ff",
-  ProcessItem: "#1890ff",
-  Subsystem: "#69c0ff",
-  ProcessStep: "#69c0ff",
-  Component: "#36cfc9",
-  ProcessWorkElement: "#36cfc9",
-  Function: "#52c41a",
-  FailureMode: "#ff4d4f",
-  FailureEffect: "#fa8c16",
-  FailureCause: "#faad14",
-  PreventionControl: "#73d13d",
-  DetectionControl: "#722ed1",
-  RecommendedAction: "#8c8c8c",
-};
+type GraphT = (key: string, options?: { defaultValue?: string }) => string;
 
-const NODE_TYPE_SHAPES: Record<string, string> = {
-  System: "rect",
-  ProcessItem: "rect",
-  Subsystem: "rect",
-  ProcessStep: "rect",
-  Component: "rect",
-  ProcessWorkElement: "rect",
-  Function: "rect",
-  FailureMode: "diamond",
-  FailureEffect: "ellipse",
-  FailureCause: "ellipse",
-  PreventionControl: "circle",
-  DetectionControl: "circle",
-  RecommendedAction: "rect",
-};
+function toG6Data(nodes: GraphNode[], edges: GraphEdge[], t: GraphT) {
+  const g6Nodes = nodes.map((n) => {
+    const nodeStyle = getNodeStyle(n.label);
+    return {
+      id: n.id,
+      data: {
+        label: n.properties.name || n.label,
+        type: n.label,
+      },
+      style: {
+        ...nodeStyle,
+      },
+    };
+  });
 
-function toG6Data(nodes: GraphNode[], edges: GraphEdge[]) {
-  const g6Nodes = nodes.map((n) => ({
-    id: n.id,
-    data: {
-      label: n.properties.name || n.label,
-      type: n.label,
-    },
-    style: {
-      fill: NODE_TYPE_COLORS[n.label] || "#e8e8e8",
-      stroke: NODE_TYPE_COLORS[n.label] || "#8c8c8c",
-      lineWidth: 1,
-      size: (n.label === "FailureMode"
-        ? [80, 50]
-        : n.label?.includes("Control")
-          ? 30
-          : [100, 40]) as [number, number] | number,
-    },
-  }));
-
-  const g6Edges = edges.map((e) => ({
-    id: `${e.source}-${e.target}-${e.label || "edge"}`,
-    source: e.source,
-    target: e.target,
-    data: { label: e.label },
-    style: {
-      stroke: "#8c8c8c",
-      lineWidth: 1,
-      endArrow: true,
-    },
-  }));
+  const g6Edges = edges.map((e) => {
+    const rawLabel = e.label || "edge";
+    return {
+      id: `${e.source}-${e.target}-${rawLabel}`,
+      source: e.source,
+      target: e.target,
+      data: {
+        label: t(getEdgeTypeKey(rawLabel), { defaultValue: rawLabel }),
+        rawLabel,
+      },
+      style: {
+        stroke: "#9aa7b8",
+        lineWidth: 1,
+        endArrow: true,
+      },
+    };
+  });
 
   return { nodes: g6Nodes, edges: g6Edges };
+}
+
+function graphLayoutOptions(layout: GraphLayout) {
+  if (layout === "dagre") {
+    return {
+      type: "dagre",
+      rankdir: "LR",
+      nodesep: 70,
+      ranksep: 110,
+      controlPoints: false,
+      animation: true,
+    } as const;
+  }
+
+  return {
+    type: layout,
+    animation: true,
+  } as const;
 }
 
 export interface GraphCanvasRef {
@@ -104,6 +96,11 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
+  const { t, i18n } = useTranslation("graph");
+  const graphData = useMemo(
+    () => toG6Data(nodes, edges, t),
+    [nodes, edges, t, i18n.language],
+  );
 
   // Keep handlers in refs so initGraph only depends on structural inputs (nodes/edges/layout)
   const handlersRef = useRef({ onNodeClick, onNodeDoubleClick, onNodeContextMenu });
@@ -114,42 +111,47 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
   const initGraph = useCallback(() => {
     if (!containerRef.current) return;
 
-    // If graph already exists, just update data instead of recreating
-    if (graphRef.current) {
-      graphRef.current.setData(toG6Data(nodes, edges));
-      return;
-    }
+    if (graphRef.current) return;
 
     const graph = new Graph({
       container: containerRef.current,
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight || 600,
       autoFit: "view",
-      data: toG6Data(nodes, edges),
+      data: graphData,
       node: {
-        type: (datum: { data?: { type?: string } }) =>
-          NODE_TYPE_SHAPES[datum.data?.type || ""] || "rect",
+        type: "rect",
         style: {
           labelText: (datum: { data?: { label?: string } }) => datum.data?.label || "",
-          labelFontSize: 10,
+          labelFontSize: 12,
           labelPlacement: "center",
-          labelFill: "#333",
+          labelFill: "#1f2937",
+          labelTextAlign: "center",
+          labelWordWrap: true,
+          labelMaxWidth: 120,
+          labelWordWrapWidth: 120,
+          labelMaxLines: 2,
+          labelTextOverflow: "ellipsis",
         },
       },
       edge: {
         type: "line",
         style: {
           endArrow: true,
+          stroke: "#9aa7b8",
+          lineWidth: 1,
           labelText: (datum: { data?: { label?: string } }) => datum.data?.label || "",
-          labelFontSize: 9,
-          labelFill: "#666",
+          labelFontSize: 11,
+          labelFill: "#4b5563",
+          labelPlacement: "center",
+          labelOffsetY: -4,
+          labelBackground: true,
+          labelBackgroundFill: "#ffffff",
+          labelBackgroundOpacity: 0.92,
+          labelBackgroundPadding: [2, 6],
         },
       },
-      layout: {
-        type: layout,
-        rankdir: layout === "dagre" ? "LR" : undefined,
-        animation: true,
-      } as const,
+      layout: graphLayoutOptions(layout),
       behaviors: [
         "drag-canvas",
         "zoom-canvas",
@@ -213,7 +215,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.render().catch((err: unknown) => {
       console.error("G6 render failed:", err);
     });
-  }, [nodes, edges, layout]);
+  }, [layout, nodes]);
 
   // Apply highlight/dim
   const applyHighlight = useCallback(() => {
@@ -243,7 +245,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
             style: {
               ...edge.style,
               opacity: isHighlighted ? 1 : 0.1,
-              stroke: isHighlighted ? "#ff4d4f" : "#8c8c8c",
+              stroke: isHighlighted ? "#ff4d4f" : "#9aa7b8",
               lineWidth: isHighlighted ? 2 : 1,
             },
           },
@@ -270,7 +272,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
             style: {
               ...edge.style,
               opacity: 1,
-              stroke: "#8c8c8c",
+              stroke: "#9aa7b8",
               lineWidth: 1,
             },
           },
@@ -287,6 +289,13 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
       graphRef.current = null;
     };
   }, [initGraph]);
+
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    graph.setData(graphData);
+    graph.draw();
+  }, [graphData]);
 
   // Apply highlight after graph initialization
   useEffect(() => {
@@ -342,9 +351,9 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
         width: "100%",
         height: "100%",
         minHeight: 500,
-        border: "1px solid #f0f0f0",
-        borderRadius: 4,
-        background: "#fafafa",
+        border: "1px solid #e5e7eb",
+        borderRadius: 8,
+        background: "#f8fafc",
       }}
     />
   );
