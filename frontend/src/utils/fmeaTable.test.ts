@@ -15,6 +15,15 @@ const mockT = (key: string) => {
   return map[key] ?? key;
 };
 
+const n = (id: string, type: string): GraphNode => ({
+  id,
+  type,
+  name: id,
+  severity: 0,
+  occurrence: 0,
+  detection: 0,
+});
+
 describe("buildRows", () => {
   it("builds one row per cause", () => {
     const nodes: GraphNode[] = [
@@ -55,6 +64,44 @@ describe("buildRows", () => {
 
   it("returns empty array for empty graph", () => {
     expect(buildRows([], [])).toEqual([]);
+  });
+
+  it("uses orderedFunctionIds before raw node order", () => {
+    const nodes: GraphNode[] = [
+      n("fn1", "ProcessStepFunction"),
+      n("fm1", "FailureMode"),
+      n("fn2", "ProcessStepFunction"),
+      n("fm2", "FailureMode"),
+    ];
+    const edges: GraphEdge[] = [
+      { source: "fn1", target: "fm1", type: "HAS_FAILURE_MODE" },
+      { source: "fn2", target: "fm2", type: "HAS_FAILURE_MODE" },
+    ];
+
+    const rows = buildRows(nodes, edges, ["fn2", "fn1"]);
+
+    expect(rows.map((r) => r.functionNodeId)).toEqual(["fn2", "fn1"]);
+    expect(rows.map((r) => r.failureModeNodeId)).toEqual(["fm2", "fm1"]);
+  });
+
+  it("appends row headers missing from orderedFunctionIds in original node order", () => {
+    const nodes: GraphNode[] = [
+      n("fn1", "ProcessStepFunction"),
+      n("fm1", "FailureMode"),
+      n("fn2", "ProcessStepFunction"),
+      n("fm2", "FailureMode"),
+      n("fn3", "ProcessStepFunction"),
+      n("fm3", "FailureMode"),
+    ];
+    const edges: GraphEdge[] = [
+      { source: "fn1", target: "fm1", type: "HAS_FAILURE_MODE" },
+      { source: "fn2", target: "fm2", type: "HAS_FAILURE_MODE" },
+      { source: "fn3", target: "fm3", type: "HAS_FAILURE_MODE" },
+    ];
+
+    const rows = buildRows(nodes, edges, ["fn2"]);
+
+    expect(rows.map((r) => r.functionNodeId)).toEqual(["fn2", "fn1", "fn3"]);
   });
 });
 

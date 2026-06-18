@@ -21,7 +21,7 @@ export interface FMEARow {
  * Build FMEA rows from graph data.
  * One row per FailureCause, or per FailureMode if it has no causes.
  */
-export function buildRows(nodes: GraphNode[], edges: GraphEdge[]): FMEARow[] {
+export function buildRows(nodes: GraphNode[], edges: GraphEdge[], orderedFunctionIds?: string[]): FMEARow[] {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const rows: FMEARow[] = [];
 
@@ -38,7 +38,20 @@ export function buildRows(nodes: GraphNode[], edges: GraphEdge[]): FMEARow[] {
     "Component",
   ];
 
-  const functionNodes = nodes.filter((n) => functionTypes.includes(n.type));
+  const rawFunctionNodes = nodes.filter((n) => functionTypes.includes(n.type));
+  const functionNodeById = new Map(rawFunctionNodes.map((n) => [n.id, n]));
+  const seenFunctionIds = new Set<string>();
+  const orderedFunctionNodes = (orderedFunctionIds || [])
+    .map((id) => functionNodeById.get(id))
+    .filter((n): n is GraphNode => {
+      if (!n || seenFunctionIds.has(n.id)) return false;
+      seenFunctionIds.add(n.id);
+      return true;
+    });
+  const functionNodes = [
+    ...orderedFunctionNodes,
+    ...rawFunctionNodes.filter((n) => !seenFunctionIds.has(n.id)),
+  ];
 
   for (const funcNode of functionNodes) {
     // Find FailureModes connected to this function
