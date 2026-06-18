@@ -682,19 +682,7 @@ Inside the `GraphCanvas` component, immediately after `const graphRef = useRef<G
   );
 ```
 
-- [ ] **Step 5: Use memoized graph data when creating or updating G6**
-
-In `initGraph`, replace:
-
-```ts
-      graphRef.current.setData(toG6Data(nodes, edges));
-```
-
-with:
-
-```ts
-      graphRef.current.setData(graphData);
-```
+- [ ] **Step 5: Use memoized graph data when creating G6**
 
 Replace:
 
@@ -717,10 +705,23 @@ At the end of the `initGraph` dependency list, replace:
 with:
 
 ```ts
-  }, [graphData, layout, nodes]);
+  }, [layout, nodes]);
 ```
 
-This dependency list intentionally includes `graphData`, which changes when `i18n.language` changes.
+Do not put `graphData`, `t`, or `i18n.language` in this dependency list. The existing effect that calls `initGraph()` destroys the graph in cleanup, so adding language-dependent values here would recreate the G6 instance and lose the current zoom/pan state.
+
+Immediately after the existing `useEffect(() => { initGraph(); ... }, [initGraph]);` block, add this separate data-refresh effect:
+
+```ts
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    graph.setData(graphData);
+    graph.draw();
+  }, [graphData]);
+```
+
+This effect updates translated edge labels on language changes without destroying the graph instance.
 
 - [ ] **Step 6: Apply node label wrapping and edge label background styles**
 
@@ -758,11 +759,10 @@ Replace the entire `edge` block with:
           labelFill: "#4b5563",
           labelPlacement: "center",
           labelOffsetY: -4,
-          labelPadding: [2, 6],
           labelBackground: true,
           labelBackgroundFill: "#ffffff",
-          labelBackgroundFillOpacity: 0.92,
-          labelBackgroundRadius: 4,
+          labelBackgroundOpacity: 0.92,
+          labelBackgroundPadding: [2, 6],
         },
       },
 ```
@@ -823,7 +823,13 @@ Expected: PASS. If TypeScript rejects one of these G6 style keys, remove only th
           labelFill: "#4b5563",
           labelPlacement: "center",
           labelOffsetY: -4,
+          labelBackground: true,
+          labelBackgroundFill: "#ffffff",
+          labelBackgroundOpacity: 0.92,
+          labelBackgroundPadding: [2, 6],
 ```
+
+Do not use `labelBackgroundFillOpacity` or `labelBackgroundRadius` unless they are verified against the installed `@antv/g6` package and visible in the browser; TypeScript may not reject unknown style keys even when G6 ignores them at runtime.
 
 For node label overflow, if TypeScript rejects either `labelMaxWidth` or `labelWordWrapWidth`, keep the one that compiles and leave `labelWordWrap`, `labelMaxLines`, and `labelTextOverflow` in place.
 
@@ -1009,7 +1015,7 @@ frontend/src/components/graph/GraphLegend.tsx
 frontend/src/components/graph/NodeDetailDrawer.tsx
 ```
 
-If the diff includes unrelated files, remove unrelated changes before proceeding.
+If the diff includes unrelated files, do not include them in this task's commits. If an unrelated change was caused by this task, revert only that self-caused change. If ownership is unclear or it may be a user/parallel-agent change, pause and ask before touching it.
 
 - [ ] **Step 4: Run manual browser verification**
 
@@ -1058,6 +1064,6 @@ Expected: commit created only when verification required a fix.
 
 ## Self-Review Notes
 
-- Spec coverage: Tasks 1-2 cover enum coverage, i18n keys, and unknown fallback. Task 3 covers canvas translations, G6 label background, node text overflow, dagre spacing, and language refresh. Task 4 covers legend and drawer consistency. Task 5 covers build and manual language verification.
+- Spec coverage: Tasks 1-2 cover enum coverage, i18n keys, and unknown fallback. Task 3 covers canvas translations, G6 label background using verified installed-package property names, node text overflow, dagre spacing, and language refresh through `setData()` without destroying the graph. Task 4 covers legend and drawer consistency. Task 5 covers build and manual language verification.
 - Placeholder scan: No task uses open-ended implementation instructions; every code-producing step includes exact code or exact replacement snippets.
 - Type consistency: The exported utility function names in Task 1 match imports and usage in Tasks 3-4.
