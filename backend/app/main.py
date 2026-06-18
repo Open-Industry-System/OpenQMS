@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.api.admin import permissions as admin_permissions_api
+from app.api.admin import ai_config as admin_ai_config_api
 from app.api.apqp import router as apqp_router
 from app.api.audit_finding import router as audit_finding_router
 from app.api.audit_plan import router as audit_plan_router
@@ -88,20 +89,17 @@ async def lifespan(app: FastAPI):
                     await db.rollback()
                     print("WARNING: role_definitions table not found. Run 'alembic upgrade head' and seed before using the permission system.")
 
-    # Initialize LLM provider (non-fatal)
-    from app.services.llm_provider import create_llm_provider
+    # Initialize LLM + embedding providers from the persisted AI config (DB),
+    # falling back to env defaults. This way a provider configured via the AI
+    # config page survives restarts/reloads instead of only being (re)built when
+    # an admin saves the page. Non-fatal: falls back to rule-only on failure.
+    from app.services import ai_config_service
     try:
-        app.state.llm_provider = create_llm_provider()
+        async with async_session() as db:
+            await ai_config_service._rebuild_providers(db, app.state)
     except Exception as e:
-        logger.warning("LLM provider init failed: %s", e)
+        logger.warning("AI provider init from DB failed: %s", e)
         app.state.llm_provider = None
-
-    # Initialize embedding provider (non-fatal)
-    from app.services.embedding_provider import create_embedding_provider
-    try:
-        app.state.embedding_provider = create_embedding_provider()
-    except Exception as e:
-        logger.warning("Embedding provider init failed: %s", e)
         app.state.embedding_provider = None
 
     # Start collaboration session cleanup coroutine
@@ -408,6 +406,7 @@ app.include_router(ppap_router)
 app.include_router(shipment_router)
 app.include_router(graph_router)
 app.include_router(admin_permissions_api.router)
+app.include_router(admin_ai_config_api.router)
 app.include_router(search_router)
 app.include_router(change_impact_router)
 app.include_router(collaboration_router)

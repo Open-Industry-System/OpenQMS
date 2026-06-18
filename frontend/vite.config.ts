@@ -5,6 +5,12 @@ const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    // react-draggable references process.env.DRAGGABLE_DEBUG in its log function;
+    // without this, the browser throws ReferenceError: process is not defined,
+    // which crashes DraggableCore.handleDragStart and prevents grid drag/resize.
+    "process.env.DRAGGABLE_DEBUG": "false",
+  },
   server: {
     port: 5173,
     proxy: {

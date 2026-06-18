@@ -12,29 +12,31 @@ import DataCard from "../../components/design/DataCard";
 import StatusBadge from "../../components/design/StatusBadge";
 import dayjs from "dayjs";
 
-const statusLabels: Record<string, string> = {
-  D1_TEAM: "D1 团队组建", D2_DESCRIPTION: "D2 问题描述",
-  D3_INTERIM: "D3 临时措施", D4_ROOT_CAUSE: "D4 根因分析",
-  D5_CORRECTION: "D5 永久措施", D6_VERIFICATION: "D6 实施验证",
-  D7_PREVENTION: "D7 预防复发", D8_CLOSURE: "D8 关闭", ARCHIVED: "已归档",
-};
-
-const statusVariant = (s: string): string => {
-  if (["D8_CLOSURE", "ARCHIVED"].includes(s)) return "success";
-  if (s === "OVERDUE") return "error";
-  return "warning";
-};
-
-const severityVariant = (s: string): string => {
-  if (s === "致命") return "error";
-  if (s === "严重") return "warning";
-  if (s === "轻微") return "info";
-  return "info";
-};
-
 export default function CAPAListPage() {
   const { t } = useTranslation("capa");
   const { t: tc } = useTranslation("common");
+
+  const statusLabels: Record<string, string> = {
+    D1_TEAM: t("status.D1_TEAM"), D2_DESCRIPTION: t("status.D2_DESCRIPTION"),
+    D3_INTERIM: t("status.D3_INTERIM"), D4_ROOT_CAUSE: t("status.D4_ROOT_CAUSE"),
+    D5_CORRECTION: t("status.D5_CORRECTION"), D6_VERIFICATION: t("status.D6_VERIFICATION"),
+    D7_PREVENTION: t("status.D7_PREVENTION"), D8_CLOSURE: t("status.D8_CLOSURE"),
+    ARCHIVED: t("status.ARCHIVED"),
+  };
+
+  const statusVariant = (s: string): string => {
+    if (["D8_CLOSURE", "ARCHIVED"].includes(s)) return "success";
+    if (s === "OVERDUE") return "error";
+    return "warning";
+  };
+
+  const severityKeyToVariant: Record<string, string> = {
+    fatal: "error", serious: "warning", general: "info", minor: "info",
+  };
+  const severityVariant = (s: string): string => {
+    const keyMap: Record<string, string> = { "致命": "fatal", "严重": "serious", "一般": "general", "轻微": "minor" };
+    return severityKeyToVariant[keyMap[s] || s] || "info";
+  };
   const { message } = App.useApp();
   const [data, setData] = useState<CAPAReport[]>([]);
   const [total, setTotal] = useState(0);
@@ -121,19 +123,24 @@ export default function CAPAListPage() {
       <Modal title={t("actions.create", "新建 8D 报告")} open={modalOpen} onOk={() => form.submit()} onCancel={() => setModalOpen(false)}>
         <Form form={form} layout="vertical" onFinish={handleCreate}>
           <Form.Item name="document_no" label={t("fields.documentNo", "报告编号")} rules={[{ required: true }]}>
-            <Input placeholder="如 8D-2026-001" />
+            <Input placeholder={t("fields.documentNoPlaceholder", "如 8D-2026-001")} />
           </Form.Item>
           <Form.Item name="title" label={t("fields.title", "标题")} rules={[{ required: true }]}>
-            <Input placeholder="如 焊接不良客诉" />
+            <Input placeholder={t("fields.titlePlaceholder", "如 焊接不良客诉")} />
           </Form.Item>
           <Form.Item name="severity" label={t("fields.severity", "严重等级")} initialValue="一般">
-            <Select options={["致命", "严重", "一般", "轻微"].map((v) => ({ value: v, label: v }))} />
+            <Select options={[
+                    { value: "致命", label: t("severity.fatal") },
+                    { value: "严重", label: t("severity.serious") },
+                    { value: "一般", label: t("severity.general") },
+                    { value: "轻微", label: t("severity.minor") },
+                  ]} />
           </Form.Item>
           <Form.Item name="due_date" label={t("fields.dueDate", "完成期限")}>
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
           <Form.Item name="problem_description" label={t("fields.problemDescription", "问题描述（可选）")}>
-            <Input.TextArea rows={2} placeholder="简述问题现象（可选，用于智能推荐）" />
+            <Input.TextArea rows={2} placeholder={t("fields.problemDescriptionPlaceholder", "简述问题现象（可选，用于智能推荐）")} />
           </Form.Item>
         </Form>
       </Modal>

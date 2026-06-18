@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Embedding & semantic search
     EMBEDDING_PROVIDER: str = ""        # "openai" | "ollama" | "" (follows LLM_PROVIDER)
+    EMBEDDING_API_KEY: str = ""         # optional; falls back to LLM_API_KEY
     EMBEDDING_MODEL: str = ""           # optional override
     EMBEDDING_BASE_URL: str = "http://ollama:11434"
     EMBEDDING_DIMENSIONS: int = 1536    # 1536 for OpenAI, 768 for nomic-embed-text, 1024 for BGE-M3

@@ -556,7 +556,7 @@ export default function InternalAuditDetailPage() {
                         ) : null,
                     },
                   ]}
-                  rowClassName={(record) => (record.result === "不符合" ? "audit-row-nc" : "")}
+                  rowClassName={(record) => (record.result === "不符合" /* backend stores Chinese result values */ ? "audit-row-nc" : "")}
                 />
               </Card>
             ),

@@ -1,5 +1,6 @@
 """测试 EmbeddingProvider 工厂逻辑和向量维度解析（纯逻辑测试）。"""
 import pytest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services.embedding_provider import create_embedding_provider, OllamaEmbeddingProvider
@@ -9,14 +10,14 @@ from app.utils.vector import parse_vector_dimensions
 class TestCreateEmbeddingProvider:
     """测试工厂函数。"""
 
-    @patch("app.config.settings")
+    @patch("app.services.embedding_provider.app_settings")
     def test_returns_none_when_no_provider(self, mock_settings):
         """未配置 provider 时返回 None。"""
         mock_settings.EMBEDDING_PROVIDER = ""
         mock_settings.LLM_PROVIDER = ""
         assert create_embedding_provider() is None
 
-    @patch("app.config.settings")
+    @patch("app.services.embedding_provider.app_settings")
     def test_returns_ollama_provider(self, mock_settings):
         """配置 ollama 时返回 OllamaEmbeddingProvider。"""
         mock_settings.EMBEDDING_PROVIDER = "ollama"
@@ -26,7 +27,7 @@ class TestCreateEmbeddingProvider:
         assert isinstance(provider, OllamaEmbeddingProvider)
         assert provider.dimensions == 768  # nomic-embed-text default
 
-    @patch("app.config.settings")
+    @patch("app.services.embedding_provider.app_settings")
     def test_returns_none_for_unsupported_provider(self, mock_settings):
         """不支持的 provider 返回 None。"""
         mock_settings.EMBEDDING_PROVIDER = "unsupported"
@@ -87,3 +88,109 @@ class TestParseVectorDimensions:
             parse_vector_dimensions("-1")
         with pytest.raises(ValueError, match="Must be 1-2000"):
             parse_vector_dimensions("2001")
+
+
+class TestEmbeddingBaseUrlAndApiKey:
+    """openai embedding provider 应当使用自定义 base_url，并支持独立的 EMBEDDING_API_KEY。
+
+    回归：OpenAIEmbeddingProvider 曾忽略 base_url（始终连 api.openai.com），且只读
+    LLM_API_KEY，无法用与 LLM 不同的密钥/端点做 embedding。
+    """
+
+    def test_wires_embedding_base_url_to_openai_client(self):
+        """配置的 EMBEDDING_BASE_URL 应传到 OpenAI embedding client。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="openai",
+            EMBEDDING_API_KEY="sk-test",
+            EMBEDDING_MODEL="text-embedding-3-small",
+            EMBEDDING_BASE_URL="https://api.deepseek.com",
+            LLM_PROVIDER="",
+            LLM_API_KEY="",
+            LLM_BASE_URL="",
+        )
+        provider = create_embedding_provider(cfg)
+        assert provider is not None, "expected an OpenAIEmbeddingProvider, got None"
+        assert "deepseek" in str(provider._client.base_url), (
+            f"EMBEDDING_BASE_URL not wired: {provider._client.base_url}"
+        )
+
+    def test_uses_embedding_api_key_when_set(self):
+        """设置了 EMBEDDING_API_KEY 时应优先于 LLM_API_KEY。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="openai",
+            EMBEDDING_API_KEY="sk-emb",
+            EMBEDDING_MODEL="text-embedding-3-small",
+            EMBEDDING_BASE_URL="",
+            LLM_PROVIDER="openai",
+            LLM_API_KEY="sk-llm",
+            LLM_BASE_URL="",
+        )
+        provider = create_embedding_provider(cfg)
+        assert provider is not None
+        assert provider._client.api_key == "sk-emb", (
+            f"expected EMBEDDING_API_KEY to win, got {provider._client.api_key}"
+        )
+
+    def test_falls_back_to_llm_api_key(self):
+        """未设置 EMBEDDING_API_KEY 时回退到 LLM_API_KEY（跟随 LLM）。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="openai",
+            EMBEDDING_API_KEY="",
+            EMBEDDING_MODEL="text-embedding-3-small",
+            EMBEDDING_BASE_URL="",
+            LLM_PROVIDER="openai",
+            LLM_API_KEY="sk-llm",
+            LLM_BASE_URL="",
+        )
+        provider = create_embedding_provider(cfg)
+        assert provider is not None
+        assert provider._client.api_key == "sk-llm"
+
+    def test_openai_defaults_to_openai_without_base_url(self):
+        """base_url 均为空时仍指向官方 api.openai.com。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="openai",
+            EMBEDDING_API_KEY="sk-test",
+            EMBEDDING_MODEL="text-embedding-3-small",
+            EMBEDDING_BASE_URL="",
+            LLM_PROVIDER="",
+            LLM_API_KEY="",
+            LLM_BASE_URL="",
+        )
+        provider = create_embedding_provider(cfg)
+        assert provider is not None
+        assert "openai.com" in str(provider._client.base_url)
+
+    def test_openai_dimensions_read_from_config(self):
+        """OpenAIEmbeddingProvider 的 dimensions 应取自 EMBEDDING_DIMENSIONS，而非硬编码 1536。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="openai",
+            EMBEDDING_API_KEY="sk-test",
+            EMBEDDING_MODEL="text-embedding-3-small",
+            EMBEDDING_BASE_URL="",
+            EMBEDDING_DIMENSIONS=768,
+            LLM_PROVIDER="",
+            LLM_API_KEY="",
+            LLM_BASE_URL="",
+        )
+        provider = create_embedding_provider(cfg)
+        assert provider is not None
+        assert provider.dimensions == 768, (
+            f"expected dimensions=768 from config, got {provider.dimensions}"
+        )
+
+    def test_openai_dimensions_defaults_to_1536(self):
+        """未配置 EMBEDDING_DIMENSIONS 时默认 1536。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="openai",
+            EMBEDDING_API_KEY="sk-test",
+            EMBEDDING_MODEL="text-embedding-3-small",
+            EMBEDDING_BASE_URL="",
+            EMBEDDING_DIMENSIONS=0,
+            LLM_PROVIDER="",
+            LLM_API_KEY="",
+            LLM_BASE_URL="",
+        )
+        provider = create_embedding_provider(cfg)
+        assert provider is not None
+        assert provider.dimensions == 1536

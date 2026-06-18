@@ -214,10 +214,14 @@ async def run_worker() -> None:
                 if str(task.id) not in process_ids:
                     continue
                 try:
-                    await projection.sync_fmea_to_neo4j(task.aggregate_id)
+                    if task.event_type == "fmea.deleted":
+                        await projection.delete_fmea_projection(task.aggregate_id)
+                        logger.info(f"Deleted FMEA {task.aggregate_id} projection from Neo4j")
+                    else:
+                        await projection.sync_fmea_to_neo4j(task.aggregate_id)
+                        logger.info(f"Synced FMEA {task.aggregate_id} to Neo4j")
                     async with get_tenant_aware_session() as db:
                         await _mark_completed(db, task.id)
-                    logger.info(f"Synced FMEA {task.aggregate_id} to Neo4j")
                 except Exception as e:
                     logger.error(f"Failed to sync FMEA {task.aggregate_id}: {e}")
                     async with get_tenant_aware_session() as db:

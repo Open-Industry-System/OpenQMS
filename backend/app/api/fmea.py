@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,8 @@ async def list_fmeas(
     status: str | None = None,
     product_line: str | None = None,
     high_rpn: bool = Query(False),
+    fmea_type: Literal["PFMEA", "DFMEA"] | None = None,
+    search: str | None = None,
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -48,6 +51,8 @@ async def list_fmeas(
         high_rpn=high_rpn,
         allowed_product_line_codes=allowed_pls,
         factory_id=scope.effective_factory_id,
+        fmea_type=fmea_type,
+        search=search,
     )
     return FMEAListResponse(
         items=[FMEAResponse.model_validate(f) for f in items],
@@ -156,6 +161,29 @@ async def update_fmea(
     return FMEAResponse.model_validate(fmea)
 
 
+@router.delete("/{fmea_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_fmea(
+    fmea_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
+    fmea = await fmea_service.get_fmea(db, fmea_id)
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.effective_factory_id and fmea.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail="FMEA not found")
+    if scope.factory_scope.accessible_factory_ids is not None:
+        if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
+            raise HTTPException(status_code=404, detail="FMEA not found")
+    # Only allow deleting draft FMEAs
+    if fmea.status != "draft":
+        raise HTTPException(status_code=400, detail="只能删除草稿状态的FMEA")
+    await fmea_service.delete_fmea(db, fmea_id, scope.user.user_id)
+
+
 async def require_approve_permission(
     req: TransitionRequest,
     scope: RequestScope = Depends(get_request_scope),
@@ -251,7 +279,18 @@ async def recommend(
     has_kg = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
     effective_scope = "current_product_line" if (not has_kg and requested_scope == "global") else requested_scope
 
-    if len(request.context.get("function_description", request.context.get("failure_mode", ""))) < 2:
+    # Early-return when there is no usable anchor text. The anchor depends on
+    # the trigger type: failure_mode is derived from function_description, while
+    # effect/cause/measure/optimization are derived from failure_mode. input_text
+    # (what the user typed in the cell) is a last-resort fallback.
+    # NOTE: dict.get("k", default) returns the stored value even when it is "" —
+    # so we chain with `or` instead, otherwise an empty function_description key
+    # would gate effect/cause triggers even when failure_mode is filled.
+    if request.trigger_type == "failure_mode":
+        anchor = request.context.get("function_description") or request.context.get("input_text") or ""
+    else:
+        anchor = request.context.get("failure_mode") or request.context.get("input_text") or ""
+    if len(anchor) < 2:
         return RecommendResponse(
             suggestions=[], source="rule", cached=False,
             llm_available=False, graph_match_count=0,
@@ -259,7 +298,8 @@ async def recommend(
         )
 
     llm = getattr(fastapi_request.app.state, "llm_provider", None)
-    service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo)
+    llm_timeout = getattr(fastapi_request.app.state, "llm_timeout", None)
+    service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo, llm_timeout=llm_timeout)
     result = await service.recommend(fmea_id, request, scope.user)
     await db.commit()
     return result

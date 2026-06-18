@@ -53,6 +53,7 @@
       "failureEffect": "Failure Effect",
       "failureCause": "Failure Cause",
       "addFailureMode": "+ Add Failure Mode",
+      "addFunction": "+ Add Function",
       "delete": "Delete",
       "newFailureMode": "New Failure Mode"
     },
@@ -64,7 +65,8 @@
       "d": "D",
       "rpn": "RPN",
       "ap": "AP",
-      "mustOptimize": "Must optimize"
+      "mustOptimize": "Must optimize",
+      "empty": "No failure chains yet — create them in the Failure Analysis step first"
     },
     "optimization": {
       "title": "Optimization Measures",
@@ -88,6 +90,133 @@
       "prev": "Previous",
       "next": "Next",
       "finish": "Finish"
+    },
+    "page": {
+      "title": "DFMEA Generation Wizard",
+      "backToList": "Back to List",
+      "saveDraft": "Save Draft",
+      "saveSaving": "Saving...",
+      "saveSaved": "Saved ✓",
+      "saveError": "Save Failed",
+      "nextStep": "Next Step",
+      "prevStep": "Previous Step",
+      "finish": "Finish",
+      "completionWarning": "The following steps are incomplete and cannot be submitted:",
+      "step3Incomplete": "Function Analysis — some components have no functions defined",
+      "step4Incomplete": "Failure Analysis — some functions have no failure modes defined",
+      "step5Incomplete": "Risk Analysis — some failure chains have missing S/O/D ratings",
+      "confirmEmptyDraftTitle": "Discard Draft?",
+      "confirmEmptyDraft": "The current draft is empty and will be deleted upon confirmation.",
+      "confirmEmptyDraftOk": "Discard and Delete",
+      "confirmEmptyDraftCancel": "Continue Editing",
+      "finishFailed": "Failed to finish. Please try again.",
+      "conflictTitle": "Document Modified",
+      "conflictContent": "This FMEA was modified by another session. Reload is required before editing. Your unsaved local changes will be discarded.",
+      "conflictReload": "Reload"
+    },
+    "guidance": {
+      "step0": {
+        "title": "Step 1: 5T Scope Definition",
+        "purpose": "Define the boundaries, team, and focus of the DFMEA analysis to ensure focused follow-up steps.",
+        "points": "The 5T are inTent, Timing, Team, Task, Tool; this step frames the scope of analysis accordingly.",
+        "fields": [
+          { "name": "Team", "desc": "Cross-functional core team: manager (project manager, decides risk acceptability), design/process leads (technical responsibility), facilitator (coordinates the 7 steps), design/system/component engineers, test engineer, quality/reliability engineer; extended team: technical experts, manufacturing/maintenance/functional-safety engineers, purchasing, suppliers, customer representative." },
+          { "name": "Timing", "desc": "DFMEA start and end dates. Start once the design concept is well understood; complete the analysis before design freeze; finish improvement actions before tooling samples. Run in parallel with the process FMEA with open information flow." },
+          { "name": "Tool", "desc": "Analysis method/tools used, e.g. structure tree, block/boundary diagram, interface analysis table, parameter diagram (P-diagram), function tree/net; if no baseline exists, develop a new base DFMEA." },
+          { "name": "Task", "desc": "Scope and object of this analysis. Clarify: what will the customer buy? Any new requirements? Do we hold design authority? At which level (system/subsystem/component) to analyze? Who owns interface design? Is it a new design, a new application, or an engineering change?" },
+          { "name": "Trend", "desc": "Trends of field failures, customer complaints, warranty data, and lessons learned from past similar products, used as the baseline reference and input for this analysis." }
+        ],
+        "example": "Team: BMS Design Group, Process Engineering; Timing: 2026 Q1–Q3; Tool: structure tree + boundary diagram; Task: DC-DC Converter DFMEA; Trend: complaint statistics from 3 past similar products"
+      },
+      "step1": {
+        "title": "Step 2: Structure Analysis",
+        "purpose": "Identify and decompose the design into systems, subsystems, components, and parts for technical risk analysis.",
+        "points": "Organize as higher-level element — focus element — lower-level element or characteristic; any element missing here will also be missing in function analysis.",
+        "fields": [
+          { "name": "Structure tree levels", "desc": "Decompose the design into system → subsystem → component/part, organized as higher-level — focus element — lower-level or characteristic type, for technical risk analysis." },
+          { "name": "Hierarchy depth", "desc": "Generally no more than 4 levels; complex structures can be split into sub-structures (work packages). Only parts the team designs or controls go inside the boundary; parts outside can be marked." },
+          { "name": "Interface node", "desc": "Represents cross-branch interaction. Five interface types: physical connection, material exchange, energy transfer, data transfer, human-machine; provides main/interface function input for function analysis." },
+          { "name": "Design Parameter", "desc": "Lower-level characteristic types, e.g. geometric dimensions, material, surface treatment — quantifiable attributes." },
+          { "name": "Naming", "desc": "Name with technical terms; each component should be an independently analyzable physical unit." }
+        ],
+        "example": "System: BMS → Subsystem: BMU / Charging Mgmt → Component: LTC6811; Interface: BMU↔Charging Mgmt (data transfer)"
+      },
+      "step2": {
+        "title": "Step 3: Function Analysis",
+        "purpose": "Ensure functions specified by requirements/specs are properly assigned to system elements, as the basis for failure analysis.",
+        "points": "Describe functions as action verb + measurable noun, present tense; distinguish base function, detailed requirement, and design constraint.",
+        "fields": [
+          { "name": "Function description", "desc": "Use action verb + measurable noun, present tense, verb base form (deliver, contain, control, transfer, acquire). E.g. transmit power, acquire cell voltage. An element can have multiple functions (main + interface/diagnostic/serviceability auxiliary functions)." },
+          { "name": "Requirement", "desc": "What is needed to realize the function, related to functional performance. Sources: legal requirements, industry standards (ISO 9001/IATF 16949/ISO 26262), customer requirements (explicit + implicit), internal requirements, product characteristics. Distinguish base function, detailed requirement, design constraint." },
+          { "name": "Specification", "desc": "Quantifiable product characteristic/attribute, with tolerance. E.g. shaft diameter, surface finish, accuracy ±2mV, sample rate ≥10Hz." }
+        ],
+        "example": "Component LTC6811 → Function: Acquire cell voltage → Requirement: Accurately acquire each cell voltage → Specification: Accuracy ±2mV, sample rate ≥10Hz"
+      },
+      "step3": {
+        "title": "Step 4: Failure Analysis",
+        "purpose": "Identify failure causes, modes, and effects and show their relationships to enable risk assessment.",
+        "points": "Failure chain FE←FM←FC: failure effect (on next level/end user/regulation), failure mode (opposite of function), failure cause (actionable level).",
+        "fields": [
+          { "name": "Failure Mode (FM)", "desc": "Ways the function may not be met, derived from the function, described in technical terms. Types: function loss, function degradation, intermittent function, partial function loss, unintended function, function out-of-range, function delay." },
+          { "name": "Failure Effect (FE)", "desc": "Consequence of the failure mode, describing impact on the next-level integrated product, the end user, and regulations; what the user may notice or experience, including safety. One FM can have multiple effects." },
+          { "name": "Failure Cause (FC)", "desc": "Why the failure mode occurs. Sources: improper functional-performance design, system interaction, time-dependent change (fatigue/wear/corrosion), external environment, user misuse, piece variation, software issues. Should be concise and complete so specific actions can target the cause." },
+          { "name": "Chain organization", "desc": "Organize as FE←FM←FC, i.e. higher-level effect — focus-element failure mode — lower-level failure cause; ensure the three elements are fully linked." }
+        ],
+        "example": "Function Acquire cell voltage → Failure mode: Insufficient acquisition accuracy → Effect: Control decision deviation → Cause: Sensor aging / calibration drift"
+      },
+      "step4": {
+        "title": "Step 5: Risk Analysis",
+        "purpose": "Estimate risk by evaluating severity, occurrence, and detection, and prioritize the actions to take.",
+        "points": "S/O/D range 1–10 (10 highest risk contribution); S rates FE, O rates FC frequency (based on prevention control), D rates detection-control effectiveness; AP is auto-calculated by the system per S→O→D.",
+        "fields": [
+          { "name": "Prevention Control (PC)", "desc": "Existing/planned actions that mitigate the potential causes leading to FM; the basis for rating Occurrence O, related to performance requirements. Must be clear and complete, citing specific tests/procedures. Examples: simulation (FEA/CFD), design review, risk analysis, lessons learned, hand sample." },
+          { "name": "Detection Control (DC)", "desc": "Actual (planned/completed) activities that detect whether FC or FM exists before production release; the basis for rating Detection D. Must cite specific test/plan/procedure. Examples: function check, burst test, environmental test, endurance test, poka-yoke." },
+          { "name": "Severity (S)", "desc": "Severity of the failure effect, 1–10 (10 highest). 10=endangers vehicle/personnel safety, 9=non-compliant with regulation, 8=base function loss, 6=convenience function loss, 1=no obvious effect. Rates FE only, not O/D." },
+          { "name": "Occurrence (O)", "desc": "Frequency of the failure cause, 1–10, based on prevention-control effectiveness. 10=new tech with no experience and no prevention control, 5=mature tech with detail changes, 1=prevention control eliminates the cause. Reference similar-product expert opinion, warranty database, lessons learned." },
+          { "name": "Detection (D)", "desc": "Detectability of an occurred FC/FM, 1–10, based on the most effective detection control. 10=no test method, 5=aging test, 1=method always detects. Consider detection capability, timing, sample count, and whether the test procedure is proven." },
+          { "name": "Action Priority (AP)", "desc": "Auto-calculated H/M/L by the system per S→O→D logic. H=must take action, M=should, L=may. S=9–10 with AP=H/M should be reviewed by management." }
+        ],
+        "example": "S=8 (base function loss) + O=4 (mature tech, detail change) + D=3 (failure test) → AP=H (Must optimize)"
+      },
+      "step5": {
+        "title": "Step 6: Optimization Measures",
+        "purpose": "Develop prevention and detection measures for failure chains needing further risk reduction, and assign owners.",
+        "points": "Optimization order: ① modify design to eliminate/reduce FE (lower S) ② reduce FC frequency (lower O) ③ improve detection (lower D); each measure needs an owner and target date.",
+        "fields": [
+          { "name": "Prevention measure", "desc": "Improve prevention control to lower Occurrence O. Ways: change design, improve engineering specs, design poka-yoke. Targets the failure cause FC." },
+          { "name": "Detection measure", "desc": "Add or change design verification to improve Detection D. Ways: design change to raise detectability, revise the test plan. Targets FC or FM." },
+          { "name": "Reducing Severity (S)", "desc": "Generally only achievable by design change to eliminate or reduce the failure effect FE — the highest-priority optimization direction." },
+          { "name": "Owner and date", "desc": "Each measure needs an owner (keeps status updated and accountable for implementation) and a realistic target completion date (per the development plan, before process validation / start of production)." },
+          { "name": "Measure status", "desc": "Not yet defined / not yet decided / not yet executed / completed / not executed. After completion, re-evaluate O and D and update AP." },
+          { "name": "Re-evaluation", "desc": "On any design change, all affected elements must be re-evaluated; on a concept change, all FMEA steps must be reviewed for the affected parts." }
+        ],
+        "example": "Prevention: redundant sensor layout → O from 4 to 2; Detection: online real-time monitoring + self-diagnosis → D from 3 to 2; Owner: Test Engineer; Target: before tooling sample"
+      },
+      "step6": {
+        "title": "Step 7: Confirm Creation",
+        "purpose": "Review data completeness across all steps, then confirm to enter the formal editor for further refinement.",
+        "points": "Verify structure, function, failure chains, S/O/D, and action closure one by one.",
+        "fields": [
+          { "name": "Structure completeness", "desc": "Does the structure tree cover all system elements, with reasonable levels and identified interfaces?" },
+          { "name": "Function coverage", "desc": "Do all components have defined functions, requirements, and specifications?" },
+          { "name": "Failure-chain completeness", "desc": "Does every function have a failure mode, with a complete FE/FM/FC chain?" },
+          { "name": "S/O/D ratings", "desc": "Are S/O/D rated for every failure chain, with prevention and detection controls assigned?" },
+          { "name": "Action closure", "desc": "Do AP=H/M items have measures, owners, target dates, and status?" }
+        ],
+        "example": "Upon confirmation, a DFMEA document will be created and the editor will open for continued revision and refinement"
+      },
+      "labelPurpose": "Purpose",
+      "labelPoints": "Key Points",
+      "labelFields": "How to fill",
+      "labelExample": "Example",
+      "expand": "Expand",
+      "collapse": "Collapse"
+    },
+    "sidebar": {
+      "structureTree": "Structure Tree",
+      "structureHint": "Structure tree appears after step 2",
+      "noStructure": "No structure nodes yet",
+      "steps": "Steps"
     }
   },
   "inlineRecommendations": {

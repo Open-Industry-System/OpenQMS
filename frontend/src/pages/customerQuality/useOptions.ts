@@ -1,13 +1,15 @@
 import { useTranslation } from "react-i18next";
-import { SEVERITY_COLOR, SEVERITY_MAP } from "./constants";
+import { SEVERITY_COLOR, getSeverityMap } from "./constants";
 
 export function useSeverityReverseMap(): Record<string, string> {
-  return Object.fromEntries(Object.entries(SEVERITY_MAP).map(([k, v]) => [v, k]));
+  const { t } = useTranslation("customerQuality");
+  const severityMap = getSeverityMap(t);
+  return Object.fromEntries(Object.entries(severityMap).map(([k, v]) => [v, k]));
 }
 
 export function useSeverityOptions() {
   const { t } = useTranslation("customerQuality");
-  return Object.keys(SEVERITY_MAP).map((key) => ({
+  return Object.keys(getSeverityMap(t)).map((key) => ({
     value: key,
     label: t(`severity.${key}`),
   }));

@@ -1,14 +1,15 @@
+import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
 from app.models.fmea import FMEADocument
 from app.models.graph_sync_outbox import GraphSyncOutbox
-from app.services.embedding_outbox import enqueue_embedding
+from app.services.embedding_outbox import delete_embeddings_for_entity, enqueue_embedding
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import _create_fmea_version_no_commit
 from app.state_machines.fmea_state import FMEAState, can_transition
@@ -23,6 +24,8 @@ async def list_fmeas(
     high_rpn: bool = False,
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
+    fmea_type: str | None = None,
+    search: str | None = None,
 ) -> tuple[list[FMEADocument], int]:
     query = select(FMEADocument)
     count_query = select(func.count(FMEADocument.fmea_id))
@@ -42,6 +45,19 @@ async def list_fmeas(
     if factory_id is not None:
         query = query.where(FMEADocument.factory_id == factory_id)
         count_query = count_query.where(FMEADocument.factory_id == factory_id)
+
+    if fmea_type:
+        query = query.where(FMEADocument.fmea_type == fmea_type)
+        count_query = count_query.where(FMEADocument.fmea_type == fmea_type)
+
+    if search and search.strip():
+        safe = re.sub(r"([%_\\])", r"\\\1", search.strip())
+        like_clause = or_(
+            FMEADocument.document_no.ilike(f"%{safe}%", escape="\\"),
+            FMEADocument.title.ilike(f"%{safe}%", escape="\\"),
+        )
+        query = query.where(like_clause)
+        count_query = count_query.where(like_clause)
 
     if high_rpn:
         from app.utils.fmea_graph import build_rpn_rows
@@ -249,6 +265,34 @@ async def update_fmea(
     await db.commit()
     await db.refresh(fmea)
     return fmea
+
+
+async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    fmea = await get_fmea(db, fmea_id)
+    if fmea is None:
+        raise ValueError("FMEA not found")
+    # Audit log for deletion
+    audit_log = AuditLog(
+        table_name="fmea_documents",
+        record_id=fmea_id,
+        action="DELETE",
+        changed_fields={"title": fmea.title, "document_no": fmea.document_no, "fmea_type": fmea.fmea_type},
+        operated_by=user_id,
+    )
+    db.add(audit_log)
+    # GraphSync outbox event for Neo4j projection cleanup
+    db.add(GraphSyncOutbox(
+        aggregate_type="fmea",
+        aggregate_id=fmea_id,
+        event_type="fmea.deleted",
+        payload={"product_line_code": fmea.product_line_code, "fmea_type": fmea.fmea_type},
+    ))
+    # document_embeddings has no FK to fmea_documents (denormalized
+    # entity_type/entity_id), so the row delete does not cascade — clean the
+    # FMEA's node embeddings explicitly, in the same transaction, BEFORE commit.
+    await delete_embeddings_for_entity(db, "fmea_node", fmea_id)
+    await db.delete(fmea)
+    await db.commit()
 
 
 async def transition_fmea(

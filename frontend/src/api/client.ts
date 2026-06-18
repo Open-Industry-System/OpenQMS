@@ -68,6 +68,13 @@ client.interceptors.response.use(
 
     // 401: attempt token refresh before redirecting to login
     if (error.response?.status === 401) {
+      // Login 401 = invalid credentials (not an expired token). Reject
+      // immediately so the login form can show the error and stop loading —
+      // the refresh flow below would otherwise hang the request forever
+      // (no refresh_token exists for an unauthenticated login attempt).
+      if (originalRequest.url?.includes("/auth/login")) {
+        return Promise.reject(error);
+      }
       // Don't retry refresh endpoint or already-retried requests
       if (originalRequest.url?.includes("/auth/refresh") || originalRequest._retry) {
         useAuthStore.getState().logout();

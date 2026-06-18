@@ -239,6 +239,18 @@ async def generate_draft(
     llm_provider = getattr(request.app.state, "llm_provider", None)
     llm_model_name = getattr(llm_provider, "model", None) or settings.LLM_MODEL or "unknown"
 
+    # DB-backed timeout (admin-configurable via /admin/ai-config), falling back to
+    # the env default when app.state lacks it (startup, background tasks, tests).
+    # int() coercion guards against non-numeric values — e.g. a MagicMock attribute
+    # auto-created by test doubles, which would otherwise bypass the getattr default
+    # and crash asyncio.wait_for with a TypeError.
+    try:
+        capa_draft_llm_timeout = int(
+            getattr(request.app.state, "capa_draft_llm_timeout", settings.CAPA_DRAFT_LLM_TIMEOUT)
+        )
+    except (TypeError, ValueError):
+        capa_draft_llm_timeout = settings.CAPA_DRAFT_LLM_TIMEOUT
+
     # Audit tracking — initialized before any validation so all paths are logged
     audit_success = False
     audit_error = None
@@ -394,7 +406,7 @@ async def generate_draft(
             try:
                 llm_raw = await asyncio.wait_for(
                     llm_provider.complete(prompt, response_schema),
-                    timeout=settings.CAPA_DRAFT_LLM_TIMEOUT,
+                    timeout=capa_draft_llm_timeout,
                 )
             except TimeoutError:
                 raise HTTPException(status_code=504, detail="AI 响应超时，请重试")

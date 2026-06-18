@@ -9,6 +9,7 @@ import LoginPage from "./pages/login/LoginPage";
 import DashboardPage from "./pages/dashboard/DashboardPage";
 import FMEAListPage from "./pages/planning/fmea/FMEAListPage";
 import FMEAEditorPage from "./pages/planning/fmea/FMEAEditorPage";
+import DFMEAWizardPage from "./pages/planning/fmea/DFMEAWizardPage";
 import CAPAListPage from "./pages/capa/CAPAListPage";
 import CAPADetailPage from "./pages/capa/CAPADetailPage";
 import ControlPlanListPage from "./pages/planning/control-plan/ControlPlanListPage";
@@ -75,6 +76,7 @@ import GroupAuditsPage from "./pages/group/GroupAudits";
 import SupplyChainRiskMapPage from "./pages/supplyChainRiskMap/SupplyChainRiskMapPage";
 import TenantSuspended from "./pages/TenantSuspended";
 import TenantDeactivated from "./pages/TenantDeactivated";
+import AIConfigPage from "./pages/admin/AIConfigPage";
 
 function isTokenExpired(token: string): boolean {
   try {
@@ -85,13 +87,13 @@ function isTokenExpired(token: string): boolean {
   }
 }
 
-function ProtectedRoute({ children, requiredModule }: { children: React.ReactNode; requiredModule?: ModuleKey }) {
+function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: React.ReactNode; requiredModule?: ModuleKey; requireAdmin?: boolean }) {
   const token = useAuthStore((s) => s.token);
   const _loading = useAuthStore((s) => s.loading);
   const fetchUser = useAuthStore((s) => s.fetchUser);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const { canView } = usePermission();
+  const { canView, isAdmin } = usePermission();
 
   useEffect(() => {
     if (token && !user) fetchUser();
@@ -111,6 +113,7 @@ function ProtectedRoute({ children, requiredModule }: { children: React.ReactNod
   }
 
   if (requiredModule && !canView(requiredModule)) return <Navigate to="/dashboard" replace />;
+  if (requireAdmin && !isAdmin) return <Navigate to="/dashboard" replace />;
 
   return <>{children}</>;
 }
@@ -131,6 +134,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<ProtectedRoute requiredModule="dashboard"><DashboardPage /></ProtectedRoute>} />
         <Route path="/fmea" element={<ProtectedRoute requiredModule="fmea"><FMEAListPage /></ProtectedRoute>} />
+        <Route path="/fmea/wizard/:id" element={<ProtectedRoute requiredModule="fmea"><DFMEAWizardPage /></ProtectedRoute>} />
         <Route path="/fmea/:id" element={<ProtectedRoute requiredModule="fmea"><FMEAEditorPage /></ProtectedRoute>} />
         <Route path="/capa" element={<ProtectedRoute requiredModule="capa"><CAPAListPage /></ProtectedRoute>} />
         <Route path="/capa/:id" element={<ProtectedRoute requiredModule="capa"><CAPADetailPage /></ProtectedRoute>} />
@@ -209,6 +213,8 @@ export default function App() {
         <Route path="/group/comparison" element={<ProtectedRoute requiredModule="group"><FactoryComparisonPage /></ProtectedRoute>} />
         <Route path="/group/suppliers" element={<ProtectedRoute requiredModule="group"><GroupSuppliersPage /></ProtectedRoute>} />
         <Route path="/group/audits" element={<ProtectedRoute requiredModule="group"><GroupAuditsPage /></ProtectedRoute>} />
+        {/* Admin */}
+        <Route path="/admin/ai-config" element={<ProtectedRoute requireAdmin><AIConfigPage /></ProtectedRoute>} />
       </Route>
     </Routes>
   );

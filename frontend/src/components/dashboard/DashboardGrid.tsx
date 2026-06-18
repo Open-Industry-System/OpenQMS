@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import type { LayoutItem, ResponsiveLayouts } from "react-grid-layout/legacy";
 import type { WidgetLayoutItem, DashboardWidgetsData } from "./widgets/types";
+import { getWidgetMeta } from "./widgets/registry";
 import WidgetWrapper from "./WidgetWrapper";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
@@ -12,7 +13,7 @@ const GRID_CONFIG = {
   margin: [16, 16] as [number, number],
   containerPadding: [0, 0] as [number, number],
   breakpoints: { lg: 1200, md: 996, sm: 768, xs: 480 },
-  cols: { lg: 12, md: 10, sm: 6, xs: 4 },
+  cols: { lg: 12, md: 12, sm: 6, xs: 4 },
 };
 
 interface DashboardGridProps {
@@ -25,17 +26,9 @@ interface DashboardGridProps {
   onRetry: () => void;
 }
 
-/** Scale lg layout (12 cols) to md layout (10 cols) preserving item.type */
+/** md breakpoint uses the same 12-col layout as lg; only column width shrinks. */
 function computeMdLayout(lgLayout: WidgetLayoutItem[]): WidgetLayoutItem[] {
-  return lgLayout.map((item) => {
-    const w = Math.max(2, Math.round((item.w * 10) / 12));
-    const x = Math.round((item.x * 10) / 12);
-    return {
-      ...item,
-      x: Math.min(x, 10 - w),
-      w,
-    };
-  });
+  return lgLayout.map((item) => ({ ...item }));
 }
 
 /** Sort by y/x then stack vertically for sm/xs breakpoints */
@@ -56,6 +49,42 @@ function computeMobileLayout(lgLayout: WidgetLayoutItem[]): WidgetLayoutItem[] {
   });
 }
 
+/** Two-column layout for sm (6 cols): KPI cards side-by-side, others full-width. */
+function computeSmLayout(lgLayout: WidgetLayoutItem[]): WidgetLayoutItem[] {
+  const sorted = [...lgLayout].sort((a, b) =>
+    a.y === b.y ? a.x - b.x : a.y - b.y,
+  );
+  const cols = GRID_CONFIG.cols.sm;
+  let rowY = 0;
+  let rowX = 0;
+  let rowHeight = 0;
+  const result: WidgetLayoutItem[] = [];
+
+  for (const item of sorted) {
+    const meta = getWidgetMeta(item.type);
+    const isKpi = meta?.category === "kpi";
+    const w = isKpi ? Math.min(item.w, 3) : cols;
+
+    if (rowX + w > cols) {
+      rowY += rowHeight;
+      rowX = 0;
+      rowHeight = 0;
+    }
+
+    result.push({ ...item, x: rowX, y: rowY, w });
+    rowX += w;
+    rowHeight = Math.max(rowHeight, item.h);
+
+    if (rowX >= cols) {
+      rowY += rowHeight;
+      rowX = 0;
+      rowHeight = 0;
+    }
+  }
+
+  return result;
+}
+
 export default function DashboardGrid({
   layout,
   data,
@@ -65,20 +94,19 @@ export default function DashboardGrid({
   onRemoveWidget,
   onRetry,
 }: DashboardGridProps) {
-  const [currentBreakpoint, setCurrentBreakpoint] = useState<string>("lg");
 
   const layouts: ResponsiveLayouts = useMemo(() => {
-    const mobile = computeMobileLayout(layout);
     return {
       lg: layout,
       md: computeMdLayout(layout),
-      sm: mobile.map((i) => ({ ...i, w: 6 })),
-      xs: mobile.map((i) => ({ ...i, w: 4 })),
+      sm: computeSmLayout(layout),
+      xs: computeMobileLayout(layout).map((i) => ({ ...i, w: 4 })),
     };
   }, [layout]);
 
-  // Only allow editing on lg breakpoint to avoid md layout overwriting lg persisted state
-  const canEdit = isEditing && currentBreakpoint === "lg";
+  // In edit mode the grid wrapper has minWidth:1200, guaranteeing the lg breakpoint.
+  // Use isEditing directly to avoid stale breakpoint state timing issues.
+  const canEdit = isEditing;
 
   return (
     <ResponsiveGridLayout
@@ -89,13 +117,12 @@ export default function DashboardGrid({
       rowHeight={GRID_CONFIG.rowHeight}
       margin={GRID_CONFIG.margin}
       containerPadding={GRID_CONFIG.containerPadding}
-      onBreakpointChange={(bp: string) => setCurrentBreakpoint(bp)}
       compactType="vertical"
       isDraggable={canEdit}
       isResizable={canEdit}
       onLayoutChange={(currentLayout: readonly LayoutItem[], allLayouts: ResponsiveLayouts) => {
         // react-grid-layout onLayoutChange only returns {i,x,y,w,h} — merge 'type' back.
-        // Only persist lg breakpoint; edit mode is disabled on md/sm/xs.
+        // Only persist lg layout; edit mode keeps grid at lg breakpoint via minWidth.
         if (isEditing && allLayouts.lg) {
           const typeMap = new Map(layout.map((w) => [w.i, w.type]));
           const newLayout: WidgetLayoutItem[] = allLayouts.lg.map((l: LayoutItem) => ({

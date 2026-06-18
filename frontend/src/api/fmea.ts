@@ -7,6 +7,8 @@ export async function listFMEAs(params: {
   status?: string;
   product_line?: string;
   high_rpn?: boolean;
+  fmea_type?: "PFMEA" | "DFMEA";
+  search?: string;
 }): Promise<FMEAListResponse> {
   const resp = await client.get("/fmea", { params });
   return resp.data;
@@ -45,4 +47,8 @@ export async function transitionFMEA(
 ): Promise<FMEADocument> {
   const resp = await client.post(`/fmea/${id}/transition`, { target_status });
   return resp.data;
+}
+
+export async function deleteFMEA(id: string): Promise<void> {
+  await client.delete(`/fmea/${id}`);
 }

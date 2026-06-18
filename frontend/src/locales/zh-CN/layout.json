@@ -53,7 +53,9 @@
     "factoryComparison": "工厂对比",
     "sharedSuppliers": "共享供应商",
     "crossFactoryAudit": "跨厂审核",
-    "factoryManagement": "工厂管理"
+    "factoryManagement": "工厂管理",
+    "admin": "系统管理",
+    "aiConfig": "AI 模型配置"
   },
   "header": {
     "selectFactory": "选择工厂",

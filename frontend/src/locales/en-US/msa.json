@@ -33,7 +33,7 @@
       "PQC": "PQC",
       "OQC": "OQC",
       "lab": "Laboratory",
-      "labValue": "实验室"
+      "labValue": "Laboratory"
     },
     "fields": {
       "gauge_no": "Gauge No",
@@ -71,6 +71,10 @@
       "addSuccess": "Calibration record added",
       "pass": "Pass",
       "fail": "Fail"
+    },
+    "placeholders": {
+      "measuring_range": "e.g. 0-150mm",
+      "selectDepartment": "Select department"
     }
   },
   "study": {
@@ -156,7 +160,8 @@
       "selectGauge": "Select gauge",
       "selectSpc": "Select SPC inspection characteristic",
       "unit": "e.g. mm",
-      "selectMethod": "Select method"
+      "selectMethod": "Select method",
+      "selectType": "Select study type"
     },
     "method": {
       "average_range": "Average & Range Method",
@@ -166,8 +171,8 @@
       "analytic": "Analytic"
     },
     "dataValues": {
-      "pass": "合格",
-      "fail": "不合格"
+      "pass": "Pass",
+      "fail": "Fail"
     },
     "measurementColumns": {
       "appraiser_name": "Appraiser",

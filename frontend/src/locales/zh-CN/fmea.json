@@ -1,4 +1,19 @@
 {
+  "actions": {
+    "confirm": "确认",
+    "save": "保存",
+    "close": "关闭",
+    "cancel": "取消",
+    "back": "返回"
+  },
+  "graph": {
+    "clearHighlight": "清除高亮",
+    "traceCause": "追溯原因",
+    "traceImpact": "追溯影响"
+  },
+  "version": {
+    "compareTitle": "版本对比"
+  },
   "status": {
     "draft": "草稿",
     "in_review": "审核中",
@@ -15,6 +30,7 @@
   },
   "list": {
     "title": "FMEA 管理",
+    "subtitle": "失效模式与影响分析 · PFMEA / DFMEA",
     "newFMEA": "新建 FMEA",
     "columns": {
       "documentNo": "文档编号",
@@ -33,6 +49,14 @@
       "pfmea": "PFMEA - 过程失效模式与影响分析",
       "dfmea": "DFMEA - 设计失效模式与影响分析"
     }
+  },
+  "filter": {
+    "all": "全部",
+    "status": "状态",
+    "type": "类型",
+    "highRisk": "高风险",
+    "searchPlaceholder": "搜索文档编号或标题",
+    "reset": "重置"
   },
   "create": {
     "title": "新建 FMEA",
@@ -56,7 +80,69 @@
     "nodeDetail": "节点详情",
     "graph": "图谱",
     "relatedCapa": "关联 CAPA",
-    "history": "版本历史"
+    "history": "版本历史",
+    "addRow": "添加行",
+    "addNode": "添加节点",
+    "addNodeTitle": "添加节点",
+    "newProcessItem": "新建过程项",
+    "newSystem": "新建系统",
+    "confirmDeleteNode": "确认删除该节点及其所有子节点和关联的失效分析行？",
+    "nodeName": "名称",
+    "nodeNamePlaceholder": "请输入名称",
+    "specification": "规范",
+    "requirement": "要求",
+    "addStep": "添加工序",
+    "addWorkElement": "添加工作要素",
+    "addSubsystem": "添加子系统",
+    "addComponent": "添加组件",
+    "addFunction": "添加功能",
+    "add": "添加",
+    "newAction": "新建议措施",
+    "selectFunctionHint": "选择左侧功能节点后点击\"添加行\"开始分析",
+    "pfmeaTitle": "过程失效模式与影响分析 (PFMEA)",
+    "dfmeaTitle": "设计失效模式与影响分析 (DFMEA)",
+    "footerLegend": "S=严重度 O=发生度 D=探测度 | RPN=风险优先数 | AP=措施优先级 (H=高 M=中 L=低) | 带 ' = 改进后评分",
+    "confirmDeleteRow": "确认删除此行？",
+    "columns": {
+      "function": "过程项 / 功能要求",
+      "failureMode": "失效模式",
+      "failureEffect": "失效影响",
+      "failureCause": "失效原因",
+      "preventionControl": "预防措施",
+      "detectionControl": "检测措施",
+      "recommendedAction": "建议措施",
+      "responsibility": "责任人 / 期限",
+      "actionsTaken": "已采取措施"
+    },
+    "placeholders": {
+      "responsible": "责任人",
+      "dueDate": "YYYY-MM-DD"
+    },
+    "tooltips": {
+      "severity": "严重度 (1-10, 10最严重)",
+      "occurrence": "发生度 (1-10, 10最高)",
+      "detection": "探测度 (1-10, 10最低)",
+      "rpn": "风险优先数 S×O×D",
+      "ap": "措施优先级 H/M/L",
+      "classification": "分类 (CC/SC)",
+      "revisedSeverity": "改进后严重度",
+      "revisedOccurrence": "改进后发生度",
+      "revisedDetection": "改进后探测度",
+      "revisedRpn": "改进后RPN",
+      "filterCode": "筛选代码"
+    }
+  },
+  "tabs": {
+    "editor": "编辑器",
+    "failureAnalysis": "失效分析",
+    "structureAnalysis": "结构分析",
+    "structureTree": "结构树",
+    "nodeDetails": "节点详情",
+    "graph": "图谱",
+    "relatedCapa": "关联 CAPA",
+    "versionHistory": "版本历史",
+    "structureFunction": "结构 / 功能",
+    "processFunction": "工序 / 功能"
   },
   "header": {
     "system": "系统",
@@ -64,8 +150,10 @@
     "designResponsibility": "设计责任",
     "processResponsibility": "过程责任",
     "fmeaNumber": "FMEA 编号",
+    "fmeaNo": "FMEA 编号",
     "keyDate": "关键日期",
     "departmentPlaceholder": "责任部门",
+    "responsibilityPlaceholder": "责任部门",
     "datePlaceholder": "YYYY-MM-DD"
   },
   "table": {
@@ -114,8 +202,23 @@
     "startAnalysisHint": "选择左侧功能节点后点击\"添加行\"开始分析",
     "footer": "S=严重度 O=发生度 D=探测度 | RPN=风险优先数 | AP=措施优先级 (H=高 M=中 L=低) | 带 ' = 改进后评分"
   },
+  "changeImpact": {
+    "title": "变更影响分析",
+    "description": "分析此节点的变更对上下游的影响范围",
+    "analyze": "分析影响范围",
+    "modalTitle": "变更影响分析",
+    "attribute": "属性变更",
+    "structural": "结构变更",
+    "fieldPlaceholder": "字段名（如 design_parameter）",
+    "valuePlaceholder": "新值",
+    "execute": "执行分析"
+  },
   "messages": {
     "fmeaNotFound": "FMEA 未找到",
+    "notFound": "FMEA 未找到",
+    "noData": "暂无数据",
+    "selectFunctionFirst": "请先在左侧选择一个功能/工序节点",
+    "selectFailureModeFirst": "请先在编辑器中选择一个失效模式行",
     "searchTimeout": "检索超时，请稍后在编辑过程中使用推荐功能",
     "searchFailed": "检索经验教训失败",
     "graphLoadFailed": "图谱数据加载失败",

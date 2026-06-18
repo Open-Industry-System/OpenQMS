@@ -16,14 +16,6 @@ import type { PLMConnection, PLMConnectionCreate, PLMConnectionUpdate } from "..
 import { usePermission } from "../../hooks/usePermission";
 import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
-const typeLabels: Record<string, string> = {
-  mock: "Mock",
-  rest: "REST API",
-  siemens_tc: "Siemens Teamcenter",
-  dassault_enovia: "Dassault ENOVIA",
-  ptc_windchill: "PTC Windchill",
-};
-
 export default function PLMConnectionsPage() {
   const { t } = useTranslation("plm");
   const { t: tc } = useTranslation("common");

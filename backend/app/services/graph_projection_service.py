@@ -208,6 +208,19 @@ class GraphProjectionService:
         async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
             await session.execute_write(_tx)
 
+    async def delete_fmea_projection(self, fmea_id: uuid.UUID) -> None:
+        """从 Neo4j 删除该 FMEA 的所有投影节点（FMEA 行已从 PG 删除）。"""
+
+        async def _tx(tx):
+            result = await tx.run(
+                "MATCH (n) WHERE n.fmea_id = $fmea_id DETACH DELETE n",
+                {"fmea_id": str(fmea_id)},
+            )
+            await result.consume()
+
+        async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+            await session.execute_write(_tx)
+
     async def full_rebuild(self) -> dict:
         """全量重建：清空 Neo4j + 遍历所有 FMEA 逐个同步。"""
         from sqlalchemy import func, select

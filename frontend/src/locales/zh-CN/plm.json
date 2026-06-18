@@ -24,6 +24,7 @@
   },
   "parts": {
     "title": "PLM 零件列表",
+    "listTitle": "零件列表",
     "searchPlaceholder": "搜索零件号或名称",
     "columns": {
       "partNumber": "零件号",
