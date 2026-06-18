@@ -7,6 +7,7 @@ import {
   deleteSubtree,
   getStructureRowHeaderOrder,
   reorderStructureSiblings,
+  canReorderStructureSiblings,
 } from "./structureTree";
 import type { GraphNode, GraphEdge } from "../types";
 
@@ -340,6 +341,78 @@ describe("reorderStructureSiblings", () => {
 
     expect(result.changed).toBe(false);
     expect(result.reason).toBe("invalid");
+  });
+});
+
+describe("canReorderStructureSiblings", () => {
+  const buildSortGraph = () => {
+    const nodes: GraphNode[] = [
+      node("pi1", "ProcessItem"),
+      node("pi2", "ProcessItem"),
+      node("ps1", "ProcessStep"),
+      node("ps2", "ProcessStep"),
+      node("we1", "ProcessWorkElement"),
+      node("fn1", "ProcessStepFunction"),
+      node("orphanFn", "ProcessStepFunction"),
+      node("fm", "FailureMode"),
+    ];
+    const edges: GraphEdge[] = [
+      { source: "pi1", target: "ps1", type: "HAS_PROCESS_STEP" },
+      { source: "pi1", target: "ps2", type: "HAS_PROCESS_STEP" },
+      { source: "ps1", target: "we1", type: "HAS_WORK_ELEMENT" },
+      { source: "ps1", target: "fn1", type: "HAS_FUNCTION" },
+      { source: "orphanFn", target: "fm", type: "HAS_FAILURE_MODE" },
+    ];
+    return { nodes, edges };
+  };
+
+  it("returns true for a valid same-parent before drop", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "ps2", dropNodeId: "ps1", dropPosition: "before",
+    })).toBe(true);
+  });
+
+  it("returns true for a valid top-level ProcessItem drop", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "pi2", dropNodeId: "pi1", dropPosition: "after",
+    })).toBe(true);
+  });
+
+  it("returns false for drop-inside", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "ps2", dropNodeId: "ps1", dropPosition: "inside",
+    })).toBe(false);
+  });
+
+  it("returns false for different relation groups under the same parent", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "fn1", dropNodeId: "we1", dropPosition: "before",
+    })).toBe(false);
+  });
+
+  it("returns false for cross-parent moves", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "we1", dropNodeId: "ps2", dropPosition: "after",
+    })).toBe(false);
+  });
+
+  it("returns false for an orphan fallback root", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "orphanFn", dropNodeId: "pi1", dropPosition: "before",
+    })).toBe(false);
+  });
+
+  it("returns true for a self before/after drop (valid no-op landing)", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "ps1", dropNodeId: "ps1", dropPosition: "after",
+    })).toBe(true);
   });
 });
 

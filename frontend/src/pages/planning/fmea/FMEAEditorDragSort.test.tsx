@@ -334,4 +334,63 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
       "fmea-structure-node-ps2",
     ]);
   });
+
+  it("shows a valid before marker on a legal same-parent drag-over", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+
+    renderEditor();
+
+    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
+    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
+    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
+    } as DOMRect);
+
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(ps2, { dataTransfer });
+    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
+
+    await waitFor(() => expect(ps1.getAttribute("data-drag-state")).toBe("before"));
+  });
+
+  it("shows an invalid marker on a cross-parent drag-over and clears it on drop", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [
+        node("pi1", "ProcessItem"),
+        node("pi2", "ProcessItem"),
+        node("ps1", "ProcessStep"),
+        node("ps2", "ProcessStep"),
+      ],
+      [
+        { source: "pi1", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi2", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+
+    renderEditor();
+
+    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
+    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
+    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
+    } as DOMRect);
+
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(ps2, { dataTransfer });
+    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
+
+    await waitFor(() => expect(ps1.getAttribute("data-drag-state")).toBe("invalid"));
+
+    fireEvent.drop(ps1, { clientY: 1, dataTransfer });
+    await waitFor(() => expect(mocks.warning).toHaveBeenCalledWith("messages.sameLevelSortOnly"));
+    expect(ps1.getAttribute("data-drag-state")).toBeNull();
+  });
 });

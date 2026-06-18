@@ -234,6 +234,40 @@ function sameOrder(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
+/**
+ * Whether a drop would land on a legal same-parent reorder position. Used for
+ * drag-over feedback so the UI can show a valid insertion line vs. an invalid
+ * marker before the user releases. Mirrors the validation gates inside
+ * `reorderStructureSiblings` (which delegates to this). A self before/after
+ * drop is a valid (no-op) landing; drop-inside is always invalid.
+ */
+export function canReorderStructureSiblings({
+  nodes,
+  edges,
+  dragNodeId,
+  dropNodeId,
+  dropPosition,
+}: ReorderStructureSiblingsParams): boolean {
+  if (dropPosition === "inside") return false;
+
+  const contexts = getStructureSortContexts(nodes, edges);
+  const drag = contexts.get(dragNodeId);
+  const drop = contexts.get(dropNodeId);
+  if (!drag || !drop) return false;
+  if (drag.isFallbackRoot || drop.isFallbackRoot) return false;
+  if (drag.parentId !== drop.parentId || drag.depth !== drop.depth || drag.parentEdgeType !== drop.parentEdgeType) {
+    return false;
+  }
+
+  if (drag.parentEdgeType === null) {
+    const dragNode = nodes.find((n) => n.id === dragNodeId);
+    const dropNode = nodes.find((n) => n.id === dropNodeId);
+    if (dragNode?.type !== "ProcessItem" || dropNode?.type !== "ProcessItem") return false;
+  }
+
+  return true;
+}
+
 export function reorderStructureSiblings({
   nodes,
   edges,
@@ -243,23 +277,14 @@ export function reorderStructureSiblings({
 }: ReorderStructureSiblingsParams): ReorderStructureSiblingsResult {
   if (dropPosition === "inside") return { nodes, edges, changed: false, reason: "invalid" };
   if (dragNodeId === dropNodeId) return { nodes, edges, changed: false };
-
-  const contexts = getStructureSortContexts(nodes, edges);
-  const drag = contexts.get(dragNodeId);
-  const drop = contexts.get(dropNodeId);
-  if (!drag || !drop) return { nodes, edges, changed: false, reason: "invalid" };
-  if (drag.isFallbackRoot || drop.isFallbackRoot) return { nodes, edges, changed: false, reason: "invalid" };
-  if (drag.parentId !== drop.parentId || drag.depth !== drop.depth || drag.parentEdgeType !== drop.parentEdgeType) {
+  if (!canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition })) {
     return { nodes, edges, changed: false, reason: "invalid" };
   }
 
-  if (drag.parentEdgeType === null) {
-    const dragNode = nodes.find((n) => n.id === dragNodeId);
-    const dropNode = nodes.find((n) => n.id === dropNodeId);
-    if (dragNode?.type !== "ProcessItem" || dropNode?.type !== "ProcessItem") {
-      return { nodes, edges, changed: false, reason: "invalid" };
-    }
+  const contexts = getStructureSortContexts(nodes, edges);
+  const drag = contexts.get(dragNodeId)!;
 
+  if (drag.parentEdgeType === null) {
     const rootIds = nodes
       .filter((n) => n.type === "ProcessItem" && contexts.get(n.id)?.parentEdgeType === null && !contexts.get(n.id)?.isFallbackRoot)
       .map((n) => n.id);

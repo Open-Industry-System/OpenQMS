@@ -27,6 +27,7 @@ import {
   deleteSubtree,
   getStructureRowHeaderOrder,
   reorderStructureSiblings,
+  canReorderStructureSiblings,
   STRUCTURE_CHILD_MAP,
   type StructureChildAction,
   type StructureDropPosition,
@@ -123,6 +124,7 @@ export default function FMEAEditorPage() {
   const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
   const dragStructureNodeIdRef = useRef<string | null>(null);
+  const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
@@ -583,15 +585,26 @@ export default function FMEAEditorPage() {
   }, [canDragSortStructure]);
 
   const handleStructureDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!canDragSortStructure || !dragStructureNodeIdRef.current) return;
+    const dragNodeId = dragStructureNodeIdRef.current;
+    if (!canDragSortStructure || !dragNodeId) return;
+    const dropNodeId = (event.currentTarget as HTMLElement).dataset.nodeId;
+    if (!dropNodeId) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  }, [canDragSortStructure]);
+    const position = getStructureDropPosition(event);
+    const valid = canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
+    event.dataTransfer.dropEffect = valid ? "move" : "none";
+    setDragOver((prev) =>
+      prev && prev.nodeId === dropNodeId && prev.position === position && prev.valid === valid
+        ? prev
+        : { nodeId: dropNodeId, position, valid }
+    );
+  }, [canDragSortStructure, edges, getStructureDropPosition, nodes]);
 
   const handleStructureDrop = useCallback((dropNodeId: string, event: React.DragEvent<HTMLDivElement>) => {
     if (!canDragSortStructure) return;
     event.preventDefault();
     event.stopPropagation();
+    setDragOver(null);
 
     const dragNodeId = dragStructureNodeIdRef.current;
     dragStructureNodeIdRef.current = null;
@@ -616,6 +629,7 @@ export default function FMEAEditorPage() {
 
   const handleStructureDragEnd = useCallback(() => {
     dragStructureNodeIdRef.current = null;
+    setDragOver(null);
   }, []);
 
   const deleteRow = useCallback((row: FMEARow) => {
@@ -1282,10 +1296,22 @@ export default function FMEAEditorPage() {
                 const actions = canEdit('fmea') ? (STRUCTURE_CHILD_MAP[node.type] || []) : [];
                 const hasRows = rowsByFunction[node.id]?.length > 0;
                 const isSelected = selectedFunctionId === node.id;
+                const dragState =
+                  dragOver && dragOver.nodeId === node.id
+                    ? dragOver.valid
+                      ? dragOver.position === "before"
+                        ? "before"
+                        : dragOver.position === "after"
+                          ? "after"
+                          : "invalid"
+                      : "invalid"
+                    : null;
                 return (
                   <div key={node.id}>
                     <div
                       data-testid={`fmea-structure-node-${node.id}`}
+                      data-node-id={node.id}
+                      data-drag-state={dragState ?? undefined}
                       draggable={canDragSortStructure}
                       onDragStart={(e) => handleStructureDragStart(node.id, e)}
                       onDragOver={handleStructureDragOver}
@@ -1299,7 +1325,17 @@ export default function FMEAEditorPage() {
                         borderRadius: 6,
                         cursor: canDragSortStructure ? "grab" : "pointer",
                         background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
-                        border: isSelected ? "1px solid var(--qf-cyan)" : "1px solid var(--qf-border)",
+                        border: isSelected
+                          ? "1px solid var(--qf-cyan)"
+                          : dragState === "invalid"
+                            ? "1px solid rgba(255, 77, 79, 0.7)"
+                            : "1px solid var(--qf-border)",
+                        boxShadow:
+                          dragState === "before"
+                            ? "0 -2px 0 0 var(--qf-cyan)"
+                            : dragState === "after"
+                              ? "0 2px 0 0 var(--qf-cyan)"
+                              : undefined,
                         fontSize: 13,
                         display: "flex",
                         alignItems: "center",
@@ -1307,7 +1343,7 @@ export default function FMEAEditorPage() {
                         transition: "background 0.2s, border-color 0.2s",
                         color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
                       }}
-                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
+                      onMouseEnter={(e) => { if (!isSelected && !dragState) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
                     >
                       <div style={{ minWidth: 0, flex: 1 }}>
