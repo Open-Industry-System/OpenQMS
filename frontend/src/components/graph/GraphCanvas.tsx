@@ -102,7 +102,8 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     [nodes, edges, t, i18n.language],
   );
 
-  // Keep handlers in refs so initGraph only depends on structural inputs (nodes/edges/layout)
+  // Keep handlers in refs so initGraph only depends on structural inputs (layout/nodes);
+  // edge changes flow through graphData and the data-refresh effect below.
   const handlersRef = useRef({ onNodeClick, onNodeDoubleClick, onNodeContextMenu });
   useEffect(() => {
     handlersRef.current = { onNodeClick, onNodeDoubleClick, onNodeContextMenu };
@@ -215,6 +216,9 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.render().catch((err: unknown) => {
       console.error("G6 render failed:", err);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- graphData is intentionally
+    // excluded so language changes do not recreate the G6 instance; the [graphData] effect
+    // below is the data refresh path and preserves zoom/pan.
   }, [layout, nodes]);
 
   // Apply highlight/dim
@@ -290,17 +294,16 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     };
   }, [initGraph]);
 
+  const prevGraphDataRef = useRef(graphData);
   useEffect(() => {
     const graph = graphRef.current;
     if (!graph) return;
-    graph.setData(graphData);
+    if (prevGraphDataRef.current !== graphData) {
+      prevGraphDataRef.current = graphData;
+      graph.setData(graphData);
+    }
     applyHighlight();
   }, [graphData, applyHighlight]);
-
-  // Apply highlight after graph initialization
-  useEffect(() => {
-    applyHighlight();
-  }, [applyHighlight]);
 
   // Resize handler
   useEffect(() => {
