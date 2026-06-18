@@ -2,6 +2,7 @@ import { Drawer, Descriptions, Tag, Space } from "antd";
 import { useTranslation } from "react-i18next";
 import type { GraphNode, GraphEdge } from "../../api/graph";
 import { calculateAP } from "../../utils/fmea";
+import { getNodeTypeKey } from "../../utils/graphPresentation";
 
 interface NodeDetailDrawerProps {
   node: GraphNode | null;
@@ -95,7 +96,7 @@ export default function NodeDetailDrawer({
       <Descriptions column={1} size="small" bordered>
         <Descriptions.Item label={t("nodeDetail.nodeId")}>{node.id}</Descriptions.Item>
         <Descriptions.Item label={t("nodeDetail.nodeType")}>
-          <Tag>{node.label}</Tag>
+          <Tag>{t(getNodeTypeKey(node.label), { defaultValue: node.label })}</Tag>
         </Descriptions.Item>
         {s > 0 && (
           <Descriptions.Item label={t("nodeDetail.severity")}>{String(s)}</Descriptions.Item>
