@@ -294,8 +294,8 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     const graph = graphRef.current;
     if (!graph) return;
     graph.setData(graphData);
-    graph.draw();
-  }, [graphData]);
+    applyHighlight();
+  }, [graphData, applyHighlight]);
 
   // Apply highlight after graph initialization
   useEffect(() => {
