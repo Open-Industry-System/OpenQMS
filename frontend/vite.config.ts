@@ -24,20 +24,23 @@ export default defineConfig({
     include: ["@ant-design/charts"],
   },
   build: {
-    // The Ant ecosystem (antd + @ant-design/charts + @antv/g6 + echarts + d3)
-    // has deep cross-dependencies that make fine-grained chunking impossible
-    // without circular chunk errors. We accept a larger UI chunk and focus on
-    // splitting it from the app code and React core for cache efficiency.
+    // Split route code from stable vendor groups. Ant Design is used broadly,
+    // while chart / graph engines are loaded by a smaller set of lazy routes;
+    // keeping them in separate vendor chunks reduces the largest shared chunk.
     chunkSizeWarningLimit: 2500,
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
 
-          // Ant ecosystem: UI framework + charts + graph vis + echarts
-          // Cross-deps: @ant-design/charts→@ant-design/graphs→@antv/g6,
-          // @ant-design/plots→@antv/g2, echarts↔echarts-for-react
-          if (/antd|@ant-design|rc-|echarts|@antv|d3-/.test(id)) return "vendor-ui";
+          // Heavy chart / graph engines are loaded only by a few lazy routes.
+          // Keep them out of the shared Ant Design UI chunk so the largest
+          // vendor chunk is smaller and easier to cache independently.
+          if (/echarts/.test(id)) return "vendor-echarts";
+          if (/@antv|@ant-design\/(charts|graphs|plots)|d3-/.test(id)) return "vendor-charts";
+
+          // Ant Design ecosystem used broadly across pages.
+          if (/antd|@ant-design|rc-/.test(id)) return "vendor-ui";
 
           // React core — rarely changes, cached separately
           if (/react-dom|\/react\//.test(id)) return "vendor-react";
