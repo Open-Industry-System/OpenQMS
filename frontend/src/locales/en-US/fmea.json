@@ -218,6 +218,7 @@
     "notFound": "FMEA not found",
     "noData": "No data",
     "selectFunctionFirst": "Please select a function/process node on the left first",
+    "sameLevelSortOnly": "Only same-level nodes can be reordered",
     "selectFailureModeFirst": "Please select a failure mode row in the editor first",
     "searchTimeout": "Search timeout, please use the recommendation feature later during editing",
     "searchFailed": "Failed to search lessons learned",
