@@ -218,6 +218,7 @@ layout: {
    - 用 `getNodeStyle()` 设置节点样式。
    - 用 G6 label background / offset / padding 优化边标签可读性。
    - 为 dagre 布局增加明确的 `nodesep`、`ranksep`。
+   - 语言切换时刷新 G6 data：`toG6Data()` 需要接收翻译函数或已翻译 label，并把 `t` / `i18n.language` 纳入相关 hook 依赖，避免语言切换后画布仍显示旧语言。
 4. 更新 `GraphLegend`：
    - 从 `graphPresentation.ts` 读取节点类型列表和颜色。
    - 文案使用 `nodeTypes.*`，不要再维护独立且不完整的 `legend.*` 类型列表。
