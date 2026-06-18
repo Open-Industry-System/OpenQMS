@@ -343,6 +343,32 @@ describe("reorderStructureSiblings", () => {
   });
 });
 
+describe("createStructureChild", () => {
+  it("creates a function node + HAS_FUNCTION edge under a ProcessStep", () => {
+    const parent = node("ps1", "ProcessStep");
+    const action = STRUCTURE_CHILD_MAP["ProcessStep"].find((a) => a.kind === "function")!;
+    const { node: child, edge } = createStructureChild(parent, action, "贴装功能", "偏移≤0.05mm", "节拍≤2s");
+    expect(child.type).toBe("ProcessStepFunction");
+    expect(child.name).toBe("贴装功能");
+    expect(child.specification).toBe("偏移≤0.05mm");
+    expect(child.requirement).toBe("节拍≤2s");
+    expect(child.severity).toBe(0);
+    expect(child.id).toMatch(/^n\d+_/);
+    expect(edge).toEqual({ source: "ps1", target: child.id, type: "HAS_FUNCTION" });
+  });
+
+  it("creates a structure child node with the right edge type", () => {
+    const parent = node("pi", "ProcessItem");
+    const action = STRUCTURE_CHILD_MAP["ProcessItem"].find((a) => a.kind === "structure")!;
+    const { node: child, edge } = createStructureChild(parent, action, "OP10");
+    expect(child.type).toBe("ProcessStep");
+    expect(child.name).toBe("OP10");
+    expect(child.specification).toBeUndefined();
+    expect(child.requirement).toBeUndefined();
+    expect(edge).toEqual({ source: "pi", target: child.id, type: "HAS_PROCESS_STEP" });
+  });
+});
+
 describe("deleteSubtree", () => {
   const buildGraph = () => {
     const nodes: GraphNode[] = [
