@@ -102,7 +102,7 @@ reorderStructureSiblings(params): {
 2. 判断是否为 drop 到节点内部；如果是，返回 `changed: false`。
 3. 通过当前 `buildStructureTree(nodes, edges)` 的结果解析拖动节点和目标节点的父级、深度、父边类型与 fallback root 状态。
 4. 校验两者必须具有同一父级、同一深度、同一父边类型；顶层 `ProcessItem` 则都必须没有父边且都不是 orphan fallback root。
-5. 对 orphan fallback root 保守处理：正常情况下不允许排序；只有同为 fallback root 且类型相同的节点可以作为 root 组排序。这样避免把缺边的异常数据伪装成合法结构调整。
+5. 对 orphan fallback root 保守处理：一律不允许拖动排序。fallback root 只用于兼容缺边的旧数据，不参与本次排序能力，避免把异常数据伪装成合法结构调整。
 6. 如果校验失败，返回 `changed: false` 和非法原因。
 7. 如果是顶层 `ProcessItem` 排序，重排 `nodes` 中这些 root 的相对顺序，其它节点保持原相对位置。
 8. 如果是普通子节点排序，重排 `edges` 中同父同 `parentEdgeType` 父边的相对顺序，其它 edges 保持原相对位置。
