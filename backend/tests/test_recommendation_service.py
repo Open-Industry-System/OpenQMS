@@ -44,6 +44,20 @@ class StubGraphRepo:
         ))
 
 
+def test_default_llm_timeout_covers_normal_provider_latency(monkeypatch):
+    """FMEA recommendations should not time out normal OpenAI-compatible calls.
+
+    Ark/DeepSeek-compatible endpoints commonly take around 9s for the FMEA
+    JSON prompt; the default must leave enough room or the UI falls back to
+    "AI 建议暂不可用" despite a configured provider.
+    """
+    monkeypatch.setattr("app.services.recommendation_service.settings.LLM_TIMEOUT", 5)
+
+    svc = RecommendationService(db=None, llm_provider=object(), graph_repo=StubGraphRepo())
+
+    assert svc.llm_timeout >= 15
+
+
 def test_merge_and_deduplicate_prefers_higher_confidence():
     svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
     a = [SuggestionItem(name="焊接不良", confidence=0.7, source="rule")]

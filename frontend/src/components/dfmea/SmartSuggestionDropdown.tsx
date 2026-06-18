@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Input, Dropdown, Tag, Spin, Alert, Typography, Radio } from "antd";
 import { BulbOutlined, StarOutlined, SettingOutlined, GlobalOutlined } from "@ant-design/icons";
+import axios from "axios";
 import { getRecommendations, type Suggestion, type RecommendResponse } from "../../api/recommendation";
 import { usePermission } from "../../hooks/usePermission";
 import type { ModuleKey } from "../../hooks/usePermission";
@@ -114,7 +115,7 @@ export default function SmartSuggestionDropdown({
         setOpen(res.suggestions.length > 0);
         setSelectedIndex(-1);
       } catch (e: unknown) {
-        if (e instanceof Error && e.name === "AbortError") return; // ignore aborts
+        if (axios.isCancel(e)) return; // ignore superseded requests
         const err = e as { response?: { status?: number }; message?: string };
         if (err?.response?.status === 429) {
           setError(t("smartSuggestion.tooFrequent"));

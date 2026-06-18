@@ -359,10 +359,9 @@ class RecommendationService:
         self.llm = llm_provider
         self.graph_repo = graph_repo
         self.rules = RuleEngine()
-        # llm_timeout comes from the persisted AI config (app.state.llm_timeout,
-        # kept in sync by _rebuild_providers). Fall back to the env-backed
-        # settings default when unset (e.g. tests / direct construction).
-        self.llm_timeout = llm_timeout or settings.LLM_TIMEOUT
+        # FMEA prompts on OpenAI-compatible gateways can take ~9s; keep a
+        # safe lower bound so configured providers don't look unavailable.
+        self.llm_timeout = max(llm_timeout or settings.LLM_TIMEOUT, 15)
 
     async def recommend(self, fmea_id: _uuid.UUID, request: RecommendRequest, user: User) -> RecommendResponse:
         from app.core.permissions import Module, PermissionLevel, get_user_permission
