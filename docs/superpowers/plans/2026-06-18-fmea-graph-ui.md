@@ -882,7 +882,16 @@ export default function GraphLegend() {
         {GRAPH_NODE_TYPES.map((type) => {
           const presentation = NODE_PRESENTATION[type];
           return (
-            <Tag key={type} color={presentation.style.stroke}>
+            <Tag
+              key={type}
+              style={{
+                backgroundColor: presentation.style.fill,
+                borderColor: presentation.style.stroke,
+                borderStyle: "solid",
+                borderWidth: 1,
+                color: "#1f2937",
+              }}
+            >
               {t(presentation.translationKey, { defaultValue: type })}
             </Tag>
           );
@@ -1019,6 +1028,7 @@ Open a FMEA document graph tab that contains PFMEA or DFMEA graph data. Verify t
 [ ] NodeDetailDrawer node type changes with the selected language and does not show raw FailureMode for known types.
 [ ] Long node names stay inside the node body, wrap to at most 2 lines, and end with an ellipsis when truncated.
 [ ] ProcessItemFunction, ProcessStepFunction, ProcessWorkElementFunction, Interface, and DesignParameter use non-default colors when present.
+[ ] Graph edges do not noticeably pass through unrelated nodes in the default dagre layout. If they do, change `controlPoints` from `false` to `true` in `graphLayoutOptions("dagre")`, rerun `npm run build`, and repeat this manual check.
 [ ] Zoom in, zoom out, fit view, download, layout switching, and node click detail still work.
 [ ] Switching language while the graph page is open refreshes the graph labels after React re-renders the component.
 ```
