@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import enGraph from "../locales/en-US/graph.json";
+import zhGraph from "../locales/zh-CN/graph.json";
 import {
   DEFAULT_NODE_STYLE,
   EDGE_PRESENTATION,
@@ -61,6 +63,20 @@ describe("graphPresentation", () => {
     expect(GRAPH_EDGE_TYPES).toEqual(REQUIRED_EDGE_TYPES);
     for (const type of REQUIRED_EDGE_TYPES) {
       expect(EDGE_PRESENTATION[type]?.translationKey).toMatch(/^edgeTypes\./);
+    }
+  });
+
+  it("has zh-CN and en-US locale entries for every known graph enum", () => {
+    for (const presentation of Object.values(NODE_PRESENTATION)) {
+      const key = presentation.translationKey.replace("nodeTypes.", "");
+      expect(zhGraph.nodeTypes[key as keyof typeof zhGraph.nodeTypes]).toBeTruthy();
+      expect(enGraph.nodeTypes[key as keyof typeof enGraph.nodeTypes]).toBeTruthy();
+    }
+
+    for (const presentation of Object.values(EDGE_PRESENTATION)) {
+      const key = presentation.translationKey.replace("edgeTypes.", "");
+      expect(zhGraph.edgeTypes[key as keyof typeof zhGraph.edgeTypes]).toBeTruthy();
+      expect(enGraph.edgeTypes[key as keyof typeof enGraph.edgeTypes]).toBeTruthy();
     }
   });
 
