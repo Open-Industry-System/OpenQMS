@@ -133,8 +133,28 @@ t(getEdgeTypeKey(type), { defaultValue: type })
   - 控制/措施：绿紫灰色系。
   - 接口/设计参数：紫色/蓝色系。
 - 节点增加细边框、轻阴影、适度内边距。
-- 节点文字居中，过长名称使用省略号，不改变原始数据。
+- 节点文字居中，过长名称必须限制在节点宽度内，最多 2 行，超出显示省略号，不改变原始数据。
 - 对 `FailureMode` 可保留轻微强调色，但不再使用过于突兀的菱形作为默认形态，优先保证整体整洁。
+
+G6 v5 目标节点 label 参数：
+
+```ts
+node: {
+  style: {
+    labelText: translatedOrRawNodeName,
+    labelFontSize: 12,
+    labelFill: "#1f2937",
+    labelPlacement: "center",
+    labelTextAlign: "center",
+    labelWordWrap: true,
+    labelMaxWidth: 120,
+    labelMaxLines: 2,
+    labelTextOverflow: "ellipsis",
+  },
+}
+```
+
+如果当前 G6 版本或类型定义不支持 `labelMaxWidth`，则使用其兼容属性 `labelWordWrapWidth: 120`。如果两者表现不同，优先采用实际能在浏览器中限制文本宽度的属性，并在实现记录中说明。
 
 ### 边
 
@@ -203,6 +223,8 @@ layout: {
    - 文案使用 `nodeTypes.*`，不要再维护独立且不完整的 `legend.*` 类型列表。
 5. 更新 `NodeDetailDrawer`：
    - 节点类型显示使用 `nodeTypes.*`，不要直接显示原始英文枚举。
+   - 与画布、图例使用同一个 `getNodeTypeKey()` / `t()` 路径，保证语言切换后三处同步。
+   - 仅节点 ID 保持原始值；节点类型不能再直接渲染 `node.label`。
 6. 补充单元测试覆盖：
    - 已知节点类型都有翻译 key。
    - 已知边类型都有翻译 key。
@@ -217,6 +239,8 @@ layout: {
   - zh-CN 下，画布边关系显示中文业务短语。
   - en-US 下，画布边关系显示英文业务短语，不显示硬编码中文。
   - 图例、画布、详情抽屉节点类型随语言切换一致变化。
+  - 详情抽屉节点类型不再直接显示 `FailureMode` 等原始英文枚举。
+  - 长节点名称最多 2 行，超出显示省略号，不横向溢出节点边界。
   - 已知类型 `ProcessItemFunction`、`ProcessStepFunction`、`ProcessWorkElementFunction`、`Interface`、`DesignParameter` 不再显示为默认样式或英文枚举。
   - 已知边 `HAS_FUNCTION`、`HAS_PARAMETER` 不再显示英文枚举。
   - 边标签可读，不明显压在线上。
