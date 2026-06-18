@@ -10,14 +10,14 @@ from app.utils.vector import parse_vector_dimensions
 class TestCreateEmbeddingProvider:
     """测试工厂函数。"""
 
-    @patch("app.config.settings")
+    @patch("app.services.embedding_provider.app_settings")
     def test_returns_none_when_no_provider(self, mock_settings):
         """未配置 provider 时返回 None。"""
         mock_settings.EMBEDDING_PROVIDER = ""
         mock_settings.LLM_PROVIDER = ""
         assert create_embedding_provider() is None
 
-    @patch("app.config.settings")
+    @patch("app.services.embedding_provider.app_settings")
     def test_returns_ollama_provider(self, mock_settings):
         """配置 ollama 时返回 OllamaEmbeddingProvider。"""
         mock_settings.EMBEDDING_PROVIDER = "ollama"
@@ -27,7 +27,7 @@ class TestCreateEmbeddingProvider:
         assert isinstance(provider, OllamaEmbeddingProvider)
         assert provider.dimensions == 768  # nomic-embed-text default
 
-    @patch("app.config.settings")
+    @patch("app.services.embedding_provider.app_settings")
     def test_returns_none_for_unsupported_provider(self, mock_settings):
         """不支持的 provider 返回 None。"""
         mock_settings.EMBEDDING_PROVIDER = "unsupported"
