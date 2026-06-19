@@ -3,6 +3,7 @@ import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import type { LayoutItem, ResponsiveLayouts } from "react-grid-layout/legacy";
 import type { WidgetLayoutItem, DashboardWidgetsData } from "./widgets/types";
 import { getWidgetMeta } from "./widgets/registry";
+import { clampWidgetSize, GRID_COLS } from "./dashboardLayoutUtils";
 import WidgetWrapper from "./WidgetWrapper";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
@@ -96,11 +97,26 @@ export default function DashboardGrid({
 }: DashboardGridProps) {
 
   const layouts: ResponsiveLayouts = useMemo(() => {
+    // Enrich items with minW/minH/maxW from the registry so react-grid-layout
+    // refuses to resize a widget below the backend's WIDGET_MIN_SIZES (which
+    // would otherwise 400 on save). clampWidgetSize also self-heals any stale
+    // below-min widget loaded from the DB.
+    const toRgl = (items: WidgetLayoutItem[]): LayoutItem[] =>
+      items.map((item) => {
+        const meta = getWidgetMeta(item.type);
+        const clamped = clampWidgetSize(item);
+        return {
+          ...clamped,
+          minW: meta?.minSize.w ?? 1,
+          minH: meta?.minSize.h ?? 1,
+          maxW: GRID_COLS,
+        };
+      });
     return {
-      lg: layout,
-      md: computeMdLayout(layout),
-      sm: computeSmLayout(layout),
-      xs: computeMobileLayout(layout).map((i) => ({ ...i, w: 4 })),
+      lg: toRgl(layout),
+      md: toRgl(computeMdLayout(layout)),
+      sm: toRgl(computeSmLayout(layout)),
+      xs: toRgl(computeMobileLayout(layout).map((i) => ({ ...i, w: 4 }))),
     };
   }, [layout]);
 

@@ -26,6 +26,7 @@ import type {
 import {
   createWidgetLayoutItem,
   filterLayoutByPermission,
+  clampWidgetSize,
 } from "../../components/dashboard/dashboardLayoutUtils";
 
 const DEFAULT_LAYOUT: DashboardLayoutConfig = {
@@ -133,12 +134,13 @@ export default function DashboardPage() {
   const handleSave = async () => {
     if (!editLayout) return;
     try {
-      await saveDashboardLayout({ lg: editLayout });
-      setLayout(editLayout);
+      const sanitized = editLayout.map(clampWidgetSize);
+      await saveDashboardLayout({ lg: sanitized });
+      setLayout(sanitized);
       setIsEditing(false);
       setEditLayout(null);
       message.success(t("messages.saveSuccess", "布局已保存"));
-      const widgetTypes = [...new Set(editLayout.map((w) => w.type))];
+      const widgetTypes = [...new Set(sanitized.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch {

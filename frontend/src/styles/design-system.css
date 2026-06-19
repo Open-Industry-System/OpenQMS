@@ -435,3 +435,23 @@ body {
   border-right: 3px solid var(--qf-cyan) !important;
   box-shadow: -4px 0 12px var(--qf-cyan-glow) !important;
 }
+
+/* 仪表盘网格：让卡片填满其网格单元，避免"占用格大小 ≠ 卡片显示区域"。
+   .react-grid-item 由 RGL 设定固定高度，但其直接子 <div>（DashboardGrid 里的
+   <div key>）默认 height:auto，导致 WidgetWrapper 的 height:100% 退化为内容高。
+   这里打通高度链，并让 antd Card 撑满单元、body 区域可滚动。 */
+.dashboard-grid .react-grid-item > div {
+  height: 100%;
+}
+
+.dashboard-grid .ant-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-grid .ant-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
