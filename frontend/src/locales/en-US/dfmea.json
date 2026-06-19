@@ -105,6 +105,7 @@
       "step3Incomplete": "Function Analysis — some components have no functions defined",
       "step4Incomplete": "Failure Analysis — some functions have no failure modes defined",
       "step5Incomplete": "Risk Analysis — some failure chains have missing S/O/D ratings",
+      "step5IncompleteMissingCause": "Risk Analysis — some failure chains have no failure cause defined (add a cause before rating)",
       "confirmEmptyDraftTitle": "Discard Draft?",
       "confirmEmptyDraft": "The current draft is empty and will be deleted upon confirmation.",
       "confirmEmptyDraftOk": "Discard and Delete",

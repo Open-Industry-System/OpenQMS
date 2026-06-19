@@ -614,7 +614,11 @@ export default function DFMEAWizardPage() {
             <div style={{ marginTop: 16, padding: 12, background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4 }}>
               <div style={{ fontWeight: 600, color: '#cf1322', marginBottom: 4 }}>{t('wizard.page.completionWarning')}</div>
               {validation.warnings.map(w => (
-                <div key={w} style={{ color: '#cf1322' }}>• {t(`wizard.page.step${w + 1}Incomplete`)}</div>
+                <div key={w} style={{ color: '#cf1322' }}>• {t(
+                  w === 4 && validation.step5MissingCause
+                    ? 'wizard.page.step5IncompleteMissingCause'
+                    : `wizard.page.step${w + 1}Incomplete`
+                )}</div>
               ))}
             </div>
           )}
