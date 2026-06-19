@@ -105,6 +105,7 @@
       "step3Incomplete": "功能分析 — 存在零部件未定义功能",
       "step4Incomplete": "失效分析 — 存在功能未定义失效模式",
       "step5Incomplete": "风险分析 — 存在失效链 S/O/D 未填写",
+      "step5IncompleteMissingCause": "风险分析 — 存在失效链未定义失效起因（须先添加起因才能评级）",
       "confirmEmptyDraftTitle": "确认放弃草稿？",
       "confirmEmptyDraft": "当前草稿为空，确定后将被删除。",
       "confirmEmptyDraftOk": "放弃并删除",
