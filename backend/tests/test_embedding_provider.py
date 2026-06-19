@@ -54,6 +54,55 @@ class TestOllamaDimensions:
         assert provider.dimensions == 768
 
 
+class TestOllamaDimensionsFromConfig:
+    """Ollama 维度来自模型固定输出，而非 EMBEDDING_DIMENSIONS。
+
+    回归 / 与 OpenAI 维度测试对称：OpenAI 的 /v1/embeddings 支持 dimensions
+    参数，因此配置值即真实值；Ollama 的 /api/embeddings 无该参数，模型输出维度
+    固定，配置值只在与模型不一致时告警（告警后仍以模型维度为准，避免向存储层
+    谎报一个模型从不产生的维度）。
+    """
+
+    def test_config_matches_model_known_dim(self, caplog):
+        """配置维度与模型已知维度一致时，照常返回该维度且不告警。"""
+        with caplog.at_level("WARNING", logger="app.services.embedding_provider"):
+            provider = OllamaEmbeddingProvider(model="nomic-embed-text", dimensions=768)
+        assert provider.dimensions == 768
+        assert not [r for r in caplog.records if "model-fixed" in r.message]
+
+    def test_config_disagrees_with_model_is_ignored_and_warned(self, caplog):
+        """配置维度与模型不符时：以模型维度为准（model-fixed），并告警。"""
+        with caplog.at_level("WARNING", logger="app.services.embedding_provider"):
+            provider = OllamaEmbeddingProvider(model="nomic-embed-text", dimensions=1024)
+        # 模型固定输出 768，配置 1024 被忽略 —— 否则存储层的列/向量会错配
+        assert provider.dimensions == 768
+        assert any("model-fixed" in r.message for r in caplog.records)
+
+    def test_factory_passes_dimensions_to_ollama(self):
+        """工厂应把 EMBEDDING_DIMENSIONS 传给 OllamaEmbeddingProvider。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="ollama",
+            EMBEDDING_MODEL="nomic-embed-text",
+            EMBEDDING_BASE_URL="http://localhost:11434",
+            EMBEDDING_DIMENSIONS=1024,
+        )
+        provider = create_embedding_provider(cfg)
+        assert isinstance(provider, OllamaEmbeddingProvider)
+        # 配置 1024 与 nomic 的 768 不符 → 模型维度为准
+        assert provider.dimensions == 768
+
+    def test_factory_defaults_to_model_known_dim_without_config(self):
+        """未配置 EMBEDDING_DIMENSIONS 时使用模型已知维度。"""
+        cfg = SimpleNamespace(
+            EMBEDDING_PROVIDER="ollama",
+            EMBEDDING_MODEL="bge-m3",
+            EMBEDDING_BASE_URL="http://localhost:11434",
+        )
+        provider = create_embedding_provider(cfg)
+        assert isinstance(provider, OllamaEmbeddingProvider)
+        assert provider.dimensions == 1024
+
+
 class TestParseVectorDimensions:
     """测试迁移中的维度参数解析（使用与迁移相同的 parse_vector_dimensions 函数）。"""
 

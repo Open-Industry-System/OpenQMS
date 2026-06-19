@@ -50,12 +50,34 @@ class OpenAIEmbeddingProvider:
 
 
 class OllamaEmbeddingProvider:
-    def __init__(self, base_url: str = "http://ollama:11434", model: str = "nomic-embed-text"):
+    def __init__(
+        self,
+        base_url: str = "http://ollama:11434",
+        model: str = "nomic-embed-text",
+        dimensions: int | None = None,
+    ):
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._client = httpx.AsyncClient(base_url=self._base_url, timeout=30.0)
+        # Unlike OpenAI, Ollama's /api/embeddings endpoint has no `dimensions`
+        # parameter — a model always emits a fixed output dimensionality. dim_map
+        # mirrors each model's known output dim so the reported `dimensions`
+        # matches what the model actually emits (which is what the pgvector
+        # column must match). A configured EMBEDDING_DIMENSIONS that disagrees
+        # with the model is a likely misconfiguration and is warned about rather
+        # than silently honored — honoring it would report a dimension the model
+        # never produces, letting the storage layer's table-vs-provider check
+        # pass while upserts still fail.
         dim_map = {"nomic-embed-text": 768, "bge-m3": 1024}
-        self._dimensions = dim_map.get(model, 768)
+        known_dim = dim_map.get(model, 768)
+        if dimensions and dimensions != known_dim:
+            logger.warning(
+                "EMBEDDING_DIMENSIONS=%s configured for Ollama model '%s', but its "
+                "output dimensionality is model-fixed at %s. The configured value "
+                "is ignored; the document_embeddings column must match %s.",
+                dimensions, model, known_dim, known_dim,
+            )
+        self._dimensions = known_dim
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         results = []
@@ -116,7 +138,11 @@ def create_embedding_provider(config=None) -> EmbeddingProvider | None:
     if provider_name == "ollama":
         model = getattr(cfg, "EMBEDDING_MODEL", "") or getattr(cfg, "embedding_model", "") or "nomic-embed-text"
         base_url = getattr(cfg, "EMBEDDING_BASE_URL", "") or getattr(cfg, "embedding_base_url", "")
-        return OllamaEmbeddingProvider(base_url=base_url, model=model)
+        dim_cfg = getattr(cfg, "EMBEDDING_DIMENSIONS", 0) or getattr(cfg, "embedding_dimensions", 0)
+        # Guard against a non-int value (e.g. a mocked settings object) leaking
+        # through; only an explicit positive int configures the dimension.
+        dimensions = dim_cfg if isinstance(dim_cfg, int) and dim_cfg > 0 else None
+        return OllamaEmbeddingProvider(base_url=base_url, model=model, dimensions=dimensions)
 
     logger.warning(f"Unsupported EMBEDDING_PROVIDER: {provider_name}")
     return None
