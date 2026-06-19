@@ -5,6 +5,9 @@ import {
   buildStructureTree,
   createStructureChild,
   deleteSubtree,
+  getStructureRowHeaderOrder,
+  reorderStructureSiblings,
+  canReorderStructureSiblings,
 } from "./structureTree";
 import type { GraphNode, GraphEdge } from "../types";
 
@@ -137,22 +140,382 @@ describe("buildStructureTree", () => {
   });
 
   it("surfaces orphan function nodes (not attached to any structure) as fallback roots", () => {
-    // Historical data: a ProcessStepFunction with no HAS_FUNCTION parent, but
-    // carrying its own HAS_FAILURE_MODE row. It must NOT vanish from the panel.
     const nodes: GraphNode[] = [
       node("pi", "ProcessItem"),
       node("orphanFn", "ProcessStepFunction"),
       node("fm", "FailureMode"),
     ];
     const edges: GraphEdge[] = [
-      // orphanFn has NO incoming HAS_FUNCTION edge; only a failure mode
       { source: "orphanFn", target: "fm", type: "HAS_FAILURE_MODE" },
     ];
     const tree = buildStructureTree(nodes, edges);
     const ids = tree.map((t) => t.node.id);
     expect(ids).toContain("pi");
-    expect(ids).toContain("orphanFn"); // fallback root, not lost
+    expect(ids).toContain("orphanFn");
     expect(tree.find((t) => t.node.id === "orphanFn")!.depth).toBe(0);
+  });
+});
+
+describe("getStructureRowHeaderOrder", () => {
+  it("returns row headers in structure-tree preorder", () => {
+    const nodes: GraphNode[] = [
+      node("pi", "ProcessItem"),
+      node("ps2", "ProcessStep"),
+      node("ps1", "ProcessStep"),
+      node("we1", "ProcessWorkElement"),
+      node("fnStep", "ProcessStepFunction"),
+      node("fnWe", "ProcessWorkElementFunction"),
+      node("orphanFn", "ProcessStepFunction"),
+      node("fm", "FailureMode"),
+    ];
+    const edges: GraphEdge[] = [
+      { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+      { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      { source: "ps1", target: "we1", type: "HAS_WORK_ELEMENT" },
+      { source: "ps1", target: "fnStep", type: "HAS_FUNCTION" },
+      { source: "we1", target: "fnWe", type: "HAS_FUNCTION" },
+      { source: "orphanFn", target: "fm", type: "HAS_FAILURE_MODE" },
+    ];
+
+    expect(getStructureRowHeaderOrder(nodes, edges)).toEqual([
+      "pi",
+      "ps1",
+      "we1",
+      "fnWe",
+      "fnStep",
+      "ps2",
+      "orphanFn",
+    ]);
+  });
+});
+
+describe("reorderStructureSiblings", () => {
+  const buildSortGraph = () => {
+    const nodes: GraphNode[] = [
+      node("pi1", "ProcessItem"),
+      node("pi2", "ProcessItem"),
+      node("ps1", "ProcessStep"),
+      node("ps2", "ProcessStep"),
+      node("we1", "ProcessWorkElement"),
+      node("we2", "ProcessWorkElement"),
+      node("fn1", "ProcessStepFunction"),
+      node("fn2", "ProcessStepFunction"),
+      node("orphanFn", "ProcessStepFunction"),
+      node("fm", "FailureMode"),
+    ];
+    const edges: GraphEdge[] = [
+      { source: "pi1", target: "ps1", type: "HAS_PROCESS_STEP" },
+      { source: "pi1", target: "ps2", type: "HAS_PROCESS_STEP" },
+      { source: "ps1", target: "we1", type: "HAS_WORK_ELEMENT" },
+      { source: "ps1", target: "we2", type: "HAS_WORK_ELEMENT" },
+      { source: "ps1", target: "fn1", type: "HAS_FUNCTION" },
+      { source: "ps1", target: "fn2", type: "HAS_FUNCTION" },
+      { source: "orphanFn", target: "fm", type: "HAS_FAILURE_MODE" },
+    ];
+    return { nodes, edges };
+  };
+
+  it("reorders top-level ProcessItem roots by changing node order", () => {
+    const { nodes, edges } = buildSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "pi2",
+      dropNodeId: "pi1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.nodes.map((n) => n.id).slice(0, 2)).toEqual(["pi2", "pi1"]);
+    expect(result.edges).toBe(edges);
+  });
+
+  it("reorders ProcessStep siblings by changing HAS_PROCESS_STEP edge order", () => {
+    const { nodes, edges } = buildSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "ps2",
+      dropNodeId: "ps1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.nodes).toBe(nodes);
+    expect(
+      result.edges
+        .filter((e) => e.source === "pi1" && e.type === "HAS_PROCESS_STEP")
+        .map((e) => e.target)
+    ).toEqual(["ps2", "ps1"]);
+  });
+
+  it("reorders ProcessWorkElement siblings by changing HAS_WORK_ELEMENT edge order", () => {
+    const { nodes, edges } = buildSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "we2",
+      dropNodeId: "we1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(
+      result.edges
+        .filter((e) => e.source === "ps1" && e.type === "HAS_WORK_ELEMENT")
+        .map((e) => e.target)
+    ).toEqual(["we2", "we1"]);
+  });
+
+  it("reorders Function siblings by changing HAS_FUNCTION edge order", () => {
+    const { nodes, edges } = buildSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "fn2",
+      dropNodeId: "fn1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(
+      result.edges
+        .filter((e) => e.source === "ps1" && e.type === "HAS_FUNCTION")
+        .map((e) => e.target)
+    ).toEqual(["fn2", "fn1"]);
+  });
+
+  it("rejects same-parent but different relation groups", () => {
+    const { nodes, edges } = buildSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "fn1",
+      dropNodeId: "we1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("invalid");
+    expect(result.nodes).toBe(nodes);
+    expect(result.edges).toBe(edges);
+  });
+
+  it("rejects cross-parent moves", () => {
+    const { nodes, edges } = buildSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "we1",
+      dropNodeId: "ps2",
+      dropPosition: "after",
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("invalid");
+  });
+
+  it("rejects drop-inside moves", () => {
+    const { nodes, edges } = buildSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "ps2",
+      dropNodeId: "ps1",
+      dropPosition: "inside",
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("invalid");
+  });
+
+  it("rejects orphan fallback roots", () => {
+    const { nodes, edges } = buildSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "orphanFn",
+      dropNodeId: "pi1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("invalid");
+  });
+
+  const buildDfmeaSortGraph = () => {
+    const nodes: GraphNode[] = [
+      node("sys1", "System"),
+      node("sys2", "System"),
+      node("sub1", "Subsystem"),
+      node("sub2", "Subsystem"),
+      node("comp1", "Component"),
+      node("comp2", "Component"),
+      node("fn1", "ProcessStepFunction"),
+    ];
+    const edges: GraphEdge[] = [
+      { source: "sys1", target: "sub1", type: "HAS_PROCESS_STEP" },
+      { source: "sys1", target: "sub2", type: "HAS_PROCESS_STEP" },
+      { source: "sub1", target: "comp1", type: "HAS_WORK_ELEMENT" },
+      { source: "sub1", target: "comp2", type: "HAS_WORK_ELEMENT" },
+      { source: "sub1", target: "fn1", type: "HAS_FUNCTION" },
+    ];
+    return { nodes, edges };
+  };
+
+  it("reorders top-level DFMEA System roots by changing node order", () => {
+    const { nodes, edges } = buildDfmeaSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "sys2",
+      dropNodeId: "sys1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.nodes.map((n) => n.id).slice(0, 2)).toEqual(["sys2", "sys1"]);
+    expect(result.edges).toBe(edges);
+  });
+
+  it("reorders DFMEA Subsystem siblings by changing HAS_PROCESS_STEP edge order", () => {
+    const { nodes, edges } = buildDfmeaSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "sub2",
+      dropNodeId: "sub1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.nodes).toBe(nodes);
+    expect(
+      result.edges
+        .filter((e) => e.source === "sys1" && e.type === "HAS_PROCESS_STEP")
+        .map((e) => e.target)
+    ).toEqual(["sub2", "sub1"]);
+  });
+
+  it("reorders DFMEA Component siblings by changing HAS_WORK_ELEMENT edge order", () => {
+    const { nodes, edges } = buildDfmeaSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "comp2",
+      dropNodeId: "comp1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(
+      result.edges
+        .filter((e) => e.source === "sub1" && e.type === "HAS_WORK_ELEMENT")
+        .map((e) => e.target)
+    ).toEqual(["comp2", "comp1"]);
+  });
+
+  it("rejects cross-type root reorder between ProcessItem and System", () => {
+    const nodes: GraphNode[] = [node("pi1", "ProcessItem"), node("sys1", "System")];
+    const edges: GraphEdge[] = [];
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "sys1",
+      dropNodeId: "pi1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("invalid");
+  });
+});
+
+describe("canReorderStructureSiblings", () => {
+  const buildSortGraph = () => {
+    const nodes: GraphNode[] = [
+      node("pi1", "ProcessItem"),
+      node("pi2", "ProcessItem"),
+      node("ps1", "ProcessStep"),
+      node("ps2", "ProcessStep"),
+      node("we1", "ProcessWorkElement"),
+      node("fn1", "ProcessStepFunction"),
+      node("orphanFn", "ProcessStepFunction"),
+      node("fm", "FailureMode"),
+    ];
+    const edges: GraphEdge[] = [
+      { source: "pi1", target: "ps1", type: "HAS_PROCESS_STEP" },
+      { source: "pi1", target: "ps2", type: "HAS_PROCESS_STEP" },
+      { source: "ps1", target: "we1", type: "HAS_WORK_ELEMENT" },
+      { source: "ps1", target: "fn1", type: "HAS_FUNCTION" },
+      { source: "orphanFn", target: "fm", type: "HAS_FAILURE_MODE" },
+    ];
+    return { nodes, edges };
+  };
+
+  it("returns true for a valid same-parent before drop", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "ps2", dropNodeId: "ps1", dropPosition: "before",
+    })).toBe(true);
+  });
+
+  it("returns true for a valid top-level ProcessItem drop", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "pi2", dropNodeId: "pi1", dropPosition: "after",
+    })).toBe(true);
+  });
+
+  it("returns false for drop-inside", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "ps2", dropNodeId: "ps1", dropPosition: "inside",
+    })).toBe(false);
+  });
+
+  it("returns false for different relation groups under the same parent", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "fn1", dropNodeId: "we1", dropPosition: "before",
+    })).toBe(false);
+  });
+
+  it("returns false for cross-parent moves", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "we1", dropNodeId: "ps2", dropPosition: "after",
+    })).toBe(false);
+  });
+
+  it("returns false for an orphan fallback root", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "orphanFn", dropNodeId: "pi1", dropPosition: "before",
+    })).toBe(false);
+  });
+
+  it("returns true for a self before/after drop (valid no-op landing)", () => {
+    const { nodes, edges } = buildSortGraph();
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "ps1", dropNodeId: "ps1", dropPosition: "after",
+    })).toBe(true);
+  });
+
+  it("returns true for a valid DFMEA System root drop", () => {
+    const nodes: GraphNode[] = [node("sys1", "System"), node("sys2", "System")];
+    const edges: GraphEdge[] = [];
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "sys2", dropNodeId: "sys1", dropPosition: "before",
+    })).toBe(true);
+  });
+
+  it("returns false for a cross-type ProcessItem↔System root drop", () => {
+    const nodes: GraphNode[] = [node("pi1", "ProcessItem"), node("sys1", "System")];
+    const edges: GraphEdge[] = [];
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "sys1", dropNodeId: "pi1", dropPosition: "before",
+    })).toBe(false);
   });
 });
 
@@ -183,9 +546,6 @@ describe("createStructureChild", () => {
 });
 
 describe("deleteSubtree", () => {
-  // Helper: build a PFMEA graph where pi1's subtree (ps1→we1→fn1) owns a failure
-  // row (fm1/fe1/fc1/pc1/dc1), and a second root pi2 owns ps2→fn2→fm2/fc2 whose
-  // cause fc2 shares pc1 with fc1.
   const buildGraph = () => {
     const nodes: GraphNode[] = [
       node("pi1", "ProcessItem", "过程1"),
@@ -216,7 +576,7 @@ describe("deleteSubtree", () => {
       { source: "ps2", target: "fn2", type: "HAS_FUNCTION" },
       { source: "fn2", target: "fm2", type: "HAS_FAILURE_MODE" },
       { source: "fc2", target: "fm2", type: "CAUSE_OF" },
-      { source: "fc2", target: "pc1", type: "PREVENTED_BY" }, // pc1 shared with fc2
+      { source: "fc2", target: "pc1", type: "PREVENTED_BY" },
     ];
     return { nodes, edges };
   };
@@ -225,13 +585,9 @@ describe("deleteSubtree", () => {
     const { nodes, edges } = buildGraph();
     const res = deleteSubtree(nodes, edges, "ps1");
     const ids = new Set(res.nodes.map((n) => n.id));
-    // subtree gone
     expect(["ps1", "we1", "fn1", "fm1", "fe1", "fc1", "dc1"].every((id) => !ids.has(id))).toBe(true);
-    // sibling root + its row untouched (pc1 kept — shared, see next test)
     expect(["pi2", "ps2", "fn2", "fm2", "fc2"].every((id) => ids.has(id))).toBe(true);
-    // no edge touches a deleted node
     expect(res.edges.every((e) => ids.has(e.source) && ids.has(e.target))).toBe(true);
-    // the pi1 root itself remains (we deleted ps1, not pi1)
     expect(ids.has("pi1")).toBe(true);
   });
 
@@ -239,23 +595,18 @@ describe("deleteSubtree", () => {
     const { nodes, edges } = buildGraph();
     const res = deleteSubtree(nodes, edges, "ps1");
     const ids = new Set(res.nodes.map((n) => n.id));
-    // pc1 is referenced by fc2 (surviving row under pi2) → must be kept
     expect(ids.has("pc1")).toBe(true);
-    // and its edge to fc2 survives
     expect(res.edges.some((e) => e.source === "fc2" && e.target === "pc1" && e.type === "PREVENTED_BY")).toBe(true);
-    // but the edge from the deleted fc1 to pc1 is gone
     expect(res.edges.some((e) => e.source === "fc1" && e.target === "pc1")).toBe(false);
   });
 
   it("deletes a shared control once no surviving row references it", () => {
     const { nodes, edges } = buildGraph();
-    // Delete ps2 first (its row fc2 is the only other referencer of pc1)
     const afterPs2 = deleteSubtree(nodes, edges, "ps2");
-    // Now pc1 is referenced only by fc1 (under pi1). Deleting ps1 should drop pc1.
     const res = deleteSubtree(afterPs2.nodes, afterPs2.edges, "ps1");
     const ids = new Set(res.nodes.map((n) => n.id));
     expect(ids.has("pc1")).toBe(false);
-    expect(ids.has("pi1")).toBe(true); // pi1 root still there
+    expect(ids.has("pi1")).toBe(true);
   });
 
   it("deleting a whole root removes it and all descendants", () => {
@@ -263,7 +614,6 @@ describe("deleteSubtree", () => {
     const res = deleteSubtree(nodes, edges, "pi1");
     const ids = new Set(res.nodes.map((n) => n.id));
     expect(["pi1", "ps1", "we1", "fn1", "fm1", "fe1", "fc1", "dc1"].every((id) => !ids.has(id))).toBe(true);
-    // pi2 subtree + shared pc1 (still referenced by fc2) remain
     expect(["pi2", "ps2", "fn2", "fm2", "fc2", "pc1"].every((id) => ids.has(id))).toBe(true);
   });
 

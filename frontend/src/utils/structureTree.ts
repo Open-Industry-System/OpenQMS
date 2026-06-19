@@ -20,12 +20,41 @@ export interface StructureChildAction {
   labelKey: string;
 }
 
+export type StructureParentEdgeType = "HAS_PROCESS_STEP" | "HAS_WORK_ELEMENT" | "HAS_FUNCTION";
+export type StructureDropPosition = "before" | "after" | "inside";
+
+export interface StructureSortContext {
+  nodeId: string;
+  parentId: string | null;
+  parentEdgeType: StructureParentEdgeType | null;
+  depth: number;
+  isFallbackRoot: boolean;
+}
+
+export interface ReorderStructureSiblingsParams {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  dragNodeId: string;
+  dropNodeId: string;
+  dropPosition: StructureDropPosition;
+}
+
+export interface ReorderStructureSiblingsResult {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  changed: boolean;
+  reason?: "invalid";
+}
+
 /** All structure node types (excludes function nodes). */
 export const STRUCTURE_TYPES = [
   "ProcessItem", "System",
   "ProcessStep", "Subsystem",
   "ProcessWorkElement", "Component",
 ];
+
+/** Top-level structure root types: ProcessItem (PFMEA) and System (DFMEA). */
+const STRUCTURE_ROOT_TYPES = ["ProcessItem", "System"];
 
 /** Edge type used to descend one structural level under a given parent type. */
 const DESCENT_EDGE: Record<string, "HAS_PROCESS_STEP" | "HAS_WORK_ELEMENT"> = {
@@ -113,6 +142,189 @@ const ROW_HEADER_TYPES = [
  * root so it never disappears from the panel or becomes unselectable. This
  * preserves the old flat `functionNodes.map` behavior for orphan nodes.
  */
+function isStructureType(type: string): boolean {
+  return STRUCTURE_TYPES.includes(type);
+}
+
+function isRowHeaderType(type: string): boolean {
+  return ROW_HEADER_TYPES.includes(type);
+}
+
+function childIdsFor(nodesById: Map<string, GraphNode>, edges: GraphEdge[], parentId: string, edgeType: StructureParentEdgeType): string[] {
+  return edges
+    .filter((e) => e.source === parentId && e.type === edgeType)
+    .map((e) => e.target)
+    .filter((id) => nodesById.has(id));
+}
+
+function collectStructureContexts(
+  nodesById: Map<string, GraphNode>,
+  edges: GraphEdge[],
+  nodeId: string,
+  depth: number,
+  parentId: string | null,
+  parentEdgeType: StructureParentEdgeType | null,
+  isFallbackRoot: boolean,
+  contexts: Map<string, StructureSortContext>,
+) {
+  const node = nodesById.get(nodeId);
+  if (!node || !isRowHeaderType(node.type) || contexts.has(nodeId)) return;
+
+  contexts.set(nodeId, { nodeId, parentId, parentEdgeType, depth, isFallbackRoot });
+
+  if (!isStructureType(node.type)) return;
+
+  const descent = DESCENT_EDGE[node.type];
+  if (descent) {
+    for (const childId of childIdsFor(nodesById, edges, nodeId, descent)) {
+      collectStructureContexts(nodesById, edges, childId, depth + 1, nodeId, descent, false, contexts);
+    }
+  }
+
+  for (const childId of childIdsFor(nodesById, edges, nodeId, "HAS_FUNCTION")) {
+    collectStructureContexts(nodesById, edges, childId, depth + 1, nodeId, "HAS_FUNCTION", false, contexts);
+  }
+}
+
+export function getStructureSortContexts(nodes: GraphNode[], edges: GraphEdge[]): Map<string, StructureSortContext> {
+  const nodesById = new Map(nodes.map((n) => [n.id, n]));
+  const contexts = new Map<string, StructureSortContext>();
+  const structuralChildIds = new Set<string>();
+
+  for (const e of edges) {
+    if ((e.type === "HAS_PROCESS_STEP" || e.type === "HAS_WORK_ELEMENT") && nodesById.has(e.target)) {
+      structuralChildIds.add(e.target);
+    }
+  }
+
+  const roots = nodes.filter((n) => isStructureType(n.type) && !structuralChildIds.has(n.id));
+  for (const root of roots) {
+    collectStructureContexts(nodesById, edges, root.id, 0, null, null, false, contexts);
+  }
+
+  for (const n of nodes) {
+    if (contexts.has(n.id) || !isRowHeaderType(n.type)) continue;
+    collectStructureContexts(nodesById, edges, n.id, 0, null, null, true, contexts);
+  }
+
+  return contexts;
+}
+
+export function getStructureRowHeaderOrder(nodes: GraphNode[], edges: GraphEdge[]): string[] {
+  const ordered: string[] = [];
+  const visit = (tn: StructureTreeNode) => {
+    if (isRowHeaderType(tn.node.type)) ordered.push(tn.node.id);
+    tn.children.forEach(visit);
+  };
+
+  buildStructureTree(nodes, edges).forEach(visit);
+  return ordered;
+}
+
+function moveId(ids: string[], dragId: string, dropId: string, dropPosition: Exclude<StructureDropPosition, "inside">): string[] {
+  if (dragId === dropId) return ids;
+  if (!ids.includes(dragId) || !ids.includes(dropId)) return ids;
+
+  const withoutDrag = ids.filter((id) => id !== dragId);
+  const dropIndex = withoutDrag.indexOf(dropId);
+  const insertAt = dropPosition === "before" ? dropIndex : dropIndex + 1;
+  const next = [...withoutDrag];
+  next.splice(insertAt, 0, dragId);
+  return next;
+}
+
+function sameOrder(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+/**
+ * Whether a drop would land on a legal same-parent reorder position. Used for
+ * drag-over feedback so the UI can show a valid insertion line vs. an invalid
+ * marker before the user releases. Mirrors the validation gates inside
+ * `reorderStructureSiblings` (which delegates to this). A self before/after
+ * drop is a valid (no-op) landing; drop-inside is always invalid.
+ */
+export function canReorderStructureSiblings({
+  nodes,
+  edges,
+  dragNodeId,
+  dropNodeId,
+  dropPosition,
+}: ReorderStructureSiblingsParams): boolean {
+  if (dropPosition === "inside") return false;
+
+  const contexts = getStructureSortContexts(nodes, edges);
+  const drag = contexts.get(dragNodeId);
+  const drop = contexts.get(dropNodeId);
+  if (!drag || !drop) return false;
+  if (drag.isFallbackRoot || drop.isFallbackRoot) return false;
+  if (drag.parentId !== drop.parentId || drag.depth !== drop.depth || drag.parentEdgeType !== drop.parentEdgeType) {
+    return false;
+  }
+
+  if (drag.parentEdgeType === null) {
+    const dragNode = nodes.find((n) => n.id === dragNodeId);
+    const dropNode = nodes.find((n) => n.id === dropNodeId);
+    if (!dragNode || !dropNode) return false;
+    if (dragNode.type !== dropNode.type) return false;
+    if (!STRUCTURE_ROOT_TYPES.includes(dragNode.type)) return false;
+  }
+
+  return true;
+}
+
+export function reorderStructureSiblings({
+  nodes,
+  edges,
+  dragNodeId,
+  dropNodeId,
+  dropPosition,
+}: ReorderStructureSiblingsParams): ReorderStructureSiblingsResult {
+  if (dropPosition === "inside") return { nodes, edges, changed: false, reason: "invalid" };
+  if (dragNodeId === dropNodeId) return { nodes, edges, changed: false };
+  if (!canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition })) {
+    return { nodes, edges, changed: false, reason: "invalid" };
+  }
+
+  const contexts = getStructureSortContexts(nodes, edges);
+  const drag = contexts.get(dragNodeId)!;
+
+  if (drag.parentEdgeType === null) {
+    const rootType = nodes.find((n) => n.id === dragNodeId)?.type;
+    const rootIds = nodes
+      .filter((n) => n.type === rootType && STRUCTURE_ROOT_TYPES.includes(n.type) && contexts.get(n.id)?.parentEdgeType === null && !contexts.get(n.id)?.isFallbackRoot)
+      .map((n) => n.id);
+    const nextRootIds = moveId(rootIds, dragNodeId, dropNodeId, dropPosition);
+    if (sameOrder(rootIds, nextRootIds)) return { nodes, edges, changed: false };
+
+    let nextRootIndex = 0;
+    const rootIdSet = new Set(rootIds);
+    const nodeById = new Map(nodes.map((n) => [n.id, n]));
+    const nextNodes = nodes.map((n) => {
+      if (!rootIdSet.has(n.id)) return n;
+      return nodeById.get(nextRootIds[nextRootIndex++])!;
+    });
+    return { nodes: nextNodes, edges, changed: true };
+  }
+
+  const siblingEdges = edges.filter(
+    (e) => e.source === drag.parentId && e.type === drag.parentEdgeType && contexts.has(e.target) && !contexts.get(e.target)?.isFallbackRoot,
+  );
+  const siblingIds = siblingEdges.map((e) => e.target);
+  const nextSiblingIds = moveId(siblingIds, dragNodeId, dropNodeId, dropPosition);
+  if (sameOrder(siblingIds, nextSiblingIds)) return { nodes, edges, changed: false };
+
+  const edgeByTarget = new Map(siblingEdges.map((e) => [e.target, e]));
+  const siblingTargetSet = new Set(siblingIds);
+  let nextEdgeIndex = 0;
+  const nextEdges = edges.map((e) => {
+    if (e.source !== drag.parentId || e.type !== drag.parentEdgeType || !siblingTargetSet.has(e.target)) return e;
+    return edgeByTarget.get(nextSiblingIds[nextEdgeIndex++])!;
+  });
+
+  return { nodes, edges: nextEdges, changed: true };
+}
+
 export function buildStructureTree(nodes: GraphNode[], edges: GraphEdge[]): StructureTreeNode[] {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const structureNodes = nodes.filter((n) => STRUCTURE_TYPES.includes(n.type));

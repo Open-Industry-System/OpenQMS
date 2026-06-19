@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Spin } from "antd";
 import { useAuthStore } from "./store/authStore";
@@ -6,77 +6,78 @@ import { usePermission } from "./hooks/usePermission";
 import type { ModuleKey } from "./hooks/usePermission";
 import AppLayout from "./components/layout/AppLayout";
 import LoginPage from "./pages/login/LoginPage";
-import DashboardPage from "./pages/dashboard/DashboardPage";
-import FMEAListPage from "./pages/planning/fmea/FMEAListPage";
-import FMEAEditorPage from "./pages/planning/fmea/FMEAEditorPage";
-import DFMEAWizardPage from "./pages/planning/fmea/DFMEAWizardPage";
-import CAPAListPage from "./pages/capa/CAPAListPage";
-import CAPADetailPage from "./pages/capa/CAPADetailPage";
-import ControlPlanListPage from "./pages/planning/control-plan/ControlPlanListPage";
-import ControlPlanEditorPage from "./pages/planning/control-plan/ControlPlanEditorPage";
-import QualityGoalListPage from "./pages/qualityGoal/QualityGoalListPage";
-import InternalAuditListPage from "./pages/internalAudit/InternalAuditListPage";
-import InternalAuditDetailPage from "./pages/internalAudit/InternalAuditDetailPage";
-import CustomerAuditListPage from "./pages/customerAudit/CustomerAuditListPage";
-import CustomerAuditDetailPage from "./pages/customerAudit/CustomerAuditDetailPage";
-import SPCListPage from "./pages/spc/SPCListPage";
-import SPCDetailPage from "./pages/spc/SPCDetailPage";
-import SupplierListPage from "./pages/supplier/SupplierListPage";
-import SupplierDetailPage from "./pages/supplier/SupplierDetailPage";
-import GaugeListPage from "./pages/msa/GaugeListPage";
-import GaugeDetailPage from "./pages/msa/GaugeDetailPage";
-import MsaStudyListPage from "./pages/msa/MsaStudyListPage";
-import StudyDetailPage from "./pages/msa/StudyDetailPage";
-import SCListPage from "./pages/planning/special-characteristic/SCListPage";
-import SCMatrixPage from "./pages/planning/special-characteristic/SCMatrixPage";
-import SCDetailPage from "./pages/planning/special-characteristic/SCDetailPage";
-import TraceabilityPage from "./pages/planning/special-characteristic/TraceabilityPage";
-import ManagementReviewListPage from "./pages/managementReview/ManagementReviewListPage";
-import ManagementReviewDetailPage from "./pages/managementReview/ManagementReviewDetailPage";
-import IqcInspectionListPage from "./pages/iqc/IqcInspectionListPage";
-import IqcInspectionDetailPage from "./pages/iqc/IqcInspectionDetailPage";
-import IqcMaterialListPage from "./pages/iqc/IqcMaterialListPage";
-import AqlOptimizationPage from "./pages/iqc/AqlOptimizationPage";
-import AqlProfileListPage from "./pages/iqc/AqlProfileListPage";
-import AqlProfileDetailPage from "./pages/iqc/AqlProfileDetailPage";
-import AqlConfigPage from "./pages/iqc/AqlConfigPage";
-import CustomerQualityPage from "./pages/customerQuality/CustomerQualityPage";
-import ComplaintDetailPage from "./pages/customerQuality/ComplaintDetailPage";
-import RMADetailPage from "./pages/customerQuality/RMADetailPage";
-import SupplierQualityPage from "./pages/supplier/SupplierQualityPage";
-import SupplierRiskPage from "./pages/supplierRisk/SupplierRiskPage";
-import RiskConfigPage from "./pages/supplierRisk/RiskConfigPage";
-import SCARListPage from "./pages/scar/SCARListPage";
-import SCARDetailPage from "./pages/scar/SCARDetailPage";
-import APQPListPage from "./pages/planning/apqp/APQPListPage";
-import APQPDetailPage from "./pages/planning/apqp/APQPDetailPage";
-import PPAPListPage from "./pages/planning/ppap/PPAPListPage";
-import PPAPDetailPage from "./pages/planning/ppap/PPAPDetailPage";
-import KnowledgeGraphPage from "./pages/graph/KnowledgeGraphPage";
-import ChangeImpactPage from "./pages/ChangeImpactPage";
-import MESConnectionsPage from "./pages/mes/MESConnectionsPage";
-import MESDashboardPage from "./pages/mes/MESDashboardPage";
-import MESOrdersPage from "./pages/mes/MESOrdersPage";
-import MESScrapPage from "./pages/mes/MESScrapPage";
-import PLMDashboardPage from "./pages/plm/PLMDashboardPage";
-import PLMConnectionsPage from "./pages/plm/PLMConnectionsPage";
-import PLMPartsPage from "./pages/plm/PLMPartsPage";
-import PLMChangeOrdersPage from "./pages/plm/PLMChangeOrdersPage";
-import ERPDashboardPage from "./pages/erp/ERPDashboardPage";
-import ERPConnectionsPage from "./pages/erp/ERPConnectionsPage";
-import ERPMasterDataPage from "./pages/erp/ERPMasterDataPage";
-import ERPSupplyChainPage from "./pages/erp/ERPSupplyChainPage";
-import ERPSalesAndCostPage from "./pages/erp/ERPSalesAndCostPage";
-import ERPTraceabilityPage from "./pages/erp/ERPTraceabilityPage";
-import GroupDashboardPage from "./pages/group/GroupDashboard";
-import FactoryManagementPage from "./pages/group/FactoryManagement";
-import FactoryComparisonPage from "./pages/group/FactoryComparison";
-import GroupSuppliersPage from "./pages/group/GroupSuppliers";
-import GroupAuditsPage from "./pages/group/GroupAudits";
-import SupplyChainRiskMapPage from "./pages/supplyChainRiskMap/SupplyChainRiskMapPage";
-import TenantSuspended from "./pages/TenantSuspended";
-import TenantDeactivated from "./pages/TenantDeactivated";
-import AIConfigPage from "./pages/admin/AIConfigPage";
+
+const DashboardPage = lazy(() => import("./pages/dashboard/DashboardPage"));
+const FMEAListPage = lazy(() => import("./pages/planning/fmea/FMEAListPage"));
+const FMEAEditorPage = lazy(() => import("./pages/planning/fmea/FMEAEditorPage"));
+const DFMEAWizardPage = lazy(() => import("./pages/planning/fmea/DFMEAWizardPage"));
+const CAPAListPage = lazy(() => import("./pages/capa/CAPAListPage"));
+const CAPADetailPage = lazy(() => import("./pages/capa/CAPADetailPage"));
+const ControlPlanListPage = lazy(() => import("./pages/planning/control-plan/ControlPlanListPage"));
+const ControlPlanEditorPage = lazy(() => import("./pages/planning/control-plan/ControlPlanEditorPage"));
+const QualityGoalListPage = lazy(() => import("./pages/qualityGoal/QualityGoalListPage"));
+const InternalAuditListPage = lazy(() => import("./pages/internalAudit/InternalAuditListPage"));
+const InternalAuditDetailPage = lazy(() => import("./pages/internalAudit/InternalAuditDetailPage"));
+const CustomerAuditListPage = lazy(() => import("./pages/customerAudit/CustomerAuditListPage"));
+const CustomerAuditDetailPage = lazy(() => import("./pages/customerAudit/CustomerAuditDetailPage"));
+const SPCListPage = lazy(() => import("./pages/spc/SPCListPage"));
+const SPCDetailPage = lazy(() => import("./pages/spc/SPCDetailPage"));
+const SupplierListPage = lazy(() => import("./pages/supplier/SupplierListPage"));
+const SupplierDetailPage = lazy(() => import("./pages/supplier/SupplierDetailPage"));
+const GaugeListPage = lazy(() => import("./pages/msa/GaugeListPage"));
+const GaugeDetailPage = lazy(() => import("./pages/msa/GaugeDetailPage"));
+const MsaStudyListPage = lazy(() => import("./pages/msa/MsaStudyListPage"));
+const StudyDetailPage = lazy(() => import("./pages/msa/StudyDetailPage"));
+const SCListPage = lazy(() => import("./pages/planning/special-characteristic/SCListPage"));
+const SCMatrixPage = lazy(() => import("./pages/planning/special-characteristic/SCMatrixPage"));
+const SCDetailPage = lazy(() => import("./pages/planning/special-characteristic/SCDetailPage"));
+const TraceabilityPage = lazy(() => import("./pages/planning/special-characteristic/TraceabilityPage"));
+const ManagementReviewListPage = lazy(() => import("./pages/managementReview/ManagementReviewListPage"));
+const ManagementReviewDetailPage = lazy(() => import("./pages/managementReview/ManagementReviewDetailPage"));
+const IqcInspectionListPage = lazy(() => import("./pages/iqc/IqcInspectionListPage"));
+const IqcInspectionDetailPage = lazy(() => import("./pages/iqc/IqcInspectionDetailPage"));
+const IqcMaterialListPage = lazy(() => import("./pages/iqc/IqcMaterialListPage"));
+const AqlOptimizationPage = lazy(() => import("./pages/iqc/AqlOptimizationPage"));
+const AqlProfileListPage = lazy(() => import("./pages/iqc/AqlProfileListPage"));
+const AqlProfileDetailPage = lazy(() => import("./pages/iqc/AqlProfileDetailPage"));
+const AqlConfigPage = lazy(() => import("./pages/iqc/AqlConfigPage"));
+const CustomerQualityPage = lazy(() => import("./pages/customerQuality/CustomerQualityPage"));
+const ComplaintDetailPage = lazy(() => import("./pages/customerQuality/ComplaintDetailPage"));
+const RMADetailPage = lazy(() => import("./pages/customerQuality/RMADetailPage"));
+const SupplierQualityPage = lazy(() => import("./pages/supplier/SupplierQualityPage"));
+const SupplierRiskPage = lazy(() => import("./pages/supplierRisk/SupplierRiskPage"));
+const RiskConfigPage = lazy(() => import("./pages/supplierRisk/RiskConfigPage"));
+const SCARListPage = lazy(() => import("./pages/scar/SCARListPage"));
+const SCARDetailPage = lazy(() => import("./pages/scar/SCARDetailPage"));
+const APQPListPage = lazy(() => import("./pages/planning/apqp/APQPListPage"));
+const APQPDetailPage = lazy(() => import("./pages/planning/apqp/APQPDetailPage"));
+const PPAPListPage = lazy(() => import("./pages/planning/ppap/PPAPListPage"));
+const PPAPDetailPage = lazy(() => import("./pages/planning/ppap/PPAPDetailPage"));
+const KnowledgeGraphPage = lazy(() => import("./pages/graph/KnowledgeGraphPage"));
+const ChangeImpactPage = lazy(() => import("./pages/ChangeImpactPage"));
+const MESConnectionsPage = lazy(() => import("./pages/mes/MESConnectionsPage"));
+const MESDashboardPage = lazy(() => import("./pages/mes/MESDashboardPage"));
+const MESOrdersPage = lazy(() => import("./pages/mes/MESOrdersPage"));
+const MESScrapPage = lazy(() => import("./pages/mes/MESScrapPage"));
+const PLMDashboardPage = lazy(() => import("./pages/plm/PLMDashboardPage"));
+const PLMConnectionsPage = lazy(() => import("./pages/plm/PLMConnectionsPage"));
+const PLMPartsPage = lazy(() => import("./pages/plm/PLMPartsPage"));
+const PLMChangeOrdersPage = lazy(() => import("./pages/plm/PLMChangeOrdersPage"));
+const ERPDashboardPage = lazy(() => import("./pages/erp/ERPDashboardPage"));
+const ERPConnectionsPage = lazy(() => import("./pages/erp/ERPConnectionsPage"));
+const ERPMasterDataPage = lazy(() => import("./pages/erp/ERPMasterDataPage"));
+const ERPSupplyChainPage = lazy(() => import("./pages/erp/ERPSupplyChainPage"));
+const ERPSalesAndCostPage = lazy(() => import("./pages/erp/ERPSalesAndCostPage"));
+const ERPTraceabilityPage = lazy(() => import("./pages/erp/ERPTraceabilityPage"));
+const GroupDashboardPage = lazy(() => import("./pages/group/GroupDashboard"));
+const FactoryManagementPage = lazy(() => import("./pages/group/FactoryManagement"));
+const FactoryComparisonPage = lazy(() => import("./pages/group/FactoryComparison"));
+const GroupSuppliersPage = lazy(() => import("./pages/group/GroupSuppliers"));
+const GroupAuditsPage = lazy(() => import("./pages/group/GroupAudits"));
+const SupplyChainRiskMapPage = lazy(() => import("./pages/supplyChainRiskMap/SupplyChainRiskMapPage"));
+const TenantSuspended = lazy(() => import("./pages/TenantSuspended"));
+const TenantDeactivated = lazy(() => import("./pages/TenantDeactivated"));
+const AIConfigPage = lazy(() => import("./pages/admin/AIConfigPage"));
 
 function isTokenExpired(token: string): boolean {
   try {
@@ -120,7 +121,8 @@ function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: 
 
 export default function App() {
   return (
-    <Routes>
+    <Suspense fallback={<div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}><Spin size="large" /></div>}>
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/tenant-suspended" element={<TenantSuspended />} />
       <Route path="/tenant-deactivated" element={<TenantDeactivated />} />
@@ -216,6 +218,7 @@ export default function App() {
         {/* Admin */}
         <Route path="/admin/ai-config" element={<ProtectedRoute requireAdmin><AIConfigPage /></ProtectedRoute>} />
       </Route>
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }

@@ -96,6 +96,7 @@ export default function KPICard({
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
       style={{
+        height: "100%",
         cursor: clickable || retryable ? "pointer" : "default",
         outline: focused ? `2px solid ${focusOutlineColor}` : "none",
         outlineOffset: focused ? "2px" : "0px",

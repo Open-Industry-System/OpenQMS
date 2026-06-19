@@ -218,6 +218,7 @@
     "notFound": "FMEA 未找到",
     "noData": "暂无数据",
     "selectFunctionFirst": "请先在左侧选择一个功能/工序节点",
+    "sameLevelSortOnly": "仅支持同级节点排序",
     "selectFailureModeFirst": "请先在编辑器中选择一个失效模式行",
     "searchTimeout": "检索超时，请稍后在编辑过程中使用推荐功能",
     "searchFailed": "检索经验教训失败",

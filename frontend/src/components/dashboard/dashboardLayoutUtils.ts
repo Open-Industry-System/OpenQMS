@@ -16,6 +16,26 @@ export function createWidgetLayoutItem(type: string, id: string): WidgetLayoutIt
   };
 }
 
+/** Grid column cap (matches backend's `w > 12` bound). */
+export const GRID_COLS = 12;
+
+/**
+ * Clamp a widget's w/h to the registry minimum (and the grid column cap) so the
+ * backend's `WIDGET_MIN_SIZES` / boundary checks never reject a save. Used both
+ * to set react-grid-layout's `minW`/`minH` (prevents illegal resizes) and to
+ * self-heal stale layouts loaded from the DB before PUT /dashboard/layout.
+ */
+export function clampWidgetSize(item: WidgetLayoutItem): WidgetLayoutItem {
+  const meta = getWidgetMeta(item.type);
+  const minW = meta?.minSize.w ?? 1;
+  const minH = meta?.minSize.h ?? 1;
+  return {
+    ...item,
+    w: Math.max(minW, Math.min(item.w, GRID_COLS)),
+    h: Math.max(minH, item.h),
+  };
+}
+
 export function filterLayoutByPermission(
   layout: WidgetLayoutItem[],
   canView: (module: ModuleKey) => boolean,

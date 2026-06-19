@@ -1,7 +1,17 @@
-import { forwardRef, useEffect, useRef, useCallback, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useRef, useCallback, useImperativeHandle, useMemo } from "react";
 import { Graph } from "@antv/g6";
+import { useTranslation } from "react-i18next";
 import type { GraphNode, GraphEdge } from "../../api/graph";
 import type { GraphLayout } from "./GraphToolbar";
+import { getEdgeTypeKey, getNodeStyle } from "../../utils/graphPresentation";
+
+// Dark-theme palette (matches darkAlgorithm tokens in utils/darkTheme.ts).
+const GRAPH_BG = "#14161d";
+const GRAPH_BORDER = "rgba(255, 255, 255, 0.08)";
+const EDGE_STROKE = "rgba(255, 255, 255, 0.28)";
+const EDGE_LABEL_FILL = "#8b93a7";
+const EDGE_LABEL_BG = "#1c1f29";
+const NODE_LABEL_FILL = "#f0f2f5";
 
 interface GraphCanvasProps {
   nodes: GraphNode[];
@@ -15,70 +25,89 @@ interface GraphCanvasProps {
   onNodeContextMenu?: (node: GraphNode, event: { clientX: number; clientY: number }) => void;
 }
 
-const NODE_TYPE_COLORS: Record<string, string> = {
-  System: "#1890ff",
-  ProcessItem: "#1890ff",
-  Subsystem: "#69c0ff",
-  ProcessStep: "#69c0ff",
-  Component: "#36cfc9",
-  ProcessWorkElement: "#36cfc9",
-  Function: "#52c41a",
-  FailureMode: "#ff4d4f",
-  FailureEffect: "#fa8c16",
-  FailureCause: "#faad14",
-  PreventionControl: "#73d13d",
-  DetectionControl: "#722ed1",
-  RecommendedAction: "#8c8c8c",
-};
+type GraphT = (key: string, options?: { defaultValue?: string }) => string;
 
-const NODE_TYPE_SHAPES: Record<string, string> = {
-  System: "rect",
-  ProcessItem: "rect",
-  Subsystem: "rect",
-  ProcessStep: "rect",
-  Component: "rect",
-  ProcessWorkElement: "rect",
-  Function: "rect",
-  FailureMode: "diamond",
-  FailureEffect: "ellipse",
-  FailureCause: "ellipse",
-  PreventionControl: "circle",
-  DetectionControl: "circle",
-  RecommendedAction: "rect",
-};
+function toG6Data(nodes: GraphNode[], edges: GraphEdge[], t: GraphT) {
+  const g6Nodes = nodes.map((n) => {
+    const nodeStyle = getNodeStyle(n.label);
+    return {
+      id: n.id,
+      data: {
+        label: n.properties.name || n.label,
+        type: n.label,
+      },
+      style: {
+        ...nodeStyle,
+      },
+    };
+  });
 
-function toG6Data(nodes: GraphNode[], edges: GraphEdge[]) {
-  const g6Nodes = nodes.map((n) => ({
-    id: n.id,
-    data: {
-      label: n.properties.name || n.label,
-      type: n.label,
-    },
-    style: {
-      fill: NODE_TYPE_COLORS[n.label] || "#e8e8e8",
-      stroke: NODE_TYPE_COLORS[n.label] || "#8c8c8c",
-      lineWidth: 1,
-      size: (n.label === "FailureMode"
-        ? [80, 50]
-        : n.label?.includes("Control")
-          ? 30
-          : [100, 40]) as [number, number] | number,
-    },
-  }));
-
-  const g6Edges = edges.map((e) => ({
-    id: `${e.source}-${e.target}-${e.label || "edge"}`,
-    source: e.source,
-    target: e.target,
-    data: { label: e.label },
-    style: {
-      stroke: "#8c8c8c",
-      lineWidth: 1,
-      endArrow: true,
-    },
-  }));
+  const g6Edges = edges.map((e) => {
+    const rawLabel = e.label || "edge";
+    return {
+      id: `${e.source}-${e.target}-${rawLabel}`,
+      source: e.source,
+      target: e.target,
+      data: {
+        label: t(getEdgeTypeKey(rawLabel), { defaultValue: rawLabel }),
+        rawLabel,
+      },
+      style: {
+        stroke: EDGE_STROKE,
+        lineWidth: 1,
+        endArrow: true,
+      },
+    };
+  });
 
   return { nodes: g6Nodes, edges: g6Edges };
+}
+
+function graphLayoutOptions(layout: GraphLayout) {
+  if (layout === "dagre") {
+    return {
+      type: "dagre",
+      rankdir: "LR",
+      nodesep: 70,
+      ranksep: 110,
+      controlPoints: false,
+      animation: true,
+    } as const;
+  }
+
+  if (layout === "force") {
+    // d3-force + drag-element-force keeps the simulation live so dragging a
+    // node re-heats it and pushes neighbors away (no overlap). `collide`
+    // enforces a minimum gap between the (up to ~144px) nodes.
+    return {
+      type: "d3-force",
+      link: { distance: 120, strength: 1 },
+      collide: { radius: 56 },
+      charge: { strength: -350 },
+      animation: true,
+    } as const;
+  }
+
+  // compact-box is a tree layout — give it real gaps so siblings don't overlap.
+  return {
+    type: "compact-box",
+    direction: "LR",
+    getHGap: () => 90,
+    getVGap: () => 18,
+    getHeight: () => 40,
+    getWidth: () => 140,
+    animation: true,
+  } as const;
+}
+
+function graphBehaviors(layout: GraphLayout) {
+  // drag-element-force re-heats the d3-force simulation on drag so other nodes
+  // follow the dragged one; use plain drag-element for the static layouts.
+  const dragBehavior =
+    layout === "force"
+      ? { type: "drag-element-force", fixed: false }
+      : { type: "drag-element" };
+  return ["drag-canvas", "zoom-canvas", dragBehavior];
 }
 
 export interface GraphCanvasRef {
@@ -104,8 +133,14 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
+  const { t, i18n } = useTranslation("graph");
+  const graphData = useMemo(
+    () => toG6Data(nodes, edges, t),
+    [nodes, edges, t, i18n.language],
+  );
 
-  // Keep handlers in refs so initGraph only depends on structural inputs (nodes/edges/layout)
+  // Keep handlers in refs so initGraph only depends on structural inputs (layout/nodes);
+  // edge changes flow through graphData and the data-refresh effect below.
   const handlersRef = useRef({ onNodeClick, onNodeDoubleClick, onNodeContextMenu });
   useEffect(() => {
     handlersRef.current = { onNodeClick, onNodeDoubleClick, onNodeContextMenu };
@@ -114,47 +149,48 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
   const initGraph = useCallback(() => {
     if (!containerRef.current) return;
 
-    // If graph already exists, just update data instead of recreating
-    if (graphRef.current) {
-      graphRef.current.setData(toG6Data(nodes, edges));
-      return;
-    }
+    if (graphRef.current) return;
 
     const graph = new Graph({
       container: containerRef.current,
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight || 600,
       autoFit: "view",
-      data: toG6Data(nodes, edges),
+      data: graphData,
       node: {
-        type: (datum: { data?: { type?: string } }) =>
-          NODE_TYPE_SHAPES[datum.data?.type || ""] || "rect",
+        type: "rect",
         style: {
           labelText: (datum: { data?: { label?: string } }) => datum.data?.label || "",
-          labelFontSize: 10,
+          labelFontSize: 12,
           labelPlacement: "center",
-          labelFill: "#333",
+          labelFill: NODE_LABEL_FILL,
+          labelTextAlign: "center",
+          labelWordWrap: true,
+          labelMaxWidth: 120,
+          labelWordWrapWidth: 120,
+          labelMaxLines: 2,
+          labelTextOverflow: "ellipsis",
         },
       },
       edge: {
         type: "line",
         style: {
           endArrow: true,
+          stroke: EDGE_STROKE,
+          lineWidth: 1,
           labelText: (datum: { data?: { label?: string } }) => datum.data?.label || "",
-          labelFontSize: 9,
-          labelFill: "#666",
+          labelFontSize: 11,
+          labelFill: EDGE_LABEL_FILL,
+          labelPlacement: "center",
+          labelOffsetY: -4,
+          labelBackground: true,
+          labelBackgroundFill: EDGE_LABEL_BG,
+          labelBackgroundOpacity: 0.92,
+          labelBackgroundPadding: [2, 6],
         },
       },
-      layout: {
-        type: layout,
-        rankdir: layout === "dagre" ? "LR" : undefined,
-        animation: true,
-      } as const,
-      behaviors: [
-        "drag-canvas",
-        "zoom-canvas",
-        "drag-element",
-      ],
+      layout: graphLayoutOptions(layout),
+      behaviors: graphBehaviors(layout),
       plugins: [
         {
           type: "minimap",
@@ -213,7 +249,10 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.render().catch((err: unknown) => {
       console.error("G6 render failed:", err);
     });
-  }, [nodes, edges, layout]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- graphData is intentionally
+    // excluded so language changes do not recreate the G6 instance; the [graphData] effect
+    // below is the data refresh path and preserves zoom/pan.
+  }, [layout, nodes]);
 
   // Apply highlight/dim
   const applyHighlight = useCallback(() => {
@@ -243,7 +282,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
             style: {
               ...edge.style,
               opacity: isHighlighted ? 1 : 0.1,
-              stroke: isHighlighted ? "#ff4d4f" : "#8c8c8c",
+              stroke: isHighlighted ? "#ff4d4f" : EDGE_STROKE,
               lineWidth: isHighlighted ? 2 : 1,
             },
           },
@@ -270,7 +309,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
             style: {
               ...edge.style,
               opacity: 1,
-              stroke: "#8c8c8c",
+              stroke: EDGE_STROKE,
               lineWidth: 1,
             },
           },
@@ -288,10 +327,16 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     };
   }, [initGraph]);
 
-  // Apply highlight after graph initialization
+  const prevGraphDataRef = useRef(graphData);
   useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    if (prevGraphDataRef.current !== graphData) {
+      prevGraphDataRef.current = graphData;
+      graph.setData(graphData);
+    }
     applyHighlight();
-  }, [applyHighlight]);
+  }, [graphData, applyHighlight]);
 
   // Resize handler
   useEffect(() => {
@@ -342,9 +387,9 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
         width: "100%",
         height: "100%",
         minHeight: 500,
-        border: "1px solid #f0f0f0",
-        borderRadius: 4,
-        background: "#fafafa",
+        border: `1px solid ${GRAPH_BORDER}`,
+        borderRadius: 8,
+        background: GRAPH_BG,
       }}
     />
   );

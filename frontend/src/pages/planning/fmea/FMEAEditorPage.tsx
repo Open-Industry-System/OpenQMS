@@ -25,8 +25,12 @@ import {
   buildStructureTree,
   createStructureChild,
   deleteSubtree,
+  getStructureRowHeaderOrder,
+  reorderStructureSiblings,
+  canReorderStructureSiblings,
   STRUCTURE_CHILD_MAP,
   type StructureChildAction,
+  type StructureDropPosition,
   type StructureTreeNode,
 } from "../../../utils/structureTree";
 import StructureTree from "../../../components/dfmea/StructureTree";
@@ -119,6 +123,8 @@ export default function FMEAEditorPage() {
   const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
   const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
+  const dragStructureNodeIdRef = useRef<string | null>(null);
+  const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
@@ -436,7 +442,15 @@ export default function FMEAEditorPage() {
 
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
-  const rows = useMemo(() => buildRows(nodes, edges), [nodes, edges]);
+  const fmeaType = fmea?.fmea_type;
+  const isDFMEA = fmeaType === "DFMEA";
+  const canDragSortStructure = canEdit("fmea");
+  const structureTree = useMemo(() => buildStructureTree(nodes, edges), [nodes, edges]);
+  const structureRowHeaderOrder = useMemo(() => getStructureRowHeaderOrder(nodes, edges), [nodes, edges]);
+  const rows = useMemo(
+    () => buildRows(nodes, edges, structureRowHeaderOrder),
+    [nodes, edges, structureRowHeaderOrder]
+  );
 
   useEffect(() => {
     if (outerTab === "graph") {
@@ -553,6 +567,70 @@ export default function FMEAEditorPage() {
     if (selectedFunctionId === node.id) setSelectedFunctionId(null);
   }, [nodes, edges, selectedFunctionId]);
 
+  const getStructureDropPosition = useCallback((event: React.DragEvent<HTMLDivElement>): StructureDropPosition => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.height <= 0) return "inside";
+    const offsetY = event.clientY - rect.top;
+    if (offsetY < rect.height * 0.25) return "before";
+    if (offsetY > rect.height * 0.75) return "after";
+    return "inside";
+  }, []);
+
+  const handleStructureDragStart = useCallback((nodeId: string, event: React.DragEvent<HTMLDivElement>) => {
+    if (!canDragSortStructure) return;
+    dragStructureNodeIdRef.current = nodeId;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", nodeId);
+  }, [canDragSortStructure]);
+
+  const handleStructureDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const dragNodeId = dragStructureNodeIdRef.current;
+    if (!canDragSortStructure || !dragNodeId) return;
+    const dropNodeId = (event.currentTarget as HTMLElement).dataset.nodeId;
+    if (!dropNodeId) return;
+    event.preventDefault();
+    const position = getStructureDropPosition(event);
+    const valid = canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
+    event.dataTransfer.dropEffect = valid ? "move" : "none";
+    setDragOver((prev) =>
+      prev && prev.nodeId === dropNodeId && prev.position === position && prev.valid === valid
+        ? prev
+        : { nodeId: dropNodeId, position, valid }
+    );
+  }, [canDragSortStructure, edges, getStructureDropPosition, nodes]);
+
+  const handleStructureDrop = useCallback((dropNodeId: string, event: React.DragEvent<HTMLDivElement>) => {
+    if (!canDragSortStructure) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDragOver(null);
+
+    const dragNodeId = dragStructureNodeIdRef.current;
+    dragStructureNodeIdRef.current = null;
+    if (!dragNodeId) return;
+
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId,
+      dropNodeId,
+      dropPosition: getStructureDropPosition(event),
+    });
+
+    if (!result.changed) {
+      if (result.reason === "invalid") message.warning(t("messages.sameLevelSortOnly"));
+      return;
+    }
+
+    if (result.nodes !== nodes) setNodes(result.nodes);
+    if (result.edges !== edges) setEdges(result.edges);
+  }, [canDragSortStructure, edges, getStructureDropPosition, message, nodes, t]);
+
+  const handleStructureDragEnd = useCallback(() => {
+    dragStructureNodeIdRef.current = null;
+    setDragOver(null);
+  }, []);
+
   const deleteRow = useCallback((row: FMEARow) => {
     // Only delete nodes that are NOT shared with other rows
     const otherRows = rows.filter((r) => r.key !== row.key);
@@ -596,8 +674,6 @@ export default function FMEAEditorPage() {
 
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
   if (!fmea) return <Empty description={t("messages.notFound")} />;
-
-  const isDFMEA = fmea.fmea_type === "DFMEA";
 
     const columns = [
     {
@@ -1213,27 +1289,52 @@ export default function FMEAEditorPage() {
             }
           >
             {(() => {
-              // buildStructureTree is type-agnostic — it inspects node.type and
-              // works for both PFMEA and DFMEA without needing fmea_type.
-              const tree = buildStructureTree(nodes, edges);
               const renderTreeNode = (tn: StructureTreeNode) => {
                 const node = tn.node;
                 const isStructure = ["ProcessItem", "ProcessStep", "ProcessWorkElement", "System", "Subsystem", "Component"].includes(node.type);
                 const actions = canEdit('fmea') ? (STRUCTURE_CHILD_MAP[node.type] || []) : [];
                 const hasRows = rowsByFunction[node.id]?.length > 0;
                 const isSelected = selectedFunctionId === node.id;
+                const dragState =
+                  dragOver && dragOver.nodeId === node.id
+                    ? dragOver.valid
+                      ? dragOver.position === "before"
+                        ? "before"
+                        : dragOver.position === "after"
+                          ? "after"
+                          : "invalid"
+                      : "invalid"
+                    : null;
                 return (
                   <div key={node.id}>
                     <div
+                      data-testid={`fmea-structure-node-${node.id}`}
+                      data-node-id={node.id}
+                      data-drag-state={dragState ?? undefined}
+                      draggable={canDragSortStructure}
+                      onDragStart={(e) => handleStructureDragStart(node.id, e)}
+                      onDragOver={handleStructureDragOver}
+                      onDrop={(e) => handleStructureDrop(node.id, e)}
+                      onDragEnd={handleStructureDragEnd}
                       onClick={() => setSelectedFunctionId(node.id)}
                       style={{
                         padding: "8px 12px",
                         marginBottom: 6,
                         marginLeft: tn.depth * 14,
                         borderRadius: 6,
-                        cursor: "pointer",
+                        cursor: canDragSortStructure ? "grab" : "pointer",
                         background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
-                        border: isSelected ? "1px solid var(--qf-cyan)" : "1px solid var(--qf-border)",
+                        border: isSelected
+                          ? "1px solid var(--qf-cyan)"
+                          : dragState === "invalid"
+                            ? "1px solid rgba(255, 77, 79, 0.7)"
+                            : "1px solid var(--qf-border)",
+                        boxShadow:
+                          dragState === "before"
+                            ? "0 -2px 0 0 var(--qf-cyan)"
+                            : dragState === "after"
+                              ? "0 2px 0 0 var(--qf-cyan)"
+                              : undefined,
                         fontSize: 13,
                         display: "flex",
                         alignItems: "center",
@@ -1241,7 +1342,7 @@ export default function FMEAEditorPage() {
                         transition: "background 0.2s, border-color 0.2s",
                         color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
                       }}
-                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
+                      onMouseEnter={(e) => { if (!isSelected && !dragState) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
                     >
                       <div style={{ minWidth: 0, flex: 1 }}>
@@ -1321,8 +1422,8 @@ export default function FMEAEditorPage() {
               };
               return (
                 <>
-                  {tree.map((tn) => renderTreeNode(tn))}
-                  {tree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                  {structureTree.map((tn) => renderTreeNode(tn))}
+                  {structureTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
                 </>
               );
             })()}
