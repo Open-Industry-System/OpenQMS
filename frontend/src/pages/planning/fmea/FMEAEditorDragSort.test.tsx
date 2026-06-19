@@ -231,7 +231,7 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     expect(ps1).toHaveAttribute("draggable", "false");
   });
 
-  it("does not enable dragging for DFMEA documents", async () => {
+  it("enables dragging for DFMEA documents", async () => {
     mocks.getFMEA.mockResolvedValue(makeDoc(
       "DFMEA",
       [node("sys", "System"), node("sub", "Subsystem")],
@@ -241,7 +241,47 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const sub = await screen.findByTestId("fmea-structure-node-sub");
-    expect(sub).toHaveAttribute("draggable", "false");
+    expect(sub).toHaveAttribute("draggable", "true");
+  });
+
+  it("reorders DFMEA System roots and keeps table rows in structure order", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "DFMEA",
+      [
+        node("sys1", "System", "系统1"),
+        node("fm1", "FailureMode", "失效1"),
+        node("sys2", "System", "系统2"),
+        node("fm2", "FailureMode", "失效2"),
+      ],
+      [
+        { source: "sys1", target: "fm1", type: "HAS_FAILURE_MODE" },
+        { source: "sys2", target: "fm2", type: "HAS_FAILURE_MODE" },
+      ],
+    ));
+
+    renderEditor();
+
+    const sys1 = await screen.findByTestId("fmea-structure-node-sys1");
+    const sys2 = await screen.findByTestId("fmea-structure-node-sys2");
+    vi.spyOn(sys1, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
+    } as DOMRect);
+
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(sys2, { dataTransfer });
+    fireEvent.dragOver(sys1, { clientY: 1, dataTransfer });
+    fireEvent.drop(sys1, { clientY: 1, dataTransfer });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
+        "fmea-structure-node-sys2",
+        "fmea-structure-node-sys1",
+      ]);
+    });
+    expect(Array.from(document.querySelectorAll("tr[data-row-key]")).map((row) => row.getAttribute("data-row-key"))).toEqual([
+      "row_sys2_fm2",
+      "row_sys1_fm1",
+    ]);
   });
 
   it("reorders legal same-parent drops and keeps table rows in structure order", async () => {

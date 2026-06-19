@@ -342,6 +342,93 @@ describe("reorderStructureSiblings", () => {
     expect(result.changed).toBe(false);
     expect(result.reason).toBe("invalid");
   });
+
+  const buildDfmeaSortGraph = () => {
+    const nodes: GraphNode[] = [
+      node("sys1", "System"),
+      node("sys2", "System"),
+      node("sub1", "Subsystem"),
+      node("sub2", "Subsystem"),
+      node("comp1", "Component"),
+      node("comp2", "Component"),
+      node("fn1", "ProcessStepFunction"),
+    ];
+    const edges: GraphEdge[] = [
+      { source: "sys1", target: "sub1", type: "HAS_PROCESS_STEP" },
+      { source: "sys1", target: "sub2", type: "HAS_PROCESS_STEP" },
+      { source: "sub1", target: "comp1", type: "HAS_WORK_ELEMENT" },
+      { source: "sub1", target: "comp2", type: "HAS_WORK_ELEMENT" },
+      { source: "sub1", target: "fn1", type: "HAS_FUNCTION" },
+    ];
+    return { nodes, edges };
+  };
+
+  it("reorders top-level DFMEA System roots by changing node order", () => {
+    const { nodes, edges } = buildDfmeaSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "sys2",
+      dropNodeId: "sys1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.nodes.map((n) => n.id).slice(0, 2)).toEqual(["sys2", "sys1"]);
+    expect(result.edges).toBe(edges);
+  });
+
+  it("reorders DFMEA Subsystem siblings by changing HAS_PROCESS_STEP edge order", () => {
+    const { nodes, edges } = buildDfmeaSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "sub2",
+      dropNodeId: "sub1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.nodes).toBe(nodes);
+    expect(
+      result.edges
+        .filter((e) => e.source === "sys1" && e.type === "HAS_PROCESS_STEP")
+        .map((e) => e.target)
+    ).toEqual(["sub2", "sub1"]);
+  });
+
+  it("reorders DFMEA Component siblings by changing HAS_WORK_ELEMENT edge order", () => {
+    const { nodes, edges } = buildDfmeaSortGraph();
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "comp2",
+      dropNodeId: "comp1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(true);
+    expect(
+      result.edges
+        .filter((e) => e.source === "sub1" && e.type === "HAS_WORK_ELEMENT")
+        .map((e) => e.target)
+    ).toEqual(["comp2", "comp1"]);
+  });
+
+  it("rejects cross-type root reorder between ProcessItem and System", () => {
+    const nodes: GraphNode[] = [node("pi1", "ProcessItem"), node("sys1", "System")];
+    const edges: GraphEdge[] = [];
+    const result = reorderStructureSiblings({
+      nodes,
+      edges,
+      dragNodeId: "sys1",
+      dropNodeId: "pi1",
+      dropPosition: "before",
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe("invalid");
+  });
 });
 
 describe("canReorderStructureSiblings", () => {
@@ -413,6 +500,22 @@ describe("canReorderStructureSiblings", () => {
     expect(canReorderStructureSiblings({
       nodes, edges, dragNodeId: "ps1", dropNodeId: "ps1", dropPosition: "after",
     })).toBe(true);
+  });
+
+  it("returns true for a valid DFMEA System root drop", () => {
+    const nodes: GraphNode[] = [node("sys1", "System"), node("sys2", "System")];
+    const edges: GraphEdge[] = [];
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "sys2", dropNodeId: "sys1", dropPosition: "before",
+    })).toBe(true);
+  });
+
+  it("returns false for a cross-type ProcessItem↔System root drop", () => {
+    const nodes: GraphNode[] = [node("pi1", "ProcessItem"), node("sys1", "System")];
+    const edges: GraphEdge[] = [];
+    expect(canReorderStructureSiblings({
+      nodes, edges, dragNodeId: "sys1", dropNodeId: "pi1", dropPosition: "before",
+    })).toBe(false);
   });
 });
 

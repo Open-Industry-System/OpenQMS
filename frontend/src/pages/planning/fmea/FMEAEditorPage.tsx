@@ -443,14 +443,13 @@ export default function FMEAEditorPage() {
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   const fmeaType = fmea?.fmea_type;
-  const isPFMEA = fmeaType === "PFMEA";
   const isDFMEA = fmeaType === "DFMEA";
-  const canDragSortStructure = isPFMEA && canEdit("fmea");
+  const canDragSortStructure = canEdit("fmea");
   const structureTree = useMemo(() => buildStructureTree(nodes, edges), [nodes, edges]);
   const structureRowHeaderOrder = useMemo(() => getStructureRowHeaderOrder(nodes, edges), [nodes, edges]);
   const rows = useMemo(
-    () => buildRows(nodes, edges, isPFMEA ? structureRowHeaderOrder : undefined),
-    [nodes, edges, isPFMEA, structureRowHeaderOrder]
+    () => buildRows(nodes, edges, structureRowHeaderOrder),
+    [nodes, edges, structureRowHeaderOrder]
   );
 
   useEffect(() => {

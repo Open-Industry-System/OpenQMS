@@ -53,6 +53,9 @@ export const STRUCTURE_TYPES = [
   "ProcessWorkElement", "Component",
 ];
 
+/** Top-level structure root types: ProcessItem (PFMEA) and System (DFMEA). */
+const STRUCTURE_ROOT_TYPES = ["ProcessItem", "System"];
+
 /** Edge type used to descend one structural level under a given parent type. */
 const DESCENT_EDGE: Record<string, "HAS_PROCESS_STEP" | "HAS_WORK_ELEMENT"> = {
   ProcessItem: "HAS_PROCESS_STEP",
@@ -262,7 +265,9 @@ export function canReorderStructureSiblings({
   if (drag.parentEdgeType === null) {
     const dragNode = nodes.find((n) => n.id === dragNodeId);
     const dropNode = nodes.find((n) => n.id === dropNodeId);
-    if (dragNode?.type !== "ProcessItem" || dropNode?.type !== "ProcessItem") return false;
+    if (!dragNode || !dropNode) return false;
+    if (dragNode.type !== dropNode.type) return false;
+    if (!STRUCTURE_ROOT_TYPES.includes(dragNode.type)) return false;
   }
 
   return true;
@@ -285,8 +290,9 @@ export function reorderStructureSiblings({
   const drag = contexts.get(dragNodeId)!;
 
   if (drag.parentEdgeType === null) {
+    const rootType = nodes.find((n) => n.id === dragNodeId)?.type;
     const rootIds = nodes
-      .filter((n) => n.type === "ProcessItem" && contexts.get(n.id)?.parentEdgeType === null && !contexts.get(n.id)?.isFallbackRoot)
+      .filter((n) => n.type === rootType && STRUCTURE_ROOT_TYPES.includes(n.type) && contexts.get(n.id)?.parentEdgeType === null && !contexts.get(n.id)?.isFallbackRoot)
       .map((n) => n.id);
     const nextRootIds = moveId(rootIds, dragNodeId, dropNodeId, dropPosition);
     if (sameOrder(rootIds, nextRootIds)) return { nodes, edges, changed: false };
