@@ -5,6 +5,14 @@ import type { GraphNode, GraphEdge } from "../../api/graph";
 import type { GraphLayout } from "./GraphToolbar";
 import { getEdgeTypeKey, getNodeStyle } from "../../utils/graphPresentation";
 
+// Dark-theme palette (matches darkAlgorithm tokens in utils/darkTheme.ts).
+const GRAPH_BG = "#14161d";
+const GRAPH_BORDER = "rgba(255, 255, 255, 0.08)";
+const EDGE_STROKE = "rgba(255, 255, 255, 0.28)";
+const EDGE_LABEL_FILL = "#8b93a7";
+const EDGE_LABEL_BG = "#1c1f29";
+const NODE_LABEL_FILL = "#f0f2f5";
+
 interface GraphCanvasProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -45,7 +53,7 @@ function toG6Data(nodes: GraphNode[], edges: GraphEdge[], t: GraphT) {
         rawLabel,
       },
       style: {
-        stroke: "#9aa7b8",
+        stroke: EDGE_STROKE,
         lineWidth: 1,
         endArrow: true,
       },
@@ -67,10 +75,39 @@ function graphLayoutOptions(layout: GraphLayout) {
     } as const;
   }
 
+  if (layout === "force") {
+    // d3-force + drag-element-force keeps the simulation live so dragging a
+    // node re-heats it and pushes neighbors away (no overlap). `collide`
+    // enforces a minimum gap between the (up to ~144px) nodes.
+    return {
+      type: "d3-force",
+      link: { distance: 120, strength: 1 },
+      collide: { radius: 56 },
+      charge: { strength: -350 },
+      animation: true,
+    } as const;
+  }
+
+  // compact-box is a tree layout — give it real gaps so siblings don't overlap.
   return {
-    type: layout,
+    type: "compact-box",
+    direction: "LR",
+    getHGap: () => 90,
+    getVGap: () => 18,
+    getHeight: () => 40,
+    getWidth: () => 140,
     animation: true,
   } as const;
+}
+
+function graphBehaviors(layout: GraphLayout) {
+  // drag-element-force re-heats the d3-force simulation on drag so other nodes
+  // follow the dragged one; use plain drag-element for the static layouts.
+  const dragBehavior =
+    layout === "force"
+      ? { type: "drag-element-force", fixed: false }
+      : { type: "drag-element" };
+  return ["drag-canvas", "zoom-canvas", dragBehavior];
 }
 
 export interface GraphCanvasRef {
@@ -126,7 +163,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
           labelText: (datum: { data?: { label?: string } }) => datum.data?.label || "",
           labelFontSize: 12,
           labelPlacement: "center",
-          labelFill: "#1f2937",
+          labelFill: NODE_LABEL_FILL,
           labelTextAlign: "center",
           labelWordWrap: true,
           labelMaxWidth: 120,
@@ -139,25 +176,21 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
         type: "line",
         style: {
           endArrow: true,
-          stroke: "#9aa7b8",
+          stroke: EDGE_STROKE,
           lineWidth: 1,
           labelText: (datum: { data?: { label?: string } }) => datum.data?.label || "",
           labelFontSize: 11,
-          labelFill: "#4b5563",
+          labelFill: EDGE_LABEL_FILL,
           labelPlacement: "center",
           labelOffsetY: -4,
           labelBackground: true,
-          labelBackgroundFill: "#ffffff",
+          labelBackgroundFill: EDGE_LABEL_BG,
           labelBackgroundOpacity: 0.92,
           labelBackgroundPadding: [2, 6],
         },
       },
       layout: graphLayoutOptions(layout),
-      behaviors: [
-        "drag-canvas",
-        "zoom-canvas",
-        "drag-element",
-      ],
+      behaviors: graphBehaviors(layout),
       plugins: [
         {
           type: "minimap",
@@ -249,7 +282,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
             style: {
               ...edge.style,
               opacity: isHighlighted ? 1 : 0.1,
-              stroke: isHighlighted ? "#ff4d4f" : "#9aa7b8",
+              stroke: isHighlighted ? "#ff4d4f" : EDGE_STROKE,
               lineWidth: isHighlighted ? 2 : 1,
             },
           },
@@ -276,7 +309,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
             style: {
               ...edge.style,
               opacity: 1,
-              stroke: "#9aa7b8",
+              stroke: EDGE_STROKE,
               lineWidth: 1,
             },
           },
@@ -354,9 +387,9 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
         width: "100%",
         height: "100%",
         minHeight: 500,
-        border: "1px solid #e5e7eb",
+        border: `1px solid ${GRAPH_BORDER}`,
         borderRadius: 8,
-        background: "#f8fafc",
+        background: GRAPH_BG,
       }}
     />
   );

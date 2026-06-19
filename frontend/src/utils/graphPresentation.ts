@@ -21,7 +21,7 @@ export interface EdgePresentation {
 }
 
 export const DEFAULT_NODE_STYLE: GraphNodeStyle = {
-  fill: "#f3f4f6",
+  fill: "rgba(255, 255, 255, 0.06)",
   stroke: "#9ca3af",
   lineWidth: 1,
   size: [128, 52],
@@ -32,7 +32,7 @@ export const DEFAULT_NODE_STYLE: GraphNodeStyle = {
 };
 
 const systemStyle: GraphNodeStyle = {
-  fill: "#e6f4ff",
+  fill: "rgba(22, 119, 255, 0.18)",
   stroke: "#1677ff",
   lineWidth: 1,
   size: [132, 52],
@@ -43,7 +43,7 @@ const systemStyle: GraphNodeStyle = {
 };
 
 const structureStyle: GraphNodeStyle = {
-  fill: "#e6fffb",
+  fill: "rgba(19, 194, 194, 0.18)",
   stroke: "#13c2c2",
   lineWidth: 1,
   size: [132, 52],
@@ -54,7 +54,7 @@ const structureStyle: GraphNodeStyle = {
 };
 
 const functionStyle: GraphNodeStyle = {
-  fill: "#f6ffed",
+  fill: "rgba(82, 196, 26, 0.20)",
   stroke: "#52c41a",
   lineWidth: 1,
   size: [144, 54],
@@ -65,7 +65,7 @@ const functionStyle: GraphNodeStyle = {
 };
 
 const failureModeStyle: GraphNodeStyle = {
-  fill: "#fff1f0",
+  fill: "rgba(255, 77, 79, 0.22)",
   stroke: "#ff4d4f",
   lineWidth: 1.5,
   size: [144, 56],
@@ -76,7 +76,7 @@ const failureModeStyle: GraphNodeStyle = {
 };
 
 const failureAnalysisStyle: GraphNodeStyle = {
-  fill: "#fff7e6",
+  fill: "rgba(250, 140, 22, 0.20)",
   stroke: "#fa8c16",
   lineWidth: 1,
   size: [144, 54],
@@ -87,7 +87,7 @@ const failureAnalysisStyle: GraphNodeStyle = {
 };
 
 const preventionStyle: GraphNodeStyle = {
-  fill: "#f6ffed",
+  fill: "rgba(115, 209, 61, 0.20)",
   stroke: "#73d13d",
   lineWidth: 1,
   size: [132, 52],
@@ -98,7 +98,7 @@ const preventionStyle: GraphNodeStyle = {
 };
 
 const detectionStyle: GraphNodeStyle = {
-  fill: "#f9f0ff",
+  fill: "rgba(114, 46, 209, 0.20)",
   stroke: "#722ed1",
   lineWidth: 1,
   size: [132, 52],
@@ -109,7 +109,7 @@ const detectionStyle: GraphNodeStyle = {
 };
 
 const actionStyle: GraphNodeStyle = {
-  fill: "#f5f5f5",
+  fill: "rgba(140, 140, 140, 0.16)",
   stroke: "#8c8c8c",
   lineWidth: 1,
   size: [132, 52],
@@ -120,7 +120,7 @@ const actionStyle: GraphNodeStyle = {
 };
 
 const interfaceStyle: GraphNodeStyle = {
-  fill: "#f9f0ff",
+  fill: "rgba(146, 84, 222, 0.20)",
   stroke: "#9254de",
   lineWidth: 1,
   size: [132, 52],
@@ -131,7 +131,7 @@ const interfaceStyle: GraphNodeStyle = {
 };
 
 const parameterStyle: GraphNodeStyle = {
-  fill: "#f0f5ff",
+  fill: "rgba(47, 84, 235, 0.20)",
   stroke: "#2f54eb",
   lineWidth: 1,
   size: [132, 52],
