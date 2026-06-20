@@ -34,7 +34,7 @@ export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactE
               fmeaId={fmeaId}
               value={node?.name || ""}
               onChange={(val: string) => updateNode(effectId, "name", val)}
-              onSelect={(s: { name: string }) => updateNode(effectId, "name", s.name)}
+              onSelect={(s) => updateNode(effectId, "name", s.name)}
               disabled={disabled}
             />
             {!disabled && (
