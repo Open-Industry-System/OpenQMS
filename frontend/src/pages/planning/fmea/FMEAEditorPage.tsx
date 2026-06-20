@@ -147,11 +147,8 @@ export default function FMEAEditorPage() {
   const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
   const dragStructureNodeIdRef = useRef<string | null>(null);
-  const lastDragOverKeyRef = useRef<string | null>(null);
-  const lastValidDropRef = useRef<{ dropNodeId: string; position: StructureDropPosition } | null>(null);
   const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
@@ -478,10 +475,6 @@ export default function FMEAEditorPage() {
   const isDFMEA = fmeaType === "DFMEA";
   const canDragSortStructure = canEdit("fmea");
   const structureTree = useMemo(() => buildStructureTree(nodes, edges), [nodes, edges]);
-  const displayTree = useMemo(
-    () => (preview ? buildStructureTree(preview.nodes, preview.edges) : structureTree),
-    [preview, structureTree],
-  );
   // 拖拽期间折叠被拖节点 + 同级节点的子树（祖先链路与无关分支保持展开）
   const dragCollapseIds = useMemo(
     () => (draggingNodeId ? dragCollapsedSubtreeRootIds(structureTree, draggingNodeId) : new Set<string>()),
@@ -620,8 +613,6 @@ export default function FMEAEditorPage() {
   const handleStructureDragStart = useCallback((nodeId: string, event: React.DragEvent<HTMLElement>) => {
     if (!canDragSortStructure) return;
     dragStructureNodeIdRef.current = nodeId;
-    lastDragOverKeyRef.current = null;
-    lastValidDropRef.current = null;
     setDraggingNodeId(nodeId);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", nodeId);
@@ -635,15 +626,6 @@ export default function FMEAEditorPage() {
     const dropNodeId = (event.currentTarget as HTMLElement).dataset.nodeId;
     if (!dropNodeId) return;
     event.preventDefault();
-    // Self-hover (dropNodeId === dragNodeId) is an artifact of the live reorder:
-    // the dragged row moved under the cursor. Skip marker/preview updates so the
-    // last valid target's marker + preview stay put — prevents the snap-back
-    // oscillation between preview and real order. If the user drops here, the
-    // drop handler commits the previewed reorder via lastValidDropRef.
-    if (dropNodeId === dragNodeId) {
-      event.dataTransfer.dropEffect = "move";
-      return;
-    }
     const position = getStructureDropPosition(event);
     const valid = canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
     event.dataTransfer.dropEffect = valid ? "move" : "none";
@@ -652,23 +634,6 @@ export default function FMEAEditorPage() {
         ? prev
         : { nodeId: dropNodeId, position, valid }
     );
-    const key = `${dropNodeId}|${position}|${valid}`;
-    if (lastDragOverKeyRef.current !== key) {
-      lastDragOverKeyRef.current = key;
-      if (valid) {
-        const result = reorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
-        if (result.changed) {
-          lastValidDropRef.current = { dropNodeId, position };
-          setPreview({ nodes: result.nodes, edges: result.edges });
-        } else {
-          lastValidDropRef.current = null;
-          setPreview(null);
-        }
-      } else {
-        lastValidDropRef.current = null;
-        setPreview(null);
-      }
-    }
   }, [canDragSortStructure, edges, getStructureDropPosition, nodes]);
 
   const handleStructureDrop = useCallback((dropNodeId: string, event: React.DragEvent<HTMLDivElement>) => {
@@ -677,21 +642,17 @@ export default function FMEAEditorPage() {
     event.stopPropagation();
     setDragOver(null);
     setDraggingNodeId(null);
-    setPreview(null);
 
     const dragNodeId = dragStructureNodeIdRef.current;
     dragStructureNodeIdRef.current = null;
     if (!dragNodeId) return;
 
-    const lastValid = lastValidDropRef.current;
-    const useFallback = dropNodeId === dragNodeId && lastValid;
-    lastValidDropRef.current = null;
     const result = reorderStructureSiblings({
       nodes,
       edges,
       dragNodeId,
-      dropNodeId: useFallback ? lastValid!.dropNodeId : dropNodeId,
-      dropPosition: useFallback ? lastValid!.position : getStructureDropPosition(event),
+      dropNodeId,
+      dropPosition: getStructureDropPosition(event),
     });
 
     if (!result.changed) {
@@ -705,10 +666,8 @@ export default function FMEAEditorPage() {
 
   const handleStructureDragEnd = useCallback(() => {
     dragStructureNodeIdRef.current = null;
-    lastValidDropRef.current = null;
     setDragOver(null);
     setDraggingNodeId(null);
-    setPreview(null);
   }, []);
 
   const deleteRow = useCallback((row: FMEARow) => {
@@ -1172,7 +1131,7 @@ export default function FMEAEditorPage() {
         return (
           <Input.TextArea
             value={node?.action_taken || ""}
-            autoSize={{ minRows: 2, maxRows: 4 }}
+            autoSize={{ minRows: 2, maxRows: 8 }}
             disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "action_taken", e.target.value)}
           />
@@ -1524,8 +1483,8 @@ export default function FMEAEditorPage() {
               };
               return (
                 <>
-                  {displayTree.map((tn) => renderTreeNode(tn))}
-                  {displayTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                  {structureTree.map((tn) => renderTreeNode(tn))}
+                  {structureTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
                 </>
               );
             })()}

@@ -200,6 +200,18 @@ beforeEach(() => {
   mocks.transitionFMEA.mockResolvedValue({});
 });
 
+// ============================================================================
+// 浏览器手动测试清单（jsdom 无法覆盖原生 HTML5 DnD 状态，下列项需手动验证）：
+//   1. 连续拖两次：第一次 swap 后，立刻再拖另一个节点，应能正常排序（regression: 拖拽途
+//      中不得改写拖拽源 DOM，否则浏览器 DnD 状态被破坏、后续 dragstart 被忽略）。
+//   2. 取消拖拽后再拖：拖出树外或按 ESC 取消，状态复位（指示线/收起消失），再拖正常。
+//   3. 跨父级非法拖：拖到不同父级的节点，显示红色非法框 + 松手弹「仅支持同级节点排序」。
+//   4. viewer 不可拖：无编辑权限时 grip 不渲染、整行不可拖。
+//   5. 同级合法拖：拖到同级节点的上/下四分之一，显示青色 before/after 线，松手提交排序。
+// 注：live preview（拖拽途中实时重排）已移除——原生 DnD + 拖拽中改写拖拽源 DOM 会破坏
+// 浏览器拖拽状态。如未来需恢复 live preview，请改用 @dnd-kit 等 transform-based DnD。
+// ============================================================================
+
 describe("FMEAEditorPage PFMEA structure drag sorting", () => {
   it("enables dragging for editable PFMEA structure nodes", async () => {
     mocks.getFMEA.mockResolvedValue(makeDoc(
@@ -521,144 +533,8 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     });
   });
 
-  it("previews the sibling reorder during drag-over before drop", async () => {
-    mocks.getFMEA.mockResolvedValue(makeDoc(
-      "PFMEA",
-      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
-      [
-        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
-        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
-      ],
-    ));
-    renderEditor();
-    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
-    } as DOMRect);
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
-    await waitFor(() => {
-      expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
-        "fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1",
-      ]);
-    });
-  });
 
-  it("does not snap back when the dragged row passes under the cursor (self-hover keeps preview)", async () => {
-    mocks.getFMEA.mockResolvedValue(makeDoc(
-      "PFMEA",
-      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
-      [
-        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
-        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
-      ],
-    ));
-    renderEditor();
-    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
-    } as DOMRect);
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });   // preview ps2 before ps1 → [pi, ps2, ps1]
-    await waitFor(() => {
-      expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
-        "fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1",
-      ]);
-    });
-    // The dragged row (ps2) has now moved under the cursor. A dragOver on it must
-    // NOT clear the preview and snap back to real order — that would oscillate.
-    fireEvent.dragOver(ps2, { clientY: 1, dataTransfer });
-    expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
-      "fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1",
-    ]);
-  });
 
-  it("reverts the preview when the drag ends without a drop", async () => {
-    mocks.getFMEA.mockResolvedValue(makeDoc(
-      "PFMEA",
-      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
-      [
-        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
-        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
-      ],
-    ));
-    renderEditor();
-    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
-    } as DOMRect);
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
-    await waitFor(() => expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
-      "fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1",
-    ]));
-    fireEvent.dragEnd(ps2Handle);
-    await waitFor(() => expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
-      "fmea-structure-node-pi", "fmea-structure-node-ps1", "fmea-structure-node-ps2",
-    ]));
-  });
 
-  it("commits the previewed reorder when the drop lands on the moved dragged row", async () => {
-    mocks.getFMEA.mockResolvedValue(makeDoc(
-      "PFMEA",
-      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
-      [
-        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
-        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
-      ],
-    ));
-    renderEditor();
-    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
-    } as DOMRect);
-    const dataTransfer = makeDataTransfer();
-    // preview ps2 before ps1
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
-    // drop lands on the moved dragged row (ps2) itself
-    fireEvent.drop(ps2, { clientY: 1, dataTransfer });
-    await waitFor(() => {
-      expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
-        "fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1",
-      ]);
-    });
-  });
 
-  it("does not commit a stale preview after the preview is cleared (drop on dragged row)", async () => {
-    mocks.getFMEA.mockResolvedValue(makeDoc(
-      "PFMEA",
-      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
-      [
-        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
-        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
-      ],
-    ));
-    renderEditor();
-    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
-    } as DOMRect);
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });    // preview ps2 before ps1
-    fireEvent.dragOver(ps1, { clientY: 20, dataTransfer });    // inside/invalid → clears preview + lastValid
-    fireEvent.drop(ps2, { clientY: 1, dataTransfer });        // drop on dragged row
-    await waitFor(() => {
-      expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
-        "fmea-structure-node-pi", "fmea-structure-node-ps1", "fmea-structure-node-ps2",
-      ]);
-    });
-  });
 });
