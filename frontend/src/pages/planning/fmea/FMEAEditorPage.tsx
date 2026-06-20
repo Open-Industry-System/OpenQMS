@@ -21,7 +21,8 @@ import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
-import { buildRows, createRowNodes, type FMEARow } from "../../../utils/fmeaTable";
+import { buildRows, createRowNodes, getRowSeverity, addEffect, deleteEffect, type FMEARow } from "../../../utils/fmeaTable";
+import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
 import {
   buildStructureTree,
   createStructureChild,
@@ -471,6 +472,26 @@ export default function FMEAEditorPage() {
 
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+
+  const handleAddEffect = useCallback((fmId: string) => {
+    const result = addEffect(fmId, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;   // advance ref synchronously so a second
+    edgesRef.current = result.edges;   // click before the effect runs still sees fresh state
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, []);
+  const handleDeleteEffect = useCallback((fmId: string, effectId: string) => {
+    const result = deleteEffect(fmId, effectId, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;
+    edgesRef.current = result.edges;
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, []);
+
   const fmeaType = fmea?.fmea_type;
   const isDFMEA = fmeaType === "DFMEA";
   const canDragSortStructure = canEdit("fmea");
@@ -676,7 +697,7 @@ export default function FMEAEditorPage() {
     const nodesUsedByOthers = new Set<string>();
     for (const r of otherRows) {
       nodesUsedByOthers.add(r.failureModeNodeId);
-      if (r.failureEffectNodeId) nodesUsedByOthers.add(r.failureEffectNodeId);
+      r.failureEffectNodeIds.forEach((id) => nodesUsedByOthers.add(id));
       if (r.failureCauseNodeId) nodesUsedByOthers.add(r.failureCauseNodeId);
       r.preventionControlIds?.forEach(id => nodesUsedByOthers.add(id));
       r.detectionControlIds?.forEach(id => nodesUsedByOthers.add(id));
@@ -691,9 +712,9 @@ export default function FMEAEditorPage() {
     if (row.failureCauseNodeId && !nodesUsedByOthers.has(row.failureCauseNodeId)) {
       idsToDelete.add(row.failureCauseNodeId);
     }
-    if (row.failureEffectNodeId && !nodesUsedByOthers.has(row.failureEffectNodeId)) {
-      idsToDelete.add(row.failureEffectNodeId);
-    }
+    row.failureEffectNodeIds.forEach((effectId) => {
+      if (!nodesUsedByOthers.has(effectId)) idsToDelete.add(effectId);
+    });
     if (!nodesUsedByOthers.has(row.failureModeNodeId)) {
       idsToDelete.add(row.failureModeNodeId);
     }
@@ -764,20 +785,17 @@ export default function FMEAEditorPage() {
       key: "failureEffect",
       width: 200,
       render: (_: unknown, row: FMEARow) => {
-        if (!row.failureEffectNodeId) return "-";
-        const node = nodeMap.get(row.failureEffectNodeId);
         return (
-          <SmartSuggestionDropdown
-            triggerType="failure_effect"
-            context={{
-              failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
-              function_description: nodeMap.get(row.functionNodeId)?.name || "",
-            }}
+          <EffectLinesEditor
+            effectIds={row.failureEffectNodeIds}
+            nodeMap={nodeMap}
             fmeaId={fmeaId}
-            value={node?.name || ""}
-            onChange={(val) => updateNode(row.failureEffectNodeId!, "name", val)}
-            onSelect={(s) => updateNode(row.failureEffectNodeId!, "name", s.name)}
+            functionDescription={nodeMap.get(row.functionNodeId)?.name || ""}
+            failureModeName={nodeMap.get(row.failureModeNodeId)?.name || ""}
             disabled={!canEdit('fmea')}
+            updateNode={updateNode}
+            onAddEffect={() => handleAddEffect(row.failureModeNodeId)}
+            onDeleteEffect={(effectId) => handleDeleteEffect(row.failureModeNodeId, effectId)}
           />
         );
       },
@@ -788,26 +806,25 @@ export default function FMEAEditorPage() {
       width: 60,
       align: "center" as const,
       render: (_: unknown, row: FMEARow) => {
-        if (!row.failureEffectNodeId) return "-";
-        const node = nodeMap.get(row.failureEffectNodeId);
+        if (row.failureEffectNodeIds.length === 0) return <Text type="secondary">-</Text>;
+        const s = getRowSeverity(row, nodeMap);
         return (
           <div>
             <Input
               min={1}
               max={10}
               size="small"
-              value={node?.severity ?? undefined}
+              value={s || undefined}
               disabled={!canEdit('fmea')}
               style={{ width: 55, textAlign: "center" }}
               onFocus={() => startEditing({ row_key: row.key, field: "severity", node_id: row.failureModeNodeId })}
               onBlur={stopEditing}
-              onChange={(e) => updateNode(row.failureEffectNodeId!, "severity", Number(e.target.value) || 0)}
+              onChange={(e) => {
+                const v = Number(e.target.value) || 0;
+                row.failureEffectNodeIds.forEach((id) => updateNode(id, "severity", v));
+              }}
             />
-            <ActiveUserIndicator
-              activeUsers={activeUsers}
-              rowKey={row.key}
-              field="severity"
-            />
+            <ActiveUserIndicator activeUsers={activeUsers} rowKey={row.key} field="severity" />
           </div>
         );
       },
@@ -840,14 +857,13 @@ export default function FMEAEditorPage() {
       render: (_: unknown, row: FMEARow) => {
         if (!row.failureCauseNodeId) return "-";
         const node = nodeMap.get(row.failureCauseNodeId);
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         return (
           <SmartSuggestionDropdown
             triggerType="failure_cause"
             context={{
               failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
               function_description: nodeMap.get(row.functionNodeId)?.name || "",
-              severity: effectNode?.severity || 0,
+              severity: getRowSeverity(row, nodeMap),
             }}
             fmeaId={fmeaId}
             value={node?.name || ""}
@@ -896,10 +912,9 @@ export default function FMEAEditorPage() {
         const nodeId = row.preventionControlIds[0];
         if (!nodeId) return "-";
         const node = nodeMap.get(nodeId);
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
-        const ap = calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, detNode?.detection || 0);
+        const ap = calculateAP(getRowSeverity(row, nodeMap), causeNode?.occurrence || 0, detNode?.detection || 0);
         return (
           <SmartSuggestionDropdown
             triggerType="measure"
@@ -924,9 +939,8 @@ export default function FMEAEditorPage() {
         const nodeId = row.detectionControlIds[0];
         if (!nodeId) return "-";
         const node = nodeMap.get(nodeId);
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
-        const ap = calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, node?.detection || 0);
+        const ap = calculateAP(getRowSeverity(row, nodeMap), causeNode?.occurrence || 0, node?.detection || 0);
         return (
           <SmartSuggestionDropdown
             triggerType="measure"
@@ -979,11 +993,10 @@ export default function FMEAEditorPage() {
       width: 60,
       align: "center" as const,
       render: (_: unknown, row: FMEARow) => {
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         const detectionNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
 
-        const s = effectNode?.severity || 0;
+        const s = getRowSeverity(row, nodeMap);
         const o = causeNode?.occurrence || 0;
         const d = detectionNode?.detection || 0;
         const rpn = s * o * d;
@@ -1014,11 +1027,10 @@ export default function FMEAEditorPage() {
       width: 55,
       align: "center" as const,
       render: (_: unknown, row: FMEARow) => {
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         const detectionNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
 
-        const s = effectNode?.severity || 0;
+        const s = getRowSeverity(row, nodeMap);
         const o = causeNode?.occurrence || 0;
         const d = detectionNode?.detection || 0;
         const ap = calculateAP(s, o, d);
@@ -1071,18 +1083,18 @@ export default function FMEAEditorPage() {
         }
         const nodeId = row.recommendedActionIds[0];
         const node = nodeMap.get(nodeId);
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
+        const s = getRowSeverity(row, nodeMap);
         return (
           <SmartSuggestionDropdown
             triggerType="optimization"
             context={{
               failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
-              severity: effectNode?.severity || 0,
+              severity: s,
               occurrence: causeNode?.occurrence || 0,
               detection: detNode?.detection || 0,
-              ap: calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, detNode?.detection || 0),
+              ap: calculateAP(s, causeNode?.occurrence || 0, detNode?.detection || 0),
             }}
             fmeaId={fmeaId}
             value={node?.name || ""}
