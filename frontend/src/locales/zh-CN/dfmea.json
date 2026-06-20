@@ -17,7 +17,8 @@
       "timeframe": "时间范围",
       "tool": "工具",
       "task": "任务",
-      "trend": "趋势"
+      "trend": "趋势",
+      "legacyTimeframe": "当前旧格式值：{{value}}（重新选择以更新）"
     },
     "structure": {
       "title": "结构分析",

@@ -17,7 +17,8 @@
       "timeframe": "Timeframe",
       "tool": "Tool",
       "task": "Task",
-      "trend": "Trend"
+      "trend": "Trend",
+      "legacyTimeframe": "Legacy value: {{value}} (re-select to update)"
     },
     "structure": {
       "title": "Structure Analysis",

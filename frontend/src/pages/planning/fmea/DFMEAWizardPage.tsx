@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, Table, InputNumber, Result } from 'antd';
+import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, Table, InputNumber, Result, DatePicker } from 'antd';
 import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { getFMEA, deleteFMEA } from '../../../api/fmea';
@@ -12,8 +12,19 @@ import { buildRows, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
 import WizardGuidanceCard from '../../../components/dfmea/WizardGuidanceCard';
+import type { ReactNode } from 'react';
+import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimeframe';
 
 const { Title, Paragraph } = Typography;
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <div style={{ marginBottom: 4 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
 
 export default function DFMEAWizardPage() {
   const { id: fmeaId } = useParams<{ id: string }>();
@@ -151,20 +162,38 @@ export default function DFMEAWizardPage() {
   };
 
   // Step 0 — 5T Scope
-  const renderStep0 = () => (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <Input placeholder={t('wizard.scope.team')} value={wizardScope.team || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, team: e.target.value })} />
-      <Input placeholder={t('wizard.scope.timeframe')} value={wizardScope.timeframe || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, timeframe: e.target.value })} />
-      <Input placeholder={t('wizard.scope.tool')} value={wizardScope.tool || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, tool: e.target.value })} />
-      <Input placeholder={t('wizard.scope.task')} value={wizardScope.task || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, task: e.target.value })} />
-      <Input placeholder={t('wizard.scope.trend')} value={wizardScope.trend || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, trend: e.target.value })} />
-    </div>
-  );
+  const renderStep0 = () => {
+    const legacyTimeframe =
+      wizardScope.timeframe && !timeframeToRange(wizardScope.timeframe) ? wizardScope.timeframe : null;
+    return (
+      <div style={{ display: 'grid', gap: 12 }}>
+        <Field label={t('wizard.scope.team')}>
+          <Input value={wizardScope.team || ''} onChange={e => updateGraphData(nodes, edges, { ...wizardScope, team: e.target.value })} />
+        </Field>
+        <Field label={t('wizard.scope.timeframe')}>
+          <DatePicker.RangePicker
+            style={{ width: '100%' }}
+            value={timeframeToRange(wizardScope.timeframe || '')}
+            onChange={(range) => updateGraphData(nodes, edges, { ...wizardScope, timeframe: rangeToTimeframe(range) })}
+          />
+          {legacyTimeframe && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t('wizard.scope.legacyTimeframe', { value: legacyTimeframe })}
+            </Typography.Text>
+          )}
+        </Field>
+        <Field label={t('wizard.scope.tool')}>
+          <Input value={wizardScope.tool || ''} onChange={e => updateGraphData(nodes, edges, { ...wizardScope, tool: e.target.value })} />
+        </Field>
+        <Field label={t('wizard.scope.task')}>
+          <Input value={wizardScope.task || ''} onChange={e => updateGraphData(nodes, edges, { ...wizardScope, task: e.target.value })} />
+        </Field>
+        <Field label={t('wizard.scope.trend')}>
+          <Input value={wizardScope.trend || ''} onChange={e => updateGraphData(nodes, edges, { ...wizardScope, trend: e.target.value })} />
+        </Field>
+      </div>
+    );
+  };
 
   // Step 1 — Structure Analysis
   const renderStep1 = () => {
