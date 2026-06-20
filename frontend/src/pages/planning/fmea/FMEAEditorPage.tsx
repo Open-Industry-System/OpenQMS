@@ -22,6 +22,7 @@ import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
 import { buildRows, createRowNodes, getRowSeverity, addEffect, deleteEffect, type FMEARow } from "../../../utils/fmeaTable";
+import { planCauseDeletion } from "./deleteRowHelpers";
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
 import {
   buildStructureTree,
@@ -692,42 +693,14 @@ export default function FMEAEditorPage() {
   }, []);
 
   const deleteRow = useCallback((row: FMEARow) => {
-    // Only delete nodes that are NOT shared with other rows
-    const otherRows = rows.filter((r) => r.key !== row.key);
-    const nodesUsedByOthers = new Set<string>();
-    for (const r of otherRows) {
-      nodesUsedByOthers.add(r.failureModeNodeId);
-      r.failureEffectNodeIds.forEach((id) => nodesUsedByOthers.add(id));
-      if (r.failureCauseNodeId) nodesUsedByOthers.add(r.failureCauseNodeId);
-      r.preventionControlIds?.forEach(id => nodesUsedByOthers.add(id));
-      r.detectionControlIds?.forEach(id => nodesUsedByOthers.add(id));
-      r.recommendedActionIds?.forEach(id => nodesUsedByOthers.add(id));
-    }
+    const { nodeIdsToDelete } = planCauseDeletion(row, rows);
 
-    const idsToDelete = new Set<string>();
-    // Always delete this row's unique edges
-    const edgesToDelete = new Set<string>();
-    edgesToDelete.add(row.failureModeNodeId);
-
-    if (row.failureCauseNodeId && !nodesUsedByOthers.has(row.failureCauseNodeId)) {
-      idsToDelete.add(row.failureCauseNodeId);
-    }
-    row.failureEffectNodeIds.forEach((effectId) => {
-      if (!nodesUsedByOthers.has(effectId)) idsToDelete.add(effectId);
-    });
-    if (!nodesUsedByOthers.has(row.failureModeNodeId)) {
-      idsToDelete.add(row.failureModeNodeId);
-    }
-    row.preventionControlIds.forEach((id) => { if (!nodesUsedByOthers.has(id)) idsToDelete.add(id); });
-    row.detectionControlIds.forEach((id) => { if (!nodesUsedByOthers.has(id)) idsToDelete.add(id); });
-    row.recommendedActionIds.forEach((id) => { if (!nodesUsedByOthers.has(id)) idsToDelete.add(id); });
-
-    setNodes((prev) => prev.filter((n) => !idsToDelete.has(n.id)));
-    // Delete edges connected to deleted nodes AND edges specific to this row
+    setNodes((prev) => prev.filter((n) => !nodeIdsToDelete.has(n.id)));
     setEdges((prev) => prev.filter((e) => {
-      if (idsToDelete.has(e.source) || idsToDelete.has(e.target)) return false;
-      // Delete the specific cause→mode edge for this row
-      if (e.source === row.failureCauseNodeId && e.target === row.failureModeNodeId && e.type === "CAUSE_OF") return false;
+      // Drop edges touching deleted nodes
+      if (nodeIdsToDelete.has(e.source) || nodeIdsToDelete.has(e.target)) return false;
+      // Drop this row's CAUSE_OF (cause → mode) edge specifically
+      if (row.failureCauseNodeId && e.source === row.failureCauseNodeId && e.target === row.failureModeNodeId && e.type === "CAUSE_OF") return false;
       return true;
     }));
   }, [rows]);
@@ -1250,11 +1223,12 @@ export default function FMEAEditorPage() {
       key: "actions",
       width: 40,
       fixed: "right" as const,
-      render: (_: unknown, row: FMEARow) => (
-        <Popconfirm title={t("editor.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
-          <Button type="text" danger size="small" disabled={!canEdit('fmea')} icon={<DeleteOutlined />} />
-        </Popconfirm>
-      ),
+      render: (_: unknown, row: FMEARow) =>
+        row.failureCauseNodeId ? (
+          <Popconfirm title={t("editor.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
+            <Button type="text" danger size="small" disabled={!canEdit('fmea')} icon={<DeleteOutlined />} />
+          </Popconfirm>
+        ) : null,
     },
   ];
 
