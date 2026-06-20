@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Input, Dropdown, Tag, Spin, Alert, Typography, Radio } from "antd";
-import { BulbOutlined, StarOutlined, SettingOutlined, GlobalOutlined } from "@ant-design/icons";
+import { Input, Dropdown, Tag, Spin, Button, Typography, Radio } from "antd";
+import { BulbOutlined, StarOutlined, SettingOutlined, GlobalOutlined, CloseOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { getRecommendations, type Suggestion, type RecommendResponse } from "../../api/recommendation";
 import { usePermission } from "../../hooks/usePermission";
@@ -188,6 +188,24 @@ export default function SmartSuggestionDropdown({
         color: "var(--qf-text-primary)",
       }}
     >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          padding: "2px 4px",
+          borderBottom: "1px solid var(--qf-border)",
+        }}
+      >
+        <Button
+          type="text"
+          size="small"
+          icon={<CloseOutlined />}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+          aria-label={t("smartSuggestion.close")}
+          title={t("smartSuggestion.close")}
+        />
+      </div>
       {error && (
         <div
           style={{
