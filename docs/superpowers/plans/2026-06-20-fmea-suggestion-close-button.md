@@ -124,7 +124,7 @@ git commit -m "i18n(dfmea): add smartSuggestion.close key"
   });
 ```
 
-> 该用例依赖组件给 `<Dropdown>` 加 `destroyOnHidden`（见 Step 4b）。若实测发现 AntD motion 未被 timer flush 触发（少数 CSS-transition 路径），可在该断言前临时 `vi.useRealTimers()` 再 `await waitFor(...)`，但优先按上面的 fake-timer flush 方式。
+> 该用例依赖组件给 `<Dropdown>` 加 `destroyOnHidden`（见 Step 4b）。**优先按上面的 fake-timer flush 方式**，不要走下面的 fallback 除非实测失败。若确需切换：在该断言前 `vi.useRealTimers()`，断言后**立即** `vi.useRealTimers()` 之后用 `vi.useFakeTimers()` 恢复（或在测试末尾 `vi.useRealTimers()` 清理）——当前测试文件没有 `afterEach`，不恢复会污染后续用例的 timer 模式。
 
 - [ ] **Step 2: 运行测试，确认失败**
 
