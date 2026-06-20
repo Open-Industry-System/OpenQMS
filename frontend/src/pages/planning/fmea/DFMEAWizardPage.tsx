@@ -8,7 +8,7 @@ import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../t
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { useWizardValidation } from '../../../hooks/useWizardValidation';
 import { useDfmeaRules } from '../../../utils/dfmeaRules';
-import { buildRows, type FMEARow } from '../../../utils/fmeaTable';
+import { buildRows, getRowSeverity, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
 import WizardGuidanceCard from '../../../components/dfmea/WizardGuidanceCard';
@@ -446,9 +446,13 @@ export default function DFMEAWizardPage() {
             return fm?.name || '';
           }},
           { title: 'S', width: 60, render: (_: unknown, r: FMEARow) => {
-            const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
-            return <InputNumber size="small" min={1} max={10} value={effect?.severity || undefined}
-              style={{ width: 50 }} onChange={val => effect && handleUpdateRisk(effect.id, 'severity', val || 0)} />;
+            const s = getRowSeverity(r, nodeMap);
+            const effectIds = new Set(r.failureEffectNodeIds);
+            return <InputNumber size="small" min={1} max={10} value={s || undefined}
+              style={{ width: 50 }} onChange={val => {
+                const v = val || 0;
+                updateGraphData(nodes.map(n => effectIds.has(n.id) ? { ...n, severity: v } : n), edges);
+              }} />;
           }},
           { title: 'O', width: 60, render: (_: unknown, r: FMEARow) => {
             const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
@@ -462,11 +466,10 @@ export default function DFMEAWizardPage() {
               style={{ width: 50 }} onChange={val => dc && handleUpdateRisk(dc.id, 'detection', val || 0)} />;
           }},
           { title: 'AP', width: 80, render: (_: unknown, r: FMEARow) => {
-            const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
             const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
             const dcId = r.detectionControlIds[0];
             const dc = dcId ? nodeMap.get(dcId) : null;
-            const s = effect?.severity || 0, o = cause?.occurrence || 0, d = dc?.detection || 0;
+            const s = getRowSeverity(r, nodeMap), o = cause?.occurrence || 0, d = dc?.detection || 0;
             const { ap } = analyzeRisk(s, o, d);
             return <Tag color={ap === 'H' ? 'red' : ap === 'M' ? 'orange' : 'green'}>{ap || '-'}</Tag>;
           }},
@@ -481,11 +484,10 @@ export default function DFMEAWizardPage() {
     const rows = buildRows(nodes, edges);
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
     const highRiskRows = rows.filter(r => {
-      const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
       const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
       const dcId = r.detectionControlIds[0];
       const dc = dcId ? nodeMap.get(dcId) : null;
-      const s = effect?.severity || 0, o = cause?.occurrence || 0, d = dc?.detection || 0;
+      const s = getRowSeverity(r, nodeMap), o = cause?.occurrence || 0, d = dc?.detection || 0;
       return analyzeRisk(s, o, d).ap === 'H';
     });
 
