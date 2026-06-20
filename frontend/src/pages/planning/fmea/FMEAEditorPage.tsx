@@ -126,6 +126,7 @@ export default function FMEAEditorPage() {
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
   const dragStructureNodeIdRef = useRef<string | null>(null);
   const lastDragOverKeyRef = useRef<string | null>(null);
+  const lastValidDropRef = useRef<{ dropNodeId: string; position: StructureDropPosition } | null>(null);
   const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
@@ -593,6 +594,7 @@ export default function FMEAEditorPage() {
     if (!canDragSortStructure) return;
     dragStructureNodeIdRef.current = nodeId;
     lastDragOverKeyRef.current = null;
+    lastValidDropRef.current = null;
     setDraggingNodeId(nodeId);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", nodeId);
@@ -619,7 +621,12 @@ export default function FMEAEditorPage() {
       lastDragOverKeyRef.current = key;
       if (valid) {
         const result = reorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
-        setPreview(result.changed ? { nodes: result.nodes, edges: result.edges } : null);
+        if (result.changed) {
+          lastValidDropRef.current = { dropNodeId, position };
+          setPreview({ nodes: result.nodes, edges: result.edges });
+        } else {
+          setPreview(null);
+        }
       } else {
         setPreview(null);
       }
@@ -638,12 +645,15 @@ export default function FMEAEditorPage() {
     dragStructureNodeIdRef.current = null;
     if (!dragNodeId) return;
 
+    const lastValid = lastValidDropRef.current;
+    const useFallback = dropNodeId === dragNodeId && lastValid;
+    lastValidDropRef.current = null;
     const result = reorderStructureSiblings({
       nodes,
       edges,
       dragNodeId,
-      dropNodeId,
-      dropPosition: getStructureDropPosition(event),
+      dropNodeId: useFallback ? lastValid!.dropNodeId : dropNodeId,
+      dropPosition: useFallback ? lastValid!.position : getStructureDropPosition(event),
     });
 
     if (!result.changed) {
