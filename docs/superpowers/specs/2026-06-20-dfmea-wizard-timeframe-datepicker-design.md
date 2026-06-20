@@ -45,10 +45,17 @@ i18n 标签 `wizard.scope.timeframe` 的描述明确写道：*"DFMEA 的**起止
 
 ### 1. 新增 helper：`frontend/src/utils/wizardTimeframe.ts`
 
-两个纯函数，供两处复用。入参类型与 antd `RangePicker` 的 `onChange` 真实类型（`null | [Dayjs | null, Dayjs | null]`）对齐，调用处无需 `as` 强转；解析时用 dayjs **严格模式**校验日期有效性（`2026-02-31`、`2026-13-01` 这类形状正确但非法的输入返回 `null`）：
+两个纯函数，供两处复用。入参类型与 antd `RangePicker` 的 `onChange` 真实类型（`null | [Dayjs | null, Dayjs | null]`）对齐，调用处无需 `as` 强转；解析时用 dayjs **严格格式模式**校验日期有效性（`2026-02-31`、`2026-13-01` 这类形状正确但非法的输入返回 `null`）。
+
+> **customParseFormat 依赖**：`dayjs(str, format, true)` 的严格格式校验依赖 `customParseFormat` 插件；仓库当前只在 `main.tsx` 配了 locale、**未启用该插件**（已全仓 grep `dayjs.extend`/`customParseFormat` 确认为空）。故 helper 内**自包含** `dayjs.extend(customParseFormat)`，避免依赖导入顺序。该插件随 dayjs 包内置、**无需新增依赖**，且只「增加」格式参数支持、不改变既有 `dayjs(str)` 调用行为（对 Gauge/SPC 等既有用法无影响）；`extend` 全局幂等，重复执行无副作用。
 
 ```ts
-import dayjs, { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+
+// 严格格式解析（dayjs(str, format, true)）依赖此插件；仓库未全局启用，故在此自包含扩展。
+dayjs.extend(customParseFormat);
 
 /** 区间 → 可读字符串；null 或任一侧为空返回空串 */
 export function rangeToTimeframe(range: [Dayjs | null, Dayjs | null] | null): string {
@@ -71,9 +78,11 @@ export function timeframeToRange(timeframe: string): [Dayjs, Dayjs] | null {
 ### 2. `frontend/src/components/dfmea/GenerationWizard.tsx`（第 173–186 行 Step 0）
 
 - 导入：`antd` 导入加 `DatePicker`；顶部 `import { rangeToTimeframe, timeframeToRange } from '../../utils/wizardTimeframe';`（无需引入 `Dayjs` 类型——helper 已封装）。
-- **Step 0 全部 5 个字段加 label**（复用现有 i18n key `wizard.scope.team/timeframe/tool/task/trend`）。label 用轻量 `<div>` 包裹，**不硬编码颜色**以兼容暗色主题（继承 antd 主题文本色）。可用文件内小 label 包裹组件减少 5× 重复：
+- **Step 0 全部 5 个字段加 label**（复用现有 i18n key `wizard.scope.team/timeframe/tool/task/trend`）。label 用轻量 `<div>` 包裹，**不硬编码颜色**以兼容暗色主题（继承 antd 主题文本色）。可用文件内小 label 包裹组件减少 5× 重复（`ReactNode` 用 `import type { ReactNode } from 'react'`，避免引入 React 值）：
   ```tsx
-  const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  import type { ReactNode } from 'react';
+  // ...
+  const Field = ({ label, children }: { label: string; children: ReactNode }) => (
     <div>
       <div style={{ marginBottom: 4 }}>{label}</div>
       {children}
