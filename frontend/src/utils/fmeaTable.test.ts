@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildRows, createRowNodes, getRowEffectNodes, getRowSeverity, computeRowSpans,
+  addEffect, deleteEffect,
 } from "./fmeaTable";
 import type { GraphNode, GraphEdge } from "../types";
 
@@ -198,5 +199,44 @@ describe("computeRowSpans", () => {
     const edges = [e("fn1", "fm1", "HAS_FAILURE_MODE"), e("fc1", "fm1", "CAUSE_OF")];
     const rows = buildRows(nodes, edges);
     expect(computeRowSpans(rows)).toEqual([{ function: 1, mode: 1 }]);
+  });
+});
+
+describe("addEffect", () => {
+  it("creates a FailureEffect node and an EFFECT_OF edge from the mode", () => {
+    const nodes = [n("fm1", "FailureMode")];
+    const edges: GraphEdge[] = [];
+    const result = addEffect("fm1", nodes, edges);
+    expect(result.nodes).toHaveLength(2);
+    expect(result.nodes[1].type).toBe("FailureEffect");
+    expect(result.edges).toHaveLength(1);
+    expect(result.edges[0]).toEqual({ source: "fm1", target: result.effectId, type: "EFFECT_OF" });
+    expect(result.effectId).toBe(result.nodes[1].id);
+  });
+});
+
+describe("deleteEffect", () => {
+  it("removes the node when the last EFFECT_OF edge is removed", () => {
+    const nodes = [n("fm1", "FailureMode"), n("fe1", "FailureEffect")];
+    const edges = [e("fm1", "fe1", "EFFECT_OF")];
+    const result = deleteEffect("fm1", "fe1", nodes, edges);
+    expect(result.nodes.map((x) => x.id)).not.toContain("fe1");
+    expect(result.edges).toHaveLength(0);
+  });
+
+  it("keeps the node but removes only this mode's edge when shared across modes", () => {
+    const nodes = [n("fm1", "FailureMode"), n("fm2", "FailureMode"), n("fe1", "FailureEffect")];
+    const edges = [e("fm1", "fe1", "EFFECT_OF"), e("fm2", "fe1", "EFFECT_OF")];
+    const result = deleteEffect("fm1", "fe1", nodes, edges);
+    expect(result.nodes.map((x) => x.id)).toContain("fe1");
+    expect(result.edges).toEqual([e("fm2", "fe1", "EFFECT_OF")]);
+  });
+
+  it("drops other edges touching a fully-removed effect", () => {
+    const nodes = [n("fm1", "FailureMode"), n("fe1", "FailureEffect"), n("x1", "DetectionControl")];
+    const edges = [e("fm1", "fe1", "EFFECT_OF"), e("fe1", "x1", "SOME_OTHER")];
+    const result = deleteEffect("fm1", "fe1", nodes, edges);
+    expect(result.nodes.map((x) => x.id)).not.toContain("fe1");
+    expect(result.edges).toHaveLength(0);
   });
 });

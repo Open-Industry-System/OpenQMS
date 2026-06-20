@@ -277,3 +277,44 @@ export function createRowNodes(
 
   return { newNodes, newEdges, row };
 }
+
+/** Create a new FailureEffect node + EFFECT_OF(fm→effect) and return updated arrays. */
+export function addEffect(fmId: string, nodes: GraphNode[], edges: GraphEdge[]): {
+  nodes: GraphNode[]; edges: GraphEdge[]; effectId: string;
+} {
+  const effectId = `n${Date.now()}_fe_${Math.random().toString(36).slice(2, 6)}`;
+  const node: GraphNode = {
+    id: effectId,
+    type: "FailureEffect",
+    name: "",
+    severity: 0,
+    occurrence: 0,
+    detection: 0,
+  };
+  const edge: GraphEdge = { source: fmId, target: effectId, type: "EFFECT_OF" };
+  return { nodes: [...nodes, node], edges: [...edges, edge], effectId };
+}
+
+/**
+ * Remove this mode's EFFECT_OF edge to the effect. Only delete the effect node
+ * (and its remaining edges) if no OTHER EFFECT_OF edge still targets it —
+ * i.e. the effect is not shared by another mode. Uses edges, NOT row reference
+ * counts: within one mode, every cause row carries the same effect ids, so a
+ * row-based count would keep a just-disconnected effect as an orphan.
+ */
+export function deleteEffect(fmId: string, effectId: string, nodes: GraphNode[], edges: GraphEdge[]): {
+  nodes: GraphNode[]; edges: GraphEdge[];
+} {
+  const edgesWithoutThis = edges.filter(
+    (e) => !(e.source === fmId && e.target === effectId && e.type === "EFFECT_OF")
+  );
+  const stillReferenced = edgesWithoutThis.some(
+    (e) => e.target === effectId && e.type === "EFFECT_OF"
+  );
+  if (stillReferenced) {
+    return { nodes, edges: edgesWithoutThis };
+  }
+  const nextNodes = nodes.filter((n) => n.id !== effectId);
+  const nextEdges = edgesWithoutThis.filter((e) => e.source !== effectId && e.target !== effectId);
+  return { nodes: nextNodes, edges: nextEdges };
+}
