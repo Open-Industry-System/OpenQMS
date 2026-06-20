@@ -21,7 +21,7 @@ import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
-import { buildRows, createRowNodes, getRowSeverity, addEffect, deleteEffect, type FMEARow } from "../../../utils/fmeaTable";
+import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, type FMEARow } from "../../../utils/fmeaTable";
 import { planCauseDeletion } from "./deleteRowHelpers";
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
 import {
@@ -507,6 +507,7 @@ export default function FMEAEditorPage() {
     () => buildRows(nodes, edges, structureRowHeaderOrder),
     [nodes, edges, structureRowHeaderOrder]
   );
+  const rowSpans = useMemo(() => computeRowSpans(rows), [rows]);
 
   useEffect(() => {
     if (outerTab === "graph") {
@@ -714,6 +715,7 @@ export default function FMEAEditorPage() {
       key: "function",
       width: 200,
       fixed: "left" as const,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.function ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
         const funcNode = nodeMap.get(row.functionNodeId);
         return (
@@ -736,6 +738,7 @@ export default function FMEAEditorPage() {
       title: t("editor.columns.failureMode"),
       key: "failureMode",
       width: 180,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
         const node = nodeMap.get(row.failureModeNodeId);
         return (
@@ -757,6 +760,7 @@ export default function FMEAEditorPage() {
       title: t("editor.columns.failureEffect"),
       key: "failureEffect",
       width: 200,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
         return (
           <EffectLinesEditor
@@ -778,6 +782,7 @@ export default function FMEAEditorPage() {
       key: "severity",
       width: 60,
       align: "center" as const,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
         if (row.failureEffectNodeIds.length === 0) return <Text type="secondary">-</Text>;
         const s = getRowSeverity(row, nodeMap);
@@ -807,6 +812,7 @@ export default function FMEAEditorPage() {
       key: "class",
       width: 70,
       align: "center" as const,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
         const node = nodeMap.get(row.failureModeNodeId);
         const classValue = node?.classification || "";
