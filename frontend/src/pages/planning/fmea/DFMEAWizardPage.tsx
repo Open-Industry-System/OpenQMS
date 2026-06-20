@@ -68,10 +68,13 @@ export default function DFMEAWizardPage() {
       // Mark initial state as "clean" — hash captured at load time
       lastSavedHashRef.current = computeHash(loadedNodes, loadedEdges, loadedScope);
       setLoading(false);
-    }).catch(() => {
-      message.error('加载失败');
+    }).catch((err: unknown) => {
+      const e = err as { response?: { data?: { detail?: string } } };
+      message.error(e?.response?.data?.detail || t('wizard.page.loadFailed'));
       navigate('/fmea');
     });
+    // t 用于错误提示文案，但不应触发重载（否则切换语言会重拉文档、丢失未保存的 wizard 编辑）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fmeaId, navigate, setLockVersion, lastSavedHashRef]);
 
   // beforeunload warning — compare live state hash vs last-successfully-saved hash

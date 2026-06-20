@@ -111,6 +111,7 @@
       "confirmEmptyDraftOk": "放弃并删除",
       "confirmEmptyDraftCancel": "继续编辑",
       "finishFailed": "完成提交失败，请重试",
+      "loadFailed": "DFMEA 数据加载失败",
       "conflictTitle": "文档已被修改",
       "conflictContent": "该 FMEA 已被其他会话修改，继续编辑前需要重新加载。未保存的本地改动将被丢弃。",
       "conflictReload": "重新加载"

@@ -111,6 +111,7 @@
       "confirmEmptyDraftOk": "Discard and Delete",
       "confirmEmptyDraftCancel": "Continue Editing",
       "finishFailed": "Failed to finish. Please try again.",
+      "loadFailed": "Failed to load DFMEA data",
       "conflictTitle": "Document Modified",
       "conflictContent": "This FMEA was modified by another session. Reload is required before editing. Your unsaved local changes will be discarded.",
       "conflictReload": "Reload"

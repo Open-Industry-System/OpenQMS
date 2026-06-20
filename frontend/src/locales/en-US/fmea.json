@@ -253,6 +253,8 @@
     "traceCause": "Trace Cause",
     "createSuccess": "FMEA created successfully",
     "createFailed": "Failed to create FMEA",
+    "documentNoExists": "Document number '{{no}}' already exists. Please use a different number.",
+    "cannotTransition": "Cannot change status from {{from}} to {{to}}. Allowed: {{allowed}}",
     "dfmeaCreateSuccess": "DFMEA created successfully"
   }
 }

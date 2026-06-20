@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { App } from "antd";
 import FMEAListPage from "./FMEAListPage";
+import i18n from "../../../i18n";
 
 // vi.mock factory 被 hoist，必须用 vi.hoisted 暴露 mock 函数给测试体引用
 const mocks = vi.hoisted(() => ({
@@ -126,6 +127,44 @@ describe("FMEAListPage filters", () => {
       expect(call.fmea_type).toBeUndefined();
       expect(call.high_rpn).toBeUndefined();
       expect(call.search).toBeUndefined();
+    });
+  });
+});
+
+describe("FMEAListPage create error", () => {
+  // 复用 list mock 默认值，避免 beforeEach 的 module 级状态污染
+  beforeEach(async () => {
+    mocks.listFMEAs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
+    // 锁定中文，断言本地化文案（而非英文 detail 透传）
+    await i18n.changeLanguage("zh-CN");
+  });
+
+  it("maps duplicate document_no error to a localized Chinese message", async () => {
+    // 后端在文档编号重复时返回 400 + 英文 detail，见 fmea_service.create_fmea
+    const detail = "FMEA document number 'PFMEA-2026-001' already exists.";
+    mocks.createFMEA.mockRejectedValueOnce({
+      response: { status: 400, data: { detail } },
+    });
+
+    renderAt("/fmea");
+    await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
+
+    // 打开新建弹窗
+    fireEvent.click(await screen.findByRole("button", { name: /new fmea|新建/i }));
+
+    // 占位符在两种语言下都含 "PFMEA-2026-001" / "SMT"，可稳定定位
+    const docNoInput = await screen.findByPlaceholderText(/PFMEA-2026-001/i);
+    fireEvent.change(docNoInput, { target: { value: "PFMEA-2026-001" } });
+    const titleInput = await screen.findByPlaceholderText(/SMT/i);
+    fireEvent.change(titleInput, { target: { value: "测试标题" } });
+
+    // 提交（antd Modal 默认 OK 按钮）
+    fireEvent.click(screen.getByRole("button", { name: /^ok$/i }));
+
+    await vi.waitFor(() => expect(mocks.createFMEA).toHaveBeenCalled());
+    // 前端映射后：英文 detail → 中文「文档编号「PFMEA-2026-001」已存在…」
+    await vi.waitFor(() => {
+      expect(screen.getByText(/文档编号「PFMEA-2026-001」已存在/)).toBeInTheDocument();
     });
   });
 });

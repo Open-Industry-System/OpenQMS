@@ -12,6 +12,7 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
+import { formatFMEAError } from "../../../utils/fmeaError";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
 import type { FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse } from "../../../types";
 import LessonsLearnedModal from "../../../components/lessons/LessonsLearnedModal";
@@ -167,7 +168,7 @@ export default function FMEAEditorPage() {
         .catch((err) => {
           clearTimeout(timeoutId);
           if (!axios.isCancel(err)) {
-            message.error(t("messages.searchFailed"));
+            message.error(err?.response?.data?.detail || t("messages.searchFailed"));
           }
           setLessonsLoading(false);
         });
@@ -260,8 +261,9 @@ export default function FMEAEditorPage() {
         setDimOthers(true);
         setPendingHighlightNode(null);
       }
-    } catch {
-      message.error(t("messages.graphLoadFailed"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.graphLoadFailed"));
     } finally {
       setGraphLoading(false);
     }
@@ -274,8 +276,9 @@ export default function FMEAEditorPage() {
       const { nodes } = normalizeGraphData(chain.nodes, chain.edges);
       setHighlightNodes(nodes.map((n) => n.id));
       setDimOthers(true);
-    } catch {
-      message.error(t("messages.impactChainFailed"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.impactChainFailed"));
     }
   };
 
@@ -286,8 +289,9 @@ export default function FMEAEditorPage() {
       const { nodes } = normalizeGraphData(chain.nodes, chain.edges);
       setHighlightNodes(nodes.map((n) => n.id));
       setDimOthers(true);
-    } catch {
-      message.error(t("messages.causeChainFailed"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.causeChainFailed"));
     }
   };
 
@@ -307,8 +311,9 @@ export default function FMEAEditorPage() {
       const result = await analyzeChangeImpact(request);
       setImpactResult(result);
       message.success(t("messages.analysisComplete"));
-    } catch {
-      message.error(t("messages.analysisFailed"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.analysisFailed"));
     } finally {
       setImpactLoading(false);
     }
@@ -362,7 +367,8 @@ export default function FMEAEditorPage() {
         }
         setConflictVisible(true);
       } else {
-        message.error(t("messages.saveFailed"));
+        const detail = err.response?.data?.detail;
+        message.error(typeof detail === "string" ? detail : t("messages.saveFailed"));
       }
     } finally {
       setSaving(false);
@@ -397,7 +403,7 @@ export default function FMEAEditorPage() {
       if (err.response?.status === 409) {
         message.error(t("messages.concurrentUpdate"));
       } else {
-        message.error(t("messages.forceSaveFailed"));
+        message.error(err.response?.data?.detail || t("messages.forceSaveFailed"));
       }
     } finally {
       setSaving(false);
@@ -412,7 +418,7 @@ export default function FMEAEditorPage() {
       message.success(t("messages.statusChanged", { status: statusLabels[target] || target }));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || t("messages.operationFailed"));
+      message.error(formatFMEAError(err?.response?.data?.detail, t) || t("messages.operationFailed"));
     }
   };
 

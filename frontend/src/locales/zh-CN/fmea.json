@@ -253,6 +253,8 @@
     "traceCause": "追溯原因",
     "createSuccess": "FMEA 创建成功",
     "createFailed": "创建失败",
+    "documentNoExists": "文档编号「{{no}}」已存在，请修改编号后重试",
+    "cannotTransition": "无法从 {{from}} 切换到 {{to}}，允许的目标状态：{{allowed}}",
     "dfmeaCreateSuccess": "DFMEA 创建成功"
   }
 }

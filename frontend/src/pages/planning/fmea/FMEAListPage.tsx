@@ -4,6 +4,7 @@ import { Table, Button, Tag, Form, Input, Select, Switch, Space, Modal, App } fr
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { listFMEAs, createFMEA } from "../../../api/fmea";
+import { formatFMEAError } from "../../../utils/fmeaError";
 import type { FMEADocument } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
@@ -128,8 +129,9 @@ export default function FMEAListPage() {
       } else {
         navigate(`/fmea/${fmea.fmea_id}`, { state: { showLessonsLearned: true, problemDescription: values.problem_description } });
       }
-    } catch {
-      message.error(t("messages.createFailed"));
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      message.error(formatFMEAError(detail, t) || t("messages.createFailed"));
     }
   };
 
