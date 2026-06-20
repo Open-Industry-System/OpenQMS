@@ -625,9 +625,11 @@ export default function FMEAEditorPage() {
           lastValidDropRef.current = { dropNodeId, position };
           setPreview({ nodes: result.nodes, edges: result.edges });
         } else {
+          lastValidDropRef.current = null;
           setPreview(null);
         }
       } else {
+        lastValidDropRef.current = null;
         setPreview(null);
       }
     }
@@ -667,6 +669,7 @@ export default function FMEAEditorPage() {
 
   const handleStructureDragEnd = useCallback(() => {
     dragStructureNodeIdRef.current = null;
+    lastValidDropRef.current = null;
     setDragOver(null);
     setDraggingNodeId(null);
     setPreview(null);
