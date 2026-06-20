@@ -260,7 +260,8 @@
     "noPermission": "No permission to use recommendations",
     "serviceUnavailable": "Recommendation service unavailable",
     "aiUnavailable": "AI suggestions unavailable, rule engine fallback used",
-    "ruleOnlyMode": "Rule engine only mode"
+    "ruleOnlyMode": "Rule engine only mode",
+    "close": "Close"
   },
   "structureTree": {
     "addSystem": "Add System",

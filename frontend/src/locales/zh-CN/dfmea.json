@@ -260,7 +260,8 @@
     "noPermission": "无权限使用推荐功能",
     "serviceUnavailable": "推荐服务暂不可用",
     "aiUnavailable": "AI 建议暂不可用，已使用规则引擎",
-    "ruleOnlyMode": "仅规则引擎模式"
+    "ruleOnlyMode": "仅规则引擎模式",
+    "close": "关闭"
   },
   "structureTree": {
     "addSystem": "添加系统",
