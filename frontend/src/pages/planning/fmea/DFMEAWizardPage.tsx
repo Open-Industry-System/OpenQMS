@@ -12,6 +12,7 @@ import { buildRows, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
 import WizardGuidanceCard from '../../../components/dfmea/WizardGuidanceCard';
+import ScopeTagField from '../../../components/dfmea/ScopeTagField';
 import type { ReactNode } from 'react';
 import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimeframe';
 
@@ -183,13 +184,27 @@ export default function DFMEAWizardPage() {
           )}
         </Field>
         <Field label={t('wizard.scope.tool')}>
-          <Input value={wizardScope.tool || ''} onChange={e => updateGraphData(nodes, edges, { ...wizardScope, tool: e.target.value })} />
+          <ScopeTagField
+            value={wizardScope.tool || ''}
+            onChange={v => updateGraphData(nodes, edges, { ...wizardScope, tool: v })}
+            presets={t('wizard.scope.toolPresets', { returnObjects: true }) as string[]}
+            triggerType="dfmea_tool"
+            fmeaId={fmeaId!}
+            context={{ fmea_title: fmea?.title, product_line_code: fmea?.product_line_code ?? '', task: wizardScope.task || '', team: wizardScope.team || '' }}
+          />
         </Field>
         <Field label={t('wizard.scope.task')}>
           <Input value={wizardScope.task || ''} onChange={e => updateGraphData(nodes, edges, { ...wizardScope, task: e.target.value })} />
         </Field>
         <Field label={t('wizard.scope.trend')}>
-          <Input value={wizardScope.trend || ''} onChange={e => updateGraphData(nodes, edges, { ...wizardScope, trend: e.target.value })} />
+          <ScopeTagField
+            value={wizardScope.trend || ''}
+            onChange={v => updateGraphData(nodes, edges, { ...wizardScope, trend: v })}
+            presets={t('wizard.scope.trendPresets', { returnObjects: true }) as string[]}
+            triggerType="dfmea_trend"
+            fmeaId={fmeaId!}
+            context={{ fmea_title: fmea?.title, product_line_code: fmea?.product_line_code ?? '', task: wizardScope.task || '', team: wizardScope.team || '' }}
+          />
         </Field>
       </div>
     );
