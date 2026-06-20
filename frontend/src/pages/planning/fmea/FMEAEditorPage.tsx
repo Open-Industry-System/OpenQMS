@@ -127,6 +127,7 @@ export default function FMEAEditorPage() {
   const dragStructureNodeIdRef = useRef<string | null>(null);
   const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
@@ -453,6 +454,10 @@ export default function FMEAEditorPage() {
   const isDFMEA = fmeaType === "DFMEA";
   const canDragSortStructure = canEdit("fmea");
   const structureTree = useMemo(() => buildStructureTree(nodes, edges), [nodes, edges]);
+  const displayTree = useMemo(
+    () => (preview ? buildStructureTree(preview.nodes, preview.edges) : structureTree),
+    [preview, structureTree],
+  );
   const structureRowHeaderOrder = useMemo(() => getStructureRowHeaderOrder(nodes, edges), [nodes, edges]);
   const rows = useMemo(
     () => buildRows(nodes, edges, structureRowHeaderOrder),
@@ -607,6 +612,12 @@ export default function FMEAEditorPage() {
         ? prev
         : { nodeId: dropNodeId, position, valid }
     );
+    if (valid) {
+      const result = reorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
+      setPreview(result.changed ? { nodes: result.nodes, edges: result.edges } : null);
+    } else {
+      setPreview(null);
+    }
   }, [canDragSortStructure, edges, getStructureDropPosition, nodes]);
 
   const handleStructureDrop = useCallback((dropNodeId: string, event: React.DragEvent<HTMLDivElement>) => {
@@ -615,6 +626,7 @@ export default function FMEAEditorPage() {
     event.stopPropagation();
     setDragOver(null);
     setDraggingNodeId(null);
+    setPreview(null);
 
     const dragNodeId = dragStructureNodeIdRef.current;
     dragStructureNodeIdRef.current = null;
@@ -641,6 +653,7 @@ export default function FMEAEditorPage() {
     dragStructureNodeIdRef.current = null;
     setDragOver(null);
     setDraggingNodeId(null);
+    setPreview(null);
   }, []);
 
   const deleteRow = useCallback((row: FMEARow) => {
@@ -1456,8 +1469,8 @@ export default function FMEAEditorPage() {
               };
               return (
                 <>
-                  {structureTree.map((tn) => renderTreeNode(tn))}
-                  {structureTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                  {displayTree.map((tn) => renderTreeNode(tn))}
+                  {displayTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
                 </>
               );
             })()}

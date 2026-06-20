@@ -483,4 +483,56 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
       expect(screen.queryByTestId("fmea-structure-node-ps2")).toBeNull();
     });
   });
+
+  it("previews the sibling reorder during drag-over before drop", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
+    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
+    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
+    } as DOMRect);
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(ps2Handle, { dataTransfer });
+    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
+        "fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1",
+      ]);
+    });
+  });
+
+  it("reverts the preview when the drag ends without a drop", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
+    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
+    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
+    } as DOMRect);
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(ps2Handle, { dataTransfer });
+    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
+    await waitFor(() => expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
+      "fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1",
+    ]));
+    fireEvent.dragEnd(ps2Handle);
+    await waitFor(() => expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
+      "fmea-structure-node-pi", "fmea-structure-node-ps1", "fmea-structure-node-ps2",
+    ]));
+  });
 });
