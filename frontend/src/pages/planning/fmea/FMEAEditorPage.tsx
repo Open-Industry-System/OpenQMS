@@ -125,6 +125,7 @@ export default function FMEAEditorPage() {
   const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
   const dragStructureNodeIdRef = useRef<string | null>(null);
+  const lastDragOverKeyRef = useRef<string | null>(null);
   const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
@@ -591,6 +592,7 @@ export default function FMEAEditorPage() {
   const handleStructureDragStart = useCallback((nodeId: string, event: React.DragEvent<HTMLElement>) => {
     if (!canDragSortStructure) return;
     dragStructureNodeIdRef.current = nodeId;
+    lastDragOverKeyRef.current = null;
     setDraggingNodeId(nodeId);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", nodeId);
@@ -612,11 +614,15 @@ export default function FMEAEditorPage() {
         ? prev
         : { nodeId: dropNodeId, position, valid }
     );
-    if (valid) {
-      const result = reorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
-      setPreview(result.changed ? { nodes: result.nodes, edges: result.edges } : null);
-    } else {
-      setPreview(null);
+    const key = `${dropNodeId}|${position}|${valid}`;
+    if (lastDragOverKeyRef.current !== key) {
+      lastDragOverKeyRef.current = key;
+      if (valid) {
+        const result = reorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
+        setPreview(result.changed ? { nodes: result.nodes, edges: result.edges } : null);
+      } else {
+        setPreview(null);
+      }
     }
   }, [canDragSortStructure, edges, getStructureDropPosition, nodes]);
 
