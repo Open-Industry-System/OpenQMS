@@ -112,6 +112,185 @@ function dragCollapsedSubtreeRootIds(roots: StructureTreeNode[], dragId: string)
   return new Set([dragId]);
 }
 
+interface StructureTreeRowProps {
+  node: GraphNode;
+  depth: number;
+  isStructure: boolean;
+  actions: StructureChildAction[];
+  hasRows: boolean;
+  isSelected: boolean;
+  dragState: "before" | "after" | "invalid" | null;
+  canDragSortStructure: boolean;
+  // 原生 DnD handler（Task 3 替换为 @dnd-kit）
+  onDragStart: (nodeId: string, event: React.DragEvent<HTMLElement>) => void;
+  onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDrop: (nodeId: string, event: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
+  onSelect: (nodeId: string) => void;
+  onRename: (nodeId: string, field: "name", value: string) => void;
+  onAddChild: (parent: GraphNode, action: StructureChildAction) => void;
+  onDelete: (node: GraphNode) => void;
+  rowsByFunction: Record<string, FMEARow[]>;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}
+
+function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
+  const {
+    node,
+    depth,
+    isStructure,
+    actions,
+    hasRows,
+    isSelected,
+    dragState,
+    canDragSortStructure,
+    onDragStart,
+    onDragOver,
+    onDrop,
+    onDragEnd,
+    onSelect,
+    onRename,
+    onAddChild,
+    onDelete,
+    rowsByFunction,
+    t,
+  } = props;
+
+  return (
+    <div
+      data-testid={`fmea-structure-node-${node.id}`}
+      data-node-id={node.id}
+      data-drag-state={dragState ?? undefined}
+      onDragOver={onDragOver}
+      onDrop={(e) => onDrop(node.id, e)}
+      onDragEnd={onDragEnd}
+      onClick={() => onSelect(node.id)}
+      style={{
+        padding: "8px 12px",
+        marginBottom: 6,
+        marginLeft: depth * 14,
+        borderRadius: 6,
+        cursor: "pointer",
+        background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
+        border: isSelected
+          ? "1px solid var(--qf-cyan)"
+          : dragState === "invalid"
+            ? "1px solid rgba(255, 77, 79, 0.7)"
+            : "1px solid var(--qf-border)",
+        boxShadow:
+          dragState === "before"
+            ? "0 -2px 0 0 var(--qf-cyan)"
+            : dragState === "after"
+              ? "0 2px 0 0 var(--qf-cyan)"
+              : undefined,
+        fontSize: 13,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        transition: "background 0.2s, border-color 0.2s",
+        color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
+      }}
+      onMouseEnter={(e) => { if (!isSelected && !dragState) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
+    >
+      {canDragSortStructure && (
+        <span
+          data-testid={`fmea-structure-drag-handle-${node.id}`}
+          draggable
+          onDragStart={(e) => onDragStart(node.id, e)}
+          onDragEnd={onDragEnd}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
+          title={t("editor.dragHandle")}
+          aria-label={t("editor.dragHandle")}
+          style={{
+            cursor: "grab",
+            color: "var(--qf-text-secondary)",
+            opacity: 0.35,
+            transition: "opacity 0.15s",
+            marginRight: 6,
+            flexShrink: 0,
+            display: "inline-flex",
+            alignItems: "center",
+          }}
+        >
+          <HolderOutlined />
+        </span>
+      )}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <Input
+          variant="borderless"
+          value={node.name}
+          disabled={!canDragSortStructure}
+          onChange={(e) => onRename(node.id, "name", e.target.value)}
+          // Stop click/focus from racing the row's setSelectedFunctionId;
+          // select explicitly on focus instead so editing a name also
+          // selects its node (and drives the right-hand spreadsheet).
+          onClick={(e) => e.stopPropagation()}
+          onFocus={() => onSelect(node.id)}
+          style={{
+            padding: 0,
+            background: "transparent",
+            fontWeight: isStructure ? 600 : 400,
+            lineHeight: "1.5",
+            color: "inherit",
+          }}
+        />
+        {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
+      </div>
+      <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
+        {hasRows && (
+          <Tag style={{ fontSize: 10, lineHeight: "16px", background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
+            {rowsByFunction[node.id].length}
+          </Tag>
+        )}
+        {actions.length > 0 && (
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: actions.map((a) => ({
+                key: a.childType,
+                label: t(a.labelKey),
+                // Stop the menu-item click from bubbling to the
+                // outer row (which would select the parent node
+                // and race the later setSelectedFunctionId on
+                // function creation). openAddNode does not itself
+                // change selection, so selection stays stable
+                // until submit.
+                onClick: ({ domEvent }) => {
+                  domEvent.stopPropagation();
+                  onAddChild(node, a);
+                },
+              })),
+            }}
+          >
+            <Button
+              size="small"
+              type="text"
+              icon={<PlusOutlined />}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </Dropdown>
+        )}
+        <Popconfirm
+          title={t("editor.confirmDeleteNode")}
+          onConfirm={() => onDelete(node)}
+          onCancel={(e) => e?.stopPropagation()}
+        >
+          <Button
+            size="small"
+            type="text"
+            danger
+            disabled={!canDragSortStructure}
+            icon={<DeleteOutlined />}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Popconfirm>
+      </Space>
+    </div>
+  );
+}
+
 export default function FMEAEditorPage() {
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
@@ -1346,137 +1525,26 @@ export default function FMEAEditorPage() {
                     : null;
                 return (
                   <div key={node.id}>
-                    <div
-                      data-testid={`fmea-structure-node-${node.id}`}
-                      data-node-id={node.id}
-                      data-drag-state={dragState ?? undefined}
+                    <StructureTreeRow
+                      node={node}
+                      depth={tn.depth}
+                      isStructure={isStructure}
+                      actions={actions}
+                      hasRows={hasRows}
+                      isSelected={isSelected}
+                      dragState={dragState}
+                      canDragSortStructure={canDragSortStructure}
+                      onDragStart={handleStructureDragStart}
                       onDragOver={handleStructureDragOver}
-                      onDrop={(e) => handleStructureDrop(node.id, e)}
+                      onDrop={handleStructureDrop}
                       onDragEnd={handleStructureDragEnd}
-                      onClick={() => setSelectedFunctionId(node.id)}
-                      style={{
-                        padding: "8px 12px",
-                        marginBottom: 6,
-                        marginLeft: tn.depth * 14,
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
-                        border: isSelected
-                          ? "1px solid var(--qf-cyan)"
-                          : dragState === "invalid"
-                            ? "1px solid rgba(255, 77, 79, 0.7)"
-                            : "1px solid var(--qf-border)",
-                        boxShadow:
-                          dragState === "before"
-                            ? "0 -2px 0 0 var(--qf-cyan)"
-                            : dragState === "after"
-                              ? "0 2px 0 0 var(--qf-cyan)"
-                              : undefined,
-                        fontSize: 13,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        transition: "background 0.2s, border-color 0.2s",
-                        color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
-                      }}
-                      onMouseEnter={(e) => { if (!isSelected && !dragState) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
-                    >
-                      {canDragSortStructure && (
-                        <span
-                          data-testid={`fmea-structure-drag-handle-${node.id}`}
-                          draggable
-                          onDragStart={(e) => handleStructureDragStart(node.id, e)}
-                          onDragEnd={handleStructureDragEnd}
-                          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
-                          title={t("editor.dragHandle")}
-                          aria-label={t("editor.dragHandle")}
-                          style={{
-                            cursor: "grab",
-                            color: "var(--qf-text-secondary)",
-                            opacity: 0.35,
-                            transition: "opacity 0.15s",
-                            marginRight: 6,
-                            flexShrink: 0,
-                            display: "inline-flex",
-                            alignItems: "center",
-                          }}
-                        >
-                          <HolderOutlined />
-                        </span>
-                      )}
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <Input
-                          variant="borderless"
-                          value={node.name}
-                          disabled={!canEdit('fmea')}
-                          onChange={(e) => updateNode(node.id, "name", e.target.value)}
-                          // Stop click/focus from racing the row's setSelectedFunctionId;
-                          // select explicitly on focus instead so editing a name also
-                          // selects its node (and drives the right-hand spreadsheet).
-                          onClick={(e) => e.stopPropagation()}
-                          onFocus={() => setSelectedFunctionId(node.id)}
-                          style={{
-                            padding: 0,
-                            background: "transparent",
-                            fontWeight: isStructure ? 600 : 400,
-                            lineHeight: "1.5",
-                            color: "inherit",
-                          }}
-                        />
-                        {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
-                      </div>
-                      <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
-                        {hasRows && (
-                          <Tag style={{ fontSize: 10, lineHeight: "16px", background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
-                            {rowsByFunction[node.id].length}
-                          </Tag>
-                        )}
-                        {actions.length > 0 && (
-                          <Dropdown
-                            trigger={["click"]}
-                            menu={{
-                              items: actions.map((a) => ({
-                                key: a.childType,
-                                label: t(a.labelKey),
-                                // Stop the menu-item click from bubbling to the
-                                // outer row (which would select the parent node
-                                // and race the later setSelectedFunctionId on
-                                // function creation). openAddNode does not itself
-                                // change selection, so selection stays stable
-                                // until submit.
-                                onClick: ({ domEvent }) => {
-                                  domEvent.stopPropagation();
-                                  openAddNode(node, a);
-                                },
-                              })),
-                            }}
-                          >
-                            <Button
-                              size="small"
-                              type="text"
-                              icon={<PlusOutlined />}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          </Dropdown>
-                        )}
-                        <Popconfirm
-                          title={t("editor.confirmDeleteNode")}
-                          onConfirm={() => deleteSubtreeNode(node)}
-                          onCancel={(e) => e?.stopPropagation()}
-                        >
-                          <Button
-                            size="small"
-                            type="text"
-                            danger
-                            disabled={!canEdit('fmea')}
-                            icon={<DeleteOutlined />}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </Popconfirm>
-                      </Space>
-                    </div>
+                      onSelect={setSelectedFunctionId}
+                      onRename={(id, field, value) => updateNode(id, field, value)}
+                      onAddChild={openAddNode}
+                      onDelete={deleteSubtreeNode}
+                      rowsByFunction={rowsByFunction}
+                      t={t}
+                    />
                     {!dragCollapseIds.has(node.id) && tn.children.map((c) => renderTreeNode(c))}
                   </div>
                 );
