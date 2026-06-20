@@ -2,7 +2,7 @@
 
 **日期**: 2026-06-20
 **分支**: fix/fmea-fixes
-**范围**: PFMEA 与 DFMEA 编辑器表格（`FMEAEditorPage`）、DFMEA 向导摘要表（`DFMEAWizardPage`）、校验 hook（`useWizardValidation`）、行构建工具（`fmeaTable.ts`）及相关测试。后端图模型不动。
+**范围**: PFMEA 与 DFMEA 编辑器表格（`FMEAEditorPage`）、DFMEA 向导摘要表（`DFMEAWizardPage`）、校验 hook（`useWizardValidation`）、行构建工具（`fmeaTable.ts`）、结构树级联删除（`structureTree.ts` 的 `deleteSubtree`）及相关测试。后端图模型不动。
 
 ## 背景
 
@@ -54,6 +54,30 @@ export interface FMEARow {
 
 `S(row) = max(nodeMap.get(id).severity for id in row.failureEffectNodeIds)`，无后果则 0。
 
+### 统一 severity 派生与使用点清单（共享 helper）
+
+`failureEffectNodeId` 现状驱动多处逻辑，接口迁移后不能只改 S 列。新增 `frontend/src/utils/fmeaTable.ts` 导出的共享 helper，所有后果/severity 读取统一走它：
+
+```ts
+export function getRowEffectNodes(row: FMEARow, nodeMap: Map<string, GraphNode>): GraphNode[]
+export function getRowSeverity(row: FMEARow, nodeMap: Map<string, GraphNode>): number  // max，无后果 0
+```
+
+**必须改用 helper 的使用点**（`FMEAEditorPage.tsx` 列 `render`）：
+- S 列：显示值 = `getRowSeverity`；编辑置所有后果（见 §2 S 单元格）。
+- 失效原因列 AI context 的 `severity`（现 `effectNode?.severity`）→ `getRowSeverity`。
+- 预防控制列 AI context 的 `severity` → `getRowSeverity`。
+- 探测控制列 AI context 的 `severity` → `getRowSeverity`。
+- 建议措施列 AI context 的 `severity`（若现用 effect severity）→ `getRowSeverity`。
+- RPN 列 `s = effectNode?.severity` → `getRowSeverity`；`rpn = s*o*d`。
+- AP 列 `s = effectNode?.severity` → `getRowSeverity`；`ap = calculateAP(s,o,d)`。
+
+**不涉及 effect severity 的列**（沿用各自节点，不动）：`S'`/`O'`/`D'` 改进值在 `RecommendedAction` 节点（`revised_severity` 等），非后果节点。
+
+**`DFMEAWizardPage` 精简表**的 S 列、AP 列同样改用 `getRowSeverity`（或等价的 max 计算），不重复手写。
+
+> 原则：禁止在表格任何列里再出现 `row.failureEffectNodeIds.length > 0 ? nodeMap.get(row.failureEffectNodeIds[0])?.severity : 0` 这类"取首个后果"的写法——统一 `getRowSeverity`，保证"取最严重"语义一致。
+
 ## §2 列与合并
 
 ### 合并的列
@@ -77,7 +101,7 @@ export interface FMEARow {
 
 纵向堆叠的 `SmartSuggestionDropdown`（`triggerType="failure_effect"`，context 带 `failure_mode` + `function_description`），每个绑定一个后果节点，行为与现有一致（含 AI 建议下拉）。
 - 末尾"＋ 添加后果"按钮：点击新建 `FailureEffect` 节点 + `EFFECT_OF`（fm→effect）边，追加到该模式。
-- 每行一个删除小图标按钮：点击删该后果节点及其所有边。后果模式级、不被行外引用，直接删。
+- 每行一个删除小图标按钮：**先删该模式的 `EFFECT_OF`（fm→effect）边**；仅当该 effect 节点不被任何其他行（其他模式）引用时，才删节点及其剩余边。复用现有 `deleteRow` 的 `nodesUsedByOthers` 引用计数思路（见 §3）。这避免导入/复制/历史数据中同一 `FailureEffect` 被多模式共享时跨模式误删。
 - 合并：该列 `rowSpan` = 模式行数，仅在首条原因行渲染这堆输入；其余原因行该列 `rowSpan:0` 隐藏。
 
 ### S 单元格
@@ -106,18 +130,34 @@ export interface FMEARow {
 - 行 key 改为 `row_${functionId}_${fmId}_${fcId}`。
 - 返回 `row.failureEffectNodeIds = [feId]`。
 
-### 行删除（`FMEAEditorPage` 现有 deleteRow，约 line 745）
+### 行删除（`FMEAEditorPage` 现有 `deleteRow`，约 line 634）
 
-- 删原因：删原因节点 + 其 PREVENTED_BY/DETECTED_BY/OPTIMIZED_BY 控制节点（沿用现有 shared-control 规则，不被其他行引用才删）+ 该 CAUSE_OF 边。**后果不随原因删**（模式级，模式还有其他原因时保留）。
-- 模式最后一个原因被删 → 保留现有"无原因占位行"语义，本期不扩展自动删模式。
+现状 `deleteRow` 在该模式不被其他行引用时连带删 `failureModeNodeId`，新行粒度下删最后一条原因正好触发该分支。**需改为只删原因、保留模式**：
+
+- 删：`FailureCause` 节点 + 该原因私有的 `PreventionControl`/`DetectionControl`/`RecommendedAction` 节点（沿用现有 shared-control 规则，不被其他行引用才删）+ 该 `CAUSE_OF`（cause→fm）边 + 该原因对应的 `PREVENTED_BY`/`DETECTED_BY`/`OPTIMIZED_BY` 边。
+- **保留**：`FailureMode` 节点、`HAS_FAILURE_MODE` 边、所有 `FailureEffect` 节点、所有 `EFFECT_OF` 边。
+- 结果：模式从有原因变为无原因，`buildRows` 自然产出一条 `causeId=null` 占位行（带该模式后果与 S）。即"模式最后一个原因被删 → 保留无原因占位行"，不自动删模式/后果。
+- `nodesUsedByOthers` 计算需同步改用 `failureEffectNodeIds`（见下"共享引用计数"）。
+
+### 共享引用计数（`structureTree.ts` `deleteSubtree` + `deleteRow`）
+
+两处都用 `buildRows` 的结果做"被幸存行引用的节点不删"判定，且都直接读 `r.failureEffectNodeId`（`structureTree.ts:464`、`FMEAEditorPage.tsx:640/655`）。接口迁移后：
+
+- `if (r.failureEffectNodeId) usedBySurvivors.add(r.failureEffectNodeId)` → `r.failureEffectNodeIds.forEach(id => usedBySurvivors.add(id))`。
+- `deleteSubtree` 遍历 subtree 行节点 id 的循环（`structureTree.ts:478`）里 `r.failureEffectNodeId` → `...r.failureEffectNodeIds`。
+- `EffectLinesEditor` 删后果（§2）复用同一引用计数：删 `EFFECT_OF` 边后，仅当 effect 不在 `usedBySurvivors`（即不被其他行/模式引用）才删节点。
+
+**范围声明**：`structureTree.ts` 列入本次改动范围。需单元测试覆盖结构树删除时多 effect id 的 survivor 计算与级联保留。
 
 ### 测试
 
-- `fmeaTable.test.ts`：`buildRows` 期望重写（行数 = 功能×模式×原因，不再×后果；断言 `failureEffectNodeIds` 数组、key 形态）。
+- `fmeaTable.test.ts`：`buildRows` 期望重写（行数 = 功能×模式×原因，不再×后果；断言 `failureEffectNodeIds` 数组、key 形态）；新增 `getRowEffectNodes`/`getRowSeverity` 单测（max、空数组→0、多后果取最大）。
 - `useWizardValidation.test.tsx`：S 判定改 max。
+- `structureTree.test.ts`（新增/扩展）：`deleteSubtree` 多 effect id 的 survivor 引用计数；删子树保留被幸存行共享的后果。
 - `FMEAEditorDragSort.test.tsx` / `SmartSuggestionDropdown.test.tsx`：若触及 `failureEffectNodeId` 则适配；拖拽排序不涉行形状，预计不动。
 - 新增 `computeRowSpans` 纯函数单测（连续段首行=组大小、其余=0、跨功能/模式边界重置、单行组 rowSpan=1）。
-- 新增 `EffectLinesEditor` 单测（增/删后果节点 + 边 reconcile；AI 下拉不破）。
+- 新增 `EffectLinesEditor` 单测：增/删后果节点 + 边 reconcile；**跨模式共享后果删一边不删节点**；AI 下拉不破。
+- 新增 `deleteRow` 单测：删最后原因 → 模式与后果保留、产出 `causeId=null` 占位行；删非末原因 → 模式保留、其余原因行不变。
 
 ### 后端
 
@@ -128,7 +168,7 @@ export interface FMEARow {
 - **模式无后果**：`effectIds=[]` → 后果格只渲染"＋添加后果"，S 格显示空；编辑 S 无操作。
 - **模式无原因**：产一条 `causeId=null` 占位行；后果格与 S 格照常显示（模式级），原因及 O/预防/探测/D/建议措施格显示"-"。
 - **S 编辑**：输入 → 对所有 `effectIds` 批量 `updateNode`；无后果 no-op。
-- **后果删除**：删节点 + 其所有边；无需 shared-control 判定。删最后一个后果 → 回到"无后果"态。
+- **后果删除**：先删该模式 `EFFECT_OF` 边；仅当该 effect 不被其他行（其他模式）引用时才删节点及剩余边。删最后一个后果 → 回到"无后果"态（`effectIds=[]`）。
 - **`rowSpan` 退化为 1**：单行组 → rowSpan=1，视觉不合并，行为正确。
 - **协作光标**：合并格仅在首条原因行渲染，`startEditing({row_key, field})` 用首行 key，所有用户对同一模式后果的编辑经同一 row_key，无歧义。
 - **性能**：`computeRowSpans` O(rows)、`buildRows` 复杂度不变；rows 数从"原因×后果"降到"原因"，通常更少。`useMemo` 包裹。
@@ -136,7 +176,7 @@ export interface FMEARow {
 
 ## 测试策略小结
 
-`computeRowSpans` 纯函数单测（连续段、跨边界重置、单行组）；`buildRows` 形状重写；`EffectLinesEditor` 增删 reconcile；`useWizardValidation` S=max；向导表 S/AP 适配；编辑器现有交互回归（增删行、协作、拖拽）。
+`computeRowSpans` 纯函数单测（连续段、跨边界重置、单行组）；`buildRows` 形状重写 + `getRowSeverity`/`getRowEffectNodes`；`EffectLinesEditor` 增删 reconcile + 跨模式共享后果保护；`useWizardValidation` S=max；向导表 S/AP 适配；`deleteRow` 保留模式/后果；`structureTree.deleteSubtree` 多 effect survivor 计算回归；编辑器现有交互回归（增删行、协作、拖拽）。
 
 ## 非目标（YAGNI）
 
