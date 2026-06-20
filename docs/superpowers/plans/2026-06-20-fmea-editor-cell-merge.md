@@ -372,13 +372,17 @@ git commit -m "refactor(fmea): FMEARow.failureEffectNodeIds[] + buildRows no eff
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `frontend/src/utils/fmeaTable.test.ts` (add `computeRowSpans` to the top import):
+**Edit the single existing import at the top** of `frontend/src/utils/fmeaTable.test.ts`. Task 1 left it as `import { buildRows, createRowNodes, getRowEffectNodes, getRowSeverity } from "./fmeaTable";`. Change that one line to:
 
 ```ts
 import {
   buildRows, createRowNodes, getRowEffectNodes, getRowSeverity, computeRowSpans,
 } from "./fmeaTable";
+```
 
+Then **append only the new `describe` block below** — do not append a second import block (the code block below is only the describe, not an import):
+
+```ts
 describe("computeRowSpans", () => {
   it("returns empty for no rows", () => {
     expect(computeRowSpans([])).toEqual([]);
@@ -493,14 +497,18 @@ git commit -m "feat(fmea): computeRowSpans for function/mode cell merge"
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `frontend/src/utils/fmeaTable.test.ts` (add `addEffect, deleteEffect` to the top import):
+**Edit the single existing import at the top** of `frontend/src/utils/fmeaTable.test.ts` to add `addEffect, deleteEffect`. After Task 2 it reads `import { buildRows, createRowNodes, getRowEffectNodes, getRowSeverity, computeRowSpans } from "./fmeaTable";`. Change that one line to:
 
 ```ts
 import {
   buildRows, createRowNodes, getRowEffectNodes, getRowSeverity, computeRowSpans,
   addEffect, deleteEffect,
 } from "./fmeaTable";
+```
 
+Then **append only the new `describe` blocks below** — do not append a second import block:
+
+```ts
 describe("addEffect", () => {
   it("creates a FailureEffect node and an EFFECT_OF edge from the mode", () => {
     const nodes = [n("fm1", "FailureMode")];
@@ -886,23 +894,21 @@ git commit -m "fix(fmea): wizard validation S = max effect severity"
 - Test: `frontend/src/components/fmea/EffectLinesEditor.test.tsx`
 
 **Interfaces:**
-- Consumes: `SmartSuggestionDropdown` (existing, props: `triggerType`, `context`, `fmeaId`, `value`, `onChange`, `onSelect`, `disabled`); `addEffect`/`deleteEffect` (Task 3); `FMEARow`/`GraphNode`/`GraphEdge` from types.
-- Produces: default-export `EffectLinesEditor(props: EffectLinesEditorProps)` rendering one `SmartSuggestionDropdown` per effect id plus an "add" button and a per-line delete icon.
+- Consumes: `SmartSuggestionDropdown` (existing, props: `triggerType`, `context`, `fmeaId`, `value`, `onChange`, `onSelect`, `disabled`); `FMEARow`/`GraphNode` from types.
+- Produces: default-export `EffectLinesEditor(props: EffectLinesEditorProps)` rendering one `SmartSuggestionDropdown` per effect id plus an "add" button and a per-line delete icon. Mutations are delegated to the parent via `onAddEffect` / `onDeleteEffect` callbacks (the page reads latest state via refs — see Task 8 — so rapid add/delete does not lose updates from stale props).
 
 ```ts
 interface EffectLinesEditorProps {
   fmId: string;
   effectIds: string[];
   nodeMap: Map<string, GraphNode>;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  setNodes: React.Dispatch<React.SetStateAction<GraphNode[]>>;
-  setEdges: React.Dispatch<React.SetStateAction<GraphEdge[]>>;
   fmeaId: string;
   functionDescription: string;
   failureModeName: string;
   disabled: boolean;
   updateNode: (nodeId: string, field: string, value: unknown) => void;
+  onAddEffect: () => void;                 // parent adds an effect to this mode
+  onDeleteEffect: (effectId: string) => void; // parent deletes an effect from this mode
 }
 ```
 
@@ -914,7 +920,7 @@ Create `frontend/src/components/fmea/EffectLinesEditor.test.tsx`:
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import EffectLinesEditor from "./EffectLinesEditor";
-import type { GraphNode, GraphEdge } from "../../types";
+import type { GraphNode } from "../../types";
 
 const mkNode = (id: string, name = ""): GraphNode => ({ id, type: "FailureEffect", name, severity: 0, occurrence: 0, detection: 0 });
 const nodeMap = (nodes: GraphNode[]) => new Map(nodes.map((n) => [n.id, n]));
@@ -923,15 +929,13 @@ const baseProps = (overrides: Partial<Parameters<typeof EffectLinesEditor>[0]> =
   fmId: "fm1",
   effectIds: ["fe1", "fe2"],
   nodeMap: nodeMap([mkNode("fe1", "烧毁电路"), mkNode("fe2", "机壳变形")]),
-  nodes: [mkNode("fe1", "烧毁电路"), mkNode("fe2", "机壳变形"), { id: "fm1", type: "FailureMode", name: "过压", severity: 0, occurrence: 0, detection: 0 }],
-  edges: [{ source: "fm1", target: "fe1", type: "EFFECT_OF" }, { source: "fm1", target: "fe2", type: "EFFECT_OF" }] as GraphEdge[],
-  setNodes: vi.fn(),
-  setEdges: vi.fn(),
   fmeaId: "doc1",
   functionDescription: "供电",
   failureModeName: "过压",
   disabled: false,
   updateNode: vi.fn(),
+  onAddEffect: vi.fn(),
+  onDeleteEffect: vi.fn(),
   ...overrides,
 });
 
@@ -942,22 +946,19 @@ describe("EffectLinesEditor", () => {
     expect(screen.getByDisplayValue("机壳变形")).toBeInTheDocument();
   });
 
-  it("add button calls setNodes/setEdges to add an effect", () => {
+  it("add button calls onAddEffect", () => {
     const props = baseProps();
     render(<EffectLinesEditor {...props} />);
-    fireEvent.click(screen.getByRole("button", { name: /添加后果|\+/i }));
-    expect(props.setNodes).toHaveBeenCalledTimes(1);
-    expect(props.setEdges).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /添加后果/i }));
+    expect(props.onAddEffect).toHaveBeenCalledTimes(1);
   });
 
-  it("delete button removes the effect via deleteEffect (edge-based)", () => {
+  it("delete button calls onDeleteEffect with the effect id", () => {
     const props = baseProps();
     render(<EffectLinesEditor {...props} />);
-    const deleteBtns = screen.getAllByRole("button", { name: /删除|Delete/i });
+    const deleteBtns = screen.getAllByRole("button", { name: /删除后果/i });
     fireEvent.click(deleteBtns[0]); // delete fe1
-    expect(props.setEdges).toHaveBeenCalled();
-    // fe2 still referenced by fm1→fe2, so fe1 (last EFFECT_OF removed) is deleted from nodes
-    expect(props.setNodes).toHaveBeenCalled();
+    expect(props.onDeleteEffect).toHaveBeenCalledWith("fe1");
   });
 });
 ```
@@ -975,42 +976,27 @@ Create `frontend/src/components/fmea/EffectLinesEditor.tsx`:
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { Button } from "antd";
 import type { ReactElement } from "react";
-import type { GraphNode, GraphEdge } from "../../types";
-import { addEffect, deleteEffect } from "../../utils/fmeaTable";
+import type { GraphNode } from "../../types";
 import SmartSuggestionDropdown from "../dfmea/SmartSuggestionDropdown";
 
 export interface EffectLinesEditorProps {
   fmId: string;
   effectIds: string[];
   nodeMap: Map<string, GraphNode>;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  setNodes: React.Dispatch<React.SetStateAction<GraphNode[]>>;
-  setEdges: React.Dispatch<React.SetStateAction<GraphEdge[]>>;
   fmeaId: string;
   functionDescription: string;
   failureModeName: string;
   disabled: boolean;
   updateNode: (nodeId: string, field: string, value: unknown) => void;
+  onAddEffect: () => void;
+  onDeleteEffect: (effectId: string) => void;
 }
 
 export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactElement {
   const {
-    fmId, effectIds, nodeMap, nodes, edges, setNodes, setEdges,
-    fmeaId, functionDescription, failureModeName, disabled, updateNode,
+    fmId, effectIds, nodeMap, fmeaId, functionDescription, failureModeName,
+    disabled, updateNode, onAddEffect, onDeleteEffect,
   } = props;
-
-  const handleAdd = () => {
-    const result = addEffect(fmId, nodes, edges);
-    setNodes(result.nodes);
-    setEdges(result.edges);
-  };
-
-  const handleDelete = (effectId: string) => {
-    const result = deleteEffect(fmId, effectId, nodes, edges);
-    setNodes(result.nodes);
-    setEdges(result.edges);
-  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1033,7 +1019,7 @@ export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactE
                 type="text"
                 danger
                 icon={<DeleteOutlined />}
-                onClick={() => handleDelete(effectId)}
+                onClick={() => onDeleteEffect(effectId)}
                 aria-label="删除后果"
               />
             )}
@@ -1041,7 +1027,7 @@ export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactE
         );
       })}
       {!disabled && (
-        <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={handleAdd}>
+        <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={onAddEffect}>
           添加后果
         </Button>
       )}
@@ -1050,7 +1036,7 @@ export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactE
 }
 ```
 
-> Confirmed: `SmartSuggestionDropdown` lives at `frontend/src/components/dfmea/SmartSuggestionDropdown.tsx` and is imported in `FMEAEditorPage.tsx:39` as `import SmartSuggestionDropdown from "../../../components/dfmea/SmartSuggestionDropdown";`. From `src/components/fmea/EffectLinesEditor.tsx` the relative path is `../dfmea/SmartSuggestionDropdown`. The prop shape (`triggerType`, `context`, `fmeaId`, `value`, `onChange(val:string)`, `onSelect(s:{name:string})`, `disabled`) matches the editor's existing failure-effect usage at `FMEAEditorPage.tsx:770-781`; if `onSelect`'s param type differs, match the existing editor usage exactly.
+> Confirmed: `SmartSuggestionDropdown` lives at `frontend/src/components/dfmea/SmartSuggestionDropdown.tsx` and is imported in `FMEAEditorPage.tsx:39` as `import SmartSuggestionDropdown from "../../../components/dfmea/SmartSuggestionDropdown";`. From `src/components/fmea/EffectLinesEditor.tsx` the relative path is `../dfmea/SmartSuggestionDropdown`. The prop shape (`triggerType`, `context`, `fmeaId`, `value`, `onChange(val:string)`, `onSelect(s:{name:string})`, `disabled`) matches the editor's existing failure-effect usage at `FMEAEditorPage.tsx:770-781`; if `onSelect`'s param type differs, match the existing editor usage exactly. The component is stateless: all graph mutations go through `onAddEffect`/`onDeleteEffect` so it never holds a stale `nodes`/`edges` snapshot — see Task 8 for the ref-backed parent handlers.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1072,22 +1058,44 @@ git commit -m "feat(fmea): EffectLinesEditor stacked-effect cell with add/delete
 - Modify: `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx` (imports line 24; failureEffect column ~762-783; S column ~785-813; failureCause column ~843-850; prevention column ~899-902; detection column ~927-929; RPN column ~982-988; AP column ~1017-1024; recommendedAction column ~1074-1086)
 
 **Interfaces:**
-- Consumes: `getRowSeverity`, `EffectLinesEditor`, `FMEARow.failureEffectNodeIds`, `addEffect`/`deleteEffect` (via EffectLinesEditor).
-- Produces: editor columns compile against the new `FMEARow` shape; effect column renders `EffectLinesEditor`; S reads/writes max; AI-context severity + RPN + AP use `getRowSeverity`. No merge yet (Task 10). No deleteRow change yet (Task 9).
+- Consumes: `getRowSeverity`, `EffectLinesEditor`, `FMEARow.failureEffectNodeIds`, `addEffect`/`deleteEffect` (via the ref-backed handlers below).
+- Produces: editor columns compile against the new `FMEARow` shape; effect column renders `EffectLinesEditor` with `onAddEffect`/`onDeleteEffect` callbacks; S reads/writes max; AI-context severity + RPN + AP use `getRowSeverity`. No merge yet (Task 10). No deleteRow change yet (Task 9).
 
-- [ ] **Step 1: Update imports**
+- [ ] **Step 1: Update imports + add effect handlers backed by refs**
 
 Edit `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx:24`:
 
 ```ts
-import { buildRows, createRowNodes, getRowSeverity, type FMEARow } from "../../../utils/fmeaTable";
+import { buildRows, createRowNodes, getRowSeverity, addEffect, deleteEffect, type FMEARow } from "../../../utils/fmeaTable";
 ```
 
-And add after line 18 (the LessonsLearnedModal import) or with the other component imports near the top:
+Add the EffectLinesEditor import near the other component imports (after line 18):
 
 ```ts
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
 ```
+
+The page does not currently keep `nodes`/`edges` in refs. Add refs + sync effects next to the existing `nodeMap` memo (~line 472). This guarantees `EffectLinesEditor` handlers always read the latest graph state, so rapid add/delete does not lose updates from a stale render snapshot:
+
+```ts
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+
+  const handleAddEffect = useCallback((fmId: string) => {
+    const result = addEffect(fmId, nodesRef.current, edgesRef.current);
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, []);
+  const handleDeleteEffect = useCallback((fmId: string, effectId: string) => {
+    const result = deleteEffect(fmId, effectId, nodesRef.current, edgesRef.current);
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, []);
+```
+
+(`useRef` is already imported at line 1.) These handlers replace the stale-props pattern: they read `nodesRef.current`/`edgesRef.current` (latest), so two rapid clicks do not both compute from the same stale snapshot.
 
 - [ ] **Step 2: Replace the failureEffect column render**
 
@@ -1104,15 +1112,13 @@ Replace `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx:762-783` (the `fail
             fmId={row.failureModeNodeId}
             effectIds={row.failureEffectNodeIds}
             nodeMap={nodeMap}
-            nodes={nodes}
-            edges={edges}
-            setNodes={setNodes}
-            setEdges={setEdges}
             fmeaId={fmeaId}
             functionDescription={nodeMap.get(row.functionNodeId)?.name || ""}
             failureModeName={nodeMap.get(row.failureModeNodeId)?.name || ""}
             disabled={!canEdit('fmea')}
             updateNode={updateNode}
+            onAddEffect={() => handleAddEffect(row.failureModeNodeId)}
+            onDeleteEffect={(effectId) => handleDeleteEffect(row.failureModeNodeId, effectId)}
           />
         );
       },
@@ -1480,7 +1486,45 @@ import { planCauseDeletion } from "./deleteRowHelpers";
 Run: `cd frontend && npx vitest run src/pages/planning/fmea/deleteRow.test.tsx`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Hide the delete button on cause-less placeholder rows**
+
+The actions column (`frontend/src/pages/planning/fmea/FMEAEditorPage.tsx:1236-1246`) renders a delete `Popconfirm` for every row. With Task 9's cause-only deletion, clicking delete on a `failureCauseNodeId === null` placeholder row is a silent no-op (`planCauseDeletion` deletes nothing). Gate it: render the delete affordance only when the row has a cause.
+
+Replace lines 1236-1246:
+
+```tsx
+    {
+      title: "",
+      key: "actions",
+      width: 40,
+      fixed: "right" as const,
+      render: (_: unknown, row: FMEARow) => (
+        <Popconfirm title={t("editor.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
+          <Button type="text" danger size="small" disabled={!canEdit('fmea')} icon={<DeleteOutlined />} />
+        </Popconfirm>
+      ),
+    },
+```
+with:
+
+```tsx
+    {
+      title: "",
+      key: "actions",
+      width: 40,
+      fixed: "right" as const,
+      render: (_: unknown, row: FMEARow) =>
+        row.failureCauseNodeId ? (
+          <Popconfirm title={t("editor.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
+            <Button type="text" danger size="small" disabled={!canEdit('fmea')} icon={<DeleteOutlined />} />
+          </Popconfirm>
+        ) : null,
+    },
+```
+
+> A cause-less placeholder row (mode with no causes) therefore has no delete button. Removing an empty mode is out of scope for this change (spec non-goal: "模式自动随末原因删除"); it would require a separate "delete mode" action. The placeholder exists precisely so the user can add a new cause to the preserved mode.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add frontend/src/pages/planning/fmea/deleteRowHelpers.ts frontend/src/pages/planning/fmea/deleteRow.test.tsx frontend/src/pages/planning/fmea/FMEAEditorPage.tsx
@@ -1565,6 +1609,8 @@ import { buildRows, getRowSeverity, type FMEARow } from '../../../utils/fmeaTabl
 
 - [ ] **Step 2: Replace step4 S column**
 
+`handleUpdateRisk(nodeId, field, value)` calls `updateGraphData(nodes.map(n => n.id === nodeId ? {...n, [field]: value} : n), edges)` — it rebuilds the full node array from the **same render-snapshot `nodes`** and `updateGraphData` does a direct `setNodes(newNodes)` (not a functional update). Calling it N times in a loop would compute N arrays each with only one effect updated; the last `setNodes` wins, so only the last effect's severity would actually change. Write all effects in a **single** `updateGraphData` call instead.
+
 Replace `frontend/src/pages/planning/fmea/DFMEAWizardPage.tsx:448-452`:
 
 ```tsx
@@ -1579,15 +1625,16 @@ with:
 ```tsx
           { title: 'S', width: 60, render: (_: unknown, r: FMEARow) => {
             const s = getRowSeverity(r, nodeMap);
+            const effectIds = new Set(r.failureEffectNodeIds);
             return <InputNumber size="small" min={1} max={10} value={s || undefined}
               style={{ width: 50 }} onChange={val => {
                 const v = val || 0;
-                r.failureEffectNodeIds.forEach(id => handleUpdateRisk(id, 'severity', v));
+                updateGraphData(nodes.map(n => effectIds.has(n.id) ? { ...n, severity: v } : n), edges);
               }} />;
           }},
 ```
 
-> Note: `handleUpdateRisk(nodeId, field, value)` calls `updateGraphData(nodes.map(...), edges)`. Calling it N times in a loop re-renders N times but composes since each reads the same `nodes` snapshot and the page state setter folds them. If perf matters, a single `setAllEffectsSeverity` helper could be added — out of scope here; the loop matches existing single-field style and `nodes` is the current snapshot.
+> One `updateGraphData` call updates every effect node in the mode in a single array replacement — no overwrites, no stale-snapshot race. `handleUpdateRisk` stays as-is for the O and D columns (single node each).
 
 - [ ] **Step 3: Replace step4 AP column**
 
@@ -1666,12 +1713,17 @@ git commit -m "fix(fmea): wizard step4/5 use getRowSeverity + failureEffectNodeI
 Run: `cd frontend && npm run build`
 Expected: PASS (tsc --noEmit + vite build both succeed).
 
-- [ ] **Step 2: Run lint**
+- [ ] **Step 2: Residual `failureEffectNodeId` scan**
+
+Run: `cd frontend && rg -n "failureEffectNodeId" src || echo "none"`
+Expected: no matches in `src/` (the field is gone from `FMEARow`, so any leftover `r.failureEffectNodeId` / `row.failureEffectNodeId` is a missed migration or a stale test fixture). If matches appear, they must only be in comments explaining the migration — otherwise fix the missed site (adapt to `failureEffectNodeIds`) before proceeding. Common stragglers: test files that construct `FMEARow` literals with `failureEffectNodeId: "fe1"` — change to `failureEffectNodeIds: ["fe1"]`.
+
+- [ ] **Step 3: Run lint**
 
 Run: `cd frontend && npm run lint`
 Expected: PASS (no new errors in touched files; pre-existing warnings unrelated to this change are acceptable).
 
-- [ ] **Step 3: Run full vitest**
+- [ ] **Step 4: Run full vitest**
 
 Run: `cd frontend && npx vitest run`
 Expected: PASS for all suites, including:
@@ -1685,7 +1737,7 @@ Expected: PASS for all suites, including:
 
 If `FMEAEditorDragSort.test.tsx` or `SmartSuggestionDropdown.test.tsx` fail due to `failureEffectNodeId` references, adapt those test fixtures to the new `failureEffectNodeIds` shape (minimal edit: replace `failureEffectNodeId: 'fe1'` with `failureEffectNodeIds: ['fe1']` in any constructed `FMEARow`).
 
-- [ ] **Step 4: Manual smoke (if a dev server is available)**
+- [ ] **Step 5: Manual smoke (if a dev server is available)**
 
 Run: `cd frontend && npm run dev` (Vite :5173, proxies /api → :8000). Open an FMEA doc with a function that has multiple modes and causes. Confirm:
 - 功能列纵向合并跨所有模式/原因。
@@ -1693,12 +1745,12 @@ Run: `cd frontend && npm run dev` (Vite :5173, proxies /api → :8000). Open an 
 - 后果列每模式只在一处渲染堆叠下拉（多个后果时多个输入框），跨原因合并。
 - S 列跨原因合并，值=max，改动 S 后所有后果 severity 同步。
 - 原因/O/预防/探测/D/建议措施 每原因一行，不合并。
-- 删除某模式最后一条原因 → 模式与后果保留，出现无原因占位行。
+- 删除某模式最后一条原因 → 模式与后果保留，出现无原因占位行（无原因占位行无删除按钮）。
 - 后果删除按钮 → 删该模式 EFFECT_OF；共享后果只断边不删节点。
 
 If no dev server, note "manual smoke skipped — no dev server in worker" and rely on build + tests.
 
-- [ ] **Step 5: Final commit (if any test fixture edits) + push**
+- [ ] **Step 6: Final commit (if any test fixture edits) + push**
 
 ```bash
 git add -A
@@ -1718,6 +1770,12 @@ git commit -m "test(fmea): adapt regression fixtures to failureEffectNodeIds[] s
 
 **Placeholder scan:** No TBD/TODO; every code step shows full code; SmartSuggestionDropdown path flagged with a verification note (Task 7 step 3) since the exact path was inferred from existing editor usage.
 
-**Type consistency:** `FMEARow.failureEffectNodeIds: string[]` used consistently in buildRows, helpers, EffectLinesEditor, deleteRowHelpers, structureTree, useWizardValidation, wizard. `computeRowSpans` returns `RowSpanMap` with `function`/`mode` keys; editor `onCell` reads `rowSpans[index]?.function` / `?.mode` matching. `getRowSeverity(row, nodeMap)` signature consistent across all consumers. `addEffect`/`deleteEffect` signatures match EffectLinesEditor usage. `planCauseDeletion(row, allRows)` matches Task 9 wiring.
+**Type consistency:** `FMEARow.failureEffectNodeIds: string[]` used consistently in buildRows, helpers, EffectLinesEditor, deleteRowHelpers, structureTree, useWizardValidation, wizard. `computeRowSpans` returns `RowSpanMap` with `function`/`mode` keys; editor `onCell` reads `rowSpans[index]?.function` / `?.mode` matching. `getRowSeverity(row, nodeMap)` signature consistent across all consumers. `addEffect`/`deleteEffect` signatures match the ref-backed `handleAddEffect`/`handleDeleteEffect` in Task 8. `planCauseDeletion(row, allRows)` matches Task 9 wiring. `EffectLinesEditor` receives `onAddEffect`/`onDeleteEffect` callbacks (not `nodes`/`edges`/`setNodes`/`setEdges`); Task 8 passes `() => handleAddEffect(row.failureModeNodeId)` and `(id) => handleDeleteEffect(row.failureModeNodeId, id)`.
+
+**Race/writeback correctness:**
+- Wizard S writeback is a single `updateGraphData(nodes.map(...), edges)` call (Task 11 step 2) — not a loop over `handleUpdateRisk`, which would lose all-but-last effect because each call rebuilds from the same snapshot and `updateGraphData` does a direct `setNodes`.
+- Editor `EffectLinesEditor` mutations go through `handleAddEffect`/`handleDeleteEffect` which read `nodesRef.current`/`edgesRef.current` (Task 8 step 1) — no stale-props snapshot race on rapid add/delete.
+- Cause-less placeholder rows render no delete button (Task 9 step 7), so the cause-only `deleteRow` is never a silent no-op.
+- Task 12 step 2 scans for residual `failureEffectNodeId` in `src/` to catch any missed migration or stale test fixture.
 
 One known risk: the `SmartSuggestionDropdown` `onSelect` callback parameter type is inferred from the existing editor usage (`onSelect={(s) => updateNode(..., s.name)}`); Task 7 step 4 (vitest) and Task 8 step 10 (tsc) gate this — any mismatch surfaces there. The import path is confirmed (`../dfmea/SmartSuggestionDropdown`).
