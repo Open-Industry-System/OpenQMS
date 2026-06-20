@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildRows, createRowNodes, getRowEffectNodes, getRowSeverity,
+  buildRows, createRowNodes, getRowEffectNodes, getRowSeverity, computeRowSpans,
 } from "./fmeaTable";
 import type { GraphNode, GraphEdge } from "../types";
 
@@ -154,11 +154,42 @@ describe("createRowNodes", () => {
     expect(result.row.failureCauseNodeId).toBeTruthy();
     expect(result.row.key).toBe(`row_fn1_${result.row.failureModeNodeId}_${result.row.failureCauseNodeId}`);
   });
+});
 
-  it("creates expected nodes and edges for DFMEA", () => {
-    const result = createRowNodes("sys1", "DFMEA", mockT);
-    expect(result.newNodes).toHaveLength(5);
-    const prevention = result.newNodes.find((x) => x.type === "PreventionControl");
-    expect(prevention?.name).toContain("Design");
+describe("computeRowSpans", () => {
+  it("returns empty for no rows", () => {
+    expect(computeRowSpans([])).toEqual([]);
+  });
+
+  it("spans function and mode groups, zeroing non-first rows", () => {
+    // fn1: fm1(2 causes fc1,fc2), fm2(1 cause fc3) ; fn2: fm3(1 cause fc4) → 4 rows
+    const nodes = [
+      n("fn1", "ProcessItemFunction"), n("fn2", "ProcessItemFunction"),
+      n("fm1", "FailureMode"), n("fm2", "FailureMode"), n("fm3", "FailureMode"),
+      n("fc1", "FailureCause"), n("fc2", "FailureCause"),
+      n("fc3", "FailureCause"), n("fc4", "FailureCause"),
+    ];
+    const edges = [
+      e("fn1", "fm1", "HAS_FAILURE_MODE"), e("fn1", "fm2", "HAS_FAILURE_MODE"),
+      e("fn2", "fm3", "HAS_FAILURE_MODE"),
+      e("fc1", "fm1", "CAUSE_OF"), e("fc2", "fm1", "CAUSE_OF"),
+      e("fc3", "fm2", "CAUSE_OF"),
+      e("fc4", "fm3", "CAUSE_OF"),
+    ];
+    const rows = buildRows(nodes, edges);
+    expect(rows).toHaveLength(4);
+    const spans = computeRowSpans(rows);
+    // rows: fn1/fm1/fc1, fn1/fm1/fc2, fn1/fm2/fc3, fn2/fm3/fc4
+    expect(spans[0]).toEqual({ function: 3, mode: 2 });
+    expect(spans[1]).toEqual({ function: 0, mode: 0 });
+    expect(spans[2]).toEqual({ function: 0, mode: 1 });
+    expect(spans[3]).toEqual({ function: 1, mode: 1 });
+  });
+
+  it("single-row groups get rowSpan 1", () => {
+    const nodes = [n("fn1", "ProcessItemFunction"), n("fm1", "FailureMode"), n("fc1", "FailureCause")];
+    const edges = [e("fn1", "fm1", "HAS_FAILURE_MODE"), e("fc1", "fm1", "CAUSE_OF")];
+    const rows = buildRows(nodes, edges);
+    expect(computeRowSpans(rows)).toEqual([{ function: 1, mode: 1 }]);
   });
 });

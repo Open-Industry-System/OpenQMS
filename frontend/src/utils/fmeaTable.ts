@@ -123,6 +123,39 @@ export function getRowSeverity(row: FMEARow, nodeMap: Map<string, GraphNode>): n
   }, 0);
 }
 
+export type MergeColumnKey = "function" | "mode";
+export type RowSpanMap = Partial<Record<MergeColumnKey, number>>;
+
+/**
+ * Compute rowSpan per row for merged columns. `function` spans a function's
+ * whole block; `mode` spans each FailureMode's block (used for the
+ * failure-mode, failure-effect, severity and class columns, which all share
+ * the failureModeNodeId grouping). First row of a group gets the group size;
+ * others get 0 (cell hidden). Single-row groups get 1.
+ */
+export function computeRowSpans(rows: FMEARow[]): RowSpanMap[] {
+  const spans: RowSpanMap[] = rows.map(() => ({}));
+  let i = 0;
+  while (i < rows.length) {
+    const fnId = rows[i].functionNodeId;
+    let j = i;
+    while (j < rows.length && rows[j].functionNodeId === fnId) j++;
+    spans[i].function = j - i;
+    for (let k = i + 1; k < j; k++) spans[k].function = 0;
+    // mode groups within the function block
+    for (let s = i; s < j; ) {
+      const fmId = rows[s].failureModeNodeId;
+      let t = s;
+      while (t < j && rows[t].failureModeNodeId === fmId) t++;
+      spans[s].mode = t - s;
+      for (let k = s + 1; k < t; k++) spans[k].mode = 0;
+      s = t;
+    }
+    i = j;
+  }
+  return spans;
+}
+
 function findPreventionControls(causeId: string, edges: GraphEdge[]): string[] {
   return edges
     .filter((e) => e.source === causeId && e.type === "PREVENTED_BY")
