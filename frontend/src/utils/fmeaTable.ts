@@ -10,7 +10,7 @@ export interface FMEARow {
   // Node IDs
   functionNodeId: string;
   failureModeNodeId: string;
-  failureEffectNodeId: string | null;
+  failureEffectNodeIds: string[]; // mode-level effects, shared across causes
   failureCauseNodeId: string | null;
   preventionControlIds: string[];
   detectionControlIds: string[];
@@ -19,13 +19,17 @@ export interface FMEARow {
 
 /**
  * Build FMEA rows from graph data.
- * One row per FailureCause, or per FailureMode if it has no causes.
+ * One row per FailureCause per FailureMode. Effects are mode-level (EFFECT_OF
+ * from the mode) and shared across all of the mode's cause rows. A mode with
+ * no causes yields a single cause-less placeholder row (key suffix `_null`).
+ * Row order: function (orderedFunctionIds first) → mode (HAS_FAILURE_MODE edge
+ * order) → cause (CAUSE_OF edge order), so same-key groups are contiguous for
+ * rowSpan computation.
  */
 export function buildRows(nodes: GraphNode[], edges: GraphEdge[], orderedFunctionIds?: string[]): FMEARow[] {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const rows: FMEARow[] = [];
 
-  // Find all function nodes
   const functionTypes = [
     "ProcessItemFunction",
     "ProcessStepFunction",
@@ -54,7 +58,6 @@ export function buildRows(nodes: GraphNode[], edges: GraphEdge[], orderedFunctio
   ];
 
   for (const funcNode of functionNodes) {
-    // Find FailureModes connected to this function
     const fmEdges = edges.filter(
       (e) => e.source === funcNode.id && e.type === "HAS_FAILURE_MODE"
     );
@@ -64,55 +67,60 @@ export function buildRows(nodes: GraphNode[], edges: GraphEdge[], orderedFunctio
       const fmNode = nodeMap.get(fmId);
       if (!fmNode) continue;
 
-      // Find FailureEffects for this FailureMode
-      const effectEdges = edges.filter(
-        (e) => e.source === fmId && e.type === "EFFECT_OF"
-      );
+      // Effects are mode-level (EFFECT_OF from the mode), shared across causes.
+      const effectIds = edges
+        .filter((e) => e.source === fmId && e.type === "EFFECT_OF")
+        .map((e) => e.target);
 
-      // Find FailureCauses for this FailureMode
       const causeEdges = edges.filter(
         (e) => e.target === fmId && e.type === "CAUSE_OF"
       );
 
-      const effects = effectEdges.length > 0
-        ? effectEdges.map(e => e.target)
-        : [null as string | null];
-
       if (causeEdges.length === 0) {
-        // No causes — fan out by effects
-        for (const effectId of effects) {
-          rows.push({
-            key: `row_${funcNode.id}_${fmId}${effectId ? `_${effectId}` : ''}`,
-            functionNodeId: funcNode.id,
-            failureModeNodeId: fmId,
-            failureEffectNodeId: effectId,
-            failureCauseNodeId: null,
-            preventionControlIds: [],
-            detectionControlIds: findDetectionControls(fmId, null, edges),
-            recommendedActionIds: [],
-          });
-        }
+        rows.push({
+          key: `row_${funcNode.id}_${fmId}_null`,
+          functionNodeId: funcNode.id,
+          failureModeNodeId: fmId,
+          failureEffectNodeIds: effectIds,
+          failureCauseNodeId: null,
+          preventionControlIds: [],
+          detectionControlIds: findDetectionControls(fmId, null, edges),
+          recommendedActionIds: [],
+        });
       } else {
         for (const causeEdge of causeEdges) {
           const causeId = causeEdge.source;
-          for (const effectId of effects) {
-            rows.push({
-              key: `row_${funcNode.id}_${fmId}_${causeId}${effectId ? `_${effectId}` : ''}`,
-              functionNodeId: funcNode.id,
-              failureModeNodeId: fmId,
-              failureEffectNodeId: effectId,
-              failureCauseNodeId: causeId,
-              preventionControlIds: findPreventionControls(causeId, edges),
-              detectionControlIds: findDetectionControls(fmId, causeId, edges),
-              recommendedActionIds: findRecommendedActions(causeId, fmId, edges),
-            });
-          }
+          rows.push({
+            key: `row_${funcNode.id}_${fmId}_${causeId}`,
+            functionNodeId: funcNode.id,
+            failureModeNodeId: fmId,
+            failureEffectNodeIds: effectIds,
+            failureCauseNodeId: causeId,
+            preventionControlIds: findPreventionControls(causeId, edges),
+            detectionControlIds: findDetectionControls(fmId, causeId, edges),
+            recommendedActionIds: findRecommendedActions(causeId, fmId, edges),
+          });
         }
       }
     }
   }
 
   return rows;
+}
+
+/** All FailureEffect nodes for the row's mode, in id order (drops stale ids). */
+export function getRowEffectNodes(row: FMEARow, nodeMap: Map<string, GraphNode>): GraphNode[] {
+  return row.failureEffectNodeIds
+    .map((id) => nodeMap.get(id))
+    .filter((n): n is GraphNode => Boolean(n));
+}
+
+/** Max severity across the row's effects; 0 when the mode has no effects. */
+export function getRowSeverity(row: FMEARow, nodeMap: Map<string, GraphNode>): number {
+  return row.failureEffectNodeIds.reduce((max, id) => {
+    const node = nodeMap.get(id);
+    return node && node.severity > max ? node.severity : max;
+  }, 0);
 }
 
 function findPreventionControls(causeId: string, edges: GraphEdge[]): string[] {
@@ -227,7 +235,7 @@ export function createRowNodes(
     key: `row_${functionNodeId}_${fmId}_${fcId}`,
     functionNodeId,
     failureModeNodeId: fmId,
-    failureEffectNodeId: feId,
+    failureEffectNodeIds: [feId],
     failureCauseNodeId: fcId,
     preventionControlIds: [pcId],
     detectionControlIds: [dcId],
