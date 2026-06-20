@@ -154,6 +154,13 @@ describe("createRowNodes", () => {
     expect(result.row.failureCauseNodeId).toBeTruthy();
     expect(result.row.key).toBe(`row_fn1_${result.row.failureModeNodeId}_${result.row.failureCauseNodeId}`);
   });
+
+  it("creates expected nodes and edges for DFMEA", () => {
+    const result = createRowNodes("sys1", "DFMEA", mockT);
+    expect(result.newNodes).toHaveLength(5);
+    const prevention = result.newNodes.find((n) => n.type === "PreventionControl");
+    expect(prevention?.name).toContain("Design");
+  });
 });
 
 describe("computeRowSpans", () => {
