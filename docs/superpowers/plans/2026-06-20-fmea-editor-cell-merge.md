@@ -899,7 +899,6 @@ git commit -m "fix(fmea): wizard validation S = max effect severity"
 
 ```ts
 interface EffectLinesEditorProps {
-  fmId: string;
   effectIds: string[];
   nodeMap: Map<string, GraphNode>;
   fmeaId: string;
@@ -911,6 +910,8 @@ interface EffectLinesEditorProps {
   onDeleteEffect: (effectId: string) => void; // parent deletes an effect from this mode
 }
 ```
+
+> `fmId` is intentionally NOT a prop: the parent bakes the mode id into `onAddEffect`/`onDeleteEffect` closures (Task 8 passes `() => handleAddEffect(row.failureModeNodeId)`), so the component never needs it. Keeping an unused `fmId` prop would trip ESLint/TS unused checks.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -926,7 +927,6 @@ const mkNode = (id: string, name = ""): GraphNode => ({ id, type: "FailureEffect
 const nodeMap = (nodes: GraphNode[]) => new Map(nodes.map((n) => [n.id, n]));
 
 const baseProps = (overrides: Partial<Parameters<typeof EffectLinesEditor>[0]> = {}) => ({
-  fmId: "fm1",
   effectIds: ["fe1", "fe2"],
   nodeMap: nodeMap([mkNode("fe1", "烧毁电路"), mkNode("fe2", "机壳变形")]),
   fmeaId: "doc1",
@@ -980,7 +980,6 @@ import type { GraphNode } from "../../types";
 import SmartSuggestionDropdown from "../dfmea/SmartSuggestionDropdown";
 
 export interface EffectLinesEditorProps {
-  fmId: string;
   effectIds: string[];
   nodeMap: Map<string, GraphNode>;
   fmeaId: string;
@@ -994,7 +993,7 @@ export interface EffectLinesEditorProps {
 
 export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactElement {
   const {
-    fmId, effectIds, nodeMap, fmeaId, functionDescription, failureModeName,
+    effectIds, nodeMap, fmeaId, functionDescription, failureModeName,
     disabled, updateNode, onAddEffect, onDeleteEffect,
   } = props;
 
@@ -1085,17 +1084,21 @@ The page does not currently keep `nodes`/`edges` in refs. Add refs + sync effect
 
   const handleAddEffect = useCallback((fmId: string) => {
     const result = addEffect(fmId, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;   // advance ref synchronously so a second
+    edgesRef.current = result.edges;   // click before the effect runs still sees fresh state
     setNodes(result.nodes);
     setEdges(result.edges);
   }, []);
   const handleDeleteEffect = useCallback((fmId: string, effectId: string) => {
     const result = deleteEffect(fmId, effectId, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;
+    edgesRef.current = result.edges;
     setNodes(result.nodes);
     setEdges(result.edges);
   }, []);
 ```
 
-(`useRef` is already imported at line 1.) These handlers replace the stale-props pattern: they read `nodesRef.current`/`edgesRef.current` (latest), so two rapid clicks do not both compute from the same stale snapshot.
+(`useRef` is already imported at line 1.) These handlers replace the stale-props pattern: they read `nodesRef.current`/`edgesRef.current` (latest) AND advance the refs synchronously after computing the result, so two rapid clicks before the `useEffect` re-sync fires still operate on fresh state — no lost update.
 
 - [ ] **Step 2: Replace the failureEffect column render**
 
@@ -1109,7 +1112,6 @@ Replace `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx:762-783` (the `fail
       render: (_: unknown, row: FMEARow) => {
         return (
           <EffectLinesEditor
-            fmId={row.failureModeNodeId}
             effectIds={row.failureEffectNodeIds}
             nodeMap={nodeMap}
             fmeaId={fmeaId}
@@ -1597,7 +1599,7 @@ git commit -m "feat(fmea): merge function/mode/effect/S/class cells via onCell r
 
 **Interfaces:**
 - Consumes: `getRowSeverity` (Task 1), `FMEARow.failureEffectNodeIds`.
-- Produces: step4 S `InputNumber` value = `getRowSeverity`, `onChange` sets all effects' severity via `handleUpdateRisk`; AP uses `analyzeRisk(getRowSeverity(...), ...)`; step5 `highRiskRows` uses `getRowSeverity`.
+- Produces: step4 S `InputNumber` value = `getRowSeverity`, `onChange` sets all effects' severity via a **single `updateGraphData` call** (not a `handleUpdateRisk` loop — see step 2); AP uses `analyzeRisk(getRowSeverity(...), ...)`; step5 `highRiskRows` uses `getRowSeverity`.
 
 - [ ] **Step 1: Add import**
 
@@ -1774,7 +1776,7 @@ git commit -m "test(fmea): adapt regression fixtures to failureEffectNodeIds[] s
 
 **Race/writeback correctness:**
 - Wizard S writeback is a single `updateGraphData(nodes.map(...), edges)` call (Task 11 step 2) — not a loop over `handleUpdateRisk`, which would lose all-but-last effect because each call rebuilds from the same snapshot and `updateGraphData` does a direct `setNodes`.
-- Editor `EffectLinesEditor` mutations go through `handleAddEffect`/`handleDeleteEffect` which read `nodesRef.current`/`edgesRef.current` (Task 8 step 1) — no stale-props snapshot race on rapid add/delete.
+- Editor `EffectLinesEditor` mutations go through `handleAddEffect`/`handleDeleteEffect` which read `nodesRef.current`/`edgesRef.current` AND advance those refs synchronously after computing the result (Task 8 step 1) — so two rapid clicks before the `useEffect` re-sync still operate on fresh state, no lost update.
 - Cause-less placeholder rows render no delete button (Task 9 step 7), so the cause-only `deleteRow` is never a silent no-op.
 - Task 12 step 2 scans for residual `failureEffectNodeId` in `src/` to catch any missed migration or stale test fixture.
 
