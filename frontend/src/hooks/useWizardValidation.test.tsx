@@ -63,3 +63,48 @@ describe('useWizardValidation — Step 5 cause-less vs unrated', () => {
     expect(result.current.warnings).not.toContain(4);
   });
 });
+
+describe('useWizardValidation — multi-effect S=max', () => {
+  it('rates a row complete when the max effect severity > 0 even if another effect is 0', () => {
+    const nodes = [
+      n('func1', 'ProcessWorkElementFunction'),
+      n('fm1', 'FailureMode'),
+      n('fc1', 'FailureCause', { occurrence: 5 }),
+      n('fe1', 'FailureEffect', { severity: 0 }),
+      n('fe2', 'FailureEffect', { severity: 7 }),
+      n('dc1', 'DetectionControl', { detection: 3 }),
+    ];
+    const edges = [
+      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
+      e('fc1', 'fm1', 'CAUSE_OF'),
+      e('fm1', 'fe1', 'EFFECT_OF'),
+      e('fm1', 'fe2', 'EFFECT_OF'),
+      e('fc1', 'dc1', 'DETECTED_BY'),
+    ];
+    const { result } = renderHook(() => useWizardValidation(nodes, edges));
+    expect(result.current.step5MissingCause).toBe(false);
+    expect(result.current.step5Unrated).toBe(false);
+    expect(result.current.step5Complete).toBe(true);
+  });
+
+  it('rates a row unrated when every effect severity is 0', () => {
+    const nodes = [
+      n('func1', 'ProcessWorkElementFunction'),
+      n('fm1', 'FailureMode'),
+      n('fc1', 'FailureCause', { occurrence: 5 }),
+      n('fe1', 'FailureEffect', { severity: 0 }),
+      n('fe2', 'FailureEffect', { severity: 0 }),
+      n('dc1', 'DetectionControl', { detection: 3 }),
+    ];
+    const edges = [
+      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
+      e('fc1', 'fm1', 'CAUSE_OF'),
+      e('fm1', 'fe1', 'EFFECT_OF'),
+      e('fm1', 'fe2', 'EFFECT_OF'),
+      e('fc1', 'dc1', 'DETECTED_BY'),
+    ];
+    const { result } = renderHook(() => useWizardValidation(nodes, edges));
+    expect(result.current.step5Unrated).toBe(true);
+    expect(result.current.step5Complete).toBe(false);
+  });
+});

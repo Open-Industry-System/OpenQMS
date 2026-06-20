@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { GraphNode, GraphEdge } from '../types';
-import { buildRows } from '../utils/fmeaTable';
+import { buildRows, getRowSeverity } from '../utils/fmeaTable';
 
 export interface StepValidation {
   step3Complete: boolean;
@@ -45,11 +45,11 @@ export function useWizardValidation(nodes: GraphNode[], edges: GraphEdge[]): Ste
     const step5Unrated = rows.some(r => {
       const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
       if (!cause) return false; // cause-less rows are surfaced via step5MissingCause
-      const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
       const detectionNode = r.detectionControlIds.length > 0
         ? nodeMap.get(r.detectionControlIds[0])
         : null;
-      return (effect?.severity ?? 0) === 0
+      // S = max severity across the mode's effects (0 if none).
+      return getRowSeverity(r, nodeMap) === 0
           || (cause.occurrence ?? 0) === 0
           || (detectionNode?.detection ?? 0) === 0;
     });
