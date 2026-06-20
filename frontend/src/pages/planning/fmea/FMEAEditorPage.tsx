@@ -126,6 +126,7 @@ export default function FMEAEditorPage() {
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
   const dragStructureNodeIdRef = useRef<string | null>(null);
   const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
@@ -585,6 +586,7 @@ export default function FMEAEditorPage() {
   const handleStructureDragStart = useCallback((nodeId: string, event: React.DragEvent<HTMLElement>) => {
     if (!canDragSortStructure) return;
     dragStructureNodeIdRef.current = nodeId;
+    setDraggingNodeId(nodeId);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", nodeId);
     const rowEl = event.currentTarget.closest<HTMLElement>("[data-node-id]");
@@ -612,6 +614,7 @@ export default function FMEAEditorPage() {
     event.preventDefault();
     event.stopPropagation();
     setDragOver(null);
+    setDraggingNodeId(null);
 
     const dragNodeId = dragStructureNodeIdRef.current;
     dragStructureNodeIdRef.current = null;
@@ -637,6 +640,7 @@ export default function FMEAEditorPage() {
   const handleStructureDragEnd = useCallback(() => {
     dragStructureNodeIdRef.current = null;
     setDragOver(null);
+    setDraggingNodeId(null);
   }, []);
 
   const deleteRow = useCallback((row: FMEARow) => {
@@ -1446,7 +1450,7 @@ export default function FMEAEditorPage() {
                         </Popconfirm>
                       </Space>
                     </div>
-                    {tn.children.map((c) => renderTreeNode(c))}
+                    {node.id !== draggingNodeId && tn.children.map((c) => renderTreeNode(c))}
                   </div>
                 );
               };

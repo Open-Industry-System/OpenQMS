@@ -464,4 +464,23 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     fireEvent.dragStart(ps2Handle, { dataTransfer });
     expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ps2Row, 0, 0);
   });
+
+  it("hides the dragged node's descendants during drag", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const piHandle = await screen.findByTestId("fmea-structure-drag-handle-pi");
+    expect(screen.getByTestId("fmea-structure-node-ps1")).toBeInTheDocument();
+    fireEvent.dragStart(piHandle, { dataTransfer: makeDataTransfer() });
+    await waitFor(() => {
+      expect(screen.queryByTestId("fmea-structure-node-ps1")).toBeNull();
+      expect(screen.queryByTestId("fmea-structure-node-ps2")).toBeNull();
+    });
+  });
 });
