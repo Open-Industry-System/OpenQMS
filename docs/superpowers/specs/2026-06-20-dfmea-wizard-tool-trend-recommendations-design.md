@@ -76,7 +76,7 @@ interface ScopeTagFieldProps {
 - 预设 chip：点击 → 在 Select 值数组里 add/remove 该 token（toggle）。已选中项不出现在「快选」行（避免重复）。
 - ✨AI 按钮：点击调 `getRecommendations(fmeaId, { trigger_type: triggerType, context, scope: "current_product_line", include_graph: false })`。结果渲染成紫色 `⭐xx` chip，**点击才加入** Select（不自动填）。按钮 loading 时转圈；无结果 / 失败时 `message.warning` 提示，不阻塞。
 
-接入点：`DFMEAWizardPage.tsx` 的 `renderStep0()` 把「工具」「趋势」两处 `<Input>` 换成 `<ScopeTagField>`，传 `presets={t("wizard.scope.toolPresets", { returnObjects: true })}`、`context={{ fmea_title: fmea?.title, product_line_code: fmea.product_line_code, task: wizardScope.task, team: wizardScope.team }}`。team / timeframe / task **不动**。
+接入点：`DFMEAWizardPage.tsx` 的 `renderStep0()` 把「工具」「趋势」两处 `<Input>` 换成 `<ScopeTagField>`，传 `presets={t("wizard.scope.toolPresets", { returnObjects: true })}`、`context={{ fmea_title: fmea?.title, product_line_code: fmea?.product_line_code ?? "", task: wizardScope.task, team: wizardScope.team }}`。team / timeframe / task **不动**。（`fmea` 类型为 `FMEADocument | null`，故 `product_line_code` 用 `?. ... ?? ""`，或实现时在 render 前先 `if (!fmea) return null` 守卫。）
 
 **类型注意（实现计划须注明）**：i18next 的 `t(key, { returnObjects: true })` 在 TS 里返回联合类型（`string | string[] | ...`），不能直接赋给 `presets: string[]`。需在调用处显式 `as string[]`（或 `Array.isArray` 守卫）。同理 `context.product_line_code` 取自 `FMEADocument`，实现时确认该字段存在于前端类型。
 
@@ -151,10 +151,10 @@ interface ScopeTagFieldProps {
 ## 9. 测试
 
 - **前端**
-  - `utils/wizardScopeTokens.test.ts`：「、/,/;」切分、空值、trim、单值。
+  - `utils/wizardScopeTokens.test.ts`：「、/,/;」切分、空值、trim、**去重保序**（如 `"边界图、P图、边界图"` → `["边界图","P图"]`）、单值。
   - `components/dfmea/ScopeTagField.test.tsx`：预设 chip toggle 进/出 Select；AI 按钮点击 mock `getRecommendations` → 出现紫色建议 chip → 点击加入；loading / 失败态。
 - **后端**
-  - 扩展现有推荐测试：`dfmea_tool` trigger 在 mock LLM 下返回建议；无 LLM 时优雅降级（空 / `rule_fallback`）。
+  - 扩展现有推荐测试：`dfmea_tool` trigger 在 mock LLM 下返回建议；**无 LLM 时返回空 suggestions + `source="rule"`**（注意：不是 `rule_fallback`——`rule_fallback` 仅在「有 LLM 但 LLM 调用失败」时出现）；后者用「mock LLM 抛异常」单测断言 `source="rule_fallback"`。
   - **短输入 anchor 测试**：`dfmea_tool` / `dfmea_trend` 当 context 仅含 `task`（无 `failure_mode`/`input_text`）时**不被 early-return 拦截**，能进入 `RecommendationService`；context 全空时仍返回空。
 - **回归**：`npm test -- --run`（前端）、`pytest tests/ -x`（后端）。
 
