@@ -213,8 +213,8 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
 
     renderEditor();
 
-    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    expect(ps1).toHaveAttribute("draggable", "true");
+    const handle = await screen.findByTestId("fmea-structure-drag-handle-ps1");
+    expect(handle).toHaveAttribute("draggable", "true");
   });
 
   it("does not enable dragging when canEdit('fmea') is false", async () => {
@@ -228,7 +228,8 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    expect(ps1).toHaveAttribute("draggable", "false");
+    expect(ps1).not.toHaveAttribute("draggable");
+    expect(screen.queryByTestId("fmea-structure-drag-handle-ps1")).toBeNull();
   });
 
   it("enables dragging for DFMEA documents", async () => {
@@ -240,8 +241,8 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
 
     renderEditor();
 
-    const sub = await screen.findByTestId("fmea-structure-node-sub");
-    expect(sub).toHaveAttribute("draggable", "true");
+    const handle = await screen.findByTestId("fmea-structure-drag-handle-sub");
+    expect(handle).toHaveAttribute("draggable", "true");
   });
 
   it("reorders DFMEA System roots and keeps table rows in structure order", async () => {
@@ -262,13 +263,13 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const sys1 = await screen.findByTestId("fmea-structure-node-sys1");
-    const sys2 = await screen.findByTestId("fmea-structure-node-sys2");
+    const sys2Handle = await screen.findByTestId("fmea-structure-drag-handle-sys2");
     vi.spyOn(sys1, "getBoundingClientRect").mockReturnValue({
       x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
     } as DOMRect);
 
     const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(sys2, { dataTransfer });
+    fireEvent.dragStart(sys2Handle, { dataTransfer });
     fireEvent.dragOver(sys1, { clientY: 1, dataTransfer });
     fireEvent.drop(sys1, { clientY: 1, dataTransfer });
 
@@ -305,7 +306,7 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
+    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
     vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
       x: 0,
       y: 0,
@@ -319,7 +320,7 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     } as DOMRect);
 
     const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2, { dataTransfer });
+    fireEvent.dragStart(ps2Handle, { dataTransfer });
     fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
     fireEvent.drop(ps1, { clientY: 1, dataTransfer });
 
@@ -349,7 +350,7 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
+    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
     vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
       x: 0,
       y: 0,
@@ -363,7 +364,7 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     } as DOMRect);
 
     const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2, { dataTransfer });
+    fireEvent.dragStart(ps2Handle, { dataTransfer });
     fireEvent.dragOver(ps1, { clientY: 20, dataTransfer });
     fireEvent.drop(ps1, { clientY: 20, dataTransfer });
 
@@ -388,13 +389,13 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
+    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
     vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
       x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
     } as DOMRect);
 
     const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2, { dataTransfer });
+    fireEvent.dragStart(ps2Handle, { dataTransfer });
     fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
 
     await waitFor(() => expect(ps1.getAttribute("data-drag-state")).toBe("before"));
@@ -418,13 +419,13 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
+    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
     vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
       x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
     } as DOMRect);
 
     const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2, { dataTransfer });
+    fireEvent.dragStart(ps2Handle, { dataTransfer });
     fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
 
     await waitFor(() => expect(ps1.getAttribute("data-drag-state")).toBe("invalid"));
@@ -432,5 +433,35 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     fireEvent.drop(ps1, { clientY: 1, dataTransfer });
     await waitFor(() => expect(mocks.warning).toHaveBeenCalledWith("messages.sameLevelSortOnly"));
     expect(ps1.getAttribute("data-drag-state")).toBeNull();
+  });
+
+  it("does not make the row itself draggable (editing a name must not start a drag)", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep")],
+      [{ source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" }],
+    ));
+    renderEditor();
+    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
+    expect(ps1).not.toHaveAttribute("draggable");
+    const handle = await screen.findByTestId("fmea-structure-drag-handle-ps1");
+    expect(handle).toHaveAttribute("draggable", "true");
+  });
+
+  it("uses the whole row as the drag image", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const ps2Row = await screen.findByTestId("fmea-structure-node-ps2");
+    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
+    const dataTransfer = makeDataTransfer();
+    fireEvent.dragStart(ps2Handle, { dataTransfer });
+    expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ps2Row, 0, 0);
   });
 });

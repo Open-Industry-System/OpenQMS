@@ -85,6 +85,7 @@
     "addNode": "Add Node",
     "addNodeTitle": "Add Node",
     "newProcessItem": "New Process Item",
+    "dragHandle": "Drag to reorder",
     "newSystem": "New System",
     "confirmDeleteNode": "Delete this node and all its children and related failure-analysis rows?",
     "nodeName": "Name",

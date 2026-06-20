@@ -8,7 +8,7 @@ import {
 import {
   SaveOutlined, ArrowLeftOutlined, SendOutlined,
   CheckOutlined, UndoOutlined, PlusOutlined, DeleteOutlined,
-  HistoryOutlined, RadarChartOutlined,
+  HistoryOutlined, RadarChartOutlined, HolderOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
@@ -582,11 +582,13 @@ export default function FMEAEditorPage() {
     return "inside";
   }, []);
 
-  const handleStructureDragStart = useCallback((nodeId: string, event: React.DragEvent<HTMLDivElement>) => {
+  const handleStructureDragStart = useCallback((nodeId: string, event: React.DragEvent<HTMLElement>) => {
     if (!canDragSortStructure) return;
     dragStructureNodeIdRef.current = nodeId;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", nodeId);
+    const rowEl = event.currentTarget.closest<HTMLElement>("[data-node-id]");
+    if (rowEl) event.dataTransfer.setDragImage(rowEl, 0, 0);
   }, [canDragSortStructure]);
 
   const handleStructureDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -1317,8 +1319,6 @@ export default function FMEAEditorPage() {
                       data-testid={`fmea-structure-node-${node.id}`}
                       data-node-id={node.id}
                       data-drag-state={dragState ?? undefined}
-                      draggable={canDragSortStructure}
-                      onDragStart={(e) => handleStructureDragStart(node.id, e)}
                       onDragOver={handleStructureDragOver}
                       onDrop={(e) => handleStructureDrop(node.id, e)}
                       onDragEnd={handleStructureDragEnd}
@@ -1328,7 +1328,7 @@ export default function FMEAEditorPage() {
                         marginBottom: 6,
                         marginLeft: tn.depth * 14,
                         borderRadius: 6,
-                        cursor: canDragSortStructure ? "grab" : "pointer",
+                        cursor: "pointer",
                         background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
                         border: isSelected
                           ? "1px solid var(--qf-cyan)"
@@ -1351,6 +1351,30 @@ export default function FMEAEditorPage() {
                       onMouseEnter={(e) => { if (!isSelected && !dragState) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
                     >
+                      {canDragSortStructure && (
+                        <span
+                          data-testid={`fmea-structure-drag-handle-${node.id}`}
+                          draggable
+                          onDragStart={(e) => handleStructureDragStart(node.id, e)}
+                          onDragEnd={handleStructureDragEnd}
+                          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
+                          title={t("editor.dragHandle")}
+                          aria-label={t("editor.dragHandle")}
+                          style={{
+                            cursor: "grab",
+                            color: "var(--qf-text-secondary)",
+                            opacity: 0.35,
+                            transition: "opacity 0.15s",
+                            marginRight: 6,
+                            flexShrink: 0,
+                            display: "inline-flex",
+                            alignItems: "center",
+                          }}
+                        >
+                          <HolderOutlined />
+                        </span>
+                      )}
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <Input
                           variant="borderless"

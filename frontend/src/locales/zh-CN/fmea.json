@@ -85,6 +85,7 @@
     "addNode": "添加节点",
     "addNodeTitle": "添加节点",
     "newProcessItem": "新建过程项",
+    "dragHandle": "拖拽以排序",
     "newSystem": "新建系统",
     "confirmDeleteNode": "确认删除该节点及其所有子节点和关联的失效分析行？",
     "nodeName": "名称",
