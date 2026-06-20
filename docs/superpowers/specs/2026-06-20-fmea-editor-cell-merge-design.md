@@ -101,7 +101,7 @@ export function getRowSeverity(row: FMEARow, nodeMap: Map<string, GraphNode>): n
 
 纵向堆叠的 `SmartSuggestionDropdown`（`triggerType="failure_effect"`，context 带 `failure_mode` + `function_description`），每个绑定一个后果节点，行为与现有一致（含 AI 建议下拉）。
 - 末尾"＋ 添加后果"按钮：点击新建 `FailureEffect` 节点 + `EFFECT_OF`（fm→effect）边，追加到该模式。
-- 每行一个删除小图标按钮：**先删该模式的 `EFFECT_OF`（fm→effect）边**；仅当该 effect 节点不被任何其他行（其他模式）引用时，才删节点及其剩余边。复用现有 `deleteRow` 的 `nodesUsedByOthers` 引用计数思路（见 §3）。这避免导入/复制/历史数据中同一 `FailureEffect` 被多模式共享时跨模式误删。
+- 每行一个删除小图标按钮：**先删该模式的 `EFFECT_OF`（fm→effect）边**；然后按**剩余边**判断——若没有任何 `EFFECT_OF` 边再指向该 effect（即没有任何其他模式引用它），才删节点及其剩余边。**用边判断、不用 row 引用计数**：同一模式多原因时多条 row 都携带同一批 `failureEffectNodeIds`，按 row 判会把刚断开的 effect 误判为仍被引用而留下孤儿。覆盖导入/复制/历史数据中同一 `FailureEffect` 被多模式共享的场景。
 - 合并：该列 `rowSpan` = 模式行数，仅在首条原因行渲染这堆输入；其余原因行该列 `rowSpan:0` 隐藏。
 
 ### S 单元格
@@ -110,12 +110,12 @@ export function getRowSeverity(row: FMEARow, nodeMap: Map<string, GraphNode>): n
 
 ## §3 连带改动
 
-### `DFMEAWizardPage` 精简表（第 4/5 步，约 line 442）
+### `DFMEAWizardPage` 第 4/5 步表（约 line 442）
 
 - 改用新 `FMEARow` 形状：`r.failureEffectNodeId` → `r.failureEffectNodeIds`。
-- S 列 = `max(effect severity)`。
-- AP 列 = `getAP(S=max, O=cause.occurrence, D=detection.detection)`（`frontend/src/utils/fmea.ts`）。
-- 只读摘要，**不合并**，仅适配新行形状。
+- **保持现有可编辑 S/O/D 行为**（`InputNumber` + `handleUpdateRisk` 写回图数据），不是只读；仅适配新行形状与 S=max 语义。S 列 `InputNumber` 的 value = `getRowSeverity`，`onChange` 经 `handleUpdateRisk` 置所有后果 severity（沿用现有写回链路，不绕过）。
+- AP 列：编辑器用 `calculateAP(s, o, d)`（`frontend/src/utils/fmea.ts`）；向导沿用现状 `dfmeaRules.analyzeRisk(s, o, d)`（包装 `calculateAP`）。两处 `s` 都改用 `getRowSeverity`。不要写不存在的 `getAP`。
+- **不合并**（保持精简），仅适配新行形状。
 
 ### `useWizardValidation`（step5）
 
@@ -139,13 +139,15 @@ export function getRowSeverity(row: FMEARow, nodeMap: Map<string, GraphNode>): n
 - 结果：模式从有原因变为无原因，`buildRows` 自然产出一条 `causeId=null` 占位行（带该模式后果与 S）。即"模式最后一个原因被删 → 保留无原因占位行"，不自动删模式/后果。
 - `nodesUsedByOthers` 计算需同步改用 `failureEffectNodeIds`（见下"共享引用计数"）。
 
-### 共享引用计数（`structureTree.ts` `deleteSubtree` + `deleteRow`）
+### 引用计数：两套机制
 
-两处都用 `buildRows` 的结果做"被幸存行引用的节点不删"判定，且都直接读 `r.failureEffectNodeId`（`structureTree.ts:464`、`FMEAEditorPage.tsx:640/655`）。接口迁移后：
+接口迁移涉及两处引用计数，语义不同，不能混用：
 
-- `if (r.failureEffectNodeId) usedBySurvivors.add(r.failureEffectNodeId)` → `r.failureEffectNodeIds.forEach(id => usedBySurvivors.add(id))`。
-- `deleteSubtree` 遍历 subtree 行节点 id 的循环（`structureTree.ts:478`）里 `r.failureEffectNodeId` → `...r.failureEffectNodeIds`。
-- `EffectLinesEditor` 删后果（§2）复用同一引用计数：删 `EFFECT_OF` 边后，仅当 effect 不在 `usedBySurvivors`（即不被其他行/模式引用）才删节点。
+**A. row 引用计数（用于 cause/控制/措施/模式的"被幸存行引用才保留"判定）**——`structureTree.ts:464` 与 `FMEAEditorPage.tsx:640` 的 `nodesUsedByOthers`/`usedBySurvivors`。把 `if (r.failureEffectNodeId) usedBySurvivors.add(r.failureEffectNodeId)` 改为 `r.failureEffectNodeIds.forEach(id => usedBySurvivors.add(id))`；`deleteSubtree` 遍历 subtree 行节点 id 的循环（`structureTree.ts:478`）里 `r.failureEffectNodeId` 改为 `...r.failureEffectNodeIds`。这套对 cause/控制/措施/模式正确：判定的是"其他幸存行是否引用"，跨功能/跨模式，同一模式多原因的重复携带不影响结论（要么整个模式在删除子树内、要么在幸存侧）。
+
+**B. 边判断（用于 `EffectLinesEditor` 删单个后果）**——见 §2：删该模式 `EFFECT_OF` 边后，按**剩余边**判断是否还有 `EFFECT_OF` 指向该 effect，没有才删节点。**不能用 row 引用计数**：同一模式多原因时多条 row 都携带同一批 `failureEffectNodeIds`，按 row 判会把刚断开的 effect 误判为仍被引用而留孤儿。
+
+> `deleteRow` 在新设计里不再删任何 effect（见上"行删除"），故只有 `EffectLinesEditor` 用边判断删 effect；`deleteRow` 与 `deleteSubtree` 对 effect 仅做 row 级幸存判定。
 
 **范围声明**：`structureTree.ts` 列入本次改动范围。需单元测试覆盖结构树删除时多 effect id 的 survivor 计算与级联保留。
 
@@ -156,7 +158,7 @@ export function getRowSeverity(row: FMEARow, nodeMap: Map<string, GraphNode>): n
 - `structureTree.test.ts`（新增/扩展）：`deleteSubtree` 多 effect id 的 survivor 引用计数；删子树保留被幸存行共享的后果。
 - `FMEAEditorDragSort.test.tsx` / `SmartSuggestionDropdown.test.tsx`：若触及 `failureEffectNodeId` 则适配；拖拽排序不涉行形状，预计不动。
 - 新增 `computeRowSpans` 纯函数单测（连续段首行=组大小、其余=0、跨功能/模式边界重置、单行组 rowSpan=1）。
-- 新增 `EffectLinesEditor` 单测：增/删后果节点 + 边 reconcile；**跨模式共享后果删一边不删节点**；AI 下拉不破。
+- 新增 `EffectLinesEditor` 单测：增/删后果节点 + 边 reconcile；**同一模式多原因、删最后一条 `EFFECT_OF` 边后 effect 节点被删**；**跨模式共享后果删一边不删节点**；AI 下拉不破。
 - 新增 `deleteRow` 单测：删最后原因 → 模式与后果保留、产出 `causeId=null` 占位行；删非末原因 → 模式保留、其余原因行不变。
 
 ### 后端
@@ -168,7 +170,7 @@ export function getRowSeverity(row: FMEARow, nodeMap: Map<string, GraphNode>): n
 - **模式无后果**：`effectIds=[]` → 后果格只渲染"＋添加后果"，S 格显示空；编辑 S 无操作。
 - **模式无原因**：产一条 `causeId=null` 占位行；后果格与 S 格照常显示（模式级），原因及 O/预防/探测/D/建议措施格显示"-"。
 - **S 编辑**：输入 → 对所有 `effectIds` 批量 `updateNode`；无后果 no-op。
-- **后果删除**：先删该模式 `EFFECT_OF` 边；仅当该 effect 不被其他行（其他模式）引用时才删节点及剩余边。删最后一个后果 → 回到"无后果"态（`effectIds=[]`）。
+- **后果删除**：先删该模式 `EFFECT_OF` 边；再按剩余边判断是否还有 `EFFECT_OF` 指向该 effect，没有才删节点及剩余边。删最后一个后果 → 回到"无后果"态（`effectIds=[]`）。
 - **`rowSpan` 退化为 1**：单行组 → rowSpan=1，视觉不合并，行为正确。
 - **协作光标**：合并格仅在首条原因行渲染，`startEditing({row_key, field})` 用首行 key，所有用户对同一模式后果的编辑经同一 row_key，无歧义。
 - **性能**：`computeRowSpans` O(rows)、`buildRows` 复杂度不变；rows 数从"原因×后果"降到"原因"，通常更少。`useMemo` 包裹。
