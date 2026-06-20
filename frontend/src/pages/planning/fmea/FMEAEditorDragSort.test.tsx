@@ -292,8 +292,8 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
       ]);
     });
     expect(Array.from(document.querySelectorAll("tr[data-row-key]")).map((row) => row.getAttribute("data-row-key"))).toEqual([
-      "row_sys2_fm2",
-      "row_sys1_fm1",
+      "row_sys2_fm2_null",
+      "row_sys1_fm1_null",
     ]);
   });
 
@@ -344,8 +344,8 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
       ]);
     });
     expect(Array.from(document.querySelectorAll("tr[data-row-key]")).map((row) => row.getAttribute("data-row-key"))).toEqual([
-      "row_ps2_fm2",
-      "row_ps1_fm1",
+      "row_ps2_fm2_null",
+      "row_ps1_fm1_null",
     ]);
   });
 
