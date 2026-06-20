@@ -16,6 +16,7 @@
 - **Tests run single-shot:** `cd frontend && npm test -- --run` (the `--run` flag prevents vitest watch mode). i18n is pre-initialized to `en-US` in `src/test-setup.ts`, so component tests assert English strings.
 - **No hardcoded colors.** Labels inherit antd theme text color (the app uses a dark theme via `ConfigProvider theme={darkTheme}`).
 - **`Field` wrapper is module-level** (defined outside the component) so React doesn't remount inputs on re-render (would cause focus loss on each keystroke).
+- **Commits are gated on explicit user request.** Per the project's standing rule ("commit only when the user asks"), do NOT run a task's commit step automatically. Leave changes uncommitted for review; execute a commit step only when the user explicitly asks you to commit (or authorizes per-task commits during execution).
 
 ---
 
@@ -80,6 +81,9 @@ describe('timeframeToRange', () => {
   it('returns null for invalid month (13)', () => {
     expect(timeframeToRange('2026-13-01 ~ 2026-09-30')).toBeNull();
   });
+  it('returns null for reversed range (start after end)', () => {
+    expect(timeframeToRange('2026-09-30 ~ 2026-01-01')).toBeNull();
+  });
 });
 ```
 
@@ -113,14 +117,17 @@ export function timeframeToRange(timeframe: string): [Dayjs, Dayjs] | null {
   if (!m) return null;
   const start = dayjs(m[1], 'YYYY-MM-DD', true);
   const end = dayjs(m[2], 'YYYY-MM-DD', true);
-  return start.isValid() && end.isValid() ? [start, end] : null;
+  // Reject invalid dates and reversed ranges (start after end). The picker never
+  // produces a reversed range, but legacy/hand-edited JSON can contain one.
+  if (!start.isValid() || !end.isValid() || start.isAfter(end, 'day')) return null;
+  return [start, end];
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd frontend && npm test -- --run src/utils/wizardTimeframe.test.ts`
-Expected: PASS (8 tests). If `2026-02-31` or `2026-13-01` cases fail, confirm `customParseFormat` is extended before `timeframeToRange` is called (the module-level `dayjs.extend` must run).
+Expected: PASS (9 tests). If `2026-02-31`, `2026-13-01`, or the reversed-range cases fail, confirm `customParseFormat` is extended before `timeframeToRange` is called (the module-level `dayjs.extend` must run).
 
 - [ ] **Step 5: Commit**
 
@@ -243,12 +250,17 @@ In `frontend/src/components/dfmea/GenerationWizard.tsx`, replace the `case 0:` b
 Run: `cd frontend && npm test -- --run src/components/dfmea/GenerationWizard.test.tsx`
 Expected: PASS. If `getByText('Timeframe')` times out (Modal render timing in jsdom), wrap it in `await waitFor(() => screen.getByText('Timeframe'))` and make the test `async`.
 
-- [ ] **Step 6: Lint + typecheck**
+- [ ] **Step 6: Lint**
 
-Run: `cd frontend && npm run lint && npm run build`
-Expected: no new lint warnings; tsc + vite build succeed (confirms `DatePicker` import, helper types, and the no-cast `onChange` all typecheck).
+Run: `cd frontend && npm run lint`
+Expected: no new lint warnings (errors here usually surface a missing `DatePicker`/`ReactNode` import).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Typecheck + build**
+
+Run: `cd frontend && npm run build`
+Expected: tsc + vite build succeed (confirms helper types and the no-cast `onChange` all typecheck).
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add frontend/src/components/dfmea/GenerationWizard.tsx frontend/src/components/dfmea/GenerationWizard.test.tsx
