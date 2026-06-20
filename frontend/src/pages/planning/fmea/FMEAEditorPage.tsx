@@ -635,6 +635,15 @@ export default function FMEAEditorPage() {
     const dropNodeId = (event.currentTarget as HTMLElement).dataset.nodeId;
     if (!dropNodeId) return;
     event.preventDefault();
+    // Self-hover (dropNodeId === dragNodeId) is an artifact of the live reorder:
+    // the dragged row moved under the cursor. Skip marker/preview updates so the
+    // last valid target's marker + preview stay put — prevents the snap-back
+    // oscillation between preview and real order. If the user drops here, the
+    // drop handler commits the previewed reorder via lastValidDropRef.
+    if (dropNodeId === dragNodeId) {
+      event.dataTransfer.dropEffect = "move";
+      return;
+    }
     const position = getStructureDropPosition(event);
     const valid = canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
     event.dataTransfer.dropEffect = valid ? "move" : "none";
