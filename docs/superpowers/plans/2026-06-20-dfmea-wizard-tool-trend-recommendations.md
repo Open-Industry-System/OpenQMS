@@ -383,6 +383,94 @@ class TestBuildPromptForToolTrend:
         prompt = self._svc()._build_prompt("dfmea_tool", {})
         assert "分析工具" in prompt  # 模板正文仍在
         assert "{task}" not in prompt
+
+
+# --- recommend() 集成：验证新 trigger 走完整链路 + source 分支（spec §9） ---
+# 通过 monkeypatch 绕过 db（_get_fmea_or_404 / _get_cached / _assemble_context /
+# _cache_result）与权限（get_user_permission），直接驱动 recommend() 逻辑。
+# RuleEngine.evaluate 对未知 trigger 返回空、quality="generic"（已核实
+# recommendation_service.py:138-140），不抛异常，故无需 patch rules。
+from unittest.mock import AsyncMock
+import uuid as _uuid
+
+from app.schemas.recommendation import RecommendRequest
+from app.core.permissions import PermissionLevel
+
+
+class _StubFmea:
+    def __init__(self):
+        self.id = _uuid.uuid4()
+        self.product_line_code = "DC-DC-100"
+        self.fmea_type = "DFMEA"
+        self.title = "DC-DC转换器设计FMEA"
+        self.factory_id = _uuid.uuid4()
+
+
+class _OkLlm:
+    async def complete(self, prompt, kwargs):
+        return {"suggestions": [{"name": "边界图", "confidence": 0.85, "explanation": "适合结构分析"}]}
+
+
+class _ThrowLlm:
+    async def complete(self, prompt, kwargs):
+        raise RuntimeError("llm boom")
+
+
+class TestRecommendIntegrationForToolTrend:
+    """dfmea_tool/trend 真正走完 recommend()：规则→（可选）LLM→source 分支。"""
+
+    def _svc(self, llm):
+        return RecommendationService(db=None, llm_provider=llm, graph_repo=StubGraphRepo())
+
+    def _patch(self, svc, monkeypatch):
+        fmea = _StubFmea()
+        monkeypatch.setattr(svc, "_get_fmea_or_404", AsyncMock(return_value=fmea))
+        monkeypatch.setattr(svc, "_get_cached", AsyncMock(return_value=None))
+        monkeypatch.setattr(svc, "_assemble_context", AsyncMock(return_value={}))
+        monkeypatch.setattr(svc, "_cache_result", AsyncMock())
+        monkeypatch.setattr(
+            "app.core.permissions.get_user_permission",
+            AsyncMock(return_value=PermissionLevel.VIEW),
+        )
+        return fmea
+
+    async def test_dfmea_tool_with_llm_returns_suggestions(self, monkeypatch):
+        svc = self._svc(_OkLlm())
+        fmea = self._patch(svc, monkeypatch)
+        req = RecommendRequest(
+            trigger_type="dfmea_tool",
+            context={"task": "分析DC-DC转换器", "fmea_title": fmea.title},
+            scope="current_product_line",
+            include_graph=False,
+        )
+        res = await svc.recommend(fmea.id, req, user=object())
+        assert any(s.name == "边界图" for s in res.suggestions)
+        assert res.source in ("hybrid", "graph_enriched")
+
+    async def test_dfmea_tool_no_llm_returns_empty_with_source_rule(self, monkeypatch):
+        svc = self._svc(None)
+        fmea = self._patch(svc, monkeypatch)
+        req = RecommendRequest(
+            trigger_type="dfmea_tool",
+            context={"task": "分析DC-DC转换器"},
+            scope="current_product_line",
+            include_graph=False,
+        )
+        res = await svc.recommend(fmea.id, req, user=object())
+        assert res.suggestions == []
+        assert res.source == "rule"
+
+    async def test_dfmea_trend_llm_failure_returns_rule_fallback(self, monkeypatch):
+        svc = self._svc(_ThrowLlm())
+        fmea = self._patch(svc, monkeypatch)
+        req = RecommendRequest(
+            trigger_type="dfmea_trend",
+            context={"task": "分析DC-DC转换器"},
+            scope="current_product_line",
+            include_graph=False,
+        )
+        res = await svc.recommend(fmea.id, req, user=object())
+        assert res.source == "rule_fallback"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -442,7 +530,7 @@ Expected: FAIL — `_build_prompt` 对未知 trigger 返回空串（模板不存
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cd backend && pytest tests/test_dfmea_tool_trend_recommendation.py -v`
-Expected: PASS（anchor + build_prompt 全部绿）。
+Expected: PASS（anchor + build_prompt + recommend() 集成全部绿；asyncio_mode=auto 自动运行 async 用例）。
 
 - [ ] **Step 5: 回归既有推荐测试**
 
@@ -469,6 +557,10 @@ git commit -m "feat(recommend): dfmea_tool/trend prompt templates"
 - Produces: 默认导出 `ScopeTagField`，props `{ value: string; onChange: (v: string) => void; presets: string[]; triggerType: "dfmea_tool" | "dfmea_trend"; fmeaId: string; context: Record<string, unknown> }`（Task 6 依赖）
 
 **UX 决策（实现 §5 的 Select-tags 形态）：** 已选项作为 tag 显示在 `Select` 控件内，移除走 tag 原生 ×（antd 内建，上游已测）；下方「快选」仅渲染**未选中**预设为 `+ 名称` chip（点击即加入并从快选行消失），这忠实呈现已批准的 Select-tags 预览（选中项在控件内、未选中项在下方）。
+
+**异步 stale 处理：** ✨AI 请求是异步的，返回前用户可能已改动选择。用 `useRef` 持有最新 `value`，回调里用 `parseScopeTokens(valueRef.current)` 重新计算「已选集合」来过滤 AI 建议，避免用 click 时的旧 `tokenSet`。点击 AI chip 添加时用的是当前 render 的 `tokens`（chip onClick 每次 render 重建，天然最新），故无需额外处理。
+
+**Loading 文案：** AI 按钮在 `aiLoading` 时显示 `t("wizard.scope.aiRecommendLoading")`，否则 `t("wizard.scope.aiRecommend")`，使 Task 5 的两个文案键都被使用（避免死文案）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -599,7 +691,7 @@ Expected: FAIL — "Failed to resolve import … ScopeTagField"。
 `frontend/src/components/dfmea/ScopeTagField.tsx`:
 
 ```tsx
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Select, Button, Tag, Spin, message } from "antd";
 import { StarOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -633,6 +725,11 @@ export default function ScopeTagField({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
 
+  // 用 ref 持有最新 value：异步 AI 回调过滤「已选」时取最新值，
+  // 避免请求返回前用户改动选择造成的 stale tokenSet。
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
   const tokens = parseScopeTokens(value);
   const tokenSet = new Set(tokens);
 
@@ -658,8 +755,9 @@ export default function ScopeTagField({
         include_graph: false,
       });
       const names = res.suggestions.map((s: Suggestion) => s.name).filter(Boolean);
-      // 去重：去掉已选中的、去掉本次内部重复的
-      const fresh = Array.from(new Set(names.filter((n) => !tokenSet.has(n))));
+      // 用 valueRef 取最新已选集合，避免请求返回前用户改动造成的 stale tokenSet
+      const current = new Set(parseScopeTokens(valueRef.current));
+      const fresh = Array.from(new Set(names.filter((n) => !current.has(n))));
       setAiSuggestions(fresh);
       if (fresh.length === 0) {
         message.warning(t("wizard.scope.aiRecommendEmpty"));
@@ -697,7 +795,7 @@ export default function ScopeTagField({
           onClick={handleAiClick}
           disabled={aiLoading}
         >
-          {t("wizard.scope.aiRecommend")}
+          {aiLoading ? t("wizard.scope.aiRecommendLoading") : t("wizard.scope.aiRecommend")}
         </Button>
         {aiSuggestions.map((name) => (
           <Tag
@@ -888,7 +986,7 @@ git commit -m "feat(dfmea): wire ScopeTagField into wizard Step 0 tool/trend fie
 - §7.2 PROMPT_TEMPLATES → Task 3 Step 3。
 - §7.3 anchor 修复 → Task 2 Step 3b/3c。
 - §8 i18n 文案 → Task 5。
-- §9 测试：前端工具函数（Task 1）、组件（Task 4）、后端 anchor（Task 2）、build_prompt（Task 3）。**source 语义说明**：无 LLM→`source="rule"`、LLM 失败→`rule_fallback` 是 `recommend()` 中**既有**分支，本方案未改动该赋值逻辑；其覆盖由既有 `_need_llm*` 测试 + 生产中 5 个 trigger 的长期使用组成，未引入新分支故不新增脆弱的 async 集成测试（YAGNI；新增的 anchor/prompt 逻辑已各有专属单测）。此为有意决定，非遗漏。
+- §9 测试全覆盖：前端工具函数（Task 1）、组件（Task 4）、后端 anchor（Task 2）、build_prompt + recommend() 集成（Task 3）。Task 3 的 `TestRecommendIntegrationForToolTrend` 用 monkeypatch 绕过 db（`_get_fmea_or_404`/`_get_cached`/`_assemble_context`/`_cache_result`）与权限（`get_user_permission`），直接验证新 trigger 走完整链路：mock LLM → 返回建议 + source∈{hybrid,graph_enriched}；无 LLM → 空 + `source="rule"`；LLM 抛异常 → `source="rule_fallback"`。`RuleEngine.evaluate` 对未知 trigger 返回空（quality="generic"，已核实 recommendation_service.py:138-140），不抛异常，故无需 patch rules。
 - §10 范围边界：未触碰 `GenerationWizard.tsx`、team/timeframe/task、wizardScope 存盘结构。
 
 **2. 占位符扫描：** 无 TBD/TODO；每步含可执行命令与完整代码。
