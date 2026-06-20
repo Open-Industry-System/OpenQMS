@@ -389,24 +389,20 @@ describe("computeRowSpans", () => {
   });
 
   it("spans function and mode groups, zeroing non-first rows", () => {
-    // fn1: fm1(2 causes), fm2(1 cause) ; fn2: fm3(1 cause)  → 4 rows
+    // fn1: fm1(2 causes fc1,fc2), fm2(1 cause fc3) ; fn2: fm3(1 cause fc4) → 4 rows
     const nodes = [
       n("fn1", "ProcessItemFunction"), n("fn2", "ProcessItemFunction"),
       n("fm1", "FailureMode"), n("fm2", "FailureMode"), n("fm3", "FailureMode"),
-      n("fc1", "FailureCause"), n("fc2", "FailureCause"), n("fc3", "FailureCause"),
+      n("fc1", "FailureCause"), n("fc2", "FailureCause"),
+      n("fc3", "FailureCause"), n("fc4", "FailureCause"),
     ];
     const edges = [
       e("fn1", "fm1", "HAS_FAILURE_MODE"), e("fn1", "fm2", "HAS_FAILURE_MODE"),
       e("fn2", "fm3", "HAS_FAILURE_MODE"),
       e("fc1", "fm1", "CAUSE_OF"), e("fc2", "fm1", "CAUSE_OF"),
       e("fc3", "fm2", "CAUSE_OF"),
-      e("fm3", "fm3", "CAUSE_OF"), // placeholder: not used; fm3 needs a cause
+      e("fc4", "fm3", "CAUSE_OF"),
     ];
-    // Replace last edge with a real cause for fm3:
-    edges[edges.length - 1] = e("fc3", "fm3", "CAUSE_OF");
-    // Actually give fm3 its own cause node:
-    nodes.push(n("fc4", "FailureCause"));
-    edges[edges.length - 1] = e("fc4", "fm3", "CAUSE_OF");
     const rows = buildRows(nodes, edges);
     expect(rows).toHaveLength(4);
     const spans = computeRowSpans(rows);
