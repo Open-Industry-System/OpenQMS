@@ -90,6 +90,28 @@ function useNextTransitions(): Record<string, { label: string; target: string; i
   };
 }
 
+/**
+ * 拖拽 `dragId` 期间需要折叠子树的节点 ID 集合：被拖节点本身 + 其同级节点
+ * （即其父节点的所有子节点），使被重排的同级层显示为紧凑单行；祖先链路与
+ * 无关分支保持展开。若 dragId 是根节点（无父），仅折叠它自身。
+ */
+function dragCollapsedSubtreeRootIds(roots: StructureTreeNode[], dragId: string): Set<string> {
+  const visit = (tn: StructureTreeNode): Set<string> | null => {
+    const childIds = tn.children.map((c) => c.node.id);
+    if (childIds.includes(dragId)) return new Set(childIds);
+    for (const child of tn.children) {
+      const found = visit(child);
+      if (found) return found;
+    }
+    return null;
+  };
+  for (const root of roots) {
+    const found = visit(root);
+    if (found) return found;
+  }
+  return new Set([dragId]);
+}
+
 export default function FMEAEditorPage() {
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
@@ -459,6 +481,11 @@ export default function FMEAEditorPage() {
   const displayTree = useMemo(
     () => (preview ? buildStructureTree(preview.nodes, preview.edges) : structureTree),
     [preview, structureTree],
+  );
+  // 拖拽期间折叠被拖节点 + 同级节点的子树（祖先链路与无关分支保持展开）
+  const dragCollapseIds = useMemo(
+    () => (draggingNodeId ? dragCollapsedSubtreeRootIds(structureTree, draggingNodeId) : new Set<string>()),
+    [draggingNodeId, structureTree],
   );
   const structureRowHeaderOrder = useMemo(() => getStructureRowHeaderOrder(nodes, edges), [nodes, edges]);
   const rows = useMemo(
@@ -1482,7 +1509,7 @@ export default function FMEAEditorPage() {
                         </Popconfirm>
                       </Space>
                     </div>
-                    {node.id !== draggingNodeId && tn.children.map((c) => renderTreeNode(c))}
+                    {!dragCollapseIds.has(node.id) && tn.children.map((c) => renderTreeNode(c))}
                   </div>
                 );
               };

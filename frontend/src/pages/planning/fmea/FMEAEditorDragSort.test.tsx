@@ -484,6 +484,43 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     });
   });
 
+  it("collapses sibling subtrees during drag but keeps unrelated branches expanded", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [
+        node("pi1", "ProcessItem"), node("pi2", "ProcessItem"),
+        node("ps1", "ProcessStep"), node("ps2", "ProcessStep"), node("ps3", "ProcessStep"),
+        node("we1", "ProcessWorkElement"), node("we2", "ProcessWorkElement"),
+        node("ps4", "ProcessStep"),
+      ],
+      [
+        { source: "pi1", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi1", target: "ps2", type: "HAS_PROCESS_STEP" },
+        { source: "pi1", target: "ps3", type: "HAS_PROCESS_STEP" },
+        { source: "ps1", target: "we1", type: "HAS_WORK_ELEMENT" },
+        { source: "ps2", target: "we2", type: "HAS_WORK_ELEMENT" },
+        { source: "pi2", target: "ps4", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
+    // sanity: both work elements visible before drag
+    expect(screen.getByTestId("fmea-structure-node-we1")).toBeInTheDocument();
+    expect(screen.getByTestId("fmea-structure-node-we2")).toBeInTheDocument();
+
+    fireEvent.dragStart(ps2Handle, { dataTransfer: makeDataTransfer() });
+    await waitFor(() => {
+      // dragged node + its siblings collapse: we1 (ps1's child) and we2 (ps2's child) hidden
+      expect(screen.queryByTestId("fmea-structure-node-we1")).toBeNull();
+      expect(screen.queryByTestId("fmea-structure-node-we2")).toBeNull();
+      // the reordered sibling level (ps1/ps2/ps3) stays visible
+      expect(screen.getByTestId("fmea-structure-node-ps1")).toBeInTheDocument();
+      expect(screen.getByTestId("fmea-structure-node-ps3")).toBeInTheDocument();
+      // unrelated branch (pi2 -> ps4) stays expanded
+      expect(screen.getByTestId("fmea-structure-node-ps4")).toBeInTheDocument();
+    });
+  });
+
   it("previews the sibling reorder during drag-over before drop", async () => {
     mocks.getFMEA.mockResolvedValue(makeDoc(
       "PFMEA",
