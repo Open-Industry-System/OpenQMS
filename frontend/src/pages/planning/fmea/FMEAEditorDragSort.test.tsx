@@ -1,35 +1,21 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { App } from "antd";
 import FMEAEditorPage from "./FMEAEditorPage";
 import type { FMEADocument, GraphEdge, GraphNode } from "../../../types";
 
-class DragDataTransferPolyfill implements DataTransfer {
-  data = new Map<string, string>();
-  dropEffect: "none" | "link" | "copy" | "move" = "none";
-  effectAllowed: "none" | "copy" | "copyLink" | "copyMove" | "link" | "linkMove" | "move" | "all" | "uninitialized" = "uninitialized";
-  files = [] as unknown as FileList;
-  items = [] as unknown as DataTransferItemList;
-  types: ReadonlyArray<string> = [];
-  setData(format: string, value: string): boolean { this.data.set(format, value); return true; }
-  getData(format: string): string { return this.data.get(format) || ""; }
-  clearData(format?: string): boolean { if (format) { this.data.delete(format); } else { this.data.clear(); } return true; }
-  setDragImage(): void {}
-}
-
-class DragEventPolyfill extends MouseEvent {
-  dataTransfer: DataTransfer;
-  constructor(type: string, init: MouseEventInit & { dataTransfer?: DataTransfer } = {}) {
-    super(type, init);
-    this.dataTransfer = init.dataTransfer || new DragDataTransferPolyfill();
-  }
-}
-
-beforeAll(() => {
-  globalThis.DataTransfer = DragDataTransferPolyfill as unknown as typeof DataTransfer;
-  globalThis.DragEvent = DragEventPolyfill as unknown as typeof DragEvent;
-});
+// ============================================================================
+// 浏览器手动测试清单（jsdom 无法覆盖原生 @dnd-kit pointer/collision 真实行为）：
+//   1. 连续拖两次：第一次 swap 后，立刻再拖另一个节点，应能正常排序。
+//   2. 取消拖拽后再拖：拖出树外或按 ESC 取消，状态复位，再拖正常。
+//   3. 跨父级非法拖：拖到不同父级的节点，显示红色非法框 + 松手弹「仅支持同级节点排序」。
+//   4. viewer 不可拖：无编辑权限时 grip 不渲染。
+//   5. 同级合法拖：拖到同级节点的上/下四分之一，显示青色 before/after 线，松手提交排序。
+//   6. 同级折叠不留白、源行降权：拖拽时同级子树折叠无空白、被拖源行变淡。
+// 注：@dnd-kit 拖拽源用 transform/overlay 管，DOM 不按视觉效果实时改；如需调整 live
+// preview 行为，用 @dnd-kit 的 sortable/transform，不要回到原生 HTML5 DnD。
+// ============================================================================
 
 const mocks = vi.hoisted(() => ({
   getFMEA: vi.fn(),
@@ -37,6 +23,40 @@ const mocks = vi.hoisted(() => ({
   transitionFMEA: vi.fn(),
   canEdit: vi.fn(),
   warning: vi.fn(),
+}));
+
+// @dnd-kit/core mock：捕获 DndContext 的 handler 供测试直接驱动（jsdom 无法真实激活
+// PointerSensor + collision），stub useDraggable/useDroppable。这样测试验证的是「我们的
+// 拖拽逻辑（reorder/marker/collapse/warning）」，@dnd-kit 真实连线靠浏览器手测清单。
+const dnd = vi.hoisted(() => ({
+  onDragStart: null as ((e: any) => void) | null,
+  onDragOver: null as ((e: any) => void) | null,
+  onDragEnd: null as ((e: any) => void) | null,
+  onDragCancel: null as (() => void) | null,
+  activeId: null as string | null,
+}));
+
+vi.mock("@dnd-kit/core", () => ({
+  DndContext: ({ children, onDragStart, onDragOver, onDragEnd, onDragCancel }: any) => {
+    dnd.onDragStart = onDragStart;
+    dnd.onDragOver = onDragOver;
+    dnd.onDragEnd = onDragEnd;
+    dnd.onDragCancel = onDragCancel;
+    return children;
+  },
+  DragOverlay: ({ children }: any) => children,
+  useDraggable: ({ id }: { id: string }) => ({
+    attributes: {},
+    listeners: {},
+    setNodeRef: () => {},
+    setActivatorNodeRef: () => {},
+    isDragging: dnd.activeId === id,
+  }),
+  useDroppable: () => ({ setNodeRef: () => {}, isOver: false, rect: { top: 0, height: 40 } }),
+  PointerSensor: function PointerSensor() {},
+  useSensor: () => null,
+  useSensors: () => null,
+  closestCenter: () => null,
 }));
 
 vi.mock("antd", async () => {
@@ -147,21 +167,6 @@ vi.mock("react-i18next", () => ({
 
 const node = (id: string, type: string, name = id): GraphNode => ({ id, type, name, severity: 0, occurrence: 0, detection: 0 });
 
-function makeDataTransfer(): DataTransfer {
-  const data = new Map<string, string>();
-  return {
-    effectAllowed: "",
-    dropEffect: "",
-    setData: vi.fn((format: string, value: string) => data.set(format, value)),
-    getData: vi.fn((format: string) => data.get(format) || ""),
-    clearData: vi.fn((format?: string) => { if (format) { data.delete(format); } else { data.clear(); } }),
-    setDragImage: vi.fn(),
-    files: [] as unknown as FileList,
-    items: [] as unknown as DataTransferItemList,
-    types: [],
-  } as unknown as DataTransfer;
-}
-
 function makeDoc(fmeaType: "PFMEA" | "DFMEA", nodes: GraphNode[], edges: GraphEdge[]): FMEADocument {
   return {
     fmea_id: "fmea-1",
@@ -193,24 +198,41 @@ function renderEditor() {
   );
 }
 
+// 落点 rect：oTop=0, oHeight=40（与原 rect mock 一致）；aTop 即原 clientY 语义：
+//   aTop<10 → before, 10..30 → inside, >30 → after。
+const O_TOP = 0, O_HEIGHT = 40;
+function activeRect(aTop: number) { return { current: { translated: { top: aTop } } }; }
+function overRect() { return { top: O_TOP, height: O_HEIGHT }; }
+
+function driveDragOver(dragId: string, overId: string, aTop: number) {
+  dnd.activeId = dragId;
+  dnd.onDragStart?.({ active: { id: dragId } });
+  dnd.onDragOver?.({ active: { id: dragId, rect: activeRect(aTop) }, over: { id: overId, rect: overRect() } });
+}
+function driveEnd(dragId: string, overId: string, aTop: number) {
+  dnd.onDragEnd?.({ active: { id: dragId, rect: activeRect(aTop) }, over: { id: overId, rect: overRect() } });
+  dnd.activeId = null;
+}
+function driveDrag(dragId: string, overId: string, aTop: number) {
+  driveDragOver(dragId, overId, aTop);
+  driveEnd(dragId, overId, aTop);
+}
+function driveCancel() {
+  dnd.onDragCancel?.();
+  dnd.activeId = null;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.canEdit.mockReturnValue(true);
   mocks.updateFMEA.mockResolvedValue({});
   mocks.transitionFMEA.mockResolvedValue({});
+  dnd.activeId = null;
+  dnd.onDragStart = null;
+  dnd.onDragOver = null;
+  dnd.onDragEnd = null;
+  dnd.onDragCancel = null;
 });
-
-// ============================================================================
-// 浏览器手动测试清单（jsdom 无法覆盖原生 HTML5 DnD 状态，下列项需手动验证）：
-//   1. 连续拖两次：第一次 swap 后，立刻再拖另一个节点，应能正常排序（regression: 拖拽途
-//      中不得改写拖拽源 DOM，否则浏览器 DnD 状态被破坏、后续 dragstart 被忽略）。
-//   2. 取消拖拽后再拖：拖出树外或按 ESC 取消，状态复位（指示线/收起消失），再拖正常。
-//   3. 跨父级非法拖：拖到不同父级的节点，显示红色非法框 + 松手弹「仅支持同级节点排序」。
-//   4. viewer 不可拖：无编辑权限时 grip 不渲染、整行不可拖。
-//   5. 同级合法拖：拖到同级节点的上/下四分之一，显示青色 before/after 线，松手提交排序。
-// 注：live preview（拖拽途中实时重排）已移除——原生 DnD + 拖拽中改写拖拽源 DOM 会破坏
-// 浏览器拖拽状态。如未来需恢复 live preview，请改用 @dnd-kit 等 transform-based DnD。
-// ============================================================================
 
 describe("FMEAEditorPage PFMEA structure drag sorting", () => {
   it("enables dragging for editable PFMEA structure nodes", async () => {
@@ -226,7 +248,7 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const handle = await screen.findByTestId("fmea-structure-drag-handle-ps1");
-    expect(handle).toHaveAttribute("draggable", "true");
+    expect(handle).toBeInTheDocument();
   });
 
   it("does not enable dragging when canEdit('fmea') is false", async () => {
@@ -240,7 +262,7 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    expect(ps1).not.toHaveAttribute("draggable");
+    expect(ps1).toBeInTheDocument();
     expect(screen.queryByTestId("fmea-structure-drag-handle-ps1")).toBeNull();
   });
 
@@ -254,7 +276,7 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const handle = await screen.findByTestId("fmea-structure-drag-handle-sub");
-    expect(handle).toHaveAttribute("draggable", "true");
+    expect(handle).toBeInTheDocument();
   });
 
   it("reorders DFMEA System roots and keeps table rows in structure order", async () => {
@@ -274,16 +296,9 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
 
     renderEditor();
 
-    const sys1 = await screen.findByTestId("fmea-structure-node-sys1");
-    const sys2Handle = await screen.findByTestId("fmea-structure-drag-handle-sys2");
-    vi.spyOn(sys1, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
-    } as DOMRect);
+    await screen.findByTestId("fmea-structure-node-sys1");
 
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(sys2Handle, { dataTransfer });
-    fireEvent.dragOver(sys1, { clientY: 1, dataTransfer });
-    fireEvent.drop(sys1, { clientY: 1, dataTransfer });
+    driveDrag("sys2", "sys1", 1);
 
     await waitFor(() => {
       expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
@@ -317,24 +332,9 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
 
     renderEditor();
 
-    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
-      x: 0,
-      y: 0,
-      top: 0,
-      left: 0,
-      bottom: 40,
-      right: 200,
-      width: 200,
-      height: 40,
-      toJSON: () => ({}),
-    } as DOMRect);
+    await screen.findByTestId("fmea-structure-node-ps1");
 
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
-    fireEvent.drop(ps1, { clientY: 1, dataTransfer });
+    driveDrag("ps2", "ps1", 1);
 
     await waitFor(() => {
       expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
@@ -361,24 +361,9 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
 
     renderEditor();
 
-    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
-      x: 0,
-      y: 0,
-      top: 0,
-      left: 0,
-      bottom: 40,
-      right: 200,
-      width: 200,
-      height: 40,
-      toJSON: () => ({}),
-    } as DOMRect);
+    await screen.findByTestId("fmea-structure-node-ps1");
 
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    fireEvent.dragOver(ps1, { clientY: 20, dataTransfer });
-    fireEvent.drop(ps1, { clientY: 20, dataTransfer });
+    driveDrag("ps2", "ps1", 20);
 
     await waitFor(() => expect(mocks.warning).toHaveBeenCalledWith("messages.sameLevelSortOnly"));
     expect(screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"))).toEqual([
@@ -401,14 +386,8 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
-    } as DOMRect);
 
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
+    driveDragOver("ps2", "ps1", 1);
 
     await waitFor(() => expect(ps1.getAttribute("data-drag-state")).toBe("before"));
   });
@@ -431,18 +410,11 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     renderEditor();
 
     const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    vi.spyOn(ps1, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, bottom: 40, right: 200, width: 200, height: 40, toJSON: () => ({}),
-    } as DOMRect);
 
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    fireEvent.dragOver(ps1, { clientY: 1, dataTransfer });
-
+    driveDragOver("ps2", "ps1", 1);
     await waitFor(() => expect(ps1.getAttribute("data-drag-state")).toBe("invalid"));
 
-    fireEvent.drop(ps1, { clientY: 1, dataTransfer });
+    driveEnd("ps2", "ps1", 1);
     await waitFor(() => expect(mocks.warning).toHaveBeenCalledWith("messages.sameLevelSortOnly"));
     expect(ps1.getAttribute("data-drag-state")).toBeNull();
   });
@@ -457,10 +429,10 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
     expect(ps1).not.toHaveAttribute("draggable");
     const handle = await screen.findByTestId("fmea-structure-drag-handle-ps1");
-    expect(handle).toHaveAttribute("draggable", "true");
+    expect(handle).toBeInTheDocument();
   });
 
-  it("uses the whole row as the drag image", async () => {
+  it("renders a drag overlay for the dragged row", async () => {
     mocks.getFMEA.mockResolvedValue(makeDoc(
       "PFMEA",
       [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
@@ -470,11 +442,86 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
       ],
     ));
     renderEditor();
-    const ps2Row = await screen.findByTestId("fmea-structure-node-ps2");
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
-    const dataTransfer = makeDataTransfer();
-    fireEvent.dragStart(ps2Handle, { dataTransfer });
-    expect(dataTransfer.setDragImage).toHaveBeenCalledWith(ps2Row, 0, 0);
+    await screen.findByTestId("fmea-structure-node-ps2");
+
+    driveDragOver("ps2", "ps1", 1);
+    const overlay = await screen.findByTestId("fmea-structure-drag-overlay-ps2");
+    // overlay renders the dragged row's name (whole-row content, not just a placeholder)
+    expect(overlay).toHaveTextContent("ps2");
+
+    driveEnd("ps2", "ps1", 1);
+    await waitFor(() => {
+      expect(screen.queryByTestId("fmea-structure-drag-overlay-ps2")).toBeNull();
+    });
+  });
+
+  it("shows a valid after marker on a legal same-parent drag-over", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
+    driveDragOver("ps2", "ps1", 35); // > 0.75*40 → after
+    await waitFor(() => expect(ps1.getAttribute("data-drag-state")).toBe("after"));
+  });
+
+  it("resets drag state on cancel and allows a subsequent drag", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const order = () => screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"));
+    await screen.findByTestId("fmea-structure-node-ps1");
+
+    // start a drag (preview marker + overlay + collapse), then cancel
+    driveDragOver("ps2", "ps1", 1);
+    await waitFor(() => expect(screen.getByTestId("fmea-structure-drag-overlay-ps2")).toBeInTheDocument());
+    driveCancel();
+
+    // state fully reset: no overlay, no marker, original order intact
+    await waitFor(() => expect(screen.queryByTestId("fmea-structure-drag-overlay-ps2")).toBeNull());
+    expect(order()).toEqual(["fmea-structure-node-pi", "fmea-structure-node-ps1", "fmea-structure-node-ps2"]);
+
+    // a subsequent drag still works (regression: drag state must not stay stuck)
+    driveDrag("ps2", "ps1", 1);
+    await waitFor(() => expect(order()).toEqual(["fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1"]));
+  });
+
+  it("allows a second drag immediately after a first swap (regression for post-swap drag break)", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep"), node("ps3", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps3", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const order = () => screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"));
+    await screen.findByTestId("fmea-structure-node-ps1");
+
+    // first swap: ps2 before ps1
+    driveDrag("ps2", "ps1", 1);
+    await waitFor(() => expect(order()).toEqual([
+      "fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1", "fmea-structure-node-ps3",
+    ]));
+
+    // second swap immediately after: ps3 before ps2
+    driveDrag("ps3", "ps2", 1);
+    await waitFor(() => expect(order()).toEqual([
+      "fmea-structure-node-pi", "fmea-structure-node-ps3", "fmea-structure-node-ps2", "fmea-structure-node-ps1",
+    ]));
   });
 
   it("hides the dragged node's descendants during drag", async () => {
@@ -487,9 +534,9 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
       ],
     ));
     renderEditor();
-    const piHandle = await screen.findByTestId("fmea-structure-drag-handle-pi");
+    await screen.findByTestId("fmea-structure-drag-handle-pi");
     expect(screen.getByTestId("fmea-structure-node-ps1")).toBeInTheDocument();
-    fireEvent.dragStart(piHandle, { dataTransfer: makeDataTransfer() });
+    driveDragOver("pi", "ps1", 1);
     await waitFor(() => {
       expect(screen.queryByTestId("fmea-structure-node-ps1")).toBeNull();
       expect(screen.queryByTestId("fmea-structure-node-ps2")).toBeNull();
@@ -515,12 +562,12 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
       ],
     ));
     renderEditor();
-    const ps2Handle = await screen.findByTestId("fmea-structure-drag-handle-ps2");
+    await screen.findByTestId("fmea-structure-drag-handle-ps2");
     // sanity: both work elements visible before drag
     expect(screen.getByTestId("fmea-structure-node-we1")).toBeInTheDocument();
     expect(screen.getByTestId("fmea-structure-node-we2")).toBeInTheDocument();
 
-    fireEvent.dragStart(ps2Handle, { dataTransfer: makeDataTransfer() });
+    driveDragOver("ps2", "ps1", 1);
     await waitFor(() => {
       // dragged node + its siblings collapse: we1 (ps1's child) and we2 (ps2's child) hidden
       expect(screen.queryByTestId("fmea-structure-node-we1")).toBeNull();
@@ -532,9 +579,4 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
       expect(screen.getByTestId("fmea-structure-node-ps4")).toBeInTheDocument();
     });
   });
-
-
-
-
-
 });

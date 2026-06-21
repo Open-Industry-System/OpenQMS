@@ -1,6 +1,11 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import {
+  DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
+  useDraggable, useDroppable, closestCenter,
+  type DragStartEvent, type DragOverEvent, type DragEndEvent,
+} from "@dnd-kit/core";
+import {
   Button, Space, Tag, Typography, Input, Select, Table, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
   Divider, Modal, Radio, Form, Dropdown,
@@ -121,11 +126,6 @@ interface StructureTreeRowProps {
   isSelected: boolean;
   dragState: "before" | "after" | "invalid" | null;
   canDragSortStructure: boolean;
-  // 原生 DnD handler（Task 3 替换为 @dnd-kit）
-  onDragStart: (nodeId: string, event: React.DragEvent<HTMLElement>) => void;
-  onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
-  onDrop: (nodeId: string, event: React.DragEvent<HTMLDivElement>) => void;
-  onDragEnd: () => void;
   onSelect: (nodeId: string) => void;
   onRename: (nodeId: string, field: "name", value: string) => void;
   onAddChild: (parent: GraphNode, action: StructureChildAction) => void;
@@ -134,36 +134,25 @@ interface StructureTreeRowProps {
   t: (key: string, options?: Record<string, unknown>) => string;
 }
 
-function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
-  const {
-    node,
-    depth,
-    isStructure,
-    actions,
-    hasRows,
-    isSelected,
-    dragState,
-    canDragSortStructure,
-    onDragStart,
-    onDragOver,
-    onDrop,
-    onDragEnd,
-    onSelect,
-    onRename,
-    onAddChild,
-    onDelete,
-    rowsByFunction,
-    t,
-  } = props;
+function dropPositionFromRects(aTop: number, oTop: number, oHeight: number): StructureDropPosition {
+  const offsetY = aTop - oTop;
+  if (offsetY < oHeight * 0.25) return "before";
+  if (offsetY > oHeight * 0.75) return "after";
+  return "inside";
+}
 
+function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
+  const { node, depth, isStructure, actions, hasRows, isSelected, dragState, canDragSortStructure, onSelect, onRename, onAddChild, onDelete, rowsByFunction, t } = props;
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } =
+    useDraggable({ id: node.id, disabled: !canDragSortStructure });
+  const { setNodeRef: setDropRef } = useDroppable({ id: node.id });
+  const setRowRef = (el: HTMLElement | null) => { setNodeRef(el); setDropRef(el); };
   return (
     <div
+      ref={setRowRef}
       data-testid={`fmea-structure-node-${node.id}`}
       data-node-id={node.id}
       data-drag-state={dragState ?? undefined}
-      onDragOver={onDragOver}
-      onDrop={(e) => onDrop(node.id, e)}
-      onDragEnd={onDragEnd}
       onClick={() => onSelect(node.id)}
       style={{
         padding: "8px 12px",
@@ -171,6 +160,7 @@ function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
         marginLeft: depth * 14,
         borderRadius: 6,
         cursor: "pointer",
+        opacity: isDragging ? 0.3 : undefined,
         background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
         border: isSelected
           ? "1px solid var(--qf-cyan)"
@@ -195,14 +185,10 @@ function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
     >
       {canDragSortStructure && (
         <span
+          ref={setActivatorNodeRef}
+          {...attributes} {...listeners}
           data-testid={`fmea-structure-drag-handle-${node.id}`}
-          draggable
-          onDragStart={(e) => onDragStart(node.id, e)}
-          onDragEnd={onDragEnd}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
-          title={t("editor.dragHandle")}
-          aria-label={t("editor.dragHandle")}
+          title={t("editor.dragHandle")} aria-label={t("editor.dragHandle")}
           style={{
             cursor: "grab",
             color: "var(--qf-text-secondary)",
@@ -213,6 +199,8 @@ function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
             display: "inline-flex",
             alignItems: "center",
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
         >
           <HolderOutlined />
         </span>
@@ -223,9 +211,6 @@ function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
           value={node.name}
           disabled={!canDragSortStructure}
           onChange={(e) => onRename(node.id, "name", e.target.value)}
-          // Stop click/focus from racing the row's setSelectedFunctionId;
-          // select explicitly on focus instead so editing a name also
-          // selects its node (and drives the right-hand spreadsheet).
           onClick={(e) => e.stopPropagation()}
           onFocus={() => onSelect(node.id)}
           style={{
@@ -251,12 +236,6 @@ function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
               items: actions.map((a) => ({
                 key: a.childType,
                 label: t(a.labelKey),
-                // Stop the menu-item click from bubbling to the
-                // outer row (which would select the parent node
-                // and race the later setSelectedFunctionId on
-                // function creation). openAddNode does not itself
-                // change selection, so selection stays stable
-                // until submit.
                 onClick: ({ domEvent }) => {
                   domEvent.stopPropagation();
                   onAddChild(node, a);
@@ -325,7 +304,7 @@ export default function FMEAEditorPage() {
   const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
   const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
-  const dragStructureNodeIdRef = useRef<string | null>(null);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
@@ -780,73 +759,51 @@ export default function FMEAEditorPage() {
     if (selectedFunctionId === node.id) setSelectedFunctionId(null);
   }, [nodes, edges, selectedFunctionId]);
 
-  const getStructureDropPosition = useCallback((event: React.DragEvent<HTMLDivElement>): StructureDropPosition => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.height <= 0) return "inside";
-    const offsetY = event.clientY - rect.top;
-    if (offsetY < rect.height * 0.25) return "before";
-    if (offsetY > rect.height * 0.75) return "after";
-    return "inside";
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const id = String(event.active.id);
+    setActiveNodeId(id);
+    setDraggingNodeId(id);
   }, []);
 
-  const handleStructureDragStart = useCallback((nodeId: string, event: React.DragEvent<HTMLElement>) => {
-    if (!canDragSortStructure) return;
-    dragStructureNodeIdRef.current = nodeId;
-    setDraggingNodeId(nodeId);
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", nodeId);
-    const rowEl = event.currentTarget.closest<HTMLElement>("[data-node-id]");
-    if (rowEl) event.dataTransfer.setDragImage(rowEl, 0, 0);
-  }, [canDragSortStructure]);
-
-  const handleStructureDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    const dragNodeId = dragStructureNodeIdRef.current;
-    if (!canDragSortStructure || !dragNodeId) return;
-    const dropNodeId = (event.currentTarget as HTMLElement).dataset.nodeId;
-    if (!dropNodeId) return;
-    event.preventDefault();
-    const position = getStructureDropPosition(event);
-    const valid = canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
-    event.dataTransfer.dropEffect = valid ? "move" : "none";
-    setDragOver((prev) =>
-      prev && prev.nodeId === dropNodeId && prev.position === position && prev.valid === valid
-        ? prev
-        : { nodeId: dropNodeId, position, valid }
-    );
-  }, [canDragSortStructure, edges, getStructureDropPosition, nodes]);
-
-  const handleStructureDrop = useCallback((dropNodeId: string, event: React.DragEvent<HTMLDivElement>) => {
-    if (!canDragSortStructure) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setDragOver(null);
-    setDraggingNodeId(null);
-
-    const dragNodeId = dragStructureNodeIdRef.current;
-    dragStructureNodeIdRef.current = null;
-    if (!dragNodeId) return;
-
-    const result = reorderStructureSiblings({
-      nodes,
-      edges,
-      dragNodeId,
-      dropNodeId,
-      dropPosition: getStructureDropPosition(event),
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const { active, over } = event;
+    if (!over) { setDragOver(null); return; }
+    const aRect = active.rect.current.translated;
+    const oRect = over.rect;
+    if (!aRect || !oRect) return;
+    const position = dropPositionFromRects(aRect.top, oRect.top, oRect.height);
+    const valid = canReorderStructureSiblings({
+      nodes, edges,
+      dragNodeId: String(active.id), dropNodeId: String(over.id), dropPosition: position,
     });
+    setDragOver((prev) =>
+      prev && prev.nodeId === String(over.id) && prev.position === position && prev.valid === valid
+        ? prev : { nodeId: String(over.id), position, valid }
+    );
+  }, [nodes, edges]);
 
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null);
+    if (!over) return;
+    const aRect = active.rect.current.translated; const oRect = over.rect;
+    if (!aRect || !oRect) return;
+    const dropPosition = dropPositionFromRects(aRect.top, oRect.top, oRect.height);
+    const result = reorderStructureSiblings({
+      nodes, edges, dragNodeId: String(active.id), dropNodeId: String(over.id), dropPosition,
+    });
     if (!result.changed) {
       if (result.reason === "invalid") message.warning(t("messages.sameLevelSortOnly"));
       return;
     }
-
     if (result.nodes !== nodes) setNodes(result.nodes);
     if (result.edges !== edges) setEdges(result.edges);
-  }, [canDragSortStructure, edges, getStructureDropPosition, message, nodes, t]);
+  }, [nodes, edges, message, t]);
 
-  const handleStructureDragEnd = useCallback(() => {
-    dragStructureNodeIdRef.current = null;
-    setDragOver(null);
-    setDraggingNodeId(null);
+  const handleDragCancel = useCallback(() => {
+    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null);
   }, []);
 
   const deleteRow = useCallback((row: FMEARow) => {
@@ -1534,10 +1491,6 @@ export default function FMEAEditorPage() {
                       isSelected={isSelected}
                       dragState={dragState}
                       canDragSortStructure={canDragSortStructure}
-                      onDragStart={handleStructureDragStart}
-                      onDragOver={handleStructureDragOver}
-                      onDrop={handleStructureDrop}
-                      onDragEnd={handleStructureDragEnd}
                       onSelect={setSelectedFunctionId}
                       onRename={(id, field, value) => updateNode(id, field, value)}
                       onAddChild={openAddNode}
@@ -1550,10 +1503,41 @@ export default function FMEAEditorPage() {
                 );
               };
               return (
-                <>
+                <DndContext
+                  sensors={sensors} collisionDetection={closestCenter}
+                  onDragStart={handleDragStart} onDragOver={handleDragOver}
+                  onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}
+                >
                   {structureTree.map((tn) => renderTreeNode(tn))}
                   {structureTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-                </>
+                  <DragOverlay>
+                    {activeNodeId && (() => {
+                      const n = nodes.find((x) => x.id === activeNodeId);
+                      if (!n) return null;
+                      const isStructureRow = ["ProcessItem", "ProcessStep", "ProcessWorkElement", "System", "Subsystem", "Component"].includes(n.type);
+                      return (
+                        <div
+                          data-testid={`fmea-structure-drag-overlay-${activeNodeId}`}
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: 6,
+                            fontSize: 13,
+                            display: "flex",
+                            alignItems: "center",
+                            background: "var(--qf-bg-elevated)",
+                            border: "1px solid var(--qf-cyan)",
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                            color: "var(--qf-text-primary)",
+                          }}
+                        >
+                          <HolderOutlined style={{ color: "var(--qf-text-secondary)", marginRight: 6 }} />
+                          <span style={{ fontWeight: isStructureRow ? 600 : 400 }}>{n.name}</span>
+                          {n.process_number && <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>{n.process_number}</Text>}
+                        </div>
+                      );
+                    })()}
+                  </DragOverlay>
+                </DndContext>
               );
             })()}
           </DataCard>
