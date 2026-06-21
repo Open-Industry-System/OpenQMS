@@ -524,6 +524,24 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     ]));
   });
 
+  it("dims the dragged source row during drag", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
+    expect(ps2.style.opacity).toBe("");
+    driveDragOver("ps2", "ps1", 1);
+    await waitFor(() => expect(ps2.style.opacity).toBe("0.3"));
+    driveEnd("ps2", "ps1", 1);
+    await waitFor(() => expect(ps2.style.opacity).toBe(""));
+  });
+
   it("hides the dragged node's descendants during drag", async () => {
     mocks.getFMEA.mockResolvedValue(makeDoc(
       "PFMEA",
