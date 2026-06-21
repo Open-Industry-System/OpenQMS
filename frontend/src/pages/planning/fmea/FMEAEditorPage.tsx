@@ -146,7 +146,9 @@ function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } =
     useDraggable({ id: node.id, disabled: !canDragSortStructure });
   const { setNodeRef: setDropRef } = useDroppable({ id: node.id });
-  const setRowRef = (el: HTMLElement | null) => { setNodeRef(el); setDropRef(el); };
+  // 合并 draggable + droppable 的 ref 到行 div；useCallback 稳定引用，避免每次渲染
+  // 都触发 ref detach/attach + @dnd-kit 重测（拖拽中 dragOver 频繁重渲染）。
+  const setRowRef = useCallback((el: HTMLElement | null) => { setNodeRef(el); setDropRef(el); }, [setNodeRef, setDropRef]);
   return (
     <div
       ref={setRowRef}
