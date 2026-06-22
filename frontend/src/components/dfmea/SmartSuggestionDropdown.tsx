@@ -183,6 +183,12 @@ export default function SmartSuggestionDropdown({
     <div
       style={{
         width: 360,
+        // Cap height to the viewport so antd's autoAdjustOverflow can always
+        // fit the popup (it opens upward when below has no room). Without this,
+        // a tall popup flipped upward has its top clipped above the viewport
+        // and the page can't scroll to it. Overflow scrolls inside the popup.
+        maxHeight: "calc(100vh - 80px)",
+        overflowY: "auto",
         background: "var(--qf-bg-panel)",
         border: "1px solid var(--qf-border-strong)",
         borderRadius: "var(--qf-radius-md)",
@@ -264,35 +270,42 @@ export default function SmartSuggestionDropdown({
           </Text>
         )}
       </div>
-      {suggestions.map((s, i) => (
-        <div
-          key={`${s.source}-${s.name}-${i}`}
-          onClick={() => handleSelect(s)}
-          style={{
-            padding: "8px 12px",
-            cursor: "pointer",
-            background: i === selectedIndex ? "var(--qf-bg-hover)" : "transparent",
-            borderBottom: i < suggestions.length - 1 ? "1px solid var(--qf-divider)" : "none",
-            transition: "background var(--qf-transition-fast)",
-          }}
-          onMouseEnter={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
-          onMouseLeave={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "transparent"; }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {sourceIcon(s.source)}
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, color: "var(--qf-text-primary)" }}>{s.name}</div>
-              {s.explanation && (
-                <Text type="secondary" style={{ fontSize: 11, color: "var(--qf-text-secondary)" }}>
-                  {s.explanation}
-                </Text>
-              )}
-              <div><SourceTag item={s} t={t} /></div>
+      <div
+        style={{
+          maxHeight: 240,
+          overflowY: "auto",
+        }}
+      >
+        {suggestions.map((s, i) => (
+          <div
+            key={`${s.source}-${s.name}-${i}`}
+            onClick={() => handleSelect(s)}
+            style={{
+              padding: "8px 12px",
+              cursor: "pointer",
+              background: i === selectedIndex ? "var(--qf-bg-hover)" : "transparent",
+              borderBottom: i < suggestions.length - 1 ? "1px solid var(--qf-divider)" : "none",
+              transition: "background var(--qf-transition-fast)",
+            }}
+            onMouseEnter={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
+            onMouseLeave={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "transparent"; }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {sourceIcon(s.source)}
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: "var(--qf-text-primary)" }}>{s.name}</div>
+                {s.explanation && (
+                  <Text type="secondary" style={{ fontSize: 11, color: "var(--qf-text-secondary)" }}>
+                    {s.explanation}
+                  </Text>
+                )}
+                <div><SourceTag item={s} t={t} /></div>
+              </div>
+              {confidenceLabel(s.confidence, t)}
             </div>
-            {confidenceLabel(s.confidence, t)}
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 
