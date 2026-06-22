@@ -43,7 +43,7 @@
 
 **Interfaces:**
 - Consumes: `parseScopeTokens`（`utils/wizardScopeTokens.ts`，已存在——但本任务直接接收 `selectedTools: string[]`，调用方负责 parse）；`GraphNode`/`GraphEdge`（`types`）。
-- Produces: `StructureNodeType = 'Interface' | 'DesignParameter'`；`toolsRequiringNodeType(selectedTools, toolStructureMap, nodeType) → string[]`；`structureGapsForTools(selectedTools, toolStructureMap, nodes, edges) → Array<{ tool: string; nodeType: StructureNodeType }>`。Task 2/3 依赖这些。
+- Produces: `StructureNodeType = 'Interface' | 'DesignParameter'`；`toolsRequiringNodeType(selectedTools, toolStructureMap, nodeType) → string[]`；`structureGapsForTools(selectedTools, toolStructureMap, nodes, edges) → Array<{ tool: string; nodeType: StructureNodeType }>`；`pickParamParent(nodes) → GraphNode | null`（选挂接 parent：Component > System/Subsystem）；`buildAttachedParamNode(parent, nodeType, idFactory) → { node: GraphNode; edge: GraphEdge }`（纯函数构造节点+`HAS_PARAMETER` 边，供组件与测试共用）。Task 2/3/4 依赖这些。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -55,6 +55,8 @@ import type { GraphNode, GraphEdge } from "../types";
 import {
   toolsRequiringNodeType,
   structureGapsForTools,
+  pickParamParent,
+  buildAttachedParamNode,
 } from "./wizardToolStructure";
 
 const MAP: Record<string, string> = {
@@ -102,6 +104,17 @@ describe("structureGapsForTools", () => {
     const edges: GraphEdge[] = []; // no HAS_PARAMETER
     expect(structureGapsForTools(["边界图"], MAP, nodes, edges)).toEqual([{ tool: "边界图", nodeType: "Interface" }]);
   });
+  it("flags a gap when HAS_PARAMETER source is a non-structure node (e.g. a FailureCause)", () => {
+    // 坏边：FailureCause -> Interface 的 HAS_PARAMETER 不算「挂接到结构节点」
+    const nodes = [n("fc1", "FailureCause"), n("iface1", "Interface")];
+    const edges = [e("fc1", "iface1", "HAS_PARAMETER")];
+    expect(structureGapsForTools(["接口矩阵"], MAP, nodes, edges)).toEqual([{ tool: "接口矩阵", nodeType: "Interface" }]);
+  });
+  it("flags a gap when HAS_PARAMETER source node does not exist (dangling edge)", () => {
+    const nodes = [n("iface1", "Interface")];
+    const edges = [e("ghost", "iface1", "HAS_PARAMETER")]; // source 'ghost' not in nodes
+    expect(structureGapsForTools(["接口矩阵"], MAP, nodes, edges)).toEqual([{ tool: "接口矩阵", nodeType: "Interface" }]);
+  });
   it("flags DesignParameter gap when no attached DesignParameter", () => {
     const nodes = [n("comp1", "Component")];
     const edges: GraphEdge[] = [];
@@ -121,6 +134,46 @@ describe("structureGapsForTools", () => {
     ]);
   });
 });
+
+describe("pickParamParent", () => {
+  it("prefers a Component over System/Subsystem", () => {
+    const nodes = [n("sys1", "System"), n("comp1", "Component")];
+    expect(pickParamParent(nodes)?.id).toBe("comp1");
+  });
+  it("falls back to System when no Component", () => {
+    const nodes = [n("sys1", "System"), n("sub1", "Subsystem")];
+    expect(pickParamParent(nodes)?.id).toBe("sys1");
+  });
+  it("falls back to Subsystem when no Component/System", () => {
+    const nodes = [n("sub1", "Subsystem")];
+    expect(pickParamParent(nodes)?.id).toBe("sub1");
+  });
+  it("returns null when no structure node exists", () => {
+    const nodes = [n("fm1", "FailureMode")];
+    expect(pickParamParent(nodes)).toBeNull();
+  });
+  it("returns null for empty nodes", () => {
+    expect(pickParamParent([])).toBeNull();
+  });
+});
+
+describe("buildAttachedParamNode", () => {
+  it("builds an Interface node + HAS_PARAMETER edge to the parent, with interface_type physical", () => {
+    const parent = n("comp1", "Component");
+    const { node, edge } = buildAttachedParamNode(parent, "Interface", () => "fixed-id");
+    expect(node.id).toBe("fixed-id");
+    expect(node.type).toBe("Interface");
+    expect((node as GraphNode & { interface_type?: string }).interface_type).toBe("physical");
+    expect(edge).toEqual({ source: "comp1", target: "fixed-id", type: "HAS_PARAMETER" });
+  });
+  it("builds a DesignParameter node without interface_type", () => {
+    const parent = n("comp1", "Component");
+    const { node, edge } = buildAttachedParamNode(parent, "DesignParameter", () => "dp-id");
+    expect(node.type).toBe("DesignParameter");
+    expect((node as GraphNode & { interface_type?: string }).interface_type).toBeUndefined();
+    expect(edge).toEqual({ source: "comp1", target: "dp-id", type: "HAS_PARAMETER" });
+  });
+});
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -137,6 +190,9 @@ import type { GraphNode, GraphEdge } from "../types";
 
 /** 工具映射的目标结构节点类型（仅结构类工具产生）。 */
 export type StructureNodeType = "Interface" | "DesignParameter";
+
+/** HAS_PARAMETER 边的合法 source：结构节点类型。 */
+const STRUCTURE_PARENT_TYPES = new Set(["System", "Subsystem", "Component"]);
 
 /**
  * 所选工具中、映射到指定 nodeType 的工具列表（去重、保序）。
@@ -160,7 +216,9 @@ export function toolsRequiringNodeType(
 
 /**
  * 所选工具产生的结构缺口：工具→其要求的 nodeType，且该 nodeType 无任何通过
- * HAS_PARAMETER 挂接到结构节点的实例（游离节点不算满足）。
+ * HAS_PARAMETER 挂接到【结构节点】的实例。仅 target 类型匹配不够——还须 source
+ * 存在且为结构节点（System/Subsystem/Component），否则坏边（如 FailureCause→Interface
+ * 或悬空 source）会让缺口错误消失。游离节点不算满足。
  */
 export function structureGapsForTools(
   selectedTools: string[],
@@ -173,7 +231,9 @@ export function structureGapsForTools(
   for (const ed of edges) {
     if (ed.type !== "HAS_PARAMETER") continue;
     const target = nodeById.get(ed.target);
-    if (!target) continue;
+    const source = nodeById.get(ed.source);
+    if (!target || !source) continue; // 悬空 source/target 不算
+    if (!STRUCTURE_PARENT_TYPES.has(source.type)) continue; // source 非结构节点不算
     attachedCountByType.set(target.type, (attachedCountByType.get(target.type) ?? 0) + 1);
   }
 
@@ -189,6 +249,43 @@ export function structureGapsForTools(
     }
   }
   return gaps;
+}
+
+/**
+ * 选 Interface/DesignParameter 的挂接 parent：优先 Component，其次 System/Subsystem。
+ * 无结构节点时返回 null（调用方应提示用户先建结构，不创建游离节点）。
+ */
+export function pickParamParent(nodes: GraphNode[]): GraphNode | null {
+  return (
+    nodes.find((nd) => nd.type === "Component") ??
+    nodes.find((nd) => nd.type === "System") ??
+    nodes.find((nd) => nd.type === "Subsystem") ??
+    null
+  );
+}
+
+/**
+ * 纯函数构造一个挂接到 parent 的 Interface/DesignParameter 节点 + HAS_PARAMETER 边。
+ * idFactory 注入避免在纯函数里碰 crypto（测试可传固定 id）。
+ * 组件的 addAttachedParamNode 是此函数的薄包装（取 parent、调 updateGraphData）。
+ */
+export function buildAttachedParamNode(
+  parent: GraphNode,
+  nodeType: StructureNodeType,
+  idFactory: () => string,
+): { node: GraphNode; edge: GraphEdge } {
+  const id = idFactory();
+  const node: GraphNode = {
+    id,
+    type: nodeType,
+    name: "", // 组件层用 i18n typeLabels 填名；纯函数保持无 i18n 依赖
+    severity: 0,
+    occurrence: 0,
+    detection: 0,
+    ...(nodeType === "Interface" ? { interface_type: "physical" } : {}),
+  };
+  const edge: GraphEdge = { source: parent.id, target: id, type: "HAS_PARAMETER" };
+  return { node, edge };
 }
 ```
 
@@ -304,11 +401,14 @@ describe('useWizardValidation — structure gaps from selected tools', () => {
     expect(result.current.structureGaps).toEqual([]);
   });
 
-  it('does NOT put structure gaps into warnings and does not block canFinish', () => {
+  it('does NOT put structure gaps into warnings (gaps stay separate, never block)', () => {
     const nodes = [n('comp1', 'Component')];
     const { result } = renderHook(() => useWizardValidation(nodes, [], ['接口矩阵'], MAP));
     expect(result.current.structureGaps.length).toBe(1);
-    expect(result.current.warnings).not.toContain(2); // gaps are not warnings
+    // structureGaps is a separate field; gaps must never leak into warnings.
+    // canFinish in DFMEAWizardPage = warnings.length===0 && step3/4/5 complete,
+    // so as long as gaps aren't in warnings, they cannot block finish.
+    expect(result.current.warnings).toEqual([]);
   });
 });
 ```
@@ -518,7 +618,7 @@ git commit -m "feat(dfmea): i18n toolStructureMap (bilingual keys) + tool-guide/
 
 ```tsx
 import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
-import { toolsRequiringNodeType, type StructureNodeType } from '../../../utils/wizardToolStructure';
+import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type StructureNodeType } from '../../../utils/wizardToolStructure';
 ```
 
 - [ ] **Step 2: 调用点传 4 参 + 取映射表/所选工具**
@@ -545,23 +645,16 @@ import { toolsRequiringNodeType, type StructureNodeType } from '../../../utils/w
     const addAttachedParamNode = (nodeType: StructureNodeType) => {
       // Interface/DesignParameter 须通过 HAS_PARAMETER 依附结构节点（不复用 handleAddNode：
       // 后者无 parent 建游离节点、CHILD_EDGE_TYPE 不含 HAS_PARAMETER）。
-      const parent = nodes.find(nd => nd.type === 'Component')
-        || nodes.find(nd => nd.type === 'System' || nd.type === 'Subsystem');
+      // 挂接逻辑由 wizardToolStructure 的纯函数承担（pickParamParent + buildAttachedParamNode），
+      // 便于单测；此处是薄包装。
+      const parent = pickParamParent(nodes);
       if (!parent) {
         message.warning(t('wizard.scope.toolGuideNeedStructure'));
         return;
       }
-      const newNode: GraphNode = {
-        id: `w${crypto.randomUUID()}_${nodeType.toLowerCase()}`,
-        type: nodeType,
-        name: t(`wizard.typeLabels.${nodeType}`, { defaultValue: nodeType }),
-        severity: 0, occurrence: 0, detection: 0,
-        ...(nodeType === 'Interface' ? { interface_type: 'physical' } : {}),
-      };
-      updateGraphData(
-        [...nodes, newNode],
-        [...edges, { source: parent.id, target: newNode.id, type: 'HAS_PARAMETER' }],
-      );
+      const { node, edge } = buildAttachedParamNode(parent, nodeType, () => `w${crypto.randomUUID()}_${nodeType.toLowerCase()}`);
+      const newNode: GraphNode = { ...node, name: t(`wizard.typeLabels.${nodeType}`, { defaultValue: nodeType }) };
+      updateGraphData([...nodes, newNode], [...edges, edge]);
     };
 
     // 工具引导：所选结构类工具、且对应 nodeType 无 HAS_PARAMETER 挂接实例时，提示+一键创建。
@@ -628,7 +721,94 @@ import { toolsRequiringNodeType, type StructureNodeType } from '../../../utils/w
           )}
 ```
 
-- [ ] **Step 5: 类型 + lint + 全量测试**
+- [ ] **Step 5: 写 Step 1 引导卡交互测试**
+
+为给核心 UI 行为加回归保护，新增一个聚焦组件测试：用最小 harness 复刻引导卡的渲染条件（`guideRows`）+ mock 的 `addAttachedParamNode`，断言卡片在有缺口时显示、按钮点击触发创建、无缺口时不显示。`renderStep1` 嵌在页面里难以独立挂载，故测「卡片渲染条件 + 回调」这一可测单元。
+
+`frontend/src/components/dfmea/ToolStructureGuide.test.tsx`:
+
+```tsx
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import type { GraphNode, GraphEdge } from "../../types";
+import { toolsRequiringNodeType, structureGapsForTools } from "../../utils/wizardToolStructure";
+
+// 最小 harness：复刻 renderStep1 里引导卡的渲染条件 + 一键创建回调。
+function GuideHarness({ nodes, edges, selectedTools, map, onAdd }: {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  selectedTools: string[];
+  map: Record<string, string>;
+  onAdd: (nodeType: "Interface" | "DesignParameter") => void;
+}) {
+  const attachedCount = (nt: "Interface" | "DesignParameter") =>
+    edges.filter(ed => ed.type === "HAS_PARAMETER"
+      && nodes.find(nd => nd.id === ed.target)?.type === nt).length;
+  const guideNodeTypes: ("Interface" | "DesignParameter")[] = attachedCount("Interface") === 0 ? ["Interface"] : [];
+  if (attachedCount("DesignParameter") === 0) guideNodeTypes.push("DesignParameter");
+  const guideRows = guideNodeTypes
+    .map(nt => {
+      const tools = toolsRequiringNodeType(selectedTools, map, nt);
+      return tools.length > 0 ? { nodeType: nt, tool: tools[0] } : null;
+    })
+    .filter((r): r is { nodeType: "Interface" | "DesignParameter"; tool: string } => r !== null);
+  if (guideRows.length === 0) return null;
+  return (
+    <div data-testid="guide-card">
+      {guideRows.map(row => (
+        <button key={row.nodeType} data-testid={`add-${row.nodeType}`} onClick={() => onAdd(row.nodeType)}>
+          add {row.nodeType}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const MAP: Record<string, string> = { "接口矩阵": "Interface", "P图/参数图": "DesignParameter" };
+const n = (id: string, type: string): GraphNode => ({ id, type, name: id, severity: 0, occurrence: 0, detection: 0 });
+
+describe("ToolStructureGuide card", () => {
+  it("shows the card with an Interface add button when 接口矩阵 selected and no attached Interface", () => {
+    const nodes = [n("comp1", "Component")];
+    const onAdd = vi.fn();
+    render(<GuideHarness nodes={nodes} edges={[]} selectedTools={["接口矩阵"]} map={MAP} onAdd={onAdd} />);
+    expect(screen.getByTestId("guide-card")).toBeInTheDocument();
+    expect(screen.getByTestId("add-Interface")).toBeInTheDocument();
+  });
+
+  it("does not show the card when the required node is already attached via HAS_PARAMETER", () => {
+    const nodes = [n("comp1", "Component"), n("iface1", "Interface")];
+    const edges: GraphEdge[] = [{ source: "comp1", target: "iface1", type: "HAS_PARAMETER" }];
+    const onAdd = vi.fn();
+    const { container } = render(<GuideHarness nodes={nodes} edges={edges} selectedTools={["接口矩阵"]} map={MAP} onAdd={onAdd} />);
+    expect(container.querySelector("[data-testid='guide-card']")).toBeNull();
+  });
+
+  it("does not show the card when no structure-class tool is selected", () => {
+    const nodes = [n("comp1", "Component")];
+    const onAdd = vi.fn();
+    const { container } = render(<GuideHarness nodes={nodes} edges={[]} selectedTools={["功能分析"]} map={MAP} onAdd={onAdd} />);
+    expect(container.querySelector("[data-testid='guide-card']")).toBeNull();
+  });
+
+  it("calls onAdd with the nodeType when the add button is clicked", () => {
+    const nodes = [n("comp1", "Component")];
+    const onAdd = vi.fn();
+    render(<GuideHarness nodes={nodes} edges={[]} selectedTools={["P图/参数图"]} map={MAP} onAdd={onAdd} />);
+    fireEvent.click(screen.getByTestId("add-DesignParameter"));
+    expect(onAdd).toHaveBeenCalledWith("DesignParameter");
+  });
+});
+```
+
+- [ ] **Step 6: 运行引导卡测试确认通过**
+
+Run: `cd frontend && npm test -- --run src/components/dfmea/ToolStructureGuide.test.tsx`
+Expected: PASS（4 用例绿）。
+
+（`addAttachedParamNode` 的挂接逻辑——parent 推断 + `HAS_PARAMETER` 边构造——已由 Task 1 的 `pickParamParent`/`buildAttachedParamNode` 纯函数测试覆盖；组件层只是薄包装。）
+
+- [ ] **Step 7: 类型 + lint + 全量测试**
 
 Run: `cd frontend && npm run build`
 Expected: tsc --noEmit + vite build 成功（确认 `StructureNodeType` import、`as Record<string,string>` cast、`guideRows` 类型守卫正确）。
@@ -637,9 +817,9 @@ Run: `cd frontend && npm run lint`
 Expected: 无新增 error/warning。
 
 Run: `cd frontend && npm test -- --run`
-Expected: 全绿（Task 1/2 新测 + 既有测试；含既有 `DFMEAWizardPage` 相关测试如有）。
+Expected: 全绿（Task 1/2 + 本任务引导卡测试 + 既有测试）。
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 8: 提交**
 
 ```bash
 git add frontend/src/pages/planning/fmea/DFMEAWizardPage.tsx
@@ -659,7 +839,7 @@ git commit -m "feat(dfmea): Step 1 tool-driven structure guidance + addAttachedP
 - §7.2 调用点传 4 参 → Task 4 Step 2。
 - §7.3 Step 6 黄色缺口块（`#fffbe6`/`#ffe58f`，红黄区分，不阻塞）→ Task 4 Step 4。
 - §8 i18n 全部键（`toolStructureMap`/`toolGuide.*`/`toolGuideNeedStructure`/`addInterfaceNode`/`addDesignParameterNode`/`structureGap`）→ Task 3。
-- §9 测试：`wizardToolStructure.test.ts`（Task 1，含游离节点仍记缺口、多工具同 nodeType 各记一条）、`useWizardValidation.test.tsx`（Task 2，原 3 + 新 4）、回归（Task 4 Step 5）。
+- §9 测试：`wizardToolStructure.test.ts`（Task 1，含游离节点仍记缺口、**坏边 source 非结构节点/悬空 source 仍记缺口**、多工具同 nodeType 各记一条、`pickParamParent` parent 推断、`buildAttachedParamNode` 节点+边构造）、`useWizardValidation.test.tsx`（Task 2，原 3 + 新 4，含 `structureGaps` 不进 `warnings`）、`ToolStructureGuide.test.tsx`（Task 4 Step 5，引导卡显示/隐藏/点击回调）、回归（Task 4 Step 7）。
 - §10 范围边界：未触碰趋势/Step2-5/AI按钮/GenerationWizard/canFinish/handleAddNode/常驻DP按钮。
 
 **2. 占位符扫描：** 无 TBD/TODO；每步含可执行命令与完整代码。
