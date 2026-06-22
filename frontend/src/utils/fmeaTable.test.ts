@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildRows, createRowNodes, getRowEffectNodes, getRowSeverity, computeRowSpans,
-  addEffect, deleteEffect,
+  addEffect, deleteEffect, addCause,
 } from "./fmeaTable";
 import type { GraphNode, GraphEdge } from "../types";
 
@@ -238,5 +238,50 @@ describe("deleteEffect", () => {
     const result = deleteEffect("fm1", "fe1", nodes, edges);
     expect(result.nodes.map((x) => x.id)).not.toContain("fe1");
     expect(result.edges).toHaveLength(0);
+  });
+});
+
+describe("addCause", () => {
+  it("creates a cause + prevention + detection node and CAUSE_OF/PREVENTED_BY/DETECTED_BY edges", () => {
+    const fmNode = n("fm1", "FailureMode");
+    const nodes = [fmNode];
+    const edges: GraphEdge[] = [];
+    const result = addCause("fm1", "PFMEA", mockT, nodes, edges);
+    expect(result.nodes).toHaveLength(4); // fm1 + cause + pc + dc
+    const types = result.nodes.map((x) => x.type);
+    expect(types).toContain("FailureCause");
+    expect(types).toContain("PreventionControl");
+    expect(types).toContain("DetectionControl");
+    expect(result.causeId).toBe(result.nodes.find((x) => x.type === "FailureCause")!.id);
+    expect(result.edges).toHaveLength(3);
+    expect(result.edges).toContainEqual({ source: result.causeId, target: "fm1", type: "CAUSE_OF" });
+    const pcId = result.nodes.find((x) => x.type === "PreventionControl")!.id;
+    const dcId = result.nodes.find((x) => x.type === "DetectionControl")!.id;
+    expect(result.edges).toContainEqual({ source: result.causeId, target: pcId, type: "PREVENTED_BY" });
+    expect(result.edges).toContainEqual({ source: result.causeId, target: dcId, type: "DETECTED_BY" });
+  });
+
+  it("does not create a FailureEffect (effects are shared across causes)", () => {
+    const result = addCause("fm1", "PFMEA", mockT, [n("fm1", "FailureMode")], []);
+    expect(result.nodes.some((x) => x.type === "FailureEffect")).toBe(false);
+  });
+
+  it("DFMEA control names use design labels", () => {
+    const result = addCause("fm1", "DFMEA", mockT, [n("fm1", "FailureMode")], []);
+    const pc = result.nodes.find((x) => x.type === "PreventionControl")!;
+    const dc = result.nodes.find((x) => x.type === "DetectionControl")!;
+    expect(pc.name).toContain("Design");
+    expect(dc.name).toContain("Design");
+  });
+
+  it("appends to existing nodes/edges without mutating inputs", () => {
+    const origNodes = [n("fm1", "FailureMode")];
+    const origEdges: GraphEdge[] = [{ source: "fm1", target: "fe1", type: "EFFECT_OF" }];
+    const result = addCause("fm1", "PFMEA", mockT, origNodes, origEdges);
+    expect(origNodes).toHaveLength(1);
+    expect(origEdges).toHaveLength(1);
+    expect(result.nodes).toHaveLength(4);
+    expect(result.edges).toHaveLength(4); // existing EFFECT_OF + 3 new
+    expect(result.edges).toContainEqual({ source: "fm1", target: "fe1", type: "EFFECT_OF" });
   });
 });

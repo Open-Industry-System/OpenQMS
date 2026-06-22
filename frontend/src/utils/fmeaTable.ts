@@ -318,3 +318,50 @@ export function deleteEffect(fmId: string, effectId: string, nodes: GraphNode[],
   const nextEdges = edgesWithoutThis.filter((e) => e.source !== effectId && e.target !== effectId);
   return { nodes: nextNodes, edges: nextEdges };
 }
+
+/**
+ * Create a new FailureCause + default Prevention/Detection controls for an
+ * existing FailureMode, and return updated arrays. Does NOT create a
+ * FailureEffect — the mode's existing effects are shared across all causes.
+ * The new cause becomes its own row via buildRows (one row per cause).
+ */
+export function addCause(
+  fmId: string,
+  fmeaType: string,
+  t: (key: string) => string,
+  nodes: GraphNode[],
+  edges: GraphEdge[]
+): { nodes: GraphNode[]; edges: GraphEdge[]; causeId: string } {
+  const ts = Date.now();
+  const causeId = `n${ts}_fc_${Math.random().toString(36).slice(2, 6)}`;
+  const pcId = `n${ts}_pc_${Math.random().toString(36).slice(2, 6)}`;
+  const dcId = `n${ts}_dc_${Math.random().toString(36).slice(2, 6)}`;
+  const isDfmea = fmeaType === "DFMEA";
+
+  const causeNode: GraphNode = {
+    id: causeId, type: "FailureCause", name: t("newFailureCause"),
+    severity: 0, occurrence: 0, detection: 0,
+  };
+  const pcNode: GraphNode = {
+    id: pcId, type: "PreventionControl",
+    name: isDfmea ? t("designPreventionControl") : t("processPreventionControl"),
+    severity: 0, occurrence: 0, detection: 0,
+  };
+  const dcNode: GraphNode = {
+    id: dcId, type: "DetectionControl",
+    name: isDfmea ? t("designDetectionControl") : t("processDetectionControl"),
+    severity: 0, occurrence: 0, detection: 0,
+  };
+
+  const newEdges: GraphEdge[] = [
+    { source: causeId, target: fmId, type: "CAUSE_OF" },
+    { source: causeId, target: pcId, type: "PREVENTED_BY" },
+    { source: causeId, target: dcId, type: "DETECTED_BY" },
+  ];
+
+  return {
+    nodes: [...nodes, causeNode, pcNode, dcNode],
+    edges: [...edges, ...newEdges],
+    causeId,
+  };
+}
