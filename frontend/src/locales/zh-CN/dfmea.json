@@ -24,7 +24,22 @@
       "aiRecommend": "✨ AI推荐",
       "aiRecommendLoading": "推荐中…",
       "aiRecommendEmpty": "暂无 AI 建议",
-      "aiRecommendFailed": "AI 推荐失败，请稍后重试"
+      "aiRecommendFailed": "AI 推荐失败，请稍后重试",
+      "toolStructureMap": {
+        "边界图": "Interface",
+        "接口矩阵": "Interface",
+        "P图/参数图": "DesignParameter",
+        "Boundary Diagram": "Interface",
+        "Interface Matrix": "Interface",
+        "Parameter Diagram (P-Diagram)": "DesignParameter"
+      },
+      "toolGuide": {
+        "Interface": "你选了【{{tool}}】，建议为组件创建 Interface 节点，记录物理/信号/能量接口。",
+        "DesignParameter": "你选了【{{tool}}】，建议创建 DesignParameter 节点，定义理想/非理想响应与控制因素。"
+      },
+      "toolGuideNeedStructure": "请先在结构树中创建系统/组件，再添加接口/参数节点。",
+      "addInterfaceNode": "+ 创建接口节点",
+      "addDesignParameterNode": "+ 创建参数节点"
     },
     "structure": {
       "title": "结构分析",
@@ -121,7 +136,8 @@
       "loadFailed": "DFMEA 数据加载失败",
       "conflictTitle": "文档已被修改",
       "conflictContent": "该 FMEA 已被其他会话修改，继续编辑前需要重新加载。未保存的本地改动将被丢弃。",
-      "conflictReload": "重新加载"
+      "conflictReload": "重新加载",
+      "structureGap": "你选了【{{tool}}】但未创建任何 {{nodeType}} 节点，建议补全以体现该分析方式。"
     },
     "guidance": {
       "step0": {

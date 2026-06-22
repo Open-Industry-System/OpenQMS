@@ -24,7 +24,22 @@
       "aiRecommend": "✨ AI Recommend",
       "aiRecommendLoading": "Recommending…",
       "aiRecommendEmpty": "No AI suggestions",
-      "aiRecommendFailed": "AI recommendation failed, please retry"
+      "aiRecommendFailed": "AI recommendation failed, please retry",
+      "toolStructureMap": {
+        "边界图": "Interface",
+        "接口矩阵": "Interface",
+        "P图/参数图": "DesignParameter",
+        "Boundary Diagram": "Interface",
+        "Interface Matrix": "Interface",
+        "Parameter Diagram (P-Diagram)": "DesignParameter"
+      },
+      "toolGuide": {
+        "Interface": "You selected [{{tool}}]. Consider creating Interface nodes for components to record physical/signal/energy interfaces.",
+        "DesignParameter": "You selected [{{tool}}]. Consider creating DesignParameter nodes to define ideal/non-ideal responses and control factors."
+      },
+      "toolGuideNeedStructure": "Please create a system/component in the structure tree first, then add interface/parameter nodes.",
+      "addInterfaceNode": "+ Add interface node",
+      "addDesignParameterNode": "+ Add parameter node"
     },
     "structure": {
       "title": "Structure Analysis",
@@ -121,7 +136,8 @@
       "loadFailed": "Failed to load DFMEA data",
       "conflictTitle": "Document Modified",
       "conflictContent": "This FMEA was modified by another session. Reload is required before editing. Your unsaved local changes will be discarded.",
-      "conflictReload": "Reload"
+      "conflictReload": "Reload",
+      "structureGap": "You selected [{{tool}}] but no {{nodeType}} node exists. Consider adding one to reflect that analysis method."
     },
     "guidance": {
       "step0": {
