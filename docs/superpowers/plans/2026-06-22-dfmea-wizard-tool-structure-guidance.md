@@ -12,7 +12,7 @@
 
 - 仅 3 个结构类工具映射：边界图/接口矩阵 → `Interface`；P图/参数图 → `DesignParameter`。功能分析/FTA/DFMEA模板/历史经验教训库不映射。
 - 仅「工具」字段；「趋势」不动。
-- 缺口判定按 **`HAS_PARAMETER` 挂接实例**计数（`attachedCount = edges.filter(HAS_PARAMETER && target node type===nodeType).length`），**非全局 node type 计数**；游离同类型节点不算满足。引导卡显示条件同此。
+- 缺口判定按 **`HAS_PARAMETER` 挂接实例**计数：`attachedCount` = `edges.filter(e.type==='HAS_PARAMETER' && target node type===nodeType && source 存在且 source.type∈{System,Subsystem,Component}).length`，**非全局 node type 计数**；游离同类型节点、坏边（source 非结构节点或悬空）不算满足。引导卡显示条件同此。
 - 一键创建用新增 `addAttachedParamNode(nodeType)`，**不复用 `handleAddNode`**（后者无 parent 建游离节点、`CHILD_EDGE_TYPE` 不含 `HAS_PARAMETER`）。新函数推断 parent（Component > System/Subsystem），加 `HAS_PARAMETER` 边；无结构节点时 `message.warning` 不创建。
 - `structureGaps` **不进 `warnings`**、不阻塞 `canFinish`；Step 6 新增**黄色**块（`#fffbe6` 底 + `#ffe58f` 边），与现有**红色**块（`#fff2f0` + `#ffccc7`，阻塞 warnings）区分。
 - `toolStructureMap` i18n 对象：**两 locale 内容完全相同**且**同时含 zh+en key**（语言无关，防切语言失效）。
@@ -658,9 +658,11 @@ import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type S
     };
 
     // 工具引导：所选结构类工具、且对应 nodeType 无 HAS_PARAMETER 挂接实例时，提示+一键创建。
+    // 挂接判定与 structureGapsForTools 一致：须 source 存在且为结构节点。
     const attachedCount = (nodeType: StructureNodeType) =>
       edges.filter(ed => ed.type === 'HAS_PARAMETER'
-        && nodes.find(nd => nd.id === ed.target)?.type === nodeType).length;
+        && nodes.find(nd => nd.id === ed.target)?.type === nodeType
+        && ['System', 'Subsystem', 'Component'].includes(nodes.find(nd => nd.id === ed.source)?.type ?? '')).length;
     const guideNodeTypes: StructureNodeType[] = attachedCount('Interface') === 0 ? ['Interface'] : [];
     if (attachedCount('DesignParameter') === 0) guideNodeTypes.push('DesignParameter');
     const guideRows = guideNodeTypes
@@ -731,7 +733,7 @@ import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type S
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { GraphNode, GraphEdge } from "../../types";
-import { toolsRequiringNodeType, structureGapsForTools } from "../../utils/wizardToolStructure";
+import { toolsRequiringNodeType } from "../../utils/wizardToolStructure";
 
 // 最小 harness：复刻 renderStep1 里引导卡的渲染条件 + 一键创建回调。
 function GuideHarness({ nodes, edges, selectedTools, map, onAdd }: {
@@ -743,7 +745,8 @@ function GuideHarness({ nodes, edges, selectedTools, map, onAdd }: {
 }) {
   const attachedCount = (nt: "Interface" | "DesignParameter") =>
     edges.filter(ed => ed.type === "HAS_PARAMETER"
-      && nodes.find(nd => nd.id === ed.target)?.type === nt).length;
+      && nodes.find(nd => nd.id === ed.target)?.type === nt
+      && ["System", "Subsystem", "Component"].includes(nodes.find(nd => nd.id === ed.source)?.type ?? "")).length;
   const guideNodeTypes: ("Interface" | "DesignParameter")[] = attachedCount("Interface") === 0 ? ["Interface"] : [];
   if (attachedCount("DesignParameter") === 0) guideNodeTypes.push("DesignParameter");
   const guideRows = guideNodeTypes
@@ -822,7 +825,7 @@ Expected: 全绿（Task 1/2 + 本任务引导卡测试 + 既有测试）。
 - [ ] **Step 8: 提交**
 
 ```bash
-git add frontend/src/pages/planning/fmea/DFMEAWizardPage.tsx
+git add frontend/src/pages/planning/fmea/DFMEAWizardPage.tsx frontend/src/components/dfmea/ToolStructureGuide.test.tsx
 git commit -m "feat(dfmea): Step 1 tool-driven structure guidance + addAttachedParamNode + Step 6 gap block"
 ```
 
