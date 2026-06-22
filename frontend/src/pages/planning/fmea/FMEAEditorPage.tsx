@@ -915,17 +915,24 @@ export default function FMEAEditorPage() {
         const node = nodeMap.get(row.failureModeNodeId);
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <SmartSuggestionDropdown
-              triggerType="failure_mode"
-              context={{
-                function_description: nodeMap.get(row.functionNodeId)?.name || "",
-              }}
-              fmeaId={fmeaId}
-              value={node?.name || ""}
-              onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
-              onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
-              disabled={!canEdit('fmea')}
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <SmartSuggestionDropdown
+                triggerType="failure_mode"
+                context={{
+                  function_description: nodeMap.get(row.functionNodeId)?.name || "",
+                }}
+                fmeaId={fmeaId}
+                value={node?.name || ""}
+                onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
+                onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
+                disabled={!canEdit('fmea')}
+              />
+              {canEdit('fmea') && (
+                <Popconfirm title={t("editor.confirmDeleteMode")} onConfirm={() => handleDeleteMode(row.failureModeNodeId)}>
+                  <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={t("editor.deleteFailureMode")} />
+                </Popconfirm>
+              )}
+            </div>
             {canEdit('fmea') && (
               <Button
                 size="small"
@@ -935,11 +942,6 @@ export default function FMEAEditorPage() {
               >
                 {t("editor.addFailureMode")}
               </Button>
-            )}
-            {canEdit('fmea') && (
-              <Popconfirm title={t("editor.confirmDeleteMode")} onConfirm={() => handleDeleteMode(row.failureModeNodeId)}>
-                <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={t("editor.deleteFailureMode")} />
-              </Popconfirm>
             )}
           </div>
         );
