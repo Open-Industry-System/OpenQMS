@@ -18,7 +18,13 @@
       "tool": "Tool",
       "task": "Task",
       "trend": "Trend",
-      "legacyTimeframe": "Legacy value: {{value}} (re-select to update)"
+      "legacyTimeframe": "Legacy value: {{value}} (re-select to update)",
+      "toolPresets": ["Boundary Diagram", "Parameter Diagram (P-Diagram)", "Interface Matrix", "Function Analysis", "Fault Tree Analysis (FTA)", "DFMEA Template", "Lessons Learned Library"],
+      "trendPresets": ["Historical FMEA", "Field/Warranty Data", "Customer Complaints", "CAPA Records", "Recall/Regulatory Data", "Audit Findings", "Design Change History"],
+      "aiRecommend": "✨ AI Recommend",
+      "aiRecommendLoading": "Recommending…",
+      "aiRecommendEmpty": "No AI suggestions",
+      "aiRecommendFailed": "AI recommendation failed, please retry"
     },
     "structure": {
       "title": "Structure Analysis",
@@ -254,7 +260,8 @@
     "noPermission": "No permission to use recommendations",
     "serviceUnavailable": "Recommendation service unavailable",
     "aiUnavailable": "AI suggestions unavailable, rule engine fallback used",
-    "ruleOnlyMode": "Rule engine only mode"
+    "ruleOnlyMode": "Rule engine only mode",
+    "close": "Close"
   },
   "structureTree": {
     "addSystem": "Add System",

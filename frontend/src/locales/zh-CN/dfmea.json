@@ -18,7 +18,13 @@
       "tool": "工具",
       "task": "任务",
       "trend": "趋势",
-      "legacyTimeframe": "当前旧格式值：{{value}}（重新选择以更新）"
+      "legacyTimeframe": "当前旧格式值：{{value}}（重新选择以更新）",
+      "toolPresets": ["边界图", "P图/参数图", "接口矩阵", "功能分析", "故障树分析", "DFMEA模板", "历史经验教训库"],
+      "trendPresets": ["历史FMEA", "售后/现场故障数据", "客户投诉", "CAPA记录", "召回/法规数据", "审核发现", "设计变更历史"],
+      "aiRecommend": "✨ AI推荐",
+      "aiRecommendLoading": "推荐中…",
+      "aiRecommendEmpty": "暂无 AI 建议",
+      "aiRecommendFailed": "AI 推荐失败，请稍后重试"
     },
     "structure": {
       "title": "结构分析",
@@ -254,7 +260,8 @@
     "noPermission": "无权限使用推荐功能",
     "serviceUnavailable": "推荐服务暂不可用",
     "aiUnavailable": "AI 建议暂不可用，已使用规则引擎",
-    "ruleOnlyMode": "仅规则引擎模式"
+    "ruleOnlyMode": "仅规则引擎模式",
+    "close": "关闭"
   },
   "structureTree": {
     "addSystem": "添加系统",

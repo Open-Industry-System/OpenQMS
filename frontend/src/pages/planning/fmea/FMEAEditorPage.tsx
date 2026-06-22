@@ -1,6 +1,11 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import {
+  DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
+  useDraggable, useDroppable, closestCenter,
+  type DragStartEvent, type DragOverEvent, type DragEndEvent,
+} from "@dnd-kit/core";
+import {
   Button, Space, Tag, Typography, Input, Select, Table, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
   Divider, Modal, Radio, Form, Dropdown,
@@ -92,26 +97,159 @@ function useNextTransitions(): Record<string, { label: string; target: string; i
   };
 }
 
-/**
- * 拖拽 `dragId` 期间需要折叠子树的节点 ID 集合：被拖节点本身 + 其同级节点
- * （即其父节点的所有子节点），使被重排的同级层显示为紧凑单行；祖先链路与
- * 无关分支保持展开。若 dragId 是根节点（无父），仅折叠它自身。
- */
-function dragCollapsedSubtreeRootIds(roots: StructureTreeNode[], dragId: string): Set<string> {
-  const visit = (tn: StructureTreeNode): Set<string> | null => {
-    const childIds = tn.children.map((c) => c.node.id);
-    if (childIds.includes(dragId)) return new Set(childIds);
-    for (const child of tn.children) {
-      const found = visit(child);
-      if (found) return found;
-    }
-    return null;
-  };
-  for (const root of roots) {
-    const found = visit(root);
-    if (found) return found;
-  }
-  return new Set([dragId]);
+interface StructureTreeRowProps {
+  node: GraphNode;
+  depth: number;
+  isStructure: boolean;
+  actions: StructureChildAction[];
+  hasRows: boolean;
+  isSelected: boolean;
+  dragState: "before" | "after" | "invalid" | null;
+  canDragSortStructure: boolean;
+  onSelect: (nodeId: string) => void;
+  onRename: (nodeId: string, field: "name", value: string) => void;
+  onAddChild: (parent: GraphNode, action: StructureChildAction) => void;
+  onDelete: (node: GraphNode) => void;
+  rowsByFunction: Record<string, FMEARow[]>;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}
+
+function dropPositionFromRects(aTop: number, oTop: number, oHeight: number): StructureDropPosition {
+  const offsetY = aTop - oTop;
+  if (offsetY < oHeight * 0.25) return "before";
+  if (offsetY > oHeight * 0.75) return "after";
+  return "inside";
+}
+
+function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
+  const { node, depth, isStructure, actions, hasRows, isSelected, dragState, canDragSortStructure, onSelect, onRename, onAddChild, onDelete, rowsByFunction, t } = props;
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } =
+    useDraggable({ id: node.id, disabled: !canDragSortStructure });
+  const { setNodeRef: setDropRef } = useDroppable({ id: node.id });
+  // 合并 draggable + droppable 的 ref 到行 div；useCallback 稳定引用，避免每次渲染
+  // 都触发 ref detach/attach + @dnd-kit 重测（拖拽中 dragOver 频繁重渲染）。
+  const setRowRef = useCallback((el: HTMLElement | null) => { setNodeRef(el); setDropRef(el); }, [setNodeRef, setDropRef]);
+  return (
+    <div
+      ref={setRowRef}
+      data-testid={`fmea-structure-node-${node.id}`}
+      data-node-id={node.id}
+      data-drag-state={dragState ?? undefined}
+      onClick={() => onSelect(node.id)}
+      style={{
+        padding: "8px 12px",
+        marginBottom: 6,
+        marginLeft: depth * 14,
+        borderRadius: 6,
+        cursor: "pointer",
+        opacity: isDragging ? 0.3 : undefined,
+        background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
+        border: isSelected
+          ? "1px solid var(--qf-cyan)"
+          : dragState === "invalid"
+            ? "1px solid rgba(255, 77, 79, 0.7)"
+            : "1px solid var(--qf-border)",
+        boxShadow:
+          dragState === "before"
+            ? "0 -2px 0 0 var(--qf-cyan)"
+            : dragState === "after"
+              ? "0 2px 0 0 var(--qf-cyan)"
+              : undefined,
+        fontSize: 13,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        transition: "background 0.2s, border-color 0.2s",
+        color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
+      }}
+      onMouseEnter={(e) => { if (!isSelected && !dragState) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
+    >
+      {canDragSortStructure && (
+        <span
+          ref={setActivatorNodeRef}
+          {...attributes} {...listeners}
+          data-testid={`fmea-structure-drag-handle-${node.id}`}
+          title={t("editor.dragHandle")} aria-label={t("editor.dragHandle")}
+          style={{
+            cursor: "grab",
+            color: "var(--qf-text-secondary)",
+            opacity: 0.35,
+            transition: "opacity 0.15s",
+            marginRight: 6,
+            flexShrink: 0,
+            display: "inline-flex",
+            alignItems: "center",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
+        >
+          <HolderOutlined />
+        </span>
+      )}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <Input
+          variant="borderless"
+          value={node.name}
+          disabled={!canDragSortStructure}
+          onChange={(e) => onRename(node.id, "name", e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onFocus={() => onSelect(node.id)}
+          style={{
+            padding: 0,
+            background: "transparent",
+            fontWeight: isStructure ? 600 : 400,
+            lineHeight: "1.5",
+            color: "inherit",
+          }}
+        />
+        {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
+      </div>
+      <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
+        {hasRows && (
+          <Tag style={{ fontSize: 10, lineHeight: "16px", background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
+            {rowsByFunction[node.id].length}
+          </Tag>
+        )}
+        {actions.length > 0 && (
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: actions.map((a) => ({
+                key: a.childType,
+                label: t(a.labelKey),
+                onClick: ({ domEvent }) => {
+                  domEvent.stopPropagation();
+                  onAddChild(node, a);
+                },
+              })),
+            }}
+          >
+            <Button
+              size="small"
+              type="text"
+              icon={<PlusOutlined />}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </Dropdown>
+        )}
+        <Popconfirm
+          title={t("editor.confirmDeleteNode")}
+          onConfirm={() => onDelete(node)}
+          onCancel={(e) => e?.stopPropagation()}
+        >
+          <Button
+            size="small"
+            type="text"
+            danger
+            disabled={!canDragSortStructure}
+            icon={<DeleteOutlined />}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Popconfirm>
+      </Space>
+    </div>
+  );
 }
 
 export default function FMEAEditorPage() {
@@ -148,9 +286,13 @@ export default function FMEAEditorPage() {
   const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
   const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
-  const dragStructureNodeIdRef = useRef<string | null>(null);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  // live-reorder preview：拖拽经过合法同级时，复用 reorderStructureSiblings 计算重排后的
+  // nodes/edges，仅用于左侧树的视觉让位（displayTree），松手才 setNodes/setEdges 提交。
+  // @dnd-kit 用 pointer events + DragOverlay，源 DOM 不动 → 重排兄弟不破坏拖拽状态。
+  const [preview, setPreview] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
@@ -513,10 +655,18 @@ export default function FMEAEditorPage() {
   const isDFMEA = fmeaType === "DFMEA";
   const canDragSortStructure = canEdit("fmea");
   const structureTree = useMemo(() => buildStructureTree(nodes, edges), [nodes, edges]);
-  // 拖拽期间折叠被拖节点 + 同级节点的子树（祖先链路与无关分支保持展开）
+  // live-reorder 预览树：拖拽经过合法同级时按 preview 重排兄弟，让用户看到落点、提高成功率。
+  // 松手提交 / 取消回滚（preview 清空 → 回到真实顺序）。
+  const displayTree = useMemo(
+    () => (preview ? buildStructureTree(preview.nodes, preview.edges) : structureTree),
+    [preview, structureTree],
+  );
+  // 拖拽期间只折叠被拖节点自身的子树（其子节点在它下方，隐藏不位移被拖节点）。
+  // 不折叠同级节点：同级折叠（display:none）会下移被拖节点，而 @dnd-kit 的
+  // DragOverlay 在折叠后才测量被拖节点 rect → overlay 错位（越靠下的节点错位越大）。
   const dragCollapseIds = useMemo(
-    () => (draggingNodeId ? dragCollapsedSubtreeRootIds(structureTree, draggingNodeId) : new Set<string>()),
-    [draggingNodeId, structureTree],
+    () => (draggingNodeId ? new Set([draggingNodeId]) : new Set<string>()),
+    [draggingNodeId],
   );
   const structureRowHeaderOrder = useMemo(() => getStructureRowHeaderOrder(nodes, edges), [nodes, edges]);
   const rows = useMemo(
@@ -640,73 +790,60 @@ export default function FMEAEditorPage() {
     if (selectedFunctionId === node.id) setSelectedFunctionId(null);
   }, [nodes, edges, selectedFunctionId]);
 
-  const getStructureDropPosition = useCallback((event: React.DragEvent<HTMLDivElement>): StructureDropPosition => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.height <= 0) return "inside";
-    const offsetY = event.clientY - rect.top;
-    if (offsetY < rect.height * 0.25) return "before";
-    if (offsetY > rect.height * 0.75) return "after";
-    return "inside";
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const id = String(event.active.id);
+    setActiveNodeId(id);
+    setDraggingNodeId(id);
+    setPreview(null);
   }, []);
 
-  const handleStructureDragStart = useCallback((nodeId: string, event: React.DragEvent<HTMLElement>) => {
-    if (!canDragSortStructure) return;
-    dragStructureNodeIdRef.current = nodeId;
-    setDraggingNodeId(nodeId);
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", nodeId);
-    const rowEl = event.currentTarget.closest<HTMLElement>("[data-node-id]");
-    if (rowEl) event.dataTransfer.setDragImage(rowEl, 0, 0);
-  }, [canDragSortStructure]);
-
-  const handleStructureDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    const dragNodeId = dragStructureNodeIdRef.current;
-    if (!canDragSortStructure || !dragNodeId) return;
-    const dropNodeId = (event.currentTarget as HTMLElement).dataset.nodeId;
-    if (!dropNodeId) return;
-    event.preventDefault();
-    const position = getStructureDropPosition(event);
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const { active, over } = event;
+    if (!over) { setDragOver(null); setPreview(null); return; }
+    const aRect = active.rect.current.translated;
+    const oRect = over.rect;
+    if (!aRect || !oRect) return;
+    const dragNodeId = String(active.id);
+    const dropNodeId = String(over.id);
+    const position = dropPositionFromRects(aRect.top, oRect.top, oRect.height);
     const valid = canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
-    event.dataTransfer.dropEffect = valid ? "move" : "none";
     setDragOver((prev) =>
       prev && prev.nodeId === dropNodeId && prev.position === position && prev.valid === valid
-        ? prev
-        : { nodeId: dropNodeId, position, valid }
+        ? prev : { nodeId: dropNodeId, position, valid }
     );
-  }, [canDragSortStructure, edges, getStructureDropPosition, nodes]);
+    // live preview：合法且确实会重排时，算出重排后的 nodes/edges 让兄弟实时让位；
+    // 非法/无变化清空预览回真实顺序。dragNodeId===dropNodeId（自悬）时 reorderStructureSiblings
+    // 返回 changed:false，天然清空，不会自激振荡（@dnd-kit overlay 不依赖源 DOM 位置）。
+    if (valid) {
+      const result = reorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
+      setPreview(result.changed ? { nodes: result.nodes, edges: result.edges } : null);
+    } else {
+      setPreview(null);
+    }
+  }, [nodes, edges]);
 
-  const handleStructureDrop = useCallback((dropNodeId: string, event: React.DragEvent<HTMLDivElement>) => {
-    if (!canDragSortStructure) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setDragOver(null);
-    setDraggingNodeId(null);
-
-    const dragNodeId = dragStructureNodeIdRef.current;
-    dragStructureNodeIdRef.current = null;
-    if (!dragNodeId) return;
-
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null); setPreview(null);
+    if (!over) return;
+    const aRect = active.rect.current.translated; const oRect = over.rect;
+    if (!aRect || !oRect) return;
+    const dropPosition = dropPositionFromRects(aRect.top, oRect.top, oRect.height);
     const result = reorderStructureSiblings({
-      nodes,
-      edges,
-      dragNodeId,
-      dropNodeId,
-      dropPosition: getStructureDropPosition(event),
+      nodes, edges, dragNodeId: String(active.id), dropNodeId: String(over.id), dropPosition,
     });
-
     if (!result.changed) {
       if (result.reason === "invalid") message.warning(t("messages.sameLevelSortOnly"));
       return;
     }
-
     if (result.nodes !== nodes) setNodes(result.nodes);
     if (result.edges !== edges) setEdges(result.edges);
-  }, [canDragSortStructure, edges, getStructureDropPosition, message, nodes, t]);
+  }, [nodes, edges, message, t]);
 
-  const handleStructureDragEnd = useCallback(() => {
-    dragStructureNodeIdRef.current = null;
-    setDragOver(null);
-    setDraggingNodeId(null);
+  const handleDragCancel = useCallback(() => {
+    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null); setPreview(null);
   }, []);
 
   const deleteRow = useCallback((row: FMEARow) => {
@@ -1374,146 +1511,62 @@ export default function FMEAEditorPage() {
                     : null;
                 return (
                   <div key={node.id}>
-                    <div
-                      data-testid={`fmea-structure-node-${node.id}`}
-                      data-node-id={node.id}
-                      data-drag-state={dragState ?? undefined}
-                      onDragOver={handleStructureDragOver}
-                      onDrop={(e) => handleStructureDrop(node.id, e)}
-                      onDragEnd={handleStructureDragEnd}
-                      onClick={() => setSelectedFunctionId(node.id)}
-                      style={{
-                        padding: "8px 12px",
-                        marginBottom: 6,
-                        marginLeft: tn.depth * 14,
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
-                        border: isSelected
-                          ? "1px solid var(--qf-cyan)"
-                          : dragState === "invalid"
-                            ? "1px solid rgba(255, 77, 79, 0.7)"
-                            : "1px solid var(--qf-border)",
-                        boxShadow:
-                          dragState === "before"
-                            ? "0 -2px 0 0 var(--qf-cyan)"
-                            : dragState === "after"
-                              ? "0 2px 0 0 var(--qf-cyan)"
-                              : undefined,
-                        fontSize: 13,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        transition: "background 0.2s, border-color 0.2s",
-                        color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
-                      }}
-                      onMouseEnter={(e) => { if (!isSelected && !dragState) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
-                    >
-                      {canDragSortStructure && (
-                        <span
-                          data-testid={`fmea-structure-drag-handle-${node.id}`}
-                          draggable
-                          onDragStart={(e) => handleStructureDragStart(node.id, e)}
-                          onDragEnd={handleStructureDragEnd}
-                          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
-                          title={t("editor.dragHandle")}
-                          aria-label={t("editor.dragHandle")}
-                          style={{
-                            cursor: "grab",
-                            color: "var(--qf-text-secondary)",
-                            opacity: 0.35,
-                            transition: "opacity 0.15s",
-                            marginRight: 6,
-                            flexShrink: 0,
-                            display: "inline-flex",
-                            alignItems: "center",
-                          }}
-                        >
-                          <HolderOutlined />
-                        </span>
-                      )}
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <Input
-                          variant="borderless"
-                          value={node.name}
-                          disabled={!canEdit('fmea')}
-                          onChange={(e) => updateNode(node.id, "name", e.target.value)}
-                          // Stop click/focus from racing the row's setSelectedFunctionId;
-                          // select explicitly on focus instead so editing a name also
-                          // selects its node (and drives the right-hand spreadsheet).
-                          onClick={(e) => e.stopPropagation()}
-                          onFocus={() => setSelectedFunctionId(node.id)}
-                          style={{
-                            padding: 0,
-                            background: "transparent",
-                            fontWeight: isStructure ? 600 : 400,
-                            lineHeight: "1.5",
-                            color: "inherit",
-                          }}
-                        />
-                        {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
-                      </div>
-                      <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
-                        {hasRows && (
-                          <Tag style={{ fontSize: 10, lineHeight: "16px", background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
-                            {rowsByFunction[node.id].length}
-                          </Tag>
-                        )}
-                        {actions.length > 0 && (
-                          <Dropdown
-                            trigger={["click"]}
-                            menu={{
-                              items: actions.map((a) => ({
-                                key: a.childType,
-                                label: t(a.labelKey),
-                                // Stop the menu-item click from bubbling to the
-                                // outer row (which would select the parent node
-                                // and race the later setSelectedFunctionId on
-                                // function creation). openAddNode does not itself
-                                // change selection, so selection stays stable
-                                // until submit.
-                                onClick: ({ domEvent }) => {
-                                  domEvent.stopPropagation();
-                                  openAddNode(node, a);
-                                },
-                              })),
-                            }}
-                          >
-                            <Button
-                              size="small"
-                              type="text"
-                              icon={<PlusOutlined />}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          </Dropdown>
-                        )}
-                        <Popconfirm
-                          title={t("editor.confirmDeleteNode")}
-                          onConfirm={() => deleteSubtreeNode(node)}
-                          onCancel={(e) => e?.stopPropagation()}
-                        >
-                          <Button
-                            size="small"
-                            type="text"
-                            danger
-                            disabled={!canEdit('fmea')}
-                            icon={<DeleteOutlined />}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </Popconfirm>
-                      </Space>
-                    </div>
+                    <StructureTreeRow
+                      node={node}
+                      depth={tn.depth}
+                      isStructure={isStructure}
+                      actions={actions}
+                      hasRows={hasRows}
+                      isSelected={isSelected}
+                      dragState={dragState}
+                      canDragSortStructure={canDragSortStructure}
+                      onSelect={setSelectedFunctionId}
+                      onRename={(id, field, value) => updateNode(id, field, value)}
+                      onAddChild={openAddNode}
+                      onDelete={deleteSubtreeNode}
+                      rowsByFunction={rowsByFunction}
+                      t={t}
+                    />
                     {!dragCollapseIds.has(node.id) && tn.children.map((c) => renderTreeNode(c))}
                   </div>
                 );
               };
               return (
-                <>
-                  {structureTree.map((tn) => renderTreeNode(tn))}
-                  {structureTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-                </>
+                <DndContext
+                  sensors={sensors} collisionDetection={closestCenter}
+                  onDragStart={handleDragStart} onDragOver={handleDragOver}
+                  onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}
+                >
+                  {displayTree.map((tn) => renderTreeNode(tn))}
+                  {displayTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                  <DragOverlay>
+                    {activeNodeId && (() => {
+                      const n = nodes.find((x) => x.id === activeNodeId);
+                      if (!n) return null;
+                      const isStructureRow = ["ProcessItem", "ProcessStep", "ProcessWorkElement", "System", "Subsystem", "Component"].includes(n.type);
+                      return (
+                        <div
+                          data-testid={`fmea-structure-drag-overlay-${activeNodeId}`}
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: 6,
+                            fontSize: 13,
+                            display: "flex",
+                            alignItems: "center",
+                            background: "var(--qf-bg-elevated)",
+                            border: "1px solid var(--qf-cyan)",
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                            color: "var(--qf-text-primary)",
+                          }}
+                        >
+                          <HolderOutlined style={{ color: "var(--qf-text-secondary)", marginRight: 6 }} />
+                          <span style={{ fontWeight: isStructureRow ? 600 : 400 }}>{n.name}</span>
+                          {n.process_number && <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>{n.process_number}</Text>}
+                        </div>
+                      );
+                    })()}
+                  </DragOverlay>
+                </DndContext>
               );
             })()}
           </DataCard>
