@@ -98,6 +98,8 @@
     "addComponent": "添加组件",
     "addFunction": "添加功能",
     "add": "添加",
+    "addFailureMode": "添加失效模式",
+    "addFailureCause": "添加失效原因",
     "newAction": "新建议措施",
     "selectFunctionHint": "选择左侧功能节点后点击\"添加行\"开始分析",
     "pfmeaTitle": "过程失效模式与影响分析 (PFMEA)",

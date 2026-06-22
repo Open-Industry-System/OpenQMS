@@ -98,6 +98,8 @@
     "addComponent": "Add Component",
     "addFunction": "Add Function",
     "add": "Add",
+    "addFailureMode": "Add Failure Mode",
+    "addFailureCause": "Add Failure Cause",
     "newAction": "New Recommended Action",
     "selectFunctionHint": "Select a function node on the left and click \"Add Row\" to start analysis",
     "pfmeaTitle": "Process FMEA (PFMEA)",

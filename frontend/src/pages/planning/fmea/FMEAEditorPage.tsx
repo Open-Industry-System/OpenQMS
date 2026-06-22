@@ -21,7 +21,7 @@ import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
-import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, type FMEARow } from "../../../utils/fmeaTable";
+import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, type FMEARow } from "../../../utils/fmeaTable";
 import { planCauseDeletion } from "./deleteRowHelpers";
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
 import {
@@ -492,6 +492,22 @@ export default function FMEAEditorPage() {
     setNodes(result.nodes);
     setEdges(result.edges);
   }, []);
+  const handleAddFailureMode = useCallback((functionId: string) => {
+    if (!fmea) return;
+    const { newNodes, newEdges } = createRowNodes(functionId, fmea.fmea_type, t);
+    nodesRef.current = [...nodesRef.current, ...newNodes];
+    edgesRef.current = [...edgesRef.current, ...newEdges];
+    setNodes(nodesRef.current);
+    setEdges(edgesRef.current);
+  }, [fmea, t]);
+  const handleAddCause = useCallback((fmId: string) => {
+    if (!fmea) return;
+    const result = addCause(fmId, fmea.fmea_type, t, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;
+    edgesRef.current = result.edges;
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, [fmea, t]);
 
   const fmeaType = fmea?.fmea_type;
   const isDFMEA = fmeaType === "DFMEA";
@@ -719,16 +735,24 @@ export default function FMEAEditorPage() {
       render: (_: unknown, row: FMEARow) => {
         const funcNode = nodeMap.get(row.functionNodeId);
         return (
-          <div
-            tabIndex={0}
-            style={{ outline: "none", minWidth: 180 }}
-          >
+          <div tabIndex={0} style={{ outline: "none", minWidth: 180 }}>
             <div style={{ fontWeight: 600, fontSize: 13, lineHeight: "1.5" }}>{funcNode?.name || "-"}</div>
             {funcNode?.specification && (
               <Text type="secondary" style={{ fontSize: 12 }}>{funcNode.specification}</Text>
             )}
             {funcNode?.requirement && (
               <div><Text type="secondary" style={{ fontSize: 12 }}>{funcNode.requirement}</Text></div>
+            )}
+            {canEdit('fmea') && (
+              <Button
+                size="small"
+                type="dashed"
+                icon={<PlusOutlined />}
+                onClick={() => handleAddFailureMode(row.functionNodeId)}
+                style={{ marginTop: 4 }}
+              >
+                {t("editor.addFailureMode")}
+              </Button>
             )}
           </div>
         );
@@ -742,17 +766,29 @@ export default function FMEAEditorPage() {
       render: (_: unknown, row: FMEARow) => {
         const node = nodeMap.get(row.failureModeNodeId);
         return (
-          <SmartSuggestionDropdown
-            triggerType="failure_mode"
-            context={{
-              function_description: nodeMap.get(row.functionNodeId)?.name || "",
-            }}
-            fmeaId={fmeaId}
-            value={node?.name || ""}
-            onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
-            onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
-            disabled={!canEdit('fmea')}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <SmartSuggestionDropdown
+              triggerType="failure_mode"
+              context={{
+                function_description: nodeMap.get(row.functionNodeId)?.name || "",
+              }}
+              fmeaId={fmeaId}
+              value={node?.name || ""}
+              onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
+              onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
+              disabled={!canEdit('fmea')}
+            />
+            {canEdit('fmea') && (
+              <Button
+                size="small"
+                type="dashed"
+                icon={<PlusOutlined />}
+                onClick={() => handleAddCause(row.failureModeNodeId)}
+              >
+                {t("editor.addFailureCause")}
+              </Button>
+            )}
+          </div>
         );
       },
     },
