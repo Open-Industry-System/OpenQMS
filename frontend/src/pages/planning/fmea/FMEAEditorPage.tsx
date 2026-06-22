@@ -1569,6 +1569,7 @@ export default function FMEAEditorPage() {
                 );
               };
               return (
+                <div style={{ maxHeight: "calc(100vh - 700px)", overflowY: "auto", minHeight: 0, paddingRight: 4 }}>
                 <DndContext
                   sensors={sensors} collisionDetection={closestCenter}
                   onDragStart={handleDragStart} onDragOver={handleDragOver}
@@ -1604,6 +1605,7 @@ export default function FMEAEditorPage() {
                     })()}
                   </DragOverlay>
                 </DndContext>
+                </div>
               );
             })()}
           </DataCard>
@@ -1633,7 +1635,7 @@ export default function FMEAEditorPage() {
                 rowKey="key"
                 size="small"
                 pagination={false}
-                scroll={{ x: 2400, y: 540 }}
+                scroll={{ x: 2400, y: "calc(100vh - 700px)" }}
                 bordered
                 className="qf-table fmea-editor-table"
                 style={{ fontSize: 13 }}
