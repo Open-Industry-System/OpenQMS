@@ -78,7 +78,7 @@ export function structureGapsForTools(
 
 ## 6. Step 1 顶部：工具引导卡 + 一键创建
 
-在 `renderStep1()` 顶部、现有 `<Space>…添加按钮</Space>` 之上，新增引导区。仅当选了结构类工具、且对应 nodeType 当前为 0 时显示。
+在 `renderStep1()` 顶部、现有 `<Space>…添加按钮</Space>` 之上，新增引导区。仅当选了结构类工具、且对应 nodeType 当前**无 `HAS_PARAMETER` 挂接实例**时显示（与 §5 缺口判定一致：按挂接计数，非全局 node type 计数；游离的同类型节点不算满足）。
 
 ```
 ┌─ 💡 根据所选分析工具 ────────────────────────────────┐
@@ -92,7 +92,7 @@ export function structureGapsForTools(
 - 解析 `wizardScope.tool`：`parseScopeTokens(wizardScope.tool || '')`。
 - 取映射表：`t('wizard.scope.toolStructureMap', { returnObjects: true }) as Record<string, string>`。
 - 按 nodeType 分组渲染：对每个有缺口的 nodeType，取 `toolsRequiringNodeType(...)` 第一条工具名作文案主语，文案走 i18n `wizard.scope.toolGuide.<nodeType>`（`Interface` / `DesignParameter` 各一条），`+ 创建XX节点` 按钮文案走 i18n `wizard.scope.addInterfaceNode` / `addDesignParameterNode`。
-- 一键创建：点击 → 新增 `addAttachedParamNode(nodeType)`（见 §6.1，**不**复用 `handleAddNode`）。点击后节点加入并挂接到结构节点，该 nodeType 计数变 1，引导行消失（重新渲染判定）。
+- 一键创建：点击 → 新增 `addAttachedParamNode(nodeType)`（见 §6.1，**不**复用 `handleAddNode`）。点击后节点加入并经 `HAS_PARAMETER` 挂接到结构节点，该 nodeType 挂接实例数变 1，引导行消失（重新渲染判定，与 §5 挂接计数一致）。
 - 引导卡样式：浅黄底 `#fffbe6`、圆角，与 Step 3 的 `#f6ffed` 推荐区风格呼应（黄=建议而非绿=自动）。
 
 ### 6.1 一键创建：`addAttachedParamNode`（新增，不复用 `handleAddNode`）
