@@ -133,7 +133,7 @@ export default function SmartSuggestionDropdown({
     [fmeaId, triggerType, context, scope, t]
   );
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const val = e.target.value;
     onChange?.(val);
     setError(null);
@@ -162,9 +162,11 @@ export default function SmartSuggestionDropdown({
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setSelectedIndex((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === "Enter" && selectedIndex >= 0) {
+    } else if (e.key === "Enter") {
+      // TextArea inserts a newline on Enter by default; suppress it while the
+      // suggestion dropdown is open so Enter confirms a selection, not a line break.
       e.preventDefault();
-      handleSelect(suggestions[selectedIndex]);
+      if (selectedIndex >= 0) handleSelect(suggestions[selectedIndex]);
     } else if (e.key === "Escape") {
       setOpen(false);
     }
@@ -302,16 +304,30 @@ export default function SmartSuggestionDropdown({
       placement="bottomLeft"
     >
       <div style={{ position: "relative" }}>
-        <Input
+        <Input.TextArea
           value={value}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 200)}
           disabled={disabled}
-          suffix={loading ? <Spin size="small" /> : <BulbOutlined style={{ color: "#faad14" }} />}
-          style={{ width: "100%" }}
+          autoSize={{ minRows: 1, maxRows: 6 }}
+          style={{ width: "100%", resize: "none", padding: "4px 28px 4px 11px" }}
         />
+        {/* Suffix indicator (Input.TextArea has no suffix prop) — pinned to
+            bottom-right so long content wraps and the row grows to fit it. */}
+        <span
+          style={{
+            position: "absolute",
+            right: 8,
+            bottom: 4,
+            pointerEvents: "none",
+            lineHeight: 1,
+            color: "#faad14",
+          }}
+        >
+          {loading ? <Spin size="small" /> : <BulbOutlined />}
+        </span>
       </div>
     </Dropdown>
   );
