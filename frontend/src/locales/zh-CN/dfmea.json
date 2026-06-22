@@ -137,7 +137,7 @@
       "conflictTitle": "文档已被修改",
       "conflictContent": "该 FMEA 已被其他会话修改，继续编辑前需要重新加载。未保存的本地改动将被丢弃。",
       "conflictReload": "重新加载",
-      "structureGap": "你选了【{{tool}}】但未创建任何 {{nodeType}} 节点，建议补全以体现该分析方式。"
+      "structureGap": "你选了【{{tool}}】但未创建任何已挂接的 {{nodeType}} 节点，建议补全以体现该分析方式。"
     },
     "guidance": {
       "step0": {

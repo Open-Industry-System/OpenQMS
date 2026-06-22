@@ -329,7 +329,7 @@ export default function DFMEAWizardPage() {
         )}
         <Space style={{ marginBottom: 12 }}>
           <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddNode('System')}>{t('wizard.structure.addSystem')}</Button>
-          <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddNode('Interface')}>{t('wizard.structure.addInterface')}</Button>
+          <Button size="small" icon={<PlusOutlined />} onClick={() => addAttachedParamNode('Interface')}>{t('wizard.structure.addInterface')}</Button>
         </Space>
         {structureNodes.length === 0 && <Empty description={t('wizard.structure.empty')} />}
         {orderedStructureNodes.map(node => (

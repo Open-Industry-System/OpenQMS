@@ -137,7 +137,7 @@
       "conflictTitle": "Document Modified",
       "conflictContent": "This FMEA was modified by another session. Reload is required before editing. Your unsaved local changes will be discarded.",
       "conflictReload": "Reload",
-      "structureGap": "You selected [{{tool}}] but no {{nodeType}} node exists. Consider adding one to reflect that analysis method."
+      "structureGap": "You selected [{{tool}}] but no attached {{nodeType}} node exists. Consider adding one to reflect that analysis method."
     },
     "guidance": {
       "step0": {
