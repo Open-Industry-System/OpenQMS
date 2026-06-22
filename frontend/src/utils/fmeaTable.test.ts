@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildRows, createRowNodes, getRowEffectNodes, getRowSeverity, computeRowSpans,
-  addEffect, deleteEffect, addCause,
+  addEffect, deleteEffect, addCause, deleteMode,
 } from "./fmeaTable";
 import type { GraphNode, GraphEdge } from "../types";
 
@@ -283,5 +283,75 @@ describe("addCause", () => {
     expect(result.nodes).toHaveLength(4);
     expect(result.edges).toHaveLength(4); // existing EFFECT_OF + 3 new
     expect(result.edges).toContainEqual({ source: "fm1", target: "fe1", type: "EFFECT_OF" });
+  });
+});
+
+describe("deleteMode", () => {
+  // Graph: fn1 —HAS_FAILURE_MODE→ fm1 ; fm1 —EFFECT_OF→ fe1 (shared with fm2), fe2 (private)
+  //   fc1 —CAUSE_OF→ fm1 ; fc1 —PREVENTED_BY→ pc1 (private) ; fc1 —DETECTED_BY→ dc1 (private)
+  //   fc2 —CAUSE_OF→ fm1 ; fc2 —PREVENTED_BY→ pc2 (shared with fc3 on fm2)
+  //   fn2 —HAS_FAILURE_MODE→ fm2 ; fm2 —EFFECT_OF→ fe1 ; fc3 —CAUSE_OF→ fm2 ; fc3 —PREVENTED_BY→ pc2
+  const buildGraph = () => {
+    const nodes: GraphNode[] = [
+      n("fn1", "ProcessItemFunction"), n("fn2", "ProcessItemFunction"),
+      n("fm1", "FailureMode"), n("fm2", "FailureMode"),
+      n("fe1", "FailureEffect"), n("fe2", "FailureEffect"),
+      n("fc1", "FailureCause"), n("fc2", "FailureCause"), n("fc3", "FailureCause"),
+      n("pc1", "PreventionControl"), n("pc2", "PreventionControl"), n("dc1", "DetectionControl"),
+    ];
+    const edges: GraphEdge[] = [
+      e("fn1", "fm1", "HAS_FAILURE_MODE"), e("fn2", "fm2", "HAS_FAILURE_MODE"),
+      e("fm1", "fe1", "EFFECT_OF"), e("fm1", "fe2", "EFFECT_OF"), e("fm2", "fe1", "EFFECT_OF"),
+      e("fc1", "fm1", "CAUSE_OF"), e("fc2", "fm1", "CAUSE_OF"), e("fc3", "fm2", "CAUSE_OF"),
+      e("fc1", "pc1", "PREVENTED_BY"), e("fc1", "dc1", "DETECTED_BY"),
+      e("fc2", "pc2", "PREVENTED_BY"), e("fc3", "pc2", "PREVENTED_BY"),
+    ];
+    return { nodes, edges };
+  };
+
+  it("deletes the mode, its private effect, its causes, and private controls", () => {
+    const { nodes, edges } = buildGraph();
+    const result = deleteMode("fm1", nodes, edges);
+    const ids = result.nodes.map((x) => x.id);
+    expect(ids).not.toContain("fm1");   // mode deleted
+    expect(ids).not.toContain("fc1");   // cause deleted
+    expect(ids).not.toContain("fc2");   // cause deleted
+    expect(ids).not.toContain("fe2");   // private effect deleted
+    expect(ids).not.toContain("pc1");   // private control deleted
+    expect(ids).not.toContain("dc1");   // private control deleted
+  });
+
+  it("keeps effects and controls shared with a surviving mode", () => {
+    const { nodes, edges } = buildGraph();
+    const result = deleteMode("fm1", nodes, edges);
+    const ids = result.nodes.map((x) => x.id);
+    expect(ids).toContain("fe1");   // shared effect kept (fm2 still references it)
+    expect(ids).toContain("pc2");   // shared control kept (fc3 on fm2 still references it)
+    expect(ids).toContain("fn1");   // function kept
+    expect(ids).toContain("fn2");
+    expect(ids).toContain("fm2");
+    expect(ids).toContain("fc3");
+  });
+
+  it("drops edges touching deleted nodes and keeps the rest", () => {
+    const { nodes, edges } = buildGraph();
+    const result = deleteMode("fm1", nodes, edges);
+    // fm2's surviving edges remain
+    expect(result.edges).toContainEqual(e("fn2", "fm2", "HAS_FAILURE_MODE"));
+    expect(result.edges).toContainEqual(e("fm2", "fe1", "EFFECT_OF"));
+    expect(result.edges).toContainEqual(e("fc3", "fm2", "CAUSE_OF"));
+    expect(result.edges).toContainEqual(e("fc3", "pc2", "PREVENTED_BY"));
+    // No edge touches fm1/fe2/fc1/fc2/pc1/dc1
+    const gone = new Set(["fm1", "fe2", "fc1", "fc2", "pc1", "dc1"]);
+    expect(result.edges.some((ed) => gone.has(ed.source) || gone.has(ed.target))).toBe(false);
+  });
+
+  it("does not mutate inputs", () => {
+    const { nodes, edges } = buildGraph();
+    const origNodeCount = nodes.length;
+    const origEdgeCount = edges.length;
+    deleteMode("fm1", nodes, edges);
+    expect(nodes).toHaveLength(origNodeCount);
+    expect(edges).toHaveLength(origEdgeCount);
   });
 });

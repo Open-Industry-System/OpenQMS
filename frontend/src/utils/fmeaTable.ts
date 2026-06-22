@@ -365,3 +365,54 @@ export function addCause(
     causeId,
   };
 }
+
+/**
+ * Cascade-delete a FailureMode and everything attached to it: its causes,
+ * each cause's private prevention/detection/recommended-action controls, and
+ * its effects. Effects and controls shared with OTHER modes/causes are kept
+ * (edge-based shared check, like deleteEffect). Does not mutate inputs.
+ */
+export function deleteMode(fmId: string, nodes: GraphNode[], edges: GraphEdge[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const causeIds = edges
+    .filter((e) => e.target === fmId && e.type === "CAUSE_OF")
+    .map((e) => e.source);
+  const effectIds = edges
+    .filter((e) => e.source === fmId && e.type === "EFFECT_OF")
+    .map((e) => e.target);
+
+  // Controls/actions attached to the mode's causes (PREVENTED_BY/DETECTED_BY/OPTIMIZED_BY)
+  // and directly to the mode (OPTIMIZED_BY fmId).
+  const controlIds = new Set<string>();
+  for (const causeId of causeIds) {
+    edges
+      .filter((e) => e.source === causeId && (e.type === "PREVENTED_BY" || e.type === "DETECTED_BY" || e.type === "OPTIMIZED_BY"))
+      .forEach((e) => controlIds.add(e.target));
+  }
+  edges
+    .filter((e) => e.source === fmId && e.type === "OPTIMIZED_BY")
+    .forEach((e) => controlIds.add(e.target));
+
+  const deleteIds = new Set<string>([fmId, ...causeIds]);
+
+  // Keep an effect only if another (surviving) mode still references it via EFFECT_OF.
+  for (const effectId of effectIds) {
+    const sharedByOther = edges.some(
+      (e) => e.source !== fmId && e.target === effectId && e.type === "EFFECT_OF"
+    );
+    if (!sharedByOther) deleteIds.add(effectId);
+  }
+  // Keep a control/action only if a surviving cause or mode still references it.
+  for (const ctrlId of controlIds) {
+    const sharedByOther = edges.some(
+      (e) =>
+        (e.type === "PREVENTED_BY" || e.type === "DETECTED_BY" || e.type === "OPTIMIZED_BY") &&
+        e.target === ctrlId &&
+        !deleteIds.has(e.source)
+    );
+    if (!sharedByOther) deleteIds.add(ctrlId);
+  }
+
+  const nextNodes = nodes.filter((n) => !deleteIds.has(n.id));
+  const nextEdges = edges.filter((e) => !deleteIds.has(e.source) && !deleteIds.has(e.target));
+  return { nodes: nextNodes, edges: nextEdges };
+}
