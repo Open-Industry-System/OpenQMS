@@ -589,8 +589,21 @@ export default function FMEAEditorPage() {
     }
   };
 
+  // Refs mirror nodes/edges so add/delete handlers (and updateNode) can read
+  // the latest graph synchronously and advance it before the next render.
+  // Declared here, before updateNode, so all mutation sites reference the same refs.
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+
   const updateNode = useCallback((nodeId: string, field: string, value: unknown) => {
-    setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, [field]: value } : n)));
+    // Compute from nodesRef.current and advance the ref synchronously, so a
+    // rapid add/delete (which also reads nodesRef.current) can't overwrite this
+    // edit with stale state. Matches the handleAdd*/handleDelete* pattern.
+    const next = nodesRef.current.map((n) => (n.id === nodeId ? { ...n, [field]: value } : n));
+    nodesRef.current = next;
+    setNodes(next);
   }, []);
 
   // Auto-compute initial AP on cause nodes when S/O/D risk ratings change
@@ -614,11 +627,6 @@ export default function FMEAEditorPage() {
   }, [nodesRiskKey]);
 
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
-
-  const nodesRef = useRef(nodes);
-  const edgesRef = useRef(edges);
-  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
-  useEffect(() => { edgesRef.current = edges; }, [edges]);
 
   const handleAddEffect = useCallback((fmId: string) => {
     const result = addEffect(fmId, nodesRef.current, edgesRef.current);
