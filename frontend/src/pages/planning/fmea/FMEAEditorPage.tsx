@@ -938,9 +938,7 @@ export default function FMEAEditorPage() {
             )}
             {canEdit('fmea') && (
               <Popconfirm title={t("editor.confirmDeleteMode")} onConfirm={() => handleDeleteMode(row.failureModeNodeId)}>
-                <Button type="text" danger size="small" icon={<DeleteOutlined />}>
-                  {t("editor.deleteFailureMode")}
-                </Button>
+                <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={t("editor.deleteFailureMode")} />
               </Popconfirm>
             )}
           </div>
