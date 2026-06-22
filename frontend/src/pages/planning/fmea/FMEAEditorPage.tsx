@@ -1657,7 +1657,7 @@ export default function FMEAEditorPage() {
         </Col>
       </Row>
         </>},
-            { key: "structure", label: t("tabs.structureAnalysis"), children: <>
+            ...(isDFMEA ? [{ key: "structure", label: t("tabs.structureAnalysis"), children: <>
           <Row gutter={16}>
             <Col span={8}>
               <DataCard title={t("tabs.structureTree")}>
@@ -1683,7 +1683,8 @@ export default function FMEAEditorPage() {
               </DataCard>
             </Col>
           </Row>
-        </>},
+        </>}]
+            : []),
           ]} />
 
       <style>{`
