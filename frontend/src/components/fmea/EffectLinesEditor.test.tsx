@@ -29,7 +29,7 @@ describe("EffectLinesEditor", () => {
   it("add button calls onAddEffect", () => {
     const props = baseProps();
     render(<EffectLinesEditor {...props} />);
-    fireEvent.click(screen.getByRole("button", { name: /添加后果/i }));
+    fireEvent.click(screen.getByRole("button", { name: /添加失效影响/i }));
     expect(props.onAddEffect).toHaveBeenCalledTimes(1);
   });
 

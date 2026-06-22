@@ -52,7 +52,7 @@ export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactE
       })}
       {!disabled && (
         <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={onAddEffect}>
-          添加后果
+          添加失效影响
         </Button>
       )}
     </div>

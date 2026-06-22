@@ -880,17 +880,6 @@ export default function FMEAEditorPage() {
             {funcNode?.requirement && (
               <div><Text type="secondary" style={{ fontSize: 12 }}>{funcNode.requirement}</Text></div>
             )}
-            {canEdit('fmea') && (
-              <Button
-                size="small"
-                type="dashed"
-                icon={<PlusOutlined />}
-                onClick={() => handleAddFailureMode(row.functionNodeId)}
-                style={{ marginTop: 4 }}
-              >
-                {t("editor.addFailureMode")}
-              </Button>
-            )}
           </div>
         );
       },
@@ -920,9 +909,9 @@ export default function FMEAEditorPage() {
                 size="small"
                 type="dashed"
                 icon={<PlusOutlined />}
-                onClick={() => handleAddCause(row.failureModeNodeId)}
+                onClick={() => handleAddFailureMode(row.functionNodeId)}
               >
-                {t("editor.addFailureCause")}
+                {t("editor.addFailureMode")}
               </Button>
             )}
           </div>
@@ -1006,23 +995,41 @@ export default function FMEAEditorPage() {
       title: t("editor.columns.failureCause"),
       key: "failureCause",
       width: 180,
-      render: (_: unknown, row: FMEARow) => {
-        if (!row.failureCauseNodeId) return "-";
-        const node = nodeMap.get(row.failureCauseNodeId);
+      render: (_: unknown, row: FMEARow, index: number) => {
+        const isLastOfMode =
+          index === rows.length - 1 ||
+          rows[index + 1].failureModeNodeId !== row.failureModeNodeId;
+        const node = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         return (
-          <SmartSuggestionDropdown
-            triggerType="failure_cause"
-            context={{
-              failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
-              function_description: nodeMap.get(row.functionNodeId)?.name || "",
-              severity: getRowSeverity(row, nodeMap),
-            }}
-            fmeaId={fmeaId}
-            value={node?.name || ""}
-            onChange={(val) => updateNode(row.failureCauseNodeId!, "name", val)}
-            onSelect={(s) => updateNode(row.failureCauseNodeId!, "name", s.name)}
-            disabled={!canEdit('fmea')}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {row.failureCauseNodeId ? (
+              <SmartSuggestionDropdown
+                triggerType="failure_cause"
+                context={{
+                  failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+                  function_description: nodeMap.get(row.functionNodeId)?.name || "",
+                  severity: getRowSeverity(row, nodeMap),
+                }}
+                fmeaId={fmeaId}
+                value={node?.name || ""}
+                onChange={(val) => updateNode(row.failureCauseNodeId!, "name", val)}
+                onSelect={(s) => updateNode(row.failureCauseNodeId!, "name", s.name)}
+                disabled={!canEdit('fmea')}
+              />
+            ) : (
+              <Text type="secondary">-</Text>
+            )}
+            {canEdit('fmea') && isLastOfMode && (
+              <Button
+                size="small"
+                type="dashed"
+                icon={<PlusOutlined />}
+                onClick={() => handleAddCause(row.failureModeNodeId)}
+              >
+                {t("editor.addFailureCause")}
+              </Button>
+            )}
+          </div>
         );
       },
     },
