@@ -26,7 +26,7 @@ import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
-import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, type FMEARow } from "../../../utils/fmeaTable";
+import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, deleteMode, type FMEARow } from "../../../utils/fmeaTable";
 import { planCauseDeletion } from "./deleteRowHelpers";
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
 import {
@@ -658,6 +658,13 @@ export default function FMEAEditorPage() {
     setNodes(result.nodes);
     setEdges(result.edges);
   }, [fmea, t]);
+  const handleDeleteMode = useCallback((fmId: string) => {
+    const result = deleteMode(fmId, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;
+    edgesRef.current = result.edges;
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, []);
 
   const fmeaType = fmea?.fmea_type;
   const isDFMEA = fmeaType === "DFMEA";
@@ -857,14 +864,21 @@ export default function FMEAEditorPage() {
   const deleteRow = useCallback((row: FMEARow) => {
     const { nodeIdsToDelete } = planCauseDeletion(row, rows);
 
-    setNodes((prev) => prev.filter((n) => !nodeIdsToDelete.has(n.id)));
-    setEdges((prev) => prev.filter((e) => {
+    // Compute from refs and advance them synchronously (same pattern as
+    // updateNode / handleAdd*/handleDelete*) so rapid edits don't get
+    // overwritten by a stale-ref mutation.
+    const nextNodes = nodesRef.current.filter((n) => !nodeIdsToDelete.has(n.id));
+    const nextEdges = edgesRef.current.filter((e) => {
       // Drop edges touching deleted nodes
       if (nodeIdsToDelete.has(e.source) || nodeIdsToDelete.has(e.target)) return false;
       // Drop this row's CAUSE_OF (cause → mode) edge specifically
       if (row.failureCauseNodeId && e.source === row.failureCauseNodeId && e.target === row.failureModeNodeId && e.type === "CAUSE_OF") return false;
       return true;
-    }));
+    });
+    nodesRef.current = nextNodes;
+    edgesRef.current = nextEdges;
+    setNodes(nextNodes);
+    setEdges(nextEdges);
   }, [rows]);
 
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
@@ -921,6 +935,13 @@ export default function FMEAEditorPage() {
               >
                 {t("editor.addFailureMode")}
               </Button>
+            )}
+            {canEdit('fmea') && (
+              <Popconfirm title={t("editor.confirmDeleteMode")} onConfirm={() => handleDeleteMode(row.failureModeNodeId)}>
+                <Button type="text" danger size="small" icon={<DeleteOutlined />}>
+                  {t("editor.deleteFailureMode")}
+                </Button>
+              </Popconfirm>
             )}
           </div>
         );
@@ -1011,19 +1032,26 @@ export default function FMEAEditorPage() {
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {row.failureCauseNodeId ? (
-              <SmartSuggestionDropdown
-                triggerType="failure_cause"
-                context={{
-                  failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
-                  function_description: nodeMap.get(row.functionNodeId)?.name || "",
-                  severity: getRowSeverity(row, nodeMap),
-                }}
-                fmeaId={fmeaId}
-                value={node?.name || ""}
-                onChange={(val) => updateNode(row.failureCauseNodeId!, "name", val)}
-                onSelect={(s) => updateNode(row.failureCauseNodeId!, "name", s.name)}
-                disabled={!canEdit('fmea')}
-              />
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <SmartSuggestionDropdown
+                  triggerType="failure_cause"
+                  context={{
+                    failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+                    function_description: nodeMap.get(row.functionNodeId)?.name || "",
+                    severity: getRowSeverity(row, nodeMap),
+                  }}
+                  fmeaId={fmeaId}
+                  value={node?.name || ""}
+                  onChange={(val) => updateNode(row.failureCauseNodeId!, "name", val)}
+                  onSelect={(s) => updateNode(row.failureCauseNodeId!, "name", s.name)}
+                  disabled={!canEdit('fmea')}
+                />
+                {canEdit('fmea') && (
+                  <Popconfirm title={t("editor.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
+                    <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={t("editor.deleteFailureCause")} />
+                  </Popconfirm>
+                )}
+              </div>
             ) : (
               <Text type="secondary">-</Text>
             )}
@@ -1411,18 +1439,6 @@ export default function FMEAEditorPage() {
           </Tag>
         );
       },
-    },
-    {
-      title: "",
-      key: "actions",
-      width: 40,
-      fixed: "right" as const,
-      render: (_: unknown, row: FMEARow) =>
-        row.failureCauseNodeId ? (
-          <Popconfirm title={t("editor.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
-            <Button type="text" danger size="small" disabled={!canEdit('fmea')} icon={<DeleteOutlined />} />
-          </Popconfirm>
-        ) : null,
     },
   ];
 
