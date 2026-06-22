@@ -15,6 +15,8 @@ import WizardGuidanceCard from '../../../components/dfmea/WizardGuidanceCard';
 import ScopeTagField from '../../../components/dfmea/ScopeTagField';
 import type { ReactNode } from 'react';
 import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimeframe';
+import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
+import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type StructureNodeType } from '../../../utils/wizardToolStructure';
 
 const { Title, Paragraph } = Typography;
 
@@ -45,7 +47,9 @@ export default function DFMEAWizardPage() {
     fmeaId: fmeaId!,
     onConflict: () => setConflictOpen(true),
   });
-  const validation = useWizardValidation(nodes, edges);
+  const toolStructureMap = t('wizard.scope.toolStructureMap', { returnObjects: true }) as Record<string, string>;
+  const selectedTools = parseScopeTokens(wizardScope.tool || '');
+  const validation = useWizardValidation(nodes, edges, selectedTools, toolStructureMap);
   const dfmeaRules = useDfmeaRules();
 
   // Refs for beforeunload handler — always hold latest values without re-registering listener
@@ -241,6 +245,36 @@ export default function DFMEAWizardPage() {
     const typeLabel = (type: string) => t(`wizard.typeLabels.${type}`, { defaultValue: type });
     const TYPE_COLORS: Record<string, string> = { System: 'red', Subsystem: 'orange', Component: 'green', Interface: 'purple', DesignParameter: 'blue' };
 
+    const addAttachedParamNode = (nodeType: StructureNodeType) => {
+      // Interface/DesignParameter 须通过 HAS_PARAMETER 依附结构节点（不复用 handleAddNode：
+      // 后者无 parent 建游离节点、CHILD_EDGE_TYPE 不含 HAS_PARAMETER）。
+      // 挂接逻辑由 wizardToolStructure 的纯函数承担（pickParamParent + buildAttachedParamNode），
+      // 便于单测；此处是薄包装。
+      const parent = pickParamParent(nodes);
+      if (!parent) {
+        message.warning(t('wizard.scope.toolGuideNeedStructure'));
+        return;
+      }
+      const { node, edge } = buildAttachedParamNode(parent, nodeType, () => `w${crypto.randomUUID()}_${nodeType.toLowerCase()}`);
+      const newNode: GraphNode = { ...node, name: t(`wizard.typeLabels.${nodeType}`, { defaultValue: nodeType }) };
+      updateGraphData([...nodes, newNode], [...edges, edge]);
+    };
+
+    // 工具引导：所选结构类工具、且对应 nodeType 无 HAS_PARAMETER 挂接实例时，提示+一键创建。
+    // 挂接判定与 structureGapsForTools 一致：须 source 存在且为结构节点。
+    const attachedCount = (nodeType: StructureNodeType) =>
+      edges.filter(ed => ed.type === 'HAS_PARAMETER'
+        && nodes.find(nd => nd.id === ed.target)?.type === nodeType
+        && ['System', 'Subsystem', 'Component'].includes(nodes.find(nd => nd.id === ed.source)?.type ?? '')).length;
+    const guideNodeTypes: StructureNodeType[] = attachedCount('Interface') === 0 ? ['Interface'] : [];
+    if (attachedCount('DesignParameter') === 0) guideNodeTypes.push('DesignParameter');
+    const guideRows = guideNodeTypes
+      .map(nt => {
+        const tools = toolsRequiringNodeType(selectedTools, toolStructureMap, nt);
+        return tools.length > 0 ? { nodeType: nt, tool: tools[0] } : null;
+      })
+      .filter((r): r is { nodeType: StructureNodeType; tool: string } => r !== null);
+
     // Derive depth from graph edges (System=0, Subsystem=1, Component=2) so
     // every child — including Interface/DesignParameter, which carry no descent
     // edge of their own — inherits its parent's depth + 1 instead of falling
@@ -279,6 +313,20 @@ export default function DFMEAWizardPage() {
 
     return (
       <div>
+        {guideRows.length > 0 && (
+          <div style={{ marginBottom: 12, padding: 10, background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
+            {guideRows.map(row => (
+              <div key={row.nodeType} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 13 }}>
+                  {t(`wizard.scope.toolGuide.${row.nodeType}`, { tool: row.tool })}
+                </span>
+                <Button size="small" type="dashed" onClick={() => addAttachedParamNode(row.nodeType)}>
+                  {t(`wizard.scope.add${row.nodeType === 'Interface' ? 'Interface' : 'DesignParameter'}Node`)}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
         <Space style={{ marginBottom: 12 }}>
           <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddNode('System')}>{t('wizard.structure.addSystem')}</Button>
           <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddNode('Interface')}>{t('wizard.structure.addInterface')}</Button>
@@ -666,6 +714,15 @@ export default function DFMEAWizardPage() {
                     ? 'wizard.page.step5IncompleteMissingCause'
                     : `wizard.page.step${w + 1}Incomplete`
                 )}</div>
+              ))}
+            </div>
+          )}
+          {currentStep === 6 && validation.structureGaps.length > 0 && (
+            <div style={{ marginTop: 16, padding: 12, background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
+              {validation.structureGaps.map((g, i) => (
+                <div key={`${g.tool}-${g.nodeType}-${i}`} style={{ color: '#ad6800' }}>
+                  ⚠ {t('wizard.page.structureGap', { tool: g.tool, nodeType: t(`wizard.typeLabels.${g.nodeType}`, { defaultValue: g.nodeType }) })}
+                </div>
               ))}
             </div>
           )}
