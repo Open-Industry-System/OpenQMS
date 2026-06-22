@@ -17,6 +17,7 @@ import type { ReactNode } from 'react';
 import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimeframe';
 import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
 import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type StructureNodeType } from '../../../utils/wizardToolStructure';
+import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
 
 const { Title, Paragraph } = Typography;
 
@@ -307,9 +308,11 @@ export default function DFMEAWizardPage() {
       if (paramParentOf[node.id]) return depthOf(paramParentOf[node.id]) + 1;
       return 0;
     };
-    const orderedStructureNodes = [...structureNodes].sort(
-      (a, b) => depthOfAny(a) - depthOfAny(b),
-    );
+    // DFS order from edges: each parent immediately followed by its own
+    // subtree, so a subsystem's components render under *that* subsystem
+    // instead of the next one (depth-only sort grouped all components after
+    // all subsystems). depthOfAny still drives indentation (marginLeft).
+    const orderedStructureNodes = orderStructureNodes(structureNodes, edges);
 
     return (
       <div>
