@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, Table, InputNumber, Result, DatePicker } from 'antd';
-import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined, BulbOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { getFMEA, deleteFMEA } from '../../../api/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
@@ -17,6 +17,7 @@ import type { ReactNode } from 'react';
 import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimeframe';
 import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
 import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type StructureNodeType } from '../../../utils/wizardToolStructure';
+import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
 
 const { Title, Paragraph } = Typography;
 
@@ -307,17 +308,20 @@ export default function DFMEAWizardPage() {
       if (paramParentOf[node.id]) return depthOf(paramParentOf[node.id]) + 1;
       return 0;
     };
-    const orderedStructureNodes = [...structureNodes].sort(
-      (a, b) => depthOfAny(a) - depthOfAny(b),
-    );
+    // DFS order from edges: each parent immediately followed by its own
+    // subtree, so a subsystem's components render under *that* subsystem
+    // instead of the next one (depth-only sort grouped all components after
+    // all subsystems). depthOfAny still drives indentation (marginLeft).
+    const orderedStructureNodes = orderStructureNodes(structureNodes, edges);
 
     return (
       <div>
         {guideRows.length > 0 && (
-          <div style={{ marginBottom: 12, padding: 10, background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
+          <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--qf-amber-dim)', border: '1px solid var(--qf-amber)', borderRadius: 'var(--qf-radius-md)' }}>
             {guideRows.map(row => (
-              <div key={row.nodeType} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <span style={{ fontSize: 13 }}>
+              <div key={row.nodeType} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, color: 'var(--qf-text-primary)', fontSize: 13 }}>
+                <BulbOutlined style={{ color: 'var(--qf-amber)', flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>
                   {t(`wizard.scope.toolGuide.${row.nodeType}`, { tool: row.tool })}
                 </span>
                 <Button size="small" type="dashed" onClick={() => addAttachedParamNode(row.nodeType)}>
@@ -720,9 +724,9 @@ export default function DFMEAWizardPage() {
             </div>
           )}
           {currentStep === 6 && validation.structureGaps.length > 0 && (
-            <div style={{ marginTop: 16, padding: 12, background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 4 }}>
+            <div style={{ marginTop: 16, padding: 12, background: 'var(--qf-amber-dim)', border: '1px solid var(--qf-amber)', borderRadius: 'var(--qf-radius-md)' }}>
               {validation.structureGaps.map((g, i) => (
-                <div key={`${g.tool}-${g.nodeType}-${i}`} style={{ color: '#ad6800' }}>
+                <div key={`${g.tool}-${g.nodeType}-${i}`} style={{ color: 'var(--qf-amber)' }}>
                   ⚠ {t('wizard.page.structureGap', { tool: g.tool, nodeType: t(`wizard.typeLabels.${g.nodeType}`, { defaultValue: g.nodeType }) })}
                 </div>
               ))}
