@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { GraphNode, GraphEdge } from "../../types";
-import { toolsRequiringNodeType } from "../../utils/wizardToolStructure";
+import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode } from "../../utils/wizardToolStructure";
 
 // 最小 harness：复刻 renderStep1 里引导卡的渲染条件 + 一键创建回调。
 function GuideHarness({ nodes, edges, selectedTools, map, onAdd }: {
@@ -68,5 +68,63 @@ describe("ToolStructureGuide card", () => {
     render(<GuideHarness nodes={nodes} edges={[]} selectedTools={["P图/参数图"]} map={MAP} onAdd={onAdd} />);
     fireEvent.click(screen.getByTestId("add-DesignParameter"));
     expect(onAdd).toHaveBeenCalledWith("DesignParameter");
+  });
+});
+
+// Integration: the visible "Add Interface" entry (the standing Step 1 button, now
+// wired to addAttachedParamNode) must create a node attached via HAS_PARAMETER —
+// NOT an orphan. addAttachedParamNode is a thin wrapper over pickParamParent +
+// buildAttachedParamNode + updateGraphData; this harness exercises that wiring
+// against a real (captured) graph state, verifying the HAS_PARAMETER relationship.
+function AddInterfaceButtonHarness({ nodes, edges, onGraphUpdate }: {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  onGraphUpdate: (nodes: GraphNode[], edges: GraphEdge[]) => void;
+}) {
+  // Mirrors addAttachedParamNode in DFMEAWizardPage.renderStep1.
+  const addAttachedParamNode = (nodeType: "Interface" | "DesignParameter") => {
+    const parent = pickParamParent(nodes);
+    if (!parent) return;
+    const { node, edge } = buildAttachedParamNode(parent, nodeType, () => `new_${nodeType}`);
+    onGraphUpdate([...nodes, { ...node, name: "Interface" }], [...edges, edge]);
+  };
+  return <button data-testid="add-interface-btn" onClick={() => addAttachedParamNode("Interface")}>Add Interface</button>;
+}
+
+describe("Add Interface button wiring (creates HAS_PARAMETER, not orphan)", () => {
+  it("creates an Interface node + a HAS_PARAMETER edge to the Component parent", () => {
+    const nodes = [n("comp1", "Component")];
+    const edges: GraphEdge[] = [];
+    let capturedNodes: GraphNode[] = [];
+    let capturedEdges: GraphEdge[] = [];
+    render(
+      <AddInterfaceButtonHarness
+        nodes={nodes}
+        edges={edges}
+        onGraphUpdate={(nn, ee) => { capturedNodes = nn; capturedEdges = ee; }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("add-interface-btn"));
+    expect(capturedNodes.some(nd => nd.type === "Interface")).toBe(true);
+    const paramEdges = capturedEdges.filter(e => e.type === "HAS_PARAMETER");
+    expect(paramEdges.length).toBe(1);
+    // edge source must be a structure node (the Component), not dangling/orphan
+    const newIface = capturedNodes.find(nd => nd.type === "Interface");
+    expect(paramEdges[0].target).toBe(newIface!.id);
+    expect(paramEdges[0].source).toBe("comp1");
+  });
+
+  it("does NOT create a node when no structure parent exists (no orphan)", () => {
+    const nodes: GraphNode[] = []; // no System/Subsystem/Component
+    let captured: { n: GraphNode[]; e: GraphEdge[] } | null = null;
+    render(
+      <AddInterfaceButtonHarness
+        nodes={nodes}
+        edges={[]}
+        onGraphUpdate={(nn, ee) => { captured = { n: nn, e: ee }; }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("add-interface-btn"));
+    expect(captured).toBeNull(); // pickParamParent returned null → no update
   });
 });
