@@ -287,6 +287,10 @@ export default function FMEAEditorPage() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  // live-reorder preview：拖拽经过合法同级时，复用 reorderStructureSiblings 计算重排后的
+  // nodes/edges，仅用于左侧树的视觉让位（displayTree），松手才 setNodes/setEdges 提交。
+  // @dnd-kit 用 pointer events + DragOverlay，源 DOM 不动 → 重排兄弟不破坏拖拽状态。
+  const [preview, setPreview] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
@@ -613,7 +617,12 @@ export default function FMEAEditorPage() {
   const isDFMEA = fmeaType === "DFMEA";
   const canDragSortStructure = canEdit("fmea");
   const structureTree = useMemo(() => buildStructureTree(nodes, edges), [nodes, edges]);
-  // 拖拽期间折叠被拖节点 + 同级节点的子树（祖先链路与无关分支保持展开）
+  // live-reorder 预览树：拖拽经过合法同级时按 preview 重排兄弟，让用户看到落点、提高成功率。
+  // 松手提交 / 取消回滚（preview 清空 → 回到真实顺序）。
+  const displayTree = useMemo(
+    () => (preview ? buildStructureTree(preview.nodes, preview.edges) : structureTree),
+    [preview, structureTree],
+  );
   // 拖拽期间只折叠被拖节点自身的子树（其子节点在它下方，隐藏不位移被拖节点）。
   // 不折叠同级节点：同级折叠（display:none）会下移被拖节点，而 @dnd-kit 的
   // DragOverlay 在折叠后才测量被拖节点 rect → overlay 错位（越靠下的节点错位越大）。
@@ -748,28 +757,37 @@ export default function FMEAEditorPage() {
     const id = String(event.active.id);
     setActiveNodeId(id);
     setDraggingNodeId(id);
+    setPreview(null);
   }, []);
 
   const handleDragOver = useCallback((event: DragOverEvent) => {
     const { active, over } = event;
-    if (!over) { setDragOver(null); return; }
+    if (!over) { setDragOver(null); setPreview(null); return; }
     const aRect = active.rect.current.translated;
     const oRect = over.rect;
     if (!aRect || !oRect) return;
+    const dragNodeId = String(active.id);
+    const dropNodeId = String(over.id);
     const position = dropPositionFromRects(aRect.top, oRect.top, oRect.height);
-    const valid = canReorderStructureSiblings({
-      nodes, edges,
-      dragNodeId: String(active.id), dropNodeId: String(over.id), dropPosition: position,
-    });
+    const valid = canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
     setDragOver((prev) =>
-      prev && prev.nodeId === String(over.id) && prev.position === position && prev.valid === valid
-        ? prev : { nodeId: String(over.id), position, valid }
+      prev && prev.nodeId === dropNodeId && prev.position === position && prev.valid === valid
+        ? prev : { nodeId: dropNodeId, position, valid }
     );
+    // live preview：合法且确实会重排时，算出重排后的 nodes/edges 让兄弟实时让位；
+    // 非法/无变化清空预览回真实顺序。dragNodeId===dropNodeId（自悬）时 reorderStructureSiblings
+    // 返回 changed:false，天然清空，不会自激振荡（@dnd-kit overlay 不依赖源 DOM 位置）。
+    if (valid) {
+      const result = reorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
+      setPreview(result.changed ? { nodes: result.nodes, edges: result.edges } : null);
+    } else {
+      setPreview(null);
+    }
   }, [nodes, edges]);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
-    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null);
+    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null); setPreview(null);
     if (!over) return;
     const aRect = active.rect.current.translated; const oRect = over.rect;
     if (!aRect || !oRect) return;
@@ -786,7 +804,7 @@ export default function FMEAEditorPage() {
   }, [nodes, edges, message, t]);
 
   const handleDragCancel = useCallback(() => {
-    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null);
+    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null); setPreview(null);
   }, []);
 
   const deleteRow = useCallback((row: FMEARow) => {
@@ -1491,8 +1509,8 @@ export default function FMEAEditorPage() {
                   onDragStart={handleDragStart} onDragOver={handleDragOver}
                   onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}
                 >
-                  {structureTree.map((tn) => renderTreeNode(tn))}
-                  {structureTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                  {displayTree.map((tn) => renderTreeNode(tn))}
+                  {displayTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
                   <DragOverlay>
                     {activeNodeId && (() => {
                       const n = nodes.find((x) => x.id === activeNodeId);

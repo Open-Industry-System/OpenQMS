@@ -544,6 +544,81 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     await waitFor(() => expect(ps2.style.opacity).toBe(""));
   });
 
+  it("live-previews sibling shift during drag-over and commits on drop", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const order = () => screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"));
+    await screen.findByTestId("fmea-structure-node-ps1");
+    expect(order()).toEqual(["fmea-structure-node-pi", "fmea-structure-node-ps1", "fmea-structure-node-ps2"]);
+
+    // during drag-over (before drop): siblings shift to preview the reorder
+    driveDragOver("ps2", "ps1", 1);
+    await waitFor(() => expect(order()).toEqual(["fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1"]));
+
+    // drop commits the previewed order
+    driveEnd("ps2", "ps1", 1);
+    await waitFor(() => expect(order()).toEqual(["fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1"]));
+  });
+
+  it("reverts the live preview when the drag is cancelled", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [node("pi", "ProcessItem"), node("ps1", "ProcessStep"), node("ps2", "ProcessStep")],
+      [
+        { source: "pi", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const order = () => screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"));
+    await screen.findByTestId("fmea-structure-node-ps1");
+
+    driveDragOver("ps2", "ps1", 1);
+    await waitFor(() => expect(order()).toEqual(["fmea-structure-node-pi", "fmea-structure-node-ps2", "fmea-structure-node-ps1"]));
+
+    driveCancel();
+    await waitFor(() => expect(order()).toEqual(["fmea-structure-node-pi", "fmea-structure-node-ps1", "fmea-structure-node-ps2"]));
+  });
+
+  it("clears the live preview over an invalid (cross-parent) target", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc(
+      "PFMEA",
+      [
+        node("pi1", "ProcessItem"), node("pi2", "ProcessItem"),
+        node("ps1", "ProcessStep"), node("ps2", "ProcessStep"),
+      ],
+      [
+        { source: "pi1", target: "ps1", type: "HAS_PROCESS_STEP" },
+        { source: "pi2", target: "ps2", type: "HAS_PROCESS_STEP" },
+      ],
+    ));
+    renderEditor();
+    const order = () => screen.getAllByTestId(/^fmea-structure-node-/).map((el) => el.getAttribute("data-testid"));
+    const ps1 = await screen.findByTestId("fmea-structure-node-ps1");
+    const ps2 = await screen.findByTestId("fmea-structure-node-ps2");
+    // first preview a valid same-parent shift
+    driveDragOver("ps1", "ps1", 35); // self after → valid no-op (changed:false) → preview null, order unchanged
+    expect(order()).toEqual([
+      "fmea-structure-node-pi1", "fmea-structure-node-ps1",
+      "fmea-structure-node-pi2", "fmea-structure-node-ps2",
+    ]);
+    // cross-parent over ps2 (under pi2) → invalid, no preview shift, invalid marker on ps2
+    driveDragOver("ps1", "ps2", 1);
+    await waitFor(() => expect(ps2.getAttribute("data-drag-state")).toBe("invalid"));
+    expect(ps1.getAttribute("data-drag-state")).toBeNull();
+    expect(order()).toEqual([
+      "fmea-structure-node-pi1", "fmea-structure-node-ps1",
+      "fmea-structure-node-pi2", "fmea-structure-node-ps2",
+    ]);
+  });
+
   it("hides the dragged node's descendants during drag", async () => {
     mocks.getFMEA.mockResolvedValue(makeDoc(
       "PFMEA",
