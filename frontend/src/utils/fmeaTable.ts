@@ -416,3 +416,60 @@ export function deleteMode(fmId: string, nodes: GraphNode[], edges: GraphEdge[])
   const nextEdges = edges.filter((e) => !deleteIds.has(e.source) && !deleteIds.has(e.target));
   return { nodes: nextNodes, edges: nextEdges };
 }
+
+/**
+ * Build the structural ancestor chain (top → nearest) for a function node, to
+ * feed the FMEA recommendation pipeline as `process_step` context. The LLM
+ * prompt uses this so failure-mode/effect/cause/measure/optimization
+ * suggestions are tied to the actual process step / work element / structure
+ * node rather than being generic.
+ *
+ * Traversal: function → structural parent via reverse HAS_FUNCTION, then up
+ * via reverse HAS_PROCESS_STEP / HAS_WORK_ELEMENT. If the function node is
+ * itself a structural node (DFMEA rows can be Component/Subsystem/System), the
+ * chain starts from it directly. Returns "" when no structural context found.
+ */
+const STRUCTURAL_NODE_TYPES = [
+  "ProcessItem",
+  "ProcessStep",
+  "ProcessWorkElement",
+  "System",
+  "Subsystem",
+  "Component",
+];
+
+export function getProcessChain(
+  functionNodeId: string,
+  nodeMap: Map<string, GraphNode>,
+  edges: GraphEdge[]
+): string {
+  const fnNode = nodeMap.get(functionNodeId);
+  if (!fnNode) return "";
+
+  // If the row's "function" node is itself structural (no separate function
+  // node in the graph), start the chain from it.
+  let curId: string | undefined = functionNodeId;
+  if (!STRUCTURAL_NODE_TYPES.includes(fnNode.type)) {
+    const structEdge = edges.find(
+      (e) => e.type === "HAS_FUNCTION" && e.target === functionNodeId
+    );
+    curId = structEdge?.source;
+  }
+  if (!curId) return "";
+
+  const chain: string[] = [];
+  const visited = new Set<string>();
+  while (curId && !visited.has(curId)) {
+    visited.add(curId);
+    const n = nodeMap.get(curId);
+    if (n) chain.push(n.name);
+    const parentEdge = edges.find(
+      (e) =>
+        (e.type === "HAS_PROCESS_STEP" || e.type === "HAS_WORK_ELEMENT") &&
+        e.target === curId
+    );
+    curId = parentEdge?.source;
+  }
+  // chain is [nearest, ..., top]; reverse to top → nearest for readability.
+  return chain.reverse().filter(Boolean).join(" › ");
+}

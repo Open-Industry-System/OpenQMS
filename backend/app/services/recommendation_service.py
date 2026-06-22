@@ -278,6 +278,7 @@ PROMPT_TEMPLATES = {
 
 【当前上下文】
 - FMEA 类型: {fmea_type}
+- 工艺步骤/结构要素: {process_step}
 - 失效模式: {failure_mode}
 - 功能描述: {function_description}
 
@@ -298,6 +299,7 @@ PROMPT_TEMPLATES = {
 
 【当前上下文】
 - FMEA 类型: {fmea_type}
+- 工艺步骤/结构要素: {process_step}
 - 失效模式: {failure_mode}
 - 功能描述: {function_description}
 
@@ -317,6 +319,7 @@ PROMPT_TEMPLATES = {
 
 【当前上下文】
 - FMEA 类型: {fmea_type}
+- 工艺步骤/结构要素: {process_step}
 - 失效模式: {failure_mode}
 - AP(行动优先级): {ap}
 
@@ -336,6 +339,7 @@ D: 焊后100% X射线探伤 / 焊缝气密性在线检测
 
 【当前上下文】
 - FMEA 类型: {fmea_type}
+- 工艺步骤/结构要素: {process_step}
 - 失效模式: {failure_mode}
 - S(严重度)={severity}  O(频度)={occurrence}  D(探测度)={detection}
 

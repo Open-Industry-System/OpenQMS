@@ -10,6 +10,7 @@ export interface EffectLinesEditorProps {
   fmeaId: string;
   functionDescription: string;
   failureModeName: string;
+  processStep?: string;
   disabled: boolean;
   updateNode: (nodeId: string, field: string, value: unknown) => void;
   onAddEffect: () => void;
@@ -18,7 +19,7 @@ export interface EffectLinesEditorProps {
 
 export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactElement {
   const {
-    effectIds, nodeMap, fmeaId, functionDescription, failureModeName,
+    effectIds, nodeMap, fmeaId, functionDescription, failureModeName, processStep,
     disabled, updateNode, onAddEffect, onDeleteEffect,
   } = props;
 
@@ -30,7 +31,7 @@ export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactE
           <div key={effectId} style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <SmartSuggestionDropdown
               triggerType="failure_effect"
-              context={{ failure_mode: failureModeName, function_description: functionDescription }}
+              context={{ failure_mode: failureModeName, function_description: functionDescription, process_step: processStep || "" }}
               fmeaId={fmeaId}
               value={node?.name || ""}
               onChange={(val: string) => updateNode(effectId, "name", val)}

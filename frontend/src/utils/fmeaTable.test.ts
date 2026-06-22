@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildRows, createRowNodes, getRowEffectNodes, getRowSeverity, computeRowSpans,
-  addEffect, deleteEffect, addCause, deleteMode,
+  addEffect, deleteEffect, addCause, deleteMode, getProcessChain,
 } from "./fmeaTable";
 import type { GraphNode, GraphEdge } from "../types";
 
@@ -353,5 +353,82 @@ describe("deleteMode", () => {
     deleteMode("fm1", nodes, edges);
     expect(nodes).toHaveLength(origNodeCount);
     expect(edges).toHaveLength(origEdgeCount);
+  });
+});
+
+describe("getProcessChain", () => {
+  const nm = (nodes: GraphNode[]) => new Map(nodes.map((x) => [x.id, x]));
+
+  it("walks PFMEA function → work element → process step → process item (top › nearest)", () => {
+    const nodes: GraphNode[] = [
+      n("pi1", "ProcessItem", { name: "焊接工位" }),
+      n("ps1", "ProcessStep", { name: "完成焊接" }),
+      n("we1", "ProcessWorkElement", { name: "施加焊接电流" }),
+      n("wef1", "ProcessWorkElementFunction", { name: "提供稳定焊接热输入" }),
+    ];
+    const edges: GraphEdge[] = [
+      e("pi1", "ps1", "HAS_PROCESS_STEP"),
+      e("ps1", "we1", "HAS_WORK_ELEMENT"),
+      e("we1", "wef1", "HAS_FUNCTION"),
+    ];
+    expect(getProcessChain("wef1", nm(nodes), edges)).toBe("焊接工位 › 完成焊接 › 施加焊接电流");
+  });
+
+  it("walks DFMEA function → component → subsystem → system", () => {
+    const nodes: GraphNode[] = [
+      n("sys1", "System", { name: "BMS" }),
+      n("sub1", "Subsystem", { name: "BMU" }),
+      n("cmp1", "Component", { name: "LTC6811" }),
+      n("sf1", "ProcessStepFunction", { name: "采集单体电压" }),
+    ];
+    const edges: GraphEdge[] = [
+      e("sys1", "sub1", "HAS_PROCESS_STEP"),
+      e("sub1", "cmp1", "HAS_PROCESS_STEP"),
+      e("cmp1", "sf1", "HAS_FUNCTION"),
+    ];
+    expect(getProcessChain("sf1", nm(nodes), edges)).toBe("BMS › BMU › LTC6811");
+  });
+
+  it("starts from the node itself when the function node is structural (no HAS_FUNCTION)", () => {
+    const nodes: GraphNode[] = [
+      n("sys1", "System", { name: "BMS" }),
+      n("sub1", "Subsystem", { name: "BMU" }),
+      n("cmp1", "Component", { name: "LTC6811" }),
+    ];
+    const edges: GraphEdge[] = [
+      e("sys1", "sub1", "HAS_PROCESS_STEP"),
+      e("sub1", "cmp1", "HAS_PROCESS_STEP"),
+    ];
+    // Component is itself the row's function node (DFMEA允许结构节点作为功能行)
+    expect(getProcessChain("cmp1", nm(nodes), edges)).toBe("BMS › BMU › LTC6811");
+  });
+
+  it("returns empty string when no structural ancestor exists", () => {
+    const nodes: GraphNode[] = [
+      n("wef1", "ProcessWorkElementFunction", { name: "提供稳定焊接热输入" }),
+    ];
+    const edges: GraphEdge[] = [];
+    expect(getProcessChain("wef1", nm(nodes), edges)).toBe("");
+  });
+
+  it("returns empty string for an unknown node id", () => {
+    expect(getProcessChain("nope", nm([]), [])).toBe("");
+  });
+
+  it("does not loop on cyclic structural edges", () => {
+    const nodes: GraphNode[] = [
+      n("pi1", "ProcessItem", { name: "A" }),
+      n("ps1", "ProcessStep", { name: "B" }),
+      n("wef1", "ProcessWorkElementFunction", { name: "F" }),
+    ];
+    // pathological cycle: ps1 -> pi1 -> ps1
+    const edges: GraphEdge[] = [
+      e("we1", "wef1", "HAS_FUNCTION"),
+      e("pi1", "ps1", "HAS_PROCESS_STEP"),
+      e("ps1", "pi1", "HAS_PROCESS_STEP"),
+      e("we1", "ps1", "HAS_WORK_ELEMENT"),
+    ];
+    // we1 missing from nodes; HAS_FUNCTION not found → empty, no crash
+    expect(getProcessChain("wef1", nm(nodes), edges)).toBe("");
   });
 });

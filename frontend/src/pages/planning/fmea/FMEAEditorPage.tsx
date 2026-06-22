@@ -26,7 +26,7 @@ import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
-import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, deleteMode, type FMEARow } from "../../../utils/fmeaTable";
+import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, deleteMode, getProcessChain, type FMEARow } from "../../../utils/fmeaTable";
 import { planCauseDeletion } from "./deleteRowHelpers";
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
 import {
@@ -920,6 +920,7 @@ export default function FMEAEditorPage() {
                 triggerType="failure_mode"
                 context={{
                   function_description: nodeMap.get(row.functionNodeId)?.name || "",
+                  process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
                 }}
                 fmeaId={fmeaId}
                 value={node?.name || ""}
@@ -960,6 +961,7 @@ export default function FMEAEditorPage() {
             fmeaId={fmeaId}
             functionDescription={nodeMap.get(row.functionNodeId)?.name || ""}
             failureModeName={nodeMap.get(row.failureModeNodeId)?.name || ""}
+            processStep={getProcessChain(row.functionNodeId, nodeMap, edges)}
             disabled={!canEdit('fmea')}
             updateNode={updateNode}
             onAddEffect={() => handleAddEffect(row.failureModeNodeId)}
@@ -1038,6 +1040,7 @@ export default function FMEAEditorPage() {
                   context={{
                     failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
                     function_description: nodeMap.get(row.functionNodeId)?.name || "",
+                    process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
                     severity: getRowSeverity(row, nodeMap),
                   }}
                   fmeaId={fmeaId}
@@ -1115,6 +1118,7 @@ export default function FMEAEditorPage() {
             triggerType="measure"
             context={{
               failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
               ap: ap,
             }}
             fmeaId={fmeaId}
@@ -1141,6 +1145,7 @@ export default function FMEAEditorPage() {
             triggerType="measure"
             context={{
               failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
               ap: ap,
             }}
             fmeaId={fmeaId}
@@ -1286,6 +1291,7 @@ export default function FMEAEditorPage() {
             triggerType="optimization"
             context={{
               failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
               severity: s,
               occurrence: causeNode?.occurrence || 0,
               detection: detNode?.detection || 0,
