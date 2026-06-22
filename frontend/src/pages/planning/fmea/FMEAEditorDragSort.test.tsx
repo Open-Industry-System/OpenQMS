@@ -12,7 +12,9 @@ import type { FMEADocument, GraphEdge, GraphNode } from "../../../types";
 //   3. 跨父级非法拖：拖到不同父级的节点，显示红色非法框 + 松手弹「仅支持同级节点排序」。
 //   4. viewer 不可拖：无编辑权限时 grip 不渲染。
 //   5. 同级合法拖：拖到同级节点的上/下四分之一，显示青色 before/after 线，松手提交排序。
-//   6. 同级折叠不留白、源行降权：拖拽时同级子树折叠无空白、被拖源行变淡。
+//   6. 被拖节点自身子树折叠 + 源行降权：拖拽时被拖节点的子树折叠（无空白）、被拖源行变淡；
+//      overlay 跟随指针不错位（拖第 2/3 个节点也应与指针对齐）。同级子树保持展开
+//      （折叠同级会位移被拖节点 → overlay 错位）。
 // 注：@dnd-kit 拖拽源用 transform/overlay 管，DOM 不按视觉效果实时改；如需调整 live
 // preview 行为，用 @dnd-kit 的 sortable/transform，不要回到原生 HTML5 DnD。
 // ============================================================================
@@ -561,7 +563,7 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
     });
   });
 
-  it("collapses sibling subtrees during drag but keeps unrelated branches expanded", async () => {
+  it("collapses only the dragged node's own subtree (siblings stay expanded)", async () => {
     mocks.getFMEA.mockResolvedValue(makeDoc(
       "PFMEA",
       [
@@ -587,13 +589,14 @@ describe("FMEAEditorPage PFMEA structure drag sorting", () => {
 
     driveDragOver("ps2", "ps1", 1);
     await waitFor(() => {
-      // dragged node + its siblings collapse: we1 (ps1's child) and we2 (ps2's child) hidden
-      expect(screen.queryByTestId("fmea-structure-node-we1")).toBeNull();
+      // only the dragged node's own subtree (we2, ps2's child) collapses
       expect(screen.queryByTestId("fmea-structure-node-we2")).toBeNull();
-      // the reordered sibling level (ps1/ps2/ps3) stays visible
+      // siblings' subtrees stay expanded (we1, ps1's child) — collapsing them would
+      // shift the dragged node and misalign the DragOverlay
+      expect(screen.getByTestId("fmea-structure-node-we1")).toBeInTheDocument();
+      // sibling level + unrelated branch stay visible/expanded
       expect(screen.getByTestId("fmea-structure-node-ps1")).toBeInTheDocument();
       expect(screen.getByTestId("fmea-structure-node-ps3")).toBeInTheDocument();
-      // unrelated branch (pi2 -> ps4) stays expanded
       expect(screen.getByTestId("fmea-structure-node-ps4")).toBeInTheDocument();
     });
   });
