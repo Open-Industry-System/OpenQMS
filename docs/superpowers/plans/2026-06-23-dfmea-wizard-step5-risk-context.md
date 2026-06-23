@@ -30,7 +30,7 @@
 
 **Interfaces:**
 - Produces:
-  - `createWizardFailureChain(funcId: string, t: (key: string) => string): { newNodes: GraphNode[]; newEdges: GraphEdge[] }` — 产 FM/FE/FC/PC/DC 五节点 + 五边；FM/FE/FC 初始 name 走 `t(...)`，PC/DC name 为 `''`。
+  - `createWizardFailureChain(funcId: string, t: (key: string) => string): { newNodes: GraphNode[]; newEdges: GraphEdge[] }` — 产 FM/FE/FC/PC/DC 五节点 + 五边；FM 初始 name 走 `t('wizard.failure.newFailureMode')`，FE/FC/PC/DC name 均为 `''`（对齐现有向导行为：effect/cause 除非推荐链提供值否则留空；PC/DC 空串是门禁契约）。
   - `ensureCauseControls(nodes: GraphNode[], edges: GraphEdge[]): { nodes: GraphNode[]; edges: GraphEdge[]; changed: boolean }` — 对每个 `FailureCause`（`CAUSE_OF` 的 source）缺 `PREVENTED_BY` 补 PC、缺 `DETECTED_BY` 补 DC；新建 name `''`；幂等。
 - Consumes: `crypto.randomUUID()`（浏览器原生，向导既有用法，见 `DFMEAWizardPage.tsx:226`）。
 
@@ -49,11 +49,11 @@ const node = (id: string, type: string, name = id): GraphNode => ({
 const edge = (source: string, target: string, type: string): GraphEdge => ({
   source, target, type,
 });
-// Minimal t: returns the key suffixed so we can assert it was used for FM/FE/FC only.
+// Minimal t: returns the key in brackets so we can assert it was used for FM only.
 const t = (key: string) => `[${key}]`;
 
 describe("createWizardFailureChain", () => {
-  it("creates FM/FE/FC/PC/DC nodes and the five edges, with PC/DC names empty", () => {
+  it("creates FM/FE/FC/PC/DC nodes and the five edges, with FE/FC/PC/DC names empty", () => {
     const { newNodes, newEdges } = createWizardFailureChain("func1", t);
 
     const types = newNodes.map(n => n.type);
@@ -65,7 +65,9 @@ describe("createWizardFailureChain", () => {
     );
     expect(newNodes).toHaveLength(5);
 
-    // FM/FE/FC names come from t(...); PC/DC names are empty strings.
+    // FM name comes from t(...); FE/FC/PC/DC names are empty strings (FE/FC
+    // are filled only when a recommended chain supplies values; PC/DC empty
+    // per the gate contract).
     const fm = newNodes.find(n => n.type === "FailureMode")!;
     const fe = newNodes.find(n => n.type === "FailureEffect")!;
     const fc = newNodes.find(n => n.type === "FailureCause")!;
@@ -214,7 +216,7 @@ import type { GraphNode, GraphEdge } from "../types";
 const ZERO = { severity: 0, occurrence: 0, detection: 0 };
 
 /** Build the nodes + edges for a new failure chain off a function node.
- *  FM/FE/FC initial names come from `t`; PC/DC names are "" (see CONTRACT). */
+ *  FM initial name comes from `t`; FE/FC/PC/DC names are "" (see CONTRACT). */
 export function createWizardFailureChain(
   funcId: string,
   t: (key: string) => string,
@@ -244,8 +246,10 @@ export function createWizardFailureChain(
 }
 
 /** For every FailureCause (a node that is the source of a CAUSE_OF edge),
- *  ensure it has exactly one outgoing PREVENTED_BY and DETECTED_BY. Missing
- *  controls are created with name "". Idempotent: a fully-equipped graph is
+ *  ensure it has at least one outgoing PREVENTED_BY and at least one
+ *  DETECTED_BY. Missing controls are created with name "". Existing controls
+ *  (including duplicates) are left untouched — this never deletes controls.
+ *  Idempotent: a graph where every cause already has both edge types is
  *  returned unchanged with changed=false. Does not mutate inputs. */
 export function ensureCauseControls(
   nodes: GraphNode[],
@@ -537,16 +541,60 @@ Replace with (note the order: `setLockVersion` BEFORE normalization; baseline ha
 
 > `immediateSave` 是 fire-and-forget（不 await）；UI 已 `setNodes(normNodes)` 立即生效。保存失败时 `useWizardSave` 自身会 `message.error('保存失败，请重试')`（useWizardSave.ts:104），无需此处额外处理。
 
-- [ ] **Step 3: Typecheck + lint**
+- [ ] **Step 3: Guard in-app navigation against a failed normalization save**
+
+`handleBackToList`（:138-155）currently navigates non-empty drafts with no dirty check. If normalization changed the graph and the fire-and-forget `immediateSave` failed (or is still in flight), `lastSavedHashRef` is still the pre-normalization baseline while live state is normalized → dirty. Guard the non-empty branch the same way `beforeunload` does (live hash vs `lastSavedHashRef`).
+
+Replace `handleBackToList` (lines 138-155) with:
+
+```ts
+  const handleBackToList = () => {
+    const hasOnlyInitialSystem = nodes.length <= 1 && edges.length === 0;
+    if (hasOnlyInitialSystem) {
+      Modal.confirm({
+        title: t('wizard.page.confirmEmptyDraftTitle'),
+        content: t('wizard.page.confirmEmptyDraft'),
+        okText: t('wizard.page.confirmEmptyDraftOk'),
+        cancelText: t('wizard.page.confirmEmptyDraftCancel'),
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          try { await deleteFMEA(fmeaId!); } catch { /* ignore */ }
+          navigate('/fmea');
+        },
+      });
+      return;
+    }
+    // Non-empty draft: if there are unsaved changes (including a normalization
+    // save that failed/in-flight — lastSavedHashRef still at pre-normalization
+    // baseline while live state is normalized), confirm before leaving.
+    const liveHash = computeHash(nodesRef.current, edgesRef.current, scopeRef.current);
+    if (liveHash !== lastSavedHashRef.current) {
+      Modal.confirm({
+        title: t('wizard.page.confirmLeaveTitle', { defaultValue: '离开向导？' }),
+        content: t('wizard.page.confirmLeave', { defaultValue: '有未保存的更改，确定离开吗？' }),
+        okText: t('wizard.page.confirmLeaveOk', { defaultValue: '离开' }),
+        cancelText: t('wizard.page.confirmEmptyDraftCancel'),
+        okButtonProps: { danger: true },
+        onOk: () => navigate('/fmea'),
+      });
+      return;
+    }
+    navigate('/fmea');
+  };
+```
+
+> `nodesRef`/`edgesRef`/`scopeRef` 已在 :57-59 声明。i18n 键用 `defaultValue` 内联（避免 Task 2 之外再加键；中英 fallback 直接生效）。这覆盖归一化保存失败/进行中时点「返回列表」的静默丢失——与 `beforeunload` 行为一致。
+
+- [ ] **Step 4: Typecheck + lint**
 
 Run: `cd frontend && npx tsc --noEmit && npm run lint`
-Expected: no errors.（`immediateSave` 已在 `useWizardSave` 解构中，:47。）
+Expected: no errors.（`immediateSave` 已在 `useWizardSave` 解构中，:47。`nodesRef`/`edgesRef`/`scopeRef`/`lastSavedHashRef` 均在闭包可见。）
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add frontend/src/pages/planning/fmea/DFMEAWizardPage.tsx
-git commit -m "feat(dfmea): normalize cause controls on load (lock-version-safe, integrity-safe hash latch)"
+git commit -m "feat(dfmea): normalize cause controls on load (lock-version-safe, integrity-safe hash latch, leave-guard)"
 ```
 
 ---
@@ -855,7 +903,7 @@ If Docker is running (`docker compose up`), open the DFMEA wizard at an existing
 ## Self-Review
 
 **1. Spec coverage:**
-- §0 归一化 + 加载时序 + 完整性 → Task 1（`ensureCauseControls`）+ Task 4（加载接入）。✓
+- §0 归一化 + 加载时序 + 完整性 → Task 1（`ensureCauseControls`）+ Task 4（加载接入 + 返回列表 leave-guard，覆盖归一化保存失败/进行中时的 in-app 静默丢失）。✓
 - §0 空 name 契约 → Task 1 单测断言 `name === ''`。✓
 - §1 `createWizardFailureChain` + 第 4 步 PC/DC 编辑框 + `handleUpdateControl` → Task 1 + Task 3。✓
 - §2 第 5 步 9 列 + 逐行 O/D 禁用 + S 共享语义 + `scroll={{ x: 1080 }}` → Task 5。✓
