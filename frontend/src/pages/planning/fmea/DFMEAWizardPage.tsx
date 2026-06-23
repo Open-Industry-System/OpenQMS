@@ -462,7 +462,7 @@ export default function DFMEAWizardPage() {
           return (
             <Card key={func.id} size="small" title={func.name} style={{ marginBottom: 12 }}>
               {fmNodes.length === 0 && suggestedModes.length > 0 && (
-                <div style={{ marginBottom: 8, padding: 8, background: '#f6ffed', borderRadius: 4 }}>
+                <div style={{ marginBottom: 8, padding: 8, background: 'var(--qf-green-dim)', border: '1px solid var(--qf-green)', borderRadius: 'var(--qf-radius-md)' }}>
                   <Tag color="green">{t('wizard.failure.recommended')}</Tag>
                   <span style={{ fontSize: 12 }}> {t('wizard.failure.autoRecommend')}</span>
                   <Space size={4} style={{ marginTop: 4 }}>
@@ -482,7 +482,7 @@ export default function DFMEAWizardPage() {
                 const causeNodes = causeEdges.map(e => nodes.find(n => n.id === e.source)).filter(Boolean) as GraphNode[];
 
                 return (
-                  <div key={fmNode.id} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                  <div key={fmNode.id} style={{ marginBottom: 8, padding: 8, background: 'var(--qf-bg-elevated)', border: '1px solid var(--qf-border)', borderRadius: 'var(--qf-radius-md)' }}>
                     <Space direction="vertical" style={{ width: '100%' }}>
                       <Input size="small" value={fmNode.name} addonBefore={t('wizard.failure.failureMode')}
                         onChange={e => handleUpdateNodeField(fmNode.id, 'name', e.target.value)} />
