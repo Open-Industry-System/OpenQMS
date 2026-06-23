@@ -104,8 +104,11 @@ signature for minimal diff (now effectively unused). This makes the
 CLAUDE.md "leave pre-existing dead code alone unless asked").
 
 **5. Imports:** add `SmartSuggestionDropdown` (from
-`../../../components/dfmea/SmartSuggestionDropdown`) and `getProcessChain`
-(append to the existing `utils/fmeaTable` import on line 11).
+`../../../components/dfmea/SmartSuggestionDropdown`) and `getProcessChain`.
+Note: the current `fmeaTable` import on line 11 is
+`import { buildRows, getRowSeverity, type FMEARow } from '../../../utils/fmeaTable';`
+— append `getProcessChain` to that same named-import (do not add a second
+`fmeaTable` import line).
 
 **6. Leave `useDfmeaRules` hook in place.** Step 4 (`analyzeRisk`) and Step 5
 (`suggestMeasures`) still use it. Only Step 3 stops consuming it.
@@ -144,7 +147,19 @@ covering Step 3 only:
   pattern from **`SmartSuggestionDropdown.test.tsx`** (the component Step 3
   actually renders) and the page-level render/mock pattern from
   **`ScopeTagField.test.tsx`**. Both exist on this base.
-- Render Step 3 with a function node present.
+- Render the page, then advance to Step 3. `DFMEAWizardPage` defaults to
+  `currentStep = 0` (DFMEAWizardPage.tsx:43) and has no prop to jump to a step;
+  `goToStep` only does `setCurrentStep` with no validation gate
+  (DFMEAWizardPage.tsx:118). So in the test click the 「下一步」 button
+  (`t('wizard.page.nextStep')`, DFMEAWizardPage.tsx:712) **three times** to move
+  0→1→2→3 and land on `renderStep3`. (If three clicks prove brittle — e.g. a
+  step blocks on a `Spin`/async `getFMEA` — fall back to wrapping in `waitFor`,
+  but the navigation is the intended path; do **not** refactor Step 3 into a
+  separately-exported sub-component for this.) Seed the graph via the mocked
+  `getFMEA` with at least one function node (type
+  `ProcessWorkElementFunction`/`ProcessItemFunction`/`ProcessStepFunction`,
+  matching `renderStep3`'s filter at DFMEAWizardPage.tsx:415) so Step 3 is
+  non-empty.
 - Assert `SmartSuggestionDropdown` renders for the FM field and that typing ≥2
   chars calls `getRecommendations` with `trigger_type: "failure_mode"` and a
   `context` containing `function_description` + `process_step`.
@@ -172,3 +187,8 @@ build), and the wizard test file.
   now starts empty instead of "新失效模式"; (3) title clarified as
   `renderStep3` / 用户第四步; (4) test references point to the files that
   actually exist (`SmartSuggestionDropdown.test.tsx` + `ScopeTagField.test.tsx`).
+- Rev 3 addresses the second review round: (5) the test now specifies clicking
+  「下一步」 three times to reach `renderStep3` (page defaults to `currentStep=0`,
+  no step prop), rather than the impossible "render Step 3 directly"; and (6)
+  the import note spells out that `getProcessChain` must be appended to the
+  existing single `fmeaTable` named-import on line 11.
