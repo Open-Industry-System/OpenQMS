@@ -819,7 +819,7 @@ git commit -m "feat(dfmea): step5MissingControl finish gate + risk-analysis empt
 **Interfaces:**
 - Consumes: `buildRows`（既有）。验证 `FMEARow.preventionControlIds` / `detectionControlIds` 对含 PC+DC 的 cause 非空且指向正确节点——为 Task 1 的图不变量提供编辑器侧的交叉验证。
 
-- [ ] **Step 1: Add the failing test**
+- [ ] **Step 1: Add the regression test**
 
 In `frontend/src/utils/fmeaTable.test.ts`, inside the `describe("buildRows", () => { ... })` block (starts line 26), add a new `it(...)` case (e.g. after the first buildRows test, ~line 51):
 
