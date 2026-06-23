@@ -14,12 +14,13 @@ import {
   getControlPlan, createControlPlan, updateControlPlan,
   checkStaleItems, approveControlPlan, syncCSRToControlPlan,
 } from "../../../api/controlPlan";
-import type { ControlPlan, ControlPlanItem } from "../../../types";
+import type { ControlPlan, ControlPlanItem, CPVersionHeader } from "../../../types";
 import { listCustomers } from "../../../api/customerQuality";
 import type { CPSyncStatusItem } from "../../../types/specialCharacteristic";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { getCPSyncStatus, syncToCP } from "../../../api/specialCharacteristic";
+import { getCPVersion } from "../../../api/version";
 import { useCollaboration } from "../../../hooks/useCollaboration";
 import { CollaborationBar, ActiveUserIndicator, ConflictResolutionModal } from "../../../components/collaboration";
 import type { ConflictInfo } from "../../../types/collaboration";
@@ -108,14 +109,22 @@ export default function ControlPlanEditorPage() {
   const [csrCustomerIds, setCsrCustomerIds] = useState<string[]>([]);
   const [csrSyncing, setCsrSyncing] = useState(false);
   const [csrCustomers, setCsrCustomers] = useState<{ customer_id: string; name: string; csr_list: unknown[] | null }[]>([]);
+  const [viewingVersion, setViewingVersion] = useState<{ major: number; minor: number } | null>(null);
+  const [versionHeader, setVersionHeader] = useState<CPVersionHeader | null>(null);
 
   const _user = useAuthStore((s) => s.user);
-  const { canEdit: canEditPerm, canApprove } = usePermission();
+  const { canEdit: canEditPerm, canApprove: rawCanApprove } = usePermission();
   const isApproved = cp?.status === "approved";
-  const canEdit = canEditPerm('planning') && !isApproved;
+  const isViewingVersion = viewingVersion !== null;
+  const canEdit = canEditPerm('planning') && !isApproved && !isViewingVersion;
+  const canApproveAllowed = (m: "planning") => rawCanApprove(m) && !isViewingVersion;
 
   const cpId = id || "";
-  const { activeUsers, isSyncing, startEditing, stopEditing } = useCollaboration("control_plan", cpId);
+  const { activeUsers, isSyncing, startEditing: rawStartEditing, stopEditing } = useCollaboration("control_plan", cpId);
+  const startEditing = useCallback((...args: Parameters<typeof rawStartEditing>) => {
+    if (isViewingVersion) return;
+    rawStartEditing(...args);
+  }, [rawStartEditing, isViewingVersion]);
 
   // Conflict resolution state
   const [conflictVisible, setConflictVisible] = useState(false);
@@ -168,6 +177,51 @@ export default function ControlPlanEditorPage() {
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isNew]);
+
+  const loadVersionSnapshot = useCallback(async (major: number, minor: number) => {
+    try {
+      const v = await getCPVersion(id!, major, minor);
+      const h = v.header_snapshot || {};
+      setTitle(h.title || "");
+      setDocumentNo(h.document_no || "");
+      setPhase(h.phase || "sample");
+      setPartNo(h.part_no || "");
+      setPartName(h.part_name || "");
+      setContactInfo(h.contact_info || "");
+      setCoreGroup(h.core_group || "");
+      setOrgFactory(h.org_factory || "");
+      setDrawingRev(h.drawing_rev || "");
+      setItems(v.items_snapshot || []);
+      setVersionHeader(v.header_snapshot);
+      setViewingVersion({ major, minor });
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      message.error(e?.response?.data?.detail || t("message.loadVersionFailed"));
+    }
+  }, [id, t, message]);
+
+  const exitVersionSnapshot = useCallback(async () => {
+    if (!id) return;
+    try {
+      const doc = await getControlPlan(id);
+      setCp(doc);
+      setTitle(doc.title);
+      setDocumentNo(doc.document_no);
+      setPhase(doc.phase || "sample");
+      setPartNo(doc.part_no || "");
+      setPartName(doc.part_name || "");
+      setContactInfo(doc.contact_info || "");
+      setCoreGroup(doc.core_group || "");
+      setOrgFactory(doc.org_factory || "");
+      setDrawingRev(doc.drawing_rev || "");
+      setItems(doc.items || []);
+      baseItemsRef.current = JSON.parse(JSON.stringify(doc.items || []));
+      setVersionHeader(null);
+      setViewingVersion(null);
+    } catch {
+      message.error(t("message.loadFailed"));
+    }
+  }, [id, t, message]);
 
   const updateItem = useCallback((index: number, field: keyof ControlPlanItem, value: string) => {
     setItems((prev) => {
@@ -669,11 +723,12 @@ export default function ControlPlanEditorPage() {
   }
 
   const currentStatus = cp?.status || "draft";
+  const displayStatus = isViewingVersion ? (versionHeader?.status || "") : currentStatus;
 
   return (
     <PageShell
       title={isNew ? t("pageTitle.newControlPlan") : title || t("pageTitle.controlPlanDetail")}
-      subtitle={`${t("column.status")}：${statusLabels[currentStatus] || currentStatus}`}
+      subtitle={`${t("column.status")}：${statusLabels[displayStatus] || displayStatus}`}
       actions={
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/control-plans")}>
           {tc("actions.back")}
@@ -696,7 +751,7 @@ export default function ControlPlanEditorPage() {
       )}
 
       {/* Sync pending banner */}
-      {cp?.sync_pending && (
+      {cp?.sync_pending && !isViewingVersion && (
         <Alert
           message={t("staleAlert.syncPending")}
           type="warning"
@@ -707,6 +762,20 @@ export default function ControlPlanEditorPage() {
             </Button>
           }
           style={{ marginBottom: 16 }}
+        />
+      )}
+
+      {viewingVersion && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t("message.viewingVersion", { version: `${viewingVersion.major}.${viewingVersion.minor}` })}
+          action={
+            <Button size="small" onClick={exitVersionSnapshot}>
+              {t("button.exitVersion")}
+            </Button>
+          }
         />
       )}
 
@@ -729,7 +798,7 @@ export default function ControlPlanEditorPage() {
             {t("button.importFromPFMEA")}
           </Button>
         )}
-        {!isNew && (
+        {!isNew && !isViewingVersion && (
           <Button icon={<ExclamationCircleOutlined />} onClick={handleCheckStale}>
             {t("button.checkPFMEAChange")}
           </Button>
@@ -751,7 +820,7 @@ export default function ControlPlanEditorPage() {
             {t("button.syncSpecialCharacteristics")}
           </Button>
         )}
-        {!isNew && canApprove('planning') && currentStatus !== "approved" && (
+        {!isNew && canApproveAllowed('planning') && displayStatus !== "approved" && (
           <Button icon={<CheckCircleOutlined />} onClick={handleApprove}>
             {tc("actions.approve")}
           </Button>
@@ -855,7 +924,7 @@ export default function ControlPlanEditorPage() {
             <div style={{ marginBottom: 12 }}>
               <Text type="secondary">{t("form.relatedPFMEA")}</Text>
               <Input
-                value={cp?.fmea_ref_id || t("form.notAssociated")}
+                value={(isViewingVersion ? versionHeader?.fmea_ref_id : cp?.fmea_ref_id) || t("form.notAssociated")}
                 disabled
               />
             </div>
@@ -898,10 +967,10 @@ export default function ControlPlanEditorPage() {
           <VersionHistoryTab
             documentId={id!}
             documentType="cp"
-            canCreate={canEditPerm('planning')}
-            canRollback={canApprove('planning')}
-            isDraft={currentStatus === "draft"}
-            onViewSnapshot={(major, minor) => message.info(`${t("button.viewSnapshot")} v${major}.${minor}`)}
+            canCreate={canEdit}
+            canRollback={canApproveAllowed('planning')}
+            isDraft={displayStatus === "draft"}
+            onViewSnapshot={loadVersionSnapshot}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
             onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}
@@ -909,7 +978,7 @@ export default function ControlPlanEditorPage() {
         )},
       ]} />
 
-      {!isNew && id && (
+      {!isNew && id && !isViewingVersion && (
         <div style={{ marginTop: 16 }}>
           <ValidationPanel cpId={id} />
         </div>
