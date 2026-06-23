@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { App } from "antd";
 import DFMEAWizardPage from "./DFMEAWizardPage";
-import type { FMEADocument, GraphEdge, GraphNode } from "../../../types";
+import type { FMEADocument, GraphNode } from "../../../types";
 
 const mocks = vi.hoisted(() => ({
   getFMEA: vi.fn(),

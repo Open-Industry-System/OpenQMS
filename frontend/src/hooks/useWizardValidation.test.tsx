@@ -135,3 +135,53 @@ describe('useWizardValidation — structure gaps from selected tools', () => {
     expect(result.current.warnings).toEqual([]);
   });
 });
+
+describe('useWizardValidation — failure-chain name completeness (Step 4)', () => {
+  // The wizard creates FM/FE/FC with empty names by default (so the AI
+  // SmartSuggestionDropdown doesn't auto-fire on a placeholder). step4Complete
+  // must therefore check non-empty NAMES, not just that a HAS_FAILURE_MODE
+  // edge exists — otherwise a user can finish a DFMEA with blank failure fields.
+  const chain = (fmName: string, feName: string, fcName: string) => ({
+    nodes: [
+      n('func1', 'ProcessWorkElementFunction'),
+      n('fm1', 'FailureMode', { name: fmName }),
+      n('fe1', 'FailureEffect', { name: feName, severity: 7 }),
+      n('fc1', 'FailureCause', { name: fcName, occurrence: 5 }),
+      n('dc1', 'DetectionControl', { name: '检测', detection: 3 }),
+    ],
+    edges: [
+      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
+      e('fm1', 'fe1', 'EFFECT_OF'),
+      e('fc1', 'fm1', 'CAUSE_OF'),
+      e('fc1', 'dc1', 'DETECTED_BY'),
+    ],
+  });
+
+  it('blocks completion when a FailureMode name is empty', () => {
+    const c = chain('', '效应', '原因');
+    const { result } = renderHook(() => useWizardValidation(c.nodes, c.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step4Complete).toBe(false);
+    expect(result.current.warnings).toContain(3);
+  });
+
+  it('blocks completion when a FailureEffect name is empty', () => {
+    const c = chain('模式', '', '原因');
+    const { result } = renderHook(() => useWizardValidation(c.nodes, c.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step4Complete).toBe(false);
+    expect(result.current.warnings).toContain(3);
+  });
+
+  it('blocks completion when a FailureCause name is empty', () => {
+    const c = chain('模式', '效应', '');
+    const { result } = renderHook(() => useWizardValidation(c.nodes, c.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step4Complete).toBe(false);
+    expect(result.current.warnings).toContain(3);
+  });
+
+  it('completes Step 4 when FM/FE/FC are all named', () => {
+    const c = chain('模式', '效应', '原因');
+    const { result } = renderHook(() => useWizardValidation(c.nodes, c.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step4Complete).toBe(true);
+    expect(result.current.warnings).not.toContain(3);
+  });
+});

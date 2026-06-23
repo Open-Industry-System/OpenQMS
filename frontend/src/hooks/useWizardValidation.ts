@@ -42,8 +42,27 @@ export function useWizardValidation(
       return edges.some(e => e.source === c.id && e.type === 'HAS_FUNCTION');
     });
 
+    // Step 4 (失效分析) is complete only when every function has a NAMED
+    // failure chain: a FailureMode, at least one FailureEffect, and at least
+    // one FailureCause — each with a non-empty name. Checking the
+    // HAS_FAILURE_MODE edge alone is insufficient: the wizard creates FM/FE/FC
+    // with empty names by default (so the AI dropdown doesn't auto-fire on a
+    // placeholder), so without name checks a user could finish a DFMEA with
+    // blank failure fields.
     const step4Complete = functions.length > 0 && functions.every(f => {
-      return edges.some(e => e.source === f.id && e.type === 'HAS_FAILURE_MODE');
+      const fmEdges = edges.filter(ed => ed.source === f.id && ed.type === 'HAS_FAILURE_MODE');
+      if (fmEdges.length === 0) return false;
+      return fmEdges.every(fe => {
+        const fm = nodeMap.get(fe.target);
+        if (!fm || !fm.name?.trim()) return false;
+        const effectNamed = edges.some(ed =>
+          ed.source === fm.id && ed.type === 'EFFECT_OF' && nodeMap.get(ed.target)?.name?.trim()
+        );
+        if (!effectNamed) return false;
+        const causeEdges = edges.filter(ed => ed.target === fm.id && ed.type === 'CAUSE_OF');
+        if (causeEdges.length === 0) return false;
+        return causeEdges.every(ce => nodeMap.get(ce.source)?.name?.trim());
+      });
     });
 
     const step5MissingCause = rows.some(r => r.failureCauseNodeId == null);
