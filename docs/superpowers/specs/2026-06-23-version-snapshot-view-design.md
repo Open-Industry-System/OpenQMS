@@ -121,6 +121,24 @@ const loadGraphData = useCallback(async () => {
 
 注意 `normalizeGraphData` 入参类型需与现有 `:257` 的强转写法一致（`rawNodes as unknown as Array<Record<string, unknown>>`）。
 
+### 3.8 选择态与协作 guard（进入/退出快照时重置）
+加载快照仅替换 nodes/edges/graphDataRef，但页面还有 `selectedFunctionId`、`selectedStructureNode`、`selectedGraphNode`、`drawerVisible`、`highlightNodes` 等选择/高亮态（`FMEAEditorPage.tsx:106-131`）。若不清空，快照切换后 drawer 仍指向已不存在的节点、图谱高亮残留。因此：
+
+- **进入快照** (`loadVersionSnapshot`)：`setSelectedFunctionId(null)`、`setSelectedStructureNode(null)`、`setSelectedGraphNode(null)`、`setDrawerVisible(false)`、`setHighlightNodes([])`。
+- **退出快照** (`exitVersionSnapshot`)：同样清空上述五项。
+
+**协作 guard**：`startEditing` 在 severity/occurrence/detection Select 的 `onFocus` 中调用，这些 Select 已 `disabled={!canEdit('fmea')}`。为提供业务层保护（非仅依赖 UI 假设），在 `useCollaboration` 解构处加单点 guard：
+
+```ts
+const { activeUsers, startEditing: rawStartEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);
+const startEditing = useCallback((...args: Parameters<typeof rawStartEditing>) => {
+  if (isViewingVersion) return;
+  rawStartEditing(...args);
+}, [rawStartEditing, isViewingVersion]);
+```
+
+测试须断言：进入快照态后 `startEditing`（mock spy）未被调用。
+
 ## 4. CP 编辑器改动 (`frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx`)
 
 ### 4.1 State
@@ -173,20 +191,70 @@ const loadVersionSnapshot = useCallback(async (major: number, minor: number) => 
 ### 4.6 横幅
 同 FMEA，在编辑器主区域顶部渲染只读 Alert + 「返回当前版本」。
 
+### 4.7 快照态隔离（隐藏当前文档态控件）
+加载快照只设置 header 字段与 items，但 `cp` state 未更新，导致以下控件在只读态仍显示**当前文档**状态/动作，须在 `isViewingVersion` 时隐藏或改读快照值：
+
+- **sync_pending 横幅**（`ControlPlanEditorPage.tsx:699` `{cp?.sync_pending && ...}`）：加 `&& !isViewingVersion` 隐藏。
+- **checkStale 按钮**（`:732` `{!isNew && (...)}`，未受 `canEdit` 门控）：加 `&& !isViewingVersion` 隐藏。
+- **ValidationPanel**（`:914` `{!isNew && id && (<ValidationPanel cpId={id} />)}`）：加 `&& !isViewingVersion` 隐藏（历史版本不做校验）。
+- **fmea_ref_id 显示**（`:858` `value={cp?.fmea_ref_id || ...}`）与 **PageShell 状态副标题**（`:676` 用 `currentStatus`）：新增 `versionHeader: CPVersionHeader | null` state，`loadVersionSnapshot` 中 `setVersionHeader(v.header_snapshot)`，`exitVersionSnapshot` 中 `setVersionHeader(null)`；显示值改为 `isViewingVersion ? (versionHeader?.fmea_ref_id || t("form.notAssociated")) : (cp?.fmea_ref_id || t("form.notAssociated"))`，副标题状态同理用 `versionHeader?.status`。
+
+**协作 guard**：CP 的 `startEditing` 在 7 处 `onFocus`（items 表各列）。与 FMEA 同理，在 `useCollaboration` 解构处（`:118`）加单点 guard：
+
+```ts
+const { activeUsers, isSyncing, startEditing: rawStartEditing, stopEditing } = useCollaboration("control_plan", cpId);
+const startEditing = useCallback((...args: Parameters<typeof rawStartEditing>) => {
+  if (isViewingVersion) return;
+  rawStartEditing(...args);
+}, [rawStartEditing, isViewingVersion]);
+```
+
 ## 5. 类型与 API 客户端修正
 
 ### `frontend/src/types/index.ts`
-后端 list 端点返回 `FMEAVersionListItem`（无 snapshot），detail 端点返回 `FMEAVersionDetail`（含 `snapshot` + `sha256_hash`）。当前前端 `FMEAVersion` 类型带 `graph_data: GraphData` 字段是错误的（list 不含此字段）。修正方案：
+后端 list 端点返回 `FMEAVersionListItem`（无 snapshot），detail 端点返回 `FMEAVersionDetail`（含 `snapshot` + `sha256_hash`）。当前前端 `VersionBase`/`FMEAVersion`/`CPVersion` 类型与后端不符（字段不可为空却应是 `| null`，且缺 `version_id`、CP 缺 `source_fmea_version_id`）。修正方案：
 
-- 重定义 `FMEAVersion`（= list item）去掉 `graph_data`：`{ fmea_id, major_no, minor_no, change_type, change_summary, created_by, created_at }`（继承 `VersionBase`）。
-- 新增 `FMEAVersionDetail extends FMEAVersion { snapshot: GraphData; sha256_hash: string; }`。
-- CP 同理：`CPVersion`（list item）已含 `items: ControlPlanItem[]` —— 但 list 端点同样不返回 items，故应去掉 `items`，改为 `CPVersionDetail extends CPVersion { header_snapshot: CPVersionHeader; items_snapshot: ControlPlanItem[]; sha256_hash: string; }`，并新增 `CPVersionHeader` 接口（字段对齐 `header_snapshot`，见 `version_service.py:236-249`）。
-- 修正各 API 客户端返回类型：
-  - `getFMEAVersion` / `createFMEAVersion` → `FMEAVersionDetail`（后端 detail 与 create 端点均返回 `FMEAVersionDetail`，见 `api/version.py:97-114`）。
-  - `getCPVersion` / `createCPVersion` → `CPVersionDetail`（同上，`api/version.py:226-243`）。
-  - `rollbackFMEAVersion` / `rollbackCPVersion` → **`RollbackResponse`**（后端 rollback 端点返回 `RollbackResponse`，见 `api/version.py:115` 与 `:244`，**不是** `*Detail`）。
-- `VersionListResponse<T>` 的 `T` 保持为 list item 类型。
-- 排查所有 `FMEAVersion`/`CPVersion` 引用（`VersionHistoryTab`、`VersionCompareView`、`RollbackConfirmModal` 等），确保仅访问 list item 字段。
+```ts
+export interface VersionBase {
+  version_id: string;
+  major_no: number;
+  minor_no: number;
+  change_type: string | null;
+  change_summary: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface FMEAVersion extends VersionBase {
+  fmea_id: string;
+}
+
+export interface FMEAVersionDetail extends FMEAVersion {
+  snapshot: GraphData;
+  sha256_hash: string;
+}
+
+export interface CPVersion extends VersionBase {
+  cp_id: string;
+  source_fmea_version_id: string | null;
+}
+
+export interface CPVersionHeader { /* 字段对齐 header_snapshot，见 version_service.py:236-249，各字段 string | null */ }
+
+export interface CPVersionDetail extends CPVersion {
+  header_snapshot: CPVersionHeader;
+  items_snapshot: ControlPlanItem[];
+  sha256_hash: string;
+}
+```
+
+`VersionHistoryTab.getChangeTypeConfig(changeType: string)` 参数改为 `string | null`，default 分支 `label: changeType ?? ""` 以避免渲染 `null`。`change_summary` 的 `{v.change_summary && ...}` 已是真值判断，null 安全。
+
+### `frontend/src/api/version.ts` 返回类型
+- `getFMEAVersion` / `createFMEAVersion` → `FMEAVersionDetail`（detail 与 create 端点均返回 `FMEAVersionDetail`，`api/version.py:97-114`）。
+- `getCPVersion` / `createCPVersion` → `CPVersionDetail`（`api/version.py:226-243`）。
+- `rollbackFMEAVersion` / `rollbackCPVersion` → **`RollbackResponse`**（rollback 端点返回 `RollbackResponse`，`api/version.py:115` 与 `:244`，**非** `*Detail`）。
+- 排查所有 `FMEAVersion`/`CPVersion` 引用（`VersionHistoryTab`、`VersionCompareView`、`RollbackConfirmModal`），确保仅访问 list item 字段。
 
 ## 6. i18n
 
@@ -199,7 +267,7 @@ const loadVersionSnapshot = useCallback(async (major: number, minor: number) => 
 
 ## 7. 边界与风险
 
-- **协作 `useCollaboration`**：查看期间 `canEdit` 为 false → 可编辑控件 disabled，通常不触发 focus → 不会调用 `startEditing`。但这是 UI 行为假设（disabled input 不 focus），不是业务保护层。**不需要改 `startEditing`**，但只读测试须覆盖「聚焦/编辑态不会产生协作事件」；若测试发现漏网（如某些非 disabled 的可聚焦元素仍挂 onFocus），则在 `startEditing` 调用处显式加 `if (viewingVersion) return;` guard。
+- **协作 `useCollaboration`**：查看期间 `canEdit` 为 false → 可编辑控件 disabled，通常不触发 focus。除此外，在 `useCollaboration` 解构处加单点 `startEditing` guard（`isViewingVersion` 时 no-op，见 §3.8/§4.7）作为业务保护层；只读测试断言进入快照态后 `startEditing`（mock spy）未被调用。
 - **版本历史 Tab 内操作**：FMEA 的 `canCreate={canEdit(...)}` / `canRollback={canApprove(...)}` 在只读时自动变 false；CP 须按 §4.2 把 history tab 改用 `canEdit` / `canApproveAllowed`。创建/回滚按钮隐藏，避免误操作。对比弹窗独立，不受影响。
 - **冲突检测基线 `baseGraphRef`**：查看时不触碰；返回时重新拉取重置。
 - **向导重定向**：查看快照仅 setState 不导航；返回重新拉取时，若当前为草稿 DFMEA 未完成向导则走原重定向逻辑（可接受边界）。

@@ -1,50 +1,59 @@
 # FMEA / Control Plan 版本快照只读查看 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 FMEA 与 CP 编辑器「查看版本」按钮从占位 `message.info` 改为就地加载版本快照并以只读模式渲染（横幅 + 返回当前版本）。
+**Goal:** 把 FMEA 与 CP 编辑器「查看版本」按钮从占位 `message.info` 改为就地加载版本快照并以只读模式渲染（横幅 + 返回当前版本），同时隔离当前文档态控件、重置选择态、加协作 guard。
 
-**Architecture:** 在每个编辑器新增 `viewingVersion` 状态；通过覆盖 `usePermission()` 返回的 `canEdit`/`canApprove`（`viewingVersion` 非空时强制 `false`）让全部已有 `disabled={!canEdit(...)}` 控件自动转只读；`onViewSnapshot` 调用已有 `getFMEAVersion`/`getCPVersion` 加载快照填入现有 state；顶部 `Alert` 横幅 + 「返回当前版本」按钮重新拉取当前文档复位。
+**Architecture:** 在每个编辑器新增 `viewingVersion` 状态；覆盖 `usePermission()` 的 `canEdit`/`canApprove`（`viewingVersion` 非空时强制 `false`）让全部 `disabled={!canEdit(...)}` 控件转只读；`onViewSnapshot` 调 `getFMEAVersion`/`getCPVersion` 加载快照填入现有 state；进入/退出时重置选择态与图谱缓存；顶部 `Alert` 横幅 + 「返回当前版本」；CP 隐藏 sync/stale/ValidationPanel 等当前文档态控件；`useCollaboration` 的 `startEditing` 加单点 guard。
 
 **Tech Stack:** React 18 + TypeScript 5.6 + Ant Design 5.29 + react-i18next + Vitest + @testing-library/react
 
 ## Global Constraints
 
 - 中文 UI（zh-CN）为主，en-US 同步；新 i18n key 必须同时加到 `frontend/src/locales/zh-CN/*.json` 与 `frontend/src/locales/en-US/*.json`。
-- FMEA 编辑器错误处理沿用现有内联风格 `err?.response?.data?.detail || t("...")`（见 `FMEAEditorPage.tsx:415`）。**不得引入 `formatFMEAError`**（该工具在本 worktree 不存在）。
+- 错误处理沿用各编辑器现有内联风格 `err?.response?.data?.detail || t("...")`。**不得引入 `formatFMEAError`**（本 worktree 不存在）。
+- **行号提示来自本 worktree**（`frontend/src/...` 相对 worktree 根）。代码定位以**内容锚点**（exact 字符串搜索）为准，行号仅为辅助；实现时若行号偏移以内容锚点为准。
 - 所有改动须 `npm run lint` + `npm run build`（含 `tsc --noEmit`）通过；现有 FMEA 编辑器测试须全绿。
-- 后端**无改动**：`GET /api/fmea/{id}/versions/{major}/{minor}` 返回 `FMEAVersionDetail`（含 `snapshot`+`sha256_hash`）；`GET /api/control-plans/{id}/versions/{major}/{minor}` 返回 `ControlPlanVersionDetail`（含 `header_snapshot`+`items_snapshot`+`sha256_hash`）；rollback 端点返回 `RollbackResponse`（非 detail）。
-- 命名：FMEA 用 `canEdit`/`canApprove`（重命名原 hook 返回为 `rawCanEdit`/`rawCanApprove` 后包装）；CP 用 `canEdit`（已有）+ 新增 `canApproveAllowed`。
-- 触碰文件须遵循现有风格（中文注释、antd 组件、`useTranslation` namespace）。
+- 后端**无改动**：`GET /api/fmea/{id}/versions/{major}/{minor}` 返回 `FMEAVersionDetail`（`snapshot`+`sha256_hash`）；`GET /api/control-plans/{id}/versions/{major}/{minor}` 返回 `ControlPlanVersionDetail`（`header_snapshot`+`items_snapshot`+`sha256_hash`）；rollback 返回 `RollbackResponse`。
+- 命名：FMEA 用 `canEdit`/`canApprove`（重命名 hook 返回为 `rawCanEdit`/`rawCanApprove`）；CP 用 `canEdit`（已有）+ 新增 `canApproveAllowed`。
 
 ---
 
 ## File Structure
 
-- **Modify** `frontend/src/types/index.ts` — 修正 `FMEAVersion`/`CPVersion` list 类型，新增 `FMEAVersionDetail`/`CPVersionDetail`/`CPVersionHeader`。
-- **Modify** `frontend/src/api/version.ts` — 修正 `getFMEAVersion`/`getCPVersion`/`createFMEAVersion`/`createCPVersion` 返回类型为 `*Detail`，`rollback*Version` 为 `RollbackResponse`。
-- **Modify** `frontend/src/locales/zh-CN/fmea.json` + `frontend/src/locales/en-US/fmea.json` — 新增 viewing/exit/loadFailed key，删除 viewSnapshot 占位 key。
-- **Modify** `frontend/src/locales/zh-CN/controlPlan.json` + `frontend/src/locales/en-US/controlPlan.json` — 同上（CP namespace）。
-- **Modify** `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx` — `viewingVersion` state、canEdit/canApprove 包装、load/exit、graphDataRef 同步、横幅、占位点替换。
-- **Modify** `frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx` — 同上（CP 版本：canApproveAllowed、history tab 权限改用包装后权限）。
-- **Create** `frontend/src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx` — 快照加载/只读/返回测试。
-- **Create** `frontend/src/pages/planning/control-plan/CPVersionSnapshot.test.tsx` — 同上（CP）。
+- **Modify** `frontend/src/types/index.ts` — `VersionBase` nullable + `version_id`、`FMEAVersion`/`CPVersion`/`*Detail`/`CPVersionHeader`/`RollbackResponse`。
+- **Modify** `frontend/src/api/version.ts` — 修正返回类型。
+- **Modify** `frontend/src/components/version/VersionHistoryTab.tsx` — `getChangeTypeConfig` 接受 `string | null`。
+- **Modify** `frontend/src/locales/{zh-CN,en-US}/fmea.json` + `controlPlan.json` — 新 i18n keys。
+- **Modify** `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx` — viewingVersion、权限包装、load/exit（含选择态重置 + graphDataRef）、startEditing guard、横幅、Alert import、占位点。
+- **Modify** `frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx` — viewingVersion、canApproveAllowed、load/exit（含 versionHeader）、startEditing guard、快照态隔离、横幅、占位点。
+- **Create** `frontend/src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx` 与 `frontend/src/pages/planning/control-plan/CPVersionSnapshot.test.tsx`。
 
 ---
 
 ### Task 1: 修正类型定义 (types/index.ts)
 
 **Files:**
-- Modify: `frontend/src/types/index.ts:561-579`
+- Modify: `frontend/src/types/index.ts`（`// --- Version Management ---` 块）
 
 **Interfaces:**
-- Produces: `FMEAVersion`（list item，无 `graph_data`）、`FMEAVersionDetail`（含 `snapshot`+`sha256_hash`）、`CPVersion`（list item，无 `items`）、`CPVersionDetail`（含 `header_snapshot`+`items_snapshot`+`sha256_hash`）、`CPVersionHeader`。供 Task 2 的 API 客户端与 Task 3/4 的编辑器使用。
+- Produces: `VersionBase`（nullable + `version_id`）、`FMEAVersion`、`FMEAVersionDetail`、`CPVersion`（含 `source_fmea_version_id`）、`CPVersionDetail`、`CPVersionHeader`、`RollbackResponse`。
 
 - [ ] **Step 1: 替换 Version Management 类型块**
 
-打开 `frontend/src/types/index.ts`，定位到 `// --- Version Management ---`（约 561 行起），将 `VersionBase` 之后的 `FMEAVersion` 与 `CPVersion` 定义替换并新增 detail 类型：
+打开 `frontend/src/types/index.ts`，定位 `// --- Version Management ---`，把 `VersionBase` 起到 `CPVersion` 的整块替换为：
 
 ```ts
+export interface VersionBase {
+  version_id: string;
+  major_no: number;
+  minor_no: number;
+  change_type: string | null;
+  change_summary: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
 export interface FMEAVersion extends VersionBase {
   fmea_id: string;
 }
@@ -56,6 +65,7 @@ export interface FMEAVersionDetail extends FMEAVersion {
 
 export interface CPVersion extends VersionBase {
   cp_id: string;
+  source_fmea_version_id: string | null;
 }
 
 export interface CPVersionHeader {
@@ -78,27 +88,59 @@ export interface CPVersionDetail extends CPVersion {
   items_snapshot: ControlPlanItem[];
   sha256_hash: string;
 }
+
+export interface RollbackResponse {
+  version_id: string;
+  major_no: number;
+  minor_no: number;
+  change_type: string | null;
+  change_summary: string | null;
+  created_at: string;
+}
 ```
 
-> 删除原 `FMEAVersion.graph_data` 与 `CPVersion.items` 字段（list 端点不返回它们）。`GraphData` 与 `ControlPlanItem` 类型在本文件已存在，无需新增 import。
+> `GraphData` 与 `ControlPlanItem` 在本文件已存在。删除原 `FMEAVersion.graph_data` 与 `CPVersion.items` 字段。
 
-- [ ] **Step 2: 检查并修正受影响引用**
+- [ ] **Step 2: VersionHistoryTab.getChangeTypeConfig 接受 null**
 
-Run: `grep -rn "\.graph_data" frontend/src --include="*.tsx" --include="*.ts" | grep -i version` 以及 `grep -rn "FMEAVersion\b\|CPVersion\b" frontend/src --include="*.tsx" --include="*.ts"`
+打开 `frontend/src/components/version/VersionHistoryTab.tsx`，定位 `const getChangeTypeConfig = (changeType: string):`，改为：
 
-Expected: `VersionHistoryTab.tsx`、`VersionCompareView.tsx`、`RollbackConfirmModal.tsx` 中对 `FMEAVersion`/`CPVersion` 的访问应仅限 `VersionBase` 字段（`major_no`/`minor_no`/`change_type`/`change_summary`/`created_by`/`created_at`）+ `fmea_id`/`cp_id`。若发现访问 `.graph_data` 或 `.items`，改为对应 `*Detail` 类型或删除该访问（这些组件只用 list item 字段，预期无需改动；若 `RollbackConfirmModal` 用了 detail，则把其 props 类型改为 `*Detail`）。
+```ts
+  const getChangeTypeConfig = (changeType: string | null): { label: string; color: string } => {
+    switch (changeType) {
+      case "submit":
+        return { label: t("history.changeTypes.submit"), color: "blue" };
+      case "approve":
+        return { label: t("history.changeTypes.approve"), color: "green" };
+      case "manual":
+        return { label: t("history.changeTypes.manual"), color: "default" };
+      case "rollback":
+        return { label: t("history.changeTypes.rollback"), color: "orange" };
+      case "fmea_sync":
+        return { label: t("history.changeTypes.fmea_sync"), color: "purple" };
+      default:
+        return { label: changeType ?? "", color: "default" };
+    }
+  };
+```
 
-- [ ] **Step 3: 验证编译**
+- [ ] **Step 3: 检查受影响引用**
+
+Run: `cd frontend && grep -rn "\.graph_data\|\.items\b" src/components/version src/components/version/*.tsx | grep -i version` 以及 `grep -rn "RollbackConfirmModal" src/components/version`
+
+Expected: `VersionHistoryTab`/`VersionCompareView`/`RollbackConfirmModal` 对 `FMEAVersion`/`CPVersion` 仅访问 list item 字段。若 `RollbackConfirmModal` 用了 detail 字段，把其 props 类型改为对应 `*Detail`（预期无需改动）。
+
+- [ ] **Step 4: 验证编译**
 
 Run: `cd frontend && npx tsc --noEmit 2>&1 | head -40`
 
-Expected: 无新增类型错误（若 `version.ts` 因返回类型报错，Task 2 会修；本步聚焦 types 自身）。
+Expected: 无新增错误（`version.ts` 的返回类型错误由 Task 2 修）。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/src/types/index.ts
-git commit -m "refactor(types): split FMEA/CP version list vs detail types"
+git add frontend/src/types/index.ts frontend/src/components/version/VersionHistoryTab.tsx
+git commit -m "refactor(types): align version types with backend (nullable, version_id, detail split)"
 ```
 
 ---
@@ -106,15 +148,15 @@ git commit -m "refactor(types): split FMEA/CP version list vs detail types"
 ### Task 2: 修正 API 客户端返回类型 (api/version.ts)
 
 **Files:**
-- Modify: `frontend/src/api/version.ts:1-156`
+- Modify: `frontend/src/api/version.ts`
 
 **Interfaces:**
-- Consumes: Task 1 的 `FMEAVersionDetail`/`CPVersionDetail`/`FMEAVersion`/`CPVersion`/`RollbackResponse`。
-- Produces: `getFMEAVersion(fmeaId, major, minor): Promise<FMEAVersionDetail>`、`getCPVersion(...): Promise<CPVersionDetail>`，供 Task 3/4 调用。
+- Consumes: Task 1 类型。
+- Produces: `getFMEAVersion(): Promise<FMEAVersionDetail>`、`getCPVersion(): Promise<CPVersionDetail>`，供 Task 4/6 调用。
 
-- [ ] **Step 1: 更新 import**
+- [ ] **Step 1: 更新 import 与返回类型**
 
-打开 `frontend/src/api/version.ts`，把第 2-10 行的 import 改为：
+打开 `frontend/src/api/version.ts`，把顶部 import 改为：
 
 ```ts
 import client from "./client";
@@ -132,27 +174,9 @@ import type {
 } from "../types";
 ```
 
-> `RollbackResponse` 类型若 `types/index.ts` 中尚不存在，先确认：`grep -n "RollbackResponse" frontend/src/types/index.ts`。若不存在，在 Task 1 的 Version Management 块末尾追加 `export interface RollbackResponse { version_id: string; major_no: number; minor_no: number; change_type: string | null; change_summary: string | null; created_at: string; }`（对齐 `backend/app/schemas/version.py:84-92`）。若已存在则跳过。
+把 `getFMEAVersion` 与 `createFMEAVersion` 返回类型改为 `Promise<FMEAVersionDetail>`；`rollbackFMEAVersion` 改为 `Promise<RollbackResponse>`。CP 同理：`getCPVersion`/`createCPVersion` → `Promise<CPVersionDetail>`，`rollbackCPVersion` → `Promise<RollbackResponse>`。
 
-- [ ] **Step 2: 修正各函数返回类型**
-
-把 `getFMEAVersion`（约 26 行）返回类型 `Promise<FMEAVersion>` → `Promise<FMEAVersionDetail>`：
-```ts
-export async function getFMEAVersion(
-  fmeaId: string,
-  major: number,
-  minor: number
-): Promise<FMEAVersionDetail> {
-  const resp = await client.get(
-    `/fmea/${fmeaId}/versions/${major}/${minor}`
-  );
-  return resp.data;
-}
-```
-
-把 `createFMEAVersion`（约 37 行）返回类型 → `Promise<FMEAVersionDetail>`。
-
-把 `rollbackFMEAVersion`（约 48 行）返回类型 → `Promise<RollbackResponse>`：
+示例（rollbackFMEAVersion）：
 ```ts
 export async function rollbackFMEAVersion(
   fmeaId: string,
@@ -168,65 +192,60 @@ export async function rollbackFMEAVersion(
 }
 ```
 
-CP 同理：`getCPVersion` → `Promise<CPVersionDetail>`，`createCPVersion` → `Promise<CPVersionDetail>`，`rollbackCPVersion` → `Promise<RollbackResponse>`。
-
-- [ ] **Step 3: 验证编译**
+- [ ] **Step 2: 验证编译**
 
 Run: `cd frontend && npx tsc --noEmit 2>&1 | head -40`
 
-Expected: 无错误（或仅剩 Task 3/4 即将处理的编辑器内部错误）。
+Expected: 无错误（或仅剩 Task 4/6 编辑器内部错误）。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/src/api/version.ts frontend/src/types/index.ts
+git add frontend/src/api/version.ts
 git commit -m "refactor(api): correct version client return types (detail vs rollback)"
 ```
 
 ---
 
-### Task 3: FMEA 编辑器 — i18n keys
+### Task 3: FMEA i18n keys
 
 **Files:**
-- Modify: `frontend/src/locales/zh-CN/fmea.json:238` 与 `frontend/src/locales/en-US/fmea.json:238`
-- Modify: 对应 `actions` 块
+- Modify: `frontend/src/locales/zh-CN/fmea.json` + `frontend/src/locales/en-US/fmea.json`
 
 **Interfaces:**
-- Produces: `messages.viewingVersion`、`actions.exitVersion`、`messages.loadVersionFailed`（zh + en）。供 Task 4 使用。
+- Produces: `messages.viewingVersion`、`actions.exitVersion`、`messages.loadVersionFailed`。
 
-- [ ] **Step 1: 修改 zh-CN fmea.json**
+- [ ] **Step 1: zh-CN fmea.json**
 
-打开 `frontend/src/locales/zh-CN/fmea.json`。在 `messages` 块中，把第 238 行 `"viewSnapshot": "查看版本 v{{version}} 快照（功能开发中）",` 改为（去掉「功能开发中」并保留作为通用查看提示，但实际不再用 message.info 调用）：
-
+在 `messages` 块内，把 `"viewSnapshot": "查看版本 v{{version}} 快照（功能开发中）",` 改为并在其后追加：
 ```json
     "viewSnapshot": "查看版本 v{{version}} 快照",
     "viewingVersion": "正在查看 v{{version}} 快照（只读）",
     "loadVersionFailed": "加载版本快照失败",
 ```
-
-在 `actions` 块中新增（找到 `"actions": {` 块内任意位置，建议紧邻 `save` 之后）：
+在 `actions` 块内（紧邻 `save` 之后）追加：
 ```json
     "exitVersion": "返回当前版本",
 ```
 
-- [ ] **Step 2: 修改 en-US fmea.json**
+- [ ] **Step 2: en-US fmea.json**
 
-打开 `frontend/src/locales/en-US/fmea.json`，同样位置：
+同样位置：
 ```json
     "viewSnapshot": "View version v{{version}} snapshot",
     "viewingVersion": "Viewing v{{version}} snapshot (read-only)",
     "loadVersionFailed": "Failed to load version snapshot",
 ```
-`actions` 块新增：
+`actions`：
 ```json
     "exitVersion": "Return to current version",
 ```
 
-- [ ] **Step 3: 验证 JSON 合法**
+- [ ] **Step 3: 验证 JSON**
 
 Run: `cd frontend && node -e "JSON.parse(require('fs').readFileSync('src/locales/zh-CN/fmea.json','utf8')); JSON.parse(require('fs').readFileSync('src/locales/en-US/fmea.json','utf8')); console.log('ok')"`
 
-Expected: 输出 `ok`。
+Expected: `ok`
 
 - [ ] **Step 4: Commit**
 
@@ -240,16 +259,24 @@ git commit -m "i18n(fmea): add version snapshot read-only banner keys"
 ### Task 4: FMEA 编辑器 — 快照只读模式
 
 **Files:**
-- Modify: `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx`（state 约 280-285、加载逻辑、横幅约 1515、占位点 1882）
+- Modify: `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx`
 - Test: `frontend/src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx`
 
 **Interfaces:**
-- Consumes: Task 2 的 `getFMEAVersion`、Task 3 的 i18n keys、现有 `getFMEA`、`normalizeGraphData`（已 import 于 `:55`）、`graphDataRef`（`:125`）、`baseGraphRef`（`:355`）。
-- Produces: `loadVersionSnapshot(major, minor)`、`exitVersionSnapshot()`、`viewingVersion` state。
+- Consumes: Task 2 `getFMEAVersion`、Task 3 i18n、现有 `getFMEA`、`normalizeGraphData`、`graphDataRef`、`baseGraphRef`、各 selection setter。
+- Produces: `viewingVersion`、`loadVersionSnapshot(major, minor)`、`exitVersionSnapshot()`、`canEdit`/`canApprove` 包装、`startEditing` guard。
 
-- [ ] **Step 1: 写失败测试 — 快照加载与只读横幅**
+**内容锚点（worktree 行号仅供参考）：**
+- antd import：文件顶部 `import { Button, Space, Tag, Typography, Input, Select, Table, Tabs,` 块（约 `:3-6`），**未含 `Alert`**。
+- `usePermission` 解构：`const { canEdit, canApprove } = usePermission();`（约 `:117`）。
+- `useCollaboration` 解构：`const { activeUsers, startEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);`（约 `:184`）。
+- `graphDataRef`/`baseGraphRef`/`loadGraphData`：约 `:125`/`:187`/`:250`。
+- 横幅插入点：`<Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }} items={[`（约 `:1274`，CollaborationBar 之后）。
+- `VersionHistoryTab` 的 `onViewSnapshot`：`onViewSnapshot={(major, minor) => message.info(t("messages.viewSnapshot", { major, minor }))}`（约 `:1700`）。
 
-创建 `frontend/src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx`。复用 `FMEAEditorDragSort.test.tsx` 的 mock 模式，但**不 mock `VersionHistoryTab`**（改用一个调用 `onViewSnapshot` 的桩），并 mock `getFMEAVersion`：
+- [ ] **Step 1: 写失败测试（含完整 mock）**
+
+创建 `frontend/src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx`：
 
 ```tsx
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -262,7 +289,9 @@ import type { FMEADocument, GraphEdge, GraphNode } from "../../../types";
 const mocks = vi.hoisted(() => ({
   getFMEA: vi.fn(),
   getFMEAVersion: vi.fn(),
+  listFMEAVersions: vi.fn(),
   canEdit: vi.fn(),
+  startEditing: vi.fn(),
 }));
 
 vi.mock("antd", async () => {
@@ -283,6 +312,7 @@ vi.mock("../../../api/fmea", () => ({
 }));
 vi.mock("../../../api/version", () => ({
   getFMEAVersion: mocks.getFMEAVersion,
+  listFMEAVersions: mocks.listFMEAVersions,
 }));
 vi.mock("../../../api/specialCharacteristic", () => ({
   syncFromFMEA: vi.fn(),
@@ -299,13 +329,15 @@ vi.mock("../../../store/authStore", () => ({
   useAuthStore: (selector: (s: { user: unknown }) => unknown) => selector({ user: { user_id: "u1", role_key: "admin" } }),
 }));
 vi.mock("../../../hooks/usePermission", () => ({
-  usePermission: () => ({
-    canEdit: mocks.canEdit,
-    canApprove: () => true,
-  }),
+  usePermission: () => ({ canEdit: mocks.canEdit, canApprove: () => true }),
 }));
 vi.mock("../../../hooks/useCollaboration", () => ({
-  useCollaboration: () => ({ activeUsers: [], startEditing: vi.fn(), stopEditing: vi.fn(), isSyncing: false }),
+  useCollaboration: () => ({
+    activeUsers: [],
+    startEditing: mocks.startEditing,
+    stopEditing: vi.fn(),
+    isSyncing: false,
+  }),
 }));
 vi.mock("../../../components/dfmea/SmartSuggestionDropdown", () => ({
   default: ({ value, disabled }: { value: string; disabled?: boolean }) => <input aria-label="smart-suggestion" value={value} disabled={disabled} readOnly />,
@@ -313,7 +345,7 @@ vi.mock("../../../components/dfmea/SmartSuggestionDropdown", () => ({
 vi.mock("../../../components/dfmea/StructureTree", () => ({ default: () => <div data-testid="dfmea-structure-tree" /> }));
 vi.mock("../../../components/dfmea/ParameterDiagram", () => ({ default: () => <div data-testid="parameter-diagram" /> }));
 vi.mock("../../../components/lessons/LessonsLearnedModal", () => ({ default: () => null }));
-// NOTE: 不 mock VersionHistoryTab — 用真实组件触发 onViewSnapshot
+// 不 mock VersionHistoryTab — 用真实组件触发 onViewSnapshot
 vi.mock("../../../components/version/CreateVersionModal", () => ({ default: () => null }));
 vi.mock("../../../components/version/RollbackConfirmModal", () => ({ default: () => null }));
 vi.mock("../../../components/version/VersionCompareView", () => ({ default: () => <div data-testid="version-compare" /> }));
@@ -364,10 +396,13 @@ function renderEditor() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.canEdit.mockReturnValue(true);
-  const cur = makeDoc([node("f1", "Function", "当前功能")], []);
-  mocks.getFMEA.mockResolvedValue(cur);
+  mocks.getFMEA.mockResolvedValue(makeDoc([node("f1", "Function", "当前功能")], []));
+  mocks.listFMEAVersions.mockResolvedValue({
+    items: [{ version_id: "v1", fmea_id: "fmea-1", major_no: 1, minor_no: 0, change_type: "approve", change_summary: "v1", created_by: "u1", created_at: "2026-06-18T00:00:00Z" }],
+    total: 1, page: 1, page_size: 100,
+  });
   mocks.getFMEAVersion.mockResolvedValue({
-    fmea_id: "fmea-1", major_no: 1, minor_no: 0, change_type: "approve",
+    version_id: "v1", fmea_id: "fmea-1", major_no: 1, minor_no: 0, change_type: "approve",
     change_summary: "v1", created_by: "u1", created_at: "2026-06-18T00:00:00Z",
     snapshot: { nodes: [node("f1", "Function", "快照功能")], edges: [] },
     sha256_hash: "abc",
@@ -379,20 +414,15 @@ describe("FMEAEditorPage version snapshot", () => {
     renderEditor();
     await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
 
-    // 切到版本历史 Tab
     fireEvent.click(screen.getByText("tabs.versionHistory"));
-    await waitFor(() => expect(mocks.getFMEAVersion).toBeDefined());
-
-    // 点击「查看」按钮（VersionHistoryTab 真实渲染，按钮文案来自 t("history.view")）
     const viewBtn = await screen.findByRole("button", { name: "history.view" });
     fireEvent.click(viewBtn);
 
-    // 快照加载
     await waitFor(() => expect(mocks.getFMEAVersion).toHaveBeenCalledWith("fmea-1", 1, 0));
-    // 只读横幅出现
     await waitFor(() => expect(screen.getByText(/messages.viewingVersion/)).toBeInTheDocument());
-    // 快照功能名渲染（结构树/表格中）
     await waitFor(() => expect(screen.getByText("快照功能")).toBeInTheDocument());
+    // 只读态未触发协作事件
+    expect(mocks.startEditing).not.toHaveBeenCalled();
   });
 
   it("returns to current version on exit", async () => {
@@ -403,11 +433,8 @@ describe("FMEAEditorPage version snapshot", () => {
     fireEvent.click(viewBtn);
     await waitFor(() => expect(screen.getByText(/messages.viewingVersion/)).toBeInTheDocument());
 
-    // 点击「返回当前版本」
     fireEvent.click(screen.getByText("actions.exitVersion"));
-    // 重新拉取当前文档（至少 2 次：初始 + exit）
     await waitFor(() => expect(mocks.getFMEA.mock.calls.length).toBeGreaterThanOrEqual(2));
-    // 横幅消失
     await waitFor(() => expect(screen.queryByText(/messages.viewingVersion/)).not.toBeInTheDocument());
   });
 });
@@ -417,13 +444,23 @@ describe("FMEAEditorPage version snapshot", () => {
 
 Run: `cd frontend && npx vitest run src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx 2>&1 | tail -30`
 
-Expected: FAIL — 横幅 `messages.viewingVersion` 未渲染（因为 `onViewSnapshot` 仍是 `message.info`）。
+Expected: FAIL — 横幅 `messages.viewingVersion` 未渲染（`onViewSnapshot` 仍是 `message.info`）。
 
-- [ ] **Step 3: 添加 viewingVersion state 与权限包装**
+- [ ] **Step 3: 添加 Alert import**
 
-打开 `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx`。
+在 antd import 块 `import { Button, Space, Tag, Typography, Input, Select, Table, Tabs,` 的第二行加入 `Alert`：
 
-定位 `:280` `const { canEdit, canApprove } = usePermission();`，替换为：
+```ts
+import {
+  Button, Space, Tag, Typography, Input, Select, Table, Tabs,
+  Row, Col, App, Spin, Popconfirm, Empty, Tooltip, Alert,
+  Divider, Modal, Radio, Form, Dropdown,
+} from "antd";
+```
+
+- [ ] **Step 4: 添加 viewingVersion state 与权限包装**
+
+定位 `const { canEdit, canApprove } = usePermission();`，替换为：
 
 ```ts
   const { canEdit: rawCanEdit, canApprove: rawCanApprove } = usePermission();
@@ -439,11 +476,30 @@ Expected: FAIL — 横幅 `messages.viewingVersion` 未渲染（因为 `onViewSn
   );
 ```
 
-> `useCallback` 已从 react import（`:1`）。`useState` 同样已 import。
+- [ ] **Step 5: 添加 startEditing guard**
 
-- [ ] **Step 4: 添加 loadVersionSnapshot 与 exitVersionSnapshot**
+定位 `const { activeUsers, startEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);`，替换为：
 
-在 `loadGraphData` 附近（约 `:418` `loadGraphData` 定义之后）添加：
+```ts
+  const { activeUsers, startEditing: rawStartEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);
+  const startEditing = useCallback((...args: Parameters<typeof rawStartEditing>) => {
+    if (isViewingVersion) return;
+    rawStartEditing(...args);
+  }, [rawStartEditing, isViewingVersion]);
+```
+
+> `isViewingVersion` 在 Step 4 已定义于同一组件作用域；若 `useCollaboration` 在 `viewingVersion` state 声明之前，把 state 声明上移到 `useCollaboration` 之前，或确保 `isViewingVersion` 可见（React hooks 顺序：state 声明通常在 hook 调用前，检查并调整顺序使 `isViewingVersion` 在 `startEditing` 定义时已声明）。
+
+- [ ] **Step 6: 添加 getFMEAVersion import**
+
+在 `import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";` 之后添加：
+```ts
+import { getFMEAVersion } from "../../../api/version";
+```
+
+- [ ] **Step 7: 添加 loadVersionSnapshot 与 exitVersionSnapshot**
+
+在 `loadGraphData` 定义之后添加：
 
 ```ts
   const loadVersionSnapshot = useCallback(async (major: number, minor: number) => {
@@ -456,6 +512,11 @@ Expected: FAIL — 横幅 `messages.viewingVersion` 未渲染（因为 `onViewSn
         snap.nodes as unknown as Array<Record<string, unknown>>,
         snap.edges as unknown as Array<Record<string, unknown>>,
       );
+      setSelectedFunctionId(null);
+      setSelectedStructureNode(null);
+      setSelectedGraphNode(null);
+      setDrawerVisible(false);
+      setHighlightNodes([]);
       setViewingVersion({ major, minor });
     } catch (err) {
       const e = err as { response?: { data?: { detail?: string } } };
@@ -473,31 +534,27 @@ Expected: FAIL — 横幅 `messages.viewingVersion` 未渲染（因为 `onViewSn
       edges: JSON.parse(JSON.stringify(doc.graph_data?.edges || [])),
     };
     graphDataRef.current = null;
+    setSelectedFunctionId(null);
+    setSelectedStructureNode(null);
+    setSelectedGraphNode(null);
+    setDrawerVisible(false);
+    setHighlightNodes([]);
     setViewingVersion(null);
   }, [fmeaId]);
 ```
 
-在文件顶部 import 区（`:19` `import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";` 之后）添加：
-```ts
-import { getFMEAVersion } from "../../../api/version";
-```
+> 各 setter（`setSelectedFunctionId`/`setSelectedStructureNode`/`setSelectedGraphNode`/`setDrawerVisible`/`setHighlightNodes`）已在 `:106-131` 声明。`getFMEA`/`setNodes`/`setEdges`/`setFmea`/`graphDataRef`/`baseGraphRef`/`normalizeGraphData`/`message`/`t` 均在作用域内。
 
-> `getFMEA`、`setNodes`、`setEdges`、`setFmea`、`graphDataRef`、`baseGraphRef`、`normalizeGraphData`、`message`、`t` 均已在作用域内。
+- [ ] **Step 8: 替换占位点**
 
-- [ ] **Step 5: 替换占位点**
-
-定位 `:1882`：
-```tsx
-            onViewSnapshot={(major, minor) => message.info(t("messages.viewSnapshot", { major, minor }))}
-```
-替换为：
+定位 `onViewSnapshot={(major, minor) => message.info(t("messages.viewSnapshot", { major, minor }))}`，替换为：
 ```tsx
             onViewSnapshot={loadVersionSnapshot}
 ```
 
-- [ ] **Step 6: 添加只读横幅**
+- [ ] **Step 9: 添加只读横幅**
 
-定位 `:1514` `<Tabs activeKey={outerTab} onChange={setOuterTab}...`（在 CollaborationBar 之后、Tabs 之前）。在 `<Tabs` 之前插入：
+定位 `<Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }} items={[`，在其**之前**插入：
 
 ```tsx
       {viewingVersion && (
@@ -515,73 +572,56 @@ import { getFMEAVersion } from "../../../api/version";
       )}
 ```
 
-> `Alert` 已从 antd import（确认 `:3-12` 的 antd import 含 `Alert`；若不含则加入）。
-
-- [ ] **Step 7: 运行测试确认通过**
+- [ ] **Step 10: 运行测试确认通过**
 
 Run: `cd frontend && npx vitest run src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx 2>&1 | tail -30`
 
-Expected: PASS（2 个测试通过）。若失败，检查 `VersionHistoryTab` 真实渲染时 `listFMEAVersions` 是否被 mock（本测试未 mock `../../../api/version` 的 `listFMEAVersions`，会导致版本列表加载失败 → 「查看」按钮不渲染）。
+Expected: PASS（2 个测试通过）。
 
-**修正：** 在 Step 1 的 `vi.mock("../../../api/version", ...)` 中补上 `listFMEAVersions`：
-```ts
-vi.mock("../../../api/version", () => ({
-  getFMEAVersion: mocks.getFMEAVersion,
-  listFMEAVersions: vi.fn().mockResolvedValue({
-    items: [{ fmea_id: "fmea-1", major_no: 1, minor_no: 0, change_type: "approve", change_summary: "v1", created_by: "u1", created_at: "2026-06-18T00:00:00Z" }],
-    total: 1, page: 1, page_size: 100,
-  }),
-}));
-```
-
-- [ ] **Step 8: 运行全部 FMEA 测试与 lint**
+- [ ] **Step 11: 全量 FMEA 测试 + lint**
 
 Run: `cd frontend && npx vitest run src/pages/planning/fmea/ 2>&1 | tail -20 && npm run lint 2>&1 | tail -20`
 
-Expected: 所有测试通过，lint 无错误。
+Expected: 全绿，lint 无错误。
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add frontend/src/pages/planning/fmea/FMEAEditorPage.tsx frontend/src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx
-git commit -m "feat(fmea): version snapshot read-only view in editor"
+git commit -m "feat(fmea): version snapshot read-only view with selection reset and collab guard"
 ```
 
 ---
 
-### Task 5: CP 编辑器 — i18n keys
+### Task 5: CP i18n keys
 
 **Files:**
 - Modify: `frontend/src/locales/zh-CN/controlPlan.json` + `frontend/src/locales/en-US/controlPlan.json`
 
-**Interfaces:**
-- Produces: CP namespace 的 `message.viewingVersion`、`button.exitVersion`、`message.loadVersionFailed`。供 Task 6 使用。
+- [ ] **Step 1: zh-CN controlPlan.json**
 
-- [ ] **Step 1: 修改 zh-CN controlPlan.json**
-
-打开 `frontend/src/locales/zh-CN/controlPlan.json`。在 `"message": {` 块（约 145 行）内新增（紧邻 `loadFailed` 之类）：
+在 `"message": {` 块内追加：
 ```json
     "viewingVersion": "正在查看 v{{version}} 快照（只读）",
     "loadVersionFailed": "加载版本快照失败",
 ```
-在 `"button": {` 块（约 10 行）内新增：
+在 `"button": {` 块内追加：
 ```json
     "exitVersion": "返回当前版本",
 ```
 
-- [ ] **Step 2: 修改 en-US controlPlan.json**
+- [ ] **Step 2: en-US controlPlan.json**
 
 同样位置：
 ```json
     "viewingVersion": "Viewing v{{version}} snapshot (read-only)",
     "loadVersionFailed": "Failed to load version snapshot",
 ```
-`button` 块：
 ```json
     "exitVersion": "Return to current version",
 ```
 
-- [ ] **Step 3: 验证 JSON 合法**
+- [ ] **Step 3: 验证 JSON**
 
 Run: `cd frontend && node -e "JSON.parse(require('fs').readFileSync('src/locales/zh-CN/controlPlan.json','utf8')); JSON.parse(require('fs').readFileSync('src/locales/en-US/controlPlan.json','utf8')); console.log('ok')"`
 
@@ -596,17 +636,29 @@ git commit -m "i18n(controlPlan): add version snapshot read-only banner keys"
 
 ---
 
-### Task 6: CP 编辑器 — 快照只读模式
+### Task 6: CP 编辑器 — 快照只读模式 + 状态隔离
 
 **Files:**
-- Modify: `frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx`（权限 113-115、审批按钮 754、history tab 898-908、横幅 713 前、占位点 904）
+- Modify: `frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx`
 - Test: `frontend/src/pages/planning/control-plan/CPVersionSnapshot.test.tsx`
 
 **Interfaces:**
-- Consumes: Task 2 的 `getCPVersion`、Task 5 的 i18n keys、现有 `getControlPlan`、`useCollaboration` 的 `startEditing`/`stopEditing`。
-- Produces: `loadVersionSnapshot(major, minor)`、`exitVersionSnapshot()`、`viewingVersion` state、`canApproveAllowed`。
+- Consumes: Task 2 `getCPVersion`、Task 5 i18n、现有 `getControlPlan`、`baseItemsRef`、`ValidationPanel`（已 import `:34`）。
+- Produces: `viewingVersion`、`versionHeader`、`loadVersionSnapshot`、`exitVersionSnapshot`、`canApproveAllowed`、`startEditing` guard。
 
-- [ ] **Step 1: 写失败测试**
+**内容锚点（worktree 行号）：**
+- 权限解构 `const { canEdit: canEditPerm, canApprove } = usePermission();`（`:113`）与 `const canEdit = canEditPerm('planning') && !isApproved;`（`:115`）。
+- `useCollaboration` 解构 `const { activeUsers, isSyncing, startEditing, stopEditing } = useCollaboration("control_plan", cpId);`（`:118`）。
+- sync_pending 横幅 `{cp?.sync_pending && (`（`:699`）。
+- checkStale 按钮 `{!isNew && (` 紧邻 `<Button icon={<ExclamationCircleOutlined />} onClick={handleCheckStale}>`（`:732`）。
+- `<Tabs activeKey={outerTab} onChange={setOuterTab} items={[`（`:713`）。
+- 审批按钮 `{!isNew && canApprove('planning') && currentStatus !== "approved" && (`（`:754`）。
+- fmea_ref_id 显示 `value={cp?.fmea_ref_id || t("form.notAssociated")}`（`:858`）。
+- ValidationPanel `{!isNew && id && (` 包裹 `<ValidationPanel cpId={id} />`（`:914`）。
+- history tab `canCreate={canEditPerm('planning')}` / `canRollback={canApprove('planning')}` / `onViewSnapshot={(major, minor) => message.info(...)}`（`:901-904`）。
+- PageShell subtitle `subtitle={\`${t("column.status")}：${statusLabels[currentStatus] || currentStatus}\`}`（`:676`）。
+
+- [ ] **Step 1: 写失败测试（含完整 mock）**
 
 创建 `frontend/src/pages/planning/control-plan/CPVersionSnapshot.test.tsx`：
 
@@ -621,7 +673,9 @@ import type { ControlPlan } from "../../../types";
 const mocks = vi.hoisted(() => ({
   getControlPlan: vi.fn(),
   getCPVersion: vi.fn(),
+  listCPVersions: vi.fn(),
   getCPSyncStatus: vi.fn(),
+  startEditing: vi.fn(),
 }));
 
 vi.mock("antd", async () => {
@@ -645,27 +699,26 @@ vi.mock("../../../api/controlPlan", () => ({
 }));
 vi.mock("../../../api/version", () => ({
   getCPVersion: mocks.getCPVersion,
-  listCPVersions: vi.fn().mockResolvedValue({
-    items: [{ cp_id: "cp-1", major_no: 1, minor_no: 0, change_type: "approve", change_summary: "v1", created_by: "u1", created_at: "2026-06-18T00:00:00Z" }],
-    total: 1, page: 1, page_size: 100,
-  }),
+  listCPVersions: mocks.listCPVersions,
 }));
 vi.mock("../../../api/customerQuality", () => ({ listCustomers: vi.fn().mockResolvedValue([]) }));
 vi.mock("../../../api/specialCharacteristic", () => ({
-  getCPSyncStatus: mocks.getCPSyncStatus.mockResolvedValue({ items: [] }),
+  getCPSyncStatus: mocks.getCPSyncStatus,
   syncToCP: vi.fn(),
 }));
 vi.mock("../../../store/authStore", () => ({
   useAuthStore: (selector: (s: { user: unknown }) => unknown) => selector({ user: { user_id: "u1", role_key: "admin" } }),
 }));
 vi.mock("../../../hooks/usePermission", () => ({
-  usePermission: () => ({
-    canEdit: () => true,
-    canApprove: () => true,
-  }),
+  usePermission: () => ({ canEdit: () => true, canApprove: () => true }),
 }));
 vi.mock("../../../hooks/useCollaboration", () => ({
-  useCollaboration: () => ({ activeUsers: [], startEditing: vi.fn(), stopEditing: vi.fn(), isSyncing: false }),
+  useCollaboration: () => ({
+    activeUsers: [],
+    startEditing: mocks.startEditing,
+    stopEditing: vi.fn(),
+    isSyncing: false,
+  }),
 }));
 vi.mock("../../../components/collaboration", () => ({
   CollaborationBar: () => <div data-testid="collab" />,
@@ -673,6 +726,7 @@ vi.mock("../../../components/collaboration", () => ({
   ConflictResolutionModal: () => null,
 }));
 vi.mock("../../../components/control-plan/ImportFromFMEAModal", () => ({ default: () => null }));
+vi.mock("../../../components/control-plan/ValidationPanel", () => ({ default: () => <div data-testid="validation-panel" /> }));
 vi.mock("../../../components/version/CreateVersionModal", () => ({ default: () => null }));
 vi.mock("../../../components/version/RollbackConfirmModal", () => ({ default: () => null }));
 vi.mock("../../../components/version/VersionCompareView", () => ({ default: () => <div data-testid="vc" /> }));
@@ -680,7 +734,7 @@ vi.mock("../../../components/design/PageShell", () => ({
   default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key, t: (key: string) => key }),
+  useTranslation: () => ({ t: (key: string) => key, tc: (key: string) => key }),
 }));
 
 function makeCP(): ControlPlan {
@@ -706,9 +760,14 @@ function renderEditor() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getControlPlan.mockResolvedValue(makeCP());
+  mocks.getCPSyncStatus.mockResolvedValue({ items: [] });
+  mocks.listCPVersions.mockResolvedValue({
+    items: [{ version_id: "v1", cp_id: "cp-1", major_no: 1, minor_no: 0, source_fmea_version_id: null, change_type: "approve", change_summary: "v1", created_by: "u1", created_at: "2026-06-18T00:00:00Z" }],
+    total: 1, page: 1, page_size: 100,
+  });
   mocks.getCPVersion.mockResolvedValue({
-    cp_id: "cp-1", major_no: 1, minor_no: 0, change_type: "approve",
-    change_summary: "v1", created_by: "u1", created_at: "2026-06-18T00:00:00Z",
+    version_id: "v1", cp_id: "cp-1", major_no: 1, minor_no: 0, source_fmea_version_id: null,
+    change_type: "approve", change_summary: "v1", created_by: "u1", created_at: "2026-06-18T00:00:00Z",
     header_snapshot: {
       document_no: "CP-1", title: "快照CP", fmea_ref_id: null, product_line_code: "DC-DC-100",
       status: "approved", phase: "sample", part_no: "P1", part_name: "快照件名",
@@ -730,8 +789,10 @@ describe("ControlPlanEditorPage version snapshot", () => {
 
     await waitFor(() => expect(mocks.getCPVersion).toHaveBeenCalledWith("cp-1", 1, 0));
     await waitFor(() => expect(screen.getByText(/message.viewingVersion/)).toBeInTheDocument());
-    // 快照标题渲染
     await waitFor(() => expect(screen.getByText("快照CP")).toBeInTheDocument());
+    // 快照态隐藏 ValidationPanel
+    await waitFor(() => expect(screen.queryByTestId("validation-panel")).not.toBeInTheDocument());
+    expect(mocks.startEditing).not.toHaveBeenCalled();
   });
 
   it("returns to current version on exit", async () => {
@@ -749,19 +810,15 @@ describe("ControlPlanEditorPage version snapshot", () => {
 });
 ```
 
-> 注意 `vi.mock("react-i18next")` 中重复的 `t` 键是非法语法 — 改为 `useTranslation: () => ({ t: (key: string) => key })` 单一 `t`。
-
 - [ ] **Step 2: 运行测试确认失败**
 
 Run: `cd frontend && npx vitest run src/pages/planning/control-plan/CPVersionSnapshot.test.tsx 2>&1 | tail -30`
 
-Expected: FAIL（横幅未渲染，`onViewSnapshot` 仍是 `message.info`）。
+Expected: FAIL — 横幅未渲染，`onViewSnapshot` 仍是 `message.info`。
 
-- [ ] **Step 3: 添加 viewingVersion state 与权限包装**
+- [ ] **Step 3: 添加 viewingVersion/versionHeader state 与权限包装**
 
-打开 `frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx`。
-
-定位 `:113-115`：
+定位：
 ```ts
   const { canEdit: canEditPerm, canApprove } = usePermission();
   const isApproved = cp?.status === "approved";
@@ -772,16 +829,35 @@ Expected: FAIL（横幅未渲染，`onViewSnapshot` 仍是 `message.info`）。
   const { canEdit: canEditPerm, canApprove: rawCanApprove } = usePermission();
   const isApproved = cp?.status === "approved";
   const [viewingVersion, setViewingVersion] = useState<{ major: number; minor: number } | null>(null);
+  const [versionHeader, setVersionHeader] = useState<CPVersionHeader | null>(null);
   const isViewingVersion = viewingVersion !== null;
   const canEdit = canEditPerm('planning') && !isApproved && !isViewingVersion;
   const canApproveAllowed = (m: "planning") => rawCanApprove(m) && !isViewingVersion;
 ```
 
-> `useState` 已 import（`:1`）。
+> 需 import `CPVersionHeader` 类型：在 `import type { ControlPlan, ControlPlanItem } from "../../../types";` 改为 `import type { ControlPlan, ControlPlanItem, CPVersionHeader } from "../../../types";`。
 
-- [ ] **Step 4: 添加 loadVersionSnapshot 与 exitVersionSnapshot**
+- [ ] **Step 4: 添加 startEditing guard**
 
-在 `useEffect`（加载 CP，约 `:146`）之后添加：
+定位 `const { activeUsers, isSyncing, startEditing, stopEditing } = useCollaboration("control_plan", cpId);`，替换为：
+```ts
+  const { activeUsers, isSyncing, startEditing: rawStartEditing, stopEditing } = useCollaboration("control_plan", cpId);
+  const startEditing = useCallback((...args: Parameters<typeof rawStartEditing>) => {
+    if (isViewingVersion) return;
+    rawStartEditing(...args);
+  }, [rawStartEditing, isViewingVersion]);
+```
+
+> 确保 `isViewingVersion` 在此 hook 调用前已声明（state 声明顺序：`viewingVersion` state 在 `useCollaboration` 之前；若顺序不符，调整 state 声明位置）。
+
+- [ ] **Step 5: 添加 getCPVersion import 与 load/exit**
+
+在 `import { getControlPlan, ... } from "../../../api/controlPlan";` 之后添加：
+```ts
+import { getCPVersion } from "../../../api/version";
+```
+
+在加载 CP 的 `useEffect` 之后添加：
 
 ```ts
   const loadVersionSnapshot = useCallback(async (major: number, minor: number) => {
@@ -798,6 +874,7 @@ Expected: FAIL（横幅未渲染，`onViewSnapshot` 仍是 `message.info`）。
       setOrgFactory(h.org_factory || "");
       setDrawingRev(h.drawing_rev || "");
       setItems(v.items_snapshot || []);
+      setVersionHeader(v.header_snapshot);
       setViewingVersion({ major, minor });
     } catch (err) {
       const e = err as { response?: { data?: { detail?: string } } };
@@ -821,6 +898,7 @@ Expected: FAIL（横幅未渲染，`onViewSnapshot` 仍是 `message.info`）。
       setDrawingRev(doc.drawing_rev || "");
       setItems(doc.items || []);
       baseItemsRef.current = JSON.parse(JSON.stringify(doc.items || []));
+      setVersionHeader(null);
       setViewingVersion(null);
     } catch {
       message.error(t("message.loadFailed"));
@@ -828,25 +906,32 @@ Expected: FAIL（横幅未渲染，`onViewSnapshot` 仍是 `message.info`）。
   }, [id, t]);
 ```
 
-在 import 区（`:14` `import { getControlPlan, ... } from "../../../api/controlPlan";` 之后）添加：
-```ts
-import { getCPVersion } from "../../../api/version";
-```
+- [ ] **Step 6: 快照态隔离 — 隐藏 sync/checkStale/ValidationPanel，fmea_ref_id 与 status 读快照**
 
-> `useCallback`、`getControlPlan`、`message`、`t`、`baseItemsRef`、各 setter 均在作用域内。
+(a) sync_pending 横幅：定位 `{cp?.sync_pending && (`，改为 `{cp?.sync_pending && !isViewingVersion && (`。
 
-- [ ] **Step 5: 替换审批按钮与 history tab 权限**
+(b) checkStale 按钮：定位紧邻 `<Button icon={<ExclamationCircleOutlined />} onClick={handleCheckStale}>` 的 `{!isNew && (`，改为 `{!isNew && !isViewingVersion && (`。
 
-定位 `:754`：
+(c) fmea_ref_id 显示：定位 `value={cp?.fmea_ref_id || t("form.notAssociated")}`，改为：
 ```tsx
-        {!isNew && canApprove('planning') && currentStatus !== "approved" && (
+                value={(isViewingVersion ? versionHeader?.fmea_ref_id : cp?.fmea_ref_id) || t("form.notAssociated")}
 ```
-替换 `canApprove('planning')` → `canApproveAllowed('planning')`：
+
+(d) ValidationPanel：定位 `{!isNew && id && (`（包裹 `<ValidationPanel cpId={id} />`），改为 `{!isNew && id && !isViewingVersion && (`。
+
+(e) PageShell subtitle：定位 `subtitle={\`${t("column.status")}：${statusLabels[currentStatus] || currentStatus}\`}`，改为：
+```tsx
+      subtitle={`${t("column.status")}：${statusLabels[isViewingVersion ? (versionHeader?.status || "") : currentStatus] || (isViewingVersion ? (versionHeader?.status || "") : currentStatus)}`}
+```
+
+- [ ] **Step 7: 替换审批按钮与 history tab 权限/占位点**
+
+(a) 审批按钮：定位 `{!isNew && canApprove('planning') && currentStatus !== "approved" && (`，把 `canApprove('planning')` 改为 `canApproveAllowed('planning')`：
 ```tsx
         {!isNew && canApproveAllowed('planning') && currentStatus !== "approved" && (
 ```
 
-定位 `:898-908` 的 `VersionHistoryTab`，把：
+(b) history tab：定位
 ```tsx
             canCreate={canEditPerm('planning')}
             canRollback={canApprove('planning')}
@@ -861,10 +946,9 @@ import { getCPVersion } from "../../../api/version";
             onViewSnapshot={loadVersionSnapshot}
 ```
 
-- [ ] **Step 6: 添加只读横幅**
+- [ ] **Step 8: 添加只读横幅**
 
-定位 `:713` `<Tabs activeKey={outerTab}...`（在 sync pending banner 之后）。在 `<Tabs` 之前插入：
-
+定位 `<Tabs activeKey={outerTab} onChange={setOuterTab} items={[`（`:713`），在其**之前**插入：
 ```tsx
       {viewingVersion && (
         <Alert
@@ -881,54 +965,51 @@ import { getCPVersion } from "../../../api/version";
       )}
 ```
 
-> `Alert` 已 import（`:5`）。`Button` 已 import。
+> `Alert` 与 `Button` 已 import。
 
-- [ ] **Step 7: 运行测试确认通过**
+- [ ] **Step 9: 运行测试确认通过**
 
 Run: `cd frontend && npx vitest run src/pages/planning/control-plan/CPVersionSnapshot.test.tsx 2>&1 | tail -30`
 
 Expected: PASS（2 个测试通过）。
 
-- [ ] **Step 8: 全量 lint + build + 测试**
+- [ ] **Step 10: 全量 lint + tsc + 测试**
 
 Run: `cd frontend && npm run lint 2>&1 | tail -20 && npx tsc --noEmit 2>&1 | tail -20 && npx vitest run src/pages/planning/ 2>&1 | tail -20`
 
-Expected: lint 无错误，tsc 无错误，所有 planning 测试通过。
+Expected: 无错误，全绿。
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx frontend/src/pages/planning/control-plan/CPVersionSnapshot.test.tsx
-git commit -m "feat(controlPlan): version snapshot read-only view in editor"
+git commit -m "feat(controlPlan): version snapshot read-only view with state isolation and collab guard"
 ```
 
 ---
 
 ### Task 7: 全量验证与收尾
 
-**Files:** 无新增；运行整体验证。
-
-- [ ] **Step 1: 全量前端构建**
+- [ ] **Step 1: 全量构建**
 
 Run: `cd frontend && npm run build 2>&1 | tail -20`
 
-Expected: 构建成功（`tsc --noEmit` + `vite build` 均通过）。
+Expected: 构建成功。
 
-- [ ] **Step 2: 全量前端测试**
+- [ ] **Step 2: 全量测试**
 
 Run: `cd frontend && npx vitest run 2>&1 | tail -20`
 
-Expected: 所有测试通过（含原有 28 个 FMEA 编辑器测试 + 4 个新增快照测试）。
+Expected: 全绿（原有测试 + 4 个新增快照测试）。
 
 - [ ] **Step 3: 手动验证（可选，需 Docker）**
 
-若要真人验证：`docker compose up`，登录 engineer，打开一个有版本的 FMEA → 版本历史 → 点「查看」→ 确认横幅 + 只读 + 图谱 Tab 显示快照 → 点「返回当前版本」。CP 同理。
+`docker compose up`，登录 engineer，打开有版本的 FMEA → 版本历史 → 「查看」→ 确认横幅 + 只读 + 图谱显示快照 + drawer/高亮已清 → 「返回当前版本」。CP 同理，并确认快照态无 sync/checkStale/ValidationPanel。
 
-- [ ] **Step 4: 最终 commit（若有未提交改动）**
+- [ ] **Step 4: 收尾 commit（若有遗漏）**
 
 ```bash
 git status
-# 若有遗漏改动：
 git add -A && git commit -m "chore: version snapshot view final cleanup"
 ```
 
@@ -937,23 +1018,17 @@ git add -A && git commit -m "chore: version snapshot view final cleanup"
 ## Self-Review
 
 **1. Spec coverage:**
-- §3.1 viewingVersion state → Task 4 Step 3 / Task 6 Step 3 ✓
-- §3.2 canEdit/canApprove 包装（重命名 rawCanEdit）→ Task 4 Step 3 ✓
-- §3.3 加载快照（含 graphDataRef 设置）→ Task 4 Step 4 ✓
-- §3.4 返回（含 graphDataRef=null）→ Task 4 Step 4 ✓
-- §3.5 占位点替换 → Task 4 Step 5 ✓
-- §3.6 横幅 → Task 4 Step 6 ✓
-- §3.7 图谱 graphDataRef 同步 → Task 4 Step 4（load 设、exit 清）✓
-- §4.2 CP canApproveAllowed + history tab 权限 → Task 6 Step 3/5 ✓
-- §4.3 CP 加载快照 → Task 6 Step 4 ✓
-- §4.4 CP 返回 → Task 6 Step 4 ✓
-- §4.5 CP 占位点 → Task 6 Step 5 ✓
-- §4.6 CP 横幅 → Task 6 Step 6 ✓
-- §5 类型修正（含 rollback=RollbackResponse）→ Task 1/2 ✓
-- §6 i18n（FMEA + CP，删除 viewSnapshot 占位提示路径）→ Task 3/5 ✓
-- §7 协作 guard（测试覆盖）→ Task 4/6 测试含 startEditing mock ✓
-- §8 测试 → Task 4/6 新增 + Task 7 全量 ✓
+- §3.1–3.6（FMEA state/权限/加载/返回/占位/横幅）→ Task 4 ✓
+- §3.7 图谱 graphDataRef 同步 → Task 4 Step 7（load 设、exit 清）✓
+- §3.8 选择态重置 + startEditing guard → Task 4 Step 5/7 + 测试断言 `startEditing` 未调用 ✓
+- §4.2 CP canApproveAllowed + history tab 权限 → Task 6 Step 3/7 ✓
+- §4.3–4.6 CP 加载/返回/占位/横幅 → Task 6 ✓
+- §4.7 CP 快照态隔离（sync/checkStale/ValidationPanel/fmea_ref_id/status + startEditing guard）→ Task 6 Step 4/6 + 测试断言 ValidationPanel 隐藏 & startEditing 未调用 ✓
+- §5 类型（nullable + version_id + source_fmea_version_id + RollbackResponse + getChangeTypeConfig null）→ Task 1 ✓
+- §5 API 返回类型（detail vs RollbackResponse）→ Task 2 ✓
+- §6 i18n → Task 3/5 ✓
+- §7 协作 guard → Task 4/6 单点 guard + 测试断言 ✓
 
-**2. Placeholder scan:** 无 TBD/TODO；所有代码块完整。Task 6 Step 1 中 `vi.mock("react-i18next")` 的重复 `t` 键已在同步骤说明修正。`RollbackResponse` 类型存在性的条件分支已在 Task 2 Step 1 说明。
+**2. Placeholder scan:** 无 TBD/TODO；所有代码块完整。`listFMEAVersions`/`listCPVersions` mock 均在 Step 1 即提供，使首测失败聚焦功能未实现。`CPVersionHeader` 类型 import 在 Task 6 Step 3 说明。
 
-**3. Type consistency:** `getFMEAVersion` → `FMEAVersionDetail`（Task 1 定义、Task 2 修正、Task 4 使用）；`getCPVersion` → `CPVersionDetail`；`canApproveAllowed` 命名在 Task 6 Step 3/5 一致；`loadVersionSnapshot`/`exitVersionSnapshot` 命名在 Task 4/6 一致。
+**3. Type consistency:** `getFMEAVersion`→`FMEAVersionDetail`、`getCPVersion`→`CPVersionDetail`、`rollback*Version`→`RollbackResponse`（Task 1 定义、Task 2 修正、Task 4/6 使用）。`canApproveAllowed`（Task 6 Step 3/7 一致）、`loadVersionSnapshot`/`exitVersionSnapshot`/`viewingVersion`/`versionHeader`（Task 4/6 一致）、`isViewingVersion`（两编辑器一致）。`startEditing` guard 模式（`rawStartEditing` + `useCallback` 包装）在 FMEA/CP 一致。
