@@ -50,6 +50,28 @@ describe("buildRows", () => {
     expect(rows[1].key).toBe("row_fn1_fm1_fc2");
   });
 
+  it("returns non-empty prevention/detection control ids pointing at the cause's controls", () => {
+    const nodes: GraphNode[] = [
+      { id: "func", type: "ProcessWorkElementFunction", name: "f", severity: 0, occurrence: 0, detection: 0 },
+      { id: "fm", type: "FailureMode", name: "m", severity: 0, occurrence: 0, detection: 0 },
+      { id: "fe", type: "FailureEffect", name: "e", severity: 0, occurrence: 0, detection: 0 },
+      { id: "fc", type: "FailureCause", name: "c", severity: 0, occurrence: 0, detection: 0 },
+      { id: "pc", type: "PreventionControl", name: "p", severity: 0, occurrence: 0, detection: 0 },
+      { id: "dc", type: "DetectionControl", name: "d", severity: 0, occurrence: 0, detection: 0 },
+    ];
+    const edges: GraphEdge[] = [
+      { source: "func", target: "fm", type: "HAS_FAILURE_MODE" },
+      { source: "fm", target: "fe", type: "EFFECT_OF" },
+      { source: "fc", target: "fm", type: "CAUSE_OF" },
+      { source: "fc", target: "pc", type: "PREVENTED_BY" },
+      { source: "fc", target: "dc", type: "DETECTED_BY" },
+    ];
+    const rows = buildRows(nodes, edges);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].preventionControlIds).toEqual(["pc"]);
+    expect(rows[0].detectionControlIds).toEqual(["dc"]);
+  });
+
   it("builds a cause-less placeholder row carrying the mode's effects", () => {
     const nodes: GraphNode[] = [
       n("fn1", "ProcessItemFunction"),
