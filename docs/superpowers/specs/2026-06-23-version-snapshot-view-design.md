@@ -30,6 +30,8 @@
 新增 `viewingVersion: { major: number; minor: number } | null`。
 
 ### 3.2 覆盖权限
+现有 `const { canEdit, canApprove } = usePermission();`（`:280`，直接解构，无别名）。必须重命名为 `rawCanEdit` / `rawCanApprove` 后再包本地 `canEdit` / `canApprove`，**避免同名冲突**：
+
 ```ts
 const { canEdit: rawCanEdit, canApprove: rawCanApprove } = usePermission();
 const isViewingVersion = viewingVersion !== null;
@@ -92,10 +94,24 @@ const exitVersionSnapshot = useCallback(async () => {
 )}
 ```
 
-### 3.7 图谱 Tab 风险点
-`GraphCanvas` 可能从 API 重新拉取**当前**文档的图谱而非 state。需在实现阶段验证：
-- 若 `GraphCanvas` 读 state → 自然显示快照数据，无需处理。
-- 若 `GraphCanvas` 读 API → 查看快照时图谱会显示当前文档（错数据）。处理方式：在只读时让图谱复用快照数据（传 prop），或隐藏图谱 Tab。
+### 3.7 图谱 Tab 数据源（已核实）
+`GraphCanvas` 本身不拉 API，它读 `graphDataRef.current`（`FMEAEditorPage.tsx:125`，渲染于 `:1562-1567`）。但 `loadGraphData()`（`:250`）在 `graphDataRef.current` 为空时调用 `getFMEA(id)` 拉取**当前**文档：
+
+```ts
+const loadGraphData = useCallback(async () => {
+  if (!id || graphDataRef.current) return;   // ← ref 非空则跳过
+  const doc = await getFMEA(id);
+  graphDataRef.current = normalizeGraphData(rawNodes, rawEdges);
+  ...
+}, [id]);
+```
+
+关键：`loadGraphData` 有 `if (!id || graphDataRef.current) return` 的早退 —— 只要 ref 已设值就不会重新拉取。因此：
+
+- **进入快照**：`loadVersionSnapshot` 中必须显式设置 `graphDataRef.current = normalizeGraphData(snapshot.nodes, snapshot.edges)`，使图谱 Tab 显示快照数据而非当前文档。
+- **退出快照**：`exitVersionSnapshot` 中必须 `graphDataRef.current = null`（与 `:332` 保存后清空一致），使下次切到图谱 Tab 时 `loadGraphData` 重新拉取当前文档。
+
+注意 `normalizeGraphData` 入参类型需与现有 `:257` 的强转写法一致（`rawNodes as unknown as Array<Record<string, unknown>>`）。
 
 ## 4. CP 编辑器改动 (`frontend/src/pages/planning/control-plan/ControlPlanEditorPage.tsx`)
 
@@ -103,7 +119,20 @@ const exitVersionSnapshot = useCallback(async () => {
 新增 `viewingVersion: { major: number; minor: number } | null`。
 
 ### 4.2 覆盖权限
-现有 `const canEdit = canEditPerm('planning') && !isApproved;` → `... && !isApproved && viewingVersion === null;`。`canApprove` 同理覆盖。
+当前 CP 编辑器**没有本地 `canApprove` 包装**：`const { canEdit: canEditPerm, canApprove } = usePermission();`（`:113`），审批按钮直接用 `canApprove('planning')`（`:754`），版本历史 Tab 也用原始权限 `canCreate={canEditPerm('planning')}` / `canRollback={canApprove('planning')}`（`:901-902`）。因此「canApprove 同理覆盖」在 CP 不成立，需新增本地包装：
+
+```ts
+const { canEdit: canEditPerm, canApprove: rawCanApprove } = usePermission();
+const isViewingVersion = viewingVersion !== null;
+const canEdit = canEditPerm('planning') && !isApproved && !isViewingVersion;
+const canApproveAllowed = (m: string) => rawCanApprove(m) && !isViewingVersion;
+```
+
+然后将：
+- 审批按钮 `:754` 的 `canApprove('planning')` → `canApproveAllowed('planning')`。
+- 版本历史 Tab `:901-902` 的 `canCreate={canEditPerm('planning')}` → `canCreate={canEdit}`，`canRollback={canApprove('planning')}` → `canRollback={canApproveAllowed('planning')}`。
+
+> 这样查看快照时审批/创建版本/回滚按钮一并隐藏，避免在只读态误操作。
 
 ### 4.3 加载快照
 ```ts
@@ -144,26 +173,29 @@ const loadVersionSnapshot = useCallback(async (major: number, minor: number) => 
 - 重定义 `FMEAVersion`（= list item）去掉 `graph_data`：`{ fmea_id, major_no, minor_no, change_type, change_summary, created_by, created_at }`（继承 `VersionBase`）。
 - 新增 `FMEAVersionDetail extends FMEAVersion { snapshot: GraphData; sha256_hash: string; }`。
 - CP 同理：`CPVersion`（list item）已含 `items: ControlPlanItem[]` —— 但 list 端点同样不返回 items，故应去掉 `items`，改为 `CPVersionDetail extends CPVersion { header_snapshot: CPVersionHeader; items_snapshot: ControlPlanItem[]; sha256_hash: string; }`，并新增 `CPVersionHeader` 接口（字段对齐 `header_snapshot`，见 `version_service.py:236-249`）。
-- 修正 `getFMEAVersion` / `getCPVersion` / `createFMEAVersion` / `createCPVersion` / `rollbackFMEAVersion` / `rollbackCPVersion` 的返回类型为对应 `*Detail`。
+- 修正各 API 客户端返回类型：
+  - `getFMEAVersion` / `createFMEAVersion` → `FMEAVersionDetail`（后端 detail 与 create 端点均返回 `FMEAVersionDetail`，见 `api/version.py:97-114`）。
+  - `getCPVersion` / `createCPVersion` → `CPVersionDetail`（同上，`api/version.py:226-243`）。
+  - `rollbackFMEAVersion` / `rollbackCPVersion` → **`RollbackResponse`**（后端 rollback 端点返回 `RollbackResponse`，见 `api/version.py:115` 与 `:244`，**不是** `*Detail`）。
 - `VersionListResponse<T>` 的 `T` 保持为 list item 类型。
 - 排查所有 `FMEAVersion`/`CPVersion` 引用（`VersionHistoryTab`、`VersionCompareView`、`RollbackConfirmModal` 等），确保仅访问 list item 字段。
 
 ## 6. i18n
 
 ### `frontend/src/locales/zh-CN/fmea.json`（及 en-US）
-- `messages.viewSnapshot` 去掉「（功能开发中）」后缀（保留作为加载提示或移除）。
-- 新增 `messages.viewingVersion`: `"正在查看 v{{version}} 快照（只读）"`
-- 新增 `actions.exitVersion`: `"返回当前版本"`
-- 新增 `messages.loadVersionFailed`: `"加载版本快照失败"`
-- CP locale 同步对应 key（视 `ControlPlanEditorPage` 的 namespace 而定，确认后补）。
+- `messages.viewSnapshot` 当前 locale 用 `{{version}}`，但 `:1882` 调用传的是 `{ major, minor }` —— 不匹配。该提示路径将被 `loadVersionSnapshot` 取代，**删除 `:1882` 的 `message.info` 调用与该 key**（或改为加载中提示并统一插值为 `{ version: \`${major}.${minor}\` }`，二选一，倾向删除）。
+- 新增 `messages.viewingVersion`: `"正在查看 v{{version}} 快照（只读）"`（插值传 `{ version: \`${major}.${minor}\` }`）。
+- 新增 `actions.exitVersion`: `"返回当前版本"`。
+- 新增 `messages.loadVersionFailed`: `"加载版本快照失败"`。
+- CP locale：`ControlPlanEditorPage` 现用 `button.viewSnapshot`（`:904`），同样删除该 `message.info` 调用，新增与 FMEA 对应的 viewing/exit/loadFailed key（确认 CP 的 i18n namespace 后补，见实现计划）。
 
 ## 7. 边界与风险
 
-- **协作 `useCollaboration`**：查看期间 `canEdit` 为 false → 不触发 `startEditing`；协作栏保留展示，不主动隐藏。
-- **版本历史 Tab 内操作**：`canCreate={canEdit(...)}` 与 `canRollback={canApprove(...)}` 在只读时自动变 false → 创建/回滚按钮隐藏，避免误操作。对比弹窗独立，不受影响。
+- **协作 `useCollaboration`**：查看期间 `canEdit` 为 false → 可编辑控件 disabled，通常不触发 focus → 不会调用 `startEditing`。但这是 UI 行为假设（disabled input 不 focus），不是业务保护层。**不需要改 `startEditing`**，但只读测试须覆盖「聚焦/编辑态不会产生协作事件」；若测试发现漏网（如某些非 disabled 的可聚焦元素仍挂 onFocus），则在 `startEditing` 调用处显式加 `if (viewingVersion) return;` guard。
+- **版本历史 Tab 内操作**：FMEA 的 `canCreate={canEdit(...)}` / `canRollback={canApprove(...)}` 在只读时自动变 false；CP 须按 §4.2 把 history tab 改用 `canEdit` / `canApproveAllowed`。创建/回滚按钮隐藏，避免误操作。对比弹窗独立，不受影响。
 - **冲突检测基线 `baseGraphRef`**：查看时不触碰；返回时重新拉取重置。
 - **向导重定向**：查看快照仅 setState 不导航；返回重新拉取时，若当前为草稿 DFMEA 未完成向导则走原重定向逻辑（可接受边界）。
-- **图谱 Tab**：见 3.7，实现阶段验证并处理。
+- **图谱 Tab**：见 3.7，进入/退出快照时同步设置/清空 `graphDataRef.current`。
 
 ## 8. 测试
 
@@ -177,7 +209,7 @@ const loadVersionSnapshot = useCallback(async (major: number, minor: number) => 
 ## 9. 实现顺序
 
 1. 类型与 API 客户端修正（types + version.ts）。
-2. FMEA 编辑器：state + canEdit 包装 + 加载/返回 + 横幅 + 占位点替换；验证图谱 Tab。
+2. FMEA 编辑器：state + canEdit/canApprove 包装（重命名避免冲突）+ 加载/返回（含 `graphDataRef` 同步）+ 横幅 + 占位点替换。
 3. CP 编辑器：同上。
 4. i18n。
 5. 测试：跑现有测试 + 新增。
