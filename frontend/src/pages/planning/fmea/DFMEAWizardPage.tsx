@@ -18,7 +18,7 @@ import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimefra
 import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
 import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type StructureNodeType } from '../../../utils/wizardToolStructure';
 import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
-import { createWizardFailureChain } from '../../../utils/wizardGraphNormalize';
+import { createWizardFailureChain, ensureCauseControls } from '../../../utils/wizardGraphNormalize';
 
 const { Title, Paragraph } = Typography;
 
@@ -78,14 +78,32 @@ export default function DFMEAWizardPage() {
       const loadedNodes = doc.graph_data?.nodes || [];
       const loadedEdges = doc.graph_data?.edges || [];
       const loadedScope = doc.graph_data?.wizardScope || {};
-      setFmea(doc);
-      setNodes(loadedNodes);
-      setEdges(loadedEdges);
-      setWizardScope(loadedScope);
+      // setLockVersion FIRST: useWizardSave.lockVersionRef defaults to 0; if
+      // ensureCauseControls triggers immediateSave before this runs, the save
+      // would go out with lock_version:0 and 409.
       setLockVersion(doc.lock_version);
-      // Mark initial state as "clean" — hash captured at load time
+      // Baseline hash = pre-normalization loaded state (backend's current
+      // state). Kept as the "clean" reference; NOT overwritten with the
+      // normalized hash — see below.
       lastSavedHashRef.current = computeHash(loadedNodes, loadedEdges, loadedScope);
+      // Normalize legacy drafts: every FailureCause gets a PC + DC so Step 5's
+      // O/D editors always have a node to write to.
+      const { nodes: normNodes, edges: normEdges, changed } = ensureCauseControls(loadedNodes, loadedEdges);
+      setFmea(doc);
+      setNodes(normNodes);
+      setEdges(normEdges);
+      setWizardScope(loadedScope);
       setLoading(false);
+      // If normalization added nodes/edges, persist the fix to the backend.
+      // Pass the NORMALIZED hash as dataHash: the save hook writes it into
+      // lastSavedHashRef only on SUCCESS (useWizardSave.ts:84). On failure,
+      // lastSavedHashRef stays at the pre-normalization baseline, so the live
+      // (normalized) state differs from it and beforeunload will warn — the
+      // user is not silently dropped despite the backend not being fixed.
+      if (changed) {
+        const normalizedHash = computeHash(normNodes, normEdges, loadedScope);
+        immediateSave({ nodes: normNodes, edges: normEdges, wizardScope: loadedScope }, doc.title, normalizedHash);
+      }
     }).catch((err: unknown) => {
       const e = err as { response?: { data?: { detail?: string } } };
       message.error(e?.response?.data?.detail || t('wizard.page.loadFailed'));
@@ -150,9 +168,24 @@ export default function DFMEAWizardPage() {
           navigate('/fmea');
         },
       });
-    } else {
-      navigate('/fmea');
+      return;
     }
+    // Non-empty draft: if there are unsaved changes (including a normalization
+    // save that failed/in-flight — lastSavedHashRef still at pre-normalization
+    // baseline while live state is normalized), confirm before leaving.
+    const liveHash = computeHash(nodesRef.current, edgesRef.current, scopeRef.current);
+    if (liveHash !== lastSavedHashRef.current) {
+      Modal.confirm({
+        title: t('wizard.page.confirmLeaveTitle', { defaultValue: '离开向导？' }),
+        content: t('wizard.page.confirmLeave', { defaultValue: '有未保存的更改，确定离开吗？' }),
+        okText: t('wizard.page.confirmLeaveOk', { defaultValue: '离开' }),
+        cancelText: t('wizard.page.confirmEmptyDraftCancel'),
+        okButtonProps: { danger: true },
+        onOk: () => navigate('/fmea'),
+      });
+      return;
+    }
+    navigate('/fmea');
   };
 
   const canFinish = validation.warnings.length === 0
