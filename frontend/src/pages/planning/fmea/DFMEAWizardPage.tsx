@@ -246,12 +246,14 @@ export default function DFMEAWizardPage() {
     const typeLabel = (type: string) => t(`wizard.typeLabels.${type}`, { defaultValue: type });
     const TYPE_COLORS: Record<string, string> = { System: 'red', Subsystem: 'orange', Component: 'green', Interface: 'purple', DesignParameter: 'blue' };
 
-    const addAttachedParamNode = (nodeType: StructureNodeType) => {
+    const addAttachedParamNode = (nodeType: StructureNodeType, parentId?: string) => {
       // Interface/DesignParameter 须通过 HAS_PARAMETER 依附结构节点（不复用 handleAddNode：
       // 后者无 parent 建游离节点、CHILD_EDGE_TYPE 不含 HAS_PARAMETER）。
       // 挂接逻辑由 wizardToolStructure 的纯函数承担（pickParamParent + buildAttachedParamNode），
       // 便于单测；此处是薄包装。
-      const parent = pickParamParent(nodes);
+      // parentId 由结构卡片上的「+ 接口 / + 设计参数」按钮传入，让用户显式选择挂接到
+      // 哪个 System/Subsystem/Component；省略时回退到 pickParamParent 自动选取。
+      const parent = parentId ? nodes.find(n => n.id === parentId) : pickParamParent(nodes);
       if (!parent) {
         message.warning(t('wizard.scope.toolGuideNeedStructure'));
         return;
@@ -346,6 +348,16 @@ export default function DFMEAWizardPage() {
                 <Button size="small" onClick={() => handleAddNode(CHILD_TYPE[node.type], node.id)}>
                   + {typeLabel(CHILD_TYPE[node.type])}
                 </Button>
+              )}
+              {['System', 'Subsystem', 'Component'].includes(node.type) && (
+                <>
+                  <Button size="small" onClick={() => addAttachedParamNode('Interface', node.id)}>
+                    + {typeLabel('Interface')}
+                  </Button>
+                  <Button size="small" onClick={() => addAttachedParamNode('DesignParameter', node.id)}>
+                    + {typeLabel('DesignParameter')}
+                  </Button>
+                </>
               )}
               <Button size="small" danger onClick={() => handleDeleteNode(node.id)}>{t('wizard.structure.delete')}</Button>
             </Space>
