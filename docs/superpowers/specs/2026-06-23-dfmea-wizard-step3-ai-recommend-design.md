@@ -130,8 +130,9 @@ suggestions, never a dead end. Scope/permission handling (`global` vs
 None new. `SmartSuggestionDropdown` uses existing `dfmea.smartSuggestion.*`
 keys. The removed chips used `wizard.failure.recommended` /
 `wizard.failure.autoRecommend`, and the changed default makes
-`wizard.failure.newFailureMode` unused — **leave all in place** (per CLAUDE.md).
-No new locale strings.
+`wizard.failure.newFailureMode` unused **by Step 3** — but all three keys are
+still read by `GenerationWizard.tsx:288,289,313`, so they remain live and are
+**left in place** (do not delete). No new locale strings.
 
 ## Testing
 

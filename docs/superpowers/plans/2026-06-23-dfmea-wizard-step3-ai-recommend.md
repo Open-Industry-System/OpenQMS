@@ -12,7 +12,7 @@
 
 - **Base branch:** `fix/fmea-fixes` (this worktree is already based on its HEAD). Do NOT rebase onto `main` — `getProcessChain`, editor `process_step` wiring, and `ScopeTagField` exist only on `fix/fmea-fixes`.
 - **Scope:** Modify only `frontend/src/pages/planning/fmea/DFMEAWizardPage.tsx` and create `frontend/src/pages/planning/fmea/DFMEAWizardPage.test.tsx`. No backend, no other frontend files, no i18n locale edits.
-- **Surgical:** Leave `useDfmeaRules` hook in place (Steps 4/5 still use it). Leave now-unused locale keys (`wizard.failure.recommended`, `wizard.failure.autoRecommend`, `wizard.failure.newFailureMode`) in place — do not delete locale entries.
+- **Surgical:** Leave `useDfmeaRules` hook in place (Steps 4/5 still use it). Leave the locale keys `wizard.failure.recommended`, `wizard.failure.autoRecommend`, `wizard.failure.newFailureMode` in place — they're no longer used by Step 3 but are still read live by `GenerationWizard.tsx:288,289,313`, so do not delete them.
 - **DRY:** Append `getProcessChain` to the existing single `fmeaTable` named-import on line 11; do not add a second import line.
 - **Verification gate:** Every task ends with `npm run lint` clean + the relevant vitest passing. Final task runs `npm run build` (tsc --noEmit + vite build).
 
