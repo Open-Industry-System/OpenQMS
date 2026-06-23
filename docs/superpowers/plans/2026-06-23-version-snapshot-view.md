@@ -420,8 +420,9 @@ describe("FMEAEditorPage version snapshot", () => {
 
     await waitFor(() => expect(mocks.getFMEAVersion).toHaveBeenCalledWith("fmea-1", 1, 0));
     await waitFor(() => expect(screen.getByText(/messages.viewingVersion/)).toBeInTheDocument());
+    // 快照功能名在失效分析表的 function 列 <div> 中渲染（非 input），用 getByText
     await waitFor(() => expect(screen.getByText("快照功能")).toBeInTheDocument());
-    // 只读态未触发协作事件
+    // 只读态未产生协作事件（注：未主动 focus 控件，此断言验证「无副作用」而非 guard 被触发）
     expect(mocks.startEditing).not.toHaveBeenCalled();
   });
 
@@ -517,12 +518,16 @@ import { getFMEAVersion } from "../../../api/version";
       setSelectedGraphNode(null);
       setDrawerVisible(false);
       setHighlightNodes([]);
+      setDimOthers(false);
+      setPendingHighlightNode(null);
+      setContextMenuOpen(false);
+      setContextMenuNode(null);
       setViewingVersion({ major, minor });
     } catch (err) {
       const e = err as { response?: { data?: { detail?: string } } };
       message.error(e?.response?.data?.detail || t("messages.loadVersionFailed"));
     }
-  }, [fmeaId, t]);
+  }, [fmeaId, t, message]);
 
   const exitVersionSnapshot = useCallback(async () => {
     const doc = await getFMEA(fmeaId);
@@ -539,11 +544,15 @@ import { getFMEAVersion } from "../../../api/version";
     setSelectedGraphNode(null);
     setDrawerVisible(false);
     setHighlightNodes([]);
+    setDimOthers(false);
+    setPendingHighlightNode(null);
+    setContextMenuOpen(false);
+    setContextMenuNode(null);
     setViewingVersion(null);
   }, [fmeaId]);
 ```
 
-> 各 setter（`setSelectedFunctionId`/`setSelectedStructureNode`/`setSelectedGraphNode`/`setDrawerVisible`/`setHighlightNodes`）已在 `:106-131` 声明。`getFMEA`/`setNodes`/`setEdges`/`setFmea`/`graphDataRef`/`baseGraphRef`/`normalizeGraphData`/`message`/`t` 均在作用域内。
+> 各 setter（`setSelectedFunctionId`/`setSelectedStructureNode`/`setSelectedGraphNode`/`setDrawerVisible`/`setHighlightNodes`/`setDimOthers`/`setPendingHighlightNode`/`setContextMenuOpen`/`setContextMenuNode`）已在 `:106-208` 声明。`getFMEA`/`setNodes`/`setEdges`/`setFmea`/`graphDataRef`/`baseGraphRef`/`normalizeGraphData`/`message`/`t` 均在作用域内。`message` 加入 deps 与本文件现有约定一致（`:268`/`:627`）。`exitVersionSnapshot` 未用 `message`，deps 仅 `[fmeaId]`。
 
 - [ ] **Step 8: 替换占位点**
 
@@ -789,9 +798,11 @@ describe("ControlPlanEditorPage version snapshot", () => {
 
     await waitFor(() => expect(mocks.getCPVersion).toHaveBeenCalledWith("cp-1", 1, 0));
     await waitFor(() => expect(screen.getByText(/message.viewingVersion/)).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText("快照CP")).toBeInTheDocument());
+    // 快照标题是 title <Input value={title}>（:773），且测试的 PageShell mock 不渲染 title prop → 用 getByDisplayValue
+    await waitFor(() => expect(screen.getByDisplayValue("快照CP")).toBeInTheDocument());
     // 快照态隐藏 ValidationPanel
     await waitFor(() => expect(screen.queryByTestId("validation-panel")).not.toBeInTheDocument());
+    // 只读态未产生协作事件（注：未主动 focus 控件，此断言验证「无副作用」而非 guard 被触发）
     expect(mocks.startEditing).not.toHaveBeenCalled();
   });
 
@@ -880,7 +891,7 @@ import { getCPVersion } from "../../../api/version";
       const e = err as { response?: { data?: { detail?: string } } };
       message.error(e?.response?.data?.detail || t("message.loadVersionFailed"));
     }
-  }, [id, t]);
+  }, [id, t, message]);
 
   const exitVersionSnapshot = useCallback(async () => {
     if (!id) return;
@@ -903,7 +914,7 @@ import { getCPVersion } from "../../../api/version";
     } catch {
       message.error(t("message.loadFailed"));
     }
-  }, [id, t]);
+  }, [id, t, message]);
 ```
 
 - [ ] **Step 6: 快照态隔离 — 隐藏 sync/checkStale/ValidationPanel，fmea_ref_id 与 status 读快照**
@@ -919,16 +930,20 @@ import { getCPVersion } from "../../../api/version";
 
 (d) ValidationPanel：定位 `{!isNew && id && (`（包裹 `<ValidationPanel cpId={id} />`），改为 `{!isNew && id && !isViewingVersion && (`。
 
-(e) PageShell subtitle：定位 `subtitle={\`${t("column.status")}：${statusLabels[currentStatus] || currentStatus}\`}`，改为：
+(e) 新增 displayStatus 派生并在 status 相关 UI 统一使用：定位 `const currentStatus = cp?.status || "draft";`（`:671`），在其后新增：
+```ts
+  const displayStatus = isViewingVersion ? (versionHeader?.status || "") : currentStatus;
+```
+然后 PageShell subtitle：定位 `subtitle={\`${t("column.status")}：${statusLabels[currentStatus] || currentStatus}\`}`，改为：
 ```tsx
-      subtitle={`${t("column.status")}：${statusLabels[isViewingVersion ? (versionHeader?.status || "") : currentStatus] || (isViewingVersion ? (versionHeader?.status || "") : currentStatus)}`}
+      subtitle={`${t("column.status")}：${statusLabels[displayStatus] || displayStatus}`}
 ```
 
 - [ ] **Step 7: 替换审批按钮与 history tab 权限/占位点**
 
-(a) 审批按钮：定位 `{!isNew && canApprove('planning') && currentStatus !== "approved" && (`，把 `canApprove('planning')` 改为 `canApproveAllowed('planning')`：
+(a) 审批按钮：定位 `{!isNew && canApprove('planning') && currentStatus !== "approved" && (`，把 `canApprove('planning')` 改为 `canApproveAllowed('planning')`，状态判断改用 `displayStatus`（快照态 displayStatus 来自快照 header，逻辑更一致）：
 ```tsx
-        {!isNew && canApproveAllowed('planning') && currentStatus !== "approved" && (
+        {!isNew && canApproveAllowed('planning') && displayStatus !== "approved" && (
 ```
 
 (b) history tab：定位
@@ -942,7 +957,7 @@ import { getCPVersion } from "../../../api/version";
 ```tsx
             canCreate={canEdit}
             canRollback={canApproveAllowed('planning')}
-            isDraft={currentStatus === "draft"}
+            isDraft={displayStatus === "draft"}
             onViewSnapshot={loadVersionSnapshot}
 ```
 
@@ -1027,8 +1042,8 @@ git add -A && git commit -m "chore: version snapshot view final cleanup"
 - §5 类型（nullable + version_id + source_fmea_version_id + RollbackResponse + getChangeTypeConfig null）→ Task 1 ✓
 - §5 API 返回类型（detail vs RollbackResponse）→ Task 2 ✓
 - §6 i18n → Task 3/5 ✓
-- §7 协作 guard → Task 4/6 单点 guard + 测试断言 ✓
+- §7 协作 guard → Task 4/6 单点 guard（`isViewingVersion` 时 no-op）+ 测试断言快照态 `startEditing` 未被调用。**注意**：测试未主动 focus 控件，故断言验证的是「快照态无协作副作用」而非「guard 被触发验证」；guard 本身是防御性单点保护，disabled 控件不 focus 是首要屏障。✓
 
 **2. Placeholder scan:** 无 TBD/TODO；所有代码块完整。`listFMEAVersions`/`listCPVersions` mock 均在 Step 1 即提供，使首测失败聚焦功能未实现。`CPVersionHeader` 类型 import 在 Task 6 Step 3 说明。
 
-**3. Type consistency:** `getFMEAVersion`→`FMEAVersionDetail`、`getCPVersion`→`CPVersionDetail`、`rollback*Version`→`RollbackResponse`（Task 1 定义、Task 2 修正、Task 4/6 使用）。`canApproveAllowed`（Task 6 Step 3/7 一致）、`loadVersionSnapshot`/`exitVersionSnapshot`/`viewingVersion`/`versionHeader`（Task 4/6 一致）、`isViewingVersion`（两编辑器一致）。`startEditing` guard 模式（`rawStartEditing` + `useCallback` 包装）在 FMEA/CP 一致。
+**3. Type consistency:** `getFMEAVersion`→`FMEAVersionDetail`、`getCPVersion`→`CPVersionDetail`、`rollback*Version`→`RollbackResponse`（Task 1 定义、Task 2 修正、Task 4/6 使用）。`canApproveAllowed`（Task 6 Step 3/7 一致）、`loadVersionSnapshot`/`exitVersionSnapshot`/`viewingVersion`/`versionHeader`/`displayStatus`（Task 4/6 一致）、`isViewingVersion`（两编辑器一致）。`startEditing` guard 模式（`rawStartEditing` + `useCallback` 包装）在 FMEA/CP 一致。`useCallback` deps 均含 `message`（与 FMEA 现有约定 `:268`/`:627` 一致），`exitVersionSnapshot` 按 `message` 使用与否决定是否含。
