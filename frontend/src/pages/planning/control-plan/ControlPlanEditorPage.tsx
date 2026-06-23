@@ -179,8 +179,9 @@ export default function ControlPlanEditorPage() {
   }, [id, isNew]);
 
   const loadVersionSnapshot = useCallback(async (major: number, minor: number) => {
+    if (!id) return;
     try {
-      const v = await getCPVersion(id!, major, minor);
+      const v = await getCPVersion(id, major, minor);
       const h = v.header_snapshot || {};
       setTitle(h.title || "");
       setDocumentNo(h.document_no || "");
