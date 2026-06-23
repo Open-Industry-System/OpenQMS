@@ -2,6 +2,7 @@
   "actions": {
     "confirm": "确认",
     "save": "保存",
+    "exitVersion": "返回当前版本",
     "close": "关闭",
     "cancel": "取消",
     "back": "返回"
@@ -235,7 +236,9 @@
     "statusChanged": "状态已变更为: {{status}}",
     "operationFailed": "操作失败",
     "selectFailureMode": "请先在编辑器中选择一个失效模式行",
-    "viewSnapshot": "查看版本 v{{version}} 快照（功能开发中）",
+    "viewSnapshot": "查看版本 v{{version}} 快照",
+    "viewingVersion": "正在查看 v{{version}} 快照（只读）",
+    "loadVersionFailed": "加载版本快照失败",
     "clearHighlight": "清除高亮",
     "changeImpactAnalysis": "变更影响分析",
     "changeImpactDescription": "分析此节点的变更对上下游的影响范围",
