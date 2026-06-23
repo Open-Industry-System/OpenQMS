@@ -35,8 +35,8 @@
 - Test: (this file)
 
 **Interfaces:**
-- Consumes: the real `DFMEAWizardPage` default export; `getRecommendations(fmeaId, request, signal?)` from `api/recommendation`; `getFMEA(id): Promise<FMEADocument>` and `updateFMEA` from `api/fmea`.
-- Produces: a red test proving Step 3 does not yet call `getRecommendations` with `failure_mode`/`failure_effect`/`failure_cause` triggers (it currently uses local rules, so the mock is never called).
+- Consumes: the real `DFMEAWizardPage` default export (which imports `getFMEA` **and `deleteFMEA`** from `api/fmea` — both must be mocked or the import throws); `getRecommendations(fmeaId, request, signal?)` from `api/recommendation`; `getFMEA(id): Promise<FMEADocument>` from `api/fmea`.
+- Produces: a red test proving Step 3 does not yet call `getRecommendations` with `failure_mode`/`failure_effect`/`failure_cause` triggers (it currently uses local rules, so the mock is never called for any of the three).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -53,12 +53,14 @@ import type { FMEADocument, GraphEdge, GraphNode } from "../../../types";
 const mocks = vi.hoisted(() => ({
   getFMEA: vi.fn(),
   updateFMEA: vi.fn(),
+  deleteFMEA: vi.fn(),
   getRecommendations: vi.fn(),
 }));
 
 vi.mock("../../../api/fmea", () => ({
   getFMEA: mocks.getFMEA,
   updateFMEA: mocks.updateFMEA,
+  deleteFMEA: mocks.deleteFMEA, // DFMEAWizardPage imports this; omitting it throws at import time
 }));
 
 vi.mock("../../../api/recommendation", () => ({
@@ -70,10 +72,21 @@ vi.mock("../../../hooks/usePermission", () => ({
   usePermission: () => ({ canView: () => true, canEdit: () => true, canApprove: () => true }),
 }));
 
-// Raw-key t keeps the test free of locale loading; the next button is
-// t('wizard.page.nextStep') -> text "wizard.page.nextStep".
+// The wizard calls several t(..., { returnObjects: true }) that are cast to
+// arrays/records and then .filter'd / indexed (Step 0 ScopeTagField presets,
+// toolStructureMap). A raw `t: key => key` returns a string -> ".filter is not
+// a function" crashes Step 0 before we ever reach Step 3. Special-case those
+// keys to their empty container; everything else returns the raw key (good
+// enough — we assert on trigger_type/context, not on rendered copy).
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) => {
+      if (key === "wizard.scope.toolPresets") return [];
+      if (key === "wizard.scope.trendPresets") return [];
+      if (key === "wizard.scope.toolStructureMap") return {};
+      return key;
+    },
+  }),
 }));
 
 const node = (id: string, type: string, name = id): GraphNode => ({
@@ -143,38 +156,72 @@ beforeEach(() => {
   mocks.getRecommendations.mockResolvedValue(AI_RESPONSE);
 });
 
+// SmartSuggestionDropdown renders an Input.TextArea with no aria-label, so
+// findByRole("textbox", {...}) rejects (it never returns null). Use
+// getAllByRole("textbox") instead. After clicking 添加失效模式, the failure card
+// renders exactly three textareas in order: FM, effect, cause (Task 2 Step 5's
+// JSX order). 500ms debounce (SmartSuggestionDropdown.tsx:143) fires the call.
+async function typeAndWait(input: HTMLElement, value: string) {
+  fireEvent.change(input, { target: { value } });
+  await act(async () => { vi.advanceTimersByTime(600); });
+  await waitFor(() => expect(mocks.getRecommendations).toHaveBeenCalled());
+}
+
 describe("DFMEAWizardPage Step 3 失效分析 — AI recommend wiring", () => {
-  it("calls getRecommendations with failure_mode trigger when typing in the FM field", async () => {
+  it("wires FM / FE / FC fields to the failure_mode / failure_effect / failure_cause triggers", async () => {
     renderWizard();
     await goToStep3();
 
-    // add a failure-mode chain -> FM/FE/FC/DC nodes created, SmartSuggestionDropdowns render
+    // add a failure-mode chain -> FM/FE/FC/DC nodes created, 3 dropdowns render
     await waitFor(() => expect(screen.getByText("wizard.failure.addFailureMode")).toBeInTheDocument());
     fireEvent.click(screen.getByText("wizard.failure.addFailureMode"));
 
-    // The FM field is the SmartSuggestionDropdown's textarea. Type >=2 chars to
-    // fire the debounced (500ms) getRecommendations call.
-    const fmInput = await screen.findByRole("textbox", { name: /smart-suggestion|失效模式|wizard.failure.failureMode/i });
-    // fallback: first textbox inside the failure card if aria isn't matched
-    const target = fmInput ?? screen.getAllByRole("textbox")[0];
-    fireEvent.change(target, { target: { value: "采集失" } });
-    await act(async () => { vi.advanceTimersByTime(600); });
+    const inputs = await screen.findAllByRole("textbox");
+    // three textareas: [0]=FM, [1]=effect, [2]=cause
+    expect(inputs.length).toBeGreaterThanOrEqual(3);
 
-    await waitFor(() => expect(mocks.getRecommendations).toHaveBeenCalled());
-    const call = mocks.getRecommendations.mock.calls[0][1];
-    expect(call.trigger_type).toBe("failure_mode");
-    expect(call.context.function_description).toBe("采集电压");
-    expect(typeof call.context.process_step).toBe("string");
+    // FM -> failure_mode
+    mocks.getRecommendations.mockClear();
+    await typeAndWait(inputs[0], "采集失");
+    {
+      const call = mocks.getRecommendations.mock.calls[0][1];
+      expect(call.trigger_type).toBe("failure_mode");
+      expect(call.context.function_description).toBe("采集电压");
+      expect(typeof call.context.process_step).toBe("string");
+    }
+
+    // effect -> failure_effect (context carries failure_mode + function_description + process_step)
+    mocks.getRecommendations.mockClear();
+    await typeAndWait(inputs[1], "控制偏差");
+    {
+      const call = mocks.getRecommendations.mock.calls[0][1];
+      expect(call.trigger_type).toBe("failure_effect");
+      expect(call.context.function_description).toBe("采集电压");
+      expect(typeof call.context.process_step).toBe("string");
+    }
+
+    // cause -> failure_cause
+    mocks.getRecommendations.mockClear();
+    await typeAndWait(inputs[2], "传感器故障");
+    {
+      const call = mocks.getRecommendations.mock.calls[0][1];
+      expect(call.trigger_type).toBe("failure_cause");
+      expect(call.context.function_description).toBe("采集电压");
+      expect(typeof call.context.process_step).toBe("string");
+    }
   });
 });
 ```
 
-Note: the `findByRole("textbox", ...)` fallback chain is intentional — the real `SmartSuggestionDropdown` renders an `Input.TextArea` whose accessible name depends on antd internals. If the role query is flaky in practice, the executor may switch to `screen.getAllByRole("textbox")[0]` (the first textbox in the failure card is the FM field, since it renders first in the `fmNodes.map` block). Keep the assertion on `trigger_type`/`context` — that is the wiring under test.
+Notes for the executor:
+- `deleteFMEA` must be in the `api/fmea` mock factory — `DFMEAWizardPage.tsx:6` imports it, and a missing export throws at module-eval time before any test body runs.
+- The `t` mock special-cases the three `returnObjects: true` keys (`toolPresets`, `trendPresets`, `toolStructureMap`) because Step 0's `ScopeTagField` calls `.filter` on the presets and `toolStructureMap` is bracket-indexed — a string return would crash Step 0 (`".filter is not a function"`), preventing navigation to Step 3. Empty array/record is safe: `toolStructureMap[tool]` returns `undefined` (no-op), and `presets.filter(...)` on `[]` yields `[]`.
+- The three textareas are addressed positionally (`inputs[0]`/`[1]`/`[2]`) because `SmartSuggestionDropdown`'s `Input.TextArea` has no accessible name (`SmartSuggestionDropdown.tsx:320`). Order is fixed by Task 2 Step 5's JSX: FM, then effect, then causes.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd frontend && npx vitest run src/pages/planning/fmea/DFMEAWizardPage.test.tsx`
-Expected: FAIL. Either (a) the FM field is a plain `<Input>` so `getRecommendations` is never called → `expected "toHaveBeenCalled"` fails, or (b) Step 3 throws because `SmartSuggestionDropdown`/`getProcessChain` aren't imported yet. Either failure mode confirms the test exercises the un-wired Step 3.
+Expected: FAIL. The current Step 3 renders plain `<Input>` elements (not `SmartSuggestionDropdown`), so `getRecommendations` is never called for any trigger → `expected "toHaveBeenCalled"` fails on the FM assertion. (If the test instead fails to find 3 textareas or throws on import, that is also an acceptable red state confirming the un-wired Step 3.)
 
 - [ ] **Step 3: Commit the red test**
 
@@ -381,4 +428,7 @@ If Steps 1–2 surfaced fixups, commit them. Otherwise no commit.
 
 **Placeholder scan:** No TBD/TODO. Every code step has full code. The one intentional flexibility (role-query fallback in Task 1 Step 1) is called out explicitly with a concrete fallback, not left vague.
 
-**Type consistency:** `handleUpdateNodeField(nodeId, field, value)` signature (DFMEAWizardPage.tsx:448) matches all `onChange`/`onSelect` calls in Task 2 Step 5. `SmartSuggestionDropdown` props match the component's interface (SmartSuggestionDropdown.tsx:12) and the editor's proven call sites. `getProcessChain(funcId, nodeMap, edges)` matches `fmeaTable.ts:441` and `FMEAEditorPage.tsx:923`.
+**Type consistency:** `handleUpdateNodeField(nodeId, field, value)` signature (DFMEAWizardPage.tsx:448) matches all `onChange`/`onSelect` calls in Task 2 Step 5. `SmartSuggestionDropdown` props match the component's interface (SmartSuggestionDropdown.tsx:12) and the editor's proven call sites. `getProcessChain(funcId, nodeMap, edges)` matches `fmeaTable.ts:441` and `FMEAEditorPage.tsx:923`. Test addresses the three dropdowns positionally (`inputs[0]`/`[1]`/`[2]`) — order is fixed by Task 2 Step 5's JSX (FM → effect → cause).
+
+**Review history:**
+- Rev 1 had 4 test-block bugs: (1) `api/fmea` mock omitted `deleteFMEA` (imported by `DFMEAWizardPage.tsx:6` → import-time throw); (2) raw-key `t` mock returned a string for `returnObjects: true` keys, crashing Step 0's `ScopeTagField` `.filter` before reaching Step 3; (3) claimed FE/FC coverage but only tested FM; (4) `findByRole(...) ?? fallback` is dead code — `findByRole` rejects, never returns null, and the textarea has no accessible name. Rev 2 fixes all four: adds `deleteFMEA` to the mock; special-cases `toolPresets`/`trendPresets`/`toolStructureMap` to empty containers; tests all three triggers positionally via `getAllByRole("textbox")`.
