@@ -326,9 +326,6 @@ export default function DFMEAWizardPage() {
                 <span style={{ flex: 1 }}>
                   {t(`wizard.scope.toolGuide.${row.nodeType}`, { tool: row.tool })}
                 </span>
-                <Button size="small" type="dashed" onClick={() => addAttachedParamNode(row.nodeType)}>
-                  {t(`wizard.scope.add${row.nodeType === 'Interface' ? 'Interface' : 'DesignParameter'}Node`)}
-                </Button>
               </div>
             ))}
           </div>
