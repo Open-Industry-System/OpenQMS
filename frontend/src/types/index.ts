@@ -560,22 +560,57 @@ export interface ReviewReportVersion {
 
 // --- Version Management ---
 export interface VersionBase {
+  version_id: string;
   major_no: number;
   minor_no: number;
-  change_type: "submit" | "approve" | "manual" | "rollback" | "fmea_sync";
-  change_summary: string;
-  created_by: string;
+  change_type: string | null;
+  change_summary: string | null;
+  created_by: string | null;
   created_at: string;
 }
 
 export interface FMEAVersion extends VersionBase {
   fmea_id: string;
-  graph_data: GraphData;
+}
+
+export interface FMEAVersionDetail extends FMEAVersion {
+  snapshot: GraphData;
+  sha256_hash: string;
 }
 
 export interface CPVersion extends VersionBase {
   cp_id: string;
-  items: ControlPlanItem[];
+  source_fmea_version_id: string | null;
+}
+
+export interface CPVersionHeader {
+  document_no: string | null;
+  title: string | null;
+  fmea_ref_id: string | null;
+  product_line_code: string | null;
+  status: string | null;
+  phase: string | null;
+  part_no: string | null;
+  part_name: string | null;
+  contact_info: string | null;
+  drawing_rev: string | null;
+  org_factory: string | null;
+  core_group: string | null;
+}
+
+export interface CPVersionDetail extends CPVersion {
+  header_snapshot: CPVersionHeader;
+  items_snapshot: ControlPlanItem[];
+  sha256_hash: string;
+}
+
+export interface RollbackResponse {
+  version_id: string;
+  major_no: number;
+  minor_no: number;
+  change_type: string | null;
+  change_summary: string | null;
+  created_at: string;
 }
 
 export interface VersionListResponse<T> {
