@@ -374,7 +374,7 @@ Rationale for the label `<div>`s instead of `addonBefore`: `SmartSuggestionDropd
 - [ ] **Step 6: Run the test to verify it passes**
 
 Run: `cd frontend && npx vitest run src/pages/planning/fmea/DFMEAWizardPage.test.tsx`
-Expected: PASS — `getRecommendations` called with `trigger_type: "failure_mode"`, `context.function_description === "采集电压"`, and `context.process_step` a string.
+Expected: PASS — all three triggers (FM `failure_mode` / FE `failure_effect` / FC `failure_cause`) call `getRecommendations` with `context.function_description === "采集电压"` and a string `context.process_step`.
 
 - [ ] **Step 7: Run lint**
 
@@ -426,7 +426,7 @@ If Steps 1–2 surfaced fixups, commit them. Otherwise no commit.
 - Spec Testing (page test, navigate 3 clicks, assert trigger_type + context) → Task 1. ✅
 - Spec i18n (no new keys, leave dead keys) → Global Constraints. ✅
 
-**Placeholder scan:** No TBD/TODO. Every code step has full code. The one intentional flexibility (role-query fallback in Task 1 Step 1) is called out explicitly with a concrete fallback, not left vague.
+**Placeholder scan:** No TBD/TODO. Every code step has full code. The positional textbox selection (`inputs[0]`/`[1]`/`[2]` via `findAllByRole("textbox")`) is intentional — `SmartSuggestionDropdown`'s `Input.TextArea` has no accessible name, and the three-field order is fixed by Task 2 Step 5's JSX (FM → effect → cause).
 
 **Type consistency:** `handleUpdateNodeField(nodeId, field, value)` signature (DFMEAWizardPage.tsx:448) matches all `onChange`/`onSelect` calls in Task 2 Step 5. `SmartSuggestionDropdown` props match the component's interface (SmartSuggestionDropdown.tsx:12) and the editor's proven call sites. `getProcessChain(funcId, nodeMap, edges)` matches `fmeaTable.ts:441` and `FMEAEditorPage.tsx:923`. Test addresses the three dropdowns positionally (`inputs[0]`/`[1]`/`[2]`) — order is fixed by Task 2 Step 5's JSX (FM → effect → cause).
 
