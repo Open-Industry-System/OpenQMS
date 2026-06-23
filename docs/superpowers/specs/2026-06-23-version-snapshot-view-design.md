@@ -54,12 +54,19 @@ const loadVersionSnapshot = useCallback(async (major: number, minor: number) => 
     const snap = v.snapshot ?? { nodes: [], edges: [] };
     setNodes(snap.nodes || []);
     setEdges(snap.edges || []);
+    graphDataRef.current = normalizeGraphData(
+      snap.nodes as unknown as Array<Record<string, unknown>>,
+      snap.edges as unknown as Array<Record<string, unknown>>,
+    );
     setViewingVersion({ major, minor });
   } catch (err) {
-    message.error(formatFMEAError(err, t("messages.loadVersionFailed")));
+    const e = err as { response?: { data?: { detail?: string } } };
+    message.error(e?.response?.data?.detail || t("messages.loadVersionFailed"));
   }
 }, [fmeaId, t]);
 ```
+
+> 错误处理沿用本编辑器现有风格（`FMEAEditorPage.tsx:415` 的 `err?.response?.data?.detail || t("messages.operationFailed")`）。**不引入 `formatFMEAError`** —— 该工具在本 worktree 不存在（`frontend/src/utils/fmeaError.ts` 缺失，`FMEAEditorPage.tsx` 也未导入），主工作区虽有但不应作为本实现的依赖。
 
 ### 3.4 返回当前版本
 ```ts
@@ -72,10 +79,11 @@ const exitVersionSnapshot = useCallback(async () => {
     nodes: JSON.parse(JSON.stringify(doc.graph_data?.nodes || [])),
     edges: JSON.parse(JSON.stringify(doc.graph_data?.edges || [])),
   };
+  graphDataRef.current = null; // 清空快照图谱缓存，使下次切到图谱 Tab 时 loadGraphData 重拉当前文档
   setViewingVersion(null);
 }, [fmeaId]);
 ```
-重新拉取当前文档（而非缓存当前 state）以避免 stale / 冲突检测基线错乱。
+重新拉取当前文档（而非缓存当前 state）以避免 stale / 冲突检测基线错乱。`graphDataRef.current = null` 与 §3.7 退出要求一致（对应 `:332` 保存后清空）。
 
 ### 3.5 占位点替换
 `FMEAEditorPage.tsx:1882` 的 `onViewSnapshot={(major, minor) => message.info(...)}` 改为 `onViewSnapshot={loadVersionSnapshot}`。
