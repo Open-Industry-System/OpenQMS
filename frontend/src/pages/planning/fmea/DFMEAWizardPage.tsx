@@ -18,6 +18,7 @@ import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimefra
 import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
 import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type StructureNodeType } from '../../../utils/wizardToolStructure';
 import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
+import { createWizardFailureChain } from '../../../utils/wizardGraphNormalize';
 
 const { Title, Paragraph } = Typography;
 
@@ -417,23 +418,11 @@ export default function DFMEAWizardPage() {
     if (functions.length === 0) return <Empty description={t('wizard.failure.title') + ' — ' + t('wizard.function.title')} />;
 
     const handleAddFailure = (funcId: string, mode?: string, effect?: string, cause?: string) => {
-      const fmId = `w${crypto.randomUUID()}_fm`;
-      const feId = `w${crypto.randomUUID()}_fe`;
-      const fcId = `w${crypto.randomUUID()}_fc`;
-      const dcId = `w${crypto.randomUUID()}_dc`;
-      const newNodes: GraphNode[] = [
-        { id: fmId, type: 'FailureMode', name: mode || t('wizard.failure.newFailureMode'), severity: 0, occurrence: 0, detection: 0 },
-        { id: feId, type: 'FailureEffect', name: effect || '', severity: 0, occurrence: 0, detection: 0 },
-        { id: fcId, type: 'FailureCause', name: cause || '', severity: 0, occurrence: 0, detection: 0 },
-        // DetectionControl created up-front so Step 4 D is editable and AP is computable.
-        { id: dcId, type: 'DetectionControl', name: t('wizard.optimization.detectionPlaceholder'), severity: 0, occurrence: 0, detection: 0 },
-      ];
-      const newEdges: GraphEdge[] = [
-        { source: funcId, target: fmId, type: 'HAS_FAILURE_MODE' },
-        { source: fmId, target: feId, type: 'EFFECT_OF' },
-        { source: fcId, target: fmId, type: 'CAUSE_OF' },
-        { source: fcId, target: dcId, type: 'DETECTED_BY' },
-      ];
+      const { newNodes, newEdges } = createWizardFailureChain(funcId, t);
+      // Override FM/FE/FC names when caller supplied explicit values (recommended chains).
+      if (mode) { const fm = newNodes.find(n => n.type === 'FailureMode'); if (fm) fm.name = mode; }
+      if (effect) { const fe = newNodes.find(n => n.type === 'FailureEffect'); if (fe) fe.name = effect; }
+      if (cause) { const fc = newNodes.find(n => n.type === 'FailureCause'); if (fc) fc.name = cause; }
       updateGraphData([...nodes, ...newNodes], [...edges, ...newEdges]);
     };
 
@@ -447,6 +436,16 @@ export default function DFMEAWizardPage() {
 
     const handleUpdateNodeField = (nodeId: string, field: string, value: string) => {
       updateGraphData(nodes.map(n => n.id === nodeId ? { ...n, [field]: value } : n), edges);
+    };
+
+    const handleUpdateControl = (causeId: string, type: 'prevention' | 'detection', value: string) => {
+      const edgeType = type === 'prevention' ? 'PREVENTED_BY' : 'DETECTED_BY';
+      const ctrlEdge = edges.find(e => e.source === causeId && e.type === edgeType);
+      if (!ctrlEdge) return; // ensureCauseControls (load) guarantees existence; guard anyway.
+      updateGraphData(
+        nodes.map(n => n.id === ctrlEdge.target ? { ...n, name: value } : n),
+        edges,
+      );
     };
 
     return (
@@ -485,10 +484,24 @@ export default function DFMEAWizardPage() {
                         onChange={e => handleUpdateNodeField(fmNode.id, 'name', e.target.value)} />
                       <Input size="small" value={effectNode?.name || ''} addonBefore={t('wizard.failure.failureEffect')}
                         onChange={e => effectNode && handleUpdateNodeField(effectNode.id, 'name', e.target.value)} />
-                      {causeNodes.map(causeNode => (
-                        <Input key={causeNode.id} size="small" value={causeNode.name} addonBefore={t('wizard.failure.failureCause')}
-                          onChange={e => handleUpdateNodeField(causeNode.id, 'name', e.target.value)} />
-                      ))}
+                      {causeNodes.map(causeNode => {
+                        const pcEdge = edges.find(e => e.source === causeNode.id && e.type === 'PREVENTED_BY');
+                        const dcEdge = edges.find(e => e.source === causeNode.id && e.type === 'DETECTED_BY');
+                        const pcName = pcEdge ? nodes.find(n => n.id === pcEdge.target)?.name || '' : '';
+                        const dcName = dcEdge ? nodes.find(n => n.id === dcEdge.target)?.name || '' : '';
+                        return (
+                          <div key={causeNode.id}>
+                            <Input size="small" value={causeNode.name} addonBefore={t('wizard.failure.failureCause')}
+                              onChange={e => handleUpdateNodeField(causeNode.id, 'name', e.target.value)} />
+                            <Input size="small" value={pcName} addonBefore={t('wizard.failure.preventionControl')}
+                              placeholder={t('wizard.optimization.preventionPlaceholder')}
+                              onChange={e => handleUpdateControl(causeNode.id, 'prevention', e.target.value)} />
+                            <Input size="small" value={dcName} addonBefore={t('wizard.failure.detectionControl')}
+                              placeholder={t('wizard.optimization.detectionPlaceholder')}
+                              onChange={e => handleUpdateControl(causeNode.id, 'detection', e.target.value)} />
+                          </div>
+                        );
+                      })}
                       <Button size="small" danger onClick={() => handleDeleteFailureChain(fmNode.id)}>{t('wizard.failure.delete')}</Button>
                     </Space>
                   </div>
