@@ -561,13 +561,35 @@ export default function DFMEAWizardPage() {
     };
 
     return (
-      <Table size="small" dataSource={rows} rowKey="key" pagination={false}
+      <Table size="small" dataSource={rows} rowKey="key" pagination={false} scroll={{ x: 1080 }}
         columns={[
           { title: t('wizard.failure.failureMode'), dataIndex: 'key', width: 140, render: (_: unknown, r: FMEARow) => {
             const fm = nodeMap.get(r.failureModeNodeId);
-            return fm?.name || '';
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: fm?.name || '' }}>{fm?.name || ''}</Typography.Text>;
+          }},
+          { title: t('wizard.failure.failureEffect'), width: 140, render: (_: unknown, r: FMEARow) => {
+            const names = r.failureEffectNodeIds
+              .map(id => nodeMap.get(id)?.name || '')
+              .filter(Boolean)
+              .join('；');
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: names }}>{names}</Typography.Text>;
+          }},
+          { title: t('wizard.failure.failureCause'), width: 140, render: (_: unknown, r: FMEARow) => {
+            const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: cause?.name || '' }}>{cause?.name || ''}</Typography.Text>;
+          }},
+          { title: t('wizard.failure.preventionControl'), width: 140, render: (_: unknown, r: FMEARow) => {
+            const pc = r.preventionControlIds[0] ? nodeMap.get(r.preventionControlIds[0]) : null;
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: pc?.name || '' }}>{pc?.name || ''}</Typography.Text>;
+          }},
+          { title: t('wizard.failure.detectionControl'), width: 140, render: (_: unknown, r: FMEARow) => {
+            const dc = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: dc?.name || '' }}>{dc?.name || ''}</Typography.Text>;
           }},
           { title: 'S', width: 60, render: (_: unknown, r: FMEARow) => {
+            // S is mode/effect-level (shared across a mode's causes) — NOT gated
+            // by this row's PC/DC. Another cause row under the same mode may
+            // have filled controls and already set S.
             const s = getRowSeverity(r, nodeMap);
             const effectIds = new Set(r.failureEffectNodeIds);
             return <InputNumber size="small" min={1} max={10} value={s || undefined}
@@ -578,19 +600,31 @@ export default function DFMEAWizardPage() {
           }},
           { title: 'O', width: 60, render: (_: unknown, r: FMEARow) => {
             const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+            const pcName = r.preventionControlIds[0] ? nodeMap.get(r.preventionControlIds[0])?.name || '' : '';
+            const dcName = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0])?.name || '' : '';
+            const locked = !pcName.trim() || !dcName.trim();
             return <InputNumber size="small" min={1} max={10} value={cause?.occurrence || undefined}
-              style={{ width: 50 }} onChange={val => cause && handleUpdateRisk(cause.id, 'occurrence', val || 0)} />;
+              style={{ width: 50 }} disabled={locked}
+              onChange={val => cause && handleUpdateRisk(cause.id, 'occurrence', val || 0)} />;
           }},
           { title: 'D', width: 60, render: (_: unknown, r: FMEARow) => {
             const dcId = r.detectionControlIds[0];
             const dc = dcId ? nodeMap.get(dcId) : null;
+            const pcName = r.preventionControlIds[0] ? nodeMap.get(r.preventionControlIds[0])?.name || '' : '';
+            const dcName = dc?.name || '';
+            const locked = !pcName.trim() || !dcName.trim();
             return <InputNumber size="small" min={1} max={10} value={dc?.detection || undefined}
-              style={{ width: 50 }} onChange={val => dc && handleUpdateRisk(dc.id, 'detection', val || 0)} />;
+              style={{ width: 50 }} disabled={locked}
+              onChange={val => dc && handleUpdateRisk(dc.id, 'detection', val || 0)} />;
           }},
           { title: 'AP', width: 80, render: (_: unknown, r: FMEARow) => {
             const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
             const dcId = r.detectionControlIds[0];
             const dc = dcId ? nodeMap.get(dcId) : null;
+            const pcName = r.preventionControlIds[0] ? nodeMap.get(r.preventionControlIds[0])?.name || '' : '';
+            const dcName = dc?.name || '';
+            const locked = !pcName.trim() || !dcName.trim();
+            if (locked) return <Tag>{t('wizard.risk.controlsFirst')}</Tag>;
             const s = getRowSeverity(r, nodeMap), o = cause?.occurrence || 0, d = dc?.detection || 0;
             const { ap } = analyzeRisk(s, o, d);
             return <Tag color={ap === 'H' ? 'red' : ap === 'M' ? 'orange' : 'green'}>{ap || '-'}</Tag>;
