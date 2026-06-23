@@ -561,8 +561,14 @@ export default function DFMEAWizardPage() {
     };
 
     return (
-      <Table size="small" dataSource={rows} rowKey="key" pagination={false} scroll={{ x: 1080 }}
-        columns={[
+      <div>
+        {validation.step5MissingControl && (
+          <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--qf-amber-dim)', border: '1px solid var(--qf-amber)', borderRadius: 'var(--qf-radius-md)', color: 'var(--qf-text-primary)', fontSize: 13 }}>
+            {t('wizard.risk.missingControlHint')}
+          </div>
+        )}
+        <Table size="small" dataSource={rows} rowKey="key" pagination={false} scroll={{ x: 1080 }}
+          columns={[
           { title: t('wizard.failure.failureMode'), dataIndex: 'key', width: 140, render: (_: unknown, r: FMEARow) => {
             const fm = nodeMap.get(r.failureModeNodeId);
             return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: fm?.name || '' }}>{fm?.name || ''}</Typography.Text>;
@@ -630,7 +636,8 @@ export default function DFMEAWizardPage() {
             return <Tag color={ap === 'H' ? 'red' : ap === 'M' ? 'orange' : 'green'}>{ap || '-'}</Tag>;
           }},
         ]}
-      />
+        />
+      </div>
     );
   };
 

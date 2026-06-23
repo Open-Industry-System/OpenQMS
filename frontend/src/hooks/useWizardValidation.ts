@@ -16,6 +16,8 @@ export interface StepValidation {
   step5MissingCause: boolean;
   /** Some row that has a cause is still missing S/O/D ratings. */
   step5Unrated: boolean;
+  /** Some row's cause has an empty Prevention or Detection control name. */
+  step5MissingControl: boolean;
   warnings: number[];
   /** 所选结构类工具对应的节点缺口（仅建议，不进 warnings、不阻塞 finish）。 */
   structureGaps: StructureGap[];
@@ -58,7 +60,15 @@ export function useWizardValidation(
           || (cause.occurrence ?? 0) === 0
           || (detectionNode?.detection ?? 0) === 0;
     });
-    const step5Complete = rows.length > 0 && !step5MissingCause && !step5Unrated;
+    const step5MissingControl = rows.some(r => {
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      if (!cause) return false; // cause-less rows are surfaced via step5MissingCause
+      const pcName = r.preventionControlIds[0] ? nodeMap.get(r.preventionControlIds[0])?.name || '' : '';
+      const dcNode = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
+      const dcName = dcNode?.name || '';
+      return !pcName.trim() || !dcName.trim();
+    });
+    const step5Complete = rows.length > 0 && !step5MissingCause && !step5Unrated && !step5MissingControl;
 
     const warnings: number[] = [];
     if (components.length > 0 && !step3Complete) warnings.push(2);
@@ -67,6 +77,6 @@ export function useWizardValidation(
 
     const structureGaps = structureGapsForTools(selectedTools, toolStructureMap, nodes, edges);
 
-    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, warnings, structureGaps };
+    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, step5MissingControl, warnings, structureGaps };
   }, [nodes, edges, selectedTools, toolStructureMap]);
 }
