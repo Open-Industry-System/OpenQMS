@@ -77,7 +77,9 @@
       "addFailureMode": "+ Add Failure Mode",
       "addFunction": "+ Add Function",
       "delete": "Delete",
-      "newFailureMode": "New Failure Mode"
+      "newFailureMode": "New Failure Mode",
+      "preventionControl": "Prevention Control",
+      "detectionControl": "Detection Control"
     },
     "risk": {
       "title": "Risk Analysis",
@@ -88,7 +90,9 @@
       "rpn": "RPN",
       "ap": "AP",
       "mustOptimize": "Must optimize",
-      "empty": "No failure chains yet — create them in the Failure Analysis step first"
+      "empty": "No failure chains yet — create them in the Failure Analysis step first",
+      "missingControlHint": "Some failure chains have empty prevention/detection controls — fill them in the Failure Analysis step first.",
+      "controlsFirst": "Fill controls first"
     },
     "optimization": {
       "title": "Optimization Measures",

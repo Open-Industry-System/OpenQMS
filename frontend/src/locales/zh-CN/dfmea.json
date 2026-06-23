@@ -77,7 +77,9 @@
       "addFailureMode": "+ 添加失效模式",
       "addFunction": "+ 添加功能",
       "delete": "删除",
-      "newFailureMode": "新失效模式"
+      "newFailureMode": "新失效模式",
+      "preventionControl": "预防措施",
+      "detectionControl": "探测措施"
     },
     "risk": {
       "title": "风险分析",
@@ -88,7 +90,9 @@
       "rpn": "RPN",
       "ap": "AP",
       "mustOptimize": "必须优化",
-      "empty": "暂无失效链，请先在失效分析步骤中创建"
+      "empty": "暂无失效链，请先在失效分析步骤中创建",
+      "missingControlHint": "存在未填写预防/探测措施的失效链，请先在失效分析步骤补全",
+      "controlsFirst": "先补全措施"
     },
     "optimization": {
       "title": "优化措施",
