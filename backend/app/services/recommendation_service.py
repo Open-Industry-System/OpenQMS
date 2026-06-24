@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.deps import RequestScope
 from app.graph.repository import FMEAGraphRepository
 from app.models.fmea import FMEADocument
 from app.models.recommendation_cache import RecommendationCache
@@ -465,7 +466,7 @@ class RecommendationService:
         # safe lower bound so configured providers don't look unavailable.
         self.llm_timeout = max(llm_timeout or settings.LLM_TIMEOUT, 15)
 
-    async def recommend(self, fmea_id: _uuid.UUID, request: RecommendRequest, user: User) -> RecommendResponse:
+    async def recommend(self, fmea_id: _uuid.UUID, request: RecommendRequest, user: User, request_scope: RequestScope) -> RecommendResponse:
         from app.core.permissions import Module, PermissionLevel, get_user_permission
 
         fmea = await self._get_fmea_or_404(fmea_id)
@@ -473,8 +474,14 @@ class RecommendationService:
         # 权限检查 + scope 强制降级
         requested_scope = getattr(request, "scope", "global")
         has_kg_permission = await get_user_permission(user, Module.KNOWLEDGE_GRAPH, self.db) >= PermissionLevel.VIEW
-        effective_scope = "current_product_line" if (not has_kg_permission and requested_scope == "global") else requested_scope
+        effective_scope = "current_product_line" if (not has_kg_permission and requested_scope in ("global", "current_product_type")) else requested_scope
         include_graph = getattr(request, "include_graph", True)
+
+        # 将 effective_scope 解析为具体的产品线代码列表（None=全局不过滤）
+        from app.services.recommendation_scope import resolve_product_line_codes
+        product_line_codes = await resolve_product_line_codes(
+            effective_scope, fmea.product_line_code, self.db, request_scope
+        )
 
         # 1. Check cache（cache key 包含 scope 和 include_graph）
         context_hash = self._compute_context_hash({
@@ -504,7 +511,7 @@ class RecommendationService:
         if include_graph:
             try:
                 graph_matches = await self._query_graph_similarity(
-                    fmea, request.trigger_type, request.context, effective_scope
+                    fmea, request.trigger_type, request.context, product_line_codes
                 )
                 graph_suggestions = self._graph_matches_to_suggestions(
                     graph_matches, fmea.product_line_code
@@ -568,7 +575,7 @@ class RecommendationService:
     # -- Graph similarity methods --
 
     async def _query_graph_similarity(
-        self, fmea: FMEADocument, trigger_type: str, context: dict, scope: str
+        self, fmea: FMEADocument, trigger_type: str, context: dict, product_line_codes: list[str] | None
     ) -> list[dict]:
         query_text = ""
         if trigger_type == "failure_mode":
@@ -582,8 +589,7 @@ class RecommendationService:
         fm_matches = await self.graph_repo.find_similar_nodes_advanced(
             node_type="FailureMode",
             query_text=query_text,
-            scope=scope,
-            product_line_code=fmea.product_line_code,
+            product_line_codes=product_line_codes,
             limit=20,
             min_similarity=0.3,
         )

@@ -40,6 +40,7 @@ from app.api.platform import router as platform_router
 from app.api.plm import router as plm_router
 from app.api.ppap import router as ppap_router
 from app.api.product_line import router as product_line_router
+from app.api.product_type import router as product_type_router
 from app.api.quality_goal import router as quality_goal_router
 from app.api.scar import router as scar_router
 from app.api.search import router as search_router
@@ -396,6 +397,7 @@ app.include_router(attribute_router)
 app.include_router(overview_router)
 app.include_router(sc_router)
 app.include_router(product_line_router)
+app.include_router(product_type_router)
 app.include_router(management_review_router)
 app.include_router(version_router)
 app.include_router(iqc_router)

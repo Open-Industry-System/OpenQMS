@@ -8,12 +8,12 @@ export async function listProductLines(isActive?: boolean): Promise<ProductLine[
   return resp.data.items;
 }
 
-export async function createProductLine(data: { code: string; name: string }): Promise<ProductLine> {
+export async function createProductLine(data: { code: string; name: string; product_type_code?: string | null }): Promise<ProductLine> {
   const resp = await client.post("/product-lines", data);
   return resp.data;
 }
 
-export async function updateProductLine(code: string, data: { name?: string; is_active?: boolean }): Promise<ProductLine> {
+export async function updateProductLine(code: string, data: { name?: string; is_active?: boolean; product_type_code?: string | null }): Promise<ProductLine> {
   const resp = await client.put(`/product-lines/${code}`, data);
   return resp.data;
 }

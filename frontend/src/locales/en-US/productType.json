@@ -1,0 +1,17 @@
+{
+  "title": "Product Type Management",
+  "fields": { "code": "Type Code", "name": "Type Name", "description": "Description", "is_active": "Active" },
+  "actions": { "create": "Create Type", "edit": "Edit", "delete": "Deactivate", "cancel": "Cancel", "save": "Save" },
+  "messages": {
+    "created": "Product type created",
+    "updated": "Product type updated",
+    "deactivated": "Product type deactivated",
+    "deleteConfirm": "Deactivate this product type?",
+    "refused": "Cannot deactivate: {{detail}}"
+  },
+  "productLine": {
+    "title": "Product Line Management",
+    "fields": { "product_type_code": "Product Type" },
+    "assignType": "Assign Product Type"
+  }
+}

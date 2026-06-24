@@ -78,6 +78,8 @@ const SupplyChainRiskMapPage = lazy(() => import("./pages/supplyChainRiskMap/Sup
 const TenantSuspended = lazy(() => import("./pages/TenantSuspended"));
 const TenantDeactivated = lazy(() => import("./pages/TenantDeactivated"));
 const AIConfigPage = lazy(() => import("./pages/admin/AIConfigPage"));
+const ProductTypePage = lazy(() => import("./pages/admin/ProductTypePage"));
+const ProductLinePage = lazy(() => import("./pages/admin/ProductLinePage"));
 
 function isTokenExpired(token: string): boolean {
   try {
@@ -217,6 +219,8 @@ export default function App() {
         <Route path="/group/audits" element={<ProtectedRoute requiredModule="group"><GroupAuditsPage /></ProtectedRoute>} />
         {/* Admin */}
         <Route path="/admin/ai-config" element={<ProtectedRoute requireAdmin><AIConfigPage /></ProtectedRoute>} />
+        <Route path="/admin/product-types" element={<ProtectedRoute requireAdmin><ProductTypePage /></ProtectedRoute>} />
+        <Route path="/admin/product-lines" element={<ProtectedRoute requireAdmin><ProductLinePage /></ProtectedRoute>} />
       </Route>
       </Routes>
     </Suspense>

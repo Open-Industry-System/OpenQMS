@@ -1,9 +1,11 @@
 import { useState, useRef } from "react";
-import { Select, Button, Tag, Spin, message } from "antd";
-import { StarOutlined } from "@ant-design/icons";
+import { Select, Button, Tag, Spin, Radio, message } from "antd";
+import { GlobalOutlined, StarOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getRecommendations, type Suggestion } from "../../api/recommendation";
 import { parseScopeTokens, stringifyScopeTokens } from "../../utils/wizardScopeTokens";
+
+type RecommendScope = "global" | "current_product_type" | "current_product_line";
 
 export type ScopeTriggerType = "dfmea_tool" | "dfmea_trend";
 
@@ -31,6 +33,8 @@ export default function ScopeTagField({
   const { t } = useTranslation("dfmea");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
+  // 推荐 scope：与 SmartSuggestionDropdown 一致默认「同类产品」，让向导范围标签也用上同类历史召回。
+  const [scope, setScope] = useState<RecommendScope>("current_product_type");
 
   // 用 ref 持有最新 value：异步 AI 回调过滤「已选」时取最新值，
   // 避免请求返回前用户改动选择造成的 stale tokenSet。
@@ -58,7 +62,7 @@ export default function ScopeTagField({
       const res = await getRecommendations(fmeaId, {
         trigger_type: triggerType,
         context,
-        scope: "current_product_line",
+        scope,
         include_graph: false,
       });
       const names = res.suggestions.map((s: Suggestion) => s.name).filter(Boolean);
@@ -86,6 +90,18 @@ export default function ScopeTagField({
         value={tokens}
         onChange={(next) => emit(next as string[])}
       />
+      <div style={{ marginTop: 6 }}>
+        <Radio.Group
+          value={scope}
+          onChange={(e) => setScope(e.target.value as RecommendScope)}
+          size="small"
+          className="qf-radio-group"
+        >
+          <Radio.Button value="global"><GlobalOutlined /> {t("smartSuggestion.global")}</Radio.Button>
+          <Radio.Button value="current_product_type">{t("smartSuggestion.currentProductType")}</Radio.Button>
+          <Radio.Button value="current_product_line">{t("smartSuggestion.currentProductLine")}</Radio.Button>
+        </Radio.Group>
+      </div>
       <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
         {presets
           .filter((p) => !tokenSet.has(p))

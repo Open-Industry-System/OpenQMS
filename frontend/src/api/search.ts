@@ -36,6 +36,7 @@ export interface QAResponse {
 export interface QARequest {
   question: string;
   product_line_code?: string;
+  product_type_code?: string;
   max_context_chunks?: number;
 }
 
@@ -43,6 +44,7 @@ export async function semanticSearch(params: {
   q: string;
   entity_types?: string;
   product_line_code?: string;
+  product_type_code?: string;
   limit?: number;
 }, signal?: AbortSignal): Promise<SemanticSearchResponse> {
   const { data } = await client.get("/search/semantic", { params, signal });

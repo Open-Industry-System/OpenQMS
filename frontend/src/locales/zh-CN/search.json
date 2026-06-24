@@ -10,6 +10,8 @@
     "switchToSearch": "切换到搜索模式",
     "switchToQa": "切换到问答模式",
     "filterType": "筛选类型",
+    "productType": "产品类型",
+    "productLine": "产品线",
     "resultsFound": "找到 {{count}} 条结果，耗时 {{ms}}ms",
     "similarity": "相似度: {{score}}% | 来源: {{source}}",
     "startSearch": "输入问题开始搜索"

@@ -277,8 +277,7 @@ class Neo4jRepository(FMEAGraphRepository):
         self,
         node_type: str,
         query_text: str,
-        scope: str,
-        product_line_code: str | None,
+        product_line_codes: list[str] | None,
         limit: int = 10,
         min_similarity: float = 0.3,
     ) -> list[dict]:
@@ -288,9 +287,9 @@ class Neo4jRepository(FMEAGraphRepository):
             WHERE d.status = 'approved'
             """
             params: dict[str, Any] = {"node_type": node_type}
-            if scope == "current_product_line" and product_line_code:
-                cypher += " AND n.product_line_code = $pl"
-                params["pl"] = product_line_code
+            if product_line_codes is not None:
+                cypher += " AND n.product_line_code IN $codes"
+                params["codes"] = product_line_codes
             cypher += """
             RETURN n.node_id AS node_id, n.name AS name, n.type AS type,
                    n.fmea_id AS fmea_id, n.product_line_code AS product_line_code,

@@ -55,7 +55,9 @@
     "crossFactoryAudit": "Cross-factory Audit",
     "factoryManagement": "Factory Management",
     "admin": "System Admin",
-    "aiConfig": "AI Model Config"
+    "aiConfig": "AI Model Config",
+    "productTypes": "Product Types",
+    "productLines": "Product Lines"
   },
   "header": {
     "selectFactory": "Select Factory",

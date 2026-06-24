@@ -55,7 +55,9 @@
     "crossFactoryAudit": "跨厂审核",
     "factoryManagement": "工厂管理",
     "admin": "系统管理",
-    "aiConfig": "AI 模型配置"
+    "aiConfig": "AI 模型配置",
+    "productTypes": "产品类型管理",
+    "productLines": "产品线管理"
   },
   "header": {
     "selectFactory": "选择工厂",

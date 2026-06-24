@@ -115,6 +115,8 @@ import uuid as _uuid
 
 from app.schemas.recommendation import RecommendRequest
 from app.core.permissions import PermissionLevel
+from app.core.deps import RequestScope
+from app.core.factory_scope import FactoryScope, ProductLineScope
 
 
 class _StubFmea:
@@ -136,6 +138,16 @@ class _ThrowLlm:
         raise RuntimeError("llm boom")
 
 
+def _stub_request_scope(user):
+    """Minimal RequestScope with full access — resolver is patched, so values are not exercised."""
+    return RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=None),
+        effective_factory_id=None,
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=user,
+    )
+
+
 class TestRecommendIntegrationForToolTrend:
     """dfmea_tool/trend 真正走完 recommend()：规则→（可选）LLM→source 分支。"""
 
@@ -152,6 +164,12 @@ class TestRecommendIntegrationForToolTrend:
             "app.core.permissions.get_user_permission",
             AsyncMock(return_value=PermissionLevel.VIEW),
         )
+        # recommend() now resolves scope -> codes via the resolver (Task 6);
+        # patch it so these DB-free tests don't touch a real session.
+        monkeypatch.setattr(
+            "app.services.recommendation_scope.resolve_product_line_codes",
+            AsyncMock(return_value=["DC-DC-100"]),
+        )
         return fmea
 
     async def test_dfmea_tool_with_llm_returns_suggestions(self, monkeypatch):
@@ -163,7 +181,8 @@ class TestRecommendIntegrationForToolTrend:
             scope="current_product_line",
             include_graph=False,
         )
-        res = await svc.recommend(fmea.id, req, user=object())
+        user = object()
+        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user))
         assert any(s.name == "边界图" for s in res.suggestions)
         assert res.source in ("hybrid", "graph_enriched")
 
@@ -176,7 +195,8 @@ class TestRecommendIntegrationForToolTrend:
             scope="current_product_line",
             include_graph=False,
         )
-        res = await svc.recommend(fmea.id, req, user=object())
+        user = object()
+        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user))
         assert res.suggestions == []
         assert res.source == "rule"
 
@@ -189,5 +209,6 @@ class TestRecommendIntegrationForToolTrend:
             scope="current_product_line",
             include_graph=False,
         )
-        res = await svc.recommend(fmea.id, req, user=object())
+        user = object()
+        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user))
         assert res.source == "rule_fallback"

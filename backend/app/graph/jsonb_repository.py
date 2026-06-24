@@ -225,8 +225,7 @@ class JSONBRepository(FMEAGraphRepository):
         self,
         node_type: str,
         query_text: str,
-        scope: str,
-        product_line_code: str | None,
+        product_line_codes: list[str] | None,
         limit: int = 10,
         min_similarity: float = 0.3,
     ) -> list[dict]:
@@ -236,8 +235,8 @@ class JSONBRepository(FMEAGraphRepository):
             FMEADocument.status == "approved",
             FMEADocument.graph_data.isnot(None),
         )
-        if scope == "current_product_line" and product_line_code:
-            query = query.where(FMEADocument.product_line_code == product_line_code)
+        if product_line_codes is not None:
+            query = query.where(FMEADocument.product_line_code.in_(product_line_codes))
         result = await self._db.execute(query)
         fmeas = result.scalars().all()
 

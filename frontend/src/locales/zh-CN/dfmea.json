@@ -280,10 +280,12 @@
   },
   "smartSuggestion": {
     "global": "全局经验",
+    "currentProductType": "同类产品",
     "currentProductLine": "仅当前产品线",
     "noGlobalPermission": "（无全局权限，仅当前产品线）",
     "actualScope": "实际范围：{{scope}}",
     "scopeGlobal": "全局",
+    "scopeProductType": "同类产品",
     "scopeLocal": "仅当前产品线",
     "ruleEngine": "规则引擎",
     "aiGenerated": "AI 生成",

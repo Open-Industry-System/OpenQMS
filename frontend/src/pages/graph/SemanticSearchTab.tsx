@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Input, Button, Select, Tag, Space, Spin, Empty, Typography, Tooltip } from "antd";
 import { SearchOutlined, RobotOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
@@ -8,6 +8,9 @@ import type { SearchResultItem, QAResponse } from "../../api/search";
 import QAAnswer from "../../components/search/QAAnswer";
 import { useProductLineStore } from "../../store/productLineStore";
 import DataCard from "../../components/design/DataCard";
+import { listProductTypes } from "../../api/productType";
+import { listProductLines } from "../../api/productLine";
+import type { ProductType, ProductLine } from "../../types";
 
 const { Text } = Typography;
 
@@ -15,6 +18,9 @@ export default function SemanticSearchTab() {
   const { t } = useTranslation("search");
   const [query, setQuery] = useState("");
   const [entityTypes, setEntityTypes] = useState<string[]>([]);
+  const [productTypeCode, setProductTypeCode] = useState<string | undefined>(undefined);
+  const [productTypes, setProductTypes] = useState<ProductType[]>([]);
+  const [productLines, setProductLines] = useState<ProductLine[]>([]);
   const [mode, setMode] = useState<"search" | "qa">("search");
   const [results, setResults] = useState<SearchResultItem[]>([]);
   const [qaData, setQaData] = useState<QAResponse | null>(null);
@@ -33,6 +39,30 @@ export default function SemanticSearchTab() {
     { label: t("qa.entityTypes.rma"), value: "rma" },
   ];
 
+  useEffect(() => {
+    listProductTypes(true)
+      .then((types) => setProductTypes(types))
+      .catch(() => setProductTypes([]));
+  }, []);
+
+  useEffect(() => {
+    listProductLines(true)
+      .then((lines) => setProductLines(lines))
+      .catch(() => setProductLines([]));
+  }, []);
+
+  const productTypeOptions = productTypes.map((pt) => ({
+    label: `${pt.name} (${pt.code})`,
+    value: pt.code,
+  }));
+
+  const productLineOptions = productLines
+    .filter((pl) => (productTypeCode ? pl.product_type_code === productTypeCode : true))
+    .map((pl) => ({
+      label: `${pl.name} (${pl.code})`,
+      value: pl.code,
+    }));
+
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return;
     abortRef.current?.abort();
@@ -48,6 +78,7 @@ export default function SemanticSearchTab() {
             q: query,
             entity_types: entityTypes.length ? entityTypes.join(",") : undefined,
             product_line_code: productLineCode || undefined,
+            product_type_code: productTypeCode,
             limit: 20,
           },
           abortRef.current.signal,
@@ -59,6 +90,7 @@ export default function SemanticSearchTab() {
           {
             question: query,
             product_line_code: productLineCode || undefined,
+            product_type_code: productTypeCode,
             max_context_chunks: 10,
           },
           abortRef.current.signal,
@@ -73,7 +105,7 @@ export default function SemanticSearchTab() {
     } finally {
       setLoading(false);
     }
-  }, [query, entityTypes, mode, productLineCode]);
+  }, [query, entityTypes, mode, productLineCode, productTypeCode]);
 
   const getEntityRoute = (item: SearchResultItem): string | null => {
     switch (item.entity_type) {
@@ -130,6 +162,36 @@ export default function SemanticSearchTab() {
           value={entityTypes}
           onChange={setEntityTypes}
           style={{ minWidth: 300 }}
+          allowClear
+        />
+        <Select
+          placeholder={t("qa.productType")}
+          options={productTypeOptions}
+          value={productTypeCode}
+          onChange={(value) => {
+            setProductTypeCode(value);
+            // Clear a stale global product-line selection that doesn't belong to the
+            // newly-chosen type; otherwise the backend type filter is silently ignored
+            // (product_line_code takes precedence). productLineOptions already hides
+            // non-matching PLs, so the store value can otherwise linger invisibly.
+            if (value && productLineCode) {
+              const stillMatches = productLines.some(
+                (pl) => pl.code === productLineCode && pl.product_type_code === value,
+              );
+              if (!stillMatches) {
+                useProductLineStore.getState().setSelected(null);
+              }
+            }
+          }}
+          style={{ minWidth: 200 }}
+          allowClear
+        />
+        <Select
+          placeholder={t("qa.productLine")}
+          options={productLineOptions}
+          value={productLineCode}
+          onChange={(value) => useProductLineStore.getState().setSelected(value)}
+          style={{ minWidth: 220 }}
           allowClear
         />
       </Space>

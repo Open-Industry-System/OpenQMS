@@ -40,6 +40,7 @@ class QAResponse(BaseModel):
 class QARequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=500)
     product_line_code: str | None = None
+    product_type_code: str | None = None
     max_context_chunks: int = Field(default=10, ge=1, le=20)
 
 
