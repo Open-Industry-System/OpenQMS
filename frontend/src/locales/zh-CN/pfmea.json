@@ -126,13 +126,13 @@
       "conflictTitle": "内容已被他人修改", "conflictContent": "文档已被他人修改，请刷新后重试。", "conflictReload": "刷新"
     },
     "guidance": {
-      "step0": { "title": "5T范围", "purpose": "界定分析范围", "points": ["团队、时间、工具、任务、趋势"], "fields": ["团队/时间/工具/任务/趋势"], "example": "SMT焊接生产线 / OP10-OP40" },
-      "step1": { "title": "结构分析", "purpose": "分解过程结构", "points": ["过程项目→过程步骤→作业要素(4M)"], "fields": ["工序号(OP10)", "4M分类(人/机/料/环)"], "example": "OP10 贴装 / 机器:高速贴片机" },
-      "step2": { "title": "功能分析", "purpose": "定义功能与特性", "points": ["3层功能树", "区分产品/过程特性", "CC/SC在此维护"], "fields": ["功能名", "产品特性/过程特性", "CC/SC"], "example": "准确贴装 / 偏移度≤0.05mm / CC" },
-      "step3": { "title": "失效分析", "purpose": "识别失效链", "points": ["失效模式挂过程步骤功能", "原因按4M"], "fields": ["FM/FE/FC/PC/DC"], "example": "贴装偏移 / 吸嘴磨损(机)" },
-      "step4": { "title": "风险分析", "purpose": "评估风险", "points": ["三段式严重度取最大值", "O/D", "AP"], "fields": ["S(本厂/客户/终端用户)", "O", "D", "AP", "特性(只读)"], "example": "S=8 O=4 D=3 AP=H" },
-      "step5": { "title": "优化", "purpose": "降低风险", "points": ["AP=H优先", "负责人与日期"], "fields": ["措施/负责人/日期/状态/重评"], "example": "引入压力闭环传感器 / 张工 / 2026-06-15" },
-      "step6": { "title": "结果文档", "purpose": "确认完成", "points": ["核对统计", "完成创建"], "fields": [], "example": "" },
+      "step0": { "title": "5T范围", "purpose": "界定PFMEA分析范围、团队与关注点。", "points": "5T 即 Team(团队)、Timing(时间)、Tool(工具)、Task(任务)、Trend(趋势)；据此框定本次过程分析范围。", "fields": [{ "name": "团队 Team", "desc": "跨职能核心团队：工艺/制造工程师、质量工程师、设备维护、生产班组长、采购/供应商代表、顾客代表。" }, { "name": "时间范围 Timing", "desc": "PFMEA 起止时间，应在过程设计早期启动，试生产前完成主要优化。" }, { "name": "工具 Tool", "desc": "过程流程图、参数图(P-图)、鱼骨图(4M)、PFMEA模板、控制计划草案、历史经验教训库。" }, { "name": "任务 Task", "desc": "本次分析的过程范围、生产线、工序段及需重点关注的特殊特性。" }, { "name": "趋势 Trend", "desc": "历史PFMEA、过程SPC数据、NCR、客户投诉、CAPA、返工/报废记录、审核发现等趋势输入。" }], "example": "团队：SMT工艺组、质量组；时间：2026年Q2；工具：过程流程图+4M鱼骨图；任务：SMT焊接OP10-OP40；趋势：近6个月贴装不良趋势" },
+      "step1": { "title": "结构分析", "purpose": "分解过程结构。", "points": "按过程项目→过程步骤→作业要素(4M)逐层分解，过程步骤填工序号，作业要素按人/机/料/环分类。", "fields": [{ "name": "工序号 OPxx", "desc": "过程步骤编号，如 OP10、OP20，用于唯一标识工序顺序。" }, { "name": "4M分类", "desc": "作业要素按人(Man)、机(Machine)、料(Material)、环(Medium/Method)分类，支撑失效起因分析。" }], "example": "OP10 贴装 / 机器:高速贴片机 / 料:锡膏" },
+      "step2": { "title": "功能分析", "purpose": "定义过程功能与特性。", "points": "建立3层功能树，区分产品特性与过程特性，维护CC/SC特殊特性。", "fields": [{ "name": "功能名", "desc": "过程项目/步骤/作业要素要达成的功能描述。" }, { "name": "产品特性/规格", "desc": "由过程步骤影响的产品质量特性及规格限。" }, { "name": "过程特性", "desc": "可直接监控的过程参数，如温度、压力、速度。" }, { "name": "CC/SC", "desc": "关键特性(CC)或重要特性(SC)标记。" }], "example": "准确贴装 / 偏移度≤0.05mm / 贴片压力0.5±0.05MPa / CC" },
+      "step3": { "title": "失效分析", "purpose": "识别失效链。", "points": "失效模式挂在过程步骤功能下，按4M组织失效起因，建立失效模式-影响-起因-控制链。", "fields": [{ "name": "FM 失效模式", "desc": "过程功能无法满足的形式。" }, { "name": "FE 失效影响", "desc": "失效模式对下游、客户或法规的影响。" }, { "name": "FC 失效起因", "desc": "导致失效模式的4M原因，如人员操作、设备磨损、材料变异。" }, { "name": "PC/DC", "desc": "现有预防控制(PC)与探测控制(DC)。" }], "example": "贴装偏移(FM) / 下工序无法焊接(FE) / 吸嘴磨损(机)(FC)" },
+      "step4": { "title": "风险分析", "purpose": "评估过程风险。", "points": "三段式严重度取本厂/客户/终端用户最大值，评估频度O、探测度D，计算AP。", "fields": [{ "name": "S(本厂/客户/终端用户)", "desc": "分别评估严重度后取最大值。" }, { "name": "O 频度", "desc": "失效起因发生的可能性。" }, { "name": "D 探测度", "desc": "现有控制探测到失效起因/模式的能力。" }, { "name": "AP", "desc": "行动优先级，由 S/O/D 查表得出 H/M/L。" }, { "name": "特性", "desc": "继承的特殊特性标记(只读)。" }], "example": "S=8 O=4 D=3 AP=H" },
+      "step5": { "title": "优化", "purpose": "降低过程风险。", "points": "AP=H 优先，必须制定优化措施、负责人与计划完成日期，并重评 S'/O'/D'/AP。", "fields": [{ "name": "优化措施", "desc": "为降低风险而采取的具体措施。" }, { "name": "负责人", "desc": "措施责任人。" }, { "name": "计划完成日期", "desc": "措施完成目标日期。" }, { "name": "状态", "desc": "待执行/已计划/已完成/不执行等。" }, { "name": "重评 S'/O'/D'/AP", "desc": "措施实施后重新评估风险。" }], "example": "引入压力闭环传感器 / 张工 / 2026-06-15" },
+      "step6": { "title": "结果文档", "purpose": "确认完成。", "points": "核对统计信息，完成PFMEA创建。", "fields": [], "example": "" },
       "labelPurpose": "目的", "labelPoints": "要点", "labelFields": "字段", "labelExample": "示例", "expand": "展开", "collapse": "收起"
     },
     "sidebar": { "structureTree": "结构树", "structureHint": "结构分析后显示", "noStructure": "尚无结构", "steps": "步骤" }

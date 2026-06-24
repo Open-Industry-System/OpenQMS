@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { getRecommendations, type Suggestion } from "../../api/recommendation";
 import { parseScopeTokens, stringifyScopeTokens } from "../../utils/wizardScopeTokens";
 
-export type ScopeTriggerType = "dfmea_tool" | "dfmea_trend";
+export type ScopeTriggerType = "dfmea_tool" | "dfmea_trend" | "pfmea_tool" | "pfmea_trend";
 
 interface ScopeTagFieldProps {
   /** 「、」分隔的存盘 string */
