@@ -10,6 +10,28 @@ async def test_create_product_type_admin_ok(admin_client):
 
 
 @pytest.mark.asyncio
+async def test_create_product_type_duplicate_logs_failed_audit(db, default_factory, admin_user):
+    """A duplicate-code create attempt is rejected AND recorded as a CREATE_FAILED audit log,
+    so failed attempts are traceable (audit parity with successful writes)."""
+    from app.services.product_type_service import create_product_type
+    from app.models.audit import AuditLog
+    from sqlalchemy import select
+
+    await create_product_type(db, "POWER", "电源类", None, admin_user.user_id)
+    # Second create with the same code → 400 at the API / ValueError at the service.
+    with pytest.raises(ValueError):
+        await create_product_type(db, "POWER", "电源类", None, admin_user.user_id)
+
+    failed = (await db.execute(
+        select(AuditLog).where(AuditLog.table_name == "product_types", AuditLog.action == "CREATE_FAILED")
+    )).scalars().all()
+    assert len(failed) == 1
+    assert failed[0].changed_fields.get("code") == "POWER"
+    assert failed[0].changed_fields.get("reason") == "duplicate_code"
+    assert failed[0].operated_by == admin_user.user_id
+
+
+@pytest.mark.asyncio
 async def test_create_product_type_non_admin_forbidden(db, viewer_user, default_factory):
     # Build an ASGI client authenticated as viewer_user (non-admin role) — require_admin raises 403.
     from app.main import app

@@ -17,7 +17,6 @@ export interface InlineRecommendationsProps {
   s?: number;
   o?: number;
   d?: number;
-  scope?: "global" | "current_product_type" | "current_product_line";
   onApplySuggestion?: (suggestion: string, field: string) => void;
 }
 

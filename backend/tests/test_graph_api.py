@@ -396,6 +396,7 @@ async def test_global_stats_rejects_product_line_code_param(client: AsyncClient)
     assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_similar_nodes_advanced_success(client: AsyncClient):
     from unittest.mock import patch
@@ -420,6 +421,7 @@ async def test_similar_nodes_advanced_success(client: AsyncClient):
     assert "similarity_score" in first
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_similar_nodes_advanced_scope_downgrade(client: AsyncClient):
     """viewer 无 KNOWLEDGE_GRAPH 权限，global 被降级为 current_product_line。"""

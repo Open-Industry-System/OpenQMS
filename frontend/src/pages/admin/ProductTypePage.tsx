@@ -27,7 +27,10 @@ export default function ProductTypePage() {
       if (editing) { await updateProductType(editing.code, values); message.success(t("messages.updated")); }
       else { await createProductType(values); message.success(t("messages.created")); }
       setOpen(false); form.resetFields(); await load();
-    } catch (e: any) { message.error(e?.response?.data?.detail || "error"); }
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      message.error(detail || "error");
+    }
   };
 
   const onDeactivate = (row: ProductType) => {
@@ -35,7 +38,10 @@ export default function ProductTypePage() {
       title: t("messages.deleteConfirm"),
       onOk: async () => {
         try { await deleteProductType(row.code); message.success(t("messages.deactivated")); await load(); }
-        catch (e: any) { message.error(t("messages.refused", { detail: e?.response?.data?.detail || "" })); }
+        catch (e) {
+          const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "";
+          message.error(t("messages.refused", { detail }));
+        }
       },
     });
   };
