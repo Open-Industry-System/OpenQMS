@@ -41,17 +41,13 @@ export function cascadeDeleteStructureNode(
   while (queue.length > 0) {
     const current = queue.shift()!;
     if (downstream.has(current)) continue;
-    // Skip the root — it's already handled above
-    if (current === nodeId) {
-      // Still traverse its children
-      for (const e of edges) {
-        if (e.source === current && FORWARD_EDGE_TYPES.has(e.type)) {
-          queue.push(e.target);
-        }
-      }
-      continue;
+    // The root is always deleted (added above); don't add it to `downstream`
+    // (the shared-parent check below is meaningless for it) but DO traverse
+    // its children AND its causes — otherwise deleting a FailureMode root
+    // (handleDeleteFailureChain) leaves its FailureCause + controls orphaned.
+    if (current !== nodeId) {
+      downstream.add(current);
     }
-    downstream.add(current);
 
     // Follow forward outgoing edges from this node
     for (const e of edges) {
@@ -61,6 +57,8 @@ export function cascadeDeleteStructureNode(
     }
 
     // If this node is a FailureMode, find all FailureCauses pointing to it
+    // (CAUSE_OF is reversed: source=cause, target=mode). Applies to the root
+    // mode too, so its causes are discovered and cascaded.
     const node = nodes.find(n => n.id === current);
     if (node && node.type === 'FailureMode') {
       for (const e of edges) {
