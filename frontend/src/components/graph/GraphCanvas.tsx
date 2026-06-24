@@ -65,10 +65,10 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
-  const { t, i18n } = useTranslation("graph");
+  const { t } = useTranslation("graph");
   const graphData = useMemo(
     () => toG6Data(nodes, edges, t, fmeaType),
-    [nodes, edges, t, fmeaType, i18n.language],
+    [nodes, edges, t, fmeaType],
   );
 
   // Keep handlers in refs so initGraph only depends on structural inputs (layout/nodes);
