@@ -17,7 +17,7 @@ interface SmartSuggestionDropdownProps {
   disabled?: boolean;
   value?: string;
   onChange?: (value: string) => void;
-  scope?: "global" | "current_product_line";
+  scope?: "global" | "current_product_type" | "current_product_line";
 }
 
 // Module-scope helpers (defined once, not re-created each render) so the
@@ -53,8 +53,11 @@ const confidenceLabel = (c: number, t: TFunc) => {
 const sourceIcon = (s: string) =>
   s === "llm" ? <StarOutlined style={{ color: "#722ed1" }} /> : <SettingOutlined style={{ color: "#1890ff" }} />;
 
-const scopeLabel = (s: "global" | "current_product_line", t: TFunc) =>
-  s === "global" ? t("smartSuggestion.scopeGlobal") : t("smartSuggestion.scopeLocal");
+const scopeLabel = (s: "global" | "current_product_type" | "current_product_line", t: TFunc) => {
+  if (s === "global") return t("smartSuggestion.scopeGlobal");
+  if (s === "current_product_type") return t("smartSuggestion.scopeProductType");
+  return t("smartSuggestion.scopeLocal");
+};
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -78,8 +81,8 @@ export default function SmartSuggestionDropdown({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const abortRef = useRef<AbortController>();
   const [selectedIndex, setSelectedIndex] = useState(-1);
-  const [scope, setScope] = useState<"global" | "current_product_line">(externalScope || "global");
-  const [effectiveScope, setEffectiveScope] = useState<"global" | "current_product_line">("global");
+  const [scope, setScope] = useState<"global" | "current_product_type" | "current_product_line">(externalScope || "global");
+  const [effectiveScope, setEffectiveScope] = useState<"global" | "current_product_type" | "current_product_line">("global");
 
   const { canView } = usePermission();
   const hasKgPermission = canView("knowledge_graph" as ModuleKey);

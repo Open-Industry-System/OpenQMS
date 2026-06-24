@@ -18,7 +18,7 @@ export interface Suggestion {
 export interface RecommendRequest {
   trigger_type: string;
   context: Record<string, unknown>;
-  scope?: "global" | "current_product_line";
+  scope?: "global" | "current_product_type" | "current_product_line";
   include_graph?: boolean;
 }
 
@@ -28,7 +28,7 @@ export interface RecommendResponse {
   cached: boolean;
   llm_available: boolean;
   graph_match_count: number;
-  effective_scope: "global" | "current_product_line";
+  effective_scope: "global" | "current_product_type" | "current_product_line";
 }
 
 export async function getRecommendations(

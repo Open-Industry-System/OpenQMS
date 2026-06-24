@@ -463,10 +463,20 @@ export interface SupplierExpiryAlert {
   days_remaining: number;
 }
 
+export interface ProductType {
+  code: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProductLine {
   code: string;
   name: string;
   is_active: boolean;
+  product_type_code: string | null;
   created_at: string;
   updated_at: string;
 }
