@@ -2,6 +2,7 @@
   "actions": {
     "confirm": "Confirm",
     "save": "Save",
+    "exitVersion": "Return to current version",
     "close": "Close",
     "cancel": "Cancel",
     "back": "Back"
@@ -241,7 +242,9 @@
     "statusChanged": "Status changed to: {{status}}",
     "operationFailed": "Operation failed",
     "selectFailureMode": "Please select a failure mode row in the editor first",
-    "viewSnapshot": "View version v{{version}} snapshot (feature in development)",
+    "viewSnapshot": "View version v{{version}} snapshot",
+    "viewingVersion": "Viewing v{{version}} snapshot (read-only)",
+    "loadVersionFailed": "Failed to load version snapshot",
     "clearHighlight": "Clear Highlight",
     "changeImpactAnalysis": "Change Impact Analysis",
     "changeImpactDescription": "Analyze the scope of impact of changes to this node on upstream/downstream nodes",

@@ -7,7 +7,7 @@ import {
 } from "@dnd-kit/core";
 import {
   Button, Space, Tag, Typography, Input, Select, Table, Tabs,
-  Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
+  Row, Col, App, Spin, Popconfirm, Empty, Tooltip, Alert,
   Divider, Modal, Radio, Form, Dropdown,
 } from "antd";
 import {
@@ -18,6 +18,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
 import { formatFMEAError } from "../../../utils/fmeaError";
+import { getFMEAVersion } from "../../../api/version";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
 import type { FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse } from "../../../types";
 import LessonsLearnedModal from "../../../components/lessons/LessonsLearnedModal";
@@ -277,7 +278,17 @@ export default function FMEAEditorPage() {
   const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(null);
 
   const _user = useAuthStore((s) => s.user);
-  const { canEdit, canApprove } = usePermission();
+  const { canEdit: rawCanEdit, canApprove: rawCanApprove } = usePermission();
+  const [viewingVersion, setViewingVersion] = useState<{ major: number; minor: number } | null>(null);
+  const isViewingVersion = viewingVersion !== null;
+  const canEdit = useCallback(
+    (m: import("../../../hooks/usePermission").ModuleKey) => rawCanEdit(m) && !isViewingVersion,
+    [rawCanEdit, isViewingVersion]
+  );
+  const canApprove = useCallback(
+    (m: import("../../../hooks/usePermission").ModuleKey) => rawCanApprove(m) && !isViewingVersion,
+    [rawCanApprove, isViewingVersion]
+  );
   const [activeTab, setActiveTab] = useState("failure");
   const [outerTab, setOuterTab] = useState("editor");
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
@@ -349,7 +360,11 @@ export default function FMEAEditorPage() {
   }, [location.state, fmeaId]);
   const canvasRef = useRef<GraphCanvasRef>(null);
 
-  const { activeUsers, startEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);
+  const { activeUsers, startEditing: rawStartEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);
+  const startEditing = useCallback((...args: Parameters<typeof rawStartEditing>) => {
+    if (isViewingVersion) return;
+    rawStartEditing(...args);
+  }, [rawStartEditing, isViewingVersion]);
 
   // Base snapshot for three-way diff
   const baseGraphRef = useRef<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
@@ -435,6 +450,59 @@ export default function FMEAEditorPage() {
       setGraphLoading(false);
     }
   }, [id, message, pendingHighlightNode, t]);
+
+  const loadVersionSnapshot = useCallback(async (major: number, minor: number) => {
+    try {
+      const v = await getFMEAVersion(fmeaId, major, minor);
+      const snap = v.snapshot ?? { nodes: [], edges: [] };
+      setNodes(snap.nodes || []);
+      setEdges(snap.edges || []);
+      graphDataRef.current = normalizeGraphData(
+        snap.nodes as unknown as Array<Record<string, unknown>>,
+        snap.edges as unknown as Array<Record<string, unknown>>,
+      );
+      setSelectedFunctionId(null);
+      setSelectedStructureNode(null);
+      setSelectedGraphNode(null);
+      setDrawerVisible(false);
+      setHighlightNodes([]);
+      setDimOthers(false);
+      setPendingHighlightNode(null);
+      setContextMenuOpen(false);
+      setContextMenuNode(null);
+      setViewingVersion({ major, minor });
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      message.error(e?.response?.data?.detail || t("messages.loadVersionFailed"));
+    }
+  }, [fmeaId, t, message]);
+
+  const exitVersionSnapshot = useCallback(async () => {
+    try {
+      const doc = await getFMEA(fmeaId);
+      setFmea(doc);
+      setNodes(doc.graph_data?.nodes || []);
+      setEdges(doc.graph_data?.edges || []);
+      baseGraphRef.current = {
+        nodes: JSON.parse(JSON.stringify(doc.graph_data?.nodes || [])),
+        edges: JSON.parse(JSON.stringify(doc.graph_data?.edges || [])),
+      };
+      graphDataRef.current = null;
+      setSelectedFunctionId(null);
+      setSelectedStructureNode(null);
+      setSelectedGraphNode(null);
+      setDrawerVisible(false);
+      setHighlightNodes([]);
+      setDimOthers(false);
+      setPendingHighlightNode(null);
+      setContextMenuOpen(false);
+      setContextMenuNode(null);
+      setViewingVersion(null);
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      message.error(e?.response?.data?.detail || t("messages.loadVersionFailed"));
+    }
+  }, [fmeaId, t, message]);
 
   const handleTraceImpact = async (nodeId: string) => {
     if (!id) return;
@@ -1512,6 +1580,20 @@ export default function FMEAEditorPage() {
         <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} compact />
       </div>
 
+      {viewingVersion && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t("messages.viewingVersion", { version: `${viewingVersion.major}.${viewingVersion.minor}` })}
+          action={
+            <Button size="small" onClick={exitVersionSnapshot}>
+              {t("actions.exitVersion")}
+            </Button>
+          }
+        />
+      )}
+
       <Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }} items={[
         { key: "editor", label: t("tabs.editor"), children: <>
           <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }} items={[
@@ -1879,7 +1961,7 @@ export default function FMEAEditorPage() {
             canCreate={canEdit('fmea')}
             canRollback={canApprove('fmea')}
             isDraft={fmea.status === "draft"}
-            onViewSnapshot={(major, minor) => message.info(t("messages.viewSnapshot", { major, minor }))}
+            onViewSnapshot={loadVersionSnapshot}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
             onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}

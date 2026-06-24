@@ -15,7 +15,8 @@
     "syncCSR": "Sync CSR",
     "addRow": "Add Row",
     "openFMEAEditor": "Open FMEA Editor",
-    "viewSnapshot": "View Snapshot"
+    "viewSnapshot": "View Snapshot",
+    "exitVersion": "Return to current version"
   },
   "phase": {
     "sample": "Sample",
@@ -157,6 +158,8 @@
     "syncFailed": "Sync failed",
     "refreshFailed": "Failed to refresh data",
     "enterTitle": "Please enter title",
-    "enterDocumentNo": "Please enter document number"
+    "enterDocumentNo": "Please enter document number",
+    "viewingVersion": "Viewing v{{version}} snapshot (read-only)",
+    "loadVersionFailed": "Failed to load version snapshot"
   }
 }
