@@ -418,7 +418,7 @@ class RecommendationService:
         # 权限检查 + scope 强制降级
         requested_scope = getattr(request, "scope", "global")
         has_kg_permission = await get_user_permission(user, Module.KNOWLEDGE_GRAPH, self.db) >= PermissionLevel.VIEW
-        effective_scope = "current_product_line" if (not has_kg_permission and requested_scope == "global") else requested_scope
+        effective_scope = "current_product_line" if (not has_kg_permission and requested_scope in ("global", "current_product_type")) else requested_scope
         include_graph = getattr(request, "include_graph", True)
 
         # 将 effective_scope 解析为具体的产品线代码列表（None=全局不过滤）
