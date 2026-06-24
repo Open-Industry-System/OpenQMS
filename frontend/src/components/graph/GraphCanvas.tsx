@@ -30,8 +30,6 @@ interface GraphCanvasProps {
   onNodeContextMenu?: (node: GraphNode, event: { clientX: number; clientY: number }) => void;
 }
 
-type GraphT = (key: string, options?: { defaultValue?: string }) => string;
-
 function graphBehaviors(layout: GraphLayout) {
   // drag-element-force re-heats the d3-force simulation on drag so other nodes
   // follow the dragged one; use plain drag-element for the static layouts.
