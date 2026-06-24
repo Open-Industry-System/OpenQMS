@@ -12,6 +12,7 @@ import {
   NODE_PRESENTATION,
   getEdgeStyle,
   getEdgeTypeKey,
+  getHighlightedEdgeStyle,
   getNodeStyle,
   getNodeTypeKey,
 } from "./graphPresentation";
@@ -212,5 +213,35 @@ describe("graphPresentation", () => {
     for (const entry of GRAPH_EDGE_LEGEND) {
       expect(entry.translationKey).toMatch(/^edgeTypes\./);
     }
+  });
+
+  describe("getHighlightedEdgeStyle", () => {
+    it("uses the red highlight override when the edge is highlighted", () => {
+      const s = getHighlightedEdgeStyle("CAUSE_OF", true, true);
+      expect(s).toEqual({ stroke: "#ff4d4f", lineWidth: 2, opacity: 1 });
+    });
+
+    it("keeps the category color at low opacity when dimmed and not highlighted", () => {
+      const s = getHighlightedEdgeStyle("CAUSE_OF", false, true);
+      expect(s).toEqual({ stroke: "#ff7875", lineWidth: 1, opacity: 0.1 });
+    });
+
+    it("keeps the category color at full opacity when reset (not dimmed)", () => {
+      const s = getHighlightedEdgeStyle("DETECTED_BY", false, false);
+      expect(s).toEqual({ stroke: "#722ed1", lineWidth: 1, opacity: 1 });
+    });
+
+    it("falls back to EDGE_STROKE for structural edges in all states", () => {
+      expect(getHighlightedEdgeStyle("HAS_FAILURE_MODE", false, false).stroke).toBe(EDGE_STROKE);
+      expect(getHighlightedEdgeStyle("HAS_FAILURE_MODE", false, true).stroke).toBe(EDGE_STROKE);
+    });
+
+    it("highlight overrides even structural edges", () => {
+      expect(getHighlightedEdgeStyle("HAS_FAILURE_MODE", true, true)).toEqual({
+        stroke: "#ff4d4f",
+        lineWidth: 2,
+        opacity: 1,
+      });
+    });
   });
 });

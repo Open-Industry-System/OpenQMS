@@ -276,6 +276,26 @@ export function getEdgeStyle(rawLabel: string): { stroke: string; lineWidth: num
   };
 }
 
+// Edge style under the highlight/dim state machine. The red override matches the
+// pre-existing highlight color; the key change vs the old code is that dim/reset
+// branches restore the CATEGORY color (via getEdgeStyle) instead of forcing
+// EDGE_STROKE, so a highlight cycle no longer erases branch colors. See spec §3.
+export function getHighlightedEdgeStyle(
+  rawLabel: string,
+  isHighlighted: boolean,
+  dimmed: boolean,
+): { stroke: string; lineWidth: number; opacity: number } {
+  if (isHighlighted) {
+    return { stroke: "#ff4d4f", lineWidth: 2, opacity: 1 };
+  }
+  const base = getEdgeStyle(rawLabel);
+  return {
+    stroke: base.stroke,
+    lineWidth: 1,
+    opacity: dimmed ? 0.1 : 1,
+  };
+}
+
 // Legend entries for the "edge types" section of GraphLegend. HAS_FAILURE_MODE
 // represents the structural chain (uses the neutral EDGE_STROKE); other structural
 // edges share that color and are not listed individually to keep the legend short.
