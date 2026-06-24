@@ -304,7 +304,7 @@ async def recommend(
 
     # Early-return when there is no usable anchor text. The anchor depends on
     # the trigger type: failure_mode is derived from function_description, while
-    # effect/cause/measure/optimization are derived from failure_mode. input_text
+    # effect/cause/measure/optimization/prevention_control/detection_control are derived from failure_mode. input_text
     # (what the user typed in the cell) is a last-resort fallback.
     # NOTE: dict.get("k", default) returns the stored value even when it is "" —
     # so we chain with `or` instead, otherwise an empty function_description key

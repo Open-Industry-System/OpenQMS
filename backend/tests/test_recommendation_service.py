@@ -179,6 +179,15 @@ def test_need_llm_generic_quality_calls_llm_despite_high_confidence():
     ) is True
 
 
+def test_recommend_request_accepts_new_triggers():
+    """RecommendRequest schema 接受新 trigger_type；service 不抛未路由错误。"""
+    req = RecommendRequest(trigger_type="prevention_control", context={"failure_mode": "采集数据失效", "ap": "H"})
+    assert req.trigger_type == "prevention_control"
+    engine = RuleEngine()
+    result = engine.evaluate(req.trigger_type, req.context)
+    assert len(result.suggestions) > 0
+
+
 def test_rule_engine_prevention_control_returns_only_prevention():
     """prevention_control trigger 必须只返回预防项，不混入探测项。"""
     engine = RuleEngine()
