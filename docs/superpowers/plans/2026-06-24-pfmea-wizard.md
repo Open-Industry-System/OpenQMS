@@ -127,30 +127,54 @@ In `backend/app/api/fmea.py`, change the `dfmea_tool`/`dfmea_trend` branch to al
 
 - [ ] **Step 5: Add prompt templates + PFMEA rule content**
 
-In `backend/app/services/recommendation_service.py`, add two entries to `PROMPT_TEMPLATES` (mirror the `dfmea_tool`/`dfmea_trend` shape but persona = process FMEA, presets = process tools). Place immediately after the `"dfmea_trend"` entry:
+In `backend/app/services/recommendation_service.py`, add two entries to `PROMPT_TEMPLATES` mirroring the `dfmea_tool`/`dfmea_trend` shape **exactly** (the LLM result is validated by `SuggestionList.model_validate()`, which requires `name`/`confidence`/`explanation` — see `backend/app/schemas/recommendation.py:16-18` and `recommendation_service.py:540`). A prompt returning `{name, reason}` would fail validation and silently fall back to empty rule/graph. Place immediately after the `"dfmea_trend"` entry (line 450):
 
 ```python
-    "pfmea_tool": """你是一名过程FMEA(PFMEA)专家。根据以下信息推荐PFMEA分析应使用的工具与方法。
-FMEA类型: {fmea_type}
-产品线: {product_line}
-任务说明: {fmea_title}
-团队: {team}
-任务目标: {task}
-历史经验: {historical_patterns}
+    "pfmea_tool": """你是资深PFMEA(过程FMEA)工程师，精通AIAG-VDA方法论。
 
-请推荐5-8个适用于制造/装配过程分析的PFMEA工具，如：过程流程图、过程参数图(P图)、鱼骨图(4M分析)、PFMEA模板、过程FMECA、控制计划草案、历史经验教训库。
-仅返回JSON: {{"suggestions": [{{"name": "工具名", "reason": "选用理由"}}]}}""",
-    "pfmea_trend": """你是一名过程FMEA(PFMEA)专家。根据以下信息推荐PFMEA分析应参考的趋势/数据来源。
-FMEA类型: {fmea_type}
-产品线: {product_line}
-任务说明: {fmea_title}
-团队: {team}
-任务目标: {task}
-历史经验: {historical_patterns}
+【任务】为下方PFMEA分析推荐 3-5 个合适的「分析工具/方法」。
+【工具定义】用于过程结构/功能/失效分析的方法与图样，例如过程流程图、过程参数图(P图)、鱼骨图(4M分析)、PFMEA模板、过程FMECA等。
+【方向约束】推荐具体、可执行的方法或图样名称，不要泛泛的"质量工具"。
 
-请推荐5-8个PFMEA趋势数据来源，如：历史PFMEA、过程SPC数据、不合格品记录(NCR)、客户投诉、CAPA记录、返工/报废记录、审核发现、过程变更历史。
-仅返回JSON: {{"suggestions": [{{"name": "来源名", "reason": "选用理由"}}]}}""",
+【当前上下文】
+- FMEA 标题: {fmea_title}
+- 产品线: {product_line_code}
+- 分析任务: {task}
+- 团队: {team}
+
+【历史相似案例】
+{historical_patterns}
+
+【示例】分析工具: 过程流程图 / 过程参数图(P图) / 鱼骨图(4M分析) / PFMEA模板 / 过程FMECA
+
+【要求】与当前过程/任务直接相关，便于据此开展结构分析与功能分析。
+返回 JSON：
+{{"suggestions": [{{"name": "工具/方法名称", "confidence": 0.0-1.0, "explanation": "为何适合当前PFMEA分析"}}]}}
+""",
+    "pfmea_trend": """你是资深PFMEA(过程FMEA)工程师，精通AIAG-VDA方法论。
+
+【任务】为下方PFMEA分析推荐 3-5 个「趋势数据/信息源」。
+【趋势定义】指导本次分析的输入信息与历史数据来源，例如历史PFMEA、过程SPC数据、不合格品记录(NCR)、客户投诉、CAPA记录、返工/报废记录等。
+【方向约束】推荐具体的数据源类别，便于据此收集分析输入。
+
+【当前上下文】
+- FMEA 标题: {fmea_title}
+- 产品线: {product_line_code}
+- 分析任务: {task}
+- 团队: {team}
+
+【历史相似案例】
+{historical_patterns}
+
+【示例】趋势数据: 历史PFMEA / 过程SPC数据 / 不合格品记录(NCR) / 客户投诉 / CAPA记录 / 返工报废记录
+
+【要求】与当前产品线/过程相关、能指导风险识别的数据源。
+返回 JSON：
+{{"suggestions": [{{"name": "趋势数据/信息源", "confidence": 0.0-1.0, "explanation": "为何该数据源对本次分析有价值"}}]}}
+""",
 ```
+
+> **Critical**: the JSON key names must be `name`/`confidence`/`explanation` (not `reason`). `_build_prompt` formats the template with `{fmea_title}`/`{product_line_code}`/`{task}`/`{team}`/`{historical_patterns}` — all are provided by `_assemble_context` (which already injects `fmea_type`, `product_line_code`, and merges `request.context`). Confirm `product_line_code` is in scope: `_assemble_context` returns `product_line_code` via the `fmea` object; if the template uses `{product_line}` instead (the failure_* templates use `{product_line}`), match whatever `_assemble_context` provides. Check `_assemble_context` (around line 844) and use the matching key. The `dfmea_tool` template uses `{product_line_code}` — use the same.
 
 Then add a PFMEA-specific rule map. After `FAILURE_CHAIN_MAP` (around line 121), add:
 
@@ -213,41 +237,67 @@ Apply the same `fmea_type` branching for the `failure_mode` verb-pattern lookup 
 Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/test_pfmea_recommend.py -x`
 Expected: PASS.
 
-- [ ] **Step 7: Add an integration-style test that the trigger returns suggestions**
+- [ ] **Step 7: Add a template-format test + a service-level non-empty-suggestions test**
 
 Append to `backend/tests/test_pfmea_recommend.py`:
 
 ```python
-@pytest.mark.asyncio
-async def test_pfmea_tool_recommend_returns_suggestions(monkeypatch):
-    """End-to-end: pfmea_tool returns at least one suggestion (rule path)."""
-    from app.services.recommendation_service import RecommendationService
-    svc = RecommendationService.__new__(RecommendationService)  # bypass __init__ deps
-    # Force rule-only path by stubbing LLM + graph to empty
-    svc._call_llm = AsyncMock(return_value=[])
-    svc._get_similar_fmeas = AsyncMock(return_value=[])
-    # The pfmea_tool/trend triggers have no rule content by design; they fall
-    # to LLM. Stub LLM to return one suggestion.
-    async def fake_llm(*a, **kw):
-        return [{"name": "过程流程图", "reason": "标准PFMEA起点"}]
-    svc._call_llm = fake_llm
-    # Build a minimal fmea-like object
-    class F:  # noqa: E742
-        fmea_type = "PFMEA"; product_line_code = "DC-DC-100"; fmea_id = "00000000-0000-0000-0000-000000000001"
-    req = RecommendRequest(trigger_type="pfmea_tool", context={"task": "PFMEA", "fmea_title": "SMT线"}, include_graph=False)
-    # If the service signature differs, adapt the call to match the real one;
-    # the assertion is: suggestions non-empty for pfmea_tool.
-    # (Adjust the exact call to the real recommend() entrypoint signature.)
+from app.services.recommendation_service import PROMPT_TEMPLATES
+from app.schemas.recommendation import SuggestionList
+
+
+def test_pfmea_prompt_templates_format_without_keyerror():
+    """Both prompts must format with the context keys _assemble_context provides."""
+    ctx = {
+        "fmea_title": "SMT线", "product_line_code": "DC-DC-100",
+        "task": "PFMEA", "team": "张工", "historical_patterns": "无",
+    }
+    for trig in ("pfmea_tool", "pfmea_trend"):
+        rendered = PROMPT_TEMPLATES[trig].format_map(_SafeDict(ctx))
+        assert "suggestions" in rendered
+        assert "confidence" in rendered  # schema key, not "reason"
+
+
+def test_pfmea_tool_llm_output_passes_suggestionlist_validation():
+    """LLM output shaped per the prompt must pass SuggestionList validation
+    (this is the gate that would otherwise drop to empty rule/graph fallback)."""
+    raw = {
+        "suggestions": [
+            {"name": "过程流程图", "confidence": 0.9, "explanation": "PFMEA标准起点"},
+            {"name": "鱼骨图(4M分析)", "confidence": 0.8, "explanation": "识别4M失效起因"},
+        ]
+    }
+    validated = SuggestionList.model_validate(raw)
+    assert len(validated.suggestions) == 2
+    assert validated.suggestions[0].name == "过程流程图"
+
+
+class _SafeDict(dict):
+    def __missing__(self, key):
+        return "{" + key + "}"
 ```
 
-> If wiring the full service in-test proves fragile, instead add a focused unit test on the new rule helpers (`_rule_failure_causes("failure_cause", "贴装偏移", "PFMEA")` returns the 4M causes) and on prompt-template formatting (`PROMPT_TEMPLATES["pfmea_tool"].format_map(...)` renders without `KeyError`). Prefer the focused tests; drop the integration test if it cannot be made stable. The key deliverable is: schema accepts the triggers + anchor resolves + templates format + rule helpers branch by type.
+> Also add a service-level test that `pfmea_tool` returns non-empty suggestions when the LLM is stubbed to return valid output. Use the existing `test_recommendation_service.py` fixture pattern for constructing a `RecommendationService` with a stubbed LLM (find it via `grep -n "class.*LLM\|llm =\|RecommendationService(" backend/tests/test_recommendation_service.py`). The stub LLM's `complete()` must return a dict matching the `SuggestionList` schema above. Assert `response.suggestions` is non-empty and `response.source in ("hybrid","graph_enriched","rule_fallback")`. If the existing fixture is hard to reuse, the two tests above (template format + SuggestionList validation) are the required minimum; drop the full-service test if it cannot be stabilized, but **do not skip the validation test** — it is the regression guard for finding #1.
 
-- [ ] **Step 8: Run full backend recommend test suite to confirm no regression**
+- [ ] **Step 8: Confirm the rule engine handles unknown triggers gracefully**
+
+The rule engine is called as `self.rules.evaluate(request.trigger_type, request.context)` (line 496). `pfmea_tool`/`pfmea_trend` have no rule handler. Verify `RuleEngine.evaluate` returns an empty `SuggestionList` for unknown triggers rather than raising (read `backend/app/services/recommendation_service.py` `RuleEngine` class / `evaluate`). If it raises for unknown triggers, add an empty-result branch for `pfmea_tool`/`pfmea_trend`. Add a test:
+
+```python
+def test_rule_engine_returns_empty_for_pfmea_scope_triggers():
+    from app.services.recommendation_service import RuleEngine
+    engine = RuleEngine()
+    for trig in ("pfmea_tool", "pfmea_trend"):
+        result = engine.evaluate(trig, {"task": "PFMEA"})
+        assert list(result.suggestions) == []
+```
+
+- [ ] **Step 9: Run full backend recommend test suite to confirm no regression**
 
 Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/test_recommendation_service.py tests/test_pfmea_recommend.py -x`
 Expected: PASS (existing DFMEA tests still green).
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add backend/app/schemas/recommendation.py backend/app/api/fmea.py backend/app/services/recommendation_service.py backend/tests/test_pfmea_recommend.py
@@ -697,6 +747,35 @@ describe('usePfmeaWizardValidation', () => {
     const { result } = renderHook(() => usePfmeaWizardValidation(nodes, edges));
     expect(result.current.step4Complete).toBe(true);
   });
+
+  it('step2 fails when a WEF maps to a sibling step\'s StepFunction (wrong branch)', () => {
+    // Two steps each with a StepFunction; one WEF under ps1 but mapped from psf2 (wrong branch).
+    const nodes: GraphNode[] = [
+      { id: 'pi', type: 'ProcessItem', name: '线', ...Z },
+      { id: 'pif', type: 'ProcessItemFunction', name: '完成', ...Z },
+      { id: 'ps1', type: 'ProcessStep', name: '贴装', process_number: 'OP10', ...Z },
+      { id: 'ps2', type: 'ProcessStep', name: '焊接', process_number: 'OP20', ...Z },
+      { id: 'psf1', type: 'ProcessStepFunction', name: '贴装功能', ...Z },
+      { id: 'psf2', type: 'ProcessStepFunction', name: '焊接功能', ...Z },
+      { id: 'we1', type: 'ProcessWorkElement', name: '机', classification: 'Machine', ...Z },
+      { id: 'wef1', type: 'ProcessWorkElementFunction', name: '机功能', ...Z },
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'pi', target: 'pif', type: 'HAS_FUNCTION' },
+      { source: 'pi', target: 'ps1', type: 'HAS_PROCESS_STEP' },
+      { source: 'pi', target: 'ps2', type: 'HAS_PROCESS_STEP' },
+      { source: 'ps1', target: 'psf1', type: 'HAS_FUNCTION' },
+      { source: 'ps2', target: 'psf2', type: 'HAS_FUNCTION' },
+      { source: 'pif', target: 'psf1', type: 'FUNCTION_MAPPED_TO' },
+      { source: 'pif', target: 'psf2', type: 'FUNCTION_MAPPED_TO' },
+      { source: 'ps1', target: 'we1', type: 'HAS_WORK_ELEMENT' },
+      { source: 'we1', target: 'wef1', type: 'HAS_FUNCTION' },
+      { source: 'psf2', target: 'wef1', type: 'FUNCTION_MAPPED_TO' }, // WRONG: we1 is under ps1, should map from psf1
+    ];
+    const { result } = renderHook(() => usePfmeaWizardValidation(nodes, edges));
+    expect(result.current.step2Complete).toBe(false);
+    expect(result.current.warnings).toContain(2);
+  });
 });
 ```
 
@@ -749,17 +828,43 @@ export function usePfmeaWizardValidation(
       ['Man', 'Machine', 'Material', 'Environment'].includes(w.classification ?? ''));
     const step1Complete = hasStructure && stepsNumbered && weClassified && workElements.length > 0;
 
-    // Step 2: every WorkElement has a HAS_FUNCTION function node; 3-level FUNCTION_MAPPED_TO chain complete
+    // Step 2: every WorkElement has a HAS_FUNCTION function node; 3-level FUNCTION_MAPPED_TO chain complete AND branch-local.
+    // Branch-local means: each StepFunction maps FROM the ItemFunction of the ProcessItem that owns its step;
+    // each WEF maps FROM the StepFunction of the ProcessStep that owns the work element.
     const weFunctionNodes = nodes.filter((n) => n.type === WE_FUNCTION);
     const weHasFunction = workElements.length > 0 && workElements.every((we) =>
       edges.some((e) => e.source === we.id && e.type === 'HAS_FUNCTION'));
     const itemFuncs = nodes.filter((n) => n.type === ITEM_FUNCTION);
     const stepFuncs = nodes.filter((n) => n.type === STEP_FUNCTION);
-    // chain: each StepFunc has FUNCTION_MAPPED_TO from an ItemFunc; each WEFunc has FUNCTION_MAPPED_TO from a StepFunc
-    const stepFuncChained = stepFuncs.length > 0 && stepFuncs.every((sf) =>
-      edges.some((e) => e.target === sf.id && e.type === 'FUNCTION_MAPPED_TO'));
-    const weFuncChained = weFunctionNodes.length > 0 && weFunctionNodes.every((wf) =>
-      edges.some((e) => e.target === wf.id && e.type === 'FUNCTION_MAPPED_TO'));
+    // StepFunction branch-local: its FUNCTION_MAPPED_TO source must be an ItemFunction whose
+    // ProcessItem owns this StepFunction's step (HAS_PROCESS_STEP).
+    const stepFuncChained = stepFuncs.length > 0 && stepFuncs.every((sf) => {
+      const mappedFrom = edges.find((e) => e.target === sf.id && e.type === 'FUNCTION_MAPPED_TO');
+      if (!mappedFrom) return false;
+      const itemFunc = nodeMap.get(mappedFrom.source);
+      if (!itemFunc || itemFunc.type !== ITEM_FUNCTION) return false;
+      // the step that owns sf, and the item that owns that step
+      const sfStep = nodes.find((n) => n.type === 'ProcessStep' &&
+        edges.some((e) => e.source === n.id && e.target === sf.id && e.type === 'HAS_FUNCTION'));
+      if (!sfStep) return false;
+      const owningItem = nodes.find((n) => n.type === 'ProcessItem' &&
+        edges.some((e) => e.source === n.id && e.target === sfStep.id && e.type === 'HAS_PROCESS_STEP'));
+      if (!owningItem) return false;
+      return edges.some((e) => e.source === owningItem.id && e.target === itemFunc.id && e.type === 'HAS_FUNCTION');
+    });
+    // WEF branch-local: its FUNCTION_MAPPED_TO source must be a StepFunction whose ProcessStep owns this WEF.
+    const weFuncChained = weFunctionNodes.length > 0 && weFunctionNodes.every((wf) => {
+      const mappedFrom = edges.find((e) => e.target === wf.id && e.type === 'FUNCTION_MAPPED_TO');
+      if (!mappedFrom) return false;
+      const stepFunc = nodeMap.get(mappedFrom.source);
+      if (!stepFunc || stepFunc.type !== STEP_FUNCTION) return false;
+      // the step that owns wf, and the step that owns stepFunc — must be the same step
+      const wfStep = nodes.find((n) => n.type === 'ProcessStep' &&
+        edges.some((e) => e.source === n.id && e.target === wf.id && e.type === 'HAS_WORK_ELEMENT'));
+      const sfStep = nodes.find((n) => n.type === 'ProcessStep' &&
+        edges.some((e) => e.source === n.id && e.target === stepFunc.id && e.type === 'HAS_FUNCTION'));
+      return !!wfStep && wfStep.id === sfStep?.id;
+    });
     const step2Complete = weHasFunction && stepFuncChained && weFuncChained
       && itemFuncs.length > 0 && stepFuncs.length > 0 && weFunctionNodes.length > 0;
 
@@ -884,7 +989,7 @@ Read `frontend/src/components/dfmea/WizardSidebar.tsx` in full. This task copies
 // frontend/src/components/pfmea/PFMEAWizardSidebar.test.tsx
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { PFMEAWizardSidebar } from './PFMEAWizardSidebar';
+import PFMEAWizardSidebar from './PFMEAWizardSidebar';
 import type { GraphNode, GraphEdge } from '../../types';
 
 const Z = { severity: 0, occurrence: 0, detection: 0 };
@@ -945,6 +1050,8 @@ const VALID_EDGE_TYPES = new Set(['HAS_PROCESS_STEP', 'HAS_WORK_ELEMENT']);
 
 No other logic changes — the tree-building, step-nav, and warning-icon logic are structure-type-driven and work unchanged once the constants are swapped.
 
+> **Export convention**: the DFMEA `WizardSidebar` uses `export default`. Keep `export default function PFMEAWizardSidebar(...)` so the page's `import WizardSidebar from '../../../components/pfmea/PFMEAWizardSidebar'` (Task 9) and the test's default import both resolve.
+
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run frontend/src/components/pfmea/PFMEAWizardSidebar.test.tsx`
@@ -984,7 +1091,7 @@ This is additive — existing DFMEA usage (`"dfmea_tool"`/`"dfmea_trend"`) is un
 // frontend/src/components/pfmea/PFMEAGuidanceCard.test.tsx
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { PFMEAGuidanceCard } from './PFMEAGuidanceCard';
+import PFMEAGuidanceCard from './PFMEAGuidanceCard';
 
 describe('PFMEAGuidanceCard', () => {
   it('renders the step0 title from pfmea namespace', () => {
@@ -1008,7 +1115,7 @@ Expected: FAIL.
 
 Copy `frontend/src/components/dfmea/WizardGuidanceCard.tsx` → `frontend/src/components/pfmea/PFMEAGuidanceCard.tsx`. Change:
 - `useTranslation()` → `useTranslation('pfmea')` (or prefix keys with `pfmea:` — match the original's pattern).
-- Rename component to `PFMEAGuidanceCard`.
+- Rename component to `PFMEAGuidanceCard` and keep it a **default export** (`export default function PFMEAGuidanceCard`) so the page (Task 9) and test default imports resolve.
 - Keep the same props `{ stepIndex: number }`, collapsible localStorage behavior, and key shape (`wizard.guidance.step${i}.{title,purpose,points,fields,example}`).
 
 - [ ] **Step 5: Run test to verify it passes**
@@ -1050,7 +1157,7 @@ interface FunctionTreeEditorProps {
 // frontend/src/components/pfmea/FunctionTreeEditor.test.tsx
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { FunctionTreeEditor } from './FunctionTreeEditor';
+import FunctionTreeEditor from './FunctionTreeEditor';
 import type { GraphNode, GraphEdge } from '../../types';
 
 const Z = { severity: 0, occurrence: 0, detection: 0 };
@@ -1089,6 +1196,59 @@ describe('FunctionTreeEditor', () => {
     // StepFunction card shows a classification (CC/SC) selector
     expect(screen.getAllByRole('combobox').length).toBeGreaterThan(0);
   });
+
+  it('branch-local: with two steps, a new StepFunction maps to ITS step\'s ProcessItem function only', () => {
+    // Two ProcessItems each with a ProcessItemFunction; two ProcessSteps (one per item).
+    const nodes: GraphNode[] = [
+      { id: 'pi1', type: 'ProcessItem', name: '线A', ...Z },
+      { id: 'pi2', type: 'ProcessItem', name: '线B', ...Z },
+      { id: 'pif1', type: 'ProcessItemFunction', name: '完成A', ...Z },
+      { id: 'pif2', type: 'ProcessItemFunction', name: '完成B', ...Z },
+      { id: 'ps1', type: 'ProcessStep', name: '贴装A', process_number: 'OP10', ...Z },
+      { id: 'ps2', type: 'ProcessStep', name: '贴装B', process_number: 'OP20', ...Z },
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'pi1', target: 'pif1', type: 'HAS_FUNCTION' },
+      { source: 'pi2', target: 'pif2', type: 'HAS_FUNCTION' },
+      { source: 'pi1', target: 'ps1', type: 'HAS_PROCESS_STEP' },
+      { source: 'pi2', target: 'ps2', type: 'HAS_PROCESS_STEP' },
+    ];
+    const onChange = vi.fn();
+    render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={onChange} />, { wrapper: I18nTestWrapper });
+    // click the add-step-function button for ps2 (贴装B)
+    fireEvent.click(screen.getByRole('button', { name: /addStepFunction.*OP20|添加过程步骤功能.*OP20/ }));
+    const [, newEdges] = onChange.mock.calls[0];
+    const mapped = newEdges.filter((e: GraphEdge) => e.type === 'FUNCTION_MAPPED_TO');
+    expect(mapped.length).toBe(1);
+    // must map from pif2 (线B's item function), NOT pif1
+    expect(mapped[0].source).toBe('pif2');
+  });
+
+  it('branch-local: with two work elements under different steps, a new WEF maps to ITS step\'s StepFunction only', () => {
+    const nodes: GraphNode[] = [
+      { id: 'ps1', type: 'ProcessStep', name: '贴装A', process_number: 'OP10', ...Z },
+      { id: 'ps2', type: 'ProcessStep', name: '焊接B', process_number: 'OP20', ...Z },
+      { id: 'psf1', type: 'ProcessStepFunction', name: '贴装功能', ...Z },
+      { id: 'psf2', type: 'ProcessStepFunction', name: '焊接功能', ...Z },
+      { id: 'we1', type: 'ProcessWorkElement', name: '机A', classification: 'Machine', ...Z },
+      { id: 'we2', type: 'ProcessWorkElement', name: '机B', classification: 'Machine', ...Z },
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'ps1', target: 'psf1', type: 'HAS_FUNCTION' },
+      { source: 'ps2', target: 'psf2', type: 'HAS_FUNCTION' },
+      { source: 'ps1', target: 'we1', type: 'HAS_WORK_ELEMENT' },
+      { source: 'ps2', target: 'we2', type: 'HAS_WORK_ELEMENT' },
+    ];
+    const onChange = vi.fn();
+    render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={onChange} />, { wrapper: I18nTestWrapper });
+    // click add-work-element-function for we2 (机B, under ps2)
+    fireEvent.click(screen.getByRole('button', { name: /addWorkElementFunction.*机B|添加作业要素功能.*机B/ }));
+    const [, newEdges] = onChange.mock.calls[0];
+    const mapped = newEdges.filter((e: GraphEdge) => e.type === 'FUNCTION_MAPPED_TO');
+    expect(mapped.length).toBe(1);
+    // must map from psf2 (焊接B's step function), NOT psf1
+    expect(mapped[0].source).toBe('psf2');
+  });
 });
 ```
 
@@ -1116,7 +1276,7 @@ interface FunctionTreeEditorProps {
 const Z = { severity: 0, occurrence: 0, detection: 0 };
 const newId = (p: string) => `w${crypto.randomUUID()}_${p}`;
 
-export function FunctionTreeEditor({ nodes, edges, fmeaId, onChange }: FunctionTreeEditorProps) {
+export default function FunctionTreeEditor({ nodes, edges, fmeaId, onChange }: FunctionTreeEditorProps) {
   const { t } = useTranslation('pfmea');
   void fmeaId;
 
@@ -1128,25 +1288,45 @@ export function FunctionTreeEditor({ nodes, edges, fmeaId, onChange }: FunctionT
     onChange(nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)), edges);
   };
 
-  const addFunction = (parentId: string, fnType: 'ProcessItemFunction' | 'ProcessStepFunction' | 'ProcessWorkElementFunction') => {
+  // Branch-local parent resolution for FUNCTION_MAPPED_TO (spec §5 Step 2 + §8):
+  //  - ProcessStepFunction  ← maps FROM the ProcessItemFunction of the ProcessItem
+  //                              that owns this ProcessStep (HAS_PROCESS_STEP parent).
+  //  - ProcessWorkElementFunction ← maps FROM the ProcessStepFunction of the ProcessStep
+  //                              that owns this WorkElement (HAS_WORK_ELEMENT parent).
+  //  - ProcessItemFunction   ← no FUNCTION_MAPPED_TO parent (top of the chain).
+  // `structureParentId` is the id of the structure node this function is being added under
+  // (ProcessItem / ProcessStep / ProcessWorkElement), passed from the add-button.
+  const itemFunctionOf = (processItemId: string): GraphNode | undefined =>
+    nodes.find((n) => n.type === 'ProcessItemFunction' &&
+      edges.some((e) => e.source === processItemId && e.target === n.id && e.type === 'HAS_FUNCTION'));
+  const stepFunctionOf = (processStepId: string): GraphNode | undefined =>
+    nodes.find((n) => n.type === 'ProcessStepFunction' &&
+      edges.some((e) => e.source === processStepId && e.target === n.id && e.type === 'HAS_FUNCTION'));
+  const processItemOfStep = (stepId: string): GraphNode | undefined =>
+    nodes.find((n) => n.type === 'ProcessItem' &&
+      edges.some((e) => e.source === n.id && e.target === stepId && e.type === 'HAS_PROCESS_STEP'));
+
+  const addFunction = (
+    structureParentId: string,
+    fnType: 'ProcessItemFunction' | 'ProcessStepFunction' | 'ProcessWorkElementFunction',
+  ) => {
     const fid = newId('func');
     const fn: GraphNode = { id: fid, type: fnType, name: '', ...Z } as GraphNode;
-    const e1: GraphEdge = { source: parentId, target: fid, type: 'HAS_FUNCTION' };
-    let newEdges = [...edges, e1];
-    // FUNCTION_MAPPED_TO: link to parent function chain
-    // StepFunction -> maps from an ItemFunction; WorkElementFunction -> maps from a StepFunction
+    const newEdges: GraphEdge[] = [{ source: structureParentId, target: fid, type: 'HAS_FUNCTION' }];
     if (fnType === 'ProcessStepFunction') {
-      const parentItemFunc = itemFuncs[0];
-      if (parentItemFunc) newEdges.push({ source: parentItemFunc.id, target: fid, type: 'FUNCTION_MAPPED_TO' });
+      // structureParentId is a ProcessStep; find its ProcessItem, then that item's function.
+      const item = processItemOfStep(structureParentId);
+      const itemFunc = item ? itemFunctionOf(item.id) : undefined;
+      if (itemFunc) newEdges.push({ source: itemFunc.id, target: fid, type: 'FUNCTION_MAPPED_TO' });
     } else if (fnType === 'ProcessWorkElementFunction') {
-      const parentStepFunc = nodes.find((n) => n.type === 'ProcessStepFunction' &&
-        edges.some((e) => e.source === parentId && e.type === 'HAS_WORK_ELEMENT' ? false : false)); // placeholder; real link below
-      // Link WEF to the StepFunction of the step that owns this work element
-      const stepFuncOfWe = nodes.find((n) => n.type === 'ProcessStepFunction' &&
-        edges.some((e) => e.target === n.id && e.type === 'FUNCTION_MAPPED_TO'));
-      if (stepFuncOfWe) newEdges.push({ source: stepFuncOfWe.id, target: fid, type: 'FUNCTION_MAPPED_TO' });
+      // structureParentId is a ProcessWorkElement; find its ProcessStep, then that step's function.
+      const step = nodes.find((n) => n.type === 'ProcessStep' &&
+        edges.some((e) => e.source === n.id && e.target === structureParentId && e.type === 'HAS_WORK_ELEMENT'));
+      const stepFunc = step ? stepFunctionOf(step.id) : undefined;
+      if (stepFunc) newEdges.push({ source: stepFunc.id, target: fid, type: 'FUNCTION_MAPPED_TO' });
     }
-    onChange([...nodes, fn], newEdges);
+    // ProcessItemFunction: no FUNCTION_MAPPED_TO parent (chain root).
+    onChange([...nodes, fn], [...edges, ...newEdges]);
   };
 
   const renderFunctionCard = (fn: GraphNode, allowClass: boolean, classOptions: { value: string; label: string }[]) => (
@@ -1206,7 +1386,7 @@ export function FunctionTreeEditor({ nodes, edges, fmeaId, onChange }: FunctionT
 }
 ```
 
-> The `addFunction` FUNCTION_MAPPED_TO linking logic above is deliberately simple (links to the first available parent function). Refine during implementation so that each `ProcessStepFunction` links from the `ProcessItemFunction` and each `ProcessWorkElementFunction` links from the `ProcessStepFunction` belonging to the same step — keep the test's assertion (`HAS_FUNCTION` + `FUNCTION_MAPPED_TO` both present after adding a step function) true. Remove the dead placeholder line.
+> The `addFunction` above resolves the `FUNCTION_MAPPED_TO` parent **branch-locally** (StepFunction ← its step's ProcessItem's ItemFunction; WorkElementFunction ← its work element's ProcessStep's StepFunction). The two branch-local tests below (Step 1) are the regression guard: with two ProcessSteps and two WorkElements, a WEF must map only to its own step's StepFunction — never a sibling step's. The `itemFuncs` variable declared earlier is now unused for linking (branch resolution uses `itemFunctionOf`); remove `itemFuncs` if it becomes unused, or keep it for rendering the item-function list.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1246,7 +1426,7 @@ interface RiskTableProps {
 // frontend/src/components/pfmea/RiskTable.test.tsx
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { RiskTable } from './RiskTable';
+import RiskTable, { computeSeverity, aggregateSpecialCharacteristic } from './RiskTable';
 import type { GraphNode, GraphEdge } from '../../types';
 
 const Z = { severity: 0, occurrence: 0, detection: 0 };
@@ -1317,10 +1497,59 @@ describe('RiskTable', () => {
     render(<RiskTable nodes={nodes} edges={edges} fmeaId="f1" onChange={() => {}} />, { wrapper: I18nTestWrapper });
     expect(screen.getByText(/SC/)).toBeInTheDocument();
   });
+
+  // --- stable pure-function tests (recommended over fragile dialog interaction) ---
+  describe('computeSeverity', () => {
+    it('returns the max of the three sub-fields', () => {
+      expect(computeSeverity(4, 8, 8)).toBe(8);
+      expect(computeSeverity(0, 0, 0)).toBe(0);
+      expect(computeSeverity(9, 3, 1)).toBe(9);
+    });
+  });
+
+  describe('aggregateSpecialCharacteristic', () => {
+    const Z2 = { severity: 0, occurrence: 0, detection: 0 };
+    it('CC wins over SC', () => {
+      const stepFunc = { id: 'psf', type: 'ProcessStepFunction', name: 'f', classification: 'CC', ...Z2 } as GraphNode;
+      const wefs = [{ id: 'wef', type: 'ProcessWorkElementFunction', name: 'n', classification: 'SC', ...Z2 } as GraphNode];
+      const edges: GraphEdge[] = [{ source: 'psf', target: 'wef', type: 'FUNCTION_MAPPED_TO' }];
+      expect(aggregateSpecialCharacteristic(stepFunc, wefs, edges).tag).toBe('CC');
+    });
+    it('lists SC WEF names when <=2 and no CC', () => {
+      const stepFunc = { id: 'psf', type: 'ProcessStepFunction', name: 'f', classification: '', ...Z2 } as GraphNode;
+      const wefs = [
+        { id: 'wef1', type: 'ProcessWorkElementFunction', name: '压力', classification: 'SC', ...Z2 } as GraphNode,
+        { id: 'wef2', type: 'ProcessWorkElementFunction', name: '温度', classification: 'SC', ...Z2 } as GraphNode,
+      ];
+      const edges: GraphEdge[] = [
+        { source: 'psf', target: 'wef1', type: 'FUNCTION_MAPPED_TO' },
+        { source: 'psf', target: 'wef2', type: 'FUNCTION_MAPPED_TO' },
+      ];
+      const r = aggregateSpecialCharacteristic(stepFunc, wefs, edges);
+      expect(r.tag).toBe('SC');
+      expect(r.label).toBe('SC(压力/温度)');
+    });
+    it('collapses to SC×N when >2', () => {
+      const stepFunc = { id: 'psf', type: 'ProcessStepFunction', name: 'f', classification: '', ...Z2 } as GraphNode;
+      const wefs = [1, 2, 3].map((i) => ({ id: `wef${i}`, type: 'ProcessWorkElementFunction', name: `n${i}`, classification: 'SC', ...Z2 } as GraphNode));
+      const edges: GraphEdge[] = wefs.map((w) => ({ source: 'psf', target: w.id, type: 'FUNCTION_MAPPED_TO' }));
+      expect(aggregateSpecialCharacteristic(stepFunc, wefs, edges).label).toBe('SC×3');
+    });
+    it('returns - when none', () => {
+      const stepFunc = { id: 'psf', type: 'ProcessStepFunction', name: 'f', classification: '', ...Z2 } as GraphNode;
+      expect(aggregateSpecialCharacteristic(stepFunc, [], []).label).toBe('-');
+    });
+    it('only counts WEFs linked to THIS step function (branch-local)', () => {
+      const stepFunc = { id: 'psf', type: 'ProcessStepFunction', name: 'f', classification: '', ...Z2 } as GraphNode;
+      const wefs = [{ id: 'wef', type: 'ProcessWorkElementFunction', name: '压力', classification: 'SC', ...Z2 } as GraphNode];
+      const edges: GraphEdge[] = [{ source: 'OTHER', target: 'wef', type: 'FUNCTION_MAPPED_TO' }]; // linked to a different step func
+      expect(aggregateSpecialCharacteristic(stepFunc, wefs, edges).label).toBe('-');
+    });
+  });
 });
 ```
 
-> The severity-dialog interaction test is fragile against exact DOM structure. If hard to stabilize, replace the second test with a pure-function unit test of the severity aggregator exported from this file (see Step 3) — export `computeSeverity(plant, customer, user)` and `aggregateSpecialCharacteristic(stepFunc, wefs, edges)` and test those directly. Prefer the pure-function tests for stability; keep one rendering test for the read-only CC display and the O/D-disabled gate.
+> The severity-dialog interaction test above (`writes severity = max...`) is fragile against exact DOM structure. **Prefer the `computeSeverity`/`aggregateSpecialCharacteristic` pure-function tests** (they are stable and are the regression guard for spec §8's aggregation rule + the `severity=max` contract). Keep one rendering test for the read-only CC display and the O/D-disabled gate; drop the dialog-interaction test if flaky.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1364,7 +1593,7 @@ export function aggregateSpecialCharacteristic(
   return { label: `SC×${scWefs.length}`, tag: 'SC' };
 }
 
-export function RiskTable({ nodes, edges, fmeaId, onChange }: RiskTableProps) {
+export default function RiskTable({ nodes, edges, fmeaId, onChange }: RiskTableProps) {
   const { t } = useTranslation('pfmea');
   void fmeaId;
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
@@ -1910,28 +2139,87 @@ git commit -m "feat(pfmea): route PFMEA wizard + list navigation (create & draft
 
 **Files:**
 - Modify: `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx:1071-1092` (Class column)
-- Test: `frontend/src/pages/planning/fmea/FMEAEditorPage.test.tsx` (extend)
+- Create: `frontend/src/pages/planning/fmea/FMEAEditorPage.test.tsx` (no editor page test exists today — only `FMEAEditorDragSort.test.tsx` and `FMEAVersionSnapshot.test.tsx` do)
+- Reference (do not modify): `frontend/src/pages/planning/fmea/FMEAEditorDragSort.test.tsx` and `FMEAVersionSnapshot.test.tsx` — copy their i18n/router/mock setup into the new test file.
 
-- [ ] **Step 1: Add the failing test**
+**Interfaces:**
+- Consumes: `aggregateSpecialCharacteristic` (named export) from `../../components/pfmea/RiskTable` (Task 8).
+- Produces: PFMEA Class column is read-only, reading function-node `classification` aggregated per spec §8; DFMEA Filter Code column unchanged (still editable on `FailureMode.classification`).
+
+- [ ] **Step 1: Inspect the existing editor test harness**
+
+Read `frontend/src/pages/planning/fmea/FMEAEditorDragSort.test.tsx` and `frontend/src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx` in full. Note the i18n wrapper, router setup, `getFMEA` mock shape, and how they construct a `FMEADocument` with `graph_data`. The new `FMEAEditorPage.test.tsx` will reuse this exact harness.
+
+- [ ] **Step 2: Create `FMEAEditorPage.test.tsx` with the failing tests**
 
 ```typescript
-// in FMEAEditorPage.test.tsx (append)
-it('PFMEA Class column is read-only and reads function-node classification (CC)', () => {
-  // Seed a PFMEA doc where ProcessStepFunction.classification === 'CC' and FailureMode.classification is empty
-  // render editor, assert the Class cell shows 'CC' and is not an editable Select (read-only text/Tag)
-});
+// frontend/src/pages/planning/fmea/FMEAEditorPage.test.tsx
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
+// Reuse the SAME wrapper/harness pattern as FMEAEditorDragSort.test.tsx (i18n + router + getFMEA mock).
+// Copy the imports, the i18n test provider, and the getFMEA mock setup from that file.
 
-it('DFMEA Filter Code column unchanged (still editable on FailureMode)', () => {
-  // Seed a DFMEA doc, assert the Class/FilterCode cell is still the editable Select bound to FailureMode.classification
+vi.mock('../../../api/fmea', () => ({ getFMEA: vi.fn(), updateFMEA: vi.fn(), deleteFMEA: vi.fn() }));
+import { getFMEA } from '../../../api/fmea';
+import type { FMEADocument, GraphNode, GraphEdge } from '../../../types';
+
+const Z = { severity: 0, occurrence: 0, detection: 0 };
+
+const pfmeaWithCC = (): FMEADocument => ({
+  fmea_id: '00000000-0000-0000-0000-000000000001',
+  document_no: 'PFMEA-2026-001', title: 'SMT焊接生产线',
+  fmea_type: 'PFMEA', status: 'approved', lock_version: 1,
+  graph_data: {
+    nodes: [
+      { id: 'psf', type: 'ProcessStepFunction', name: '准确贴装', classification: 'CC', ...Z } as GraphNode,
+      { id: 'fm', type: 'FailureMode', name: '贴装偏移', classification: '', ...Z } as GraphNode, // FM classification empty (new model)
+      { id: 'fe', type: 'FailureEffect', name: '功能丧失', severity: 8, ...Z } as GraphNode,
+      { id: 'fc', type: 'FailureCause', name: '吸嘴磨损', occurrence: 4, ...Z } as GraphNode,
+      { id: 'pc', type: 'PreventionControl', name: '校准', ...Z } as GraphNode,
+      { id: 'dc', type: 'DetectionControl', name: 'AOI', detection: 3, ...Z } as GraphNode,
+    ],
+    edges: [
+      { source: 'psf', target: 'fm', type: 'HAS_FAILURE_MODE' },
+      { source: 'fm', target: 'fe', type: 'EFFECT_OF' },
+      { source: 'fc', target: 'fm', type: 'CAUSE_OF' },
+      { source: 'fc', target: 'pc', type: 'PREVENTED_BY' },
+      { source: 'fc', target: 'dc', type: 'DETECTED_BY' },
+    ] as GraphEdge[],
+    wizardScope: { wizard_completed: true },
+  },
+} as unknown as FMEADocument);
+
+describe('FMEAEditorPage Class column', () => {
+  beforeEach(() => { vi.mocked(getFMEA).mockResolvedValue(pfmeaWithCC()); });
+
+  it('PFMEA: Class column is read-only and shows CC from ProcessStepFunction.classification', async () => {
+    render(<FMEAEditorPageWrapper />, { wrapper: EditorTestHarness }); // reuse harness from FMEAEditorDragSort.test
+    await screen.findByText(/SMT焊接生产线|PFMEA/i);
+    // The Class cell should show 'CC' (from psf.classification), and there should be NO editable
+    // Select whose onChange writes to the FailureMode node for PFMEA.
+    expect(screen.getAllByText('CC').length).toBeGreaterThan(0);
+  });
+
+  it('DFMEA: Filter Code column unchanged (editable Select on FailureMode.classification)', async () => {
+    const dfmea = { ...pfmeaWithCC(), fmea_type: 'DFMEA' } as unknown as FMEADocument;
+    vi.mocked(getFMEA).mockResolvedValue(dfmea);
+    render(<FMEAEditorPageWrapper />, { wrapper: EditorTestHarness });
+    await screen.findByText(/DFMEA/i);
+    // For DFMEA the Class column must remain the editable Select bound to FailureMode.classification.
+    const selects = screen.getAllByRole('combobox');
+    expect(selects.length).toBeGreaterThan(0); // Filter Code Select present
+  });
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+> `FMEAEditorPageWrapper` / `EditorTestHarness` — names placeholder for the harness you copy from `FMEAEditorDragSort.test.tsx`. If that file renders `FMEAEditorPage` directly via a route, mirror it exactly (same `MemoryRouter` + `ProtectedRoute`/auth mock + i18n provider). The assertions are deliberately tolerant (presence of `CC` text / presence of a combobox) to avoid coupling to exact column DOM; tighten only if the existing harness makes stronger assertions straightforward. If rendering the full editor in-test is too heavy (auth/permission deps), fall back to a unit test of the column's `render` function extracted into a pure helper — but prefer the rendering test since the deliverable is an integrated column change.
+
+- [ ] **Step 3: Run to verify it fails**
 
 Run: `npx vitest run frontend/src/pages/planning/fmea/FMEAEditorPage.test.tsx`
-Expected: FAIL (PFMEA Class column currently reads `FailureMode.classification`).
+Expected: FAIL (PFMEA Class column currently reads `FailureMode.classification`, which is empty → no `CC` shown).
 
-- [ ] **Step 3: Modify the Class column**
+- [ ] **Step 4: Modify the Class column**
 
 In `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx` (lines 1071-1092), branch by `isDFMEA`. Keep the DFMEA branch exactly as-is (Filter Code on `FailureMode.classification`, editable). Replace the PFMEA branch (`!isDFMEA`) with a read-only aggregation that reads the row's function node:
 
@@ -1970,12 +2258,12 @@ In `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx` (lines 1071-1092), bran
 ```
 Import `aggregateSpecialCharacteristic` from `../../components/pfmea/RiskTable` (exported in Task 8). Ensure `nodes` and `edges` are in scope in the column render (they are — the editor holds them in state like the wizard).
 
-- [ ] **Step 4: Run to verify it passes**
+- [ ] **Step 5: Run to verify it passes**
 
 Run: `npx vitest run frontend/src/pages/planning/fmea/FMEAEditorPage.test.tsx`
 Expected: PASS (PFMEA read-only + DFMEA unchanged).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/src/pages/planning/fmea/FMEAEditorPage.tsx frontend/src/pages/planning/fmea/FMEAEditorPage.test.tsx
@@ -2005,5 +2293,9 @@ Expected: `tsc --noEmit` + `vite build` succeed (no type errors; PFMEA namespace
 ## Self-review notes
 
 - **Spec coverage**: Every spec section maps to a task — Steps 0–6 (Tasks 9–13), CC/SC model §8 (Tasks 7+8+15), editor compat §9 (Task 15), three-tier severity (Tasks 4+8), pfmea_tool/trend backend §6 (Task 1), routing §7 (Task 14), validation §10 (Task 4), tests §11 (per-task tests), scope §12 (exclusions respected: no FC↔WEF edge, no FailureCause.special_characteristic, DFMEA untouched except additive ScopeTagField union + PFMEA-only editor branch).
-- **No placeholders**: every code step shows real code; the two "copy-then-adapt" tasks (5, 9) reference the exact source file + show the specific edits. Where a test interaction is fragile (Step 4 severity dialog), a stable pure-function alternative (`computeSeverity`/`aggregateSpecialCharacteristic`) is provided and exported.
-- **Type consistency**: `PfmeaStepValidation` field names (`step1Complete`..`step5Complete`) match the finish-gate usage in Task 9. `aggregateSpecialCharacteristic`/`computeSeverity` are defined in Task 8 and reused in Task 15 (imported). `createWizardFailureChain` signature unchanged (called with `ProcessStepFunction` id). `ScopeTriggerType` extended additively.
+- **LLM schema alignment (review fix #1)**: Task 1 prompts now return `{"suggestions":[{"name","confidence","explanation"}]}` matching `SuggestionList.model_validate` (not `{name,"reason"}`). Task 1 Step 7 tests template formatting + `SuggestionList` validation as the regression guard; Step 8 confirms the rule engine returns empty (not raises) for the new scope triggers so they fall through to LLM.
+- **Branch-local FUNCTION_MAPPED_TO (review fix #2)**: Task 7 `addFunction` resolves the mapped parent by walking the structure tree (StepFunction ← its step's ProcessItem's ItemFunction; WEF ← its work element's ProcessStep's StepFunction). Two branch-local tests in Task 7 (two steps / two work elements) assert WEF maps only to its own step's StepFunction. Task 4 validation's `step2Complete` is strengthened to reject wrong-branch mapping, with a failing-branch test.
+- **Export consistency (review fix #3)**: all four PFMEA components use **default exports** (matching the existing DFMEA `WizardSidebar`/`WizardGuidanceCard` convention). All page + test imports use default imports (`import X from '...'`); only the pure helpers `computeSeverity`/`aggregateSpecialCharacteristic` remain named exports (imported by Task 8 tests and Task 15). No `{ NamedComponent }` component imports remain.
+- **Editor test file (review fix #4)**: Task 15 creates a new `FMEAEditorPage.test.tsx` (none exists today — only `FMEAEditorDragSort.test.tsx` / `FMEAVersionSnapshot.test.tsx`), reusing their i18n/router/mock harness; it does not reference a non-existent file.
+- **No placeholders**: every code step shows real code; the two "copy-then-adapt" tasks (5, 9) reference the exact source file + show the specific edits. Pure-function tests (`computeSeverity`/`aggregateSpecialCharacteristic`) are the stable alternative to the fragile severity-dialog interaction test.
+- **Type consistency**: `PfmeaStepValidation` field names (`step1Complete`..`step5Complete`) match the finish-gate usage in Task 9. `aggregateSpecialCharacteristic`/`computeSeverity` are defined in Task 8 and reused in Task 15 (imported). `createWizardFailureChain` signature unchanged (called with `ProcessStepFunction` id). `ScopeTriggerType` extended additively. Step numbering verified unique within each task (Task 1: 1–10; Task 15: 1–6).
