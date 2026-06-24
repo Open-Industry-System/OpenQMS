@@ -74,7 +74,7 @@
 - `backend/tests/test_recommendation_scope.py` — `resolve_product_line_codes` cases + permission intersection.
 - `backend/tests/test_product_line_type_field.py` — type field create/update + clear-null + invalid-type 400.
 - `backend/tests/test_search_product_type.py` — search/QA product_type_code filter.
-- `backend/tests/conftest.py` — add shared fixtures (admin_client/viewer_client/request_scope_all/request_scope_restricted_other_factory/product_type_power) building on existing `db`/`default_factory`/`admin_user`.
+- `backend/tests/conftest.py` — add shared fixtures (admin_client/viewer_user/request_scope_all/request_scope_restricted_other_factory/product_type_power) building on existing `db`/`default_factory`/`admin_user`.
 
 ---
 
@@ -181,10 +181,10 @@ git commit -m "feat(product_type): add ProductType model + migration with produc
 **Files:**
 - Modify: `backend/tests/conftest.py`
 
-> **Why this comes first:** Tasks 3-7 depend on `admin_client`, `viewer_client`, `request_scope_all`, `request_scope_restricted_other_factory`, `product_type_power`. Existing conftest already provides `db` (AsyncSession), `default_factory` (Factory), `admin_user` (User) — we build on those. `require_admin` depends on `get_current_user` (`permissions.py:145`), so admin clients MUST override `get_current_user` too, not just `get_request_scope`/`get_db`.
+> **Why this comes first:** Tasks 3-7 depend on `admin_client`, `viewer_user`, `request_scope_all`, `request_scope_restricted_other_factory`, `product_type_power`. Existing conftest already provides `db` (AsyncSession), `default_factory` (Factory), `admin_user` (User) — we build on those. `require_admin` depends on `get_current_user` (`permissions.py:145`), so admin clients MUST override `get_current_user` too, not just `get_request_scope`/`get_db`.
 
 **Interfaces:**
-- Produces: `admin_client`, `viewer_client`, `request_scope_all`, `request_scope_restricted_other_factory`, `product_type_power` — all building on existing `db`/`default_factory`/`admin_user`.
+- Produces: `admin_client`, `viewer_user`, `request_scope_all`, `request_scope_restricted_other_factory`, `product_type_power` — all building on existing `db`/`default_factory`/`admin_user`.
 
 - [ ] **Step 1: Inspect existing conftest**
 
@@ -193,7 +193,7 @@ Confirm `db`, `default_factory`, `admin_user` exist and note their imports.
 
 - [ ] **Step 2: Add shared fixtures**
 
-Append to `backend/tests/conftest.py` (adapt imports to what's already present; mirror the pattern in `tests/test_graph_api.py:144-188`):
+Append to `backend/tests/conftest.py` (use `@pytest_asyncio.fixture` to match the existing fixtures at `conftest.py:108,129`; `pytest_asyncio` is already imported there — confirm with `grep -n "import pytest_asyncio\|from pytest_asyncio" tests/conftest.py`). Mirror the override pattern in `tests/test_graph_api.py:144-188`:
 ```python
 import uuid
 from httpx import ASGITransport, AsyncClient
@@ -212,8 +212,10 @@ def _scope_for(user, default_factory, accessible_factory_ids=None, pl_mode="ALL"
     )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def admin_client(db, admin_user, default_factory):
+    """ASGI client authenticated as admin. Overrides get_current_user (required by require_admin),
+    get_db, and get_request_scope. Clears overrides on teardown."""
     scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
     app.dependency_overrides[get_current_user] = lambda: admin_user
     app.dependency_overrides[get_db] = lambda: db
@@ -224,40 +226,52 @@ async def admin_client(db, admin_user, default_factory):
     app.dependency_overrides.clear()
 
 
-@pytest.fixture
-async def viewer_client(db, admin_user, default_factory):
-    # Reuse admin_user as a stand-in but give it a non-admin (viewer-like) permission by
-    # NOT overriding get_user_permission here; the API require_admin guard checks role via
-    # get_current_user. For a true viewer, build a separate user fixture if needed. For this
-    # plan, viewer_client uses admin_user but tests assert 403 by overriding get_user_permission
-    # to return VIEW in the specific test (see test_product_type_api.py).
-    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=[default_factory.id])
-    app.dependency_overrides[get_current_user] = lambda: admin_user
-    app.dependency_overrides[get_db] = lambda: db
-    app.dependency_overrides[get_request_scope] = lambda: scope
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-    app.dependency_overrides.clear()
+@pytest_asyncio.fixture
+async def viewer_user(db: AsyncSession, default_factory: Factory) -> User:
+    """Create a user whose role is non-admin so require_admin (permissions.py:145) raises 403.
+    Mirrors admin_user (conftest.py:129) but uses a viewer RoleDefinition."""
+    from app.models.role import RoleDefinition
+    result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "viewer"))
+    role = result.scalar_one_or_none()
+    if role is None:
+        role = RoleDefinition(role_key="viewer", name_zh="只读用户", name_en="Viewer", is_system=True, is_active=True)
+        db.add(role)
+        await db.flush()
+    user = User(
+        user_id=uuid.uuid4(),
+        username=f"test_viewer_{uuid.uuid4().hex[:8]}",
+        display_name="Test Viewer",
+        password_hash="hashed",
+        role_id=role.id,
+        legacy_role="viewer",
+        is_active=True,
+        factory_id=default_factory.id,
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+    return user
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def request_scope_all(admin_user, default_factory):
     return _scope_for(admin_user, default_factory, accessible_factory_ids=None)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def request_scope_restricted_other_factory(admin_user, default_factory):
     other = uuid.uuid4()
     return _scope_for(admin_user, default_factory, accessible_factory_ids=[other])
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def product_type_power(db, admin_user):
     return await create_product_type(db, "POWER", "电源类", None, admin_user.user_id)
 ```
 
-> `viewer_client` note: `require_admin` (`permissions.py:145`) checks `user.role_definition` for admin role via `get_current_user`. Since we override `get_current_user` to return `admin_user` (a real admin), `viewer_client` would pass admin guard. For a genuine 403 test, the specific test overrides `get_user_permission` to VIEW (see Task 4 Step 2). This mirrors `test_graph_api.py:258-294` which swaps `get_request_scope` per-test for admin/viewer. Keep this in mind when writing 403 tests — override the permission/scope in the test, not the fixture, when you need a non-admin.
+> **No `viewer_client` fixture.** `require_admin` (`permissions.py:145`) checks the user's role via `get_current_user`; a client backed by `admin_user` would pass the admin guard, so a `viewer_client` fixture would be misleading. The 403 test in Task 4 builds its own ASGI client inline with `viewer_user` (which has a non-admin role), exactly like `test_graph_api.py:258-294` swaps scope per-test. `viewer_user` is the fixture non-admin tests depend on.
+
+> **`admin_user` side-effect:** the existing `admin_user` fixture idempotently pre-creates `ProductLine(code="DC-DC-100", factory_id=default_factory.id)` with `product_type_code=None` (conftest.py:136-146). Tests below use **unique product-line codes** (e.g. `PT-DC-100`, `PT-AC-200`, `PT-MOTOR-100`) to avoid PK collisions; tests that specifically need to type the existing `DC-DC-100` use `update_product_line`, not `create_product_line`.
 
 - [ ] **Step 3: Verify fixtures load**
 
@@ -297,22 +311,23 @@ from app.services.product_type_service import create_product_type
 
 @pytest.mark.asyncio
 async def test_create_product_line_with_type(db, default_factory, admin_user):
+    # NOTE: admin_user fixture pre-creates DC-DC-100; use a unique code to avoid PK collision.
     await create_product_type(db, "POWER", "电源类", None, admin_user.user_id)
-    pl = await create_product_line(db, code="DC-DC-100", name="DC-DC 100W", factory_id=default_factory.id, product_type_code="POWER")
+    pl = await create_product_line(db, code="PT-DC-100", name="DC-DC 100W", factory_id=default_factory.id, product_type_code="POWER")
     assert pl.product_type_code == "POWER"
-    assert (await get_product_line(db, "DC-DC-100")).product_type_code == "POWER"
+    assert (await get_product_line(db, "PT-DC-100")).product_type_code == "POWER"
 
 
 @pytest.mark.asyncio
 async def test_create_product_line_invalid_type_raises(db, default_factory, admin_user):
     with pytest.raises(ValueError):
-        await create_product_line(db, code="X-1", name="X", factory_id=default_factory.id, product_type_code="NOPE")
+        await create_product_line(db, code="PT-X-1", name="X", factory_id=default_factory.id, product_type_code="NOPE")
 
 
 @pytest.mark.asyncio
 async def test_update_product_line_clears_type_to_null(db, default_factory, admin_user):
     await create_product_type(db, "POWER", "电源类", None, admin_user.user_id)
-    pl = await create_product_line(db, code="DC-DC-100", name="DC-DC 100W", factory_id=default_factory.id, product_type_code="POWER")
+    pl = await create_product_line(db, code="PT-CLR-1", name="Clearable", factory_id=default_factory.id, product_type_code="POWER")
     # Sentinel UNSET for name/is_active; explicit None for product_type_code clears it.
     updated = await update_product_line(db, pl, name=None, is_active=None, product_type_code=None)
     assert updated.product_type_code is None
@@ -499,8 +514,6 @@ class ProductTypeListResponse(BaseModel):
 `backend/tests/test_product_type_api.py`:
 ```python
 import pytest
-from unittest.mock import AsyncMock, patch
-from app.core.permissions import PermissionLevel
 from app.models.product_line import ProductLine
 
 
@@ -512,46 +525,17 @@ async def test_create_product_type_admin_ok(admin_client):
 
 
 @pytest.mark.asyncio
-async def test_create_product_type_viewer_forbidden(db, admin_user, default_factory):
-    # Override get_user_permission to VIEW (non-admin) for this test only.
+async def test_create_product_type_non_admin_forbidden(db, viewer_user, default_factory):
+    # Build an ASGI client authenticated as viewer_user (non-admin role) — require_admin raises 403.
     from app.main import app
-    from app.core.deps import get_current_user, get_db, get_request_scope
-    from httpx import ASGITransport, AsyncClient
+    from app.core.deps import get_current_user, get_db, get_request_scope, RequestScope
     from app.core.factory_scope import FactoryScope, ProductLineScope
-    from app.core.deps import RequestScope
+    from httpx import ASGITransport, AsyncClient
     scope = RequestScope(
         factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
         effective_factory_id=default_factory.id,
         pl_scope=ProductLineScope(mode="ALL", codes=None),
-        user=admin_user,
-    )
-    app.dependency_overrides[get_current_user] = lambda: admin_user
-    app.dependency_overrides[get_db] = lambda: db
-    app.dependency_overrides[get_request_scope] = lambda: scope
-    # Make require_admin fail by patching the role check: require_admin checks user.role_definition.
-    # Simpler: patch get_user_permission so the endpoint's own guard (none here) — but require_admin
-    # is a FastAPI dependency on get_current_user only. To force 403, set admin_user.role to non-admin.
-    try:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            resp = await ac.post("/api/product-types", json={"code": "X", "name": "X"})
-        # admin_user has admin role → 200. To assert 403, use a viewer user (see note).
-        assert resp.status_code in (200, 403)
-    finally:
-        app.dependency_overrides.clear()
-```
-
-> **Replace the 403 test** with a real viewer. `require_admin` (`permissions.py:145`) returns the user if `user.role_definition` is admin-ish; otherwise raises 403. To get a true 403, create a viewer `User` whose `role_definition` is non-admin. Concretely, add a `viewer_user` fixture to conftest (mirror `admin_user` but with a viewer role_definition), and use it. For this task, the minimal robust assertion is:
-```python
-@pytest.mark.asyncio
-async def test_create_product_type_non_admin_forbidden(db, viewer_user, default_factory):
-    from app.main import app
-    from app.core.deps import get_current_user, get_db, get_request_scope, RequestScope
-    from httpx import ASGITransport, AsyncClient
-    from app.core.factory_scope import FactoryScope, ProductLineScope
-    scope = RequestScope(
-        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
-        effective_factory_id=default_factory.id, pl_scope=ProductLineScope(mode="ALL", codes=None), user=viewer_user,
+        user=viewer_user,
     )
     app.dependency_overrides[get_current_user] = lambda: viewer_user
     app.dependency_overrides[get_db] = lambda: db
@@ -563,14 +547,13 @@ async def test_create_product_type_non_admin_forbidden(db, viewer_user, default_
         assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
-```
-Add `viewer_user` fixture to conftest (Task 2): same as `admin_user` but set `role_definition.role_key = "viewer"` / non-system role so `require_admin` raises. Inspect `admin_user` in conftest.py:130 to mirror it.
 
-```python
+
 @pytest.mark.asyncio
 async def test_delete_product_type_refused_when_active_product_line_references(admin_client, db, default_factory):
     await admin_client.post("/api/product-types", json={"code": "POWER", "name": "电源类"})
-    db.add(ProductLine(code="DC-DC-100", name="DC-DC 100W", factory_id=default_factory.id, product_type_code="POWER"))
+    # Use a unique product-line code (admin_user fixture pre-creates DC-DC-100).
+    db.add(ProductLine(code="PT-REF-1", name="Ref PL", factory_id=default_factory.id, product_type_code="POWER"))
     await db.commit()
     resp = await admin_client.delete("/api/product-types/POWER")
     assert resp.status_code == 400
@@ -586,6 +569,8 @@ async def test_delete_product_type_soft_deletes_when_no_references(admin_client)
     motor = next(i for i in resp.json()["items"] if i["code"] == "MOTOR")
     assert motor["is_active"] is False
 ```
+
+> The `viewer_user` fixture is defined in Task 2's conftest additions. It has a non-admin `RoleDefinition` so `require_admin` (`permissions.py:145`) raises 403 — no per-test permission patching needed.
 
 - [ ] **Step 3: Run tests to verify they fail**
 
@@ -772,7 +757,7 @@ app.include_router(product_type_router)
 - [ ] **Step 7: Run tests to verify they pass**
 
 Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/test_product_type_api.py -x -v`
-Expected: PASS (4 tests, after adding `viewer_user` fixture to conftest).
+Expected: PASS (4 tests). `viewer_user` is provided by the Task 2 conftest additions.
 
 - [ ] **Step 8: Commit**
 
@@ -804,45 +789,46 @@ from app.services.product_type_service import create_product_type
 
 
 async def _seed_two_types(db, default_factory, request_scope_all):
+    # Use unique codes (PT-* prefix) — admin_user fixture pre-creates DC-DC-100.
     await create_product_type(db, "POWER", "电源类", None, request_scope_all.user.user_id)
     await create_product_type(db, "MOTOR", "电机类", None, request_scope_all.user.user_id)
-    await create_product_line(db, "DC-DC-100", "DC-DC 100W", factory_id=default_factory.id, product_type_code="POWER")
-    await create_product_line(db, "AC-DC-200", "AC-DC 200W", factory_id=default_factory.id, product_type_code="POWER")
-    await create_product_line(db, "MOTOR-100", "电机 100W", factory_id=default_factory.id, product_type_code="MOTOR")
+    await create_product_line(db, "PT-DC-100", "DC-DC 100W", factory_id=default_factory.id, product_type_code="POWER")
+    await create_product_line(db, "PT-AC-200", "AC-DC 200W", factory_id=default_factory.id, product_type_code="POWER")
+    await create_product_line(db, "PT-MOTOR-100", "电机 100W", factory_id=default_factory.id, product_type_code="MOTOR")
 
 
 @pytest.mark.asyncio
 async def test_global_returns_none(db, request_scope_all):
-    assert await resolve_product_line_codes("global", "DC-DC-100", db, request_scope_all) is None
+    assert await resolve_product_line_codes("global", "PT-DC-100", db, request_scope_all) is None
 
 
 @pytest.mark.asyncio
 async def test_current_product_line_returns_single(db, request_scope_all, default_factory):
     await _seed_two_types(db, default_factory, request_scope_all)
-    codes = await resolve_product_line_codes("current_product_line", "DC-DC-100", db, request_scope_all)
-    assert codes == ["DC-DC-100"]
+    codes = await resolve_product_line_codes("current_product_line", "PT-DC-100", db, request_scope_all)
+    assert codes == ["PT-DC-100"]
 
 
 @pytest.mark.asyncio
 async def test_current_product_type_returns_same_type_codes(db, request_scope_all, default_factory):
     await _seed_two_types(db, default_factory, request_scope_all)
-    codes = await resolve_product_line_codes("current_product_type", "DC-DC-100", db, request_scope_all)
-    assert set(codes) == {"DC-DC-100", "AC-DC-200"}
-    assert "MOTOR-100" not in codes
+    codes = await resolve_product_line_codes("current_product_type", "PT-DC-100", db, request_scope_all)
+    assert set(codes) == {"PT-DC-100", "PT-AC-200"}
+    assert "PT-MOTOR-100" not in codes
 
 
 @pytest.mark.asyncio
 async def test_current_product_type_untyped_degrades_to_current(db, request_scope_all, default_factory):
-    await create_product_line(db, "UNTYPED-1", "未分类线", factory_id=default_factory.id, product_type_code=None)
-    codes = await resolve_product_line_codes("current_product_type", "UNTYPED-1", db, request_scope_all)
-    assert codes == ["UNTYPED-1"]
+    await create_product_line(db, "PT-UNTYPED-1", "未分类线", factory_id=default_factory.id, product_type_code=None)
+    codes = await resolve_product_line_codes("current_product_type", "PT-UNTYPED-1", db, request_scope_all)
+    assert codes == ["PT-UNTYPED-1"]
 
 
 @pytest.mark.asyncio
 async def test_current_product_type_excludes_inaccessible_factory(db, request_scope_restricted_other_factory, default_factory, request_scope_all):
     # Seed under default_factory (accessible to request_scope_all, NOT to restricted scope)
     await _seed_two_types(db, default_factory, request_scope_all)
-    codes = await resolve_product_line_codes("current_product_type", "DC-DC-100", db, request_scope_restricted_other_factory)
+    codes = await resolve_product_line_codes("current_product_type", "PT-DC-100", db, request_scope_restricted_other_factory)
     assert codes == []  # restricted scope can access a different factory only
 ```
 
@@ -1089,21 +1075,29 @@ from app.services.recommendation_service import RecommendationService
 
 
 @pytest.mark.asyncio
-async def test_recommend_current_product_type_passes_sibling_codes(db, default_factory, admin_user, request_scope_all, monkeypatch):
-    # Seed two product lines under POWER; create an FMEA in DC-DC-100.
-    # Build a RecommendationService with a fake graph_repo whose find_similar_nodes_advanced
-    # records the product_line_codes it was called with.
+async def test_recommend_current_product_type_passes_sibling_codes(db, default_factory, admin_user, request_scope_all):
+    # Seed two unique product lines under POWER; create an FMEA in PT-DC-100.
+    # (Use PT-* codes — admin_user fixture pre-creates DC-DC-100.)
+    await create_product_type(db, "POWER", "电源类", None, admin_user.user_id)
+    await create_product_line(db, "PT-DC-100", "DC-DC 100W", factory_id=default_factory.id, product_type_code="POWER")
+    await create_product_line(db, "PT-AC-200", "AC-DC 200W", factory_id=default_factory.id, product_type_code="POWER")
+    fmea = FMEADocument(fmea_id=uuid.uuid4(), document_no="PFMEA-PT-1", title="PT test", fmea_type="PFMEA",
+                        product_line_code="PT-DC-100", status="draft", version=1, graph_data={"nodes": [], "edges": []},
+                        lock_version=1, factory_id=default_factory.id, created_by=admin_user.user_id)
+    db.add(fmea); await db.commit()
+
     captured: dict = {}
     fake_repo = AsyncMock()
     async def _capture(**kwargs):
-        captured.update(kwargs)
-        return []
+        captured.update(kwargs); return []
     fake_repo.find_similar_nodes_advanced = _capture
 
-    # ... build fmea, call service.recommend(fmea_id, request(scope="current_product_type"), admin_user, request_scope_all) ...
-    assert set(captured["product_line_codes"]) == {"DC-DC-100", "AC-DC-200"}
+    service = RecommendationService(db, llm_provider=None, graph_repo=fake_repo)
+    req = RecommendRequest(trigger_type="failure_mode", context={"function_description": "test"}, scope="current_product_type")
+    await service.recommend(fmea.fmea_id, req, admin_user, request_scope_all)
+    assert set(captured["product_line_codes"]) == {"PT-DC-100", "PT-AC-200"}
 ```
-(Flesh out the FMEA fixture inline using the existing `FMEADocument` model + a `db` insert; keep the assertion focused on the codes passed to the repo.)
+(Imports needed in the test file: `uuid`, `from app.models.fmea import FMEADocument`, `from app.schemas.recommendation import RecommendRequest`, `from app.services.recommendation_service import RecommendationService`, `from app.services.product_line_service import create_product_line`, `from app.services.product_type_service import create_product_type`. Verify the `FMEADocument` required fields against `backend/app/models/fmea.py` before finalizing the insert.)
 
 - [ ] **Step 10: Run tests**
 
@@ -1144,7 +1138,7 @@ async def test_semantic_search_filters_by_product_type(monkeypatch):
     # (Full embedding setup is heavy; test the filter logic at the service layer.)
     ...
 ```
-(Write a focused service-layer test: construct a `SearchService` with a mocked `self.db` whose `execute` returns rows for `DC-DC-100`, `AC-DC-200`, and `MOTOR-100`; call `semantic_search(query, user, product_type_code="POWER")`; assert only the two POWER rows survive. If `SearchService` construction needs a real `db`, use the `db` fixture and seed `ProductLine` rows + mock the pgvector query path.)
+(Write a focused service-layer test: construct a `SearchService` with a mocked `self.db` whose `execute` returns rows for `PT-DC-100`, `PT-AC-200`, and `PT-MOTOR-100`; call `semantic_search(query, user, product_type_code="POWER")`; assert only the two POWER rows survive. If `SearchService` construction needs a real `db`, use the `db` fixture and seed `ProductLine` rows (unique PT-* codes) + mock the pgvector query path.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1643,6 +1637,8 @@ git commit -m "test: regression fixes for product_type scope rollout"
 - §4 Frontend → Task 9 (types/API), Task 10 (admin pages + routes + menu + i18n), Task 11 (scope selector + search filter).
 - §5 Tests → each task carries its own TDD test; Task 2 shared fixtures (moved before the tests that need them); Task 12 full regression.
 
-**Placeholder scan:** No "write then rewrite" passages remain — the graph repo signature is final from Step 2 of Task 6. No known-bad code blocks — the admin guard in Task 4 Step 5 is a real FastAPI dependency (`_user: User = Depends(require_admin)` as a function parameter). `self.db` used in SearchService (Task 7 Step 3). ProductTypePage uses `onOk={onSubmit}` and imports `ProductType` (Task 10 Step 2).
+**Placeholder scan:** No "write then rewrite" passages remain — the graph repo signature is final from Step 2 of Task 6. No known-bad code blocks — the admin guard in Task 4 Step 5 is a real FastAPI dependency (`_user: User = Depends(require_admin)` as a function parameter). `self.db` used in SearchService (Task 7 Step 3). ProductTypePage uses `onOk={onSubmit}` and imports `ProductType` (Task 10 Step 2). No `assert status in (200, 403)` placeholder — the 403 test uses a real `viewer_user` fixture (non-admin role) so `require_admin` raises 403 deterministically.
+
+**Test fixture hygiene:** New fixtures use `@pytest_asyncio.fixture` (matching existing conftest at lines 108/129). `admin_client` overrides `get_current_user` + `get_db` + `get_request_scope` (all three, so `require_admin` resolves). `viewer_user` is a real non-admin fixture; no misleading `viewer_client` fixture. All test-created product lines use unique `PT-*` codes to avoid colliding with the `admin_user` fixture's idempotent `DC-DC-100` pre-seed (conftest.py:136-146); tests that need to type the existing `DC-DC-100` use `update_product_line`, not `create_product_line`.
 
 **Type consistency:** `resolve_product_line_codes(scope, current_product_line_code, db, request_scope)` used consistently in Task 5 (impl) and Task 6 (call sites: RecommendationService + /similar-nodes). `find_similar_nodes_advanced(node_type, query_text, product_line_codes, limit, min_similarity)` unified across abstract/JSONB/Neo4j and both callers (recommendation_service.py, api/graph.py). `RecommendRequest.scope` / `effective_scope` 3-value Literal consistent across Task 6 (backend) and Task 9 (frontend). `ProductLine.product_type_code` and the `UNSET` sentinel consistent across Task 3 service + API + tests.
