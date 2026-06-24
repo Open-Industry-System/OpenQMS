@@ -3,6 +3,7 @@ import enGraph from "../locales/en-US/graph.json";
 import zhGraph from "../locales/zh-CN/graph.json";
 import {
   DEFAULT_NODE_STYLE,
+  DFMEA_LEGEND_NODE_TYPES,
   EDGE_PRESENTATION,
   GRAPH_EDGE_TYPES,
   GRAPH_NODE_TYPES,
@@ -93,6 +94,50 @@ describe("graphPresentation", () => {
     expect(getEdgeTypeKey("CUSTOM_EDGE_TYPE")).toBe("CUSTOM_EDGE_TYPE");
   });
 
+  describe("DFMEA-aware labels", () => {
+    // The data model shares enum names across PFMEA and DFMEA. In a DFMEA graph,
+    // HAS_PROCESS_STEP means System→Subsystem and HAS_WORK_ELEMENT means
+    // Subsystem→Component; the shared "process step"/"work element" labels are
+    // PFMEA terminology and must be overridden for DFMEA.
+    it("overrides structure-descent edge keys for DFMEA", () => {
+      expect(getEdgeTypeKey("HAS_PROCESS_STEP", "DFMEA")).toBe("edgeTypes.hasSubsystem");
+      expect(getEdgeTypeKey("HAS_WORK_ELEMENT", "DFMEA")).toBe("edgeTypes.hasComponent");
+    });
+
+    it("leaves generic edge keys unchanged for DFMEA", () => {
+      expect(getEdgeTypeKey("HAS_FUNCTION", "DFMEA")).toBe("edgeTypes.hasFunction");
+      expect(getEdgeTypeKey("HAS_FAILURE_MODE", "DFMEA")).toBe("edgeTypes.hasFailureMode");
+    });
+
+    it("keeps PFMEA labels when fmeaType is PFMEA or omitted", () => {
+      expect(getEdgeTypeKey("HAS_PROCESS_STEP", "PFMEA")).toBe("edgeTypes.hasProcessStep");
+      expect(getEdgeTypeKey("HAS_PROCESS_STEP")).toBe("edgeTypes.hasProcessStep");
+      expect(getEdgeTypeKey("HAS_WORK_ELEMENT")).toBe("edgeTypes.hasWorkElement");
+    });
+
+    it("overrides function node-type keys for DFMEA", () => {
+      expect(getNodeTypeKey("ProcessWorkElementFunction", "DFMEA")).toBe("nodeTypes.componentFunction");
+      expect(getNodeTypeKey("ProcessStepFunction", "DFMEA")).toBe("nodeTypes.subsystemFunction");
+      expect(getNodeTypeKey("ProcessItemFunction", "DFMEA")).toBe("nodeTypes.systemFunction");
+    });
+
+    it("leaves non-function node types unchanged for DFMEA", () => {
+      expect(getNodeTypeKey("System", "DFMEA")).toBe("nodeTypes.system");
+      expect(getNodeTypeKey("FailureMode", "DFMEA")).toBe("nodeTypes.failureMode");
+    });
+
+    it("has zh-CN and en-US locale entries for every DFMEA override key", () => {
+      for (const key of ["hasSubsystem", "hasComponent"] as const) {
+        expect(zhGraph.edgeTypes[key]).toBeTruthy();
+        expect(enGraph.edgeTypes[key]).toBeTruthy();
+      }
+      for (const key of ["systemFunction", "subsystemFunction", "componentFunction"] as const) {
+        expect(zhGraph.nodeTypes[key]).toBeTruthy();
+        expect(enGraph.nodeTypes[key]).toBeTruthy();
+      }
+    });
+  });
+
   it("does not use default styling for the expanded FMEA node types", () => {
     for (const type of [
       "ProcessItemFunction",
@@ -102,6 +147,24 @@ describe("graphPresentation", () => {
       "DesignParameter",
     ]) {
       expect(getNodeStyle(type)).not.toEqual(DEFAULT_NODE_STYLE);
+    }
+  });
+
+  it("excludes PFMEA-only layers from the DFMEA legend", () => {
+    // DFMEA legend must not show PFMEA structure layers or PFMEA-flavored functions.
+    for (const pfmeaOnly of [
+      "ProcessItem",
+      "ProcessStep",
+      "ProcessWorkElement",
+      "ProcessItemFunction",
+      "ProcessStepFunction",
+      "ProcessWorkElementFunction",
+    ]) {
+      expect(DFMEA_LEGEND_NODE_TYPES).not.toContain(pfmeaOnly);
+    }
+    // Every DFMEA legend entry must resolve to a real presentation + locale label.
+    for (const type of DFMEA_LEGEND_NODE_TYPES) {
+      expect(NODE_PRESENTATION[type]).toBeTruthy();
     }
   });
 });
