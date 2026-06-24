@@ -1,0 +1,151 @@
+{
+  "wizard": {
+    "title": "PFMEA 生成向导",
+    "steps": ["5T范围", "结构分析", "功能分析", "失效分析", "风险分析", "优化", "结果文档"],
+    "scope": {
+      "title": "5T范围",
+      "description": "定义PFMEA分析的团队、时间、工具、任务与趋势数据来源。",
+      "team": "团队",
+      "timeframe": "时间范围",
+      "tool": "工具",
+      "task": "任务",
+      "trend": "趋势数据来源",
+      "legacyTimeframe": "时间范围",
+      "toolPresets": ["过程流程图", "过程参数图(P图)", "鱼骨图(4M分析)", "PFMEA模板", "过程FMECA", "控制计划草案", "历史经验教训库"],
+      "trendPresets": ["历史PFMEA", "过程SPC数据", "不合格品记录(NCR)", "客户投诉", "CAPA记录", "返工/报废记录", "审核发现", "过程变更历史"],
+      "aiRecommend": "AI推荐",
+      "aiRecommendLoading": "推荐中…",
+      "aiRecommendEmpty": "暂无推荐",
+      "aiRecommendFailed": "推荐失败",
+      "toolGuide": "工具说明",
+      "toolGuideNeedStructure": "请先完成结构分析"
+    },
+    "structure": {
+      "title": "结构分析",
+      "description": "分解过程项目 → 过程步骤 → 作业要素(4M)。",
+      "addProcessItem": "添加过程项目",
+      "addProcessStep": "添加过程步骤",
+      "addWorkElement": "添加作业要素",
+      "delete": "删除",
+      "empty": "尚未添加结构节点",
+      "processNumber": "工序号",
+      "classification4M": "4M分类",
+      "newProcessItem": "新建过程项目",
+      "newProcessStep": "新建过程步骤",
+      "newWorkElement": "新建作业要素"
+    },
+    "typeLabels": {
+      "ProcessItem": "过程项目",
+      "ProcessStep": "过程步骤",
+      "ProcessWorkElement": "作业要素"
+    },
+    "function": {
+      "title": "功能分析",
+      "description": "为每个结构节点定义功能，建立3层功能树并区分产品特性/过程特性。",
+      "functionDesc": "功能",
+      "requirement": "技术要求/过程特性",
+      "specification": "产品特性/规格",
+      "productChar": "产品特性",
+      "processChar": "过程特性",
+      "specialCharacteristic": "特殊特性",
+      "addItemFunction": "添加过程项目功能",
+      "addStepFunction": "添加过程步骤功能",
+      "addWorkElementFunction": "添加作业要素功能"
+    },
+    "failure": {
+      "title": "失效分析",
+      "description": "为每个过程步骤功能建立失效链(挂过程步骤功能)。原因按4M组织。",
+      "recommended": "推荐",
+      "autoRecommend": "AI推荐",
+      "failureMode": "失效模式",
+      "failureEffect": "失效影响",
+      "failureCause": "失效起因",
+      "preventionControl": "预防控制",
+      "detectionControl": "探测控制",
+      "addFailureChain": "添加失效链",
+      "delete": "删除",
+      "newFailureMode": "新建失效模式",
+      "workElementHint": "该步骤的4M作业要素"
+    },
+    "risk": {
+      "title": "风险分析",
+      "description": "评估三段式严重度(本厂/客户/终端用户，取最大值)、频度、探测度，计算AP。",
+      "s": "S",
+      "o": "O",
+      "d": "D",
+      "ap": "AP",
+      "severityPlant": "本厂严重度",
+      "severityCustomer": "客户严重度",
+      "severityUser": "终端用户严重度",
+      "severityMax": "综合严重度(最大值)",
+      "severityDialog": "三段式严重度评分",
+      "class": "特性",
+      "mustOptimize": "需优化",
+      "empty": "尚无风险行",
+      "missingControlHint": "请先填写预防/探测控制",
+      "controlsFirst": "填写控制后再评分O/D"
+    },
+    "optimization": {
+      "title": "优化",
+      "noOptimization": "无需优化",
+      "noOptimizationHint": "没有AP=H的行",
+      "apBadge": "AP=H",
+      "measure": "优化措施",
+      "measurePlaceholder": "输入优化措施",
+      "responsible": "负责人",
+      "responsiblePlaceholder": "负责人",
+      "dueDate": "计划完成日期",
+      "status": "状态",
+      "actionTaken": "已采取措施",
+      "actionTakenPlaceholder": "实际采取的措施",
+      "completionDate": "完成日期",
+      "revisedRatings": "重评 S′/O′/D′",
+      "revisedAp": "重评AP",
+      "statusOptions": { "open": "待执行", "undecided": "未决", "planned": "已计划", "done": "已完成", "notExecuted": "不执行" }
+    },
+    "confirm": {
+      "title": "结果文档",
+      "structureNodes": "结构节点",
+      "functionNodes": "功能节点",
+      "failureChains": "失效链",
+      "totalNodes": "总节点",
+      "totalEdges": "总边",
+      "description": "确认PFMEA分析结果并完成创建。"
+    },
+    "buttons": { "cancel": "取消", "prev": "上一步", "next": "下一步", "finish": "完成创建" },
+    "page": {
+      "title": "PFMEA向导", "backToList": "返回列表", "saveDraft": "存草稿",
+      "saveSaving": "保存中…", "saveSaved": "已保存", "saveError": "保存失败",
+      "nextStep": "下一步", "prevStep": "上一步", "finish": "完成创建",
+      "step1Incomplete": "结构分析未完成：过程步骤需填工序号、作业要素需选4M分类",
+      "step2Incomplete": "功能分析未完成：所有作业要素需有功能，3层功能链需完整",
+      "step3Incomplete": "失效分析未完成：所有过程步骤功能需有命名失效链与控制",
+      "step4Incomplete": "风险分析未完成：需填写三段式严重度、O/D，且控制非空",
+      "step5Incomplete": "优化未完成：AP=H的行需填负责人与计划完成日期",
+      "finishFailed": "完成失败", "loadFailed": "加载失败",
+      "conflictTitle": "内容已被他人修改", "conflictContent": "文档已被他人修改，请刷新后重试。", "conflictReload": "刷新"
+    },
+    "guidance": {
+      "step0": { "title": "5T范围", "purpose": "界定分析范围", "points": ["团队、时间、工具、任务、趋势"], "fields": ["团队/时间/工具/任务/趋势"], "example": "SMT焊接生产线 / OP10-OP40" },
+      "step1": { "title": "结构分析", "purpose": "分解过程结构", "points": ["过程项目→过程步骤→作业要素(4M)"], "fields": ["工序号(OP10)", "4M分类(人/机/料/环)"], "example": "OP10 贴装 / 机器:高速贴片机" },
+      "step2": { "title": "功能分析", "purpose": "定义功能与特性", "points": ["3层功能树", "区分产品/过程特性", "CC/SC在此维护"], "fields": ["功能名", "产品特性/过程特性", "CC/SC"], "example": "准确贴装 / 偏移度≤0.05mm / CC" },
+      "step3": { "title": "失效分析", "purpose": "识别失效链", "points": ["失效模式挂过程步骤功能", "原因按4M"], "fields": ["FM/FE/FC/PC/DC"], "example": "贴装偏移 / 吸嘴磨损(机)" },
+      "step4": { "title": "风险分析", "purpose": "评估风险", "points": ["三段式严重度取最大值", "O/D", "AP"], "fields": ["S(本厂/客户/终端用户)", "O", "D", "AP", "特性(只读)"], "example": "S=8 O=4 D=3 AP=H" },
+      "step5": { "title": "优化", "purpose": "降低风险", "points": ["AP=H优先", "负责人与日期"], "fields": ["措施/负责人/日期/状态/重评"], "example": "引入压力闭环传感器 / 张工 / 2026-06-15" },
+      "step6": { "title": "结果文档", "purpose": "确认完成", "points": ["核对统计", "完成创建"], "fields": [], "example": "" },
+      "labelPurpose": "目的", "labelPoints": "要点", "labelFields": "字段", "labelExample": "示例", "expand": "展开", "collapse": "收起"
+    },
+    "sidebar": { "structureTree": "结构树", "structureHint": "结构分析后显示", "noStructure": "尚无结构", "steps": "步骤" }
+  },
+  "smartSuggestion": {
+    "global": "全局", "currentProductLine": "当前产品线", "noGlobalPermission": "无全局权限",
+    "scopeGlobal": "全局范围", "scopeLocal": "产品线范围", "ruleEngine": "规则引擎", "aiGenerated": "AI生成",
+    "from": "来源", "confidence": { "high": "高", "medium": "中", "low": "低" },
+    "tooFrequent": "请求过于频繁", "noPermission": "无权限", "serviceUnavailable": "服务不可用",
+    "aiUnavailable": "AI不可用", "ruleOnlyMode": "仅规则模式", "close": "关闭"
+  },
+  "rules": {
+    "optimizationHint": "AP=H 建议优先优化",
+    "verbPatterns": "过程动词模式", "failureChains": "失效链"
+  }
+}

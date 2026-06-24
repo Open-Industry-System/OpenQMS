@@ -1,0 +1,151 @@
+{
+  "wizard": {
+    "title": "PFMEA Generation Wizard",
+    "steps": ["5T Scope", "Structure Analysis", "Function Analysis", "Failure Analysis", "Risk Analysis", "Optimization", "Result Documentation"],
+    "scope": {
+      "title": "5T Scope",
+      "description": "Define the PFMEA team, timeframe, tools, tasks, and trend data sources.",
+      "team": "Team",
+      "timeframe": "Timeframe",
+      "tool": "Tool",
+      "task": "Task",
+      "trend": "Trend Data Source",
+      "legacyTimeframe": "Timeframe",
+      "toolPresets": ["Process Flow Diagram", "P-Diagram", "Fishbone (4M)", "PFMEA Template", "Process FMECA", "Control Plan Draft", "Lessons Learned Library"],
+      "trendPresets": ["Historical PFMEA", "Process SPC Data", "Nonconformance Records (NCR)", "Customer Complaints", "CAPA Records", "Rework/Scrap Records", "Audit Findings", "Process Change History"],
+      "aiRecommend": "AI Recommend",
+      "aiRecommendLoading": "Recommending…",
+      "aiRecommendEmpty": "No recommendations",
+      "aiRecommendFailed": "Recommendation failed",
+      "toolGuide": "Tool Guide",
+      "toolGuideNeedStructure": "Please complete structure analysis first"
+    },
+    "structure": {
+      "title": "Structure Analysis",
+      "description": "Break down Process Item → Process Step → Work Element (4M).",
+      "addProcessItem": "Add Process Item",
+      "addProcessStep": "Add Process Step",
+      "addWorkElement": "Add Work Element",
+      "delete": "Delete",
+      "empty": "No structure nodes added yet",
+      "processNumber": "Process No.",
+      "classification4M": "4M Classification",
+      "newProcessItem": "New Process Item",
+      "newProcessStep": "New Process Step",
+      "newWorkElement": "New Work Element"
+    },
+    "typeLabels": {
+      "ProcessItem": "Process Item",
+      "ProcessStep": "Process Step",
+      "ProcessWorkElement": "Work Element"
+    },
+    "function": {
+      "title": "Function Analysis",
+      "description": "Define functions for each structure node, build a 3-level function tree, and distinguish product/process characteristics.",
+      "functionDesc": "Function",
+      "requirement": "Technical Requirement / Process Characteristic",
+      "specification": "Product Characteristic / Specification",
+      "productChar": "Product Characteristic",
+      "processChar": "Process Characteristic",
+      "specialCharacteristic": "Special Characteristic",
+      "addItemFunction": "Add Process Item Function",
+      "addStepFunction": "Add Process Step Function",
+      "addWorkElementFunction": "Add Work Element Function"
+    },
+    "failure": {
+      "title": "Failure Analysis",
+      "description": "Build failure chains for each process step function. Causes are organized by 4M.",
+      "recommended": "Recommended",
+      "autoRecommend": "AI Recommend",
+      "failureMode": "Failure Mode",
+      "failureEffect": "Failure Effect",
+      "failureCause": "Failure Cause",
+      "preventionControl": "Prevention Control",
+      "detectionControl": "Detection Control",
+      "addFailureChain": "Add Failure Chain",
+      "delete": "Delete",
+      "newFailureMode": "New Failure Mode",
+      "workElementHint": "4M work elements for this step"
+    },
+    "risk": {
+      "title": "Risk Analysis",
+      "description": "Evaluate three-tier severity (plant / customer / end user, max value), occurrence, detection, and calculate AP.",
+      "s": "S",
+      "o": "O",
+      "d": "D",
+      "ap": "AP",
+      "severityPlant": "Plant Severity",
+      "severityCustomer": "Customer Severity",
+      "severityUser": "End User Severity",
+      "severityMax": "Combined Severity (Max)",
+      "severityDialog": "Three-tier Severity Rating",
+      "class": "Class",
+      "mustOptimize": "Must Optimize",
+      "empty": "No risk rows yet",
+      "missingControlHint": "Please fill in prevention/detection controls first",
+      "controlsFirst": "Rate O/D after controls are filled"
+    },
+    "optimization": {
+      "title": "Optimization",
+      "noOptimization": "No optimization needed",
+      "noOptimizationHint": "No AP=H rows",
+      "apBadge": "AP=H",
+      "measure": "Optimization Measure",
+      "measurePlaceholder": "Enter optimization measure",
+      "responsible": "Responsible",
+      "responsiblePlaceholder": "Responsible person",
+      "dueDate": "Planned Completion Date",
+      "status": "Status",
+      "actionTaken": "Action Taken",
+      "actionTakenPlaceholder": "Actual action taken",
+      "completionDate": "Completion Date",
+      "revisedRatings": "Re-evaluate S′/O′/D′",
+      "revisedAp": "Re-evaluated AP",
+      "statusOptions": { "open": "Open", "undecided": "Undecided", "planned": "Planned", "done": "Done", "notExecuted": "Not Executed" }
+    },
+    "confirm": {
+      "title": "Result Documentation",
+      "structureNodes": "Structure Nodes",
+      "functionNodes": "Function Nodes",
+      "failureChains": "Failure Chains",
+      "totalNodes": "Total Nodes",
+      "totalEdges": "Total Edges",
+      "description": "Confirm the PFMEA analysis results and complete creation."
+    },
+    "buttons": { "cancel": "Cancel", "prev": "Previous", "next": "Next", "finish": "Complete Creation" },
+    "page": {
+      "title": "PFMEA Wizard", "backToList": "Back to List", "saveDraft": "Save Draft",
+      "saveSaving": "Saving…", "saveSaved": "Saved", "saveError": "Save Failed",
+      "nextStep": "Next Step", "prevStep": "Previous Step", "finish": "Complete Creation",
+      "step1Incomplete": "Structure analysis incomplete: process steps need process numbers and work elements need 4M classification",
+      "step2Incomplete": "Function analysis incomplete: all work elements need functions and the 3-level function chain must be complete",
+      "step3Incomplete": "Failure analysis incomplete: all process step functions need named failure chains and controls",
+      "step4Incomplete": "Risk analysis incomplete: three-tier severity, O/D must be filled and controls must not be empty",
+      "step5Incomplete": "Optimization incomplete: AP=H rows need responsible person and planned completion date",
+      "finishFailed": "Completion Failed", "loadFailed": "Load Failed",
+      "conflictTitle": "Content Modified by Others", "conflictContent": "The document has been modified by someone else, please refresh and retry.", "conflictReload": "Refresh"
+    },
+    "guidance": {
+      "step0": { "title": "5T Scope", "purpose": "Define analysis scope", "points": ["Team, Timeframe, Tool, Task, Trend"], "fields": ["Team/Timeframe/Tool/Task/Trend"], "example": "SMT welding line / OP10-OP40" },
+      "step1": { "title": "Structure Analysis", "purpose": "Break down process structure", "points": ["Process Item → Process Step → Work Element (4M)"], "fields": ["Process No. (OP10)", "4M classification (Man/Machine/Material/Environment)"], "example": "OP10 placement / Machine: high-speed chip mounter" },
+      "step2": { "title": "Function Analysis", "purpose": "Define functions and characteristics", "points": ["3-level function tree", "Distinguish product/process characteristics", "CC/SC maintained here"], "fields": ["Function name", "Product/process characteristic", "CC/SC"], "example": "Accurate placement / offset ≤ 0.05mm / CC" },
+      "step3": { "title": "Failure Analysis", "purpose": "Identify failure chains", "points": ["Failure mode attached to process step function", "Causes organized by 4M"], "fields": ["FM/FE/FC/PC/DC"], "example": "Placement offset / nozzle wear (Machine)" },
+      "step4": { "title": "Risk Analysis", "purpose": "Evaluate risk", "points": ["Three-tier severity uses maximum", "O/D", "AP"], "fields": ["S(Plant/Customer/End User)", "O", "D", "AP", "Class (read-only)"], "example": "S=8 O=4 D=3 AP=H" },
+      "step5": { "title": "Optimization", "purpose": "Reduce risk", "points": ["AP=H priority", "Responsible person and date"], "fields": ["Measure/Responsible/Date/Status/Re-evaluation"], "example": "Introduce pressure closed-loop sensor / Zhang / 2026-06-15" },
+      "step6": { "title": "Result Documentation", "purpose": "Confirm completion", "points": ["Check statistics", "Complete creation"], "fields": [], "example": "" },
+      "labelPurpose": "Purpose", "labelPoints": "Key Points", "labelFields": "Fields", "labelExample": "Example", "expand": "Expand", "collapse": "Collapse"
+    },
+    "sidebar": { "structureTree": "Structure Tree", "structureHint": "Shown after structure analysis", "noStructure": "No structure yet", "steps": "Steps" }
+  },
+  "smartSuggestion": {
+    "global": "Global", "currentProductLine": "Current Product Line", "noGlobalPermission": "No global permission",
+    "scopeGlobal": "Global Scope", "scopeLocal": "Product Line Scope", "ruleEngine": "Rule Engine", "aiGenerated": "AI Generated",
+    "from": "From", "confidence": { "high": "High", "medium": "Medium", "low": "Low" },
+    "tooFrequent": "Too frequent", "noPermission": "No permission", "serviceUnavailable": "Service unavailable",
+    "aiUnavailable": "AI unavailable", "ruleOnlyMode": "Rule-only mode", "close": "Close"
+  },
+  "rules": {
+    "optimizationHint": "AP=H should be optimized first",
+    "verbPatterns": "Process Verb Patterns", "failureChains": "Failure Chains"
+  }
+}
