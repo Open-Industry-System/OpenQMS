@@ -309,26 +309,31 @@ export default function FMEAEditorPage() {
   }, [fmeaId, t, message]);
 
   const exitVersionSnapshot = useCallback(async () => {
-    const doc = await getFMEA(fmeaId);
-    setFmea(doc);
-    setNodes(doc.graph_data?.nodes || []);
-    setEdges(doc.graph_data?.edges || []);
-    baseGraphRef.current = {
-      nodes: JSON.parse(JSON.stringify(doc.graph_data?.nodes || [])),
-      edges: JSON.parse(JSON.stringify(doc.graph_data?.edges || [])),
-    };
-    graphDataRef.current = null;
-    setSelectedFunctionId(null);
-    setSelectedStructureNode(null);
-    setSelectedGraphNode(null);
-    setDrawerVisible(false);
-    setHighlightNodes([]);
-    setDimOthers(false);
-    setPendingHighlightNode(null);
-    setContextMenuOpen(false);
-    setContextMenuNode(null);
-    setViewingVersion(null);
-  }, [fmeaId]);
+    try {
+      const doc = await getFMEA(fmeaId);
+      setFmea(doc);
+      setNodes(doc.graph_data?.nodes || []);
+      setEdges(doc.graph_data?.edges || []);
+      baseGraphRef.current = {
+        nodes: JSON.parse(JSON.stringify(doc.graph_data?.nodes || [])),
+        edges: JSON.parse(JSON.stringify(doc.graph_data?.edges || [])),
+      };
+      graphDataRef.current = null;
+      setSelectedFunctionId(null);
+      setSelectedStructureNode(null);
+      setSelectedGraphNode(null);
+      setDrawerVisible(false);
+      setHighlightNodes([]);
+      setDimOthers(false);
+      setPendingHighlightNode(null);
+      setContextMenuOpen(false);
+      setContextMenuNode(null);
+      setViewingVersion(null);
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      message.error(e?.response?.data?.detail || t("messages.loadVersionFailed"));
+    }
+  }, [fmeaId, t, message]);
 
   const handleTraceImpact = async (nodeId: string) => {
     if (!id) return;

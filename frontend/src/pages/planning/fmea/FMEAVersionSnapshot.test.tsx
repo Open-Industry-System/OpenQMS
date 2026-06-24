@@ -178,4 +178,20 @@ describe("FMEAEditorPage version snapshot", () => {
     await waitFor(() => expect(mocks.getFMEA.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(screen.queryByText(/messages.viewingVersion/)).not.toBeInTheDocument());
   });
+
+  it("stays in snapshot mode if reload fails on exit (no unhandled rejection)", async () => {
+    renderEditor();
+    await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
+    fireEvent.click(screen.getByText("tabs.versionHistory"));
+    const viewBtn = await screen.findByRole("button", { name: /history\.view/ });
+    fireEvent.click(viewBtn);
+    await waitFor(() => expect(screen.getByText(/messages.viewingVersion/)).toBeInTheDocument());
+
+    // Make the exit reload fail.
+    mocks.getFMEA.mockRejectedValueOnce({ response: { data: { detail: "network down" } } });
+    fireEvent.click(screen.getByText("actions.exitVersion"));
+    // Banner stays (still in snapshot mode), no unhandled rejection thrown.
+    await waitFor(() => expect(mocks.getFMEA.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(await screen.findByText(/messages.viewingVersion/)).toBeInTheDocument();
+  });
 });
