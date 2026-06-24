@@ -74,7 +74,7 @@ class SearchService:
                 filters.append("product_line_code = ANY(:user_product_lines)")
                 params["user_product_lines"] = user_pls
 
-        if product_type_code and not product_line_code:
+        if product_type_code:
             from app.models.product_line import ProductLine
             from sqlalchemy import select
 
@@ -82,7 +82,16 @@ class SearchService:
                 select(ProductLine.code).where(ProductLine.product_type_code == product_type_code)
             )
             codes = [r[0] for r in type_pls.fetchall()]
-            if codes:
+            if product_line_code:
+                # If both are supplied, the product line must belong to the chosen
+                # type; otherwise the type filter is silently ignored (the brief's
+                # "product_line_code takes precedence" rule would let a stale
+                # global product-line selection override a freshly-picked type).
+                # Returning empty is safer than honoring the mismatched PL.
+                if product_line_code not in codes:
+                    elapsed = int((time.monotonic() - start) * 1000)
+                    return SemanticSearchResponse(results=[], total=0, query_time_ms=elapsed)
+            elif codes:
                 filters.append("product_line_code = ANY(:product_type_codes)")
                 params["product_type_codes"] = codes
             else:

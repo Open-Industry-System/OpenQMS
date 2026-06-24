@@ -171,3 +171,59 @@ async def test_semantic_search_filters_by_product_type(db, default_factory):
     returned_codes = {r.product_line_code for r in response.results}
     assert returned_codes == {"PT-DC-100", "PT-AC-200"}
     assert "PT-MOTOR-100" not in returned_codes
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_mismatched_pl_and_type_returns_empty(db, default_factory):
+    """When both product_line_code and product_type_code are supplied but the PL
+    does not belong to that type, return empty instead of silently honoring the
+    (stale) product_line_code and ignoring the type filter."""
+    for code, name in [("POWER", "动力类"), ("MOTOR", "电机类")]:
+        db.add(ProductType(code=code, name=name, is_active=True))
+    await db.flush()
+    pl_codes = [("PT-DC-100", "POWER"), ("PT-AC-200", "POWER"), ("PT-MOTOR-100", "MOTOR")]
+    for code, ptype in pl_codes:
+        db.add(ProductLine(code=code, name=code, factory_id=default_factory.id, product_type_code=ptype))
+    await db.flush()
+
+    user = await _admin_user_with_permissions(db, default_factory)
+    service = SearchService(db=db, llm_provider=None, embedding_provider=None)
+    real_execute = service.db.execute
+
+    class FakeScalarRow:
+        def __init__(self, value):
+            self._value = value
+        def __getitem__(self, idx):
+            if idx == 0:
+                return self._value
+            raise IndexError(idx)
+
+    class FakeResult:
+        def __init__(self, rows, scalar=False):
+            self._rows = rows
+            self._scalar = scalar
+        def fetchall(self):
+            if self._scalar:
+                return [FakeScalarRow(r[0]) for r in self._rows]
+            return []
+
+    async def _fake_execute(stmt, params=None):
+        text_str = str(stmt.compile(compile_kwargs={"literal_binds": True})) if hasattr(stmt, "compile") else str(stmt)
+        if "product_lines" in text_str and "product_type_code" in text_str:
+            # Resolve POWER -> its PL codes; PT-MOTOR-100 is not among them.
+            matched = [(c,) for c, p in pl_codes if p == "POWER"]
+            return FakeResult(matched, scalar=True)
+        return await real_execute(stmt, params)
+
+    service.db.execute = AsyncMock(side_effect=_fake_execute)
+
+    response = await service.semantic_search(
+        query="test",
+        user=user,
+        product_line_code="PT-MOTOR-100",   # belongs to MOTOR, not POWER
+        product_type_code="POWER",
+        entity_types=["fmea_node"],
+        limit=10,
+    )
+    assert response.results == []
+    assert response.total == 0

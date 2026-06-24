@@ -168,7 +168,21 @@ export default function SemanticSearchTab() {
           placeholder={t("qa.productType")}
           options={productTypeOptions}
           value={productTypeCode}
-          onChange={(value) => setProductTypeCode(value)}
+          onChange={(value) => {
+            setProductTypeCode(value);
+            // Clear a stale global product-line selection that doesn't belong to the
+            // newly-chosen type; otherwise the backend type filter is silently ignored
+            // (product_line_code takes precedence). productLineOptions already hides
+            // non-matching PLs, so the store value can otherwise linger invisibly.
+            if (value && productLineCode) {
+              const stillMatches = productLines.some(
+                (pl) => pl.code === productLineCode && pl.product_type_code === value,
+              );
+              if (!stillMatches) {
+                useProductLineStore.getState().setSelected(null);
+              }
+            }
+          }}
           style={{ minWidth: 200 }}
           allowClear
         />
