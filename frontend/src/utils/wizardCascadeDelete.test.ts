@@ -145,6 +145,58 @@ describe('cascadeDeleteStructureNode', () => {
     expect(result.edges.some(ed => ed.source === 'fc1' && ed.target === 'ra1')).toBe(false);
   });
 
+  it('deleting a FailureMode root cascades to its FailureCause and Prevention/Detection controls', () => {
+    // Graph: psf → fm → fe
+    //             fc →(CAUSE_OF)→ fm
+    //             fc → pc (PREVENTED_BY)
+    //             fc → dc (DETECTED_BY)
+    // Deleting the root FailureMode should delete fm, fe, fc, pc, dc.
+    const nodes = [
+      n('psf', 'ProcessStepFunction'), n('fm', 'FailureMode'),
+      n('fe', 'FailureEffect'), n('fc', 'FailureCause'),
+      n('pc', 'PreventionControl'), n('dc', 'DetectionControl'),
+    ];
+    const edges = [
+      e('psf', 'fm', 'HAS_FAILURE_MODE'),
+      e('fm', 'fe', 'EFFECT_OF'),
+      e('fc', 'fm', 'CAUSE_OF'),
+      e('fc', 'pc', 'PREVENTED_BY'),
+      e('fc', 'dc', 'DETECTED_BY'),
+    ];
+    const result = cascadeDeleteStructureNode('fm', nodes, edges);
+    expect(result.nodes.map(x => x.id)).toEqual(['psf']);
+    expect(result.edges).toHaveLength(0);
+  });
+
+  it('keeps RecommendedAction (OPTIMIZED_BY) shared by two causes when deleting one cause', () => {
+    // OPTIMIZED_BY is intentionally NOT in FORWARD_EDGE_TYPES — recommended
+    // actions are shared/recommended, not owned by a single cause, so they must
+    // NOT cascade-delete with a cause.
+    //   fc1 →(OPTIMIZED_BY)→ ra1
+    //   fc2 →(OPTIMIZED_BY)→ ra1   (shared)
+    //   func1 →(HAS_FAILURE_MODE)→ fm1 ←(CAUSE_OF)— fc1   (so fc1 is reachable)
+    const nodes = [
+      n('func1', 'ProcessWorkElementFunction'), n('fm1', 'FailureMode'),
+      n('fc1', 'FailureCause'), n('fc2', 'FailureCause'),
+      n('ra1', 'RecommendedAction', 'Shared recommended action'),
+    ];
+    const edges = [
+      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
+      e('fc1', 'fm1', 'CAUSE_OF'),
+      e('fc1', 'ra1', 'OPTIMIZED_BY'),
+      e('fc2', 'ra1', 'OPTIMIZED_BY'),
+    ];
+    const result = cascadeDeleteStructureNode('fc1', nodes, edges);
+    const remainingIds = result.nodes.map(x => x.id);
+    // ra1 is kept (shared with fc2, AND OPTIMIZED_BY is excluded from cascade)
+    expect(remainingIds).toContain('ra1');
+    expect(remainingIds).toContain('fc2');
+    expect(remainingIds).not.toContain('fc1');
+    // fc1's OPTIMIZED_BY edge is removed; fc2's remains
+    expect(result.edges.some(ed => ed.source === 'fc2' && ed.target === 'ra1' && ed.type === 'OPTIMIZED_BY')).toBe(true);
+    expect(result.edges.some(ed => ed.source === 'fc1' && ed.target === 'ra1')).toBe(false);
+  });
+
   it('keeps RecommendedAction even when only one cause references it (exclusion, not just sharing)', () => {
     // Locks the OPTIMIZED_BY exclusion: even with no other cause sharing ra1,
     // deleting its sole cause must NOT delete the recommended action. A future

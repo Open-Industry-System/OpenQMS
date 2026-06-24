@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { App } from "antd";
 import FMEAListPage from "./FMEAListPage";
 import i18n from "../../../i18n";
@@ -30,6 +30,12 @@ vi.mock("../../../store/productLineStore", () => ({
   useProductLineStore: (selector: (s: { selected: string }) => unknown) =>
     selector({ selected: "DC-DC-100" }),
 }));
+
+const navigate = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, useNavigate: () => navigate };
+});
 
 function renderAt(path: string) {
   return render(
@@ -166,5 +172,115 @@ describe("FMEAListPage create error", () => {
     await vi.waitFor(() => {
       expect(screen.getByText(/文档编号「PFMEA-2026-001」已存在/)).toBeInTheDocument();
     });
+  });
+});
+
+describe("FMEAListPage create navigation", () => {
+  beforeEach(() => {
+    mocks.listFMEAs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
+  });
+
+  it("navigates to DFMEA wizard on create fmea_type=DFMEA", async () => {
+    mocks.createFMEA.mockResolvedValue({ fmea_id: "dfmea-1", fmea_type: "DFMEA" });
+
+    renderAt("/fmea");
+    await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByRole("button", { name: /new fmea|新建/i }));
+
+    // 选择 DFMEA：modal 中 type Select 的 option 文案是完整中文全称，匹配开头 "DFMEA -"
+    const typeSelectSelector = document.querySelectorAll(".ant-select-selector")[2];
+    fireEvent.mouseDown(typeSelectSelector!);
+    let option: HTMLElement | undefined;
+    await vi.waitFor(() => {
+      option = Array.from(document.querySelectorAll<HTMLElement>(".ant-select-item-option"))
+        .find((el) => el.textContent?.startsWith("DFMEA"));
+      expect(option).toBeTruthy();
+    });
+    fireEvent.mouseDown(option!);
+    fireEvent.click(option!);
+
+    const docNoInput = await screen.findByPlaceholderText(/PFMEA-2026-001/i);
+    fireEvent.change(docNoInput, { target: { value: "DFMEA-2026-002" } });
+    const titleInput = await screen.findByPlaceholderText(/SMT/i);
+    fireEvent.change(titleInput, { target: { value: "DFMEA 标题" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /^ok$/i }));
+
+    await vi.waitFor(() => expect(mocks.createFMEA).toHaveBeenCalled());
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith("/fmea/wizard/dfmea-1"));
+  });
+
+  it("navigates to PFMEA wizard on create fmea_type=PFMEA", async () => {
+    mocks.createFMEA.mockResolvedValue({ fmea_id: "pfmea-1", fmea_type: "PFMEA" });
+
+    renderAt("/fmea");
+    await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByRole("button", { name: /new fmea|新建/i }));
+
+    const docNoInput = await screen.findByPlaceholderText(/PFMEA-2026-001/i);
+    fireEvent.change(docNoInput, { target: { value: "PFMEA-2026-002" } });
+    const titleInput = await screen.findByPlaceholderText(/SMT/i);
+    fireEvent.change(titleInput, { target: { value: "PFMEA 标题" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /^ok$/i }));
+
+    await vi.waitFor(() => expect(mocks.createFMEA).toHaveBeenCalled());
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith("/fmea/pfmea-wizard/pfmea-1"));
+  });
+});
+
+describe("FMEAListPage draft navigation", () => {
+  it("routes DFMEA incomplete drafts to the DFMEA wizard", async () => {
+    mocks.listFMEAs.mockResolvedValue({
+      items: [{
+        fmea_id: "dfmea-draft-1",
+        document_no: "DFMEA-2026-D1",
+        title: "DFMEA draft",
+        fmea_type: "DFMEA",
+        status: "draft",
+        version: 1,
+        updated_at: new Date().toISOString(),
+        graph_data: { wizardScope: { wizard_completed: false } },
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+
+    renderAt("/fmea");
+    await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
+
+    const editBtn = await screen.findByRole("button", { name: /edit|编辑/i });
+    fireEvent.click(editBtn);
+
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith("/fmea/wizard/dfmea-draft-1"));
+  });
+
+  it("routes PFMEA incomplete drafts to the PFMEA wizard", async () => {
+    mocks.listFMEAs.mockResolvedValue({
+      items: [{
+        fmea_id: "pfmea-draft-1",
+        document_no: "PFMEA-2026-D1",
+        title: "PFMEA draft",
+        fmea_type: "PFMEA",
+        status: "draft",
+        version: 1,
+        updated_at: new Date().toISOString(),
+        graph_data: { wizardScope: { wizard_completed: false } },
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+
+    renderAt("/fmea");
+    await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
+
+    const editBtn = await screen.findByRole("button", { name: /edit|编辑/i });
+    fireEvent.click(editBtn);
+
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith("/fmea/pfmea-wizard/pfmea-draft-1"));
   });
 });

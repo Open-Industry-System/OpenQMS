@@ -99,6 +99,31 @@ def test_graph_matches_to_suggestions():
     assert items[0].source_document_no == "PFMEA-001"
 
 
+def test_rule_engine_pfmea_cause_fallback_uses_4m_buckets():
+    """PFMEA 失效原因无图谱匹配时，回退到 4M 组织的原因提示而非通用默认。"""
+    engine = RuleEngine()
+    result = engine.evaluate("failure_cause", {"failure_mode": "未知失效模式", "fmea_type": "PFMEA"})
+    names = [s.name for s in result.suggestions]
+    explanations = " ".join(s.explanation for s in result.suggestions)
+    # 至少包含每个 4M 类别中的一项
+    assert any("操作未按SOP" in n or "培训不足" in n for n in names)
+    assert any("设备校准漂移" in n or "设备磨损" in n for n in names)
+    assert any("来料尺寸超差" in n or "来料材质不符" in n for n in names)
+    assert any("温湿度超范围" in n or "粉尘/洁净度不足" in n for n in names)
+    # explanation 标注 4M 类别
+    assert "Man" in explanations or "Machine" in explanations or "Material" in explanations or "Environment" in explanations
+
+
+def test_rule_engine_dfmea_cause_fallback_keeps_generic_defaults():
+    """DFMEA 失效原因无图谱匹配时，仍使用通用默认原因。"""
+    engine = RuleEngine()
+    result = engine.evaluate("failure_cause", {"failure_mode": "未知失效模式", "fmea_type": "DFMEA"})
+    names = [s.name for s in result.suggestions]
+    assert "零部件老化" in names
+    assert "环境因素" in names
+    assert "制造缺陷" in names
+
+
 def test_rule_engine_failure_mode():
     engine = RuleEngine()
     result = engine.evaluate("failure_mode", {"function_description": "采集数据"})

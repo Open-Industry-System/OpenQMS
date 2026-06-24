@@ -7,7 +7,7 @@ import { parseScopeTokens, stringifyScopeTokens } from "../../utils/wizardScopeT
 
 type RecommendScope = "global" | "current_product_type" | "current_product_line";
 
-export type ScopeTriggerType = "dfmea_tool" | "dfmea_trend";
+export type ScopeTriggerType = "dfmea_tool" | "dfmea_trend" | "pfmea_tool" | "pfmea_trend";
 
 interface ScopeTagFieldProps {
   /** 「、」分隔的存盘 string */

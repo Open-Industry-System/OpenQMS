@@ -27,6 +27,7 @@ import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
+import { aggregateSpecialCharacteristic } from "../../../components/pfmea/RiskTable";
 import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, deleteMode, getProcessChain, type FMEARow } from "../../../utils/fmeaTable";
 import { planCauseDeletion } from "./deleteRowHelpers";
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
@@ -395,13 +396,16 @@ export default function FMEAEditorPage() {
     if (!id) return;
     getFMEA(id)
       .then((doc) => {
-        // Redirect draft DFMEAs that haven't completed the wizard
-        if (
-          doc.fmea_type === "DFMEA" &&
+        // Redirect draft FMEAs that haven't completed the wizard to the correct wizard
+        const isIncompleteDraft =
           doc.status === "draft" &&
-          !doc.graph_data?.wizardScope?.wizard_completed
-        ) {
+          !doc.graph_data?.wizardScope?.wizard_completed;
+        if (isIncompleteDraft && doc.fmea_type === "DFMEA") {
           navigate(`/fmea/wizard/${id}`, { replace: true });
+          return;
+        }
+        if (isIncompleteDraft && doc.fmea_type === "PFMEA") {
+          navigate(`/fmea/pfmea-wizard/${id}`, { replace: true });
           return;
         }
         setFmea(doc);
@@ -1076,19 +1080,36 @@ export default function FMEAEditorPage() {
       align: "center" as const,
       onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
-        const node = nodeMap.get(row.failureModeNodeId);
-        const classValue = node?.classification || "";
-        const bgStyle = classValue === "CC" ? { background: "#fff1f0" } : classValue === "SC" ? { background: "#fffbe6" } : {};
-        return (
-          <Select
-            size="small"
-            value={classValue || undefined}
-            onChange={(value) => updateNode(row.failureModeNodeId, "classification", value || "")}
-            disabled={!canEdit('fmea')}
-            style={{ width: 60, ...bgStyle }}
-            options={[{ value: "", label: "-" }, { value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
-          />
-        );
+        if (isDFMEA) {
+          // ---- DFMEA: Filter Code on FailureMode, editable (UNCHANGED) ----
+          const node = nodeMap.get(row.failureModeNodeId);
+          const classValue = node?.classification || "";
+          const bgStyle = classValue === "CC" ? { background: "#fff1f0" } : classValue === "SC" ? { background: "#fffbe6" } : {};
+          return (
+            <Select
+              size="small"
+              value={classValue || undefined}
+              onChange={(value) => updateNode(row.failureModeNodeId, "classification", value || "")}
+              disabled={!canEdit('fmea')}
+              style={{ width: 60, ...bgStyle }}
+              options={[{ value: "", label: "-" }, { value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
+            />
+          );
+        }
+        // ---- PFMEA: read-only, from function-node classification (spec §9) ----
+        const stepFunc = nodeMap.get(row.functionNodeId);
+        const wefs = nodes.filter((n) => n.type === "ProcessWorkElementFunction");
+        let { label, tag } = aggregateSpecialCharacteristic(stepFunc, wefs, edges);
+        // backward compat: legacy PFMEA docs stored CC/SC on FailureMode.classification
+        if (tag === "-") {
+          const fmClass = nodeMap.get(row.failureModeNodeId)?.classification || "";
+          if (fmClass === "CC" || fmClass === "SC") {
+            label = fmClass;
+            tag = fmClass;
+          }
+        }
+        const bg = tag === "CC" ? "#fff1f0" : tag === "SC" ? "#fffbe6" : undefined;
+        return <Tooltip title={label}><Tag style={{ background: bg }}>{label}</Tag></Tooltip>;
       },
     },
     {

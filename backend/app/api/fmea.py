@@ -254,7 +254,7 @@ def _recommend_anchor(trigger_type: str, context: dict) -> str:
     """
     if trigger_type == "failure_mode":
         return context.get("function_description") or context.get("input_text") or ""
-    if trigger_type in ("dfmea_tool", "dfmea_trend"):
+    if trigger_type in ("dfmea_tool", "dfmea_trend", "pfmea_tool", "pfmea_trend"):
         return (
             context.get("task")
             or context.get("fmea_title")

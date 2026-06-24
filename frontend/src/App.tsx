@@ -11,6 +11,7 @@ const DashboardPage = lazy(() => import("./pages/dashboard/DashboardPage"));
 const FMEAListPage = lazy(() => import("./pages/planning/fmea/FMEAListPage"));
 const FMEAEditorPage = lazy(() => import("./pages/planning/fmea/FMEAEditorPage"));
 const DFMEAWizardPage = lazy(() => import("./pages/planning/fmea/DFMEAWizardPage"));
+const PFMEAWizardPage = lazy(() => import("./pages/planning/fmea/PFMEAWizardPage"));
 const CAPAListPage = lazy(() => import("./pages/capa/CAPAListPage"));
 const CAPADetailPage = lazy(() => import("./pages/capa/CAPADetailPage"));
 const ControlPlanListPage = lazy(() => import("./pages/planning/control-plan/ControlPlanListPage"));
@@ -139,6 +140,7 @@ export default function App() {
         <Route path="/dashboard" element={<ProtectedRoute requiredModule="dashboard"><DashboardPage /></ProtectedRoute>} />
         <Route path="/fmea" element={<ProtectedRoute requiredModule="fmea"><FMEAListPage /></ProtectedRoute>} />
         <Route path="/fmea/wizard/:id" element={<ProtectedRoute requiredModule="fmea"><DFMEAWizardPage /></ProtectedRoute>} />
+        <Route path="/fmea/pfmea-wizard/:id" element={<ProtectedRoute requiredModule="fmea"><PFMEAWizardPage /></ProtectedRoute>} />
         <Route path="/fmea/:id" element={<ProtectedRoute requiredModule="fmea"><FMEAEditorPage /></ProtectedRoute>} />
         <Route path="/capa" element={<ProtectedRoute requiredModule="capa"><CAPAListPage /></ProtectedRoute>} />
         <Route path="/capa/:id" element={<ProtectedRoute requiredModule="capa"><CAPADetailPage /></ProtectedRoute>} />
