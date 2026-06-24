@@ -3,7 +3,7 @@
 > 日期：2026-06-24
 > 分支：`fix/fmea-fixes` → `worktree-pfmea-wizard-design`
 > 权威数据结构来源：`docs/superpowers/specs/2026-05-20-pfmea-data-structure-design.md`（已评审通过，定义节点/边/字段口径）
-> 方法论来源：`Reference/FMEA.md` §3.1–3.7（AIAG-VDA PFMEA 七步法）
+> 方法论来源：`Reference/FMEA.md` §3.1–3.7（AIAG-VDA PFMEA 七步法，外部参考资料，位于仓库主检出根目录的 `Reference/`，不在本 worktree 内）
 > 现有 DFMEA 向导实现：`DFMEAWizardPage.tsx` + `components/dfmea/`
 
 > [!IMPORTANT]
@@ -100,7 +100,7 @@ frontend/src/
   - 过程项功能 / 过程步骤功能：**产品特性**（geometry/material/surface 等可测量产品属性）。
   - 工作要素功能：**过程特性**（压力/温度/速度 等过程控制参数）。
 - `FUNCTION_MAPPED_TO` 自动连接 ItemFunc → StepFunc → WorkElementFunc。
-- **CC/SC 维护**（见 §8）：在 `FunctionTreeEditor` 中为每个函数节点设置 `classification`（无/CC/SC）——CC 设 `ProcessStepFunction`，SC 设 `ProcessWorkElementFunction`。这是 CC/SC 的唯一维护入口。
+- **CC/SC 维护**（见 §8）：在 `FunctionTreeEditor` 中设置 `classification`（无/CC/SC）——**仅 `ProcessStepFunction`（CC）与 `ProcessWorkElementFunction`（SC）可设置**；`ProcessItemFunction` 不提供 CC/SC 编辑（仅允许空值，因其为高层整合功能，不承载特性）。这是 CC/SC 的唯一维护入口。
 - AI 触发器：复用现有（功能建议按 `fmea_type` 分流）。
 
 ### Step 3 — 失效分析
@@ -160,7 +160,8 @@ frontend/src/
 - **归属**（对齐种子 `seed.py:31-32` + 2026-05-20 文档 §2.1-A NOTE）：
   - CC（产品特性）→ `ProcessStepFunction.classification`
   - SC（过程特性）→ `ProcessWorkElementFunction.classification`
-- **Step 2（`FunctionTreeEditor`）**：用户在每个函数节点上设置 `classification`（无/CC/SC）。因函数节点是 3 层树中的具体节点，写入目标唯一确定，不存在歧义。
+  - `ProcessItemFunction` → **不承载 CC/SC**（仅允许空值；高层整合功能不涉及特性）
+- **Step 2（`FunctionTreeEditor`）**：仅 `ProcessStepFunction` 与 `ProcessWorkElementFunction` 提供 CC/SC 编辑入口；`ProcessItemFunction` 不提供。写入目标唯一确定，不存在歧义。
 - **Step 4（`RiskTable`）**：风险表「特性」列**只读**展示，聚合规则（行的 `functionNodeId` = `ProcessStepFunction`）：
   1. 若该 `ProcessStepFunction.classification === "CC"` → 展示 `CC`（CC 优先级最高，一个步骤的产品特性 CC 主导该行展示）。
   2. 否则收集该 `ProcessStepFunction` 沿 `FUNCTION_MAPPED_TO` 下游所有 `ProcessWorkElementFunction` 中 `classification === "SC"` 的节点：
