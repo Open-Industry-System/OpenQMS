@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Table, Button, Tag, Form, Input, Select, Switch, Space, Modal, App } from "antd";
-import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
+import { Table, Button, Tag, Form, Input, Select, Switch, Space, Modal, Popconfirm, App } from "antd";
+import { PlusOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { listFMEAs, createFMEA } from "../../../api/fmea";
+import { listFMEAs, createFMEA, deleteFMEA } from "../../../api/fmea";
 import { formatFMEAError } from "../../../utils/fmeaError";
 import type { FMEADocument } from "../../../types";
 import { useAuthStore } from "../../../store/authStore";
@@ -137,6 +137,17 @@ export default function FMEAListPage() {
     }
   };
 
+  const handleDelete = async (record: FMEADocument) => {
+    try {
+      await deleteFMEA(record.fmea_id);
+      message.success(tc("messages.deleteSuccess"));
+      fetchData(page);
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      message.error(detail || tc("messages.deleteFailed"));
+    }
+  };
+
   const columns = [
     {
       title: t("list.columns.documentNo"),
@@ -181,7 +192,7 @@ export default function FMEAListPage() {
     {
       title: t("list.columns.actions"),
       key: "actions",
-      width: 100,
+      width: 160,
       render: (_: unknown, record: FMEADocument) => {
         // Send incomplete DFMEA/PFMEA drafts back to their respective wizard;
         // completed drafts open directly in the editor, matching FMEAEditorPage's redirect guard.
@@ -191,10 +202,25 @@ export default function FMEAListPage() {
         const targetPath = isIncompleteDraft
           ? (record.fmea_type === "PFMEA" ? `/fmea/pfmea-wizard/${record.fmea_id}` : `/fmea/wizard/${record.fmea_id}`)
           : `/fmea/${record.fmea_id}`;
+        // 后端仅允许删除 draft / rework(返工=被拒) 状态的 FMEA
+        const canDelete = canEdit('fmea') && (record.status === "draft" || record.status === "rework");
         return (
-          <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(targetPath)}>
-            {canEdit('fmea') ? tc("actions.edit") : tc("actions.view")}
-          </Button>
+          <>
+            <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(targetPath)}>
+              {canEdit('fmea') ? tc("actions.edit") : tc("actions.view")}
+            </Button>
+            {canDelete && (
+              <Popconfirm
+                title={t("list.deleteConfirm", { no: record.document_no })}
+                okButtonProps={{ danger: true }}
+                onConfirm={() => handleDelete(record)}
+              >
+                <Button type="link" danger icon={<DeleteOutlined />}>
+                  {tc("actions.delete")}
+                </Button>
+              </Popconfirm>
+            )}
+          </>
         );
       },
     },

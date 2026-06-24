@@ -9,11 +9,13 @@ import i18n from "../../../i18n";
 const mocks = vi.hoisted(() => ({
   listFMEAs: vi.fn(),
   createFMEA: vi.fn(),
+  deleteFMEA: vi.fn(),
 }));
 
 vi.mock("../../../api/fmea", () => ({
   listFMEAs: mocks.listFMEAs,
   createFMEA: mocks.createFMEA,
+  deleteFMEA: mocks.deleteFMEA,
 }));
 
 // store 以 selector 方式调用，mock 必须执行 selector
@@ -282,5 +284,63 @@ describe("FMEAListPage draft navigation", () => {
     fireEvent.click(editBtn);
 
     await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith("/fmea/pfmea-wizard/pfmea-draft-1"));
+  });
+});
+
+describe("FMEAListPage delete", () => {
+  const draftItem = {
+    fmea_id: "fmea-draft-1",
+    document_no: "PFMEA-2026-DEL",
+    title: "draft to delete",
+    fmea_type: "PFMEA",
+    status: "draft",
+    version: 1,
+    updated_at: new Date().toISOString(),
+    graph_data: { wizardScope: { wizard_completed: true } },
+  };
+
+  beforeEach(() => {
+    mocks.deleteFMEA.mockResolvedValue(undefined);
+  });
+
+  it("shows delete button only for draft / rework rows", async () => {
+    mocks.listFMEAs.mockResolvedValue({
+      items: [
+        { ...draftItem, fmea_id: "d1", status: "draft" },
+        { ...draftItem, fmea_id: "r1", status: "rework" },
+        { ...draftItem, fmea_id: "a1", status: "approved" },
+        { ...draftItem, fmea_id: "i1", status: "in_review" },
+      ],
+      total: 4,
+      page: 1,
+      page_size: 20,
+    });
+
+    renderAt("/fmea");
+    // draft + rework 各有一个删除按钮；approved / in_review 无
+    const delButtons = await screen.findAllByRole("button", { name: /delete|删除/i });
+    expect(delButtons).toHaveLength(2);
+  });
+
+  it("confirms deletion, calls deleteFMEA, and refreshes the list", async () => {
+    mocks.listFMEAs.mockResolvedValue({ items: [draftItem], total: 1, page: 1, page_size: 20 });
+
+    renderAt("/fmea");
+    await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalledTimes(1));
+
+    const delBtn = await screen.findByRole("button", { name: /delete|删除/i });
+    fireEvent.click(delBtn);
+
+    // Popconfirm 的确认按钮（避免与触发按钮「删除」重名，按容器类名定位）
+    let okBtn: HTMLElement | null = null;
+    await vi.waitFor(() => {
+      okBtn = document.querySelector(".ant-popconfirm-buttons .ant-btn-primary");
+      expect(okBtn).toBeTruthy();
+    });
+    fireEvent.click(okBtn!);
+
+    await vi.waitFor(() => expect(mocks.deleteFMEA).toHaveBeenCalledWith("fmea-draft-1"));
+    // 删除后应重新拉取列表
+    await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalledTimes(2));
   });
 });

@@ -33,6 +33,7 @@
     "title": "FMEA Management",
     "subtitle": "Failure Mode and Effects Analysis · PFMEA / DFMEA",
     "newFMEA": "New FMEA",
+    "deleteConfirm": "Delete \"{{no}}\"? This cannot be undone.",
     "columns": {
       "documentNo": "Document No.",
       "title": "Title",

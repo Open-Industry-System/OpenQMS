@@ -33,6 +33,7 @@
     "title": "FMEA 管理",
     "subtitle": "失效模式与影响分析 · PFMEA / DFMEA",
     "newFMEA": "新建 FMEA",
+    "deleteConfirm": "确定删除「{{no}}」吗？此操作不可撤销。",
     "columns": {
       "documentNo": "文档编号",
       "title": "标题",

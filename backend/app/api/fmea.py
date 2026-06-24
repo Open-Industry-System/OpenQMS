@@ -178,9 +178,9 @@ async def delete_fmea(
     if scope.factory_scope.accessible_factory_ids is not None:
         if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
             raise HTTPException(status_code=404, detail="FMEA not found")
-    # Only allow deleting draft FMEAs
-    if fmea.status != "draft":
-        raise HTTPException(status_code=400, detail="只能删除草稿状态的FMEA")
+    # Only allow deleting draft or rework (rejected) FMEAs
+    if fmea.status not in ("draft", "rework"):
+        raise HTTPException(status_code=400, detail="只能删除草稿或返工状态的FMEA")
     await fmea_service.delete_fmea(db, fmea_id, scope.user.user_id)
 
 
