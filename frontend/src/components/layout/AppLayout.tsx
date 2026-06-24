@@ -32,6 +32,8 @@ import {
   GlobalOutlined,
   BankOutlined,
   HeatMapOutlined,
+  AppstoreOutlined,
+  ProfileOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
@@ -265,6 +267,8 @@ function useMenuItems(): MenuItem[] {
         label: t("menu.admin"),
         children: [
           { key: "/admin/ai-config", icon: <SettingOutlined />, label: t("menu.aiConfig"), adminOnly: true },
+          { key: "/admin/product-types", icon: <AppstoreOutlined />, label: t("menu.productTypes"), adminOnly: true },
+          { key: "/admin/product-lines", icon: <ProfileOutlined />, label: t("menu.productLines"), adminOnly: true },
         ],
       },
     ],
