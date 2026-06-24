@@ -267,19 +267,35 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     },
     download: () => {
       const g = graphRef.current;
-      if (g) {
-        // Use G6's toDataURL instead of querySelector to avoid capturing minimap
-        g.toDataURL()
-          .then((url: string) => {
+      if (!g) return;
+      // G6's toDataURL captures only the canvas (transparent background); the dark
+      // GRAPH_BG lives in the container CSS, so the raw export is invisible on a
+      // white viewer. Composite the export onto a GRAPH_BG-filled canvas first.
+      g.toDataURL()
+        .then((url: string) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            ctx.fillStyle = GRAPH_BG;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
             const link = document.createElement("a");
             link.download = "graph.png";
-            link.href = url;
+            link.href = canvas.toDataURL("image/png");
             link.click();
-          })
-          .catch((err: unknown) => {
-            console.error("Graph download failed:", err);
-          });
-      }
+          };
+          img.onerror = (err: unknown) => {
+            console.error("Graph download image load failed:", err);
+          };
+          img.src = url;
+        })
+        .catch((err: unknown) => {
+          console.error("Graph download failed:", err);
+        });
     },
   }));
 
