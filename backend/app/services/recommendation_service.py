@@ -120,6 +120,38 @@ FAILURE_CHAIN_MAP: dict[str, dict[str, list[str]]] = {
     },
 }
 
+# PFMEA 过程动词 → 失效模式（按 4M 组织）
+PFMEA_VERB_PATTERNS: dict[str, list[str]] = {
+    "焊接": ["焊点虚焊", "焊点桥连", "焊料不足", "焊点气孔"],
+    "装配": ["装配错位", "漏装", "错装", "装配过紧/过松"],
+    "注塑": ["缺料", "飞边", "缩水", "气泡"],
+    "涂装": ["涂层不均", "漏涂", "涂层过厚/过薄", "色差"],
+    "压装": ["压装不到位", "压装过载", "压装偏斜", "压装扭矩不稳"],
+    "贴装": ["贴装偏移", "贴装漏件", "贴装反件", "贴装压力异常"],
+}
+
+PFMEA_FAILURE_CHAIN_MAP: dict[str, dict[str, list[str]]] = {
+    "贴装偏移": {
+        "effects": ["电控板功能丧失", "整机无法启动", "客户退货"],
+        "causes": ["贴装吸嘴磨损", "贴装压力设定偏小", "设备校准漂移", "来料器件偏置"],
+    },
+    "压装不到位": {
+        "effects": ["连接松动", "异响", "功能间歇性失效"],
+        "causes": ["压头行程未校准", "压力传感器漂移", "来料尺寸超差", "操作未按SOP"],
+    },
+    "焊点虚焊": {
+        "effects": ["电路断开", "信号中断", "功能丧失"],
+        "causes": ["焊接温度不足", "焊膏活性不足", "贴装压力不足", "环境湿度过高"],
+    },
+}
+
+PFMEA_4M_CAUSE_HINTS: dict[str, list[str]] = {
+    "Man": ["操作未按SOP", "培训不足", "疲劳/疏忽", "人员换线未验证"],
+    "Machine": ["设备校准漂移", "设备磨损", "设备参数漂移", "预防性维护缺失"],
+    "Material": ["来料尺寸超差", "来料材质不符", "辅料过期", "批次不一致"],
+    "Environment": ["温湿度超范围", "粉尘/洁净度不足", "静电(ESD)", "照明不足"],
+}
+
 DEFAULT_EFFECTS = ["功能降级", "系统性能下降"]
 DEFAULT_CAUSES = ["零部件老化", "环境因素", "制造缺陷"]
 
@@ -142,12 +174,20 @@ class RuleEngine:
             return RuleResult(suggestions=[], quality="generic")
         return handler(context)
 
+    def _get_verb_patterns(self, fmea_type: str) -> dict[str, list[str]]:
+        return PFMEA_VERB_PATTERNS if fmea_type == "PFMEA" else VERB_PATTERNS
+
+    def _get_failure_chain_map(self, fmea_type: str) -> dict[str, dict[str, list[str]]]:
+        return PFMEA_FAILURE_CHAIN_MAP if fmea_type == "PFMEA" else FAILURE_CHAIN_MAP
+
     def _generate_failure_modes(self, context: dict) -> RuleResult:
         func_desc = context.get("function_description", "") or context.get("input_text", "")
         if not func_desc:
             return RuleResult(suggestions=[], quality="generic")
 
-        for verb, modes in VERB_PATTERNS.items():
+        fmea_type = context.get("fmea_type", "DFMEA")
+        verb_patterns = self._get_verb_patterns(fmea_type)
+        for verb, modes in verb_patterns.items():
             if verb in func_desc:
                 return RuleResult(
                     suggestions=[RuleSuggestion(name=m, confidence=0.7, explanation=f"动词「{verb}」匹配") for m in modes],
@@ -162,7 +202,9 @@ class RuleEngine:
 
     def _suggest_failure_effect(self, context: dict) -> RuleResult:
         fm = context.get("failure_mode", "")
-        for key, chain in FAILURE_CHAIN_MAP.items():
+        fmea_type = context.get("fmea_type", "DFMEA")
+        chain_map = self._get_failure_chain_map(fmea_type)
+        for key, chain in chain_map.items():
             if key in fm:
                 return RuleResult(
                     suggestions=[RuleSuggestion(name=e, confidence=0.7, explanation=f"关联失效模式「{key}」") for e in chain["effects"]],
@@ -175,7 +217,9 @@ class RuleEngine:
 
     def _suggest_failure_cause(self, context: dict) -> RuleResult:
         fm = context.get("failure_mode", "")
-        for key, chain in FAILURE_CHAIN_MAP.items():
+        fmea_type = context.get("fmea_type", "DFMEA")
+        chain_map = self._get_failure_chain_map(fmea_type)
+        for key, chain in chain_map.items():
             if key in fm:
                 return RuleResult(
                     suggestions=[RuleSuggestion(name=c, confidence=0.7, explanation=f"关联失效模式「{key}」") for c in chain["causes"]],
@@ -448,6 +492,48 @@ D: 焊后100% X射线探伤 / 焊缝气密性在线检测
 返回 JSON：
 {{"suggestions": [{{"name": "趋势数据/信息源", "confidence": 0.0-1.0, "explanation": "为何该数据源对本次分析有价值"}}]}}
 """,
+    "pfmea_tool": """你是资深PFMEA(过程FMEA)工程师，精通AIAG-VDA方法论。
+
+【任务】为下方PFMEA分析推荐 3-5 个合适的「分析工具/方法」。
+【工具定义】用于过程结构/功能/失效分析的方法与图样，例如过程流程图、过程参数图(P图)、鱼骨图(4M分析)、PFMEA模板、过程FMECA等。
+【方向约束】推荐具体、可执行的方法或图样名称，不要泛泛的"质量工具"。
+
+【当前上下文】
+- FMEA 标题: {fmea_title}
+- 产品线: {product_line}
+- 分析任务: {task}
+- 团队: {team}
+
+【历史相似案例】
+{historical_patterns}
+
+【示例】分析工具: 过程流程图 / 过程参数图(P图) / 鱼骨图(4M分析) / PFMEA模板 / 过程FMECA
+
+【要求】与当前过程/任务直接相关，便于据此开展结构分析与功能分析。
+返回 JSON：
+{{"suggestions": [{{"name": "工具/方法名称", "confidence": 0.0-1.0, "explanation": "为何适合当前PFMEA分析"}}]}}
+""",
+    "pfmea_trend": """你是资深PFMEA(过程FMEA)工程师，精通AIAG-VDA方法论。
+
+【任务】为下方PFMEA分析推荐 3-5 个「趋势数据/信息源」。
+【趋势定义】指导本次分析的输入信息与历史数据来源，例如历史PFMEA、过程SPC数据、不合格品记录(NCR)、客户投诉、CAPA记录、返工/报废记录等。
+【方向约束】推荐具体的数据源类别，便于据此收集分析输入。
+
+【当前上下文】
+- FMEA 标题: {fmea_title}
+- 产品线: {product_line}
+- 分析任务: {task}
+- 团队: {team}
+
+【历史相似案例】
+{historical_patterns}
+
+【示例】趋势数据: 历史PFMEA / 过程SPC数据 / 不合格品记录(NCR) / 客户投诉 / CAPA记录 / 返工报废记录
+
+【要求】与当前产品线/过程相关、能指导风险识别的数据源。
+返回 JSON：
+{{"suggestions": [{{"name": "趋势数据/信息源", "confidence": 0.0-1.0, "explanation": "为何该数据源对本次分析有价值"}}]}}
+""",
 }
 
 
@@ -493,7 +579,9 @@ class RecommendationService:
                 return cached_response
 
         # 2. Rule engine（sync, ~1ms）
-        rule_result = self.rules.evaluate(request.trigger_type, request.context)
+        # 传入 fmea_type 使 PFMEA 能使用 PFMEA 规则映射
+        rule_context = {**request.context, "fmea_type": fmea.fmea_type}
+        rule_result = self.rules.evaluate(request.trigger_type, rule_context)
         rule_suggestions = [
             SuggestionItem(name=s.name, confidence=s.confidence, source="rule", explanation=s.explanation)
             for s in rule_result.suggestions
