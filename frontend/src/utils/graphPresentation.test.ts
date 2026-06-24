@@ -5,9 +5,12 @@ import {
   DEFAULT_NODE_STYLE,
   DFMEA_LEGEND_NODE_TYPES,
   EDGE_PRESENTATION,
+  EDGE_STROKE,
+  GRAPH_EDGE_LEGEND,
   GRAPH_EDGE_TYPES,
   GRAPH_NODE_TYPES,
   NODE_PRESENTATION,
+  getEdgeStyle,
   getEdgeTypeKey,
   getNodeStyle,
   getNodeTypeKey,
@@ -165,6 +168,49 @@ describe("graphPresentation", () => {
     // Every DFMEA legend entry must resolve to a real presentation + locale label.
     for (const type of DFMEA_LEGEND_NODE_TYPES) {
       expect(NODE_PRESENTATION[type]).toBeTruthy();
+    }
+  });
+
+  describe("edge style", () => {
+    it("maps CAUSE_OF to the red-pink cause-branch color", () => {
+      expect(getEdgeStyle("CAUSE_OF").stroke).toBe("#ff7875");
+    });
+
+    it("maps EFFECT_OF to the orange effect-branch color", () => {
+      expect(getEdgeStyle("EFFECT_OF").stroke).toBe("#fa8c16");
+    });
+
+    it("maps control edges to their control-type colors", () => {
+      expect(getEdgeStyle("PREVENTED_BY").stroke).toBe("#73d13d");
+      expect(getEdgeStyle("DETECTED_BY").stroke).toBe("#722ed1");
+      expect(getEdgeStyle("OPTIMIZED_BY").stroke).toBe("#8c8c8c");
+    });
+
+    it("falls back to EDGE_STROKE for structural chain edges", () => {
+      expect(getEdgeStyle("HAS_FAILURE_MODE").stroke).toBe(EDGE_STROKE);
+      expect(getEdgeStyle("FUNCTION_MAPPED_TO").stroke).toBe(EDGE_STROKE);
+      expect(getEdgeStyle("UNKNOWN_EDGE").stroke).toBe(EDGE_STROKE);
+    });
+
+    it("always returns lineWidth 1", () => {
+      for (const raw of ["CAUSE_OF", "EFFECT_OF", "HAS_FAILURE_MODE", "UNKNOWN"]) {
+        expect(getEdgeStyle(raw).lineWidth).toBe(1);
+      }
+    });
+  });
+
+  it("GRAPH_EDGE_LEGEND lists the six branch + chain edge types with i18n keys", () => {
+    const types = GRAPH_EDGE_LEGEND.map((e) => e.type);
+    expect(types).toEqual([
+      "EFFECT_OF",
+      "CAUSE_OF",
+      "PREVENTED_BY",
+      "DETECTED_BY",
+      "OPTIMIZED_BY",
+      "HAS_FAILURE_MODE",
+    ]);
+    for (const entry of GRAPH_EDGE_LEGEND) {
+      expect(entry.translationKey).toMatch(/^edgeTypes\./);
     }
   });
 });
