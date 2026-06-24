@@ -292,7 +292,7 @@ git commit -m "feat(graph): add getHighlightedEdgeStyle pure fn preserving branc
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `frontend/src/utils/__tests__/graphLayout.test.ts`:
+Create the test directory and file `frontend/src/utils/__tests__/graphLayout.test.ts` (the `__tests__` directory does not exist yet — the Write tool creates parent dirs, but if your editor requires the dir first, run `mkdir -p frontend/src/utils/__tests__`):
 
 ```typescript
 import { describe, expect, it } from "vitest";
@@ -673,7 +673,7 @@ git commit -m "i18n(graph): add causeBranch, edgeLegend, direction toolbar keys"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `frontend/src/components/graph/__tests__/GraphToolbar.test.tsx`:
+Create the test directory and file `frontend/src/components/graph/__tests__/GraphToolbar.test.tsx` (the `__tests__` directory does not exist yet — run `mkdir -p frontend/src/components/graph/__tests__` first if your editor requires the dir):
 
 ```tsx
 import { describe, expect, it, vi } from "vitest";
