@@ -5,6 +5,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.product_line import ProductLine
 
+# Sentinel for "field not provided" (distinct from None = "clear to null").
+UNSET = object()
+
+
+async def _validate_product_type_code(db: AsyncSession, product_type_code: str | None) -> str | None:
+    """Validate the type exists when set; raise ValueError on invalid. None means clear-to-null."""
+    if product_type_code is None:
+        return None
+    from app.models.product_type import ProductType
+    existing = await db.execute(select(ProductType).where(ProductType.code == product_type_code))
+    if existing.scalar_one_or_none() is None:
+        raise ValueError(f"产品类型 '{product_type_code}' 不存在")
+    return product_type_code
+
 
 async def list_product_lines(
     db: AsyncSession,
@@ -25,22 +39,34 @@ async def get_product_line(db: AsyncSession, code: str) -> ProductLine | None:
     return result.scalar_one_or_none()
 
 
-async def create_product_line(db: AsyncSession, code: str, name: str, factory_id: uuid.UUID | None = None) -> ProductLine:
+async def create_product_line(
+    db: AsyncSession, code: str, name: str, factory_id: uuid.UUID | None = None, product_type_code: str | None = None
+) -> ProductLine:
     existing = await get_product_line(db, code)
     if existing:
         raise ValueError(f"产品线 '{code}' 已存在")
-    pl = ProductLine(code=code, name=name, factory_id=factory_id)
+    product_type_code = await _validate_product_type_code(db, product_type_code)
+    pl = ProductLine(code=code, name=name, factory_id=factory_id, product_type_code=product_type_code)
     db.add(pl)
     await db.commit()
     await db.refresh(pl)
     return pl
 
 
-async def update_product_line(db: AsyncSession, pl: ProductLine, name: str | None, is_active: bool | None) -> ProductLine:
+async def update_product_line(
+    db: AsyncSession,
+    pl: ProductLine,
+    name: str | None,
+    is_active: bool | None,
+    product_type_code=UNSET,
+) -> ProductLine:
+    """product_type_code: UNSET = leave unchanged; None = clear to null; str = set."""
     if name is not None:
         pl.name = name
     if is_active is not None:
         pl.is_active = is_active
+    if product_type_code is not UNSET:
+        pl.product_type_code = await _validate_product_type_code(db, product_type_code)
     await db.commit()
     await db.refresh(pl)
     return pl
