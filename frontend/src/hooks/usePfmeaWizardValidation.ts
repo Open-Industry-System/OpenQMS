@@ -69,9 +69,14 @@ export function usePfmeaWizardValidation(
       if (!mappedFrom) return false;
       const stepFunc = nodeMap.get(mappedFrom.source);
       if (!stepFunc || stepFunc.type !== STEP_FUNCTION) return false;
-      // the step that owns wf, and the step that owns stepFunc — must be the same step
+      // (1) the ProcessWorkElement that owns this WEF (WorkElement --HAS_FUNCTION--> WEF)
+      const wfOwner = nodes.find((n) => n.type === 'ProcessWorkElement' &&
+        edges.some((e) => e.source === n.id && e.target === wf.id && e.type === 'HAS_FUNCTION'));
+      if (!wfOwner) return false;
+      // (2) the ProcessStep that owns that WorkElement (ProcessStep --HAS_WORK_ELEMENT--> WorkElement)
       const wfStep = nodes.find((n) => n.type === 'ProcessStep' &&
-        edges.some((e) => e.source === n.id && e.target === wf.id && e.type === 'HAS_WORK_ELEMENT'));
+        edges.some((e) => e.source === n.id && e.target === wfOwner.id && e.type === 'HAS_WORK_ELEMENT'));
+      // the ProcessStep that owns stepFunc (ProcessStep --HAS_FUNCTION--> stepFunc)
       const sfStep = nodes.find((n) => n.type === 'ProcessStep' &&
         edges.some((e) => e.source === n.id && e.target === stepFunc.id && e.type === 'HAS_FUNCTION'));
       return !!wfStep && wfStep.id === sfStep?.id;

@@ -203,7 +203,6 @@ describe("PFMEAWizardPage", () => {
         edges: [
           { source: "pi", target: "ps", type: "HAS_PROCESS_STEP" },
           { source: "ps", target: "we1", type: "HAS_WORK_ELEMENT" },
-          { source: "ps", target: "wef", type: "HAS_WORK_ELEMENT" },
           { source: "pi", target: "pif", type: "HAS_FUNCTION" },
           { source: "pif", target: "psf", type: "FUNCTION_MAPPED_TO" },
           { source: "ps", target: "psf", type: "HAS_FUNCTION" },
@@ -280,7 +279,6 @@ describe("PFMEAWizardPage", () => {
         edges: [
           { source: "pi", target: "ps", type: "HAS_PROCESS_STEP" },
           { source: "ps", target: "we1", type: "HAS_WORK_ELEMENT" },
-          { source: "ps", target: "wef", type: "HAS_WORK_ELEMENT" },
           { source: "pi", target: "pif", type: "HAS_FUNCTION" },
           { source: "pif", target: "psf", type: "FUNCTION_MAPPED_TO" },
           { source: "ps", target: "psf", type: "HAS_FUNCTION" },

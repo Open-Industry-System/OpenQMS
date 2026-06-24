@@ -86,6 +86,28 @@ describe('usePfmeaWizardValidation', () => {
     expect(result.current.step4Complete).toBe(true);
   });
 
+  it('step2 complete when 3-level branch-local chain is correct', () => {
+    const nodes: GraphNode[] = [
+      { id: 'pi', type: 'ProcessItem', name: '线', ...Z },
+      { id: 'pif', type: 'ProcessItemFunction', name: '完成', ...Z },
+      { id: 'ps', type: 'ProcessStep', name: '贴装', process_number: 'OP10', ...Z },
+      { id: 'psf', type: 'ProcessStepFunction', name: '贴装功能', ...Z },
+      { id: 'we', type: 'ProcessWorkElement', name: '机', classification: 'Machine', ...Z },
+      { id: 'wef', type: 'ProcessWorkElementFunction', name: '机功能', ...Z },
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'pi', target: 'pif', type: 'HAS_FUNCTION' },
+      { source: 'pi', target: 'ps', type: 'HAS_PROCESS_STEP' },
+      { source: 'ps', target: 'psf', type: 'HAS_FUNCTION' },
+      { source: 'pif', target: 'psf', type: 'FUNCTION_MAPPED_TO' },
+      { source: 'ps', target: 'we', type: 'HAS_WORK_ELEMENT' },
+      { source: 'we', target: 'wef', type: 'HAS_FUNCTION' },
+      { source: 'psf', target: 'wef', type: 'FUNCTION_MAPPED_TO' },
+    ];
+    const { result } = renderHook(() => usePfmeaWizardValidation(nodes, edges));
+    expect(result.current.step2Complete).toBe(true);
+  });
+
   it('step2 fails when a WEF maps to a sibling step\'s StepFunction (wrong branch)', () => {
     // Two steps each with a StepFunction; one WEF under ps1 but mapped from psf2 (wrong branch).
     const nodes: GraphNode[] = [
