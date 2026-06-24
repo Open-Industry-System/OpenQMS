@@ -1767,11 +1767,23 @@ async def seed():
         db.add_all([engineer, manager, viewer])
         await db.flush()
 
+        # Product types (cross-factory taxonomy)
+        from app.models.product_type import ProductType
+        pt_data = [
+            {"code": "POWER", "name": "电源类", "description": "电源模块/电源线", "is_active": True},
+            {"code": "PCB", "name": "PCB 类", "description": "印制电路板/贴片线", "is_active": True},
+        ]
+        for pt_dict in pt_data:
+            existing = await db.execute(select(ProductType).where(ProductType.code == pt_dict["code"]))
+            if not existing.scalar_one_or_none():
+                db.add(ProductType(**pt_dict))
+        await db.flush()
+
         # Product lines (must exist before UserProductLine assignments)
         from app.models.product_line import ProductLine
         pl_data = [
-            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块"},
-            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线"},
+            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER"},
+            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB"},
         ]
         for pl_dict in pl_data:
             existing = await db.execute(select(ProductLine).where(ProductLine.code == pl_dict["code"]))
@@ -1971,8 +1983,8 @@ async def seed():
         from app.models.product_line import ProductLine
 
         pl_data = [
-            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块"},
-            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线"},
+            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER"},
+            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB"},
         ]
         for pl_dict in pl_data:
             existing = await db.execute(select(ProductLine).where(ProductLine.code == pl_dict["code"]))
