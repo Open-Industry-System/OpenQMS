@@ -226,20 +226,23 @@ async def similar_nodes_advanced(
     无 KNOWLEDGE_GRAPH 权限时，global scope 强制降级为 current_product_line。
     """
 
-    # 产品线访问校验
-    if scope.pl_scope.mode == "EXPLICIT":
+    # 产品线访问校验（仅在调用方显式指定了 product_line_code 时检查；
+    # product_line_code 为 None 时由 resolver 按 pl_scope 收敛）
+    if req.product_line_code is not None and scope.pl_scope.mode == "EXPLICIT":
         if req.product_line_code not in (scope.pl_scope.codes or []):
             raise HTTPException(status_code=403, detail="No access to this product line")
 
-    # scope 强制降级
+    # scope 强制降级：无 KNOWLEDGE_GRAPH 权限时，global/current_product_type 降级为 current_product_line
     has_kg = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db) >= PermissionLevel.VIEW
-    effective_scope = "current_product_line" if (not has_kg and req.scope == "global") else req.scope
+    effective_scope = "current_product_line" if (not has_kg and req.scope in ("global", "current_product_type")) else req.scope
+
+    from app.services.recommendation_scope import resolve_product_line_codes
+    codes = await resolve_product_line_codes(effective_scope, req.product_line_code, db, scope)
 
     matches = await repo.find_similar_nodes_advanced(
         node_type=req.node_type,
         query_text=req.query_text,
-        scope=effective_scope,
-        product_line_code=req.product_line_code,
+        product_line_codes=codes,
         limit=req.limit,
         min_similarity=req.min_similarity,
     )

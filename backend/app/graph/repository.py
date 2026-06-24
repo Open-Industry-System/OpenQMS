@@ -38,18 +38,15 @@ class FMEAGraphRepository(ABC):
         self,
         node_type: str,
         query_text: str,
-        scope: str,
-        product_line_code: str | None,
+        product_line_codes: list[str] | None,
         limit: int = 10,
         min_similarity: float = 0.3,
     ) -> list[dict]:
         """跨 FMEA 相似节点搜索（增强版）。
 
-        返回项包含：
-        - node_id, name, type, fmea_id, document_no
-        - product_line_code, product_line_name
-        - similarity_score (0.0 ~ 1.0)
-        - match_reason
+        product_line_codes: None = global (no filter); a list = restrict to those codes.
+        返回项包含 node_id, name, type, fmea_id, document_no, product_line_code,
+        product_line_name, similarity_score, match_reason。
         """
 
     @abstractmethod

@@ -9,7 +9,7 @@ class RecommendRequest(BaseModel):
         "dfmea_tool", "dfmea_trend",
     ]
     context: dict = Field(default_factory=dict)
-    scope: Literal["global", "current_product_line"] = "global"
+    scope: Literal["global", "current_product_type", "current_product_line"] = "global"
     include_graph: bool = True
 
 
@@ -35,7 +35,7 @@ class RecommendResponse(BaseModel):
     cached: bool = False
     llm_available: bool = False
     graph_match_count: int = 0
-    effective_scope: Literal["global", "current_product_line"] = "global"
+    effective_scope: Literal["global", "current_product_type", "current_product_line"] = "global"
 
 
 class SuggestionList(BaseModel):
@@ -48,8 +48,8 @@ class SuggestionList(BaseModel):
 class SimilarNodesRequest(BaseModel):
     node_type: str
     query_text: str
-    scope: Literal["global", "current_product_line"] = "global"
-    product_line_code: str
+    scope: Literal["global", "current_product_type", "current_product_line"] = "global"
+    product_line_code: str | None = None   # now optional; codes resolved server-side
     limit: int = Field(10, ge=1, le=100)
     min_similarity: float = Field(0.3, ge=0.0, le=1.0)
 
@@ -69,4 +69,4 @@ class SimilarNodeMatch(BaseModel):
 class SimilarNodesResponse(BaseModel):
     matches: list[SimilarNodeMatch]
     total: int
-    effective_scope: Literal["global", "current_product_line"] = "global"
+    effective_scope: Literal["global", "current_product_type", "current_product_line"] = "global"
