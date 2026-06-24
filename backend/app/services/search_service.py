@@ -49,6 +49,7 @@ class SearchService:
         query: str,
         user: User,
         product_line_code: str | None = None,
+        product_type_code: str | None = None,
         entity_types: list[str] | None = None,
         limit: int = 20,
     ) -> SemanticSearchResponse:
@@ -72,6 +73,20 @@ class SearchService:
             if user_pls is not None:
                 filters.append("product_line_code = ANY(:user_product_lines)")
                 params["user_product_lines"] = user_pls
+
+        if product_type_code and not product_line_code:
+            from app.models.product_line import ProductLine
+            from sqlalchemy import select
+
+            type_pls = await self.db.execute(
+                select(ProductLine.code).where(ProductLine.product_type_code == product_type_code)
+            )
+            codes = [r[0] for r in type_pls.fetchall()]
+            if codes:
+                filters.append("product_line_code = ANY(:product_type_codes)")
+                params["product_type_codes"] = codes
+            else:
+                filters.append("1 = 0")
 
         # Pre-filter by accessible modules
         accessible_modules = []
@@ -174,6 +189,7 @@ class SearchService:
         question: str,
         user: User,
         product_line_code: str | None = None,
+        product_type_code: str | None = None,
         max_context_chunks: int = 10,
     ) -> QAResponse:
         """RAG Q&A: search + LLM answer with citations."""
@@ -183,6 +199,7 @@ class SearchService:
             query=question,
             user=user,
             product_line_code=product_line_code,
+            product_type_code=product_type_code,
             limit=max_context_chunks,
         )
 
