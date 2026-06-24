@@ -574,11 +574,23 @@ export default function DFMEAWizardPage() {
                               onSelect={(s) => handleUpdateNodeField(causeNode.id, 'name', s.name)}
                             />
                             <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.preventionControl')}</div>
-                            <Input size="small" value={pcName} placeholder={t('wizard.optimization.preventionPlaceholder')}
-                              onChange={e => handleUpdateControl(causeNode.id, 'prevention', e.target.value)} />
+                            <SmartSuggestionDropdown
+                              triggerType="prevention_control"
+                              context={{ failure_mode: fmNode.name, function_description: func.name, process_step: processStep(func.id) }}
+                              fmeaId={fmeaId!}
+                              value={pcName}
+                              onChange={(val) => handleUpdateControl(causeNode.id, 'prevention', val)}
+                              onSelect={(s) => handleUpdateControl(causeNode.id, 'prevention', s.name)}
+                            />
                             <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.detectionControl')}</div>
-                            <Input size="small" value={dcName} placeholder={t('wizard.optimization.detectionPlaceholder')}
-                              onChange={e => handleUpdateControl(causeNode.id, 'detection', e.target.value)} />
+                            <SmartSuggestionDropdown
+                              triggerType="detection_control"
+                              context={{ failure_mode: fmNode.name, function_description: func.name, process_step: processStep(func.id) }}
+                              fmeaId={fmeaId!}
+                              value={dcName}
+                              onChange={(val) => handleUpdateControl(causeNode.id, 'detection', val)}
+                              onSelect={(s) => handleUpdateControl(causeNode.id, 'detection', s.name)}
+                            />
                           </div>
                         );
                       })}
