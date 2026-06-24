@@ -6,7 +6,7 @@ import {
   type DragStartEvent, type DragOverEvent, type DragEndEvent,
 } from "@dnd-kit/core";
 import {
-  Button, Space, Tag, Typography, Input, Select, Table, Tabs,
+  Button, Space, Tag, Typography, Input, InputNumber, Select, Table, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip, Alert,
   Divider, Modal, Radio, Form, Dropdown,
 } from "antd";
@@ -1054,18 +1054,21 @@ export default function FMEAEditorPage() {
         const s = getRowSeverity(row, nodeMap);
         return (
           <div>
-            <Input
+            <InputNumber
               min={1}
               max={10}
+              step={1}
+              precision={0}
+              controls={false}
               size="small"
               value={s || undefined}
               disabled={!canEdit('fmea')}
               style={{ width: 55, textAlign: "center" }}
               onFocus={() => startEditing({ row_key: row.key, field: "severity", node_id: row.failureModeNodeId })}
               onBlur={stopEditing}
-              onChange={(e) => {
-                const v = Number(e.target.value) || 0;
-                row.failureEffectNodeIds.forEach((id) => updateNode(id, "severity", v));
+              onChange={(v) => {
+                const val = v ?? 0;
+                row.failureEffectNodeIds.forEach((id) => updateNode(id, "severity", val));
               }}
             />
             <ActiveUserIndicator activeUsers={activeUsers} rowKey={row.key} field="severity" />
@@ -1172,16 +1175,19 @@ export default function FMEAEditorPage() {
         const node = nodeMap.get(row.failureCauseNodeId);
         return (
           <div>
-            <Input
+            <InputNumber
               min={1}
               max={10}
+              step={1}
+              precision={0}
+              controls={false}
               size="small"
               value={node?.occurrence ?? undefined}
               disabled={!canEdit('fmea')}
               style={{ width: 55, textAlign: "center" }}
               onFocus={() => startEditing({ row_key: row.key, field: "occurrence", node_id: row.failureModeNodeId })}
               onBlur={stopEditing}
-              onChange={(e) => updateNode(row.failureCauseNodeId!, "occurrence", Number(e.target.value) || 0)}
+              onChange={(v) => updateNode(row.failureCauseNodeId!, "occurrence", v ?? 0)}
             />
             <ActiveUserIndicator
               activeUsers={activeUsers}
@@ -1257,16 +1263,19 @@ export default function FMEAEditorPage() {
         const node = nodeMap.get(row.detectionControlIds[0]);
         return (
           <div>
-            <Input
+            <InputNumber
               min={1}
               max={10}
+              step={1}
+              precision={0}
+              controls={false}
               size="small"
               value={node?.detection ?? undefined}
               disabled={!canEdit('fmea')}
               style={{ width: 55, textAlign: "center" }}
               onFocus={() => startEditing({ row_key: row.key, field: "detection", node_id: row.failureModeNodeId })}
               onBlur={stopEditing}
-              onChange={(e) => updateNode(row.detectionControlIds[0], "detection", Number(e.target.value) || 0)}
+              onChange={(v) => updateNode(row.detectionControlIds[0], "detection", v ?? 0)}
             />
             <ActiveUserIndicator
               activeUsers={activeUsers}
@@ -1450,14 +1459,17 @@ export default function FMEAEditorPage() {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
         return (
-          <Input
+          <InputNumber
             min={1}
             max={10}
+            step={1}
+            precision={0}
+            controls={false}
             size="small"
             value={node?.revised_severity ?? undefined}
             disabled={!canEdit('fmea')}
             style={{ width: 48, textAlign: "center" }}
-            onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_severity", Number(e.target.value) || 0)}
+            onChange={(v) => updateNode(row.recommendedActionIds[0], "revised_severity", v ?? 0)}
           />
         );
       },
@@ -1471,14 +1483,17 @@ export default function FMEAEditorPage() {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
         return (
-          <Input
+          <InputNumber
             min={1}
             max={10}
+            step={1}
+            precision={0}
+            controls={false}
             size="small"
             value={node?.revised_occurrence ?? undefined}
             disabled={!canEdit('fmea')}
             style={{ width: 48, textAlign: "center" }}
-            onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_occurrence", Number(e.target.value) || 0)}
+            onChange={(v) => updateNode(row.recommendedActionIds[0], "revised_occurrence", v ?? 0)}
           />
         );
       },
@@ -1492,14 +1507,17 @@ export default function FMEAEditorPage() {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
         return (
-          <Input
+          <InputNumber
             min={1}
             max={10}
+            step={1}
+            precision={0}
+            controls={false}
             size="small"
             value={node?.revised_detection ?? undefined}
             disabled={!canEdit('fmea')}
             style={{ width: 48, textAlign: "center" }}
-            onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_detection", Number(e.target.value) || 0)}
+            onChange={(v) => updateNode(row.recommendedActionIds[0], "revised_detection", v ?? 0)}
           />
         );
       },
