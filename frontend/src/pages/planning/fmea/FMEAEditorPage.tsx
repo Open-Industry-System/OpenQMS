@@ -27,6 +27,7 @@ import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
+import { aggregateSpecialCharacteristic } from "../../../components/pfmea/RiskTable";
 import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, deleteMode, getProcessChain, type FMEARow } from "../../../utils/fmeaTable";
 import { planCauseDeletion } from "./deleteRowHelpers";
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
@@ -1075,19 +1076,28 @@ export default function FMEAEditorPage() {
       align: "center" as const,
       onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
-        const node = nodeMap.get(row.failureModeNodeId);
-        const classValue = node?.classification || "";
-        const bgStyle = classValue === "CC" ? { background: "#fff1f0" } : classValue === "SC" ? { background: "#fffbe6" } : {};
-        return (
-          <Select
-            size="small"
-            value={classValue || undefined}
-            onChange={(value) => updateNode(row.failureModeNodeId, "classification", value || "")}
-            disabled={!canEdit('fmea')}
-            style={{ width: 60, ...bgStyle }}
-            options={[{ value: "", label: "-" }, { value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
-          />
-        );
+        if (isDFMEA) {
+          // ---- DFMEA: Filter Code on FailureMode, editable (UNCHANGED) ----
+          const node = nodeMap.get(row.failureModeNodeId);
+          const classValue = node?.classification || "";
+          const bgStyle = classValue === "CC" ? { background: "#fff1f0" } : classValue === "SC" ? { background: "#fffbe6" } : {};
+          return (
+            <Select
+              size="small"
+              value={classValue || undefined}
+              onChange={(value) => updateNode(row.failureModeNodeId, "classification", value || "")}
+              disabled={!canEdit('fmea')}
+              style={{ width: 60, ...bgStyle }}
+              options={[{ value: "", label: "-" }, { value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
+            />
+          );
+        }
+        // ---- PFMEA: read-only, from function-node classification (spec §9) ----
+        const stepFunc = nodeMap.get(row.functionNodeId);
+        const wefs = nodes.filter((n) => n.type === "ProcessWorkElementFunction");
+        const { label, tag } = aggregateSpecialCharacteristic(stepFunc, wefs, edges);
+        const bg = tag === "CC" ? "#fff1f0" : tag === "SC" ? "#fffbe6" : undefined;
+        return <Tooltip title={label}><Tag style={{ background: bg }}>{label}</Tag></Tooltip>;
       },
     },
     {
