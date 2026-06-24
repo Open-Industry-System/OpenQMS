@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, Table, InputNumber, Result, DatePicker } from 'antd';
 import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined, BulbOutlined } from '@ant-design/icons';
@@ -44,7 +44,41 @@ export default function DFMEAWizardPage() {
   const [wizardScope, setWizardScope] = useState<WizardScope>({});
   const [currentStep, setCurrentStep] = useState(0);
   const [conflictOpen, setConflictOpen] = useState(false);
-  const completedSteps = useRef(new Set<number>());
+
+  /** Steps whose data is already present in the loaded draft — used for the
+   *  sidebar's status checkmarks AND to derive how far forward the user may
+   *  jump. Derived from graph data (not a session ref) so it survives save →
+   *  exit → reopen: a saved draft's earlier steps stay navigable. */
+  const completedSteps = useMemo(() => {
+    const set = new Set<number>();
+    const hasScope = !!(wizardScope.team || wizardScope.timeframe || wizardScope.tool || wizardScope.task || wizardScope.trend);
+    const hasAny = nodes.length > 0;
+    const hasStructure = nodes.some(n => ['System', 'Subsystem', 'Component', 'Interface', 'DesignParameter'].includes(n.type));
+    const hasFunction = nodes.some(n => ['ProcessWorkElementFunction', 'ProcessItemFunction', 'ProcessStepFunction'].includes(n.type));
+    const hasFailure = nodes.some(n => n.type === 'FailureMode');
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const hasRating = buildRows(nodes, edges).some(r => {
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const dc = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
+      return getRowSeverity(r, nodeMap) > 0 || (cause?.occurrence ?? 0) > 0 || (dc?.detection ?? 0) > 0;
+    });
+    const hasOptimization = nodes.some(n => (n.type === 'PreventionControl' || n.type === 'DetectionControl') && (n.name ?? '').trim());
+    if (hasScope || hasAny) set.add(0);
+    if (hasStructure) set.add(1);
+    if (hasFunction) set.add(2);
+    if (hasFailure) set.add(3);
+    if (hasRating) set.add(4);
+    if (hasOptimization) set.add(5);
+    return set;
+  }, [nodes, edges, wizardScope]);
+
+  /** Furthest reached step + 1 — the step the user is about to work on next.
+   *  Forward sidebar jumps are allowed up to and including this step. */
+  const maxReachableStep = useMemo(() => {
+    let furthest = -1;
+    for (let i = 0; i <= 6; i++) if (completedSteps.has(i)) furthest = i;
+    return Math.min(furthest + 1, 6);
+  }, [completedSteps]);
 
   const { saveStatus, setLockVersion, debouncedSave, immediateSave, lastSavedHashRef } = useWizardSave({
     fmeaId: fmeaId!,
@@ -136,9 +170,8 @@ export default function DFMEAWizardPage() {
   }, [debouncedSave, wizardScope, fmea?.title]);
 
   const goToStep = useCallback((step: number) => {
-    completedSteps.current.add(currentStep);
     setCurrentStep(step);
-  }, [currentStep]);
+  }, []);
 
   const handleFinish = async () => {
     const completedScope = { ...wizardScope, wizard_completed: true };
@@ -788,7 +821,8 @@ export default function DFMEAWizardPage() {
           <WizardSidebar
             currentStep={currentStep}
             onStepClick={goToStep}
-            completedSteps={completedSteps.current}
+            completedSteps={completedSteps}
+            maxReachableStep={maxReachableStep}
             warnings={validation.warnings}
             structureNodes={nodes}
             edges={edges}

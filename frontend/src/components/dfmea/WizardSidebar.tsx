@@ -20,6 +20,9 @@ interface WizardSidebarProps {
   currentStep: number;
   onStepClick: (step: number) => void;
   completedSteps: Set<number>;
+  /** Highest step index the user may jump forward to (= furthest completed + 1).
+   *  Backward jumps (step < currentStep) are always allowed. */
+  maxReachableStep: number;
   warnings: number[];
   structureNodes: GraphNode[];
   edges: GraphEdge[];
@@ -57,6 +60,7 @@ export default function WizardSidebar({
   currentStep,
   onStepClick,
   completedSteps,
+  maxReachableStep,
   warnings,
   structureNodes,
   edges,
@@ -125,7 +129,7 @@ export default function WizardSidebar({
             icon: warnings.includes(i) ? <WarningOutlined style={{ color: 'var(--qf-amber)' }} /> : undefined,
           }))}
           onChange={(step) => {
-            if (step < currentStep || completedSteps.has(step)) {
+            if (step < currentStep || step <= maxReachableStep) {
               onStepClick(step);
             }
           }}
