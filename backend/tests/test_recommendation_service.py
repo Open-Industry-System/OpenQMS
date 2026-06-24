@@ -225,7 +225,7 @@ def test_rule_engine_measure_still_returns_mixed():
     assert "检测" in explanations
 
 
-def test_extract_neighbors_prevention_control_only_prevented_by():
+async def test_extract_neighbors_prevention_control_only_prevented_by():
     """prevention_control 图谱增强只取 PREVENTED_BY 邻居，不含 DETECTED_BY。"""
     svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
     match = {
@@ -249,16 +249,13 @@ def test_extract_neighbors_prevention_control_only_prevented_by():
         }
     svc._get_graph_data_by_fmea_id = fake_graph_data  # type: ignore[method-assign]
 
-    import asyncio
-    nodes = asyncio.get_event_loop().run_until_complete(
-        svc._extract_neighbors_from_match(match, "prevention_control")
-    )
+    nodes = await svc._extract_neighbors_from_match(match, "prevention_control")
     names = [n["name"] for n in nodes]
     assert "预防A" in names
     assert "探测B" not in names
 
 
-def test_extract_neighbors_detection_control_only_detected_by():
+async def test_extract_neighbors_detection_control_only_detected_by():
     """detection_control 图谱增强只取 DETECTED_BY 邻居。"""
     svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
     match = {"node_id": "fm1", "fmea_id": str(uuid.uuid4())}
@@ -278,10 +275,7 @@ def test_extract_neighbors_detection_control_only_detected_by():
         }
     svc._get_graph_data_by_fmea_id = fake_graph_data  # type: ignore[method-assign]
 
-    import asyncio
-    nodes = asyncio.get_event_loop().run_until_complete(
-        svc._extract_neighbors_from_match(match, "detection_control")
-    )
+    nodes = await svc._extract_neighbors_from_match(match, "detection_control")
     names = [n["name"] for n in nodes]
     assert "探测B" in names
     assert "预防A" not in names
