@@ -178,7 +178,7 @@ function makeDoc(fmeaType: "PFMEA" | "DFMEA", stepFuncClass: string, fmClass: st
   } as GraphNode;
   const fm: GraphNode = {
     id: "fm", type: "FailureMode", name: "贴装偏移",
-    classification: fmeaType === "DFMEA" ? fmClass : "", ...Z,
+    classification: fmClass, ...Z,
   } as GraphNode;
   const nodes: GraphNode[] = [
     { id: "ps", type: "ProcessStep", name: "贴装", process_number: "OP10", ...Z } as GraphNode,
@@ -235,6 +235,15 @@ describe("FMEAEditorPage Class column", () => {
     await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
     // The PFMEA Class cell renders a read-only Tag with the aggregated label 'CC'.
     // (FailureMode.classification is '' here, so the old code would have shown '-' — this asserts the new behavior.)
+    await waitFor(() => {
+      expect(screen.getAllByText("CC").length).toBeGreaterThan(0);
+    });
+  });
+
+  it("PFMEA: legacy docs fallback to FailureMode.classification when ProcessStepFunction has none", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc("PFMEA", "", "CC"));
+    renderEditor();
+    await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
     await waitFor(() => {
       expect(screen.getAllByText("CC").length).toBeGreaterThan(0);
     });

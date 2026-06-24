@@ -145,6 +145,55 @@ describe("PFMEAWizardPage", () => {
     });
   });
 
+  it("Step 3 surfaces clickable 4M cause hint tags", async () => {
+    const doc = {
+      ...baseDoc,
+      graph_data: {
+        nodes: [
+          { id: "pi", type: "ProcessItem", name: "线", ...Z },
+          { id: "ps", type: "ProcessStep", name: "贴装", process_number: "OP10", ...Z },
+          { id: "we1", type: "ProcessWorkElement", name: "贴片机吸嘴", classification: "Machine", ...Z },
+          { id: "psf", type: "ProcessStepFunction", name: "准确贴装", ...Z },
+          { id: "fm", type: "FailureMode", name: "偏移", ...Z },
+          { id: "fe", type: "FailureEffect", name: "焊接不良", severity: 7 },
+          { id: "fc", type: "FailureCause", name: "", ...Z },
+          { id: "pc", type: "PreventionControl", name: "", ...Z },
+          { id: "dc", type: "DetectionControl", name: "", ...Z },
+        ],
+        edges: [
+          { source: "pi", target: "ps", type: "HAS_PROCESS_STEP" },
+          { source: "ps", target: "we1", type: "HAS_WORK_ELEMENT" },
+          { source: "ps", target: "psf", type: "HAS_FUNCTION" },
+          { source: "psf", target: "fm", type: "HAS_FAILURE_MODE" },
+          { source: "fm", target: "fe", type: "EFFECT_OF" },
+          { source: "fc", target: "fm", type: "CAUSE_OF" },
+          { source: "fc", target: "pc", type: "PREVENTED_BY" },
+          { source: "fc", target: "dc", type: "DETECTED_BY" },
+        ],
+        wizardScope: {},
+      },
+    };
+    vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
+    render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
+    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    // advance to step 3
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+
+    // 4M cause hint tags should appear
+    await waitFor(() => {
+      expect(screen.getByText("操作未按SOP")).toBeInTheDocument();
+    });
+    expect(screen.getByText("设备校准漂移")).toBeInTheDocument();
+
+    // Clicking a hint populates the empty cause node
+    fireEvent.click(screen.getByText("操作未按SOP"));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("操作未按SOP")).toBeInTheDocument();
+    });
+  });
+
   it("Step 3 creates a failure chain on a ProcessStepFunction", async () => {
     const doc = {
       ...baseDoc,

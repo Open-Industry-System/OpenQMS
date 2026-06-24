@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import RiskTable, { computeSeverity, aggregateSpecialCharacteristic } from './RiskTable';
 import type { GraphNode, GraphEdge } from '../../types';
 import { I18nTestWrapper } from './__test-utils__/I18nWrapper';
@@ -51,7 +51,26 @@ describe('RiskTable', () => {
     expect(screen.getByText(/SC/)).toBeInTheDocument();
   });
 
-  // --- stable pure-function tests (recommended over fragile dialog interaction) ---
+  it('severity ButtonLike is keyboard-activatable with Enter and Space', () => {
+    const { nodes, edges } = baseRow();
+    render(<RiskTable nodes={nodes} edges={edges} fmeaId="f1" onChange={() => {}} />, { wrapper: I18nTestWrapper });
+    const severityButton = screen.getByRole('button', { name: /severity/i });
+    expect(severityButton).toHaveAttribute('tabIndex', '0');
+
+    let clicked = false;
+    severityButton.addEventListener('click', () => { clicked = true; });
+
+    fireEvent.keyDown(severityButton, { key: 'Enter' });
+    expect(clicked).toBe(true);
+
+    clicked = false;
+    fireEvent.keyDown(severityButton, { key: ' ' });
+    expect(clicked).toBe(true);
+
+    clicked = false;
+    fireEvent.keyDown(severityButton, { key: 'ArrowDown' });
+    expect(clicked).toBe(false);
+  });
   describe('computeSeverity', () => {
     it('returns the max of the three sub-fields', () => {
       expect(computeSeverity(4, 8, 8)).toBe(8);

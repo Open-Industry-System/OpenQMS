@@ -225,6 +225,15 @@ class RuleEngine:
                     suggestions=[RuleSuggestion(name=c, confidence=0.7, explanation=f"关联失效模式「{key}」") for c in chain["causes"]],
                     quality="specific",
                 )
+        if fmea_type == "PFMEA":
+            # PFMEA: 无图谱匹配时回退到 4M 组织的原因提示
+            suggestions: list[RuleSuggestion] = []
+            for category, causes in PFMEA_4M_CAUSE_HINTS.items():
+                suggestions.extend(
+                    RuleSuggestion(name=c, confidence=0.4, explanation=f"4M-{category} 原因提示")
+                    for c in causes
+                )
+            return RuleResult(suggestions=suggestions, quality="generic")
         return RuleResult(
             suggestions=[RuleSuggestion(name=c, confidence=0.3, explanation="通用默认") for c in DEFAULT_CAUSES],
             quality="generic",

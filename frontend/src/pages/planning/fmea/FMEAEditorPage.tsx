@@ -1095,7 +1095,15 @@ export default function FMEAEditorPage() {
         // ---- PFMEA: read-only, from function-node classification (spec §9) ----
         const stepFunc = nodeMap.get(row.functionNodeId);
         const wefs = nodes.filter((n) => n.type === "ProcessWorkElementFunction");
-        const { label, tag } = aggregateSpecialCharacteristic(stepFunc, wefs, edges);
+        let { label, tag } = aggregateSpecialCharacteristic(stepFunc, wefs, edges);
+        // backward compat: legacy PFMEA docs stored CC/SC on FailureMode.classification
+        if (tag === "-") {
+          const fmClass = nodeMap.get(row.failureModeNodeId)?.classification || "";
+          if (fmClass === "CC" || fmClass === "SC") {
+            label = fmClass;
+            tag = fmClass;
+          }
+        }
         const bg = tag === "CC" ? "#fff1f0" : tag === "SC" ? "#fffbe6" : undefined;
         return <Tooltip title={label}><Tag style={{ background: bg }}>{label}</Tag></Tooltip>;
       },

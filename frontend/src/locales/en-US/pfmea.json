@@ -65,7 +65,8 @@
       "addFailureChain": "Add Failure Chain",
       "delete": "Delete",
       "newFailureMode": "New Failure Mode",
-      "workElementHint": "4M work elements for this step"
+      "workElementHint": "4M work elements for this step",
+      "cause4MHint": "4M cause hints"
     },
     "risk": {
       "title": "Risk Analysis",

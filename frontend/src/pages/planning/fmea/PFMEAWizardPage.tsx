@@ -22,6 +22,7 @@ import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
 import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
 import RiskTable from '../../../components/pfmea/RiskTable';
 import { createWizardFailureChain, ensureCauseControls } from '../../../utils/wizardGraphNormalize';
+import { usePfmeaRules } from '../../../utils/pfmeaRules';
 
 const { Title, Paragraph } = Typography;
 
@@ -43,6 +44,8 @@ export default function PFMEAWizardPage() {
   const { id: fmeaId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation('pfmea');
+  const { suggest4MCauses } = usePfmeaRules();
+  const cause4MHints = useMemo(() => suggest4MCauses(), [suggest4MCauses]);
 
   const [fmea, setFmea] = useState<FMEADocument | null>(null);
   const [loading, setLoading] = useState(true);
@@ -479,6 +482,23 @@ export default function PFMEAWizardPage() {
                               onChange={(val) => handleUpdateNodeField(causeNode.id, 'name', val)}
                               onSelect={(s) => handleUpdateNodeField(causeNode.id, 'name', s.name)}
                             />
+                            <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>
+                              <span style={{ color: 'var(--qf-text-secondary)' }}>{t('wizard.failure.cause4MHint')}：</span>
+                              <Space size={[4, 4]} wrap>
+                                {Object.entries(cause4MHints).flatMap(([category, hints]) =>
+                                  hints.slice(0, 2).map((hint, idx) => (
+                                    <Tag
+                                      key={`${category}-${idx}`}
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleUpdateNodeField(causeNode.id, 'name', hint)}
+                                      title={`${category}: ${hint}`}
+                                    >
+                                      {hint}
+                                    </Tag>
+                                  ))
+                                )}
+                              </Space>
+                            </div>
                             <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.preventionControl')}</div>
                             <SmartSuggestionDropdown
                               triggerType="prevention_control"

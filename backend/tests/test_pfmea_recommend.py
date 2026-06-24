@@ -1,5 +1,21 @@
 from app.services.recommendation_service import RecommendationService
-from app.schemas.recommendation import SuggestionList
+from app.schemas.recommendation import SuggestionList, RecommendRequest
+
+
+def test_pfmea_tool_trigger_accepted_by_schema():
+    """pfmea_tool / pfmea_trend must be valid trigger_type values."""
+    req = RecommendRequest(trigger_type="pfmea_tool", context={"fmea_title": "SMT焊接生产线", "task": "PFMEA"})
+    assert req.trigger_type == "pfmea_tool"
+    req2 = RecommendRequest(trigger_type="pfmea_trend", context={"task": "PFMEA"})
+    assert req2.trigger_type == "pfmea_trend"
+
+
+def test_pfmea_tool_anchor_returns_task():
+    """_recommend_anchor must resolve pfmea_tool via task fallback like dfmea_tool."""
+    from app.api.fmea import _recommend_anchor
+    assert _recommend_anchor("pfmea_tool", {"task": "过程FMEA", "fmea_title": "SMT线"}) == "过程FMEA"
+    assert _recommend_anchor("pfmea_trend", {"fmea_title": "SMT线"}) == "SMT线"
+    assert _recommend_anchor("pfmea_tool", {}) == ""
 
 
 def test_pfmea_prompt_builds_via_real_build_prompt_path():

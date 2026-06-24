@@ -125,5 +125,19 @@ export default function RiskTable({ nodes, edges, fmeaId, onChange }: RiskTableP
 }
 
 function ButtonLike({ value }: { value: number }) {
-  return <a role="button" tabIndex={0}>{value || '-'}</a>;
+  return (
+    <a
+      role="button"
+      tabIndex={0}
+      aria-label={typeof value === 'number' && value > 0 ? `severity ${value}` : 'severity unrated'}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.currentTarget.click();
+        }
+      }}
+    >
+      {value || '-'}
+    </a>
+  );
 }
