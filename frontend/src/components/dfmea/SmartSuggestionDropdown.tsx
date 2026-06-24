@@ -81,7 +81,7 @@ export default function SmartSuggestionDropdown({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const abortRef = useRef<AbortController>();
   const [selectedIndex, setSelectedIndex] = useState(-1);
-  const [scope, setScope] = useState<"global" | "current_product_type" | "current_product_line">(externalScope || "global");
+  const [scope, setScope] = useState<"global" | "current_product_type" | "current_product_line">(externalScope || "current_product_type");
   const [effectiveScope, setEffectiveScope] = useState<"global" | "current_product_type" | "current_product_line">("global");
 
   const { canView } = usePermission();
@@ -115,7 +115,7 @@ export default function SmartSuggestionDropdown({
         setLlmAvailable(res.llm_available);
         setFallback(res.source === "rule_fallback");
         setEffectiveScope(res.effective_scope);
-        setOpen(res.suggestions.length > 0);
+        setOpen(true);
         setSelectedIndex(-1);
       } catch (e: unknown) {
         if (axios.isCancel(e)) return; // ignore superseded requests
@@ -260,6 +260,7 @@ export default function SmartSuggestionDropdown({
           className="qf-radio-group"
         >
           <Radio.Button value="global"><GlobalOutlined /> {t("smartSuggestion.global")}</Radio.Button>
+          <Radio.Button value="current_product_type">{t("smartSuggestion.currentProductType")}</Radio.Button>
           <Radio.Button value="current_product_line">{t("smartSuggestion.currentProductLine")}</Radio.Button>
         </Radio.Group>
         {!hasKgPermission && (

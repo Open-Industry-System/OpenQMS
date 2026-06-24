@@ -262,10 +262,12 @@
   },
   "smartSuggestion": {
     "global": "Global Experience",
+    "currentProductType": "Same Product Type",
     "currentProductLine": "Current Product Line Only",
     "noGlobalPermission": "(No global permission, current product line only)",
     "actualScope": "Actual scope: {{scope}}",
     "scopeGlobal": "Global",
+    "scopeProductType": "Same Product Type",
     "scopeLocal": "Current Product Line Only",
     "ruleEngine": "Rule Engine",
     "aiGenerated": "AI Generated",
