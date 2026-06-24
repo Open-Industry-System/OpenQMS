@@ -92,4 +92,13 @@ describe("PFMEAWizardPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /下一步|nextStep/i }));
     await waitFor(() => screen.getByText(/添加过程步骤|addProcessStep/i));
   });
+
+  it("Step 2 renders the FunctionTreeEditor", async () => {
+    render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
+    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    // advance to step 2
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    await waitFor(() => screen.getByText(/addItemFunction|添加过程项目功能/i));
+  });
 });

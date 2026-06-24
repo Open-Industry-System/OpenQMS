@@ -14,6 +14,7 @@ import WizardGuidanceCard from '../../../components/pfmea/PFMEAGuidanceCard';
 import ScopeTagField from '../../../components/dfmea/ScopeTagField';
 import type { ReactNode } from 'react';
 import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimeframe';
+import FunctionTreeEditor from '../../../components/pfmea/FunctionTreeEditor';
 import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
 import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
 import { ensureCauseControls } from '../../../utils/wizardGraphNormalize';
@@ -356,7 +357,9 @@ export default function PFMEAWizardPage() {
     );
   };
 
-  const renderStep2 = () => <div>{t('wizard.steps.2')}</div>;
+  const renderStep2 = () => (
+    <FunctionTreeEditor nodes={nodes} edges={edges} fmeaId={fmeaId!} onChange={(n, e) => updateGraphData(n, e)} />
+  );
   const renderStep3 = () => <div>{t('wizard.steps.3')}</div>;
   const renderStep4 = () => <div>{t('wizard.steps.4')}</div>;
   const renderStep5 = () => <div>{t('wizard.steps.5')}</div>;
