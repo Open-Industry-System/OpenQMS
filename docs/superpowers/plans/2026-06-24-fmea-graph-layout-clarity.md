@@ -573,21 +573,30 @@ Expected: FAIL — `causeBranch` / `edgeLegend` / `directionTB` undefined.
 
 - [ ] **Step 3: Add the zh-CN keys**
 
-In `frontend/src/locales/zh-CN/graph.json`, add inside the `"edgeTypes"` object (after `"causeOf": "由原因引起",`):
+In `frontend/src/locales/zh-CN/graph.json`, add a new entry inside the `"edgeTypes"` object. `"causeOf": "由原因引起",` already has a trailing comma (it is followed by `"preventedBy"`), so insert immediately after it:
 
 ```json
     "causeBranch": "失效原因",
 ```
 
-Add inside the `"toolbar"` object (after `"download": "下载快照"`):
+The `"toolbar"` object currently ends with `"download": "下载快照"` (no trailing comma, it is the last entry). You must first add a trailing comma to that line, then add the three new keys. Change:
 
 ```json
+    "download": "下载快照"
+  },
+```
+
+to:
+
+```json
+    "download": "下载快照",
     "directionTB": "从上到下",
     "directionLR": "从左到右",
     "directionDisabledHint": "仅层次布局可用"
+  },
 ```
 
-Add a new top-level section after the `"edgeTypes"` block (i.e. after its closing `}` and before `"nodeDetail"`):
+Add a new top-level section after the `"edgeTypes"` block (after its closing `}` and before `"nodeDetail"`):
 
 ```json
   "edgeLegend": {
@@ -597,23 +606,32 @@ Add a new top-level section after the `"edgeTypes"` block (i.e. after its closin
 
 - [ ] **Step 4: Add the en-US keys**
 
-In `frontend/src/locales/en-US/graph.json`, mirror exactly:
-
-- `"edgeTypes"` — after `"causeOf": "Cause Of",` add:
+In `frontend/src/locales/en-US/graph.json`, mirror exactly. First confirm the en-US `"toolbar"` block's `download` value by reading the file (it is the last entry in `toolbar`, no trailing comma). The `"edgeTypes"` block's `"causeOf": "Cause Of",` has a trailing comma, so insert after it:
 
 ```json
     "causeBranch": "Cause",
 ```
 
-- `"toolbar"` — after `"download": "Download snapshot"` (read the file to confirm the exact en-US value) add:
+For the `"toolbar"` block, change the closing (the `download` line is the last entry, no trailing comma):
 
 ```json
+    "download": "Download snapshot"
+  },
+```
+
+to:
+
+```json
+    "download": "Download snapshot",
     "directionTB": "Top to Bottom",
     "directionLR": "Left to Right",
     "directionDisabledHint": "Only available for hierarchy layout"
+  },
 ```
 
-- New section after `"edgeTypes"`:
+> If the en-US `download` value differs from `"Download snapshot"`, preserve the existing value — only add the trailing comma and the three new keys.
+
+Add a new top-level section after the `"edgeTypes"` block:
 
 ```json
   "edgeLegend": {
@@ -621,12 +639,17 @@ In `frontend/src/locales/en-US/graph.json`, mirror exactly:
   },
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 5: Validate both JSON files parse**
+
+Run: `cd frontend && node -e "JSON.parse(require('fs').readFileSync('src/locales/zh-CN/graph.json','utf8')); JSON.parse(require('fs').readFileSync('src/locales/en-US/graph.json','utf8')); console.log('ok')"`
+Expected: prints `ok` (no SyntaxError).
+
+- [ ] **Step 6: Run the test to verify it passes**
 
 Run: `cd frontend && npx vitest run src/utils/graphPresentation.test.ts`
-Expected: PASS.
+Expected: PASS — the new locale-keys test passes.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add frontend/src/locales/zh-CN/graph.json frontend/src/locales/en-US/graph.json frontend/src/utils/graphPresentation.test.ts
@@ -711,9 +734,10 @@ describe("GraphToolbar direction selector", () => {
         onDownload={() => {}}
       />,
     );
-    // The hierarchical button is labeled by toolbar.hierarchical ("层次" / "Hierarchy").
-    // It must be enabled (not disabled) so the user can switch back to dagre.
-    const hierBtn = screen.getByRole("button", { name: /层次|Hierarchy/ });
+    // Tests run in en-US (see src/test-setup.ts), so toolbar.hierarchical renders as
+    // "Hierarchical" — NOT "Hierarchy" (which would not match). The button must be
+    // enabled so the user can switch back to dagre from force/compact-tree.
+    const hierBtn = screen.getByRole("button", { name: /Hierarchical/ });
     expect(hierBtn).not.toBeDisabled();
     fireEvent.click(hierBtn);
     expect(onLayoutChange).toHaveBeenCalledWith("dagre");
@@ -994,7 +1018,7 @@ git commit -m "feat(graph): wire direction prop + category-color highlight resto
 Replace the import line and the `return` JSX. New file:
 
 ```tsx
-import { Card, Space, Tag, Divider } from "antd";
+import { Card, Space, Tag, Divider, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   GRAPH_EDGE_LEGEND,
@@ -1036,6 +1060,9 @@ export default function GraphLegend({ fmeaType }: GraphLegendProps) {
           );
         })}
         <Divider style={{ margin: "8px 0" }} />
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {t("edgeLegend.title")}
+        </Typography.Text>
         {GRAPH_EDGE_LEGEND.map((entry) => {
           const style = getEdgeStyle(entry.type);
           return (
