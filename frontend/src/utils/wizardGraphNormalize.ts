@@ -47,6 +47,16 @@ export function createWizardFailureChain(
   return { newNodes, newEdges };
 }
 
+/** Legacy wizard placeholder names that the old handleAddFailure wrote into
+ *  DetectionControl.name (and would have written into PreventionControl). They
+ *  are NOT real measures — treat them as empty so step5MissingControl gates
+ *  finish and the Step 5 O/D lock engages, forcing the user to write a real
+ *  measure. Hardcoded (not via i18n) because legacy drafts may have been saved
+ *  under either locale. */
+const LEGACY_PLACEHOLDER_NAMES = new Set([
+  "预防措施", "探测措施", "Prevention measure", "Detection measure",
+]);
+
 /** For every FailureCause (a node that is the source of a CAUSE_OF edge),
  *  ensure it has at least one outgoing PREVENTED_BY and at least one
  *  DETECTED_BY. Missing controls are created with name "". Existing controls
@@ -57,8 +67,12 @@ export function ensureCauseControls(
   nodes: GraphNode[],
   edges: GraphEdge[],
 ): { nodes: GraphNode[]; edges: GraphEdge[]; changed: boolean } {
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
   const causeIds = new Set(
-    edges.filter(e => e.type === "CAUSE_OF").map(e => e.source),
+    edges
+      .filter(e => e.type === "CAUSE_OF")
+      .map(e => e.source)
+      .filter(id => nodeMap.get(id)?.type === "FailureCause"),
   );
   if (causeIds.size === 0) {
     return { nodes, edges, changed: false };
@@ -71,7 +85,6 @@ export function ensureCauseControls(
   for (const causeId of causeIds) {
     const hasPc = nextEdges.some(e => e.source === causeId && e.type === "PREVENTED_BY");
     const hasDc = nextEdges.some(e => e.source === causeId && e.type === "DETECTED_BY");
-    if (hasPc && hasDc) continue;
 
     if (!hasPc) {
       const pcId = `w${crypto.randomUUID()}_pc`;
@@ -86,5 +99,20 @@ export function ensureCauseControls(
       changed = true;
     }
   }
-  return { nodes: nextNodes, edges: nextEdges, changed };
+
+  // Clear legacy placeholder names on existing controls. The old wizard wrote
+  // translated placeholder strings into DC.name; these pass the non-empty
+  // validation gate even though they are not real measures.
+  const clearedNodes = nextNodes.map(n => {
+    if (
+      (n.type === "PreventionControl" || n.type === "DetectionControl") &&
+      LEGACY_PLACEHOLDER_NAMES.has(n.name)
+    ) {
+      changed = true;
+      return { ...n, name: "" };
+    }
+    return n;
+  });
+
+  return { nodes: clearedNodes, edges: nextEdges, changed };
 }

@@ -142,4 +142,68 @@ describe("ensureCauseControls", () => {
     expect(n2).toEqual(nodes);
     expect(e2).toEqual([]);
   });
+
+  it("clears a legacy placeholder DC name to empty and marks changed", () => {
+    const nodes = [
+      node("fm", "FailureMode"),
+      node("fc", "FailureCause"),
+      node("dc", "DetectionControl", "探测措施"), // legacy placeholder
+    ];
+    const edges = [
+      edge("fc", "fm", "CAUSE_OF"),
+      edge("fc", "dc", "DETECTED_BY"),
+      // PC missing — will also be added
+    ];
+    const { nodes: n2, edges: e2, changed } = ensureCauseControls(nodes, edges);
+    expect(changed).toBe(true);
+    const dc = n2.find(n => n.id === "dc")!;
+    expect(dc.name).toBe(""); // placeholder cleared
+    // PC was added (missing)
+    expect(n2.find(n => n.type === "PreventionControl")).toBeDefined();
+    expect(e2).toContainEqual(edge("fc", n2.find(n => n.type === "PreventionControl")!.id, "PREVENTED_BY"));
+  });
+
+  it("clears English-locale legacy placeholder names too", () => {
+    const nodes = [
+      node("fm", "FailureMode"),
+      node("fc", "FailureCause"),
+      node("pc", "PreventionControl", "Prevention measure"),
+      node("dc", "DetectionControl", "Detection measure"),
+    ];
+    const edges = [
+      edge("fc", "fm", "CAUSE_OF"),
+      edge("fc", "pc", "PREVENTED_BY"),
+      edge("fc", "dc", "DETECTED_BY"),
+    ];
+    const { nodes: n2, changed } = ensureCauseControls(nodes, edges);
+    expect(changed).toBe(true);
+    expect(n2.find(n => n.id === "pc")!.name).toBe("");
+    expect(n2.find(n => n.id === "dc")!.name).toBe("");
+  });
+
+  it("ignores CAUSE_OF edges whose source is not an existing FailureCause node", () => {
+    const nodes = [
+      node("fm", "FailureMode"),
+      // no "fc" node — orphan edge
+    ];
+    const edges = [
+      edge("fc", "fm", "CAUSE_OF"), // source "fc" not in nodes
+    ];
+    const { nodes: n2, edges: e2, changed } = ensureCauseControls(nodes, edges);
+    expect(changed).toBe(false);
+    expect(n2).toEqual(nodes); // no controls added
+    expect(e2).toEqual(edges);
+  });
+
+  it("ignores CAUSE_OF edges whose source node is not type FailureCause", () => {
+    const nodes = [
+      node("fm", "FailureMode"),
+      node("notacause", "FailureEffect"), // wrong type as CAUSE_OF source
+    ];
+    const edges = [
+      edge("notacause", "fm", "CAUSE_OF"),
+    ];
+    const { changed } = ensureCauseControls(nodes, edges);
+    expect(changed).toBe(false);
+  });
 });
