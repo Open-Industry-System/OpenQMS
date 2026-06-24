@@ -79,6 +79,25 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "requires_db: mark test as requiring a live database connection")
 
 
+def pytest_collection_modifyitems(config, items):
+    """Skip tests marked `requires_db` when the database is not reachable.
+
+    The `db` session fixture already skips on its own, but ASGI-client tests
+    whose endpoint resolves through the real `get_db` (not the fixture session)
+    would error instead of skip in a no-DB lane — this marker makes them skip
+    gracefully. DB availability is checked once (cached by _check_db_available).
+    """
+    import asyncio
+
+    db_available = asyncio.new_event_loop().run_until_complete(_check_db_available())
+    if db_available:
+        return
+    skip_marker = pytest.mark.skip(reason="Database not available")
+    for item in items:
+        if item.get_closest_marker("requires_db"):
+            item.add_marker(skip_marker)
+
+
 @pytest_asyncio.fixture
 async def db():
     """Yield an async session whose commit() only flushes (test isolation).

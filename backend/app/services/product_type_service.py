@@ -25,6 +25,16 @@ async def create_product_type(
 ) -> ProductType:
     existing = await get_product_type(db, code)
     if existing:
+        # Audit the failed-create attempt so duplicate-code tries are traceable,
+        # matching the audit completeness of successful writes.
+        db.add(AuditLog(
+            table_name="product_types",
+            record_id=uuid.uuid4(),
+            action="CREATE_FAILED",
+            changed_fields={"code": code, "reason": "duplicate_code"},
+            operated_by=operated_by,
+        ))
+        await db.commit()
         raise ValueError(f"产品类型 '{code}' 已存在")
     pt = ProductType(code=code, name=name, description=description)
     db.add(pt)
