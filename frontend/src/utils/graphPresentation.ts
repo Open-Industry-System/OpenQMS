@@ -20,6 +20,15 @@ export interface EdgePresentation {
   translationKey: string;
 }
 
+// Dark-theme palette (moved from GraphCanvas.tsx so pure helpers can use it).
+// Keep these values in sync with GraphCanvas.tsx usage.
+export const GRAPH_BG = "#14161d";
+export const GRAPH_BORDER = "rgba(255, 255, 255, 0.08)";
+export const EDGE_STROKE = "rgba(255, 255, 255, 0.28)";
+export const EDGE_LABEL_FILL = "#8b93a7";
+export const EDGE_LABEL_BG = "#1c1f29";
+export const NODE_LABEL_FILL = "#f0f2f5";
+
 export const DEFAULT_NODE_STYLE: GraphNodeStyle = {
   fill: "rgba(255, 255, 255, 0.06)",
   stroke: "#9ca3af",
@@ -248,3 +257,53 @@ export function getEdgeTypeKey(type: string, fmeaType?: string): string {
 export function getNodeStyle(type: string): GraphNodeStyle {
   return NODE_PRESENTATION[type]?.style ?? DEFAULT_NODE_STYLE;
 }
+
+// Edge branch colors — category-coded so cause/effect/control branches are
+// readable at a glance without reading the edge label. Colors match the
+// related node-type stroke for visual tying. See spec §3.
+const EDGE_COLOR_BY_TYPE: Record<string, string> = {
+  EFFECT_OF: "#fa8c16",
+  CAUSE_OF: "#ff7875",
+  PREVENTED_BY: "#73d13d",
+  DETECTED_BY: "#722ed1",
+  OPTIMIZED_BY: "#8c8c8c",
+};
+
+export function getEdgeStyle(rawLabel: string): { stroke: string; lineWidth: number } {
+  return {
+    stroke: EDGE_COLOR_BY_TYPE[rawLabel] ?? EDGE_STROKE,
+    lineWidth: 1,
+  };
+}
+
+// Edge style under the highlight/dim state machine. The red override matches the
+// pre-existing highlight color; the key change vs the old code is that dim/reset
+// branches restore the CATEGORY color (via getEdgeStyle) instead of forcing
+// EDGE_STROKE, so a highlight cycle no longer erases branch colors. See spec §3.
+export function getHighlightedEdgeStyle(
+  rawLabel: string,
+  isHighlighted: boolean,
+  dimmed: boolean,
+): { stroke: string; lineWidth: number; opacity: number } {
+  if (isHighlighted) {
+    return { stroke: "#ff4d4f", lineWidth: 2, opacity: 1 };
+  }
+  const base = getEdgeStyle(rawLabel);
+  return {
+    stroke: base.stroke,
+    lineWidth: 1,
+    opacity: dimmed ? 0.1 : 1,
+  };
+}
+
+// Legend entries for the "edge types" section of GraphLegend. HAS_FAILURE_MODE
+// represents the structural chain (uses the neutral EDGE_STROKE); other structural
+// edges share that color and are not listed individually to keep the legend short.
+export const GRAPH_EDGE_LEGEND: ReadonlyArray<{ type: string; translationKey: string }> = [
+  { type: "EFFECT_OF", translationKey: "edgeTypes.effectOf" },
+  { type: "CAUSE_OF", translationKey: "edgeTypes.causeBranch" },
+  { type: "PREVENTED_BY", translationKey: "edgeTypes.preventedBy" },
+  { type: "DETECTED_BY", translationKey: "edgeTypes.detectedBy" },
+  { type: "OPTIMIZED_BY", translationKey: "edgeTypes.optimizedBy" },
+  { type: "HAS_FAILURE_MODE", translationKey: "edgeTypes.structuralChain" },
+];

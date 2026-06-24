@@ -5,10 +5,14 @@ import {
   DEFAULT_NODE_STYLE,
   DFMEA_LEGEND_NODE_TYPES,
   EDGE_PRESENTATION,
+  EDGE_STROKE,
+  GRAPH_EDGE_LEGEND,
   GRAPH_EDGE_TYPES,
   GRAPH_NODE_TYPES,
   NODE_PRESENTATION,
+  getEdgeStyle,
   getEdgeTypeKey,
+  getHighlightedEdgeStyle,
   getNodeStyle,
   getNodeTypeKey,
 } from "./graphPresentation";
@@ -166,5 +170,93 @@ describe("graphPresentation", () => {
     for (const type of DFMEA_LEGEND_NODE_TYPES) {
       expect(NODE_PRESENTATION[type]).toBeTruthy();
     }
+  });
+
+  describe("edge style", () => {
+    it("maps CAUSE_OF to the red-pink cause-branch color", () => {
+      expect(getEdgeStyle("CAUSE_OF").stroke).toBe("#ff7875");
+    });
+
+    it("maps EFFECT_OF to the orange effect-branch color", () => {
+      expect(getEdgeStyle("EFFECT_OF").stroke).toBe("#fa8c16");
+    });
+
+    it("maps control edges to their control-type colors", () => {
+      expect(getEdgeStyle("PREVENTED_BY").stroke).toBe("#73d13d");
+      expect(getEdgeStyle("DETECTED_BY").stroke).toBe("#722ed1");
+      expect(getEdgeStyle("OPTIMIZED_BY").stroke).toBe("#8c8c8c");
+    });
+
+    it("falls back to EDGE_STROKE for structural chain edges", () => {
+      expect(getEdgeStyle("HAS_FAILURE_MODE").stroke).toBe(EDGE_STROKE);
+      expect(getEdgeStyle("FUNCTION_MAPPED_TO").stroke).toBe(EDGE_STROKE);
+      expect(getEdgeStyle("UNKNOWN_EDGE").stroke).toBe(EDGE_STROKE);
+    });
+
+    it("always returns lineWidth 1", () => {
+      for (const raw of ["CAUSE_OF", "EFFECT_OF", "HAS_FAILURE_MODE", "UNKNOWN"]) {
+        expect(getEdgeStyle(raw).lineWidth).toBe(1);
+      }
+    });
+  });
+
+  it("has zh-CN and en-US locale entries for the new edge-legend keys", () => {
+    expect(zhGraph.edgeTypes.causeBranch).toBeTruthy();
+    expect(enGraph.edgeTypes.causeBranch).toBeTruthy();
+    expect(zhGraph.edgeTypes.structuralChain).toBeTruthy();
+    expect(enGraph.edgeTypes.structuralChain).toBeTruthy();
+    expect((zhGraph as { edgeLegend?: { title: string } }).edgeLegend?.title).toBeTruthy();
+    expect((enGraph as { edgeLegend?: { title: string } }).edgeLegend?.title).toBeTruthy();
+    expect(zhGraph.toolbar.directionTB).toBeTruthy();
+    expect(zhGraph.toolbar.directionLR).toBeTruthy();
+    expect(zhGraph.toolbar.directionDisabledHint).toBeTruthy();
+    expect(enGraph.toolbar.directionTB).toBeTruthy();
+    expect(enGraph.toolbar.directionLR).toBeTruthy();
+    expect(enGraph.toolbar.directionDisabledHint).toBeTruthy();
+  });
+
+  it("GRAPH_EDGE_LEGEND lists the six branch + chain edge types with i18n keys", () => {
+    const types = GRAPH_EDGE_LEGEND.map((e) => e.type);
+    expect(types).toEqual([
+      "EFFECT_OF",
+      "CAUSE_OF",
+      "PREVENTED_BY",
+      "DETECTED_BY",
+      "OPTIMIZED_BY",
+      "HAS_FAILURE_MODE",
+    ]);
+    for (const entry of GRAPH_EDGE_LEGEND) {
+      expect(entry.translationKey).toMatch(/^edgeTypes\./);
+    }
+  });
+
+  describe("getHighlightedEdgeStyle", () => {
+    it("uses the red highlight override when the edge is highlighted", () => {
+      const s = getHighlightedEdgeStyle("CAUSE_OF", true, true);
+      expect(s).toEqual({ stroke: "#ff4d4f", lineWidth: 2, opacity: 1 });
+    });
+
+    it("keeps the category color at low opacity when dimmed and not highlighted", () => {
+      const s = getHighlightedEdgeStyle("CAUSE_OF", false, true);
+      expect(s).toEqual({ stroke: "#ff7875", lineWidth: 1, opacity: 0.1 });
+    });
+
+    it("keeps the category color at full opacity when reset (not dimmed)", () => {
+      const s = getHighlightedEdgeStyle("DETECTED_BY", false, false);
+      expect(s).toEqual({ stroke: "#722ed1", lineWidth: 1, opacity: 1 });
+    });
+
+    it("falls back to EDGE_STROKE for structural edges in all states", () => {
+      expect(getHighlightedEdgeStyle("HAS_FAILURE_MODE", false, false).stroke).toBe(EDGE_STROKE);
+      expect(getHighlightedEdgeStyle("HAS_FAILURE_MODE", false, true).stroke).toBe(EDGE_STROKE);
+    });
+
+    it("highlight overrides even structural edges", () => {
+      expect(getHighlightedEdgeStyle("HAS_FAILURE_MODE", true, true)).toEqual({
+        stroke: "#ff4d4f",
+        lineWidth: 2,
+        opacity: 1,
+      });
+    });
   });
 });

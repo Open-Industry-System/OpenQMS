@@ -51,7 +51,7 @@ import RollbackConfirmModal from "../../../components/version/RollbackConfirmMod
 import VersionCompareView from "../../../components/version/VersionCompareView";
 import RelatedCAPAList from "../../../components/cross-links/RelatedCAPAList";
 import { GraphCanvas, GraphToolbar, NodeDetailDrawer, GraphLegend } from "../../../components/graph";
-import type { GraphLayout, GraphCanvasRef } from "../../../components/graph";
+import type { GraphLayout, GraphDirection, GraphCanvasRef } from "../../../components/graph";
 import type { GraphNode as APIGraphNode } from "../../../api/graph";
 import { getImpactChain, getCauseChain, normalizeGraphData } from "../../../api/graph";
 import { analyzeChangeImpact } from "../../../api/changeImpact";
@@ -307,6 +307,7 @@ export default function FMEAEditorPage() {
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
+  const [graphDirection, setGraphDirection] = useState<GraphDirection>("TB");
   const [highlightNodes, setHighlightNodes] = useState<string[]>([]);
   const [dimOthers, setDimOthers] = useState(false);
   const [graphLoading, setGraphLoading] = useState(false);
@@ -1815,7 +1816,9 @@ export default function FMEAEditorPage() {
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
               <GraphToolbar
                 layout={graphLayout}
+                direction={graphDirection}
                 onLayoutChange={setGraphLayout}
+                onDirectionChange={setGraphDirection}
                 onZoomIn={() => canvasRef.current?.zoomIn()}
                 onZoomOut={() => canvasRef.current?.zoomOut()}
                 onFitView={() => canvasRef.current?.fitView()}
@@ -1832,6 +1835,7 @@ export default function FMEAEditorPage() {
                     mode="single-fmea"
                     fmeaType={fmeaType}
                     layout={graphLayout}
+                    direction={graphDirection}
                     highlightNodes={highlightNodes}
                     dimOthers={dimOthers}
                     onNodeClick={(node) => {
