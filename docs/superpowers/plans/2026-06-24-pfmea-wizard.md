@@ -127,7 +127,9 @@ In `backend/app/api/fmea.py`, change the `dfmea_tool`/`dfmea_trend` branch to al
 
 - [ ] **Step 5: Add prompt templates + PFMEA rule content**
 
-In `backend/app/services/recommendation_service.py`, add two entries to `PROMPT_TEMPLATES` mirroring the `dfmea_tool`/`dfmea_trend` shape **exactly** (the LLM result is validated by `SuggestionList.model_validate()`, which requires `name`/`confidence`/`explanation` — see `backend/app/schemas/recommendation.py:16-18` and `recommendation_service.py:540`). A prompt returning `{name, reason}` would fail validation and silently fall back to empty rule/graph. Place immediately after the `"dfmea_trend"` entry (line 450):
+In `backend/app/services/recommendation_service.py`, add two entries to `PROMPT_TEMPLATES` mirroring the `dfmea_tool`/`dfmea_trend` shape **exactly** (the LLM result is validated by `SuggestionList.model_validate()`, which requires `name`/`confidence`/`explanation` — see `backend/app/schemas/recommendation.py:16-18` and `recommendation_service.py:540`). A prompt returning `{name, reason}` would fail validation and silently fall back to empty rule/graph. Place immediately after the `"dfmea_trend"` entry (line 450).
+
+> **Context field names (review fix)**: `_build_prompt` (line 880-894) merges `request.context` (as `current_context`) first, then `_assemble_context`'s top-level keys. `_assemble_context` (line 844-851) returns `product_line` (the product line **code**) — NOT `product_line_code`. The `dfmea_tool` template uses `{product_line_code}`, which only resolves because `ScopeTagField` happens to pass `product_line_code` in `request.context`. To be robust against that coupling, the PFMEA prompts use `{product_line}` (guaranteed by `_assemble_context`) for the product-line field. `{fmea_title}`/`{task}`/`{team}` resolve from `request.context` (PFMEA `ScopeTagField` passes them — confirm in Task 9 `renderStep0`); `{historical_patterns}` resolves from `_assemble_context`. Use `{product_line}` in the prompt.
 
 ```python
     "pfmea_tool": """你是资深PFMEA(过程FMEA)工程师，精通AIAG-VDA方法论。
@@ -138,7 +140,7 @@ In `backend/app/services/recommendation_service.py`, add two entries to `PROMPT_
 
 【当前上下文】
 - FMEA 标题: {fmea_title}
-- 产品线: {product_line_code}
+- 产品线: {product_line}
 - 分析任务: {task}
 - 团队: {team}
 
@@ -159,7 +161,7 @@ In `backend/app/services/recommendation_service.py`, add two entries to `PROMPT_
 
 【当前上下文】
 - FMEA 标题: {fmea_title}
-- 产品线: {product_line_code}
+- 产品线: {product_line}
 - 分析任务: {task}
 - 团队: {team}
 
@@ -174,7 +176,7 @@ In `backend/app/services/recommendation_service.py`, add two entries to `PROMPT_
 """,
 ```
 
-> **Critical**: the JSON key names must be `name`/`confidence`/`explanation` (not `reason`). `_build_prompt` formats the template with `{fmea_title}`/`{product_line_code}`/`{task}`/`{team}`/`{historical_patterns}` — all are provided by `_assemble_context` (which already injects `fmea_type`, `product_line_code`, and merges `request.context`). Confirm `product_line_code` is in scope: `_assemble_context` returns `product_line_code` via the `fmea` object; if the template uses `{product_line}` instead (the failure_* templates use `{product_line}`), match whatever `_assemble_context` provides. Check `_assemble_context` (around line 844) and use the matching key. The `dfmea_tool` template uses `{product_line_code}` — use the same.
+> **Critical**: the JSON key names must be `name`/`confidence`/`explanation` (not `reason`), and the product-line placeholder must be `{product_line}` (matches `_assemble_context`'s return key), not `{product_line_code}`.
 
 Then add a PFMEA-specific rule map. After `FAILURE_CHAIN_MAP` (around line 121), add:
 
@@ -237,25 +239,44 @@ Apply the same `fmea_type` branching for the `failure_mode` verb-pattern lookup 
 Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/test_pfmea_recommend.py -x`
 Expected: PASS.
 
-- [ ] **Step 7: Add a template-format test + a service-level non-empty-suggestions test**
+- [ ] **Step 7: Add a real-path `_build_prompt` test + a SuggestionList validation test**
 
 Append to `backend/tests/test_pfmea_recommend.py`:
 
 ```python
-from app.services.recommendation_service import PROMPT_TEMPLATES
+from app.services.recommendation_service import RecommendationService
 from app.schemas.recommendation import SuggestionList
 
 
-def test_pfmea_prompt_templates_format_without_keyerror():
-    """Both prompts must format with the context keys _assemble_context provides."""
+def test_pfmea_prompt_builds_via_real_build_prompt_path():
+    """Exercises the real _build_prompt merge (request.context as current_context,
+    then _assemble_context top-level keys) to catch prompt/context field mismatches.
+
+    This is the regression guard for review fix #1: the prompt must use {product_line}
+    (what _assemble_context returns), not {product_line_code}."""
+    svc = RecommendationService.__new__(RecommendationService)  # bypass __init__ deps; _build_prompt only needs PROMPT_TEMPLATES (class-level)
+    # Shape mirrors what _assemble_context(fmea, request) returns:
+    #   {fmea_type, product_line, current_context: request.context, historical_patterns}
+    # and request.context (ScopeTagField) provides fmea_title/task/team.
+    request_context = {"fmea_title": "SMT焊接生产线", "task": "PFMEA分析", "team": "张工"}
     ctx = {
-        "fmea_title": "SMT线", "product_line_code": "DC-DC-100",
-        "task": "PFMEA", "team": "张工", "historical_patterns": "无",
+        "fmea_type": "PFMEA",
+        "product_line": "DC-DC-100",          # _assemble_context returns THIS key (not product_line_code)
+        "current_context": request_context,
+        "historical_patterns": "无",
     }
     for trig in ("pfmea_tool", "pfmea_trend"):
-        rendered = PROMPT_TEMPLATES[trig].format_map(_SafeDict(ctx))
+        rendered = svc._build_prompt(trig, ctx)
+        # the product-line line must be filled (not empty), proving {product_line} resolved
+        assert "产品线: DC-DC-100" in rendered, f"{trig} did not resolve {{product_line}} — check prompt placeholder"
+        assert "SMT焊接生产线" in rendered          # {fmea_title} resolved from request.context
+        assert "PFMEA分析" in rendered              # {task}
         assert "suggestions" in rendered
-        assert "confidence" in rendered  # schema key, not "reason"
+        assert "confidence" in rendered             # schema key, not "reason"
+        # no leftover unresolved placeholders for the keys we expect to provide
+        assert "{product_line}" not in rendered
+        assert "{fmea_title}" not in rendered
+        assert "{historical_patterns}" not in rendered
 
 
 def test_pfmea_tool_llm_output_passes_suggestionlist_validation():
@@ -270,14 +291,11 @@ def test_pfmea_tool_llm_output_passes_suggestionlist_validation():
     validated = SuggestionList.model_validate(raw)
     assert len(validated.suggestions) == 2
     assert validated.suggestions[0].name == "过程流程图"
-
-
-class _SafeDict(dict):
-    def __missing__(self, key):
-        return "{" + key + "}"
 ```
 
-> Also add a service-level test that `pfmea_tool` returns non-empty suggestions when the LLM is stubbed to return valid output. Use the existing `test_recommendation_service.py` fixture pattern for constructing a `RecommendationService` with a stubbed LLM (find it via `grep -n "class.*LLM\|llm =\|RecommendationService(" backend/tests/test_recommendation_service.py`). The stub LLM's `complete()` must return a dict matching the `SuggestionList` schema above. Assert `response.suggestions` is non-empty and `response.source in ("hybrid","graph_enriched","rule_fallback")`. If the existing fixture is hard to reuse, the two tests above (template format + SuggestionList validation) are the required minimum; drop the full-service test if it cannot be stabilized, but **do not skip the validation test** — it is the regression guard for finding #1.
+> If `RecommendationService.__new__` proves insufficient (e.g. `_build_prompt` reads instance state beyond `PROMPT_TEMPLATES`), replicate the exact merge from `_build_prompt` (lines 880-894) in a local helper instead — the assertion is the contract: a context shaped like `_assemble_context` + `request.context` must fully resolve the prompt's `{product_line}`/`{fmea_title}`/`{task}`/`{team}`/`{historical_patterns}` placeholders. Read `_build_prompt` first and match its `_SafeDict` (missing keys render as empty string, line 884).
+
+> **Optional fuller service test**: if a `RecommendationService` with a stubbed LLM can be constructed cheaply (find the pattern via `grep -n "class.*LLM\|llm =\|RecommendationService(" backend/tests/test_recommendation_service.py`), add a test where the stub `complete()` returns the `SuggestionList`-shaped dict and assert `response.suggestions` is non-empty. This is not required — the two tests above (`_build_prompt` real-path + `SuggestionList` validation) are the required regression guards for finding #1.
 
 - [ ] **Step 8: Confirm the rule engine handles unknown triggers gracefully**
 
@@ -2148,71 +2166,133 @@ git commit -m "feat(pfmea): route PFMEA wizard + list navigation (create & draft
 
 - [ ] **Step 1: Inspect the existing editor test harness**
 
-Read `frontend/src/pages/planning/fmea/FMEAEditorDragSort.test.tsx` and `frontend/src/pages/planning/fmea/FMEAVersionSnapshot.test.tsx` in full. Note the i18n wrapper, router setup, `getFMEA` mock shape, and how they construct a `FMEADocument` with `graph_data`. The new `FMEAEditorPage.test.tsx` will reuse this exact harness.
+Read `frontend/src/pages/planning/fmea/FMEAEditorDragSort.test.tsx` in full (lines 1-168 are the mock harness). The new `FMEAEditorPage.test.tsx` reuses this exact, proven harness verbatim — it mocks `react-i18next` (`t: (key) => key`), `api/fmea`, `api/specialCharacteristic`, `api/lessonsLearned`, `api/graph`, `api/changeImpact`, `store/authStore`, `hooks/usePermission`, `hooks/useCollaboration`, the DFMEA feature components (`StructureTree`/`ParameterDiagram`/etc.), `@dnd-kit/core`, and the antd `App` message hook. This is real, runnable code (the DragSort test runs against it).
 
 - [ ] **Step 2: Create `FMEAEditorPage.test.tsx` with the failing tests**
 
 ```typescript
 // frontend/src/pages/planning/fmea/FMEAEditorPage.test.tsx
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-// Reuse the SAME wrapper/harness pattern as FMEAEditorDragSort.test.tsx (i18n + router + getFMEA mock).
-// Copy the imports, the i18n test provider, and the getFMEA mock setup from that file.
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { App } from "antd";
+import FMEAEditorPage from "./FMEAEditorPage";
+import type { FMEADocument, GraphEdge, GraphNode } from "../../../types";
 
-vi.mock('../../../api/fmea', () => ({ getFMEA: vi.fn(), updateFMEA: vi.fn(), deleteFMEA: vi.fn() }));
-import { getFMEA } from '../../../api/fmea';
-import type { FMEADocument, GraphNode, GraphEdge } from '../../../types';
+// ---- BEGIN: harness copied verbatim from FMEAEditorDragSort.test.tsx lines 22-168 ----
+// (vi.hoisted mocks block, @dnd-kit/core mock, antd App mock, api/fmea + api/specialCharacteristic
+//  + api/lessonsLearned + api/graph + api/changeImpact mocks, store/authStore, usePermission,
+//  useCollaboration, StructureTree/ParameterDiagram/LessonsLearnedModal/version/* /cross-links/
+//  graph/change-impact/collaboration/design component mocks, react-i18next mock).
+// Copy that block EXACTLY. The @dnd-kit mock is required because FMEAEditorPage imports the
+// structure tree which wires DndContext; even though StructureTree is stubbed, keep the @dnd-kit
+// mock to match the proven harness. mocks.getFMEA / mocks.canEdit / mocks.warning are the
+// hoisted vi.fn()s you will drive below.
+// ---- END harness ----
 
 const Z = { severity: 0, occurrence: 0, detection: 0 };
 
-const pfmeaWithCC = (): FMEADocument => ({
-  fmea_id: '00000000-0000-0000-0000-000000000001',
-  document_no: 'PFMEA-2026-001', title: 'SMT焊接生产线',
-  fmea_type: 'PFMEA', status: 'approved', lock_version: 1,
-  graph_data: {
-    nodes: [
-      { id: 'psf', type: 'ProcessStepFunction', name: '准确贴装', classification: 'CC', ...Z } as GraphNode,
-      { id: 'fm', type: 'FailureMode', name: '贴装偏移', classification: '', ...Z } as GraphNode, // FM classification empty (new model)
-      { id: 'fe', type: 'FailureEffect', name: '功能丧失', severity: 8, ...Z } as GraphNode,
-      { id: 'fc', type: 'FailureCause', name: '吸嘴磨损', occurrence: 4, ...Z } as GraphNode,
-      { id: 'pc', type: 'PreventionControl', name: '校准', ...Z } as GraphNode,
-      { id: 'dc', type: 'DetectionControl', name: 'AOI', detection: 3, ...Z } as GraphNode,
-    ],
-    edges: [
-      { source: 'psf', target: 'fm', type: 'HAS_FAILURE_MODE' },
-      { source: 'fm', target: 'fe', type: 'EFFECT_OF' },
-      { source: 'fc', target: 'fm', type: 'CAUSE_OF' },
-      { source: 'fc', target: 'pc', type: 'PREVENTED_BY' },
-      { source: 'fc', target: 'dc', type: 'DETECTED_BY' },
-    ] as GraphEdge[],
-    wizardScope: { wizard_completed: true },
-  },
-} as unknown as FMEADocument);
+function makeDoc(fmeaType: "PFMEA" | "DFMEA", stepFuncClass: string, fmClass: string): FMEADocument {
+  // PFMEA: ProcessStepFunction carries classification (CC/SC); FailureMode.classification empty.
+  // DFMEA: FailureMode carries classification (Filter Code); ProcessStepFunction has none.
+  const psf: GraphNode = {
+    id: "psf", type: "ProcessStepFunction", name: "准确贴装",
+    classification: fmeaType === "PFMEA" ? stepFuncClass : "", ...Z,
+  } as GraphNode;
+  const fm: GraphNode = {
+    id: "fm", type: "FailureMode", name: "贴装偏移",
+    classification: fmeaType === "DFMEA" ? fmClass : "", ...Z,
+  } as GraphNode;
+  const nodes: GraphNode[] = [
+    { id: "ps", type: "ProcessStep", name: "贴装", process_number: "OP10", ...Z } as GraphNode,
+    psf,
+    fm,
+    { id: "fe", type: "FailureEffect", name: "功能丧失", severity: 8, ...Z } as GraphNode,
+    { id: "fc", type: "FailureCause", name: "吸嘴磨损", occurrence: 4, ...Z } as GraphNode,
+    { id: "pc", type: "PreventionControl", name: "校准", ...Z } as GraphNode,
+    { id: "dc", type: "DetectionControl", name: "AOI", detection: 3, ...Z } as GraphNode,
+  ];
+  const edges: GraphEdge[] = [
+    { source: "ps", target: "psf", type: "HAS_FUNCTION" },
+    { source: "psf", target: "fm", type: "HAS_FAILURE_MODE" },
+    { source: "fm", target: "fe", type: "EFFECT_OF" },
+    { source: "fc", target: "fm", type: "CAUSE_OF" },
+    { source: "fc", target: "pc", type: "PREVENTED_BY" },
+    { source: "fc", target: "dc", type: "DETECTED_BY" },
+  ];
+  return {
+    fmea_id: "fmea-1",
+    document_no: `${fmeaType}-1`,
+    title: `${fmeaType} doc`,
+    fmea_type: fmeaType,
+    product_line_code: "DC-DC-100",
+    status: "approved",
+    lock_version: 1,
+    graph_data: { nodes, edges, wizardScope: { wizard_completed: true } },
+  } as unknown as FMEADocument;
+}
 
-describe('FMEAEditorPage Class column', () => {
-  beforeEach(() => { vi.mocked(getFMEA).mockResolvedValue(pfmeaWithCC()); });
+function renderEditor() {
+  return render(
+    <MemoryRouter initialEntries={["/fmea/fmea-1"]}>
+      <App>
+        <Routes>
+          <Route path="/fmea/:id" element={<FMEAEditorPage />} />
+        </Routes>
+      </App>
+    </MemoryRouter>,
+  );
+}
 
-  it('PFMEA: Class column is read-only and shows CC from ProcessStepFunction.classification', async () => {
-    render(<FMEAEditorPageWrapper />, { wrapper: EditorTestHarness }); // reuse harness from FMEAEditorDragSort.test
-    await screen.findByText(/SMT焊接生产线|PFMEA/i);
-    // The Class cell should show 'CC' (from psf.classification), and there should be NO editable
-    // Select whose onChange writes to the FailureMode node for PFMEA.
-    expect(screen.getAllByText('CC').length).toBeGreaterThan(0);
+describe("FMEAEditorPage Class column", () => {
+  beforeEach(() => {
+    // Default: admin can edit.
+    // (mocks.canEdit is the hoisted vi.fn() from the copied harness.)
+    mocks.canEdit.mockReturnValue(true);
+    mocks.getFMEA.mockReset();
   });
 
-  it('DFMEA: Filter Code column unchanged (editable Select on FailureMode.classification)', async () => {
-    const dfmea = { ...pfmeaWithCC(), fmea_type: 'DFMEA' } as unknown as FMEADocument;
-    vi.mocked(getFMEA).mockResolvedValue(dfmea);
-    render(<FMEAEditorPageWrapper />, { wrapper: EditorTestHarness });
-    await screen.findByText(/DFMEA/i);
-    // For DFMEA the Class column must remain the editable Select bound to FailureMode.classification.
-    const selects = screen.getAllByRole('combobox');
-    expect(selects.length).toBeGreaterThan(0); // Filter Code Select present
+  it("PFMEA: Class column is read-only and shows CC from ProcessStepFunction.classification", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc("PFMEA", "CC", ""));
+    renderEditor();
+    await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
+    // The PFMEA Class cell renders a read-only Tag with the aggregated label 'CC'.
+    // (FailureMode.classification is '' here, so the old code would have shown '-' — this asserts the new behavior.)
+    await waitFor(() => {
+      expect(screen.getAllByText("CC").length).toBeGreaterThan(0);
+    });
+  });
+
+  it("PFMEA: shows '-' when no CC and no SC", async () => {
+    mocks.getFMEA.mockResolvedValue(makeDoc("PFMEA", "", ""));
+    renderEditor();
+    await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
+    // No CC/SC tag content; aggregateSpecialCharacteristic returns '-'. Assert a '-' cell is present
+    // and no 'CC'/'SC' tag is rendered for the class column.
+    await waitFor(() => {
+      // the read-only branch renders a Tag with label '-'
+      expect(screen.getAllByText("-").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("CC")).toBeNull();
+    expect(screen.queryByText("SC")).toBeNull();
+  });
+
+  it("DFMEA: Filter Code column unchanged (editable Select bound to FailureMode.classification)", async () => {
+    // DFMEA: classification lives on FailureMode; the Select must still be present and editable.
+    mocks.getFMEA.mockResolvedValue(makeDoc("DFMEA", "", "CC"));
+    renderEditor();
+    await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
+    // The DFMEA branch renders the Select (role=combobox) with the CC option.
+    await waitFor(() => {
+      expect(screen.getAllByRole("combobox").length).toBeGreaterThan(0);
+    });
+    // And the Select's CC option is selectable (Filter Code still editable on FailureMode).
+    expect(screen.getAllByText("CC").length).toBeGreaterThan(0);
   });
 });
 ```
 
-> `FMEAEditorPageWrapper` / `EditorTestHarness` — names placeholder for the harness you copy from `FMEAEditorDragSort.test.tsx`. If that file renders `FMEAEditorPage` directly via a route, mirror it exactly (same `MemoryRouter` + `ProtectedRoute`/auth mock + i18n provider). The assertions are deliberately tolerant (presence of `CC` text / presence of a combobox) to avoid coupling to exact column DOM; tighten only if the existing harness makes stronger assertions straightforward. If rendering the full editor in-test is too heavy (auth/permission deps), fall back to a unit test of the column's `render` function extracted into a pure helper — but prefer the rendering test since the deliverable is an integrated column change.
+> The `mocks` object (with `getFMEA`/`canEdit`/`warning`/`updateFMEA`/`transitionFMEA`) and the entire mock block are the verbatim harness from `FMEAEditorDragSort.test.tsx:22-168` — copy it, do not paraphrase. The `App` wrapper + `MemoryRouter` + `Routes` match how the DragSort test mounts the editor. Because `react-i18next` is mocked to `t: (key) => key`, the column header renders the literal key `editor.tooltips.classification`; the assertions target the CC/SC/`-` label strings (which are literal in `aggregateSpecialCharacteristic` and the Select options), not i18n output — so they are stable.
 
 - [ ] **Step 3: Run to verify it fails**
 
@@ -2293,9 +2373,9 @@ Expected: `tsc --noEmit` + `vite build` succeed (no type errors; PFMEA namespace
 ## Self-review notes
 
 - **Spec coverage**: Every spec section maps to a task — Steps 0–6 (Tasks 9–13), CC/SC model §8 (Tasks 7+8+15), editor compat §9 (Task 15), three-tier severity (Tasks 4+8), pfmea_tool/trend backend §6 (Task 1), routing §7 (Task 14), validation §10 (Task 4), tests §11 (per-task tests), scope §12 (exclusions respected: no FC↔WEF edge, no FailureCause.special_characteristic, DFMEA untouched except additive ScopeTagField union + PFMEA-only editor branch).
-- **LLM schema alignment (review fix #1)**: Task 1 prompts now return `{"suggestions":[{"name","confidence","explanation"}]}` matching `SuggestionList.model_validate` (not `{name,"reason"}`). Task 1 Step 7 tests template formatting + `SuggestionList` validation as the regression guard; Step 8 confirms the rule engine returns empty (not raises) for the new scope triggers so they fall through to LLM.
+- **LLM schema alignment (review fix #1)**: Task 1 prompts now return `{"suggestions":[{"name","confidence","explanation"}]}` matching `SuggestionList.model_validate` (not `{name,"reason"}`). The product-line placeholder is `{product_line}` — the key `_assemble_context` actually returns (line 848), not `{product_line_code}` (which only resolves via `request.context` coupling). Task 1 Step 7 test exercises the **real `_build_prompt` merge path** with a context shaped like `_assemble_context` + `request.context`, asserting `{product_line}`/`{fmea_title}`/`{task}`/`{historical_patterns}` fully resolve (regression guard for the field-name mismatch). Step 8 confirms the rule engine returns empty (not raises) for the new scope triggers so they fall through to LLM.
 - **Branch-local FUNCTION_MAPPED_TO (review fix #2)**: Task 7 `addFunction` resolves the mapped parent by walking the structure tree (StepFunction ← its step's ProcessItem's ItemFunction; WEF ← its work element's ProcessStep's StepFunction). Two branch-local tests in Task 7 (two steps / two work elements) assert WEF maps only to its own step's StepFunction. Task 4 validation's `step2Complete` is strengthened to reject wrong-branch mapping, with a failing-branch test.
 - **Export consistency (review fix #3)**: all four PFMEA components use **default exports** (matching the existing DFMEA `WizardSidebar`/`WizardGuidanceCard` convention). All page + test imports use default imports (`import X from '...'`); only the pure helpers `computeSeverity`/`aggregateSpecialCharacteristic` remain named exports (imported by Task 8 tests and Task 15). No `{ NamedComponent }` component imports remain.
-- **Editor test file (review fix #4)**: Task 15 creates a new `FMEAEditorPage.test.tsx` (none exists today — only `FMEAEditorDragSort.test.tsx` / `FMEAVersionSnapshot.test.tsx`), reusing their i18n/router/mock harness; it does not reference a non-existent file.
-- **No placeholders**: every code step shows real code; the two "copy-then-adapt" tasks (5, 9) reference the exact source file + show the specific edits. Pure-function tests (`computeSeverity`/`aggregateSpecialCharacteristic`) are the stable alternative to the fragile severity-dialog interaction test.
+- **Editor test file (review fix #4)**: Task 15 creates a new `FMEAEditorPage.test.tsx` (none exists today — only `FMEAEditorDragSort.test.tsx` / `FMEAVersionSnapshot.test.tsx`), reusing their i18n/router/mock harness **verbatim** (lines 22-168 of `FMEAEditorDragSort.test.tsx`) — real, runnable code, not pseudocode. The test mounts `FMEAEditorPage` via `MemoryRouter`+`App`+`Routes` exactly as the DragSort test does; assertions target literal CC/SC/`-` label strings (stable under the `t:(key)=>key` i18n mock).
+- **No placeholders**: every code step shows real code; the two "copy-then-adapt" tasks (5, 9) reference the exact source file + show the specific edits; Task 15's test copies a real, proven harness verbatim and uses a real `makeDoc` helper + real `renderEditor` mount. Pure-function tests (`computeSeverity`/`aggregateSpecialCharacteristic`) are the stable alternative to the fragile severity-dialog interaction test.
 - **Type consistency**: `PfmeaStepValidation` field names (`step1Complete`..`step5Complete`) match the finish-gate usage in Task 9. `aggregateSpecialCharacteristic`/`computeSeverity` are defined in Task 8 and reused in Task 15 (imported). `createWizardFailureChain` signature unchanged (called with `ProcessStepFunction` id). `ScopeTriggerType` extended additively. Step numbering verified unique within each task (Task 1: 1–10; Task 15: 1–6).
