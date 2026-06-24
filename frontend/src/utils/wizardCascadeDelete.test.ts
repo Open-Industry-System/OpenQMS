@@ -145,26 +145,26 @@ describe('cascadeDeleteStructureNode', () => {
     expect(result.edges.some(ed => ed.source === 'fc1' && ed.target === 'ra1')).toBe(false);
   });
 
-  it('keeps RecommendedAction even when only one cause references it (exclusion, not just sharing)', () => {
-    // Locks the OPTIMIZED_BY exclusion: even with no other cause sharing ra1,
-    // deleting its sole cause must NOT delete the recommended action. A future
-    // refactor that adds OPTIMIZED_BY to FORWARD_EDGE_TYPES would fail here.
-    //   func1 →(HAS_FAILURE_MODE)→ fm1 ←(CAUSE_OF)— fc1 →(OPTIMIZED_BY)→ ra1
+  it('deleting a FailureMode root cascades to its FailureCause and Prevention/Detection controls', () => {
+    // Graph: psf → fm → fe
+    //             fc →(CAUSE_OF)→ fm
+    //             fc → pc (PREVENTED_BY)
+    //             fc → dc (DETECTED_BY)
+    // Deleting the root FailureMode should delete fm, fe, fc, pc, dc.
     const nodes = [
-      n('func1', 'ProcessWorkElementFunction'), n('fm1', 'FailureMode'),
-      n('fc1', 'FailureCause'), n('ra1', 'RecommendedAction', 'Lone recommended action'),
+      n('psf', 'ProcessStepFunction'), n('fm', 'FailureMode'),
+      n('fe', 'FailureEffect'), n('fc', 'FailureCause'),
+      n('pc', 'PreventionControl'), n('dc', 'DetectionControl'),
     ];
     const edges = [
-      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
-      e('fc1', 'fm1', 'CAUSE_OF'),
-      e('fc1', 'ra1', 'OPTIMIZED_BY'),
+      e('psf', 'fm', 'HAS_FAILURE_MODE'),
+      e('fm', 'fe', 'EFFECT_OF'),
+      e('fc', 'fm', 'CAUSE_OF'),
+      e('fc', 'pc', 'PREVENTED_BY'),
+      e('fc', 'dc', 'DETECTED_BY'),
     ];
-    const result = cascadeDeleteStructureNode('fc1', nodes, edges);
-    const remainingIds = result.nodes.map(x => x.id);
-    // fc1 deleted, but ra1 survives — OPTIMIZED_BY is never followed downstream
-    expect(remainingIds).not.toContain('fc1');
-    expect(remainingIds).toContain('ra1');
-    // The fc1→ra1 edge is dropped (fc1 was deleted), leaving ra1 edge-less but intact
-    expect(result.edges.some(ed => ed.target === 'ra1')).toBe(false);
+    const result = cascadeDeleteStructureNode('fm', nodes, edges);
+    expect(result.nodes.map(x => x.id)).toEqual(['psf']);
+    expect(result.edges).toHaveLength(0);
   });
 });

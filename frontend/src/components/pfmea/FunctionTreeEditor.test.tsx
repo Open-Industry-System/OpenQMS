@@ -68,6 +68,32 @@ describe('FunctionTreeEditor', () => {
     expect(mapped[0].source).toBe('pif2');
   });
 
+  it('branch-local: auto-creates an ItemFunction for a ProcessItem when adding a StepFunction before an item function exists', () => {
+    const nodes: GraphNode[] = [
+      { id: 'pi1', type: 'ProcessItem', name: '线A', ...Z },
+      { id: 'pi2', type: 'ProcessItem', name: '线B', ...Z },
+      { id: 'ps2', type: 'ProcessStep', name: '贴装B', process_number: 'OP20', ...Z },
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'pi2', target: 'ps2', type: 'HAS_PROCESS_STEP' },
+    ];
+    const onChange = vi.fn();
+    render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={onChange} />,
+      { wrapper: I18nTestWrapper },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /addStepFunction.*OP20|添加过程步骤功能.*OP20/ }));
+    expect(onChange).toHaveBeenCalled();
+    const [newNodes, newEdges] = onChange.mock.calls[0];
+    // An ItemFunction was auto-created and linked to pi2
+    const autoItemFunc = newNodes.find((n: GraphNode) => n.type === 'ProcessItemFunction');
+    expect(autoItemFunc).toBeTruthy();
+    expect(newEdges.some((e: GraphEdge) => e.source === 'pi2' && e.target === autoItemFunc.id && e.type === 'HAS_FUNCTION')).toBe(true);
+    // The StepFunction maps from the auto-created ItemFunction
+    const mapped = newEdges.filter((e: GraphEdge) => e.type === 'FUNCTION_MAPPED_TO');
+    expect(mapped.length).toBe(1);
+    expect(mapped[0].source).toBe(autoItemFunc.id);
+  });
+
   it('branch-local: with two work elements under different steps, a new WEF maps to ITS step\'s StepFunction only', () => {
     const nodes: GraphNode[] = [
       { id: 'ps1', type: 'ProcessStep', name: '贴装A', process_number: 'OP10', ...Z },

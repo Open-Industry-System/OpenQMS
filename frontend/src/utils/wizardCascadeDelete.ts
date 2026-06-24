@@ -43,10 +43,14 @@ export function cascadeDeleteStructureNode(
     if (downstream.has(current)) continue;
     // Skip the root — it's already handled above
     if (current === nodeId) {
-      // Still traverse its children
+      const rootNode = nodes.find(n => n.id === nodeId);
       for (const e of edges) {
         if (e.source === current && FORWARD_EDGE_TYPES.has(e.type)) {
           queue.push(e.target);
+        }
+        // Root is a FailureMode: also discover its FailureCauses via CAUSE_OF (target=root)
+        if (rootNode?.type === 'FailureMode' && e.target === current && e.type === 'CAUSE_OF') {
+          queue.push(e.source);
         }
       }
       continue;

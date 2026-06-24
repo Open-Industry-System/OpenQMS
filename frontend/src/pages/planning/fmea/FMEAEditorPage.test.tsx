@@ -209,12 +209,14 @@ function makeDoc(fmeaType: "PFMEA" | "DFMEA", stepFuncClass: string, fmClass: st
   } as unknown as FMEADocument;
 }
 
-function renderEditor() {
+function renderEditor(initialEntry = "/fmea/fmea-1") {
   return render(
     <App>
-      <MemoryRouter initialEntries={["/fmea/fmea-1"]}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/fmea/:id" element={<FMEAEditorPage />} />
+          <Route path="/fmea/wizard/:id" element={<div data-testid="dfmea-wizard-page">DFMEA Wizard</div>} />
+          <Route path="/fmea/pfmea-wizard/:id" element={<div data-testid="pfmea-wizard-page">PFMEA Wizard</div>} />
         </Routes>
       </MemoryRouter>
     </App>,
@@ -261,6 +263,38 @@ describe("FMEAEditorPage Class column", () => {
     });
     expect(screen.queryByText("CC")).toBeNull();
     expect(screen.queryByText("SC")).toBeNull();
+  });
+
+  it("PFMEA: incomplete draft redirects to PFMEA wizard and does not render editor table", async () => {
+    const pfmeaDraft: FMEADocument = {
+      ...makeDoc("PFMEA", "", ""),
+      status: "draft",
+      graph_data: { nodes: [], edges: [], wizardScope: { wizard_completed: false } },
+    } as unknown as FMEADocument;
+    mocks.getFMEA.mockResolvedValue(pfmeaDraft);
+    renderEditor("/fmea/fmea-1");
+    await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getByTestId("pfmea-wizard-page")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("dfmea-structure-tree")).toBeNull();
+    expect(screen.queryByTestId("parameter-diagram")).toBeNull();
+  });
+
+  it("DFMEA: incomplete draft redirects to DFMEA wizard and does not render editor table", async () => {
+    const dfmeaDraft: FMEADocument = {
+      ...makeDoc("DFMEA", "", ""),
+      status: "draft",
+      graph_data: { nodes: [], edges: [], wizardScope: { wizard_completed: false } },
+    } as unknown as FMEADocument;
+    mocks.getFMEA.mockResolvedValue(dfmeaDraft);
+    renderEditor("/fmea/fmea-1");
+    await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getByTestId("dfmea-wizard-page")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("dfmea-structure-tree")).toBeNull();
+    expect(screen.queryByTestId("parameter-diagram")).toBeNull();
   });
 
   it("DFMEA: Filter Code column unchanged (editable Select bound to FailureMode.classification)", async () => {

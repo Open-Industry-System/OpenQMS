@@ -395,13 +395,16 @@ export default function FMEAEditorPage() {
     if (!id) return;
     getFMEA(id)
       .then((doc) => {
-        // Redirect draft DFMEAs that haven't completed the wizard
-        if (
-          doc.fmea_type === "DFMEA" &&
+        // Redirect draft FMEAs that haven't completed the wizard to the correct wizard
+        const isIncompleteDraft =
           doc.status === "draft" &&
-          !doc.graph_data?.wizardScope?.wizard_completed
-        ) {
+          !doc.graph_data?.wizardScope?.wizard_completed;
+        if (isIncompleteDraft && doc.fmea_type === "DFMEA") {
           navigate(`/fmea/wizard/${id}`, { replace: true });
+          return;
+        }
+        if (isIncompleteDraft && doc.fmea_type === "PFMEA") {
+          navigate(`/fmea/pfmea-wizard/${id}`, { replace: true });
           return;
         }
         setFmea(doc);
