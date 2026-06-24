@@ -126,6 +126,8 @@ export default function FMEAListPage() {
       form.resetFields();
       if (values.fmea_type === "DFMEA") {
         navigate(`/fmea/wizard/${fmea.fmea_id}`);
+      } else if (values.fmea_type === "PFMEA") {
+        navigate(`/fmea/pfmea-wizard/${fmea.fmea_id}`);
       } else {
         navigate(`/fmea/${fmea.fmea_id}`, { state: { showLessonsLearned: true, problemDescription: values.problem_description } });
       }
@@ -181,12 +183,13 @@ export default function FMEAListPage() {
       key: "actions",
       width: 100,
       render: (_: unknown, record: FMEADocument) => {
-        // Only send incomplete DFMEA drafts back to the wizard; completed drafts (wizard_completed)
-        // open directly in the editor, matching FMEAEditorPage's redirect guard.
-        const isIncompleteDraft = record.fmea_type === "DFMEA" && record.status === "draft"
+        // Send incomplete DFMEA/PFMEA drafts back to their respective wizard;
+        // completed drafts open directly in the editor, matching FMEAEditorPage's redirect guard.
+        const isIncompleteDraft = (record.fmea_type === "DFMEA" || record.fmea_type === "PFMEA")
+          && record.status === "draft"
           && !record.graph_data?.wizardScope?.wizard_completed;
         const targetPath = isIncompleteDraft
-          ? `/fmea/wizard/${record.fmea_id}`
+          ? (record.fmea_type === "PFMEA" ? `/fmea/pfmea-wizard/${record.fmea_id}` : `/fmea/wizard/${record.fmea_id}`)
           : `/fmea/${record.fmea_id}`;
         return (
           <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(targetPath)}>
