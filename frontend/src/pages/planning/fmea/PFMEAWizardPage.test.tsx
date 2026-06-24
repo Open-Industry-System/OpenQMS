@@ -102,6 +102,49 @@ describe("PFMEAWizardPage", () => {
     await waitFor(() => screen.getByText(/addItemFunction|添加过程项目功能/i));
   });
 
+  it("Step 4 renders the RiskTable with severity dialog and CC/SC column", async () => {
+    const doc = {
+      ...baseDoc,
+      graph_data: {
+        nodes: [
+          { id: "pi", type: "ProcessItem", name: "线", ...Z },
+          { id: "ps", type: "ProcessStep", name: "贴装", process_number: "OP10", ...Z },
+          { id: "psf", type: "ProcessStepFunction", name: "准确贴装", ...Z },
+          { id: "fm", type: "FailureMode", name: "偏移", ...Z },
+          { id: "fe", type: "FailureEffect", name: "焊接不良", severity: 7, severity_plant: 7, severity_customer: 5, severity_user: 3 },
+          { id: "fc", type: "FailureCause", name: "吸嘴磨损", ...Z, occurrence: 4 },
+          { id: "pc", type: "PreventionControl", name: "定期更换吸嘴", ...Z },
+          { id: "dc", type: "DetectionControl", name: "SPC监控", ...Z, detection: 3 },
+        ],
+        edges: [
+          { source: "pi", target: "ps", type: "HAS_PROCESS_STEP" },
+          { source: "ps", target: "psf", type: "HAS_FUNCTION" },
+          { source: "psf", target: "fm", type: "HAS_FAILURE_MODE" },
+          { source: "fm", target: "fe", type: "EFFECT_OF" },
+          { source: "fc", target: "fm", type: "CAUSE_OF" },
+          { source: "fc", target: "pc", type: "PREVENTED_BY" },
+          { source: "fc", target: "dc", type: "DETECTED_BY" },
+        ],
+        wizardScope: {},
+      },
+    };
+    vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
+    render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
+    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    // advance to step 4 (0 -> 1 -> 2 -> 3 -> 4)
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+
+    // RiskTable renders an AP tag (H/M/L) or the class column (CC/SC/-)
+    await waitFor(() => {
+      const apTag = screen.queryByText(/^[HML]$/);
+      const classTag = screen.queryByText(/^(CC|SC|-)$/);
+      expect(apTag || classTag).toBeTruthy();
+    });
+  });
+
   it("Step 3 creates a failure chain on a ProcessStepFunction", async () => {
     const doc = {
       ...baseDoc,

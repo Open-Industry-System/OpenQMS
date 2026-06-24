@@ -18,6 +18,7 @@ import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimefra
 import FunctionTreeEditor from '../../../components/pfmea/FunctionTreeEditor';
 import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
 import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
+import RiskTable from '../../../components/pfmea/RiskTable';
 import { createWizardFailureChain, ensureCauseControls } from '../../../utils/wizardGraphNormalize';
 
 const { Title } = Typography;
@@ -509,7 +510,9 @@ export default function PFMEAWizardPage() {
       </div>
     );
   };
-  const renderStep4 = () => <div>{t('wizard.steps.4')}</div>;
+  const renderStep4 = () => (
+    <RiskTable nodes={nodes} edges={edges} fmeaId={fmeaId!} onChange={(n, e) => updateGraphData(n, e)} />
+  );
   const renderStep5 = () => <div>{t('wizard.steps.5')}</div>;
   const renderStep6 = () => <div>{t('wizard.steps.6')}</div>;
 
