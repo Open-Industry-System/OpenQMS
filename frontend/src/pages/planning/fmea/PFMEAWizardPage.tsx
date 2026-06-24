@@ -7,17 +7,18 @@ import { getFMEA, deleteFMEA } from '../../../api/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { usePfmeaWizardValidation } from '../../../hooks/usePfmeaWizardValidation';
-import { buildRows, getRowSeverity } from '../../../utils/fmeaTable';
+import { buildRows, getRowSeverity, getProcessChain } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/pfmea/PFMEAWizardSidebar';
 import WizardGuidanceCard from '../../../components/pfmea/PFMEAGuidanceCard';
 import ScopeTagField from '../../../components/dfmea/ScopeTagField';
+import SmartSuggestionDropdown from '../../../components/dfmea/SmartSuggestionDropdown';
 import type { ReactNode } from 'react';
 import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimeframe';
 import FunctionTreeEditor from '../../../components/pfmea/FunctionTreeEditor';
 import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
 import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
-import { ensureCauseControls } from '../../../utils/wizardGraphNormalize';
+import { createWizardFailureChain, ensureCauseControls } from '../../../utils/wizardGraphNormalize';
 
 const { Title } = Typography;
 
@@ -360,7 +361,154 @@ export default function PFMEAWizardPage() {
   const renderStep2 = () => (
     <FunctionTreeEditor nodes={nodes} edges={edges} fmeaId={fmeaId!} onChange={(n, e) => updateGraphData(n, e)} />
   );
-  const renderStep3 = () => <div>{t('wizard.steps.3')}</div>;
+
+  // Step 3 — Failure Analysis (failure chains hang off ProcessStepFunction)
+  const renderStep3 = () => {
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const processStep = (funcId: string) => getProcessChain(funcId, nodeMap, edges);
+
+    // FM only hangs off ProcessStepFunction per PFMEA spec.
+    const stepFuncs = nodes.filter(n => n.type === 'ProcessStepFunction');
+    if (stepFuncs.length === 0) return <Empty description={t('wizard.failure.title') + ' — ' + t('wizard.function.title')} />;
+
+    // For a ProcessStepFunction, walk HAS_FUNCTION back to ProcessStep, then
+    // collect its HAS_WORK_ELEMENT children to surface 4M hints.
+    const workElementsForStepFunction = (funcId: string) => {
+      const fnEdge = edges.find(e => e.target === funcId && e.type === 'HAS_FUNCTION');
+      const stepId = fnEdge?.source;
+      if (!stepId) return [];
+      return edges
+        .filter(e => e.source === stepId && e.type === 'HAS_WORK_ELEMENT')
+        .map(e => nodeMap.get(e.target))
+        .filter(Boolean) as GraphNode[];
+    };
+
+    const handleAddFailure = (funcId: string) => {
+      const { newNodes, newEdges } = createWizardFailureChain(funcId);
+      updateGraphData([...nodes, ...newNodes], [...edges, ...newEdges]);
+    };
+
+    const handleDeleteFailureChain = (failureModeId: string) => {
+      const result = cascadeDeleteStructureNode(failureModeId, nodes, edges);
+      updateGraphData(result.nodes, result.edges);
+    };
+
+    const handleUpdateNodeField = (nodeId: string, field: string, value: string) => {
+      updateGraphData(nodes.map(n => n.id === nodeId ? { ...n, [field]: value } : n), edges);
+    };
+
+    const handleUpdateControl = (causeId: string, type: 'prevention' | 'detection', value: string) => {
+      const edgeType = type === 'prevention' ? 'PREVENTED_BY' : 'DETECTED_BY';
+      const ctrlEdge = edges.find(e => e.source === causeId && e.type === edgeType);
+      if (!ctrlEdge) return;
+      updateGraphData(
+        nodes.map(n => n.id === ctrlEdge.target ? { ...n, name: value } : n),
+        edges,
+      );
+    };
+
+    return (
+      <div>
+        {stepFuncs.map(func => {
+          const fmEdges = edges.filter(e => e.source === func.id && e.type === 'HAS_FAILURE_MODE');
+          const fmNodes = fmEdges.map(e => nodeMap.get(e.target)).filter(Boolean) as GraphNode[];
+          const workElements = workElementsForStepFunction(func.id);
+          const workElementNames = workElements.map(we => `${we.classification || ''}:${we.name}`).join(', ');
+          const baseContext = {
+            function_description: func.name,
+            process_step: processStep(func.id),
+          };
+
+          return (
+            <Card key={func.id} size="small" title={func.name} style={{ marginBottom: 12 }}>
+              {workElements.length > 0 && (
+                <div style={{ fontSize: 12, marginBottom: 8, color: 'var(--qf-text-secondary)' }}>
+                  <span style={{ fontWeight: 600 }}>{t('wizard.failure.workElementHint')}：</span>
+                  {workElementNames}
+                </div>
+              )}
+              {fmNodes.map(fmNode => {
+                const effectEdge = edges.find(e => e.source === fmNode.id && e.type === 'EFFECT_OF');
+                const effectNode = effectEdge ? nodes.find(n => n.id === effectEdge!.target) : null;
+                const causeEdges = edges.filter(e => e.target === fmNode.id && e.type === 'CAUSE_OF');
+                const causeNodes = causeEdges.map(e => nodeMap.get(e.source)).filter(Boolean) as GraphNode[];
+
+                return (
+                  <div key={fmNode.id} style={{ marginBottom: 8, padding: 8, background: 'var(--qf-bg-elevated)', border: '1px solid var(--qf-border)', borderRadius: 'var(--qf-radius-md)' }}>
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <div>
+                        <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureMode')}</div>
+                        <SmartSuggestionDropdown
+                          triggerType="failure_mode"
+                          context={baseContext}
+                          fmeaId={fmeaId!}
+                          value={fmNode.name}
+                          onChange={(val) => handleUpdateNodeField(fmNode.id, 'name', val)}
+                          onSelect={(s) => handleUpdateNodeField(fmNode.id, 'name', s.name)}
+                        />
+                      </div>
+                      {effectNode && (
+                        <div>
+                          <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureEffect')}</div>
+                          <SmartSuggestionDropdown
+                            triggerType="failure_effect"
+                            context={{ failure_mode: fmNode.name, ...baseContext }}
+                            fmeaId={fmeaId!}
+                            value={effectNode.name}
+                            onChange={(val) => handleUpdateNodeField(effectNode.id, 'name', val)}
+                            onSelect={(s) => handleUpdateNodeField(effectNode.id, 'name', s.name)}
+                          />
+                        </div>
+                      )}
+                      {causeNodes.map(causeNode => {
+                        const pcEdge = edges.find(e => e.source === causeNode.id && e.type === 'PREVENTED_BY');
+                        const dcEdge = edges.find(e => e.source === causeNode.id && e.type === 'DETECTED_BY');
+                        const pcName = pcEdge ? nodes.find(n => n.id === pcEdge.target)?.name || '' : '';
+                        const dcName = dcEdge ? nodes.find(n => n.id === dcEdge.target)?.name || '' : '';
+                        return (
+                          <div key={causeNode.id}>
+                            <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureCause')}</div>
+                            <SmartSuggestionDropdown
+                              triggerType="failure_cause"
+                              context={{ failure_mode: fmNode.name, ...baseContext, work_elements: workElementNames }}
+                              fmeaId={fmeaId!}
+                              value={causeNode.name}
+                              onChange={(val) => handleUpdateNodeField(causeNode.id, 'name', val)}
+                              onSelect={(s) => handleUpdateNodeField(causeNode.id, 'name', s.name)}
+                            />
+                            <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.preventionControl')}</div>
+                            <SmartSuggestionDropdown
+                              triggerType="prevention_control"
+                              context={{ failure_mode: fmNode.name, ...baseContext }}
+                              fmeaId={fmeaId!}
+                              value={pcName}
+                              onChange={(val) => handleUpdateControl(causeNode.id, 'prevention', val)}
+                              onSelect={(s) => handleUpdateControl(causeNode.id, 'prevention', s.name)}
+                            />
+                            <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.detectionControl')}</div>
+                            <SmartSuggestionDropdown
+                              triggerType="detection_control"
+                              context={{ failure_mode: fmNode.name, ...baseContext }}
+                              fmeaId={fmeaId!}
+                              value={dcName}
+                              onChange={(val) => handleUpdateControl(causeNode.id, 'detection', val)}
+                              onSelect={(s) => handleUpdateControl(causeNode.id, 'detection', s.name)}
+                            />
+                          </div>
+                        );
+                      })}
+                      <Button size="small" danger onClick={() => handleDeleteFailureChain(fmNode.id)}>{t('wizard.failure.delete')}</Button>
+                    </Space>
+                  </div>
+                );
+              })}
+              <Button size="small" type="dashed" onClick={() => handleAddFailure(func.id)}>{t('wizard.failure.addFailureChain')}</Button>
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
   const renderStep4 = () => <div>{t('wizard.steps.4')}</div>;
   const renderStep5 = () => <div>{t('wizard.steps.5')}</div>;
   const renderStep6 = () => <div>{t('wizard.steps.6')}</div>;

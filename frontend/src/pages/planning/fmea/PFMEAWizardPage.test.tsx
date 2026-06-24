@@ -101,4 +101,42 @@ describe("PFMEAWizardPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
     await waitFor(() => screen.getByText(/addItemFunction|添加过程项目功能/i));
   });
+
+  it("Step 3 creates a failure chain on a ProcessStepFunction", async () => {
+    const doc = {
+      ...baseDoc,
+      graph_data: {
+        nodes: [
+          { id: "pi", type: "ProcessItem", name: "线", ...Z },
+          { id: "ps", type: "ProcessStep", name: "贴装", process_number: "OP10", ...Z },
+          { id: "we1", type: "ProcessWorkElement", name: "贴片机吸嘴", classification: "Machine", ...Z },
+          { id: "we2", type: "ProcessWorkElement", name: "操作员", classification: "Man", ...Z },
+          { id: "psf", type: "ProcessStepFunction", name: "准确贴装", ...Z },
+        ],
+        edges: [
+          { source: "pi", target: "ps", type: "HAS_PROCESS_STEP" },
+          { source: "ps", target: "we1", type: "HAS_WORK_ELEMENT" },
+          { source: "ps", target: "we2", type: "HAS_WORK_ELEMENT" },
+          { source: "ps", target: "psf", type: "HAS_FUNCTION" },
+        ],
+        wizardScope: {},
+      },
+    };
+    vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
+    render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
+    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    // advance to step 3 (0 -> 1 -> 2 -> 3)
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+
+    await waitFor(() => screen.getByRole("button", { name: /添加失效链|addFailureChain/i }));
+    expect(screen.getByText("Machine:贴片机吸嘴, Man:操作员")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /添加失效链|addFailureChain/i }));
+    await waitFor(() => {
+      // After adding a failure chain, the failure_mode SmartSuggestionDropdown label appears.
+      expect(screen.getAllByText(/失效模式|failureMode/i).length).toBeGreaterThan(0);
+    });
+  });
 });
