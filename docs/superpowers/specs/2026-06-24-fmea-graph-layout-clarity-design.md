@@ -151,6 +151,7 @@ getHighlightedEdgeStyle(rawLabel, isHighlighted, dimmed): {
 
 - `frontend/src/components/graph/GraphCanvas.tsx`（`toG6Data`/`graphLayoutOptions` 抽出后改为 import；`initGraph` 依赖加 `direction` 并调用 `graphLayoutOptions(layout, direction)`；`applyHighlight` dim/reset 分支改用 `getHighlightedEdgeStyle`；props 加 `direction`；调色板常量改 import；`GraphLayout`/`GraphDirection` 改从 `graphLayout.ts` import）
 - `frontend/src/components/graph/GraphToolbar.tsx`（新增方向 `Segmented`、`direction`/`onDirectionChange` props；`GraphLayout`/`GraphDirection` 改从 `graphLayout.ts` import，不再本地定义）
+- `frontend/src/components/graph/index.ts`（barrel：`export type { GraphLayout } from "./GraphToolbar"` 改为从 `../../utils/graphLayout` re-export `GraphLayout`，并补 re-export `GraphDirection`；否则类型迁移后 TS build 会断。`FMEAEditorPage.tsx:54` 经此 barrel import `GraphLayout`，保持该路径可用）
 - `frontend/src/components/graph/GraphLegend.tsx`（边类型图例段）
 - `frontend/src/utils/graphPresentation.ts`（`getEdgeStyle`、`getHighlightedEdgeStyle`、`GRAPH_EDGE_LEGEND`、调色板常量 `EDGE_STROKE` 等移入并导出）
 - `frontend/src/utils/graphLayout.ts`（**新建**，导出纯函数 `toG6Data` + `graphLayoutOptions`，以及类型 `GraphLayout` + `GraphDirection`）
