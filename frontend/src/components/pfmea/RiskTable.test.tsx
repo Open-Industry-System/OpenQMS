@@ -10,10 +10,10 @@ const baseRow = () => {
   const nodes: GraphNode[] = [
     { id: 'psf', type: 'ProcessStepFunction', name: '准确贴装', classification: 'CC', ...Z },
     { id: 'fm', type: 'FailureMode', name: '贴装偏移', ...Z },
-    { id: 'fe', type: 'FailureEffect', name: '功能丧失', severity: 0, severity_plant: 0, severity_customer: 0, severity_user: 0, ...Z },
-    { id: 'fc', type: 'FailureCause', name: '吸嘴磨损', occurrence: 0, ...Z },
+    { id: 'fe', type: 'FailureEffect', name: '功能丧失', ...Z, severity_plant: 0, severity_customer: 0, severity_user: 0 },
+    { id: 'fc', type: 'FailureCause', name: '吸嘴磨损', ...Z },
     { id: 'pc', type: 'PreventionControl', name: '校准', ...Z },
-    { id: 'dc', type: 'DetectionControl', name: 'AOI', detection: 0, ...Z },
+    { id: 'dc', type: 'DetectionControl', name: 'AOI', ...Z },
   ];
   const edges: GraphEdge[] = [
     { source: 'psf', target: 'fm', type: 'HAS_FAILURE_MODE' },
