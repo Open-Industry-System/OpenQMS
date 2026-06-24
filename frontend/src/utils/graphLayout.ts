@@ -1,3 +1,4 @@
+import type { GraphData, LayoutOptions } from "@antv/g6";
 import type { GraphNode, GraphEdge } from "../api/graph";
 import { getEdgeStyle, getEdgeTypeKey, getNodeStyle } from "./graphPresentation";
 
@@ -5,20 +6,6 @@ export type GraphLayout = "dagre" | "force" | "compact-box";
 export type GraphDirection = "TB" | "LR";
 
 type GraphT = (key: string, options?: { defaultValue?: string }) => string;
-
-interface G6Node {
-  id: string;
-  data: { label: string; type: string };
-  style: Record<string, unknown>;
-}
-
-interface G6Edge {
-  id: string;
-  source: string;
-  target: string;
-  data: { label: string; rawLabel: string };
-  style: { stroke: string; lineWidth: number; endArrow: boolean };
-}
 
 // Build G6-ready data from the FMEA graph model. Presentation-only: the data model
 // is untouched. CAUSE_OF is reversed here (mode -> cause) so the hierarchy renders
@@ -30,14 +17,14 @@ export function toG6Data(
   edges: GraphEdge[],
   t: GraphT,
   fmeaType?: string,
-): { nodes: G6Node[]; edges: G6Edge[] } {
-  const g6Nodes: G6Node[] = nodes.map((n) => ({
+): GraphData {
+  const g6Nodes = nodes.map((n) => ({
     id: n.id,
-    data: { label: n.properties.name || n.label, type: n.label },
-    style: { ...getNodeStyle(n.label) },
+    data: { label: n.properties.name || n.label, type: n.label } as Record<string, unknown>,
+    style: { ...getNodeStyle(n.label) } as Record<string, unknown>,
   }));
 
-  const g6Edges: G6Edge[] = edges.map((e) => {
+  const g6Edges = edges.map((e) => {
     const rawLabel = e.label || "edge";
     const reversed = rawLabel === "CAUSE_OF";
     const labelKey = reversed ? "edgeTypes.causeBranch" : getEdgeTypeKey(rawLabel, fmeaType);
@@ -46,11 +33,8 @@ export function toG6Data(
       id: `${e.source}-${e.target}-${rawLabel}`,
       source: reversed ? e.target : e.source,
       target: reversed ? e.source : e.target,
-      data: {
-        label: t(labelKey, { defaultValue: rawLabel }),
-        rawLabel,
-      },
-      style: { stroke: style.stroke, lineWidth: style.lineWidth, endArrow: true },
+      data: { label: t(labelKey, { defaultValue: rawLabel }), rawLabel } as Record<string, unknown>,
+      style: { stroke: style.stroke, lineWidth: style.lineWidth, endArrow: true } as Record<string, unknown>,
     };
   });
 
@@ -60,7 +44,7 @@ export function toG6Data(
 // Layout config for G6. dagre honors `direction` (TB default elsewhere; this fn
 // defaults to LR for back-compat when direction is omitted). force / compact-box
 // are direction-agnostic and left as-is per spec §2.
-export function graphLayoutOptions(layout: GraphLayout, direction?: GraphDirection): Record<string, unknown> {
+export function graphLayoutOptions(layout: GraphLayout, direction?: GraphDirection): LayoutOptions {
   if (layout === "dagre") {
     // TB: taller ranks, tighter columns so siblings stack vertically without overlap.
     // LR: original spacing.
