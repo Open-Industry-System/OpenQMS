@@ -8,11 +8,12 @@ import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../t
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { useWizardValidation } from '../../../hooks/useWizardValidation';
 import { useDfmeaRules } from '../../../utils/dfmeaRules';
-import { buildRows, getRowSeverity, type FMEARow } from '../../../utils/fmeaTable';
+import { buildRows, getRowSeverity, getProcessChain, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
 import WizardGuidanceCard from '../../../components/dfmea/WizardGuidanceCard';
 import ScopeTagField from '../../../components/dfmea/ScopeTagField';
+import SmartSuggestionDropdown from '../../../components/dfmea/SmartSuggestionDropdown';
 import type { ReactNode } from 'react';
 import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimeframe';
 import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
@@ -445,14 +446,15 @@ export default function DFMEAWizardPage() {
 
   // Step 3 — Failure Analysis
   const renderStep3 = () => {
-    const { generateFailureModes, suggestFailureChain } = dfmeaRules;
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const processStep = (funcId: string) => getProcessChain(funcId, nodeMap, edges);
     const functions = nodes.filter(n => ['ProcessWorkElementFunction', 'ProcessItemFunction', 'ProcessStepFunction'].includes(n.type));
 
     if (functions.length === 0) return <Empty description={t('wizard.failure.title') + ' — ' + t('wizard.function.title')} />;
 
     const handleAddFailure = (funcId: string, mode?: string, effect?: string, cause?: string) => {
-      const { newNodes, newEdges } = createWizardFailureChain(funcId, t);
-      // Override FM/FE/FC names when caller supplied explicit values (recommended chains).
+      const { newNodes, newEdges } = createWizardFailureChain(funcId);
+      // Override FM/FE/FC names when caller supplied explicit values (AI suggestions).
       if (mode) { const fm = newNodes.find(n => n.type === 'FailureMode'); if (fm) fm.name = mode; }
       if (effect) { const fe = newNodes.find(n => n.type === 'FailureEffect'); if (fe) fe.name = effect; }
       if (cause) { const fc = newNodes.find(n => n.type === 'FailureCause'); if (fc) fc.name = cause; }
@@ -486,24 +488,9 @@ export default function DFMEAWizardPage() {
         {functions.map(func => {
           const fmEdges = edges.filter(e => e.source === func.id && e.type === 'HAS_FAILURE_MODE');
           const fmNodes = fmEdges.map(e => nodes.find(n => n.id === e.target)).filter(Boolean) as GraphNode[];
-          const suggestedModes = generateFailureModes(func.name);
 
           return (
             <Card key={func.id} size="small" title={func.name} style={{ marginBottom: 12 }}>
-              {fmNodes.length === 0 && suggestedModes.length > 0 && (
-                <div style={{ marginBottom: 8, padding: 8, background: 'var(--qf-green-dim)', border: '1px solid var(--qf-green)', borderRadius: 'var(--qf-radius-md)' }}>
-                  <Tag color="green">{t('wizard.failure.recommended')}</Tag>
-                  <span style={{ fontSize: 12 }}> {t('wizard.failure.autoRecommend')}</span>
-                  <Space size={4} style={{ marginTop: 4 }}>
-                    {suggestedModes.slice(0, 3).map(mode => (
-                      <Button key={mode} size="small" onClick={() => {
-                        const chain = suggestFailureChain(mode);
-                        handleAddFailure(func.id, mode, chain.effects[0] || '', chain.causes[0] || '');
-                      }}>{mode}</Button>
-                    ))}
-                  </Space>
-                </div>
-              )}
               {fmNodes.map(fmNode => {
                 const effectEdge = edges.find(e => e.source === fmNode.id && e.type === 'EFFECT_OF');
                 const effectNode = effectEdge ? nodes.find(n => n.id === effectEdge!.target) : null;
@@ -513,10 +500,30 @@ export default function DFMEAWizardPage() {
                 return (
                   <div key={fmNode.id} style={{ marginBottom: 8, padding: 8, background: 'var(--qf-bg-elevated)', border: '1px solid var(--qf-border)', borderRadius: 'var(--qf-radius-md)' }}>
                     <Space direction="vertical" style={{ width: '100%' }}>
-                      <Input size="small" value={fmNode.name} addonBefore={t('wizard.failure.failureMode')}
-                        onChange={e => handleUpdateNodeField(fmNode.id, 'name', e.target.value)} />
-                      <Input size="small" value={effectNode?.name || ''} addonBefore={t('wizard.failure.failureEffect')}
-                        onChange={e => effectNode && handleUpdateNodeField(effectNode.id, 'name', e.target.value)} />
+                      <div>
+                        <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureMode')}</div>
+                        <SmartSuggestionDropdown
+                          triggerType="failure_mode"
+                          context={{ function_description: func.name, process_step: processStep(func.id) }}
+                          fmeaId={fmeaId!}
+                          value={fmNode.name}
+                          onChange={(val) => handleUpdateNodeField(fmNode.id, 'name', val)}
+                          onSelect={(s) => handleUpdateNodeField(fmNode.id, 'name', s.name)}
+                        />
+                      </div>
+                      {effectNode && (
+                        <div>
+                          <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureEffect')}</div>
+                          <SmartSuggestionDropdown
+                            triggerType="failure_effect"
+                            context={{ failure_mode: fmNode.name, function_description: func.name, process_step: processStep(func.id) }}
+                            fmeaId={fmeaId!}
+                            value={effectNode.name}
+                            onChange={(val) => handleUpdateNodeField(effectNode.id, 'name', val)}
+                            onSelect={(s) => handleUpdateNodeField(effectNode.id, 'name', s.name)}
+                          />
+                        </div>
+                      )}
                       {causeNodes.map(causeNode => {
                         const pcEdge = edges.find(e => e.source === causeNode.id && e.type === 'PREVENTED_BY');
                         const dcEdge = edges.find(e => e.source === causeNode.id && e.type === 'DETECTED_BY');
@@ -524,13 +531,20 @@ export default function DFMEAWizardPage() {
                         const dcName = dcEdge ? nodes.find(n => n.id === dcEdge.target)?.name || '' : '';
                         return (
                           <div key={causeNode.id}>
-                            <Input size="small" value={causeNode.name} addonBefore={t('wizard.failure.failureCause')}
-                              onChange={e => handleUpdateNodeField(causeNode.id, 'name', e.target.value)} />
-                            <Input size="small" value={pcName} addonBefore={t('wizard.failure.preventionControl')}
-                              placeholder={t('wizard.optimization.preventionPlaceholder')}
+                            <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureCause')}</div>
+                            <SmartSuggestionDropdown
+                              triggerType="failure_cause"
+                              context={{ failure_mode: fmNode.name, function_description: func.name, process_step: processStep(func.id) }}
+                              fmeaId={fmeaId!}
+                              value={causeNode.name}
+                              onChange={(val) => handleUpdateNodeField(causeNode.id, 'name', val)}
+                              onSelect={(s) => handleUpdateNodeField(causeNode.id, 'name', s.name)}
+                            />
+                            <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.preventionControl')}</div>
+                            <Input size="small" value={pcName} placeholder={t('wizard.optimization.preventionPlaceholder')}
                               onChange={e => handleUpdateControl(causeNode.id, 'prevention', e.target.value)} />
-                            <Input size="small" value={dcName} addonBefore={t('wizard.failure.detectionControl')}
-                              placeholder={t('wizard.optimization.detectionPlaceholder')}
+                            <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.detectionControl')}</div>
+                            <Input size="small" value={dcName} placeholder={t('wizard.optimization.detectionPlaceholder')}
                               onChange={e => handleUpdateControl(causeNode.id, 'detection', e.target.value)} />
                           </div>
                         );

@@ -18,10 +18,11 @@ import type { GraphNode, GraphEdge } from "../types";
 const ZERO = { severity: 0, occurrence: 0, detection: 0 };
 
 /** Build the nodes + edges for a new failure chain off a function node.
- *  FM initial name comes from `t`; FE/FC/PC/DC names are "" (see CONTRACT). */
+ *  All node names are "" (see CONTRACT). Step 3 fills FM/FE/FC via the AI
+ *  SmartSuggestionDropdown (or overrides them when handleAddFailure is called
+ *  with explicit values); PC/DC stay empty until the user writes a measure. */
 export function createWizardFailureChain(
   funcId: string,
-  t: (key: string) => string,
 ): { newNodes: GraphNode[]; newEdges: GraphEdge[] } {
   const fmId = `w${crypto.randomUUID()}_fm`;
   const feId = `w${crypto.randomUUID()}_fe`;
@@ -30,7 +31,7 @@ export function createWizardFailureChain(
   const dcId = `w${crypto.randomUUID()}_dc`;
 
   const newNodes: GraphNode[] = [
-    { id: fmId, type: "FailureMode", name: t("wizard.failure.newFailureMode"), ...ZERO },
+    { id: fmId, type: "FailureMode", name: "", ...ZERO },
     { id: feId, type: "FailureEffect", name: "", ...ZERO },
     { id: fcId, type: "FailureCause", name: "", ...ZERO },
     // PC/DC created up-front so Step 5 O/D are scorable against real controls.

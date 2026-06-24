@@ -8,12 +8,10 @@ const node = (id: string, type: string, name = id): GraphNode => ({
 const edge = (source: string, target: string, type: string): GraphEdge => ({
   source, target, type,
 });
-// Minimal t: returns the key in brackets so we can assert it was used for FM only.
-const t = (key: string) => `[${key}]`;
 
 describe("createWizardFailureChain", () => {
-  it("creates FM/FE/FC/PC/DC nodes and the five edges, with FE/FC/PC/DC names empty", () => {
-    const { newNodes, newEdges } = createWizardFailureChain("func1", t);
+  it("creates FM/FE/FC/PC/DC nodes and the five edges, with all names empty", () => {
+    const { newNodes, newEdges } = createWizardFailureChain("func1");
 
     const types = newNodes.map(n => n.type);
     expect(types).toEqual(
@@ -24,15 +22,15 @@ describe("createWizardFailureChain", () => {
     );
     expect(newNodes).toHaveLength(5);
 
-    // FM name comes from t(...); FE/FC/PC/DC names are empty strings (FE/FC
-    // are filled only when a recommended chain supplies values; PC/DC empty
-    // per the gate contract).
+    // All names are empty strings: FM/FE/FC are filled via the AI
+    // SmartSuggestionDropdown in Step 3 (or when handleAddFailure overrides
+    // them); PC/DC stay empty per the gate contract.
     const fm = newNodes.find(n => n.type === "FailureMode")!;
     const fe = newNodes.find(n => n.type === "FailureEffect")!;
     const fc = newNodes.find(n => n.type === "FailureCause")!;
     const pc = newNodes.find(n => n.type === "PreventionControl")!;
     const dc = newNodes.find(n => n.type === "DetectionControl")!;
-    expect(fm.name).toBe("[wizard.failure.newFailureMode]");
+    expect(fm.name).toBe("");
     expect(fe.name).toBe("");
     expect(fc.name).toBe("");
     expect(pc.name).toBe(""); // contract: empty, not a placeholder
@@ -56,8 +54,8 @@ describe("createWizardFailureChain", () => {
   });
 
   it("generates unique node ids across calls", () => {
-    const a = createWizardFailureChain("f", t);
-    const b = createWizardFailureChain("f", t);
+    const a = createWizardFailureChain("f");
+    const b = createWizardFailureChain("f");
     const aIds = a.newNodes.map(n => n.id);
     const bIds = b.newNodes.map(n => n.id);
     expect(aIds.some(id => bIds.includes(id))).toBe(false);
