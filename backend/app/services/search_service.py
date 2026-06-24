@@ -79,7 +79,10 @@ class SearchService:
             from sqlalchemy import select
 
             type_pls = await self.db.execute(
-                select(ProductLine.code).where(ProductLine.product_type_code == product_type_code)
+                select(ProductLine.code).where(
+                    ProductLine.product_type_code == product_type_code,
+                    ProductLine.is_active.is_(True),
+                )
             )
             codes = [r[0] for r in type_pls.fetchall()]
             if product_line_code:

@@ -227,3 +227,54 @@ async def test_semantic_search_mismatched_pl_and_type_returns_empty(db, default_
     )
     assert response.results == []
     assert response.total == 0
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_product_type_excludes_inactive_pl(db, default_factory):
+    """product_type_code expansion must only include active product lines, matching
+    recommendation_scope's is_active filter — a deactivated PL's codes must not be
+    passed to the embedding query for an admin querying by type."""
+    db.add(ProductType(code="POWER", name="动力类", is_active=True))
+    await db.flush()
+    # PT-DC-100 active, PT-AC-200 inactive (soft-deleted) — both POWER type.
+    db.add(ProductLine(code="PT-DC-100", name="PT-DC-100", factory_id=default_factory.id, product_type_code="POWER", is_active=True))
+    db.add(ProductLine(code="PT-AC-200", name="PT-AC-200", factory_id=default_factory.id, product_type_code="POWER", is_active=False))
+    await db.flush()
+
+    user = await _admin_user_with_permissions(db, default_factory)
+    service = SearchService(db=db, llm_provider=None, embedding_provider=None)
+    real_execute = service.db.execute
+
+    captured: dict = {}
+
+    class FakeResult:
+        def __init__(self, rows): self._rows = rows
+        def fetchall(self): return self._rows
+        def scalars(self):
+            class _S:
+                def __init__(self, rows): self._rows = rows
+                def all(self): return self._rows
+            return _S(self._rows)
+
+    async def _fake_execute(stmt, params=None):
+        text_str = str(stmt.compile(compile_kwargs={"literal_binds": True})) if hasattr(stmt, "compile") else str(stmt)
+        # Only stub the document_embeddings query; let everything else (product_lines
+        # type-resolution, permission checks, user PLs) hit the real DB.
+        if "document_embeddings" in text_str:
+            if params and "product_type_codes" in params:
+                captured["product_type_codes"] = list(params["product_type_codes"])
+            return FakeResult([])
+        return await real_execute(stmt, params)
+
+    service.db.execute = AsyncMock(side_effect=_fake_execute)
+
+    await service.semantic_search(
+        query="test",
+        user=user,
+        product_type_code="POWER",
+        entity_types=["fmea_node"],
+        limit=10,
+    )
+    codes = captured.get("product_type_codes", [])
+    assert "PT-DC-100" in codes          # active PL included
+    assert "PT-AC-200" not in codes      # inactive PL excluded
