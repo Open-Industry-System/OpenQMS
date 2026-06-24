@@ -349,6 +349,44 @@ D: 焊后100% X射线探伤 / 焊缝气密性在线检测
 返回 JSON：
 {{"suggestions": [{{"name": "P: 措施描述 或 D: 措施描述", "confidence": 0.0-1.0, "explanation": "为何针对该失效模式及为何属预防/探测"}}]}}
 """,
+    "prevention_control": """你是资深质量工程师，精通 AIAG-VDA FMEA 方法论。
+
+【任务】为下方失效模式推荐 3-5 个「预防控制(P)」。
+【预防控制(P)】阻止失效模式或失效原因发生的设计/工艺手段（防止"发生"或"起因"）。
+【方向约束】措施必须可执行、可验证，与该失效模式直接相关；只给预防控制，不要给探测控制。
+
+【当前上下文】
+- FMEA 类型: {fmea_type}
+- 工艺步骤/结构要素: {process_step}
+- 失效模式: {failure_mode}
+- AP(行动优先级): {ap}
+
+【示例（失效模式=焊缝气孔, AP=H）】
+焊接参数(电流/气流量)在线监控与闭环 / 焊前母材清洁度自动检验
+
+【要求】name 为纯措施描述，不加前缀；explanation 说明为何针对该失效及为何属预防。
+返回 JSON：
+{{"suggestions": [{{"name": "措施描述", "confidence": 0.0-1.0, "explanation": "为何针对该失效模式及为何属预防控制"}}]}}
+""",
+    "detection_control": """你是资深质量工程师，精通 AIAG-VDA FMEA 方法论。
+
+【任务】为下方失效模式推荐 3-5 个「探测控制(D)」。
+【探测控制(D)】在交付前探测失效模式或失效原因的检验/测试手段（探测"已发生"或"已起因"）。
+【方向约束】措施必须可执行、可验证，与该失效模式直接相关；只给探测控制，不要给预防控制。
+
+【当前上下文】
+- FMEA 类型: {fmea_type}
+- 工艺步骤/结构要素: {process_step}
+- 失效模式: {failure_mode}
+- AP(行动优先级): {ap}
+
+【示例（失效模式=焊缝气孔, AP=H）】
+焊后100% X射线探伤 / 焊缝气密性在线检测
+
+【要求】name 为纯措施描述，不加前缀；explanation 说明为何针对该失效及为何属探测。
+返回 JSON：
+{{"suggestions": [{{"name": "措施描述", "confidence": 0.0-1.0, "explanation": "为何针对该失效模式及为何属探测控制"}}]}}
+""",
     "optimization": """你是资深质量工程师，精通 AIAG-VDA FMEA 方法论。
 
 【任务】针对下方高风险失效模式，推荐 3-5 个「优化行动」，以降低风险。
@@ -623,6 +661,34 @@ class RecommendationService:
                 if e.get("type") == "OPTIMIZED_BY" and e.get("source") in cause_ids:
                     opt_ids.add(e.get("target"))
             return [node_map[oid] for oid in opt_ids if oid in node_map]
+
+        elif trigger_type == "prevention_control":
+            ctrl_ids = set()
+            for e in edges:
+                if e.get("type") == "PREVENTED_BY" and e.get("source") == fm_id:
+                    ctrl_ids.add(e.get("target"))
+            cause_ids = {
+                e.get("source") for e in edges
+                if e.get("type") == "CAUSE_OF" and e.get("target") == fm_id
+            }
+            for e in edges:
+                if e.get("type") == "PREVENTED_BY" and e.get("source") in cause_ids:
+                    ctrl_ids.add(e.get("target"))
+            return [node_map[cid] for cid in ctrl_ids if cid in node_map]
+
+        elif trigger_type == "detection_control":
+            ctrl_ids = set()
+            for e in edges:
+                if e.get("type") == "DETECTED_BY" and e.get("source") == fm_id:
+                    ctrl_ids.add(e.get("target"))
+            cause_ids = {
+                e.get("source") for e in edges
+                if e.get("type") == "CAUSE_OF" and e.get("target") == fm_id
+            }
+            for e in edges:
+                if e.get("type") == "DETECTED_BY" and e.get("source") in cause_ids:
+                    ctrl_ids.add(e.get("target"))
+            return [node_map[cid] for cid in ctrl_ids if cid in node_map]
 
         return []
 

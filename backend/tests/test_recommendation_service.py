@@ -214,3 +214,65 @@ def test_rule_engine_measure_still_returns_mixed():
     explanations = " ".join(s.explanation for s in result.suggestions)
     assert "预防" in explanations
     assert "检测" in explanations
+
+
+def test_extract_neighbors_prevention_control_only_prevented_by():
+    """prevention_control 图谱增强只取 PREVENTED_BY 邻居，不含 DETECTED_BY。"""
+    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    match = {
+        "node_id": "fm1", "fmea_id": str(uuid.uuid4()),
+    }
+    # StubGraphRepo 不提供 graph_data；直接测 _extract_neighbors_from_match 的边逻辑
+    # 需要注入 graph_data。改用最小桩：覆写 _get_graph_data_by_fmea_id。
+    async def fake_graph_data(_fmea_id):
+        return {
+            "nodes": [
+                {"id": "fm1", "type": "FailureMode", "name": "m"},
+                {"id": "fc1", "type": "FailureCause", "name": "c"},
+                {"id": "pc1", "type": "PreventionControl", "name": "预防A"},
+                {"id": "dc1", "type": "DetectionControl", "name": "探测B"},
+            ],
+            "edges": [
+                {"source": "fc1", "target": "fm1", "type": "CAUSE_OF"},
+                {"source": "fc1", "target": "pc1", "type": "PREVENTED_BY"},
+                {"source": "fc1", "target": "dc1", "type": "DETECTED_BY"},
+            ],
+        }
+    svc._get_graph_data_by_fmea_id = fake_graph_data  # type: ignore[method-assign]
+
+    import asyncio
+    nodes = asyncio.get_event_loop().run_until_complete(
+        svc._extract_neighbors_from_match(match, "prevention_control")
+    )
+    names = [n["name"] for n in nodes]
+    assert "预防A" in names
+    assert "探测B" not in names
+
+
+def test_extract_neighbors_detection_control_only_detected_by():
+    """detection_control 图谱增强只取 DETECTED_BY 邻居。"""
+    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    match = {"node_id": "fm1", "fmea_id": str(uuid.uuid4())}
+    async def fake_graph_data(_fmea_id):
+        return {
+            "nodes": [
+                {"id": "fm1", "type": "FailureMode", "name": "m"},
+                {"id": "fc1", "type": "FailureCause", "name": "c"},
+                {"id": "pc1", "type": "PreventionControl", "name": "预防A"},
+                {"id": "dc1", "type": "DetectionControl", "name": "探测B"},
+            ],
+            "edges": [
+                {"source": "fc1", "target": "fm1", "type": "CAUSE_OF"},
+                {"source": "fc1", "target": "pc1", "type": "PREVENTED_BY"},
+                {"source": "fc1", "target": "dc1", "type": "DETECTED_BY"},
+            ],
+        }
+    svc._get_graph_data_by_fmea_id = fake_graph_data  # type: ignore[method-assign]
+
+    import asyncio
+    nodes = asyncio.get_event_loop().run_until_complete(
+        svc._extract_neighbors_from_match(match, "detection_control")
+    )
+    names = [n["name"] for n in nodes]
+    assert "探测B" in names
+    assert "预防A" not in names
