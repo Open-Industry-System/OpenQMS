@@ -63,8 +63,9 @@ frontend/src/
 ├── components/pfmea/
 │   ├── PFMEAWizardSidebar.tsx                       # 侧栏：PFMEA 结构树 + 步骤导航
 │   ├── PFMEAGuidanceCard.tsx                        # 引导卡（i18n pfmea.wizard.guidance.step{0-6}）
-│   ├── ScopeTagField.tsx                            # PFMEA 版（pfmea_tool/pfmea_trend + 过程工具预设）│   ├── FunctionTreeEditor.tsx                       # 3 层功能树编辑器（Step 2）
-│   └── RiskTable.tsx                                # 风险表（含 CC/SC 列，Step 4）
+│   ├── ScopeTagField.tsx                            # PFMEA 版（pfmea_tool/pfmea_trend + 过程工具预设）
+│   ├── FunctionTreeEditor.tsx                       # 3 层功能树编辑器（Step 2），含 CC/SC 维护
+│   └── RiskTable.tsx                                # 风险表（特性列只读展示，Step 4）
 ├── utils/pfmeaRules.ts                              # PFMEA 规则建议（过程动词/4M 失效链）
 ├── hooks/usePfmeaWizardValidation.ts                # PFMEA 校验
 └── locales/{zh-CN,en-US}/pfmea.json                 # i18n
@@ -99,6 +100,7 @@ frontend/src/
   - 过程项功能 / 过程步骤功能：**产品特性**（geometry/material/surface 等可测量产品属性）。
   - 工作要素功能：**过程特性**（压力/温度/速度 等过程控制参数）。
 - `FUNCTION_MAPPED_TO` 自动连接 ItemFunc → StepFunc → WorkElementFunc。
+- **CC/SC 维护**（见 §8）：在 `FunctionTreeEditor` 中为每个函数节点设置 `classification`（无/CC/SC）——CC 设 `ProcessStepFunction`，SC 设 `ProcessWorkElementFunction`。这是 CC/SC 的唯一维护入口。
 - AI 触发器：复用现有（功能建议按 `fmea_type` 分流）。
 
 ### Step 3 — 失效分析
@@ -118,7 +120,7 @@ frontend/src/
 - 风险表列：`FE(S) | FM | FC | PC | O | DC | D | AP | 特性`。
   - O 存 `FailureCause.occurrence`，D 存 `DetectionControl.detection`，AP 由 `calculateAP(S,O,D)` 计算。
   - O/D 在 PC/DC 为空时禁用（镜像 DFMEA）。
-- **特殊特性（CC/SC）**：`Select`（无/CC/SC），写入**函数节点 `classification` 字段**——产品特性 CC 写到对应 `ProcessStepFunction.classification`，过程特性 SC 写到对应 `ProcessWorkElementFunction.classification`（对齐种子 `seed.py:31-32`）。风险表「特性」列只读展示所属函数节点的 classification。**不新增 `FailureCause.special_characteristic`**。
+- **特殊特性（CC/SC）**：Step 4 风险表「特性」列**只读**展示该行所属函数节点的 `classification`（CC 展示 `ProcessStepFunction.classification`，SC 沿 `FUNCTION_MAPPED_TO` 展示对应 `ProcessWorkElementFunction.classification`）。**CC/SC 的维护入口在 Step 2 `FunctionTreeEditor`**（见 §8），Step 4 不提供编辑入口。
 
 ### Step 5 — 优化
 - AP=H 行建 `RecommendedAction`（`OPTIMIZED_BY`）。
@@ -151,11 +153,35 @@ frontend/src/
   - 创建 `fmea_type=PFMEA` 时导航到 `/fmea/pfmea-wizard/{id}`（当前是进普通编辑器 `/fmea/{id}`）。
   - 重开未完成 PFMEA 草稿（status=draft 且 `wizardScope.wizard_completed` 为假）也进向导。
 
-## 8. 校验门禁（`usePfmeaWizardValidation`）
+## 8. 特殊特性（CC/SC）模型与归属
+
+**核心决策**：CC/SC **在 Step 2 功能树维护、Step 4 只读展示**，避免「一个 `ProcessStepFunction` 下有多个 `ProcessWorkElementFunction` 时 SC 写入目标不可判定」的问题。
+
+- **归属**（对齐种子 `seed.py:31-32` + 2026-05-20 文档 §2.1-A NOTE）：
+  - CC（产品特性）→ `ProcessStepFunction.classification`
+  - SC（过程特性）→ `ProcessWorkElementFunction.classification`
+- **Step 2（`FunctionTreeEditor`）**：用户在每个函数节点上设置 `classification`（无/CC/SC）。因函数节点是 3 层树中的具体节点，写入目标唯一确定，不存在歧义。
+- **Step 4（`RiskTable`）**：风险表「特性」列**只读**展示该行所属函数节点（`functionNodeId`，即 `ProcessStepFunction`）的 `classification`；若是 SC，再沿 `FUNCTION_MAPPED_TO` 展示对应 `ProcessWorkElementFunction.classification`。**Step 4 不提供 CC/SC 编辑入口**，从根源消除「行不知写哪个 WEF」的歧义。
+- **不新增边、不新增字段**：复用现有 `classification` 字段与 `FUNCTION_MAPPED_TO` 边。
+
+> 选型理由：审查提出的三种方案（Step 2 维护/Step 4 选 WEF/引入映射边）中，Step 2 维护最契合数据结构口径（CC/SC 本就是函数节点属性，非行属性），且不破坏「不新增 FC↔WEF 边」的约束。
+
+## 9. 普通编辑器兼容性
+
+向导完成后进入普通编辑器 `FMEAEditorPage`。当前编辑器 Class 列读写的是 `FailureMode.classification`（`FMEAEditorPage.tsx:1078/1085`），**与已批准数据结构「CC/SC 设函数节点」口径不一致**，也与向导产出数据不一致（向导把 CC/SC 写在函数节点，`FailureMode.classification` 为空）。
+
+为消除不一致，本特性**附带必要兼容修改**（范围限于 PFMEA 的 Class 列，不动 DFMEA 的 Filter Code 列）：
+- PFMEA 模式下（`!isDFMEA`），编辑器 Class 列改为**读函数节点 `classification`**（行的 `functionNodeId`）而非 `FailureMode.classification`；CC/SC 编辑入口下沉到函数节点（编辑器已有结构/功能区，可在该处编辑）或保持只读 + 提示「在向导/结构区维护」。
+- 若 `FailureMode.classification` 存在历史值（旧数据），加载时迁移/展示为函数节点 classification（一次性兼容，具体策略在实现计划定）。
+- DFMEA 的 Filter Code 列行为不变。
+
+> 此修改是对既有偏离的纠正，使编辑器与向导、种子、已批准文档三者口径统一。实现计划需包含编辑器改动任务与对应回归测试。
+
+## 10. 校验门禁（`usePfmeaWizardValidation`）
 
 | 检查 | 条件 |
 |---|---|
-| Step 1 完成 | 存在结构树；所有 `ProcessStep` 有 `process_number`；所有 `ProcessWorkElement` 有 `classification` |
+| Step 1 完成 | 存在结构树；所有 `ProcessStep` 有 `process_number`；所有 `ProcessWorkElement` 有 `classification`（4M） |
 | Step 2 完成 | 所有工作要素有功能；3 层 `FUNCTION_MAPPED_TO` 链完整（ItemFunc→StepFunc→WorkElementFunc） |
 | Step 3 完成 | 所有 `ProcessStepFunction` 有命名 FM→FE→FC 链 + PC/DC（FM 挂在过程步骤功能上） |
 | Step 4 完成 | 所有行 `severity_plant`/`severity_customer`/`severity_user` 均 >0（`severity` 取最大值）、O/D>0、PC/DC 非空 |
@@ -164,21 +190,22 @@ frontend/src/
 
 侧栏 `maxReachableStep` 由 `completedSteps` 派生（镜像 DFMEA，支持保存退出后重开续作）。
 
-## 9. 测试（TDD）
+## 11. 测试（TDD）
 
 - `PFMEAWizardPage.test.tsx`：步骤导航、保存续作、冲突弹窗、Finish 门禁。
 - `usePfmeaWizardValidation` 测试：各步骤完成判定、4M/OP 必填、3 层功能链、三段式严重度门禁、CC/SC。
 - `pfmeaRules` 测试：过程动词模式、4M 失效链映射、PFMEA/DFMEA 规则分流。
-- `FunctionTreeEditor` / 图规范化测试：3 层功能树构建、`FUNCTION_MAPPED_TO` 连接、产品/过程特性字段、CC/SC 写入函数节点 `classification`。
-- `RiskTable` 测试：三段式严重度录入与 `severity=max`、CC/SC 存取（函数节点 `classification`）、O/D 禁用门、失效链挂在 `ProcessStepFunction`。
+- `FunctionTreeEditor` / 图规范化测试：3 层功能树构建、`FUNCTION_MAPPED_TO` 连接、产品/过程特性字段、CC/SC 写入函数节点 `classification`（Step 2 维护）。
+- `RiskTable` 测试：三段式严重度录入与 `severity=max`、特性列只读展示（CC/SC 来源函数节点）、O/D 禁用门、失效链挂在 `ProcessStepFunction`。
+- 普通编辑器兼容测试（§9）：PFMEA Class 列读函数节点 `classification`、DFMEA Filter Code 不变、历史 `FailureMode.classification` 兼容。
 - 后端测试：`pfmea_tool`/`pfmea_trend` 触发器（schema 枚举、anchor、prompt、缓存命中/未命中）、PFMEA 规则分流。
 
-## 10. 范围边界（YAGNI）
+## 12. 范围边界（YAGNI）
 
 - 不重构 DFMEA 向导为类型参数化（避免回归）。
 - 不新增 `process_step` AI 触发器（Step 1 纯手工）。
 - 不新增 FC↔WEF 边（已批准边集合不含；4M 上下文仅作 UI 提示 + AI context）。
-- 不新增 `FailureCause.special_characteristic` 字段（CC/SC 复用函数节点 `classification`）。
+- 不新增 `FailureCause.special_characteristic` 字段（CC/SC 复用函数节点 `classification`，在 Step 2 维护）。
 - 不实现完整 PFMEA 报告 PDF 导出（Step 6 仅汇总卡片）。
-- 不改动普通 PFMEA 编辑器（`FMEAEditorPage`）——向导完成后的编辑沿用现有编辑器。
-- 特殊特性不联动控制计划（仅作为风险表标记，写入函数节点 `classification`）。
+- 不改动普通 PFMEA 编辑器的非 Class 列；Class 列按 §9 做必要兼容修改，DFMEA Filter Code 列不动。
+- 特殊特性不联动控制计划（仅作为函数节点 `classification` 标记，Step 4 只读展示）。
