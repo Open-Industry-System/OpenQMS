@@ -12,7 +12,10 @@
     "zoomIn": "Zoom In",
     "zoomOut": "Zoom Out",
     "fitView": "Fit View",
-    "download": "Download Snapshot"
+    "download": "Download Snapshot",
+    "directionTB": "Top to Bottom",
+    "directionLR": "Left to Right",
+    "directionDisabledHint": "Only available for hierarchy layout"
   },
   "legend": {
     "title": "Legend",
@@ -66,11 +69,15 @@
     "hasFailureMode": "Has Failure Mode",
     "effectOf": "Effect Of",
     "causeOf": "Cause Of",
+    "causeBranch": "Cause",
     "preventedBy": "Prevented By",
     "detectedBy": "Detected By",
     "optimizedBy": "Optimized By",
     "hasNode": "Has Node",
     "hasChild": "Has Child"
+  },
+  "edgeLegend": {
+    "title": "Edge Types"
   },
   "nodeDetail": {
     "title": "Node Detail",

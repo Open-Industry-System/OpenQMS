@@ -200,6 +200,19 @@ describe("graphPresentation", () => {
     });
   });
 
+  it("has zh-CN and en-US locale entries for the new edge-legend keys", () => {
+    expect(zhGraph.edgeTypes.causeBranch).toBeTruthy();
+    expect(enGraph.edgeTypes.causeBranch).toBeTruthy();
+    expect((zhGraph as { edgeLegend?: { title: string } }).edgeLegend?.title).toBeTruthy();
+    expect((enGraph as { edgeLegend?: { title: string } }).edgeLegend?.title).toBeTruthy();
+    expect(zhGraph.toolbar.directionTB).toBeTruthy();
+    expect(zhGraph.toolbar.directionLR).toBeTruthy();
+    expect(zhGraph.toolbar.directionDisabledHint).toBeTruthy();
+    expect(enGraph.toolbar.directionTB).toBeTruthy();
+    expect(enGraph.toolbar.directionLR).toBeTruthy();
+    expect(enGraph.toolbar.directionDisabledHint).toBeTruthy();
+  });
+
   it("GRAPH_EDGE_LEGEND lists the six branch + chain edge types with i18n keys", () => {
     const types = GRAPH_EDGE_LEGEND.map((e) => e.type);
     expect(types).toEqual([
