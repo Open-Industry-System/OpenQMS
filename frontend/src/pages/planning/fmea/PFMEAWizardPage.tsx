@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, DatePicker, Select } from 'antd';
-import { ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, DatePicker, Select, InputNumber, Result, Row, Col } from 'antd';
+import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import dayjs from 'dayjs';
 import { getFMEA, deleteFMEA } from '../../../api/fmea';
+import { calculateAP } from '../../../utils/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { usePfmeaWizardValidation } from '../../../hooks/usePfmeaWizardValidation';
-import { buildRows, getRowSeverity, getProcessChain } from '../../../utils/fmeaTable';
+import { buildRows, getRowSeverity, getProcessChain, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/pfmea/PFMEAWizardSidebar';
 import WizardGuidanceCard from '../../../components/pfmea/PFMEAGuidanceCard';
@@ -21,7 +23,7 @@ import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
 import RiskTable from '../../../components/pfmea/RiskTable';
 import { createWizardFailureChain, ensureCauseControls } from '../../../utils/wizardGraphNormalize';
 
-const { Title } = Typography;
+const { Title, Paragraph } = Typography;
 
 const STRUCTURE_TYPES = ['ProcessItem', 'ProcessStep', 'ProcessWorkElement'];
 const FUNCTION_TYPES = ['ProcessItemFunction', 'ProcessStepFunction', 'ProcessWorkElementFunction'];
@@ -63,7 +65,7 @@ export default function PFMEAWizardPage() {
       const dc = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
       return getRowSeverity(r, nodeMap) > 0 || (cause?.occurrence ?? 0) > 0 || (dc?.detection ?? 0) > 0;
     });
-    const hasOptimization = nodes.some(n => n.type === 'RecommendedAction');
+    const hasOptimization = nodes.some(n => n.type === 'RecommendedAction' && (n.responsible ?? '').trim());
     if (hasScope || hasAny) set.add(0);
     if (hasStructure) set.add(1);
     if (hasFunction) set.add(2);
@@ -513,8 +515,139 @@ export default function PFMEAWizardPage() {
   const renderStep4 = () => (
     <RiskTable nodes={nodes} edges={edges} fmeaId={fmeaId!} onChange={(n, e) => updateGraphData(n, e)} />
   );
-  const renderStep5 = () => <div>{t('wizard.steps.5')}</div>;
-  const renderStep6 = () => <div>{t('wizard.steps.6')}</div>;
+  const renderStep5 = () => {
+    const rows = buildRows(nodes, edges);
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const highRiskRows = rows.map(r => {
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const dcId = r.detectionControlIds[0];
+      const dc = dcId ? nodeMap.get(dcId) : null;
+      const s = getRowSeverity(r, nodeMap), o = cause?.occurrence || 0, d = dc?.detection || 0;
+      return { row: r, s, o, d, ap: calculateAP(s, o, d) };
+    }).filter(x => x.ap === 'H');
+
+    if (highRiskRows.length === 0) {
+      return <Result icon={<CheckCircleOutlined />} title={t('wizard.optimization.noOptimization')} subTitle={t('wizard.optimization.noOptimizationHint')} />;
+    }
+
+    const handleActionField = (row: FMEARow, field: string, value: unknown) => {
+      const existingId = row.recommendedActionIds[0];
+      if (existingId) {
+        updateGraphData(nodes.map(n => n.id === existingId ? { ...n, [field]: value } : n), edges);
+        return;
+      }
+      const raId = `w${crypto.randomUUID()}_ra`;
+      const newNode: GraphNode = { id: raId, type: 'RecommendedAction', name: '', severity: 0, occurrence: 0, detection: 0, [field]: value };
+      const sourceId = row.failureCauseNodeId || row.failureModeNodeId;
+      updateGraphData([...nodes, newNode], [...edges, { source: sourceId, target: raId, type: 'OPTIMIZED_BY' }]);
+    };
+
+    const statusOptions = [
+      { value: 'open', label: t('wizard.optimization.statusOptions.open') },
+      { value: 'undecided', label: t('wizard.optimization.statusOptions.undecided') },
+      { value: 'planned', label: t('wizard.optimization.statusOptions.planned') },
+      { value: 'done', label: t('wizard.optimization.statusOptions.done') },
+      { value: 'notExecuted', label: t('wizard.optimization.statusOptions.notExecuted') },
+    ];
+
+    return (
+      <div>
+        <Paragraph style={{ color: '#cf1322' }}>{t('wizard.optimization.mustOptimize', { count: highRiskRows.length })}</Paragraph>
+        {highRiskRows.map(({ row: r, s, o, d }) => {
+          const fm = nodeMap.get(r.failureModeNodeId);
+          const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+          const raId = r.recommendedActionIds[0];
+          const ra = raId ? nodeMap.get(raId) : null;
+          const revisedS = ra?.revised_severity || 0;
+          const revisedO = ra?.revised_occurrence || 0;
+          const revisedD = ra?.revised_detection || 0;
+          const revisedAp = calculateAP(revisedS || s, revisedO || o, revisedD || d);
+          const apColor = revisedAp === 'H' ? 'red' : revisedAp === 'M' ? 'orange' : 'green';
+          const toDate = (v?: string) => (v ? dayjs(v) : undefined);
+
+          return (
+            <Card key={r.key} size="small" style={{ marginBottom: 12 }}
+              title={<Space wrap align="center">
+                <Tag color="red">{t('wizard.optimization.apBadge')}</Tag>
+                <span>{fm?.name || ''}</span>
+                <span style={{ color: 'var(--qf-text-tertiary)', fontSize: 12 }}>S{s} O{o} D{d}</span>
+              </Space>}>
+              <Row gutter={[12, 8]}>
+                <Col span={24}>
+                  <Field label={t('wizard.optimization.measure')}>
+                    <Input.TextArea rows={2} placeholder={t('wizard.optimization.measurePlaceholder')} value={ra?.name || ''}
+                      onChange={e => handleActionField(r, 'name', e.target.value)} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.responsible')}>
+                    <Input size="small" placeholder={t('wizard.optimization.responsiblePlaceholder')}
+                      value={ra?.responsible || ''} onChange={e => handleActionField(r, 'responsible', e.target.value)} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.dueDate')}>
+                    <DatePicker size="small" style={{ width: '100%' }} placeholder={t('wizard.optimization.dueDate')} value={toDate(ra?.due_date)}
+                      onChange={v => handleActionField(r, 'due_date', v ? v.format('YYYY-MM-DD') : '')} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.status')}>
+                    <Select size="small" style={{ width: '100%' }} options={statusOptions} allowClear
+                      value={ra?.status} onChange={v => handleActionField(r, 'status', v)} />
+                  </Field>
+                </Col>
+                <Col span={24}>
+                  <Field label={t('wizard.optimization.actionTaken')}>
+                    <Input.TextArea rows={2} placeholder={t('wizard.optimization.actionTakenPlaceholder')}
+                      value={ra?.action_taken || ''} onChange={e => handleActionField(r, 'action_taken', e.target.value)} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.completionDate')}>
+                    <DatePicker size="small" style={{ width: '100%' }} placeholder={t('wizard.optimization.completionDate')} value={toDate(ra?.completion_date)}
+                      onChange={v => handleActionField(r, 'completion_date', v ? v.format('YYYY-MM-DD') : '')} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={16}>
+                  <Field label={t('wizard.optimization.revisedRatings')}>
+                    <Space wrap>
+                      <span>S'</span>
+                      <InputNumber size="small" min={1} max={10} style={{ width: 56 }} value={revisedS || undefined}
+                        onChange={v => handleActionField(r, 'revised_severity', (v ?? 0) as number)} />
+                      <span>O'</span>
+                      <InputNumber size="small" min={1} max={10} style={{ width: 56 }} value={revisedO || undefined}
+                        onChange={v => handleActionField(r, 'revised_occurrence', (v ?? 0) as number)} />
+                      <span>D'</span>
+                      <InputNumber size="small" min={1} max={10} style={{ width: 56 }} value={revisedD || undefined}
+                        onChange={v => handleActionField(r, 'revised_detection', (v ?? 0) as number)} />
+                      <span>{t('wizard.optimization.revisedAp')}</span>
+                      {revisedAp ? <Tag color={apColor}>{revisedAp}</Tag> : <Tag>-</Tag>}
+                    </Space>
+                  </Field>
+                </Col>
+              </Row>
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
+  const renderStep6 = () => {
+    const structCount = nodes.filter(n => STRUCTURE_TYPES.includes(n.type)).length;
+    const funcCount = nodes.filter(n => FUNCTION_TYPES.includes(n.type)).length;
+    const fmCount = nodes.filter(n => n.type === 'FailureMode').length;
+
+    return (
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <div>{t('wizard.confirm.structureNodes', { count: structCount })}</div>
+        <div>{t('wizard.confirm.functionNodes', { count: funcCount })}</div>
+        <div>{t('wizard.confirm.failureChains', { count: fmCount })}</div>
+        <div>{t('wizard.confirm.totalNodes', { count: nodes.length })}</div>
+        <div>{t('wizard.confirm.totalEdges', { count: edges.length })}</div>
+      </Card>
+    );
+  };
 
   const STEP_RENDERERS: Record<number, () => React.ReactNode> = {
     0: renderStep0,
