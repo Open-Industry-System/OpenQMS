@@ -117,6 +117,23 @@ async function typeAndWait(input: HTMLElement, value: string) {
   await waitFor(() => expect(mocks.getRecommendations).toHaveBeenCalled());
 }
 
+describe("DFMEAWizardPage sidebar step navigation on reopened draft", () => {
+  it("allows jumping forward to a later sidebar step after loading a saved draft", async () => {
+    // Draft has a function node → step 2 (Function Analysis) reached.
+    // currentStep resets to 0 on load. The user should be able to click the
+    // sidebar's step 3 to jump forward (previously blocked because the
+    // session-only completedSteps ref was empty on reopen).
+    renderWizard();
+    await screen.findByText("wizard.page.nextStep");
+
+    fireEvent.click(screen.getByText("wizard.steps.3"));
+
+    await waitFor(() =>
+      expect(screen.getByText("wizard.failure.addFailureMode")).toBeInTheDocument()
+    );
+  });
+});
+
 describe("DFMEAWizardPage Step 3 失效分析 — AI recommend wiring", () => {
   it("wires FM / FE / FC fields to the failure_mode / failure_effect / failure_cause triggers", async () => {
     renderWizard();
