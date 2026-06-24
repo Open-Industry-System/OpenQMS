@@ -2161,7 +2161,7 @@ git commit -m "feat(pfmea): route PFMEA wizard + list navigation (create & draft
 - Reference (do not modify): `frontend/src/pages/planning/fmea/FMEAEditorDragSort.test.tsx` and `FMEAVersionSnapshot.test.tsx` — copy their i18n/router/mock setup into the new test file.
 
 **Interfaces:**
-- Consumes: `aggregateSpecialCharacteristic` (named export) from `../../components/pfmea/RiskTable` (Task 8).
+- Consumes: `aggregateSpecialCharacteristic` (named export) from `../../../components/pfmea/RiskTable` (Task 8). Note: `FMEAEditorPage.tsx` lives in `frontend/src/pages/planning/fmea/`, so the import path is `../../../components/...` (three levels up), matching the existing imports in `FMEAEditorPage.tsx:24` (e.g. `../../../components/dfmea/...`).
 - Produces: PFMEA Class column is read-only, reading function-node `classification` aggregated per spec §8; DFMEA Filter Code column unchanged (still editable on `FailureMode.classification`).
 
 - [ ] **Step 1: Inspect the existing editor test harness**
@@ -2336,7 +2336,7 @@ In `frontend/src/pages/planning/fmea/FMEAEditorPage.tsx` (lines 1071-1092), bran
   },
 },
 ```
-Import `aggregateSpecialCharacteristic` from `../../components/pfmea/RiskTable` (exported in Task 8). Ensure `nodes` and `edges` are in scope in the column render (they are — the editor holds them in state like the wizard).
+Import `aggregateSpecialCharacteristic` from `../../../components/pfmea/RiskTable` (exported in Task 8) — three levels up from `frontend/src/pages/planning/fmea/`, matching the existing import pattern in `FMEAEditorPage.tsx:24`. Ensure `nodes` and `edges` are in scope in the column render (they are — the editor holds them in state like the wizard).
 
 - [ ] **Step 5: Run to verify it passes**
 
