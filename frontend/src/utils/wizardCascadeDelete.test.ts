@@ -167,4 +167,53 @@ describe('cascadeDeleteStructureNode', () => {
     // The fc1→ra1 edge is dropped (fc1 was deleted), leaving ra1 edge-less but intact
     expect(result.edges.some(ed => ed.target === 'ra1')).toBe(false);
   });
+
+  it('deletes a FailureMode root and cascades to its causes and controls (handleDeleteFailureChain)', () => {
+    // Mirror of createWizardFailureChain output — this is exactly what
+    // handleDeleteFailureChain passes to cascadeDeleteStructureNode:
+    //   func1 →(HAS_FAILURE_MODE)→ fm1 →(EFFECT_OF)→ fe1
+    //   fc1 →(CAUSE_OF)→ fm1
+    //   fc1 →(PREVENTED_BY)→ pc1
+    //   fc1 →(DETECTED_BY)→ dc1
+    // Deleting fm1 must cascade-delete fc1, pc1, dc1 — NOT leave them as orphans.
+    const nodes = [
+      n('func1', 'ProcessWorkElementFunction'), n('fm1', 'FailureMode'), n('fe1', 'FailureEffect'),
+      n('fc1', 'FailureCause'), n('pc1', 'PreventionControl'), n('dc1', 'DetectionControl'),
+    ];
+    const edges = [
+      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
+      e('fm1', 'fe1', 'EFFECT_OF'),
+      e('fc1', 'fm1', 'CAUSE_OF'),
+      e('fc1', 'pc1', 'PREVENTED_BY'),
+      e('fc1', 'dc1', 'DETECTED_BY'),
+    ];
+    const result = cascadeDeleteStructureNode('fm1', nodes, edges);
+    const ids = result.nodes.map(x => x.id);
+    expect(ids).toEqual(['func1']);
+    expect(result.edges).toHaveLength(0);
+  });
+
+  it('keeps an external FailureCause when deleting a FailureMode shared by causes', () => {
+    // Two causes point at the same mode via CAUSE_OF, but only fc1 is private
+    // to fm1 (no other mode). fc2 also points to fm1. Deleting fm1 should drop
+    // both CAUSE_OF edges; causes with no surviving mode are orphaned and deleted.
+    // Here both fc1 and fc2 lose their only mode, so both go.
+    const nodes = [
+      n('func1', 'ProcessWorkElementFunction'), n('fm1', 'FailureMode'), n('fe1', 'FailureEffect'),
+      n('fc1', 'FailureCause'), n('pc1', 'PreventionControl'), n('dc1', 'DetectionControl'),
+      n('fc2', 'FailureCause'),
+    ];
+    const edges = [
+      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
+      e('fm1', 'fe1', 'EFFECT_OF'),
+      e('fc1', 'fm1', 'CAUSE_OF'),
+      e('fc2', 'fm1', 'CAUSE_OF'),
+      e('fc1', 'pc1', 'PREVENTED_BY'),
+      e('fc1', 'dc1', 'DETECTED_BY'),
+    ];
+    const result = cascadeDeleteStructureNode('fm1', nodes, edges);
+    const ids = result.nodes.map(x => x.id);
+    expect(ids).toEqual(['func1']);
+    expect(result.edges).toHaveLength(0);
+  });
 });
