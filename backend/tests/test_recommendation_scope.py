@@ -46,3 +46,17 @@ async def test_current_product_type_excludes_inaccessible_factory(db, request_sc
     await _seed_two_types(db, default_factory, request_scope_all)
     codes = await resolve_product_line_codes("current_product_type", "PT-DC-100", db, request_scope_restricted_other_factory)
     assert codes == []  # restricted scope can access a different factory only
+
+
+@pytest.mark.asyncio
+async def test_current_product_type_excludes_inactive_pl_for_unrestricted(db, request_scope_all, default_factory):
+    """An unrestricted (group admin) user's accessible set is None, so the only
+    guard against inactive product lines in the same-type recall set is the
+    is_active filter in the business-set query itself."""
+    from app.services.product_line_service import get_product_line, update_product_line
+    await _seed_two_types(db, default_factory, request_scope_all)
+    # Deactivate PT-AC-200 (same POWER type as PT-DC-100)
+    pl = await get_product_line(db, "PT-AC-200")
+    await update_product_line(db, pl, None, False)
+    codes = await resolve_product_line_codes("current_product_type", "PT-DC-100", db, request_scope_all)
+    assert codes == ["PT-DC-100"]  # PT-AC-200 excluded because inactive

@@ -10,13 +10,20 @@ UNSET = object()
 
 
 async def _validate_product_type_code(db: AsyncSession, product_type_code: str | None) -> str | None:
-    """Validate the type exists when set; raise ValueError on invalid. None means clear-to-null."""
+    """Validate the type exists and is active when set; raise ValueError otherwise.
+
+    None means clear-to-null. Rejecting inactive types preserves soft-delete
+    semantics: a deactivated product type cannot be re-assigned to a product line.
+    """
     if product_type_code is None:
         return None
     from app.models.product_type import ProductType
     existing = await db.execute(select(ProductType).where(ProductType.code == product_type_code))
-    if existing.scalar_one_or_none() is None:
+    pt = existing.scalar_one_or_none()
+    if pt is None:
         raise ValueError(f"产品类型 '{product_type_code}' 不存在")
+    if not pt.is_active:
+        raise ValueError(f"产品类型 '{product_type_code}' 已停用，不可分配")
     return product_type_code
 
 

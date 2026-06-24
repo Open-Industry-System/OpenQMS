@@ -48,8 +48,15 @@ async def resolve_product_line_codes(
         if not pt_code:
             business = {current_product_line_code}  # untyped → degrade
         else:
+            # Same-type product lines. Exclude inactive ones so a soft-deleted
+            # product line never enters the recall set — including for group
+            # admins, whose accessible set is None (unrestricted) and would
+            # otherwise skip the is_active filter applied in list_product_lines.
             type_result = await db.execute(
-                select(ProductLine.code).where(ProductLine.product_type_code == pt_code)
+                select(ProductLine.code).where(
+                    ProductLine.product_type_code == pt_code,
+                    ProductLine.is_active.is_(True),
+                )
             )
             business = {row[0] for row in type_result.fetchall()}
     else:
