@@ -183,6 +183,25 @@ const edgeEntries = [
 export const GRAPH_NODE_TYPES = nodeEntries.map(([type]) => type);
 export const GRAPH_EDGE_TYPES = edgeEntries.map(([type]) => type);
 
+// Node types shown in a DFMEA graph legend. DFMEA uses the
+// System→Subsystem→Component→Function chain, so the PFMEA-only structure layers
+// (ProcessItem/ProcessStep/ProcessWorkElement) and their function variants are
+// omitted — a single "Function" entry covers DFMEA functions.
+export const DFMEA_LEGEND_NODE_TYPES = [
+  "System",
+  "Subsystem",
+  "Component",
+  "Function",
+  "FailureMode",
+  "FailureEffect",
+  "FailureCause",
+  "PreventionControl",
+  "DetectionControl",
+  "RecommendedAction",
+  "Interface",
+  "DesignParameter",
+];
+
 export const NODE_PRESENTATION: Record<string, NodePresentation> = Object.fromEntries(
   nodeEntries.map(([type, translationKey, style]) => [
     type,
@@ -194,11 +213,35 @@ export const EDGE_PRESENTATION: Record<string, EdgePresentation> = Object.fromEn
   edgeEntries.map(([type, translationKey]) => [type, { type, translationKey }]),
 );
 
-export function getNodeTypeKey(type: string): string {
+// The FMEA graph data model shares enum names across PFMEA and DFMEA (the wizard
+// and SAMPLE_DFMEA_GRAPH both use HAS_PROCESS_STEP / HAS_WORK_ELEMENT /
+// ProcessWorkElementFunction for DFMEA too). The shared labels are PFMEA
+// terminology ("包含工序", "工作要素功能"), which is misleading on a DFMEA graph.
+// These overrides render DFMEA-appropriate labels; types not listed fall back to
+// the shared label (HAS_FUNCTION, FailureMode, etc. are generic either way).
+const DFMEA_NODE_KEY_OVERRIDE: Record<string, string> = {
+  ProcessItemFunction: "nodeTypes.systemFunction",
+  ProcessStepFunction: "nodeTypes.subsystemFunction",
+  ProcessWorkElementFunction: "nodeTypes.componentFunction",
+};
+
+const DFMEA_EDGE_KEY_OVERRIDE: Record<string, string> = {
+  // System → Subsystem → Component descent in DFMEA.
+  HAS_PROCESS_STEP: "edgeTypes.hasSubsystem",
+  HAS_WORK_ELEMENT: "edgeTypes.hasComponent",
+};
+
+export function getNodeTypeKey(type: string, fmeaType?: string): string {
+  if (fmeaType === "DFMEA" && DFMEA_NODE_KEY_OVERRIDE[type]) {
+    return DFMEA_NODE_KEY_OVERRIDE[type];
+  }
   return NODE_PRESENTATION[type]?.translationKey ?? type;
 }
 
-export function getEdgeTypeKey(type: string): string {
+export function getEdgeTypeKey(type: string, fmeaType?: string): string {
+  if (fmeaType === "DFMEA" && DFMEA_EDGE_KEY_OVERRIDE[type]) {
+    return DFMEA_EDGE_KEY_OVERRIDE[type];
+  }
   return EDGE_PRESENTATION[type]?.translationKey ?? type;
 }
 

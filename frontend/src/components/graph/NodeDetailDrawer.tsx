@@ -8,6 +8,8 @@ interface NodeDetailDrawerProps {
   node: GraphNode | null;
   visible: boolean;
   onClose: () => void;
+  /** FMEA family — drives DFMEA-aware node-type labels. */
+  fmeaType?: string;
   /** Provides full graph data for FailureMode RPN row-level calculation (consistent with risk map). */
   allNodes?: GraphNode[];
   allEdges?: GraphEdge[];
@@ -69,6 +71,7 @@ export default function NodeDetailDrawer({
   node,
   visible,
   onClose,
+  fmeaType,
   allNodes,
   allEdges,
 }: NodeDetailDrawerProps) {
@@ -96,7 +99,7 @@ export default function NodeDetailDrawer({
       <Descriptions column={1} size="small" bordered>
         <Descriptions.Item label={t("nodeDetail.nodeId")}>{node.id}</Descriptions.Item>
         <Descriptions.Item label={t("nodeDetail.nodeType")}>
-          <Tag>{t(getNodeTypeKey(node.label), { defaultValue: node.label })}</Tag>
+          <Tag>{t(getNodeTypeKey(node.label, fmeaType), { defaultValue: node.label })}</Tag>
         </Descriptions.Item>
         {s > 0 && (
           <Descriptions.Item label={t("nodeDetail.severity")}>{String(s)}</Descriptions.Item>

@@ -41,6 +41,9 @@
     "processItemFunction": "过程项功能",
     "processStepFunction": "工序功能",
     "processWorkElementFunction": "工作要素功能",
+    "systemFunction": "系统功能",
+    "subsystemFunction": "子系统功能",
+    "componentFunction": "组件功能",
     "failureMode": "失效模式",
     "failureEffect": "失效影响",
     "failureCause": "失效原因",
@@ -53,6 +56,8 @@
   "edgeTypes": {
     "hasProcessStep": "包含工序",
     "hasWorkElement": "包含工作要素",
+    "hasSubsystem": "包含子系统",
+    "hasComponent": "包含零部件",
     "workIn": "包含工作要素",
     "hasFunction": "包含功能",
     "asFunction": "定义功能",

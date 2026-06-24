@@ -17,6 +17,8 @@ interface GraphCanvasProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
   mode: "single-fmea" | "global";
+  /** FMEA family of the document being viewed — drives DFMEA-aware edge labels. */
+  fmeaType?: string;
   layout?: GraphLayout;
   highlightNodes?: string[];
   dimOthers?: boolean;
@@ -27,7 +29,7 @@ interface GraphCanvasProps {
 
 type GraphT = (key: string, options?: { defaultValue?: string }) => string;
 
-function toG6Data(nodes: GraphNode[], edges: GraphEdge[], t: GraphT) {
+function toG6Data(nodes: GraphNode[], edges: GraphEdge[], t: GraphT, fmeaType?: string) {
   const g6Nodes = nodes.map((n) => {
     const nodeStyle = getNodeStyle(n.label);
     return {
@@ -49,7 +51,7 @@ function toG6Data(nodes: GraphNode[], edges: GraphEdge[], t: GraphT) {
       source: e.source,
       target: e.target,
       data: {
-        label: t(getEdgeTypeKey(rawLabel), { defaultValue: rawLabel }),
+        label: t(getEdgeTypeKey(rawLabel, fmeaType), { defaultValue: rawLabel }),
         rawLabel,
       },
       style: {
@@ -122,6 +124,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     nodes,
     edges,
     mode,
+    fmeaType,
     layout = mode === "single-fmea" ? "dagre" : "force",
     highlightNodes = [],
     dimOthers = false,
@@ -135,8 +138,8 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
   const graphRef = useRef<Graph | null>(null);
   const { t, i18n } = useTranslation("graph");
   const graphData = useMemo(
-    () => toG6Data(nodes, edges, t),
-    [nodes, edges, t, i18n.language],
+    () => toG6Data(nodes, edges, t, fmeaType),
+    [nodes, edges, t, fmeaType, i18n.language],
   );
 
   // Keep handlers in refs so initGraph only depends on structural inputs (layout/nodes);

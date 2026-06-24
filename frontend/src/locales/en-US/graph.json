@@ -41,6 +41,9 @@
     "processItemFunction": "Process Item Function",
     "processStepFunction": "Process Step Function",
     "processWorkElementFunction": "Work Element Function",
+    "systemFunction": "System Function",
+    "subsystemFunction": "Subsystem Function",
+    "componentFunction": "Component Function",
     "failureMode": "Failure Mode",
     "failureEffect": "Failure Effect",
     "failureCause": "Failure Cause",
@@ -53,6 +56,8 @@
   "edgeTypes": {
     "hasProcessStep": "Has Process Step",
     "hasWorkElement": "Has Work Element",
+    "hasSubsystem": "Has Subsystem",
+    "hasComponent": "Has Component",
     "workIn": "Has Work Element",
     "hasFunction": "Has Function",
     "asFunction": "Defines Function",

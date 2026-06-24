@@ -1830,6 +1830,7 @@ export default function FMEAEditorPage() {
                     nodes={graphDataRef.current.nodes}
                     edges={graphDataRef.current.edges}
                     mode="single-fmea"
+                    fmeaType={fmeaType}
                     layout={graphLayout}
                     highlightNodes={highlightNodes}
                     dimOthers={dimOthers}
@@ -1871,7 +1872,7 @@ export default function FMEAEditorPage() {
               )}
             </div>
             <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 16 }}>
-              <GraphLegend />
+              <GraphLegend fmeaType={fmeaType} />
               {highlightNodes.length > 0 && (
                 <Button onClick={() => { setHighlightNodes([]); setDimOthers(false); }}>
                   {t("graph.clearHighlight")}
@@ -1896,6 +1897,7 @@ export default function FMEAEditorPage() {
             node={selectedGraphNode}
             visible={drawerVisible}
             onClose={() => setDrawerVisible(false)}
+            fmeaType={fmeaType}
             allNodes={graphDataRef.current?.nodes}
             allEdges={graphDataRef.current?.edges}
           />
