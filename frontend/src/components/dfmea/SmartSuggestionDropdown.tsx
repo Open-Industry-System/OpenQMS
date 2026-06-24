@@ -10,7 +10,7 @@ import type { ModuleKey } from "../../hooks/usePermission";
 const { Text } = Typography;
 
 interface SmartSuggestionDropdownProps {
-  triggerType: "failure_mode" | "failure_effect" | "failure_cause" | "measure" | "optimization";
+  triggerType: "failure_mode" | "failure_effect" | "failure_cause" | "measure" | "optimization" | "prevention_control" | "detection_control";
   context: Record<string, unknown>;
   fmeaId: string;
   onSelect: (suggestion: Suggestion) => void;
