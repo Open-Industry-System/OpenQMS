@@ -106,7 +106,7 @@ describe("ScopeTagField", () => {
     await waitFor(() => expect(mockedGetRecommendations).toHaveBeenCalled());
     const arg = mockedGetRecommendations.mock.calls[0][1];
     expect(arg.trigger_type).toBe("dfmea_trend");
-    expect(arg.scope).toBe("current_product_line");
+    expect(arg.scope).toBe("current_product_type");
     expect(arg.include_graph).toBe(false);
   });
 });
