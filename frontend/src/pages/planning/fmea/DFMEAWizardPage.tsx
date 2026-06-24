@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, Table, InputNumber, Result, DatePicker } from 'antd';
+import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, Table, InputNumber, Result, DatePicker, Select, Row, Col } from 'antd';
 import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined, BulbOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import dayjs from 'dayjs';
 import { getFMEA, deleteFMEA } from '../../../api/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { useWizardValidation } from '../../../hooks/useWizardValidation';
 import { useDfmeaRules } from '../../../utils/dfmeaRules';
+import { calculateAP } from '../../../utils/fmea';
 import { buildRows, getRowSeverity, getProcessChain, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
@@ -688,75 +690,128 @@ export default function DFMEAWizardPage() {
     );
   };
 
-  // Step 5 — Optimization
+  // Step 5 — Optimization (第六步「优化」) — per Reference/DFMEA.md step 6:
+  // for each AP=H row, capture a RecommendedAction (OPTIMIZED_BY) with the
+  // measure, responsible person, target/actual dates, status, evidence-based
+  // action, and re-evaluated S'/O'/D' → AP'. Mirrors FMEAEditorPage's
+  // RecommendedAction pattern so the wizard and editor share one graph model.
   const renderStep5 = () => {
     const { suggestMeasures, analyzeRisk } = dfmeaRules;
     const rows = buildRows(nodes, edges);
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
-    const highRiskRows = rows.filter(r => {
+    const highRiskRows = rows.map(r => {
       const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
       const dcId = r.detectionControlIds[0];
       const dc = dcId ? nodeMap.get(dcId) : null;
       const s = getRowSeverity(r, nodeMap), o = cause?.occurrence || 0, d = dc?.detection || 0;
-      return analyzeRisk(s, o, d).ap === 'H';
-    });
+      return { row: r, s, o, d, ap: analyzeRisk(s, o, d).ap };
+    }).filter(x => x.ap === 'H');
 
     if (highRiskRows.length === 0) {
       return <Result icon={<CheckCircleOutlined />} title={t('wizard.optimization.noOptimization')} subTitle={t('wizard.optimization.noOptimizationHint')} />;
     }
 
-    const handleAddOptimization = (row: FMEARow, type: 'prevention' | 'detection', value: string) => {
-      const causeId = row.failureCauseNodeId;
-      if (!causeId) return;
-
-      let newNodes = [...nodes];
-      const newEdges = [...edges];
-
-      if (type === 'prevention') {
-        const existingPcIds = edges
-          .filter(e => e.source === causeId && e.type === 'PREVENTED_BY')
-          .map(e => e.target);
-        if (existingPcIds.length > 0) {
-          newNodes = newNodes.map(n => n.id === existingPcIds[0] ? { ...n, name: value } : n);
-        } else {
-          const pcId = `w${crypto.randomUUID()}_pc`;
-          newNodes.push({ id: pcId, type: 'PreventionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
-          newEdges.push({ source: causeId, target: pcId, type: 'PREVENTED_BY' });
-        }
-      } else {
-        const existingDcIds = edges
-          .filter(e => e.source === causeId && e.type === 'DETECTED_BY')
-          .map(e => e.target);
-        if (existingDcIds.length > 0) {
-          newNodes = newNodes.map(n => n.id === existingDcIds[0] ? { ...n, name: value } : n);
-        } else {
-          const dcId = `w${crypto.randomUUID()}_dc`;
-          newNodes.push({ id: dcId, type: 'DetectionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
-          newEdges.push({ source: causeId, target: dcId, type: 'DETECTED_BY' });
-        }
+    // Write a field on the row's RecommendedAction node, creating the node
+    // (OPTIMIZED_BY edge from the cause, or the mode if cause-less) on first edit.
+    const handleActionField = (row: FMEARow, field: string, value: unknown) => {
+      const existingId = row.recommendedActionIds[0];
+      if (existingId) {
+        updateGraphData(nodes.map(n => n.id === existingId ? { ...n, [field]: value } : n), edges);
+        return;
       }
-
-      updateGraphData(newNodes, newEdges);
+      const raId = `w${crypto.randomUUID()}_ra`;
+      const newNode: GraphNode = { id: raId, type: 'RecommendedAction', name: '', severity: 0, occurrence: 0, detection: 0, [field]: value };
+      const sourceId = row.failureCauseNodeId || row.failureModeNodeId;
+      updateGraphData([...nodes, newNode], [...edges, { source: sourceId, target: raId, type: 'OPTIMIZED_BY' }]);
     };
+
+    const statusOptions = [
+      { value: 'undecided', label: t('wizard.optimization.statusOptions.undecided') },
+      { value: 'planned', label: t('wizard.optimization.statusOptions.planned') },
+      { value: 'done', label: t('wizard.optimization.statusOptions.done') },
+      { value: 'notExecuted', label: t('wizard.optimization.statusOptions.notExecuted') },
+    ];
 
     return (
       <div>
         <Paragraph style={{ color: '#cf1322' }}>{t('wizard.optimization.mustOptimize', { count: highRiskRows.length })}</Paragraph>
-        {highRiskRows.map(r => {
+        {highRiskRows.map(({ row: r, s, o, d }) => {
           const fm = nodeMap.get(r.failureModeNodeId);
+          const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
           const measures = suggestMeasures(fm?.name || '', 'H');
-          const causeId = r.failureCauseNodeId;
-          const existingPc = causeId ? edges.find(e => e.source === causeId && e.type === 'PREVENTED_BY') : null;
-          const existingDc = causeId ? edges.find(e => e.source === causeId && e.type === 'DETECTED_BY') : null;
-          const pcName = existingPc ? nodeMap.get(existingPc.target)?.name || '' : '';
-          const dcName = existingDc ? nodeMap.get(existingDc.target)?.name || '' : '';
+          const raId = r.recommendedActionIds[0];
+          const ra = raId ? nodeMap.get(raId) : null;
+          const revisedS = ra?.revised_severity || 0;
+          const revisedO = ra?.revised_occurrence || 0;
+          const revisedD = ra?.revised_detection || 0;
+          const revisedAp = calculateAP(revisedS || s, revisedO || o, revisedD || d);
+          const apColor = revisedAp === 'H' ? 'red' : revisedAp === 'M' ? 'orange' : 'green';
+          const measurePlaceholder = [...measures.prevention, ...measures.detection].filter(Boolean).join(' / ')
+            || t('wizard.optimization.measurePlaceholder');
+          const toDate = (v?: string) => (v ? dayjs(v) : undefined);
 
           return (
-            <Card key={r.key} size="small" title={fm?.name || 'Failure Mode'} style={{ marginBottom: 12 }}>
-              <Input.TextArea rows={2} placeholder={measures.prevention.join(' / ')} value={pcName}
-                onChange={e => handleAddOptimization(r, 'prevention', e.target.value)} style={{ marginBottom: 8 }} />
-              <Input.TextArea rows={2} placeholder={measures.detection.join(' / ')} value={dcName}
-                onChange={e => handleAddOptimization(r, 'detection', e.target.value)} />
+            <Card key={r.key} size="small" style={{ marginBottom: 12 }}
+              title={<Space wrap align="center">
+                <Tag color="red">{t('wizard.optimization.apBadge')}</Tag>
+                <span>{fm?.name || ''}</span>
+                <span style={{ color: 'var(--qf-text-tertiary)', fontSize: 12 }}>S{s} O{o} D{d}</span>
+              </Space>}>
+              <Row gutter={[12, 8]}>
+                <Col span={24}>
+                  <Field label={t('wizard.optimization.measure')}>
+                    <Input.TextArea rows={2} placeholder={measurePlaceholder} value={ra?.name || ''}
+                      onChange={e => handleActionField(r, 'name', e.target.value)} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.responsible')}>
+                    <Input size="small" placeholder={t('wizard.optimization.responsiblePlaceholder')}
+                      value={ra?.responsible || ''} onChange={e => handleActionField(r, 'responsible', e.target.value)} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.dueDate')}>
+                    <DatePicker size="small" style={{ width: '100%' }} value={toDate(ra?.due_date)}
+                      onChange={v => handleActionField(r, 'due_date', v ? v.format('YYYY-MM-DD') : '')} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.status')}>
+                    <Select size="small" style={{ width: '100%' }} options={statusOptions} allowClear
+                      value={ra?.status} onChange={v => handleActionField(r, 'status', v)} />
+                  </Field>
+                </Col>
+                <Col span={24}>
+                  <Field label={t('wizard.optimization.actionTaken')}>
+                    <Input.TextArea rows={2} placeholder={t('wizard.optimization.actionTakenPlaceholder')}
+                      value={ra?.action_taken || ''} onChange={e => handleActionField(r, 'action_taken', e.target.value)} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.completionDate')}>
+                    <DatePicker size="small" style={{ width: '100%' }} value={toDate(ra?.completion_date)}
+                      onChange={v => handleActionField(r, 'completion_date', v ? v.format('YYYY-MM-DD') : '')} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={16}>
+                  <Field label={t('wizard.optimization.revisedRatings')}>
+                    <Space wrap>
+                      <span>S'</span>
+                      <InputNumber size="small" min={1} max={10} style={{ width: 56 }} value={revisedS || undefined}
+                        onChange={v => handleActionField(r, 'revised_severity', (v ?? 0) as number)} />
+                      <span>O'</span>
+                      <InputNumber size="small" min={1} max={10} style={{ width: 56 }} value={revisedO || undefined}
+                        onChange={v => handleActionField(r, 'revised_occurrence', (v ?? 0) as number)} />
+                      <span>D'</span>
+                      <InputNumber size="small" min={1} max={10} style={{ width: 56 }} value={revisedD || undefined}
+                        onChange={v => handleActionField(r, 'revised_detection', (v ?? 0) as number)} />
+                      <span>{t('wizard.optimization.revisedAp')}</span>
+                      {revisedAp ? <Tag color={apColor}>{revisedAp}</Tag> : <Tag>-</Tag>}
+                    </Space>
+                  </Field>
+                </Col>
+              </Row>
             </Card>
           );
         })}
