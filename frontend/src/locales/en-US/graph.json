@@ -70,6 +70,7 @@
     "effectOf": "Effect Of",
     "causeOf": "Cause Of",
     "causeBranch": "Cause",
+    "structuralChain": "Structural Chain",
     "preventedBy": "Prevented By",
     "detectedBy": "Detected By",
     "optimizedBy": "Optimized By",

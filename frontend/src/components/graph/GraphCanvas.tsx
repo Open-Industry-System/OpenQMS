@@ -181,9 +181,9 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.render().catch((err: unknown) => {
       console.error("G6 render failed:", err);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- graphData is intentionally
-    // excluded so language changes do not recreate the G6 instance; the [graphData] effect
-    // below is the data refresh path and preserves zoom/pan.
+    // graphData is intentionally excluded so language changes do not recreate the G6 instance;
+    // the [graphData] effect below is the data refresh path and preserves zoom/pan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layout, direction, nodes]);
 
   // Apply highlight/dim

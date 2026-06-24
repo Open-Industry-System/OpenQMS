@@ -70,6 +70,7 @@
     "effectOf": "产生影响",
     "causeOf": "由原因引起",
     "causeBranch": "失效原因",
+    "structuralChain": "结构链",
     "preventedBy": "预防控制",
     "detectedBy": "探测控制",
     "optimizedBy": "优化措施",

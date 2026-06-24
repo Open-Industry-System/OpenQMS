@@ -203,6 +203,8 @@ describe("graphPresentation", () => {
   it("has zh-CN and en-US locale entries for the new edge-legend keys", () => {
     expect(zhGraph.edgeTypes.causeBranch).toBeTruthy();
     expect(enGraph.edgeTypes.causeBranch).toBeTruthy();
+    expect(zhGraph.edgeTypes.structuralChain).toBeTruthy();
+    expect(enGraph.edgeTypes.structuralChain).toBeTruthy();
     expect((zhGraph as { edgeLegend?: { title: string } }).edgeLegend?.title).toBeTruthy();
     expect((enGraph as { edgeLegend?: { title: string } }).edgeLegend?.title).toBeTruthy();
     expect(zhGraph.toolbar.directionTB).toBeTruthy();

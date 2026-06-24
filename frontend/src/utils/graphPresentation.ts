@@ -305,5 +305,5 @@ export const GRAPH_EDGE_LEGEND: ReadonlyArray<{ type: string; translationKey: st
   { type: "PREVENTED_BY", translationKey: "edgeTypes.preventedBy" },
   { type: "DETECTED_BY", translationKey: "edgeTypes.detectedBy" },
   { type: "OPTIMIZED_BY", translationKey: "edgeTypes.optimizedBy" },
-  { type: "HAS_FAILURE_MODE", translationKey: "edgeTypes.hasFailureMode" },
+  { type: "HAS_FAILURE_MODE", translationKey: "edgeTypes.structuralChain" },
 ];
