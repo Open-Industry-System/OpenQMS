@@ -177,3 +177,40 @@ def test_need_llm_generic_quality_calls_llm_despite_high_confidence():
         suggestion_count=7,
         rule_quality="generic",
     ) is True
+
+
+def test_rule_engine_prevention_control_returns_only_prevention():
+    """prevention_control trigger 必须只返回预防项，不混入探测项。"""
+    engine = RuleEngine()
+    result = engine.evaluate("prevention_control", {"failure_mode": "采集数据失效", "ap": "H"})
+    assert len(result.suggestions) > 0
+    # 预防项 explanation 标注「预防措施」；不得出现检测专属词
+    for s in result.suggestions:
+        assert "预防" in s.explanation
+    detection_only_keywords = ["在线实时监测", "自诊断功能", "出厂100%功能测试", "传感器信号校验", "气密性测试", "接触电阻测试"]
+    names = [s.name for s in result.suggestions]
+    for kw in detection_only_keywords:
+        assert kw not in names, f"探测项 {kw} 不应出现在 prevention_control 结果中"
+
+
+def test_rule_engine_detection_control_returns_only_detection():
+    """detection_control trigger 必须只返回探测项。"""
+    engine = RuleEngine()
+    result = engine.evaluate("detection_control", {"failure_mode": "采集数据失效", "ap": "H"})
+    assert len(result.suggestions) > 0
+    for s in result.suggestions:
+        assert "检测" in s.explanation or "探测" in s.explanation
+    prevention_only_keywords = ["冗余设计", "降额设计", "失效安全设计", "传感器冗余布置", "信号滤波设计", "双重密封结构", "防松结构设计"]
+    names = [s.name for s in result.suggestions]
+    for kw in prevention_only_keywords:
+        assert kw not in names, f"预防项 {kw} 不应出现在 detection_control 结果中"
+
+
+def test_rule_engine_measure_still_returns_mixed():
+    """旧 measure trigger 行为不变：仍返回预防+探测混合。"""
+    engine = RuleEngine()
+    result = engine.evaluate("measure", {"failure_mode": "采集数据失效", "ap": "H"})
+    assert len(result.suggestions) > 0
+    explanations = " ".join(s.explanation for s in result.suggestions)
+    assert "预防" in explanations
+    assert "检测" in explanations

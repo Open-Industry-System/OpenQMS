@@ -134,6 +134,8 @@ class RuleEngine:
             "failure_cause": self._suggest_failure_cause,
             "measure": self._suggest_measures,
             "optimization": self._suggest_optimization,
+            "prevention_control": self._suggest_prevention_control,
+            "detection_control": self._suggest_detection_control,
         }
         handler = dispatch.get(trigger_type)
         if not handler:
@@ -184,7 +186,9 @@ class RuleEngine:
             quality="generic",
         )
 
-    def _suggest_measures(self, context: dict) -> RuleResult:
+    def _measure_lists(self, context: dict) -> tuple[list[str], list[str], Literal["specific", "generic"]]:
+        """按 AP/关键词生成 (prevention, detection, quality) 两列表。
+        供 measure / prevention_control / detection_control 三个 trigger 共享。"""
         fm = context.get("failure_mode", "")
         ap = context.get("ap", "L")
         prevention: list[str] = []
@@ -210,11 +214,25 @@ class RuleEngine:
             prevention.extend(["防松结构设计", "镀金/镀银处理"])
             detection.extend(["接触电阻测试", "振动试验验证"])
 
+        quality: Literal["specific", "generic"] = "specific" if (fm and any(kw in fm for kw in ["采集", "密封", "连接"])) else "generic"
+        return prevention, detection, quality
+
+    def _suggest_measures(self, context: dict) -> RuleResult:
+        prevention, detection, quality = self._measure_lists(context)
         suggestions = (
             [RuleSuggestion(name=p, confidence=0.6, explanation="预防措施") for p in prevention]
             + [RuleSuggestion(name=d, confidence=0.6, explanation="检测措施") for d in detection]
         )
-        quality: Literal["specific", "generic"] = "specific" if (fm and any(kw in fm for kw in ["采集", "密封", "连接"])) else "generic"
+        return RuleResult(suggestions=suggestions, quality=quality)
+
+    def _suggest_prevention_control(self, context: dict) -> RuleResult:
+        prevention, _detection, quality = self._measure_lists(context)
+        suggestions = [RuleSuggestion(name=p, confidence=0.6, explanation="预防措施") for p in prevention]
+        return RuleResult(suggestions=suggestions, quality=quality)
+
+    def _suggest_detection_control(self, context: dict) -> RuleResult:
+        _prevention, detection, quality = self._measure_lists(context)
+        suggestions = [RuleSuggestion(name=d, confidence=0.6, explanation="检测措施") for d in detection]
         return RuleResult(suggestions=suggestions, quality=quality)
 
     def _suggest_optimization(self, context: dict) -> RuleResult:

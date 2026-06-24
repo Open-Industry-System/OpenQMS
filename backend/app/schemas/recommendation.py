@@ -7,6 +7,7 @@ class RecommendRequest(BaseModel):
     trigger_type: Literal[
         "failure_mode", "failure_effect", "failure_cause", "measure", "optimization",
         "dfmea_tool", "dfmea_trend",
+        "prevention_control", "detection_control",
     ]
     context: dict = Field(default_factory=dict)
     scope: Literal["global", "current_product_line"] = "global"
