@@ -99,6 +99,31 @@ def test_graph_matches_to_suggestions():
     assert items[0].source_document_no == "PFMEA-001"
 
 
+def test_rule_engine_pfmea_cause_fallback_uses_4m_buckets():
+    """PFMEA 失效原因无图谱匹配时，回退到 4M 组织的原因提示而非通用默认。"""
+    engine = RuleEngine()
+    result = engine.evaluate("failure_cause", {"failure_mode": "未知失效模式", "fmea_type": "PFMEA"})
+    names = [s.name for s in result.suggestions]
+    explanations = " ".join(s.explanation for s in result.suggestions)
+    # 至少包含每个 4M 类别中的一项
+    assert any("操作未按SOP" in n or "培训不足" in n for n in names)
+    assert any("设备校准漂移" in n or "设备磨损" in n for n in names)
+    assert any("来料尺寸超差" in n or "来料材质不符" in n for n in names)
+    assert any("温湿度超范围" in n or "粉尘/洁净度不足" in n for n in names)
+    # explanation 标注 4M 类别
+    assert "Man" in explanations or "Machine" in explanations or "Material" in explanations or "Environment" in explanations
+
+
+def test_rule_engine_dfmea_cause_fallback_keeps_generic_defaults():
+    """DFMEA 失效原因无图谱匹配时，仍使用通用默认原因。"""
+    engine = RuleEngine()
+    result = engine.evaluate("failure_cause", {"failure_mode": "未知失效模式", "fmea_type": "DFMEA"})
+    names = [s.name for s in result.suggestions]
+    assert "零部件老化" in names
+    assert "环境因素" in names
+    assert "制造缺陷" in names
+
+
 def test_rule_engine_failure_mode():
     engine = RuleEngine()
     result = engine.evaluate("failure_mode", {"function_description": "采集数据"})
@@ -177,3 +202,105 @@ def test_need_llm_generic_quality_calls_llm_despite_high_confidence():
         suggestion_count=7,
         rule_quality="generic",
     ) is True
+
+
+def test_recommend_request_accepts_new_triggers():
+    """RecommendRequest schema 接受新 trigger_type；service 不抛未路由错误。"""
+    req = RecommendRequest(trigger_type="prevention_control", context={"failure_mode": "采集数据失效", "ap": "H"})
+    assert req.trigger_type == "prevention_control"
+    engine = RuleEngine()
+    result = engine.evaluate(req.trigger_type, req.context)
+    assert len(result.suggestions) > 0
+
+
+def test_rule_engine_prevention_control_returns_only_prevention():
+    """prevention_control trigger 必须只返回预防项，不混入探测项。"""
+    engine = RuleEngine()
+    result = engine.evaluate("prevention_control", {"failure_mode": "采集数据失效", "ap": "H"})
+    assert len(result.suggestions) > 0
+    # 预防项 explanation 标注「预防措施」；不得出现检测专属词
+    for s in result.suggestions:
+        assert "预防" in s.explanation
+    detection_only_keywords = ["在线实时监测", "自诊断功能", "出厂100%功能测试", "传感器信号校验", "气密性测试", "接触电阻测试"]
+    names = [s.name for s in result.suggestions]
+    for kw in detection_only_keywords:
+        assert kw not in names, f"探测项 {kw} 不应出现在 prevention_control 结果中"
+
+
+def test_rule_engine_detection_control_returns_only_detection():
+    """detection_control trigger 必须只返回探测项。"""
+    engine = RuleEngine()
+    result = engine.evaluate("detection_control", {"failure_mode": "采集数据失效", "ap": "H"})
+    assert len(result.suggestions) > 0
+    for s in result.suggestions:
+        assert "检测" in s.explanation or "探测" in s.explanation
+    prevention_only_keywords = ["冗余设计", "降额设计", "失效安全设计", "传感器冗余布置", "信号滤波设计", "双重密封结构", "防松结构设计"]
+    names = [s.name for s in result.suggestions]
+    for kw in prevention_only_keywords:
+        assert kw not in names, f"预防项 {kw} 不应出现在 detection_control 结果中"
+
+
+def test_rule_engine_measure_still_returns_mixed():
+    """旧 measure trigger 行为不变：仍返回预防+探测混合。"""
+    engine = RuleEngine()
+    result = engine.evaluate("measure", {"failure_mode": "采集数据失效", "ap": "H"})
+    assert len(result.suggestions) > 0
+    explanations = " ".join(s.explanation for s in result.suggestions)
+    assert "预防" in explanations
+    assert "检测" in explanations
+
+
+async def test_extract_neighbors_prevention_control_only_prevented_by():
+    """prevention_control 图谱增强只取 PREVENTED_BY 邻居，不含 DETECTED_BY。"""
+    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    match = {
+        "node_id": "fm1", "fmea_id": str(uuid.uuid4()),
+    }
+    # StubGraphRepo 不提供 graph_data；直接测 _extract_neighbors_from_match 的边逻辑
+    # 需要注入 graph_data。改用最小桩：覆写 _get_graph_data_by_fmea_id。
+    async def fake_graph_data(_fmea_id):
+        return {
+            "nodes": [
+                {"id": "fm1", "type": "FailureMode", "name": "m"},
+                {"id": "fc1", "type": "FailureCause", "name": "c"},
+                {"id": "pc1", "type": "PreventionControl", "name": "预防A"},
+                {"id": "dc1", "type": "DetectionControl", "name": "探测B"},
+            ],
+            "edges": [
+                {"source": "fc1", "target": "fm1", "type": "CAUSE_OF"},
+                {"source": "fc1", "target": "pc1", "type": "PREVENTED_BY"},
+                {"source": "fc1", "target": "dc1", "type": "DETECTED_BY"},
+            ],
+        }
+    svc._get_graph_data_by_fmea_id = fake_graph_data  # type: ignore[method-assign]
+
+    nodes = await svc._extract_neighbors_from_match(match, "prevention_control")
+    names = [n["name"] for n in nodes]
+    assert "预防A" in names
+    assert "探测B" not in names
+
+
+async def test_extract_neighbors_detection_control_only_detected_by():
+    """detection_control 图谱增强只取 DETECTED_BY 邻居。"""
+    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    match = {"node_id": "fm1", "fmea_id": str(uuid.uuid4())}
+    async def fake_graph_data(_fmea_id):
+        return {
+            "nodes": [
+                {"id": "fm1", "type": "FailureMode", "name": "m"},
+                {"id": "fc1", "type": "FailureCause", "name": "c"},
+                {"id": "pc1", "type": "PreventionControl", "name": "预防A"},
+                {"id": "dc1", "type": "DetectionControl", "name": "探测B"},
+            ],
+            "edges": [
+                {"source": "fc1", "target": "fm1", "type": "CAUSE_OF"},
+                {"source": "fc1", "target": "pc1", "type": "PREVENTED_BY"},
+                {"source": "fc1", "target": "dc1", "type": "DETECTED_BY"},
+            ],
+        }
+    svc._get_graph_data_by_fmea_id = fake_graph_data  # type: ignore[method-assign]
+
+    nodes = await svc._extract_neighbors_from_match(match, "detection_control")
+    names = [n["name"] for n in nodes]
+    assert "探测B" in names
+    assert "预防A" not in names

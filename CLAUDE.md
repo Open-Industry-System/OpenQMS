@@ -156,7 +156,7 @@ The JSONB graph is the most complex part of the system:
 
 ## Known Gaps
 
-- No comprehensive test suite (pytest exists but many tests need factory_id fixtures)
+- Test suite expanding (backend pytest with factory_id fixtures + frontend vitest); some legacy modules still need fixture backfill
 - No rate limiting on login
 - Redis configured but no caching logic implemented
 - Frontend bundle is 5.5MB — needs code splitting

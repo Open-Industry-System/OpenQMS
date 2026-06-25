@@ -2,6 +2,7 @@
   "actions": {
     "confirm": "Confirm",
     "save": "Save",
+    "exitVersion": "Return to current version",
     "close": "Close",
     "cancel": "Cancel",
     "back": "Back"
@@ -32,6 +33,7 @@
     "title": "FMEA Management",
     "subtitle": "Failure Mode and Effects Analysis · PFMEA / DFMEA",
     "newFMEA": "New FMEA",
+    "deleteConfirm": "Delete \"{{no}}\"? This cannot be undone.",
     "columns": {
       "documentNo": "Document No.",
       "title": "Title",
@@ -85,6 +87,7 @@
     "addNode": "Add Node",
     "addNodeTitle": "Add Node",
     "newProcessItem": "New Process Item",
+    "dragHandle": "Drag to reorder",
     "newSystem": "New System",
     "confirmDeleteNode": "Delete this node and all its children and related failure-analysis rows?",
     "nodeName": "Name",
@@ -97,6 +100,11 @@
     "addComponent": "Add Component",
     "addFunction": "Add Function",
     "add": "Add",
+    "addFailureMode": "Add Failure Mode",
+    "addFailureCause": "Add Failure Cause",
+    "deleteFailureMode": "Delete Failure Mode",
+    "deleteFailureCause": "Delete Failure Cause",
+    "confirmDeleteMode": "Delete this failure mode and all its causes/effects?",
     "newAction": "New Recommended Action",
     "selectFunctionHint": "Select a function node on the left and click \"Add Row\" to start analysis",
     "pfmeaTitle": "Process FMEA (PFMEA)",
@@ -235,7 +243,9 @@
     "statusChanged": "Status changed to: {{status}}",
     "operationFailed": "Operation failed",
     "selectFailureMode": "Please select a failure mode row in the editor first",
-    "viewSnapshot": "View version v{{version}} snapshot (feature in development)",
+    "viewSnapshot": "View version v{{version}} snapshot",
+    "viewingVersion": "Viewing v{{version}} snapshot (read-only)",
+    "loadVersionFailed": "Failed to load version snapshot",
     "clearHighlight": "Clear Highlight",
     "changeImpactAnalysis": "Change Impact Analysis",
     "changeImpactDescription": "Analyze the scope of impact of changes to this node on upstream/downstream nodes",
@@ -253,6 +263,8 @@
     "traceCause": "Trace Cause",
     "createSuccess": "FMEA created successfully",
     "createFailed": "Failed to create FMEA",
+    "documentNoExists": "Document number '{{no}}' already exists. Please use a different number.",
+    "cannotTransition": "Cannot change status from {{from}} to {{to}}. Allowed: {{allowed}}",
     "dfmeaCreateSuccess": "DFMEA created successfully"
   }
 }

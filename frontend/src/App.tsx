@@ -11,6 +11,7 @@ const DashboardPage = lazy(() => import("./pages/dashboard/DashboardPage"));
 const FMEAListPage = lazy(() => import("./pages/planning/fmea/FMEAListPage"));
 const FMEAEditorPage = lazy(() => import("./pages/planning/fmea/FMEAEditorPage"));
 const DFMEAWizardPage = lazy(() => import("./pages/planning/fmea/DFMEAWizardPage"));
+const PFMEAWizardPage = lazy(() => import("./pages/planning/fmea/PFMEAWizardPage"));
 const CAPAListPage = lazy(() => import("./pages/capa/CAPAListPage"));
 const CAPADetailPage = lazy(() => import("./pages/capa/CAPADetailPage"));
 const ControlPlanListPage = lazy(() => import("./pages/planning/control-plan/ControlPlanListPage"));
@@ -78,6 +79,8 @@ const SupplyChainRiskMapPage = lazy(() => import("./pages/supplyChainRiskMap/Sup
 const TenantSuspended = lazy(() => import("./pages/TenantSuspended"));
 const TenantDeactivated = lazy(() => import("./pages/TenantDeactivated"));
 const AIConfigPage = lazy(() => import("./pages/admin/AIConfigPage"));
+const ProductTypePage = lazy(() => import("./pages/admin/ProductTypePage"));
+const ProductLinePage = lazy(() => import("./pages/admin/ProductLinePage"));
 
 function isTokenExpired(token: string): boolean {
   try {
@@ -137,6 +140,7 @@ export default function App() {
         <Route path="/dashboard" element={<ProtectedRoute requiredModule="dashboard"><DashboardPage /></ProtectedRoute>} />
         <Route path="/fmea" element={<ProtectedRoute requiredModule="fmea"><FMEAListPage /></ProtectedRoute>} />
         <Route path="/fmea/wizard/:id" element={<ProtectedRoute requiredModule="fmea"><DFMEAWizardPage /></ProtectedRoute>} />
+        <Route path="/fmea/pfmea-wizard/:id" element={<ProtectedRoute requiredModule="fmea"><PFMEAWizardPage /></ProtectedRoute>} />
         <Route path="/fmea/:id" element={<ProtectedRoute requiredModule="fmea"><FMEAEditorPage /></ProtectedRoute>} />
         <Route path="/capa" element={<ProtectedRoute requiredModule="capa"><CAPAListPage /></ProtectedRoute>} />
         <Route path="/capa/:id" element={<ProtectedRoute requiredModule="capa"><CAPADetailPage /></ProtectedRoute>} />
@@ -217,6 +221,8 @@ export default function App() {
         <Route path="/group/audits" element={<ProtectedRoute requiredModule="group"><GroupAuditsPage /></ProtectedRoute>} />
         {/* Admin */}
         <Route path="/admin/ai-config" element={<ProtectedRoute requireAdmin><AIConfigPage /></ProtectedRoute>} />
+        <Route path="/admin/product-types" element={<ProtectedRoute requireAdmin><ProductTypePage /></ProtectedRoute>} />
+        <Route path="/admin/product-lines" element={<ProtectedRoute requireAdmin><ProductLinePage /></ProtectedRoute>} />
       </Route>
       </Routes>
     </Suspense>

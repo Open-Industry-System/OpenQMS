@@ -178,9 +178,9 @@ async def delete_fmea(
     if scope.factory_scope.accessible_factory_ids is not None:
         if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
             raise HTTPException(status_code=404, detail="FMEA not found")
-    # Only allow deleting draft FMEAs
-    if fmea.status != "draft":
-        raise HTTPException(status_code=400, detail="只能删除草稿状态的FMEA")
+    # Only allow deleting draft or rework (rejected) FMEAs
+    if fmea.status not in ("draft", "rework"):
+        raise HTTPException(status_code=400, detail="只能删除草稿或返工状态的FMEA")
     await fmea_service.delete_fmea(db, fmea_id, scope.user.user_id)
 
 
@@ -242,6 +242,29 @@ from app.graph.deps import get_graph_repository
 from app.graph.repository import FMEAGraphRepository
 
 
+def _recommend_anchor(trigger_type: str, context: dict) -> str:
+    """短输入守卫的 anchor 文本；无可用 anchor 时返回 ''。
+
+    failure_mode 取自 function_description；dfmea_tool/dfmea_trend 取自 5T 范围字段
+    （task → title → team）；其余 trigger 取自 failure_mode。input_text 是所有 trigger
+    的最后兜底。
+
+    NOTE: dict.get(k, default) 在存储值为 "" 时也返回 ""，故用 `or` 链式回退，否则
+    一个空的 function_description 键会挡住已填的 failure_mode/input_text。
+    """
+    if trigger_type == "failure_mode":
+        return context.get("function_description") or context.get("input_text") or ""
+    if trigger_type in ("dfmea_tool", "dfmea_trend", "pfmea_tool", "pfmea_trend"):
+        return (
+            context.get("task")
+            or context.get("fmea_title")
+            or context.get("team")
+            or context.get("input_text")
+            or ""
+        )
+    return context.get("failure_mode") or context.get("input_text") or ""
+
+
 @router.post("/{fmea_id}/recommend", response_model=RecommendResponse)
 async def recommend(
     fmea_id: uuid.UUID,
@@ -281,15 +304,12 @@ async def recommend(
 
     # Early-return when there is no usable anchor text. The anchor depends on
     # the trigger type: failure_mode is derived from function_description, while
-    # effect/cause/measure/optimization are derived from failure_mode. input_text
+    # effect/cause/measure/optimization/prevention_control/detection_control are derived from failure_mode. input_text
     # (what the user typed in the cell) is a last-resort fallback.
     # NOTE: dict.get("k", default) returns the stored value even when it is "" —
     # so we chain with `or` instead, otherwise an empty function_description key
     # would gate effect/cause triggers even when failure_mode is filled.
-    if request.trigger_type == "failure_mode":
-        anchor = request.context.get("function_description") or request.context.get("input_text") or ""
-    else:
-        anchor = request.context.get("failure_mode") or request.context.get("input_text") or ""
+    anchor = _recommend_anchor(request.trigger_type, request.context)
     if len(anchor) < 2:
         return RecommendResponse(
             suggestions=[], source="rule", cached=False,
@@ -300,7 +320,7 @@ async def recommend(
     llm = getattr(fastapi_request.app.state, "llm_provider", None)
     llm_timeout = getattr(fastapi_request.app.state, "llm_timeout", None)
     service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo, llm_timeout=llm_timeout)
-    result = await service.recommend(fmea_id, request, scope.user)
+    result = await service.recommend(fmea_id, request, scope.user, scope)
     await db.commit()
     return result
 

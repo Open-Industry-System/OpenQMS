@@ -1,12 +1,15 @@
 import client from "./client";
 import type {
   FMEAVersion,
+  FMEAVersionDetail,
   CPVersion,
+  CPVersionDetail,
   VersionListResponse,
   FMEACompareResponse,
   CPCompareResponse,
   VerifyResponse,
   SyncPreviewResponse,
+  RollbackResponse,
 } from "../types";
 
 // --- FMEA Version APIs ---
@@ -27,7 +30,7 @@ export async function getFMEAVersion(
   fmeaId: string,
   major: number,
   minor: number
-): Promise<FMEAVersion> {
+): Promise<FMEAVersionDetail> {
   const resp = await client.get(
     `/fmea/${fmeaId}/versions/${major}/${minor}`
   );
@@ -40,7 +43,7 @@ export async function createFMEAVersion(
     change_summary: string;
     is_major?: boolean;
   }
-): Promise<FMEAVersion> {
+): Promise<FMEAVersionDetail> {
   const resp = await client.post(`/fmea/${fmeaId}/versions`, data);
   return resp.data;
 }
@@ -50,7 +53,7 @@ export async function rollbackFMEAVersion(
   major: number,
   minor: number,
   data: { reason: string }
-): Promise<FMEAVersion> {
+): Promise<RollbackResponse> {
   const resp = await client.post(
     `/fmea/${fmeaId}/versions/${major}/${minor}/rollback`,
     data
@@ -100,7 +103,7 @@ export async function getCPVersion(
   cpId: string,
   major: number,
   minor: number
-): Promise<CPVersion> {
+): Promise<CPVersionDetail> {
   const resp = await client.get(
     `/control-plans/${cpId}/versions/${major}/${minor}`
   );
@@ -113,7 +116,7 @@ export async function createCPVersion(
     change_summary: string;
     is_major?: boolean;
   }
-): Promise<CPVersion> {
+): Promise<CPVersionDetail> {
   const resp = await client.post(`/control-plans/${cpId}/versions`, data);
   return resp.data;
 }
@@ -123,7 +126,7 @@ export async function rollbackCPVersion(
   major: number,
   minor: number,
   data: { reason: string }
-): Promise<CPVersion> {
+): Promise<RollbackResponse> {
   const resp = await client.post(
     `/control-plans/${cpId}/versions/${major}/${minor}/rollback`,
     data

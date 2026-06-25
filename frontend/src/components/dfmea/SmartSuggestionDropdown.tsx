@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Input, Dropdown, Tag, Spin, Alert, Typography, Radio } from "antd";
-import { BulbOutlined, StarOutlined, SettingOutlined, GlobalOutlined } from "@ant-design/icons";
+import { Input, Dropdown, Tag, Spin, Button, Typography, Radio } from "antd";
+import { BulbOutlined, StarOutlined, SettingOutlined, GlobalOutlined, CloseOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { getRecommendations, type Suggestion, type RecommendResponse } from "../../api/recommendation";
 import { usePermission } from "../../hooks/usePermission";
@@ -10,14 +10,14 @@ import type { ModuleKey } from "../../hooks/usePermission";
 const { Text } = Typography;
 
 interface SmartSuggestionDropdownProps {
-  triggerType: "failure_mode" | "failure_effect" | "failure_cause" | "measure" | "optimization";
+  triggerType: "failure_mode" | "failure_effect" | "failure_cause" | "measure" | "optimization" | "prevention_control" | "detection_control";
   context: Record<string, unknown>;
   fmeaId: string;
   onSelect: (suggestion: Suggestion) => void;
   disabled?: boolean;
   value?: string;
   onChange?: (value: string) => void;
-  scope?: "global" | "current_product_line";
+  scope?: "global" | "current_product_type" | "current_product_line";
 }
 
 // Module-scope helpers (defined once, not re-created each render) so the
@@ -53,8 +53,11 @@ const confidenceLabel = (c: number, t: TFunc) => {
 const sourceIcon = (s: string) =>
   s === "llm" ? <StarOutlined style={{ color: "#722ed1" }} /> : <SettingOutlined style={{ color: "#1890ff" }} />;
 
-const scopeLabel = (s: "global" | "current_product_line", t: TFunc) =>
-  s === "global" ? t("smartSuggestion.scopeGlobal") : t("smartSuggestion.scopeLocal");
+const scopeLabel = (s: "global" | "current_product_type" | "current_product_line", t: TFunc) => {
+  if (s === "global") return t("smartSuggestion.scopeGlobal");
+  if (s === "current_product_type") return t("smartSuggestion.scopeProductType");
+  return t("smartSuggestion.scopeLocal");
+};
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -78,8 +81,8 @@ export default function SmartSuggestionDropdown({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const abortRef = useRef<AbortController>();
   const [selectedIndex, setSelectedIndex] = useState(-1);
-  const [scope, setScope] = useState<"global" | "current_product_line">(externalScope || "global");
-  const [effectiveScope, setEffectiveScope] = useState<"global" | "current_product_line">("global");
+  const [scope, setScope] = useState<"global" | "current_product_type" | "current_product_line">(externalScope || "current_product_type");
+  const [effectiveScope, setEffectiveScope] = useState<"global" | "current_product_type" | "current_product_line">("global");
 
   const { canView } = usePermission();
   const hasKgPermission = canView("knowledge_graph" as ModuleKey);
@@ -112,7 +115,7 @@ export default function SmartSuggestionDropdown({
         setLlmAvailable(res.llm_available);
         setFallback(res.source === "rule_fallback");
         setEffectiveScope(res.effective_scope);
-        setOpen(res.suggestions.length > 0);
+        setOpen(true);
         setSelectedIndex(-1);
       } catch (e: unknown) {
         if (axios.isCancel(e)) return; // ignore superseded requests
@@ -133,7 +136,7 @@ export default function SmartSuggestionDropdown({
     [fmeaId, triggerType, context, scope, t]
   );
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const val = e.target.value;
     onChange?.(val);
     setError(null);
@@ -162,9 +165,11 @@ export default function SmartSuggestionDropdown({
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setSelectedIndex((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === "Enter" && selectedIndex >= 0) {
+    } else if (e.key === "Enter") {
+      // TextArea inserts a newline on Enter by default; suppress it while the
+      // suggestion dropdown is open so Enter confirms a selection, not a line break.
       e.preventDefault();
-      handleSelect(suggestions[selectedIndex]);
+      if (selectedIndex >= 0) handleSelect(suggestions[selectedIndex]);
     } else if (e.key === "Escape") {
       setOpen(false);
     }
@@ -181,6 +186,12 @@ export default function SmartSuggestionDropdown({
     <div
       style={{
         width: 360,
+        // Cap height to the viewport so antd's autoAdjustOverflow can always
+        // fit the popup (it opens upward when below has no room). Without this,
+        // a tall popup flipped upward has its top clipped above the viewport
+        // and the page can't scroll to it. Overflow scrolls inside the popup.
+        maxHeight: "calc(100vh - 80px)",
+        overflowY: "auto",
         background: "var(--qf-bg-panel)",
         border: "1px solid var(--qf-border-strong)",
         borderRadius: "var(--qf-radius-md)",
@@ -188,6 +199,24 @@ export default function SmartSuggestionDropdown({
         color: "var(--qf-text-primary)",
       }}
     >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          padding: "2px 4px",
+          borderBottom: "1px solid var(--qf-border)",
+        }}
+      >
+        <Button
+          type="text"
+          size="small"
+          icon={<CloseOutlined />}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+          aria-label={t("smartSuggestion.close")}
+          title={t("smartSuggestion.close")}
+        />
+      </div>
       {error && (
         <div
           style={{
@@ -231,6 +260,7 @@ export default function SmartSuggestionDropdown({
           className="qf-radio-group"
         >
           <Radio.Button value="global"><GlobalOutlined /> {t("smartSuggestion.global")}</Radio.Button>
+          <Radio.Button value="current_product_type">{t("smartSuggestion.currentProductType")}</Radio.Button>
           <Radio.Button value="current_product_line">{t("smartSuggestion.currentProductLine")}</Radio.Button>
         </Radio.Group>
         {!hasKgPermission && (
@@ -244,35 +274,42 @@ export default function SmartSuggestionDropdown({
           </Text>
         )}
       </div>
-      {suggestions.map((s, i) => (
-        <div
-          key={`${s.source}-${s.name}-${i}`}
-          onClick={() => handleSelect(s)}
-          style={{
-            padding: "8px 12px",
-            cursor: "pointer",
-            background: i === selectedIndex ? "var(--qf-bg-hover)" : "transparent",
-            borderBottom: i < suggestions.length - 1 ? "1px solid var(--qf-divider)" : "none",
-            transition: "background var(--qf-transition-fast)",
-          }}
-          onMouseEnter={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
-          onMouseLeave={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "transparent"; }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {sourceIcon(s.source)}
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, color: "var(--qf-text-primary)" }}>{s.name}</div>
-              {s.explanation && (
-                <Text type="secondary" style={{ fontSize: 11, color: "var(--qf-text-secondary)" }}>
-                  {s.explanation}
-                </Text>
-              )}
-              <div><SourceTag item={s} t={t} /></div>
+      <div
+        style={{
+          maxHeight: 240,
+          overflowY: "auto",
+        }}
+      >
+        {suggestions.map((s, i) => (
+          <div
+            key={`${s.source}-${s.name}-${i}`}
+            onClick={() => handleSelect(s)}
+            style={{
+              padding: "8px 12px",
+              cursor: "pointer",
+              background: i === selectedIndex ? "var(--qf-bg-hover)" : "transparent",
+              borderBottom: i < suggestions.length - 1 ? "1px solid var(--qf-divider)" : "none",
+              transition: "background var(--qf-transition-fast)",
+            }}
+            onMouseEnter={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
+            onMouseLeave={(e) => { if (i !== selectedIndex) e.currentTarget.style.background = "transparent"; }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {sourceIcon(s.source)}
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: "var(--qf-text-primary)" }}>{s.name}</div>
+                {s.explanation && (
+                  <Text type="secondary" style={{ fontSize: 11, color: "var(--qf-text-secondary)" }}>
+                    {s.explanation}
+                  </Text>
+                )}
+                <div><SourceTag item={s} t={t} /></div>
+              </div>
+              {confidenceLabel(s.confidence, t)}
             </div>
-            {confidenceLabel(s.confidence, t)}
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 
@@ -284,16 +321,30 @@ export default function SmartSuggestionDropdown({
       placement="bottomLeft"
     >
       <div style={{ position: "relative" }}>
-        <Input
+        <Input.TextArea
           value={value}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 200)}
           disabled={disabled}
-          suffix={loading ? <Spin size="small" /> : <BulbOutlined style={{ color: "#faad14" }} />}
-          style={{ width: "100%" }}
+          autoSize={{ minRows: 1, maxRows: 6 }}
+          style={{ width: "100%", resize: "none", padding: "4px 28px 4px 11px" }}
         />
+        {/* Suffix indicator (Input.TextArea has no suffix prop) — pinned to
+            bottom-right so long content wraps and the row grows to fit it. */}
+        <span
+          style={{
+            position: "absolute",
+            right: 8,
+            bottom: 4,
+            pointerEvents: "none",
+            lineHeight: 1,
+            color: "#faad14",
+          }}
+        >
+          {loading ? <Spin size="small" /> : <BulbOutlined />}
+        </span>
       </div>
     </Dropdown>
   );

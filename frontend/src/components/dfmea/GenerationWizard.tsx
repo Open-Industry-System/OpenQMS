@@ -1,9 +1,11 @@
 import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Modal, Steps, Button, Input, Card, Tag, Space, Table, Typography, Empty, InputNumber, Result } from 'antd';
+import { Modal, Steps, Button, Input, Card, Tag, Space, Table, Typography, Empty, InputNumber, Result, DatePicker } from 'antd';
 import { PlusOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import type { GraphNode, GraphEdge } from '../../types';
 import { useDfmeaRules } from '../../utils/dfmeaRules';
+import type { ReactNode } from 'react';
+import { rangeToTimeframe, timeframeToRange } from '../../utils/wizardTimeframe';
 
 const { Title, Paragraph } = Typography;
 
@@ -110,6 +112,15 @@ function generateSkeleton(data: WizardData): { nodes: GraphNode[]; edges: GraphE
   return { nodes, edges };
 }
 
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <div style={{ marginBottom: 4 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
 export default function GenerationWizard({ open, onCancel, onComplete }: GenerationWizardProps) {
   const { t } = useTranslation('dfmea');
   const { generateFailureModes, suggestFailureChain, analyzeRisk, suggestMeasures } = useDfmeaRules();
@@ -176,11 +187,25 @@ export default function GenerationWizard({ open, onCancel, onComplete }: Generat
             <Title level={5}>{t('wizard.scope.title')}</Title>
             <Paragraph>{t('wizard.scope.description')}</Paragraph>
             <div style={{ display: 'grid', gap: 12 }}>
-              <Input placeholder={t('wizard.scope.team')} value={data.scope.team} onChange={(e) => updateData({ scope: { ...data.scope, team: e.target.value } })} />
-              <Input placeholder={t('wizard.scope.timeframe')} value={data.scope.timeframe} onChange={(e) => updateData({ scope: { ...data.scope, timeframe: e.target.value } })} />
-              <Input placeholder={t('wizard.scope.tool')} value={data.scope.tool} onChange={(e) => updateData({ scope: { ...data.scope, tool: e.target.value } })} />
-              <Input placeholder={t('wizard.scope.task')} value={data.scope.task} onChange={(e) => updateData({ scope: { ...data.scope, task: e.target.value } })} />
-              <Input placeholder={t('wizard.scope.trend')} value={data.scope.trend} onChange={(e) => updateData({ scope: { ...data.scope, trend: e.target.value } })} />
+              <Field label={t('wizard.scope.team')}>
+                <Input value={data.scope.team} onChange={(e) => updateData({ scope: { ...data.scope, team: e.target.value } })} />
+              </Field>
+              <Field label={t('wizard.scope.timeframe')}>
+                <DatePicker.RangePicker
+                  style={{ width: '100%' }}
+                  value={timeframeToRange(data.scope.timeframe)}
+                  onChange={(range) => updateData({ scope: { ...data.scope, timeframe: rangeToTimeframe(range) } })}
+                />
+              </Field>
+              <Field label={t('wizard.scope.tool')}>
+                <Input value={data.scope.tool} onChange={(e) => updateData({ scope: { ...data.scope, tool: e.target.value } })} />
+              </Field>
+              <Field label={t('wizard.scope.task')}>
+                <Input value={data.scope.task} onChange={(e) => updateData({ scope: { ...data.scope, task: e.target.value } })} />
+              </Field>
+              <Field label={t('wizard.scope.trend')}>
+                <Input value={data.scope.trend} onChange={(e) => updateData({ scope: { ...data.scope, trend: e.target.value } })} />
+              </Field>
             </div>
           </div>
         );

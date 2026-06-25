@@ -461,7 +461,7 @@ export function deleteSubtree(
   const usedBySurvivors = new Set<string>();
   for (const r of survivingRows) {
     usedBySurvivors.add(r.failureModeNodeId);
-    if (r.failureEffectNodeId) usedBySurvivors.add(r.failureEffectNodeId);
+    r.failureEffectNodeIds.forEach((id) => usedBySurvivors.add(id));
     if (r.failureCauseNodeId) usedBySurvivors.add(r.failureCauseNodeId);
     r.preventionControlIds.forEach((id) => usedBySurvivors.add(id));
     r.detectionControlIds.forEach((id) => usedBySurvivors.add(id));
@@ -475,7 +475,7 @@ export function deleteSubtree(
     if (!subtree.has(r.functionNodeId)) continue;
     for (const id of [
       r.failureModeNodeId,
-      r.failureEffectNodeId,
+      ...r.failureEffectNodeIds,
       r.failureCauseNodeId,
       ...r.preventionControlIds,
       ...r.detectionControlIds,

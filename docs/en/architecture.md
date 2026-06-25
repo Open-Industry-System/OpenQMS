@@ -41,7 +41,7 @@ OpenQMS/
 │   │   ├── main.py          # FastAPI app entry, route registration, middleware
 │   │   └── seed.py          # Demo data seed script
 │   ├── alembic/             # Database migrations
-│   └── tests/               # Manual tests (no pytest framework)
+│   └── tests/               # pytest backend tests (factory_id fixtures + multi-module regression)
 ├── frontend/
 │   ├── src/
 │   │   ├── api/             # Axios instance + per-module API functions
@@ -169,6 +169,7 @@ See [Permissions Reference](permissions.md).
 | `user_product_lines` | User-product line scope | UUID |
 | `factories` | Factories | UUID |
 | `product_lines` | Product lines | UUID |
+| `product_types` | Product type master data (shared across factories, referenced by product_lines) | String (code) |
 | `fmea_documents` | FMEA documents (JSONB graph_data) | UUID |
 | `capa_eightd` | 8D/CAPA reports | UUID |
 | `audit_logs` | Audit logs | UUID |
@@ -242,7 +243,7 @@ All API endpoint paths start with `/api/`. Authentication uses Bearer Token (JWT
 
 | Limitation | Description |
 |------------|-------------|
-| No test framework | Backend uses manual `test_schema.py`; frontend has no tests |
+| No test framework | ~~Backend uses manual `test_schema.py`; frontend has no tests~~ Backend migrated to pytest (factory_id fixtures, multi-module regression, API guard tests); frontend covered by vitest for key utils/pages; some legacy modules still need fixture backfill |
 | Frontend does not auto-refresh tokens | Backend has `/api/auth/refresh`, but the frontend does not call it automatically; users must re-login after 120 minutes |
 | No login rate limiting | Login endpoint has no rate limiting |
 | Redis not used | Configured but caching logic is not implemented |

@@ -18,7 +18,7 @@ export interface Suggestion {
 export interface RecommendRequest {
   trigger_type: string;
   context: Record<string, unknown>;
-  scope?: "global" | "current_product_line";
+  scope?: "global" | "current_product_type" | "current_product_line";
   include_graph?: boolean;
 }
 
@@ -28,7 +28,7 @@ export interface RecommendResponse {
   cached: boolean;
   llm_available: boolean;
   graph_match_count: number;
-  effective_scope: "global" | "current_product_line";
+  effective_scope: "global" | "current_product_type" | "current_product_line";
 }
 
 export async function getRecommendations(
@@ -36,6 +36,15 @@ export async function getRecommendations(
   request: RecommendRequest,
   signal?: AbortSignal
 ): Promise<RecommendResponse> {
-  const { data } = await client.post(`/fmea/${fmeaId}/recommend`, request, { signal });
+  // The global axios client timeout is 10s, but the backend recommendation
+  // pipeline's LLM leg is bounded by llm_timeout (clamped >=15s; real Ark call
+  // ~9-15s). A 10s timeout aborts the request before the backend finishes, so
+  // the caller's catch block fires ("AI recommend failed"). Override per-request
+  // to wait long enough for the backend to self-bound. Must exceed the
+  // configured llm_timeout (see /admin/ai-config); 45s covers 15-30s + buffer.
+  const { data } = await client.post(`/fmea/${fmeaId}/recommend`, request, {
+    signal,
+    timeout: 45000,
+  });
   return data;
 }

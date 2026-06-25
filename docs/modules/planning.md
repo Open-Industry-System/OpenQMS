@@ -1,6 +1,6 @@
 # 前期策划模块 — 用户手册
 
-> 最后更新: 2026-06-13 | 适用版本: OpenQMS v1.0
+> 最后更新: 2026-06-25 | 适用版本: OpenQMS v1.0
 
 ---
 
@@ -10,7 +10,7 @@
 
 | 子模块 | 路由 | ModuleKey | 功能范围 |
 |--------|------|-----------|----------|
-| FMEA | `/fmea`, `/fmea/:id` | fmea | DFMEA/PFMEA 新建、编辑、审批、归档 |
+| FMEA | `/fmea`, `/fmea/:id`, `/fmea/pfmea-wizard/:id` | fmea | DFMEA/PFMEA 新建、编辑、审批、归档；PFMEA 七步法生成向导 |
 | 控制计划 | `/control-plans`, `/control-plans/:id` | planning | 从 PFMEA 导入、编辑、审批、版本管理 |
 | APQP | `/apqp`, `/apqp/:id` | planning | 5 阶段门径管理、交付物关联 |
 | PPAP | `/ppap`, `/ppap/:id` | ppap | 18 要素提交、审批、驳回、重新提交 |
@@ -130,6 +130,8 @@ FMEA 节点通过 `classification` 字段标记特殊特性：
 3. 系统自动生成文档编号（`PFMEA-2026-XXX` 或 `DFMEA-2026-XXX`）
 4. 初始状态为 `draft`
 
+> 也可在创建后通过列表页「进入向导」入口使用七步法生成向导（见 3.2.4）完成建模。
+
 #### 3.2.2 编辑 FMEA 图谱
 
 1. 在 FMEA 列表点击文档编号进入编辑页 `/fmea/:id`
@@ -160,6 +162,39 @@ archived    in_review
 
 > **审批限制**：仅 `admin` 和 `manager` 角色可将 FMEA 推进到 `approved` 状态。
 
+#### 3.2.4 七步法生成向导
+
+PFMEA 与 DFMEA 均提供引导式生成向导，将 AIAG-VDA 七步法分解为可逐步完成的交互流程，降低手工建模成本。
+
+**PFMEA 向导**（`/fmea/pfmea-wizard/:id`）：
+
+| 步骤 | 名称 | 内容 |
+|:----:|------|------|
+| 0 | 范围定义 | 5T 工具/趋势标签 + 时间区间 + 范围边界 |
+| 1 | 结构分析 | `PFMEAWizardSidebar` 过程项 / 工序 / 作业元素树；结构树拖拽排序（`@dnd-kit`） |
+| 2 | 功能分析 | `FunctionTreeEditor` 三级功能树 + `FUNCTION_MAPPED_TO` 边 + CC/SC 标记 |
+| 3 | 失效分析 | 在 ProcessStepFunction 上构建 FE-FM-FC 失效链，4M 语境（人/机/料/法） |
+| 4 | 风险分析 | `RiskTable`：severity 取层级 max、CC/SC 只读聚合、O/D 门禁；Step 4 上下文前置 |
+| 5 | 优化 | AP=H 的失效模式自动生成推荐措施；PC/DC 创建前置 |
+| 6 | 结果文档化 | 确认完成门禁（`usePfmeaWizardValidation`：4M/OP 门禁、3 级严重度、CC/SC 感知） |
+
+向导内置级联删除（`wizardCascadeDelete`），删除共享控制/措施节点时会校验是否被其他行引用。
+
+**DFMEA 向导** 增强：时间区间改用 `DatePicker.RangePicker`；5T 工具/趋势由 AI 推荐（`pfmea_tool` / `pfmea_trend` 触发器 + 4M 规则内容）；Step 3 AI 推荐（`SmartSuggestionDropdown` 接后端触发器）；Step 5 风险分析承载 Step 4 上下文与 PC/DC 创建前置；PC/DC AI 推荐；`ToolStructureGuide` 工具结构引导卡。
+
+> **权限**：向导写入受 `fmea` 模块 `EDIT (3)` 权限约束；列表页仅对 `draft` 状态文档开放「进入向导」入口。
+
+#### 3.2.5 删除 FMEA
+
+仅 `draft` 与 `rework` 状态的 FMEA 文档可删除：
+
+- 列表页（`FMEAListPage`）对上述状态显示删除按钮；其他状态不开放入口
+- 后端状态守卫：非 `draft` / `rework` 返回 400「只能删除草稿或返工状态的FMEA」
+- 删除前执行 `_null_out_fmea_references`：将 `control_plan`、`capa_eightd` 等关联记录的 FMEA 外键置空，避免外键约束导致的 `IntegrityError` → 500
+- 删除操作写入审计日志
+
+> **权限**：删除受 `fmea` 模块 `EDIT (3)` 权限约束；已审批 / 归档文档不可删除，需先退回 `rework`。
+
 ### 3.3 版本管理
 
 FMEA 支持版本快照：每次审批通过时自动创建版本记录（`fmea_versions` 表），包含：
@@ -168,6 +203,8 @@ FMEA 支持版本快照：每次审批通过时自动创建版本记录（`fmea_
 - **完整图谱快照**（`snapshot` JSONB）
 - **SHA-256 哈希**（`sha256_hash`），用于完整性校验
 - **变更摘要和类型**（`change_summary`, `change_type`）
+
+**版本快照只读查看器**：编辑器顶部版本历史中可切换查看任一历史版本，进入只读模式（`viewingVersion` 状态，`FMEAVersionSnapshot` 组件），完整还原该版本图谱而不影响当前可编辑态。控制计划编辑器提供对等的 `CPVersionSnapshot` 只读查看器。
 
 ### 3.4 FMEA 与控制计划的关联
 

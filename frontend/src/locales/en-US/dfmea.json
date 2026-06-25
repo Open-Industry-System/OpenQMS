@@ -17,7 +17,29 @@
       "timeframe": "Timeframe",
       "tool": "Tool",
       "task": "Task",
-      "trend": "Trend"
+      "trend": "Trend",
+      "legacyTimeframe": "Legacy value: {{value}} (re-select to update)",
+      "toolPresets": ["Boundary Diagram", "Parameter Diagram (P-Diagram)", "Interface Matrix", "Function Analysis", "Fault Tree Analysis (FTA)", "DFMEA Template", "Lessons Learned Library"],
+      "trendPresets": ["Historical FMEA", "Field/Warranty Data", "Customer Complaints", "CAPA Records", "Recall/Regulatory Data", "Audit Findings", "Design Change History"],
+      "aiRecommend": "✨ AI Recommend",
+      "aiRecommendLoading": "Recommending…",
+      "aiRecommendEmpty": "No AI suggestions",
+      "aiRecommendFailed": "AI recommendation failed, please retry",
+      "toolStructureMap": {
+        "边界图": "Interface",
+        "接口矩阵": "Interface",
+        "P图/参数图": "DesignParameter",
+        "Boundary Diagram": "Interface",
+        "Interface Matrix": "Interface",
+        "Parameter Diagram (P-Diagram)": "DesignParameter"
+      },
+      "toolGuide": {
+        "Interface": "You selected [{{tool}}]. Consider creating Interface nodes for components to record physical/signal/energy interfaces.",
+        "DesignParameter": "You selected [{{tool}}]. Consider creating DesignParameter nodes to define ideal/non-ideal responses and control factors."
+      },
+      "toolGuideNeedStructure": "Please create a system/component in the structure tree first, then add interface/parameter nodes.",
+      "addInterfaceNode": "+ Add interface node",
+      "addDesignParameterNode": "+ Add parameter node"
     },
     "structure": {
       "title": "Structure Analysis",
@@ -55,7 +77,9 @@
       "addFailureMode": "+ Add Failure Mode",
       "addFunction": "+ Add Function",
       "delete": "Delete",
-      "newFailureMode": "New Failure Mode"
+      "newFailureMode": "New Failure Mode",
+      "preventionControl": "Prevention Control",
+      "detectionControl": "Detection Control"
     },
     "risk": {
       "title": "Risk Analysis",
@@ -66,13 +90,33 @@
       "rpn": "RPN",
       "ap": "AP",
       "mustOptimize": "Must optimize",
-      "empty": "No failure chains yet — create them in the Failure Analysis step first"
+      "empty": "No failure chains yet — create them in the Failure Analysis step first",
+      "missingControlHint": "Some failure chains have empty prevention/detection controls — fill them in the Failure Analysis step first.",
+      "controlsFirst": "Fill controls first"
     },
     "optimization": {
       "title": "Optimization Measures",
       "noOptimization": "No Mandatory Optimization",
       "noOptimizationHint": "All failure modes have AP other than H; current risk is acceptable.",
       "mustOptimize": "The following {{count}} items have AP=H and require optimization measures:",
+      "apBadge": "AP H",
+      "measure": "Optimization Measure",
+      "measurePlaceholder": "Suggested prevention / detection optimization",
+      "responsible": "Responsible",
+      "responsiblePlaceholder": "Responsible person",
+      "dueDate": "Target Completion Date",
+      "status": "Status",
+      "actionTaken": "Evidence-Based Action Taken",
+      "actionTakenPlaceholder": "Action taken and supporting evidence",
+      "completionDate": "Completion Date",
+      "revisedRatings": "Revised S / O / D",
+      "revisedAp": "AP After Action",
+      "statusOptions": {
+        "undecided": "Undecided",
+        "planned": "Planned (not executed)",
+        "done": "Completed",
+        "notExecuted": "Not executed"
+      },
       "preventionPlaceholder": "Prevention measure",
       "detectionPlaceholder": "Detection measure"
     },
@@ -111,9 +155,11 @@
       "confirmEmptyDraftOk": "Discard and Delete",
       "confirmEmptyDraftCancel": "Continue Editing",
       "finishFailed": "Failed to finish. Please try again.",
+      "loadFailed": "Failed to load DFMEA data",
       "conflictTitle": "Document Modified",
       "conflictContent": "This FMEA was modified by another session. Reload is required before editing. Your unsaved local changes will be discarded.",
-      "conflictReload": "Reload"
+      "conflictReload": "Reload",
+      "structureGap": "You selected [{{tool}}] but no attached {{nodeType}} node exists. Consider adding one to reflect that analysis method."
     },
     "guidance": {
       "step0": {
@@ -234,10 +280,12 @@
   },
   "smartSuggestion": {
     "global": "Global Experience",
+    "currentProductType": "Same Product Type",
     "currentProductLine": "Current Product Line Only",
     "noGlobalPermission": "(No global permission, current product line only)",
     "actualScope": "Actual scope: {{scope}}",
     "scopeGlobal": "Global",
+    "scopeProductType": "Same Product Type",
     "scopeLocal": "Current Product Line Only",
     "ruleEngine": "Rule Engine",
     "aiGenerated": "AI Generated",
@@ -252,7 +300,8 @@
     "noPermission": "No permission to use recommendations",
     "serviceUnavailable": "Recommendation service unavailable",
     "aiUnavailable": "AI suggestions unavailable, rule engine fallback used",
-    "ruleOnlyMode": "Rule engine only mode"
+    "ruleOnlyMode": "Rule engine only mode",
+    "close": "Close"
   },
   "structureTree": {
     "addSystem": "Add System",

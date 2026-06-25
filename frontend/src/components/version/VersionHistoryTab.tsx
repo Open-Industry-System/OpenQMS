@@ -39,7 +39,7 @@ export default function VersionHistoryTab({
   const [loading, setLoading] = useState(true);
   const [majorOnly, setMajorOnly] = useState(true);
 
-  const getChangeTypeConfig = (changeType: string): { label: string; color: string } => {
+  const getChangeTypeConfig = (changeType: string | null): { label: string; color: string } => {
     switch (changeType) {
       case "submit":
         return { label: t("history.changeTypes.submit"), color: "blue" };
@@ -52,7 +52,7 @@ export default function VersionHistoryTab({
       case "fmea_sync":
         return { label: t("history.changeTypes.fmea_sync"), color: "purple" };
       default:
-        return { label: changeType, color: "default" };
+        return { label: changeType ?? "", color: "default" };
     }
   };
 

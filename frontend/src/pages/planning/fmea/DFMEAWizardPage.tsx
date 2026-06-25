@@ -1,19 +1,38 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, Table, InputNumber, Result } from 'antd';
-import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empty, Table, InputNumber, Result, DatePicker, Select, Row, Col } from 'antd';
+import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined, BulbOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import dayjs from 'dayjs';
 import { getFMEA, deleteFMEA } from '../../../api/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { useWizardValidation } from '../../../hooks/useWizardValidation';
 import { useDfmeaRules } from '../../../utils/dfmeaRules';
-import { buildRows, type FMEARow } from '../../../utils/fmeaTable';
+import { calculateAP } from '../../../utils/fmea';
+import { buildRows, getRowSeverity, getProcessChain, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
 import WizardGuidanceCard from '../../../components/dfmea/WizardGuidanceCard';
+import ScopeTagField from '../../../components/dfmea/ScopeTagField';
+import SmartSuggestionDropdown from '../../../components/dfmea/SmartSuggestionDropdown';
+import type { ReactNode } from 'react';
+import { rangeToTimeframe, timeframeToRange } from '../../../utils/wizardTimeframe';
+import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
+import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type StructureNodeType } from '../../../utils/wizardToolStructure';
+import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
+import { createWizardFailureChain, ensureCauseControls } from '../../../utils/wizardGraphNormalize';
 
 const { Title, Paragraph } = Typography;
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <div style={{ marginBottom: 4 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
 
 export default function DFMEAWizardPage() {
   const { id: fmeaId } = useParams<{ id: string }>();
@@ -27,13 +46,49 @@ export default function DFMEAWizardPage() {
   const [wizardScope, setWizardScope] = useState<WizardScope>({});
   const [currentStep, setCurrentStep] = useState(0);
   const [conflictOpen, setConflictOpen] = useState(false);
-  const completedSteps = useRef(new Set<number>());
+
+  /** Steps whose data is already present in the loaded draft — used for the
+   *  sidebar's status checkmarks AND to derive how far forward the user may
+   *  jump. Derived from graph data (not a session ref) so it survives save →
+   *  exit → reopen: a saved draft's earlier steps stay navigable. */
+  const completedSteps = useMemo(() => {
+    const set = new Set<number>();
+    const hasScope = !!(wizardScope.team || wizardScope.timeframe || wizardScope.tool || wizardScope.task || wizardScope.trend);
+    const hasAny = nodes.length > 0;
+    const hasStructure = nodes.some(n => ['System', 'Subsystem', 'Component', 'Interface', 'DesignParameter'].includes(n.type));
+    const hasFunction = nodes.some(n => ['ProcessWorkElementFunction', 'ProcessItemFunction', 'ProcessStepFunction'].includes(n.type));
+    const hasFailure = nodes.some(n => n.type === 'FailureMode');
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const hasRating = buildRows(nodes, edges).some(r => {
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const dc = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
+      return getRowSeverity(r, nodeMap) > 0 || (cause?.occurrence ?? 0) > 0 || (dc?.detection ?? 0) > 0;
+    });
+    const hasOptimization = nodes.some(n => (n.type === 'PreventionControl' || n.type === 'DetectionControl') && (n.name ?? '').trim());
+    if (hasScope || hasAny) set.add(0);
+    if (hasStructure) set.add(1);
+    if (hasFunction) set.add(2);
+    if (hasFailure) set.add(3);
+    if (hasRating) set.add(4);
+    if (hasOptimization) set.add(5);
+    return set;
+  }, [nodes, edges, wizardScope]);
+
+  /** Furthest reached step + 1 — the step the user is about to work on next.
+   *  Forward sidebar jumps are allowed up to and including this step. */
+  const maxReachableStep = useMemo(() => {
+    let furthest = -1;
+    for (let i = 0; i <= 6; i++) if (completedSteps.has(i)) furthest = i;
+    return Math.min(furthest + 1, 6);
+  }, [completedSteps]);
 
   const { saveStatus, setLockVersion, debouncedSave, immediateSave, lastSavedHashRef } = useWizardSave({
     fmeaId: fmeaId!,
     onConflict: () => setConflictOpen(true),
   });
-  const validation = useWizardValidation(nodes, edges);
+  const toolStructureMap = t('wizard.scope.toolStructureMap', { returnObjects: true }) as Record<string, string>;
+  const selectedTools = parseScopeTokens(wizardScope.tool || '');
+  const validation = useWizardValidation(nodes, edges, selectedTools, toolStructureMap);
   const dfmeaRules = useDfmeaRules();
 
   // Refs for beforeunload handler — always hold latest values without re-registering listener
@@ -60,18 +115,39 @@ export default function DFMEAWizardPage() {
       const loadedNodes = doc.graph_data?.nodes || [];
       const loadedEdges = doc.graph_data?.edges || [];
       const loadedScope = doc.graph_data?.wizardScope || {};
-      setFmea(doc);
-      setNodes(loadedNodes);
-      setEdges(loadedEdges);
-      setWizardScope(loadedScope);
+      // setLockVersion FIRST: useWizardSave.lockVersionRef defaults to 0; if
+      // ensureCauseControls triggers immediateSave before this runs, the save
+      // would go out with lock_version:0 and 409.
       setLockVersion(doc.lock_version);
-      // Mark initial state as "clean" — hash captured at load time
+      // Baseline hash = pre-normalization loaded state (backend's current
+      // state). Kept as the "clean" reference; NOT overwritten with the
+      // normalized hash — see below.
       lastSavedHashRef.current = computeHash(loadedNodes, loadedEdges, loadedScope);
+      // Normalize legacy drafts: every FailureCause gets a PC + DC so Step 5's
+      // O/D editors always have a node to write to.
+      const { nodes: normNodes, edges: normEdges, changed } = ensureCauseControls(loadedNodes, loadedEdges);
+      setFmea(doc);
+      setNodes(normNodes);
+      setEdges(normEdges);
+      setWizardScope(loadedScope);
       setLoading(false);
-    }).catch(() => {
-      message.error('加载失败');
+      // If normalization added nodes/edges, persist the fix to the backend.
+      // Pass the NORMALIZED hash as dataHash: the save hook writes it into
+      // lastSavedHashRef only on SUCCESS (useWizardSave.ts:84). On failure,
+      // lastSavedHashRef stays at the pre-normalization baseline, so the live
+      // (normalized) state differs from it and beforeunload will warn — the
+      // user is not silently dropped despite the backend not being fixed.
+      if (changed) {
+        const normalizedHash = computeHash(normNodes, normEdges, loadedScope);
+        immediateSave({ nodes: normNodes, edges: normEdges, wizardScope: loadedScope }, doc.title, normalizedHash);
+      }
+    }).catch((err: unknown) => {
+      const e = err as { response?: { data?: { detail?: string } } };
+      message.error(e?.response?.data?.detail || t('wizard.page.loadFailed'));
       navigate('/fmea');
     });
+    // t 用于错误提示文案，但不应触发重载（否则切换语言会重拉文档、丢失未保存的 wizard 编辑）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fmeaId, navigate, setLockVersion, lastSavedHashRef]);
 
   // beforeunload warning — compare live state hash vs last-successfully-saved hash
@@ -96,9 +172,8 @@ export default function DFMEAWizardPage() {
   }, [debouncedSave, wizardScope, fmea?.title]);
 
   const goToStep = useCallback((step: number) => {
-    completedSteps.current.add(currentStep);
     setCurrentStep(step);
-  }, [currentStep]);
+  }, []);
 
   const handleFinish = async () => {
     const completedScope = { ...wizardScope, wizard_completed: true };
@@ -129,9 +204,24 @@ export default function DFMEAWizardPage() {
           navigate('/fmea');
         },
       });
-    } else {
-      navigate('/fmea');
+      return;
     }
+    // Non-empty draft: if there are unsaved changes (including a normalization
+    // save that failed/in-flight — lastSavedHashRef still at pre-normalization
+    // baseline while live state is normalized), confirm before leaving.
+    const liveHash = computeHash(nodesRef.current, edgesRef.current, scopeRef.current);
+    if (liveHash !== lastSavedHashRef.current) {
+      Modal.confirm({
+        title: t('wizard.page.confirmLeaveTitle', { defaultValue: '离开向导？' }),
+        content: t('wizard.page.confirmLeave', { defaultValue: '有未保存的更改，确定离开吗？' }),
+        okText: t('wizard.page.confirmLeaveOk', { defaultValue: '离开' }),
+        cancelText: t('wizard.page.confirmEmptyDraftCancel'),
+        okButtonProps: { danger: true },
+        onOk: () => navigate('/fmea'),
+      });
+      return;
+    }
+    navigate('/fmea');
   };
 
   const canFinish = validation.warnings.length === 0
@@ -148,20 +238,52 @@ export default function DFMEAWizardPage() {
   };
 
   // Step 0 — 5T Scope
-  const renderStep0 = () => (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <Input placeholder={t('wizard.scope.team')} value={wizardScope.team || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, team: e.target.value })} />
-      <Input placeholder={t('wizard.scope.timeframe')} value={wizardScope.timeframe || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, timeframe: e.target.value })} />
-      <Input placeholder={t('wizard.scope.tool')} value={wizardScope.tool || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, tool: e.target.value })} />
-      <Input placeholder={t('wizard.scope.task')} value={wizardScope.task || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, task: e.target.value })} />
-      <Input placeholder={t('wizard.scope.trend')} value={wizardScope.trend || ''}
-        onChange={e => updateGraphData(nodes, edges, { ...wizardScope, trend: e.target.value })} />
-    </div>
-  );
+  const renderStep0 = () => {
+    const legacyTimeframe =
+      wizardScope.timeframe && !timeframeToRange(wizardScope.timeframe) ? wizardScope.timeframe : null;
+    return (
+      <div style={{ display: 'grid', gap: 12 }}>
+        <Field label={t('wizard.scope.team')}>
+          <Input value={wizardScope.team || ''} onChange={e => updateGraphData(nodes, edges, { ...wizardScope, team: e.target.value })} />
+        </Field>
+        <Field label={t('wizard.scope.timeframe')}>
+          <DatePicker.RangePicker
+            style={{ width: '100%' }}
+            value={timeframeToRange(wizardScope.timeframe || '')}
+            onChange={(range) => updateGraphData(nodes, edges, { ...wizardScope, timeframe: rangeToTimeframe(range) })}
+          />
+          {legacyTimeframe && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t('wizard.scope.legacyTimeframe', { value: legacyTimeframe })}
+            </Typography.Text>
+          )}
+        </Field>
+        <Field label={t('wizard.scope.tool')}>
+          <ScopeTagField
+            value={wizardScope.tool || ''}
+            onChange={v => updateGraphData(nodes, edges, { ...wizardScope, tool: v })}
+            presets={t('wizard.scope.toolPresets', { returnObjects: true }) as string[]}
+            triggerType="dfmea_tool"
+            fmeaId={fmeaId!}
+            context={{ fmea_title: fmea?.title, product_line_code: fmea?.product_line_code ?? '', task: wizardScope.task || '', team: wizardScope.team || '' }}
+          />
+        </Field>
+        <Field label={t('wizard.scope.task')}>
+          <Input value={wizardScope.task || ''} onChange={e => updateGraphData(nodes, edges, { ...wizardScope, task: e.target.value })} />
+        </Field>
+        <Field label={t('wizard.scope.trend')}>
+          <ScopeTagField
+            value={wizardScope.trend || ''}
+            onChange={v => updateGraphData(nodes, edges, { ...wizardScope, trend: v })}
+            presets={t('wizard.scope.trendPresets', { returnObjects: true }) as string[]}
+            triggerType="dfmea_trend"
+            fmeaId={fmeaId!}
+            context={{ fmea_title: fmea?.title, product_line_code: fmea?.product_line_code ?? '', task: wizardScope.task || '', team: wizardScope.team || '' }}
+          />
+        </Field>
+      </div>
+    );
+  };
 
   // Step 1 — Structure Analysis
   const renderStep1 = () => {
@@ -193,6 +315,38 @@ export default function DFMEAWizardPage() {
 
     const typeLabel = (type: string) => t(`wizard.typeLabels.${type}`, { defaultValue: type });
     const TYPE_COLORS: Record<string, string> = { System: 'red', Subsystem: 'orange', Component: 'green', Interface: 'purple', DesignParameter: 'blue' };
+
+    const addAttachedParamNode = (nodeType: StructureNodeType, parentId?: string) => {
+      // Interface/DesignParameter 须通过 HAS_PARAMETER 依附结构节点（不复用 handleAddNode：
+      // 后者无 parent 建游离节点、CHILD_EDGE_TYPE 不含 HAS_PARAMETER）。
+      // 挂接逻辑由 wizardToolStructure 的纯函数承担（pickParamParent + buildAttachedParamNode），
+      // 便于单测；此处是薄包装。
+      // parentId 由结构卡片上的「+ 接口 / + 设计参数」按钮传入，让用户显式选择挂接到
+      // 哪个 System/Subsystem/Component；省略时回退到 pickParamParent 自动选取。
+      const parent = parentId ? nodes.find(n => n.id === parentId) : pickParamParent(nodes);
+      if (!parent) {
+        message.warning(t('wizard.scope.toolGuideNeedStructure'));
+        return;
+      }
+      const { node, edge } = buildAttachedParamNode(parent, nodeType, () => `w${crypto.randomUUID()}_${nodeType.toLowerCase()}`);
+      const newNode: GraphNode = { ...node, name: t(`wizard.typeLabels.${nodeType}`, { defaultValue: nodeType }) };
+      updateGraphData([...nodes, newNode], [...edges, edge]);
+    };
+
+    // 工具引导：所选结构类工具、且对应 nodeType 无 HAS_PARAMETER 挂接实例时，提示+一键创建。
+    // 挂接判定与 structureGapsForTools 一致：须 source 存在且为结构节点。
+    const attachedCount = (nodeType: StructureNodeType) =>
+      edges.filter(ed => ed.type === 'HAS_PARAMETER'
+        && nodes.find(nd => nd.id === ed.target)?.type === nodeType
+        && ['System', 'Subsystem', 'Component'].includes(nodes.find(nd => nd.id === ed.source)?.type ?? '')).length;
+    const guideNodeTypes: StructureNodeType[] = attachedCount('Interface') === 0 ? ['Interface'] : [];
+    if (attachedCount('DesignParameter') === 0) guideNodeTypes.push('DesignParameter');
+    const guideRows = guideNodeTypes
+      .map(nt => {
+        const tools = toolsRequiringNodeType(selectedTools, toolStructureMap, nt);
+        return tools.length > 0 ? { nodeType: nt, tool: tools[0] } : null;
+      })
+      .filter((r): r is { nodeType: StructureNodeType; tool: string } => r !== null);
 
     // Derive depth from graph edges (System=0, Subsystem=1, Component=2) so
     // every child — including Interface/DesignParameter, which carry no descent
@@ -226,15 +380,29 @@ export default function DFMEAWizardPage() {
       if (paramParentOf[node.id]) return depthOf(paramParentOf[node.id]) + 1;
       return 0;
     };
-    const orderedStructureNodes = [...structureNodes].sort(
-      (a, b) => depthOfAny(a) - depthOfAny(b),
-    );
+    // DFS order from edges: each parent immediately followed by its own
+    // subtree, so a subsystem's components render under *that* subsystem
+    // instead of the next one (depth-only sort grouped all components after
+    // all subsystems). depthOfAny still drives indentation (marginLeft).
+    const orderedStructureNodes = orderStructureNodes(structureNodes, edges);
 
     return (
       <div>
+        {guideRows.length > 0 && (
+          <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--qf-amber-dim)', border: '1px solid var(--qf-amber)', borderRadius: 'var(--qf-radius-md)' }}>
+            {guideRows.map(row => (
+              <div key={row.nodeType} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, color: 'var(--qf-text-primary)', fontSize: 13 }}>
+                <BulbOutlined style={{ color: 'var(--qf-amber)', flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>
+                  {t(`wizard.scope.toolGuide.${row.nodeType}`, { tool: row.tool })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         <Space style={{ marginBottom: 12 }}>
           <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddNode('System')}>{t('wizard.structure.addSystem')}</Button>
-          <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddNode('Interface')}>{t('wizard.structure.addInterface')}</Button>
+          <Button size="small" icon={<PlusOutlined />} onClick={() => addAttachedParamNode('Interface')}>{t('wizard.structure.addInterface')}</Button>
         </Space>
         {structureNodes.length === 0 && <Empty description={t('wizard.structure.empty')} />}
         {orderedStructureNodes.map(node => (
@@ -247,6 +415,16 @@ export default function DFMEAWizardPage() {
                 <Button size="small" onClick={() => handleAddNode(CHILD_TYPE[node.type], node.id)}>
                   + {typeLabel(CHILD_TYPE[node.type])}
                 </Button>
+              )}
+              {['System', 'Subsystem', 'Component'].includes(node.type) && (
+                <>
+                  <Button size="small" onClick={() => addAttachedParamNode('Interface', node.id)}>
+                    + {typeLabel('Interface')}
+                  </Button>
+                  <Button size="small" onClick={() => addAttachedParamNode('DesignParameter', node.id)}>
+                    + {typeLabel('DesignParameter')}
+                  </Button>
+                </>
               )}
               <Button size="small" danger onClick={() => handleDeleteNode(node.id)}>{t('wizard.structure.delete')}</Button>
             </Space>
@@ -303,29 +481,18 @@ export default function DFMEAWizardPage() {
 
   // Step 3 — Failure Analysis
   const renderStep3 = () => {
-    const { generateFailureModes, suggestFailureChain } = dfmeaRules;
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const processStep = (funcId: string) => getProcessChain(funcId, nodeMap, edges);
     const functions = nodes.filter(n => ['ProcessWorkElementFunction', 'ProcessItemFunction', 'ProcessStepFunction'].includes(n.type));
 
     if (functions.length === 0) return <Empty description={t('wizard.failure.title') + ' — ' + t('wizard.function.title')} />;
 
     const handleAddFailure = (funcId: string, mode?: string, effect?: string, cause?: string) => {
-      const fmId = `w${crypto.randomUUID()}_fm`;
-      const feId = `w${crypto.randomUUID()}_fe`;
-      const fcId = `w${crypto.randomUUID()}_fc`;
-      const dcId = `w${crypto.randomUUID()}_dc`;
-      const newNodes: GraphNode[] = [
-        { id: fmId, type: 'FailureMode', name: mode || t('wizard.failure.newFailureMode'), severity: 0, occurrence: 0, detection: 0 },
-        { id: feId, type: 'FailureEffect', name: effect || '', severity: 0, occurrence: 0, detection: 0 },
-        { id: fcId, type: 'FailureCause', name: cause || '', severity: 0, occurrence: 0, detection: 0 },
-        // DetectionControl created up-front so Step 4 D is editable and AP is computable.
-        { id: dcId, type: 'DetectionControl', name: t('wizard.optimization.detectionPlaceholder'), severity: 0, occurrence: 0, detection: 0 },
-      ];
-      const newEdges: GraphEdge[] = [
-        { source: funcId, target: fmId, type: 'HAS_FAILURE_MODE' },
-        { source: fmId, target: feId, type: 'EFFECT_OF' },
-        { source: fcId, target: fmId, type: 'CAUSE_OF' },
-        { source: fcId, target: dcId, type: 'DETECTED_BY' },
-      ];
+      const { newNodes, newEdges } = createWizardFailureChain(funcId);
+      // Override FM/FE/FC names when caller supplied explicit values (AI suggestions).
+      if (mode) { const fm = newNodes.find(n => n.type === 'FailureMode'); if (fm) fm.name = mode; }
+      if (effect) { const fe = newNodes.find(n => n.type === 'FailureEffect'); if (fe) fe.name = effect; }
+      if (cause) { const fc = newNodes.find(n => n.type === 'FailureCause'); if (fc) fc.name = cause; }
       updateGraphData([...nodes, ...newNodes], [...edges, ...newEdges]);
     };
 
@@ -341,29 +508,24 @@ export default function DFMEAWizardPage() {
       updateGraphData(nodes.map(n => n.id === nodeId ? { ...n, [field]: value } : n), edges);
     };
 
+    const handleUpdateControl = (causeId: string, type: 'prevention' | 'detection', value: string) => {
+      const edgeType = type === 'prevention' ? 'PREVENTED_BY' : 'DETECTED_BY';
+      const ctrlEdge = edges.find(e => e.source === causeId && e.type === edgeType);
+      if (!ctrlEdge) return; // ensureCauseControls (load) guarantees existence; guard anyway.
+      updateGraphData(
+        nodes.map(n => n.id === ctrlEdge.target ? { ...n, name: value } : n),
+        edges,
+      );
+    };
+
     return (
       <div>
         {functions.map(func => {
           const fmEdges = edges.filter(e => e.source === func.id && e.type === 'HAS_FAILURE_MODE');
           const fmNodes = fmEdges.map(e => nodes.find(n => n.id === e.target)).filter(Boolean) as GraphNode[];
-          const suggestedModes = generateFailureModes(func.name);
 
           return (
             <Card key={func.id} size="small" title={func.name} style={{ marginBottom: 12 }}>
-              {fmNodes.length === 0 && suggestedModes.length > 0 && (
-                <div style={{ marginBottom: 8, padding: 8, background: '#f6ffed', borderRadius: 4 }}>
-                  <Tag color="green">{t('wizard.failure.recommended')}</Tag>
-                  <span style={{ fontSize: 12 }}> {t('wizard.failure.autoRecommend')}</span>
-                  <Space size={4} style={{ marginTop: 4 }}>
-                    {suggestedModes.slice(0, 3).map(mode => (
-                      <Button key={mode} size="small" onClick={() => {
-                        const chain = suggestFailureChain(mode);
-                        handleAddFailure(func.id, mode, chain.effects[0] || '', chain.causes[0] || '');
-                      }}>{mode}</Button>
-                    ))}
-                  </Space>
-                </div>
-              )}
               {fmNodes.map(fmNode => {
                 const effectEdge = edges.find(e => e.source === fmNode.id && e.type === 'EFFECT_OF');
                 const effectNode = effectEdge ? nodes.find(n => n.id === effectEdge!.target) : null;
@@ -371,16 +533,69 @@ export default function DFMEAWizardPage() {
                 const causeNodes = causeEdges.map(e => nodes.find(n => n.id === e.source)).filter(Boolean) as GraphNode[];
 
                 return (
-                  <div key={fmNode.id} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                  <div key={fmNode.id} style={{ marginBottom: 8, padding: 8, background: 'var(--qf-bg-elevated)', border: '1px solid var(--qf-border)', borderRadius: 'var(--qf-radius-md)' }}>
                     <Space direction="vertical" style={{ width: '100%' }}>
-                      <Input size="small" value={fmNode.name} addonBefore={t('wizard.failure.failureMode')}
-                        onChange={e => handleUpdateNodeField(fmNode.id, 'name', e.target.value)} />
-                      <Input size="small" value={effectNode?.name || ''} addonBefore={t('wizard.failure.failureEffect')}
-                        onChange={e => effectNode && handleUpdateNodeField(effectNode.id, 'name', e.target.value)} />
-                      {causeNodes.map(causeNode => (
-                        <Input key={causeNode.id} size="small" value={causeNode.name} addonBefore={t('wizard.failure.failureCause')}
-                          onChange={e => handleUpdateNodeField(causeNode.id, 'name', e.target.value)} />
-                      ))}
+                      <div>
+                        <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureMode')}</div>
+                        <SmartSuggestionDropdown
+                          triggerType="failure_mode"
+                          context={{ function_description: func.name, process_step: processStep(func.id) }}
+                          fmeaId={fmeaId!}
+                          value={fmNode.name}
+                          onChange={(val) => handleUpdateNodeField(fmNode.id, 'name', val)}
+                          onSelect={(s) => handleUpdateNodeField(fmNode.id, 'name', s.name)}
+                        />
+                      </div>
+                      {effectNode && (
+                        <div>
+                          <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureEffect')}</div>
+                          <SmartSuggestionDropdown
+                            triggerType="failure_effect"
+                            context={{ failure_mode: fmNode.name, function_description: func.name, process_step: processStep(func.id) }}
+                            fmeaId={fmeaId!}
+                            value={effectNode.name}
+                            onChange={(val) => handleUpdateNodeField(effectNode.id, 'name', val)}
+                            onSelect={(s) => handleUpdateNodeField(effectNode.id, 'name', s.name)}
+                          />
+                        </div>
+                      )}
+                      {causeNodes.map(causeNode => {
+                        const pcEdge = edges.find(e => e.source === causeNode.id && e.type === 'PREVENTED_BY');
+                        const dcEdge = edges.find(e => e.source === causeNode.id && e.type === 'DETECTED_BY');
+                        const pcName = pcEdge ? nodes.find(n => n.id === pcEdge.target)?.name || '' : '';
+                        const dcName = dcEdge ? nodes.find(n => n.id === dcEdge.target)?.name || '' : '';
+                        return (
+                          <div key={causeNode.id}>
+                            <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureCause')}</div>
+                            <SmartSuggestionDropdown
+                              triggerType="failure_cause"
+                              context={{ failure_mode: fmNode.name, function_description: func.name, process_step: processStep(func.id) }}
+                              fmeaId={fmeaId!}
+                              value={causeNode.name}
+                              onChange={(val) => handleUpdateNodeField(causeNode.id, 'name', val)}
+                              onSelect={(s) => handleUpdateNodeField(causeNode.id, 'name', s.name)}
+                            />
+                            <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.preventionControl')}</div>
+                            <SmartSuggestionDropdown
+                              triggerType="prevention_control"
+                              context={{ failure_mode: fmNode.name, function_description: func.name, process_step: processStep(func.id) }}
+                              fmeaId={fmeaId!}
+                              value={pcName}
+                              onChange={(val) => handleUpdateControl(causeNode.id, 'prevention', val)}
+                              onSelect={(s) => handleUpdateControl(causeNode.id, 'prevention', s.name)}
+                            />
+                            <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.detectionControl')}</div>
+                            <SmartSuggestionDropdown
+                              triggerType="detection_control"
+                              context={{ failure_mode: fmNode.name, function_description: func.name, process_step: processStep(func.id) }}
+                              fmeaId={fmeaId!}
+                              value={dcName}
+                              onChange={(val) => handleUpdateControl(causeNode.id, 'detection', val)}
+                              onSelect={(s) => handleUpdateControl(causeNode.id, 'detection', s.name)}
+                            />
+                          </div>
+                        );
+                      })}
                       <Button size="small" danger onClick={() => handleDeleteFailureChain(fmNode.id)}>{t('wizard.failure.delete')}</Button>
                     </Space>
                   </div>
@@ -407,112 +622,208 @@ export default function DFMEAWizardPage() {
     };
 
     return (
-      <Table size="small" dataSource={rows} rowKey="key" pagination={false}
-        columns={[
+      <div>
+        {validation.step5MissingControl && (
+          <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--qf-amber-dim)', border: '1px solid var(--qf-amber)', borderRadius: 'var(--qf-radius-md)', color: 'var(--qf-text-primary)', fontSize: 13 }}>
+            {t('wizard.risk.missingControlHint')}
+          </div>
+        )}
+        <Table size="small" dataSource={rows} rowKey="key" pagination={false} scroll={{ x: 1080 }}
+          columns={[
           { title: t('wizard.failure.failureMode'), dataIndex: 'key', width: 140, render: (_: unknown, r: FMEARow) => {
             const fm = nodeMap.get(r.failureModeNodeId);
-            return fm?.name || '';
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: fm?.name || '' }}>{fm?.name || ''}</Typography.Text>;
+          }},
+          { title: t('wizard.failure.failureEffect'), width: 140, render: (_: unknown, r: FMEARow) => {
+            const names = r.failureEffectNodeIds
+              .map(id => nodeMap.get(id)?.name || '')
+              .filter(Boolean)
+              .join('；');
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: names }}>{names}</Typography.Text>;
+          }},
+          { title: t('wizard.failure.failureCause'), width: 140, render: (_: unknown, r: FMEARow) => {
+            const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: cause?.name || '' }}>{cause?.name || ''}</Typography.Text>;
+          }},
+          { title: t('wizard.failure.preventionControl'), width: 140, render: (_: unknown, r: FMEARow) => {
+            const pc = r.preventionControlIds[0] ? nodeMap.get(r.preventionControlIds[0]) : null;
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: pc?.name || '' }}>{pc?.name || ''}</Typography.Text>;
+          }},
+          { title: t('wizard.failure.detectionControl'), width: 140, render: (_: unknown, r: FMEARow) => {
+            const dc = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
+            return <Typography.Text style={{ fontSize: 12 }} ellipsis={{ tooltip: dc?.name || '' }}>{dc?.name || ''}</Typography.Text>;
           }},
           { title: 'S', width: 60, render: (_: unknown, r: FMEARow) => {
-            const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
-            return <InputNumber size="small" min={1} max={10} value={effect?.severity || undefined}
-              style={{ width: 50 }} onChange={val => effect && handleUpdateRisk(effect.id, 'severity', val || 0)} />;
+            // S is mode/effect-level (shared across a mode's causes) — NOT gated
+            // by this row's PC/DC. Another cause row under the same mode may
+            // have filled controls and already set S.
+            const s = getRowSeverity(r, nodeMap);
+            const effectIds = new Set(r.failureEffectNodeIds);
+            return <InputNumber size="small" min={1} max={10} value={s || undefined}
+              style={{ width: 50 }} onChange={val => {
+                const v = val || 0;
+                updateGraphData(nodes.map(n => effectIds.has(n.id) ? { ...n, severity: v } : n), edges);
+              }} />;
           }},
           { title: 'O', width: 60, render: (_: unknown, r: FMEARow) => {
             const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+            const pcName = r.preventionControlIds[0] ? nodeMap.get(r.preventionControlIds[0])?.name || '' : '';
+            const dcName = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0])?.name || '' : '';
+            const locked = !pcName.trim() || !dcName.trim();
             return <InputNumber size="small" min={1} max={10} value={cause?.occurrence || undefined}
-              style={{ width: 50 }} onChange={val => cause && handleUpdateRisk(cause.id, 'occurrence', val || 0)} />;
+              style={{ width: 50 }} disabled={locked}
+              onChange={val => cause && handleUpdateRisk(cause.id, 'occurrence', val || 0)} />;
           }},
           { title: 'D', width: 60, render: (_: unknown, r: FMEARow) => {
             const dcId = r.detectionControlIds[0];
             const dc = dcId ? nodeMap.get(dcId) : null;
+            const pcName = r.preventionControlIds[0] ? nodeMap.get(r.preventionControlIds[0])?.name || '' : '';
+            const dcName = dc?.name || '';
+            const locked = !pcName.trim() || !dcName.trim();
             return <InputNumber size="small" min={1} max={10} value={dc?.detection || undefined}
-              style={{ width: 50 }} onChange={val => dc && handleUpdateRisk(dc.id, 'detection', val || 0)} />;
+              style={{ width: 50 }} disabled={locked}
+              onChange={val => dc && handleUpdateRisk(dc.id, 'detection', val || 0)} />;
           }},
           { title: 'AP', width: 80, render: (_: unknown, r: FMEARow) => {
-            const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
             const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
             const dcId = r.detectionControlIds[0];
             const dc = dcId ? nodeMap.get(dcId) : null;
-            const s = effect?.severity || 0, o = cause?.occurrence || 0, d = dc?.detection || 0;
+            const pcName = r.preventionControlIds[0] ? nodeMap.get(r.preventionControlIds[0])?.name || '' : '';
+            const dcName = dc?.name || '';
+            const locked = !pcName.trim() || !dcName.trim();
+            if (locked) return <Tag>{t('wizard.risk.controlsFirst')}</Tag>;
+            const s = getRowSeverity(r, nodeMap), o = cause?.occurrence || 0, d = dc?.detection || 0;
             const { ap } = analyzeRisk(s, o, d);
             return <Tag color={ap === 'H' ? 'red' : ap === 'M' ? 'orange' : 'green'}>{ap || '-'}</Tag>;
           }},
         ]}
-      />
+        />
+      </div>
     );
   };
 
-  // Step 5 — Optimization
+  // Step 5 — Optimization (第六步「优化」) — per Reference/DFMEA.md step 6:
+  // for each AP=H row, capture a RecommendedAction (OPTIMIZED_BY) with the
+  // measure, responsible person, target/actual dates, status, evidence-based
+  // action, and re-evaluated S'/O'/D' → AP'. Mirrors FMEAEditorPage's
+  // RecommendedAction pattern so the wizard and editor share one graph model.
   const renderStep5 = () => {
     const { suggestMeasures, analyzeRisk } = dfmeaRules;
     const rows = buildRows(nodes, edges);
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
-    const highRiskRows = rows.filter(r => {
-      const effect = r.failureEffectNodeId ? nodeMap.get(r.failureEffectNodeId) : null;
+    const highRiskRows = rows.map(r => {
       const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
       const dcId = r.detectionControlIds[0];
       const dc = dcId ? nodeMap.get(dcId) : null;
-      const s = effect?.severity || 0, o = cause?.occurrence || 0, d = dc?.detection || 0;
-      return analyzeRisk(s, o, d).ap === 'H';
-    });
+      const s = getRowSeverity(r, nodeMap), o = cause?.occurrence || 0, d = dc?.detection || 0;
+      return { row: r, s, o, d, ap: analyzeRisk(s, o, d).ap };
+    }).filter(x => x.ap === 'H');
 
     if (highRiskRows.length === 0) {
       return <Result icon={<CheckCircleOutlined />} title={t('wizard.optimization.noOptimization')} subTitle={t('wizard.optimization.noOptimizationHint')} />;
     }
 
-    const handleAddOptimization = (row: FMEARow, type: 'prevention' | 'detection', value: string) => {
-      const causeId = row.failureCauseNodeId;
-      if (!causeId) return;
-
-      let newNodes = [...nodes];
-      const newEdges = [...edges];
-
-      if (type === 'prevention') {
-        const existingPcIds = edges
-          .filter(e => e.source === causeId && e.type === 'PREVENTED_BY')
-          .map(e => e.target);
-        if (existingPcIds.length > 0) {
-          newNodes = newNodes.map(n => n.id === existingPcIds[0] ? { ...n, name: value } : n);
-        } else {
-          const pcId = `w${crypto.randomUUID()}_pc`;
-          newNodes.push({ id: pcId, type: 'PreventionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
-          newEdges.push({ source: causeId, target: pcId, type: 'PREVENTED_BY' });
-        }
-      } else {
-        const existingDcIds = edges
-          .filter(e => e.source === causeId && e.type === 'DETECTED_BY')
-          .map(e => e.target);
-        if (existingDcIds.length > 0) {
-          newNodes = newNodes.map(n => n.id === existingDcIds[0] ? { ...n, name: value } : n);
-        } else {
-          const dcId = `w${crypto.randomUUID()}_dc`;
-          newNodes.push({ id: dcId, type: 'DetectionControl', name: value, severity: 0, occurrence: 0, detection: 0 });
-          newEdges.push({ source: causeId, target: dcId, type: 'DETECTED_BY' });
-        }
+    // Write a field on the row's RecommendedAction node, creating the node
+    // (OPTIMIZED_BY edge from the cause, or the mode if cause-less) on first edit.
+    const handleActionField = (row: FMEARow, field: string, value: unknown) => {
+      const existingId = row.recommendedActionIds[0];
+      if (existingId) {
+        updateGraphData(nodes.map(n => n.id === existingId ? { ...n, [field]: value } : n), edges);
+        return;
       }
-
-      updateGraphData(newNodes, newEdges);
+      const raId = `w${crypto.randomUUID()}_ra`;
+      const newNode: GraphNode = { id: raId, type: 'RecommendedAction', name: '', severity: 0, occurrence: 0, detection: 0, [field]: value };
+      const sourceId = row.failureCauseNodeId || row.failureModeNodeId;
+      updateGraphData([...nodes, newNode], [...edges, { source: sourceId, target: raId, type: 'OPTIMIZED_BY' }]);
     };
+
+    const statusOptions = [
+      { value: 'undecided', label: t('wizard.optimization.statusOptions.undecided') },
+      { value: 'planned', label: t('wizard.optimization.statusOptions.planned') },
+      { value: 'done', label: t('wizard.optimization.statusOptions.done') },
+      { value: 'notExecuted', label: t('wizard.optimization.statusOptions.notExecuted') },
+    ];
 
     return (
       <div>
         <Paragraph style={{ color: '#cf1322' }}>{t('wizard.optimization.mustOptimize', { count: highRiskRows.length })}</Paragraph>
-        {highRiskRows.map(r => {
+        {highRiskRows.map(({ row: r, s, o, d }) => {
           const fm = nodeMap.get(r.failureModeNodeId);
+          const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
           const measures = suggestMeasures(fm?.name || '', 'H');
-          const causeId = r.failureCauseNodeId;
-          const existingPc = causeId ? edges.find(e => e.source === causeId && e.type === 'PREVENTED_BY') : null;
-          const existingDc = causeId ? edges.find(e => e.source === causeId && e.type === 'DETECTED_BY') : null;
-          const pcName = existingPc ? nodeMap.get(existingPc.target)?.name || '' : '';
-          const dcName = existingDc ? nodeMap.get(existingDc.target)?.name || '' : '';
+          const raId = r.recommendedActionIds[0];
+          const ra = raId ? nodeMap.get(raId) : null;
+          const revisedS = ra?.revised_severity || 0;
+          const revisedO = ra?.revised_occurrence || 0;
+          const revisedD = ra?.revised_detection || 0;
+          const revisedAp = calculateAP(revisedS || s, revisedO || o, revisedD || d);
+          const apColor = revisedAp === 'H' ? 'red' : revisedAp === 'M' ? 'orange' : 'green';
+          const measurePlaceholder = [...measures.prevention, ...measures.detection].filter(Boolean).join(' / ')
+            || t('wizard.optimization.measurePlaceholder');
+          const toDate = (v?: string) => (v ? dayjs(v) : undefined);
 
           return (
-            <Card key={r.key} size="small" title={fm?.name || 'Failure Mode'} style={{ marginBottom: 12 }}>
-              <Input.TextArea rows={2} placeholder={measures.prevention.join(' / ')} value={pcName}
-                onChange={e => handleAddOptimization(r, 'prevention', e.target.value)} style={{ marginBottom: 8 }} />
-              <Input.TextArea rows={2} placeholder={measures.detection.join(' / ')} value={dcName}
-                onChange={e => handleAddOptimization(r, 'detection', e.target.value)} />
+            <Card key={r.key} size="small" style={{ marginBottom: 12 }}
+              title={<Space wrap align="center">
+                <Tag color="red">{t('wizard.optimization.apBadge')}</Tag>
+                <span>{fm?.name || ''}</span>
+                <span style={{ color: 'var(--qf-text-tertiary)', fontSize: 12 }}>S{s} O{o} D{d}</span>
+              </Space>}>
+              <Row gutter={[12, 8]}>
+                <Col span={24}>
+                  <Field label={t('wizard.optimization.measure')}>
+                    <Input.TextArea rows={2} placeholder={measurePlaceholder} value={ra?.name || ''}
+                      onChange={e => handleActionField(r, 'name', e.target.value)} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.responsible')}>
+                    <Input size="small" placeholder={t('wizard.optimization.responsiblePlaceholder')}
+                      value={ra?.responsible || ''} onChange={e => handleActionField(r, 'responsible', e.target.value)} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.dueDate')}>
+                    <DatePicker size="small" style={{ width: '100%' }} value={toDate(ra?.due_date)}
+                      onChange={v => handleActionField(r, 'due_date', v ? v.format('YYYY-MM-DD') : '')} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.status')}>
+                    <Select size="small" style={{ width: '100%' }} options={statusOptions} allowClear
+                      value={ra?.status} onChange={v => handleActionField(r, 'status', v)} />
+                  </Field>
+                </Col>
+                <Col span={24}>
+                  <Field label={t('wizard.optimization.actionTaken')}>
+                    <Input.TextArea rows={2} placeholder={t('wizard.optimization.actionTakenPlaceholder')}
+                      value={ra?.action_taken || ''} onChange={e => handleActionField(r, 'action_taken', e.target.value)} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Field label={t('wizard.optimization.completionDate')}>
+                    <DatePicker size="small" style={{ width: '100%' }} value={toDate(ra?.completion_date)}
+                      onChange={v => handleActionField(r, 'completion_date', v ? v.format('YYYY-MM-DD') : '')} />
+                  </Field>
+                </Col>
+                <Col xs={24} sm={16}>
+                  <Field label={t('wizard.optimization.revisedRatings')}>
+                    <Space wrap>
+                      <span>S'</span>
+                      <InputNumber size="small" min={1} max={10} style={{ width: 56 }} value={revisedS || undefined}
+                        onChange={v => handleActionField(r, 'revised_severity', (v ?? 0) as number)} />
+                      <span>O'</span>
+                      <InputNumber size="small" min={1} max={10} style={{ width: 56 }} value={revisedO || undefined}
+                        onChange={v => handleActionField(r, 'revised_occurrence', (v ?? 0) as number)} />
+                      <span>D'</span>
+                      <InputNumber size="small" min={1} max={10} style={{ width: 56 }} value={revisedD || undefined}
+                        onChange={v => handleActionField(r, 'revised_detection', (v ?? 0) as number)} />
+                      <span>{t('wizard.optimization.revisedAp')}</span>
+                      {revisedAp ? <Tag color={apColor}>{revisedAp}</Tag> : <Tag>-</Tag>}
+                    </Space>
+                  </Field>
+                </Col>
+              </Row>
             </Card>
           );
         })}
@@ -577,7 +888,8 @@ export default function DFMEAWizardPage() {
           <WizardSidebar
             currentStep={currentStep}
             onStepClick={goToStep}
-            completedSteps={completedSteps.current}
+            completedSteps={completedSteps}
+            maxReachableStep={maxReachableStep}
             warnings={validation.warnings}
             structureNodes={nodes}
             edges={edges}
@@ -611,14 +923,23 @@ export default function DFMEAWizardPage() {
 
           {/* Validation warnings for finish button */}
           {currentStep === 6 && validation.warnings.length > 0 && (
-            <div style={{ marginTop: 16, padding: 12, background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4 }}>
-              <div style={{ fontWeight: 600, color: '#cf1322', marginBottom: 4 }}>{t('wizard.page.completionWarning')}</div>
+            <div style={{ marginTop: 16, padding: 12, background: 'var(--qf-red-dim)', border: '1px solid var(--qf-red)', borderRadius: 'var(--qf-radius-md)' }}>
+              <div style={{ fontWeight: 600, color: 'var(--qf-red)', marginBottom: 4 }}>{t('wizard.page.completionWarning')}</div>
               {validation.warnings.map(w => (
-                <div key={w} style={{ color: '#cf1322' }}>• {t(
+                <div key={w} style={{ color: 'var(--qf-red)' }}>• {t(
                   w === 4 && validation.step5MissingCause
                     ? 'wizard.page.step5IncompleteMissingCause'
                     : `wizard.page.step${w + 1}Incomplete`
                 )}</div>
+              ))}
+            </div>
+          )}
+          {currentStep === 6 && validation.structureGaps.length > 0 && (
+            <div style={{ marginTop: 16, padding: 12, background: 'var(--qf-amber-dim)', border: '1px solid var(--qf-amber)', borderRadius: 'var(--qf-radius-md)' }}>
+              {validation.structureGaps.map((g, i) => (
+                <div key={`${g.tool}-${g.nodeType}-${i}`} style={{ color: 'var(--qf-amber)' }}>
+                  ⚠ {t('wizard.page.structureGap', { tool: g.tool, nodeType: t(`wizard.typeLabels.${g.nodeType}`, { defaultValue: g.nodeType }) })}
+                </div>
               ))}
             </div>
           )}

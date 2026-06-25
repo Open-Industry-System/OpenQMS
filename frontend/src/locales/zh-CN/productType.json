@@ -1,0 +1,17 @@
+{
+  "title": "产品类型管理",
+  "fields": { "code": "类型代码", "name": "类型名称", "description": "描述", "is_active": "启用" },
+  "actions": { "create": "新建类型", "edit": "编辑", "delete": "停用", "cancel": "取消", "save": "保存" },
+  "messages": {
+    "created": "产品类型已创建",
+    "updated": "产品类型已更新",
+    "deactivated": "产品类型已停用",
+    "deleteConfirm": "确定停用该产品类型？",
+    "refused": "无法停用：{{detail}}"
+  },
+  "productLine": {
+    "title": "产品线管理",
+    "fields": { "product_type_code": "产品类型" },
+    "assignType": "分配产品类型"
+  }
+}

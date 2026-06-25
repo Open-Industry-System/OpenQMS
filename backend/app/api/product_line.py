@@ -38,7 +38,9 @@ async def create_product_line(
     try:
         factory_id = await resolve_create_factory_id(db, scope)
         check_factory_access(factory_id, scope)
-        pl = await product_line_service.create_product_line(db, req.code, req.name, factory_id=factory_id)
+        pl = await product_line_service.create_product_line(
+            db, req.code, req.name, factory_id=factory_id, product_type_code=req.product_type_code
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return schemas.ProductLineResponse.model_validate(pl)
@@ -54,7 +56,11 @@ async def update_product_line(
     pl = await product_line_service.get_product_line(db, code)
     if not pl:
         raise HTTPException(status_code=404, detail=f"产品线 '{code}' 不存在")
-    updated = await product_line_service.update_product_line(db, pl, req.name, req.is_active)
+    pt_code = req.product_type_code if "product_type_code" in req.model_fields_set else product_line_service.UNSET
+    try:
+        updated = await product_line_service.update_product_line(db, pl, req.name, req.is_active, pt_code)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return schemas.ProductLineResponse.model_validate(updated)
 
 

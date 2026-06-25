@@ -27,6 +27,11 @@ from app.models.user import User
 
 from sqlalchemy.pool import NullPool
 
+from httpx import ASGITransport, AsyncClient
+from app.main import app
+from app.core.deps import RequestScope, get_current_user, get_db, get_request_scope
+from app.core.factory_scope import FactoryScope, ProductLineScope
+
 
 # ── Database availability check ──────────────────────────────────────────────
 
@@ -72,6 +77,25 @@ DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 def pytest_configure(config):
     """Register the requires_db marker."""
     config.addinivalue_line("markers", "requires_db: mark test as requiring a live database connection")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip tests marked `requires_db` when the database is not reachable.
+
+    The `db` session fixture already skips on its own, but ASGI-client tests
+    whose endpoint resolves through the real `get_db` (not the fixture session)
+    would error instead of skip in a no-DB lane — this marker makes them skip
+    gracefully. DB availability is checked once (cached by _check_db_available).
+    """
+    import asyncio
+
+    db_available = asyncio.new_event_loop().run_until_complete(_check_db_available())
+    if db_available:
+        return
+    skip_marker = pytest.mark.skip(reason="Database not available")
+    for item in items:
+        if item.get_closest_marker("requires_db"):
+            item.add_marker(skip_marker)
 
 
 @pytest_asyncio.fixture
@@ -212,3 +236,63 @@ async def plm_connection(db: AsyncSession, admin_user: User, default_factory: Fa
     await db.flush()
     await db.refresh(conn)
     return conn
+
+
+def _scope_for(user, default_factory, accessible_factory_ids=None, pl_mode="ALL", pl_codes=None):
+    return RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=accessible_factory_ids, default_factory_id=default_factory.id),
+        effective_factory_id=default_factory.id,
+        pl_scope=ProductLineScope(mode=pl_mode, codes=pl_codes),
+        user=user,
+    )
+
+
+@pytest_asyncio.fixture
+async def admin_client(db, admin_user, default_factory):
+    """ASGI client authenticated as admin. Overrides get_current_user (required by require_admin),
+    get_db, and get_request_scope. Clears overrides on teardown."""
+    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_request_scope] = lambda: scope
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def viewer_user(db: AsyncSession, default_factory: Factory) -> User:
+    """Create a user whose role is non-admin so require_admin (permissions.py:145) raises 403.
+    Mirrors admin_user (conftest.py:129) but uses a viewer RoleDefinition."""
+    result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "viewer"))
+    role = result.scalar_one_or_none()
+    if role is None:
+        role = RoleDefinition(role_key="viewer", name_zh="只读用户", name_en="Viewer", is_system=True, is_active=True)
+        db.add(role)
+        await db.flush()
+    user = User(
+        user_id=uuid.uuid4(),
+        username=f"test_viewer_{uuid.uuid4().hex[:8]}",
+        display_name="Test Viewer",
+        password_hash="hashed",
+        role_id=role.id,
+        legacy_role="viewer",
+        is_active=True,
+        factory_id=default_factory.id,
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+    return user
+
+
+@pytest_asyncio.fixture
+async def request_scope_all(admin_user, default_factory):
+    return _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+
+
+@pytest_asyncio.fixture
+async def request_scope_restricted_other_factory(admin_user, default_factory):
+    other = uuid.uuid4()
+    return _scope_for(admin_user, default_factory, accessible_factory_ids=[other])

@@ -1,4 +1,4 @@
-import { Button, Space, Tooltip } from "antd";
+import { Button, Space, Tooltip, Segmented } from "antd";
 import {
   ZoomInOutlined,
   ZoomOutOutlined,
@@ -9,12 +9,13 @@ import {
   ApartmentOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-
-export type GraphLayout = "dagre" | "force" | "compact-box";
+import type { GraphDirection, GraphLayout } from "../../utils/graphLayout";
 
 interface GraphToolbarProps {
   layout: GraphLayout;
+  direction: GraphDirection;
   onLayoutChange: (layout: GraphLayout) => void;
+  onDirectionChange: (direction: GraphDirection) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFitView: () => void;
@@ -23,19 +24,22 @@ interface GraphToolbarProps {
 
 export default function GraphToolbar({
   layout,
+  direction,
   onLayoutChange,
+  onDirectionChange,
   onZoomIn,
   onZoomOut,
   onFitView,
   onDownload,
 }: GraphToolbarProps) {
   const { t } = useTranslation("graph");
+  const isDagre = layout === "dagre";
   return (
     <Space wrap>
       <Tooltip title={t("toolbar.hierarchical")}>
         <Button
           icon={<ApartmentOutlined />}
-          type={layout === "dagre" ? "primary" : "default"}
+          type={isDagre ? "primary" : "default"}
           onClick={() => onLayoutChange("dagre")}
         >
           {t("toolbar.hierarchical")}
@@ -58,6 +62,17 @@ export default function GraphToolbar({
         >
           {t("toolbar.compactTree")}
         </Button>
+      </Tooltip>
+      <Tooltip title={isDagre ? "" : t("toolbar.directionDisabledHint")}>
+        <Segmented
+          value={direction}
+          onChange={(val) => onDirectionChange(val as GraphDirection)}
+          disabled={!isDagre}
+          options={[
+            { label: t("toolbar.directionTB"), value: "TB" },
+            { label: t("toolbar.directionLR"), value: "LR" },
+          ]}
+        />
       </Tooltip>
       <Tooltip title={t("toolbar.zoomIn")}>
         <Button icon={<ZoomInOutlined />} onClick={onZoomIn} />

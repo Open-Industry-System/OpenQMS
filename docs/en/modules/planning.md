@@ -1,6 +1,6 @@
 # Advanced Planning Module — User Manual
 
-> Last updated: 2026-06-13 | Applicable version: OpenQMS v1.0
+> Last updated: 2026-06-25 | Applicable version: OpenQMS v1.0
 
 ---
 
@@ -10,7 +10,7 @@ The Advanced Planning module covers the full IATF 16949 APQP (Advanced Product Q
 
 | Sub-module | Route | ModuleKey | Feature scope |
 |--------|------|-----------|----------|
-| FMEA | `/fmea`, `/fmea/:id` | fmea | DFMEA/PFMEA creation, editing, approval, archiving |
+| FMEA | `/fmea`, `/fmea/:id`, `/fmea/pfmea-wizard/:id` | fmea | DFMEA/PFMEA creation, editing, approval, archiving; PFMEA 7-step generation wizard |
 | Control Plan | `/control-plans`, `/control-plans/:id` | planning | Import from PFMEA, editing, approval, version management |
 | APQP | `/apqp`, `/apqp/:id` | planning | 5-phase gate management, deliverable linking |
 | PPAP | `/ppap`, `/ppap/:id` | ppap | 18-element submission, approval, rejection, resubmission |
@@ -130,6 +130,8 @@ FMEA nodes mark Special Characteristics through the `classification` field:
 3. The system automatically generates a document number (`PFMEA-2026-XXX` or `DFMEA-2026-XXX`)
 4. Initial status is `draft`
 
+> After creation, you can also use the 7-step generation wizard via the "Enter Wizard" entry on the list page (see 3.2.4) to build the model.
+
 #### 3.2.2 Editing FMEA Graph
 
 1. Click the document number in the FMEA list to enter the editor page `/fmea/:id`
@@ -160,6 +162,39 @@ archived    in_review
 
 > **Approval restriction**: Only `admin` and `manager` roles can advance FMEA to `approved` status.
 
+#### 3.2.4 7-Step Generation Wizard
+
+Both PFMEA and DFMEA provide a guided generation wizard that decomposes the AIAG-VDA 7-step method into a step-by-step interactive flow, reducing manual modeling effort.
+
+**PFMEA Wizard** (`/fmea/pfmea-wizard/:id`):
+
+| Step | Name | Content |
+|:----:|------|------|
+| 0 | Scope definition | 5T tool/trend tags + time range + scope boundaries |
+| 1 | Structure analysis | `PFMEAWizardSidebar` process-item / step / work-element tree; structure-tree drag-to-reorder (`@dnd-kit`) |
+| 2 | Function analysis | `FunctionTreeEditor` three-level function tree + `FUNCTION_MAPPED_TO` edges + CC/SC marking |
+| 3 | Failure analysis | Build FE-FM-FC failure chains on ProcessStepFunction, 4M context (man/machine/material/method) |
+| 4 | Risk analysis | `RiskTable`: severity takes the hierarchy max, CC/SC read-only aggregation, O/D gates; Step 4 context carried forward |
+| 5 | Optimization | AP=H failure modes auto-generate recommended actions; PC/DC creation prerequisite |
+| 6 | Results documentation | Confirmation finish gate (`usePfmeaWizardValidation`: 4M/OP gates, 3-tier severity, CC/SC-aware) |
+
+The wizard includes cascade delete (`wizardCascadeDelete`): deleting a shared control/action node verifies whether it is referenced by other rows.
+
+**DFMEA Wizard** enhancements: time range uses `DatePicker.RangePicker`; 5T tool/trend via AI recommendation (`pfmea_tool` / `pfmea_trend` triggers + 4M rule content); Step 3 AI recommendation (`SmartSuggestionDropdown` wired to backend triggers); Step 5 risk analysis carries Step 4 context and PC/DC creation prerequisite; PC/DC AI recommendation; `ToolStructureGuide` tool-structure guidance card.
+
+> **Permissions**: Wizard writes are constrained by the `fmea` module `EDIT (3)` permission; the list page exposes the "Enter Wizard" entry only for `draft` documents.
+
+#### 3.2.5 Deleting FMEA
+
+Only FMEA documents in `draft` or `rework` status can be deleted:
+
+- The list page (`FMEAListPage`) shows a delete button for these statuses; other statuses do not expose the entry
+- Backend status guard: non-`draft` / `rework` returns 400 "只能删除草稿或返工状态的FMEA"
+- Before deletion, `_null_out_fmea_references` nulls the FMEA foreign keys on related `control_plan`, `capa_eightd`, etc. records, avoiding `IntegrityError` → 500 from FK constraints
+- Deletion is written to the audit log
+
+> **Permissions**: Deletion is constrained by the `fmea` module `EDIT (3)` permission; approved / archived documents cannot be deleted and must first be reverted to `rework`.
+
 ### 3.3 Version Management
 
 FMEA supports version snapshots: a version record is automatically created each time approval passes (`fmea_versions` table), including:
@@ -168,6 +203,8 @@ FMEA supports version snapshots: a version record is automatically created each 
 - **Complete graph snapshot** (`snapshot` JSONB)
 - **SHA-256 hash** (`sha256_hash`), for integrity verification
 - **Change summary and type** (`change_summary`, `change_type`)
+
+**Read-only version snapshot viewer**: From the version history at the top of the editor, you can switch to view any historical version, entering read-only mode (`viewingVersion` state, `FMEAVersionSnapshot` component), which fully restores that version's graph without affecting the current editable state. The Control Plan editor provides an equivalent `CPVersionSnapshot` read-only viewer.
 
 ### 3.4 FMEA and Control Plan Linkage
 

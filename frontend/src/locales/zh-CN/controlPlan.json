@@ -15,7 +15,8 @@
     "syncCSR": "同步 CSR",
     "addRow": "新增行",
     "openFMEAEditor": "打开 FMEA 编辑器",
-    "viewSnapshot": "查看快照"
+    "viewSnapshot": "查看快照",
+    "exitVersion": "返回当前版本"
   },
   "phase": {
     "sample": "样件",
@@ -157,6 +158,8 @@
     "syncFailed": "同步失败",
     "refreshFailed": "刷新数据失败",
     "enterTitle": "请输入标题",
-    "enterDocumentNo": "请输入文档编号"
+    "enterDocumentNo": "请输入文档编号",
+    "viewingVersion": "正在查看 v{{version}} 快照（只读）",
+    "loadVersionFailed": "加载版本快照失败"
   }
 }

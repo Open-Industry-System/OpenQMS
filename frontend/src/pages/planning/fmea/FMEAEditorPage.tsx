@@ -1,17 +1,24 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import {
+  DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
+  useDraggable, useDroppable, closestCenter,
+  type DragStartEvent, type DragOverEvent, type DragEndEvent,
+} from "@dnd-kit/core";
+import {
   Button, Space, Tag, Typography, Input, Select, Table, Tabs,
-  Row, Col, App, Spin, Popconfirm, Empty, Tooltip,
+  Row, Col, App, Spin, Popconfirm, Empty, Tooltip, Alert,
   Divider, Modal, Radio, Form, Dropdown,
 } from "antd";
 import {
   SaveOutlined, ArrowLeftOutlined, SendOutlined,
   CheckOutlined, UndoOutlined, PlusOutlined, DeleteOutlined,
-  HistoryOutlined, RadarChartOutlined,
+  HistoryOutlined, RadarChartOutlined, HolderOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
+import { formatFMEAError } from "../../../utils/fmeaError";
+import { getFMEAVersion } from "../../../api/version";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
 import type { FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse } from "../../../types";
 import LessonsLearnedModal from "../../../components/lessons/LessonsLearnedModal";
@@ -20,7 +27,10 @@ import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
-import { buildRows, createRowNodes, type FMEARow } from "../../../utils/fmeaTable";
+import { aggregateSpecialCharacteristic } from "../../../components/pfmea/RiskTable";
+import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, deleteMode, getProcessChain, type FMEARow } from "../../../utils/fmeaTable";
+import { planCauseDeletion } from "./deleteRowHelpers";
+import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
 import {
   buildStructureTree,
   createStructureChild,
@@ -42,7 +52,7 @@ import RollbackConfirmModal from "../../../components/version/RollbackConfirmMod
 import VersionCompareView from "../../../components/version/VersionCompareView";
 import RelatedCAPAList from "../../../components/cross-links/RelatedCAPAList";
 import { GraphCanvas, GraphToolbar, NodeDetailDrawer, GraphLegend } from "../../../components/graph";
-import type { GraphLayout, GraphCanvasRef } from "../../../components/graph";
+import type { GraphLayout, GraphDirection, GraphCanvasRef } from "../../../components/graph";
 import type { GraphNode as APIGraphNode } from "../../../api/graph";
 import { getImpactChain, getCauseChain, normalizeGraphData } from "../../../api/graph";
 import { analyzeChangeImpact } from "../../../api/changeImpact";
@@ -89,6 +99,161 @@ function useNextTransitions(): Record<string, { label: string; target: string; i
   };
 }
 
+interface StructureTreeRowProps {
+  node: GraphNode;
+  depth: number;
+  isStructure: boolean;
+  actions: StructureChildAction[];
+  hasRows: boolean;
+  isSelected: boolean;
+  dragState: "before" | "after" | "invalid" | null;
+  canDragSortStructure: boolean;
+  onSelect: (nodeId: string) => void;
+  onRename: (nodeId: string, field: "name", value: string) => void;
+  onAddChild: (parent: GraphNode, action: StructureChildAction) => void;
+  onDelete: (node: GraphNode) => void;
+  rowsByFunction: Record<string, FMEARow[]>;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}
+
+function dropPositionFromRects(aTop: number, oTop: number, oHeight: number): StructureDropPosition {
+  const offsetY = aTop - oTop;
+  if (offsetY < oHeight * 0.25) return "before";
+  if (offsetY > oHeight * 0.75) return "after";
+  return "inside";
+}
+
+function StructureTreeRow(props: StructureTreeRowProps): JSX.Element {
+  const { node, depth, isStructure, actions, hasRows, isSelected, dragState, canDragSortStructure, onSelect, onRename, onAddChild, onDelete, rowsByFunction, t } = props;
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } =
+    useDraggable({ id: node.id, disabled: !canDragSortStructure });
+  const { setNodeRef: setDropRef } = useDroppable({ id: node.id });
+  // 合并 draggable + droppable 的 ref 到行 div；useCallback 稳定引用，避免每次渲染
+  // 都触发 ref detach/attach + @dnd-kit 重测（拖拽中 dragOver 频繁重渲染）。
+  const setRowRef = useCallback((el: HTMLElement | null) => { setNodeRef(el); setDropRef(el); }, [setNodeRef, setDropRef]);
+  return (
+    <div
+      ref={setRowRef}
+      data-testid={`fmea-structure-node-${node.id}`}
+      data-node-id={node.id}
+      data-drag-state={dragState ?? undefined}
+      onClick={() => onSelect(node.id)}
+      style={{
+        padding: "8px 12px",
+        marginBottom: 6,
+        marginLeft: depth * 14,
+        borderRadius: 6,
+        cursor: "pointer",
+        opacity: isDragging ? 0.3 : undefined,
+        background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
+        border: isSelected
+          ? "1px solid var(--qf-cyan)"
+          : dragState === "invalid"
+            ? "1px solid rgba(255, 77, 79, 0.7)"
+            : "1px solid var(--qf-border)",
+        boxShadow:
+          dragState === "before"
+            ? "0 -2px 0 0 var(--qf-cyan)"
+            : dragState === "after"
+              ? "0 2px 0 0 var(--qf-cyan)"
+              : undefined,
+        fontSize: 13,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        transition: "background 0.2s, border-color 0.2s",
+        color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
+      }}
+      onMouseEnter={(e) => { if (!isSelected && !dragState) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
+    >
+      {canDragSortStructure && (
+        <span
+          ref={setActivatorNodeRef}
+          {...attributes} {...listeners}
+          data-testid={`fmea-structure-drag-handle-${node.id}`}
+          title={t("editor.dragHandle")} aria-label={t("editor.dragHandle")}
+          style={{
+            cursor: "grab",
+            color: "var(--qf-text-secondary)",
+            opacity: 0.35,
+            transition: "opacity 0.15s",
+            marginRight: 6,
+            flexShrink: 0,
+            display: "inline-flex",
+            alignItems: "center",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.35"; }}
+        >
+          <HolderOutlined />
+        </span>
+      )}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <Input
+          variant="borderless"
+          value={node.name}
+          disabled={!canDragSortStructure}
+          onChange={(e) => onRename(node.id, "name", e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onFocus={() => onSelect(node.id)}
+          style={{
+            padding: 0,
+            background: "transparent",
+            fontWeight: isStructure ? 600 : 400,
+            lineHeight: "1.5",
+            color: "inherit",
+          }}
+        />
+        {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
+      </div>
+      <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
+        {hasRows && (
+          <Tag style={{ fontSize: 10, lineHeight: "16px", background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
+            {rowsByFunction[node.id].length}
+          </Tag>
+        )}
+        {actions.length > 0 && (
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: actions.map((a) => ({
+                key: a.childType,
+                label: t(a.labelKey),
+                onClick: ({ domEvent }) => {
+                  domEvent.stopPropagation();
+                  onAddChild(node, a);
+                },
+              })),
+            }}
+          >
+            <Button
+              size="small"
+              type="text"
+              icon={<PlusOutlined />}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </Dropdown>
+        )}
+        <Popconfirm
+          title={t("editor.confirmDeleteNode")}
+          onConfirm={() => onDelete(node)}
+          onCancel={(e) => e?.stopPropagation()}
+        >
+          <Button
+            size="small"
+            type="text"
+            danger
+            disabled={!canDragSortStructure}
+            icon={<DeleteOutlined />}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Popconfirm>
+      </Space>
+    </div>
+  );
+}
+
 export default function FMEAEditorPage() {
   const { message } = App.useApp();
   const { id } = useParams<{ id: string }>();
@@ -114,7 +279,17 @@ export default function FMEAEditorPage() {
   const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(null);
 
   const _user = useAuthStore((s) => s.user);
-  const { canEdit, canApprove } = usePermission();
+  const { canEdit: rawCanEdit, canApprove: rawCanApprove } = usePermission();
+  const [viewingVersion, setViewingVersion] = useState<{ major: number; minor: number } | null>(null);
+  const isViewingVersion = viewingVersion !== null;
+  const canEdit = useCallback(
+    (m: import("../../../hooks/usePermission").ModuleKey) => rawCanEdit(m) && !isViewingVersion,
+    [rawCanEdit, isViewingVersion]
+  );
+  const canApprove = useCallback(
+    (m: import("../../../hooks/usePermission").ModuleKey) => rawCanApprove(m) && !isViewingVersion,
+    [rawCanApprove, isViewingVersion]
+  );
   const [activeTab, setActiveTab] = useState("failure");
   const [outerTab, setOuterTab] = useState("editor");
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
@@ -123,11 +298,17 @@ export default function FMEAEditorPage() {
   const [selectedStructureNode, setSelectedStructureNode] = useState<GraphNode | null>(null);
   const [severityWarnings, setSeverityWarnings] = useState<string[]>([]);
   const graphDataRef = useRef<{ nodes: APIGraphNode[]; edges: import("../../../api/graph").GraphEdge[] } | null>(null);
-  const dragStructureNodeIdRef = useRef<string | null>(null);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<{ nodeId: string; position: StructureDropPosition; valid: boolean } | null>(null);
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  // live-reorder preview：拖拽经过合法同级时，复用 reorderStructureSiblings 计算重排后的
+  // nodes/edges，仅用于左侧树的视觉让位（displayTree），松手才 setNodes/setEdges 提交。
+  // @dnd-kit 用 pointer events + DragOverlay，源 DOM 不动 → 重排兄弟不破坏拖拽状态。
+  const [preview, setPreview] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
   const [selectedGraphNode, setSelectedGraphNode] = useState<APIGraphNode | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [graphLayout, setGraphLayout] = useState<GraphLayout>("dagre");
+  const [graphDirection, setGraphDirection] = useState<GraphDirection>("TB");
   const [highlightNodes, setHighlightNodes] = useState<string[]>([]);
   const [dimOthers, setDimOthers] = useState(false);
   const [graphLoading, setGraphLoading] = useState(false);
@@ -167,7 +348,7 @@ export default function FMEAEditorPage() {
         .catch((err) => {
           clearTimeout(timeoutId);
           if (!axios.isCancel(err)) {
-            message.error(t("messages.searchFailed"));
+            message.error(err?.response?.data?.detail || t("messages.searchFailed"));
           }
           setLessonsLoading(false);
         });
@@ -181,7 +362,11 @@ export default function FMEAEditorPage() {
   }, [location.state, fmeaId]);
   const canvasRef = useRef<GraphCanvasRef>(null);
 
-  const { activeUsers, startEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);
+  const { activeUsers, startEditing: rawStartEditing, stopEditing, isSyncing } = useCollaboration("fmea", fmeaId);
+  const startEditing = useCallback((...args: Parameters<typeof rawStartEditing>) => {
+    if (isViewingVersion) return;
+    rawStartEditing(...args);
+  }, [rawStartEditing, isViewingVersion]);
 
   // Base snapshot for three-way diff
   const baseGraphRef = useRef<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
@@ -211,13 +396,16 @@ export default function FMEAEditorPage() {
     if (!id) return;
     getFMEA(id)
       .then((doc) => {
-        // Redirect draft DFMEAs that haven't completed the wizard
-        if (
-          doc.fmea_type === "DFMEA" &&
+        // Redirect draft FMEAs that haven't completed the wizard to the correct wizard
+        const isIncompleteDraft =
           doc.status === "draft" &&
-          !doc.graph_data?.wizardScope?.wizard_completed
-        ) {
+          !doc.graph_data?.wizardScope?.wizard_completed;
+        if (isIncompleteDraft && doc.fmea_type === "DFMEA") {
           navigate(`/fmea/wizard/${id}`, { replace: true });
+          return;
+        }
+        if (isIncompleteDraft && doc.fmea_type === "PFMEA") {
+          navigate(`/fmea/pfmea-wizard/${id}`, { replace: true });
           return;
         }
         setFmea(doc);
@@ -260,12 +448,66 @@ export default function FMEAEditorPage() {
         setDimOthers(true);
         setPendingHighlightNode(null);
       }
-    } catch {
-      message.error(t("messages.graphLoadFailed"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.graphLoadFailed"));
     } finally {
       setGraphLoading(false);
     }
   }, [id, message, pendingHighlightNode, t]);
+
+  const loadVersionSnapshot = useCallback(async (major: number, minor: number) => {
+    try {
+      const v = await getFMEAVersion(fmeaId, major, minor);
+      const snap = v.snapshot ?? { nodes: [], edges: [] };
+      setNodes(snap.nodes || []);
+      setEdges(snap.edges || []);
+      graphDataRef.current = normalizeGraphData(
+        snap.nodes as unknown as Array<Record<string, unknown>>,
+        snap.edges as unknown as Array<Record<string, unknown>>,
+      );
+      setSelectedFunctionId(null);
+      setSelectedStructureNode(null);
+      setSelectedGraphNode(null);
+      setDrawerVisible(false);
+      setHighlightNodes([]);
+      setDimOthers(false);
+      setPendingHighlightNode(null);
+      setContextMenuOpen(false);
+      setContextMenuNode(null);
+      setViewingVersion({ major, minor });
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      message.error(e?.response?.data?.detail || t("messages.loadVersionFailed"));
+    }
+  }, [fmeaId, t, message]);
+
+  const exitVersionSnapshot = useCallback(async () => {
+    try {
+      const doc = await getFMEA(fmeaId);
+      setFmea(doc);
+      setNodes(doc.graph_data?.nodes || []);
+      setEdges(doc.graph_data?.edges || []);
+      baseGraphRef.current = {
+        nodes: JSON.parse(JSON.stringify(doc.graph_data?.nodes || [])),
+        edges: JSON.parse(JSON.stringify(doc.graph_data?.edges || [])),
+      };
+      graphDataRef.current = null;
+      setSelectedFunctionId(null);
+      setSelectedStructureNode(null);
+      setSelectedGraphNode(null);
+      setDrawerVisible(false);
+      setHighlightNodes([]);
+      setDimOthers(false);
+      setPendingHighlightNode(null);
+      setContextMenuOpen(false);
+      setContextMenuNode(null);
+      setViewingVersion(null);
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      message.error(e?.response?.data?.detail || t("messages.loadVersionFailed"));
+    }
+  }, [fmeaId, t, message]);
 
   const handleTraceImpact = async (nodeId: string) => {
     if (!id) return;
@@ -274,8 +516,9 @@ export default function FMEAEditorPage() {
       const { nodes } = normalizeGraphData(chain.nodes, chain.edges);
       setHighlightNodes(nodes.map((n) => n.id));
       setDimOthers(true);
-    } catch {
-      message.error(t("messages.impactChainFailed"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.impactChainFailed"));
     }
   };
 
@@ -286,8 +529,9 @@ export default function FMEAEditorPage() {
       const { nodes } = normalizeGraphData(chain.nodes, chain.edges);
       setHighlightNodes(nodes.map((n) => n.id));
       setDimOthers(true);
-    } catch {
-      message.error(t("messages.causeChainFailed"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.causeChainFailed"));
     }
   };
 
@@ -307,8 +551,9 @@ export default function FMEAEditorPage() {
       const result = await analyzeChangeImpact(request);
       setImpactResult(result);
       message.success(t("messages.analysisComplete"));
-    } catch {
-      message.error(t("messages.analysisFailed"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.analysisFailed"));
     } finally {
       setImpactLoading(false);
     }
@@ -362,7 +607,8 @@ export default function FMEAEditorPage() {
         }
         setConflictVisible(true);
       } else {
-        message.error(t("messages.saveFailed"));
+        const detail = err.response?.data?.detail;
+        message.error(typeof detail === "string" ? detail : t("messages.saveFailed"));
       }
     } finally {
       setSaving(false);
@@ -397,7 +643,7 @@ export default function FMEAEditorPage() {
       if (err.response?.status === 409) {
         message.error(t("messages.concurrentUpdate"));
       } else {
-        message.error(t("messages.forceSaveFailed"));
+        message.error(err.response?.data?.detail || t("messages.forceSaveFailed"));
       }
     } finally {
       setSaving(false);
@@ -412,12 +658,25 @@ export default function FMEAEditorPage() {
       message.success(t("messages.statusChanged", { status: statusLabels[target] || target }));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || t("messages.operationFailed"));
+      message.error(formatFMEAError(err?.response?.data?.detail, t) || t("messages.operationFailed"));
     }
   };
 
+  // Refs mirror nodes/edges so add/delete handlers (and updateNode) can read
+  // the latest graph synchronously and advance it before the next render.
+  // Declared here, before updateNode, so all mutation sites reference the same refs.
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+
   const updateNode = useCallback((nodeId: string, field: string, value: unknown) => {
-    setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, [field]: value } : n)));
+    // Compute from nodesRef.current and advance the ref synchronously, so a
+    // rapid add/delete (which also reads nodesRef.current) can't overwrite this
+    // edit with stale state. Matches the handleAdd*/handleDelete* pattern.
+    const next = nodesRef.current.map((n) => (n.id === nodeId ? { ...n, [field]: value } : n));
+    nodesRef.current = next;
+    setNodes(next);
   }, []);
 
   // Auto-compute initial AP on cause nodes when S/O/D risk ratings change
@@ -442,15 +701,67 @@ export default function FMEAEditorPage() {
 
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
+  const handleAddEffect = useCallback((fmId: string) => {
+    const result = addEffect(fmId, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;   // advance ref synchronously so a second
+    edgesRef.current = result.edges;   // click before the effect runs still sees fresh state
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, []);
+  const handleDeleteEffect = useCallback((fmId: string, effectId: string) => {
+    const result = deleteEffect(fmId, effectId, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;
+    edgesRef.current = result.edges;
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, []);
+  const handleAddFailureMode = useCallback((functionId: string) => {
+    if (!fmea) return;
+    const { newNodes, newEdges } = createRowNodes(functionId, fmea.fmea_type, t);
+    nodesRef.current = [...nodesRef.current, ...newNodes];
+    edgesRef.current = [...edgesRef.current, ...newEdges];
+    setNodes(nodesRef.current);
+    setEdges(edgesRef.current);
+  }, [fmea, t]);
+  const handleAddCause = useCallback((fmId: string) => {
+    if (!fmea) return;
+    const result = addCause(fmId, fmea.fmea_type, t, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;
+    edgesRef.current = result.edges;
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, [fmea, t]);
+  const handleDeleteMode = useCallback((fmId: string) => {
+    const result = deleteMode(fmId, nodesRef.current, edgesRef.current);
+    nodesRef.current = result.nodes;
+    edgesRef.current = result.edges;
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, []);
+
   const fmeaType = fmea?.fmea_type;
   const isDFMEA = fmeaType === "DFMEA";
   const canDragSortStructure = canEdit("fmea");
   const structureTree = useMemo(() => buildStructureTree(nodes, edges), [nodes, edges]);
+  // live-reorder 预览树：拖拽经过合法同级时按 preview 重排兄弟，让用户看到落点、提高成功率。
+  // 松手提交 / 取消回滚（preview 清空 → 回到真实顺序）。
+  const displayTree = useMemo(
+    () => (preview ? buildStructureTree(preview.nodes, preview.edges) : structureTree),
+    [preview, structureTree],
+  );
+  // 拖拽期间只折叠被拖节点自身的子树（其子节点在它下方，隐藏不位移被拖节点）。
+  // 不折叠同级节点：同级折叠（display:none）会下移被拖节点，而 @dnd-kit 的
+  // DragOverlay 在折叠后才测量被拖节点 rect → overlay 错位（越靠下的节点错位越大）。
+  const dragCollapseIds = useMemo(
+    () => (draggingNodeId ? new Set([draggingNodeId]) : new Set<string>()),
+    [draggingNodeId],
+  );
   const structureRowHeaderOrder = useMemo(() => getStructureRowHeaderOrder(nodes, edges), [nodes, edges]);
   const rows = useMemo(
     () => buildRows(nodes, edges, structureRowHeaderOrder),
     [nodes, edges, structureRowHeaderOrder]
   );
+  const rowSpans = useMemo(() => computeRowSpans(rows), [rows]);
 
   useEffect(() => {
     if (outerTab === "graph") {
@@ -567,109 +878,80 @@ export default function FMEAEditorPage() {
     if (selectedFunctionId === node.id) setSelectedFunctionId(null);
   }, [nodes, edges, selectedFunctionId]);
 
-  const getStructureDropPosition = useCallback((event: React.DragEvent<HTMLDivElement>): StructureDropPosition => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.height <= 0) return "inside";
-    const offsetY = event.clientY - rect.top;
-    if (offsetY < rect.height * 0.25) return "before";
-    if (offsetY > rect.height * 0.75) return "after";
-    return "inside";
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const id = String(event.active.id);
+    setActiveNodeId(id);
+    setDraggingNodeId(id);
+    setPreview(null);
   }, []);
 
-  const handleStructureDragStart = useCallback((nodeId: string, event: React.DragEvent<HTMLDivElement>) => {
-    if (!canDragSortStructure) return;
-    dragStructureNodeIdRef.current = nodeId;
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", nodeId);
-  }, [canDragSortStructure]);
-
-  const handleStructureDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    const dragNodeId = dragStructureNodeIdRef.current;
-    if (!canDragSortStructure || !dragNodeId) return;
-    const dropNodeId = (event.currentTarget as HTMLElement).dataset.nodeId;
-    if (!dropNodeId) return;
-    event.preventDefault();
-    const position = getStructureDropPosition(event);
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const { active, over } = event;
+    if (!over) { setDragOver(null); setPreview(null); return; }
+    const aRect = active.rect.current.translated;
+    const oRect = over.rect;
+    if (!aRect || !oRect) return;
+    const dragNodeId = String(active.id);
+    const dropNodeId = String(over.id);
+    const position = dropPositionFromRects(aRect.top, oRect.top, oRect.height);
     const valid = canReorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
-    event.dataTransfer.dropEffect = valid ? "move" : "none";
     setDragOver((prev) =>
       prev && prev.nodeId === dropNodeId && prev.position === position && prev.valid === valid
-        ? prev
-        : { nodeId: dropNodeId, position, valid }
+        ? prev : { nodeId: dropNodeId, position, valid }
     );
-  }, [canDragSortStructure, edges, getStructureDropPosition, nodes]);
+    // live preview：合法且确实会重排时，算出重排后的 nodes/edges 让兄弟实时让位；
+    // 非法/无变化清空预览回真实顺序。dragNodeId===dropNodeId（自悬）时 reorderStructureSiblings
+    // 返回 changed:false，天然清空，不会自激振荡（@dnd-kit overlay 不依赖源 DOM 位置）。
+    if (valid) {
+      const result = reorderStructureSiblings({ nodes, edges, dragNodeId, dropNodeId, dropPosition: position });
+      setPreview(result.changed ? { nodes: result.nodes, edges: result.edges } : null);
+    } else {
+      setPreview(null);
+    }
+  }, [nodes, edges]);
 
-  const handleStructureDrop = useCallback((dropNodeId: string, event: React.DragEvent<HTMLDivElement>) => {
-    if (!canDragSortStructure) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setDragOver(null);
-
-    const dragNodeId = dragStructureNodeIdRef.current;
-    dragStructureNodeIdRef.current = null;
-    if (!dragNodeId) return;
-
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null); setPreview(null);
+    if (!over) return;
+    const aRect = active.rect.current.translated; const oRect = over.rect;
+    if (!aRect || !oRect) return;
+    const dropPosition = dropPositionFromRects(aRect.top, oRect.top, oRect.height);
     const result = reorderStructureSiblings({
-      nodes,
-      edges,
-      dragNodeId,
-      dropNodeId,
-      dropPosition: getStructureDropPosition(event),
+      nodes, edges, dragNodeId: String(active.id), dropNodeId: String(over.id), dropPosition,
     });
-
     if (!result.changed) {
       if (result.reason === "invalid") message.warning(t("messages.sameLevelSortOnly"));
       return;
     }
-
     if (result.nodes !== nodes) setNodes(result.nodes);
     if (result.edges !== edges) setEdges(result.edges);
-  }, [canDragSortStructure, edges, getStructureDropPosition, message, nodes, t]);
+  }, [nodes, edges, message, t]);
 
-  const handleStructureDragEnd = useCallback(() => {
-    dragStructureNodeIdRef.current = null;
-    setDragOver(null);
+  const handleDragCancel = useCallback(() => {
+    setDragOver(null); setDraggingNodeId(null); setActiveNodeId(null); setPreview(null);
   }, []);
 
   const deleteRow = useCallback((row: FMEARow) => {
-    // Only delete nodes that are NOT shared with other rows
-    const otherRows = rows.filter((r) => r.key !== row.key);
-    const nodesUsedByOthers = new Set<string>();
-    for (const r of otherRows) {
-      nodesUsedByOthers.add(r.failureModeNodeId);
-      if (r.failureEffectNodeId) nodesUsedByOthers.add(r.failureEffectNodeId);
-      if (r.failureCauseNodeId) nodesUsedByOthers.add(r.failureCauseNodeId);
-      r.preventionControlIds?.forEach(id => nodesUsedByOthers.add(id));
-      r.detectionControlIds?.forEach(id => nodesUsedByOthers.add(id));
-      r.recommendedActionIds?.forEach(id => nodesUsedByOthers.add(id));
-    }
+    const { nodeIdsToDelete } = planCauseDeletion(row, rows);
 
-    const idsToDelete = new Set<string>();
-    // Always delete this row's unique edges
-    const edgesToDelete = new Set<string>();
-    edgesToDelete.add(row.failureModeNodeId);
-
-    if (row.failureCauseNodeId && !nodesUsedByOthers.has(row.failureCauseNodeId)) {
-      idsToDelete.add(row.failureCauseNodeId);
-    }
-    if (row.failureEffectNodeId && !nodesUsedByOthers.has(row.failureEffectNodeId)) {
-      idsToDelete.add(row.failureEffectNodeId);
-    }
-    if (!nodesUsedByOthers.has(row.failureModeNodeId)) {
-      idsToDelete.add(row.failureModeNodeId);
-    }
-    row.preventionControlIds.forEach((id) => { if (!nodesUsedByOthers.has(id)) idsToDelete.add(id); });
-    row.detectionControlIds.forEach((id) => { if (!nodesUsedByOthers.has(id)) idsToDelete.add(id); });
-    row.recommendedActionIds.forEach((id) => { if (!nodesUsedByOthers.has(id)) idsToDelete.add(id); });
-
-    setNodes((prev) => prev.filter((n) => !idsToDelete.has(n.id)));
-    // Delete edges connected to deleted nodes AND edges specific to this row
-    setEdges((prev) => prev.filter((e) => {
-      if (idsToDelete.has(e.source) || idsToDelete.has(e.target)) return false;
-      // Delete the specific cause→mode edge for this row
-      if (e.source === row.failureCauseNodeId && e.target === row.failureModeNodeId && e.type === "CAUSE_OF") return false;
+    // Compute from refs and advance them synchronously (same pattern as
+    // updateNode / handleAdd*/handleDelete*) so rapid edits don't get
+    // overwritten by a stale-ref mutation.
+    const nextNodes = nodesRef.current.filter((n) => !nodeIdsToDelete.has(n.id));
+    const nextEdges = edgesRef.current.filter((e) => {
+      // Drop edges touching deleted nodes
+      if (nodeIdsToDelete.has(e.source) || nodeIdsToDelete.has(e.target)) return false;
+      // Drop this row's CAUSE_OF (cause → mode) edge specifically
+      if (row.failureCauseNodeId && e.source === row.failureCauseNodeId && e.target === row.failureModeNodeId && e.type === "CAUSE_OF") return false;
       return true;
-    }));
+    });
+    nodesRef.current = nextNodes;
+    edgesRef.current = nextEdges;
+    setNodes(nextNodes);
+    setEdges(nextEdges);
   }, [rows]);
 
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
@@ -681,13 +963,11 @@ export default function FMEAEditorPage() {
       key: "function",
       width: 200,
       fixed: "left" as const,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.function ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
         const funcNode = nodeMap.get(row.functionNodeId);
         return (
-          <div
-            tabIndex={0}
-            style={{ outline: "none", minWidth: 180 }}
-          >
+          <div tabIndex={0} style={{ outline: "none", minWidth: 180 }}>
             <div style={{ fontWeight: 600, fontSize: 13, lineHeight: "1.5" }}>{funcNode?.name || "-"}</div>
             {funcNode?.specification && (
               <Text type="secondary" style={{ fontSize: 12 }}>{funcNode.specification}</Text>
@@ -703,20 +983,41 @@ export default function FMEAEditorPage() {
       title: t("editor.columns.failureMode"),
       key: "failureMode",
       width: 180,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
         const node = nodeMap.get(row.failureModeNodeId);
         return (
-          <SmartSuggestionDropdown
-            triggerType="failure_mode"
-            context={{
-              function_description: nodeMap.get(row.functionNodeId)?.name || "",
-            }}
-            fmeaId={fmeaId}
-            value={node?.name || ""}
-            onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
-            onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
-            disabled={!canEdit('fmea')}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <SmartSuggestionDropdown
+                triggerType="failure_mode"
+                context={{
+                  function_description: nodeMap.get(row.functionNodeId)?.name || "",
+                  process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
+                }}
+                fmeaId={fmeaId}
+                value={node?.name || ""}
+                onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
+                onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
+                disabled={!canEdit('fmea')}
+              />
+              {canEdit('fmea') && (
+                <Popconfirm title={t("editor.confirmDeleteMode")} onConfirm={() => handleDeleteMode(row.failureModeNodeId)}>
+                  <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={t("editor.deleteFailureMode")} />
+                </Popconfirm>
+              )}
+            </div>
+            {canEdit('fmea') && (
+              <Button
+                size="small"
+                type="dashed"
+                icon={<PlusOutlined />}
+                onClick={() => handleAddFailureMode(row.functionNodeId)}
+              >
+                {t("editor.addFailureMode")}
+              </Button>
+            )}
+          </div>
         );
       },
     },
@@ -724,21 +1025,20 @@ export default function FMEAEditorPage() {
       title: t("editor.columns.failureEffect"),
       key: "failureEffect",
       width: 200,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
-        if (!row.failureEffectNodeId) return "-";
-        const node = nodeMap.get(row.failureEffectNodeId);
         return (
-          <SmartSuggestionDropdown
-            triggerType="failure_effect"
-            context={{
-              failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
-              function_description: nodeMap.get(row.functionNodeId)?.name || "",
-            }}
+          <EffectLinesEditor
+            effectIds={row.failureEffectNodeIds}
+            nodeMap={nodeMap}
             fmeaId={fmeaId}
-            value={node?.name || ""}
-            onChange={(val) => updateNode(row.failureEffectNodeId!, "name", val)}
-            onSelect={(s) => updateNode(row.failureEffectNodeId!, "name", s.name)}
+            functionDescription={nodeMap.get(row.functionNodeId)?.name || ""}
+            failureModeName={nodeMap.get(row.failureModeNodeId)?.name || ""}
+            processStep={getProcessChain(row.functionNodeId, nodeMap, edges)}
             disabled={!canEdit('fmea')}
+            updateNode={updateNode}
+            onAddEffect={() => handleAddEffect(row.failureModeNodeId)}
+            onDeleteEffect={(effectId) => handleDeleteEffect(row.failureModeNodeId, effectId)}
           />
         );
       },
@@ -748,27 +1048,27 @@ export default function FMEAEditorPage() {
       key: "severity",
       width: 60,
       align: "center" as const,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
-        if (!row.failureEffectNodeId) return "-";
-        const node = nodeMap.get(row.failureEffectNodeId);
+        if (row.failureEffectNodeIds.length === 0) return <Text type="secondary">-</Text>;
+        const s = getRowSeverity(row, nodeMap);
         return (
           <div>
             <Input
               min={1}
               max={10}
               size="small"
-              value={node?.severity ?? undefined}
+              value={s || undefined}
               disabled={!canEdit('fmea')}
               style={{ width: 55, textAlign: "center" }}
               onFocus={() => startEditing({ row_key: row.key, field: "severity", node_id: row.failureModeNodeId })}
               onBlur={stopEditing}
-              onChange={(e) => updateNode(row.failureEffectNodeId!, "severity", Number(e.target.value) || 0)}
+              onChange={(e) => {
+                const v = Number(e.target.value) || 0;
+                row.failureEffectNodeIds.forEach((id) => updateNode(id, "severity", v));
+              }}
             />
-            <ActiveUserIndicator
-              activeUsers={activeUsers}
-              rowKey={row.key}
-              field="severity"
-            />
+            <ActiveUserIndicator activeUsers={activeUsers} rowKey={row.key} field="severity" />
           </div>
         );
       },
@@ -778,44 +1078,87 @@ export default function FMEAEditorPage() {
       key: "class",
       width: 70,
       align: "center" as const,
+      onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.mode ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
-        const node = nodeMap.get(row.failureModeNodeId);
-        const classValue = node?.classification || "";
-        const bgStyle = classValue === "CC" ? { background: "#fff1f0" } : classValue === "SC" ? { background: "#fffbe6" } : {};
-        return (
-          <Select
-            size="small"
-            value={classValue || undefined}
-            onChange={(value) => updateNode(row.failureModeNodeId, "classification", value || "")}
-            disabled={!canEdit('fmea')}
-            style={{ width: 60, ...bgStyle }}
-            options={[{ value: "", label: "-" }, { value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
-          />
-        );
+        if (isDFMEA) {
+          // ---- DFMEA: Filter Code on FailureMode, editable (UNCHANGED) ----
+          const node = nodeMap.get(row.failureModeNodeId);
+          const classValue = node?.classification || "";
+          const bgStyle = classValue === "CC" ? { background: "#fff1f0" } : classValue === "SC" ? { background: "#fffbe6" } : {};
+          return (
+            <Select
+              size="small"
+              value={classValue || undefined}
+              onChange={(value) => updateNode(row.failureModeNodeId, "classification", value || "")}
+              disabled={!canEdit('fmea')}
+              style={{ width: 60, ...bgStyle }}
+              options={[{ value: "", label: "-" }, { value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
+            />
+          );
+        }
+        // ---- PFMEA: read-only, from function-node classification (spec §9) ----
+        const stepFunc = nodeMap.get(row.functionNodeId);
+        const wefs = nodes.filter((n) => n.type === "ProcessWorkElementFunction");
+        let { label, tag } = aggregateSpecialCharacteristic(stepFunc, wefs, edges);
+        // backward compat: legacy PFMEA docs stored CC/SC on FailureMode.classification
+        if (tag === "-") {
+          const fmClass = nodeMap.get(row.failureModeNodeId)?.classification || "";
+          if (fmClass === "CC" || fmClass === "SC") {
+            label = fmClass;
+            tag = fmClass;
+          }
+        }
+        const bg = tag === "CC" ? "#fff1f0" : tag === "SC" ? "#fffbe6" : undefined;
+        return <Tooltip title={label}><Tag style={{ background: bg }}>{label}</Tag></Tooltip>;
       },
     },
     {
       title: t("editor.columns.failureCause"),
       key: "failureCause",
       width: 180,
-      render: (_: unknown, row: FMEARow) => {
-        if (!row.failureCauseNodeId) return "-";
-        const node = nodeMap.get(row.failureCauseNodeId);
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
+      render: (_: unknown, row: FMEARow, index: number) => {
+        const isLastOfMode =
+          index === rows.length - 1 ||
+          rows[index + 1].failureModeNodeId !== row.failureModeNodeId;
+        const node = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         return (
-          <SmartSuggestionDropdown
-            triggerType="failure_cause"
-            context={{
-              failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
-              function_description: nodeMap.get(row.functionNodeId)?.name || "",
-              severity: effectNode?.severity || 0,
-            }}
-            fmeaId={fmeaId}
-            value={node?.name || ""}
-            onChange={(val) => updateNode(row.failureCauseNodeId!, "name", val)}
-            onSelect={(s) => updateNode(row.failureCauseNodeId!, "name", s.name)}
-            disabled={!canEdit('fmea')}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {row.failureCauseNodeId ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <SmartSuggestionDropdown
+                  triggerType="failure_cause"
+                  context={{
+                    failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+                    function_description: nodeMap.get(row.functionNodeId)?.name || "",
+                    process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
+                    severity: getRowSeverity(row, nodeMap),
+                  }}
+                  fmeaId={fmeaId}
+                  value={node?.name || ""}
+                  onChange={(val) => updateNode(row.failureCauseNodeId!, "name", val)}
+                  onSelect={(s) => updateNode(row.failureCauseNodeId!, "name", s.name)}
+                  disabled={!canEdit('fmea')}
+                />
+                {canEdit('fmea') && (
+                  <Popconfirm title={t("editor.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
+                    <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={t("editor.deleteFailureCause")} />
+                  </Popconfirm>
+                )}
+              </div>
+            ) : (
+              <Text type="secondary">-</Text>
+            )}
+            {canEdit('fmea') && isLastOfMode && (
+              <Button
+                size="small"
+                type="dashed"
+                icon={<PlusOutlined />}
+                onClick={() => handleAddCause(row.failureModeNodeId)}
+              >
+                {t("editor.addFailureCause")}
+              </Button>
+            )}
+          </div>
         );
       },
     },
@@ -857,15 +1200,15 @@ export default function FMEAEditorPage() {
         const nodeId = row.preventionControlIds[0];
         if (!nodeId) return "-";
         const node = nodeMap.get(nodeId);
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
-        const ap = calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, detNode?.detection || 0);
+        const ap = calculateAP(getRowSeverity(row, nodeMap), causeNode?.occurrence || 0, detNode?.detection || 0);
         return (
           <SmartSuggestionDropdown
             triggerType="measure"
             context={{
               failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
               ap: ap,
             }}
             fmeaId={fmeaId}
@@ -885,14 +1228,14 @@ export default function FMEAEditorPage() {
         const nodeId = row.detectionControlIds[0];
         if (!nodeId) return "-";
         const node = nodeMap.get(nodeId);
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
-        const ap = calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, node?.detection || 0);
+        const ap = calculateAP(getRowSeverity(row, nodeMap), causeNode?.occurrence || 0, node?.detection || 0);
         return (
           <SmartSuggestionDropdown
             triggerType="measure"
             context={{
               failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
+              process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
               ap: ap,
             }}
             fmeaId={fmeaId}
@@ -940,11 +1283,10 @@ export default function FMEAEditorPage() {
       width: 60,
       align: "center" as const,
       render: (_: unknown, row: FMEARow) => {
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         const detectionNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
 
-        const s = effectNode?.severity || 0;
+        const s = getRowSeverity(row, nodeMap);
         const o = causeNode?.occurrence || 0;
         const d = detectionNode?.detection || 0;
         const rpn = s * o * d;
@@ -975,11 +1317,10 @@ export default function FMEAEditorPage() {
       width: 55,
       align: "center" as const,
       render: (_: unknown, row: FMEARow) => {
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         const detectionNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
 
-        const s = effectNode?.severity || 0;
+        const s = getRowSeverity(row, nodeMap);
         const o = causeNode?.occurrence || 0;
         const d = detectionNode?.detection || 0;
         const ap = calculateAP(s, o, d);
@@ -1032,18 +1373,19 @@ export default function FMEAEditorPage() {
         }
         const nodeId = row.recommendedActionIds[0];
         const node = nodeMap.get(nodeId);
-        const effectNode = row.failureEffectNodeId ? nodeMap.get(row.failureEffectNodeId) : null;
         const causeNode = row.failureCauseNodeId ? nodeMap.get(row.failureCauseNodeId) : null;
         const detNode = row.detectionControlIds.length > 0 ? nodeMap.get(row.detectionControlIds[0]) : null;
+        const s = getRowSeverity(row, nodeMap);
         return (
           <SmartSuggestionDropdown
             triggerType="optimization"
             context={{
               failure_mode: nodeMap.get(row.failureModeNodeId)?.name || "",
-              severity: effectNode?.severity || 0,
+              process_step: getProcessChain(row.functionNodeId, nodeMap, edges),
+              severity: s,
               occurrence: causeNode?.occurrence || 0,
               detection: detNode?.detection || 0,
-              ap: calculateAP(effectNode?.severity || 0, causeNode?.occurrence || 0, detNode?.detection || 0),
+              ap: calculateAP(s, causeNode?.occurrence || 0, detNode?.detection || 0),
             }}
             fmeaId={fmeaId}
             value={node?.name || ""}
@@ -1092,7 +1434,7 @@ export default function FMEAEditorPage() {
         return (
           <Input.TextArea
             value={node?.action_taken || ""}
-            autoSize={{ minRows: 2, maxRows: 4 }}
+            autoSize={{ minRows: 2, maxRows: 8 }}
             disabled={!canEdit('fmea')}
             onChange={(e) => updateNode(row.recommendedActionIds[0], "action_taken", e.target.value)}
           />
@@ -1194,17 +1536,6 @@ export default function FMEAEditorPage() {
         );
       },
     },
-    {
-      title: "",
-      key: "actions",
-      width: 40,
-      fixed: "right" as const,
-      render: (_: unknown, row: FMEARow) => (
-        <Popconfirm title={t("editor.confirmDeleteRow")} onConfirm={() => deleteRow(row)}>
-          <Button type="text" danger size="small" disabled={!canEdit('fmea')} icon={<DeleteOutlined />} />
-        </Popconfirm>
-      ),
-    },
   ];
 
   return (
@@ -1271,6 +1602,20 @@ export default function FMEAEditorPage() {
         <CollaborationBar activeUsers={activeUsers} isSyncing={isSyncing} compact />
       </div>
 
+      {viewingVersion && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t("messages.viewingVersion", { version: `${viewingVersion.major}.${viewingVersion.minor}` })}
+          action={
+            <Button size="small" onClick={exitVersionSnapshot}>
+              {t("actions.exitVersion")}
+            </Button>
+          }
+        />
+      )}
+
       <Tabs activeKey={outerTab} onChange={setOuterTab} style={{ marginBottom: 16 }} items={[
         { key: "editor", label: t("tabs.editor"), children: <>
           <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }} items={[
@@ -1307,124 +1652,64 @@ export default function FMEAEditorPage() {
                     : null;
                 return (
                   <div key={node.id}>
-                    <div
-                      data-testid={`fmea-structure-node-${node.id}`}
-                      data-node-id={node.id}
-                      data-drag-state={dragState ?? undefined}
-                      draggable={canDragSortStructure}
-                      onDragStart={(e) => handleStructureDragStart(node.id, e)}
-                      onDragOver={handleStructureDragOver}
-                      onDrop={(e) => handleStructureDrop(node.id, e)}
-                      onDragEnd={handleStructureDragEnd}
-                      onClick={() => setSelectedFunctionId(node.id)}
-                      style={{
-                        padding: "8px 12px",
-                        marginBottom: 6,
-                        marginLeft: tn.depth * 14,
-                        borderRadius: 6,
-                        cursor: canDragSortStructure ? "grab" : "pointer",
-                        background: isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)",
-                        border: isSelected
-                          ? "1px solid var(--qf-cyan)"
-                          : dragState === "invalid"
-                            ? "1px solid rgba(255, 77, 79, 0.7)"
-                            : "1px solid var(--qf-border)",
-                        boxShadow:
-                          dragState === "before"
-                            ? "0 -2px 0 0 var(--qf-cyan)"
-                            : dragState === "after"
-                              ? "0 2px 0 0 var(--qf-cyan)"
-                              : undefined,
-                        fontSize: 13,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        transition: "background 0.2s, border-color 0.2s",
-                        color: isSelected ? "var(--qf-cyan)" : "var(--qf-text-primary)",
-                      }}
-                      onMouseEnter={(e) => { if (!isSelected && !dragState) e.currentTarget.style.background = "var(--qf-bg-hover)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "rgba(0, 229, 255, 0.12)" : isStructure ? "var(--qf-bg-elevated)" : "var(--qf-bg-input)"; }}
-                    >
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <Input
-                          variant="borderless"
-                          value={node.name}
-                          disabled={!canEdit('fmea')}
-                          onChange={(e) => updateNode(node.id, "name", e.target.value)}
-                          // Stop click/focus from racing the row's setSelectedFunctionId;
-                          // select explicitly on focus instead so editing a name also
-                          // selects its node (and drives the right-hand spreadsheet).
-                          onClick={(e) => e.stopPropagation()}
-                          onFocus={() => setSelectedFunctionId(node.id)}
-                          style={{
-                            padding: 0,
-                            background: "transparent",
-                            fontWeight: isStructure ? 600 : 400,
-                            lineHeight: "1.5",
-                            color: "inherit",
-                          }}
-                        />
-                        {node.process_number && <Text type="secondary" style={{ fontSize: 11 }}>{node.process_number}</Text>}
-                      </div>
-                      <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
-                        {hasRows && (
-                          <Tag style={{ fontSize: 10, lineHeight: "16px", background: "var(--qf-cyan-dim)", color: "var(--qf-cyan)", borderColor: "var(--qf-cyan)" }}>
-                            {rowsByFunction[node.id].length}
-                          </Tag>
-                        )}
-                        {actions.length > 0 && (
-                          <Dropdown
-                            trigger={["click"]}
-                            menu={{
-                              items: actions.map((a) => ({
-                                key: a.childType,
-                                label: t(a.labelKey),
-                                // Stop the menu-item click from bubbling to the
-                                // outer row (which would select the parent node
-                                // and race the later setSelectedFunctionId on
-                                // function creation). openAddNode does not itself
-                                // change selection, so selection stays stable
-                                // until submit.
-                                onClick: ({ domEvent }) => {
-                                  domEvent.stopPropagation();
-                                  openAddNode(node, a);
-                                },
-                              })),
-                            }}
-                          >
-                            <Button
-                              size="small"
-                              type="text"
-                              icon={<PlusOutlined />}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          </Dropdown>
-                        )}
-                        <Popconfirm
-                          title={t("editor.confirmDeleteNode")}
-                          onConfirm={() => deleteSubtreeNode(node)}
-                          onCancel={(e) => e?.stopPropagation()}
-                        >
-                          <Button
-                            size="small"
-                            type="text"
-                            danger
-                            disabled={!canEdit('fmea')}
-                            icon={<DeleteOutlined />}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </Popconfirm>
-                      </Space>
-                    </div>
-                    {tn.children.map((c) => renderTreeNode(c))}
+                    <StructureTreeRow
+                      node={node}
+                      depth={tn.depth}
+                      isStructure={isStructure}
+                      actions={actions}
+                      hasRows={hasRows}
+                      isSelected={isSelected}
+                      dragState={dragState}
+                      canDragSortStructure={canDragSortStructure}
+                      onSelect={setSelectedFunctionId}
+                      onRename={(id, field, value) => updateNode(id, field, value)}
+                      onAddChild={openAddNode}
+                      onDelete={deleteSubtreeNode}
+                      rowsByFunction={rowsByFunction}
+                      t={t}
+                    />
+                    {!dragCollapseIds.has(node.id) && tn.children.map((c) => renderTreeNode(c))}
                   </div>
                 );
               };
               return (
-                <>
-                  {structureTree.map((tn) => renderTreeNode(tn))}
-                  {structureTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-                </>
+                <div style={{ maxHeight: "calc(100vh - 700px)", overflowY: "auto", minHeight: 0, paddingRight: 4 }}>
+                <DndContext
+                  sensors={sensors} collisionDetection={closestCenter}
+                  onDragStart={handleDragStart} onDragOver={handleDragOver}
+                  onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}
+                >
+                  {displayTree.map((tn) => renderTreeNode(tn))}
+                  {displayTree.length === 0 && <Empty description={t("messages.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+                  <DragOverlay>
+                    {activeNodeId && (() => {
+                      const n = nodes.find((x) => x.id === activeNodeId);
+                      if (!n) return null;
+                      const isStructureRow = ["ProcessItem", "ProcessStep", "ProcessWorkElement", "System", "Subsystem", "Component"].includes(n.type);
+                      return (
+                        <div
+                          data-testid={`fmea-structure-drag-overlay-${activeNodeId}`}
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: 6,
+                            fontSize: 13,
+                            display: "flex",
+                            alignItems: "center",
+                            background: "var(--qf-bg-elevated)",
+                            border: "1px solid var(--qf-cyan)",
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                            color: "var(--qf-text-primary)",
+                          }}
+                        >
+                          <HolderOutlined style={{ color: "var(--qf-text-secondary)", marginRight: 6 }} />
+                          <span style={{ fontWeight: isStructureRow ? 600 : 400 }}>{n.name}</span>
+                          {n.process_number && <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>{n.process_number}</Text>}
+                        </div>
+                      );
+                    })()}
+                  </DragOverlay>
+                </DndContext>
+                </div>
               );
             })()}
           </DataCard>
@@ -1454,7 +1739,7 @@ export default function FMEAEditorPage() {
                 rowKey="key"
                 size="small"
                 pagination={false}
-                scroll={{ x: 2400, y: 540 }}
+                scroll={{ x: 2400, y: "calc(100vh - 700px)" }}
                 bordered
                 className="qf-table fmea-editor-table"
                 style={{ fontSize: 13 }}
@@ -1476,7 +1761,7 @@ export default function FMEAEditorPage() {
         </Col>
       </Row>
         </>},
-            { key: "structure", label: t("tabs.structureAnalysis"), children: <>
+            ...(isDFMEA ? [{ key: "structure", label: t("tabs.structureAnalysis"), children: <>
           <Row gutter={16}>
             <Col span={8}>
               <DataCard title={t("tabs.structureTree")}>
@@ -1502,7 +1787,8 @@ export default function FMEAEditorPage() {
               </DataCard>
             </Col>
           </Row>
-        </>},
+        </>}]
+            : []),
           ]} />
 
       <style>{`
@@ -1551,7 +1837,9 @@ export default function FMEAEditorPage() {
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
               <GraphToolbar
                 layout={graphLayout}
+                direction={graphDirection}
                 onLayoutChange={setGraphLayout}
+                onDirectionChange={setGraphDirection}
                 onZoomIn={() => canvasRef.current?.zoomIn()}
                 onZoomOut={() => canvasRef.current?.zoomOut()}
                 onFitView={() => canvasRef.current?.fitView()}
@@ -1566,7 +1854,9 @@ export default function FMEAEditorPage() {
                     nodes={graphDataRef.current.nodes}
                     edges={graphDataRef.current.edges}
                     mode="single-fmea"
+                    fmeaType={fmeaType}
                     layout={graphLayout}
+                    direction={graphDirection}
                     highlightNodes={highlightNodes}
                     dimOthers={dimOthers}
                     onNodeClick={(node) => {
@@ -1607,7 +1897,7 @@ export default function FMEAEditorPage() {
               )}
             </div>
             <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 16 }}>
-              <GraphLegend />
+              <GraphLegend fmeaType={fmeaType} />
               {highlightNodes.length > 0 && (
                 <Button onClick={() => { setHighlightNodes([]); setDimOthers(false); }}>
                   {t("graph.clearHighlight")}
@@ -1632,6 +1922,7 @@ export default function FMEAEditorPage() {
             node={selectedGraphNode}
             visible={drawerVisible}
             onClose={() => setDrawerVisible(false)}
+            fmeaType={fmeaType}
             allNodes={graphDataRef.current?.nodes}
             allEdges={graphDataRef.current?.edges}
           />
@@ -1697,7 +1988,7 @@ export default function FMEAEditorPage() {
             canCreate={canEdit('fmea')}
             canRollback={canApprove('fmea')}
             isDraft={fmea.status === "draft"}
-            onViewSnapshot={(major, minor) => message.info(t("messages.viewSnapshot", { major, minor }))}
+            onViewSnapshot={loadVersionSnapshot}
             onCompare={(major1, minor1, major2, minor2) => setCompareState({ major1, minor1, major2, minor2 })}
             onRollback={(major, minor) => setRollbackTarget({ major_no: major, minor_no: minor })}
             onCreateVersion={() => setCreateVersionOpen(true)}

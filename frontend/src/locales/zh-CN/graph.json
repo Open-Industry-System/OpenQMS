@@ -12,7 +12,10 @@
     "zoomIn": "放大",
     "zoomOut": "缩小",
     "fitView": "适应画布",
-    "download": "下载快照"
+    "download": "下载快照",
+    "directionTB": "从上到下",
+    "directionLR": "从左到右",
+    "directionDisabledHint": "仅层次布局可用"
   },
   "legend": {
     "title": "图例",
@@ -41,6 +44,9 @@
     "processItemFunction": "过程项功能",
     "processStepFunction": "工序功能",
     "processWorkElementFunction": "工作要素功能",
+    "systemFunction": "系统功能",
+    "subsystemFunction": "子系统功能",
+    "componentFunction": "组件功能",
     "failureMode": "失效模式",
     "failureEffect": "失效影响",
     "failureCause": "失效原因",
@@ -53,6 +59,8 @@
   "edgeTypes": {
     "hasProcessStep": "包含工序",
     "hasWorkElement": "包含工作要素",
+    "hasSubsystem": "包含子系统",
+    "hasComponent": "包含零部件",
     "workIn": "包含工作要素",
     "hasFunction": "包含功能",
     "asFunction": "定义功能",
@@ -61,11 +69,16 @@
     "hasFailureMode": "导致失效",
     "effectOf": "产生影响",
     "causeOf": "由原因引起",
+    "causeBranch": "失效原因",
+    "structuralChain": "结构链",
     "preventedBy": "预防控制",
     "detectedBy": "探测控制",
     "optimizedBy": "优化措施",
     "hasNode": "包含节点",
     "hasChild": "包含子项"
+  },
+  "edgeLegend": {
+    "title": "边类型"
   },
   "nodeDetail": {
     "title": "节点详情",

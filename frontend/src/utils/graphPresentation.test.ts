@@ -3,11 +3,16 @@ import enGraph from "../locales/en-US/graph.json";
 import zhGraph from "../locales/zh-CN/graph.json";
 import {
   DEFAULT_NODE_STYLE,
+  DFMEA_LEGEND_NODE_TYPES,
   EDGE_PRESENTATION,
+  EDGE_STROKE,
+  GRAPH_EDGE_LEGEND,
   GRAPH_EDGE_TYPES,
   GRAPH_NODE_TYPES,
   NODE_PRESENTATION,
+  getEdgeStyle,
   getEdgeTypeKey,
+  getHighlightedEdgeStyle,
   getNodeStyle,
   getNodeTypeKey,
 } from "./graphPresentation";
@@ -93,6 +98,50 @@ describe("graphPresentation", () => {
     expect(getEdgeTypeKey("CUSTOM_EDGE_TYPE")).toBe("CUSTOM_EDGE_TYPE");
   });
 
+  describe("DFMEA-aware labels", () => {
+    // The data model shares enum names across PFMEA and DFMEA. In a DFMEA graph,
+    // HAS_PROCESS_STEP means System→Subsystem and HAS_WORK_ELEMENT means
+    // Subsystem→Component; the shared "process step"/"work element" labels are
+    // PFMEA terminology and must be overridden for DFMEA.
+    it("overrides structure-descent edge keys for DFMEA", () => {
+      expect(getEdgeTypeKey("HAS_PROCESS_STEP", "DFMEA")).toBe("edgeTypes.hasSubsystem");
+      expect(getEdgeTypeKey("HAS_WORK_ELEMENT", "DFMEA")).toBe("edgeTypes.hasComponent");
+    });
+
+    it("leaves generic edge keys unchanged for DFMEA", () => {
+      expect(getEdgeTypeKey("HAS_FUNCTION", "DFMEA")).toBe("edgeTypes.hasFunction");
+      expect(getEdgeTypeKey("HAS_FAILURE_MODE", "DFMEA")).toBe("edgeTypes.hasFailureMode");
+    });
+
+    it("keeps PFMEA labels when fmeaType is PFMEA or omitted", () => {
+      expect(getEdgeTypeKey("HAS_PROCESS_STEP", "PFMEA")).toBe("edgeTypes.hasProcessStep");
+      expect(getEdgeTypeKey("HAS_PROCESS_STEP")).toBe("edgeTypes.hasProcessStep");
+      expect(getEdgeTypeKey("HAS_WORK_ELEMENT")).toBe("edgeTypes.hasWorkElement");
+    });
+
+    it("overrides function node-type keys for DFMEA", () => {
+      expect(getNodeTypeKey("ProcessWorkElementFunction", "DFMEA")).toBe("nodeTypes.componentFunction");
+      expect(getNodeTypeKey("ProcessStepFunction", "DFMEA")).toBe("nodeTypes.subsystemFunction");
+      expect(getNodeTypeKey("ProcessItemFunction", "DFMEA")).toBe("nodeTypes.systemFunction");
+    });
+
+    it("leaves non-function node types unchanged for DFMEA", () => {
+      expect(getNodeTypeKey("System", "DFMEA")).toBe("nodeTypes.system");
+      expect(getNodeTypeKey("FailureMode", "DFMEA")).toBe("nodeTypes.failureMode");
+    });
+
+    it("has zh-CN and en-US locale entries for every DFMEA override key", () => {
+      for (const key of ["hasSubsystem", "hasComponent"] as const) {
+        expect(zhGraph.edgeTypes[key]).toBeTruthy();
+        expect(enGraph.edgeTypes[key]).toBeTruthy();
+      }
+      for (const key of ["systemFunction", "subsystemFunction", "componentFunction"] as const) {
+        expect(zhGraph.nodeTypes[key]).toBeTruthy();
+        expect(enGraph.nodeTypes[key]).toBeTruthy();
+      }
+    });
+  });
+
   it("does not use default styling for the expanded FMEA node types", () => {
     for (const type of [
       "ProcessItemFunction",
@@ -103,5 +152,111 @@ describe("graphPresentation", () => {
     ]) {
       expect(getNodeStyle(type)).not.toEqual(DEFAULT_NODE_STYLE);
     }
+  });
+
+  it("excludes PFMEA-only layers from the DFMEA legend", () => {
+    // DFMEA legend must not show PFMEA structure layers or PFMEA-flavored functions.
+    for (const pfmeaOnly of [
+      "ProcessItem",
+      "ProcessStep",
+      "ProcessWorkElement",
+      "ProcessItemFunction",
+      "ProcessStepFunction",
+      "ProcessWorkElementFunction",
+    ]) {
+      expect(DFMEA_LEGEND_NODE_TYPES).not.toContain(pfmeaOnly);
+    }
+    // Every DFMEA legend entry must resolve to a real presentation + locale label.
+    for (const type of DFMEA_LEGEND_NODE_TYPES) {
+      expect(NODE_PRESENTATION[type]).toBeTruthy();
+    }
+  });
+
+  describe("edge style", () => {
+    it("maps CAUSE_OF to the red-pink cause-branch color", () => {
+      expect(getEdgeStyle("CAUSE_OF").stroke).toBe("#ff7875");
+    });
+
+    it("maps EFFECT_OF to the orange effect-branch color", () => {
+      expect(getEdgeStyle("EFFECT_OF").stroke).toBe("#fa8c16");
+    });
+
+    it("maps control edges to their control-type colors", () => {
+      expect(getEdgeStyle("PREVENTED_BY").stroke).toBe("#73d13d");
+      expect(getEdgeStyle("DETECTED_BY").stroke).toBe("#722ed1");
+      expect(getEdgeStyle("OPTIMIZED_BY").stroke).toBe("#8c8c8c");
+    });
+
+    it("falls back to EDGE_STROKE for structural chain edges", () => {
+      expect(getEdgeStyle("HAS_FAILURE_MODE").stroke).toBe(EDGE_STROKE);
+      expect(getEdgeStyle("FUNCTION_MAPPED_TO").stroke).toBe(EDGE_STROKE);
+      expect(getEdgeStyle("UNKNOWN_EDGE").stroke).toBe(EDGE_STROKE);
+    });
+
+    it("always returns lineWidth 1", () => {
+      for (const raw of ["CAUSE_OF", "EFFECT_OF", "HAS_FAILURE_MODE", "UNKNOWN"]) {
+        expect(getEdgeStyle(raw).lineWidth).toBe(1);
+      }
+    });
+  });
+
+  it("has zh-CN and en-US locale entries for the new edge-legend keys", () => {
+    expect(zhGraph.edgeTypes.causeBranch).toBeTruthy();
+    expect(enGraph.edgeTypes.causeBranch).toBeTruthy();
+    expect(zhGraph.edgeTypes.structuralChain).toBeTruthy();
+    expect(enGraph.edgeTypes.structuralChain).toBeTruthy();
+    expect((zhGraph as { edgeLegend?: { title: string } }).edgeLegend?.title).toBeTruthy();
+    expect((enGraph as { edgeLegend?: { title: string } }).edgeLegend?.title).toBeTruthy();
+    expect(zhGraph.toolbar.directionTB).toBeTruthy();
+    expect(zhGraph.toolbar.directionLR).toBeTruthy();
+    expect(zhGraph.toolbar.directionDisabledHint).toBeTruthy();
+    expect(enGraph.toolbar.directionTB).toBeTruthy();
+    expect(enGraph.toolbar.directionLR).toBeTruthy();
+    expect(enGraph.toolbar.directionDisabledHint).toBeTruthy();
+  });
+
+  it("GRAPH_EDGE_LEGEND lists the six branch + chain edge types with i18n keys", () => {
+    const types = GRAPH_EDGE_LEGEND.map((e) => e.type);
+    expect(types).toEqual([
+      "EFFECT_OF",
+      "CAUSE_OF",
+      "PREVENTED_BY",
+      "DETECTED_BY",
+      "OPTIMIZED_BY",
+      "HAS_FAILURE_MODE",
+    ]);
+    for (const entry of GRAPH_EDGE_LEGEND) {
+      expect(entry.translationKey).toMatch(/^edgeTypes\./);
+    }
+  });
+
+  describe("getHighlightedEdgeStyle", () => {
+    it("uses the red highlight override when the edge is highlighted", () => {
+      const s = getHighlightedEdgeStyle("CAUSE_OF", true, true);
+      expect(s).toEqual({ stroke: "#ff4d4f", lineWidth: 2, opacity: 1 });
+    });
+
+    it("keeps the category color at low opacity when dimmed and not highlighted", () => {
+      const s = getHighlightedEdgeStyle("CAUSE_OF", false, true);
+      expect(s).toEqual({ stroke: "#ff7875", lineWidth: 1, opacity: 0.1 });
+    });
+
+    it("keeps the category color at full opacity when reset (not dimmed)", () => {
+      const s = getHighlightedEdgeStyle("DETECTED_BY", false, false);
+      expect(s).toEqual({ stroke: "#722ed1", lineWidth: 1, opacity: 1 });
+    });
+
+    it("falls back to EDGE_STROKE for structural edges in all states", () => {
+      expect(getHighlightedEdgeStyle("HAS_FAILURE_MODE", false, false).stroke).toBe(EDGE_STROKE);
+      expect(getHighlightedEdgeStyle("HAS_FAILURE_MODE", false, true).stroke).toBe(EDGE_STROKE);
+    });
+
+    it("highlight overrides even structural edges", () => {
+      expect(getHighlightedEdgeStyle("HAS_FAILURE_MODE", true, true)).toEqual({
+        stroke: "#ff4d4f",
+        lineWidth: 2,
+        opacity: 1,
+      });
+    });
   });
 });

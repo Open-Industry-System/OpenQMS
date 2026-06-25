@@ -12,7 +12,7 @@ An out-of-the-box quality management system platform for manufacturing, covering
 
 | Module | Description |
 |--------|-------------|
-| **FMEA** | AIAG-VDA 7-step PFMEA/DFMEA, graph model editing, automatic RPN/AP calculation, approval workflow |
+| **FMEA** | AIAG-VDA 7-step PFMEA/DFMEA, graph model editing, 7-step generation wizard, automatic RPN/AP calculation, approval workflow |
 | **8D / CAPA** | D1–D8 step progression, team formation, FMEA linking, approval closure |
 | **Control Plan** | One-click generation from PFMEA, bidirectional sync, version management |
 | **Special Characteristics** | CC/SC identification, coverage matrix, FMEA→CP linkage, traceability view |
@@ -31,6 +31,7 @@ An out-of-the-box quality management system platform for manufacturing, covering
 | **ERP / MES / PLM** | External system integration dashboards and data sync |
 | **Knowledge Graph** | FMEA/CP knowledge association and visualization |
 | **Group Management** | Multi-plant dashboards, plant comparison, group-level suppliers and audits |
+| **Product Type Master Data** | Shared cross-factory product classification, product-line attribution and semantic-search filtering |
 
 ---
 
@@ -110,7 +111,7 @@ Open **http://localhost:5173** in your browser and log in with one of the follow
 
 | Module | Status | Description |
 |--------|:------:|-------------|
-| FMEA | ✅ | PFMEA/DFMEA editor, approval workflow |
+| FMEA | ✅ | PFMEA/DFMEA editor, 7-step generation wizard, approval workflow |
 | 8D / CAPA | ✅ | D1–D8 step progression, FMEA linking |
 | Control Plan | ✅ | One-click generation from PFMEA, version management |
 | Special Characteristics | ✅ | CC/SC identification, coverage matrix, traceability |
@@ -129,6 +130,7 @@ Open **http://localhost:5173** in your browser and log in with one of the follow
 | Supplier Risk | ✅ | Risk rule configuration + risk dashboard |
 | Supply Chain Risk Map | ✅ | Multi-dimensional risk heatmap |
 | Group Management | ✅ | Multi-plant dashboard + comparison + group suppliers |
+| Product Type Master Data | ✅ | Cross-factory product-line classification + semantic-search filtering |
 | ERP Integration | ✅ | Dashboard + connection configuration + data sync |
 | MES Integration | ✅ | Dashboard + connection configuration + production/scrap data |
 | PLM Integration | ✅ | Parts/BOM/change orders + mock connector |

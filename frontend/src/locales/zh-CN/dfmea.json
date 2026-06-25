@@ -17,7 +17,29 @@
       "timeframe": "时间范围",
       "tool": "工具",
       "task": "任务",
-      "trend": "趋势"
+      "trend": "趋势",
+      "legacyTimeframe": "当前旧格式值：{{value}}（重新选择以更新）",
+      "toolPresets": ["边界图", "P图/参数图", "接口矩阵", "功能分析", "故障树分析", "DFMEA模板", "历史经验教训库"],
+      "trendPresets": ["历史FMEA", "售后/现场故障数据", "客户投诉", "CAPA记录", "召回/法规数据", "审核发现", "设计变更历史"],
+      "aiRecommend": "✨ AI推荐",
+      "aiRecommendLoading": "推荐中…",
+      "aiRecommendEmpty": "暂无 AI 建议",
+      "aiRecommendFailed": "AI 推荐失败，请稍后重试",
+      "toolStructureMap": {
+        "边界图": "Interface",
+        "接口矩阵": "Interface",
+        "P图/参数图": "DesignParameter",
+        "Boundary Diagram": "Interface",
+        "Interface Matrix": "Interface",
+        "Parameter Diagram (P-Diagram)": "DesignParameter"
+      },
+      "toolGuide": {
+        "Interface": "你选了【{{tool}}】，建议为组件创建 Interface 节点，记录物理/信号/能量接口。",
+        "DesignParameter": "你选了【{{tool}}】，建议创建 DesignParameter 节点，定义理想/非理想响应与控制因素。"
+      },
+      "toolGuideNeedStructure": "请先在结构树中创建系统/组件，再添加接口/参数节点。",
+      "addInterfaceNode": "+ 创建接口节点",
+      "addDesignParameterNode": "+ 创建参数节点"
     },
     "structure": {
       "title": "结构分析",
@@ -55,7 +77,9 @@
       "addFailureMode": "+ 添加失效模式",
       "addFunction": "+ 添加功能",
       "delete": "删除",
-      "newFailureMode": "新失效模式"
+      "newFailureMode": "新失效模式",
+      "preventionControl": "预防措施",
+      "detectionControl": "探测措施"
     },
     "risk": {
       "title": "风险分析",
@@ -66,13 +90,33 @@
       "rpn": "RPN",
       "ap": "AP",
       "mustOptimize": "必须优化",
-      "empty": "暂无失效链，请先在失效分析步骤中创建"
+      "empty": "暂无失效链，请先在失效分析步骤中创建",
+      "missingControlHint": "存在未填写预防/探测措施的失效链，请先在失效分析步骤补全",
+      "controlsFirst": "先补全措施"
     },
     "optimization": {
       "title": "优化措施",
       "noOptimization": "无需强制优化",
       "noOptimizationHint": "所有失效模式 AP 均不为 H，当前风险可接受。",
       "mustOptimize": "以下 {{count}} 项 AP=H，必须采取优化措施：",
+      "apBadge": "AP H",
+      "measure": "优化措施",
+      "measurePlaceholder": "建议的预防/探测优化措施",
+      "responsible": "负责人",
+      "responsiblePlaceholder": "负责人姓名",
+      "dueDate": "目标完成日期",
+      "status": "状态",
+      "actionTaken": "采取基于证据的措施",
+      "actionTakenPlaceholder": "实际采取的措施及证据",
+      "completionDate": "完成日期",
+      "revisedRatings": "重新评估 S / O / D",
+      "revisedAp": "措施后 AP",
+      "statusOptions": {
+        "undecided": "尚未确定",
+        "planned": "尚未执行",
+        "done": "已完成",
+        "notExecuted": "不执行"
+      },
       "preventionPlaceholder": "预防措施",
       "detectionPlaceholder": "探测措施"
     },
@@ -111,9 +155,11 @@
       "confirmEmptyDraftOk": "放弃并删除",
       "confirmEmptyDraftCancel": "继续编辑",
       "finishFailed": "完成提交失败，请重试",
+      "loadFailed": "DFMEA 数据加载失败",
       "conflictTitle": "文档已被修改",
       "conflictContent": "该 FMEA 已被其他会话修改，继续编辑前需要重新加载。未保存的本地改动将被丢弃。",
-      "conflictReload": "重新加载"
+      "conflictReload": "重新加载",
+      "structureGap": "你选了【{{tool}}】但未创建任何已挂接的 {{nodeType}} 节点，建议补全以体现该分析方式。"
     },
     "guidance": {
       "step0": {
@@ -234,10 +280,12 @@
   },
   "smartSuggestion": {
     "global": "全局经验",
+    "currentProductType": "同类产品",
     "currentProductLine": "仅当前产品线",
     "noGlobalPermission": "（无全局权限，仅当前产品线）",
     "actualScope": "实际范围：{{scope}}",
     "scopeGlobal": "全局",
+    "scopeProductType": "同类产品",
     "scopeLocal": "仅当前产品线",
     "ruleEngine": "规则引擎",
     "aiGenerated": "AI 生成",
@@ -252,7 +300,8 @@
     "noPermission": "无权限使用推荐功能",
     "serviceUnavailable": "推荐服务暂不可用",
     "aiUnavailable": "AI 建议暂不可用，已使用规则引擎",
-    "ruleOnlyMode": "仅规则引擎模式"
+    "ruleOnlyMode": "仅规则引擎模式",
+    "close": "关闭"
   },
   "structureTree": {
     "addSystem": "添加系统",

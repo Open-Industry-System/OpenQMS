@@ -30,6 +30,7 @@ async def semantic_search(
     q: str = Query(..., min_length=1, max_length=500),
     entity_types: str | None = Query(None, description="Comma-separated entity types"),
     product_line_code: str | None = Query(None),
+    product_type_code: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -44,6 +45,7 @@ async def semantic_search(
         query=q,
         user=user,
         product_line_code=product_line_code,
+        product_type_code=product_type_code,
         entity_types=parsed_types,
         limit=limit,
     )
@@ -70,6 +72,7 @@ async def ask_question(
         question=body.question,
         user=user,
         product_line_code=body.product_line_code,
+        product_type_code=body.product_type_code,
         max_context_chunks=body.max_context_chunks,
     )
 

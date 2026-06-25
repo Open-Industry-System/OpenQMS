@@ -12,7 +12,10 @@
     "zoomIn": "Zoom In",
     "zoomOut": "Zoom Out",
     "fitView": "Fit View",
-    "download": "Download Snapshot"
+    "download": "Download Snapshot",
+    "directionTB": "Top to Bottom",
+    "directionLR": "Left to Right",
+    "directionDisabledHint": "Only available for hierarchy layout"
   },
   "legend": {
     "title": "Legend",
@@ -41,6 +44,9 @@
     "processItemFunction": "Process Item Function",
     "processStepFunction": "Process Step Function",
     "processWorkElementFunction": "Work Element Function",
+    "systemFunction": "System Function",
+    "subsystemFunction": "Subsystem Function",
+    "componentFunction": "Component Function",
     "failureMode": "Failure Mode",
     "failureEffect": "Failure Effect",
     "failureCause": "Failure Cause",
@@ -53,6 +59,8 @@
   "edgeTypes": {
     "hasProcessStep": "Has Process Step",
     "hasWorkElement": "Has Work Element",
+    "hasSubsystem": "Has Subsystem",
+    "hasComponent": "Has Component",
     "workIn": "Has Work Element",
     "hasFunction": "Has Function",
     "asFunction": "Defines Function",
@@ -61,11 +69,16 @@
     "hasFailureMode": "Has Failure Mode",
     "effectOf": "Effect Of",
     "causeOf": "Cause Of",
+    "causeBranch": "Cause",
+    "structuralChain": "Structural Chain",
     "preventedBy": "Prevented By",
     "detectedBy": "Detected By",
     "optimizedBy": "Optimized By",
     "hasNode": "Has Node",
     "hasChild": "Has Child"
+  },
+  "edgeLegend": {
+    "title": "Edge Types"
   },
   "nodeDetail": {
     "title": "Node Detail",

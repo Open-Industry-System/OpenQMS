@@ -2,102 +2,32 @@ import { forwardRef, useEffect, useRef, useCallback, useImperativeHandle, useMem
 import { Graph } from "@antv/g6";
 import { useTranslation } from "react-i18next";
 import type { GraphNode, GraphEdge } from "../../api/graph";
-import type { GraphLayout } from "./GraphToolbar";
-import { getEdgeTypeKey, getNodeStyle } from "../../utils/graphPresentation";
-
-// Dark-theme palette (matches darkAlgorithm tokens in utils/darkTheme.ts).
-const GRAPH_BG = "#14161d";
-const GRAPH_BORDER = "rgba(255, 255, 255, 0.08)";
-const EDGE_STROKE = "rgba(255, 255, 255, 0.28)";
-const EDGE_LABEL_FILL = "#8b93a7";
-const EDGE_LABEL_BG = "#1c1f29";
-const NODE_LABEL_FILL = "#f0f2f5";
+import { toG6Data, graphLayoutOptions } from "../../utils/graphLayout";
+import type { GraphLayout, GraphDirection } from "../../utils/graphLayout";
+import { getHighlightedEdgeStyle } from "../../utils/graphPresentation";
+import {
+  EDGE_LABEL_BG,
+  EDGE_LABEL_FILL,
+  EDGE_STROKE,
+  GRAPH_BG,
+  GRAPH_BORDER,
+  NODE_LABEL_FILL,
+} from "../../utils/graphPresentation";
 
 interface GraphCanvasProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
   mode: "single-fmea" | "global";
+  /** FMEA family of the document being viewed — drives DFMEA-aware edge labels. */
+  fmeaType?: string;
   layout?: GraphLayout;
+  /** Hierarchy reading direction — only applies to dagre. */
+  direction?: GraphDirection;
   highlightNodes?: string[];
   dimOthers?: boolean;
   onNodeClick?: (node: GraphNode) => void;
   onNodeDoubleClick?: (node: GraphNode) => void;
   onNodeContextMenu?: (node: GraphNode, event: { clientX: number; clientY: number }) => void;
-}
-
-type GraphT = (key: string, options?: { defaultValue?: string }) => string;
-
-function toG6Data(nodes: GraphNode[], edges: GraphEdge[], t: GraphT) {
-  const g6Nodes = nodes.map((n) => {
-    const nodeStyle = getNodeStyle(n.label);
-    return {
-      id: n.id,
-      data: {
-        label: n.properties.name || n.label,
-        type: n.label,
-      },
-      style: {
-        ...nodeStyle,
-      },
-    };
-  });
-
-  const g6Edges = edges.map((e) => {
-    const rawLabel = e.label || "edge";
-    return {
-      id: `${e.source}-${e.target}-${rawLabel}`,
-      source: e.source,
-      target: e.target,
-      data: {
-        label: t(getEdgeTypeKey(rawLabel), { defaultValue: rawLabel }),
-        rawLabel,
-      },
-      style: {
-        stroke: EDGE_STROKE,
-        lineWidth: 1,
-        endArrow: true,
-      },
-    };
-  });
-
-  return { nodes: g6Nodes, edges: g6Edges };
-}
-
-function graphLayoutOptions(layout: GraphLayout) {
-  if (layout === "dagre") {
-    return {
-      type: "dagre",
-      rankdir: "LR",
-      nodesep: 70,
-      ranksep: 110,
-      controlPoints: false,
-      animation: true,
-    } as const;
-  }
-
-  if (layout === "force") {
-    // d3-force + drag-element-force keeps the simulation live so dragging a
-    // node re-heats it and pushes neighbors away (no overlap). `collide`
-    // enforces a minimum gap between the (up to ~144px) nodes.
-    return {
-      type: "d3-force",
-      link: { distance: 120, strength: 1 },
-      collide: { radius: 56 },
-      charge: { strength: -350 },
-      animation: true,
-    } as const;
-  }
-
-  // compact-box is a tree layout — give it real gaps so siblings don't overlap.
-  return {
-    type: "compact-box",
-    direction: "LR",
-    getHGap: () => 90,
-    getVGap: () => 18,
-    getHeight: () => 40,
-    getWidth: () => 140,
-    animation: true,
-  } as const;
 }
 
 function graphBehaviors(layout: GraphLayout) {
@@ -122,7 +52,9 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     nodes,
     edges,
     mode,
+    fmeaType,
     layout = mode === "single-fmea" ? "dagre" : "force",
+    direction = "TB",
     highlightNodes = [],
     dimOthers = false,
     onNodeClick,
@@ -133,10 +65,10 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
-  const { t, i18n } = useTranslation("graph");
+  const { t } = useTranslation("graph");
   const graphData = useMemo(
-    () => toG6Data(nodes, edges, t),
-    [nodes, edges, t, i18n.language],
+    () => toG6Data(nodes, edges, t, fmeaType),
+    [nodes, edges, t, fmeaType],
   );
 
   // Keep handlers in refs so initGraph only depends on structural inputs (layout/nodes);
@@ -189,7 +121,7 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
           labelBackgroundPadding: [2, 6],
         },
       },
-      layout: graphLayoutOptions(layout),
+      layout: graphLayoutOptions(layout, direction),
       behaviors: graphBehaviors(layout),
       plugins: [
         {
@@ -249,73 +181,44 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     graph.render().catch((err: unknown) => {
       console.error("G6 render failed:", err);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- graphData is intentionally
-    // excluded so language changes do not recreate the G6 instance; the [graphData] effect
-    // below is the data refresh path and preserves zoom/pan.
-  }, [layout, nodes]);
+    // graphData is intentionally excluded so language changes do not recreate the G6 instance;
+    // the [graphData] effect below is the data refresh path and preserves zoom/pan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, direction, nodes]);
 
   // Apply highlight/dim
   const applyHighlight = useCallback(() => {
     const graph = graphRef.current;
     if (!graph) return;
+    const dimmed = highlightNodes.length > 0 && dimOthers;
 
-    if (highlightNodes.length > 0 && dimOthers) {
-      graph.getNodeData().forEach((node) => {
-        const isHighlighted = highlightNodes.includes(node.id);
-        graph.updateNodeData([
-          {
-            id: node.id,
-            style: {
-              ...node.style,
-              opacity: isHighlighted ? 1 : 0.2,
-            },
+    graph.getNodeData().forEach((node) => {
+      const isHighlighted = highlightNodes.includes(node.id);
+      graph.updateNodeData([
+        {
+          id: node.id,
+          style: {
+            ...node.style,
+            opacity: dimmed ? (isHighlighted ? 1 : 0.2) : 1,
           },
-        ]);
-      });
-      graph.getEdgeData().forEach((edge) => {
-        const edgeId = edge.id!;
-        const isHighlighted =
-          highlightNodes.includes(edge.source) && highlightNodes.includes(edge.target);
-        graph.updateEdgeData([
-          {
-            id: edgeId,
-            style: {
-              ...edge.style,
-              opacity: isHighlighted ? 1 : 0.1,
-              stroke: isHighlighted ? "#ff4d4f" : EDGE_STROKE,
-              lineWidth: isHighlighted ? 2 : 1,
-            },
-          },
-        ]);
-      });
-    } else {
-      // Reset
-      graph.getNodeData().forEach((node) => {
-        graph.updateNodeData([
-          {
-            id: node.id,
-            style: {
-              ...node.style,
-              opacity: 1,
-            },
-          },
-        ]);
-      });
-      graph.getEdgeData().forEach((edge) => {
-        const edgeId = edge.id!;
-        graph.updateEdgeData([
-          {
-            id: edgeId,
-            style: {
-              ...edge.style,
-              opacity: 1,
-              stroke: EDGE_STROKE,
-              lineWidth: 1,
-            },
-          },
-        ]);
-      });
-    }
+        },
+      ]);
+    });
+
+    graph.getEdgeData().forEach((edge) => {
+      const edgeId = edge.id!;
+      const rawLabel = (edge.data as { rawLabel?: string } | undefined)?.rawLabel ?? "";
+      const isHighlighted =
+        highlightNodes.includes(edge.source) && highlightNodes.includes(edge.target);
+      const style = getHighlightedEdgeStyle(rawLabel, isHighlighted, dimmed);
+      graph.updateEdgeData([
+        {
+          id: edgeId,
+          style: { ...edge.style, ...style },
+        },
+      ]);
+    });
+
     graph.draw();
   }, [highlightNodes, dimOthers]);
 
@@ -364,19 +267,35 @@ const GraphCanvas = forwardRef<GraphCanvasRef, GraphCanvasProps>(function GraphC
     },
     download: () => {
       const g = graphRef.current;
-      if (g) {
-        // Use G6's toDataURL instead of querySelector to avoid capturing minimap
-        g.toDataURL()
-          .then((url: string) => {
+      if (!g) return;
+      // G6's toDataURL captures only the canvas (transparent background); the dark
+      // GRAPH_BG lives in the container CSS, so the raw export is invisible on a
+      // white viewer. Composite the export onto a GRAPH_BG-filled canvas first.
+      g.toDataURL()
+        .then((url: string) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            ctx.fillStyle = GRAPH_BG;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
             const link = document.createElement("a");
             link.download = "graph.png";
-            link.href = url;
+            link.href = canvas.toDataURL("image/png");
             link.click();
-          })
-          .catch((err: unknown) => {
-            console.error("Graph download failed:", err);
-          });
-      }
+          };
+          img.onerror = (err: unknown) => {
+            console.error("Graph download image load failed:", err);
+          };
+          img.src = url;
+        })
+        .catch((err: unknown) => {
+          console.error("Graph download failed:", err);
+        });
     },
   }));
 

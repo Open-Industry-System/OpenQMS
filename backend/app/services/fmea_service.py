@@ -2,13 +2,18 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
+from app.models.capa import CAPAEightD
+from app.models.control_plan import ControlPlan
+from app.models.customer_quality import CustomerComplaint, RMARecord
 from app.models.fmea import FMEADocument
 from app.models.graph_sync_outbox import GraphSyncOutbox
+from app.models.special_characteristic import SpecialCharacteristic
+from app.models.spc import SPCAlarm
 from app.services.embedding_outbox import delete_embeddings_for_entity, enqueue_embedding
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import _create_fmea_version_no_commit
@@ -291,8 +296,30 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
     # entity_type/entity_id), so the row delete does not cascade — clean the
     # FMEA's node embeddings explicitly, in the same transaction, BEFORE commit.
     await delete_embeddings_for_entity(db, "fmea_node", fmea_id)
+    # Several nullable FKs to fmea_documents have no ondelete clause (Postgres
+    # NO ACTION): control_plans / capa_eightd / customer_complaints /
+    # rma_records / special_characteristics / spc_alarms. Null them out in the
+    # same transaction so deleting a (rework) FMEA that's still referenced by a
+    # ControlPlan / CAPA / etc. doesn't raise IntegrityError. Mirrors the
+    # ondelete=SET NULL already used by apqp.
+    await _null_out_fmea_references(db, fmea_id)
     await db.delete(fmea)
     await db.commit()
+
+
+async def _null_out_fmea_references(db: AsyncSession, fmea_id: uuid.UUID) -> None:
+    """Set nullable fmea_ref_id / source_fmea_id / confirmed_fmea_id columns
+    that point at fmea_id to NULL, so the FMEA row can be deleted without
+    tripping a NO-ACTION FK constraint."""
+    for model, column in (
+        (ControlPlan, ControlPlan.fmea_ref_id),
+        (CAPAEightD, CAPAEightD.fmea_ref_id),
+        (CustomerComplaint, CustomerComplaint.fmea_ref_id),
+        (RMARecord, RMARecord.fmea_ref_id),
+        (SpecialCharacteristic, SpecialCharacteristic.source_fmea_id),
+        (SPCAlarm, SPCAlarm.confirmed_fmea_id),
+    ):
+        await db.execute(update(model).where(column == fmea_id).values({column: None}))
 
 
 async def transition_fmea(
