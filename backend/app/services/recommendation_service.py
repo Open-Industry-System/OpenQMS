@@ -918,6 +918,7 @@ class RecommendationService:
                 context_hash=context_hash,
                 product_line_code=fmea.product_line_code,
                 fmea_type=fmea.fmea_type,
+                factory_id=fmea.factory_id,
                 expires_at=func.now() + text("INTERVAL '24 hours'"),
                 suggestions=[s.model_dump() for s in response.suggestions],
                 source=response.source,

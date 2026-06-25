@@ -235,6 +235,9 @@ async def plm_connection(db: AsyncSession, admin_user: User, default_factory: Fa
     db.add(conn)
     await db.flush()
     await db.refresh(conn)
+    return conn
+
+
 def _scope_for(user, default_factory, accessible_factory_ids=None, pl_mode="ALL", pl_codes=None):
     return RequestScope(
         factory_scope=FactoryScope(accessible_factory_ids=accessible_factory_ids, default_factory_id=default_factory.id),
