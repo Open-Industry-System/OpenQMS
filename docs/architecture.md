@@ -41,7 +41,7 @@ OpenQMS/
 │   │   ├── main.py          # FastAPI app 入口，路由注册，中间件
 │   │   └── seed.py          # 演示数据种子脚本
 │   ├── alembic/             # 数据库迁移
-│   └── tests/               # 手动测试（无 pytest 框架）
+│   └── tests/               # pytest 后端测试（含 factory_id fixtures + 多模块回归）
 ├── frontend/
 │   ├── src/
 │   │   ├── api/             # Axios 实例 + 按模块划分的 API 函数
@@ -169,6 +169,7 @@ async def create_fmea(...):
 | `user_product_lines` | 用户-产品线范围 | UUID |
 | `factories` | 工厂 | UUID |
 | `product_lines` | 产品线 | UUID |
+| `product_types` | 产品类型主数据（跨工厂共享，被 product_lines 引用） | String (code) |
 | `fmea_documents` | FMEA 文档（JSONB graph_data） | UUID |
 | `capa_eightd` | 8D/CAPA 报告 | UUID |
 | `audit_logs` | 审计日志 | UUID |
@@ -242,7 +243,7 @@ FastAPI 自动生成交互式 API 文档：
 
 | 限制 | 说明 |
 |------|------|
-| 无测试框架 | 后端使用手动 `test_schema.py`，前端无测试 |
+| 测试覆盖持续完善 | 后端已迁移至 pytest（含 factory_id fixtures、多模块回归与 API 守卫测试），前端使用 vitest 覆盖关键工具与页面；部分历史模块仍需补齐 fixture |
 | 前端未自动刷新 Token | 后端已有 `/api/auth/refresh`，但前端未自动调用，120 分钟后仍需重新登录 |
 | 无登录限速 | 登录接口无速率限制 |
 | Redis 未使用 | 已配置但未实现缓存逻辑 |

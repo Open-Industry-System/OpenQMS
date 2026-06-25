@@ -1,6 +1,6 @@
 # OpenQMS 开发路线图
 
-**更新日期**: 2026-06-13
+**更新日期**: 2026-06-25
 **当前版本**: v0.1.0 (MVP)
 **目标版本**: v3.0 (全功能发布)
 
@@ -213,7 +213,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 ---
 
-## 项目统计 (截至 2026-06-13)
+## 项目统计 (截至 2026-06-25)
 
 | 指标 | 数量 |
 |------|------|
@@ -238,6 +238,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 2026 M6  ──── ✅ Phase 3 AI + 知识图谱增强全部完成
 2026 M6  ──── ✅ Phase 4 高级分析 + 生态集成启动
 2026 M6.5 ── ✅ 供应链风险地图上线
+2026 M6   ── ✅ Phase 4+ FMEA 向导化与体验优化（PFMEA/DFMEA 七步法向导、版本快照查看、安全删除、产品类型主数据）
 2026 M12 ──── 🔲 GA v2.0 发布
 2027 M4  ──── 🔲 全功能发布 (GA v3.0)
 ```
@@ -379,3 +380,22 @@ Phase 4 全部功能已开发完毕。多租户架构是最后一个 Phase 4 模
 7. ~~种子数据~~ ✅ 第二工厂 + GROUP ADMIN 用户
 8. ~~测试~~ ✅ Factory isolation (14) + scope resolution (41) + 管理评审 API (5) + 权限解耦边界测试
 9. ~~代码审查修复~~ ✅ GROUP VIEW 明细响应工厂范围过滤 + product_line 列表过滤 + shipment 重复校验 + 管理评审 API 测试修复
+
+---
+
+## Phase 4+: FMEA 向导化与体验优化 (2026-06-14 ~ 2026-06-25) ✅ 已完成
+
+Phase 4 收官后在 `fix/fmea-fixes` 分支上持续迭代 FMEA 编辑器与生成向导，落地 AIAG-VDA 七步法的引导式建模、版本快照只读查看、安全删除，以及产品类型主数据，全部带前后端测试。
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| PFMEA 七步法生成向导 | ✅ 完成 | `PFMEAWizardPage`：Step 0 范围定义 → Step 1 结构树 → Step 2 功能树（`FunctionTreeEditor`，3 级功能 + `FUNCTION_MAPPED_TO` + CC/SC）→ Step 3 失效链（4M 语境）→ Step 4 风险表（`RiskTable`，severity 取层级 max、CC/SC 只读聚合、O/D 门禁）→ Step 5 优化（AP=H + 推荐措施）→ Step 6 确认完成门禁；配套 `usePfmeaWizardValidation`（4M/OP 门禁、3 级严重度、CC/SC 感知）+ `PFMEAWizardSidebar` + `PFMEAGuidanceCard` + `wizardCascadeDelete` |
+| DFMEA 向导增强 | ✅ 完成 | 时间区间改为 `DatePicker.RangePicker`；5T 工具/趋势 AI 推荐（`pfmea_tool` / `pfmea_trend` 触发器 + 4M 规则内容）；Step 3 AI 推荐（`SmartSuggestionDropdown` 接后端触发器取代规则桩）；Step 5 风险分析承载 Step 4 上下文 + PC/DC 创建前置；PC/DC AI 推荐；工具结构引导卡（`ToolStructureGuide`）+ `ScopeTagField` 触发联合扩展 |
+| FMEA 版本快照只读查看器 | ✅ 完成 | 编辑器内通过 `viewingVersion` 状态嵌入历史版本只读预览（`FMEAVersionSnapshot` / `CPVersionSnapshot`），替换原占位页；版本快照查看不改变当前可编辑态 |
+| FMEA 删除 | ✅ 完成 | 列表页对 `draft` / `rework` 状态开放删除；后端状态守卫拒绝其他状态；删除前 `_null_out_fmea_references` 将 `control_plan` / `capa` 等关联记录外键置空，避免 IntegrityError → 500；FK 回归测试覆盖 |
+| 产品类型主数据 | ✅ 完成 | `product_types` 表（code 主键 + name + 描述 + is_active）+ `product_lines.product_type_code` 外键（`ondelete=RESTRICT`）+ 后端 API（list/create/update/delete）+ `ProductTypePage` / `ProductLinePage` 管理页（`requireAdmin` 守卫）+ 语义搜索 `product_type` 过滤；跨工厂共享的主数据 |
+| FMEA 图谱布局清晰度 | ✅ 完成 | `CAUSE_OF` 渲染方向修正 + 默认 TB 层次方向 + 边按分支着色 + 边类型图例 + 方向切换 Segmented（`graphDirection` 状态注入 `GraphCanvas`）+ PNG 导出合成背景色保证内容可见；提取 `toG6Data` / `graphLayoutOptions` / `GraphDirection` 至 utils |
+| 结构树拖拽 @dnd-kit 迁移 | ✅ 完成 | 原 8 轮原生 HTML5 DnD 对 n≥2 步触达架构上限，迁移至 `@dnd-kit`（`FMEAEditorDragSort`），稳定支持多级排序 |
+| 推荐缓存与作用域 | ✅ 完成 | `recommendation_cache` 修复 upsert + KG 视图前置条件隔离（CI 稳定）+ `recommendation_scope` 作用域收敛 |
+
+**验收标准**: FMEA 编辑器全流程（手工建模 + 向导生成 + 版本回溯 + 安全删除）端到端可用，前后端回归全绿。
