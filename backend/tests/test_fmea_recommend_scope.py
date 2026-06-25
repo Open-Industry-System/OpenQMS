@@ -57,7 +57,11 @@ async def test_recommend_current_product_type_passes_sibling_codes(db, default_f
         context={"function_description": "采集单体电压"},
         scope="current_product_type",
     )
-    await service.recommend(fmea.fmea_id, req, admin_user, request_scope_all)
+    # Admin's KG VIEW permission is normally migration-seeded (029_knowledge_graph_permissions);
+    # destructive tests that drop_all+create_all wipe that row, so establish the precondition
+    # explicitly rather than depend on seed data surviving.
+    with patch("app.core.permissions.get_user_permission", return_value=PermissionLevel.VIEW):
+        await service.recommend(fmea.fmea_id, req, admin_user, request_scope_all)
 
     assert set(captured["product_line_codes"]) == {"PT-DC-100", "PT-AC-200"}
     # scope/product_line_code kwargs must NOT be passed (unified signature)
