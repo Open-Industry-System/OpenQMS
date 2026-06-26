@@ -1,0 +1,15 @@
+{
+  "title": "Log Management",
+  "tabs": { "audit": "Audit Logs", "login": "Login Logs", "system": "System Logs" },
+  "filters": {
+    "table_name": "Table", "action": "Action", "operated_by": "Operator",
+    "username": "Username", "result": "Result", "all": "All", "success": "Success", "fail": "Failed",
+    "level": "Level", "logger_name": "Logger", "timeRange": "Time Range"
+  },
+  "columns": {
+    "operated_at": "Time", "occurred_at": "Time", "table_name": "Table", "action": "Action",
+    "operated_by": "Operator", "ip": "IP", "username": "Username", "result": "Result",
+    "failure_reason": "Failure Reason", "level": "Level", "logger_name": "Logger", "message": "Message"
+  },
+  "expand": { "oldValues": "Old Values", "newValues": "New Values", "changedFields": "Changed Fields", "traceback": "Traceback" }
+}

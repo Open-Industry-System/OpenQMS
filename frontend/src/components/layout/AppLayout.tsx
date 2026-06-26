@@ -276,6 +276,7 @@ function useMenuItems(): MenuItem[] {
           { key: "/admin/product-types", icon: <AppstoreOutlined />, label: t("menu.productTypes"), adminOnly: true },
           { key: "/admin/product-lines", icon: <ProfileOutlined />, label: t("menu.productLines"), adminOnly: true },
           { key: "/admin/users", icon: <UserOutlined />, label: t("menu.users"), adminOnly: true },
+          { key: "/admin/logs", icon: <FileTextOutlined />, label: t("menu.logs"), adminOnly: true },
         ],
       },
     ],

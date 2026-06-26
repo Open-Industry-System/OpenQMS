@@ -58,7 +58,8 @@
     "aiConfig": "AI Model Config",
     "productTypes": "Product Types",
     "productLines": "Product Lines",
-    "users": "User Management"
+    "users": "User Management",
+    "logs": "Log Management"
   },
   "header": {
     "selectFactory": "Select Factory",
