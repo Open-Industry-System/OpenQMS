@@ -159,6 +159,7 @@ async def register(
         display_name=req.display_name or req.username,
         email=req.email,
         role_id=role_def.id,
+        legacy_role=req.role_key,
     )
     db.add(user)
     await db.commit()
