@@ -1,0 +1,20 @@
+{
+  "title": "用户管理",
+  "create": "新建用户",
+  "fields": {
+    "username": "用户名",
+    "password": "密码",
+    "display_name": "显示名",
+    "email": "邮箱",
+    "role_key": "角色",
+    "is_active": "状态",
+    "factories": "可访问工厂"
+  },
+  "createModalTitle": "新建用户",
+  "messages": {
+    "created": "用户已创建",
+    "createFailed": "创建失败"
+  },
+  "active": "启用",
+  "inactive": "停用"
+}

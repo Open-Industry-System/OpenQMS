@@ -1,0 +1,20 @@
+{
+  "title": "User Management",
+  "create": "Create User",
+  "fields": {
+    "username": "Username",
+    "password": "Password",
+    "display_name": "Display Name",
+    "email": "Email",
+    "role_key": "Role",
+    "is_active": "Status",
+    "factories": "Factories"
+  },
+  "createModalTitle": "Create User",
+  "messages": {
+    "created": "User created",
+    "createFailed": "Create failed"
+  },
+  "active": "Active",
+  "inactive": "Inactive"
+}

@@ -1,5 +1,5 @@
 import client from "./client";
-import type { LoginRequest, TokenResponse, User } from "../types";
+import type { LoginRequest, TokenResponse, User, RegisterRequest } from "../types";
 
 export async function login(data: LoginRequest): Promise<TokenResponse> {
   const resp = await client.post("/auth/login", data);
@@ -18,5 +18,10 @@ export async function getMe(): Promise<User> {
 
 export async function listUsers(): Promise<User[]> {
   const resp = await client.get("/auth/users");
+  return resp.data;
+}
+
+export async function registerUser(data: RegisterRequest): Promise<User> {
+  const resp = await client.post("/auth/register", data);
   return resp.data;
 }

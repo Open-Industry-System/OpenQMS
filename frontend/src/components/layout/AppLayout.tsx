@@ -58,6 +58,7 @@ const MENU_KEYS = [
   "/plm/dashboard", "/plm/connections", "/plm/parts", "/plm/change-orders",
   "/erp", "/erp/connections", "/erp/master-data", "/erp/supply-chain", "/erp/commercial", "/erp/traceability",
   "/group/dashboard", "/group/comparison", "/group/suppliers", "/group/audits", "/group/factories",
+  "/admin/ai-config", "/admin/product-types", "/admin/product-lines", "/admin/users", "/admin/logs",
 ];
 
 const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
@@ -107,6 +108,11 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/group/suppliers": ["grp:group"],
   "/group/audits": ["grp:group"],
   "/group/factories": ["grp:group"],
+  "/admin/ai-config": ["grp:admin"],
+  "/admin/product-types": ["grp:admin"],
+  "/admin/product-lines": ["grp:admin"],
+  "/admin/users": ["grp:admin"],
+  "/admin/logs": ["grp:admin"],
 };
 
 interface MenuItem {
@@ -269,6 +275,7 @@ function useMenuItems(): MenuItem[] {
           { key: "/admin/ai-config", icon: <SettingOutlined />, label: t("menu.aiConfig"), adminOnly: true },
           { key: "/admin/product-types", icon: <AppstoreOutlined />, label: t("menu.productTypes"), adminOnly: true },
           { key: "/admin/product-lines", icon: <ProfileOutlined />, label: t("menu.productLines"), adminOnly: true },
+          { key: "/admin/users", icon: <UserOutlined />, label: t("menu.users"), adminOnly: true },
         ],
       },
     ],

@@ -81,6 +81,7 @@ const TenantDeactivated = lazy(() => import("./pages/TenantDeactivated"));
 const AIConfigPage = lazy(() => import("./pages/admin/AIConfigPage"));
 const ProductTypePage = lazy(() => import("./pages/admin/ProductTypePage"));
 const ProductLinePage = lazy(() => import("./pages/admin/ProductLinePage"));
+const UserManagementPage = lazy(() => import("./pages/admin/UserManagementPage"));
 
 function isTokenExpired(token: string): boolean {
   try {
@@ -223,6 +224,7 @@ export default function App() {
         <Route path="/admin/ai-config" element={<ProtectedRoute requireAdmin><AIConfigPage /></ProtectedRoute>} />
         <Route path="/admin/product-types" element={<ProtectedRoute requireAdmin><ProductTypePage /></ProtectedRoute>} />
         <Route path="/admin/product-lines" element={<ProtectedRoute requireAdmin><ProductLinePage /></ProtectedRoute>} />
+        <Route path="/admin/users" element={<ProtectedRoute requireAdmin><UserManagementPage /></ProtectedRoute>} />
       </Route>
       </Routes>
     </Suspense>

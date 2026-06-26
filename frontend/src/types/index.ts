@@ -1731,3 +1731,20 @@ export interface SnapshotGenerateResponse {
   snapshot_count: number;
   period: string;
 }
+
+export interface RegisterRequest {
+  username: string;
+  password: string;
+  display_name?: string | null;
+  email?: string | null;
+  role_key: string;
+}
+
+export interface RoleOption {
+  id: string;
+  role_key: string;
+  name_zh: string;
+  name_en: string;
+  is_system: boolean;
+  is_editable: boolean;
+}
