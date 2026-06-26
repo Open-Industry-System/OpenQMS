@@ -23,7 +23,7 @@ function AuditTab() {
     try {
       const { range, ...rest } = values;
       setData(await listAuditLogs({ page, page_size, ...rest, ...rangeParams(range as never) }));
-    } catch { message.error("error"); }
+    } catch { message.error(t("error.load")); }
     finally { setLoading(false); }
   }, [message]);
 
@@ -41,7 +41,7 @@ function AuditTab() {
         <Form.Item name="action"><Input placeholder={t("filters.action")} allowClear /></Form.Item>
         <Form.Item name="operated_by"><Input placeholder={t("filters.operated_by")} allowClear /></Form.Item>
         <Form.Item name="range"><DatePicker.RangePicker showTime /></Form.Item>
-        <Form.Item><Button type="primary" onClick={onSearch}>查询</Button></Form.Item>
+        <Form.Item><Button type="primary" onClick={onSearch}>{t("filters.search")}</Button></Form.Item>
       </Form>
       <Table
         rowKey="log_id" loading={loading} dataSource={data.items}
@@ -83,7 +83,7 @@ function LoginTab() {
       const { range, success, ...rest } = values;
       const successVal = success === "all" || success == null ? undefined : success === "true";
       setData(await listLoginLogs({ page, page_size, ...rest, success: successVal, ...rangeParams(range as never) }));
-    } catch { message.error("error"); }
+    } catch { message.error(t("error.load")); }
     finally { setLoading(false); }
   }, [message]);
 
@@ -106,7 +106,7 @@ function LoginTab() {
           ]} />
         </Form.Item>
         <Form.Item name="range"><DatePicker.RangePicker showTime /></Form.Item>
-        <Form.Item><Button type="primary" onClick={onSearch}>查询</Button></Form.Item>
+        <Form.Item><Button type="primary" onClick={onSearch}>{t("filters.search")}</Button></Form.Item>
       </Form>
       <Table
         rowKey="log_id" loading={loading} dataSource={data.items}
@@ -141,7 +141,7 @@ function SystemTab() {
     try {
       const { range, ...rest } = values;
       setData(await listSystemLogs({ page, page_size, ...rest, ...rangeParams(range as never) }));
-    } catch { message.error("error"); }
+    } catch { message.error(t("error.load")); }
     finally { setLoading(false); }
   }, [message]);
 
@@ -166,7 +166,7 @@ function SystemTab() {
         </Form.Item>
         <Form.Item name="logger_name"><Input placeholder={t("filters.logger_name")} allowClear /></Form.Item>
         <Form.Item name="range"><DatePicker.RangePicker showTime /></Form.Item>
-        <Form.Item><Button type="primary" onClick={onSearch}>查询</Button></Form.Item>
+        <Form.Item><Button type="primary" onClick={onSearch}>{t("filters.search")}</Button></Form.Item>
       </Form>
       <Table
         rowKey="log_id" loading={loading} dataSource={data.items}

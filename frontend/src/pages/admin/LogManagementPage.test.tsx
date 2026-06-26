@@ -20,9 +20,17 @@ describe("LogManagementPage", () => {
     await waitFor(() => expect(screen.getByText("fmea_documents")).toBeInTheDocument());
   });
 
-  it("switching to system tab loads system logs", async () => {
+  it("switching to login tab loads login logs", async () => {
     render(<App><MemoryRouter><LogManagementPage /></MemoryRouter></App>);
     await waitFor(() => expect(listAuditLogs).toHaveBeenCalled());
+    fireEvent.click(screen.getByText("tabs.login"));
+    await waitFor(() => expect(listLoginLogs).toHaveBeenCalled());
+  });
+
+  it("switching to system tab loads system logs lazily", async () => {
+    render(<App><MemoryRouter><LogManagementPage /></MemoryRouter></App>);
+    await waitFor(() => expect(listAuditLogs).toHaveBeenCalled());
+    expect(listSystemLogs).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText("tabs.system"));
     await waitFor(() => expect(listSystemLogs).toHaveBeenCalled());
   });
