@@ -18,6 +18,7 @@ from app.core.security import (
     verify_password,
 )
 from app.database import get_db
+from app.models.login_audit_log import LoginAuditLog
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
 from app.models.user import User
@@ -114,9 +115,19 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     user = result.scalar_one_or_none()
     if user is None or not verify_password(req.password, user.password_hash):
         logger.warning("AUTH_LOGIN_FAILED username=%s ip=%s ua=%s", req.username, client_ip, user_agent[:200])
+        db.add(LoginAuditLog(
+            username=req.username, user_id=None, success=False,
+            failure_reason="Invalid credentials", ip_address=client_ip, user_agent=user_agent,
+        ))
+        await db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.is_active:
         logger.warning("AUTH_LOGIN_DEACTIVATED user_id=%s username=%s ip=%s", user.user_id, user.username, client_ip)
+        db.add(LoginAuditLog(
+            username=user.username, user_id=user.user_id, success=False,
+            failure_reason="Account deactivated", ip_address=client_ip, user_agent=user_agent,
+        ))
+        await db.commit()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
     # Build JWT payload — include tenant_id when request has a resolved tenant
     tenant = getattr(request.state, "tenant", None)
@@ -134,6 +145,10 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     )
     user.refresh_token = refresh_token
     user.refresh_token_expires = refresh_expires
+    db.add(LoginAuditLog(
+        username=user.username, user_id=user.user_id, success=True,
+        failure_reason=None, ip_address=client_ip, user_agent=user_agent,
+    ))
     await db.commit()
     logger.info("AUTH_LOGIN_SUCCESS user_id=%s username=%s role=%s ip=%s", user.user_id, user.username, user.role_definition.role_key, client_ip)
     user_resp = await build_user_response(user, db)
