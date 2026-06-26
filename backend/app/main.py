@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -52,13 +53,18 @@ from app.api.supplier_risk import router as supplier_risk_router
 from app.api.supply_chain_risk_map import router as supply_chain_risk_map_router
 from app.api.version import router as version_router
 from app.config import settings
+from app.core.logging_handler import DBLogHandler, start_log_drainer
 from app.core.security import hash_password
 from app.core.tenant_context import TenantContextMiddleware
-from app.database import async_session, get_tenant_aware_session, run_for_each_tenant
+from app.database import async_session, async_session as _async_session_factory, get_tenant_aware_session, run_for_each_tenant
 from app.models.role import RoleDefinition
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+_log_queue: asyncio.Queue | None = None
+_log_drainer: asyncio.Task | None = None
+_log_handler: logging.Handler | None = None
 
 
 @asynccontextmanager
@@ -296,7 +302,23 @@ async def lifespan(app: FastAPI):
 
     risk_map_snapshot_task = asyncio.create_task(snapshot_loop())
 
+    global _log_queue, _log_drainer, _log_handler
+    _log_queue = asyncio.Queue()
+    _log_drainer = start_log_drainer(_log_queue, _async_session_factory)
+    _log_handler = DBLogHandler(_log_queue, asyncio.get_running_loop())
+    logging.getLogger().addHandler(_log_handler)
+
     yield
+
+    if _log_handler is not None:
+        logging.getLogger().removeHandler(_log_handler)
+        _log_handler = None
+    if _log_drainer:
+        _log_drainer.cancel()
+        try:
+            await _log_drainer
+        except asyncio.CancelledError:
+            pass
 
     # Cancel cleanup coroutine
     cleanup_task.cancel()

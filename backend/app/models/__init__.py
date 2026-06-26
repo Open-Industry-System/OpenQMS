@@ -6,6 +6,7 @@ from app.models.apqp import APQPProject
 from app.models.attribute import AttributeMeasurement, AttributeResult, AttributeStudy
 from app.models.audit import AuditLog
 from app.models.login_audit_log import LoginAuditLog
+from app.models.system_log import SystemLog
 from app.models.audit_finding import AuditFinding
 from app.models.audit_plan import AuditPlan
 from app.models.audit_program import AuditChecklistTemplate, AuditProgram, AuditProgramTargetFactory
