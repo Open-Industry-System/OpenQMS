@@ -4,7 +4,6 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from app.core.security import hash_password
 from app.models.login_audit_log import LoginAuditLog
 from app.models.role import RoleDefinition
 from app.models.user import User
@@ -15,7 +14,6 @@ pytestmark = pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_login_logs_paginated(admin_client, db, default_factory):
     # seed two login log rows
-    role = (await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))).scalar_one()
     db.add(LoginAuditLog(username="u1", user_id=None, success=False, failure_reason="x", ip_address="1.1.1.1"))
     db.add(LoginAuditLog(username="u2", user_id=None, success=True, ip_address="2.2.2.2"))
     await db.flush()

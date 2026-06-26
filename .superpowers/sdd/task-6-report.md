@@ -1,73 +1,96 @@
-# Task 6 Report: PFMEAGuidanceCard + ScopeTagField trigger union
+# Task 6 Report: Frontend Log Management Page
 
 ## Implemented
 
-### A. PFMEAGuidanceCard
+Added the admin log management page with three tabs (audit / login / system logs) under `/admin/logs`:
 
-- Created `frontend/src/components/pfmea/PFMEAGuidanceCard.tsx` by copying and adapting `frontend/src/components/dfmea/WizardGuidanceCard.tsx`.
-- Component is a **default export** named `PFMEAGuidanceCard`, with props `{ stepIndex: number }`.
-- Uses `useTranslation('pfmea')` and key shape `wizard.guidance.step${stepIndex}.{title,purpose,points,fields,example}`.
-- Preserved collapsible behavior and localStorage persistence, with a PFMEA-specific key `pfmea_wizard_card_collapsed`.
-- Updated `frontend/src/locales/zh-CN/pfmea.json` guidance section so that:
-  - `points` is a string (matches the copied component's plain `t(...)` interpolation).
-  - `fields` is an array of `{name, desc}` objects (matches the copied component's `returnObjects` cast).
-
-### B. ScopeTagField trigger union
-
-- In `frontend/src/components/dfmea/ScopeTagField.tsx`, extended the union on line 8:
-  ```typescript
-  export type ScopeTriggerType = "dfmea_tool" | "dfmea_trend" | "pfmea_tool" | "pfmea_trend";
-  ```
-- This is purely additive; existing DFMEA usages (`"dfmea_tool"`, `"dfmea_trend"`) remain valid.
-
-### C. Shared i18n test helper
-
-- Extracted the inline `I18nTestWrapper` from `frontend/src/components/pfmea/PFMEAWizardSidebar.test.tsx` into a shared helper:
-  `frontend/src/components/pfmea/__test-utils__/I18nWrapper.tsx`.
-- The new `PFMEAGuidanceCard.test.tsx` imports from this helper.
-- `PFMEAWizardSidebar.test.tsx` still has its own inline wrapper; the shared helper is available for future reuse.
-
-## TDD RED / GREEN evidence
-
-- **RED:** Initial run of `npx vitest run src/components/pfmea/PFMEAGuidanceCard.test.tsx` failed because `PFMEAGuidanceCard.tsx` did not exist.
-- **RED (after implementation):** Test failed because the existing `pfmea.json` guidance values used string arrays for `fields` and arrays for `points`, causing empty field names and duplicate matches against the broad regex.
-- **GREEN:** After reshaping the JSON guidance values to match the copied component's expected structure and tightening the test assertions to avoid multiple DOM matches, the test passes:
-  ```
-   ✓ src/components/pfmea/PFMEAGuidanceCard.test.tsx > PFMEAGuidanceCard > renders the step0 title from pfmea namespace
-   ✓ src/components/pfmea/PFMEAGuidanceCard.test.tsx > PFMEAGuidanceCard > renders step1 fields mentioning 4M or 工序号
-        Tests  2 passed (2)
-  ```
+1. **Types** — appended `AuditLogItem`, `LoginLogItem`, `SystemLogItem` to `frontend/src/types/index.ts`.
+2. **API client** — created `frontend/src/api/logs.ts` with `listAuditLogs`, `listLoginLogs`, `listSystemLogs` calling `GET /api/admin/logs/{audit|login|system}`.
+3. **i18n** — created `frontend/src/locales/zh-CN/logs.json` and `en-US/logs.json`; added `"logs": "日志管理"` / `"logs": "Log Management"` to both `layout.json` `menu` blocks.
+4. **Page** — created `frontend/src/pages/admin/LogManagementPage.tsx` with `AuditTab`, `LoginTab`, `SystemTab`. Each tab has a `useEffect` first-load, server-side pagination via `onChange`, filter forms, and expand rows for audit (old/new/changed JSON) and system (traceback) logs.
+5. **Test** — created `frontend/src/pages/admin/LogManagementPage.test.tsx`. The brief's verbatim mock pattern hit Vitest hoisting (`Cannot access 'listAuditLogs' before initialization`), so I used `vi.hoisted()` for the mock functions while preserving the test assertions.
+6. **Route + menu** — added lazy import and `/admin/logs` route in `App.tsx`; added `FileTextOutlined` menu item under `grp:admin` in `AppLayout.tsx` (no duplicate `MENU_KEYS`/`MENU_KEY_TO_OPEN_KEYS` edits — Task 5 already added them).
 
 ## Verification
 
-- `npx vitest run src/components/pfmea/PFMEAGuidanceCard.test.tsx` — pass (2/2)
-- `npx vitest run src/components/dfmea/ScopeTagField.test.tsx` — pass (8/8)
-- `npx vitest run src/components/pfmea/PFMEAWizardSidebar.test.tsx` — pass (2/2)
-- `npx tsc --noEmit` — no errors
+### LogManagementPage test
+
+```
+ RUN  v4.1.7
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Duration  3.44s
+```
+
+### Type check + all admin page tests
+
+```
+$ npx tsc --noEmit && npx vitest run src/pages/admin/
+ RUN  v4.1.7
+ Test Files  3 passed (3)
+      Tests  5 passed (5)
+   Duration  5.35s
+```
+
+`npx tsc --noEmit` completed with no errors.
 
 ## Files changed
 
-- `frontend/src/components/pfmea/PFMEAGuidanceCard.tsx` (new)
-- `frontend/src/components/pfmea/PFMEAGuidanceCard.test.tsx` (new)
-- `frontend/src/components/pfmea/__test-utils__/I18nWrapper.tsx` (new)
-- `frontend/src/components/dfmea/ScopeTagField.tsx` (union extended)
-- `frontend/src/locales/zh-CN/pfmea.json` (guidance value shapes adjusted)
+- `frontend/src/types/index.ts`
+- `frontend/src/api/logs.ts` (new)
+- `frontend/src/locales/zh-CN/logs.json` (new)
+- `frontend/src/locales/en-US/logs.json` (new)
+- `frontend/src/locales/zh-CN/layout.json`
+- `frontend/src/locales/en-US/layout.json`
+- `frontend/src/pages/admin/LogManagementPage.tsx` (new)
+- `frontend/src/pages/admin/LogManagementPage.test.tsx` (new)
+- `frontend/src/App.tsx`
+- `frontend/src/components/layout/AppLayout.tsx`
 
-## Self-review / concerns
+## Commit
 
-- The copied card expects `fields` as `{name, desc}[]`. The original Task 3 JSON had `fields` as `string[]`, so I adjusted the JSON rather than the component to keep the component a true copy of the DFMEA pattern. This is a data-shape fix, not behavior change.
-- The brief's suggested test regex (`/5T|范围|Scope/i` and `/4M|工序号|OP10|分类/i`) matched multiple elements. I tightened the assertions to target the specific rendered title and field names while keeping the test intent identical.
-- No other changes were made to `ScopeTagField`; the union extension is additive and all 8 existing tests still pass.
-- Commit: `f4f676e` — feat(pfmea): add PFMEAGuidanceCard; extend ScopeTagField trigger union for pfmea_tool/trend
+```
+eccde58 feat(admin): log management page (audit/login/system tabs)
+```
 
-## Fix: en-US guidance shape parity
+## Self-review notes
 
-- Problem: `frontend/src/locales/en-US/pfmea.json` still used the old `wizard.guidance.stepN` shape (`points` as string array, `fields` as string array), while the card expects `points` as a single string and `fields` as `{name, desc}[]`.
-- Changed only `frontend/src/locales/en-US/pfmea.json` `wizard.guidance.step0` through `step6`:
-  - `points`: now a single English string per step.
-  - `fields`: now an array of `{name, desc}` objects in English.
-  - `title`, `purpose`, `example` left unchanged.
-- Verification after fix:
-  - `npx vitest run src/locales/pfmea.i18n.test.ts` — pass (2/2)
-  - `npx vitest run src/components/pfmea/PFMEAGuidanceCard.test.tsx` — pass (2/2)
-  - Shape parity check: both `zh-CN` and `en-US` step1 report `points` as `str` and `fields` as `list`.
+- Three tabs each include `useEffect(() => { load(1, 20, form.getFieldsValue()); }, [load, form])` for first-load. ✓
+- `listAuditLogs/listLoginLogs/listSystemLogs` call the correct endpoints. ✓
+- Server-side pagination re-fetches via `onChange`. ✓
+- Audit tab expand renders old/new/changed JSON. ✓
+- Login tab success filter maps `"all"` / `null` to `undefined` and `"true"`/`"false"` to boolean. ✓
+- System tab level tags use `orange`/`red`/`magenta` for WARNING/ERROR/CRITICAL. ✓
+- Route `/admin/logs` uses `requireAdmin`. ✓
+- Menu item uses `FileTextOutlined` with `adminOnly: true`. ✓
+- `logs.json` uses `result` (not duplicate `success`) for the result-filter label. ✓
+- No unused `Typography`/`Text` imports. ✓
+- One divergence from brief: the test uses `vi.hoisted()` to avoid the Vitest mock-hoisting error that the verbatim snippet produced.
+
+## Fixes
+
+Reviewer findings addressed:
+
+1. **i18n search buttons** — added `filters.search` key (`"查询"` / `"Search"`) and replaced the three hard-coded `<Button>查询</Button>` labels with `{t("filters.search")}`.
+2. **i18n error messages** — added `error.load` key (`"加载失败"` / `"Failed to load"`) and replaced hard-coded `message.error("error")` in all three tab loaders with `message.error(t("error.load"))`.
+3. **Login tab coverage** — added `switching to login tab loads login logs` test mirroring the system tab test.
+4. **Lazy system tab assertion** — strengthened the system tab test to first assert `listSystemLogs` was NOT called, then click and assert it was called.
+
+### Verification after fixes
+
+```
+$ cd /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/admin-user-log-mgmt/frontend && npx vitest run src/pages/admin/LogManagementPage.test.tsx
+ RUN  v4.1.7
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Duration  2.56s
+
+$ npx tsc --noEmit
+(no output - clean)
+```
+
+### Fix commit
+
+```
+c9f16c2 fix(frontend): Task 6 review fixes - i18n search/error keys, login tab test, lazy system tab assertion
+```

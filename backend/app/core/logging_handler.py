@@ -12,7 +12,7 @@ and recurse).
 import asyncio
 import logging
 from collections import defaultdict
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from sqlalchemy import text
 

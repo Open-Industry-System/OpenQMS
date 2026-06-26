@@ -57,7 +57,7 @@ from app.config import settings
 from app.core.logging_handler import DBLogHandler, start_log_drainer
 from app.core.security import hash_password
 from app.core.tenant_context import TenantContextMiddleware
-from app.database import async_session, async_session as _async_session_factory, get_tenant_aware_session, run_for_each_tenant
+from app.database import async_session, get_tenant_aware_session, run_for_each_tenant
 from app.models.role import RoleDefinition
 from app.models.user import User
 
@@ -305,7 +305,7 @@ async def lifespan(app: FastAPI):
 
     global _log_queue, _log_drainer, _log_handler
     _log_queue = asyncio.Queue()
-    _log_drainer = start_log_drainer(_log_queue, _async_session_factory)
+    _log_drainer = start_log_drainer(_log_queue, async_session)
     _log_handler = DBLogHandler(_log_queue, asyncio.get_running_loop())
     logging.getLogger().addHandler(_log_handler)
 
