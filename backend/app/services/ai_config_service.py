@@ -231,8 +231,8 @@ async def _rebuild_providers(db: AsyncSession, app_state: Any) -> None:
             logger.warning("Error closing old embedding provider: %s", e)
 
     # Recreate.
-    from app.services.embedding_provider import create_embedding_provider
     from app.services.llm_provider import create_llm_provider
+    from app.services.embedding_provider import create_embedding_provider
 
     try:
         app_state.llm_provider = create_llm_provider(snapshot)
@@ -306,8 +306,8 @@ async def test_ai_config(
 
     Nothing is persisted. Returns per-provider ok/latency/error.
     """
-    from app.services.embedding_provider import create_embedding_provider
     from app.services.llm_provider import create_llm_provider
+    from app.services.embedding_provider import create_embedding_provider
 
     snapshot = await _build_effective_snapshot(db, update)
     timeout = int(getattr(snapshot, "LLM_TIMEOUT", 5) or 5)
@@ -335,7 +335,7 @@ async def test_ai_config(
                 latency_ms=int((time.perf_counter() - start) * 1000),
                 detail="LLM 调用成功",
             )
-    except TimeoutError:
+    except asyncio.TimeoutError:
         llm_result = ProviderTestResult(ok=False, detail=f"请求超时（{timeout}秒）")
     except Exception as e:
         llm_result = ProviderTestResult(ok=False, detail=f"{type(e).__name__}: {e}")
@@ -364,7 +364,7 @@ async def test_ai_config(
                 latency_ms=int((time.perf_counter() - start) * 1000),
                 detail=f"向量维度 {dims}",
             )
-    except TimeoutError:
+    except asyncio.TimeoutError:
         emb_result = ProviderTestResult(ok=False, detail=f"请求超时（{timeout}秒）")
     except Exception as e:
         emb_result = ProviderTestResult(ok=False, detail=f"{type(e).__name__}: {e}")
