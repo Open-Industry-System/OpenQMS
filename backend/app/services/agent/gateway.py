@@ -121,6 +121,16 @@ async def _record_rejected(ctx: AgentContext, tool_name: str, params: dict, leve
     return GatewayResult(status="rejected", reason=reason, tool_call_id=tool_call_id, audit_log_id=log.log_id)
 
 
+async def _safe_call(spec, ctx: AgentContext, params: dict):
+    """Run spec.func; on param-validation failure (TypeError/ValueError) return a
+    GatewayResult(rejected) with a rejected AgentToolCall + audit (no silent bubble)."""
+    try:
+        result = await spec.func(ctx, **params)
+        return result, None
+    except (TypeError, ValueError) as e:
+        return None, await _record_rejected(ctx, spec.name, params, spec.level, f"param invalid: {e}")
+
+
 async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResult:
     spec = TOOL_REGISTRY.get(tool_name)
     if spec is None:
@@ -134,7 +144,9 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
     correlation_id = uuid.uuid4()
 
     if spec.level == "readonly":
-        result = await spec.func(ctx, **params)
+        result, rejected = await _safe_call(spec, ctx, params)
+        if rejected is not None:
+            return rejected
         dur = int((time.perf_counter() - t0) * 1000)
         log = await harness.write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "call", correlation_id)
         tc = AgentToolCall(tool_call_id=tool_call_id, session_id=ctx.session_id,
@@ -146,7 +158,9 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
                              audit_log_id=log.log_id)
 
     if spec.level == "draft":
-        result = await spec.func(ctx, **params)
+        result, rejected = await _safe_call(spec, ctx, params)
+        if rejected is not None:
+            return rejected
         action_id = uuid.uuid4()
         action = AgentAction(action_id=action_id, session_id=ctx.session_id, factory_id=ctx.factory_id,
                              tool_name=tool_name, level="draft", payload=result, status="pending")
@@ -165,7 +179,9 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
         return GatewayResult(status="pending", action_id=action_id, audit_log_id=log.log_id, reason="awaiting approval")
 
     # whitelisted -> execute + full audit
-    result = await spec.func(ctx, **params)
+    result, rejected = await _safe_call(spec, ctx, params)
+    if rejected is not None:
+        return rejected
     dur = int((time.perf_counter() - t0) * 1000)
     action_id = uuid.uuid4()
     action = AgentAction(action_id=action_id, session_id=ctx.session_id, factory_id=ctx.factory_id,
@@ -189,6 +205,9 @@ async def execute_approved_action(ctx: AgentContext, action: AgentAction) -> Gat
     Skips the whitelist/pending branch (approval IS the authorization) but still
     enforces permission + writes tool_call + audit. Used by approval.approve/modify.
     """
+    if action.level != "commit":
+        return await _record_rejected(ctx, action.tool_name, action.payload or {}, action.level or "commit",
+                                        "execute_approved_action only handles commit actions")
     spec = TOOL_REGISTRY.get(action.tool_name)
     if spec is None:
         return await _record_rejected(ctx, action.tool_name, action.payload or {}, "commit", "unknown tool at exec time")
@@ -197,7 +216,9 @@ async def execute_approved_action(ctx: AgentContext, action: AgentAction) -> Gat
     t0 = time.perf_counter()
     tool_call_id = uuid.uuid4()
     correlation_id = uuid.uuid4()
-    result = await spec.func(ctx, **(action.payload or {}))
+    result, rejected = await _safe_call(spec, ctx, action.payload or {})
+    if rejected is not None:
+        return rejected
     dur = int((time.perf_counter() - t0) * 1000)
     log = await harness.write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "commit", correlation_id,
                                     new_values=result)

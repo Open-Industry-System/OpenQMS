@@ -1,5 +1,9 @@
 import uuid
+
 import pytest
+from sqlalchemy import select
+
+from app.models.agent import AgentToolCall
 from app.services.agent import harness, gateway
 from app.services.agent.registry import agent_tool, AgentContext, TOOL_REGISTRY
 from app.services.agent.tools import demo  # noqa: F401 — registers tools
@@ -16,8 +20,6 @@ async def test_readonly_executes_when_permitted(db, admin_user, default_factory)
 
 @pytest.mark.asyncio
 async def test_unknown_tool_rejected_with_audit(db, admin_user, default_factory):
-    from sqlalchemy import select
-    from app.models.agent import AgentToolCall
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
     ctx = await harness.build_context(db, s, admin_user)
     res = await gateway.invoke(ctx, "does_not_exist", {})
@@ -96,9 +98,8 @@ async def test_whitelist_jsonb_matches_enum_spec_regression(db, admin_user, defa
     """Regression: whitelist JSONB {"module":"fmea","min_level":3} matches a tool spec
     declared with Module.FMEA/PermissionLevel.EDIT (enum), admin (FMEA ADMIN>=EDIT)
     auto-approved. Uses a throwaway tool registered locally and cleaned up — NOT added
-    to demo.py, to keep P0's LLM-visible tool surface at 4 demo tools."""
+    to demo.py, to keep Task 5's LLM-visible demo surface at 2 stubs (echo_factory + commit_tag)."""
     import uuid as _uuid
-    from sqlalchemy import select
     from app.core.permissions import Module, PermissionLevel
     from app.services.agent.registry import agent_tool, AgentContext, TOOL_REGISTRY
     from app.models.agent import AgentCommitWhitelist, AgentAction
@@ -123,3 +124,18 @@ async def test_whitelist_jsonb_matches_enum_spec_regression(db, admin_user, defa
         assert a.decision_source == "whitelist"
     finally:
         TOOL_REGISTRY.pop("_jsonb_test_commit", None)  # never pollute the global registry
+
+
+@pytest.mark.asyncio
+async def test_param_invalid_rejected_with_audit(db, admin_user, default_factory):
+    """Bad/missing/extra params must produce status rejected + a rejected AgentToolCall
+    with an audit_log_id, instead of bubbling the TypeError uncaught."""
+    s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
+    ctx = await harness.build_context(db, s, admin_user)
+    res = await gateway.invoke(ctx, "echo_factory", {"unexpected": 1})
+    assert res.status == "rejected"
+    assert res.tool_call_id is not None
+    tc = (await db.execute(select(AgentToolCall).where(AgentToolCall.tool_call_id == res.tool_call_id))).scalar_one()
+    assert tc.status == "rejected"
+    assert tc.audit_log_id is not None
+    assert "param invalid" in tc.result.get("error", "")
