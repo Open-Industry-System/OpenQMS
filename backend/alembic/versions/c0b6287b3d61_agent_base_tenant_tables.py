@@ -110,9 +110,9 @@ def upgrade() -> None:
             sa.Column("tool_name", sa.String(100), nullable=False),
             sa.Column("action", sa.String(50), nullable=False),
             sa.Column("entity_type", sa.String(50), nullable=False),
-            sa.Column("max_scope", postgresql.JSONB),
+            sa.Column("max_scope", postgresql.JSONB, nullable=False),
             sa.Column("required_permission", postgresql.JSONB, nullable=False),
-            sa.Column("enabled", sa.Boolean),
+            sa.Column("enabled", sa.Boolean, nullable=False),
             sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id")),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         )
