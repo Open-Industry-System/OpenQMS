@@ -46,18 +46,20 @@ migrations/versions/*_agent_base.py  # alembic revision, hash 生成时确定
 `session_id`(UUID PK) · `user_id`(FK users) · `factory_id`(FK factories, NOT NULL) · `tenant_schema`(String) · `scenario`(enum: copilot/auto_8d/migration) · `status`(enum: active/completed/failed) · `related_entity_type`(String, nullable) · `related_entity_id`(UUID, nullable) · `task_state`(JSONB, 工作记忆：计划/todo/中间产物) · `created_at` · `updated_at`
 
 ### `agent_messages`
-`message_id`(UUID PK) · `session_id`(FK) · `role`(enum: system/user/assistant/tool) · `content`(Text) · `tool_call_refs`(JSONB, 指向 agent_tool_calls ID 列表) · `token_in`(int) · `token_out`(int) · `created_at`
+`message_id`(UUID PK) · `session_id`(FK) · `factory_id`(FK factories, NOT NULL) · `role`(enum: system/user/assistant/tool) · `content`(Text) · `tool_call_refs`(JSONB, 指向 agent_tool_calls ID 列表) · `token_in`(int) · `token_out`(int) · `created_at`
 
 ### `agent_tool_calls`
 `tool_call_id`(UUID PK) · `session_id`(FK) · `tool_name`(String) · `level`(enum: readonly/draft/commit) · `params`(JSONB) · `result`(JSONB) · `status`(enum: executed/rejected/pending/approved) · `factory_id`(FK, NOT NULL) · `correlation_id`(UUID, 指向 agent_actions 或自引) · `duration_ms`(int) · `audit_log_id`(FK audit_logs) · `created_at`
 
 ### `agent_actions`
-`action_id`(UUID PK) · `session_id`(FK) · `tool_name`(String) · `level`(enum) · `payload`(JSONB) · `status`(enum: pending/approved/rejected/modified) · `approver_id`(FK users, nullable) · `reason`(Text) · `pre_values`(JSONB) · `post_values`(JSONB) · `related_entity_type`(String) · `related_entity_id`(UUID) · `created_at` · `decided_at`(DateTime, nullable)
+`action_id`(UUID PK) · `session_id`(FK) · `factory_id`(FK factories, NOT NULL) · `tool_name`(String) · `level`(enum) · `payload`(JSONB) · `status`(enum: pending/approved/rejected/modified) · `approver_id`(FK users, nullable) · `reason`(Text) · `pre_values`(JSONB) · `post_values`(JSONB) · `related_entity_type`(String) · `related_entity_id`(UUID) · `created_at` · `decided_at`(DateTime, nullable)
+
+`factory_id` NOT NULL 使待办审批队列与工厂隔离查询不依赖 join session，审计约束更强。
 
 ### `agent_memory`
-`memory_id`(UUID PK) · `user_id`(FK) · `factory_id`(FK, NOT NULL) · `kind`(enum: preference/fact) · `content`(Text) · `source_session_id`(FK) · `embedding_ready`(bool, default false) · `expires_at`(DateTime, nullable) · `created_at`。
+`memory_id`(UUID PK) · `user_id`(FK) · `factory_id`(FK, NOT NULL) · `kind`(enum: preference/fact) · `content`(Text) · `source_session_id`(FK) · `embedding_status`(enum: queued/ready/failed, default queued) · `expires_at`(DateTime, nullable) · `created_at`。
 
-**embedding 关联约定**：`agent_memory` 作为 embedding entity，入队时 `enqueue_embedding(entity_type="agent_memory", entity_id=memory_id, factory_id=...)` → `embedding_sync_outbox` → `document_embeddings`（该表 `entity_type`/`entity_id`/`factory_id` 即关联键，`entity_id` 为 UUID 非 FK，按 `entity_type="agent_memory" AND entity_id=memory_id AND factory_id` 查询）。写入成功后置 `embedding_ready=true`。可读条目在 `agent_memory`，向量 chunk 在 `document_embeddings`，二者通过 `memory_id` 稳定对应。
+**embedding 关联约定**：`agent_memory` 作为 embedding entity，入队时 `enqueue_embedding(entity_type="agent_memory", entity_id=memory_id, factory_id=...)` → `embedding_sync_outbox` → `document_embeddings`（该表 `entity_type`/`entity_id`/`factory_id` 即关联键，`entity_id` 为 UUID 非 FK，按 `entity_type="agent_memory" AND entity_id=memory_id AND factory_id` 查询）。`enqueue_embedding()` 只写 outbox，**入队后 `embedding_status=queued`**；真正向量写入由异步 worker 完成，worker 成功 upsert `document_embeddings` 后置 `embedding_status=ready`，失败置 `failed`。长期记忆检索仅匹配 `ready` 行，避免误用未生成的向量。
 
 ### `agent_commit_whitelist`
 `id`(UUID PK) · `tool_name`(String) · `action`(String) · `entity_type`(String) · `max_scope`(JSONB, 工厂/产品线范围限制，不得跨 factory) · `required_permission`(JSONB: `{module: <Module value>, min_level: <PermissionLevel int>}`) · `enabled`(bool, default true) · `created_by`(FK users) · `created_at`。变更进 AuditLog。
@@ -85,13 +87,14 @@ class AgentContext:
 
 主循环（同步，P0）：
 1. 加载/创建 session → 构造 `AgentContext`（scope 来自 `RequestScope`，非 LLM）。
-2. 拼装上下文：system prompt（角色/规则/tool 描述，固化、不可被用户消息覆盖）+ 历史消息 + 三层记忆（短期 Redis + 工作 `task_state` + 长期 embedding 检索）+ tool schema。
-3. guardrails 前置：输入过滤。
-4. 调 Pydantic AI（经 provider_adapter）。
-5. 解析输出 → tool 调用经网关三态处理（第 5 节）。
-6. guardrails 后置：tool 出参回灌前脱敏。
-7. 结果喂回 → 回到第 4 步，直到结束标记或终止条件。
-8. 全程每步写 `agent_tool_calls` + `agent_messages` + `audit_logs`（带 `factory_id`/`correlation_id`，含耗时/token/审批状态）。
+2. **`tenant_schema` 来源**：API 层从 `request.state.tenant`（由 `tenant_context` 中间件注入）解析 schema_name，或读 `current_tenant_schema` ContextVar；**单租户/public 模式填 `"public"`**（与 `logging_handler` 单租户回落 public 一致）。`RequestScope` 本身不带 tenant，故由 API 层在构造 `AgentContext` 时显式注入。
+3. 拼装上下文：system prompt（角色/规则/tool 描述，固化、不可被用户消息覆盖）+ 历史消息 + 三层记忆（短期 Redis + 工作 `task_state` + 长期 embedding 检索）+ tool schema。
+4. guardrails 前置：输入过滤。
+5. 调 Pydantic AI（经 provider_adapter）。
+6. 解析输出 → tool 调用经网关三态处理（第 5 节）。
+7. guardrails 后置：tool 出参回灌前脱敏。
+8. 结果喂回 → 回到第 5 步，直到结束标记或终止条件。
+9. 全程每步写 `agent_tool_calls` + `agent_messages` + `audit_logs`（带 `factory_id`/`correlation_id`，含耗时/token/审批状态）。
 
 短期记忆：Redis key=`factory_id:user_id:session_id` 存最近 N 轮消息。P0 无队列/worker。
 
@@ -102,7 +105,8 @@ class AgentContext:
             required_permission={"module": Module.FMEA, "min_level": PermissionLevel.VIEW},
             description="列出当前工厂的 FMEA 文档")
 async def list_fmea_documents(ctx: AgentContext, page: int = 1) -> dict:
-    return await fmea_service.list(db=ctx.db, factory_id=ctx.factory_id, page=page)
+    items, total = await fmea_service.list_fmeas(db=ctx.db, factory_id=ctx.factory_id, page=page)
+    return {"items": [str(i.fmea_id) for i in items], "total": total}  # 仅回元数据，避免泄露敏感字段
 ```
 
 - 装饰器收集进 `TOOL_REGISTRY`：`{tool_name: ToolSpec(callable, level, entity_type, required_permission={module,min_level}, param_schema, description)}`，供网关校验、白名单 UI 枚举。
@@ -150,7 +154,7 @@ async def list_fmea_documents(ctx: AgentContext, page: int = 1) -> dict:
 | tool | level | 类型 | 用途 |
 |---|---|---|---|
 | `echo_factory` | readonly | stub | 返回标签化结果 `{"scope_bound": true, "factory_match": true}`，证 factory 隔离；**不向 assistant 输出暴露 `factory_id`**，真实 `factory_id` 仅存审计 |
-| `list_fmea_documents` | readonly | 真实 | 包 `fmea_service.list`，证真实跨厂隔离 |
+| `list_fmea_documents` | readonly | 真实 | 包 `fmea_service.list_fmeas`，证真实跨厂隔离 |
 | `draft_note` | draft | stub | 产草稿入 `agent_actions`，证不落库 |
 | `commit_tag` | commit | stub | 证三态：拒绝 / 待审 / 白名单自主 |
 
@@ -170,7 +174,7 @@ async def list_fmea_documents(ctx: AgentContext, page: int = 1) -> dict:
 - `GET  /api/agent/actions?status=pending` — 待办列表
 - `GET/POST/PUT/DELETE /api/agent/whitelist` — admin 维护白名单（受 admin 权限保护）
 
-均经 `ProtectedRoute` + `RequestScope`，按 RBAC + factory 隔离。
+均经后端认证依赖（`get_current_user` / `require_permission`）+ `RequestScope`，按 RBAC + factory 隔离。前端 `ProtectedRoute` 留待 P2 Copilot UI。
 
 ## 13. 不在 P0（YAGNI）
 
