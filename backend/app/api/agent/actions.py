@@ -35,6 +35,7 @@ async def approve_action(
     action = await approval.get(db, action_id)
     if action is None:
         raise HTTPException(status_code=404, detail="动作不存在")
+    check_factory_access(action.factory_id, scope)
     try:
         action = await approval.approve(db, action_id, scope.user, req.reason or "")
     except ValueError as e:
@@ -52,6 +53,7 @@ async def reject_action(
     action = await approval.get(db, action_id)
     if action is None:
         raise HTTPException(status_code=404, detail="动作不存在")
+    check_factory_access(action.factory_id, scope)
     try:
         action = await approval.reject(db, action_id, scope.user, req.reason or "")
     except ValueError as e:
@@ -71,6 +73,7 @@ async def modify_action(
     action = await approval.get(db, action_id)
     if action is None:
         raise HTTPException(status_code=404, detail="动作不存在")
+    check_factory_access(action.factory_id, scope)
     try:
         action = await approval.modify(
             db, action_id, scope.user, req.new_payload, req.reason or ""

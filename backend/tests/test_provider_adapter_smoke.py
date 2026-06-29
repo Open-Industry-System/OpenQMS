@@ -28,24 +28,3 @@ def test_anthropic_sdk_imports_and_client():
     assert "tools" in sig.parameters and "tool_choice" in sig.parameters
 
 
-def test_openai_tool_schema_shape():
-    """The OpenAI function-calling tool schema shape provider_adapter will emit."""
-    tool = {
-        "type": "function",
-        "function": {
-            "name": "echo_factory",
-            "description": "echo scope",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    }
-    assert tool["type"] == "function" and tool["function"]["name"]
-
-
-def test_anthropic_tool_schema_shape():
-    """The Anthropic tool schema shape provider_adapter will emit (flat, no 'function' wrapper)."""
-    tool = {
-        "name": "echo_factory",
-        "description": "echo scope",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
-    }
-    assert tool["name"] and "input_schema" in tool
