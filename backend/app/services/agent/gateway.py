@@ -14,12 +14,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import Module, PermissionLevel
 from app.models.agent import AgentAction, AgentCommitWhitelist, AgentToolCall
 from app.services.agent import harness
-from app.services.agent.registry import AgentContext, TOOL_REGISTRY
+from app.services.agent.registry import TOOL_REGISTRY, AgentContext
 
 
 @dataclass

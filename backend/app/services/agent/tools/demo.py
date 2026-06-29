@@ -1,4 +1,4 @@
-from app.services.agent.registry import agent_tool, AgentContext
+from app.services.agent.registry import AgentContext, agent_tool
 
 
 @agent_tool(level="readonly", entity_type="factory",

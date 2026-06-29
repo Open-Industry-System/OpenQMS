@@ -1,11 +1,10 @@
-import uuid
 
 import pytest
 from sqlalchemy import select
 
 from app.models.agent import AgentToolCall
-from app.services.agent import harness, gateway
-from app.services.agent.registry import agent_tool, AgentContext, TOOL_REGISTRY
+from app.services.agent import gateway, harness
+from app.services.agent.registry import TOOL_REGISTRY, AgentContext, agent_tool
 from app.services.agent.tools import demo  # noqa: F401 — registers tools
 
 
@@ -43,6 +42,7 @@ async def test_commit_without_whitelist_becomes_pending(db, admin_user, default_
 async def test_whitelist_max_scope_excludes_other_factory(db, admin_user, default_factory):
     """Whitelist with max_scope.factory_ids=[other] must NOT match ctx.factory_id."""
     import uuid as _uuid
+
     from app.models.agent import AgentCommitWhitelist
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
     ctx = await harness.build_context(db, s, admin_user)
@@ -61,6 +61,7 @@ async def test_whitelist_product_line_scope_enforced_when_ctx_none(db, admin_use
     """max_scope.product_line_codes non-empty but ctx has no product_line_code -> no match -> pending.
     Proves product_line scope is enforced (not silently ignored)."""
     import uuid as _uuid
+
     from app.models.agent import AgentCommitWhitelist
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
     ctx = await harness.build_context(db, s, admin_user)
@@ -79,6 +80,7 @@ async def test_whitelist_required_permission_mismatch_blocks_auto_approve(db, ad
     required_permission -> no match -> pending. Prevents a stale row auto-approving
     after the tool's declared permission changes."""
     import uuid as _uuid
+
     from app.core.permissions import Module, PermissionLevel
     from app.models.agent import AgentCommitWhitelist
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
@@ -100,9 +102,9 @@ async def test_whitelist_jsonb_matches_enum_spec_regression(db, admin_user, defa
     auto-approved. Uses a throwaway tool registered locally and cleaned up — NOT added
     to demo.py, to keep Task 5's LLM-visible demo surface at 2 stubs (echo_factory + commit_tag)."""
     import uuid as _uuid
+
     from app.core.permissions import Module, PermissionLevel
-    from app.services.agent.registry import agent_tool, AgentContext, TOOL_REGISTRY
-    from app.models.agent import AgentCommitWhitelist, AgentAction
+    from app.models.agent import AgentAction, AgentCommitWhitelist
 
     @agent_tool(level="commit", entity_type="fmea_tag", action="tag",
                 required_permission={"module": Module.FMEA, "min_level": PermissionLevel.EDIT},
