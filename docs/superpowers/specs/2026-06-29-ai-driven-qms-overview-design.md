@@ -53,7 +53,7 @@
 | **harness.py** | 会话生命周期、注入 factory/user scope、调用前后写 AuditLog、错误归一化 | `core/deps.py` 的 RequestScope、audit |
 | **tools/ 注册表** | 把现有 service 方法包成类型化 tool，标注 `readonly`/`draft`/`commit`；权限网关在调用前校验 | `services/*`、Pydantic AI |
 | **memory.py** | 三层记忆：短期=Redis（key=`factory_id:user_id:session_id`，当前对话 context window）；工作记忆=`agent_sessions.task_state` JSONB（当前任务 todo / 中间状态）；长期=向量检索（复用 `enqueue_embedding()` → `embedding_sync_outbox` → `document_embeddings`，跨会话 user/factory 偏好与知识） | Redis、现有 embedding 管线 |
-| **approval.py** | draft/commit 产出落 `agent_actions`；在线 inline 确认 + 离场待办审批；批准后才调 commit tool | 新表、AuditLog |
+| **approval.py** | 管理非白名单 commit 的待审动作（draft 产出与未命中白名单的 commit 都落 `agent_actions`）；在线 inline 确认 + 离场待办审批；批准后才调 commit tool。白名单自主 commit 仍创建 `agent_action`/`correlation_id` 用于审计，但不进 pending 审批 | 新表、AuditLog |
 | **provider_adapter** | **兼容层**：现有 `LLMProvider` 仅是 `complete(prompt, response_schema)->dict` 协议，无 tool-calling / streaming / 模型对象（见 `services/llm_provider.py`），Pydantic AI 无法直接复用。本层把 `/admin/ai-config`（`llm_provider/model/base_url/api_key`）封装成 Pydantic AI 可用的 model 对象，桥接 tool-calling 与流式；Ark/DeepSeek/OpenAI 兼容端点的 `response_format` 差异在此吸收 | 现有 `ai_config`、`llm_provider` |
 | **Pydantic AI 内核** | 经 provider_adapter 拿到模型对象后跑 tool-calling 循环、重试、流式；system prompt 注入角色/规则/tool 描述（固化、不可被用户消息覆盖） | provider_adapter |
 | **guardrails** | prompt injection 过滤（tool 出参回灌前清洗）、危险输入拦截；与 harness 同层，P0 非可选 | harness |
@@ -125,8 +125,8 @@
 
 1. **readonly 可执行**：agent 调 readonly tool 成功，`agent_tool_calls` + `audit_logs`（带 `factory_id`/`correlation_id`）留痕；跨 factory 隔离生效（A 厂 agent 查不到 B 厂数据）。
 2. **draft 不落库**：agent 调 draft tool 只在 `agent_actions` 产草稿，**业务表零改动**；草稿可被审批。
-3. **commit 受控**：未白名单的 commit 被网关拒绝；白名单内的 commit 仍须记录理由/前后值/`agent_action_id`；离场 commit 必须经审批后才执行，拒绝/修改不执行。
-4. **guardrails 生效**：恶意用户输入与恶意 tool observation 不得覆盖 system prompt、不得诱导越权 tool 调用、不得把未授权数据回灌进上下文；被拦截时留拒绝审计（`agent_tool_calls` 状态=rejected + `audit_logs` 摘要）。
+3. **commit 受控（三态）**：未授权 / 越权 / 参数不合法的 commit 被网关**拒绝**；合法但未命中白名单的 commit 生成 `agent_action` **待 HITL 审批**；命中白名单的 commit **可自主执行并完整审计**（理由/前后值/`agent_action_id`/`correlation_id`）。离场 commit 必须经审批后才执行，拒绝/修改不执行。
+4. **guardrails 生效**：恶意用户输入与恶意 tool observation 不得覆盖 system prompt、不得诱导越权 tool 调用、不得把未授权数据回灌进上下文；被拦截时按发生阶段在 `agent_messages` / `agent_tool_calls` / `audit_logs` 中留拒绝审计。
 
 ## 7. 关键设计决策（假设，可在期级 spec 中再定）
 
@@ -151,7 +151,7 @@
 2. 外壳拼装上下文：system prompt（角色/规则/tool 描述，固化）+ 历史消息 + 相关记忆（短期 Redis + 工作记忆 `task_state` + 长期 embedding 检索）+ tool schema。
 3. **guardrails 前置**：输入过滤（prompt injection / 危险输入）。
 4. 调用 LLM（Pydantic AI）。
-5. 解析输出 → 若是 tool 调用，外壳权限网关校验 readonly/draft/commit：readonly 直接执行；draft 产草稿入 `agent_actions`；**commit 先查白名单——未命中则生成 `agent_action` 待 HITL 审批，命中则可执行，但仍必须记录理由、前后值、`agent_action_id`/`correlation_id` 与审计摘要**。
+5. 解析输出 → 若是 tool 调用，外壳权限网关校验 readonly/draft/commit：readonly 直接执行；draft 产草稿入 `agent_actions`；**commit 三态——未授权/越权/参数不合法则拒绝，合法但未命中白名单则生成 `agent_action` 待 HITL 审批，命中白名单则可执行但仍必须记录理由、前后值、`agent_action_id`/`correlation_id` 与审计摘要**。
 6. **guardrails 后置**：tool 出参回灌前清洗。
 7. 结果喂回上下文 → 回到第 4 步，直到模型输出结束标记或达终止条件。
 8. 全程每步写 `agent_tool_calls` + `audit_logs`（含耗时、token、审批状态）。
