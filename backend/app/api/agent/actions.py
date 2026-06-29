@@ -32,6 +32,9 @@ async def approve_action(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    action = await approval.get(db, action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="动作不存在")
     try:
         action = await approval.approve(db, action_id, scope.user, req.reason or "")
     except ValueError as e:
@@ -46,6 +49,9 @@ async def reject_action(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    action = await approval.get(db, action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="动作不存在")
     try:
         action = await approval.reject(db, action_id, scope.user, req.reason or "")
     except ValueError as e:
@@ -62,6 +68,9 @@ async def modify_action(
 ):
     if req.new_payload is None:
         raise HTTPException(status_code=400, detail="modify requires new_payload")
+    action = await approval.get(db, action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="动作不存在")
     try:
         action = await approval.modify(
             db, action_id, scope.user, req.new_payload, req.reason or ""

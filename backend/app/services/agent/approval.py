@@ -13,6 +13,12 @@ from app.services.agent import gateway, harness
 from app.services.agent.registry import AgentContext
 
 
+async def get(db: AsyncSession, action_id: uuid.UUID) -> AgentAction | None:
+    return (
+        await db.execute(select(AgentAction).where(AgentAction.action_id == action_id))
+    ).scalar_one_or_none()
+
+
 async def _get(db: AsyncSession, action_id: uuid.UUID) -> AgentAction:
     a = (await db.execute(select(AgentAction).where(AgentAction.action_id == action_id))).scalar_one()
     return a

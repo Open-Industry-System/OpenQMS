@@ -15,23 +15,20 @@ import uuid
 
 import pytest
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
+from app.core.deps import RequestScope, get_current_user, get_db, get_request_scope
+from app.core.factory_scope import FactoryScope, ProductLineScope
+from app.main import app
 from app.models.factory import Factory
 from app.models.plm import PLMConnection
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
 from app.models.user import User
-
-from sqlalchemy.pool import NullPool
-
-from httpx import ASGITransport, AsyncClient
-from app.main import app
-from app.core.deps import RequestScope, get_current_user, get_db, get_request_scope
-from app.core.factory_scope import FactoryScope, ProductLineScope
-
 
 # ── Database availability check ──────────────────────────────────────────────
 
@@ -62,6 +59,7 @@ _test_db_url = os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL)
 # get_tenant_aware_session (e.g. MES concurrency, PLM sync) must not hold
 # pooled connections that outlive the event loop of the test that created them.
 import app.database as _db_mod
+
 _db_mod.engine = create_async_engine(_test_db_url, echo=False, poolclass=NullPool)
 _db_mod.async_session = async_sessionmaker(_db_mod.engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -206,8 +204,9 @@ async def admin_user(db: AsyncSession, default_factory: Factory) -> User:
     await db.refresh(user)
 
     # Ensure admin role has planning module permission (required by CP validation API)
-    from app.models.role import RolePermission
     from sqlalchemy import select as _sel
+
+    from app.models.role import RolePermission
     perm_result = await db.execute(
         _sel(RolePermission).where(
             RolePermission.role_id == role.id,
@@ -259,6 +258,27 @@ async def admin_client(db, admin_user, default_factory):
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def other_admin_user(db: AsyncSession, default_factory: Factory) -> User:
+    """Another admin user in the same factory, for ownership-crossing tests."""
+    result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
+    role = result.scalar_one()
+    user = User(
+        user_id=uuid.uuid4(),
+        username=f"test_other_admin_{uuid.uuid4().hex[:8]}",
+        display_name="Other Test Admin",
+        password_hash="hashed",
+        role_id=role.id,
+        legacy_role="admin",
+        is_active=True,
+        factory_id=default_factory.id,
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+    return user
 
 
 @pytest_asyncio.fixture

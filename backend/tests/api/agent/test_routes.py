@@ -7,10 +7,26 @@ is made.
 import uuid
 
 import pytest
+from sqlalchemy import select
 
+from app.core.deps import get_current_user, get_request_scope
+from app.core.factory_scope import FactoryScope, ProductLineScope
+from app.main import app
+from app.models.audit import AuditLog
 from app.services.agent import provider_adapter
 
 pytestmark = pytest.mark.requires_db
+
+
+def _scope_for(user, default_factory, accessible_factory_ids=None, pl_mode="ALL", pl_codes=None):
+    from app.core.deps import RequestScope
+
+    return RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=accessible_factory_ids, default_factory_id=default_factory.id),
+        effective_factory_id=default_factory.id,
+        pl_scope=ProductLineScope(mode=pl_mode, codes=pl_codes),
+        user=user,
+    )
 
 
 @pytest.fixture
@@ -92,6 +108,81 @@ async def test_whitelist_admin_crud(admin_client):
 
     r_get2 = await admin_client.get(f"/api/agent/whitelist/{wid}")
     assert r_get2.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_post_message_ownership_check(admin_client, other_admin_user, default_factory, stub_llm):
+    r = await admin_client.post("/api/agent/sessions", json={"scenario": "copilot"})
+    assert r.status_code == 201
+    sid = r.json()["session_id"]
+
+    # Switch auth to another admin in the same factory
+    app.dependency_overrides[get_current_user] = lambda: other_admin_user
+    app.dependency_overrides[get_request_scope] = lambda: _scope_for(other_admin_user, default_factory)
+    try:
+        r2 = await admin_client.post(
+            f"/api/agent/sessions/{sid}/messages", json={"content": "帮我查 SPC"}
+        )
+    finally:
+        # admin_client fixture teardown will clear overrides; restore in case other tests share scope
+        pass
+    assert r2.status_code == 403
+    assert "无权操作他人会话" in r2.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_action_decision_not_found_returns_404(admin_client):
+    missing_id = str(uuid.uuid4())
+    for endpoint in ("approve", "reject", "modify"):
+        url = f"/api/agent/actions/{missing_id}/{endpoint}"
+        payload = {"reason": "test"} if endpoint != "modify" else {"reason": "test", "new_payload": {}}
+        r = await admin_client.post(url, json=payload)
+        assert r.status_code == 404, f"{endpoint} should return 404 for missing action"
+        assert "动作不存在" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_whitelist_crud_writes_audit_log(admin_client, db):
+    payload = {
+        "tool_name": "draft_note",
+        "action": "create",
+        "entity_type": "note",
+        "max_scope": {"factories": [str(uuid.uuid4())]},
+        "required_permission": {"module": "fmea", "min_level": 3},
+        "enabled": True,
+    }
+    r = await admin_client.post("/api/agent/whitelist", json=payload)
+    assert r.status_code == 201
+    wid = r.json()["id"]
+
+    result = await db.execute(
+        select(AuditLog)
+        .where(AuditLog.table_name == "agent_commit_whitelist")
+        .where(AuditLog.record_id == uuid.UUID(wid))
+        .where(AuditLog.action == "create")
+    )
+    assert result.scalar_one_or_none() is not None
+
+    updated = {**payload, "enabled": False}
+    r_put = await admin_client.put(f"/api/agent/whitelist/{wid}", json=updated)
+    assert r_put.status_code == 200
+    result = await db.execute(
+        select(AuditLog)
+        .where(AuditLog.table_name == "agent_commit_whitelist")
+        .where(AuditLog.record_id == uuid.UUID(wid))
+        .where(AuditLog.action == "update")
+    )
+    assert result.scalar_one_or_none() is not None
+
+    r_del = await admin_client.delete(f"/api/agent/whitelist/{wid}")
+    assert r_del.status_code == 204
+    result = await db.execute(
+        select(AuditLog)
+        .where(AuditLog.table_name == "agent_commit_whitelist")
+        .where(AuditLog.record_id == uuid.UUID(wid))
+        .where(AuditLog.action == "delete")
+    )
+    assert result.scalar_one_or_none() is not None
 
 
 @pytest.mark.asyncio

@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db
+from app.core.deps import RequestScope, get_db, get_request_scope
 from app.core.permissions import require_admin
 from app.models.user import User
 from app.schemas.agent import WhitelistIn, WhitelistOut
@@ -15,13 +15,26 @@ from app.services.agent import whitelist as whitelist_service
 router = APIRouter(prefix="/whitelist", tags=["agent-whitelist"])
 
 
+def _tenant_schema(request: Request) -> str:
+    tenant = getattr(request.state, "tenant", None)
+    return tenant.schema_name if tenant else "public"
+
+
 @router.post("", response_model=WhitelistOut, status_code=201)
 async def create_whitelist(
     req: WhitelistIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    row = await whitelist_service.create(db, admin, **req.model_dump())
+    row = await whitelist_service.create(
+        db,
+        admin,
+        **req.model_dump(),
+        factory_id=scope.effective_factory_id,
+        tenant_schema=_tenant_schema(request),
+    )
     return WhitelistOut.model_validate(row)
 
 
@@ -50,24 +63,41 @@ async def get_whitelist(
 async def update_whitelist(
     whitelist_id: uuid.UUID,
     req: WhitelistIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     row = await whitelist_service.get(db, whitelist_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Whitelist rule not found")
-    row = await whitelist_service.update(db, row, **req.model_dump())
+    row = await whitelist_service.update(
+        db,
+        row,
+        admin,
+        **req.model_dump(),
+        factory_id=scope.effective_factory_id,
+        tenant_schema=_tenant_schema(request),
+    )
     return WhitelistOut.model_validate(row)
 
 
 @router.delete("/{whitelist_id}", status_code=204)
 async def delete_whitelist(
     whitelist_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     row = await whitelist_service.get(db, whitelist_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Whitelist rule not found")
-    await whitelist_service.delete(db, row)
+    await whitelist_service.delete(
+        db,
+        row,
+        admin,
+        factory_id=scope.effective_factory_id,
+        tenant_schema=_tenant_schema(request),
+    )
     return None
