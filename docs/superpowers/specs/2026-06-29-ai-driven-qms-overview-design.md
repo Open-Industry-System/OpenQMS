@@ -34,7 +34,7 @@
 │   ├─ memory.py         短期 Redis + 长期 embedding         │
 │   └─ approval.py       agent_actions 待审 + inline 确认    │
 │  services/...  (现有业务服务，被 tools 包裹)               │
-│  Pydantic AI 内核 (tool-calling 循环/重试/流式)            │
+│  tool-calling 内核 (基于现有 openai/anthropic SDK 的自研循环) │
 └────────────────────┬───────────────────────────────────────┘
                      │
    PostgreSQL (source of truth, 全量审计) + Redis (热缓存/队列)
@@ -43,7 +43,7 @@
 ### 混合分层原则
 
 - **自研外壳**守住「合规 / 多租户隔离 / 审计 / HITL / 权限网关」——这些是不能外包给第三方库的关切。
-- **Pydantic AI 内核 + provider_adapter**承担「provider 兼容 + tool-calling 循环 + 重试 + 流式」——这些没必要重造。
+- **tool-calling 内核 + provider_adapter**（基于已安装的 `openai`/`anthropic` SDK 自研最小循环）承担「provider 适配 + tool-calling 循环 + 重试 + 流式」——不引入 `pydantic-ai`（其 2.x 要求 `pydantic>=2.12`，与项目 pinned `pydantic==2.9.2` 冲突，会升级 starlette/uvicorn 破坏 FastAPI 0.115）。复用现有 SDK 避免重造，又不动摇项目依赖基线。
 - 外壳在每次内核调用前后插入审计与权限网关；内核对多租户无感知，scope 由外壳注入。
 
 ## 3. 核心组件
@@ -51,11 +51,11 @@
 | 组件 | 职责 | 依赖 |
 |---|---|---|
 | **harness.py** | 会话生命周期、注入 factory/user scope、调用前后写 AuditLog、错误归一化 | `core/deps.py` 的 RequestScope、audit |
-| **tools/ 注册表** | 把现有 service 方法包成类型化 tool，标注 `readonly`/`draft`/`commit`；权限网关在调用前校验 | `services/*`、Pydantic AI |
+| **tools/ 注册表** | 把现有 service 方法包成类型化 tool，标注 `readonly`/`draft`/`commit`；权限网关在调用前校验 | `services/*`、tool-calling 内核 |
 | **memory.py** | 三层记忆：短期=Redis（key=`factory_id:user_id:session_id`，当前对话 context window）；工作记忆=`agent_sessions.task_state` JSONB（当前任务 todo / 中间状态）；长期=向量检索（复用 `enqueue_embedding()` → `embedding_sync_outbox` → `document_embeddings`，跨会话 user/factory 偏好与知识） | Redis、现有 embedding 管线 |
 | **approval.py** | 管理非白名单 commit 的待审动作（draft 产出与未命中白名单的 commit 都落 `agent_actions`）；在线 inline 确认 + 离场待办审批；批准后才调 commit tool。白名单自主 commit 仍创建 `agent_action`/`correlation_id` 用于审计，但不进 pending 审批 | 新表、AuditLog |
-| **provider_adapter** | **兼容层**：现有 `LLMProvider` 仅是 `complete(prompt, response_schema)->dict` 协议，无 tool-calling / streaming / 模型对象（见 `services/llm_provider.py`），Pydantic AI 无法直接复用。本层把 `/admin/ai-config`（`llm_provider/model/base_url/api_key`）封装成 Pydantic AI 可用的 model 对象，桥接 tool-calling 与流式；Ark/DeepSeek/OpenAI 兼容端点的 `response_format` 差异在此吸收 | 现有 `ai_config`、`llm_provider` |
-| **Pydantic AI 内核** | 经 provider_adapter 拿到模型对象后跑 tool-calling 循环、重试、流式；system prompt 注入角色/规则/tool 描述（固化、不可被用户消息覆盖） | provider_adapter |
+| **provider_adapter** | **兼容层**：现有 `LLMProvider` 仅是 `complete(prompt, response_schema)->dict` 协议，无 tool-calling / streaming（见 `services/llm_provider.py`）。本层扩展现有 `OpenAIProvider`/`ClaudeProvider`（基于已安装的 `openai`/`anthropic` SDK）支持 tool-calling（function-calling）与流式；读 `/admin/ai-config` 的 raw key 构造客户端；Ark/DeepSeek/OpenAI 兼容端点的 `base_url`/`response_format` 差异在此吸收。**不引入 pydantic-ai** | 现有 `ai_config`、`llm_provider`、`openai`/`anthropic` SDK |
+| **tool-calling 内核** | 经 provider_adapter 驱动 tool-calling 循环（LLM 输出 tool_call → 网关执行 → 结果回灌 → 再调，直到无 tool_call）；system prompt 注入角色/规则/tool 描述（固化、不可被用户消息覆盖）；最小自研实现，无第三方 agent 框架 | provider_adapter |
 | **guardrails** | prompt injection 过滤（tool 出参回灌前清洗）、危险输入拦截；与 harness 同层，P0 非可选 | harness |
 
 ### 推理范式（Planning / Reasoning）
@@ -116,7 +116,7 @@
 
 | 期 | 目标 | 交付 | 验收 |
 |---|---|---|---|
-| **P0 基座** | 基础设施，无业务功能 | 第 4 节全部新表 + `audit_logs` 扩 `factory_id/tenant_schema/correlation_id` + harness + tools 注册表骨架 + 三级权限网关 + HITL 待审 + 白名单（5 元组粒度）+ guardrails（注入过滤/出参清洗）+ **provider_adapter 兼容层** + Pydantic AI 接入 | 见下「P0 验收用例」 |
+| **P0 基座** | 基础设施，无业务功能 | 第 4 节全部新表 + `audit_logs` 扩 `factory_id/tenant_schema/correlation_id` + harness + tools 注册表骨架 + 三级权限网关 + HITL 待审 + 白名单（5 元组粒度）+ guardrails（注入过滤/出参清洗）+ **provider_adapter 兼容层**（扩展现有 SDK）+ 自研 tool-calling 循环接入 | 见下「P0 验收用例」 |
 | **P1 迁移 (C)** | 现有 LLM 调用统一 | DFMEA/PFMEA 推荐、5T 工具/趋势推荐迁成基座 tools | 用户无感、可观测性提升、旧调用点删除 |
 | **P2 Copilot (B)** | 对话式助手 | UI 侧栏 + readonly tools（查 FMEA/SPC/客诉/8D/供应商）+ draft tools（8D 草稿、PFMEA 行建议） | 工程师可用自然语言查数 + 生成草稿进编辑器 |
 | **P3 流程自动化 (A)** | 客诉→8D 端到端 | 客诉触发 → agent 拆解 D1–D8 起草 → 待办审批 → 落库 | 一条客诉全流程 agent 产出草稿、人审批后入库，全程可审计 |
@@ -130,7 +130,7 @@
 
 ## 7. 关键设计决策（假设，可在期级 spec 中再定）
 
-- **LLM provider**：复用现有 `/admin/ai-config` 配置项，但需新建 **provider_adapter 兼容层**（现有 `LLMProvider.complete()` 不支持 tool-calling/streaming），不引入第二套配置入口。
+- **LLM provider**：复用现有 `/admin/ai-config` 配置项（raw key，非 masked DTO），扩展现有 `OpenAIProvider`/`ClaudeProvider`（已安装的 `openai`/`anthropic` SDK）支持 tool-calling/streaming，不引入第二套配置入口。**不引入 pydantic-ai**——其 2.x 要求 `pydantic>=2.12`，与项目 pinned `pydantic==2.9.2` 冲突（会升级 starlette/uvicorn/httpx 破坏 FastAPI 0.115）。tool-calling 循环最小自研。
 - **异步执行**：P2 Copilot 短轮次同步流式；P3 长流程用 Redis 轻量任务队列（arq 或自写 worker），**不引入 Celery**。
 - **Copilot UI 落点**：AppLayout 右侧抽屉式侧栏，全局可用，按当前路由上下文注入相关 tools。
 - **可观测性**：`agent_tool_calls` 表 + `/admin/ai-config` 扩展「agent 调用审计」页，接现有日志管理页。
@@ -145,12 +145,12 @@
 
 ## 9. 执行循环（Execution Loop）
 
-主循环由 Pydantic AI 内核承担，外壳在关键点插桩：
+主循环由自研 tool-calling 内核承担，外壳在关键点插桩：
 
 1. 接收用户输入（或 P3 的触发事件）。
 2. 外壳拼装上下文：system prompt（角色/规则/tool 描述，固化）+ 历史消息 + 相关记忆（短期 Redis + 工作记忆 `task_state` + 长期 embedding 检索）+ tool schema。
 3. **guardrails 前置**：输入过滤（prompt injection / 危险输入）。
-4. 调用 LLM（Pydantic AI）。
+4. 调用 LLM（provider_adapter 驱动的 tool-calling 循环）。
 5. 解析输出 → 若是 tool 调用，外壳权限网关校验 readonly/draft/commit：readonly 直接执行；draft 产草稿入 `agent_actions`；**commit 三态——未授权/越权/参数不合法则拒绝，合法但未命中白名单则生成 `agent_action` 待 HITL 审批，命中白名单则可执行但仍必须记录理由、前后值、`agent_action_id`/`correlation_id` 与审计摘要**。
 6. **guardrails 后置**：tool 出参回灌前清洗。
 7. 结果喂回上下文 → 回到第 4 步，直到模型输出结束标记或达终止条件。

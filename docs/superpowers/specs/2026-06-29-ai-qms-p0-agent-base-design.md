@@ -8,7 +8,7 @@
 
 ## 1. 范围与目标
 
-建立 Agent 基座基础设施，**无业务功能**。P0 交付：6 张 `agent_*` 表（`agent_sessions`/`agent_messages`/`agent_tool_calls`/`agent_actions`/`agent_memory`/`agent_commit_whitelist`）+ `audit_logs` 扩字段、harness、tool 注册表 + 三态权限网关、HITL 审批、白名单、guardrails、provider_adapter、Pydantic AI 接入、4 个 demo tool。用 4 条验收用例证明链路正确。
+建立 Agent 基座基础设施，**无业务功能**。P0 交付：6 张 `agent_*` 表（`agent_sessions`/`agent_messages`/`agent_tool_calls`/`agent_actions`/`agent_memory`/`agent_commit_whitelist`）+ `audit_logs` 扩字段、harness、tool 注册表 + 三态权限网关、HITL 审批、白名单、guardrails、provider_adapter、自研 tool-calling 循环接入、4 个 demo tool。用 4 条验收用例证明链路正确。
 
 **不在 P0**：真实业务 service 包装（除 `list_fmea_documents`）、DFMEA/PFMEA 推荐迁移、Copilot UI、任务队列、客诉→8D、模型级 guardrails（见第 11 节）。
 
@@ -27,7 +27,7 @@ backend/app/
     registry.py        # @agent_tool 装饰器 + TOOL_REGISTRY + 权限网关
     approval.py        # agent_actions 待审/审批流转
     memory.py          # 三层记忆: Redis 短期 + task_state 工作 + embedding 长期
-    provider_adapter.py# ai-config → Pydantic AI 原生 model 工厂
+    provider_adapter.py# 扩展现有 openai/anthropic SDK 支持 tool-calling
     guardrails.py      # Guardrail 接口 + 输入启发式 + 出参脱敏
     tools/
       demo.py          # 4 个 demo tool (stub + 真实 list_fmea_documents)
@@ -92,7 +92,7 @@ class AgentContext:
 2. **`tenant_schema` 来源**：API 层从 `request.state.tenant`（由 `tenant_context` 中间件注入）解析 schema_name，或读 `current_tenant_schema` ContextVar；**无 tenant 上下文（单租户/public 模式）时 agent 审计直接写 `tenant_schema="public"`**（agent 审计的自定义规则，不依赖 `logging_handler` 行为——该 handler 在无 tenant 时丢弃日志）。`RequestScope` 本身不带 tenant，故由 API 层在构造 `AgentContext` 时显式注入。
 3. 拼装上下文：system prompt（角色/规则/tool 描述，固化、不可被用户消息覆盖）+ 历史消息 + 三层记忆（短期 Redis + 工作 `task_state` + 长期 embedding 检索）+ tool schema。
 4. guardrails 前置：输入过滤。
-5. 调 Pydantic AI（经 provider_adapter）。
+5. 调 tool-calling 循环（经 provider_adapter 驱动现有 SDK）。
 6. 解析输出 → tool 调用经网关三态处理（第 5 节）。
 7. guardrails 后置：tool 出参回灌前脱敏。
 8. 结果喂回 → 回到第 5 步，直到结束标记或终止条件。
@@ -135,13 +135,14 @@ async def list_fmea_documents(ctx: AgentContext, page: int = 1) -> dict:
 - 工作：`agent_sessions.task_state` JSONB（当前计划/todo/中间产物；P3 Plan-and-Execute 用，P0 留字段与读写接口）。
 - 长期：`agent_memory` 条目 + `enqueue_embedding()` → `embedding_sync_outbox`。**P0 仅做 queued 入队 + 非向量 fallback 检索**（`content` SQL/关键词过滤 + factory/user 隔离）；向量检索待 worker 增强（§13，P0 外）。跨会话 user/factory 偏好与知识。
 
-## 8. provider_adapter.py
+## 8. provider_adapter.py（自研 tool-calling，不引入 pydantic-ai）
 
-- 读 `/admin/ai-config`（`llm_provider`/`llm_model`/`llm_base_url`/`llm_api_key`）→ 工厂化成 Pydantic AI 原生 model（`OpenAIModel`/`AnthropicModel`；`base_url` 支持 Ark/DeepSeek 兼容端点）。
-- 吸收 `response_format` 差异（Ark/DeepSeek 兼容）。
-- 旧 `LLMProvider`（`complete(prompt, schema)->dict`）保留不动，P1 迁移后删。
-- **新增依赖**：`pydantic-ai>=2.0,<3.0` 加入 `backend/requirements.txt`（当前仅有 `anthropic>=0.40`、`openai>=1.50`，无 pydantic-ai）。
-- **adapter smoke test（plan 首个任务）**：在写任何业务代码前，先验证 installed 版本的 model 对象构造 + tool-calling 调用 API 与 spec 假设一致（`OpenAIModel`/`AnthropicModel` 的实例化参数、tool 注册方式、流式接口），不符则锁定版本并修正 adapter 契约，避免后续返工。
+- 读 `/admin/ai-config` 的 **raw** key（新增 `get_raw_ai_config`，非 masked `get_ai_config`）→ 构造现有 `openai.AsyncOpenAI`（`base_url` 支持 Ark/DeepSeek 兼容端点）或 `anthropic.AsyncAnthropic` 客户端。
+- 扩展现有 `OpenAIProvider`/`ClaudeProvider`（`services/llm_provider.py`）增加 `chat_with_tools(messages, tools_schema)` 方法：调用 OpenAI chat-completions / Anthropic messages 的 **function-calling** 接口，返回含 `tool_calls` 的 assistant 消息。最小自研，无第三方 agent 框架。
+- 吸收 `response_format` / tool-schema 差异（Ark/DeepSeek 兼容）。
+- 旧 `LLMProvider.complete(prompt, schema)->dict` 保留不动，P1 迁移后删。
+- **不新增依赖**：复用已安装的 `openai>=1.50`、`anthropic>=0.40`。**不引入 pydantic-ai**（其 2.x 要求 `pydantic>=2.12`，与项目 pinned `pydantic==2.9.2` 冲突，会升级 starlette/uvicorn/httpx 破坏 FastAPI 0.115）。
+- **adapter smoke test（plan 首个任务）**：在写业务代码前，验证 installed `openai`/`anthropic` SDK 的 tool-calling 调用面（`AsyncOpenAI.chat.completions.create(tools=...)` 与 `AsyncAnthropic.messages.create(tools=...)` 的签名与 tool_calls 返回结构）与 spec 假设一致，避免后续返工。
 
 ## 9. guardrails.py
 

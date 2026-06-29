@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the Agent harness base infrastructure (no business features) with 6 `agent_*` tables, harness, tool registry + three-state permission gateway, HITL approval, whitelist, guardrails, provider adapter, Pydantic AI integration, and 4 demo tools — proven by 4 acceptance test cases.
+**Goal:** Build the Agent harness base infrastructure (no business features) with 6 `agent_*` tables, harness, tool registry + three-state permission gateway, HITL approval, whitelist, guardrails, provider adapter, a self-contained tool-calling loop, and 4 demo tools — proven by 4 acceptance test cases.
 
-**Architecture:** Self-built shell (`services/agent/`) owns compliance/multi-tenant isolation/audit/HITL/permission gateway; Pydantic AI kernel runs the tool-calling loop via a `provider_adapter` that bridges the existing `/admin/ai-config` to Pydantic AI native model objects. `AgentContext` carries factory/user/tenant scope injected by the harness — never visible to the LLM.
+**Architecture:** Self-built shell (`services/agent/`) owns compliance/multi-tenant isolation/audit/HITL/permission gateway; a **self-contained tool-calling loop** runs in the harness, driven by a `provider_adapter` that **extends the already-installed `openai`/`anthropic` SDK providers** (via `/admin/ai-config` raw keys) to do function-calling — no `pydantic-ai` (its 2.x requires `pydantic>=2.12`, conflicting with the project's pinned `pydantic==2.9.2`). `AgentContext` carries factory/user/tenant scope injected by the harness — never visible to the LLM.
 
-**Tech Stack:** Python 3.11 + FastAPI 0.115 (async) · SQLAlchemy 2.0 async (asyncpg) · PostgreSQL 15 (JSONB, UUID) · Redis 7 (short-term memory) · Pydantic AI >=2.0,<3.0 · Pydantic v2 · pytest (async, real DB, rollback isolation).
+**Tech Stack:** Python 3.11 + FastAPI 0.115 (async) · SQLAlchemy 2.0 async (asyncpg) · PostgreSQL 15 (JSONB, UUID) · Redis 7 (short-term memory) · already-installed `openai>=1.50` + `anthropic>=0.40` SDKs (function-calling) · Pydantic v2 · pytest (async, real DB, rollback isolation).
 
 **Spec:** `docs/superpowers/specs/2026-06-29-ai-qms-p0-agent-base-design.md`
 
@@ -20,8 +20,8 @@
 - Permission model: `Module` (StrEnum) + `PermissionLevel` (IntEnum: NONE/VIEW/CREATE/EDIT/APPROVE/ADMIN) + `get_user_permission(user, module, db)` from `app.core.permissions`. **Never invent string permissions like `"fmea:read"`.**
 - Tool scope (`factory_id`/`tenant_schema`/`permission_levels`) comes from `AgentContext`, injected by the harness — **never from LLM tool arguments**.
 - `echo_factory` must NOT return `factory_id` to the assistant output; return tagged booleans only. Real `factory_id` lives in audit rows only.
-- Existing `LLMProvider` (`complete(prompt, schema)->dict`) is kept untouched; P0 adds a parallel `provider_adapter` + Pydantic AI. Old provider removed in P1.
-- `pydantic-ai>=2.0,<3.0` added to `backend/requirements.txt`. Task 1 verifies the installed API before any code depends on it.
+- Existing `LLMProvider` (`complete(prompt, schema)->dict`) is kept untouched; P0 adds a parallel `provider_adapter` that **extends the existing `OpenAIProvider`/`ClaudeProvider`** (already-installed `openai`/`anthropic` SDKs) to support tool-calling. Old `complete()` removed in P1.
+- **No `pydantic-ai`** — it conflicts with the project's pinned `pydantic==2.9.2` (its 2.x requires `pydantic>=2.12`, which upgrades starlette/uvicorn/httpx and breaks FastAPI 0.115). Do NOT add pydantic-ai to `requirements.txt`. Tool-calling uses the already-installed `openai>=1.50` / `anthropic>=0.40` SDKs' function-calling APIs. Task 1 verifies those SDKs' tool-calling API surface before any code depends on it.
 - `enqueue_embedding()` only writes the `embedding_sync_outbox`; the existing worker does NOT handle `agent_memory`. P0 long-term memory verifies only **queued enqueue + non-vector fallback retrieval** (SQL/keyword on `agent_memory.content`). Vector retrieval is out of P0.
 - Backend tests use the real DB with rollback isolation (see `backend/tests/conftest.py` fixtures `db`, `admin_user`, `default_factory`). Set `SECRET_KEY=test-secret-key-for-pytest-only`.
 - Commits: one commit per task (or per TDD red→green cycle within a task). Match existing commit message style (`feat(scope): ...`, `test(scope): ...`).
@@ -42,7 +42,7 @@
 | `backend/app/services/agent/gateway.py` | Three-state permission gateway (readonly/draft/commit) + whitelist lookup |
 | `backend/app/services/agent/approval.py` | `agent_actions` CRUD + state machine (pending→approved/rejected/modified) |
 | `backend/app/services/agent/memory.py` | Three-layer memory: Redis short-term, `task_state` working, embedding enqueue + fallback retrieval |
-| `backend/app/services/agent/provider_adapter.py` | `/admin/ai-config` → Pydantic AI native model factory |
+| `backend/app/services/agent/provider_adapter.py` | `/admin/ai-config` (raw keys) → extends existing `OpenAIProvider`/`ClaudeProvider` with `chat_with_tools(messages, tools_schema)` for function-calling; no pydantic-ai |
 | `backend/app/services/agent/guardrails.py` | `Guardrail` interface + input heuristic + output sanitization |
 | `backend/app/services/agent/tools/demo.py` | 4 demo tools: `echo_factory`, `list_fmea_documents`, `draft_note`, `commit_tag` |
 | `backend/app/api/agent/__init__.py` | Router aggregation |
@@ -56,107 +56,110 @@
 | `backend/tests/services/agent/test_memory.py` | memory tests |
 | `backend/tests/services/agent/test_guardrails.py` | guardrails tests |
 | `backend/tests/services/agent/test_harness.py` | harness + acceptance tests (4 cases) |
-| `backend/tests/test_provider_adapter_smoke.py` | Pydantic AI API smoke test |
+| `backend/tests/test_provider_adapter_smoke.py` | openai/anthropic SDK tool-calling API smoke test |
 
 ---
 
-## Task 1: Pin pydantic-ai + adapter smoke test
+## Task 1: Verify SDK tool-calling API + adapter smoke test
 
-**Goal:** Add the dependency and verify the installed Pydantic AI API (model construction + tool calling) before any code depends on it. Produce a verified contract comment in `provider_adapter.py`.
+**Goal:** Verify the already-installed `openai` / `anthropic` SDK function-calling API surface (the methods/signatures/return shapes that `provider_adapter` and the harness loop will call) before any code depends on it. Produce a verified contract comment in `provider_adapter.py`. **No `pydantic-ai`** (conflicts with pinned `pydantic==2.9.2`).
 
 **Files:**
-- Modify: `backend/requirements.txt`
 - Create: `backend/tests/test_provider_adapter_smoke.py`
 - Create: `backend/app/services/agent/__init__.py` (empty package marker)
 - Create: `backend/app/services/agent/provider_adapter.py` (contract comment only, no impl yet)
 
 **Interfaces:**
-- Produces: a smoke test proving `pydantic_ai` import path, model class names, and tool-calling shape — captured as a code comment in `provider_adapter.py` that Task 9 implements against.
+- Produces: a smoke test proving the `openai`/`anthropic` SDK function-calling call shapes — captured as a code comment in `provider_adapter.py` that Task 9 implements against.
 
-- [ ] **Step 1: Add dependency**
+- [ ] **Step 1: Confirm the SDKs are installed (no new dependency)**
 
-Append to `backend/requirements.txt`:
-```
-pydantic-ai>=2.0,<3.0
-```
+Run: `cd backend && /Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python -c "import openai, anthropic; print('openai', openai.__version__); print('anthropic', anthropic.__version__)"`
+Expected: both import and print versions (already in `requirements.txt` as `openai>=1.50`, `anthropic>=0.40`). **Do NOT add pydantic-ai or run `pip install` that upgrades pydantic/starlette/uvicorn/httpx** — those break FastAPI 0.115.
 
-- [ ] **Step 2: Install**
-
-Run: `cd backend && pip install -r requirements.txt`
-Expected: `pydantic-ai` installs within the 2.x range.
-
-- [ ] **Step 3: Write the smoke test**
+- [ ] **Step 2: Write the smoke test**
 
 `backend/tests/test_provider_adapter_smoke.py`:
 ```python
-"""Smoke test: verify installed pydantic-ai API surface used by provider_adapter.
+"""Smoke test: verify installed openai/anthropic SDK function-calling API surface.
 
-This test does NOT call a real LLM. It only asserts the import paths,
-model class names, and tool-calling construction shape match what
-provider_adapter (Task 9) will rely on. If pydantic-ai's API changes,
-this test fails first — before any business code is written.
+This test does NOT call a real LLM. It asserts the import paths, client
+construction, and tool-calling call shapes that provider_adapter (Task 9)
+and the harness loop (Task 11) will rely on — so a SDK upgrade that breaks
+the shape fails here first, before business code is written.
 """
 import inspect
 
 
-def test_pydantic_ai_imports():
-    from pydantic_ai import Agent
-    from pydantic_ai.models.openai import OpenAIModel
-    from pydantic_ai.models.anthropic import AnthropicModel
-    assert inspect.isclass(Agent)
-    assert inspect.isclass(OpenAIModel)
-    assert inspect.isclass(AnthropicModel)
+def test_openai_sdk_imports_and_client():
+    from openai import AsyncOpenAI
+    assert inspect.isclass(AsyncOpenAI)
+    # client accepts api_key + base_url (Ark/DeepSeek compatible)
+    c = AsyncOpenAI(api_key="sk-demo", base_url="https://demo.example/v1")
+    # chat.completions.create exists and accepts tools= (function-calling)
+    assert hasattr(c.chat, "completions") and hasattr(c.chat.completions, "create")
+    sig = inspect.signature(c.chat.completions.create)
+    assert "tools" in sig.parameters and "tool_choice" in sig.parameters
 
 
-def test_openai_model_constructible_with_base_url():
-    """OpenAIModel must accept api_key + base_url for Ark/DeepSeek compatible endpoints."""
-    from pydantic_ai.models.openai import OpenAIModel
-    m = OpenAIModel(model_name="demo", api_key="sk-demo", base_url="https://demo.example/v1")
-    assert m is not None
+def test_anthropic_sdk_imports_and_client():
+    from anthropic import AsyncAnthropic
+    assert inspect.isclass(AsyncAnthropic)
+    c = AsyncAnthropic(api_key="sk-demo")
+    assert hasattr(c, "messages") and hasattr(c.messages, "create")
+    sig = inspect.signature(c.messages.create)
+    assert "tools" in sig.parameters and "tool_choice" in sig.parameters
 
 
-def test_agent_accepts_model_and_tools_decorator():
-    """Agent(model=...) + @agent.tool is the tool registration shape we build on."""
-    from pydantic_ai import Agent
-    agent = Agent(model="test")  # model name string is accepted at construction
-    assert hasattr(agent, "tool")
-    # @agent.tool registers a function tool
-    @agent.tool
-    async def echo(ctx, x: int) -> int:
-        return x
-    assert "echo" in {t.name for t in agent._function_tools.values()} \
-        or hasattr(agent, "_function_tools")
+def test_openai_tool_schema_shape():
+    """The OpenAI function-calling tool schema shape provider_adapter will emit."""
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "echo_factory",
+            "description": "echo scope",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    }
+    assert tool["type"] == "function" and tool["function"]["name"]
+
+
+def test_anthropic_tool_schema_shape():
+    """The Anthropic tool schema shape provider_adapter will emit (flat, no 'function' wrapper)."""
+    tool = {
+        "name": "echo_factory",
+        "description": "echo scope",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    }
+    assert tool["name"] and "input_schema" in tool
 ```
 
-> Note: the exact internal attribute name for registered tools may differ across pydantic-ai versions. If the last assertion fails, inspect `dir(agent)` and adjust the assertion to the real attribute — the **purpose** is to confirm `@agent.tool` registers a named tool. Record the verified attribute name in the `provider_adapter.py` contract comment in Step 5.
+> Note: if `inspect.signature` on a pydantic-modelled SDK method raises or omits `tools`/`tool_choice` (some SDK versions use `@overload`), fall back to asserting the param via `inspect.signature(...).parameters` is non-empty AND read the method docstring / source for `tools`; record whatever you verified in the contract comment in Step 4. The **purpose** is to confirm function-calling is reachable on the installed SDK versions — adjust assertions to the real API, do NOT call a real LLM.
 
-- [ ] **Step 4: Run the smoke test**
+- [ ] **Step 3: Run the smoke test**
 
-Run: `cd backend && pytest tests/test_provider_adapter_smoke.py -v`
-Expected: PASS (or, if the tool-registry attribute assertion fails, inspect `dir(agent)`, fix the assertion to the real attribute, re-run until PASS). This is the gate: the verified API names are what Task 9 implements against.
+Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only /Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python -m pytest tests/test_provider_adapter_smoke.py -v`
+Expected: PASS (adjust assertions per the note above if needed). This is the gate: the verified SDK shapes are what Task 9/11 implement against.
 
-- [ ] **Step 5: Record the verified contract**
+- [ ] **Step 4: Record the verified contract**
 
 `backend/app/services/agent/provider_adapter.py`:
 ```python
-"""Provider adapter: /admin/ai-config -> Pydantic AI native model objects.
+"""Provider adapter: extend existing openai/anthropic SDK providers with tool-calling.
 
-Verified API contract (from tests/test_provider_adapter_smoke.py):
-- from pydantic_ai import Agent
-- from pydantic_ai.models.openai import OpenAIModel(model_name=, api_key=, base_url=)
-- from pydantic_ai.models.anthropic import AnthropicModel(model_name=, api_key=)
-- Tool registration: @agent.tool on an async function(ctx, ...args) -> return
-- Agent run: await agent.run(prompt, deps=ctx)  (implemented in Task 9)
-
-Implemented in Task 9.
+Verified SDK contract (from tests/test_provider_adapter_smoke.py):
+- openai: AsyncOpenAI(api_key=, base_url=).chat.completions.create(messages=, tools=[{type:"function", function:{name, description, parameters}}], tool_choice=) -> response.choices[0].message.tool_calls[i].function.{name, arguments(JSON str)}
+- anthropic: AsyncAnthropic(api_key=).messages.create(model=, messages=, tools=[{name, description, input_schema}], tool_choice=) -> response.content blocks of type="tool_use" with .name and .input(dict)
+- No pydantic-ai (conflicts with pinned pydantic 2.9.2).
+Implemented in Task 9; loop driven in Task 11.
 """
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add backend/requirements.txt backend/tests/test_provider_adapter_smoke.py backend/app/services/agent/__init__.py backend/app/services/agent/provider_adapter.py
-git commit -m "feat(agent): pin pydantic-ai and verify adapter API surface"
+git add backend/tests/test_provider_adapter_smoke.py backend/app/services/agent/__init__.py backend/app/services/agent/provider_adapter.py
+git commit -m "feat(agent): verify openai/anthropic SDK tool-calling API surface"
 ```
 
 ---
@@ -609,7 +612,7 @@ def _derive_param_schema(func: Callable) -> dict:
 
     Skips the first parameter (ctx: AgentContext) — scope is injected, not LLM-supplied.
     Minimal implementation: returns {"type": "object", "properties": {}}; richer
-    inference is added when needed (Pydantic AI derives schemas from type hints
+    inference is added when needed (the self-contained loop consumes spec.param_schema
     in Task 12, so this stays a lightweight metadata placeholder).
     """
     return {"type": "object", "properties": {}}
@@ -1555,15 +1558,16 @@ git commit -m "feat(agent): guardrails — input injection heuristic + output re
 
 ---
 
-## Task 9: provider_adapter.py — ai-config → Pydantic AI model factory
+## Task 9: provider_adapter.py — extend existing SDK providers with tool-calling
 
 **Files:**
 - Modify: `backend/app/services/agent/provider_adapter.py`
+- Modify: `backend/app/services/ai_config_service.py` (add `get_raw_ai_config`)
 - Test: `backend/tests/services/agent/test_provider_adapter.py`
 
 **Interfaces:**
-- Consumes: the verified Pydantic AI API from Task 1; `ai_config` service **raw** reader (`get_raw_ai_config(db) -> AIConfigOut`, added in Step 1 — NOT the masked `get_ai_config`).
-- Produces: `provider_adapter.build_model(db) -> pydantic_ai Model`; `provider_adapter.build_agent(db, system_prompt, tool_specs) -> pydantic_ai.Agent`.
+- Consumes: the verified `openai`/`anthropic` SDK function-calling API from Task 1; `ai_config` service **raw** reader (`get_raw_ai_config(db) -> AIConfigOut`, added in Step 1 — NOT the masked `get_ai_config`).
+- Produces: `provider_adapter.build_client(db) -> ProviderClient`; `provider_adapter.chat_with_tools(pc, messages, tools) -> AssistantTurn`; `provider_adapter.tools_schema_for(pc, tool_specs) -> list[dict]`. **No pydantic-ai.**
 
 - [ ] **Step 1: Add a raw (unmasked) AI config reader**
 
@@ -1572,10 +1576,10 @@ git commit -m "feat(agent): guardrails — input injection heuristic + output re
 In `backend/app/services/ai_config_service.py`, add:
 ```python
 async def get_raw_ai_config(db: AsyncSession) -> AIConfigOut:
-    """Like get_ai_config but returns the REAL api keys (for backend-internal use only).
+    """Like get_ai_config but returns the REAL api keys (backend-internal use only).
 
     Never return this to the frontend. Used by provider_adapter to construct
-    Pydantic AI model objects with the actual credential.
+    openai/anthropic clients with the actual credential.
     """
     result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(AI_CONFIG_KEYS)))
     rows = {row.key: row.value for row in result.scalars().all()}
@@ -1590,42 +1594,57 @@ async def get_raw_ai_config(db: AsyncSession) -> AIConfigOut:
 ```
 (Reuse the existing `_coerce`, `_env_default`, `AI_CONFIG_KEYS`, `SystemSetting` already imported in that module.)
 
-Record the import path `from app.services.ai_config_service import get_raw_ai_config` for Step 3.
-
 - [ ] **Step 2: Write failing test**
 
 `backend/tests/services/agent/test_provider_adapter.py`:
 ```python
 import pytest
 from app.services.agent import provider_adapter
+from app.services.agent.provider_adapter import ProviderClient, tools_schema_for
 
 
 @pytest.mark.asyncio
-async def test_build_model_returns_pydantic_ai_model(db):
-    model = await provider_adapter.build_model(db)
-    # a pydantic_ai Model instance (not None, has the run/request shape)
-    assert model is not None
-    assert hasattr(model, "request") or hasattr(model, "run") or model.__class__.__module__.startswith("pydantic_ai")
+async def test_build_client_returns_provider_client(db):
+    pc = await provider_adapter.build_client(db)
+    assert pc.provider in ("openai", "anthropic")
+    assert pc.client is not None
+    assert pc.model  # non-empty model name
 
 
-def test_build_agent_accepts_system_prompt_and_tools():
-    from pydantic_ai import Agent
-    agent = provider_adapter.build_agent_sync(model="test", system_prompt="你是一个助手", tools=[])
-    assert isinstance(agent, Agent)
+def test_tools_schema_shape_openai():
+    from types import SimpleNamespace
+    spec = SimpleNamespace(name="echo_factory", description="d",
+                           param_schema={"type": "object", "properties": {}})
+    pc = ProviderClient(provider="openai", client=None, model="m")
+    schema = tools_schema_for(pc, [spec])
+    assert schema[0]["type"] == "function"
+    assert schema[0]["function"]["name"] == "echo_factory"
+
+
+def test_tools_schema_shape_anthropic():
+    from types import SimpleNamespace
+    spec = SimpleNamespace(name="echo_factory", description="d",
+                           param_schema={"type": "object", "properties": {}})
+    pc = ProviderClient(provider="anthropic", client=None, model="m")
+    schema = tools_schema_for(pc, [spec])
+    assert schema[0]["name"] == "echo_factory"
+    assert "input_schema" in schema[0]
 ```
 
 - [ ] **Step 3: Implement provider_adapter.py**
 
-Replace the contract-comment file from Task 1 with a real implementation:
+Replace the contract-comment file from Task 1 with a real implementation (no pydantic-ai):
 ```python
-"""Provider adapter: /admin/ai-config -> Pydantic AI native model objects + Agent."""
+"""Provider adapter: extend existing openai/anthropic SDK providers with tool-calling.
+
+No pydantic-ai (conflicts with project's pinned pydantic 2.9.2). Uses the
+already-installed openai/anthropic SDK function-calling APIs directly.
+"""
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from typing import Any
-
-from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIModel
-from pydantic_ai.models.anthropic import AnthropicModel
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1633,36 +1652,92 @@ from app.schemas.ai_config import AIConfigOut
 from app.services.ai_config_service import get_raw_ai_config  # raw (unmasked) keys
 
 
-async def build_model(db: AsyncSession):
+@dataclass
+class ProviderClient:
+    provider: str            # "openai" | "anthropic"
+    client: Any              # AsyncOpenAI | AsyncAnthropic
+    model: str
+
+
+@dataclass
+class AssistantTurn:
+    content: str              # assistant text (may be "")
+    tool_calls: list[dict]   # [{"name": str, "arguments": dict}]
+
+
+async def build_client(db: AsyncSession) -> ProviderClient:
     cfg: AIConfigOut = await get_raw_ai_config(db)  # real api key, not masked
-    provider = (cfg.llm_provider or "").lower()
+    provider = (cfg.llm_provider or "openai").lower()
     if provider in ("anthropic", "claude"):
-        return AnthropicModel(model_name=cfg.llm_model, api_key=cfg.llm_api_key)
-    # default: OpenAI-compatible (OpenAI / DeepSeek / Ark via base_url)
-    return OpenAIModel(model_name=cfg.llm_model, api_key=cfg.llm_api_key, base_url=cfg.llm_base_url or None)
+        from anthropic import AsyncAnthropic
+        return ProviderClient(provider="anthropic",
+                              client=AsyncAnthropic(api_key=cfg.llm_api_key),
+                              model=cfg.llm_model or "claude-sonnet-4-6-20250514")
+    from openai import AsyncOpenAI
+    return ProviderClient(provider="openai",
+                          client=AsyncOpenAI(api_key=cfg.llm_api_key, base_url=cfg.llm_base_url or None),
+                          model=cfg.llm_model or "gpt-4o")
 
 
-def build_agent_sync(*, model, system_prompt: str, tools: list) -> Agent:
-    agent = Agent(model=model, system_prompt=system_prompt)
-    for tool in tools:
-        # `tool` is a callable produced by the harness wrapping a ToolSpec;
-        # registration via @agent.tool happens in the harness (Task 12).
-        agent._register_tool(tool)  # use the verified registration API from Task 1 smoke test
-    return agent
+def tools_schema_for(pc: ProviderClient, tool_specs) -> list[dict]:
+    """Convert ToolSpecs to the SDK-native tool schema shape (openai vs anthropic)."""
+    out = []
+    for spec in tool_specs:
+        if pc.provider == "openai":
+            out.append({"type": "function",
+                        "function": {"name": spec.name, "description": spec.description,
+                                     "parameters": spec.param_schema}})
+        else:
+            out.append({"name": spec.name, "description": spec.description,
+                        "input_schema": spec.param_schema})
+    return out
+
+
+async def chat_with_tools(pc: ProviderClient, messages: list[dict], tools: list[dict]) -> AssistantTurn:
+    """One LLM turn with function-calling. Returns assistant text + parsed tool_calls.
+
+    Note: anthropic requires a top-level 'system' param rather than a system-role
+    message in `messages`; the harness (Task 11) passes system prompt separately
+    and this function routes it correctly per provider."""
+    if pc.provider == "openai":
+        resp = await pc.client.chat.completions.create(model=pc.model, messages=messages, tools=tools)
+        msg = resp.choices[0].message
+        calls = []
+        for tc in (msg.tool_calls or []):
+            calls.append({"name": tc.function.name,
+                          "arguments": json.loads(tc.function.arguments or "{}")})
+        return AssistantTurn(content=msg.content or "", tool_calls=calls)
+    # anthropic
+    system_text = ""
+    convo = []
+    for m in messages:
+        if m.get("role") == "system":
+            system_text += m.get("content", "")
+        else:
+            convo.append(m)
+    resp = await pc.client.messages.create(model=pc.model, system=system_text or None,
+                                            messages=convo, tools=tools, max_tokens=1024)
+    text_parts, calls = [], []
+    for block in resp.content:
+        if block.type == "text":
+            text_parts.append(block.text)
+        elif block.type == "tool_use":
+            calls.append({"name": block.name, "arguments": block.input})
+    return AssistantTurn(content="".join(text_parts), tool_calls=calls)
 ```
 
-> The exact tool-registration call (`agent._register_tool` vs `agent.tool` decorator vs `agent.tool_func`) depends on what Task 1's smoke test verified. Use the verified mechanism. If unsure, register tools in the harness (Task 12) via the `@agent.tool` decorator pattern instead of here, and make `build_agent_sync` only construct the `Agent(model=, system_prompt=)`. Adjust the test accordingly — the test only asserts an `Agent` is returned.
+> `chat_with_tools` makes a real SDK call — it is only exercised in Task 11 with a monkeypatched fake client. The Task 9 test does NOT call it.
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd backend && pytest tests/services/agent/test_provider_adapter.py -v`
-Expected: PASS (model construction against the live ai-config; no real LLM call).
+Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only /Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python -m pytest tests/services/agent/test_provider_adapter.py -v`
+Expected: PASS (client construction against live ai-config + schema shape; no real LLM call).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/services/agent/provider_adapter.py backend/tests/services/agent/test_provider_adapter.py
-git commit -m "feat(agent): provider_adapter — ai-config to Pydantic AI model/agent factory"
+git add backend/app/services/agent/provider_adapter.py backend/app/services/ai_config_service.py backend/tests/services/agent/test_provider_adapter.py
+git commit -m "feat(agent): provider_adapter — extend openai/anthropic SDK with tool-calling"
 ```
 
 ---
@@ -1752,18 +1827,18 @@ git commit -m "feat(agent): real list_fmea_documents + draft_note demo tools"
 
 ---
 
-## Task 11: harness main loop (wire everything + Pydantic AI)
+## Task 11: harness main loop (wire everything — self-contained tool-calling)
 
 **Files:**
 - Modify: `backend/app/services/agent/harness.py`
 - Test: `backend/tests/services/agent/test_harness_loop.py`
 
 **Interfaces:**
-- Produces: `harness.run_message(db, session, user, redis, user_message) -> RunResult` executing the full loop: guardrails input → build agent (provider_adapter + registered tools) → run Pydantic AI → gateway per tool call → guardrails output → persist `agent_messages`/`agent_tool_calls` + audit per step.
+- Produces: `harness.run_message(db, session, user, redis, user_message) -> RunResult` executing the self-contained loop: guardrails input → build provider client (provider_adapter) → loop: `chat_with_tools` → if tool_calls, route each through `gateway.invoke` and feed results back → repeat until no tool_calls → guardrails output → persist `agent_messages` + audit per step. No pydantic-ai.
 
-> The Pydantic AI run loop calls tools itself; we intercept by wrapping each `ToolSpec.func` so the wrapper calls `gateway.invoke` (which enforces three-state + audit) instead of the raw tool. This keeps the LLM-driven loop but routes every tool execution through the gateway.
+> The loop is self-contained: `chat_with_tools` returns an assistant turn that may contain `tool_calls`; the harness executes each via `gateway.invoke` (which enforces three-state + audit) and appends the tool result, then calls again. No third-party agent framework.
 
-- [ ] **Step 1: Write failing test (uses a stubbed LLM model to avoid real calls)**
+- [ ] **Step 1: Write failing test (uses stubbed provider_adapter so no real LLM is called)**
 
 `backend/tests/services/agent/test_harness_loop.py`:
 ```python
@@ -1773,29 +1848,20 @@ from app.services.agent import harness
 
 @pytest.mark.asyncio
 async def test_run_message_persists_user_and_assistant_messages(db, admin_user, default_factory, monkeypatch):
-    # Stub provider_adapter.build_model + the Pydantic AI run so no real LLM is called.
+    # Stub provider_adapter so no real LLM is called.
     from app.services.agent import provider_adapter
 
-    class _FakeAgent:
-        def __init__(self, *a, **k): pass
-        async def run(self, prompt, deps=None):
-            return _FakeResult("已收到")
+    async def _fake_chat(pc, messages, tools):
+        return provider_adapter.AssistantTurn(content="已收到", tool_calls=[])
+    monkeypatch.setattr(provider_adapter, "chat_with_tools", _fake_chat)
 
-    class _FakeResult:
-        def __init__(self, text): self.output = text
-
-    monkeypatch.setattr(provider_adapter, "build_agent_sync", lambda **k: _FakeAgent())
-
-    async def _fake_model(db):  # build_model is async — fake must be async too
-        return None
-    monkeypatch.setattr(provider_adapter, "build_model", _fake_model)
-    # _FakeAgent has no tool-registration API — stub the harness registration shim
-    monkeypatch.setattr(harness, "_register_tool", lambda *a, **k: None)
+    async def _fake_client(db):
+        return provider_adapter.ProviderClient(provider="openai", client=None, model="m")
+    monkeypatch.setattr(provider_adapter, "build_client", _fake_client)
 
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
     res = await harness.run_message(db, s, admin_user, redis=None, user_message="帮我查 SPC 异常")
     assert res.assistant_text == "已收到"
-    # user + assistant messages persisted
     from sqlalchemy import select
     from app.models.agent import AgentMessage
     msgs = (await db.execute(select(AgentMessage).where(AgentMessage.session_id == s.session_id))).scalars().all()
@@ -1814,14 +1880,15 @@ async def test_run_message_blocks_injection_input(db, admin_user, default_factor
 
 - [ ] **Step 2: Run to verify fail**
 
-Run: `cd backend && pytest tests/services/agent/test_harness_loop.py -v`
+Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only /Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python -m pytest tests/services/agent/test_harness_loop.py -v`
 Expected: FAIL (`run_message` not defined).
 
 - [ ] **Step 3: Implement run_message in harness.py**
 
 Append to `backend/app/services/agent/harness.py`:
 ```python
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from app.services.agent import gateway, guardrails, provider_adapter
 from app.models.agent import AgentMessage
 from app.services.agent.registry import TOOL_REGISTRY
@@ -1832,13 +1899,14 @@ class RunResult:
     assistant_text: str | None
     blocked: bool = False
     reason: str | None = None
-    pending_action_ids: list = None
+    pending_action_ids: list = field(default_factory=list)
 
 
 _SYSTEM_PROMPT = (
     "你是 OpenQMS 质量管理助手。只能调用提供的工具。"
     "严禁泄露 factory_id 或跨工厂访问数据。"
 )
+_MAX_ITER = 6
 
 
 async def run_message(db, session, user, redis, user_message: str) -> RunResult:
@@ -1856,47 +1924,61 @@ async def run_message(db, session, user, redis, user_message: str) -> RunResult:
         await db.flush()
         return RunResult(assistant_text=None, blocked=True, reason=gr.reason)
 
-    # persist user message
     db.add(AgentMessage(message_id=uuid.uuid4(), session_id=session.session_id,
                         factory_id=session.factory_id, role="user", content=user_message))
 
-    # build agent with tool wrappers that route through gateway
-    def make_tool_wrapper(spec):
-        async def wrapper(tool_ctx, **params):
-            res = await gateway.invoke(ctx, spec.name, params)
-            return res.result
-        return wrapper
+    pc = await provider_adapter.build_client(db)
+    specs = list(TOOL_REGISTRY.values())
+    tools = provider_adapter.tools_schema_for(pc, specs)
+    # P0 minimal: system + current user message (short-term history can be prepended in P2)
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}]
 
-    model = await provider_adapter.build_model(db)
-    agent = provider_adapter.build_agent_sync(model=model, system_prompt=_SYSTEM_PROMPT, tools=[])
-    # register wrapped tools using the verified mechanism from Task 1
-    for spec in TOOL_REGISTRY.values():
-        _register_tool(agent, spec.name, make_tool_wrapper(spec), spec.param_schema)
-
-    result = await agent.run(user_message, deps=ctx)
-    assistant_text = getattr(result, "output", str(result))
+    assistant_text = ""
+    pending = []
+    for _ in range(_MAX_ITER):
+        turn = await provider_adapter.chat_with_tools(pc, messages, tools)
+        if not turn.tool_calls:
+            assistant_text = turn.content
+            break
+        # append the assistant turn (openai-style tool_calls) and execute each via the gateway
+        messages.append({"role": "assistant", "content": turn.content,
+                         "tool_calls": [{"id": f"call_{i}", "type": "function",
+                                         "function": {"name": c["name"],
+                                                      "arguments": json.dumps(c.get("arguments") or {})}}]
+                                       for i, c in enumerate(turn.tool_calls)]})
+        for c in turn.tool_calls:
+            res = await gateway.invoke(ctx, c["name"], c.get("arguments") or {})
+            if res.status == "pending" and res.action_id:
+                pending.append(res.action_id)
+            # feed the tool result back (openai-style tool message; anthropic shaping is a P2 follow-up)
+            messages.append({"role": "tool", "tool_call_id": "call_0",
+                             "content": json.dumps(res.result if res.result is not None else {"status": res.status})})
+    else:
+        assistant_text = "（已达到最大工具调用轮数）"
 
     # guardrails: output (sanitize before persisting/returning)
-    assistant_text = guardrails._redact(assistant_text, ctx.factory_id) if isinstance(assistant_text, str) else assistant_text
+    if isinstance(assistant_text, str):
+        assistant_text = guardrails._redact(assistant_text, ctx.factory_id)
 
     db.add(AgentMessage(message_id=uuid.uuid4(), session_id=session.session_id,
                         factory_id=session.factory_id, role="assistant", content=str(assistant_text)))
     await db.flush()
-    return RunResult(assistant_text=str(assistant_text))
+    return RunResult(assistant_text=str(assistant_text), pending_action_ids=pending)
 ```
 
-> `_register_tool` and the exact `agent.run` signature depend on what Task 1's smoke test verified. Define `_register_tool` as a thin shim using the verified API (e.g. `agent._register_tool(name, func, schema)` or the `@agent.tool` equivalent). If the verified API only supports decorator registration, register tools at agent construction inside `build_agent_sync` (Task 9) by passing the wrappers there — and simplify this function to just `agent.run`. Match whatever the smoke test confirmed; the test stubs `build_agent_sync` so it passes regardless.
+> P0 simplification: the tool-result message uses the OpenAI `role:"tool"` shape (the default provider). Anthropic's `tool_result` content-block shaping is a P2 follow-up when real multi-turn tool use against an Anthropic model is exercised. P0 tests stub `chat_with_tools` (no real tool_calls), so this branch is structurally present but not LLM-exercised — that's acceptable for the base; real tool-use integration lands in P2.
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd backend && pytest tests/services/agent/test_harness_loop.py -v`
+Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only /Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python -m pytest tests/services/agent/test_harness_loop.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/agent/harness.py backend/tests/services/agent/test_harness_loop.py
-git commit -m "feat(agent): harness main loop — guardrails + Pydantic AI + gateway-routed tools + audit"
+git commit -m "feat(agent): harness main loop — self-contained tool-calling + gateway-routed tools + audit"
 ```
 
 ---
@@ -1928,20 +2010,16 @@ from app.main import app
 
 @pytest.mark.asyncio
 async def test_create_session_and_post_message(db, admin_user, default_factory, monkeypatch):
-    # stub the LLM so no real call
-    from app.services.agent import provider_adapter, harness
-    class _FakeAgent:
-        async def run(self, prompt, deps=None):
-            class R: output = "ok"
-            return R()
-    monkeypatch.setattr(provider_adapter, "build_agent_sync", lambda **k: _FakeAgent())
+    # stub the LLM so no real call (self-contained loop: stub build_client + chat_with_tools)
+    from app.services.agent import provider_adapter
 
-    async def _fake_model(db_):  # build_model is async — fake must be async too
-        return None
-    monkeypatch.setattr(provider_adapter, "build_model", _fake_model)
-    # _FakeAgent has no tool-registration API — stub the harness registration shim
-    from app.services.agent import harness as _harness
-    monkeypatch.setattr(_harness, "_register_tool", lambda *a, **k: None)
+    async def _fake_chat(pc, messages, tools):
+        return provider_adapter.AssistantTurn(content="ok", tool_calls=[])
+    monkeypatch.setattr(provider_adapter, "chat_with_tools", _fake_chat)
+
+    async def _fake_client(db_):
+        return provider_adapter.ProviderClient(provider="openai", client=None, model="m")
+    monkeypatch.setattr(provider_adapter, "build_client", _fake_client)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -2200,7 +2278,7 @@ git commit -m "test(agent): 4 P0 acceptance cases (readonly isolation / draft no
    - §13 out-of-scope (worker enhancement, record_id fix) → explicitly NOT in any task. ✓
 2. **Placeholder scan:** migrations have `<rev>` placeholders for alembic revision IDs — these are generated by `alembic revision` at execution time, not plan placeholders. The `...` in Task 3 Step 2 must be filled by the implementer with full `op.create_table` calls (called out explicitly). No "TBD"/"TODO" elsewhere.
 3. **Type consistency:** `AgentContext` defined once (Task 4 registry.py), used everywhere. `GatewayResult` defined in Task 5, used in Task 6/11. `RunResult` in Task 11. `echo_factory` returns `{"scope_bound": True, "factory_match": True}` consistently (Task 5 stub, Task 10 real, Task 13 acceptance). `decision_source` nullable (Task 2) consistent with pending (Task 6). `embedding_status` queued (Task 2/7) consistent.
-4. **Open items for implementer (called out inline, not placeholders):** exact Pydantic AI tool-registration mechanism (Task 1 smoke test is authoritative); exact test-auth helper (Task 12 Step 2); alembic revision ID + down_revision (Task 3 Step 1). The raw AI config reader is specified (`get_raw_ai_config`, Task 9 Step 1) — do NOT use the masked `get_ai_config`.
+4. **Open items for implementer (called out inline, not placeholders):** exact `openai`/`anthropic` SDK tool-calling call shapes (Task 1 smoke test is authoritative); exact test-auth helper (Task 12 Step 2); alembic revision ID + down_revision (Task 3 Step 1). The raw AI config reader is specified (`get_raw_ai_config`, Task 9 Step 1) — do NOT use the masked `get_ai_config`. **No pydantic-ai** (dependency conflict) — the loop is self-contained.
 
 ---
 
