@@ -822,6 +822,40 @@ async def test_whitelist_required_permission_mismatch_blocks_auto_approve(db, ad
     db.add(wl); await db.flush()
     res = await gateway.invoke(ctx, "commit_tag", {"tag": "x"})
     assert res.status == "pending"  # required_permission mismatch -> not whitelisted
+
+
+@pytest.mark.asyncio
+async def test_whitelist_jsonb_matches_enum_spec_regression(db, admin_user, default_factory):
+    """Regression: whitelist JSONB {"module":"fmea","min_level":3} matches a tool spec
+    declared with Module.FMEA/PermissionLevel.EDIT (enum), admin (FMEA ADMIN>=EDIT)
+    auto-approved. Uses a throwaway tool registered locally and cleaned up — NOT added
+    to demo.py, to keep P0's LLM-visible tool surface at 4 demo tools."""
+    import uuid as _uuid
+    from sqlalchemy import select
+    from app.core.permissions import Module, PermissionLevel
+    from app.services.agent.registry import agent_tool, AgentContext, TOOL_REGISTRY
+    from app.models.agent import AgentCommitWhitelist, AgentAction
+
+    @agent_tool(level="commit", entity_type="fmea_tag", action="tag",
+                required_permission={"module": Module.FMEA, "min_level": PermissionLevel.EDIT},
+                description="throwaway jsonb regression tool")
+    async def _jsonb_test_commit(ctx: AgentContext, tag: str = "") -> dict:
+        return {"tagged": tag}
+    try:
+        s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
+        ctx = await harness.build_context(db, s, admin_user)
+        wl = AgentCommitWhitelist(id=_uuid.uuid4(), tool_name="_jsonb_test_commit", action="tag",
+                                  entity_type="fmea_tag", max_scope={},
+                                  required_permission={"module": "fmea", "min_level": 3},  # JSONB form
+                                  enabled=True)
+        db.add(wl); await db.flush()
+        res = await gateway.invoke(ctx, "_jsonb_test_commit", {"tag": "z"})
+        assert res.status == "approved"
+        assert res.action_id is not None
+        a = (await db.execute(select(AgentAction).where(AgentAction.action_id == res.action_id))).scalar_one()
+        assert a.decision_source == "whitelist"
+    finally:
+        TOOL_REGISTRY.pop("_jsonb_test_commit", None)  # never pollute the global registry
 ```
 
 > `demo` tools are created in Task 11. To keep Task 5 independently testable, create a minimal `backend/app/services/agent/tools/__init__.py` and `backend/app/services/agent/tools/demo.py` now with just `echo_factory` and `commit_tag` stubs (registered via `@agent_tool`). The full `list_fmea_documents`/`draft_note` are added in Task 11.
@@ -1702,13 +1736,6 @@ async def draft_note(ctx: AgentContext, text: str = "") -> dict:
             description="给实体打标签（commit demo）")
 async def commit_tag(ctx: AgentContext, tag: str = "") -> dict:
     return {"tagged": tag}
-
-
-@agent_tool(level="commit", entity_type="fmea_tag", action="tag",
-            required_permission={"module": Module.FMEA, "min_level": PermissionLevel.EDIT},
-            description="给 FMEA 文档打标签（真实权限 commit demo）")
-async def commit_tag_fmea(ctx: AgentContext, tag: str = "") -> dict:
-    return {"tagged": tag}
 ```
 
 - [ ] **Step 4: Run tests**
@@ -2109,26 +2136,6 @@ async def test_acceptance_3_commit_three_states(db, admin_user, default_factory)
     assert r2.action_id is not None
     wl2 = (await db.execute(select(AgentAction).where(AgentAction.action_id == r2.action_id))).scalar_one()
     assert wl2.decision_source == "whitelist"
-
-
-@pytest.mark.asyncio
-async def test_acceptance_3b_whitelist_jsonb_matches_enum_spec(db, admin_user, default_factory):
-    """Positive: whitelist row stored as JSONB {"module": "fmea", "min_level": 3}
-    matches a tool spec declared with Module.FMEA / PermissionLevel.EDIT (enum),
-    and admin (FMEA ADMIN>=EDIT) is auto-approved — proves JSONB/Enum normalization."""
-    from app.models.agent import AgentCommitWhitelist, AgentAction
-    s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
-    ctx = await harness.build_context(db, s, admin_user)
-    wl = AgentCommitWhitelist(id=uuid.uuid4(), tool_name="commit_tag_fmea", action="tag",
-                              entity_type="fmea_tag", max_scope={},
-                              required_permission={"module": "fmea", "min_level": 3},  # JSONB form
-                              enabled=True)
-    db.add(wl); await db.flush()
-    res = await gateway.invoke(ctx, "commit_tag_fmea", {"tag": "z"})
-    assert res.status == "approved"
-    assert res.action_id is not None
-    a = (await db.execute(select(AgentAction).where(AgentAction.action_id == res.action_id))).scalar_one()
-    assert a.decision_source == "whitelist"
 
 
 @pytest.mark.asyncio
