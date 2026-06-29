@@ -40,7 +40,7 @@ migrations/versions/*_agent_base.py  # alembic revision, hash 生成时确定
 
 ## 3. 数据模型（字段级）
 
-除 `agent_commit_whitelist` 外，agent 行为/记忆表（`agent_sessions`/`agent_messages`/`agent_tool_calls`/`agent_actions`/`agent_memory`）均带 `factory_id`（NOT NULL）+ 按租户隔离，沿用现有 `RequestScope` + `check_factory_access()`。`agent_commit_whitelist` 无 `factory_id`，通过 `max_scope` 限制适用工厂/产品线（全局规则表，由 admin 维护）。
+除 `agent_commit_whitelist` 外，agent 行为/记忆表（`agent_sessions`/`agent_messages`/`agent_tool_calls`/`agent_actions`/`agent_memory`）均带 `factory_id`（NOT NULL）+ 按租户隔离，沿用现有 `RequestScope` + `check_factory_access()`。`agent_commit_whitelist` 是**租户表**（`Base`/`TenantBase`，与 `users` 同 schema，故 `created_by` FK 到 `users.user_id` 合法），无 `factory_id`，通过 `max_scope` 限制适用工厂/产品线（租户内全局规则，由 admin 维护）。
 
 ### `agent_sessions`
 `session_id`(UUID PK) · `user_id`(FK users) · `factory_id`(FK factories, NOT NULL) · `tenant_schema`(String) · `scenario`(enum: copilot/auto_8d/migration) · `status`(enum: active/completed/failed) · `related_entity_type`(String, nullable) · `related_entity_id`(UUID, nullable) · `task_state`(JSONB, 工作记忆：计划/todo/中间产物) · `created_at` · `updated_at`

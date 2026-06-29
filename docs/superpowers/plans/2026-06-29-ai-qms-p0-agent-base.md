@@ -14,7 +14,7 @@
 
 - UI is Chinese (zh_CN); comments may be mixed Chinese/English. New user-facing strings (if any in P0 API errors) in both `frontend/src/locales/en-US` and `zh-CN` — but P0 has **no frontend**, so this only applies to any i18n keys referenced by backend error messages (none expected in P0).
 - PKs are UUID v4 generated in Python (`default=uuid.uuid4`).
-- `factory_id` NOT NULL on all agent behavior/memory tables; `agent_commit_whitelist` is a global/platform table (no `factory_id`, uses `max_scope` JSONB).
+- `factory_id` NOT NULL on all agent behavior/memory tables; `agent_commit_whitelist` is a **tenant** table (`Base`/`TenantBase`, lives in tenant schema alongside `users` so its `created_by` FK to `users.user_id` is valid; no `factory_id`, uses `max_scope` JSONB to narrow to factory_ids/product_line_codes).
 - Tenant business models extend `Base` (= `TenantBase`); platform/global models extend `PlatformBase` (both from `app.database`).
 - Every CRUD/service operation manually writes an `AuditLog` (existing convention). Agent audit also writes `agent_tool_calls`/`agent_messages`/`agent_actions` with `correlation_id` linking to `audit_logs`.
 - Permission model: `Module` (StrEnum) + `PermissionLevel` (IntEnum: NONE/VIEW/CREATE/EDIT/APPROVE/ADMIN) + `get_user_permission(user, module, db)` from `app.core.permissions`. **Never invent string permissions like `"fmea:read"`.**
@@ -35,8 +35,7 @@
 | `backend/app/models/agent.py` | 6 ORM models: `AgentSession`, `AgentMessage`, `AgentToolCall`, `AgentAction`, `AgentMemory`, `AgentCommitWhitelist` |
 | `backend/app/models/audit.py` | Extend `AuditLog` with `factory_id`, `tenant_schema`, `correlation_id` (nullable) |
 | `backend/app/models/__init__.py` | Register new agent models |
-| `backend/alembic/versions/<rev>_agent_base_tenant.py` | Tenant migration: 5 agent behavior/memory tables + `audit_logs` extension |
-| `backend/alembic/versions/<rev>_agent_commit_whitelist.py` | Platform migration: `agent_commit_whitelist` table |
+| `backend/alembic/versions/<rev>_agent_base_tenant.py` | Tenant migration: 6 agent_* tables (incl. `agent_commit_whitelist`) + `audit_logs` extension |
 | `backend/app/schemas/agent.py` | Pydantic v2 request/response schemas for agent API |
 | `backend/app/services/agent/harness.py` | `AgentContext`, session lifecycle, audit helpers, main loop orchestration |
 | `backend/app/services/agent/registry.py` | `@agent_tool` decorator, `ToolSpec`, `TOOL_REGISTRY`, `AgentContext` re-export |
@@ -218,9 +217,10 @@ async def test_agent_action_decision_source_nullable_when_pending(db, admin_user
     assert got.approver_id is None
 
 
-def test_agent_commit_whitelist_is_platform_model():
-    from app.database import PlatformBase
-    assert AgentCommitWhitelist.__bases__[0] is PlatformBase or issubclass(AgentCommitWhitelist, PlatformBase)
+def test_agent_commit_whitelist_is_tenant_model():
+    from app.database import Base
+    # whitelist is a tenant table so its created_by FK to users.user_id (also tenant) is valid
+    assert issubclass(AgentCommitWhitelist, Base)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -239,7 +239,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database import Base, PlatformBase
+from app.database import Base, PlatformBase  # PlatformBase kept for reference; whitelist is tenant (Base)
 
 
 class AgentSession(Base):
@@ -331,7 +331,10 @@ class AgentMemory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class AgentCommitWhitelist(PlatformBase):
+class AgentCommitWhitelist(Base):
+    """Tenant-scoped whitelist (lives in tenant schema alongside users, so the
+    created_by FK to users.user_id is valid). Rules apply tenant-wide; max_scope
+    narrows to specific factory_ids / product_line_codes."""
     __tablename__ = "agent_commit_whitelist"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -424,33 +427,7 @@ def upgrade() -> None:
     op.create_table("agent_tool_calls", ...)  # mirror AgentToolCall columns
     op.create_table("agent_actions", ...)     # mirror AgentAction columns
     op.create_table("agent_memory", ...)      # mirror AgentMemory columns
-    op.add_column("audit_logs", sa.Column("factory_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("factories.id")))
-    op.add_column("audit_logs", sa.Column("tenant_schema", sa.String(63)))
-    op.add_column("audit_logs", sa.Column("correlation_id", postgresql.UUID(as_uuid=True)))
-
-
-def downgrade() -> None:
-    op.drop_column("audit_logs", "correlation_id")
-    op.drop_column("audit_logs", "tenant_schema")
-    op.drop_column("audit_logs", "factory_id")
-    op.drop_table("agent_memory")
-    op.drop_table("agent_actions")
-    op.drop_table("agent_tool_calls")
-    op.drop_table("agent_messages")
-    op.drop_table("agent_sessions")
-```
-> Replace each `...` with the full `op.create_table` matching the model from Task 2 (copy every column). Do not leave any table incomplete — the implementer must fill all 5 create_table calls with all columns.
-
-Set `down_revision` to the current tenant head from Step 1. Add `from alembic import op` and `import sqlalchemy as sa` and `from sqlalchemy.dialects import postgresql`.
-
-- [ ] **Step 3: Create the platform migration**
-
-Generate: `cd backend && alembic revision -m "agent commit whitelist"` (no `-x schema` → platform metadata, `version_table_schema="public"`).
-
-Edit `upgrade()`/`downgrade()`:
-```python
-def upgrade() -> None:
-    op.create_table(
+    op.create_table(                          # whitelist is tenant (FK to users.user_id)
         "agent_commit_whitelist",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("tool_name", sa.String(100), nullable=False),
@@ -462,25 +439,42 @@ def upgrade() -> None:
         sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.user_id")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
+    op.add_column("audit_logs", sa.Column("factory_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("factories.id")))
+    op.add_column("audit_logs", sa.Column("tenant_schema", sa.String(63)))
+    op.add_column("audit_logs", sa.Column("correlation_id", postgresql.UUID(as_uuid=True)))
+
 
 def downgrade() -> None:
+    op.drop_column("audit_logs", "correlation_id")
+    op.drop_column("audit_logs", "tenant_schema")
+    op.drop_column("audit_logs", "factory_id")
     op.drop_table("agent_commit_whitelist")
+    op.drop_table("agent_memory")
+    op.drop_table("agent_actions")
+    op.drop_table("agent_tool_calls")
+    op.drop_table("agent_messages")
+    op.drop_table("agent_sessions")
 ```
-Set `down_revision` to the current platform head from Step 1.
+> Replace each `...` with the full `op.create_table` matching the model from Task 2 (copy every column). Do not leave any table incomplete — the implementer must fill all 5 create_table calls with all columns.
+
+Set `down_revision` to the current tenant head from Step 1. Add `from alembic import op` and `import sqlalchemy as sa` and `from sqlalchemy.dialects import postgresql`.
+
+- [ ] **Step 3: No platform migration needed**
+
+`agent_commit_whitelist` is now a **tenant** table (moved into the tenant migration in Step 2) so its `created_by` FK to `users.user_id` is valid. Do **not** create a separate platform migration for it. (If a platform migration was already generated, delete it.) Proceed to Step 4.
 
 - [ ] **Step 4: Apply migrations and verify**
 
-Run (tenant): `cd backend && alembic upgrade head -x schema=<tenant_schema>` 
-Run (platform): `cd backend && alembic upgrade head`
-Expected: both apply cleanly. Verify with `\d agent_sessions` etc. in psql, or by re-running the Task 2 model tests against a migrated DB:
+Run (tenant): `cd backend && alembic upgrade head -x schema=<tenant_schema>`
+Expected: applies cleanly (all 6 agent_* tenant tables + audit_logs extension). Verify with `\d agent_sessions`, `\d agent_commit_whitelist` in psql, or re-run the Task 2 model tests against a migrated DB:
 `cd backend && pytest tests/models/test_agent_models.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/alembic/versions/*_agent_base_tenant.py backend/alembic/versions/*_agent_commit_whitelist.py
-git commit -m "feat(agent): alembic migrations for agent_* tables + audit_logs extension"
+git add backend/alembic/versions/*_agent_base_tenant.py
+git commit -m "feat(agent): alembic tenant migration for 6 agent_* tables + audit_logs extension"
 ```
 
 ---
@@ -581,6 +575,7 @@ class ToolSpec:
     name: str
     func: Callable
     level: str                       # readonly/draft/commit
+    action: str                      # sub-action for whitelist 5-tuple (defaults to tool name)
     entity_type: str
     required_permission: dict        # {module: Module, min_level: PermissionLevel}
     description: str
@@ -590,12 +585,13 @@ class ToolSpec:
 TOOL_REGISTRY: dict[str, ToolSpec] = {}
 
 
-def agent_tool(*, level: str, entity_type: str, required_permission: dict, description: str):
+def agent_tool(*, level: str, entity_type: str, required_permission: dict, description: str, action: str | None = None):
     def decorator(func: Callable) -> Callable:
         spec = ToolSpec(
             name=func.__name__,
             func=func,
             level=level,
+            action=action or func.__name__,
             entity_type=entity_type,
             required_permission=required_permission,
             description=description,
@@ -750,11 +746,17 @@ async def test_readonly_executes_when_permitted(db, admin_user, default_factory)
 
 
 @pytest.mark.asyncio
-async def test_unknown_tool_rejected(db, admin_user, default_factory):
+async def test_unknown_tool_rejected_with_audit(db, admin_user, default_factory):
+    from sqlalchemy import select
+    from app.models.agent import AgentToolCall
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
     ctx = await harness.build_context(db, s, admin_user)
     res = await gateway.invoke(ctx, "does_not_exist", {})
     assert res.status == "rejected"
+    # rejected calls must leave a rejected AgentToolCall + audit (no silent rejection)
+    tc = (await db.execute(select(AgentToolCall).where(AgentToolCall.tool_call_id == res.tool_call_id))).scalar_one()
+    assert tc.status == "rejected"
+    assert tc.audit_log_id is not None
 
 
 @pytest.mark.asyncio
@@ -764,6 +766,23 @@ async def test_commit_without_whitelist_becomes_pending(db, admin_user, default_
     res = await gateway.invoke(ctx, "commit_tag", {"tag": "x"})
     assert res.status == "pending"
     assert res.action_id is not None
+
+
+@pytest.mark.asyncio
+async def test_whitelist_max_scope_excludes_other_factory(db, admin_user, default_factory):
+    """Whitelist with max_scope.factory_ids=[other] must NOT match ctx.factory_id."""
+    import uuid as _uuid
+    from app.models.agent import AgentCommitWhitelist
+    s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
+    ctx = await harness.build_context(db, s, admin_user)
+    other = _uuid.uuid4()
+    wl = AgentCommitWhitelist(id=_uuid.uuid4(), tool_name="commit_tag", action="tag",
+                              entity_type="tag", max_scope={"factory_ids": [str(other)]},
+                              required_permission={"module": None, "min_level": None}, enabled=True)
+    db.add(wl); await db.flush()
+    res = await gateway.invoke(ctx, "commit_tag", {"tag": "x"})
+    # scope mismatch -> not whitelisted -> pending (NOT auto-approved)
+    assert res.status == "pending"
 ```
 
 > `demo` tools are created in Task 11. To keep Task 5 independently testable, create a minimal `backend/app/services/agent/tools/__init__.py` and `backend/app/services/agent/tools/demo.py` now with just `echo_factory` and `commit_tag` stubs (registered via `@agent_tool`). The full `list_fmea_documents`/`draft_note` are added in Task 11.
@@ -783,7 +802,7 @@ async def echo_factory(ctx: AgentContext) -> dict:
     return {"scope_bound": True, "factory_match": True}
 
 
-@agent_tool(level="commit", entity_type="tag",
+@agent_tool(level="commit", entity_type="tag", action="tag",
             required_permission={"module": None, "min_level": None},
             description="Tag something (commit demo)")
 async def commit_tag(ctx: AgentContext, tag: str = "") -> dict:
@@ -800,12 +819,19 @@ Expected: FAIL `ModuleNotFoundError: app.services.agent.gateway`.
 
 `backend/app/services/agent/gateway.py`:
 ```python
-"""Three-state permission gateway: readonly / draft / commit."""
+"""Three-state permission gateway: readonly / draft / commit.
+
+Whitelist matching uses the full 5-tuple: tool_name + action + entity_type +
+max_scope (ctx.factory_id must fall in scope) + required_permission (ctx must
+satisfy the whitelist's own permission requirement, in addition to the tool's).
+Rejected calls (unknown tool / permission denied) still write a rejected
+AgentToolCall + audit summary — no silent rejections.
+"""
 from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
@@ -836,23 +862,50 @@ async def _check_permission(ctx: AgentContext, required: dict) -> bool:
     return level >= min_level
 
 
-async def _whitelist_hit(db: AsyncSession, tool_name: str, entity_type: str) -> AgentCommitWhitelist | None:
-    result = await db.execute(
+def _in_max_scope(max_scope: dict, factory_id: uuid.UUID) -> bool:
+    """max_scope = {"factory_ids": [...], "product_line_codes": [...]}; empty = no restriction."""
+    fids = (max_scope or {}).get("factory_ids")
+    if not fids:
+        return True  # no factory restriction -> whole tenant
+    return str(factory_id) in [str(x) for x in fids]
+
+
+async def _whitelist_match(ctx: AgentContext, spec) -> AgentCommitWhitelist | None:
+    """Full 5-tuple match: tool_name + action + entity_type + max_scope + required_permission."""
+    rows = (await ctx.db.execute(
         select(AgentCommitWhitelist)
-        .where(AgentCommitWhitelist.tool_name == tool_name)
-        .where(AgentCommitWhitelist.entity_type == entity_type)
+        .where(AgentCommitWhitelist.tool_name == spec.name)
+        .where(AgentCommitWhitelist.action == spec.action)
+        .where(AgentCommitWhitelist.entity_type == spec.entity_type)
         .where(AgentCommitWhitelist.enabled.is_(True))
-    )
-    return result.scalar_one_or_none()
+    )).scalars().all()
+    for wl in rows:
+        if not _in_max_scope(wl.max_scope, ctx.factory_id):
+            continue
+        if not await _check_permission(ctx, wl.required_permission):
+            continue
+        return wl
+    return None
+
+
+async def _record_rejected(ctx: AgentContext, tool_name: str, params: dict, level: str, reason: str) -> GatewayResult:
+    tool_call_id = uuid.uuid4()
+    correlation_id = uuid.uuid4()
+    log = await harness.write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "rejected", correlation_id)
+    tc = AgentToolCall(tool_call_id=tool_call_id, session_id=ctx.session_id, tool_name=tool_name,
+                       level=level, params=params, status="rejected", factory_id=ctx.factory_id,
+                       correlation_id=correlation_id, audit_log_id=log.log_id, result={"error": reason})
+    ctx.db.add(tc); await ctx.db.flush()
+    return GatewayResult(status="rejected", reason=reason, tool_call_id=tool_call_id, audit_log_id=log.log_id)
 
 
 async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResult:
     spec = TOOL_REGISTRY.get(tool_name)
     if spec is None:
-        return GatewayResult(status="rejected", reason=f"unknown tool {tool_name}")
+        return await _record_rejected(ctx, tool_name, params, "unknown", f"unknown tool {tool_name}")
 
     if not await _check_permission(ctx, spec.required_permission):
-        return GatewayResult(status="rejected", reason="permission denied")
+        return await _record_rejected(ctx, tool_name, params, spec.level, "permission denied")
 
     t0 = time.perf_counter()
     tool_call_id = uuid.uuid4()
@@ -868,11 +921,10 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
                            correlation_id=correlation_id, duration_ms=dur, audit_log_id=log.log_id)
         ctx.db.add(tc); await ctx.db.flush()
         return GatewayResult(status="executed", result=result, tool_call_id=tool_call_id,
-                             audit_log_id=log.log_id, reason=None)
+                             audit_log_id=log.log_id)
 
     if spec.level == "draft":
-        # produce a draft action, do NOT modify business tables
-        result = await spec.func(ctx, **params)  # demo draft returns payload text
+        result = await spec.func(ctx, **params)
         action_id = uuid.uuid4()
         action = AgentAction(action_id=action_id, session_id=ctx.session_id, factory_id=ctx.factory_id,
                              tool_name=tool_name, level="draft", payload=result, status="pending")
@@ -881,9 +933,8 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
         return GatewayResult(status="pending", result=result, action_id=action_id, audit_log_id=log.log_id)
 
     # commit: three-state
-    wl = await _whitelist_hit(ctx.db, tool_name, spec.entity_type)
+    wl = await _whitelist_match(ctx, spec)
     if wl is None:
-        # legal but not whitelisted -> pending for HITL
         action_id = uuid.uuid4()
         action = AgentAction(action_id=action_id, session_id=ctx.session_id, factory_id=ctx.factory_id,
                              tool_name=tool_name, level="commit", payload=params, status="pending")
@@ -891,7 +942,7 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
         log = await harness.write_audit(ctx.db, ctx, "agent_actions", action_id, "commit_pending", correlation_id)
         return GatewayResult(status="pending", action_id=action_id, audit_log_id=log.log_id, reason="awaiting approval")
 
-    # whitelisted -> execute + full audit (reason/pre/post via action record)
+    # whitelisted -> execute + full audit
     result = await spec.func(ctx, **params)
     dur = int((time.perf_counter() - t0) * 1000)
     action_id = uuid.uuid4()
@@ -907,6 +958,33 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
                        audit_log_id=log.log_id)
     ctx.db.add(tc); await ctx.db.flush()
     return GatewayResult(status="approved", result=result, action_id=action_id,
+                         audit_log_id=log.log_id, tool_call_id=tool_call_id)
+
+
+async def execute_approved_action(ctx: AgentContext, action: AgentAction) -> GatewayResult:
+    """Force-execute a previously-pending commit action after HITL approval.
+
+    Skips the whitelist/pending branch (approval IS the authorization) but still
+    enforces permission + writes tool_call + audit. Used by approval.approve/modify.
+    """
+    spec = TOOL_REGISTRY.get(action.tool_name)
+    if spec is None:
+        return await _record_rejected(ctx, action.tool_name, action.payload or {}, "commit", "unknown tool at exec time")
+    if not await _check_permission(ctx, spec.required_permission):
+        return await _record_rejected(ctx, action.tool_name, action.payload or {}, "commit", "permission denied")
+    t0 = time.perf_counter()
+    tool_call_id = uuid.uuid4()
+    correlation_id = uuid.uuid4()
+    result = await spec.func(ctx, **(action.payload or {}))
+    dur = int((time.perf_counter() - t0) * 1000)
+    log = await harness.write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "commit", correlation_id,
+                                    new_values=result)
+    tc = AgentToolCall(tool_call_id=tool_call_id, session_id=ctx.session_id, tool_name=action.tool_name,
+                       level="commit", params=action.payload, result=result, status="approved",
+                       factory_id=ctx.factory_id, correlation_id=correlation_id, duration_ms=dur,
+                       audit_log_id=log.log_id)
+    ctx.db.add(tc); await ctx.db.flush()
+    return GatewayResult(status="approved", result=result, action_id=action.action_id,
                          audit_log_id=log.log_id, tool_call_id=tool_call_id)
 ```
 
@@ -947,6 +1025,8 @@ from app.models.agent import AgentAction
 
 @pytest.mark.asyncio
 async def test_approve_pending_commit_executes_tool(db, admin_user, default_factory):
+    from sqlalchemy import select
+    from app.models.agent import AgentToolCall
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
     ctx = await harness.build_context(db, s, admin_user)
     res = await gateway.invoke(ctx, "commit_tag", {"tag": "x"})  # not whitelisted -> pending
@@ -955,6 +1035,11 @@ async def test_approve_pending_commit_executes_tool(db, admin_user, default_fact
     assert action.status == "approved"
     assert action.decision_source == "user"
     assert action.approver_id == admin_user.user_id
+    # the tool actually executed: post_values recorded + an approved AgentToolCall exists
+    assert action.post_values == {"tagged": "x"}
+    tcs = (await db.execute(select(AgentToolCall).where(AgentToolCall.session_id == s.session_id)
+                            .where(AgentToolCall.status == "approved"))).scalars().all()
+    assert any(tc.tool_name == "commit_tag" for tc in tcs)
 
 
 @pytest.mark.asyncio
@@ -1018,10 +1103,13 @@ async def approve(db: AsyncSession, action_id: uuid.UUID, user: User, reason: st
     a = await _get(db, action_id)
     if a.status != "pending":
         raise ValueError(f"action {action_id} not pending (status={a.status})")
-    # rebuild a minimal context to execute the commit tool under the same scope
     session = (await db.execute(select_from_session(a.session_id))).scalar_one()
     ctx = await harness.build_context(db, session, user)
-    res = await gateway.invoke(ctx, a.tool_name, a.payload or {})
+    # Force-execute the commit tool (approval IS the authorization): skips the
+    # whitelist/pending branch but still enforces permission + writes tool_call + audit.
+    res = await gateway.execute_approved_action(ctx, a)
+    if res.status == "rejected":
+        raise ValueError(f"approved action could not execute: {res.reason}")
     a.status = "approved"
     a.decision_source = "user"
     a.approver_id = user.user_id
@@ -1052,7 +1140,10 @@ async def modify(db: AsyncSession, action_id: uuid.UUID, user: User, new_payload
         raise ValueError(f"action {action_id} not pending")
     session = (await db.execute(select_from_session(a.session_id))).scalar_one()
     ctx = await harness.build_context(db, session, user)
-    res = await gateway.invoke(ctx, a.tool_name, new_payload)
+    a.payload = new_payload  # execute_approved_action reads action.payload
+    res = await gateway.execute_approved_action(ctx, a)
+    if res.status == "rejected":
+        raise ValueError(f"modified action could not execute: {res.reason}")
     a.status = "modified"
     a.decision_source = "user"
     a.approver_id = user.user_id
@@ -1502,7 +1593,7 @@ async def draft_note(ctx: AgentContext, text: str = "") -> dict:
     return {"draft": text or "（空草稿）"}
 
 
-@agent_tool(level="commit", entity_type="tag",
+@agent_tool(level="commit", entity_type="tag", action="tag",
             required_permission={"module": None, "min_level": None},
             description="给实体打标签（commit demo）")
 async def commit_tag(ctx: AgentContext, tag: str = "") -> dict:
@@ -1777,7 +1868,13 @@ class WhitelistOut(WhitelistIn):
     class Config: from_attributes = True
 ```
 
-`backend/app/api/agent/sessions.py`, `messages.py`, `actions.py`, `whitelist.py` — thin handlers using `get_current_user` + `get_db` (or `RequestScope`) deps, calling the service functions (`harness.create_session`, `harness.run_message`, `approval.list_pending/approve/reject/modify`, whitelist CRUD). Whitelist routes guarded by `require_admin`. Resolve `factory_id`/`tenant_schema` from the request (`get_current_user` → user's factory; `request.state.tenant` → schema, else `"public"`).
+`backend/app/api/agent/sessions.py`, `messages.py`, `actions.py`, `whitelist.py` — thin handlers using `get_current_user` + `get_request_scope` deps, calling the service functions (`harness.create_session`, `harness.run_message`, `approval.list_pending/approve/reject/modify`, whitelist CRUD). Whitelist routes guarded by `require_admin`.
+
+**Factory/tenant resolution (do NOT read `user.factory_id` directly — group admins may have None):**
+- `factory_id` = `scope.effective_factory_id` from `get_request_scope` (`RequestScope` resolves default/selected factory via `resolve_effective_factory_id`).
+- For routes that take a target `factory_id` (e.g. list pending actions for a factory), call `check_factory_access(factory_id, scope)` from `app.core.factory_scope` before use.
+- `tenant_schema` = `request.state.tenant.schema_name` if a tenant is set, else `"public"` (agent audit's own rule — see spec §4).
+- Pass `factory_id` + `tenant_schema` into `harness.create_session` / `build_context`.
 
 `backend/app/api/agent/__init__.py`:
 ```python
