@@ -94,6 +94,24 @@ async def get_ai_config(db: AsyncSession) -> AIConfigOut:
     return AIConfigOut(**values)
 
 
+async def get_raw_ai_config(db: AsyncSession) -> AIConfigOut:
+    """Like get_ai_config but returns the REAL api keys (backend-internal use only).
+
+    Never return this to the frontend. Used by provider_adapter to construct
+    openai/anthropic clients with the actual credential.
+    """
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(AI_CONFIG_KEYS)))
+    rows = {row.key: row.value for row in result.scalars().all()}
+    values: dict[str, Any] = {}
+    for key in AI_CONFIG_KEYS:
+        raw = rows.get(key)
+        coerced = _coerce(key, raw)
+        if coerced is None or coerced == "":
+            coerced = _env_default(key)
+        values[key] = coerced
+    return AIConfigOut(**values)  # NO masking here
+
+
 async def update_ai_config(
     db: AsyncSession,
     update: AIConfigUpdate,
@@ -213,8 +231,8 @@ async def _rebuild_providers(db: AsyncSession, app_state: Any) -> None:
             logger.warning("Error closing old embedding provider: %s", e)
 
     # Recreate.
-    from app.services.llm_provider import create_llm_provider
     from app.services.embedding_provider import create_embedding_provider
+    from app.services.llm_provider import create_llm_provider
 
     try:
         app_state.llm_provider = create_llm_provider(snapshot)
@@ -288,8 +306,8 @@ async def test_ai_config(
 
     Nothing is persisted. Returns per-provider ok/latency/error.
     """
-    from app.services.llm_provider import create_llm_provider
     from app.services.embedding_provider import create_embedding_provider
+    from app.services.llm_provider import create_llm_provider
 
     snapshot = await _build_effective_snapshot(db, update)
     timeout = int(getattr(snapshot, "LLM_TIMEOUT", 5) or 5)
@@ -317,7 +335,7 @@ async def test_ai_config(
                 latency_ms=int((time.perf_counter() - start) * 1000),
                 detail="LLM 调用成功",
             )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         llm_result = ProviderTestResult(ok=False, detail=f"请求超时（{timeout}秒）")
     except Exception as e:
         llm_result = ProviderTestResult(ok=False, detail=f"{type(e).__name__}: {e}")
@@ -346,7 +364,7 @@ async def test_ai_config(
                 latency_ms=int((time.perf_counter() - start) * 1000),
                 detail=f"向量维度 {dims}",
             )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         emb_result = ProviderTestResult(ok=False, detail=f"请求超时（{timeout}秒）")
     except Exception as e:
         emb_result = ProviderTestResult(ok=False, detail=f"{type(e).__name__}: {e}")
