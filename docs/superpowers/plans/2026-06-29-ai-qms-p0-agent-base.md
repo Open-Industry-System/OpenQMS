@@ -893,12 +893,24 @@ class GatewayResult:
 
 
 async def _check_permission(ctx: AgentContext, required: dict) -> bool:
-    module = required.get("module")
-    min_level = required.get("min_level")
-    if module is None or min_level is None:
+    """Check ctx.user satisfies `required`. Normalizes JSONB-form input
+    (e.g. {"module": "fmea", "min_level": 1} from DB) and Enum form alike,
+    so whitelist rows stored as JSON never break the lookup or raise TypeError."""
+    mod = (required or {}).get("module")
+    lvl = (required or {}).get("min_level")
+    if mod is None or lvl is None:
         return True  # demo tools with no permission requirement
-    level = ctx.permission_levels.get(module, PermissionLevel.NONE)
-    return level >= min_level
+    if not isinstance(mod, Module):
+        try:
+            mod = Module(mod)  # JSONB string -> Module enum
+        except ValueError:
+            return False  # unknown module string
+    try:
+        min_level = int(lvl)  # JSONB int or numeric string -> int
+    except (TypeError, ValueError):
+        return False
+    level = ctx.permission_levels.get(mod, PermissionLevel.NONE)
+    return int(level) >= min_level
 
 
 def _in_max_scope(max_scope: dict, ctx: AgentContext) -> tuple[bool, str | None]:
@@ -950,7 +962,9 @@ async def _whitelist_match(ctx: AgentContext, spec) -> AgentCommitWhitelist | No
             continue
         if not _required_permission_matches(wl.required_permission, spec.required_permission):
             continue
-        if not await _check_permission(ctx, wl.required_permission):
+        # equality already confirmed wl_req == spec_req; check the USER against the
+        # enum-typed spec.required_permission (avoids any JSONB-form lookup issue).
+        if not await _check_permission(ctx, spec.required_permission):
             continue
         return wl
     return None
@@ -1688,6 +1702,13 @@ async def draft_note(ctx: AgentContext, text: str = "") -> dict:
             description="给实体打标签（commit demo）")
 async def commit_tag(ctx: AgentContext, tag: str = "") -> dict:
     return {"tagged": tag}
+
+
+@agent_tool(level="commit", entity_type="fmea_tag", action="tag",
+            required_permission={"module": Module.FMEA, "min_level": PermissionLevel.EDIT},
+            description="给 FMEA 文档打标签（真实权限 commit demo）")
+async def commit_tag_fmea(ctx: AgentContext, tag: str = "") -> dict:
+    return {"tagged": tag}
 ```
 
 - [ ] **Step 4: Run tests**
@@ -2088,6 +2109,26 @@ async def test_acceptance_3_commit_three_states(db, admin_user, default_factory)
     assert r2.action_id is not None
     wl2 = (await db.execute(select(AgentAction).where(AgentAction.action_id == r2.action_id))).scalar_one()
     assert wl2.decision_source == "whitelist"
+
+
+@pytest.mark.asyncio
+async def test_acceptance_3b_whitelist_jsonb_matches_enum_spec(db, admin_user, default_factory):
+    """Positive: whitelist row stored as JSONB {"module": "fmea", "min_level": 3}
+    matches a tool spec declared with Module.FMEA / PermissionLevel.EDIT (enum),
+    and admin (FMEA ADMIN>=EDIT) is auto-approved — proves JSONB/Enum normalization."""
+    from app.models.agent import AgentCommitWhitelist, AgentAction
+    s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
+    ctx = await harness.build_context(db, s, admin_user)
+    wl = AgentCommitWhitelist(id=uuid.uuid4(), tool_name="commit_tag_fmea", action="tag",
+                              entity_type="fmea_tag", max_scope={},
+                              required_permission={"module": "fmea", "min_level": 3},  # JSONB form
+                              enabled=True)
+    db.add(wl); await db.flush()
+    res = await gateway.invoke(ctx, "commit_tag_fmea", {"tag": "z"})
+    assert res.status == "approved"
+    assert res.action_id is not None
+    a = (await db.execute(select(AgentAction).where(AgentAction.action_id == res.action_id))).scalar_one()
+    assert a.decision_source == "whitelist"
 
 
 @pytest.mark.asyncio
