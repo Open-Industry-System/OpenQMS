@@ -53,7 +53,9 @@
 
 - **`audit_logs`（已存在）**：租户级（`TenantBase`，租户 schema）。查询走 `get_db()`（租户）。
 - **`login_audit_logs`（新增）**：**租户级**（`TenantBase`），与 `users` 同 schema；在 `auth.login()` 的租户 `db` session 内写入；查询走 `get_db()`（租户）。
-- **`system_logs`（新增）**：**租户级**（`TenantBase`，建在各租户 schema）。handler 在 `emit()` 时通过 `current_tenant_schema` ContextVar 读取当前租户 schema 并随记录入队；drain task 按记录携带的 schema 设置 `search_path` 后 insert。**无租户上下文的日志（启动阶段、平台级后台任务）一律丢弃**——这部分日志仍走 stdout/容器日志，不入库。租户 admin 只能看到本租户的系统日志，无跨租户泄漏。
+- **`system_logs`（新增）**：**租户级**（`TenantBase`，建在各租户 schema）。handler 在 `emit()` 时通过 `current_tenant_schema` ContextVar 读取当前租户 schema 并随记录入队；drain task 按记录携带的 schema 设置 `search_path` 后 insert。租户 admin 只能看到本租户的系统日志，无跨租户泄漏。
+
+  **单租户模式（`TENANT_MODE == "single"`，默认部署）行为修正（2026-06-29）：** 单租户模式下 `TenantContextMiddleware` 对所有请求设 `request.state.tenant = None`，`get_db()` 因此把 `current_tenant_schema` 设为 None。若直接"schema 为 None 即丢弃"，默认部署下 handler 永不写入、系统日志页空置——这是 bug。修正：`emit()` 解析**有效 schema** —— 单租户模式下 `current_tenant_schema` 为 None 时映射为 `"public"`（单租户模式下 `system_logs` 建在 public schema，`/api/admin/logs/system` 经 `get_db()`（不设 search_path，停在 public）查询）；多租户模式下 `current_tenant_schema` 为 None 才丢弃（启动阶段/平台级后台任务日志，仍走 stdout）。drain 写 `public` 用安全的常量 SQL `SET search_path TO "public"`（`public` 是固定字面量，无注入风险，且 `set_search_path_sql` 的正则只接受 `tenant_*` 故不能用于 public）；写租户 schema 仍用 `set_search_path_sql(schema)`。补一条测试：单租户模式 + `current_tenant_schema` 为 None 的 WARNING 经 drain 落到 `public.system_logs`。
 
 ### 新增表（Alembic 手写迁移）
 
@@ -146,7 +148,7 @@
 - `log_service` 三个查询的分页与筛选（按 table_name / success / level 等）；`list_system_logs` 在租户 session 下可见本租户 handler 写入的行
 - `register()` 设置 `legacy_role`：新建用户落库成功（不再 NotNullViolation）
 - `auth.login` 成功路径在租户 schema 写入 `login_audit_logs(success=True)`；失败路径写入 `success=False, failure_reason` 且仍返回 401（登录日志行已 commit 未被 rollback）
-- `DBLogHandler`：在有租户上下文时发 WARNING → 经后台 drain task 按记录携带 schema 落到该租户 `system_logs` 一行；无租户上下文（`current_tenant_schema` 为 None）的记录被丢弃不入库；写失败静默丢弃、不抛、不递归
+- `DBLogHandler`：在有租户上下文时发 WARNING → 经后台 drain task 按记录携带 schema 落到该租户 `system_logs` 一行；多租户模式下无租户上下文（`current_tenant_schema` 为 None）的记录被丢弃不入库；**单租户模式下** `current_tenant_schema` 为 None 映射为 `public`，WARNING 经 drain 落到 `public.system_logs`；写失败静默丢弃、不抛、不递归
 - `DBLogHandler` 跨线程 ContextVar：event loop 线程内 `emit` 可读 tenant schema 并入库；`asyncio.to_thread()` 调起的线程可读；`loop.run_in_executor`（未显式 `copy_context`）和裸线程读不到 → 记录被丢弃（验证不入库且不抛）
 - `/api/admin/logs/audit|login|system`：admin 200（仅本租户数据）；非 admin 403
 
