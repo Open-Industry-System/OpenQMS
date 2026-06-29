@@ -802,6 +802,26 @@ async def test_whitelist_product_line_scope_enforced_when_ctx_none(db, admin_use
     db.add(wl); await db.flush()
     res = await gateway.invoke(ctx, "commit_tag", {"tag": "x"})
     assert res.status == "pending"  # product_line required but ctx has none -> no whitelist match
+
+
+@pytest.mark.asyncio
+async def test_whitelist_required_permission_mismatch_blocks_auto_approve(db, admin_user, default_factory):
+    """Same tool/action/entity/scope but whitelist required_permission != tool spec's
+    required_permission -> no match -> pending. Prevents a stale row auto-approving
+    after the tool's declared permission changes."""
+    import uuid as _uuid
+    from app.core.permissions import Module, PermissionLevel
+    from app.models.agent import AgentCommitWhitelist
+    s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
+    ctx = await harness.build_context(db, s, admin_user)
+    # commit_tag spec requires {module: None, min_level: None}; whitelist row declares FMEA/ADMIN -> mismatch
+    wl = AgentCommitWhitelist(id=_uuid.uuid4(), tool_name="commit_tag", action="tag",
+                              entity_type="tag", max_scope={},
+                              required_permission={"module": Module.FMEA, "min_level": PermissionLevel.ADMIN},
+                              enabled=True)
+    db.add(wl); await db.flush()
+    res = await gateway.invoke(ctx, "commit_tag", {"tag": "x"})
+    assert res.status == "pending"  # required_permission mismatch -> not whitelisted
 ```
 
 > `demo` tools are created in Task 11. To keep Task 5 independently testable, create a minimal `backend/app/services/agent/tools/__init__.py` and `backend/app/services/agent/tools/demo.py` now with just `echo_factory` and `commit_tag` stubs (registered via `@agent_tool`). The full `list_fmea_documents`/`draft_note` are added in Task 11.
@@ -898,6 +918,23 @@ def _in_max_scope(max_scope: dict, ctx: AgentContext) -> tuple[bool, str | None]
     return True, None
 
 
+def _norm_perm(req: dict) -> tuple:
+    """Normalize a required_permission dict to a comparable tuple.
+    Tolerates Module/PermissionLevel enums, their values, or None."""
+    mod = (req or {}).get("module")
+    lvl = (req or {}).get("min_level")
+    mod_v = mod.value if hasattr(mod, "value") else (str(mod) if mod is not None else None)
+    lvl_v = int(lvl) if lvl is not None else 0
+    return (mod_v, lvl_v)
+
+
+def _required_permission_matches(wl_req: dict, spec_req: dict) -> bool:
+    """5-tuple equality: the whitelist row must declare the SAME permission
+    requirement as the tool spec — otherwise a stale whitelist row could keep
+    auto-approving after the tool's declared permission changes."""
+    return _norm_perm(wl_req) == _norm_perm(spec_req)
+
+
 async def _whitelist_match(ctx: AgentContext, spec) -> AgentCommitWhitelist | None:
     """Full 5-tuple match: tool_name + action + entity_type + max_scope + required_permission."""
     rows = (await ctx.db.execute(
@@ -910,6 +947,8 @@ async def _whitelist_match(ctx: AgentContext, spec) -> AgentCommitWhitelist | No
     for wl in rows:
         ok, _reason = _in_max_scope(wl.max_scope, ctx)
         if not ok:
+            continue
+        if not _required_permission_matches(wl.required_permission, spec.required_permission):
             continue
         if not await _check_permission(ctx, wl.required_permission):
             continue
