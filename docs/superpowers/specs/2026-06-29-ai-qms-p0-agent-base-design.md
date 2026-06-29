@@ -8,7 +8,7 @@
 
 ## 1. 范围与目标
 
-建立 Agent 基座基础设施，**无业务功能**。P0 交付：6 张 `agent_*` 表 + `agent_commit_whitelist` + `audit_logs` 扩字段、harness、tool 注册表 + 三态权限网关、HITL 审批、白名单、guardrails、provider_adapter、Pydantic AI 接入、4 个 demo tool。用 4 条验收用例证明链路正确。
+建立 Agent 基座基础设施，**无业务功能**。P0 交付：6 张 `agent_*` 表（`agent_sessions`/`agent_messages`/`agent_tool_calls`/`agent_actions`/`agent_memory`/`agent_commit_whitelist`）+ `audit_logs` 扩字段、harness、tool 注册表 + 三态权限网关、HITL 审批、白名单、guardrails、provider_adapter、Pydantic AI 接入、4 个 demo tool。用 4 条验收用例证明链路正确。
 
 **不在 P0**：真实业务 service 包装（除 `list_fmea_documents`）、DFMEA/PFMEA 推荐迁移、Copilot UI、任务队列、客诉→8D、模型级 guardrails（见第 11 节）。
 
@@ -52,9 +52,9 @@ migrations/versions/*_agent_base.py  # alembic revision, hash 生成时确定
 `tool_call_id`(UUID PK) · `session_id`(FK) · `tool_name`(String) · `level`(enum: readonly/draft/commit) · `params`(JSONB) · `result`(JSONB) · `status`(enum: executed/rejected/pending/approved) · `factory_id`(FK, NOT NULL) · `correlation_id`(UUID, 指向 agent_actions 或自引) · `duration_ms`(int) · `audit_log_id`(FK audit_logs) · `created_at`
 
 ### `agent_actions`
-`action_id`(UUID PK) · `session_id`(FK) · `factory_id`(FK factories, NOT NULL) · `tool_name`(String) · `level`(enum) · `payload`(JSONB) · `status`(enum: pending/approved/rejected/modified) · `approver_id`(FK users, nullable) · `decision_source`(enum: user/whitelist/system, NOT NULL) · `reason`(Text) · `pre_values`(JSONB) · `post_values`(JSONB) · `related_entity_type`(String) · `related_entity_id`(UUID) · `created_at` · `decided_at`(DateTime, nullable)
+`action_id`(UUID PK) · `session_id`(FK) · `factory_id`(FK factories, NOT NULL) · `tool_name`(String) · `level`(enum) · `payload`(JSONB) · `status`(enum: pending/approved/rejected/modified) · `approver_id`(FK users, nullable) · `decision_source`(enum: user/whitelist/system, **nullable**) · `reason`(Text) · `pre_values`(JSONB) · `post_values`(JSONB) · `related_entity_type`(String) · `related_entity_id`(UUID) · `created_at` · `decided_at`(DateTime, nullable)
 
-`factory_id` NOT NULL 使待办审批队列与工厂隔离查询不依赖 join session，审计约束更强。`approver_id` 仅在 `decision_source=user` 时填用户 ID；白名单自主 commit 用 `approver_id=NULL` + `decision_source='whitelist'`（agent 不是用户，不写入 users FK）。
+`factory_id` NOT NULL 使待办审批队列与工厂隔离查询不依赖 join session，审计约束更强。`decision_source` 在 `pending` 阶段为 NULL（尚未决策），决策时填入：`user`（人审批，`approver_id` 填用户 ID）/`whitelist`（白名单自主 commit，`approver_id=NULL`）/`system`。agent 不是用户，不写入 users FK。
 
 ### `agent_memory`
 `memory_id`(UUID PK) · `user_id`(FK) · `factory_id`(FK, NOT NULL) · `kind`(enum: preference/fact) · `content`(Text) · `source_session_id`(FK) · `embedding_status`(enum: queued/ready/failed, default queued) · `expires_at`(DateTime, nullable) · `created_at`。
