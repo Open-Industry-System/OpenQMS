@@ -125,7 +125,7 @@
 
 1. **readonly 可执行**：agent 调 readonly tool 成功，`agent_tool_calls` + `audit_logs`（带 `factory_id`/`correlation_id`）留痕；跨 factory 隔离生效（A 厂 agent 查不到 B 厂数据）。
 2. **draft 不落库**：agent 调 draft tool 只在 `agent_actions` 产草稿，**业务表零改动**；草稿可被审批。
-3. **commit 受控（三态）**：未授权 / 越权 / 参数不合法的 commit 被网关**拒绝**；合法但未命中白名单的 commit 生成 `agent_action` **待 HITL 审批**；命中白名单的 commit **可自主执行并完整审计**（理由/前后值/`agent_action_id`/`correlation_id`）。离场 commit 必须经审批后才执行，拒绝/修改不执行。
+3. **commit 受控（三态）**：未授权 / 越权 / 参数不合法的 commit 被网关**拒绝**；合法但未命中白名单的 commit 生成 `agent_action` **待 HITL 审批**；命中白名单的 commit **可自主执行并完整审计**（理由/前后值/`agent_action_id`/`correlation_id`）。离场的非白名单 commit 必须经审批后才执行，拒绝/修改不执行。
 4. **guardrails 生效**：恶意用户输入与恶意 tool observation 不得覆盖 system prompt、不得诱导越权 tool 调用、不得把未授权数据回灌进上下文；被拦截时按发生阶段在 `agent_messages` / `agent_tool_calls` / `audit_logs` 中留拒绝审计。
 
 ## 7. 关键设计决策（假设，可在期级 spec 中再定）
