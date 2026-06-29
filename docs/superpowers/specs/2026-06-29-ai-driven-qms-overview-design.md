@@ -108,7 +108,7 @@
 - **`agent_*` 表承载 agent 行为明细**（消息、tool 调用、审批），均带 `factory_id` + tenant，是 agent 审计的 source of truth。
 - **`audit_logs` 扩字段**：新增 `factory_id`（可空，向后兼容历史行）、`tenant_schema`、`correlation_id`（指向 `agent_tool_calls`/`agent_actions` 的 ID），使所有审计（agent 与非 agent）可按工厂与 agent 会话追溯。
 - agent 的每次 LLM/tool/HITL 都在 `agent_tool_calls` 或 `agent_actions` 留明细，并在 `audit_logs` 写一条带 `correlation_id` 的摘要引用。
-- 既有随机 `record_id` 写审计的调用点在 P0 一并校正为可追溯主键。
+- 既有随机 `record_id` 写审计的调用点的兼容修复作为独立后续任务，不进 P0 基座范围（避免 P0 跨模块扩大）；P0 只保证新增 agent 审计使用可追溯主键。
 
 ## 6. 分期路线图
 
