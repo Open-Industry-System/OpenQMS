@@ -25,11 +25,15 @@ async def test_approve_pending_commit_executes_tool(db, admin_user, default_fact
 
 @pytest.mark.asyncio
 async def test_reject_does_not_execute(db, admin_user, default_factory):
+    from app.models.agent import AgentToolCall
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
     ctx = await harness.build_context(db, s, admin_user)
     res = await gateway.invoke(ctx, "commit_tag", {"tag": "x"})
     action = await approval.reject(db, res.action_id, admin_user, reason="no")
     assert action.status == "rejected"
+    tcs = (await db.execute(select(AgentToolCall).where(AgentToolCall.session_id == s.session_id))).scalars().all()
+    assert not any(tc.tool_name == "commit_tag" and tc.status == "approved" for tc in tcs)
+    assert action.post_values is None
 
 
 @pytest.mark.asyncio

@@ -1,96 +1,60 @@
-# Task 6 Report: Frontend Log Management Page
+# Task 6 Report: approval.py — agent_actions state machine
 
-## Implemented
+## Summary
+Implemented `backend/app/services/agent/approval.py` with `list_pending`, `approve`, `reject`, and `modify` operations per the task brief. Added corresponding tests in `backend/tests/services/agent/test_approval.py`. All agent tests pass.
 
-Added the admin log management page with three tabs (audit / login / system logs) under `/admin/logs`:
+## TDD Evidence
 
-1. **Types** — appended `AuditLogItem`, `LoginLogItem`, `SystemLogItem` to `frontend/src/types/index.ts`.
-2. **API client** — created `frontend/src/api/logs.ts` with `listAuditLogs`, `listLoginLogs`, `listSystemLogs` calling `GET /api/admin/logs/{audit|login|system}`.
-3. **i18n** — created `frontend/src/locales/zh-CN/logs.json` and `en-US/logs.json`; added `"logs": "日志管理"` / `"logs": "Log Management"` to both `layout.json` `menu` blocks.
-4. **Page** — created `frontend/src/pages/admin/LogManagementPage.tsx` with `AuditTab`, `LoginTab`, `SystemTab`. Each tab has a `useEffect` first-load, server-side pagination via `onChange`, filter forms, and expand rows for audit (old/new/changed JSON) and system (traceback) logs.
-5. **Test** — created `frontend/src/pages/admin/LogManagementPage.test.tsx`. The brief's verbatim mock pattern hit Vitest hoisting (`Cannot access 'listAuditLogs' before initialization`), so I used `vi.hoisted()` for the mock functions while preserving the test assertions.
-6. **Route + menu** — added lazy import and `/admin/logs` route in `App.tsx`; added `FileTextOutlined` menu item under `grp:admin` in `AppLayout.tsx` (no duplicate `MENU_KEYS`/`MENU_KEY_TO_OPEN_KEYS` edits — Task 5 already added them).
+### Step 1: Failing test
+Created `backend/tests/services/agent/test_approval.py` exactly as specified in the brief.
 
-## Verification
-
-### LogManagementPage test
-
+### Step 2: Verify fail
 ```
- RUN  v4.1.7
- Test Files  1 passed (1)
-      Tests  2 passed (2)
-   Duration  3.44s
+ImportError: cannot import name 'approval' from 'app.services.agent'
 ```
+Confirmed `approval.py` was missing.
 
-### Type check + all admin page tests
+### Step 3: Implementation
+Created `backend/app/services/agent/approval.py`:
+- `list_pending(db, factory_id)` — factory-isolated, ordered by `created_at`.
+- `approve(db, action_id, user, reason)` — asserts pending, builds context, calls `gateway.execute_approved_action`, sets approved state + `post_values`.
+- `reject(db, action_id, user, reason)` — asserts pending, sets rejected state, **awaits** `_ctx_from_action`, writes audit.
+- `modify(db, action_id, user, new_payload, reason)` — asserts pending, updates payload, executes, sets modified state + `post_values`.
+- Helpers: `_get`, `select_from_session`, `_ctx_from_action`.
 
+### Step 4: Test results
 ```
-$ npx tsc --noEmit && npx vitest run src/pages/admin/
- RUN  v4.1.7
- Test Files  3 passed (3)
-      Tests  5 passed (5)
-   Duration  5.35s
+tests/services/agent/test_approval.py::test_approve_pending_commit_executes_tool PASSED
+tests/services/agent/test_approval.py::test_reject_does_not_execute PASSED
+tests/services/agent/test_approval.py::test_list_pending_isolated_by_factory PASSED
 ```
 
-`npx tsc --noEmit` completed with no errors.
-
-## Files changed
-
-- `frontend/src/types/index.ts`
-- `frontend/src/api/logs.ts` (new)
-- `frontend/src/locales/zh-CN/logs.json` (new)
-- `frontend/src/locales/en-US/logs.json` (new)
-- `frontend/src/locales/zh-CN/layout.json`
-- `frontend/src/locales/en-US/layout.json`
-- `frontend/src/pages/admin/LogManagementPage.tsx` (new)
-- `frontend/src/pages/admin/LogManagementPage.test.tsx` (new)
-- `frontend/src/App.tsx`
-- `frontend/src/components/layout/AppLayout.tsx`
-
-## Commit
-
+Full agent suite:
 ```
-eccde58 feat(admin): log management page (audit/login/system tabs)
+14 passed in 0.60s
 ```
 
-## Self-review notes
-
-- Three tabs each include `useEffect(() => { load(1, 20, form.getFieldsValue()); }, [load, form])` for first-load. ✓
-- `listAuditLogs/listLoginLogs/listSystemLogs` call the correct endpoints. ✓
-- Server-side pagination re-fetches via `onChange`. ✓
-- Audit tab expand renders old/new/changed JSON. ✓
-- Login tab success filter maps `"all"` / `null` to `undefined` and `"true"`/`"false"` to boolean. ✓
-- System tab level tags use `orange`/`red`/`magenta` for WARNING/ERROR/CRITICAL. ✓
-- Route `/admin/logs` uses `requireAdmin`. ✓
-- Menu item uses `FileTextOutlined` with `adminOnly: true`. ✓
-- `logs.json` uses `result` (not duplicate `success`) for the result-filter label. ✓
-- No unused `Typography`/`Text` imports. ✓
-- One divergence from brief: the test uses `vi.hoisted()` to avoid the Vitest mock-hoisting error that the verbatim snippet produced.
-
-## Fixes
-
-Reviewer findings addressed:
-
-1. **i18n search buttons** — added `filters.search` key (`"查询"` / `"Search"`) and replaced the three hard-coded `<Button>查询</Button>` labels with `{t("filters.search")}`.
-2. **i18n error messages** — added `error.load` key (`"加载失败"` / `"Failed to load"`) and replaced hard-coded `message.error("error")` in all three tab loaders with `message.error(t("error.load"))`.
-3. **Login tab coverage** — added `switching to login tab loads login logs` test mirroring the system tab test.
-4. **Lazy system tab assertion** — strengthened the system tab test to first assert `listSystemLogs` was NOT called, then click and assert it was called.
-
-### Verification after fixes
-
+### Step 5: Commit
 ```
-$ cd /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/admin-user-log-mgmt/frontend && npx vitest run src/pages/admin/LogManagementPage.test.tsx
- RUN  v4.1.7
- Test Files  1 passed (1)
-      Tests  3 passed (3)
-   Duration  2.56s
-
-$ npx tsc --noEmit
-(no output - clean)
+[worktree-ai-qms-overview-spec b1c0c6a] feat(agent): agent_actions state machine (approve/reject/modify)
+ 2 files changed, 140 insertions(+)
+ create mode 100644 backend/app/services/agent/approval.py
+ create mode 100644 backend/tests/services/agent/test_approval.py
 ```
 
-### Fix commit
+## Files Changed
+- `backend/app/services/agent/approval.py` (new)
+- `backend/tests/services/agent/test_approval.py` (new)
 
-```
-c9f16c2 fix(frontend): Task 6 review fixes - i18n search/error keys, login tab test, lazy system tab assertion
-```
+## Self-Review Findings
+- Implementation matches the brief verbatim; no deviations.
+- `reject` correctly awaits the async `_ctx_from_action` helper.
+- `approve`/`modify` raise `ValueError` when `execute_approved_action` returns a rejected result.
+- Factory isolation in `list_pending` is enforced by `factory_id` filter.
+- `ruff check` passes on both new files.
+
+## Concerns
+None. The brief's `GatewayResult` semantics (`status == "rejected"`) align with the existing gateway implementation, and the empty `app.services.agent.__init__.py` correctly allows submodule import once `approval.py` exists.
+
+## Post-Review Fixes
+Fix: reject test + dedupe

@@ -32,8 +32,7 @@ async def approve(db: AsyncSession, action_id: uuid.UUID, user: User, reason: st
     a = await _get(db, action_id)
     if a.status != "pending":
         raise ValueError(f"action {action_id} not pending (status={a.status})")
-    session = (await db.execute(select_from_session(a.session_id))).scalar_one()
-    ctx = await harness.build_context(db, session, user)
+    ctx = await _ctx_from_action(db, a, user)
     # Force-execute the commit tool (approval IS the authorization): skips the
     # whitelist/pending branch but still enforces permission + writes tool_call + audit.
     res = await gateway.execute_approved_action(ctx, a)
@@ -68,8 +67,7 @@ async def modify(db: AsyncSession, action_id: uuid.UUID, user: User, new_payload
     a = await _get(db, action_id)
     if a.status != "pending":
         raise ValueError(f"action {action_id} not pending")
-    session = (await db.execute(select_from_session(a.session_id))).scalar_one()
-    ctx = await harness.build_context(db, session, user)
+    ctx = await _ctx_from_action(db, a, user)
     a.payload = new_payload  # execute_approved_action reads action.payload
     res = await gateway.execute_approved_action(ctx, a)
     if res.status == "rejected":
@@ -78,7 +76,6 @@ async def modify(db: AsyncSession, action_id: uuid.UUID, user: User, new_payload
     a.decision_source = "user"
     a.approver_id = user.user_id
     a.reason = reason
-    a.payload = new_payload
     a.post_values = res.result
     a.decided_at = datetime.now(UTC)
     await db.flush()
