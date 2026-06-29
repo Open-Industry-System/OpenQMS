@@ -14,7 +14,7 @@
 
 - UI is Chinese (zh_CN); comments may be mixed Chinese/English. New user-facing strings (if any in P0 API errors) in both `frontend/src/locales/en-US` and `zh-CN` — but P0 has **no frontend**, so this only applies to any i18n keys referenced by backend error messages (none expected in P0).
 - PKs are UUID v4 generated in Python (`default=uuid.uuid4`).
-- `factory_id` NOT NULL on all agent behavior/memory tables; `agent_commit_whitelist` is a **tenant** table (`Base`/`TenantBase`, lives in tenant schema alongside `users` so its `created_by` FK to `users.user_id` is valid; no `factory_id`, uses `max_scope` JSONB to narrow to factory_ids/product_line_codes).
+- `factory_id` NOT NULL on all agent behavior/memory tables; `agent_commit_whitelist` is a **tenant** table (`Base`/`TenantBase`, lives in tenant schema alongside `users` so its `created_by` FK to `users.user_id` is valid; no `factory_id`, uses `max_scope` JSONB `{"factory_ids": [...], "product_line_codes": [...]}` to narrow scope). **Both dimensions enforced** by `_in_max_scope` — empty list = no restriction on that dimension; P0 `AgentContext.product_line_code` is usually `None`, so any whitelist row requiring `product_line_codes` will not match (falls to pending) until a future phase populates `product_line_code`.
 - Tenant business models extend `Base` (= `TenantBase`); platform/global models extend `PlatformBase` (both from `app.database`).
 - Every CRUD/service operation manually writes an `AuditLog` (existing convention). Agent audit also writes `agent_tool_calls`/`agent_messages`/`agent_actions` with `correlation_id` linking to `audit_logs`.
 - Permission model: `Module` (StrEnum) + `PermissionLevel` (IntEnum: NONE/VIEW/CREATE/EDIT/APPROVE/ADMIN) + `get_user_permission(user, module, db)` from `app.core.permissions`. **Never invent string permissions like `"fmea:read"`.**
@@ -456,7 +456,7 @@ def downgrade() -> None:
     op.drop_table("agent_messages")
     op.drop_table("agent_sessions")
 ```
-> Replace each `...` with the full `op.create_table` matching the model from Task 2 (copy every column). Do not leave any table incomplete — the implementer must fill all 5 create_table calls with all columns.
+> Replace each `...` with the full `op.create_table` matching the model from Task 2 (copy every column). Do not leave any table incomplete — the implementer must fill all **6** create_table calls (`agent_sessions`, `agent_messages`, `agent_tool_calls`, `agent_actions`, `agent_memory`, `agent_commit_whitelist`) with all columns.
 
 Set `down_revision` to the current tenant head from Step 1. Add `from alembic import op` and `import sqlalchemy as sa` and `from sqlalchemy.dialects import postgresql`.
 
@@ -568,6 +568,7 @@ class AgentContext:
     factory_id: uuid.UUID          # from RequestScope, not LLM
     tenant_schema: str
     permission_levels: dict[Module, PermissionLevel] = field(default_factory=dict)
+    product_line_code: str | None = None  # resolved from request query (P0: usually None)
     session: AgentSession | None = None
 
 
@@ -784,6 +785,23 @@ async def test_whitelist_max_scope_excludes_other_factory(db, admin_user, defaul
     res = await gateway.invoke(ctx, "commit_tag", {"tag": "x"})
     # scope mismatch -> not whitelisted -> pending (NOT auto-approved)
     assert res.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_whitelist_product_line_scope_enforced_when_ctx_none(db, admin_user, default_factory):
+    """max_scope.product_line_codes non-empty but ctx has no product_line_code -> no match -> pending.
+    Proves product_line scope is enforced (not silently ignored)."""
+    import uuid as _uuid
+    from app.models.agent import AgentCommitWhitelist
+    s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
+    ctx = await harness.build_context(db, s, admin_user)
+    assert ctx.product_line_code is None  # P0: no product line in scope
+    wl = AgentCommitWhitelist(id=_uuid.uuid4(), tool_name="commit_tag", action="tag",
+                              entity_type="tag", max_scope={"product_line_codes": ["DC-DC-100"]},
+                              required_permission={"module": None, "min_level": None}, enabled=True)
+    db.add(wl); await db.flush()
+    res = await gateway.invoke(ctx, "commit_tag", {"tag": "x"})
+    assert res.status == "pending"  # product_line required but ctx has none -> no whitelist match
 ```
 
 > `demo` tools are created in Task 11. To keep Task 5 independently testable, create a minimal `backend/app/services/agent/tools/__init__.py` and `backend/app/services/agent/tools/demo.py` now with just `echo_factory` and `commit_tag` stubs (registered via `@agent_tool`). The full `list_fmea_documents`/`draft_note` are added in Task 11.
@@ -863,12 +881,21 @@ async def _check_permission(ctx: AgentContext, required: dict) -> bool:
     return level >= min_level
 
 
-def _in_max_scope(max_scope: dict, factory_id: uuid.UUID) -> bool:
-    """max_scope = {"factory_ids": [...], "product_line_codes": [...]}; empty = no restriction."""
-    fids = (max_scope or {}).get("factory_ids")
-    if not fids:
-        return True  # no factory restriction -> whole tenant
-    return str(factory_id) in [str(x) for x in fids]
+def _in_max_scope(max_scope: dict, ctx: AgentContext) -> tuple[bool, str | None]:
+    """Check ctx against max_scope = {"factory_ids": [...], "product_line_codes": [...]}.
+    Empty/missing list = no restriction on that dimension. Both dimensions enforced
+    (no silent ignore). Returns (ok, reason)."""
+    ms = max_scope or {}
+    fids = ms.get("factory_ids")
+    if fids and str(ctx.factory_id) not in [str(x) for x in fids]:
+        return False, "factory_id not in max_scope.factory_ids"
+    plcs = ms.get("product_line_codes")
+    if plcs:
+        if ctx.product_line_code is None:
+            return False, "product_line scope required but ctx has no product_line_code"
+        if ctx.product_line_code not in plcs:
+            return False, "product_line_code not in max_scope.product_line_codes"
+    return True, None
 
 
 async def _whitelist_match(ctx: AgentContext, spec) -> AgentCommitWhitelist | None:
@@ -881,7 +908,8 @@ async def _whitelist_match(ctx: AgentContext, spec) -> AgentCommitWhitelist | No
         .where(AgentCommitWhitelist.enabled.is_(True))
     )).scalars().all()
     for wl in rows:
-        if not _in_max_scope(wl.max_scope, ctx.factory_id):
+        ok, _reason = _in_max_scope(wl.max_scope, ctx)
+        if not ok:
             continue
         if not await _check_permission(ctx, wl.required_permission):
             continue
@@ -1447,7 +1475,7 @@ git commit -m "feat(agent): guardrails — input injection heuristic + output re
 - Test: `backend/tests/services/agent/test_provider_adapter.py`
 
 **Interfaces:**
-- Consumes: the verified Pydantic AI API from Task 1; `ai_config` service (`get_ai_config(db) -> AIConfigOut`).
+- Consumes: the verified Pydantic AI API from Task 1; `ai_config` service **raw** reader (`get_raw_ai_config(db) -> AIConfigOut`, added in Step 1 — NOT the masked `get_ai_config`).
 - Produces: `provider_adapter.build_model(db) -> pydantic_ai Model`; `provider_adapter.build_agent(db, system_prompt, tool_specs) -> pydantic_ai.Agent`.
 
 - [ ] **Step 1: Add a raw (unmasked) AI config reader**
@@ -1674,6 +1702,8 @@ async def test_run_message_persists_user_and_assistant_messages(db, admin_user, 
     async def _fake_model(db):  # build_model is async — fake must be async too
         return None
     monkeypatch.setattr(provider_adapter, "build_model", _fake_model)
+    # _FakeAgent has no tool-registration API — stub the harness registration shim
+    monkeypatch.setattr(harness, "_register_tool", lambda *a, **k: None)
 
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
     res = await harness.run_message(db, s, admin_user, redis=None, user_message="帮我查 SPC 异常")
@@ -1822,6 +1852,9 @@ async def test_create_session_and_post_message(db, admin_user, default_factory, 
     async def _fake_model(db_):  # build_model is async — fake must be async too
         return None
     monkeypatch.setattr(provider_adapter, "build_model", _fake_model)
+    # _FakeAgent has no tool-registration API — stub the harness registration shim
+    from app.services.agent import harness as _harness
+    monkeypatch.setattr(_harness, "_register_tool", lambda *a, **k: None)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
