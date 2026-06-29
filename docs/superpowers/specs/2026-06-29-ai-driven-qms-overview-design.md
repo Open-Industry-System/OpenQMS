@@ -52,15 +52,22 @@
 |---|---|---|
 | **harness.py** | 会话生命周期、注入 factory/user scope、调用前后写 AuditLog、错误归一化 | `core/deps.py` 的 RequestScope、audit |
 | **tools/ 注册表** | 把现有 service 方法包成类型化 tool，标注 `readonly`/`draft`/`commit`；权限网关在调用前校验 | `services/*`、Pydantic AI |
-| **memory.py** | 短期=Redis（key=`factory_id:user_id:session_id`）；长期=embedding outbox 检索（复用 `enqueue_embedding`） | Redis、现有 embedding 管线 |
+| **memory.py** | 三层记忆：短期=Redis（key=`factory_id:user_id:session_id`，当前对话 context window）；工作记忆=`agent_sessions.task_state` JSONB（当前任务 todo / 中间状态）；长期=embedding outbox 检索（复用 `enqueue_embedding`，跨会话 user/factory 偏好与知识） | Redis、现有 embedding 管线 |
 | **approval.py** | draft/commit 产出落 `agent_actions`；在线 inline 确认 + 离场待办审批；批准后才调 commit tool | 新表、AuditLog |
-| **Pydantic AI 内核** | LLM provider 适配（复用 `/admin/ai-config` 的 Ark/DeepSeek/OpenAI）、tool-calling 循环、流式 | 现有 LLM 配置 |
+| **Pydantic AI 内核** | LLM provider 适配（复用 `/admin/ai-config` 的 Ark/DeepSeek/OpenAI）、tool-calling 循环、流式；system prompt 注入角色/规则/tool 描述（固化、不可被用户消息覆盖） | 现有 LLM 配置 |
+| **guardrails** | prompt injection 过滤（tool 出参回灌前清洗）、危险输入拦截；与 harness 同层，P0 非可选 | harness |
+
+### 推理范式（Planning / Reasoning）
+
+- **默认 ReAct**：tool-calling 循环即 Thought → Action → Observation，覆盖 P1 迁移与 P2 Copilot 的大部分场景。
+- **P3 客诉→8D 用 Plan-and-Execute**：agent 先产出 D1–D8 计划（写入工作记忆 `task_state`），再逐步起草每步草稿，人逐步审批。
+- **Reflection / Self-Critique**：P3+ 可选——起草完成后 agent 自检草稿与历史 SCAR/客诉的一致性，给出修订建议；不在 P0–P2 范围。
 
 ## 4. 数据模型（新增表，均带 `factory_id` + tenant）
 
 | 表 | 用途 |
 |---|---|
-| `agent_sessions` | 会话：user, factory, 场景类型, 状态, 关联业务实体（如 `capa_id`） |
+| `agent_sessions` | 会话：user, factory, 场景类型, 状态, 关联业务实体（如 `capa_id`），`task_state` JSONB（工作记忆：当前计划 / todo / 中间产物，区别于对话记忆与长期记忆） |
 | `agent_messages` | 消息：role, content, tool_calls 引用, token 用量 |
 | `agent_tool_calls` | 每次 tool 调用：tool 名、入参、出参、权限级、是否审批后执行、耗时、审计 ID |
 | `agent_actions` | 待审动作：产出类型（草稿/提交）、payload、状态（pending/approved/rejected/modified）、审批人、关联业务实体 |
@@ -90,7 +97,7 @@
 
 | 期 | 目标 | 交付 | 验收 |
 |---|---|---|---|
-| **P0 基座** | 基础设施，无业务功能 | 第 4 节全部新表 + harness + tools 注册表骨架 + 三级权限网关 + HITL 待审 + Pydantic AI 接入 + 复用 ai-config | 一个 readonly demo tool 跑通完整链路（含审计、隔离、记忆） |
+| **P0 基座** | 基础设施，无业务功能 | 第 4 节全部新表 + harness + tools 注册表骨架 + 三级权限网关 + HITL 待审 + guardrails（注入过滤/出参清洗）+ Pydantic AI 接入 + 复用 ai-config | 一个 readonly demo tool 跑通完整链路（含审计、隔离、记忆、guardrails） |
 | **P1 迁移 (C)** | 现有 LLM 调用统一 | DFMEA/PFMEA 推荐、5T 工具/趋势推荐迁成基座 tools | 用户无感、可观测性提升、旧调用点删除 |
 | **P2 Copilot (B)** | 对话式助手 | UI 侧栏 + readonly tools（查 FMEA/SPC/客诉/8D/供应商）+ draft tools（8D 草稿、PFMEA 行建议） | 工程师可用自然语言查数 + 生成草稿进编辑器 |
 | **P3 流程自动化 (A)** | 客诉→8D 端到端 | 客诉触发 → agent 拆解 D1–D8 起草 → 待办审批 → 落库 | 一条客诉全流程 agent 产出草稿、人审批后入库，全程可审计 |
@@ -104,12 +111,26 @@
 
 ## 8. 显式排除（YAGNI）
 
+- **Tool 范围仅限 OpenQMS service 方法 + 只读 DB 查询**；排除 shell / 浏览器 / 文件系统 / 子 agent 委托（delegation）。沙箱边界由此天然封闭——agent 无任意 I/O 能力。
 - 不做 agent 自我进化 / 自动修改 tool 注册表。
-- 不做多 agent 协作编排（CrewAI/Autogen 风格）——单 agent + tool 足以覆盖 A/B/C。
+- 不做多 agent 协作编排（CrewAI/Autogen 风格）——单 agent + tool 足以覆盖 A/B/C，故无子 agent 委托。
 - 不做语音 / 多模态。
 - 不在 P0 做向量检索 UI，长期记忆仅 agent 内部使用。
 
-## 9. 期级 spec 衔接
+## 9. 执行循环（Execution Loop）
+
+主循环由 Pydantic AI 内核承担，外壳在关键点插桩：
+
+1. 接收用户输入（或 P3 的触发事件）。
+2. 外壳拼装上下文：system prompt（角色/规则/tool 描述，固化）+ 历史消息 + 相关记忆（短期 Redis + 工作记忆 `task_state` + 长期 embedding 检索）+ tool schema。
+3. **guardrails 前置**：输入过滤（prompt injection / 危险输入）。
+4. 调用 LLM（Pydantic AI）。
+5. 解析输出 → 若是 tool 调用，外壳权限网关校验 readonly/draft/commit，执行 tool（commit 级走 HITL 审批）。
+6. **guardrails 后置**：tool 出参回灌前清洗。
+7. 结果喂回上下文 → 回到第 4 步，直到模型输出结束标记或达终止条件。
+8. 全程每步写 `agent_tool_calls` + `audit_logs`（含耗时、token、审批状态）。
+
+## 10. 期级 spec 衔接
 
 本总览定下架构与分期后，每一期开独立 spec → plan → 实现：
 
