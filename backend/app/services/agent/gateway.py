@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from app.core.permissions import Module, PermissionLevel
 from app.models.agent import AgentAction, AgentCommitWhitelist, AgentToolCall
-from app.services.agent import harness
+from app.services.agent.audit import write_audit
 from app.services.agent.registry import TOOL_REGISTRY, AgentContext
 
 
@@ -112,7 +112,7 @@ async def _whitelist_match(ctx: AgentContext, spec) -> AgentCommitWhitelist | No
 async def _record_rejected(ctx: AgentContext, tool_name: str, params: dict, level: str, reason: str) -> GatewayResult:
     tool_call_id = uuid.uuid4()
     correlation_id = uuid.uuid4()
-    log = await harness.write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "rejected", correlation_id)
+    log = await write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "rejected", correlation_id)
     tc = AgentToolCall(tool_call_id=tool_call_id, session_id=ctx.session_id, tool_name=tool_name,
                        level=level, params=params, status="rejected", factory_id=ctx.factory_id,
                        correlation_id=correlation_id, audit_log_id=log.log_id, result={"error": reason})
@@ -147,7 +147,7 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
         if rejected is not None:
             return rejected
         dur = int((time.perf_counter() - t0) * 1000)
-        log = await harness.write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "call", correlation_id)
+        log = await write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "call", correlation_id)
         tc = AgentToolCall(tool_call_id=tool_call_id, session_id=ctx.session_id,
                            tool_name=tool_name, level="readonly", params=params,
                            result=result, status="executed", factory_id=ctx.factory_id,
@@ -164,7 +164,7 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
         action = AgentAction(action_id=action_id, session_id=ctx.session_id, factory_id=ctx.factory_id,
                              tool_name=tool_name, level="draft", payload=result, status="pending")
         ctx.db.add(action); await ctx.db.flush()
-        log = await harness.write_audit(ctx.db, ctx, "agent_actions", action_id, "draft", correlation_id)
+        log = await write_audit(ctx.db, ctx, "agent_actions", action_id, "draft", correlation_id)
         return GatewayResult(status="pending", result=result, action_id=action_id, audit_log_id=log.log_id)
 
     # commit: three-state
@@ -174,7 +174,7 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
         action = AgentAction(action_id=action_id, session_id=ctx.session_id, factory_id=ctx.factory_id,
                              tool_name=tool_name, level="commit", payload=params, status="pending")
         ctx.db.add(action); await ctx.db.flush()
-        log = await harness.write_audit(ctx.db, ctx, "agent_actions", action_id, "commit_pending", correlation_id)
+        log = await write_audit(ctx.db, ctx, "agent_actions", action_id, "commit_pending", correlation_id)
         return GatewayResult(status="pending", action_id=action_id, audit_log_id=log.log_id, reason="awaiting approval")
 
     # whitelisted -> execute + full audit
@@ -187,7 +187,7 @@ async def invoke(ctx: AgentContext, tool_name: str, params: dict) -> GatewayResu
                          tool_name=tool_name, level="commit", payload=params, status="approved",
                          decision_source="whitelist", post_values=result)
     ctx.db.add(action); await ctx.db.flush()
-    log = await harness.write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "commit", correlation_id,
+    log = await write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "commit", correlation_id,
                                     new_values=result)
     tc = AgentToolCall(tool_call_id=tool_call_id, session_id=ctx.session_id, tool_name=tool_name,
                        level="commit", params=params, result=result, status="approved",
@@ -219,7 +219,7 @@ async def execute_approved_action(ctx: AgentContext, action: AgentAction) -> Gat
     if rejected is not None:
         return rejected
     dur = int((time.perf_counter() - t0) * 1000)
-    log = await harness.write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "commit", correlation_id,
+    log = await write_audit(ctx.db, ctx, "agent_tool_calls", tool_call_id, "commit", correlation_id,
                                     new_values=result)
     tc = AgentToolCall(tool_call_id=tool_call_id, session_id=ctx.session_id, tool_name=action.tool_name,
                        level="commit", params=action.payload, result=result, status="approved",
