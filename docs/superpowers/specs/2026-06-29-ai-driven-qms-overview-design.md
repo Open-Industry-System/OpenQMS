@@ -1,0 +1,117 @@
+# AI 驱动 QMS 平台 — 总览设计
+
+- **日期**: 2026-06-29
+- **作者**: Sam Wang (与 Claude 协作)
+- **状态**: 已定稿，待逐期展开实现 spec
+- **类型**: 平台总览 / 路线图设计（非单期实现 spec）
+
+## 1. 愿景与定位
+
+把 OpenQMS 从「人操作的工具型系统」升级为「AI 协作的质量管理平台」。Agent 在三个层次介入，三者共用同一套基座：
+
+- **(C) 统一并重构现有零散 LLM 调用** —— DFMEA/PFMEA 推荐、5T 工具/趋势推荐等迁入统一 agent 管线。
+- **(B) 工程师对话式 Copilot** —— 自然语言查询与生成草稿，注入现有编辑器。
+- **(A) 端到端质量流程自动化** —— 客诉→8D 自动拆解起草，human-in-the-loop 审批后落库。
+
+### 不可妥协的约束（贯穿全设计）
+
+1. **IATF 16949 可追溯**：每次 LLM 调用、tool 调用、HITL 审批都写入 `audit_logs`，不留审计盲区。
+2. **多租户 factory 隔离**：agent 不打开隔离缺口；所有 agent 数据带 `factory_id` + tenant schema。
+3. **写操作 human-in-the-loop**：所有写操作默认需人确认；仅 admin 显式配置的小白名单可自主。
+
+## 2. 总体架构
+
+```
+┌─ Frontend (React) ────────────────────────────────────────┐
+│  AppLayout + Copilot 侧栏 │ FMEA/8D 编辑器建议区 │ 待办审批队列 │
+└────────────────────┬──────────────────────────────────────┘
+                     │ /api/agent/*  +  /api/agent-actions/*
+┌─ Backend (FastAPI)────────────────────────────────────────┐
+│  api/agent/  (薄路由)                                      │
+│  services/agent/                                           │
+│   ├─ harness.py        自研外壳: 会话/审计/隔离/HITL       │
+│   ├─ tools/            tool 注册表 + 三级权限网关          │
+│   ├─ memory.py         短期 Redis + 长期 embedding         │
+│   └─ approval.py       agent_actions 待审 + inline 确认    │
+│  services/...  (现有业务服务，被 tools 包裹)               │
+│  Pydantic AI 内核 (tool-calling 循环/重试/流式)            │
+└────────────────────┬───────────────────────────────────────┘
+                     │
+   PostgreSQL (source of truth, 全量审计) + Redis (热缓存/队列)
+```
+
+### 混合分层原则
+
+- **自研外壳**守住「合规 / 多租户隔离 / 审计 / HITL / 权限网关」——这些是不能外包给第三方库的关切。
+- **Pydantic AI 内核**承担「LLM provider 适配 + tool-calling 循环 + 重试 + 流式」——这些没必要重造。
+- 外壳在每次内核调用前后插入审计与权限网关；内核对多租户无感知，scope 由外壳注入。
+
+## 3. 核心组件
+
+| 组件 | 职责 | 依赖 |
+|---|---|---|
+| **harness.py** | 会话生命周期、注入 factory/user scope、调用前后写 AuditLog、错误归一化 | `core/deps.py` 的 RequestScope、audit |
+| **tools/ 注册表** | 把现有 service 方法包成类型化 tool，标注 `readonly`/`draft`/`commit`；权限网关在调用前校验 | `services/*`、Pydantic AI |
+| **memory.py** | 短期=Redis（key=`factory_id:user_id:session_id`）；长期=embedding outbox 检索（复用 `enqueue_embedding`） | Redis、现有 embedding 管线 |
+| **approval.py** | draft/commit 产出落 `agent_actions`；在线 inline 确认 + 离场待办审批；批准后才调 commit tool | 新表、AuditLog |
+| **Pydantic AI 内核** | LLM provider 适配（复用 `/admin/ai-config` 的 Ark/DeepSeek/OpenAI）、tool-calling 循环、流式 | 现有 LLM 配置 |
+
+## 4. 数据模型（新增表，均带 `factory_id` + tenant）
+
+| 表 | 用途 |
+|---|---|
+| `agent_sessions` | 会话：user, factory, 场景类型, 状态, 关联业务实体（如 `capa_id`） |
+| `agent_messages` | 消息：role, content, tool_calls 引用, token 用量 |
+| `agent_tool_calls` | 每次 tool 调用：tool 名、入参、出参、权限级、是否审批后执行、耗时、审计 ID |
+| `agent_actions` | 待审动作：产出类型（草稿/提交）、payload、状态（pending/approved/rejected/modified）、审批人、关联业务实体 |
+| `agent_memory` | 长期记忆条目：user/factory 维度、embedding、来源 session、过期策略 |
+
+复用现有 `audit_logs` 与 `embedding_outbox`，不另造审计/向量管线。
+
+## 5. Tool 权限与 Human-in-the-Loop
+
+### 三级权限
+
+- `readonly`：agent 可直接调用（查 FMEA、读 SPC、搜历史客诉）。
+- `draft`：agent 调用后只产草稿，**不落库**，进 `agent_actions` 待审或塞入编辑器建议区（生成 8D 草稿、PFMEA 行建议）。
+- `commit`：能直接落库的写操作。**默认禁止 agent 自主调用**；admin 在 `/admin/ai-config` 维护白名单（如状态推进、打标签）。
+
+### HITL 落点（在线 + 离场分级）
+
+- **在线 Copilot**：写操作在对话框旁 inline 确认按钮，一键批准/修改/拒绝。
+- **离场自动化**：退化到「我的待办」审批队列，逐条审批后调真正 commit tool。
+- FMEA 编辑器已有的「建议/草稿」交互范式被复用为 draft 落点。
+
+每步审批与执行都进 AuditLog。
+
+## 6. 分期路线图
+
+每期独立 spec → plan → SDD 实现，沿用既有工作流。
+
+| 期 | 目标 | 交付 | 验收 |
+|---|---|---|---|
+| **P0 基座** | 基础设施，无业务功能 | 第 4 节全部新表 + harness + tools 注册表骨架 + 三级权限网关 + HITL 待审 + Pydantic AI 接入 + 复用 ai-config | 一个 readonly demo tool 跑通完整链路（含审计、隔离、记忆） |
+| **P1 迁移 (C)** | 现有 LLM 调用统一 | DFMEA/PFMEA 推荐、5T 工具/趋势推荐迁成基座 tools | 用户无感、可观测性提升、旧调用点删除 |
+| **P2 Copilot (B)** | 对话式助手 | UI 侧栏 + readonly tools（查 FMEA/SPC/客诉/8D/供应商）+ draft tools（8D 草稿、PFMEA 行建议） | 工程师可用自然语言查数 + 生成草稿进编辑器 |
+| **P3 流程自动化 (A)** | 客诉→8D 端到端 | 客诉触发 → agent 拆解 D1–D8 起草 → 待办审批 → 落库 | 一条客诉全流程 agent 产出草稿、人审批后入库，全程可审计 |
+
+## 7. 关键设计决策（假设，可在期级 spec 中再定）
+
+- **LLM provider**：复用现有 `/admin/ai-config`（Ark/DeepSeek/OpenAI 兼容），不另建 provider 层。
+- **异步执行**：P2 Copilot 短轮次同步流式；P3 长流程用 Redis 轻量任务队列（arq 或自写 worker），**不引入 Celery**。
+- **Copilot UI 落点**：AppLayout 右侧抽屉式侧栏，全局可用，按当前路由上下文注入相关 tools。
+- **可观测性**：`agent_tool_calls` 表 + `/admin/ai-config` 扩展「agent 调用审计」页，接现有日志管理页。
+
+## 8. 显式排除（YAGNI）
+
+- 不做 agent 自我进化 / 自动修改 tool 注册表。
+- 不做多 agent 协作编排（CrewAI/Autogen 风格）——单 agent + tool 足以覆盖 A/B/C。
+- 不做语音 / 多模态。
+- 不在 P0 做向量检索 UI，长期记忆仅 agent 内部使用。
+
+## 9. 期级 spec 衔接
+
+本总览定下架构与分期后，每一期开独立 spec → plan → 实现：
+
+- **下一步**：开 P0（Agent 基座）的实现 spec，细化为可 TDD 的任务。
+- P1/P2/P3 在 P0 完成后依次展开，每期 spec 引用本总览的对应章节作为上下文。
