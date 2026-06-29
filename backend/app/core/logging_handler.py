@@ -4,10 +4,12 @@ Pipeline: handler.emit() (any thread) -> reads current_tenant_schema ContextVar 
 builds a record dict -> loop.call_soon_threadsafe(_safe_enqueue, queue, item) ->
 asyncio.Queue -> background drain task groups by schema, sets search_path, bulk-inserts.
 
-Records with no tenant context (current_tenant_schema is None) are dropped — they
-still go to stdout/container logs via other handlers. Any exception in emit() or the
-drain loop is swallowed: logging must never raise (it would re-trigger the handler
-and recurse).
+Records with no tenant context (current_tenant_schema is None) are dropped in
+multi-tenant mode (they have no tenant-safe target), but mapped to the public
+schema in single-tenant mode, where system_logs lives and the system-log endpoint
+reads. They still go to stdout/container logs via other handlers regardless.
+Any exception in emit() or the drain loop is swallowed: logging must never raise
+(it would re-trigger the handler and recurse).
 """
 import asyncio
 import logging
@@ -16,6 +18,7 @@ from typing import Any, Callable
 
 from sqlalchemy import text
 
+from app.config import settings
 from app.core.tenant_utils import current_tenant_schema, set_search_path_sql
 from app.models.system_log import SystemLog
 
@@ -32,7 +35,14 @@ class DBLogHandler(logging.Handler):
         try:
             schema = current_tenant_schema.get()
             if schema is None:
-                return  # no tenant context -> drop (still goes to stdout)
+                # Single-tenant mode: no tenant context -> write to public schema
+                # (where system_logs lives and /api/admin/logs/system reads).
+                # Multi-tenant mode: genuinely contextless logs (startup/platform
+                # background tasks) have nowhere tenant-safe to go -> drop.
+                if settings.TENANT_MODE == "single":
+                    schema = "public"
+                else:
+                    return  # no tenant context -> drop (still goes to stdout)
             exc_text = record.exc_text
             if exc_text is None and record.exc_info:
                 exc_text = self.format(record)
@@ -84,7 +94,10 @@ async def drain_log_queue(
             for schema, items in by_schema.items():
                 try:
                     async with session_factory() as session:
-                        await session.execute(text(set_search_path_sql(schema)))
+                        if schema == "public":
+                            await session.execute(text('SET search_path TO "public"'))
+                        else:
+                            await session.execute(text(set_search_path_sql(schema)))
                         session.add_all([SystemLog(
                             logger_name=i["logger_name"],
                             level=i["level"],
