@@ -52,14 +52,16 @@ migrations/versions/*_agent_base.py  # alembic revision, hash 生成时确定
 `tool_call_id`(UUID PK) · `session_id`(FK) · `tool_name`(String) · `level`(enum: readonly/draft/commit) · `params`(JSONB) · `result`(JSONB) · `status`(enum: executed/rejected/pending/approved) · `factory_id`(FK, NOT NULL) · `correlation_id`(UUID, 指向 agent_actions 或自引) · `duration_ms`(int) · `audit_log_id`(FK audit_logs) · `created_at`
 
 ### `agent_actions`
-`action_id`(UUID PK) · `session_id`(FK) · `factory_id`(FK factories, NOT NULL) · `tool_name`(String) · `level`(enum) · `payload`(JSONB) · `status`(enum: pending/approved/rejected/modified) · `approver_id`(FK users, nullable) · `reason`(Text) · `pre_values`(JSONB) · `post_values`(JSONB) · `related_entity_type`(String) · `related_entity_id`(UUID) · `created_at` · `decided_at`(DateTime, nullable)
+`action_id`(UUID PK) · `session_id`(FK) · `factory_id`(FK factories, NOT NULL) · `tool_name`(String) · `level`(enum) · `payload`(JSONB) · `status`(enum: pending/approved/rejected/modified) · `approver_id`(FK users, nullable) · `decision_source`(enum: user/whitelist/system, NOT NULL) · `reason`(Text) · `pre_values`(JSONB) · `post_values`(JSONB) · `related_entity_type`(String) · `related_entity_id`(UUID) · `created_at` · `decided_at`(DateTime, nullable)
 
-`factory_id` NOT NULL 使待办审批队列与工厂隔离查询不依赖 join session，审计约束更强。
+`factory_id` NOT NULL 使待办审批队列与工厂隔离查询不依赖 join session，审计约束更强。`approver_id` 仅在 `decision_source=user` 时填用户 ID；白名单自主 commit 用 `approver_id=NULL` + `decision_source='whitelist'`（agent 不是用户，不写入 users FK）。
 
 ### `agent_memory`
 `memory_id`(UUID PK) · `user_id`(FK) · `factory_id`(FK, NOT NULL) · `kind`(enum: preference/fact) · `content`(Text) · `source_session_id`(FK) · `embedding_status`(enum: queued/ready/failed, default queued) · `expires_at`(DateTime, nullable) · `created_at`。
 
-**embedding 关联约定**：`agent_memory` 作为 embedding entity，入队时 `enqueue_embedding(entity_type="agent_memory", entity_id=memory_id, factory_id=...)` → `embedding_sync_outbox` → `document_embeddings`（该表 `entity_type`/`entity_id`/`factory_id` 即关联键，`entity_id` 为 UUID 非 FK，按 `entity_type="agent_memory" AND entity_id=memory_id AND factory_id` 查询）。`enqueue_embedding()` 只写 outbox，**入队后 `embedding_status=queued`**；真正向量写入由异步 worker 完成，worker 成功 upsert `document_embeddings` 后置 `embedding_status=ready`，失败置 `failed`。长期记忆检索仅匹配 `ready` 行，避免误用未生成的向量。
+**embedding 关联约定**：`agent_memory` 作为 embedding entity，入队时 `enqueue_embedding(entity_type="agent_memory", entity_id=memory_id, factory_id=...)` → `embedding_sync_outbox`。`enqueue_embedding()` 只写 outbox，**入队后 `embedding_status=queued`**。
+
+**P0 范围边界（重要）**：现有 `embedding_sync_worker.py` 用固定 `table_field_map`（`fmea_node` 等），**不认识 `agent_memory`、不回写 agent 表**。让 worker 处理 `agent_memory` 并在 upsert `document_embeddings` 后置 `ready`/`failed` **属于 P0 之外的独立任务**（见 §13）。因此 **P0 只验收「queued 入队 + 非向量 fallback 检索」**（按 `agent_memory.content` SQL/关键词过滤 + `factory_id`/`user_id` 隔离）；向量检索（匹配 `ready` 行）在 worker 增强后可用，不在 P0 验收。`embedding_status` 字段保留三态以备后续。
 
 ### `agent_commit_whitelist`
 `id`(UUID PK) · `tool_name`(String) · `action`(String) · `entity_type`(String) · `max_scope`(JSONB, 工厂/产品线范围限制，不得跨 factory) · `required_permission`(JSONB: `{module: <Module value>, min_level: <PermissionLevel int>}`) · `enabled`(bool, default true) · `created_by`(FK users) · `created_at`。变更进 AuditLog。
@@ -87,7 +89,7 @@ class AgentContext:
 
 主循环（同步，P0）：
 1. 加载/创建 session → 构造 `AgentContext`（scope 来自 `RequestScope`，非 LLM）。
-2. **`tenant_schema` 来源**：API 层从 `request.state.tenant`（由 `tenant_context` 中间件注入）解析 schema_name，或读 `current_tenant_schema` ContextVar；**单租户/public 模式填 `"public"`**（与 `logging_handler` 单租户回落 public 一致）。`RequestScope` 本身不带 tenant，故由 API 层在构造 `AgentContext` 时显式注入。
+2. **`tenant_schema` 来源**：API 层从 `request.state.tenant`（由 `tenant_context` 中间件注入）解析 schema_name，或读 `current_tenant_schema` ContextVar；**无 tenant 上下文（单租户/public 模式）时 agent 审计直接写 `tenant_schema="public"`**（agent 审计的自定义规则，不依赖 `logging_handler` 行为——该 handler 在无 tenant 时丢弃日志）。`RequestScope` 本身不带 tenant，故由 API 层在构造 `AgentContext` 时显式注入。
 3. 拼装上下文：system prompt（角色/规则/tool 描述，固化、不可被用户消息覆盖）+ 历史消息 + 三层记忆（短期 Redis + 工作 `task_state` + 长期 embedding 检索）+ tool schema。
 4. guardrails 前置：输入过滤。
 5. 调 Pydantic AI（经 provider_adapter）。
@@ -125,13 +127,13 @@ async def list_fmea_documents(ctx: AgentContext, page: int = 1) -> dict:
 - `agent_actions` 状态机：`pending → approved | rejected | modified`。
 - `approved` → 调真正 commit tool（仍走网关审计）；`modified` → 用修改后 payload 执行；`rejected` → 不执行，留痕。
 - 在线 inline 确认 + 离场待办队列同一张表，按 `approver_id`/场景区分。
-- **白名单自主 commit 也建 `agent_action`**（status=approved, approver=agent）仅作审计载体，**不进 pending**。
+- **白名单自主 commit 也建 `agent_action`**（status=approved, `approver_id=NULL`, `decision_source='whitelist'`）仅作审计载体，**不进 pending**。
 
 ## 7. memory.py（三层）
 
 - 短期：Redis `factory_id:user_id:session_id` → 最近 N 轮消息（context window）。
 - 工作：`agent_sessions.task_state` JSONB（当前计划/todo/中间产物；P3 Plan-and-Execute 用，P0 留字段与读写接口）。
-- 长期：`agent_memory` 条目 + `enqueue_embedding()` → `embedding_sync_outbox` → `document_embeddings` 向量检索；跨会话 user/factory 偏好与知识。
+- 长期：`agent_memory` 条目 + `enqueue_embedding()` → `embedding_sync_outbox`。**P0 仅做 queued 入队 + 非向量 fallback 检索**（`content` SQL/关键词过滤 + factory/user 隔离）；向量检索待 worker 增强（§13，P0 外）。跨会话 user/factory 偏好与知识。
 
 ## 8. provider_adapter.py
 
@@ -184,6 +186,7 @@ async def list_fmea_documents(ctx: AgentContext, page: int = 1) -> dict:
 - 任务队列/worker、客诉→8D → P3
 - 模型级 guardrails 检测 → P1+
 - **既有随机 `record_id` 写审计调用点的兼容修复**（如 `quality_trend_service` 等）→ 独立后续任务，不进 P0 基座范围
+- **embedding worker 支持 `agent_memory` + `embedding_status` 状态回写**（ready/failed）→ 独立后续任务；P0 长期记忆只验 queued 入队 + 非向量 fallback 检索
 
 ## 14. plan 衔接
 
