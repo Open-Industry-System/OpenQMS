@@ -4,6 +4,14 @@ from app.database import (
 )
 from app.models.apqp import APQPProject
 from app.models.attribute import AttributeMeasurement, AttributeResult, AttributeStudy
+from app.models.agent import (
+    AgentAction,
+    AgentCommitWhitelist,
+    AgentMemory,
+    AgentMessage,
+    AgentSession,
+    AgentToolCall,
+)
 from app.models.audit import AuditLog
 from app.models.login_audit_log import LoginAuditLog
 from app.models.system_log import SystemLog
@@ -104,6 +112,7 @@ from .plm import (
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "AuditLog",
+    "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentSession", "AgentToolCall",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
     "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",
     "InspectionCharacteristic", "SampleBatch", "SampleValue", "SPCAlarm", "ControlLimitSnapshot",
