@@ -126,6 +126,7 @@
 1. **readonly 可执行**：agent 调 readonly tool 成功，`agent_tool_calls` + `audit_logs`（带 `factory_id`/`correlation_id`）留痕；跨 factory 隔离生效（A 厂 agent 查不到 B 厂数据）。
 2. **draft 不落库**：agent 调 draft tool 只在 `agent_actions` 产草稿，**业务表零改动**；草稿可被审批。
 3. **commit 受控**：未白名单的 commit 被网关拒绝；白名单内的 commit 仍须记录理由/前后值/`agent_action_id`；离场 commit 必须经审批后才执行，拒绝/修改不执行。
+4. **guardrails 生效**：恶意用户输入与恶意 tool observation 不得覆盖 system prompt、不得诱导越权 tool 调用、不得把未授权数据回灌进上下文；被拦截时留拒绝审计（`agent_tool_calls` 状态=rejected + `audit_logs` 摘要）。
 
 ## 7. 关键设计决策（假设，可在期级 spec 中再定）
 
@@ -150,7 +151,7 @@
 2. 外壳拼装上下文：system prompt（角色/规则/tool 描述，固化）+ 历史消息 + 相关记忆（短期 Redis + 工作记忆 `task_state` + 长期 embedding 检索）+ tool schema。
 3. **guardrails 前置**：输入过滤（prompt injection / 危险输入）。
 4. 调用 LLM（Pydantic AI）。
-5. 解析输出 → 若是 tool 调用，外壳权限网关校验 readonly/draft/commit，执行 tool（commit 级走 HITL 审批）。
+5. 解析输出 → 若是 tool 调用，外壳权限网关校验 readonly/draft/commit：readonly 直接执行；draft 产草稿入 `agent_actions`；**commit 先查白名单——未命中则生成 `agent_action` 待 HITL 审批，命中则可执行，但仍必须记录理由、前后值、`agent_action_id`/`correlation_id` 与审计摘要**。
 6. **guardrails 后置**：tool 出参回灌前清洗。
 7. 结果喂回上下文 → 回到第 4 步，直到模型输出结束标记或达终止条件。
 8. 全程每步写 `agent_tool_calls` + `audit_logs`（含耗时、token、审批状态）。
