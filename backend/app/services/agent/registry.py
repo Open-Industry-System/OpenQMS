@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.models.agent import AgentSession
+
+if TYPE_CHECKING:
+    from app.core.permissions import Module, PermissionLevel
 
 
 @dataclass

@@ -1,8 +1,9 @@
 import uuid
+
 import pytest
+
 from app.services.agent import harness
 from app.services.agent.registry import AgentContext
-from app.models.agent import AgentSession
 
 
 @pytest.mark.asyncio
@@ -24,6 +25,8 @@ async def test_build_context_injects_scope_not_from_llm(db, admin_user, default_
     # permission_levels is a dict keyed by Module
     from app.core.permissions import Module
     assert isinstance(ctx.permission_levels, dict)
+    assert Module.FMEA in ctx.permission_levels
+    assert ctx.product_line_code is None
 
 
 @pytest.mark.asyncio
