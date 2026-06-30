@@ -92,6 +92,7 @@ async def chat_with_tools(
         for tc in msg.tool_calls or []:
             calls.append(
                 {
+                    "id": tc.id,
                     "name": tc.function.name,
                     "arguments": json.loads(tc.function.arguments or "{}"),
                 }
@@ -117,5 +118,5 @@ async def chat_with_tools(
         if block.type == "text":
             text_parts.append(block.text)
         elif block.type == "tool_use":
-            calls.append({"name": block.name, "arguments": block.input})
+            calls.append({"id": block.id, "name": block.name, "arguments": block.input})
     return AssistantTurn(content="".join(text_parts), tool_calls=calls)

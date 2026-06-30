@@ -1,6 +1,8 @@
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
+from app.models.document_embedding import EmbeddingSyncOutbox
 from app.services.agent import harness, memory
 from app.services.agent.tools import demo  # noqa
 
@@ -49,6 +51,16 @@ async def test_remember_enqueues_queued_status(db, admin_user, default_factory):
     m = await memory.remember(db, ctx, kind="preference", content="用户偏好简短 8D 报告")
     assert m.embedding_status == "queued"
     assert m.factory_id == default_factory.id
+    outbox_row = (
+        await db.execute(
+            select(EmbeddingSyncOutbox).where(
+                EmbeddingSyncOutbox.entity_type == "agent_memory",
+                EmbeddingSyncOutbox.entity_id == m.memory_id,
+            )
+        )
+    ).scalar_one_or_none()
+    assert outbox_row is not None
+    assert outbox_row.factory_id == default_factory.id
 
 
 @pytest.mark.asyncio

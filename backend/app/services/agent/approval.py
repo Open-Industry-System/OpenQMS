@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent import AgentAction
 from app.models.user import User
 from app.services.agent import gateway, harness
+from app.services.agent.audit import write_audit
 from app.services.agent.registry import AgentContext
+
+
+async def get(db: AsyncSession, action_id: uuid.UUID) -> AgentAction | None:
+    return (
+        await db.execute(select(AgentAction).where(AgentAction.action_id == action_id))
+    ).scalar_one_or_none()
 
 
 async def _get(db: AsyncSession, action_id: uuid.UUID) -> AgentAction:
@@ -58,7 +65,7 @@ async def reject(db: AsyncSession, action_id: uuid.UUID, user: User, reason: str
     a.reason = reason
     a.decided_at = datetime.now(UTC)
     ctx = await _ctx_from_action(db, a, user)  # _ctx_from_action is async — must await
-    await harness.write_audit(db, ctx, "agent_actions", a.action_id, "rejected", None)
+    await write_audit(db, ctx, "agent_actions", a.action_id, "rejected", None)
     await db.flush()
     return a
 
