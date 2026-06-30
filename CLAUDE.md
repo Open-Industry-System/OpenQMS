@@ -26,6 +26,21 @@ Run the relevant command (build, lint, test, or start the app) before declaring 
 
 After changing `backend/app/`, `frontend/src/`, `docker-compose.yml`, or any `Dockerfile`, check whether `docs/`, `CLAUDE.md`, `README.md`, or a module `README.md` needs an update — and update it in the same change. CI enforces this on PRs: when code under those paths changes without a matching docs change, the `docs-check` job fails. If documentation truly doesn't need an update, add the `docs-not-needed` label to the PR with a one-line justification in the PR description.
 
+### 6. Session Workflow (clock-in / clock-out)
+
+**Clock-in (start of session)**
+
+1. Read `PROGRESS.md` for current status, blockers, and the "next steps" section
+2. Read `docs/DECISIONS.md` for accepted key decisions (avoid overturning them, avoid re-proposing already-rejected options)
+3. Run `make check` to confirm the repo is in a consistent state (backend tests + frontend `tsc --noEmit` + frontend build all green)
+4. Resume work from `PROGRESS.md`'s "next steps" section
+
+**Clock-out (end of session)**
+
+1. Update `PROGRESS.md`: tick off finished items, append new findings, refresh "next steps"
+2. Run `make check` again to confirm consistency
+3. Commit all completed work (one-line subject + body when needed)
+
 ---
 
 ## Project Overview
