@@ -26,22 +26,20 @@ Run the relevant command (build, lint, test, or start the app) before declaring 
 
 After changing `backend/app/`, `frontend/src/`, `docker-compose.yml`, or any `Dockerfile`, check whether `docs/`, `CLAUDE.md`, `README.md`, or a module `README.md` needs an update — and update it in the same change. CI enforces this on PRs: when code under those paths changes without a matching docs change, the `docs-check` job fails. If documentation truly doesn't need an update, add the `docs-not-needed` label to the PR with a one-line justification in the PR description.
 
-### 6. Session Workflow（每次会话的"上下班"流程）
+### 6. Session Workflow (clock-in / clock-out)
 
-**会话开始（上班）**
+**Clock-in (start of session)**
 
-1. 读 `progress.md` 了解当前进度、阻塞项与"下一步"
-2. 读 `docs/DECISIONS.md` 了解已落定的关键决策（避免推翻、避免重蹈被否决的方案）
-3. 跑 `make check` 确认仓库一致（后端测试 + 前端 `tsc --noEmit` + 前端 `lint` 全绿）
-4. 从 `progress.md` "下一步" 部分继续工作
+1. Read `PROGRESS.md` for current status, blockers, and the "next steps" section
+2. Read `docs/DECISIONS.md` for accepted key decisions (avoid overturning them, avoid re-proposing already-rejected options)
+3. Run `make check` to confirm the repo is in a consistent state (backend tests + frontend `tsc --noEmit` + frontend build all green)
+4. Resume work from `PROGRESS.md`'s "next steps" section
 
-**会话结束（下班）**
+**Clock-out (end of session)**
 
-1. 更新 `progress.md`：勾掉已完成项、追加新发现、刷新"下一步"
-2. 跑 `make check` 再次确认一致
-3. 提交所有已完成的工作（一句话 commit subject + 必要的 body）
-
-> 备注：`make check` 目标尚未建立——临时替代是直接跑 `cd backend && pytest tests/ -x --tb=short` 加 `cd frontend && npm run build && npm run lint`。建好 `Makefile` 后此备注移除。
+1. Update `PROGRESS.md`: tick off finished items, append new findings, refresh "next steps"
+2. Run `make check` again to confirm consistency
+3. Commit all completed work (one-line subject + body when needed)
 
 ---
 

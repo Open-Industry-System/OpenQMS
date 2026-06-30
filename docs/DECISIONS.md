@@ -77,7 +77,7 @@
   - ✅ 实现简单，无后端 session 存储
   - ⚠️ 无主动登出/撤销机制——修改密码后旧 token 仍可用最长 2 小时
   - ⚠️ `SECRET_KEY` 必须在部署/测试两侧一致；测试用 `SECRET_KEY=test-secret-key`
-  - ⚠️ 登录无速率限制（见 `progress.md` Known Gaps），后续需引入
+  - ⚠️ 登录无速率限制（见 `PROGRESS.md` Known Gaps），后续需引入
 
 ## ADR-0006 — 权限矩阵 = 7 角色 × 25 模块 × 5 级，不做 ACL/策略引擎
 
@@ -171,7 +171,7 @@
 - **影响**：
   - ✅ 数据迁移和 schema 迁移在同一文件，回滚明确
   - ✅ JSONB 字段、check constraint 行为可控
-  - ⚠️ 编号偶发冲突（多分支并行开发时）——`progress.md` Known Gaps 已标注，需规范
+  - ⚠️ 编号偶发冲突（多分支并行开发时）——`PROGRESS.md` Known Gaps 已标注，需规范
   - ⚠️ 新开发者上手成本略高，参考已有迁移文件模仿
 
 ---
@@ -187,7 +187,7 @@
 下列**不**写：
 
 - 单文件实现细节、bug 修复、变量改名
-- 临时绕过（应该写 `# TODO` 或 `progress.md`）
+- 临时绕过（应该写 `# TODO` 或 `PROGRESS.md`）
 - 单模块内部选择，对其他模块无影响
 
 ---
