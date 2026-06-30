@@ -342,6 +342,35 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
 ```
 Remove the now-duplicate `import json` if it becomes unused (keep it if `chat_with_tools` still uses it — it does).
 
+**Also patch `chat_with_tools` to reject `local` provider** (it has no tool-calling API; `build_client` now returns local clients, so without this guard a local-configured tool call would fall through the `else` branch into `pc.client.messages.create` and AttributeError). Insert at the top of `chat_with_tools`:
+```python
+async def chat_with_tools(
+    pc: ProviderClient, messages: list[dict], tools: list[dict]
+) -> AssistantTurn:
+    """One LLM turn with function-calling. Returns assistant text + parsed tool_calls.
+
+    Note: anthropic requires a top-level 'system' param rather than a system-role
+    message in `messages`; the harness (Task 11) passes system prompt separately
+    and this function routes it correctly per provider.
+    """
+    if pc.provider == "local":
+        raise ProviderNotConfiguredError("local provider does not support tool-calling")
+    if pc.provider == "openai":
+        # ... existing body unchanged
+```
+Keep the rest of `chat_with_tools` unchanged.
+
+Add a test for this in `backend/tests/services/agent/test_provider_adapter.py`:
+```python
+@pytest.mark.asyncio
+async def test_chat_with_tools_rejects_local_provider():
+    """local provider has no tool-calling API; chat_with_tools must raise, not
+    silently fall through to the anthropic branch and AttributeError."""
+    pc = ProviderClient(provider="local", client=object(), model="m")
+    with pytest.raises(ProviderNotConfiguredError):
+        await provider_adapter.chat_with_tools(pc, [{"role": "user", "content": "x"}], [])
+```
+
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only /Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python -m pytest tests/services/agent/test_provider_adapter.py tests/test_provider_adapter_smoke.py -v`
@@ -719,6 +748,21 @@ async def test_interpret_route_does_not_read_app_state_llm_provider(monkeypatch)
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only /Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python -m pytest tests/test_quality_trend_interpret_api.py::test_interpret_route_does_not_read_app_state_llm_provider -v`
 Expected: FAIL — route still reads `app.state.llm_provider` and passes `llm_provider=` to the service (which no longer accepts it → TypeError → 502, not 503).
+
+- [ ] **Step 3a: Pre-patch `_call_interpret` mock db to accept `db.flush`**
+
+After Task 3, the route writes audits via `write_audit_raw`, which calls `await db.flush()`. The existing `_call_interpret` mock db in `backend/tests/test_quality_trend_interpret_api.py` doesn't define `db.flush`, so it would return a `MagicMock` (non-awaitable) and the route would 502. Patch the mock db here so Task 4 Step 4 (and any other existing test in that file) doesn't break before Task 5 fully rewires the helper.
+
+In `backend/tests/test_quality_trend_interpret_api.py`, locate the `_call_interpret` body (search `db.add = MagicMock`) and add `db.flush = AsyncMock()` right after `db.commit = AsyncMock()`:
+```python
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    db.rollback = AsyncMock()
+    db.scalar = AsyncMock(side_effect=[4, 1, 2, 3, 2])
+    db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+```
+This is a one-line addition; do NOT yet rewire the rest of `_call_interpret` (the `app.state.llm_provider` setting and the lack of `provider_adapter` stubs are still there — Task 5 handles those).
 
 - [ ] **Step 3: Add `_tenant_schema` helper + rewire the route**
 
