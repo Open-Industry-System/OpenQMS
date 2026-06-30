@@ -22,6 +22,10 @@ Touch only what must change. Don't improve adjacent code, comments, or formattin
 
 Run the relevant command (build, lint, test, or start the app) before declaring work done. "It should work" is not verification. If you can't verify, say so explicitly rather than claiming completion.
 
+### 5. Keep Docs in Sync With Code
+
+After changing `backend/app/`, `frontend/src/`, `docker-compose.yml`, or any `Dockerfile`, check whether `docs/`, `CLAUDE.md`, `README.md`, or a module `README.md` needs an update — and update it in the same change. CI enforces this on PRs: when code under those paths changes without a matching docs change, the `docs-check` job fails. If documentation truly doesn't need an update, add the `docs-not-needed` label to the PR with a one-line justification in the PR description.
+
 ---
 
 ## Project Overview
