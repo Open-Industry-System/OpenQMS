@@ -55,6 +55,7 @@ async def _call_interpret(llm_provider):
     db = MagicMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.flush = AsyncMock()
     db.rollback = AsyncMock()
     db.scalar = AsyncMock(side_effect=[4, 1, 2, 3, 2])
     db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
@@ -202,3 +203,34 @@ async def test_interpret_audits_llm_provider_failure():
     audit = next(obj for obj in db.add.call_args_list if isinstance(obj.args[0], AuditLog)).args[0]
     assert audit.new_values["status"] == "llm_failed"
     assert "provider timeout" in audit.new_values["error"]
+
+
+@pytest.mark.anyio
+async def test_interpret_route_does_not_read_app_state_llm_provider(monkeypatch):
+    """Route must not read app.state.llm_provider; it builds via provider_adapter."""
+    from app.services.agent import provider_adapter
+    from app.services import quality_trend_service
+
+    captured = {}
+
+    async def _no_cfg(db):
+        raise provider_adapter.ProviderNotConfiguredError("test")
+    monkeypatch.setattr(provider_adapter, "build_client", _no_cfg)
+    monkeypatch.setattr(quality_trend_service, "_enforce_rate_limit", lambda uid: None)
+    from app.schemas.quality_trend import QualityTrendMetadata, QualityTrendSummary
+    async def _summary(*a, **k):
+        return QualityTrendSummary(
+            risk_level="high", headline="h", evidence=[], actions=[],
+            data_window_days=30, generated_at="2026-06-30T00:00:00Z",
+            evidence_hash="sha256:x", scope_hash="", ai_available=True,
+            metadata=QualityTrendMetadata(omitted_modules=[], available_modules=["spc"]),
+        )
+    monkeypatch.setattr(quality_trend_service, "build_quality_trend_summary", _summary)
+    monkeypatch.setattr(quality_trend_service, "_get_cached_interpretation", lambda k: None)
+
+    # explicitly do NOT set app.state.llm_provider
+    if hasattr(app.state, "llm_provider"):
+        delattr(app.state, "llm_provider")
+
+    response, _db = await _call_interpret(None)  # llm_provider arg now ignored by _call_interpret
+    assert response.status_code == 503  # LLMNotConfiguredError -> 503

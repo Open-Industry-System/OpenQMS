@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,11 @@ def _resolve_filter_codes(scope: RequestScope, product_line: str | None = None) 
                 raise HTTPException(403, f"无权访问产品线 '{product_line}'")
             return [product_line], False
         return scope.pl_scope.codes, False
+
+
+def _tenant_schema(request: Request) -> str:
+    tenant = getattr(request.state, "tenant", None)
+    return tenant.schema_name if tenant else "public"
 
 
 @router.get("")
@@ -278,7 +283,6 @@ async def get_widgets(
     return layout_schemas.DashboardWidgetsResponse(**data)
 
 
-from fastapi import Request
 from pydantic import BaseModel
 
 from app.services.quality_trend_service import (
@@ -320,13 +324,13 @@ async def interpret_quality_trend(
 
     scope_description = build_scope_description(filter_codes or None)
     scope_hash = await build_scope_hash(filter_codes)
-    llm_provider = getattr(request.app.state, "llm_provider", None)
 
     try:
         return await interpret_quality_trend_service(
             db=db,
             user_id=str(scope.user.user_id),
-            llm_provider=llm_provider,
+            factory_id=scope.effective_factory_id,
+            tenant_schema=_tenant_schema(request),
             filter_codes=filter_codes,
             allowed_modules=quality_trend_allowed_modules,
             scope_description=scope_description,
