@@ -73,6 +73,7 @@ export interface DashboardWidgetsData {
     high_ppm_suppliers?: Array<{ supplier_id: string; supplier_name: string; ppm: number }>;
   };
   recent_actions: Array<{
+    log_id: string;
     record_id: string;
     table_name: string;
     entity_no: string;

@@ -479,6 +479,7 @@ async def get_recent_actions(db: AsyncSession, user_id: str, limit: int = 5) -> 
             entity_no = await db.scalar(q) or ""
 
         actions.append({
+            "log_id": str(log.log_id),
             "record_id": str(log.record_id),
             "table_name": log.table_name,
             "entity_no": entity_no,
