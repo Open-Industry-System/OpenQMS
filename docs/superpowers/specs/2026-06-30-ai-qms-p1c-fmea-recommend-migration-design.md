@@ -28,12 +28,15 @@ P1-B 的 `quality_trend` 是纯 LLM 特性——LLM 未配置时返回 503（`ll
 - 去掉 `llm_provider` 参数，签名改为 `__init__(self, db: AsyncSession, graph_repo: FMEAGraphRepository, llm_timeout: int | None = None)`。
 - 删 `self.llm`、删 `from app.services.llm_provider import LLMProvider` 导入。
 - `self.llm_timeout = max(llm_timeout or settings.LLM_TIMEOUT, 15)` 保留（15s 下限不动）。
-- **替换全部 `self.llm is not None` / `self.llm.complete` 引用**（共 5 处业务引用，分布在 `recommend()` 与缓存 helper）：
-  - line 592（`_get_cached` 命中后的 fall-through gate）：`if self.llm is not None and not cached_with_llm:` —— 见下方"缓存 gate 顺序"特殊处理
-  - line 624（`_need_llm` 调用入参 `llm_available=self.llm is not None`）：改为 `llm_available=pc is not None`
-  - line 641（`self.llm.complete(prompt, {})`）：改为 `provider_adapter.complete_json(pc, prompt, {})`（见 §`need_llm` 分支）
-  - line 663 / 902 / 925 / 933（`RecommendResponse.llm_available` 与 `RecommendationCache.llm_available` 写入）：改为 `pc is not None`。`_cache_result`（line 902/925/933）与响应构造（line 663）需把 `llm_available` 值从 `recommend()` 局部 `pc is not None` 传入（`_cache_result` 加 `llm_available: bool` 参数），不再访问已删除的 `self.llm`。
+- **替换全部 `self.llm is not None` / `self.llm.complete` 引用**（共 8 处，分布在 `recommend()` 与两个缓存 helper）：
   - line 557（`self.llm = llm_provider`）随构造函数删除一并去掉。
+  - line 592（`_get_cached` 命中后的 fall-through gate）：`if self.llm is not None and not cached_with_llm:` —— 改 `pc is not None`，见下方"缓存 gate 顺序"特殊处理。
+  - line 624（`_need_llm` 调用入参 `llm_available=self.llm is not None`）：改为 `llm_available=pc is not None`。
+  - line 641（`self.llm.complete(prompt, {})`）：改为 `provider_adapter.complete_json(pc, prompt, {})`（见 §`need_llm` 分支）。
+  - line 663（`recommend()` 内 `RecommendResponse.llm_available` 写入）：改为 `pc is not None`。
+  - **line 902（`_get_cached` 内 `RecommendResponse.llm_available` 写入——缓存命中响应）**：`_get_cached` 需加 `llm_available: bool` 参数（由 `recommend()` 传 `pc is not None`），改 line 902 用该参数。**勿漏**：缓存命中响应里的 `llm_available` 也要反映当前 `pc` 状态，否则命中陈旧缓存时返回错误可用性。
+  - line 925 / 933（`_cache_result` 内 `RecommendationCache.llm_available` 写入，两处——insert values 与 on_conflict update set）：`_cache_result` 需加 `llm_available: bool` 参数（由 `recommend()` 传 `pc is not None`），改这两处用该参数。
+  - 综上：`_get_cached` 与 `_cache_result` 各加 `llm_available: bool` 参数，`recommend()` 调用处传 `pc is not None`，彻底去掉对 `self.llm` 的访问。
 - `self.llm_timeout`（line 562/642）**保留**（这是超时字段，不是 provider 引用）。
 
 **`recommend()` 签名**：新增 `tenant_schema: str` 参数（由路由传入，与 P1-B 一致）。`factory_id` 从 `fmea.factory_id` 取（NOT NULL，无需新参）。保留 `request: RecommendRequest` / `user: User` / `request_scope: RequestScope`。
@@ -51,15 +54,16 @@ except ProviderNotConfiguredError:
 
 > **⚠ 必须在缓存检查之前解析 `pc`**，否则有行为回归：现有 line 590–595 的缓存 gate 是 `if self.llm is not None and not cached_with_llm: pass  # fall through to re-evaluate with LLM`——即"缓存是无 LLM 生成的、而现在 LLM 已可用"时**穿透缓存重新评估**。若按"缓存 miss 后才 build provider"实现，`pc` 在缓存命中时尚未解析，这个 fall-through gate 永远走 `else: return cached`，导致规则模式缓存在 LLM 配好后继续命中 24 小时、AI 增强不触发。因此 `pc` 必须先于缓存检查解析，缓存 gate 的 `self.llm is not None`（line 592）改为 `pc is not None`，`_need_llm` 的 `llm_available`（line 624）同样用 `pc is not None`。
 
-**`_need_llm` 调用**：`llm_available=pc is not None`（其余参数不变）。
+**`_need_llm` 调用**：`llm_available=pc is not None`（其余参数不变）。`_need_llm` 实现是 `return llm_available and (...)`（`recommendation_service.py:864`），故 `pc is None` 时 `_need_llm` 恒返回 `False`——**`pc is None` 走 `need_llm=False` 分支，不进 `need_llm=True` 分支**。
 
-**`need_llm` 分支**（原 `self.llm.complete` 调用点，当前行 630–657）：
-- `pc is None` → 审计 `llm_not_configured`；`source = "graph" if graph_suggestions else "rule_fallback"`（与旧 `self.llm is None` 路径等价，仅新增审计）。
-- `pc is not None` →
+**`need_llm` 分支语义（保留现状，关键决策）**：
+- `need_llm=False`（含 `pc is None` 未配置）→ `source = "graph" if graph_suggestions else "rule"`（**当前行 657**，非 `rule_fallback`），**不审计**，规则模式照常缓存 24h（`source != "rule_fallback"` 满足当前 line 668 缓存 gate）。这是 P1-C 的明确决策：**未配置 LLM 不审计、不 `rule_fallback`、规则模式缓存**——保留现有 hybrid UX，最小改动。
+- `need_llm=True`（`pc is not None` 且业务上值得 LLM 增强）→ 原调用点（当前行 630–657）：
   - `raw = await asyncio.wait_for(provider_adapter.complete_json(pc, prompt, {}), timeout=self.llm_timeout)`（`response_schema={}` 与旧 `self.llm.complete(prompt, {})` 一致；解析校验 `SuggestionList.model_validate(raw)` 不变）。
   - 成功 → 审计 `success`，`source` 同现状（`graph_enriched` / `hybrid`）。
-  - 异常（含超时）→ 审计 `llm_failed`，`source = "graph" if graph_suggestions else "rule_fallback"`，`logger.warning` 保留（与现状 `except Exception` 一致）。
-- `need_llm=False` 分支不变（纯规则 / 纯图谱，不审计）。
+  - 异常（含超时）→ 审计 `llm_failed`，`source = "graph" if graph_suggestions else "rule_fallback"`，`logger.warning` 保留（与现状 `except Exception` 一致）；`rule_fallback` 不缓存（line 668 gate 保持）。
+
+> **⚠ 状态机闭合说明**：审计只覆盖 `need_llm=True` 分支的真实 LLM 调用，**两态** `success` / `llm_failed`。**不写 `llm_not_configured` 审计**——因 `pc is None` 时 `_need_llm` 返回 `False`，根本不进 LLM 尝试分支，没有"本该调 LLM 但没配"的可观测信号被丢弃（这是与 P1-B 的差异：P1-B 是纯 LLM 特性，未配置即 503 并审计；P1-C 是 hybrid，未配置即静默规则降级，与现状一致）。若未来需要"本该用 LLM 但没配"的可观测性，再拆 `_need_llm` 为 `would_need_llm`（业务）+ `pc` 可用性两轴——P1-C 不做（YAGNI）。
 
 **审计入口**（新增私有方法 `_write_recommend_audit`，调 `audit.write_audit_raw`）：
 - `db` / `user_id=user.user_id`（`User` 模型主键字段是 `user_id`，非 `id`——`backend/app/models/user.py:14`）/ `factory_id=fmea.factory_id` / `tenant_schema=tenant_schema`
@@ -70,7 +74,7 @@ except ProviderNotConfiguredError:
 
 > **⚠ 不要写成"FastAPI 请求依赖自动提交"**——`backend/app/database.py:39` 的 `get_db` 依赖在 `finally` 里**只 `rollback`、从不 `commit`**（`if session.in_transaction(): await session.rollback()`）。OpenQMS 的提交约定是**路由层显式 `await db.commit()`**，`/recommend` 路由当前就有（line 325），P1-C 保留它即可。这与 P1-B 的 `_write_interpret_audit` 内部独立 `await db.commit()` 不同（P1-B 走 dashboard 路由、helper 自提交）；P1-C 选择沿用 `recommend()` 的"路由层统一提交"现状，不强制对齐 P1-B。两种模式各自自洽，但**文档不得描述为依赖自动提交**。
 
-**审计范围（有意收窄）**：审计只覆盖 `need_llm=True` 的 LLM 尝试路径，三态 `success` / `llm_failed` / `llm_not_configured`。**缓存命中、`need_llm=False` 纯规则路径不审计**——对齐"审计 LLM 调用"语义，避免每次缓存读都写审计。这是与 P1-B（每次解读都写审计）的差异，因 recommend 有缓存且高频。
+**审计范围（有意收窄）**：审计只覆盖 `need_llm=True` 分支的真实 LLM 调用，**两态** `success` / `llm_failed`。**缓存命中、`need_llm=False` 路径（含 `pc is None` 未配置）不审计**——对齐"审计 LLM 调用"语义，避免每次缓存读都写审计，且 `pc is None` 时 `_need_llm` 恒 `False`、根本不进 LLM 尝试分支。这是与 P1-B（每次解读都写审计、未配置写 `llm_not_configured`）的关键差异：P1-C 是 hybrid，未配置即静默规则降级，不产生审计。
 
 ### 2.2 `backend/app/api/fmea.py` — 调用面适配
 
@@ -107,12 +111,12 @@ P1-B 在 `backend/app/api/dashboard.py` 加了私有 `_tenant_schema(request) ->
 
 - **`recommendation_service` 测试**：stub `provider_adapter.build_client` / `complete_json` 替换旧 `llm_provider` 注入；覆盖：
   - `success`：`complete_json` 返回合法 dict → `source=hybrid/graph_enriched`，审计 `success`，`factory_id`/`tenant_schema`/`correlation_id` 落库
-  - `llm_failed`：`complete_json` 抛异常 / 超时 → `source=rule_fallback`，审计 `llm_failed`，`logger.warning` 保留
-  - `llm_not_configured`：`build_client` 抛 `ProviderNotConfiguredError` → `pc=None`，规则降级 200，审计 `llm_not_configured`
+  - `llm_failed`：`complete_json` 抛异常 / 超时 → `source=rule_fallback`，审计 `llm_failed`，`logger.warning` 保留；`rule_fallback` 不缓存
+  - `llm_not_configured`：`build_client` 抛 `ProviderNotConfiguredError` → `pc=None` → `_need_llm=False` → `source=rule`（或 `graph`），**不审计**、规则模式缓存 24h（验证保留现状 hybrid 降级，非 `rule_fallback`、非 503）
   - 缓存命中：不审计（验证 `_write_recommend_audit` 不被调）
   - `need_llm=False` 纯规则：不审计
   - `correlation_id` 对同一 (fmea, trigger, context) 稳定
-  - **缓存 gate 顺序回归**：先以 `pc=None`（未配 LLM）请求生成规则模式缓存 → 配好 LLM（`build_client` 返回 pc）再请求同 context → fall-through 重新评估、`source` 含 LLM 增强（验证 §2.1 顺序修复，防止 24h 陈旧规则缓存）
+  - **缓存 gate 顺序回归**：先以 `pc=None`（未配 LLM）请求生成规则模式缓存（`source=rule`，`cached=True` 落库）→ 配好 LLM（`build_client` 返回 pc）再请求同 context → fall-through 重新评估、`source` 含 LLM 增强（验证 §2.1 顺序修复，防止 24h 陈旧规则缓存）
 - **`api/fmea.py` `/recommend` 路由测试**：不传 `app.state.llm_provider`，验证 service 用 `tenant_schema` 构造；现有路由测试适配；验证路由仍 `await db.commit()`（审计行 + 缓存行落库）。
 - **`fmea_service.update_fmea` 测试**：`graph_data`/`product_line_code` 变更触发缓存失效路径不 `TypeError`（验证构造函数签名改动覆盖此调用点）。
 - **`dashboard.py` 路由测试**：验证改用共享 `tenant_schema` 后行为不变（P1-B 既有测试应仍绿）。
@@ -133,10 +137,10 @@ api/fmea.py  POST /{fmea_id}/recommend
         ├─ rules + graph similarity                       ← 不变
         ├─ _need_llm(llm_available=pc is not None)        ← 入参改 pc
         └─ need_llm 分支:
-            pc is None → audit llm_not_configured → source=rule_fallback
-            pc ok:
+            need_llm=False（含 pc is None）→ source=rule/graph，不审计，规则模式缓存
+            need_llm=True（pc ok 且值得增强）:
               complete_json(pc, prompt, {}) → success → audit success
-                                       → except  → audit llm_failed → rule_fallback
+                                       → except  → audit llm_failed → rule_fallback（不缓存）
         └─ 路由层 await db.commit()（审计行 + 缓存行一并提交）  ← 保留 fmea.py:325
 ```
 
@@ -167,7 +171,7 @@ api/fmea.py  POST /{fmea_id}/recommend
 1. `core/tenant.py` 共享 util + 单测 → `dashboard.py` 切换导入（P1-B 测试应仍绿）
 2. `recommendation_service.__init__` 去 `llm_provider` 参数；**同步改 `fmea_service.update_fmea:266` 的构造调用**（去 `llm_provider=None`）+ `recommend()` 加 `tenant_schema` 参数；替换全部 `self.llm` 引用（line 557/592/624/641/663/902/925/933，`self.llm_timeout` 保留）
 3. **`pc` 解析置于缓存检查之前**（避免缓存 gate 回归），缓存 gate `pc is not None` 替换 line 592，`_need_llm` 入参 `pc is not None` 替换 line 624，`_cache_result` 加 `llm_available: bool` 参数替换 line 902/925/933
-4. `_write_recommend_audit`（调 `write_audit_raw`，含 `user_id=user.user_id` / correlation_id / factory_id / tenant_schema）+ `need_llm` 分支三态审计接线；**不 commit**（路由层 `await db.commit()` 统一提交）
+4. `_write_recommend_audit`（调 `write_audit_raw`，含 `user_id=user.user_id` / correlation_id / factory_id / tenant_schema）+ `need_llm=True` 分支**两态**审计接线（`success`/`llm_failed`；`need_llm=False` 含未配置不审计）；**不 commit**（路由层 `await db.commit()` 统一提交）
 5. `api/fmea.py` `/recommend` 调用面切换（去 `app.state.llm_provider`、传 `tenant_schema`、保留 `await db.commit()`）
 6. 全量回归 + `make check`（backend pytest + frontend tsc）
 
