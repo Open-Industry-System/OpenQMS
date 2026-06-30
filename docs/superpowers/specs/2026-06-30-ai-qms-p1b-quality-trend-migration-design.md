@@ -32,7 +32,14 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
 - openai 降级重试保留：`chat.completions.create(response_format={"type": "json_object"})` 报 `"json_object"`/`"response_format"` 时去掉 `response_format` 重试
 - `chat_with_tools`（tool-calling）不动；`complete_json` 服务单次 JSON 消费者
 - `response_schema` 参数保留（与旧 `complete` 签名一致；P1-B 不强制 schema 校验，留作 P2+ 模型级 schema 强制时用）
-- **未配置 LLM 边界**：`provider_adapter` 定义自己的 `ProviderNotConfiguredError`（基座异常，不 import 业务层 `LLMNotConfiguredError`）。`build_client` 在 `cfg.llm_api_key` 为空 或 `cfg.llm_model` 为空时抛 `ProviderNotConfiguredError`（不再默认 `gpt-4o`/`claude-sonnet-...` 静默构造）。`interpret_quality_trend` 捕获 `ProviderNotConfiguredError` → 写 `llm_not_configured` 审计 → 抛业务层 `LLMNotConfiguredError`（保持对 dashboard 路由的 503 语义不变）。
+- **未配置 LLM 边界**：`provider_adapter` 定义自己的 `ProviderNotConfiguredError`（基座异常，不 import 业务层 `LLMNotConfiguredError`）。`build_client` 抛 `ProviderNotConfiguredError` 的条件与旧 `create_llm_provider` 返回 None 的条件**对齐**（不收紧配置策略）：
+  - `cfg.llm_provider` 为空 → 抛（旧: provider 空返回 None = rule-only）
+  - provider 非 `local` 且 `cfg.llm_api_key` 为空 → 抛（旧: 同）
+  - provider == `local` 且 `cfg.llm_base_url` 为空 → 抛（旧: 同）
+  - provider == `local` 且 `cfg.llm_model` 为空 → 抛（旧: local 要求 model 必填）
+  - **`cfg.llm_model` 为空（claude/openai）→ 不抛**，用 provider 默认值（`claude-sonnet-4-6-20250514` / `gpt-4o`），与旧 `create_llm_provider` 一致（`config.py:26` 注释「各 provider 有内部默认值」）
+  - `interpret_quality_trend` 捕获 `ProviderNotConfiguredError` → 写 `llm_not_configured` 审计 → 抛业务层 `LLMNotConfiguredError`（保持对 dashboard 路由的 503 语义不变）。
+  - **注意**：P0 `build_client` 当前对 claude/openai 也默认 model（`claude-sonnet-4-6-20250514`/`gpt-4o`）—— 本 spec 不改变该行为，只补「未配置」抛错路径。P0 的 agent harness 调用 `build_client` 时若配置缺失，现在会抛 `ProviderNotConfiguredError` 而非静默用默认 client（这是基座行为收敛，P0 测试若有 `build_client` 用空配置的用例需适配）。
 
 ### 2.2 `backend/app/services/agent/audit.py` — 新增 `write_audit_raw`
 
@@ -89,14 +96,14 @@ dashboard.py 路由
 
 7 状态全部保留并经 `write_audit_raw` 写入：`rate_limited` / `insufficient_data` / `llm_not_configured` / `llm_failed`(超时+异常) / `parse_failed` / `cache_hit` / `success`。`LLM_TIMEOUT=30s` 保留。`complete_json` 的降级重试对调用方透明（不改变错误状态机）。
 
-`llm_not_configured` 语义闭合（见 §2.1）：`build_client` 缺 key/model → 抛基座 `ProviderNotConfiguredError` → `interpret_quality_trend` 捕获 → 写 `llm_not_configured` 审计 → 抛业务层 `LLMNotConfiguredError`（dashboard 路由仍返回 503，语义不变）。基座不 import 业务层异常。
+`llm_not_configured` 语义闭合（见 §2.1）：`build_client` 在「provider 空 / 非 local 且 api_key 空 / local 且 base_url 或 model 空」时抛基座 `ProviderNotConfiguredError` → `interpret_quality_trend` 捕获 → 写 `llm_not_configured` 审计 → 抛业务层 `LLMNotConfiguredError`（dashboard 路由仍返回 503，语义不变）。基座不 import 业务层异常。claude/openai 的 model 空时用 provider 默认值（不抛）。
 
 ## 5. 测试
 
 - `provider_adapter.complete_json`：
   - openai 路径：`response_format=json_object` 成功 → 返回 dict；SDK 拒绝 `response_format` → 降级重试成功；返回非 JSON 包裹 ```json fence → `_extract_json` 解析；超 `MAX_RESPONSE_BYTES` → 抛 `ValueError`
   - anthropic 路径：`messages.create` → `json.loads` 成功；超限抛错
-  - `build_client` 缺 key/model → 抛 `ProviderNotConfiguredError`
+  - `build_client` 未配置抛 `ProviderNotConfiguredError`：provider 空 / 非 local 且 api_key 空 / local 且 base_url 或 model 空；**claude/openai 的 model 空不抛**（用默认值）
   - 全程 stub SDK（monkeypatch `pc.client`），不调真实 LLM
 - `audit.write_audit_raw`：写入 `audit_logs` 含 `factory_id`（含 None 用例）/`tenant_schema`/`correlation_id`；`write_audit(ctx)` 仍工作（薄包装不破坏 P0 测试）
 - `interpret_quality_trend` 迁移后：
