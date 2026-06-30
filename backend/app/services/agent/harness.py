@@ -62,31 +62,68 @@ async def run_message(db, session, user, redis, user_message: str) -> RunResult:
         if not turn.tool_calls:
             assistant_text = turn.content or ""
             break
-        # append the assistant turn (openai-style tool_calls) and execute each via the gateway
-        messages.append(
-            {
-                "role": "assistant",
-                "content": turn.content,
-                "tool_calls": [
+        if pc.provider == "openai":
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": turn.content or "",
+                    "tool_calls": [
+                        {
+                            "id": c["id"],
+                            "type": "function",
+                            "function": {
+                                "name": c["name"],
+                                "arguments": json.dumps(c.get("arguments") or {}),
+                            },
+                        }
+                        for c in turn.tool_calls
+                    ],
+                }
+            )
+            for c in turn.tool_calls:
+                res = await gateway.invoke(ctx, c["name"], c.get("arguments") or {})
+                if res.status == "pending" and res.action_id:
+                    pending.append(res.action_id)
+                messages.append(
                     {
-                        "id": f"call_{i}",
-                        "type": "function",
-                        "function": {
-                            "name": c["name"],
-                            "arguments": json.dumps(c.get("arguments") or {}),
-                        },
+                        "role": "tool",
+                        "tool_call_id": c["id"],
+                        "content": json.dumps(
+                            res.result if res.result is not None else {"status": res.status}
+                        ),
                     }
-                    for i, c in enumerate(turn.tool_calls)
-                ],
-            }
-        )
-        for c in turn.tool_calls:
-            res = await gateway.invoke(ctx, c["name"], c.get("arguments") or {})
-            if res.status == "pending" and res.action_id:
-                pending.append(res.action_id)
-            # feed the tool result back (openai-style tool message; anthropic shaping is a P2 follow-up)
-            messages.append({"role": "tool", "tool_call_id": "call_0",
-                             "content": json.dumps(res.result if res.result is not None else {"status": res.status})})
+                )
+        else:  # anthropic
+            tool_use_blocks = [
+                {
+                    "type": "tool_use",
+                    "id": c["id"],
+                    "name": c["name"],
+                    "input": c.get("arguments") or {},
+                }
+                for c in turn.tool_calls
+            ]
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": turn.content or ""}] + tool_use_blocks,
+                }
+            )
+            tool_results = []
+            for c in turn.tool_calls:
+                res = await gateway.invoke(ctx, c["name"], c.get("arguments") or {})
+                if res.status == "pending" and res.action_id:
+                    pending.append(res.action_id)
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": c["id"],
+                        "content": json.dumps(
+                            res.result if res.result is not None else {"status": res.status}
+                        ),
+                    }
+                )
+            messages.append({"role": "user", "content": tool_results})
     else:
         assistant_text = "（已达到最大工具调用轮数）"
 

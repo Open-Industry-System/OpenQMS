@@ -4,11 +4,13 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_db, get_request_scope
 from app.core.factory_scope import check_factory_access
 from app.models.agent import AgentAction
+from app.models.role import RoleDefinition
 from app.schemas.agent import ActionOut, DecisionIn
 from app.services.agent import approval
 
@@ -23,7 +25,12 @@ async def _check_approver_auth(action: AgentAction, scope: RequestScope, db: Asy
     from app.core.permissions import Module, PermissionLevel, get_user_permission
     from app.services.agent.registry import TOOL_REGISTRY
 
-    if scope.user.role_definition.role_key == "admin":
+    role_key = (
+        await db.execute(
+            select(RoleDefinition.role_key).where(RoleDefinition.id == scope.user.role_id)
+        )
+    ).scalar_one_or_none()
+    if role_key == "admin":
         return
     spec = TOOL_REGISTRY.get(action.tool_name)
     req = (spec.required_permission if spec else None) or {}
