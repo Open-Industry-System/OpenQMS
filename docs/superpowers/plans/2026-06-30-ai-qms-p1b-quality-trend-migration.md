@@ -14,7 +14,7 @@
 
 - **No `pydantic-ai`** (conflicts with pinned `pydantic==2.9.2`). Use already-installed `openai>=1.50`/`anthropic>=0.40` SDKs.
 - Base must NOT import business-layer exceptions. `provider_adapter` defines `ProviderNotConfiguredError`; `interpret_quality_trend` catches it and raises business-layer `LLMNotConfiguredError`.
-- `build_client` raises `ProviderNotConfiguredError` when: `llm_provider` empty; OR provider != `local` and `llm_api_key` empty; OR provider == `local` and (`llm_base_url` empty or `llm_model` empty). **claude/openai with empty `llm_model` does NOT raise** — use provider default (`claude-sonnet-4-6-20250514` / `gpt-4o`), matching legacy `create_llm_provider`. (P0 `build_client` currently never raises — this plan adds the raise path; P0 test `test_build_client_returns_provider_client` is adapted in Task 1.)
+- `build_client` raises `ProviderNotConfiguredError` when: `llm_provider` empty; OR provider != `local` and `llm_api_key` empty; OR provider == `local` and (`llm_base_url` empty or `llm_model` empty). **claude/openai with empty `llm_model` does NOT raise** — use provider default (`claude-sonnet-4-6-20250514` / `gpt-4o`), matching legacy `create_llm_provider`. **`local` with complete config is supported** (httpx `POST {base_url}/api/generate`, mirroring legacy `LocalProvider.complete`) — do NOT raise "not supported". (P0 `build_client` currently never raises — this plan adds the raise path; P0 test `test_build_client_returns_provider_client` is adapted in Task 1.)
 - `factory_id: uuid.UUID | None` (nullable — matches `RequestScope.effective_factory_id` + dashboard "None=global" + `AuditLog.factory_id` nullable).
 - `tenant_schema` resolved via a `_tenant_schema(request)` helper (`getattr(request.state, "tenant", None)` → `schema_name`, else `"public"`) — mirror `backend/app/api/agent/sessions.py:17`.
 - `_extract_json` + `MAX_RESPONSE_BYTES` extracted to a **shared util** (`backend/app/services/agent/llm_json.py`); `llm_provider.py` imports from it (legacy `OpenAIProvider.complete` keeps working). Do NOT delete `llm_provider.py`'s symbols.
@@ -285,9 +285,12 @@ async def build_client(db: AsyncSession) -> ProviderClient:
             raise ProviderNotConfiguredError("local 需要 LLM_BASE_URL")
         if not cfg.llm_model:
             raise ProviderNotConfiguredError("local 需要 LLM_MODEL")
-        # local uses httpx directly; fall through to openai-compatible client below
-        # (legacy LocalProvider is separate; P1-B does not migrate local — raise to be safe)
-        raise ProviderNotConfiguredError("local provider not supported by agent base yet")
+        import httpx
+        return ProviderClient(
+            provider="local",
+            client=httpx.AsyncClient(base_url=cfg.llm_base_url.rstrip("/"), timeout=30),
+            model=cfg.llm_model,
+        )
     # openai-compatible (openai / deepseek / ark via base_url)
     if not cfg.llm_api_key:
         raise ProviderNotConfiguredError(f"{provider} 需要 LLM_API_KEY")
@@ -305,6 +308,7 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
     openai: response_format=json_object, retry without it if the gateway rejects.
     anthropic: messages.create + json.loads.
     Both enforce MAX_RESPONSE_BYTES and use extract_json for fenced JSON.
+    local: httpx POST {base_url}/api/generate (mirrors legacy LocalProvider.complete).
     """
     messages = [{"role": "user", "content": prompt}]
     if pc.provider == "openai":
@@ -320,6 +324,13 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
             else:
                 raise
         text = resp.choices[0].message.content or ""
+    elif pc.provider == "local":
+        resp = await pc.client.post(
+            "/api/generate",
+            json={"model": pc.model, "prompt": prompt, "stream": False},
+        )
+        resp.raise_for_status()
+        text = resp.json().get("response", "")
     else:  # anthropic
         resp = await pc.client.messages.create(
             model=pc.model, messages=messages, max_tokens=1024,
@@ -406,7 +417,7 @@ async def test_write_audit_delegates_to_raw(db, admin_user, default_factory):
     from app.services.agent import harness
     s = await harness.create_session(db, admin_user, default_factory.id, "public", "copilot")
     ctx = await harness.build_context(db, s, admin_user)
-    log = await audit.write_audit(ctx, "agent_tool_calls", uuid.uuid4(), "call", uuid.uuid4())
+    log = await audit.write_audit(db, ctx, "agent_tool_calls", uuid.uuid4(), "call", uuid.uuid4())
     assert log.factory_id == default_factory.id
     assert log.operated_by == admin_user.user_id
 ```
@@ -567,12 +578,12 @@ from app.services.agent import provider_adapter
 from app.services.agent.audit import write_audit_raw
 ```
 
-(b) Change the `interpret_quality_trend` signature — replace `llm_provider,` param with `factory_id: uuid.UUID | None, tenant_schema: str,`:
+(b) Change the `interpret_quality_trend` signature — replace `llm_provider,` param with `factory_id: uuid_mod.UUID | None, tenant_schema: str,`. **Note:** this file uses `import uuid as uuid_mod` (line 168) — use `uuid_mod.UUID` (not `uuid.UUID`) so the annotation matches the file's alias and doesn't trip an implementer who copies verbatim. With `from __future__ import annotations` the annotation is a string at runtime, but keep the alias consistent:
 ```python
 async def interpret_quality_trend(
     db,
     user_id: str,
-    factory_id: uuid.UUID | None,
+    factory_id: uuid_mod.UUID | None,
     tenant_schema: str,
     filter_codes: list[str],
     allowed_modules: set[str],
@@ -783,6 +794,7 @@ async def _call_interpret(llm_provider):
     db = MagicMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.flush = AsyncMock()
     db.rollback = AsyncMock()
     db.scalar = AsyncMock(side_effect=[4, 1, 2, 3, 2])
     db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
