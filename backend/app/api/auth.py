@@ -1,10 +1,12 @@
 import logging
 import time
+import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
@@ -29,7 +31,9 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
     UserResponse,
+    UserUpdateRequest,
 )
+from app.services import factory_service, permission_service, user_service
 from app.services.permission_service import get_role_permissions
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -188,6 +192,70 @@ async def list_users(db: AsyncSession = Depends(get_db), _user: User = Depends(r
     result = await db.execute(select(User))
     users = result.scalars().all()
     return [await build_user_response(u, db) for u in users]
+
+
+@router.patch("/users/{user_id}", response_model=UserResponse)
+async def update_user_endpoint(
+    user_id: uuid.UUID,
+    req: UserUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)),
+):
+    updates = req.model_dump(exclude_unset=True)
+    try:
+        user = await user_service.update_user(db, user_id, updates, _admin.user_id)
+        await db.commit()
+        await db.refresh(user)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    logger.info("AUTH_USER_UPDATE user_id=%s by=%s fields=%s", user_id, _admin.user_id, list(updates.keys()))
+    return await build_user_response(user, db)
+
+
+@router.delete("/users/{user_id}")
+async def delete_user_endpoint(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)),
+):
+    try:
+        await user_service.delete_user(db, user_id, _admin.user_id)
+        await db.commit()
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该用户存在关联业务记录，无法删除；建议改为停用",
+        )
+    logger.info("AUTH_USER_DELETE user_id=%s by=%s", user_id, _admin.user_id)
+    return {"message": "用户已删除"}
+
+
+@router.get("/roles")
+async def list_assignable_roles(
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)),
+):
+    roles = await permission_service.list_roles(db)
+    return [{"role_key": r.role_key, "name_zh": r.name_zh, "name_en": r.name_en} for r in roles]
+
+
+@router.get("/factories")
+async def list_factories_for_admin(
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)),
+):
+    factories = await factory_service.list_factories(db, is_active=True)
+    return [
+        {"id": str(f.id), "code": f.code, "name": f.name, "location": f.location, "is_active": f.is_active}
+        for f in factories
+    ]
 
 
 @router.get("/me", response_model=UserResponse)

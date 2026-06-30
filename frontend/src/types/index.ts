@@ -12,6 +12,12 @@ export interface Factory {
   is_active: boolean;
 }
 
+export interface AssignableRoleOption {
+  role_key: string;
+  name_zh: string;
+  name_en: string;
+}
+
 export interface FactoryScope {
   accessible_factory_ids: string[] | null;  // null = all factories
   default_factory_id: string | null;
@@ -1738,6 +1744,16 @@ export interface RegisterRequest {
   display_name?: string | null;
   email?: string | null;
   role_key: string;
+}
+
+export interface UserUpdateRequest {
+  display_name?: string | null;
+  email?: string | null;
+  role_key?: string | null;
+  is_active?: boolean | null;
+  password?: string | null;
+  default_factory_id?: string | null;
+  factory_ids?: string[] | null;
 }
 
 export interface RoleOption {

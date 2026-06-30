@@ -1,6 +1,19 @@
 {
   "title": "User Management",
   "create": "Create User",
+  "edit": "Edit",
+  "deactivate": "Deactivate",
+  "activate": "Activate",
+  "delete": "Delete",
+  "resetPassword": "Reset Password",
+  "editModalTitle": "Edit User",
+  "noDefaultFactory": "None",
+  "passwordHint": "Leave blank to keep unchanged; min 8 chars with upper/lower/digit/special",
+  "confirmDeleteTitle": "Delete user",
+  "confirmDeleteContent": "Hard delete is irreversible. If the user has linked business records, deletion will fail — consider deactivating instead.",
+  "cannotDeactivateSelf": "You cannot deactivate yourself",
+  "cannotDeleteSelf": "You cannot delete yourself",
+  "actions": "Actions",
   "fields": {
     "username": "Username",
     "password": "Password",
@@ -8,12 +21,17 @@
     "email": "Email",
     "role_key": "Role",
     "is_active": "Status",
-    "factories": "Factories"
+    "factories": "Accessible Factories",
+    "defaultFactory": "Default Factory"
   },
   "createModalTitle": "Create User",
   "messages": {
     "created": "User created",
-    "createFailed": "Create failed"
+    "createFailed": "Create failed",
+    "updated": "User updated",
+    "updateFailed": "Update failed",
+    "deleted": "User deleted",
+    "deleteFailed": "Delete failed"
   },
   "active": "Active",
   "inactive": "Inactive"
