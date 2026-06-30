@@ -150,6 +150,7 @@ docker compose exec backend python -m app.seed
 | [权限参考](docs/permissions.md) | 完整权限矩阵 |
 | [开发指南](docs/development.md) | 开发约定、添加新模块 |
 | [路线图](docs/ROADMAP.md) | 开发计划与进度 |
+| [决策日志](docs/DECISIONS.md) | 关键架构决策（ADR）及其背景与影响 |
 
 ### 模块手册
 
