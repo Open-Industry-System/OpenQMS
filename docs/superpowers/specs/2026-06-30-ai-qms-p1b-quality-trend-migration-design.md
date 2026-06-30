@@ -27,11 +27,12 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
     - anthropic 路径：messages.create + json.loads + 大小上限。"""
 ```
 
-- 复用 `_extract_json`（从 `llm_provider.py` 移到 `provider_adapter.py`，或两处共用一个 util；优先移到 `provider_adapter.py` 让基座自洽）
-- `MAX_RESPONSE_BYTES = 10_240` 上限保留（从 `llm_provider.py` 一并搬入或共用）
+- 复用 `_extract_json`：**抽到共享 util**（`backend/app/services/agent/llm_json.py` 或类似），`provider_adapter.complete_json` 与旧 `llm_provider._extract_json` 都从该 util 导入。**不直接移动** `llm_provider._extract_json`——旧 `OpenAIProvider.complete()` 仍依赖它（P1-B 不迁移 FMEA/管理评审/图谱等消费者，旧 `LLMProvider` 类保留），`llm_provider.py` 改为从共享 util 导入并保留兼容包装。
+- `MAX_RESPONSE_BYTES = 10_240`：同样抽到共享 util（或 `provider_adapter` 模块常量），`llm_provider.py` 保留导入兼容。
 - openai 降级重试保留：`chat.completions.create(response_format={"type": "json_object"})` 报 `"json_object"`/`"response_format"` 时去掉 `response_format` 重试
 - `chat_with_tools`（tool-calling）不动；`complete_json` 服务单次 JSON 消费者
 - `response_schema` 参数保留（与旧 `complete` 签名一致；P1-B 不强制 schema 校验，留作 P2+ 模型级 schema 强制时用）
+- **未配置 LLM 边界**：`provider_adapter` 定义自己的 `ProviderNotConfiguredError`（基座异常，不 import 业务层 `LLMNotConfiguredError`）。`build_client` 在 `cfg.llm_api_key` 为空 或 `cfg.llm_model` 为空时抛 `ProviderNotConfiguredError`（不再默认 `gpt-4o`/`claude-sonnet-...` 静默构造）。`interpret_quality_trend` 捕获 `ProviderNotConfiguredError` → 写 `llm_not_configured` 审计 → 抛业务层 `LLMNotConfiguredError`（保持对 dashboard 路由的 503 语义不变）。
 
 ### 2.2 `backend/app/services/agent/audit.py` — 新增 `write_audit_raw`
 
@@ -39,7 +40,7 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
 
 ```python
 async def write_audit_raw(
-    db: AsyncSession, *, user_id: uuid.UUID, factory_id: uuid.UUID,
+    db: AsyncSession, *, user_id: uuid.UUID, factory_id: uuid.UUID | None,
     tenant_schema: str, table_name: str, record_id: uuid.UUID, action: str,
     correlation_id: uuid.UUID | None = None, changed_fields: dict | None = None,
     old_values: dict | None = None, new_values: dict | None = None,
@@ -52,13 +53,13 @@ async def write_audit_raw(
 
 ### 2.3 `backend/app/services/quality_trend_service.py` — 换 provider + 换审计
 
-- `interpret_quality_trend` 签名：**去掉 `llm_provider` 参数**，新增 `factory_id: uuid.UUID` + `tenant_schema: str`（由调用方从 `RequestScope` 解析传入）
+- `interpret_quality_trend` 签名：**去掉 `llm_provider` 参数**，新增 `factory_id: uuid.UUID | None` + `tenant_schema: str`（由调用方从 `RequestScope` 解析传入）。`factory_id` 允许 `None`——与 `RequestScope.effective_factory_id: UUID | None` 及 dashboard 现有"None=全局范围"语义一致；`AuditLog.factory_id` 本就 nullable，`write_audit_raw` 接受 `factory_id: uuid.UUID | None`。
 - 内部：
   - `pc = await provider_adapter.build_client(db)`（读 raw ai-config，基座 provider）
   - `raw = await asyncio.wait_for(provider_adapter.complete_json(pc, prompt, _interpret_response_schema()), timeout=LLM_TIMEOUT)`
 - `_write_interpret_audit` 改用 `audit.write_audit_raw`：
-  - 传 `factory_id`/`tenant_schema`/`user_id`
-  - `correlation_id` = 由 `scope_hash` 派生的稳定 UUID（`uuid.uuid5(uuid.NAMESPACE_URL, f"quality_trend:{scope_hash}")`）或每次新生成 —— **选稳定派生**（同一 scope 的多次解读可按 correlation_id 聚合）
+  - 传 `factory_id`（可 None）/`tenant_schema`/`user_id`
+  - `correlation_id` = 由 `scope_hash` 派生的稳定 UUID（`uuid.uuid5(uuid.NAMESPACE_URL, f"quality_trend:{scope_hash}")`）—— 同一 scope 多次解读可按 correlation_id 聚合
   - 7 状态 + `audit_context` 原样保留（写入 `new_values`）
   - 保留现有 `await db.commit()`（`_write_interpret_audit` 本就独立提交；`write_audit_raw` flush 后由 `_write_interpret_audit` commit）
 - 缓存 / rate limit / `_parse_interpretation` / `evidence_refs` 校验 / 5 种错误状态 全部不动
@@ -67,7 +68,8 @@ async def write_audit_raw(
 
 `POST /widgets/quality-trend/interpret` 路由（`interpret_quality_trend` handler）：
 - 不再传 `app_state.llm_provider`
-- 从 `RequestScope` 解析 `factory_id`（`scope.effective_factory_id`）+ `tenant_schema`（`request.state.tenant.schema_name` 或 `"public"`）传入
+- 从 `RequestScope` 解析 `factory_id`（`scope.effective_factory_id`，可为 None）传入
+- `tenant_schema`：在 dashboard 路由模块加同名小 helper `_tenant_schema(request) -> str`（与 `backend/app/api/agent/sessions.py:17` 一致：`getattr(request.state, "tenant", None)` 取 `schema_name`，缺省 `"public"`），避免 `request.state.tenant` 缺属性时踩空，并与 P0 agent API 保持一致
 - 其余请求参数不变
 
 ## 3. 数据流
@@ -87,15 +89,16 @@ dashboard.py 路由
 
 7 状态全部保留并经 `write_audit_raw` 写入：`rate_limited` / `insufficient_data` / `llm_not_configured` / `llm_failed`(超时+异常) / `parse_failed` / `cache_hit` / `success`。`LLM_TIMEOUT=30s` 保留。`complete_json` 的降级重试对调用方透明（不改变错误状态机）。
 
-`llm_provider is None` 检查语义迁移：旧代码 `if llm_provider is None: raise LLMNotConfiguredError`；新代码在 `build_client` 失败/配置缺失时由 `build_client` 抛错或返回 None —— **保持 `LLMNotConfiguredError` 语义**：若 `get_raw_ai_config` 返回空 key/model，`build_client` 应抛 `LLMNotConfiguredError`（或 `interpret_quality_trend` 捕获后转抛），并写 `llm_not_configured` 审计。
+`llm_not_configured` 语义闭合（见 §2.1）：`build_client` 缺 key/model → 抛基座 `ProviderNotConfiguredError` → `interpret_quality_trend` 捕获 → 写 `llm_not_configured` 审计 → 抛业务层 `LLMNotConfiguredError`（dashboard 路由仍返回 503，语义不变）。基座不 import 业务层异常。
 
 ## 5. 测试
 
 - `provider_adapter.complete_json`：
   - openai 路径：`response_format=json_object` 成功 → 返回 dict；SDK 拒绝 `response_format` → 降级重试成功；返回非 JSON 包裹 ```json fence → `_extract_json` 解析；超 `MAX_RESPONSE_BYTES` → 抛 `ValueError`
   - anthropic 路径：`messages.create` → `json.loads` 成功；超限抛错
+  - `build_client` 缺 key/model → 抛 `ProviderNotConfiguredError`
   - 全程 stub SDK（monkeypatch `pc.client`），不调真实 LLM
-- `audit.write_audit_raw`：写入 `audit_logs` 含 `factory_id`/`tenant_schema`/`correlation_id`；`write_audit(ctx)` 仍工作（薄包装不破坏 P0 测试）
+- `audit.write_audit_raw`：写入 `audit_logs` 含 `factory_id`（含 None 用例）/`tenant_schema`/`correlation_id`；`write_audit(ctx)` 仍工作（薄包装不破坏 P0 测试）
 - `interpret_quality_trend` 迁移后：
   - 7 状态审计经 `write_audit_raw`、`factory_id`/`correlation_id` 落库
   - 缓存命中/rate limit/`evidence_refs` 校验行为不变（现有测试适配新签名：去 `llm_provider`、加 `factory_id`/`tenant_schema`）
