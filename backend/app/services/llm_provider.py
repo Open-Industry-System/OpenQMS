@@ -4,27 +4,10 @@ import logging
 from typing import Protocol
 
 from app.config import settings as app_settings
+from app.services.agent.llm_json import MAX_RESPONSE_BYTES
+from app.services.agent.llm_json import extract_json as _extract_json
 
 logger = logging.getLogger(__name__)
-
-MAX_RESPONSE_BYTES = 10_240  # 10KB
-
-
-def _extract_json(text: str) -> dict:
-    """Parse JSON from an LLM response, tolerating ```json code fences.
-
-    Used when a model returns JSON without response_format enforcement (the
-    prompt already requests JSON); some models wrap output in fences.
-    """
-    text = (text or "").strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-    return json.loads(text)
 
 
 class LLMProvider(Protocol):

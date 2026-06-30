@@ -6,20 +6,25 @@ already-installed openai/anthropic SDK function-calling APIs directly.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.ai_config import AIConfigOut
+from app.services.agent.llm_json import MAX_RESPONSE_BYTES, extract_json
 from app.services.ai_config_service import get_raw_ai_config  # raw (unmasked) keys
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ProviderClient:
-    provider: str  # "openai" | "anthropic"
-    client: Any  # AsyncOpenAI | AsyncAnthropic
+    provider: str  # "openai" | "anthropic" | "local"
+    client: Any  # AsyncOpenAI | AsyncAnthropic | None for local
     model: str
+    base_url: str | None = None  # local provider endpoint
 
 
 @dataclass
@@ -28,19 +33,41 @@ class AssistantTurn:
     tool_calls: list[dict]  # [{"name": str, "arguments": dict}]
 
 
-async def build_client(db: AsyncSession) -> ProviderClient:
-    cfg: AIConfigOut = await get_raw_ai_config(db)  # real api key, not masked
-    provider = (cfg.llm_provider or "openai").lower()
-    if provider in ("anthropic", "claude"):
-        from anthropic import AsyncAnthropic
+class ProviderNotConfiguredError(RuntimeError):
+    """Raised by build_client when AI config is missing (rule-only mode)."""
 
+
+async def build_client(db: AsyncSession) -> ProviderClient:
+    cfg: AIConfigOut = await get_raw_ai_config(db)
+    provider = (cfg.llm_provider or "").lower()
+    if not provider:
+        raise ProviderNotConfiguredError("LLM_PROVIDER 未配置（纯规则引擎模式）")
+    if provider in ("anthropic", "claude"):
+        if not cfg.llm_api_key:
+            raise ProviderNotConfiguredError("anthropic/claude 需要 LLM_API_KEY")
+        from anthropic import AsyncAnthropic
         return ProviderClient(
             provider="anthropic",
             client=AsyncAnthropic(api_key=cfg.llm_api_key),
             model=cfg.llm_model or "claude-sonnet-4-6-20250514",
         )
+    if provider == "local":
+        if not cfg.llm_base_url:
+            raise ProviderNotConfiguredError("local 需要 LLM_BASE_URL")
+        if not cfg.llm_model:
+            raise ProviderNotConfiguredError("local 需要 LLM_MODEL")
+        return ProviderClient(
+            provider="local",
+            client=None,
+            model=cfg.llm_model,
+            base_url=cfg.llm_base_url.rstrip("/"),
+        )
+    # openai-compatible providers: openai, deepseek, ark (all use AsyncOpenAI with base_url)
+    if provider not in ("openai", "deepseek", "ark"):
+        raise ProviderNotConfiguredError(f"未知的 LLM_PROVIDER: {provider!r}")
+    if not cfg.llm_api_key:
+        raise ProviderNotConfiguredError(f"{provider} 需要 LLM_API_KEY")
     from openai import AsyncOpenAI
-
     return ProviderClient(
         provider="openai",
         client=AsyncOpenAI(api_key=cfg.llm_api_key, base_url=cfg.llm_base_url or None),
@@ -83,6 +110,8 @@ async def chat_with_tools(
     message in `messages`; the harness (Task 11) passes system prompt separately
     and this function routes it correctly per provider.
     """
+    if pc.provider == "local":
+        raise ProviderNotConfiguredError("local provider does not support tool-calling")
     if pc.provider == "openai":
         resp = await pc.client.chat.completions.create(
             model=pc.model, messages=messages, tools=tools
@@ -120,3 +149,45 @@ async def chat_with_tools(
         elif block.type == "tool_use":
             calls.append({"id": block.id, "name": block.name, "arguments": block.input})
     return AssistantTurn(content="".join(text_parts), tool_calls=calls)
+
+
+async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) -> dict:
+    """Single-shot JSON LLM call: prompt -> dict. Parity with legacy LLMProvider.complete.
+
+    openai: response_format=json_object, retry without it if the gateway rejects.
+    anthropic: messages.create + json.loads.
+    Both enforce MAX_RESPONSE_BYTES and use extract_json for fenced JSON.
+    local: httpx POST {base_url}/api/generate (mirrors legacy LocalProvider.complete).
+    """
+    messages = [{"role": "user", "content": prompt}]
+    if pc.provider == "openai":
+        try:
+            resp = await pc.client.chat.completions.create(
+                model=pc.model, messages=messages,
+                response_format={"type": "json_object"},
+            )
+        except Exception as e:
+            if "json_object" in str(e) or "response_format" in str(e):
+                logger.info("LLM rejected response_format=json_object, retrying without: %s", e)
+                resp = await pc.client.chat.completions.create(model=pc.model, messages=messages)
+            else:
+                raise
+        text = resp.choices[0].message.content or ""
+    elif pc.provider == "local":
+        import httpx
+
+        async with httpx.AsyncClient(base_url=pc.base_url, timeout=30) as client:
+            resp = await client.post(
+                "/api/generate",
+                json={"model": pc.model, "prompt": prompt, "stream": False},
+            )
+        resp.raise_for_status()
+        text = resp.json().get("response", "")
+    else:  # anthropic
+        resp = await pc.client.messages.create(
+            model=pc.model, messages=messages, max_tokens=1024,
+        )
+        text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+    if len(text.encode()) > MAX_RESPONSE_BYTES:
+        raise ValueError("LLM response too large")
+    return extract_json(text)
