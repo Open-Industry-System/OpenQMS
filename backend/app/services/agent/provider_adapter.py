@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ProviderClient:
-    provider: str  # "openai" | "anthropic"
+    provider: str  # "openai" | "anthropic" | "local"
     client: Any  # AsyncOpenAI | AsyncAnthropic
     model: str
 

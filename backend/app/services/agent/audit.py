@@ -42,7 +42,6 @@ async def write_audit(
     old_values: dict | None = None, new_values: dict | None = None,
 ) -> AuditLog:
     """Write an audit log using an AgentContext for scope. Delegates to write_audit_raw."""
-    # Late import to avoid a circular reference at module load (registry <-> audit).
     return await write_audit_raw(
         db, user_id=ctx.user_id, factory_id=ctx.factory_id,
         tenant_schema=ctx.tenant_schema, table_name=table_name, record_id=record_id,

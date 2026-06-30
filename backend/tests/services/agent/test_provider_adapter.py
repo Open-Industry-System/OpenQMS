@@ -186,3 +186,57 @@ async def test_chat_with_tools_rejects_local_provider():
     pc = ProviderClient(provider="local", client=object(), model="m")
     with pytest.raises(ProviderNotConfiguredError):
         await provider_adapter.chat_with_tools(pc, [{"role": "user", "content": "x"}], [])
+
+
+@pytest.mark.asyncio
+async def test_build_client_raises_when_anthropic_api_key_empty(monkeypatch):
+    """anthropic/claude provider without api_key -> ProviderNotConfiguredError.
+    Mirrors legacy create_llm_provider returning None for that case."""
+    from app.schemas.ai_config import AIConfigOut
+
+    async def _cfg(db):
+        return AIConfigOut(llm_provider="anthropic", llm_api_key="", llm_model="",
+                           llm_base_url="", llm_timeout=30, capa_draft_llm_timeout=15,
+                           report_llm_timeout=10, embedding_provider="", embedding_api_key="",
+                           embedding_model="", embedding_base_url="", embedding_dimensions=1536,
+                           search_vector_weight=0.7, search_fulltext_weight=0.3)
+
+    monkeypatch.setattr(provider_adapter, "get_raw_ai_config", _cfg)
+    with pytest.raises(ProviderNotConfiguredError):
+        await provider_adapter.build_client(object())
+
+
+@pytest.mark.asyncio
+async def test_build_client_raises_when_local_base_url_empty(monkeypatch):
+    """local provider without base_url -> ProviderNotConfiguredError."""
+    from app.schemas.ai_config import AIConfigOut
+
+    async def _cfg(db):
+        return AIConfigOut(llm_provider="local", llm_api_key="", llm_model="some-model",
+                           llm_base_url="", llm_timeout=30, capa_draft_llm_timeout=15,
+                           report_llm_timeout=10, embedding_provider="", embedding_api_key="",
+                           embedding_model="", embedding_base_url="", embedding_dimensions=1536,
+                           search_vector_weight=0.7, search_fulltext_weight=0.3)
+
+    monkeypatch.setattr(provider_adapter, "get_raw_ai_config", _cfg)
+    with pytest.raises(ProviderNotConfiguredError):
+        await provider_adapter.build_client(object())
+
+
+@pytest.mark.asyncio
+async def test_build_client_raises_when_local_model_empty(monkeypatch):
+    """local provider without model -> ProviderNotConfiguredError (local requires
+    explicit model; only claude/openai default the model)."""
+    from app.schemas.ai_config import AIConfigOut
+
+    async def _cfg(db):
+        return AIConfigOut(llm_provider="local", llm_api_key="", llm_model="",
+                           llm_base_url="http://localhost:11434", llm_timeout=30,
+                           capa_draft_llm_timeout=15, report_llm_timeout=10,
+                           embedding_provider="", embedding_api_key="",
+                           embedding_model="", embedding_base_url="", embedding_dimensions=1536,
+                           search_vector_weight=0.7, search_fulltext_weight=0.3)
+
+    monkeypatch.setattr(provider_adapter, "get_raw_ai_config", _cfg)
+    with pytest.raises(ProviderNotConfiguredError):
+        await provider_adapter.build_client(object())
