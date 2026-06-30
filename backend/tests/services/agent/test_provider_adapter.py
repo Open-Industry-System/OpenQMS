@@ -240,3 +240,66 @@ async def test_build_client_raises_when_local_model_empty(monkeypatch):
     monkeypatch.setattr(provider_adapter, "get_raw_ai_config", _cfg)
     with pytest.raises(ProviderNotConfiguredError):
         await provider_adapter.build_client(object())
+
+
+@pytest.mark.asyncio
+async def test_build_client_raises_when_unknown_provider(monkeypatch):
+    """Unknown provider (e.g. typo 'opneai') -> ProviderNotConfiguredError. Mirrors
+    legacy create_llm_provider returning None for unknown providers."""
+    from app.schemas.ai_config import AIConfigOut
+
+    async def _cfg(db):
+        return AIConfigOut(llm_provider="opneai", llm_api_key="sk-x", llm_model="",
+                           llm_base_url="", llm_timeout=30, capa_draft_llm_timeout=15,
+                           report_llm_timeout=10, embedding_provider="", embedding_api_key="",
+                           embedding_model="", embedding_base_url="", embedding_dimensions=1536,
+                           search_vector_weight=0.7, search_fulltext_weight=0.3)
+
+    monkeypatch.setattr(provider_adapter, "get_raw_ai_config", _cfg)
+    with pytest.raises(ProviderNotConfiguredError):
+        await provider_adapter.build_client(object())
+
+
+@pytest.mark.asyncio
+async def test_build_client_local_returns_base_url_and_no_client(monkeypatch):
+    """local provider must not hold a long-lived httpx client; base_url is the sentinel."""
+    from app.schemas.ai_config import AIConfigOut
+
+    async def _cfg(db):
+        return AIConfigOut(llm_provider="local", llm_api_key="", llm_model="llama3",
+                           llm_base_url="http://localhost:11434/", llm_timeout=30,
+                           capa_draft_llm_timeout=15, report_llm_timeout=10,
+                           embedding_provider="", embedding_api_key="",
+                           embedding_model="", embedding_base_url="", embedding_dimensions=1536,
+                           search_vector_weight=0.7, search_fulltext_weight=0.3)
+
+    monkeypatch.setattr(provider_adapter, "get_raw_ai_config", _cfg)
+    pc = await provider_adapter.build_client(object())
+    assert pc.provider == "local"
+    assert pc.client is None
+    assert pc.base_url == "http://localhost:11434"
+    assert pc.model == "llama3"
+
+
+@pytest.mark.asyncio
+async def test_complete_json_local_success(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    pc = ProviderClient(provider="local", client=None, model="llama3", base_url="http://localhost:11434")
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.post = AsyncMock(return_value=type("R", (), {
+        "raise_for_status": lambda self: None,
+        "json": lambda self: {"response": '{"z": 3}'},
+    })())
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    out = await complete_json(pc, "prompt", {"type": "object"})
+    assert out == {"z": 3}
+    mock_client.post.assert_awaited_once_with(
+        "/api/generate",
+        json={"model": "llama3", "prompt": "prompt", "stream": False},
+    )

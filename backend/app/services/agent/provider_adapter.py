@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProviderClient:
     provider: str  # "openai" | "anthropic" | "local"
-    client: Any  # AsyncOpenAI | AsyncAnthropic
+    client: Any  # AsyncOpenAI | AsyncAnthropic | None for local
     model: str
+    base_url: str | None = None  # local provider endpoint
 
 
 @dataclass
@@ -55,13 +56,15 @@ async def build_client(db: AsyncSession) -> ProviderClient:
             raise ProviderNotConfiguredError("local 需要 LLM_BASE_URL")
         if not cfg.llm_model:
             raise ProviderNotConfiguredError("local 需要 LLM_MODEL")
-        import httpx
         return ProviderClient(
             provider="local",
-            client=httpx.AsyncClient(base_url=cfg.llm_base_url.rstrip("/"), timeout=30),
+            client=None,
             model=cfg.llm_model,
+            base_url=cfg.llm_base_url.rstrip("/"),
         )
-    # openai-compatible (openai / deepseek / ark via base_url)
+    # openai-compatible providers: openai, deepseek, ark (all use AsyncOpenAI with base_url)
+    if provider not in ("openai", "deepseek", "ark"):
+        raise ProviderNotConfiguredError(f"未知的 LLM_PROVIDER: {provider!r}")
     if not cfg.llm_api_key:
         raise ProviderNotConfiguredError(f"{provider} 需要 LLM_API_KEY")
     from openai import AsyncOpenAI
@@ -171,10 +174,13 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
                 raise
         text = resp.choices[0].message.content or ""
     elif pc.provider == "local":
-        resp = await pc.client.post(
-            "/api/generate",
-            json={"model": pc.model, "prompt": prompt, "stream": False},
-        )
+        import httpx
+
+        async with httpx.AsyncClient(base_url=pc.base_url, timeout=30) as client:
+            resp = await client.post(
+                "/api/generate",
+                json={"model": pc.model, "prompt": prompt, "stream": False},
+            )
         resp.raise_for_status()
         text = resp.json().get("response", "")
     else:  # anthropic

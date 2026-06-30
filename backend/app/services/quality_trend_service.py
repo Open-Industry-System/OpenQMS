@@ -230,6 +230,13 @@ async def interpret_quality_trend(
         await _write_interpret_audit(db, user_id, "insufficient_data", audit_context, factory_id, tenant_schema, scope_hash)
         raise InsufficientTrendDataError("数据不足，无法生成 AI 解读")
 
+    # Config check FIRST — legacy behavior: unconfigured LLM raises even if cache is warm.
+    try:
+        pc = await provider_adapter.build_client(db)
+    except provider_adapter.ProviderNotConfiguredError as exc:
+        await _write_interpret_audit(db, user_id, "llm_not_configured", audit_context, factory_id, tenant_schema, scope_hash)
+        raise LLMNotConfiguredError("LLM 未配置") from exc
+
     cache_key = f"{scope_hash}:{summary.data_window_days}:{summary.evidence_hash}"
     cached = _get_cached_interpretation(cache_key)
     if cached:
@@ -238,14 +245,10 @@ async def interpret_quality_trend(
 
     prompt = _build_interpret_prompt(summary, allowed_modules, scope_description)
     try:
-        pc = await provider_adapter.build_client(db)
         raw = await asyncio.wait_for(
             provider_adapter.complete_json(pc, prompt, _interpret_response_schema()),
             timeout=LLM_TIMEOUT,
         )
-    except provider_adapter.ProviderNotConfiguredError as exc:
-        await _write_interpret_audit(db, user_id, "llm_not_configured", audit_context, factory_id, tenant_schema, scope_hash)
-        raise LLMNotConfiguredError("LLM 未配置") from exc
     except TimeoutError as exc:
         await _write_interpret_audit(db, user_id, "llm_failed", audit_context | {"error": f"LLM 调用超时（>{LLM_TIMEOUT}s）"}, factory_id, tenant_schema, scope_hash)
         raise LLMNotConfiguredError("AI 解读服务响应超时，请稍后重试") from exc

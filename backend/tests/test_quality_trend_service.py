@@ -208,3 +208,55 @@ async def test_interpret_raises_llm_not_configured_when_provider_unconfigured(
         )
     rows = (await db.execute(select(AuditLog).where(AuditLog.action == "AI_TREND_INTERPRET"))).scalars().all()
     assert any(r.new_values.get("status") == "llm_not_configured" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_interpret_raises_llm_not_configured_even_when_cache_warm(
+    db, admin_user, default_factory, monkeypatch
+):
+    """Regression: unconfigured LLM must raise before cache lookup, even if a warm
+    cached entry exists for the same scope_hash."""
+    from sqlalchemy import select
+
+    from app.models.audit import AuditLog
+    from app.services.agent import provider_adapter
+
+    async def _raise(db):
+        raise provider_adapter.ProviderNotConfiguredError("no cfg")
+
+    monkeypatch.setattr(provider_adapter, "build_client", _raise)
+    monkeypatch.setattr(quality_trend_service, "_enforce_rate_limit", lambda uid: None)
+
+    from app.schemas.quality_trend import QualityTrendInterpretation, QualityTrendMetadata, QualityTrendSummary
+    async def _summary(*a, **k):
+        return QualityTrendSummary(
+            risk_level="high", headline="h", evidence=[], actions=[],
+            data_window_days=30, generated_at="2026-06-30T00:00:00Z",
+            evidence_hash="sha256:x", scope_hash="", ai_available=True,
+            metadata=QualityTrendMetadata(omitted_modules=[], available_modules=["spc"]),
+        )
+    monkeypatch.setattr(quality_trend_service, "build_quality_trend_summary", _summary)
+
+    scope_hash = "hash1"
+    cache_key = f"{scope_hash}:30:sha256:x"
+    quality_trend_service._set_cached_interpretation(
+        cache_key,
+        QualityTrendInterpretation(
+            summary="cached", possible_causes=[], impact_scope=[],
+            recommended_actions=[], evidence_refs=[], confidence="low",
+            model="cached-model", evidence_hash="sha256:x", scope_hash=scope_hash,
+            generated_at="2026-06-30T00:00:00Z",
+        ),
+    )
+
+    with pytest.raises(LLMNotConfiguredError):
+        await quality_trend_service.interpret_quality_trend(
+            db=db, user_id=str(admin_user.user_id),
+            factory_id=default_factory.id, tenant_schema="public",
+            filter_codes=["DC-DC-100"], allowed_modules={"spc"},
+            scope_description="d", selected_product_line="DC-DC-100",
+            scope_hash=scope_hash,
+        )
+    rows = (await db.execute(select(AuditLog).where(AuditLog.action == "AI_TREND_INTERPRET"))).scalars().all()
+    assert any(r.new_values.get("status") == "llm_not_configured" for r in rows)
+    assert not any(r.new_values.get("status") == "cache_hit" for r in rows)

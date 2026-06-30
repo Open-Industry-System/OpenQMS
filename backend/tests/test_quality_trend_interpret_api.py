@@ -220,29 +220,26 @@ async def test_interpret_audits_llm_provider_failure():
 
 
 @pytest.mark.anyio
-async def test_interpret_route_does_not_read_app_state_llm_provider(monkeypatch):
-    """Route must not read app.state.llm_provider; it builds via provider_adapter."""
+async def test_interpret_route_passes_factory_and_tenant_not_llm_provider(monkeypatch):
+    """Route must pass factory_id+tenant_schema to the service and NOT pass llm_provider."""
     from app.services import quality_trend_service
-    from app.services.agent import provider_adapter
 
-    async def _no_cfg(db):
-        raise provider_adapter.ProviderNotConfiguredError("test")
-    monkeypatch.setattr(provider_adapter, "build_client", _no_cfg)
+    captured_kwargs = {}
+
+    async def _capture(**kwargs):
+        captured_kwargs.update(kwargs)
+        # raise a known-handled exception so the route returns predictably
+        from app.services.quality_trend_service import LLMNotConfiguredError
+        raise LLMNotConfiguredError("test")
+
+    monkeypatch.setattr("app.api.dashboard.interpret_quality_trend_service", _capture)
     monkeypatch.setattr(quality_trend_service, "_enforce_rate_limit", lambda uid: None)
-    from app.schemas.quality_trend import QualityTrendMetadata, QualityTrendSummary
-    async def _summary(*a, **k):
-        return QualityTrendSummary(
-            risk_level="high", headline="h", evidence=[], actions=[],
-            data_window_days=30, generated_at="2026-06-30T00:00:00Z",
-            evidence_hash="sha256:x", scope_hash="", ai_available=True,
-            metadata=QualityTrendMetadata(omitted_modules=[], available_modules=["spc"]),
-        )
-    monkeypatch.setattr(quality_trend_service, "build_quality_trend_summary", _summary)
-    monkeypatch.setattr(quality_trend_service, "_get_cached_interpretation", lambda k: None)
 
-    # explicitly do NOT set app.state.llm_provider
-    if hasattr(app.state, "llm_provider"):
-        delattr(app.state, "llm_provider")
-
-    response, _db = await _call_interpret(None)  # llm_provider arg now ignored by _call_interpret
+    # Use _call_interpret with any non-None provider so it doesn't short-circuit;
+    # _capture above replaces the actual service call entirely.
+    response, _ = await _call_interpret(FakeLLMProvider())
     assert response.status_code == 503  # LLMNotConfiguredError -> 503
+    assert "llm_provider" not in captured_kwargs
+    assert "factory_id" in captured_kwargs
+    assert "tenant_schema" in captured_kwargs
+    assert isinstance(captured_kwargs["tenant_schema"], str)

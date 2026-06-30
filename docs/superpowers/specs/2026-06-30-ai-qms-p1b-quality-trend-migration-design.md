@@ -85,8 +85,9 @@ async def write_audit_raw(
 dashboard.py 路由
   └─ RequestScope → factory_id (effective_factory_id) + tenant_schema
   └─ interpret_quality_trend(db, user_id, factory_id, tenant_schema, filter_codes, ...)
-       ├─ _enforce_rate_limit / 缓存检查（不变）
-       ├─ pc = provider_adapter.build_client(db)        ← 新：基座 provider
+       ├─ _enforce_rate_limit（不变）
+       ├─ pc = provider_adapter.build_client(db)        ← 新：基座 provider（先校验配置）
+       ├─ 缓存检查（不变；配置未通过时即使缓存命中也直接 503）
        ├─ raw = complete_json(pc, prompt, schema)       ← 新：基座 complete_json
        ├─ _parse_interpretation(raw, ...)               ← 不变
        └─ _write_interpret_audit → audit.write_audit_raw ← 新：基座审计入口
