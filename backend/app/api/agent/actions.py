@@ -8,10 +8,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_db, get_request_scope
 from app.core.factory_scope import check_factory_access
+from app.models.agent import AgentAction
 from app.schemas.agent import ActionOut, DecisionIn
 from app.services.agent import approval
 
 router = APIRouter(prefix="/actions", tags=["agent-actions"])
+
+
+async def _check_approver_auth(action: AgentAction, scope: RequestScope, db: AsyncSession) -> None:
+    """Approver must be admin, OR hold APPROVE on the tool's module.
+
+    Demo tools with required_permission module=None are admin-only.
+    """
+    from app.core.permissions import Module, PermissionLevel, get_user_permission
+    from app.services.agent.registry import TOOL_REGISTRY
+
+    if scope.user.role_definition.role_key == "admin":
+        return
+    spec = TOOL_REGISTRY.get(action.tool_name)
+    req = (spec.required_permission if spec else None) or {}
+    module = req.get("module")
+    if module is None:
+        raise HTTPException(status_code=403, detail="需要管理员权限审批此动作")
+    if (await get_user_permission(scope.user, Module(module), db)) < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="需要该模块的审批权限")
 
 
 @router.get("", response_model=list[ActionOut])
@@ -36,6 +56,7 @@ async def approve_action(
     if action is None:
         raise HTTPException(status_code=404, detail="动作不存在")
     check_factory_access(action.factory_id, scope)
+    await _check_approver_auth(action, scope, db)
     try:
         action = await approval.approve(db, action_id, scope.user, req.reason or "")
     except ValueError as e:
@@ -54,6 +75,7 @@ async def reject_action(
     if action is None:
         raise HTTPException(status_code=404, detail="动作不存在")
     check_factory_access(action.factory_id, scope)
+    await _check_approver_auth(action, scope, db)
     try:
         action = await approval.reject(db, action_id, scope.user, req.reason or "")
     except ValueError as e:
@@ -74,6 +96,7 @@ async def modify_action(
     if action is None:
         raise HTTPException(status_code=404, detail="动作不存在")
     check_factory_access(action.factory_id, scope)
+    await _check_approver_auth(action, scope, db)
     try:
         action = await approval.modify(
             db, action_id, scope.user, req.new_payload, req.reason or ""

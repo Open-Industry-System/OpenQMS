@@ -80,7 +80,7 @@ async def test_whitelist_admin_crud(admin_client):
         "tool_name": "draft_note",
         "action": "create",
         "entity_type": "note",
-        "max_scope": {"factories": [str(uuid.uuid4())]},
+        "max_scope": {"factory_ids": [str(uuid.uuid4())]},
         "required_permission": {"module": "fmea", "min_level": 3},
         "enabled": True,
     }
@@ -108,6 +108,20 @@ async def test_whitelist_admin_crud(admin_client):
 
     r_get2 = await admin_client.get(f"/api/agent/whitelist/{wid}")
     assert r_get2.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_whitelist_rejects_unknown_max_scope_keys(admin_client):
+    payload = {
+        "tool_name": "draft_note",
+        "action": "create",
+        "entity_type": "note",
+        "max_scope": {"factories": [str(uuid.uuid4())]},
+        "required_permission": {"module": "fmea", "min_level": 3},
+        "enabled": True,
+    }
+    r = await admin_client.post("/api/agent/whitelist", json=payload)
+    assert r.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -147,7 +161,7 @@ async def test_whitelist_crud_writes_audit_log(admin_client, db):
         "tool_name": "draft_note",
         "action": "create",
         "entity_type": "note",
-        "max_scope": {"factories": [str(uuid.uuid4())]},
+        "max_scope": {"factory_ids": [str(uuid.uuid4())]},
         "required_permission": {"module": "fmea", "min_level": 3},
         "enabled": True,
     }
@@ -195,3 +209,43 @@ async def test_list_actions_requires_factory(admin_client, default_factory):
     )
     assert r2.status_code == 200
     assert r2.json() == []
+
+
+@pytest.mark.asyncio
+async def test_action_decision_viewer_same_factory_forbidden(admin_client, viewer_user, default_factory, db):
+    """A non-admin viewer in the same factory must not approve a pending commit action."""
+    from app.models.agent import AgentAction, AgentSession
+
+    session = AgentSession(
+        user_id=viewer_user.user_id,
+        factory_id=default_factory.id,
+        tenant_schema="public",
+        scenario="copilot",
+    )
+    db.add(session)
+    await db.flush()
+
+    action = AgentAction(
+        session_id=session.session_id,
+        factory_id=default_factory.id,
+        tool_name="commit_tag",
+        level="commit",
+        payload={"tag": "x"},
+        status="pending",
+    )
+    db.add(action)
+    await db.flush()
+    await db.refresh(action)
+
+    # Switch auth to viewer scoped to the same factory
+    app.dependency_overrides[get_current_user] = lambda: viewer_user
+    app.dependency_overrides[get_request_scope] = lambda: _scope_for(
+        viewer_user, default_factory, accessible_factory_ids=[default_factory.id]
+    )
+    try:
+        r = await admin_client.post(
+            f"/api/agent/actions/{action.action_id}/approve", json={"reason": "test"}
+        )
+    finally:
+        pass  # admin_client fixture teardown clears overrides
+    assert r.status_code == 403

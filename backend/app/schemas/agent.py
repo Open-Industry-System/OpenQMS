@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SessionCreate(BaseModel):
@@ -44,11 +44,17 @@ class DecisionIn(BaseModel):
     new_payload: dict | None = None  # only for modify
 
 
+class MaxScope(BaseModel):
+    factory_ids: list[str] | None = None
+    product_line_codes: list[str] | None = None
+    model_config = ConfigDict(extra="forbid")
+
+
 class WhitelistIn(BaseModel):
     tool_name: str
     action: str
     entity_type: str
-    max_scope: dict = Field(default_factory=dict)
+    max_scope: MaxScope = Field(default_factory=MaxScope)
     required_permission: dict
     enabled: bool = True
 
