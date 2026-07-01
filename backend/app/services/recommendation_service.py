@@ -23,6 +23,8 @@ from app.schemas.recommendation import (
     SuggestionItem,
     SuggestionList,
 )
+from app.services.agent import provider_adapter
+from app.services.agent.provider_adapter import ProviderNotConfiguredError
 logger = logging.getLogger(__name__)
 
 
@@ -565,8 +567,10 @@ class RecommendationService:
         from app.core.permissions import Module, PermissionLevel, get_user_permission
 
         fmea = await self._get_fmea_or_404(fmea_id)
-        # Task 3 replaces this placeholder with provider_adapter.build_client(db).
-        pc = None
+        try:
+            pc = await provider_adapter.build_client(self.db)
+        except ProviderNotConfiguredError:
+            pc = None
 
         # 权限检查 + scope 强制降级
         requested_scope = getattr(request, "scope", "global")
@@ -640,7 +644,7 @@ class RecommendationService:
                     ]
                 prompt = self._build_prompt(request.trigger_type, llm_context)
                 llm_result = await asyncio.wait_for(
-                    self.llm.complete(prompt, {}),
+                    provider_adapter.complete_json(pc, prompt, {}),
                     timeout=self.llm_timeout,
                 )
                 validated = SuggestionList.model_validate(llm_result)

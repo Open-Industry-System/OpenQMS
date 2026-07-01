@@ -169,7 +169,6 @@ class TestRecommendIntegrationForToolTrend:
             monkeypatch.setattr(provider_adapter, "complete_json", complete_json)
         return fmea
 
-    @pytest.mark.skip(reason="Task 3 wires build_client resolution + complete_json call line")
     async def test_dfmea_tool_with_llm_returns_suggestions(self, monkeypatch):
         async def _ok_client(db_arg):
             class _PC:
@@ -210,7 +209,6 @@ class TestRecommendIntegrationForToolTrend:
         assert res.suggestions == []
         assert res.source == "rule"
 
-    @pytest.mark.skip(reason="Task 3 wires build_client resolution + complete_json call line")
     async def test_dfmea_trend_llm_failure_returns_rule_fallback(self, monkeypatch):
         async def _ok_client(db_arg):
             class _PC:
