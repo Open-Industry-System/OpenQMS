@@ -56,6 +56,37 @@ class SearchService:
         codes = [row[0] for row in result.fetchall()]
         return codes if codes else []
 
+    async def _write_rag_audit(
+        self,
+        *,
+        user: User,
+        question: str,
+        sources,
+        tenant_schema: str,
+        status: str,
+        model: str | None,
+        error: str | None = None,
+    ) -> None:
+        from app.services.agent import audit as audit_mod
+
+        new_values: dict = {"status": status, "model": model}
+        if error is not None:
+            new_values["error"] = error
+        await audit_mod.write_audit_raw(
+            self.db,
+            user_id=user.user_id,
+            factory_id=None,
+            tenant_schema=tenant_schema,
+            table_name="rag_qa",
+            record_id=uuid.uuid5(uuid.NAMESPACE_URL, f"rag_qa:{_stable_query_hash(question)}"),
+            action="llm_rag_qa",
+            correlation_id=uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"rag_qa:{_stable_query_hash(question)}:{_stable_source_hash(sources)}",
+            ),
+            new_values=new_values,
+        )
+
     async def semantic_search(
         self,
         query: str,
@@ -286,8 +317,6 @@ class SearchService:
 **必须只返回以下 JSON 格式，不要添加任何其他文本、markdown 围栏或解释：**
 {{"answer": "你的回答内容"}}"""
 
-        from app.services.agent import audit as audit_mod
-
         try:
             rag_schema = {
                 "type": "object",
@@ -298,36 +327,25 @@ class SearchService:
             }
             llm_response = await provider_adapter.complete_json(pc, prompt, rag_schema)
             answer = llm_response.get("answer", "生成回答失败。")
-            await audit_mod.write_audit_raw(
-                self.db,
-                user_id=user.user_id,
-                factory_id=None,
+            await self._write_rag_audit(
+                user=user,
+                question=question,
+                sources=sources,
                 tenant_schema=tenant_schema,
-                table_name="rag_qa",
-                record_id=uuid.uuid5(uuid.NAMESPACE_URL, f"rag_qa:{_stable_query_hash(question)}"),
-                action="llm_rag_qa",
-                correlation_id=uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    f"rag_qa:{_stable_query_hash(question)}:{_stable_source_hash(sources)}",
-                ),
-                new_values={"status": "success", "model": pc.model},
+                status="success",
+                model=pc.model,
             )
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             answer = f"LLM 调用失败: {e}"
-            await audit_mod.write_audit_raw(
-                self.db,
-                user_id=user.user_id,
-                factory_id=None,
+            await self._write_rag_audit(
+                user=user,
+                question=question,
+                sources=sources,
                 tenant_schema=tenant_schema,
-                table_name="rag_qa",
-                record_id=uuid.uuid5(uuid.NAMESPACE_URL, f"rag_qa:{_stable_query_hash(question)}"),
-                action="llm_rag_qa",
-                correlation_id=uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    f"rag_qa:{_stable_query_hash(question)}:{_stable_source_hash(sources)}",
-                ),
-                new_values={"status": "llm_failed", "error": str(e), "model": (pc.model if pc else None)},
+                status="llm_failed",
+                model=(pc.model if pc else None),
+                error=str(e),
             )
 
         elapsed = int((time.monotonic() - start) * 1000)
