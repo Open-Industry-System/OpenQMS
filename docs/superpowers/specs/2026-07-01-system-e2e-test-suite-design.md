@@ -42,8 +42,9 @@
                                             │
                 ┌───────────────────────────▼───────────────────────────┐
                 │   docker-compose.e2e.yml (override, profile=e2e)      │
-                │   db(pgvector) redis backend(:8000) frontend(:5173)    │
-                │   专用库 qms_e2e，backend 读 .env.e2e 的 LLM 凭证        │
+                │   db(pgvector,:5433) redis backend(:8000) frontend(:5174) │
+                │   专用库 qms_e2e（独立卷 pgdata_e2e），TENANT_MODE=single │
+                │   backend 读 .env.e2e 的 LLM 凭证 + DATABASE_URL        │
                 └───────────────────────────┬───────────────────────────┘
                                             │ http://localhost:5173, /api → :8000
                 ┌───────────────────────────▼───────────────────────────┐
@@ -60,8 +61,10 @@
 
 要点：
 - **新增** `docker-compose.e2e.yml`（override：e2e profile，backend 指向 e2e 库，加 frontend 服务，backend 注入 LLM 凭证 env）。现有 `docker-compose.yml` 不动。
+  - **独立卷与端口**：e2e db 用独立 volume `pgdata_e2e`（不复用开发的 `pgdata`，否则既有卷使 `POSTGRES_DB: qms_e2e` 初始化脚本失效、库不会被创建），主机端口绑 `5433`（避开开发库 5432 冲突）；`.env.e2e` 的 `DATABASE_URL` 指向 `:5433/qms_e2e`。frontend 绑 `5174`（避开 `:5173`），Playwright `baseURL` 同步改 `:5174`。
+  - **强制单租户**：e2e 简档 `TENANT_MODE=single`，避免 SaaS schema-per-tenant 的子域名伪造（`tenant1.localhost`）配置复杂度；工厂行级隔离在单租户下用 `factory_id` 验证。多租户子域名场景留作 M4 单独 spec，不在默认套件。
 - **新增** `backend/app/seed_e2e.py`（确定性、幂等，独立于 demo `app.seed`）。
-- **新增** `backend/app/api/e2e.py` 只读 `/api/e2e/seed-state` 端点（仅 e2e 简档暴露），避免前后端常量双源漂移。
+- **新增** `backend/app/api/e2e.py` 只读 `/api/e2e/seed-state` 端点（仅 e2e 简档暴露），避免前后端常量双源漂移。**生产门控**：路由注册处双重校验 `E2E_MODE=="1" and settings.TENANT_MODE != "production"`，否则整组路由不载入——即便生产环境误注入 `E2E_MODE=1` 也绝不暴露种子元数据。
 - **新增** `frontend/e2e/` 下 fixtures/helpers/specs 分阶段目录；现有 2 spec 迁入 `m1-core/` 并改用新 fixtures。
 - **新增** `make e2e` / `e2e-up` / `e2e-seed` / `e2e-down` / `e2e-reset` 目标（不并入 `make check`）。
 - **不改** `test.yml`（不接入 CI）。
@@ -69,8 +72,8 @@
 ## 4. 组件与文件布局
 
 ```
-docker-compose.e2e.yml                # e2e profile override
-.env.e2e.example                       # LLM 凭证模板（入库）；.env.e2e gitignore
+docker-compose.e2e.yml                # e2e profile override：db 卷 pgdata_e2e + :5433，frontend :5174
+.env.e2e.example                       # 模板（入库）：DATABASE_URL(:5433/qms_e2e)、TENANT_MODE=single、E2E_LLM_*；.env.e2e gitignore
 backend/app/seed_e2e.py                # 确定性种子（已有记录，幂等可重跑）
 backend/app/seed_e2e_constants.py     # 单号/工厂码等常量（seed 与端点共用）
 backend/app/e2e_input_fixtures/        # 后端输入文档库（API 造前置数据用）
@@ -81,7 +84,7 @@ backend/app/e2e_input_fixtures/        # 后端输入文档库（API 造前置�
   iqc_inspection_lot.py
   supplier_payload.py
   ...（每个写流程一份示例文档）
-backend/app/api/e2e.py                 # 只读 /api/e2e/seed-state 端点
+backend/app/api/e2e.py                 # 只读 /api/e2e/seed-state 端点（生产门控：E2E_MODE=1 且非 production 才载入路由）
 
 Makefile                               # 新增 e2e* 目标
 
@@ -132,7 +135,8 @@ CLAUDE.md                               # 命令节追加 make e2e
 ```
 1. make e2e-up
    docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e up -d
-   → db / redis / backend(:8000) / frontend(:5173)（专用库 qms_e2e）
+   → db(:5433, 卷 pgdata_e2e) / redis / backend(:8000) / frontend(:5174)
+   → backend 注入 TENANT_MODE=single、DATABASE_URL→:5433/qms_e2e、E2E_MODE=1
 2. 等待健康：backend /healthz 轮询至 200（总超时 60s，未达即明确报错并打印 backend logs），db pg_isready
 3. alembic upgrade head（e2e 库）
 4. python -m app.seed_e2e            # 幂等灌入已知记录
@@ -181,7 +185,10 @@ spec (m1-core/capa.spec.ts)
    - 凭证从本地 `.env.e2e`（gitignore）读：`E2E_LLM_API_KEY` / `E2E_LLM_BASE_URL` / `E2E_LLM_PROVIDER`（ark/deepseek/openai）。
    - 后端 e2e 简档据此覆盖活跃 provider、key、base_url；`llm_timeout` 设 **30s**（默认 5s < 真实 ~9s Ark 调用 → 超时静默 fallback；e2e 要真实调用，必须留足余量）。
    - Playwright AI 断言用 `expect.poll(...,{timeout:30s})` + `waitForResponse`。
-   - **断言只验结构/行为**：推荐→卡片出现、字段齐全、AP∈{H,M,L}、S/O/D∈1-10；AI 草拟→编辑器非空文本含预期小节标题；趋势解读→非空含中文分段。不验精确文本。
+   - **断言只验结构/行为，绝不文本匹配**（真实 LLM 非确定性，精确文本必 flake）：
+     - 推荐 → 卡片 DOM 存在、关键字段齐全、`AP ∈ {H,M,L}`、`S/O/D ∈ 1..10`。
+     - AI 草拟 → 目标编辑器区域**非空**、字符数 > N、含预期 HTML 标签层级（如小节容器节点存在），**不**断言具体文字。
+     - 趋势解读 → 返回非空、含中文、分段节点存在，不断言逐句。
    - provider 适配坑：setup 阶段先做一次 `complete_json` 烟测；失败即跳过 AI spec 组并报告（参照 `ai-credentials.guard`）。
 3. **凭证缺失报警**（非静默）：
    - `global.setup.ts` 缺凭证 → stderr 醒目横幅 `⚠️ E2E_LLM_API_KEY 未配置 → AI spec 组将跳过` + 写 `e2e-env.json`。
@@ -190,7 +197,8 @@ spec (m1-core/capa.spec.ts)
 4. **残留数据/清理失败**：`drain()` 包 `afterEach`、try/each；失败打印未清记录，不挂后续 spec；重残留由 `make e2e-reset` 兜底。写数据单号用确定性前缀 `E2E-{module}-{seq}`，避开 seed-state 已占单号集合。
 5. **栈未就绪**：健康轮询 60s 超时即明确报错并打印 backend logs，不静默继续。
 6. **并发与重试**：`workers:1`、`fullyParallel:false`、CI `retries:2`、本地 `retries:0`（本地立刻看见 flake）、`trace:"on-first-retry"`。
-7. **环境隔离**：e2e 库 `qms_e2e` 与开发库 `qms` / CI 测试库 `qms_test` 完全分开；`down -v` 清卷。`/api/e2e/seed-state` 与 LLM 凭证注入由环境变量 `E2E_MODE=1` 开关，生产/正常 CI 不暴露。
+7. **环境隔离**：e2e 库 `qms_e2e`（独立卷 `pgdata_e2e`、端口 `:5433`）与开发库 `qms` / CI 测试库 `qms_test` 完全分开；`down -v` 清卷。`/api/e2e/seed-state` 与 LLM 凭证注入由环境变量 `E2E_MODE=1` 开关，生产/正常 CI 不暴露。
+8. **生产泄露门控**：`/api/e2e/seed-state` 路由注册处双重校验 `E2E_MODE=="1" and settings.TENANT_MODE != "production"`；条件不满足则**整组 e2e 路由不载入**，即便生产环境误注入 `E2E_MODE=1` 也绝不暴露种子元数据/账号信息。
 
 ## 7. 套件自身验证（meta）
 
@@ -219,11 +227,14 @@ spec (m1-core/capa.spec.ts)
 | 串行慢 | E2E 可靠优先于快；单模块 `--grep` 提速迭代；日后写流程多可演进到 per-worker 库 |
 | `data-e2e` 改生产代码 | 仅可测性最小改动，无测试专用分支 |
 | 种子与 demo seed 漂移 | 独立 `seed_e2e`，不依赖 `app.seed` |
+| e2e db 卷/端口与开发库冲突（既有卷使 `POSTGRES_DB` 初始化失效、端口占用） | 独立卷 `pgdata_e2e` + 端口 `:5433`（db）/`:5174`（frontend）；`DATABASE_URL` 指向 `:5433/qms_e2e` |
+| 多租户子域名伪造增加本地配置复杂度 | e2e 简档强制 `TENANT_MODE=single`，factory 行级隔离用 `factory_id` 在单租户下验证；多租户场景留 M4 单独 spec |
+| e2e 端点生产泄露 | 路由注册双重门控 `E2E_MODE=1 且非 production`，否则不载入 |
 
 ## 11. 验收标准（首版 M0+M1）
 
 1. `make e2e-reset && make e2e` 在干净环境一键全绿（无 LLM 凭证时 AI 组 skip+warning，其余全过）。
 2. `make e2e -- --grep m1-core` 单模块独立跑通，写数据 afterEach 自清、种子不动。
-3. M1 四个流程 spec 全绿：①4 角色登录+权限门控+跨工厂不可见 ②新建 FMEA→编辑→推荐按钮→版本快照 ③新建 8D→D1-D8 流转→审批/关闭 ④看板 KPI 卡→过滤列表→详情。
-4. LLM 凭证齐全时 AI 相关断言（推荐卡片、草拟非空）全绿。
+3. M1 四个流程 spec 全绿：①**5 角色（4+1：admin/engineer/manager/viewer/group_admin）**登录+权限门控+跨工厂行级隔离不可见 ②新建 FMEA→编辑→推荐按钮→版本快照 ③新建 8D→D1-D8 流转→审批/关闭 ④看板 KPI 卡→过滤列表→详情。
+4. LLM 凭证齐全时 AI 相关断言全绿——**仅验结构/行为**（推荐卡片 DOM 存在、`AP∈{H,M,L}`、`S/O/D∈1..10`；草拟编辑器非空含预期 HTML 层级；趋势解读非空含中文分段），绝不文本匹配。
 5. `docs/e2e.md` + `CLAUDE.md` 更新，`docs-check` 过。
