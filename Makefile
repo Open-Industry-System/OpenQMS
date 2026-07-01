@@ -16,6 +16,11 @@ FRONTEND_DIR := frontend
 PYTEST_SECRET_KEY ?= test-secret-key-for-ci-only
 PYTEST_IGNORES    := --ignore=tests/test_graph_sync_worker.py --ignore=tests/test_graph_projection.py
 
+# Prefer the project venv's pytest if present (local dev); fall back to PATH
+# pytest (CI installs requirements into the runner python, no .venv). Without
+# this, `make check-backend` may resolve a system python lacking openai/anthropic.
+PYTEST ?= $(shell if [ -x $(BACKEND_DIR)/.venv/bin/pytest ]; then echo $(BACKEND_DIR)/.venv/bin/pytest; else echo pytest; fi)
+
 .PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend
 
 help:
@@ -31,7 +36,7 @@ help:
 check: check-backend check-frontend
 
 check-backend:
-	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. pytest tests/ -v $(PYTEST_IGNORES)
+	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(PYTEST) tests/ -v $(PYTEST_IGNORES)
 
 check-frontend: check-frontend-tsc check-frontend-build
 
