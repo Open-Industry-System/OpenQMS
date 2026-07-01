@@ -1,11 +1,13 @@
 import os
+
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
-import pytest
 import uuid
 
-from app.services.recommendation_service import RecommendationService, RuleEngine, _NullGraphRepo
+import pytest
+
 from app.schemas.recommendation import RecommendRequest, SuggestionItem
+from app.services.recommendation_service import RecommendationService, RuleEngine, _NullGraphRepo
 
 
 class StubGraphRepo:
@@ -319,6 +321,7 @@ async def test_recommend_writes_success_audit_on_llm_success(
 ):
     """need_llm=True + complete_json succeeds → audit row status=success."""
     from sqlalchemy import select
+
     from app.models.audit import AuditLog
     from app.models.fmea import FMEADocument
     from app.services.agent import provider_adapter
@@ -332,14 +335,15 @@ async def test_recommend_writes_success_audit_on_llm_success(
     await db.flush()
 
     async def _ok_client(db_arg):
-        class _PC: pass
+        class _PC:
+            pass
         return _PC()
     async def _ok_complete(pc, prompt, schema):
         return {"suggestions": [{"name": "焊接虚焊", "confidence": 0.9, "explanation": "x"}]}
     monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
     monkeypatch.setattr(provider_adapter, "complete_json", _ok_complete)
 
-    from app.core.deps import RequestScope, FactoryScope, ProductLineScope
+    from app.core.deps import FactoryScope, ProductLineScope, RequestScope
     scope = RequestScope(
         factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
         effective_factory_id=default_factory.id,
@@ -374,6 +378,7 @@ async def test_recommend_writes_llm_failed_audit_on_exception(
 ):
     """need_llm=True + complete_json raises → source=rule_fallback, audit status=llm_failed, NOT cached."""
     from sqlalchemy import select
+
     from app.models.audit import AuditLog
     from app.models.fmea import FMEADocument
     from app.models.recommendation_cache import RecommendationCache
@@ -388,14 +393,15 @@ async def test_recommend_writes_llm_failed_audit_on_exception(
     await db.flush()
 
     async def _ok_client(db_arg):
-        class _PC: pass
+        class _PC:
+            pass
         return _PC()
     async def _boom(pc, prompt, schema):
         raise RuntimeError("upstream 500")
     monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
     monkeypatch.setattr(provider_adapter, "complete_json", _boom)
 
-    from app.core.deps import RequestScope, FactoryScope, ProductLineScope
+    from app.core.deps import FactoryScope, ProductLineScope, RequestScope
     scope = RequestScope(
         factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
         effective_factory_id=default_factory.id,
@@ -431,6 +437,7 @@ async def test_recommend_no_audit_when_llm_unconfigured(
 ):
     """pc is None (ProviderNotConfiguredError) → rule fallback, NO audit, rule-mode cached."""
     from sqlalchemy import select
+
     from app.models.audit import AuditLog
     from app.models.fmea import FMEADocument
     from app.models.recommendation_cache import RecommendationCache
@@ -448,7 +455,7 @@ async def test_recommend_no_audit_when_llm_unconfigured(
         raise provider_adapter.ProviderNotConfiguredError("no cfg")
     monkeypatch.setattr(provider_adapter, "build_client", _raise)
 
-    from app.core.deps import RequestScope, FactoryScope, ProductLineScope
+    from app.core.deps import FactoryScope, ProductLineScope, RequestScope
     scope = RequestScope(
         factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
         effective_factory_id=default_factory.id,
@@ -495,7 +502,7 @@ async def test_recommend_cache_gate_falls_through_when_llm_becomes_available(
     db.add(fmea)
     await db.flush()
 
-    from app.core.deps import RequestScope, FactoryScope, ProductLineScope
+    from app.core.deps import FactoryScope, ProductLineScope, RequestScope
     scope = RequestScope(
         factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
         effective_factory_id=default_factory.id,
@@ -521,7 +528,8 @@ async def test_recommend_cache_gate_falls_through_when_llm_becomes_available(
 
     # 2nd call: LLM now available → must fall through (not return stale rule cache)
     async def _ok_client(db_arg):
-        class _PC: pass
+        class _PC:
+            pass
         return _PC()
     async def _ok_complete(pc, prompt, schema):
         return {"suggestions": [{"name": "焊接虚焊", "confidence": 0.9, "explanation": "x"}]}

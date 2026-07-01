@@ -25,6 +25,7 @@ from app.schemas.recommendation import (
 )
 from app.services.agent import provider_adapter
 from app.services.agent.provider_adapter import ProviderNotConfiguredError
+
 logger = logging.getLogger(__name__)
 
 

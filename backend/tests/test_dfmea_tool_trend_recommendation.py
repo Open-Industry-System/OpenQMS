@@ -1,7 +1,7 @@
 import os
+
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
-import pytest
 
 from app.api.fmea import _recommend_anchor
 
@@ -110,13 +110,13 @@ class TestBuildPromptForToolTrend:
 # _cache_result）与权限（get_user_permission），直接驱动 recommend() 逻辑。
 # RuleEngine.evaluate 对未知 trigger 返回空、quality="generic"（已核实
 # recommendation_service.py:138-140），不抛异常，故无需 patch rules。
-from unittest.mock import AsyncMock
 import uuid as _uuid
+from unittest.mock import AsyncMock
 
-from app.schemas.recommendation import RecommendRequest
-from app.core.permissions import PermissionLevel
 from app.core.deps import RequestScope
 from app.core.factory_scope import FactoryScope, ProductLineScope
+from app.core.permissions import PermissionLevel
+from app.schemas.recommendation import RecommendRequest
 
 
 class _StubFmea:

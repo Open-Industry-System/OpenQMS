@@ -1,8 +1,10 @@
 import os
+
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only")
 
-import pytest
 import uuid
+
+import pytest
 
 from app.models.fmea import FMEADocument
 

@@ -12,8 +12,8 @@ from app.models.control_plan import ControlPlan
 from app.models.customer_quality import CustomerComplaint, RMARecord
 from app.models.fmea import FMEADocument
 from app.models.graph_sync_outbox import GraphSyncOutbox
-from app.models.special_characteristic import SpecialCharacteristic
 from app.models.spc import SPCAlarm
+from app.models.special_characteristic import SpecialCharacteristic
 from app.services.embedding_outbox import delete_embeddings_for_entity, enqueue_embedding
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import _create_fmea_version_no_commit
