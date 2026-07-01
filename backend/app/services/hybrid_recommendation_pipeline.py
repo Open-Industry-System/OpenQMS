@@ -5,7 +5,6 @@ import uuid
 
 from app.models.user import User
 from app.services.agent import audit as audit_mod
-from app.services.agent import provider_adapter
 from app.services.fusion_engine import FusionEngine
 from app.services.llm_fusion_layer import LLMFusionLayer
 from app.services.recommendation_sources import (
