@@ -162,8 +162,97 @@ In `backend/tests/test_recommendation_service.py`, replace every `Recommendation
 The `test_default_llm_timeout_covers_normal_provider_latency` test (line 47–58) currently passes `llm_provider=object()` only to assert `svc.llm_timeout >= 15`. Drop the `llm_provider=` arg; the assertion `svc.llm_timeout >= 15` still holds (timeout floor is in the ctor).
 
 In `backend/tests/test_dfmea_tool_trend_recommendation.py`:
-- line 69: `return RecommendationService(db=None, graph_repo=StubGraphRepo())`
-- line 155 (`_svc`): change signature to `_svc(self)` (drop `llm` param) and `return RecommendationService(db=None, graph_repo=StubGraphRepo())`. The `_OkLlm()`-based test at line 175 will be rewritten in Task 3 to stub `build_client`/`complete_json`; for now, leave that test calling `self._svc()` and mark it `pytest.skip("wired in Task 3")` so the suite stays green. Update the call site at line 176 to `svc = self._svc()`.
+- line 69 (the `_svc` in the prompt-building test class): `return RecommendationService(db=None, graph_repo=StubGraphRepo())`
+- line 154–155 (`_svc(self, llm)` in `TestRecommendIntegrationForToolTrend`): change signature to `_svc(self)` and `return RecommendationService(db=None, graph_repo=StubGraphRepo())` (drop `llm` param). The 3 integration tests (lines 175, 189, 203) all use `db=None` and `user=object()` — **all 3 must be migrated together here**, not deferred to Task 3, because:
+  - Task 2's `pc=None` placeholder already changes the `no-llm` test (line 189) and `failure` test (line 203) behavior: with `pc=None`, `_need_llm=False` → `source="rule"` for both, so the `failure` test's `assert res.source == "rule_fallback"` (line 214) goes red until `build_client` is stubbed to return a pc.
+  - After Task 4, the `failure` path calls `_write_recommend_audit(user.user_id, ...)` → `AttributeError` because `user=object()` has no `user_id`.
+  - After Task 3, `db=None` tests that don't stub `build_client` will call real `build_client(None)` against a None session.
+
+  Rewrite all 3 tests to stub `provider_adapter.build_client`/`complete_json` explicitly and pass a stub user with `user_id`. Since these are DB-free unit tests (no audit rows asserted), also stub `_write_recommend_audit` so they don't touch a DB:
+
+```python
+    def _svc(self):
+        return RecommendationService(db=None, graph_repo=StubGraphRepo())
+
+    def _patch(self, svc, monkeypatch, *, build_client, complete_json=None):
+        fmea = _StubFmea()
+        monkeypatch.setattr(svc, "_get_fmea_or_404", AsyncMock(return_value=fmea))
+        monkeypatch.setattr(svc, "_get_cached", AsyncMock(return_value=None))
+        monkeypatch.setattr(svc, "_assemble_context", AsyncMock(return_value={}))
+        monkeypatch.setattr(svc, "_cache_result", AsyncMock())
+        # DB-free: short-circuit audit so user.user_id / db.flush aren't exercised here.
+        monkeypatch.setattr(svc, "_write_recommend_audit", AsyncMock())
+        monkeypatch.setattr(
+            "app.core.permissions.get_user_permission",
+            AsyncMock(return_value=PermissionLevel.VIEW),
+        )
+        monkeypatch.setattr(
+            "app.services.recommendation_scope.resolve_product_line_codes",
+            AsyncMock(return_value=["DC-DC-100"]),
+        )
+        from app.services.agent import provider_adapter
+        monkeypatch.setattr(provider_adapter, "build_client", build_client)
+        if complete_json is not None:
+            monkeypatch.setattr(provider_adapter, "complete_json", complete_json)
+        return fmea
+```
+
+  Then the 3 tests become:
+
+```python
+    async def test_dfmea_tool_with_llm_returns_suggestions(self, monkeypatch):
+        async def _ok_client(db_arg):
+            class _PC: pass
+            return _PC()
+        async def _ok_complete(pc, prompt, schema):
+            return {"suggestions": [{"name": "边界图", "confidence": 0.85, "explanation": "适合结构分析"}]}
+        svc = self._svc()
+        fmea = self._patch(svc, monkeypatch, build_client=_ok_client, complete_json=_ok_complete)
+        req = RecommendRequest(
+            trigger_type="dfmea_tool",
+            context={"task": "分析DC-DC转换器", "fmea_title": fmea.title},
+            scope="current_product_line", include_graph=False,
+        )
+        user = object()
+        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user), tenant_schema="public")
+        assert any(s.name == "边界图" for s in res.suggestions)
+        assert res.source in ("hybrid", "graph_enriched")
+
+    async def test_dfmea_tool_no_llm_returns_empty_with_source_rule(self, monkeypatch):
+        async def _raise(db_arg):
+            from app.services.agent.provider_adapter import ProviderNotConfiguredError
+            raise ProviderNotConfiguredError("no cfg")
+        svc = self._svc()
+        fmea = self._patch(svc, monkeypatch, build_client=_raise)
+        req = RecommendRequest(
+            trigger_type="dfmea_tool",
+            context={"task": "分析DC-DC转换器"},
+            scope="current_product_line", include_graph=False,
+        )
+        user = object()
+        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user), tenant_schema="public")
+        assert res.suggestions == []
+        assert res.source == "rule"
+
+    async def test_dfmea_trend_llm_failure_returns_rule_fallback(self, monkeypatch):
+        async def _ok_client(db_arg):
+            class _PC: pass
+            return _PC()
+        async def _boom(pc, prompt, schema):
+            raise RuntimeError("llm boom")
+        svc = self._svc()
+        fmea = self._patch(svc, monkeypatch, build_client=_ok_client, complete_json=_boom)
+        req = RecommendRequest(
+            trigger_type="dfmea_trend",
+            context={"task": "分析DC-DC转换器"},
+            scope="current_product_line", include_graph=False,
+        )
+        user = object()
+        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user), tenant_schema="public")
+        assert res.source == "rule_fallback"
+```
+
+  Delete the now-unused `_OkLlm` and `_ThrowLlm` classes (lines 131–138) — they were stubs for the old `self.llm.complete` interface, no longer referenced.
 
 In `backend/tests/test_fmea_recommend_scope.py`:
 - line 54: `service = RecommendationService(db=db, graph_repo=fake_repo)`
@@ -286,10 +375,10 @@ Update the call site (line 669):
             await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response, pc is not None)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass (with LLM-call test skipped)**
+- [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_recommendation_service.py tests/test_dfmea_tool_trend_recommendation.py tests/test_fmea_recommend_scope.py -v`
-Expected: PASS (the `_OkLlm` test is skipped; all `llm_provider=None` paths now go through `pc=None` rule fallback, behaviorally identical to before).
+Expected: PASS. The 3 dfmea integration tests now stub `build_client`/`complete_json`/`_write_recommend_audit` directly and pass with the `pc=None` placeholder (the `no-llm` test asserts `source="rule"`; the `failure` and `success` tests stub `build_client` to return a pc — but since the placeholder forces `pc=None`, the `success`/`failure` tests will FAIL here because `_need_llm` returns `False`. **That's expected** — Task 3 replaces the `pc=None` placeholder with real `build_client` resolution, after which they pass. So after Task 2, only the `no-llm` test and the DB-free unit tests pass; `success`/`failure` dfmea tests fail until Task 3. Adjust the run: `pytest tests/test_recommendation_service.py tests/test_fmea_recommend_scope.py -v` passes fully; `pytest tests/test_dfmea_tool_trend_recommendation.py -v -k "no_llm or not (with_llm or failure)"` passes. The `with_llm`/`failure` tests are red — Task 3 greens them.)
 
 - [ ] **Step 6: Run `update_fmea` cache-invalidation regression**
 
@@ -305,55 +394,23 @@ git commit -m "refactor(recommend): drop llm_provider ctor param, thread llm_ava
 
 ---
 
-## Task 3: Resolve `pc` via `provider_adapter.build_client` before cache check; rewire LLM call to `complete_json`
+## Task 3: Resolve `pc` via `provider_adapter.build_client` before cache check
+
+The dfmea integration tests were already migrated in Task 2 (they stub `build_client`/`complete_json` directly). Task 3 only replaces the `pc = None` placeholder with real `build_client` resolution + adds the imports. **Note:** the `complete_json` call-line replacement (old `self.llm.complete`) is folded into Task 4's `need_llm`-branch restructure — Task 3 does NOT touch the call line yet. After Task 3, `pc` resolves correctly; the `success`/`failure` dfmea tests still assert against `complete_json`, which the old `self.llm.complete` call line won't satisfy until Task 4. So those 2 tests stay red until Task 4. (This is intentional: Task 3 isolates `build_client` resolution + the cache-gate fix; Task 4 isolates the LLM-call + audit restructure.)
 
 **Files:**
-- Modify: `backend/app/services/recommendation_service.py` (replace `pc = None` placeholder; rewire `need_llm=True` branch line 641)
-- Modify: `backend/tests/test_dfmea_tool_trend_recommendation.py` (un-skip + stub `build_client`/`complete_json`)
-- Modify: `backend/tests/test_recommendation_service.py` (add `complete_json` stub for any LLM-success test)
+- Modify: `backend/app/services/recommendation_service.py` (replace `pc = None` placeholder; add imports)
 
 **Interfaces:**
-- Consumes: `provider_adapter.build_client(db) -> ProviderClient` (raises `ProviderNotConfiguredError`), `provider_adapter.complete_json(pc, prompt, response_schema) -> dict`.
-- Produces: `recommend()` end-to-end on the base provider.
+- Consumes: `provider_adapter.build_client(db) -> ProviderClient` (raises `ProviderNotConfiguredError`).
+- Produces: `pc` correctly resolved before the cache check; cache fall-through gate works against real provider availability.
 
-- [ ] **Step 1: Write/restore the failing LLM-success test**
+- [ ] **Step 1: Run the dfmea success/failure tests to confirm they're red (sanity)**
 
-In `backend/tests/test_dfmea_tool_trend_recommendation.py`, un-skip `test_dfmea_tool_with_llm_returns_suggestions` and stub the base provider instead of injecting `_OkLlm`. Replace the test body:
-```python
-    async def test_dfmea_tool_with_llm_returns_suggestions(self, monkeypatch):
-        from app.services.agent import provider_adapter
+Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_dfmea_tool_trend_recommendation.py -v -k "with_llm or failure"`
+Expected: FAIL — `pc` is `None` (Task 2 placeholder), so `_need_llm` returns `False`; `with_llm` gets `source="rule"` (not `hybrid`), `failure` gets `source="rule"` (not `rule_fallback`). The `no_llm` test passes.
 
-        async def _ok_client(db):
-            class _PC:
-                pass
-            return _PC()
-
-        async def _ok_complete(pc, prompt, response_schema):
-            return {"suggestions": [{"name": "边界图", "confidence": 0.9, "explanation": "x"}]}
-
-        monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
-        monkeypatch.setattr(provider_adapter, "complete_json", _ok_complete)
-
-        svc = self._svc()
-        fmea = self._patch(svc, monkeypatch)
-        req = RecommendRequest(
-            trigger_type="dfmea_tool",
-            context={"task": "分析DC-DC转换器", "fmea_title": fmea.title},
-            scope="current_product_line",
-            include_graph=False,
-        )
-        user = object()
-        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user), tenant_schema="public")
-        assert any(s.name == "边界图" for s in res.suggestions)
-        assert res.source in ("hybrid", "graph_enriched")
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_dfmea_tool_trend_recommendation.py::TestRecommendIntegrationForToolTrend::test_dfmea_tool_with_llm_returns_suggestions -v`
-Expected: FAIL — `pc` is `None` (placeholder), so `_need_llm` returns `False`, `source="rule"`, no `边界图` suggestion.
-
-- [ ] **Step 3: Implement `build_client` resolution + `complete_json` call**
+- [ ] **Step 2: Implement `build_client` resolution + imports**
 
 In `backend/app/services/recommendation_service.py`:
 
@@ -363,7 +420,7 @@ from app.services.agent import provider_adapter
 from app.services.agent.provider_adapter import ProviderNotConfiguredError
 ```
 
-Replace the `pc = None` placeholder (inserted Task 2) with real resolution:
+Replace the `pc = None` placeholder (inserted Task 2, immediately after `fmea = await self._get_fmea_or_404(fmea_id)`) with real resolution:
 ```python
         try:
             pc = await provider_adapter.build_client(self.db)
@@ -371,26 +428,24 @@ Replace the `pc = None` placeholder (inserted Task 2) with real resolution:
             pc = None
 ```
 
-Rewire the LLM call (line 640–643) — replace `self.llm.complete(prompt, {})`:
-```python
-                llm_result = await asyncio.wait_for(
-                    provider_adapter.complete_json(pc, prompt, {}),
-                    timeout=self.llm_timeout,
-                )
+- [ ] **Step 3: Run the dfmea success/failure tests — still red (call line not yet switched)**
+
+Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_dfmea_tool_trend_recommendation.py -v -k "with_llm or failure"`
+Expected: FAIL — but now because `self.llm.complete` is gone/`pc` path is hit differently. Specifically: the old call line `self.llm.complete(prompt, {})` (line 641) still references the deleted `self.llm` → `AttributeError`. This confirms Task 3 touched `pc` resolution; Task 4 fixes the call line + audit. (If the error is `AttributeError: 'RecommendationService' object has no attribute 'llm'`, you're on track.)
+
+- [ ] **Step 4: Run the no-llm + scope tests to confirm no regression**
+
+Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_dfmea_tool_trend_recommendation.py::TestRecommendIntegrationForToolTrend::test_dfmea_tool_no_llm_returns_empty_with_source_rule tests/test_fmea_recommend_scope.py tests/test_recommendation_service.py -v -k "no_llm or scope or merge or graph_matches or timeout"`
+Expected: PASS (these don't exercise the `need_llm=True` call line).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add backend/app/services/recommendation_service.py
+git commit -m "feat(recommend): resolve pc via provider_adapter.build_client before cache check"
 ```
-(`pc` is guaranteed non-None here because `need_llm=True` requires `pc is not None` via `_need_llm`.)
 
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_dfmea_tool_trend_recommendation.py -v`
-Expected: PASS (all tests, including the un-skipped LLM-success test).
-
-- [ ] **Step 5: Run full recommendation suite**
-
-Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_recommendation_service.py tests/test_dfmea_tool_trend_recommendation.py tests/test_fmea_recommend_scope.py tests/test_pfmea_recommend.py -v`
-Expected: PASS
-
-- [ ] **Step 6: Commit**
+(Task 4 follows immediately and greens the `with_llm`/`failure` tests by switching the call line to `complete_json` + adding audit.)
 
 ```bash
 git add backend/app/services/recommendation_service.py backend/tests/test_dfmea_tool_trend_recommendation.py
@@ -676,22 +731,53 @@ Add the helper method (place it near `_compute_context_hash`, ~line 879):
         )
 ```
 
-Wire it into the `need_llm=True` branch (current lines 630–655). After the `validated = SuggestionList.model_validate(llm_result)` + merge + `source = "graph_enriched" if graph_suggestions else "hybrid"` (success path), add:
+Wire it into the `need_llm=True` branch. **⚠ Critical: the audit write MUST sit OUTSIDE the LLM try/except** — otherwise an audit failure (DB flush error, missing `user.user_id`, etc.) gets caught by `except Exception` and mis-tagged as `llm_failed`, or an audit exception in the failure branch bubbles up and crashes the request. Restructure the `if need_llm:` block (current lines 630–655) so the try/except only owns the LLM call + parse + merge and sets `status`/`source`, then a single audit write runs after:
+
 ```python
+        if need_llm:
+            llm_status = "llm_failed"  # default; overwritten on success
+            try:
+                import asyncio
+                llm_context = await self._assemble_context(fmea, request)
+                if graph_suggestions:
+                    llm_context["similar_history"] = [
+                        {"name": s.name, "from": s.source_document_no}
+                        for s in graph_suggestions[:5]
+                    ]
+                prompt = self._build_prompt(request.trigger_type, llm_context)
+                llm_result = await asyncio.wait_for(
+                    provider_adapter.complete_json(pc, prompt, {}),
+                    timeout=self.llm_timeout,
+                )
+                validated = SuggestionList.model_validate(llm_result)
+                llm_items = [
+                    SuggestionItem(
+                        name=s.name, confidence=s.confidence, source="llm", explanation=s.explanation
+                    )
+                    for s in validated.suggestions
+                ]
+                all_suggestions = self._merge_and_deduplicate(all_suggestions, llm_items)
+                source = "graph_enriched" if graph_suggestions else "hybrid"
+                llm_status = "success"
+            except Exception as e:
+                source = "graph" if graph_suggestions else "rule_fallback"
+                logger.warning("LLM failed, using rule+graph results: %s: %r", type(e).__name__, e)
+            # Audit sits OUTSIDE the try/except so audit errors never masquerade
+            # as LLM failures. Wrap in its own guard so an audit hiccup never
+            # breaks the recommend response (audit is observability, not business logic).
+            try:
                 await self._write_recommend_audit(
                     fmea_id, request.trigger_type, context_hash,
                     user, fmea.factory_id, tenant_schema,
-                    status="success", source=source, suggestion_count=len(all_suggestions),
+                    status=llm_status, source=source, suggestion_count=len(all_suggestions),
                 )
+            except Exception as audit_err:
+                logger.warning("recommend audit write failed: %s: %r", type(audit_err).__name__, audit_err)
+        else:
+            source = "graph" if graph_suggestions else "rule"
 ```
-In the `except Exception as e:` branch (line 653), after `source = "graph" if graph_suggestions else "rule_fallback"` and `logger.warning(...)`, add:
-```python
-                await self._write_recommend_audit(
-                    fmea_id, request.trigger_type, context_hash,
-                    user, fmea.factory_id, tenant_schema,
-                    status="llm_failed", source=source, suggestion_count=len(all_suggestions),
-                )
-```
+
+This also replaces the old `self.llm.complete(prompt, {})` call site (line 641) — Task 3's `complete_json` rewiring is folded into this restructure. **Adjust Task 3 accordingly**: Task 3 should only add the `build_client` resolution + the `provider_adapter` import; the `complete_json` call-line replacement happens here in Task 4's restructure. (If you prefer, you may fold Task 3's call-line change into this Task 4 step — either way, the final code is the block above.)
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -726,13 +812,15 @@ git commit -m "feat(recommend): add two-state llm_recommend audit on LLM-attempt
 
 - [ ] **Step 1: Write the failing route test**
 
-Create `backend/tests/test_fmea_recommend_api.py` (or extend an existing fmea route test file):
+Create `backend/tests/test_fmea_recommend_api.py` (or extend an existing fmea route test file). **⚠ Patch target must be `app.api.fmea.RecommendationService`** — the route module does `from app.services.recommendation_service import RecommendationService` (`fmea.py:221`), binding the name into the `app.api.fmea` namespace. Patching `app.services.recommendation_service.RecommendationService` does NOT affect the route (the name was already imported by value). Also **spy on `db.commit`** to assert the route keeps its explicit commit (a removed `await db.commit()` must turn this test red):
+
 ```python
 import os
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only")
 
 import pytest
 import uuid
+from unittest.mock import AsyncMock
 
 from app.models.fmea import FMEADocument
 
@@ -742,9 +830,9 @@ async def test_recommend_route_passes_tenant_schema_and_commits(
     admin_client, db, default_factory, admin_user, monkeypatch
 ):
     """POST /api/fmea/{id}/recommend no longer reads app.state.llm_provider;
-    it constructs RecommendationService without llm_provider and commits."""
-    from app.services.agent import provider_adapter
-    from app.services import recommendation_service
+    it constructs RecommendationService WITHOUT llm_provider, passes
+    tenant_schema, and awaits db.commit()."""
+    import app.api.fmea as fmea_api
 
     fmea = FMEADocument(
         fmea_id=uuid.uuid4(), document_no="PFMEA-2026-010", fmea_type="PFMEA",
@@ -758,8 +846,9 @@ async def test_recommend_route_passes_tenant_schema_and_commits(
 
     class _FakeService:
         def __init__(self, db_arg, graph_repo, llm_timeout=None):
-            captured["ctor"] = {"db": db_arg, "graph_repo": graph_repo, "llm_timeout": llm_timeout}
-            captured["llm_provider_in_ctor"] = False  # no such kwarg
+            captured["ctor_kwargs"] = list(self.__init__.__code__.co_varnames)
+            # Reject llm_provider at construction so the test fails if the route
+            # still passes it. (We assert via __init__ signature below instead.)
         async def recommend(self, *args, **kwargs):
             captured["recommend_kwargs"] = kwargs
             from app.schemas.recommendation import RecommendResponse
@@ -768,21 +857,33 @@ async def test_recommend_route_passes_tenant_schema_and_commits(
                 llm_available=False, graph_match_count=0, effective_scope="current_product_line",
             )
 
-    monkeypatch.setattr(recommendation_service, "RecommendationService", _FakeService)
+    # Patch the name as bound in the route module's namespace.
+    monkeypatch.setattr(fmea_api, "RecommendationService", _FakeService)
+
+    # Spy on db.commit so a future deletion of `await db.commit()` turns this red.
+    real_commit = db.commit
+    commit_calls = []
+    async def _spy_commit():
+        commit_calls.append(True)
+        await real_commit()
+    monkeypatch.setattr(db, "commit", _spy_commit)
 
     resp = await admin_client.post(
         f"/api/fmea/{fmea.fmea_id}/recommend",
-        json={"trigger_type": "failure_mode", "context": {"function_description": "x", "failure_mode": "y"},
+        json={"trigger_type": "failure_mode",
+              "context": {"function_description": "x", "failure_mode": "y"},
               "scope": "current_product_line", "include_graph": False},
     )
     assert resp.status_code == 200
     assert "tenant_schema" in captured["recommend_kwargs"]
+    assert captured["recommend_kwargs"]["tenant_schema"] == "public"
+    assert len(commit_calls) >= 1, "route must await db.commit() (audit + cache rows depend on it)"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_fmea_recommend_api.py -v`
-Expected: FAIL — route still passes `llm_provider=` to the ctor (the `_FakeService.__init__` rejects it) and/or doesn't pass `tenant_schema`.
+Expected: FAIL — route still passes `llm_provider=` to the ctor (`_FakeService.__init__` rejects the kwarg → `TypeError`) and/or doesn't pass `tenant_schema` (`assert "tenant_schema" in captured["recommend_kwargs"]` fails) and/or doesn't commit (the route currently does commit, so this assertion may already pass — the `tenant_schema`/`llm_provider` assertions are the ones that fail first).
 
 - [ ] **Step 3: Update the `/recommend` route**
 
@@ -880,13 +981,20 @@ git commit -m "chore(p1c): regression green — make check passes" --allow-empty
 - §2.1 `pc` before cache check + fall-through gate → Task 3 (impl) + Task 4 (regression test) ✓
 - §2.1 `need_llm` two-state audit, no `llm_not_configured` → Task 4 ✓
 - §2.1 `user.user_id`, `correlation_id`, `record_id=fmea_id`, `write_audit_raw` flush-only → Task 4 ✓
-- §2.1 route-layer `await db.commit()` (no dep auto-commit) → Task 5 (route keeps commit) + Global Constraints ✓
+- §2.1 route-layer `await db.commit()` (no dep auto-commit) → Task 5 (route keeps commit, **spy-tested**) + Global Constraints ✓
 - §2.2 `/recommend` route + `fmea_service:266` ctor → Task 2 (fmea_service) + Task 5 (route) ✓
 - §2.3 `core/tenant.py` shared util + dashboard switch → Task 1 (util) + Task 5 (dashboard switch) ✓
 - §2.4 tests (success/llm_failed/llm_not_configured-no-audit/cache-gate regression/fmea_service no-TypeError/tenant unit/route) → Tasks 1–5 ✓
 
+**Review-fix coverage (round 2):**
+- Audit/LLM isolation (audit write OUTSIDE the LLM try/except, in its own guard) → Task 4 Step 3 restructure ✓
+- All 3 dfmea integration tests migrated (not just `_OkLlm`) with explicit `build_client`/`complete_json`/`_write_recommend_audit` stubs + `tenant_schema` arg; `_OkLlm`/`_ThrowLlm` deleted → Task 2 Step 1 ✓
+- Route test patches `app.api.fmea.RecommendationService` (not `app.services.recommendation_service.RecommendationService`) → Task 5 Step 1 ✓
+- Route `await db.commit()` spy-tested (removal turns the test red) → Task 5 Step 1 ✓
+- Task 3 narrowed to `build_client` resolution + imports only (call-line + audit restructure folded into Task 4) — avoids half-migrated `complete_json` call mid-plan ✓
+
 **Placeholder scan:** none — every code step has full code.
 
-**Type consistency:** `tenant_schema(request: Request) -> str` (Task 1) matches call sites in Tasks 5. `_get_cached(..., llm_available: bool)` / `_cache_result(..., llm_available: bool)` (Task 2) match call sites. `_write_recommend_audit(...)` signature (Task 4) matches its two call sites. `recommend(..., tenant_schema: str)` matches all test call sites.
+**Type consistency:** `tenant_schema(request: Request) -> str` (Task 1) matches call sites in Task 5. `_get_cached(..., llm_available: bool)` / `_cache_result(..., llm_available: bool)` (Task 2) match call sites. `_write_recommend_audit(...)` signature (Task 4) matches its single post-try/except call site. `recommend(..., tenant_schema: str)` matches all test call sites.
 
 **Scope:** single subsystem (recommend path), one plan. ✓
