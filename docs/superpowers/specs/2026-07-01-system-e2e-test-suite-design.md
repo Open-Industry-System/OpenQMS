@@ -6,7 +6,7 @@
 
 ## 1. 目标与范围
 
-为 OpenQMS 建立**浏览器全栈端到端测试套件**：Playwright 驱动真实浏览器 → 前端(:5173) → 后端(:8000) → 真实 Postgres，覆盖登录/RBAC/工厂隔离、FMEA、CAPA 8D、看板下钻等用户旅程，最终覆盖全部模块。
+为 OpenQMS 建立**浏览器全栈端到端测试套件**：Playwright 驱动真实浏览器 → 前端(:5174) → 后端(:8001) → 真实 Postgres，覆盖登录/RBAC/工厂隔离、FMEA、CAPA 8D、看板下钻等用户旅程，最终覆盖全部模块。
 
 **不做**：API 级 E2E 扩展（已有 `test_supply_chain_risk_e2e.py` 等后端 pytest 覆盖）、单元/组件测试（vitest/pytest 已有）。本套件只补"整条真实用户旅程"这一层。
 
@@ -42,19 +42,22 @@
                                             │
                 ┌───────────────────────────▼───────────────────────────┐
                 │   docker-compose.e2e.yml (override, profile=e2e)      │
-                │   db(pgvector,:5433) redis backend(:8000) frontend(:5174) │
+                │   db(pgvector,:5432内部/:5433主机) redis backend(:8000内部/:8001主机) frontend(:5173内部/:5174主机) │
                 │   专用库 qms_e2e（独立卷 pgdata_e2e），TENANT_MODE=single │
-                │   backend 读 .env.e2e 的 LLM 凭证 + DATABASE_URL        │
+                │   backend 容器内 DATABASE_URL=@db:5432/qms_e2e          │
+                │   frontend 容器内 vite 代理 /api → http://backend:8000  │
+                │   backend 读 .env.e2e 的 LLM 凭证                       │
                 └───────────────────────────┬───────────────────────────┘
-                                            │ http://localhost:5174, /api → :8000
+                                            │ 浏览器: http://localhost:5174 (→vite代理→backend:8000)
                 ┌───────────────────────────▼───────────────────────────┐
                 │   Playwright (chromium)  testDir: frontend/e2e         │
-                │   baseURL http://localhost:5173                        │
+                │   baseURL http://localhost:5174                        │
                 │   workers:1, fullyParallel:false, retries:CI=2        │
+                │   API helper: E2E_API_BASE_URL=http://localhost:8001/api │
                 │                                                         │
                 │   fixtures: auth(role)→storageState  seed-state        │
                 │   input 文档库(喂 UI) / 后端 payload(API 造前置)        │
-                │   cleanup-registry: track(id) → afterEach LIFO drain   │
+                │   cleanup: afterEach → POST /api/e2e/cleanup?prefix=   │
                 │   specs: m1-core/ m2-quality/ .../ m5-agent/            │
                 └─────────────────────────────────────────────────────────┘
 ```
@@ -62,7 +65,8 @@
 要点：
 - **新增** `docker-compose.e2e.yml`（override：e2e profile，backend 指向 e2e 库，frontend 服务，backend 注入 LLM 凭证 env）。现有 `docker-compose.yml` 不动。
   - **隔离 AI 服务**：`docker-compose.yml` 的 neo4j / graph-worker / ollama 无 profile，裸 `up` 会被拉起。`make e2e-up` **显式指定服务名**：`docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e up -d db redis backend frontend`——不传这三个 AI 服务即不启。同时在 override 里给它们加 `profiles: ["ai-infra"]` 作双保险（带 profile 的服务仅在该 profile 激活时启动）。
-  - **独立卷与端口**：e2e db 用独立 volume `pgdata_e2e`（不复用开发的 `pgdata`，否则既有卷使 `POSTGRES_DB: qms_e2e` 初始化脚本失效、库不会被创建），主机端口绑 `5433`（避开开发库 5432 冲突）；`.env.e2e` 的 `DATABASE_URL` 指向 `:5433/qms_e2e`。frontend 绑 `5174`（避开 `:5173`），Playwright `baseURL` 同步改 `:5174`。
+  - **端口隔离**（开发栈已在跑也不冲突）：db 主机 `5433:5432`、backend 主机 `8001:8000`、frontend 主机 `5174:5173`；redis **不暴露主机端口**（仅 backend 容器内访问）。容器间通信用服务名：backend `DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@db:5432/qms_e2e`，frontend vite 代理 `/api → http://backend:8000`。Playwright 跑在宿主：`baseURL=http://localhost:5174`，直连 API helper 用 `E2E_API_BASE_URL=http://localhost:8001/api`。宿主工具若需直连库：`E2E_HOST_DATABASE_URL=...@localhost:5433/qms_e2e`（可选；alembic/seed 走 `docker compose exec backend` 用容器内 `DATABASE_URL`）。
+  - **独立卷**：e2e db 用独立 volume `pgdata_e2e`（不复用开发的 `pgdata`，否则既有卷使 `POSTGRES_DB: qms_e2e` 初始化脚本失效、库不会被创建）。
   - **强制单租户**：e2e 简档 `TENANT_MODE=single`（已是默认值，显式置以防漂移），避免 SaaS schema-per-tenant 的子域名伪造（`tenant1.localhost`）配置复杂度；工厂行级隔离在单租户下用 `factory_id` 验证。多租户子域名场景留作 M4 单独 spec，不在默认套件。
 - **新增** `backend/app/seed_e2e.py`（确定性、幂等，独立于 demo `app.seed`）。它是**账号/密码/工厂/固定单号的唯一来源**，并通过 seed-state 暴露——spec 不硬编码任何账号名（现有种子用户名是 `admin`/`engineer`/`manager`/`viewer`/`groupadmin`，`engineer` 对应 role_key `field_qe`，`groupadmin` 是 group 用户跨两厂；**不**是 `group_admin`）。
 - **新增** `backend/app/api/e2e.py`，两个端点：只读 `/api/e2e/seed-state`（暴露账号/工厂/已知单号），写 `/api/e2e/cleanup`（按 `E2E-*` 前缀删测试数据，状态无关、绕过公开 API 的删除限制）。**配置与门控**：`config.py` Settings 新增 `E2E_MODE: bool = False` 字段；`main.py` 条件注册 `if settings.E2E_MODE and settings.TENANT_MODE != "production": app.include_router(e2e_router)`——既有路由注册是无条件的，e2e 路由必须改条件注册。e2e override 设 `E2E_MODE=1`。即便生产误注入 `E2E_MODE=1`，`TENANT_MODE=production` 时整组 e2e 路由仍不载入，绝不暴露种子元数据。
@@ -74,8 +78,8 @@
 ## 4. 组件与文件布局
 
 ```
-docker-compose.e2e.yml                # e2e profile override：db 卷 pgdata_e2e + :5433，frontend :5174，给 neo4j/graph-worker/ollama 加 profiles:["ai-infra"]
-.env.e2e.example                       # 模板（入库）：DATABASE_URL(:5433/qms_e2e)、TENANT_MODE=single、E2E_MODE=1、LLM_PROVIDER/LLM_API_KEY/LLM_MODEL/LLM_BASE_URL/LLM_TIMEOUT=30；.env.e2e gitignore
+docker-compose.e2e.yml                # e2e profile override：db 主机5433+独立卷pgdata_e2e，backend 主机8001，frontend 主机5174，redis 不暴露主机端口；给 neo4j/graph-worker/ollama 加 profiles:["ai-infra"]；backend 容器内 DATABASE_URL=@db:5432/qms_e2e
+.env.e2e.example                       # 模板（入库）：LLM_PROVIDER/LLM_API_KEY/LLM_MODEL/LLM_BASE_URL/LLM_TIMEOUT=30、E2E_API_BASE_URL=http://localhost:8001/api、E2E_HOST_DATABASE_URL=...@localhost:5433/qms_e2e(可选)；.env.e2e gitignore
 backend/app/config.py                 # 改：Settings 新增 E2E_MODE: bool = False（生产门控字段）
 backend/app/main.py                    # 改：条件注册 e2e 路由 if settings.E2E_MODE and settings.TENANT_MODE != "production"
 backend/app/seed_e2e.py                # 确定性种子（已有记录，幂等可重跑）
@@ -92,7 +96,7 @@ backend/app/api/e2e.py                 # /api/e2e/seed-state（只读）+ /api/e
 
 Makefile                               # 新增 e2e* 目标
 
-frontend/playwright.config.ts          # 改：workers:1, fullyParallel:false, globalSetup, storageState 目录
+frontend/playwright.config.ts          # 改：baseURL→:5174, workers:1(固定非 undefined), fullyParallel:false(现有为 true), globalSetup/teardown, storageState 目录
 frontend/e2e/
   global.setup.ts                      # 凭证检测+报警、seed-state 校验、4+1 角色 UI 登录存 storageState
   global.teardown.ts                   # 仅报告（库由 make e2e-down 清）
@@ -108,7 +112,7 @@ frontend/e2e/
       ...
   helpers/
     e2e-utils.ts                        # 导航、表格行按文档号定位、Antd Select/Modal 交互
-    api-client.ts                       # axios 直打 :8000（带 token），写流程造前置/清理
+    api-client.ts                       # axios 直打 E2E_API_BASE_URL(:8001/api)（带 token），造前置/调 cleanup
     cleanup-registry.ts                 # ★ track(kind,id) 仅诊断用；实际清理走 e2e cleanup 端点
   specs/
     m1-core/  m2-quality/  m3-supplier-customer/  m4-ai-integration/  m5-agent/
@@ -130,7 +134,8 @@ CLAUDE.md                               # 命令节追加 make e2e
 **问题**：公开 API 不能可靠清理——CAPA **无 delete 端点**；FMEA delete 仅限 `draft`/`rework`，而生命周期 spec 会推进状态。故**不**靠公开 API LIFO DELETE。
 
 **机制**：E2E-gated `POST /api/e2e/cleanup?prefix=E2E-M1`（backend/app/api/e2e.py）：
-- 后端维护一份 E2E 受跟踪表清单（与 seed_e2e 同处维护），按 FK 安全顺序执行 `DELETE FROM <table> WHERE <doc_no_col> LIKE 'E2E-M1%'`（每表指明其单号/名称列），**状态无关**——CAPA、已推进的 FMEA 都能删。
+- 后端维护一份**固定白名单**（与 seed_e2e 同处维护，绝不拼接任意表名/列名）：每个父表指明其单号/名称列（如 `capa_eightd.document_no`、`fmea_documents.document_no`），及其子表与 FK 列（如 `audit_logs.entity_id`、版本表、推荐缓存表、关联表——很多子表无单号列）。
+- 删除算法（**单事务**）：① 对每个白名单父表，`SELECT id WHERE <单号列> LIKE :prefix` 收集 IDs；② 按 FK 依赖逆序，对每个子表 `DELETE WHERE <fk_col> IN (:ids)`（用绑定参数，不拼 SQL）；③ 删父表 `DELETE WHERE id IN (:ids)`。**状态无关**——CAPA、已推进的 FMEA 都能删。
 - 写 spec 创建的记录一律用 **`E2E-` 前缀**（置于单号**开头**）单号 `E2E-{module}-{seq}`（如 `E2E-M1-CAPA-001`）。种子单号用 `-E2E-` 中缀（如 `PFMEA-E2E-001`）——**前缀不重叠**（cleanup `LIKE 'E2E-{module}%'` 只匹配写数据，不误删种子），且避开 seed-state 暴露的已占用单号集合。
 - spec `afterEach` 调 `/api/e2e/cleanup?prefix=E2E-{本模块}`；`cleanup-registry` 仅 `track(kind,id)` 作诊断（失败时打印未清记录），不负责删除。
 - 清理失败不让本 spec 挂掉后续；重残留由 `make e2e-reset`（down -v + up + seed）兜底。
@@ -143,12 +148,13 @@ CLAUDE.md                               # 命令节追加 make e2e
 
 ```
 1. make e2e-up
-   docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e up -d
-   → db(:5433, 卷 pgdata_e2e) / redis / backend(:8000) / frontend(:5174)
-   → backend 注入 TENANT_MODE=single、DATABASE_URL→:5433/qms_e2e、E2E_MODE=1
-2. 等待健康：backend **`/api/health`** 轮询至 200（总超时 60s，未达即明确报错并打印 backend logs），db pg_isready
-3. alembic upgrade head（e2e 库）
-4. python -m app.seed_e2e            # 幂等灌入已知记录
+   docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e up -d db redis backend frontend
+   （显式列 4 服务，避免误拉 neo4j/graph-worker/ollama）
+   → db(主机5433→5432, 独立卷 pgdata_e2e) / redis(不暴露主机) / backend(主机8001→8000) / frontend(主机5174→5173)
+   → backend 容器内注入 TENANT_MODE=single、DATABASE_URL=@db:5432/qms_e2e、E2E_MODE=1、LLM_*
+2. 等待健康：backend **`/api/health`**（经 http://localhost:8001/api/health）轮询至 200（总超时 60s，未达即明确报错并打印 backend logs），db pg_isready
+3. docker compose exec backend alembic upgrade head（e2e 库，用容器内 DATABASE_URL）
+4. docker compose exec backend python -m app.seed_e2e   # 幂等灌入已知记录
 5. npx playwright test               # global.setup.ts 先跑：
    ├─ 凭证检测（LLM_*）：缺失 → stderr 醒目报警横幅 + 写 e2e-env.json
    ├─ GET /api/e2e/seed-state → 校验种子就位（账号/工厂/单号从端点取，不硬编码）
@@ -205,7 +211,7 @@ spec (m1-core/capa.spec.ts)
    - 绝不静默：setup 横幅 + reporter warn 两层。
 4. **残留数据/清理失败**：清理走 `/api/e2e/cleanup?prefix=...`（非公开 API），`afterEach` 调用；失败打印未清记录，不挂后续 spec；重残留由 `make e2e-reset` 兜底。写数据单号用确定性前缀 `E2E-{module}-{seq}`，避开 seed-state 已占单号集合。
 5. **栈未就绪**：健康轮询 60s 超时即明确报错并打印 backend logs，不静默继续。
-6. **并发与重试**：`workers:1`、`fullyParallel:false`、CI `retries:2`、本地 `retries:0`（本地立刻看见 flake）、`trace:"on-first-retry"`。
+6. **并发与重试（必须改现有配置）**：现有 `playwright.config.ts` 是 `fullyParallel:true`、本地 `workers:undefined`（默认多 worker）——**必须改**为 `workers:1`、`fullyParallel:false`，否则 cleanup 按前缀并发互踩、storageState 写入竞争。CI `retries:2`、本地 `retries:0`（立刻看见 flake）、`trace:"on-first-retry"`。
 7. **环境隔离**：e2e 库 `qms_e2e`（独立卷 `pgdata_e2e`、端口 `:5433`）与开发库 `qms` / CI 测试库 `qms_test` 完全分开；`down -v` 清卷。e2e 路由与 LLM 凭证注入由环境变量 `E2E_MODE=1` 开关（Settings 新增 `E2E_MODE` 字段，e2e override 置 1），生产/正常 CI 不暴露。
 8. **生产泄露门控**：`config.py` 新增 `E2E_MODE: bool = False`；`main.py` 条件注册 `if settings.E2E_MODE and settings.TENANT_MODE != "production": app.include_router(e2e_router)`——既有路由注册是无条件 `app.include_router(...)`，e2e 路由必须条件注册。条件不满足则**整组 e2e 路由（seed-state + cleanup）不载入**，即便生产误注入 `E2E_MODE=1`、`TENANT_MODE=production` 时仍不暴露，绝不泄露种子元数据/账号信息，也不开放清理端点。
 
@@ -240,7 +246,7 @@ spec (m1-core/capa.spec.ts)
 | 串行慢 | E2E 可靠优先于快；单模块 `--grep` 提速迭代；日后写流程多可演进到 per-worker 库 |
 | `data-e2e` 改生产代码 | 仅可测性最小改动，无测试专用分支 |
 | 种子与 demo seed 漂移 | 独立 `seed_e2e`，不依赖 `app.seed` |
-| e2e db 卷/端口与开发库冲突（既有卷使 `POSTGRES_DB` 初始化失效、端口占用） | 独立卷 `pgdata_e2e` + 端口 `:5433`（db）/`:5174`（frontend）；`DATABASE_URL` 指向 `:5433/qms_e2e` |
+| e2e db/端口与开发栈冲突（既有卷使 `POSTGRES_DB` 初始化失效、端口占用） | 独立卷 `pgdata_e2e`；主机端口 db `5433`/backend `8001`/frontend `5174`，redis 不暴露；backend 容器内 `DATABASE_URL=@db:5432/qms_e2e`，宿主工具用 `E2E_HOST_DATABASE_URL=@localhost:5433/qms_e2e` |
 | 多租户子域名伪造增加本地配置复杂度 | e2e 简档强制 `TENANT_MODE=single`，factory 行级隔离用 `factory_id` 在单租户下验证；多租户场景留 M4 单独 spec |
 
 ## 11. 验收标准（首版 M0+M1）
@@ -249,4 +255,5 @@ spec (m1-core/capa.spec.ts)
 2. `make e2e -- --grep m1-core` 单模块独立跑通，写数据 afterEach 自清、种子不动。
 3. M1 四个流程 spec 全绿：①**种子 5 账号（admin/engineer/manager/viewer/groupadmin，账号名与密码从 seed-state 读取不硬编码；groupadmin 为跨两厂的 group 用户）**登录+权限门控+跨工厂行级隔离不可见 ②新建 FMEA→编辑→推荐按钮→版本快照 ③新建 8D→D1-D8 流转→审批/关闭 ④看板 KPI 卡→过滤列表→详情。
 4. LLM 凭证齐全时 AI 相关断言全绿——**仅验结构/行为**（推荐卡片 DOM 存在、`AP∈{H,M,L}`、`S/O/D∈1..10`；草拟编辑器非空含预期 HTML 层级；趋势解读非空含中文分段），绝不文本匹配。
-5. `docs/e2e.md` + `CLAUDE.md` 更新，`docs-check` 过。
+5. **端口/配置隔离**：开发栈同时在跑时 `make e2e` 不冲突（db 5433 / backend 8001 / frontend 5174 / redis 不暴露）；`playwright.config.ts` 已固定 `workers:1`+`fullyParallel:false`+`baseURL:5174`；后端 `E2E_MODE` 未置时 `/api/e2e/*` 不载入。
+6. `docs/e2e.md` + `CLAUDE.md` 更新，`docs-check` 过。
