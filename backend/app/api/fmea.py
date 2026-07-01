@@ -81,7 +81,7 @@ async def create_fmea(
         )
         await validate_factory_invariant(fmea, db)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return FMEAResponse.model_validate(fmea)
 
 
@@ -145,7 +145,7 @@ async def update_fmea(
                         "latest_lock_version": fmea.lock_version,
                     },
                 },
-            )
+            ) from e
         if error_msg == "lock_version_changed_again":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -157,8 +157,8 @@ async def update_fmea(
                         "latest_lock_version": fmea.lock_version,
                     },
                 },
-            )
-        raise HTTPException(status_code=400, detail=error_msg)
+            ) from e
+        raise HTTPException(status_code=400, detail=error_msg) from e
     return FMEAResponse.model_validate(fmea)
 
 
@@ -211,7 +211,7 @@ async def transition_fmea(
     try:
         fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return FMEAResponse.model_validate(fmea)
 
 

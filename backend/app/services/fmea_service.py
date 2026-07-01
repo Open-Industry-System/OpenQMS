@@ -179,9 +179,9 @@ async def create_fmea(
     await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code, fmea.factory_id)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
-        raise ValueError(f"FMEA document number '{document_no}' already exists.")
+        raise ValueError(f"FMEA document number '{document_no}' already exists.") from e
 
     await db.refresh(fmea)
     return fmea
