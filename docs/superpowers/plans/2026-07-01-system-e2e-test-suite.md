@@ -19,7 +19,7 @@
 - LLM credentials use app-native env names: `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` / `LLM_BASE_URL` / `LLM_TIMEOUT=30`. Missing → AI specs skip-with-warning, never silently.
 - `playwright.config.ts` MUST be `workers:1` + `fullyParallel:false` + `baseURL:5174` (current is `fullyParallel:true`, local `workers:undefined`).
 - No CI integration; E2E runs only via `make e2e*`. Do not touch `.github/workflows/test.yml`.
-- Backend tests use `SECRET_KEY=test-secret-key-for-pytest-only` and `TEST_DATABASE_URL` pointing at the e2e DB.
+- Backend e2e endpoint tests (`test_e2e_endpoints.py`) skip unless `E2E_MODE` is set (so `make check`, which does not set it nor run `seed_e2e`, skips them). Run them explicitly with `E2E_MODE=1` + `TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5433/qms_e2e` (the e2e DB). The file must NOT default `E2E_MODE` itself.
 - Production code changes are limited to adding `data-e2e="..."` attributes for testability — no test-only branches/logic.
 
 ---
@@ -305,15 +305,24 @@ Note: `field_qe` is the role_key for the `engineer` user (verified in `seed.py:1
 `backend/tests/test_e2e_endpoints.py`:
 
 ```python
-"""Tests for /api/e2e/* endpoints (seed-state)."""
+"""Tests for /api/e2e/* endpoints (seed-state + cleanup).
+
+Skipped unless E2E_MODE is set, so `make check` (which does NOT set E2E_MODE and
+does not seed_e2e) skips these cleanly instead of failing on a missing e2e router /
+empty e2e DB. Run explicitly with E2E_MODE=1 + TEST_DATABASE_URL (see Task 3/4 steps)."""
 import os
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only")
-os.environ.setdefault("E2E_MODE", "1")
+# NOTE: do NOT default E2E_MODE here — that would force the e2e router on under `make check`.
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("E2E_MODE"),
+    reason="E2E_MODE not set — e2e endpoints not registered / e2e DB not seeded",
+)
 
 
 @pytest.mark.asyncio
@@ -340,7 +349,7 @@ async def test_seed_state_shape():
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only PYTHONPATH=. pytest tests/test_e2e_endpoints.py -v`
+Run: `cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5433/qms_e2e PYTHONPATH=. pytest tests/test_e2e_endpoints.py -v`
 Expected: FAIL (NotImplementedError or seed not run).
 
 - [ ] **Step 4: Write `seed_e2e.py`**
@@ -535,7 +544,7 @@ async def get_seed_state(db: AsyncSession = Depends(get_db)):
 
 Run (e2e stack must be up — `make e2e-up`):
 ```
-cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only PYTHONPATH=. pytest tests/test_e2e_endpoints.py::test_seed_state_shape -v
+cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5433/qms_e2e PYTHONPATH=. pytest tests/test_e2e_endpoints.py::test_seed_state_shape -v
 ```
 Expected: PASS. If model-required columns are missing, the seed will error at flush — fix by adding the column from the model (Step 4 note).
 
@@ -626,7 +635,7 @@ async def test_cleanup_deletes_prefixed_only():
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only PYTHONPATH=. pytest tests/test_e2e_endpoints.py::test_cleanup_deletes_prefixed_only -v`
+Run: `cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5433/qms_e2e PYTHONPATH=. pytest tests/test_e2e_endpoints.py::test_cleanup_deletes_prefixed_only -v`
 Expected: FAIL (NotImplementedError).
 
 - [ ] **Step 4: Implement `cleanup_test_data`**
@@ -662,7 +671,7 @@ async def cleanup_test_data(prefix: str = Query(..., min_length=4, max_length=20
 
 - [ ] **Step 5: Run test, verify pass**
 
-Run: `cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only PYTHONPATH=. pytest tests/test_e2e_endpoints.py -v`
+Run: `cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5433/qms_e2e PYTHONPATH=. pytest tests/test_e2e_endpoints.py -v`
 Expected: both tests PASS.
 
 - [ ] **Step 6: Commit**
@@ -831,7 +840,7 @@ export async function accountPassword(username: string): Promise<string> {
 import type { Page } from "@playwright/test";
 import { getSeedState, accountPassword } from "./seed-state";
 
-const STORAGE_DIR = "frontend/e2e/.storage-state";
+const STORAGE_DIR = "e2e/.storage-state";
 
 export async function loginAs(page: Page, username: string): Promise<void> {
   const password = await accountPassword(username);
@@ -1186,7 +1195,7 @@ import { getSeedState } from "../../fixtures/seed-state";
 
 test.describe("auth + RBAC + factory isolation", () => {
   test("viewer cannot see FMEA/CAPA menu items", async ({ browser }) => {
-    const ctx = await browser.newContext({ storageState: "frontend/e2e/.storage-state/viewer.json" });
+    const ctx = await browser.newContext({ storageState: "e2e/.storage-state/viewer.json" });
     const page = await ctx.newPage();
     await page.goto("/dashboard");
     await page.waitForLoadState("networkidle");
@@ -1196,7 +1205,7 @@ test.describe("auth + RBAC + factory isolation", () => {
   });
 
   test("engineer sees FMEA + CAPA menus but not admin user mgmt", async ({ browser }) => {
-    const ctx = await browser.newContext({ storageState: "frontend/e2e/.storage-state/engineer.json" });
+    const ctx = await browser.newContext({ storageState: "e2e/.storage-state/engineer.json" });
     const page = await ctx.newPage();
     await page.goto("/dashboard");
     await page.waitForLoadState("networkidle");
@@ -1208,7 +1217,7 @@ test.describe("auth + RBAC + factory isolation", () => {
 
   test("factory isolation: engineer sees only DC-FACT-E2E data", async ({ browser }) => {
     const s = await getSeedState();
-    const ctx = await browser.newContext({ storageState: "frontend/e2e/.storage-state/engineer.json" });
+    const ctx = await browser.newContext({ storageState: "e2e/.storage-state/engineer.json" });
     const page = await ctx.newPage();
     await page.goto("/fmea");
     await page.waitForLoadState("networkidle");
@@ -1221,7 +1230,7 @@ test.describe("auth + RBAC + factory isolation", () => {
 
   test("groupadmin sees both factories", async ({ browser }) => {
     const s = await getSeedState();
-    const ctx = await browser.newContext({ storageState: "frontend/e2e/.storage-state/groupadmin.json" });
+    const ctx = await browser.newContext({ storageState: "e2e/.storage-state/groupadmin.json" });
     const page = await ctx.newPage();
     await page.goto("/dashboard");
     await page.waitForLoadState("networkidle");
@@ -1293,7 +1302,7 @@ test.describe("FMEA lifecycle", () => {
   test.afterAll(async () => { await cleanupByPrefix("E2E-M1-PFMEA"); });
 
   test("create PFMEA, see it in list, open editor, recommend button present, snapshot view exists", async ({ browser }) => {
-    const ctx = await browser.newContext({ storageState: "frontend/e2e/.storage-state/engineer.json" });
+    const ctx = await browser.newContext({ storageState: "e2e/.storage-state/engineer.json" });
     const page = await ctx.newPage();
     await page.goto("/fmea");
     await page.waitForLoadState("networkidle");
@@ -1375,7 +1384,7 @@ test.describe("CAPA 8D lifecycle", () => {
   test.afterAll(async () => { await cleanupByPrefix("E2E-M1-CAPA"); });
 
   test("create 8D, advance D-states, approval visible for manager", async ({ browser }) => {
-    const ctx = await browser.newContext({ storageState: "frontend/e2e/.storage-state/engineer.json" });
+    const ctx = await browser.newContext({ storageState: "e2e/.storage-state/engineer.json" });
     const page = await ctx.newPage();
     await page.goto("/capa");
     await page.waitForLoadState("networkidle");
@@ -1434,7 +1443,7 @@ import { test, expect } from "@playwright/test";
 
 test.describe("dashboard drilldown", () => {
   test("KPI pending card click opens filtered list", async ({ browser }) => {
-    const ctx = await browser.newContext({ storageState: "frontend/e2e/.storage-state/manager.json" });
+    const ctx = await browser.newContext({ storageState: "e2e/.storage-state/manager.json" });
     const page = await ctx.newPage();
     await page.goto("/dashboard");
     await page.waitForLoadState("networkidle");
