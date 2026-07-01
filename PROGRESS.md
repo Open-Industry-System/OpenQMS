@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-06-30
-**当前分支**: `fix/dashboard-admin-pages`（领先 `main` 66 个 commit，尚未合并）
-**最近合并**: `178487b` Merge worktree-ai-qms-overview-spec — P0 Agent Base
+**更新日期**: 2026-07-01
+**当前分支**: `fix/dashboard-admin-pages`（领先 `main` 108 个 commit，尚未合并）
+**最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移（6 任务 TDD 已落地，41 推荐测试绿）
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
 
@@ -76,19 +76,28 @@
    - 自研 tool-calling 主循环（基于 openai/anthropic SDK，**未引入 pydantic-ai** — 与 pinned pydantic 2.9.2 冲突）
    - API 路由：sessions / messages / actions / whitelist（含 factory_id + `check_factory_access`）
    - 82 个测试（含 4 个 P0 验收用例：readonly 隔离 / draft 不落库 / commit 三态 / guardrails）
-4. 杂项：`a178b5d` 清理 5 个 Finder 复制的 ' 2.*' 文档文件
+4. **P1-B：质量趋势解读迁移到 Agent 基座**（2026-06-30，合并 `4102de5`）
+   - `quality_trend_service` LLM 调用切到 `provider_adapter.complete_json` + `audit.write_audit_raw`
+   - config-check 前置于 cache（修回归）、严格 provider 白名单、每调用本地 httpx、路由测试 assert kwargs
+   - 5 个 TDD 任务，全分支回归绿
+5. **P1-C：FMEA 智能推荐迁移到 Agent 基座**（2026-07-01，6 任务 TDD 已落地）
+   - `RecommendationService.recommend()` 的 LLM 调用从旧 `LLMProvider.complete()` 迁到 `provider_adapter.complete_json`
+   - 新增两态审计 `_write_recommend_audit`（`success` / `llm_failed`），仅覆盖 `need_llm=True` 路径
+   - 抽 `_tenant_schema` 到共享 `core/tenant.py`（dashboard + fmea 路由共用）；`build_client` 前置于 cache 检查
+   - 丢 `llm_provider` ctor 参数 + `self.llm`；`llm_available` 穿透 `_get_cached`/`_cache_result`
+   - 混合 rule-fallback UX、缓存行为、5 态 `source` 状态机**不变**；未配置 LLM 静默 rule 降级（200，不审计，不 503）
+   - 经 4 轮 spec/plan 对抗评审（17+ 修复合并入计划），零中间红 commit；41 推荐测试绿
+6. 杂项：`a178b5d` 清理 5 个 Finder 复制的 ' 2.*' 文档文件；`e91b1ad`/`97cf6d3` Makefile 用 venv 绝对路径跑 pytest；`f80c27a` SCAR 测试改 `SCAR-TEST-*` 避免种子碰撞
 
 ---
 
 ## 二、还没有开发（已规划，待启动或进行中）
 
 ### 紧邻待启动
-- **P1-B：质量趋势解读迁移到 Agent 基座**
-  - spec / plan 已设计完成（`complete_json` 引入 provider_adapter、`write_audit_raw` 抽到 audit、`interpret_quality_trend` 切 provider+audit、dashboard 路由适配）
-  - 5 个 TDD 任务已切好，**等待 SDD 执行**
-- **P1：剩余 LLM 调用迁移到 Agent 基座（C 阶段）**
-  - DFMEA/PFMEA 智能推荐、5T 工具/趋势推荐
-  - 目标：旧调用点删除，用户无感，可观测性提升
+- **P1 后续：剩余 LLM 调用点迁移到 Agent 基座（D 阶段及以后）**
+  - P1-B（质量趋势）+ P1-C（FMEA 推荐 / 5T 工具趋势）已完成，agent 基座 `provider_adapter.complete_json` + `write_audit_raw` 已就位
+  - 仍未迁移的旧 LLM 调用点：8D D4/D5 混合推荐管道、SPC-FMEA 异常关联、D7 预防复发、经验教训推送等（Phase 3 功能里的 LLM 直连）
+  - 目标：旧调用点删除，用户无感，可观测性统一（base 审计覆盖）
 - **系统级端到端（E2E）测试套件**（2026-06-30 新增需求）
   - 目标：对所有代码更改进行系统级端到端测试，覆盖每次合并/发版前的回归
   - 待 brainstorm 的范围：模块覆盖（FMEA / CAPA / IQC / SPC / MSA / 客户质量 / 供应商质量 / Admin / Agent Base）、层次（API 契约 + 浏览器 UI 流 + RBAC 角色矩阵 + 多工厂 `factory_id` 隔离）、运行方式（docker-compose 整栈 vs in-process）
@@ -138,14 +147,14 @@
 - ~~Worktree 执行 superpowers 计划~~ — `worktree.baseRef=fresh` 缺已 commit 的 plan + 当前代码状态，已改为 `baseRef=head`；backend 测试需 `SECRET_KEY=test-secret-key`；worktree frontend 需 `npm install`
 
 ### 当前实际待解（需要决策/手动操作）
-1. **P0 → P1-B 衔接执行**：plan 已就绪但**等 SDD 执行触发**，未自动启动
+1. **P1 后续迁移排期**：P1-B + P1-C 已落地，剩余旧 LLM 调用点（8D D4/D5 / SPC-FMEA / D7 / 经验教训推送）未排迁移顺序
 2. **P0 follow-up 优先级未排期**：embedding worker / 随机 record_id 修复 / 多工具循环 / Anthropic shaping 四项已识别但未挑顺序
-3. **`fix/dashboard-admin-pages` 合 main 时机**：分支已领先 66 个 commit，含 P0 Agent Base 大变更（6 新表 + audit_logs schema 扩展），合并前需：
+3. **`fix/dashboard-admin-pages` 合 main 时机**：分支已领先 108 个 commit，含 P0 Agent Base 大变更（6 新表 + audit_logs schema 扩展）+ P1-B/C 迁移，合并前需：
    - 完整运行 backend `pytest` + frontend `npm run lint` + `tsc --noEmit`
    - 在干净 DB 上跑 `alembic upgrade head` 验证迁移
    - 评审者过 P0 Agent Base 整体（已逐 commit review，但 PR 级总览未做）
-4. **LLM Provider 兼容性**：Anthropic 的 `tool_result` 结构与 OpenAI 不一致，provider_adapter 当前仅 OpenAI 形态完善，切到 Claude provider 会跑不通
-5. **数据库基线**：CLAUDE.md 已标注"部分 Alembic 迁移号重叠，需规整"——P0 又加了 6 表 + audit_logs 扩展，迁移线越来越长，建议在 P1-B 前后做一次 squash
+4. **LLM Provider 兼容性**：Anthropic 的 `tool_result` 结构与 OpenAI 不一致，provider_adapter 当前仅 OpenAI 形态完善，切到 Claude provider 会跑不通（P1-B/C 都走 OpenAI 形态 `complete_json`，未触碰此缺口）
+5. **数据库基线**：CLAUDE.md 已标注"部分 Alembic 迁移号重叠，需规整"——P0 加了 6 表 + audit_logs 扩展，迁移线越来越长，建议在合 main 前做一次 squash
 
 ### 非阻塞但需关注
 - 前端 5.5MB bundle，代码分割工作未排期
@@ -159,10 +168,11 @@
 | 项目 | 状态 | 位置 |
 |---|---|---|
 | P0 Agent Base | ✅ 已合并 `178487b`，82 测试通过 | `fix/dashboard-admin-pages` |
-| P1-B 质量趋势迁移 | 🟡 spec + plan 完成，待 SDD 执行 | （未起 worktree） |
+| P1-B 质量趋势迁移 | ✅ 已落地（`4102de5`） | `fix/dashboard-admin-pages` |
+| P1-C FMEA 推荐迁移 | ✅ 已落地（6 任务 TDD，41 推荐测试绿） | `fix/dashboard-admin-pages` |
 | Admin 用户/日志/工厂编辑 | ✅ 已落地（`cfde81c` 等） | `fix/dashboard-admin-pages` |
 | 仪表盘下钻 | ✅ 已落地（`b82967c`） | `fix/dashboard-admin-pages` |
-| `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审 | — |
+| `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 108 commit） | — |
 
 ---
 
@@ -172,5 +182,7 @@
 - AI-QMS 总体设计：`docs/superpowers/specs/2026-06-29-ai-driven-qms-overview-design.md`
 - P0 Agent Base 设计：`docs/superpowers/specs/2026-06-29-ai-qms-p0-agent-base-design.md`
 - P0 Agent Base 实施计划：`docs/superpowers/plans/2026-06-29-ai-qms-p0-agent-base-plan.md`（13 任务 / 4 验收）
+- P1-B 质量趋势迁移：`docs/superpowers/specs/2026-06-30-ai-qms-p1b-quality-trend-migration-design.md` + `docs/superpowers/plans/2026-06-30-ai-qms-p1b-quality-trend-migration.md`（5 TDD 任务）
+- P1-C FMEA 推荐迁移：`docs/superpowers/specs/2026-06-30-ai-qms-p1c-fmea-recommend-migration-design.md` + `docs/superpowers/plans/2026-06-30-ai-qms-p1c-fmea-recommend-migration.md`（6 TDD 任务，4 轮评审）
 - 权限矩阵：`docs/permissions.md`
 - 各模块详细文档：`docs/modules/`
