@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
 from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.core.tenant import tenant_schema
 from app.database import get_db
 from app.models.user_dashboard_layout import UserDashboardLayout
 from app.schemas import dashboard_layout as layout_schemas
@@ -32,11 +33,6 @@ def _resolve_filter_codes(scope: RequestScope, product_line: str | None = None) 
                 raise HTTPException(403, f"无权访问产品线 '{product_line}'")
             return [product_line], False
         return scope.pl_scope.codes, False
-
-
-def _tenant_schema(request: Request) -> str:
-    tenant = getattr(request.state, "tenant", None)
-    return tenant.schema_name if tenant else "public"
 
 
 @router.get("")
@@ -330,7 +326,7 @@ async def interpret_quality_trend(
             db=db,
             user_id=str(scope.user.user_id),
             factory_id=scope.effective_factory_id,
-            tenant_schema=_tenant_schema(request),
+            tenant_schema=tenant_schema(request),
             filter_codes=filter_codes,
             allowed_modules=quality_trend_allowed_modules,
             scope_description=scope_description,

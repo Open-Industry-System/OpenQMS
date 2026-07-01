@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.core.tenant import tenant_schema
 from app.database import get_db
 from app.schemas.fmea import (
     FMEACreate,
@@ -317,10 +318,11 @@ async def recommend(
             effective_scope=effective_scope,
         )
 
-    llm = getattr(fastapi_request.app.state, "llm_provider", None)
     llm_timeout = getattr(fastapi_request.app.state, "llm_timeout", None)
-    service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo, llm_timeout=llm_timeout)
-    result = await service.recommend(fmea_id, request, scope.user, scope)
+    service = RecommendationService(db=db, graph_repo=graph_repo, llm_timeout=llm_timeout)
+    result = await service.recommend(
+        fmea_id, request, scope.user, scope, tenant_schema=tenant_schema(fastapi_request),
+    )
     await db.commit()
     return result
 
