@@ -44,10 +44,11 @@
 - `backend/app/config.py` — add `E2E_MODE` field.
 - `backend/app/main.py` — conditional `include_router(e2e_router)`.
 - `frontend/playwright.config.ts` — workers/baseURL/globalSetup.
-- `frontend/package.json` — add `test:e2e` scripts.
+- `frontend/package.json` — add `test:e2e` scripts + `@types/node` devDep.
+- `frontend/tsconfig.e2e.json` — NEW: type-check `playwright.config.ts` + `e2e/**` (src tsconfig doesn't include them).
 - `Makefile` — add `e2e*` targets.
 - `CLAUDE.md` — append `make e2e`.
-- `frontend/src/pages/login/LoginPage.tsx`, `frontend/src/pages/capa/CAPAListPage.tsx`, `frontend/src/pages/capa/CAPADetailPage.tsx`, `frontend/src/pages/FMEAListPage.tsx`, dashboard widgets — add `data-e2e` attributes.
+- `frontend/src/pages/login/LoginPage.tsx`, `frontend/src/pages/capa/CAPAListPage.tsx`, `frontend/src/pages/capa/CAPADetailPage.tsx`, `frontend/src/pages/planning/fmea/FMEAListPage.tsx`, dashboard widgets — add `data-e2e` attributes.
 
 ---
 
@@ -147,7 +148,7 @@ e2e-seed:
 	$(DC_E2E) exec backend python -m app.seed_e2e
 
 e2e-run:
-	cd $(FRONTEND_DIR) && npx playwright test $(TEST_ARGS)
+	cd $(FRONTEND_DIR) && if [ -f ../.env.e2e ]; then set -a && . ../.env.e2e && set +a; fi; npx playwright test $(TEST_ARGS)
 
 e2e: e2e-up
 	$(DC_E2E) exec backend alembic upgrade head
@@ -673,12 +674,16 @@ VERSION_TRIGGERS = [
 
 @router.post("/cleanup")
 async def cleanup_test_data(prefix: str = Query(..., min_length=4, max_length=20), db: AsyncSession = Depends(get_db)):
-    """Whitelist-based, FK-ordered delete in a single transaction. Never string-concats table names."""
+    """Whitelist-based, FK-ordered delete in a single transaction. Never string-concats table names.
+
+    On any failure: rollback (undoes the trigger DISABLE + all deletes) and re-raise.
+    Do NOT re-enable triggers in a failed/aborted transaction — that would raise a
+    secondary error. ALTER TABLE is transactional, so rollback cleanly reverts the disable."""
     deleted: dict[str, int] = {}
-    # Disable immutability triggers for this txn (only affects version tables; safe in dedicated e2e DB).
-    for table, trig in VERSION_TRIGGERS:
-        await db.execute(text(f'ALTER TABLE "{table}" DISABLE TRIGGER "{trig}"'))
     try:
+        # Disable immutability triggers for this txn (only version tables; safe in dedicated e2e DB).
+        for table, trig in VERSION_TRIGGERS:
+            await db.execute(text(f'ALTER TABLE "{table}" DISABLE TRIGGER "{trig}"'))
         for model, pk_col, doc_col, children in CLEANUP_PARENTS:
             col = getattr(model, doc_col)
             pk = getattr(model, pk_col)
@@ -693,10 +698,13 @@ async def cleanup_test_data(prefix: str = Query(..., min_length=4, max_length=20
             # Delete parents (CASCADE handles version/cache/change-impact rows now that triggers are disabled).
             result = await db.execute(delete(model).where(pk.in_(parent_ids)))
             deleted[f"{model.__name__}"] = result.rowcount
-    finally:
+        # Re-enable triggers before commit (txn is still healthy here).
         for table, trig in VERSION_TRIGGERS:
             await db.execute(text(f'ALTER TABLE "{table}" ENABLE TRIGGER "{trig}"'))
-    await db.commit()
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     return {"deleted": deleted}
 ```
 
@@ -927,16 +935,42 @@ export async function clickByTestid(page: Page, testid: string): Promise<void> {
 
 - [ ] **Step 6: Create `frontend/e2e/fixtures/input/.gitkeep`** (empty).
 
-- [ ] **Step 7: Verify TypeScript compiles**
+- [ ] **Step 7: Add `tsconfig.e2e.json` + `@types/node` (e2e files are NOT under `src`, so `tsc --noEmit` against `tsconfig.json` skips them)**
 
-Run: `cd frontend && npx tsc --noEmit`
-Expected: PASS (no type errors in e2e files).
+The existing `frontend/tsconfig.json` has `include: ["src"]`, so `npx tsc --noEmit` never checks `frontend/e2e/**`. Create a dedicated e2e tsconfig so type errors in helpers/setup/specs surface:
 
-- [ ] **Step 8: Commit**
+`frontend/tsconfig.e2e.json`:
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["playwright.config.ts", "e2e/**/*.ts", "e2e/**/*.tsx"]
+}
+```
+
+Install node types (the e2e helpers use `process`, `path`, `fs`, `mkdirSync`):
+```
+cd frontend && npm install -D @types/node
+```
+
+- [ ] **Step 8: Verify e2e TypeScript compiles**
+
+Run: `cd frontend && npx tsc -p tsconfig.e2e.json --noEmit`
+Expected: PASS (no type errors in e2e helpers/setup/specs). Note: `npx tsc --noEmit` (the src check) does NOT cover e2e — always use `-p tsconfig.e2e.json` for e2e.
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add frontend/e2e/helpers frontend/e2e/fixtures
-git commit -m "feat(e2e): frontend helpers + seed-state/auth/cleanup fixtures"
+git add frontend/e2e/helpers frontend/e2e/fixtures frontend/tsconfig.e2e.json frontend/package.json frontend/package-lock.json
+git commit -m "feat(e2e): frontend helpers + seed-state/auth/cleanup fixtures + tsconfig.e2e"
 ```
 
 ---
@@ -961,7 +995,9 @@ import { chromium } from "@playwright/test";
 import { apiClient } from "./helpers/api-client";
 import { getSeedState, accountPassword } from "./fixtures/seed-state";
 
-const STORAGE_DIR = path.resolve(__dirname, ".storage-state");
+// frontend package.json is "type":"module" — __dirname is undefined under ESM. Playwright
+// runs with cwd = frontend/ (make e2e-run cd's there), so resolve relative to process.cwd().
+const STORAGE_DIR = path.resolve(process.cwd(), "e2e/.storage-state");
 
 const ROLES = ["admin", "engineer", "manager", "viewer", "groupadmin"];
 
@@ -1043,13 +1079,13 @@ test("seed-state has all known records", async () => {
 
 ```typescript
 import { test, expect } from "@playwright/test";
-import { existsSync } from "fs";
+import { readFileSync } from "fs";
 import path from "path";
 
 test("AI credentials configured (smoke) or skip with warning", async () => {
-  const env = JSON.parse(
-    require("fs").readFileSync(path.resolve(__dirname, "../../.storage-state/e2e-env.json"), "utf-8")
-  );
+  // ESM: no __dirname / require. cwd = frontend/ when Playwright runs.
+  const envPath = path.resolve(process.cwd(), "e2e/.storage-state/e2e-env.json");
+  const env = JSON.parse(readFileSync(envPath, "utf-8"));
   if (!env.hasLLM) {
     test.skip(true, "LLM_PROVIDER/LLM_API_KEY not configured — AI specs skipped");
   }
@@ -1312,7 +1348,7 @@ git commit -m "feat(e2e): M1 auth/RBAC/factory-isolation spec + menu testids"
 
 **Files:**
 - Test: `frontend/e2e/specs/m1-core/fmea.spec.ts`
-- Modify: `frontend/src/pages/FMEAListPage.tsx` (add `data-e2e` to create button, list rows)
+- Modify: `frontend/src/pages/planning/fmea/FMEAListPage.tsx` (add `data-e2e` to create button, list rows)
 - Modify: the FMEA editor (add `data-e2e` to recommend button, version snapshot entry)
 - Create: `frontend/e2e/fixtures/input/pfmea-wizard-inputs.ts`
 
@@ -1391,7 +1427,7 @@ In `backend/app/e2e_cleanup_whitelist.py`, confirm `FMEADocument` is listed (it 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add frontend/e2e/specs/m1-core/fmea.spec.ts frontend/e2e/fixtures/input/pfmea-wizard-inputs.ts frontend/src/pages/FMEAListPage.tsx <fmea editor files>
+git add frontend/e2e/specs/m1-core/fmea.spec.ts frontend/e2e/fixtures/input/pfmea-wizard-inputs.ts frontend/src/pages/planning/fmea/FMEAListPage.tsx <fmea editor files>
 git commit -m "feat(e2e): M1 FMEA lifecycle spec + fmea testids"
 ```
 
@@ -1551,12 +1587,13 @@ cd backend && E2E_MODE=1 TENANT_MODE=production SECRET_KEY=test-secret-key-for-p
 ```
 Expected: `[]` — e2e endpoints NOT loaded even with E2E_MODE when TENANT_MODE=production.
 
-- [ ] **Step 4: `make check` still green**
+- [ ] **Step 4: `make check` still green + e2e type-check**
 
 ```
 make check
+cd frontend && npx tsc -p tsconfig.e2e.json --noEmit
 ```
-Expected: backend pytest + frontend tsc + build all green. `test_e2e_endpoints.py` is SKIPPED here (no `E2E_MODE`, no `seed_e2e`) — its `pytestmark skipif` keeps `make check` green. The e2e endpoint tests are verified by the explicit `E2E_MODE=1 TEST_DATABASE_URL=...` commands in Task 3/4, not by `make check`. If `make check` shows them as failures instead of skips, the file is defaulting `E2E_MODE` — remove that `os.environ.setdefault`.
+Expected: `make check` (backend pytest + src tsc + build) green. `test_e2e_endpoints.py` is SKIPPED here (no `E2E_MODE`, no `seed_e2e`) — its `pytestmark skipif` keeps `make check` green. The e2e endpoint tests are verified by the explicit `E2E_MODE=1 TEST_DATABASE_URL=...` commands in Task 3/4, not by `make check`. If `make check` shows them as failures instead of skips, the file is defaulting `E2E_MODE` — remove that `os.environ.setdefault`. The second command type-checks `playwright.config.ts` + `e2e/**` (NOT covered by `make check`'s src-only tsc).
 
 - [ ] **Step 5: Commit (if any final tweaks)**
 
