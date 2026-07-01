@@ -359,6 +359,7 @@ async def test_recommend_writes_success_audit_on_llm_success(
     assert res.source in ("hybrid", "graph_enriched")
     rows = (await db.execute(
         select(AuditLog).where(AuditLog.action == "llm_recommend")
+        .where(AuditLog.record_id == fmea.fmea_id)
     )).scalars().all()
     assert any(r.new_values.get("status") == "success" for r in rows)
     assert rows[0].factory_id == default_factory.id
@@ -414,6 +415,7 @@ async def test_recommend_writes_llm_failed_audit_on_exception(
     assert res.source == "rule_fallback"
     rows = (await db.execute(
         select(AuditLog).where(AuditLog.action == "llm_recommend")
+        .where(AuditLog.record_id == fmea.fmea_id)
     )).scalars().all()
     assert any(r.new_values.get("status") == "llm_failed" for r in rows)
     # rule_fallback NOT cached
@@ -467,6 +469,7 @@ async def test_recommend_no_audit_when_llm_unconfigured(
     assert res.llm_available is False
     rows = (await db.execute(
         select(AuditLog).where(AuditLog.action == "llm_recommend")
+        .where(AuditLog.record_id == fmea.fmea_id)
     )).scalars().all()
     assert len(rows) == 0  # unconfigured is NOT audited
     # rule-mode IS cached
