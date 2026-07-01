@@ -236,8 +236,13 @@ async def generate_draft(
 ) -> dict:
     start_time = time.time()
 
-    llm_provider = getattr(request.app.state, "llm_provider", None)
-    llm_model_name = getattr(llm_provider, "model", None) or settings.LLM_MODEL or "unknown"
+    from app.services.agent import provider_adapter
+    from app.services.agent.provider_adapter import ProviderNotConfiguredError
+    try:
+        pc = await provider_adapter.build_client(db)
+    except ProviderNotConfiguredError:
+        pc = None
+    llm_model_name = (pc.model if pc else None) or settings.LLM_MODEL or "unknown"
 
     # DB-backed timeout (admin-configurable via /admin/ai-config), falling back to
     # the env default when app.state lacks it (startup, background tasks, tests).
@@ -384,7 +389,7 @@ async def generate_draft(
                 raise HTTPException(status_code=503, detail="请求处理中，请稍后重试")
 
         # 10. LLM Provider
-        if llm_provider is None:
+        if pc is None:
             audit_status_code = 503
             raise HTTPException(status_code=503, detail="AI 服务未配置")
 
@@ -405,7 +410,7 @@ async def generate_draft(
         async def _generate_and_validate():
             try:
                 llm_raw = await asyncio.wait_for(
-                    llm_provider.complete(prompt, response_schema),
+                    provider_adapter.complete_json(pc, prompt, response_schema),
                     timeout=capa_draft_llm_timeout,
                 )
             except TimeoutError:

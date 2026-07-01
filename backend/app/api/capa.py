@@ -120,10 +120,18 @@ async def capa_capabilities(
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
-    llm_provider = getattr(request.app.state, "llm_provider", None)
+    from app.services.agent import provider_adapter
+    from app.services.agent.provider_adapter import ProviderNotConfiguredError
+    try:
+        pc = await provider_adapter.build_client(db)
+        ai_draft_enabled = True
+        llm_provider_name = pc.model or settings.LLM_MODEL or None
+    except ProviderNotConfiguredError:
+        ai_draft_enabled = False
+        llm_provider_name = None
     return {
-        "ai_draft_enabled": llm_provider is not None,
-        "llm_provider": getattr(llm_provider, "model", None) or settings.LLM_PROVIDER or None,
+        "ai_draft_enabled": ai_draft_enabled,
+        "llm_provider": llm_provider_name,
     }
 
 

@@ -11,6 +11,7 @@ from app.core.deps import get_request_scope, RequestScope
 from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.core.permissions import get_current_user, Module, PermissionLevel
 from app.models.user import User
+from app.services.agent import provider_adapter
 
 
 @pytest.fixture
@@ -136,3 +137,43 @@ async def test_invalid_step_returns_400(override_dependencies):
         )
     assert resp.status_code == status.HTTP_400_BAD_REQUEST
     assert "无效的步骤" in resp.json()["detail"]
+
+
+# ---------- P1-D capa_capabilities build_client probe ----------
+
+class _PC:
+    model = "test-model"
+
+
+@pytest.mark.asyncio
+async def test_capabilities_build_client_success(override_dependencies, monkeypatch):
+    """GET /api/capa/capabilities probes provider_adapter.build_client; when it
+    succeeds ai_draft_enabled=True and llm_provider reflects pc.model."""
+    async def _ok_client(db_arg):
+        return _PC()
+    monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/capa/capabilities")
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+    assert data["ai_draft_enabled"] is True
+    assert data["llm_provider"] == "test-model"
+
+
+@pytest.mark.asyncio
+async def test_capabilities_build_client_unconfigured(override_dependencies, monkeypatch):
+    """When build_client raises ProviderNotConfiguredError, capabilities reports
+    ai_draft_enabled=False and llm_provider=None."""
+    async def _raise(db_arg):
+        raise provider_adapter.ProviderNotConfiguredError("no cfg")
+    monkeypatch.setattr(provider_adapter, "build_client", _raise)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/capa/capabilities")
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+    assert data["ai_draft_enabled"] is False
+    assert data["llm_provider"] is None
