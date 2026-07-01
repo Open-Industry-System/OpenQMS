@@ -641,15 +641,15 @@ async def test_rag_no_audit_when_pc_none(db, default_factory, admin_user, monkey
 
 async def _fake_semantic_search(self, **kw):
     """Return one fake source so ask() reaches the LLM branch."""
-    from app.schemas.search import SemanticSearchResult, SemanticSearchHit
-    return SemanticSearchResult(results=[
-        SemanticSearchHit(entity_type="fmea", entity_id=uuid.uuid4(),
-                          document_no="PFMEA-2026-001", chunk_text="焊接虚焊",
-                          score=0.9, metadata={})
-    ], total=1)
+    from app.schemas.search import SemanticSearchResponse, SearchResultItem
+    return SemanticSearchResponse(results=[
+        SearchResultItem(entity_type="fmea", entity_id=uuid.uuid4(),
+                         chunk_text="焊接虚焊", score=0.9, source="vector",
+                         metadata={"document_no": "PFMEA-2026-001"})
+    ], total=1, query_time_ms=10)
 ```
 
-> **Implementer note:** Adjust `_fake_semantic_search` to match `SemanticSearchResult`/`SemanticSearchHit` actual field names in `backend/app/schemas/search.py`. The test's intent: `ask()` gets ≥1 source so it proceeds past the "no results" early return and into the LLM branch. Also add `test_rag_correlation_id_stable_across_source_order` — call `ask` twice with sources in different orders (monkeypatch `semantic_search` to return reversed lists), assert both audit rows share the same `correlation_id` (verifies sort/dedup before hashing). **Also add `test_rag_no_results_reports_llm_available_true_when_configured`**: `build_client` succeeds (pc not None), `semantic_search` returns `results=[]`; assert the response `llm_available is True` (old `self.llm is not None` semantics preserved — pc resolved *before* the no-results early return). This guards against the regression where the no-results branch hardcodes `llm_available=False`.
+> **Schema note:** `backend/app/schemas/search.py` defines `SearchResultItem` (fields `entity_type: str`, `entity_id: uuid.UUID`, `chunk_text: str`, `score: float`, `source: str`, `metadata: dict = {}` — **`document_no` is NOT a field**, it's read from `metadata["document_no"]` inside `ask()`) and `SemanticSearchResponse` (`results: list[SearchResultItem]`, `total: int`, `query_time_ms: int`). `QASource`/`QAResponse` are separate. The test's intent: `ask()` gets ≥1 source so it proceeds past the "no results" early return and into the LLM branch. Also add `test_rag_correlation_id_stable_across_source_order` — call `ask` twice with sources in different orders (monkeypatch `semantic_search` to return reversed `entity_id` lists), assert both audit rows share the same `correlation_id` (verifies sort/dedup before hashing). **Also add `test_rag_no_results_reports_llm_available_true_when_configured`**: `build_client` succeeds (pc not None), `semantic_search` returns `results=[]`; assert the response `llm_available is True` (old `self.llm is not None` semantics preserved — pc resolved *before* the no-results early return). This guards against the regression where the no-results branch hardcodes `llm_available=False`.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -1197,7 +1197,7 @@ async def test_draft_uses_complete_json_and_no_write_audit_raw(
     from app.models.capa import CAPAEightD
     import uuid
     # CAPAEightD: document_no (not doc_no) is the field; title is nullable=False.
-    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-902", title="t",
+    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-902", title="测试标题足够长",
                       factory_id=default_factory.id, product_line_code="DC-DC-100",
                       status="D2_DESCRIPTION")
     db.add(capa); await db.commit()
@@ -1227,7 +1227,7 @@ async def test_draft_503_when_pc_none_no_attribute_error(
     from app.models.capa import CAPAEightD
     import uuid
     from fastapi import HTTPException
-    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-903", title="t",
+    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-903", title="测试标题足够长",
                       factory_id=default_factory.id, product_line_code="DC-DC-100",
                       status="D2_DESCRIPTION")
     db.add(capa); await db.commit()
@@ -1245,7 +1245,7 @@ async def test_draft_503_when_pc_none_no_attribute_error(
     # (the audit commits in get_tenant_aware_session, not on `db`).
 ```
 
-> **Implementer note:** The test now uses the correct model fields (`document_no` + `title`, both `nullable=False` on `CAPAEightD`), `format="paragraph"` (validates against `ParagraphLLMOutput(content: str)` — simpler than the structured `D2StructuredLLMOutput`), and a valid UUID4 string for `request_id` (parsed as UUID internally; "r1" would break the parse). The `_Req` fake satisfies `request.app.state.capa_draft_llm_timeout` (L248-252) — after migration `generate_draft` no longer reads `app.state.llm_provider`. To assert the 503 audit row's `model == "unknown"`: query `AuditLog` where `action == "AI_DRAFT"` and `record_id == capa.report_id` — note `_write_audit` commits in a separate `get_tenant_aware_session()`, so query a fresh session (or `db.execute` after the 503, since the audit session committed independently). Verify `request_id` UUID parsing: read `generate_draft` L255-265 for the `normalized_request_id` parse — if it wraps in try/except, any string works; if not, the UUID4 string is required.
+> **Implementer note:** The test now uses the correct model fields (`document_no` + `title`, both `nullable=False` on `CAPAEightD`) with **`title="测试标题足够长"` (≥6 chars)** — d2's precondition gate (`_FIELD_MIN_LENGTH["title"]=6`, checked at L358-364) runs **before** the LLM provider/503 check (L387); a 1-char `title` would raise 409 before reaching the migration path, making both tests assert the wrong branch. `format="paragraph"` validates against `ParagraphLLMOutput(content: str)` (simpler than the structured `D2StructuredLLMOutput`). `request_id` is a valid UUID4 string (parsed as UUID internally; "r1" would break the parse). The `_Req` fake satisfies `request.app.state.capa_draft_llm_timeout` (L248-252) — after migration `generate_draft` no longer reads `app.state.llm_provider`. To assert the 503 audit row's `model == "unknown"`: query `AuditLog` where `action == "AI_DRAFT"` and `record_id == capa.report_id` — note `_write_audit` commits in a separate `get_tenant_aware_session()`, so query a fresh session (or `db.execute` after the 503, since the audit session committed independently). Verify `request_id` UUID parsing: read `generate_draft` L255-265 for the `normalized_request_id` parse — if it wraps in try/except, any string works; if not, the UUID4 string is required.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -1372,7 +1372,7 @@ Verify each spec §8 回归 item against the green suite:
 - (g) per-consumer timeouts unchanged (D4/D5 2s / mgmt `REPORT_LLM_TIMEOUT` / RAG httpx 30s / CAPA draft `CAPA_DRAFT_LLM_TIMEOUT`).
 - (h) RAG `/ask` with configured LLM but **no search hits** returns `llm_available=True` (pc resolved before the no-results early return; NOT `False`) — add/keep a test for this.
 - (i) mgmt `generate_report` content + CRUD `REPORT_GENERATE` audit `changed_fields` use the **recomputed `llm_enriched`** (`section_attempted > len(section_failed_keys)`), not a stale/dropped bool.
-- (j) CAPA draft tests reach the migration behavior (not fail on setup): `CAPAEightD` uses `document_no`+`title`; `DraftRequest` uses `format="paragraph"` + valid UUID4 `request_id`; `_ok_complete` returns `{"content": ...}`.
+- (j) CAPA draft tests reach the migration behavior (not fail on setup): `CAPAEightD` uses `document_no`+`title` with **`title` ≥ 6 chars** (d2 precondition gate `_FIELD_MIN_LENGTH["title"]=6` runs before the provider/503 check — short titles 409 before migration path); `DraftRequest` uses `format="paragraph"` + valid UUID4 `request_id`; `_ok_complete` returns `{"content": ...}` (ParagraphLLMOutput).
 
 - [ ] **Step 6: Final commit (docs sync)**
 
