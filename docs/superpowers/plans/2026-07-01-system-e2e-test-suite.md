@@ -48,7 +48,6 @@
 - `Makefile` — add `e2e*` targets.
 - `CLAUDE.md` — append `make e2e`.
 - `frontend/src/pages/login/LoginPage.tsx`, `frontend/src/pages/capa/CAPAListPage.tsx`, `frontend/src/pages/capa/CAPADetailPage.tsx`, `frontend/src/pages/FMEAListPage.tsx`, dashboard widgets — add `data-e2e` attributes.
-- `frontend/.gitignore` — add `.env.e2e`.
 
 ---
 
@@ -58,7 +57,6 @@
 - Create: `docker-compose.e2e.yml`
 - Create: `.env.e2e.example`
 - Modify: `Makefile` (append e2e targets)
-- Modify: `frontend/.gitignore` (add `.env.e2e`)
 - Create: `docs/e2e.md` (stub, expanded in Task 9)
 
 **Interfaces:**
@@ -82,6 +80,8 @@ services:
     ports: !reset []
 
   backend:
+    ports: !override
+      - "8001:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@db:5432/qms_e2e
       REDIS_URL: redis://redis:6379/0
@@ -97,7 +97,7 @@ services:
     ports: !override
       - "5174:5173"
     environment:
-      VITE_BACKEND_URL: http://backend:8000
+      BACKEND_URL: http://backend:8000
 
   # Prevent the AI infra services from starting under the e2e profile.
   neo4j:
@@ -159,9 +159,9 @@ e2e-reset: e2e-down e2e-up
 	$(MAKE) e2e-seed
 ```
 
-- [ ] **Step 4: Add `.env.e2e` to `frontend/.gitignore`**
+- [ ] **Step 4: Confirm `.env.e2e` is gitignored**
 
-Append `/.env.e2e` to `frontend/.gitignore`.
+The repo has no `frontend/.gitignore`; the root `.gitignore` already covers `.env` and `.env.*` (lines 15-16), so `.env.e2e` is ignored automatically. Verify: `git check-ignore .env.e2e` prints `.env.e2e`. (No file change needed.)
 
 - [ ] **Step 5: Stub `docs/e2e.md`**
 
@@ -175,7 +175,7 @@ Expected: exits 0 (validates `!override` syntax is supported). If it errors on `
 - [ ] **Step 7: Commit**
 
 ```bash
-git add docker-compose.e2e.yml .env.e2e.example Makefile frontend/.gitignore docs/e2e.md
+git add docker-compose.e2e.yml .env.e2e.example Makefile docs/e2e.md
 git commit -m "build(e2e): compose override, env template, make e2e targets"
 ```
 
@@ -211,7 +211,7 @@ Never exposed in production (gated at router registration in main.py)."""
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_db
+from app.database import get_db
 from app.config import settings
 
 router = APIRouter(prefix="/api/e2e", tags=["e2e"])
@@ -327,6 +327,9 @@ async def test_seed_state_shape():
     assert any(pl["code"] == "DC-DC-100-E2E" for pl in data["product_lines"])
     usernames = {a["username"] for a in data["accounts"]}
     assert {"admin", "engineer", "manager", "viewer", "groupadmin"} <= usernames
+    # password included (seed_e2e is single source of truth; demo creds public)
+    for a in data["accounts"]:
+        assert a["password"], f"missing password for {a['username']}"
     # groupadmin spans both factories
     ga = next(a for a in data["accounts"] if a["username"] == "groupadmin")
     assert set(ga["factory_codes"]) == {"DC-FACT-E2E", "SH-FACT-E2E"}
@@ -401,6 +404,10 @@ async def _seed_product_line(db, factory_ids):
 
 async def _seed_accounts(db, factory_ids):
     roles = {r.role_key: r.id for r in (await db.execute(select(RoleDefinition))).scalars().all()}
+    # Non-bypass roles need a UserProductLine assignment or resolve_product_line_scope
+    # returns ProductLineScope.NONE → no FMEA/CAPA data visible (factory_scope.py:56).
+    # admin/groupadmin have bypass_row_level_security → ProductLineScope.ALL, no assignment needed.
+    NON_BYPASS_USERNAMES = {"engineer", "manager", "viewer"}
     for username, password, role_key, factory_codes in E2E_ACCOUNTS:
         user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
         if not user:
@@ -418,6 +425,16 @@ async def _seed_accounts(db, factory_ids):
             fid = factory_ids[code]
             if fid not in existing_facs:
                 db.add(UserFactory(user_id=user.user_id, factory_id=fid))
+        # Ensure product-line assignment for non-bypass users (so they see FMEA/CAPA data)
+        if username in NON_BYPASS_USERNAMES:
+            from app.models.role import UserProductLine
+            existing_pls = {
+                p.product_line_code for p in (
+                    await db.execute(select(UserProductLine).where(UserProductLine.user_id == user.user_id))
+                ).scalars().all()
+            }
+            if E2E_PRODUCT_LINE["code"] not in existing_pls:
+                db.add(UserProductLine(user_id=user.user_id, product_line_code=E2E_PRODUCT_LINE["code"]))
 
 
 async def _seed_known_docs(db, factory_ids):
@@ -426,11 +443,11 @@ async def _seed_known_docs(db, factory_ids):
     Model columns verified in app/models/fmea.py and app/models/capa.py:
     - FMEADocument: pk=fmea_id, required non-null: document_no, title, factory_id;
       all other columns have defaults (fmea_type, product_line_code, status, version, …).
-    - CapaEightD: pk=report_id, required non-null: document_no, title, factory_id;
+    - CAPAEightD: pk=report_id, required non-null: document_no, title, factory_id;
       all other columns have defaults (status='D1_TEAM', severity, …).
     """
     from app.models.fmea import FMEADocument
-    from app.models.capa import CapaEightD
+    from app.models.capa import CAPAEightD
 
     admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
 
@@ -447,9 +464,9 @@ async def _seed_known_docs(db, factory_ids):
             created_by=admin.user_id,
         ))
 
-    capa = (await db.execute(select(CapaEightD).where(CapaEightD.document_no == "8D-E2E-001"))).scalar_one_or_none()
+    capa = (await db.execute(select(CAPAEightD).where(CAPAEightD.document_no == "8D-E2E-001"))).scalar_one_or_none()
     if not capa:
-        db.add(CapaEightD(
+        db.add(CAPAEightD(
             report_id=CAPA_E2E_ID,
             document_no="8D-E2E-001",
             title="E2E 已知 8D",
@@ -473,7 +490,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-**Note:** `FMEADocument`/`CapaEightD` are imported inside `_seed_known_docs` to avoid circular imports at module load. The `created_by` uses the admin `user_id` fetched via `select`.
+**Note:** `FMEADocument`/`CAPAEightD` are imported inside `_seed_known_docs` to avoid circular imports at module load. The `created_by` uses the admin `user_id` fetched via `select`.
 
 - [ ] **Step 5: Implement `get_seed_state` in `backend/app/api/e2e.py`**
 
@@ -494,11 +511,17 @@ async def get_seed_state(db: AsyncSession = Depends(get_db)):
     pls = (await db.execute(select(ProductLine).where(ProductLine.code == "DC-DC-100-E2E"))).scalars().all()
     users = (await db.execute(select(User).where(User.username.in_([a[0] for a in E2E_ACCOUNTS])))).scalars().all()
     roles = {r.id: r.role_key for r in (await db.execute(select(RoleDefinition))).scalars().all()}
+    pw_by_user = {a[0]: a[1] for a in E2E_ACCOUNTS}  # seed_e2e is the single source of truth for passwords
     accounts = []
     for u in users:
         facs = (await db.execute(select(UserFactory.factory_id).where(UserFactory.user_id == u.user_id))).scalars().all()
         fac_codes = [f.code for f in factories if f.id in facs]
-        accounts.append({"username": u.username, "role_key": roles.get(u.role_id), "factory_codes": fac_codes})
+        accounts.append({
+            "username": u.username,
+            "password": pw_by_user.get(u.username),
+            "role_key": roles.get(u.role_id),
+            "factory_codes": fac_codes,
+        })
     return {
         "factories": [{"code": f.code, "name": f.name, "id": str(f.id)} for f in factories],
         "product_lines": [{"code": p.code, "name": p.name, "factory_id": str(p.factory_id)} for p in pls],
@@ -546,24 +569,41 @@ Each parent entry: (model, pk_col_name, doc_no_col_name, [(child_model, child_fk
 Children are deleted first (FK reverse order), then the parent. All in one transaction.
 Only models whose doc_no/name can carry an E2E- prefix are listed as parents.
 
-Note on audit logs: AuditLog.entity_id stores entity ids but its type/contents are not
-guaranteed to match a raw UUID `in_` lookup, and audit logs are append-only with no unique
-constraint — leaving them behind does NOT block re-runs (idempotent seed uses unique
-document_no, not audit rows). They are cleaned by `make e2e-reset` (down -v). So AuditLog
-is deliberately NOT a cleanup child here."""
+FK ondelete analysis (verified against backend/app/models/*.py):
+- FMEAVersion.fmea_id        → ondelete=CASCADE  → auto-deleted with parent. NOT listed.
+- RecommendationCache.fmea_id → ondelete=CASCADE → auto-deleted with parent. NOT listed.
+- RecommendationCache.report_id → ondelete=CASCADE → auto-deleted with parent. NOT listed.
+- ChangeImpact.fmea_id      → ondelete=CASCADE  → auto-deleted with parent. NOT listed.
+  (The FMEAVersion triggers `trg_fmea_version_no_update`/`trg_fmea_version_hash_verify`
+   in alembic 020_snapshot_hash_trigger.py block UPDATE, NOT DELETE — so CASCADE deletion
+   of version rows is not blocked.)
+- ControlPlan.fmea_id        → no ondelete (NO ACTION), nullable. Could block parent delete
+                              IF a spec links a control plan to an E2E FMEA. Not exercised
+                              in M1; add as child when the control-plan spec (M2) links E2E FMEAs.
+- CAPAEightD.fmea_ref_id     → no ondelete, nullable. Self-referential; not a child of FMEA
+                              cleanup (cleanup deletes CAPA by its own document_no prefix).
+- audit_finding.report_id    → no ondelete, nullable. Could block CAPA delete IF a spec
+                              creates an audit finding referencing an E2E CAPA. Add as child
+                              when the audit spec exercises this.
+
+AuditLog.entity_id is deliberately NOT a child: append-only, no unique constraint, type not
+guaranteed to match a UUID in_ lookup, and leaving rows does NOT block re-runs (idempotent
+seed keys on unique document_no). Cleaned by `make e2e-reset` (down -v)."""
 from app.models.fmea import FMEADocument
-from app.models.capa import CapaEightD
+from app.models.capa import CAPAEightD
 
 # Parents: (model, pk_col, doc_no_col, [(child_model, child_fk_col), ...])
-# M0: parents only. Add child models per-module IF an FK ondelete=RESTRICT would
-# otherwise block parent deletion (verify by running the module's spec twice).
+# M0+M1: parents only — CASCADE handles version/recommendation-cache/change-impact children.
+# Add a child entry ONLY when a later module links a NO-ACTION-FK child to an E2E parent
+# (e.g. ControlPlan in M2, audit_finding in the audit module) — run that module's spec twice
+# to confirm; if parent delete fails with FK violation, add the child here.
 CLEANUP_PARENTS = [
     (FMEADocument, "fmea_id", "document_no", []),
-    (CapaEightD, "report_id", "document_no", []),
+    (CAPAEightD, "report_id", "document_no", []),
 ]
 ```
 
-The implementer extends this list as M1 specs create more entity types. The rule: only add models whose `document_no`/name column can carry an `E2E-` prefix; children are deleted by FK to the parent PK — add a child entry only when the spec fails to delete a parent due to an FK RESTRICT (run the spec twice to surface this). PK column names are model-specific (`fmea_id`, `report_id`) — never assume `id`.
+The implementer extends this list as M1+ specs create more entity types. The rule: only add models whose `document_no`/name column can carry an `E2E-` prefix; children are deleted by FK to the parent PK — but per the analysis above, the CASCADE children (FMEAVersion, RecommendationCache, ChangeImpact) are auto-deleted and must NOT be listed (listing them would be redundant double-delete). Add a child entry ONLY when a later module links a NO-ACTION-FK child (ControlPlan, audit_finding) to an E2E parent and the parent delete fails. PK column names are model-specific (`fmea_id`, `report_id`) — never assume `id`.
 
 - [ ] **Step 2: Write the failing test (append to `test_e2e_endpoints.py`)**
 
@@ -642,7 +682,7 @@ git commit -m "feat(e2e): whitelist cleanup endpoint (FK-ordered, single txn)"
 - Create: `frontend/e2e/global.setup.ts` (stub) and `frontend/e2e/global.teardown.ts` (stub) — implemented in Task 7.
 
 **Interfaces:**
-- Produces: `playwright.config.ts` with `workers:1`, `fullyParallel:false`, `baseURL:5174`, `globalSetup`/`globalTeardown`, `storageState` dir.
+- Produces: `playwright.config.ts` with `workers:1`, `fullyParallel:false`, `baseURL:5174`, `globalSetup`/`globalTeardown` (string paths).
 
 - [ ] **Step 1: Rewrite `frontend/playwright.config.ts`**
 
@@ -656,13 +696,12 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   reporter: "list",
-  globalSetup: require.resolve("./e2e/global.setup.ts"),
-  globalTeardown: require.resolve("./e2e/global.teardown.ts"),
+  // String paths (NOT require.resolve) — frontend package.json has "type":"module".
+  globalSetup: "./e2e/global.setup.ts",
+  globalTeardown: "./e2e/global.teardown.ts",
   use: {
     baseURL: "http://localhost:5174",
     trace: "on-first-retry",
-    storageStateDir: "./e2e/.storage-state",
-    extraHTTPHeaders: { "x-e2e": "1" },
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
@@ -670,7 +709,7 @@ export default defineConfig({
 });
 ```
 
-Note: `testDir` moves to `./e2e/specs` so guard + m1-core specs are discovered; the old `./e2e` root specs are migrated in Task 8.
+Note: `testDir` moves to `./e2e/specs` so guard + m1-core specs are discovered; the old `./e2e` root specs are migrated in Task 8. `storageState` is NOT set globally — each spec passes a per-role `storageState` path explicitly. `storageStateDir` is not a valid Playwright `use` option and is omitted; storage file paths are managed by the helpers (`STORAGE_DIR` constant in `global.setup.ts`).
 
 - [ ] **Step 2: Add npm scripts to `frontend/package.json`**
 
@@ -744,7 +783,11 @@ export async function authedApi(token: string) {
 
 export async function cleanupByPrefix(prefix: string): Promise<void> {
   // Best-effort; backend gated endpoint. Requires an admin token.
-  const token = await loginForToken("admin", "Admin@2026");
+  // Read admin password from seed-state (single source of truth) via dynamic
+  // import to avoid a circular dependency (api-client ← seed-state ← api-client).
+  const { accountPassword } = await import("../fixtures/seed-state");
+  const adminPw = await accountPassword("admin");
+  const token = await loginForToken("admin", adminPw);
   const ac = await authedApi(token);
   await ac.post(`/e2e/cleanup?prefix=${encodeURIComponent(prefix)}`);
 }
@@ -758,7 +801,8 @@ import { apiClient } from "../helpers/api-client";
 export interface SeedState {
   factories: { code: string; name: string; id: string }[];
   product_lines: { code: string; name: string; factory_id: string }[];
-  accounts: { username: string; role_key: string; factory_codes: string[] }[];
+  // password is included — seed_e2e is the single source of truth (demo creds are public).
+  accounts: { username: string; password: string; role_key: string; factory_codes: string[] }[];
   known_docs: Record<string, string[]>;
   used_doc_numbers: string[];
 }
@@ -773,12 +817,11 @@ export async function getSeedState(): Promise<SeedState> {
 }
 
 export async function accountPassword(username: string): Promise<string> {
-  // Passwords are not in seed-state (security). Map from the known e2e seed constants.
-  const pw: Record<string, string> = {
-    admin: "Admin@2026", engineer: "Engineer@2026", manager: "Manager@2026",
-    viewer: "Viewer@2026", groupadmin: "GroupAdmin@2026",
-  };
-  return pw[username];
+  // Read from seed-state (single source of truth) — never hardcode.
+  const s = await getSeedState();
+  const acct = s.accounts.find(a => a.username === username);
+  if (!acct) throw new Error(`[e2e] no seed account for ${username}`);
+  return acct.password;
 }
 ```
 
