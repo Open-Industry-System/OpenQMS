@@ -65,7 +65,9 @@
 要点：
 - **新增** `docker-compose.e2e.yml`（override：e2e profile，backend 指向 e2e 库，frontend 服务，backend 注入 LLM 凭证 env）。现有 `docker-compose.yml` 不动。
   - **隔离 AI 服务**：`docker-compose.yml` 的 neo4j / graph-worker / ollama 无 profile，裸 `up` 会被拉起。`make e2e-up` **显式指定服务名**：`docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e up -d db redis backend frontend`——不传这三个 AI 服务即不启。同时在 override 里给它们加 `profiles: ["ai-infra"]` 作双保险（带 profile 的服务仅在该 profile 激活时启动）。
-  - **端口隔离**（开发栈已在跑也不冲突）：db 主机 `5433:5432`、backend 主机 `8001:8000`、frontend 主机 `5174:5173`；redis **不暴露主机端口**（仅 backend 容器内访问）。容器间通信用服务名：backend `DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@db:5432/qms_e2e`，frontend vite 代理 `/api → http://backend:8000`。Playwright 跑在宿主：`baseURL=http://localhost:5174`，直连 API helper 用 `E2E_API_BASE_URL=http://localhost:8001/api`。宿主工具若需直连库：`E2E_HOST_DATABASE_URL=...@localhost:5433/qms_e2e`（可选；alembic/seed 走 `docker compose exec backend` 用容器内 `DATABASE_URL`）。
+  - **端口隔离**（开发栈已在跑也不冲突）：db 主机 `5433:5432`、backend 主机 `8001:8000`、frontend 主机 `5174:5173`；redis **不暴露主机端口**（仅 backend 容器内访问）。容器间通信用服务名：backend `DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@db:5432/qms_e2e`，frontend vite 代理 `/api → http://backend:8000`。Playwright 跑在宿主：`baseURL=http://localhost:5174`，直连 API helper 用 `E2E_API_BASE_URL=http://localhost:8001/api`。宿主工具若需直连库：`E2E_HOST_DATABASE_URL=...@localhost:5433/qms_e2e`（可选；alembic/seed 走容器内 `DATABASE_URL`）。
+  - **override 必须替换而非追加 base ports**：Compose 对 `ports` 列表默认是**合并/追加**——override 只写 `5433:5432` 不会移除 base 的 `5432:5432`，开发栈在跑时仍冲突。故 override 里 db/backend/frontend 的 `ports:` 用 Compose 的 **`!override`** 标签整体替换（`ports: !override ["5433:5432"]`，需 Compose v2.24+）；redis 用 `ports: !reset []` 清空继承。若 Compose 版本过老不支持 `!override`/`!reset`，回退方案：`docker-compose.e2e.yml` 改为**独立文件**（不以 `-f docker-compose.yml` 叠加），重定义所需 4 服务，彻底无合并歧义。
+  - **统一项目名 `-p openqms-e2e`**：所有 compose 调用（up/exec/logs/down）固定带 `-f docker-compose.yml -f docker-compose.e2e.yml --profile e2e -p openqms-e2e`，使 e2e 容器在独立 project 命名空间，不与开发 project 容器混名（注意：`-p` 隔离容器名，但主机端口冲突仍由上一条 `!override` 解决）。
   - **独立卷**：e2e db 用独立 volume `pgdata_e2e`（不复用开发的 `pgdata`，否则既有卷使 `POSTGRES_DB: qms_e2e` 初始化脚本失效、库不会被创建）。
   - **强制单租户**：e2e 简档 `TENANT_MODE=single`（已是默认值，显式置以防漂移），避免 SaaS schema-per-tenant 的子域名伪造（`tenant1.localhost`）配置复杂度；工厂行级隔离在单租户下用 `factory_id` 验证。多租户子域名场景留作 M4 单独 spec，不在默认套件。
 - **新增** `backend/app/seed_e2e.py`（确定性、幂等，独立于 demo `app.seed`）。它是**账号/密码/工厂/固定单号的唯一来源**，并通过 seed-state 暴露——spec 不硬编码任何账号名（现有种子用户名是 `admin`/`engineer`/`manager`/`viewer`/`groupadmin`，`engineer` 对应 role_key `field_qe`，`groupadmin` 是 group 用户跨两厂；**不**是 `group_admin`）。
@@ -147,14 +149,17 @@ CLAUDE.md                               # 命令节追加 make e2e
 ### 5.1 一键全跑 `make e2e`
 
 ```
+统一 compose 前缀（下文 DC_E2E）：
+   DC_E2E := docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e -p openqms-e2e
+
 1. make e2e-up
-   docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e up -d db redis backend frontend
-   （显式列 4 服务，避免误拉 neo4j/graph-worker/ollama）
+   $(DC_E2E) up -d db redis backend frontend
+   （显式列 4 服务，避免误拉 neo4j/graph-worker/ollama；-p openqms-e2e 独立项目命名空间）
    → db(主机5433→5432, 独立卷 pgdata_e2e) / redis(不暴露主机) / backend(主机8001→8000) / frontend(主机5174→5173)
    → backend 容器内注入 TENANT_MODE=single、DATABASE_URL=@db:5432/qms_e2e、E2E_MODE=1、LLM_*
-2. 等待健康：backend **`/api/health`**（经 http://localhost:8001/api/health）轮询至 200（总超时 60s，未达即明确报错并打印 backend logs），db pg_isready
-3. docker compose exec backend alembic upgrade head（e2e 库，用容器内 DATABASE_URL）
-4. docker compose exec backend python -m app.seed_e2e   # 幂等灌入已知记录
+2. 等待健康：backend **`/api/health`**（经 http://localhost:8001/api/health）轮询至 200（总超时 60s，未达即明确报错并打印 `$(DC_E2E) logs backend`），db pg_isready
+3. $(DC_E2E) exec backend alembic upgrade head（e2e 库，用容器内 DATABASE_URL）
+4. $(DC_E2E) exec backend python -m app.seed_e2e   # 幂等灌入已知记录
 5. npx playwright test               # global.setup.ts 先跑：
    ├─ 凭证检测（LLM_*）：缺失 → stderr 醒目报警横幅 + 写 e2e-env.json
    ├─ GET /api/e2e/seed-state → 校验种子就位（账号/工厂/单号从端点取，不硬编码）
@@ -162,8 +167,10 @@ CLAUDE.md                               # 命令节追加 make e2e
 6. 各 spec 用 storageState 跑：
    ├─ 读流程：断言 seed-state 已知记录
    └─ 写流程：UI 填表 / API 造前置 → 单号带 E2E-{module}-{seq} 前缀 → 断言 → afterEach 调 /api/e2e/cleanup?prefix=...
-7. (不自动 down，便于看现场) → 手动 make e2e-down 清
+7. (不自动 down，便于看现场) → 手动 `make e2e-down`（即 `$(DC_E2E) down -v`）清
 ```
+
+> `make e2e` / `e2e-up` / `e2e-seed` / `e2e-down` / `e2e-reset` 各目标内部统一用上述 `DC_E2E` 前缀，保证 up/exec/logs/down 走同一 project 名，不与开发栈混。
 
 ### 5.2 单模块迭代 `make e2e -- --grep m1-core/fmea`
 
@@ -247,6 +254,8 @@ spec (m1-core/capa.spec.ts)
 | `data-e2e` 改生产代码 | 仅可测性最小改动，无测试专用分支 |
 | 种子与 demo seed 漂移 | 独立 `seed_e2e`，不依赖 `app.seed` |
 | e2e db/端口与开发栈冲突（既有卷使 `POSTGRES_DB` 初始化失效、端口占用） | 独立卷 `pgdata_e2e`；主机端口 db `5433`/backend `8001`/frontend `5174`，redis 不暴露；backend 容器内 `DATABASE_URL=@db:5432/qms_e2e`，宿主工具用 `E2E_HOST_DATABASE_URL=@localhost:5433/qms_e2e` |
+| Compose `ports` 列表默认合并/追加 → base 的 `5432:5432` 等仍生效、与开发栈冲突 | override 用 `!override` 整体替换 ports（redis 用 `!reset []`）；版本过老则改独立 compose 文件重定义服务 |
+| up/exec/down 用不同 compose 前缀 → 与开发 project 容器混名、操作错栈 | 统一 `DC_E2E` 前缀含 `-p openqms-e2e`，所有 make e2e* 目标共用 |
 | 多租户子域名伪造增加本地配置复杂度 | e2e 简档强制 `TENANT_MODE=single`，factory 行级隔离用 `factory_id` 在单租户下验证；多租户场景留 M4 单独 spec |
 
 ## 11. 验收标准（首版 M0+M1）
