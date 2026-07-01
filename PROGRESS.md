@@ -87,7 +87,13 @@
    - 丢 `llm_provider` ctor 参数 + `self.llm`；`llm_available` 穿透 `_get_cached`/`_cache_result`
    - 混合 rule-fallback UX、缓存行为、5 态 `source` 状态机**不变**；未配置 LLM 静默 rule 降级（200，不审计，不 503）
    - 经 4 轮 spec/plan 对抗评审（17+ 修复合并入计划），零中间红 commit；41 推荐测试绿
-6. 杂项：`a178b5d` 清理 5 个 Finder 复制的 ' 2.*' 文档文件；`e91b1ad`/`97cf6d3` Makefile 用 venv 绝对路径跑 pytest；`f80c27a` SCAR 测试改 `SCAR-TEST-*` 避免种子碰撞
+6. **P1-D：8D D4/D5 混合推荐迁移到 Agent 基座**（2026-07-01，Task 1 已落地）
+   - `LLMFusionLayer.enrich()` 返回 `LLMOutcome`（attempted / succeeded / failed 两阶段计数）
+   - `HybridRecommendationPipeline` 迁到 `(db, pc, embedding_provider)`，写入 3 态审计 `llm_recommend`（`success` / `partial` / `llm_failed`）
+   - D4/D5 路由通过 `provider_adapter.build_client(db)` 解析 `pc`，透传 `user/report_id/factory_id/tenant_schema` 并 `await db.commit()`
+   - LLM 未配置时静默降级为 rule-only，不抛 503，不污染审计；`LLMProvider` 类保留给 `ai_config_service` 使用
+   - 3 子循环 TDD：12 fusion / 4 pipeline / 1 route 新增测试 + 既有测试迁移签名，全绿
+7. 杂项：`a178b5d` 清理 5 个 Finder 复制的 ' 2.*' 文档文件；`e91b1ad`/`97cf6d3` Makefile 用 venv 绝对路径跑 pytest；`f80c27a` SCAR 测试改 `SCAR-TEST-*` 避免种子碰撞
 
 ---
 
@@ -95,8 +101,8 @@
 
 ### 紧邻待启动
 - **P1 后续：剩余 LLM 调用点迁移到 Agent 基座（D 阶段及以后）**
-  - P1-B（质量趋势）+ P1-C（FMEA 推荐 / 5T 工具趋势）已完成，agent 基座 `provider_adapter.complete_json` + `write_audit_raw` 已就位
-  - 仍未迁移的旧 LLM 调用点：8D D4/D5 混合推荐管道、SPC-FMEA 异常关联、D7 预防复发、经验教训推送等（Phase 3 功能里的 LLM 直连）
+  - P1-B（质量趋势）+ P1-C（FMEA 推荐 / 5T 工具趋势）+ P1-D Task 1（8D D4/D5）已完成，agent 基座 `provider_adapter.complete_json` + `write_audit_raw` 已就位
+  - 仍未迁移的旧 LLM 调用点：SPC-FMEA 异常关联、D7 预防复发、经验教训推送等（Phase 3 功能里的 LLM 直连）
   - 目标：旧调用点删除，用户无感，可观测性统一（base 审计覆盖）
 - **系统级端到端（E2E）测试套件**（2026-06-30 新增需求）
   - 目标：对所有代码更改进行系统级端到端测试，覆盖每次合并/发版前的回归
@@ -170,6 +176,7 @@
 | P0 Agent Base | ✅ 已合并 `178487b`，82 测试通过 | `fix/dashboard-admin-pages` |
 | P1-B 质量趋势迁移 | ✅ 已落地（`4102de5`） | `fix/dashboard-admin-pages` |
 | P1-C FMEA 推荐迁移 | ✅ 已落地（6 任务 TDD，41 推荐测试绿） | `fix/dashboard-admin-pages` |
+| P1-D Task 1：8D D4/D5 迁移 | ✅ 已落地（3 子循环 TDD，36 测试绿） | `worktree-p1d-llm-migration-spec` |
 | Admin 用户/日志/工厂编辑 | ✅ 已落地（`cfde81c` 等） | `fix/dashboard-admin-pages` |
 | 仪表盘下钻 | ✅ 已落地（`b82967c`） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 108 commit） | — |
