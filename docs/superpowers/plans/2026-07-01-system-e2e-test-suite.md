@@ -133,7 +133,10 @@ Append to `Makefile`:
 ```makefile
 # ── E2E (manual; not part of `make check`) ──────────────────────────────────
 DC_E2E := docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e -p openqms-e2e
-E2E_ENV := --env-file .env.e2e
+# Only pass --env-file if .env.e2e exists, so `make e2e-up` works without copying the
+# template (LLM creds optional → AI specs skip-with-warning). LLM_* have ${VAR:-}
+# defaults in the override, so absence is fine.
+E2E_ENV := $(shell test -f .env.e2e && echo --env-file .env.e2e)
 
 .PHONY: e2e e2e-up e2e-seed e2e-down e2e-reset e2e-run
 
@@ -542,11 +545,15 @@ async def get_seed_state(db: AsyncSession = Depends(get_db)):
 
 - [ ] **Step 6: Run seed + test, verify pass**
 
-Run (e2e stack must be up — `make e2e-up`):
+Bring up the e2e stack, migrate, and seed first (pytest connects from the host via `TEST_DATABASE_URL` → `localhost:5433/qms_e2e`; seed runs inside the backend container → same e2e DB):
 ```
+make e2e-up
+$(DC_E2E) exec backend alembic upgrade head     # or: make -C . e2e-seed won't migrate; run migrate explicitly
+make e2e-seed
 cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5433/qms_e2e PYTHONPATH=. pytest tests/test_e2e_endpoints.py::test_seed_state_shape -v
 ```
-Expected: PASS. If model-required columns are missing, the seed will error at flush — fix by adding the column from the model (Step 4 note).
+(`$(DC_E2E)` = the make variable value; in a shell run the literal `docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e -p openqms-e2e`.)
+Expected: PASS. If model-required columns are missing, the seed errors at flush — fix by adding the column from the model (Step 4 note). If seed-state returns empty, the seed didn't run — re-run `make e2e-seed`.
 
 - [ ] **Step 7: Commit**
 
@@ -578,14 +585,11 @@ Each parent entry: (model, pk_col_name, doc_no_col_name, [(child_model, child_fk
 Children are deleted first (FK reverse order), then the parent. All in one transaction.
 Only models whose doc_no/name can carry an E2E- prefix are listed as parents.
 
-FK ondelete analysis (verified against backend/app/models/*.py):
+FK ondelete analysis (verified against backend/app/models/*.py and alembic 020):
 - FMEAVersion.fmea_id        → ondelete=CASCADE  → auto-deleted with parent. NOT listed.
 - RecommendationCache.fmea_id → ondelete=CASCADE → auto-deleted with parent. NOT listed.
 - RecommendationCache.report_id → ondelete=CASCADE → auto-deleted with parent. NOT listed.
 - ChangeImpact.fmea_id      → ondelete=CASCADE  → auto-deleted with parent. NOT listed.
-  (The FMEAVersion triggers `trg_fmea_version_no_update`/`trg_fmea_version_hash_verify`
-   in alembic 020_snapshot_hash_trigger.py block UPDATE, NOT DELETE — so CASCADE deletion
-   of version rows is not blocked.)
 - ControlPlan.fmea_id        → no ondelete (NO ACTION), nullable. Could block parent delete
                               IF a spec links a control plan to an E2E FMEA. Not exercised
                               in M1; add as child when the control-plan spec (M2) links E2E FMEAs.
@@ -594,6 +598,14 @@ FK ondelete analysis (verified against backend/app/models/*.py):
 - audit_finding.report_id    → no ondelete, nullable. Could block CAPA delete IF a spec
                               creates an audit finding referencing an E2E CAPA. Add as child
                               when the audit spec exercises this.
+
+⚠️ VERSION-TABLE TRIGGER (alembic 020_snapshot_hash_trigger.py:60): `trg_fmea_version_no_update`
+is `BEFORE UPDATE OR DELETE` and `prevent_version_tampering()` RAISES on delete. So when a spec
+creates an FMEA version snapshot, CASCADE-deleting the parent FMEA will fail on the version row.
+The cleanup endpoint handles this by DISABLE-ing the two no_update triggers for the duration of
+its transaction (dedicated e2e DB, serialized workers:1), then re-enabling — see cleanup_test_data.
+(M1 FMEA spec only asserts the snapshot entry is VISIBLE, does not click "create snapshot", so no
+version row is created in M1; the trigger-disable is forward-robustness for later specs.)
 
 AuditLog.entity_id is deliberately NOT a child: append-only, no unique constraint, type not
 guaranteed to match a UUID in_ lookup, and leaving rows does NOT block re-runs (idempotent
@@ -647,24 +659,43 @@ from sqlalchemy import delete, select
 from app.e2e_cleanup_whitelist import CLEANUP_PARENTS
 
 
+from sqlalchemy import text
+
+# Version tables have BEFORE UPDATE OR DELETE triggers (prevent_version_tampering) that
+# RAISE on delete (alembic 020). They would block CASCADE deletion of parent FMEAs that have
+# version snapshots. In E2E_MODE (dedicated DB, workers:1) we disable them for this cleanup
+# transaction, then re-enable. ALTER TABLE is transactional in PG (no implicit commit).
+VERSION_TRIGGERS = [
+    ("fmea_versions", "trg_fmea_version_no_update"),
+    ("control_plan_versions", "trg_cp_version_no_update"),
+]
+
+
 @router.post("/cleanup")
 async def cleanup_test_data(prefix: str = Query(..., min_length=4, max_length=20), db: AsyncSession = Depends(get_db)):
     """Whitelist-based, FK-ordered delete in a single transaction. Never string-concats table names."""
     deleted: dict[str, int] = {}
-    for model, pk_col, doc_col, children in CLEANUP_PARENTS:
-        col = getattr(model, doc_col)
-        pk = getattr(model, pk_col)
-        parent_ids = [row[0] for row in (await db.execute(select(pk).where(col.like(f"{prefix}%")))).all()]
-        if not parent_ids:
-            continue
-        # Delete children first by FK to parent PK.
-        for child_model, fk_col in children:
-            fk = getattr(child_model, fk_col)
-            result = await db.execute(delete(child_model).where(fk.in_(parent_ids)))
-            deleted[f"{child_model.__name__}.{fk_col}"] = deleted.get(f"{child_model.__name__}.{fk_col}", 0) + result.rowcount
-        # Delete parents.
-        result = await db.execute(delete(model).where(pk.in_(parent_ids)))
-        deleted[f"{model.__name__}"] = result.rowcount
+    # Disable immutability triggers for this txn (only affects version tables; safe in dedicated e2e DB).
+    for table, trig in VERSION_TRIGGERS:
+        await db.execute(text(f'ALTER TABLE "{table}" DISABLE TRIGGER "{trig}"'))
+    try:
+        for model, pk_col, doc_col, children in CLEANUP_PARENTS:
+            col = getattr(model, doc_col)
+            pk = getattr(model, pk_col)
+            parent_ids = [row[0] for row in (await db.execute(select(pk).where(col.like(f"{prefix}%")))).all()]
+            if not parent_ids:
+                continue
+            # Delete children first by FK to parent PK.
+            for child_model, fk_col in children:
+                fk = getattr(child_model, fk_col)
+                result = await db.execute(delete(child_model).where(fk.in_(parent_ids)))
+                deleted[f"{child_model.__name__}.{fk_col}"] = deleted.get(f"{child_model.__name__}.{fk_col}", 0) + result.rowcount
+            # Delete parents (CASCADE handles version/cache/change-impact rows now that triggers are disabled).
+            result = await db.execute(delete(model).where(pk.in_(parent_ids)))
+            deleted[f"{model.__name__}"] = result.rowcount
+    finally:
+        for table, trig in VERSION_TRIGGERS:
+            await db.execute(text(f'ALTER TABLE "{table}" ENABLE TRIGGER "{trig}"'))
     await db.commit()
     return {"deleted": deleted}
 ```
@@ -1057,8 +1088,13 @@ Replace hardcoded `http://localhost:5173` with relative paths (baseURL is `:5174
 ```typescript
 import { test, expect } from "@playwright/test";
 import { loginAs } from "../../fixtures/auth";
+import { cleanupByPrefix } from "../../helpers/api-client";
 
 test.describe("CAPA AI Draft", () => {
+  // Distinct prefix from Task 12 (E2E-M1-CAPA-*) so the two specs never collide on the
+  // unique document_no, and each cleans up its own records.
+  test.afterAll(async () => { await cleanupByPrefix("E2E-AI-CAPA"); });
+
   test("capabilities endpoint returns 401 not 422", async ({ page }) => {
     const res = await page.evaluate(async () => {
       const r = await fetch("/api/capa/capabilities");
@@ -1071,8 +1107,9 @@ test.describe("CAPA AI Draft", () => {
     await loginAs(page, "engineer");
     await page.goto("/capa");
     await page.getByRole("button", { name: /新建 8D/ }).click();
-    await page.getByPlaceholder(/报告标题|report title/i).fill("E2E-M1-CAPA-001");
-    await page.getByRole("button", { name: /创建|create/i }).click();
+    await page.getByLabel(/报告编号|document no/i).fill("E2E-AI-CAPA-001");
+    await page.getByLabel(/标题|title/i).fill("E2E AI draft visibility");
+    await page.getByRole("button", { name: /创建|create|确定|ok/i }).click();
     await page.waitForURL(/\/capa\//);
     await expect(page.getByText(/AI草拟|AI draft/i).first()).toBeVisible({ timeout: 10000 });
   });
@@ -1284,9 +1321,11 @@ git commit -m "feat(e2e): M1 auth/RBAC/factory-isolation spec + menu testids"
 `frontend/e2e/fixtures/input/pfmea-wizard-inputs.ts`:
 ```typescript
 export const pfmeaWizardInputs = {
-  title: "E2E-M1-PFMEA-001",
-  scope: "E2E test scope",
-  // Step-wise fill values added as the wizard UI is wired; keep minimal.
+  // FMEACreate schema (backend/app/schemas/fmea.py:82) requires: title, document_no.
+  // fmea_type defaults to "PFMEA"; product_line_code defaults to "DC-DC-100".
+  document_no: "E2E-M1-PFMEA-001",
+  title: "E2E PFMEA lifecycle test",
+  fmea_type: "PFMEA",
 };
 ```
 
@@ -1297,6 +1336,7 @@ export const pfmeaWizardInputs = {
 ```typescript
 import { test, expect } from "@playwright/test";
 import { cleanupByPrefix } from "../../helpers/api-client";
+import { pfmeaWizardInputs } from "../../fixtures/input/pfmea-wizard-inputs";
 
 test.describe("FMEA lifecycle", () => {
   test.afterAll(async () => { await cleanupByPrefix("E2E-M1-PFMEA"); });
@@ -1307,9 +1347,13 @@ test.describe("FMEA lifecycle", () => {
     await page.goto("/fmea");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: /新建|create/i }).first().click();
-    // Fill create form (adjust selectors to the real modal)
-    await page.getByPlaceholder(/标题|title/i).fill("E2E-M1-PFMEA-001");
-    await page.getByRole("button", { name: /创建|确定|create/i }).click();
+    // Fill create form — FMEACreate requires document_no + title. Match the real modal's
+    // Form.Item labels (implementer: confirm exact labels in FMEAListPage create modal).
+    await page.getByLabel(/文件编号|document no|单号/i).fill(pfmeaWizardInputs.document_no);
+    await page.getByLabel(/标题|title/i).fill(pfmeaWizardInputs.title);
+    // fmea_type select (PFMEA/DFMEA) — only if the modal exposes it; default PFMEA is fine if absent.
+    // await page.getByLabel(/类型|type/i).selectOption(pfmeaWizardInputs.fmea_type);
+    await page.getByRole("button", { name: /创建|确定|create|ok/i }).click();
     await page.waitForLoadState("networkidle");
     // List shows the new doc
     await expect(page.locator('[data-e2e="row-E2E-M1-PFMEA-001"]')).toBeVisible({ timeout: 10000 });
@@ -1512,7 +1556,7 @@ Expected: `[]` — e2e endpoints NOT loaded even with E2E_MODE when TENANT_MODE=
 ```
 make check
 ```
-Expected: backend pytest (incl. `test_e2e_endpoints.py`) + frontend tsc + build all green.
+Expected: backend pytest + frontend tsc + build all green. `test_e2e_endpoints.py` is SKIPPED here (no `E2E_MODE`, no `seed_e2e`) — its `pytestmark skipif` keeps `make check` green. The e2e endpoint tests are verified by the explicit `E2E_MODE=1 TEST_DATABASE_URL=...` commands in Task 3/4, not by `make check`. If `make check` shows them as failures instead of skips, the file is defaulting `E2E_MODE` — remove that `os.environ.setdefault`.
 
 - [ ] **Step 5: Commit (if any final tweaks)**
 
