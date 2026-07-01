@@ -2,53 +2,75 @@ import asyncio
 import dataclasses
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
+from app.services.agent import provider_adapter
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class LLMOutcome:
+    """Result of an enrich() call: fused candidates + per-stage LLM counts."""
+    candidates: list[RecommendationCandidate]
+    attempted: int = 0   # stage-1 fusion + stage-2 fallback (max 2)
+    succeeded: int = 0
+    failed: int = 0
+
+
 class LLMFusionLayer:
     """LLM 融合层：为候选生成推荐理由 + 候选不足时回退生成。"""
 
-    def __init__(self, llm_provider, timeout: float = 2.0):
-        self.llm = llm_provider
+    def __init__(self, pc, timeout: float = 2.0):
+        self.pc = pc
         self.timeout = timeout
 
     async def enrich(
         self,
         candidates: list[RecommendationCandidate],
         context: RecommendationContext | None,
-    ) -> list[RecommendationCandidate]:
-        if not self.llm:
-            return candidates
+    ) -> LLMOutcome:
+        if self.pc is None:
+            return LLMOutcome(candidates=list(candidates) if candidates else [], attempted=0)
 
-        # 阶段 1：为候选生成推荐理由
+        attempted = 0
+        succeeded = 0
+        failed = 0
         enriched: list[RecommendationCandidate] = []
+
+        # 阶段 1：为候选生成推荐理由（一次批量 fusion 调用）
         if candidates:
+            attempted += 1
             try:
                 prompt = self._build_fusion_prompt(candidates, context)
                 result = await asyncio.wait_for(
-                    self.llm.complete(prompt, {}),
+                    provider_adapter.complete_json(self.pc, prompt, {}),
                     timeout=self.timeout,
                 )
                 enriched = self._merge_explanations(candidates, result)
+                succeeded += 1
             except Exception as e:
                 logger.warning(f"LLM fusion failed: {e}")
-                enriched = candidates
+                enriched = list(candidates)
+                failed += 1
         else:
             enriched = []
 
-        # 阶段 2：候选不足时独立生成
-        if len(enriched) < 3:
+        # 阶段 2：候选不足时独立生成（一次 fallback 调用）
+        if len(enriched) < 3 and context is not None:
+            attempted += 1
             try:
                 generated = await self._generate_fallback(context)
                 enriched.extend(generated)
+                succeeded += 1
             except Exception as e:
                 logger.warning(f"LLM fallback generation failed: {e}")
+                failed += 1
 
-        return enriched
+        return LLMOutcome(candidates=enriched, attempted=attempted,
+                          succeeded=succeeded, failed=failed)
 
     def _build_fusion_prompt(
         self,
@@ -134,7 +156,7 @@ D4 根因: {d4}
 """
 
         result = await asyncio.wait_for(
-            self.llm.complete(prompt, {}),
+            provider_adapter.complete_json(self.pc, prompt, {}),
             timeout=self.timeout,
         )
 
