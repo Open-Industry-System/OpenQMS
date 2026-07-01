@@ -126,13 +126,19 @@ except ProviderNotConfiguredError:
 - `_enrich_with_llm(... llm_provider ...)`（L137）+ `_generate_executive_summary(... llm_provider ...)`（L180）：去 `llm_provider` 参数，改用闭包/传入的 `pc`；L143/186 `if llm_provider is None:` → `if pc is None:`（走 `_fallback_executive_summary`，hybrid 降级）。
 - L152 `llm_provider.complete(prompt, LLM_SECTION_SCHEMA)` → `provider_adapter.complete_json(pc, prompt, LLM_SECTION_SCHEMA)`。
 - L191 `llm_provider.complete(...)` → `provider_adapter.complete_json(pc, prompt, ...)`。
-- `generate_report` 内 LLM 尝试包审计：用 LLM 时写一条 `write_audit_raw` 两态 `success`/`llm_failed`；`pc is None` 走 fallback 不审计。
-- `model_name`（L249）`getattr(llm_provider, "model", None)` → `pc.model or settings.LLM_MODEL or "rule-only"`（`ProviderClient.model` 真实存在，`provider_adapter.py:26`；优先 `pc.model` 反映 DB 配置的实际模型，env 兜底）。
+- **关键：helper 必须向 `generate_report` 回传 LLM 失败信号**（现状吞异常，generate_report 拿不到失败）。真实结构：`_enrich_with_llm` 对 `REPORT_SECTIONS`（13 段）**循环**调 LLM、按段 `except` 吞异常降级，现返回 `(sections, llm_enriched: bool)`；`_generate_executive_summary` 吞异常返回 `(summary, recs)` 无失败信号。改为：
+  - `_enrich_with_llm` 返回 `(sections, section_attempted: int, section_failed_keys: list[str])` —— `section_attempted` = 实际尝试 LLM 的段数（13，若 pc 非None），`section_failed_keys` = 抛异常的段 key 列表。
+  - `_generate_executive_summary` 返回 `(summary, recs, summary_failed: bool)` —— `summary_failed=True` 当 LLM 抛异常走 fallback。
+  - `generate_report` 据这些写审计（见下）。**保留各 helper 现有 fallback 行为不变**（按段降级 / `_fallback_executive_summary`），只追加 outcome 回传，不重构 fallback。
+- `model_name`（L249）`getattr(llm_provider, "model", None)` → `(pc.model if pc else None) or settings.LLM_MODEL or "rule-only"`（`ProviderClient.model` 真实存在，`provider_adapter.py:26`；**`pc` 可能为 None**（未配置 / `use_llm=False` 路径仍算 `model_name`），需 `if pc else None` 空值保护，再 `settings.LLM_MODEL` 兜底）。
 - **保留**现有 CRUD `_write_audit(db, review_id, user_id, action, changed_fields)`（L372，`REPORT_GENERATE/SAVE_DRAFT/FINALIZE/REOPEN`）**原样不动** —— LLM 审计与 CRUD 审计分离，不复用、不删除。
 
 **审计语义（新增 `write_audit_raw` 两态，与 CRUD 审计并存；状态写 `new_values`）**：
-- `pc is None` 或 `use_llm=False` → 不审计。
-- LLM 尝试 → `new_values={"status": "success"/"llm_failed", "model": pc.model, ...}` 两态（管理评审是单次 generate_report 内两次 LLM 调用——`_enrich_with_llm` 段落增强 + `_generate_executive_summary` 摘要——但作为一个"报告生成 LLM 增强"逻辑单元，聚合两态：任一失败 → `new_values={"status": "llm_failed", "failed_stage": "enrich"/"summary"/"both", "model": pc.model}`；都成功 → `new_values={"status": "success", "model": pc.model}`。**不用 D4/D5 的三态**：管理评审两次调用是固定编排、非按阶段独立降级，两态足够且与 P1-C 对齐）。
+- `pc is None` 或 `use_llm=False` → 不审计（`section_attempted=0`、`summary` 走 fallback）。
+- LLM 尝试（`pc is not None and use_llm`）→ 据 helper outcome 聚合**两态**：
+  - `section_failed_keys == [] and not summary_failed` → `new_values={"status": "success", "model": (pc.model if pc else None) or settings.LLM_MODEL, "section_attempted": N, "summary_failed": false}`。
+  - `section_failed_keys` 非空 **或** `summary_failed` → `new_values={"status": "llm_failed", "model": ..., "section_attempted": N, "section_failed_keys": [...], "summary_failed": bool}`（部分段失败也算 `llm_failed`，但 failed_keys 记录细节，**fallback 行为不变**——失败段降级、summary 走 fallback）。
+  - > **不用 D4/D5 的三态**：管理评审 13 段 + 1 summary 是固定编排、按段降级后仍出报告；两态（success / llm_failed-with-detail）足够，`section_failed_keys` 承载粒度。`partial` 态的"部分失败但仍可用"语义这里等同于 `llm_failed` + 非空 `section_failed_keys`，不另设状态。
 - `record_id = review.review_id`；`table_name = "management_reviews"`；`correlation_id = uuid5(NAMESPACE_URL, f"mgmt_review:{review_id}:{sections_hash}")`；`factory_id = review.factory_id`；`action = "llm_report_generate"`；`tenant_schema` 由路由传 `generate_report`。
 - `write_audit_raw` 只 flush；**提交骑乘 service 内 `generate_report` 现有 `await db.commit()`（`management_review_report_service.py:264`），不是路由**——路由 `management_review.py` generate 端点**无 commit**（L411-439 无 `db.commit`），现有 CRUD `_write_audit`（L261）已靠 service L264 commit 落库。新增 LLM `write_audit_raw` 的 flush 必须在 service L264 commit **之前**完成（与 CRUD `_write_audit` 一并由 L264 提交）。**plan 勿在路由加 commit、勿删 service L264 commit**。
 
@@ -145,7 +151,7 @@ except ProviderNotConfiguredError:
 
 **`capa_draft_service.py`** `generate_draft()`：
 - L239 `llm_provider = getattr(request.app.state, "llm_provider", None)` → `pc = await provider_adapter.build_client(db)`（`try/except ProviderNotConfiguredError → pc=None`）。
-- L240 `llm_model_name = getattr(llm_provider, "model", None) or settings.LLM_MODEL or "unknown"` → `pc.model or settings.LLM_MODEL or "unknown"`（`ProviderClient.model` 真实存在，`provider_adapter.py:26`；优先 `pc.model` 反映 DB 配置的实际模型，env 兜底）。
+- L240 `llm_model_name = getattr(llm_provider, "model", None) or settings.LLM_MODEL or "unknown"` → `(pc.model if pc else None) or settings.LLM_MODEL or "unknown"`（`ProviderClient.model` 真实存在，`provider_adapter.py:26`；**L240 在 L387 503 检查之前执行，`pc` 可能为 None**，需 `if pc else None` 空值保护，再 `settings.LLM_MODEL` 兜底；503 审计行的 `model` 字段仍能正确落 "unknown"）。
 - L387 `if llm_provider is None: raise HTTPException(503, "AI 服务未配置")` → `if pc is None: ...`（**保留纯 LLM 503 语义**，P1-B 模式）。
 - L408 `llm_provider.complete(prompt, response_schema)` → `provider_adapter.complete_json(pc, prompt, response_schema)`（包在现有 `asyncio.wait_for(..., timeout=capa_draft_llm_timeout)` 内不变）。
 - L411-418 的 `TimeoutError`/`ConnectionError`/`Exception` 分支保留（`complete_json` 异常向上冒泡，现有 except 仍捕获；`complete_json` 内部 `response_format=json_object` 被拒重试对调用方透明）。
@@ -187,8 +193,8 @@ api/management_review.py  generate
         ├─ pc = build_client(db) (except → None)
         ├─ use_llm and pc is None → fallback, 不审计
         └─ use_llm and pc: _enrich_with_llm + _generate_executive_summary
-              complete_json × 2 → success → write_audit_raw(success)
-                                except → write_audit_raw(llm_failed)
+              complete_json (13 段 enrich + 1 summary) → success (no failures) → write_audit_raw(success)
+                                       except (any section/summary) → fallback + write_audit_raw(llm_failed, section_failed_keys/summary_failed)
         └─ CRUD _write_audit(REPORT_GENERATE)  (保留, 不动)
         └─ service 内 await db.commit()  (L264, LLM 审计 flush + CRUD 审计 一并落库)
   └─ 路由无 commit  (management_review.py generate 端点不 commit)
@@ -211,7 +217,15 @@ api/capa.py  POST /{report_id}/draft/{step}
 - 管理评审：`pc is None` → `_fallback_executive_summary`；LLM 失败 → fallback + 审计 `llm_failed`。
 - CAPA draft：`pc is None` → 503；LLM 超时 → 504；连接错误 → 503；JSON 解析失败 → 422（现有 except 分支不变）。
 
-`complete_json` 的 `response_format=json_object` 被 Ark/DeepSeek 拒绝时的降级重试对调用方透明，不改变各消费者降级状态机。`ProviderNotConfiguredError` → `pc=None` → 各 hybrid 走降级 / CAPA draft 走 503。`LLM_TIMEOUT` 15s 下限保留；CAPA draft 用其自有 `capa_draft_llm_timeout`（`settings.CAPA_DRAFT_LLM_TIMEOUT`），其余用 `settings.LLM_TIMEOUT`（15s 下限，P1-C 已设）。基座不 import 业务层异常。
+`complete_json` 的 `response_format=json_object` 被 Ark/DeepSeek 拒绝时的降级重试对调用方透明，不改变各消费者降级状态机。`ProviderNotConfiguredError` → `pc=None` → 各 hybrid 走降级 / CAPA draft 走 503。**各消费者 timeout 来源保留现状，不统一**：
+- D4/D5：`LLMFusionLayer(timeout=2.0)` 默认 2s（`capa.py:376/447` 构造 `HybridRecommendationPipeline` 未传 timeout，沿用 2s 默认）—— **保留 2s，不强制 15s**。
+- 管理评审：`report_llm_timeout or settings.REPORT_LLM_TIMEOUT`（路由 `management_review.py:427` 取 `app.state.report_llm_timeout` 传入 `generate_report`，helper L146/188 用）—— 保留。
+- RAG 搜索：`search_service` 无 `wait_for`，走 `complete_json` 内部 `httpx.AsyncClient(timeout=30)`（`provider_adapter.py:179`）—— 保留。
+- CAPA draft：`capa_draft_llm_timeout`（`settings.CAPA_DRAFT_LLM_TIMEOUT`，`generate_draft` L248-252 解析）—— 保留。
+
+> **⚠ plan 勿把 timeout 统一成 `settings.LLM_TIMEOUT` 15s**：D4/D5 现行 2s 是 fusion 层刻意短超时（候选已就绪、LLM 只 enrich，超时即降级）；统一到 15s 会改变 D4/D5 响应特性。P1-C 的 15s 下限只作用于 FMEA `recommend()`，不外推到 P1-D。
+
+基座不 import 业务层异常。
 
 ## 6. 测试
 
@@ -234,9 +248,11 @@ api/capa.py  POST /{report_id}/draft/{step}
 - `ask_question` 路由 `await db.commit()` 验证
 
 **§3.3 管理评审**：
-- `success`：两次 `complete_json` 成功 → 审计 `new_values.status="success"`
-- `llm_failed`：任一 `complete_json` 抛异常 → fallback + 审计 `new_values.status="llm_failed"` + `failed_stage`
+- `success`：13 段 `complete_json` + summary 全成功 → `section_failed_keys=[]`、`summary_failed=False` → 审计 `new_values.status="success"`
+- `llm_failed`：部分段 `complete_json` 抛异常 **或** summary 抛异常 → fallback（按段降级 / `_fallback_executive_summary`）+ 审计 `new_values.status="llm_failed"` + `section_failed_keys`/`summary_failed` 记细节
+- helper outcome 回传：`_enrich_with_llm` 返回 `(sections, section_attempted, section_failed_keys)`；`_generate_executive_summary` 返回 `(summary, recs, summary_failed)` —— 验证 generate_report 能拿到失败信号（现状吞异常拿不到）
 - `pc is None` / `use_llm=False` → fallback + 不审计
+- `model_name` 空值保护：`pc=None` 路径 `(pc.model if pc else None) or settings.LLM_MODEL or "rule-only"` 不 AttributeError
 - **CRUD `_write_audit(REPORT_GENERATE)` 仍写**（验证 LLM 审计与 CRUD 审计并存，不互相覆盖）
 - **service L264 `await db.commit()` 落库 LLM 审计 + CRUD 审计**（路由无 commit，验证路由未加 commit、service commit 未被删）
 
@@ -267,8 +283,8 @@ api/capa.py  POST /{report_id}/draft/{step}
 进 writing-plans，按消费者拆 TDD 任务，风险递增顺序：
 1. **8D D4/D5 LLMFusionLayer**（P1-C 自然延伸）：`LLMOutcome` dataclass + `enrich()` 返回升级 + 调用方解包；`pc` 透传；pipeline `write_audit_raw` 三态；`capa.py` D4/D5 路由 `build_client` + `await db.commit()` + `tenant_schema`
 2. **RAG 搜索**：`SearchService.__init__` 去 `llm_provider`；`ask()` 内 `build_client` + `complete_json` + 两态 `write_audit_raw`（哨兵 `record_id` + sort/dedup `correlation_id`）；`search.py` `ask_question` 路由 `await db.commit()` + `tenant_schema`
-3. **管理评审报告**：`generate_report` 去 `llm_provider` 参数 + 内部 `build_client`；`_enrich_with_llm`/`_generate_executive_summary` 切 `complete_json`；`model_name` 用 `pc.model or settings.LLM_MODEL`；新增 LLM `write_audit_raw` 两态（`new_values.status`，CRUD 审计保留）；LLM flush 置于 service L264 commit **之前**；`management_review.py` 路由去 `app.state.llm_provider` + 传 `tenant_schema`（**路由不加 commit、不删 service L264 commit**）
+3. **管理评审报告**：`generate_report` 去 `llm_provider` 参数 + 内部 `build_client`；`_enrich_with_llm`/`_generate_executive_summary` 切 `complete_json` 且**改返回 outcome**（`(sections, section_attempted, section_failed_keys)` / `(summary, recs, summary_failed)`，保留各自 fallback）；`model_name` 用 `(pc.model if pc else None) or settings.LLM_MODEL or "rule-only"`；timeout 保留 `report_llm_timeout or settings.REPORT_LLM_TIMEOUT`；新增 LLM `write_audit_raw` 两态（`new_values.status` + `section_failed_keys`/`summary_failed`，CRUD 审计保留）；LLM flush 置于 service L264 commit **之前**；`management_review.py` 路由去 `app.state.llm_provider` + 传 `tenant_schema`（**路由不加 commit、不删 service L264 commit**）
 4. **CAPA draft**：`generate_draft` 内 `build_client` 替 `app.state.llm_provider`；`complete_json` 替 `.complete()`；`llm_model_name` 用 `pc.model or settings.LLM_MODEL`；`capa_capabilities`（`capa.py:112`）探测适配（`draft_capabilities:480` 不动）；现有 `AI_DRAFT` 审计保留不动
 5. 全量回归 + `make check`（backend pytest + frontend tsc）
 
-> **回归测试必含**：(a) D4/D5 `LLMOutcome` 三态（success/partial/llm_failed，partial = fusion/fallback 两阶段中部分失败）+ 路由 commit；(b) RAG 哨兵 `record_id` 稳定 + `correlation_id` sort/dedup + 路由 commit；(c) 管理评审 LLM 审计（`new_values.status`）与 CRUD 审计并存、service L264 commit 落库、路由无 commit；(d) CAPA draft 现有 `AI_DRAFT` 审计 success/503/504/422 不变（`model` 用 `pc.model`）+ 不引入 `write_audit_raw` + `capa_capabilities:112` 探测 `build_client`、`draft_capabilities:480` 不动；(e) 所有审计状态写 `new_values={"status":...}`（`write_audit_raw` 无 status 参数）；(f) `LLMProvider` 类仍被 `ai_config_service` 引用（未删）。
+> **回归测试必含**：(a) D4/D5 `LLMOutcome` 三态（success/partial/llm_failed，partial = fusion/fallback 两阶段中部分失败）+ 路由 commit + **2s timeout 保留**；(b) RAG 哨兵 `record_id` 稳定 + `correlation_id` sort/dedup + 路由 commit；(c) 管理评审 helper 回传 outcome（`section_attempted`/`section_failed_keys`/`summary_failed`）+ LLM 审计（`new_values.status` + failed 细节）与 CRUD 审计并存 + service L264 commit 落库 + 路由无 commit + `pc=None` 路径 `model_name` 空值保护不 AttributeError；(d) CAPA draft 现有 `AI_DRAFT` 审计 success/503/504/422 不变（`model` 用 `(pc.model if pc else None) or settings.LLM_MODEL`，503 路径不 AttributeError）+ 不引入 `write_audit_raw` + `capa_capabilities:112` 探测 `build_client`、`draft_capabilities:480` 不动；(e) 所有审计状态写 `new_values={"status":...}`（`write_audit_raw` 无 status 参数）；(f) `LLMProvider` 类仍被 `ai_config_service` 引用（未删）；(g) **各消费者 timeout 来源未统一**（D4/D5 2s / mgmt `REPORT_LLM_TIMEOUT` / RAG httpx 30s / CAPA draft `CAPA_DRAFT_LLM_TIMEOUT`）。
