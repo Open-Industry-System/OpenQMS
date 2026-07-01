@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
 **更新日期**: 2026-07-01
-**当前分支**: `fix/dashboard-admin-pages`（领先 `main` 108 个 commit，尚未合并）
-**最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移（6 任务 TDD 已落地，41 推荐测试绿）
+**当前分支**: `fix/dashboard-admin-pages`（领先 `main` 125 个 commit，尚未合并）
+**最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移；P1-D 剩余 4 个 LLM 消费者迁移（5 任务 TDD 已落地，948 backend 测试绿）
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
 
@@ -87,12 +87,13 @@
    - 丢 `llm_provider` ctor 参数 + `self.llm`；`llm_available` 穿透 `_get_cached`/`_cache_result`
    - 混合 rule-fallback UX、缓存行为、5 态 `source` 状态机**不变**；未配置 LLM 静默 rule 降级（200，不审计，不 503）
    - 经 4 轮 spec/plan 对抗评审（17+ 修复合并入计划），零中间红 commit；41 推荐测试绿
-6. **P1-D：8D D4/D5 混合推荐迁移到 Agent 基座**（2026-07-01，Task 1 已落地）
-   - `LLMFusionLayer.enrich()` 返回 `LLMOutcome`（attempted / succeeded / failed 两阶段计数）
-   - `HybridRecommendationPipeline` 迁到 `(db, pc, embedding_provider)`，写入 3 态审计 `llm_recommend`（`success` / `partial` / `llm_failed`）
-   - D4/D5 路由通过 `provider_adapter.build_client(db)` 解析 `pc`，透传 `user/report_id/factory_id/tenant_schema` 并 `await db.commit()`
-   - LLM 未配置时静默降级为 rule-only，不抛 503，不污染审计；`LLMProvider` 类保留给 `ai_config_service` 使用
-   - 3 子循环 TDD：12 fusion / 4 pipeline / 1 route 新增测试 + 既有测试迁移签名，全绿
+6. **P1-D：剩余 4 个 LLM 消费者迁移到 Agent 基座**（2026-07-01，5 任务 TDD 全部落地）
+   - **8D D4/D5 混合推荐**：`LLMFusionLayer.enrich()` 返回 `LLMOutcome`（attempted/succeeded/failed 两阶段计数）；`HybridRecommendationPipeline` 迁到 `(db, pc, embedding_provider)`，写入 3 态审计 `llm_recommend`（`success`/`partial`/`llm_failed`）；D4/D5 路由 `build_client` 解析 `pc` + 透传 audit ctx + `await db.commit()`；LLM 未配置静默降级，不 503
+   - **RAG 语义搜索问答**：`SearchService.ask()` 顶部解析 `pc`（no-results 早返回 `llm_available=pc is not None`），`complete_json` + 2 态审计 `llm_rag_qa`（哨兵 `record_id=uuid5` + `table_name="rag_qa"` + sort/dedup `correlation_id`）；路由改 503 守卫为 embedding-only + commit；hybrid 200 sources-only 保留
+   - **管理评审报告**：`_enrich_with_llm`/`_generate_executive_summary` 改返回 outcome（`section_attempted`/`section_failed_keys`/`summary_failed`）；`generate_report` 重算 `llm_enriched` + `pc.model` 空值保护 + 2 态审计（与 CRUD 审计并存，骑乘 service L264 commit，路由无 commit）
+   - **CAPA draft D2-D8**：仅换 `complete_json`（`llm_model_name` 空值保护，503 保留），**保留现有 `AI_DRAFT` 审计**不引入 `write_audit_raw`；`capa_capabilities`（`:112`）改 `build_client` 探测，`draft_capabilities`（`:480`）不动
+   - 全消费者 timeout 来源不变（D4/D5 2s / mgmt `REPORT_LLM_TIMEOUT` / RAG httpx 30s / CAPA draft `CAPA_DRAFT_LLM_TIMEOUT`）；`LLMProvider` 类保留给 `ai_config_service` 自检
+   - 经 3 轮 spec + 3 轮 plan 评审（11+7 findings 全闭合）+ 4 任务子代理逐任务评审 + opus 全分支评审；948 backend 测试绿 + frontend build 绿
 7. 杂项：`a178b5d` 清理 5 个 Finder 复制的 ' 2.*' 文档文件；`e91b1ad`/`97cf6d3` Makefile 用 venv 绝对路径跑 pytest；`f80c27a` SCAR 测试改 `SCAR-TEST-*` 避免种子碰撞
 
 ---
@@ -100,10 +101,11 @@
 ## 二、还没有开发（已规划，待启动或进行中）
 
 ### 紧邻待启动
-- **P1 后续：剩余 LLM 调用点迁移到 Agent 基座（D 阶段及以后）**
-  - P1-B（质量趋势）+ P1-C（FMEA 推荐 / 5T 工具趋势）+ P1-D Task 1（8D D4/D5）已完成，agent 基座 `provider_adapter.complete_json` + `write_audit_raw` 已就位
-  - 仍未迁移的旧 LLM 调用点：SPC-FMEA 异常关联、D7 预防复发、经验教训推送等（Phase 3 功能里的 LLM 直连）
-  - 目标：旧调用点删除，用户无感，可观测性统一（base 审计覆盖）
+- **P1 LLM 迁移收尾**（P1-D 后剩余项）
+  - P1-B + P1-C + P1-D 全部落地：4 个 LLM 消费者（8D D4/D5 / RAG 搜索 / 管理评审报告 / CAPA draft）已迁到 `provider_adapter.complete_json` + `write_audit_raw`
+  - 经核实 **SPC-FMEA 异常关联 / D7 预防复发 / 经验教训推送均无 LLM 调用**（纯规则/图匹配），早先 PROGRESS 列入"剩余 LLM 调用点"有误
+  - 仅剩 `ai_config_service` 自检仍用旧 `LLMProvider`（诊断用途，单独处理，不迁）
+  - 后续可选：旧 `LLMProvider` 类在 `ai_config` 自检也切基座后删除；P0 follow-up（embedding worker / 多工具 LLM 循环 / Anthropic shaping）排期
 - **系统级端到端（E2E）测试套件**（2026-06-30 新增需求）
   - 目标：对所有代码更改进行系统级端到端测试，覆盖每次合并/发版前的回归
   - 待 brainstorm 的范围：模块覆盖（FMEA / CAPA / IQC / SPC / MSA / 客户质量 / 供应商质量 / Admin / Agent Base）、层次（API 契约 + 浏览器 UI 流 + RBAC 角色矩阵 + 多工厂 `factory_id` 隔离）、运行方式（docker-compose 整栈 vs in-process）
@@ -176,11 +178,10 @@
 | P0 Agent Base | ✅ 已合并 `178487b`，82 测试通过 | `fix/dashboard-admin-pages` |
 | P1-B 质量趋势迁移 | ✅ 已落地（`4102de5`） | `fix/dashboard-admin-pages` |
 | P1-C FMEA 推荐迁移 | ✅ 已落地（6 任务 TDD，41 推荐测试绿） | `fix/dashboard-admin-pages` |
-| P1-D Task 1：8D D4/D5 迁移 | ✅ 已落地（3 子循环 TDD，36 测试绿） | `worktree-p1d-llm-migration-spec` |
-| P1-D Task 3：管理评审报告迁移 | ✅ 已落地（helper outcome + 2-state audit，17 报告测试绿） | `worktree-p1d-llm-migration-spec` |
+| P1-D 剩余 LLM 消费者迁移 | ✅ 已落地（5 任务 TDD：D4/D5 + RAG + 管理评审 + CAPA draft，948 测试绿） | `fix/dashboard-admin-pages` |
 | Admin 用户/日志/工厂编辑 | ✅ 已落地（`cfde81c` 等） | `fix/dashboard-admin-pages` |
 | 仪表盘下钻 | ✅ 已落地（`b82967c`） | `fix/dashboard-admin-pages` |
-| `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 108 commit） | — |
+| `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
 
 ---
 
@@ -192,5 +193,6 @@
 - P0 Agent Base 实施计划：`docs/superpowers/plans/2026-06-29-ai-qms-p0-agent-base-plan.md`（13 任务 / 4 验收）
 - P1-B 质量趋势迁移：`docs/superpowers/specs/2026-06-30-ai-qms-p1b-quality-trend-migration-design.md` + `docs/superpowers/plans/2026-06-30-ai-qms-p1b-quality-trend-migration.md`（5 TDD 任务）
 - P1-C FMEA 推荐迁移：`docs/superpowers/specs/2026-06-30-ai-qms-p1c-fmea-recommend-migration-design.md` + `docs/superpowers/plans/2026-06-30-ai-qms-p1c-fmea-recommend-migration.md`（6 TDD 任务，4 轮评审）
+- P1-D 剩余 LLM 消费者迁移：`docs/superpowers/specs/2026-07-01-ai-qms-p1d-remaining-llm-migration-design.md` + `docs/superpowers/plans/2026-07-01-ai-qms-p1d-remaining-llm-migration.md`（5 TDD 任务，3 轮 spec + 3 轮 plan 评审）
 - 权限矩阵：`docs/permissions.md`
 - 各模块详细文档：`docs/modules/`
