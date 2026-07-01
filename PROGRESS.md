@@ -177,6 +177,7 @@
 | P1-B 质量趋势迁移 | ✅ 已落地（`4102de5`） | `fix/dashboard-admin-pages` |
 | P1-C FMEA 推荐迁移 | ✅ 已落地（6 任务 TDD，41 推荐测试绿） | `fix/dashboard-admin-pages` |
 | P1-D Task 1：8D D4/D5 迁移 | ✅ 已落地（3 子循环 TDD，36 测试绿） | `worktree-p1d-llm-migration-spec` |
+| P1-D Task 3：管理评审报告迁移 | ✅ 已落地（helper outcome + 2-state audit，17 报告测试绿） | `worktree-p1d-llm-migration-spec` |
 | Admin 用户/日志/工厂编辑 | ✅ 已落地（`cfde81c` 等） | `fix/dashboard-admin-pages` |
 | 仪表盘下钻 | ✅ 已落地（`b82967c`） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 108 commit） | — |

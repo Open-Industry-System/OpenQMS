@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -13,10 +14,10 @@ from app.config import settings
 from app.models.audit import AuditLog
 from app.models.management_review import ManagementReview
 from app.models.management_review_report import ReviewReport
+from app.services.agent import audit as audit_mod, provider_adapter
 
 if TYPE_CHECKING:
     from app.models.user import User
-    from app.services.llm_provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -137,28 +138,30 @@ def _build_section_prompt(section: dict, review: ManagementReview) -> str:
 async def _enrich_with_llm(
     sections: list[dict],
     review: ManagementReview,
-    llm_provider: "LLMProvider | None",
+    pc,
     report_llm_timeout: int | None = None,
-) -> tuple[list[dict], bool]:
-    if llm_provider is None:
-        return sections, False
+) -> tuple[list[dict], int, list[str]]:
+    if pc is None:
+        return sections, 0, []
 
     timeout = report_llm_timeout or settings.REPORT_LLM_TIMEOUT
-    llm_enriched = False
+    section_attempted = 0
+    section_failed_keys: list[str] = []
     for section in sections:
+        section_attempted += 1
         try:
             prompt = _build_section_prompt(section, review)
             response = await asyncio.wait_for(
-                llm_provider.complete(prompt, LLM_SECTION_SCHEMA),
+                provider_adapter.complete_json(pc, prompt, LLM_SECTION_SCHEMA),
                 timeout=timeout,
             )
             section["ai_analysis"] = str(response.get("analysis", "")).strip()
             section["findings"] = [str(x) for x in response.get("findings", []) if x]
             section["recommendations"] = [str(x) for x in response.get("recommendations", []) if x]
-            llm_enriched = True
         except Exception as e:
             logger.warning("LLM enrichment failed for section %s: %s", section["key"], e)
-    return sections, llm_enriched
+            section_failed_keys.append(section["key"])
+    return sections, section_attempted, section_failed_keys
 
 
 def _build_executive_prompt(sections: list[dict], review: ManagementReview) -> str:
@@ -180,15 +183,16 @@ def _build_executive_prompt(sections: list[dict], review: ManagementReview) -> s
 async def _generate_executive_summary(
     sections: list[dict],
     review: ManagementReview,
-    llm_provider: "LLMProvider | None",
+    pc,
     report_llm_timeout: int | None = None,
-) -> tuple[str, list[str]]:
-    if llm_provider is None:
-        return _fallback_executive_summary(review), []
+) -> tuple[str, list[str], bool]:
+    if pc is None:
+        return _fallback_executive_summary(review), [], False
     timeout = report_llm_timeout or settings.REPORT_LLM_TIMEOUT
     try:
         response = await asyncio.wait_for(
-            llm_provider.complete(
+            provider_adapter.complete_json(
+                pc,
                 _build_executive_prompt(sections, review),
                 {
                     "type": "object",
@@ -204,10 +208,11 @@ async def _generate_executive_summary(
         return (
             str(response.get("executive_summary", "")).strip(),
             [str(x) for x in response.get("overall_recommendations", []) if x],
+            False,
         )
     except Exception as e:
         logger.warning("LLM executive summary failed: %s", e)
-        return _fallback_executive_summary(review), []
+        return _fallback_executive_summary(review), [], True
 
 
 def _fallback_executive_summary(review: ManagementReview) -> str:
@@ -220,9 +225,10 @@ async def generate_report(
     db: AsyncSession,
     review: ManagementReview,
     user: "User",
-    llm_provider: "LLMProvider | None" = None,
+    *,
     use_llm: bool = True,
     report_llm_timeout: int | None = None,
+    tenant_schema: str = "public",
 ) -> dict:
     if review.status == "closed":
         raise ValueError("cannot generate report for closed review")
@@ -232,21 +238,36 @@ async def generate_report(
     # Explicitly load deferred JSONB columns to avoid MissingGreenlet in async mode
     await db.refresh(review, ["data_package", "manual_inputs", "generated_report"])
     sections = _build_sections(review.data_package, review.manual_inputs)
-    llm_enriched = False
-    if use_llm and llm_provider is not None:
-        sections, llm_enriched = await _enrich_with_llm(
-            sections, review, llm_provider, report_llm_timeout=report_llm_timeout
+
+    try:
+        pc = await provider_adapter.build_client(db)
+    except provider_adapter.ProviderNotConfiguredError:
+        pc = None
+
+    section_failed_keys: list[str] = []
+    summary_failed = False
+    section_attempted = 0
+
+    if use_llm and pc is not None:
+        sections, section_attempted, section_failed_keys = await _enrich_with_llm(
+            sections, review, pc, report_llm_timeout=report_llm_timeout
         )
 
-    executive_summary, overall_recommendations = "", []
-    if use_llm and llm_provider is not None:
-        executive_summary, overall_recommendations = await _generate_executive_summary(
-            sections, review, llm_provider, report_llm_timeout=report_llm_timeout
+    if use_llm and pc is not None:
+        executive_summary, overall_recommendations, summary_failed = await _generate_executive_summary(
+            sections, review, pc, report_llm_timeout=report_llm_timeout
         )
     else:
         executive_summary = _fallback_executive_summary(review)
+        overall_recommendations = []
 
-    model_name = getattr(llm_provider, "model", None) or "rule-only"
+    model_name = (pc.model if pc else None) or settings.LLM_MODEL or "rule-only"
+
+    # Recompute llm_enriched (old _enrich_with_llm returned this bool) for content
+    # assembly + CRUD audit changed_fields that previously read it. Semantic:
+    # "at least one section was LLM-enriched" = attempted > 0 and not all failed.
+    llm_enriched = section_attempted > 0 and section_attempted > len(section_failed_keys)
+
     content = {
         "generated_at": datetime.now(UTC).isoformat(),
         "generation_model": model_name,
@@ -258,6 +279,36 @@ async def generate_report(
 
     review.generated_report = content
     review.report_status = "draft"
+
+    # --- LLM audit (only when LLM was attempted) ---
+    if use_llm and pc is not None:
+        if not section_failed_keys and not summary_failed:
+            audit_status = "success"
+        else:
+            audit_status = "llm_failed"
+        sections_hash = hashlib.sha256(
+            json.dumps([s["key"] for s in sections], sort_keys=True, default=str).encode()
+        ).hexdigest()[:16]
+        await audit_mod.write_audit_raw(
+            db,
+            user_id=user.user_id,
+            factory_id=review.factory_id,
+            tenant_schema=tenant_schema,
+            table_name="management_reviews",
+            record_id=review.review_id,
+            action="llm_report_generate",
+            correlation_id=uuid.uuid5(
+                uuid.NAMESPACE_URL, f"mgmt_review:{review.review_id}:{sections_hash}"
+            ),
+            new_values={
+                "status": audit_status,
+                "model": model_name,
+                "section_attempted": section_attempted,
+                "section_failed_keys": section_failed_keys,
+                "summary_failed": summary_failed,
+            },
+        )
+
     await _write_audit(db, review.review_id, user.user_id, "REPORT_GENERATE", {
         "model": model_name, "llm_enriched": llm_enriched,
     })
