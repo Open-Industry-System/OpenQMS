@@ -311,3 +311,221 @@ async def test_invalidate_cache_for_fmea_with_null_repo_does_not_raise():
     from unittest.mock import AsyncMock
     svc = RecommendationService(db=AsyncMock(), graph_repo=_NullGraphRepo())
     await svc.invalidate_cache_for_fmea(uuid.uuid4())
+
+
+@pytest.mark.asyncio
+async def test_recommend_writes_success_audit_on_llm_success(
+    db, default_factory, admin_user, monkeypatch
+):
+    """need_llm=True + complete_json succeeds → audit row status=success."""
+    from sqlalchemy import select
+    from app.models.audit import AuditLog
+    from app.models.fmea import FMEADocument
+    from app.services.agent import provider_adapter
+
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no="PFMEA-2026-901", fmea_type="PFMEA",
+        title="t", product_line_code="DC-DC-100", factory_id=default_factory.id,
+        status="draft", graph_data={"nodes": [], "edges": []}, version=1,
+    )
+    db.add(fmea)
+    await db.flush()
+
+    async def _ok_client(db_arg):
+        class _PC: pass
+        return _PC()
+    async def _ok_complete(pc, prompt, schema):
+        return {"suggestions": [{"name": "焊接虚焊", "confidence": 0.9, "explanation": "x"}]}
+    monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
+    monkeypatch.setattr(provider_adapter, "complete_json", _ok_complete)
+
+    from app.core.deps import RequestScope, FactoryScope, ProductLineScope
+    scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
+        effective_factory_id=default_factory.id,
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=admin_user,
+    )
+    from app.services.recommendation_service import RecommendationService, _NullGraphRepo
+    svc = RecommendationService(db=db, graph_repo=_NullGraphRepo())
+    req = RecommendRequest(
+        trigger_type="failure_mode",
+        context={"function_description": "电源转换", "failure_mode": "虚焊"},
+        scope="current_product_line", include_graph=False,
+    )
+    res = await svc.recommend(fmea.fmea_id, req, admin_user, scope, tenant_schema="public")
+    await db.commit()
+
+    assert res.source in ("hybrid", "graph_enriched")
+    rows = (await db.execute(
+        select(AuditLog).where(AuditLog.action == "llm_recommend")
+    )).scalars().all()
+    assert any(r.new_values.get("status") == "success" for r in rows)
+    assert rows[0].factory_id == default_factory.id
+    assert rows[0].tenant_schema == "public"
+    assert rows[0].record_id == fmea.fmea_id
+    assert rows[0].correlation_id is not None
+
+
+@pytest.mark.asyncio
+async def test_recommend_writes_llm_failed_audit_on_exception(
+    db, default_factory, admin_user, monkeypatch
+):
+    """need_llm=True + complete_json raises → source=rule_fallback, audit status=llm_failed, NOT cached."""
+    from sqlalchemy import select
+    from app.models.audit import AuditLog
+    from app.models.fmea import FMEADocument
+    from app.models.recommendation_cache import RecommendationCache
+    from app.services.agent import provider_adapter
+
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no="PFMEA-2026-902", fmea_type="PFMEA",
+        title="t", product_line_code="DC-DC-100", factory_id=default_factory.id,
+        status="draft", graph_data={"nodes": [], "edges": []}, version=1,
+    )
+    db.add(fmea)
+    await db.flush()
+
+    async def _ok_client(db_arg):
+        class _PC: pass
+        return _PC()
+    async def _boom(pc, prompt, schema):
+        raise RuntimeError("upstream 500")
+    monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
+    monkeypatch.setattr(provider_adapter, "complete_json", _boom)
+
+    from app.core.deps import RequestScope, FactoryScope, ProductLineScope
+    scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
+        effective_factory_id=default_factory.id,
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=admin_user,
+    )
+    from app.services.recommendation_service import RecommendationService, _NullGraphRepo
+    svc = RecommendationService(db=db, graph_repo=_NullGraphRepo())
+    req = RecommendRequest(
+        trigger_type="failure_mode",
+        context={"function_description": "电源转换", "failure_mode": "虚焊"},
+        scope="current_product_line", include_graph=False,
+    )
+    res = await svc.recommend(fmea.fmea_id, req, admin_user, scope, tenant_schema="public")
+    await db.commit()
+
+    assert res.source == "rule_fallback"
+    rows = (await db.execute(
+        select(AuditLog).where(AuditLog.action == "llm_recommend")
+    )).scalars().all()
+    assert any(r.new_values.get("status") == "llm_failed" for r in rows)
+    # rule_fallback NOT cached
+    cached = (await db.execute(
+        select(RecommendationCache).where(RecommendationCache.fmea_id == fmea.fmea_id)
+    )).scalars().all()
+    assert len(cached) == 0
+
+
+@pytest.mark.asyncio
+async def test_recommend_no_audit_when_llm_unconfigured(
+    db, default_factory, admin_user, monkeypatch
+):
+    """pc is None (ProviderNotConfiguredError) → rule fallback, NO audit, rule-mode cached."""
+    from sqlalchemy import select
+    from app.models.audit import AuditLog
+    from app.models.fmea import FMEADocument
+    from app.models.recommendation_cache import RecommendationCache
+    from app.services.agent import provider_adapter
+
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no="PFMEA-2026-903", fmea_type="PFMEA",
+        title="t", product_line_code="DC-DC-100", factory_id=default_factory.id,
+        status="draft", graph_data={"nodes": [], "edges": []}, version=1,
+    )
+    db.add(fmea)
+    await db.flush()
+
+    async def _raise(db_arg):
+        raise provider_adapter.ProviderNotConfiguredError("no cfg")
+    monkeypatch.setattr(provider_adapter, "build_client", _raise)
+
+    from app.core.deps import RequestScope, FactoryScope, ProductLineScope
+    scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
+        effective_factory_id=default_factory.id,
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=admin_user,
+    )
+    from app.services.recommendation_service import RecommendationService, _NullGraphRepo
+    svc = RecommendationService(db=db, graph_repo=_NullGraphRepo())
+    req = RecommendRequest(
+        trigger_type="failure_mode",
+        context={"function_description": "电源转换", "failure_mode": "虚焊"},
+        scope="current_product_line", include_graph=False,
+    )
+    res = await svc.recommend(fmea.fmea_id, req, admin_user, scope, tenant_schema="public")
+    await db.commit()
+
+    assert res.source in ("rule", "graph")  # NOT rule_fallback
+    assert res.llm_available is False
+    rows = (await db.execute(
+        select(AuditLog).where(AuditLog.action == "llm_recommend")
+    )).scalars().all()
+    assert len(rows) == 0  # unconfigured is NOT audited
+    # rule-mode IS cached
+    cached = (await db.execute(
+        select(RecommendationCache).where(RecommendationCache.fmea_id == fmea.fmea_id)
+    )).scalars().all()
+    assert len(cached) == 1
+
+
+@pytest.mark.asyncio
+async def test_recommend_cache_gate_falls_through_when_llm_becomes_available(
+    db, default_factory, admin_user, monkeypatch
+):
+    """Regression: rule-mode cache (no LLM) must fall through + re-evaluate once LLM is configured."""
+    from app.models.fmea import FMEADocument
+    from app.services.agent import provider_adapter
+
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no="PFMEA-2026-904", fmea_type="PFMEA",
+        title="t", product_line_code="DC-DC-100", factory_id=default_factory.id,
+        status="draft", graph_data={"nodes": [], "edges": []}, version=1,
+    )
+    db.add(fmea)
+    await db.flush()
+
+    from app.core.deps import RequestScope, FactoryScope, ProductLineScope
+    scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=default_factory.id),
+        effective_factory_id=default_factory.id,
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=admin_user,
+    )
+    from app.services.recommendation_service import RecommendationService, _NullGraphRepo
+
+    # 1st call: unconfigured → rule-mode cache written
+    async def _raise(db_arg):
+        raise provider_adapter.ProviderNotConfiguredError("no cfg")
+    monkeypatch.setattr(provider_adapter, "build_client", _raise)
+    svc = RecommendationService(db=db, graph_repo=_NullGraphRepo())
+    req = RecommendRequest(
+        trigger_type="failure_mode",
+        context={"function_description": "电源转换", "failure_mode": "虚焊"},
+        scope="current_product_line", include_graph=False,
+    )
+    res1 = await svc.recommend(fmea.fmea_id, req, admin_user, scope, tenant_schema="public")
+    await db.commit()
+    assert res1.llm_available is False
+    assert res1.cached is False
+
+    # 2nd call: LLM now available → must fall through (not return stale rule cache)
+    async def _ok_client(db_arg):
+        class _PC: pass
+        return _PC()
+    async def _ok_complete(pc, prompt, schema):
+        return {"suggestions": [{"name": "焊接虚焊", "confidence": 0.9, "explanation": "x"}]}
+    monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
+    monkeypatch.setattr(provider_adapter, "complete_json", _ok_complete)
+    svc2 = RecommendationService(db=db, graph_repo=_NullGraphRepo())
+    res2 = await svc2.recommend(fmea.fmea_id, req, admin_user, scope, tenant_schema="public")
+    await db.commit()
+    assert res2.llm_available is True
+    assert res2.source in ("hybrid", "graph_enriched")  # LLM-enhanced, not stale rule

@@ -634,6 +634,7 @@ class RecommendationService:
         )
 
         if need_llm:
+            llm_status = "llm_failed"  # default; overwritten on success
             try:
                 import asyncio
                 llm_context = await self._assemble_context(fmea, request)
@@ -656,9 +657,21 @@ class RecommendationService:
                 ]
                 all_suggestions = self._merge_and_deduplicate(all_suggestions, llm_items)
                 source = "graph_enriched" if graph_suggestions else "hybrid"
+                llm_status = "success"
             except Exception as e:
                 source = "graph" if graph_suggestions else "rule_fallback"
                 logger.warning("LLM failed, using rule+graph results: %s: %r", type(e).__name__, e)
+            # Audit sits OUTSIDE the try/except so audit errors never masquerade
+            # as LLM failures. Wrap in its own guard so an audit hiccup never
+            # breaks the recommend response (audit is observability, not business logic).
+            try:
+                await self._write_recommend_audit(
+                    fmea_id, request.trigger_type, context_hash,
+                    user, fmea.factory_id, tenant_schema,
+                    status=llm_status, source=source, suggestion_count=len(all_suggestions),
+                )
+            except Exception as audit_err:
+                logger.warning("recommend audit write failed: %s: %r", type(audit_err).__name__, audit_err)
         else:
             source = "graph" if graph_suggestions else "rule"
 
@@ -885,6 +898,38 @@ class RecommendationService:
     def _compute_context_hash(self, context: dict) -> str:
         raw = json.dumps(context, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(raw.encode()).hexdigest()
+
+    async def _write_recommend_audit(
+        self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str,
+        user: User, factory_id: _uuid.UUID, tenant_schema: str,
+        status: str, source: str, suggestion_count: int,
+    ) -> None:
+        """Write an llm_recommend audit row (two-state: success / llm_failed).
+
+        Only called on the need_llm=True path. Unconfigured (pc is None) is NOT
+        audited — it silently rule-degrades. write_audit_raw flushes only; the
+        route's await db.commit() is the single commit point.
+        """
+        from app.services.agent import audit as agent_audit
+        correlation_id = _uuid.uuid5(
+            _uuid.NAMESPACE_URL, f"fmea_recommend:{fmea_id}:{trigger_type}:{context_hash}"
+        )
+        await agent_audit.write_audit_raw(
+            self.db,
+            user_id=user.user_id,
+            factory_id=factory_id,
+            tenant_schema=tenant_schema,
+            table_name="fmea_documents",
+            record_id=fmea_id,
+            action="llm_recommend",
+            correlation_id=correlation_id,
+            new_values={
+                "status": status,
+                "trigger_type": trigger_type,
+                "source": source,
+                "suggestion_count": suggestion_count,
+            },
+        )
 
     async def _get_cached(
         self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str,
