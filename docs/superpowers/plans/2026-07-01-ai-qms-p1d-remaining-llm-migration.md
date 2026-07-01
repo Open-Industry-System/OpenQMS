@@ -477,7 +477,7 @@ async def test_d4_route_passes_audit_ctx_and_commits(
     # Create a CAPA row for the route to load (factory_id = default_factory.id)
     from app.models.capa import CAPAEightD
     import uuid
-    capa = CAPAEightD(report_id=uuid.uuid4(), doc_no="8D-2026-901",
+    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-901", title="t",
                       factory_id=default_factory.id, product_line_code="DC-DC-100",
                       status="D2_DESCRIPTION")
     db.add(capa)
@@ -649,7 +649,7 @@ async def _fake_semantic_search(self, **kw):
     ], total=1)
 ```
 
-> **Implementer note:** Adjust `_fake_semantic_search` to match `SemanticSearchResult`/`SemanticSearchHit` actual field names in `backend/app/schemas/search.py`. The test's intent: `ask()` gets ≥1 source so it proceeds past the "no results" early return and into the LLM branch. Also add `test_rag_correlation_id_stable_across_source_order` — call `ask` twice with sources in different orders (monkeypatch `semantic_search` to return reversed lists), assert both audit rows share the same `correlation_id` (verifies sort/dedup before hashing).
+> **Implementer note:** Adjust `_fake_semantic_search` to match `SemanticSearchResult`/`SemanticSearchHit` actual field names in `backend/app/schemas/search.py`. The test's intent: `ask()` gets ≥1 source so it proceeds past the "no results" early return and into the LLM branch. Also add `test_rag_correlation_id_stable_across_source_order` — call `ask` twice with sources in different orders (monkeypatch `semantic_search` to return reversed lists), assert both audit rows share the same `correlation_id` (verifies sort/dedup before hashing). **Also add `test_rag_no_results_reports_llm_available_true_when_configured`**: `build_client` succeeds (pc not None), `semantic_search` returns `results=[]`; assert the response `llm_available is True` (old `self.llm is not None` semantics preserved — pc resolved *before* the no-results early return). This guards against the regression where the no-results branch hardcodes `llm_available=False`.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -666,15 +666,40 @@ Expected: FAIL — `SearchService.__init__` still requires `llm_provider` / `ask
 ```
 Remove `self.llm = llm_provider`. Remove any `self.llm` attribute. (Audit: grep `self.llm` in the file — there are refs at L223, L237, L277; all handled below.)
 
-`ask()` signature — add `user: User, tenant_schema: str` params (keep existing `question`, `product_line_code`, `product_type_code`, `max_context_chunks`). After the early `if not search_result.results:` block (L218-225), replace the `if not self.llm:` block (L237-247) with:
+`ask()` signature — add `user: User, tenant_schema: str` params (keep existing `question`, `product_line_code`, `product_type_code`, `max_context_chunks`). **Resolve `pc` at the TOP of `ask()` — before `semantic_search` — so the no-results early return can report `llm_available=pc is not None` truthfully** (matches old `self.llm is not None`; setting it `False` when LLM is configured but no hits is a behavior regression). Replace the body from `start = time.monotonic()` through the old `if not self.llm:` block (L237-247) with:
 
 ```python
+        """RAG Q&A: search + LLM answer with citations."""
+        start = time.monotonic()
+
         from app.services.agent import provider_adapter
         from app.services.agent.provider_adapter import ProviderNotConfiguredError
         try:
             pc = await provider_adapter.build_client(self.db)
         except ProviderNotConfiguredError:
             pc = None
+
+        search_result = await self.semantic_search(
+            query=question, user=user, product_line_code=product_line_code,
+            product_type_code=product_type_code, limit=max_context_chunks,
+        )
+
+        if not search_result.results:
+            elapsed = int((time.monotonic() - start) * 1000)
+            return QAResponse(
+                answer="未找到相关记录。",
+                sources=[],
+                llm_available=pc is not None,
+                query_time_ms=elapsed,
+            )
+
+        sources = []
+        for r in search_result.results:
+            sources.append(QASource(
+                entity_type=r.entity_type, entity_id=r.entity_id,
+                document_no=r.metadata.get("document_no", ""),
+                chunk_text=r.chunk_text, relevance_score=r.score,
+            ))
 
         if pc is None:
             elapsed = int((time.monotonic() - start) * 1000)
@@ -689,11 +714,11 @@ Remove `self.llm = llm_provider`. Remove any `self.llm` attribute. (Audit: grep 
             )
 ```
 
-Replace the LLM call block (L269-281) with audit-wrapped version:
+Then the prompt-building + LLM call block (the old L249-281: `context_parts`/`prompt`/`try: rag_schema = ... llm_response = await self.llm.complete(...)`) — replace the `try`/`except` with the audit-wrapped version:
 
 ```python
         from app.services.agent import audit as audit_mod
-        import uuid, hashlib
+        # uuid + hashlib are module-level imports (see top-of-file note below)
 
         try:
             rag_schema = {
@@ -738,6 +763,8 @@ Replace the LLM call block (L269-281) with audit-wrapped version:
             )
 ```
 
+**Top-of-file imports** (`search_service.py`): add `import hashlib` and `import uuid` at module level (the helpers below are module-level and need `hashlib`; `uuid` is used in `ask()`). Do NOT rely on a local `import uuid, hashlib` inside `ask()` — that is not visible to module-level helpers.
+
 Add module-level helpers near the top of `search_service.py`:
 
 ```python
@@ -751,7 +778,7 @@ def _stable_source_hash(sources) -> str:
     return hashlib.sha256(":".join(ids).encode()).hexdigest()[:16]
 ```
 
-Also fix the earlier `llm_available=self.llm is not None` (L223) → `llm_available=pc is not None`. Because `pc` is resolved after the `if not search_result.results:` early return but the `llm_available` at L223 is inside that early-return block — set it to `False` there (no LLM ran). Audit the full `ask` body for any remaining `self.llm` and replace per the spec §3.2.
+Audit the full `ask` body for any remaining `self.llm` and replace per spec §3.2 (`self.llm` → `pc`; all three old refs L223/L237/L277 are covered by the blocks above).
 
 - [ ] **Step 4: Edit `backend/app/api/search.py`**:
 
@@ -1035,6 +1062,11 @@ async def generate_report(
 
     model_name = (pc.model if pc else None) or settings.LLM_MODEL or "rule-only"
 
+    # Recompute llm_enriched (old _enrich_with_llm returned this bool) for content
+    # assembly + CRUD audit changed_fields that previously read it. Semantic:
+    # "at least one section was LLM-enriched" = attempted > 0 and not all failed.
+    llm_enriched = section_attempted > 0 and section_attempted > len(section_failed_keys)
+
     # --- LLM audit (only when LLM was attempted) ---
     if use_llm and pc is not None:
         if not section_failed_keys and not summary_failed:
@@ -1073,7 +1105,7 @@ async def generate_report(
     return content
 ```
 
-> **Implementer note:** The real `generate_report` body (L219-264) assembles `content` and calls `_write_audit(REPORT_GENERATE, {...})` then `await db.commit()`. Preserve all of that — the only changes are: (1) drop `llm_provider` param, add `tenant_schema` keyword param; (2) resolve `pc`; (3) call helpers with `pc` and unpack their new 3-tuple returns; (4) `model_name` null-guard; (5) insert the LLM `write_audit_raw` block **before** the existing `_write_audit` + `await db.commit()` so both audit rows ride the L264 commit. Do **not** add a route-level commit (Task 3c confirms). Read the actual L219-264 body and carry over every line not shown above.
+> **Implementer note:** The real `generate_report` body (L219-264) assembles `content` (which embeds `llm_enriched`) and calls `_write_audit(REPORT_GENERATE, {...})` then `await db.commit()`. Preserve all of that — the only changes are: (1) drop `llm_provider` param, add `tenant_schema` keyword param; (2) resolve `pc`; (3) call helpers with `pc` and unpack their new 3-tuple returns (`sections, section_attempted, section_failed_keys` / `summary, recs, summary_failed`); (4) `model_name` null-guard; (5) **recompute `llm_enriched`** (see line above — the old helper returned this bool; `content` assembly + CRUD `_write_audit(REPORT_GENERATE, {...})` changed_fields both read it, so feed the recomputed value into both where the old code used the helper's bool); (6) insert the LLM `write_audit_raw` block **before** the existing `_write_audit` + `await db.commit()` so both audit rows ride the L264 commit. Do **not** add a route-level commit (Task 3 Step 5 confirms). Read the actual L219-264 body and carry over every line not shown above — in particular find every read of the old `llm_enriched` bool and replace with the recomputed value.
 
 - [ ] **Step 5: Edit route** — `backend/app/api/management_review.py:426-432`:
 
@@ -1147,7 +1179,8 @@ async def test_draft_uses_complete_json_and_no_write_audit_raw(
     async def _ok_client(db_arg):
         return _PC()
     async def _ok_complete(pc, prompt, schema):
-        return {"d2_description": "AI 草稿"}
+        # paragraph format validates against ParagraphLLMOutput(content: str)
+        return {"content": "AI 草稿正文"}
     monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
     monkeypatch.setattr(provider_adapter, "complete_json", _ok_complete)
 
@@ -1163,12 +1196,15 @@ async def test_draft_uses_complete_json_and_no_write_audit_raw(
     from app.schemas.capa_draft import DraftRequest
     from app.models.capa import CAPAEightD
     import uuid
-    capa = CAPAEightD(report_id=uuid.uuid4(), doc_no="8D-2026-902",
+    # CAPAEightD: document_no (not doc_no) is the field; title is nullable=False.
+    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-902", title="t",
                       factory_id=default_factory.id, product_line_code="DC-DC-100",
                       status="D2_DESCRIPTION")
     db.add(capa); await db.commit()
 
-    req = DraftRequest(format="structured", request_id="r1")
+    # paragraph format → no structured schema validation; request_id is parsed as
+    # UUID internally, so pass a valid UUID4 string (not "r1").
+    req = DraftRequest(format="paragraph", request_id=str(uuid.uuid4()))
     # build a fake Request with app.state carrying timeout
     class _Req:
         class app:
@@ -1191,11 +1227,11 @@ async def test_draft_503_when_pc_none_no_attribute_error(
     from app.models.capa import CAPAEightD
     import uuid
     from fastapi import HTTPException
-    capa = CAPAEightD(report_id=uuid.uuid4(), doc_no="8D-2026-903",
+    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-903", title="t",
                       factory_id=default_factory.id, product_line_code="DC-DC-100",
                       status="D2_DESCRIPTION")
     db.add(capa); await db.commit()
-    req = DraftRequest(format="structured", request_id="r1")
+    req = DraftRequest(format="paragraph", request_id=str(uuid.uuid4()))
     class _Req:
         class app:
             class state:
@@ -1203,10 +1239,13 @@ async def test_draft_503_when_pc_none_no_attribute_error(
     with pytest.raises(HTTPException) as ei:
         await generate_draft(db, capa.report_id, "d2", req, admin_user, _Req())
     assert ei.value.status_code == 503
-    # llm_model_name null-guard: the 503 audit row's model must be "unknown", not crash
+    # llm_model_name null-guard: the 503 audit row's model must be "unknown", not crash.
+    # The 503 path runs the existing _write_audit (AI_DRAFT) in a separate session;
+    # assert its changed_fields model == "unknown" via a fresh query if feasible
+    # (the audit commits in get_tenant_aware_session, not on `db`).
 ```
 
-> **Implementer note:** Adjust `DraftRequest` / `CAPAEightD` required fields to the real schemas/models. The `_Req` fake must satisfy whatever `generate_draft` reads off `request.app.state` (currently `capa_draft_llm_timeout` at L248-252) — after migration it no longer reads `app.state.llm_provider`. Add an assertion that the 503 path's existing `AI_DRAFT` audit row has `model == "unknown"` (query `AuditLog` where `action == "AI_DRAFT"`).
+> **Implementer note:** The test now uses the correct model fields (`document_no` + `title`, both `nullable=False` on `CAPAEightD`), `format="paragraph"` (validates against `ParagraphLLMOutput(content: str)` — simpler than the structured `D2StructuredLLMOutput`), and a valid UUID4 string for `request_id` (parsed as UUID internally; "r1" would break the parse). The `_Req` fake satisfies `request.app.state.capa_draft_llm_timeout` (L248-252) — after migration `generate_draft` no longer reads `app.state.llm_provider`. To assert the 503 audit row's `model == "unknown"`: query `AuditLog` where `action == "AI_DRAFT"` and `record_id == capa.report_id` — note `_write_audit` commits in a separate `get_tenant_aware_session()`, so query a fresh session (or `db.execute` after the 503, since the audit session committed independently). Verify `request_id` UUID parsing: read `generate_draft` L255-265 for the `normalized_request_id` parse — if it wraps in try/except, any string works; if not, the UUID4 string is required.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -1331,6 +1370,9 @@ Verify each spec §8 回归 item against the green suite:
 - (e) all audit status in `new_values={"status":...}`.
 - (f) `LLMProvider` class still imported by `ai_config_service.py` (grep step 2 confirms not deleted).
 - (g) per-consumer timeouts unchanged (D4/D5 2s / mgmt `REPORT_LLM_TIMEOUT` / RAG httpx 30s / CAPA draft `CAPA_DRAFT_LLM_TIMEOUT`).
+- (h) RAG `/ask` with configured LLM but **no search hits** returns `llm_available=True` (pc resolved before the no-results early return; NOT `False`) — add/keep a test for this.
+- (i) mgmt `generate_report` content + CRUD `REPORT_GENERATE` audit `changed_fields` use the **recomputed `llm_enriched`** (`section_attempted > len(section_failed_keys)`), not a stale/dropped bool.
+- (j) CAPA draft tests reach the migration behavior (not fail on setup): `CAPAEightD` uses `document_no`+`title`; `DraftRequest` uses `format="paragraph"` + valid UUID4 `request_id`; `_ok_complete` returns `{"content": ...}`.
 
 - [ ] **Step 6: Final commit (docs sync)**
 
