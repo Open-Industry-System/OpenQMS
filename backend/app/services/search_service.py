@@ -1,6 +1,8 @@
 """Search service: hybrid vector + fulltext search with RRF fusion, and RAG Q&A."""
+import hashlib
 import logging
 import time
+import uuid
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +13,17 @@ from app.models.user import User
 from app.schemas.search import QAResponse, QASource, SearchResultItem, SemanticSearchResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _stable_query_hash(question: str) -> str:
+    return hashlib.sha256(question.strip().encode()).hexdigest()[:16]
+
+
+def _stable_source_hash(sources) -> str:
+    # sort + dedup entity_ids before hashing so source order doesn't split correlation_id
+    ids = sorted({str(getattr(s, "entity_id", "")) for s in sources})
+    return hashlib.sha256(":".join(ids).encode()).hexdigest()[:16]
+
 
 # Map entity_type to Module permission enum
 ENTITY_MODULE_MAP = {
@@ -24,9 +37,8 @@ ENTITY_MODULE_MAP = {
 
 
 class SearchService:
-    def __init__(self, db: AsyncSession, llm_provider=None, embedding_provider=None):
+    def __init__(self, db: AsyncSession, embedding_provider=None):
         self.db = db
-        self.llm = llm_provider
         self.embedding = embedding_provider
 
     async def _get_user_product_lines(self, user: User) -> list[str] | None:
@@ -200,12 +212,20 @@ class SearchService:
         self,
         question: str,
         user: User,
+        tenant_schema: str,
         product_line_code: str | None = None,
         product_type_code: str | None = None,
         max_context_chunks: int = 10,
     ) -> QAResponse:
         """RAG Q&A: search + LLM answer with citations."""
         start = time.monotonic()
+
+        from app.services.agent import provider_adapter
+        from app.services.agent.provider_adapter import ProviderNotConfiguredError
+        try:
+            pc = await provider_adapter.build_client(self.db)
+        except ProviderNotConfiguredError:
+            pc = None
 
         search_result = await self.semantic_search(
             query=question,
@@ -220,7 +240,7 @@ class SearchService:
             return QAResponse(
                 answer="未找到相关记录。",
                 sources=[],
-                llm_available=self.llm is not None,
+                llm_available=pc is not None,
                 query_time_ms=elapsed,
             )
 
@@ -234,7 +254,7 @@ class SearchService:
                 relevance_score=r.score,
             ))
 
-        if not self.llm:
+        if pc is None:
             elapsed = int((time.monotonic() - start) * 1000)
             answer_parts = ["未配置 LLM，无法生成智能回答。以下是相关搜索结果：\n"]
             for i, s in enumerate(sources, 1):
@@ -266,6 +286,8 @@ class SearchService:
 **必须只返回以下 JSON 格式，不要添加任何其他文本、markdown 围栏或解释：**
 {{"answer": "你的回答内容"}}"""
 
+        from app.services.agent import audit as audit_mod
+
         try:
             rag_schema = {
                 "type": "object",
@@ -274,11 +296,39 @@ class SearchService:
                 },
                 "required": ["answer"],
             }
-            llm_response = await self.llm.complete(prompt=prompt, response_schema=rag_schema)
+            llm_response = await provider_adapter.complete_json(pc, prompt, rag_schema)
             answer = llm_response.get("answer", "生成回答失败。")
+            await audit_mod.write_audit_raw(
+                self.db,
+                user_id=user.user_id,
+                factory_id=None,
+                tenant_schema=tenant_schema,
+                table_name="rag_qa",
+                record_id=uuid.uuid5(uuid.NAMESPACE_URL, f"rag_qa:{_stable_query_hash(question)}"),
+                action="llm_rag_qa",
+                correlation_id=uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"rag_qa:{_stable_query_hash(question)}:{_stable_source_hash(sources)}",
+                ),
+                new_values={"status": "success", "model": pc.model},
+            )
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             answer = f"LLM 调用失败: {e}"
+            await audit_mod.write_audit_raw(
+                self.db,
+                user_id=user.user_id,
+                factory_id=None,
+                tenant_schema=tenant_schema,
+                table_name="rag_qa",
+                record_id=uuid.uuid5(uuid.NAMESPACE_URL, f"rag_qa:{_stable_query_hash(question)}"),
+                action="llm_rag_qa",
+                correlation_id=uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"rag_qa:{_stable_query_hash(question)}:{_stable_source_hash(sources)}",
+                ),
+                new_values={"status": "llm_failed", "error": str(e), "model": (pc.model if pc else None)},
+            )
 
         elapsed = int((time.monotonic() - start) * 1000)
         return QAResponse(
