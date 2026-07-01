@@ -19,7 +19,8 @@ PYTEST_IGNORES    := --ignore=tests/test_graph_sync_worker.py --ignore=tests/tes
 # Prefer the project venv's pytest if present (local dev); fall back to PATH
 # pytest (CI installs requirements into the runner python, no .venv). Without
 # this, `make check-backend` may resolve a system python lacking openai/anthropic.
-PYTEST ?= $(shell if [ -x $(BACKEND_DIR)/.venv/bin/pytest ]; then echo $(BACKEND_DIR)/.venv/bin/pytest; else echo pytest; fi)
+# Resolve to an ABSOLUTE path so it stays valid after the target's `cd $(BACKEND_DIR)`.
+PYTEST ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest"; else echo pytest; fi)
 
 .PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend
 
