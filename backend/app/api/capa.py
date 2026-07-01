@@ -9,6 +9,7 @@ from app.config import settings
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.core.tenant import tenant_schema
 from app.database import get_db
 from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
@@ -371,9 +372,14 @@ async def get_d4_fmea_recommendations(
                 linked_fmea = doc
                 break
 
-    llm_provider = request.app.state.llm_provider
     embedding_provider = request.app.state.embedding_provider
-    pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
+    from app.services.agent import provider_adapter
+    from app.services.agent.provider_adapter import ProviderNotConfiguredError
+    try:
+        pc = await provider_adapter.build_client(db)
+    except ProviderNotConfiguredError:
+        pc = None
+    pipeline = HybridRecommendationPipeline(db, pc, embedding_provider)
 
     context = RecommendationContext(
         capa_data={
@@ -389,7 +395,14 @@ async def get_d4_fmea_recommendations(
         linked_fmea=linked_fmea,
     )
 
-    result = await pipeline.recommend(context)
+    result = await pipeline.recommend(
+        context,
+        user=scope.user,
+        report_id=report_id,
+        factory_id=capa.factory_id,
+        tenant_schema=tenant_schema(request),
+    )
+    await db.commit()
     return {"items": [c.to_d4_schema() for c in result.items]}
 
 
@@ -442,9 +455,14 @@ async def get_d5_fmea_recommendations(
                 linked_fmea = doc
                 break
 
-    llm_provider = request.app.state.llm_provider
     embedding_provider = request.app.state.embedding_provider
-    pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
+    from app.services.agent import provider_adapter
+    from app.services.agent.provider_adapter import ProviderNotConfiguredError
+    try:
+        pc = await provider_adapter.build_client(db)
+    except ProviderNotConfiguredError:
+        pc = None
+    pipeline = HybridRecommendationPipeline(db, pc, embedding_provider)
 
     context = RecommendationContext(
         capa_data={
@@ -460,7 +478,14 @@ async def get_d5_fmea_recommendations(
         linked_fmea=linked_fmea,
     )
 
-    result = await pipeline.recommend(context)
+    result = await pipeline.recommend(
+        context,
+        user=scope.user,
+        report_id=report_id,
+        factory_id=capa.factory_id,
+        tenant_schema=tenant_schema(request),
+    )
+    await db.commit()
 
     existing_controls = []
     general_suggestions = []
