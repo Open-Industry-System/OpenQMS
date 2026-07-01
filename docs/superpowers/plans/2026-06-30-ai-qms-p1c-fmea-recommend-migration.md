@@ -168,7 +168,7 @@ In `backend/tests/test_dfmea_tool_trend_recommendation.py`:
   - After Task 4, the `failure` path calls `_write_recommend_audit(user.user_id, ...)` → `AttributeError` because `user=object()` has no `user_id`.
   - After Task 3, `db=None` tests that don't stub `build_client` will call real `build_client(None)` against a None session.
 
-  Rewrite all 3 tests to stub `provider_adapter.build_client`/`complete_json` explicitly and pass a stub user with `user_id`. Since these are DB-free unit tests (no audit rows asserted), also stub `_write_recommend_audit` so they don't touch a DB:
+  Rewrite all 3 tests to stub `provider_adapter.build_client`/`complete_json` explicitly. The tests can keep `user = object()` (no `user_id`) because `_write_recommend_audit` is stubbed to a no-op (see `_patch` below, `raising=False`) — `user.user_id` is never accessed on the DB-free path. Since these are DB-free unit tests (no audit rows asserted), stubbing `_write_recommend_audit` also keeps them off the DB:
 
 ```python
     def _svc(self):
@@ -800,7 +800,7 @@ Wire it into the `need_llm=True` branch. **⚠ Critical: the audit write MUST si
             source = "graph" if graph_suggestions else "rule"
 ```
 
-This also replaces the old `self.llm.complete(prompt, {})` call site (line 641) — Task 3's `complete_json` rewiring is folded into this restructure. **Adjust Task 3 accordingly**: Task 3 should only add the `build_client` resolution + the `provider_adapter` import; the `complete_json` call-line replacement happens here in Task 4's restructure. (If you prefer, you may fold Task 3's call-line change into this Task 4 step — either way, the final code is the block above.)
+Task 3 already switched the call line to `provider_adapter.complete_json(...)`; Task 4 only adds `llm_status` tracking + the `_write_recommend_audit` helper and moves the audit write outside the LLM try/except (into its own guard). The `complete_json` call inside the try block below is unchanged from Task 3 — don't re-edit it.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
