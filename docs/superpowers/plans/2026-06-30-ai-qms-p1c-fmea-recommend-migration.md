@@ -181,7 +181,10 @@ In `backend/tests/test_dfmea_tool_trend_recommendation.py`:
         monkeypatch.setattr(svc, "_assemble_context", AsyncMock(return_value={}))
         monkeypatch.setattr(svc, "_cache_result", AsyncMock())
         # DB-free: short-circuit audit so user.user_id / db.flush aren't exercised here.
-        monkeypatch.setattr(svc, "_write_recommend_audit", AsyncMock())
+        # raising=False because _write_recommend_audit isn't added until Task 3
+        # (the merged build_client+complete_json+audit task). Without raising=False
+        # this AttributeError's at patch time and the no-llm test can't even run.
+        monkeypatch.setattr(svc, "_write_recommend_audit", AsyncMock(), raising=False)
         monkeypatch.setattr(
             "app.core.permissions.get_user_permission",
             AsyncMock(return_value=PermissionLevel.VIEW),
@@ -375,17 +378,33 @@ Update the call site (line 669):
             await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response, pc is not None)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 5: Skip the two LLM-exercising dfmea tests until Task 3**
+
+The `with_llm` and `failure` dfmea tests stub `build_client` to return a pc, but the `pc=None` placeholder (Step 4) forces `_need_llm=False` → they'd fail on the `source` assertion. To keep Task 2 a clean green commit, mark both tests skipped with a reason pointing to Task 3:
+
+```python
+    @pytest.mark.skip(reason="Task 3 wires build_client resolution + complete_json call line")
+    async def test_dfmea_tool_with_llm_returns_suggestions(self, monkeypatch):
+        ...
+
+    @pytest.mark.skip(reason="Task 3 wires build_client resolution + complete_json call line")
+    async def test_dfmea_trend_llm_failure_returns_rule_fallback(self, monkeypatch):
+        ...
+```
+
+(The `no_llm` test stays un-skipped — `pc=None` is exactly its scenario, so it passes now.)
+
+- [ ] **Step 6: Run tests to verify they pass (green commit)**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_recommendation_service.py tests/test_dfmea_tool_trend_recommendation.py tests/test_fmea_recommend_scope.py -v`
-Expected: PASS. The 3 dfmea integration tests now stub `build_client`/`complete_json`/`_write_recommend_audit` directly and pass with the `pc=None` placeholder (the `no-llm` test asserts `source="rule"`; the `failure` and `success` tests stub `build_client` to return a pc — but since the placeholder forces `pc=None`, the `success`/`failure` tests will FAIL here because `_need_llm` returns `False`. **That's expected** — Task 3 replaces the `pc=None` placeholder with real `build_client` resolution, after which they pass. So after Task 2, only the `no-llm` test and the DB-free unit tests pass; `success`/`failure` dfmea tests fail until Task 3. Adjust the run: `pytest tests/test_recommendation_service.py tests/test_fmea_recommend_scope.py -v` passes fully; `pytest tests/test_dfmea_tool_trend_recommendation.py -v -k "no_llm or not (with_llm or failure)"` passes. The `with_llm`/`failure` tests are red — Task 3 greens them.)
+Expected: PASS — `with_llm`/`failure` show as SKIPPED, everything else (including `no_llm`) PASS.
 
-- [ ] **Step 6: Run `update_fmea` cache-invalidation regression**
+- [ ] **Step 7: Run `update_fmea` cache-invalidation regression**
 
 Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_fmea_service.py -v -k "update or invalidat or cache"`
 Expected: PASS — no `TypeError` from the ctor call at `fmea_service.py:266`. (If no `update_fmea` test exists yet, add a minimal one: construct `RecommendationService(db=db, graph_repo=_NullGraphRepo())` and call `invalidate_cache_for_fmea(uuid.uuid4())` — should not raise.)
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add backend/app/services/recommendation_service.py backend/app/services/fmea_service.py backend/tests/test_recommendation_service.py backend/tests/test_dfmea_tool_trend_recommendation.py backend/tests/test_fmea_recommend_scope.py
@@ -394,23 +413,19 @@ git commit -m "refactor(recommend): drop llm_provider ctor param, thread llm_ava
 
 ---
 
-## Task 3: Resolve `pc` via `provider_adapter.build_client` before cache check
+## Task 3: Resolve `pc` via `build_client` + switch call line to `complete_json` (un-skip dfmea tests)
 
-The dfmea integration tests were already migrated in Task 2 (they stub `build_client`/`complete_json` directly). Task 3 only replaces the `pc = None` placeholder with real `build_client` resolution + adds the imports. **Note:** the `complete_json` call-line replacement (old `self.llm.complete`) is folded into Task 4's `need_llm`-branch restructure — Task 3 does NOT touch the call line yet. After Task 3, `pc` resolves correctly; the `success`/`failure` dfmea tests still assert against `complete_json`, which the old `self.llm.complete` call line won't satisfy until Task 4. So those 2 tests stay red until Task 4. (This is intentional: Task 3 isolates `build_client` resolution + the cache-gate fix; Task 4 isolates the LLM-call + audit restructure.)
+Task 2 left the `pc=None` placeholder and skipped the two LLM-exercising dfmea tests. Task 3 replaces the placeholder with real `build_client` resolution AND switches the LLM call line from the deleted `self.llm.complete` to `provider_adapter.complete_json` — together, so the two skipped dfmea tests go green in one commit. No audit yet (Task 4); the `need_llm=True` branch's audit call is added in Task 4, so for now the call line switch is the only change inside the try block.
 
 **Files:**
-- Modify: `backend/app/services/recommendation_service.py` (replace `pc = None` placeholder; add imports)
+- Modify: `backend/app/services/recommendation_service.py` (replace `pc = None` placeholder; add imports; switch call line 641)
+- Modify: `backend/tests/test_dfmea_tool_trend_recommendation.py` (remove the two `@pytest.mark.skip` decorators from Task 2)
 
 **Interfaces:**
-- Consumes: `provider_adapter.build_client(db) -> ProviderClient` (raises `ProviderNotConfiguredError`).
-- Produces: `pc` correctly resolved before the cache check; cache fall-through gate works against real provider availability.
+- Consumes: `provider_adapter.build_client(db) -> ProviderClient` (raises `ProviderNotConfiguredError`), `provider_adapter.complete_json(pc, prompt, response_schema) -> dict`.
+- Produces: `pc` resolved before the cache check; LLM call on the base provider; dfmea `with_llm`/`failure` tests green.
 
-- [ ] **Step 1: Run the dfmea success/failure tests to confirm they're red (sanity)**
-
-Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_dfmea_tool_trend_recommendation.py -v -k "with_llm or failure"`
-Expected: FAIL — `pc` is `None` (Task 2 placeholder), so `_need_llm` returns `False`; `with_llm` gets `source="rule"` (not `hybrid`), `failure` gets `source="rule"` (not `rule_fallback`). The `no_llm` test passes.
-
-- [ ] **Step 2: Implement `build_client` resolution + imports**
+- [ ] **Step 1: Implement `build_client` resolution + imports + call-line switch**
 
 In `backend/app/services/recommendation_service.py`:
 
@@ -428,28 +443,34 @@ Replace the `pc = None` placeholder (inserted Task 2, immediately after `fmea = 
             pc = None
 ```
 
-- [ ] **Step 3: Run the dfmea success/failure tests — still red (call line not yet switched)**
+Switch the LLM call line (line 640–643) — replace `self.llm.complete(prompt, {})`:
+```python
+                llm_result = await asyncio.wait_for(
+                    provider_adapter.complete_json(pc, prompt, {}),
+                    timeout=self.llm_timeout,
+                )
+```
+(`pc` is guaranteed non-None here: `need_llm=True` requires `pc is not None` via `_need_llm`, since `_need_llm` returns `llm_available and (...)` and we pass `llm_available=pc is not None`.)
 
-Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_dfmea_tool_trend_recommendation.py -v -k "with_llm or failure"`
-Expected: FAIL — but now because `self.llm.complete` is gone/`pc` path is hit differently. Specifically: the old call line `self.llm.complete(prompt, {})` (line 641) still references the deleted `self.llm` → `AttributeError`. This confirms Task 3 touched `pc` resolution; Task 4 fixes the call line + audit. (If the error is `AttributeError: 'RecommendationService' object has no attribute 'llm'`, you're on track.)
+- [ ] **Step 2: Remove the two `@pytest.mark.skip` decorators**
 
-- [ ] **Step 4: Run the no-llm + scope tests to confirm no regression**
+In `backend/tests/test_dfmea_tool_trend_recommendation.py`, delete the `@pytest.mark.skip(reason="Task 3 wires build_client resolution + complete_json call line")` lines above `test_dfmea_tool_with_llm_returns_suggestions` and `test_dfmea_trend_llm_failure_returns_rule_fallback` (added in Task 2 Step 5).
 
-Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_dfmea_tool_trend_recommendation.py::TestRecommendIntegrationForToolTrend::test_dfmea_tool_no_llm_returns_empty_with_source_rule tests/test_fmea_recommend_scope.py tests/test_recommendation_service.py -v -k "no_llm or scope or merge or graph_matches or timeout"`
-Expected: PASS (these don't exercise the `need_llm=True` call line).
+- [ ] **Step 3: Run the dfmea suite to verify the two un-skipped tests now pass**
+
+Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_dfmea_tool_trend_recommendation.py -v`
+Expected: PASS — all 3 dfmea integration tests green (`with_llm` gets `source in ("hybrid","graph_enriched")`; `failure` gets `source == "rule_fallback"`; `no_llm` stays `rule`). The `_write_recommend_audit` stub (`raising=False`) is still a no-op since the audit call isn't added until Task 4.
+
+- [ ] **Step 4: Run the full recommendation suite (green commit)**
+
+Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_recommendation_service.py tests/test_dfmea_tool_trend_recommendation.py tests/test_fmea_recommend_scope.py tests/test_pfmea_recommend.py -v`
+Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/services/recommendation_service.py
-git commit -m "feat(recommend): resolve pc via provider_adapter.build_client before cache check"
-```
-
-(Task 4 follows immediately and greens the `with_llm`/`failure` tests by switching the call line to `complete_json` + adding audit.)
-
-```bash
 git add backend/app/services/recommendation_service.py backend/tests/test_dfmea_tool_trend_recommendation.py
-git commit -m "feat(recommend): resolve pc via provider_adapter.build_client, call complete_json"
+git commit -m "feat(recommend): resolve pc via build_client, switch LLM call to complete_json"
 ```
 
 ---
@@ -457,7 +478,7 @@ git commit -m "feat(recommend): resolve pc via provider_adapter.build_client, ca
 ## Task 4: Add `_write_recommend_audit` (two-state) on the LLM-attempt path
 
 **Files:**
-- Modify: `backend/app/services/recommendation_service.py` (add `_write_recommend_audit`; call it in `need_llm=True` success + except branches)
+- Modify: `backend/app/services/recommendation_service.py` (add `_write_recommend_audit`; restructure `need_llm=True` so audit writes OUTSIDE the LLM try/except, in its own guard)
 - Modify: `backend/tests/test_recommendation_service.py` (add audit two-state tests + cache-gate-order regression)
 
 **Interfaces:**
@@ -692,9 +713,11 @@ async def test_recommend_cache_gate_falls_through_when_llm_becomes_available(
 Run: `cd backend && SECRET_KEY=test-secret-key-for-pytest-only .venv/bin/python -m pytest tests/test_recommendation_service.py -v -k "audit or cache_gate"`
 Expected: FAIL — no audit rows written (`_write_recommend_audit` doesn't exist yet).
 
-- [ ] **Step 3: Implement `_write_recommend_audit` + wire into `need_llm=True` branch**
+- [ ] **Step 3: Implement `_write_recommend_audit` + restructure `need_llm=True` branch (audit outside try/except)**
 
 In `backend/app/services/recommendation_service.py`, add `uuid` import if not present (line 6 is `import uuid as _uuid` — use `_uuid.uuid5`/`_uuid.NAMESPACE_URL`).
+
+The call line is already `provider_adapter.complete_json(...)` from Task 3. This step adds the `_write_recommend_audit` helper and restructures the `if need_llm:` block so the audit write sits OUTSIDE the LLM try/except (Task 3 left the try/except shape unchanged with no audit call; Task 4 adds the audit + the `llm_status` variable).
 
 Add the helper method (place it near `_compute_context_hash`, ~line 879):
 ```python
@@ -986,12 +1009,14 @@ git commit -m "chore(p1c): regression green — make check passes" --allow-empty
 - §2.3 `core/tenant.py` shared util + dashboard switch → Task 1 (util) + Task 5 (dashboard switch) ✓
 - §2.4 tests (success/llm_failed/llm_not_configured-no-audit/cache-gate regression/fmea_service no-TypeError/tenant unit/route) → Tasks 1–5 ✓
 
-**Review-fix coverage (round 2):**
+**Review-fix coverage (round 2 → round 3):**
 - Audit/LLM isolation (audit write OUTSIDE the LLM try/except, in its own guard) → Task 4 Step 3 restructure ✓
 - All 3 dfmea integration tests migrated (not just `_OkLlm`) with explicit `build_client`/`complete_json`/`_write_recommend_audit` stubs + `tenant_schema` arg; `_OkLlm`/`_ThrowLlm` deleted → Task 2 Step 1 ✓
 - Route test patches `app.api.fmea.RecommendationService` (not `app.services.recommendation_service.RecommendationService`) → Task 5 Step 1 ✓
 - Route `await db.commit()` spy-tested (removal turns the test red) → Task 5 Step 1 ✓
-- Task 3 narrowed to `build_client` resolution + imports only (call-line + audit restructure folded into Task 4) — avoids half-migrated `complete_json` call mid-plan ✓
+- **Round 3:** Task 2's `_write_recommend_audit` monkeypatch uses `raising=False` (helper doesn't exist until Task 4) → Task 2 `_patch` ✓
+- **Round 3:** No mid-plan red commits — Task 2 skips `with_llm`/`failure` dfmea tests (clean green commit); Task 3 un-skips + does both `build_client` resolution AND `complete_json` call-line switch in one green commit; Task 4 adds audit + restructure in one green commit ✓
+- **Round 3:** Removed stale duplicate commit block at end of (old) Task 3 ✓
 
 **Placeholder scan:** none — every code step has full code.
 
