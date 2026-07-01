@@ -4,7 +4,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key")
 import pytest
 import uuid
 
-from app.services.recommendation_service import RecommendationService, RuleEngine
+from app.services.recommendation_service import RecommendationService, RuleEngine, _NullGraphRepo
 from app.schemas.recommendation import RecommendRequest, SuggestionItem
 
 
@@ -53,13 +53,13 @@ def test_default_llm_timeout_covers_normal_provider_latency(monkeypatch):
     """
     monkeypatch.setattr("app.services.recommendation_service.settings.LLM_TIMEOUT", 5)
 
-    svc = RecommendationService(db=None, llm_provider=object(), graph_repo=StubGraphRepo())
+    svc = RecommendationService(db=None, graph_repo=StubGraphRepo())
 
     assert svc.llm_timeout >= 15
 
 
 def test_merge_and_deduplicate_prefers_higher_confidence():
-    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    svc = RecommendationService(db=None, graph_repo=StubGraphRepo())
     a = [SuggestionItem(name="焊接不良", confidence=0.7, source="rule")]
     b = [SuggestionItem(name="焊接不良", confidence=0.85, source="graph")]
     result = svc._merge_and_deduplicate(a, b)
@@ -69,7 +69,7 @@ def test_merge_and_deduplicate_prefers_higher_confidence():
 
 
 def test_merge_and_deduplicate_graph_wins_on_tie():
-    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    svc = RecommendationService(db=None, graph_repo=StubGraphRepo())
     a = [SuggestionItem(name="A", confidence=0.7, source="rule")]
     b = [SuggestionItem(name="A", confidence=0.7, source="graph")]
     result = svc._merge_and_deduplicate(a, b)
@@ -77,7 +77,7 @@ def test_merge_and_deduplicate_graph_wins_on_tie():
 
 
 def test_graph_matches_to_suggestions():
-    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    svc = RecommendationService(db=None, graph_repo=StubGraphRepo())
     matches = [
         {
             "node_id": "n1",
@@ -140,7 +140,7 @@ def test_rule_engine_generic_fallback():
 
 def test_graph_matches_to_suggestions_with_parent_node():
     """neighbor_match 结果 explanation 应包含父节点名称。"""
-    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    svc = RecommendationService(db=None, graph_repo=StubGraphRepo())
     matches = [{
         "node_id": "n1", "name": "密封件老化", "type": "FailureCause",
         "fmea_id": "f1", "document_no": "PFMEA-001",
@@ -252,7 +252,7 @@ def test_rule_engine_measure_still_returns_mixed():
 
 async def test_extract_neighbors_prevention_control_only_prevented_by():
     """prevention_control 图谱增强只取 PREVENTED_BY 邻居，不含 DETECTED_BY。"""
-    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    svc = RecommendationService(db=None, graph_repo=StubGraphRepo())
     match = {
         "node_id": "fm1", "fmea_id": str(uuid.uuid4()),
     }
@@ -282,7 +282,7 @@ async def test_extract_neighbors_prevention_control_only_prevented_by():
 
 async def test_extract_neighbors_detection_control_only_detected_by():
     """detection_control 图谱增强只取 DETECTED_BY 邻居。"""
-    svc = RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+    svc = RecommendationService(db=None, graph_repo=StubGraphRepo())
     match = {"node_id": "fm1", "fmea_id": str(uuid.uuid4())}
     async def fake_graph_data(_fmea_id):
         return {
@@ -304,3 +304,10 @@ async def test_extract_neighbors_detection_control_only_detected_by():
     names = [n["name"] for n in nodes]
     assert "探测B" in names
     assert "预防A" not in names
+
+
+async def test_invalidate_cache_for_fmea_with_null_repo_does_not_raise():
+    """Regression: RecommendationService can be built with _NullGraphRepo and invalidate cache."""
+    from unittest.mock import AsyncMock
+    svc = RecommendationService(db=AsyncMock(), graph_repo=_NullGraphRepo())
+    await svc.invalidate_cache_for_fmea(uuid.uuid4())

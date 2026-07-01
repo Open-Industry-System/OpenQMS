@@ -51,7 +51,7 @@ async def test_recommend_current_product_type_passes_sibling_codes(db, default_f
 
     fake_repo = _FakeRepo()
 
-    service = RecommendationService(db=db, llm_provider=None, graph_repo=fake_repo)
+    service = RecommendationService(db=db, graph_repo=fake_repo)
     req = RecommendRequest(
         trigger_type="failure_mode",
         context={"function_description": "采集单体电压"},
@@ -61,7 +61,7 @@ async def test_recommend_current_product_type_passes_sibling_codes(db, default_f
     # destructive tests that drop_all+create_all wipe that row, so establish the precondition
     # explicitly rather than depend on seed data surviving.
     with patch("app.core.permissions.get_user_permission", return_value=PermissionLevel.VIEW):
-        await service.recommend(fmea.fmea_id, req, admin_user, request_scope_all)
+        await service.recommend(fmea.fmea_id, req, admin_user, request_scope_all, tenant_schema="public")
 
     assert set(captured["product_line_codes"]) == {"PT-DC-100", "PT-AC-200"}
     # scope/product_line_code kwargs must NOT be passed (unified signature)
@@ -104,7 +104,7 @@ async def test_recommend_no_kg_current_product_type_downgrades_to_current_produc
             return []
 
     fake_repo = _FakeRepo()
-    service = RecommendationService(db=db, llm_provider=None, graph_repo=fake_repo)
+    service = RecommendationService(db=db, graph_repo=fake_repo)
     req = RecommendRequest(
         trigger_type="failure_mode",
         context={"function_description": "采集单体电压"},
@@ -112,7 +112,7 @@ async def test_recommend_no_kg_current_product_type_downgrades_to_current_produc
     )
 
     with patch("app.core.permissions.get_user_permission", return_value=PermissionLevel.NONE):
-        await service.recommend(fmea.fmea_id, req, admin_user, request_scope_all)
+        await service.recommend(fmea.fmea_id, req, admin_user, request_scope_all, tenant_schema="public")
 
     assert captured.get("product_line_codes") == ["PT-DC-100"]
     assert "scope" not in captured
