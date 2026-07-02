@@ -262,7 +262,7 @@ spec (m1-core/capa.spec.ts)
 
 1. `make e2e-reset && make e2e` 在干净环境一键全绿（无 LLM 凭证时 AI 组 skip+warning，其余全过）。
 2. `make e2e -- --grep m1-core` 单模块独立跑通，写数据 afterEach 自清、种子不动。
-3. M1 四个流程 spec 全绿：①**种子 5 账号（admin/engineer/manager/viewer/groupadmin，账号名与密码从 seed-state 读取不硬编码；groupadmin 为跨两厂的 group 用户）**登录+权限门控+跨工厂行级隔离不可见 ②新建 FMEA→编辑→推荐按钮→版本快照 ③新建 8D→D1-D8 流转→审批/关闭 ④看板 KPI 卡→过滤列表→详情。
+3. M1 流程 spec 全绿（3 个，④延后）：①**种子 5 账号（admin/engineer/manager/viewer/groupadmin，账号名与密码从 seed-state 读取不硬编码；groupadmin 为跨两厂的 group 用户）**登录+权限门控+跨工厂行级隔离不可见 ②新建 FMEA→编辑→推荐按钮→版本快照 ③新建 8D→D1-D8 流转→审批/关闭。④看板下钻 spec **延后**——下钻功能仅实现一半（KPICard 支持 onClick、列表页读 query param，但 widget→navigate 接线与 dashboardDrilldown.ts 未实现，设计 spec 状态待评审）；待下钻接线落地后再补 spec。
 4. LLM 凭证齐全时 AI 相关断言全绿——**仅验结构/行为**（推荐卡片 DOM 存在、`AP∈{H,M,L}`、`S/O/D∈1..10`；草拟编辑器非空含预期 HTML 层级；趋势解读非空含中文分段），绝不文本匹配。
 5. **端口/配置隔离**：开发栈同时在跑时 `make e2e` 不冲突（db 5433 / backend 8001 / frontend 5174 / redis 不暴露）；`playwright.config.ts` 已固定 `workers:1`+`fullyParallel:false`+`baseURL:5174`；后端 `E2E_MODE` 未置时 `/api/e2e/*` 不载入。
 6. `docs/e2e.md` + `CLAUDE.md` 更新，`docs-check` 过。
