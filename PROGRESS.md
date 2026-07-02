@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-01
-**当前分支**: `fix/dashboard-admin-pages`（领先 `main` 108 个 commit，尚未合并）
-**最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移（6 任务 TDD 已落地，41 推荐测试绿）
+**更新日期**: 2026-07-02
+**当前分支**: `worktree-e2e-spec`（E2E 套件 Task 4 工作树）
+**最近合并**: `6e3fa9b` feat(e2e): whitelist cleanup endpoint (FK-ordered, single txn)
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
 
@@ -102,10 +102,11 @@
   - 目标：对所有代码更改进行系统级端到端测试，覆盖每次合并/发版前的回归
   - 已落地（TDD 计划 14 任务）：
     - Task 3 `seed_e2e` / `seed-state` endpoint / `backend/tests/test_e2e_endpoints.py`：确定性 E2E 种子（2 工厂 / 1 产品线 / 5 账号 / 1 PFMEA / 1 CAPA）+ `GET /api/e2e/seed-state`
+    - Task 4 `POST /api/e2e/cleanup?prefix=` 白名单清理 + `backend/app/e2e_cleanup_whitelist.py`：FK 有序、单事务、版本表触发器临时禁用、仅处理 `E2E-` 前缀父表；测试 `test_cleanup_deletes_prefixed_only` 绿
   - 待 brainstorm 的范围：模块覆盖（FMEA / CAPA / IQC / SPC / MSA / 客户质量 / 供应商质量 / Admin / Agent Base）、层次（API 契约 + 浏览器 UI 流 + RBAC 角色矩阵 + 多工厂 `factory_id` 隔离）、运行方式（docker-compose 整栈 vs in-process）
   - 候选工具：后端 pytest + httpx；前端 Playwright（仓库已有 `mcp__plugin_playwright`）；位置建议 `backend/tests/e2e/` + `frontend/e2e/`，或新增顶层 `e2e/`
   - 与现有 `make check`（单元层）分离为独立 target，避免 CI 时长爆炸
-  - 下一步：Task 4 cleanup endpoint + 后续 E2E spec 任务
+  - 下一步：Task 5+ E2E spec 任务（FMEA / CAPA 首个浏览器/契约流）
 
 ### P2 — Copilot（对话式助手）
 - 前端 UI 侧栏（`ProtectedRoute` 接入待做）
@@ -175,6 +176,7 @@
 | Admin 用户/日志/工厂编辑 | ✅ 已落地（`cfde81c` 等） | `fix/dashboard-admin-pages` |
 | 仪表盘下钻 | ✅ 已落地（`b82967c`） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 108 commit） | — |
+| E2E 系统级测试套件 | 🟢 Task 4 cleanup endpoint 已落地，`test_e2e_endpoints.py` 2 测试绿 | `worktree-e2e-spec` |
 
 ---
 
