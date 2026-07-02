@@ -68,7 +68,8 @@ async def cleanup_test_data(prefix: str = Query(..., min_length=4, max_length=20
         for model, pk_col, doc_col, children in CLEANUP_PARENTS:
             col = getattr(model, doc_col)
             pk = getattr(model, pk_col)
-            parent_ids = [row[0] for row in (await db.execute(select(pk).where(col.like(f"{prefix}%")))).all()]
+            escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            parent_ids = [row[0] for row in (await db.execute(select(pk).where(col.like(f"{escaped}%")))).all()]
             if not parent_ids:
                 continue
             # Delete children first by FK to parent PK.

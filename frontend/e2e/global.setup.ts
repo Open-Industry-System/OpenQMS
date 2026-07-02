@@ -1,7 +1,6 @@
 import { mkdirSync, writeFileSync } from "fs";
 import path from "path";
 import { chromium } from "@playwright/test";
-import { apiClient } from "./helpers/api-client";
 import { getSeedState, accountPassword } from "./fixtures/seed-state";
 
 // frontend package.json is "type":"module" — __dirname is undefined under ESM. Playwright
@@ -50,6 +49,4 @@ export default async function globalSetup() {
     await ctx.close();
   }
   await browser.close();
-  // silence unused import warning for apiClient
-  void apiClient;
 }
