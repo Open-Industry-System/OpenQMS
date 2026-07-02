@@ -396,15 +396,19 @@ export default function FMEAEditorPage() {
     if (!id) return;
     getFMEA(id)
       .then((doc) => {
-        // Redirect draft FMEAs that haven't completed the wizard to the correct wizard
+        // Redirect draft FMEAs that haven't completed the wizard to the correct wizard.
+        // The ?no_wizard_redirect=true query param lets E2E specs open the editor for
+        // an incomplete draft to assert UI entries (e.g. the version-history tab) without
+        // having to walk through the full wizard.
         const isIncompleteDraft =
           doc.status === "draft" &&
           !doc.graph_data?.wizardScope?.wizard_completed;
-        if (isIncompleteDraft && doc.fmea_type === "DFMEA") {
+        const skipRedirect = searchParams.get("no_wizard_redirect") === "true";
+        if (!skipRedirect && isIncompleteDraft && doc.fmea_type === "DFMEA") {
           navigate(`/fmea/wizard/${id}`, { replace: true });
           return;
         }
-        if (isIncompleteDraft && doc.fmea_type === "PFMEA") {
+        if (!skipRedirect && isIncompleteDraft && doc.fmea_type === "PFMEA") {
           navigate(`/fmea/pfmea-wizard/${id}`, { replace: true });
           return;
         }
@@ -426,7 +430,7 @@ export default function FMEAEditorPage() {
         if (firstFn) setSelectedFunctionId(firstFn.id);
       })
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, searchParams, navigate]);
 
   useEffect(() => {
     if (!id) return;
@@ -1981,7 +1985,7 @@ export default function FMEAEditorPage() {
             </Typography.Text>
           )}
         </>},
-        { key: "history", label: <span><HistoryOutlined /> {t("tabs.versionHistory")}</span>, children: <>
+        { key: "history", label: <span data-e2e="fmea-version-snapshot"><HistoryOutlined /> {t("tabs.versionHistory")}</span>, children: <>
           <VersionHistoryTab
             documentId={id!}
             documentType="fmea"

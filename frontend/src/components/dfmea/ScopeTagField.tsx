@@ -114,6 +114,7 @@ export default function ScopeTagField({
           size="small"
           type="dashed"
           data-testid="scope-ai-btn"
+          data-e2e="fmea-recommend"
           icon={aiLoading ? <Spin size="small" /> : <StarOutlined />}
           onClick={handleAiClick}
           disabled={aiLoading}
