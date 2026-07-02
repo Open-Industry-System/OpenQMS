@@ -265,7 +265,7 @@ export default function CAPADetailPage() {
   const renderLabelWithDraft = (step: string, label: string) => {
     const field = stepToField[step];
     const hasHistory = canUndo(field);
-    const showAIButton = canEdit('capa');
+    const showAIButton = aiDraftEnabled && canEdit('capa');
     return (
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ color: "var(--qf-text-secondary)", fontWeight: 500 }}>{label}</span>
@@ -284,7 +284,7 @@ export default function CAPADetailPage() {
             <span data-e2e="capa-ai-draft">
               <AIDraftButton
                 loading={draftLoading}
-                tempUnavailable={tempUnavailable || !aiDraftEnabled}
+                tempUnavailable={tempUnavailable}
                 error={errorLevel === "error" ? draftError : null}
                 onGenerate={(format) => handleGenerate(step, format)}
               />
