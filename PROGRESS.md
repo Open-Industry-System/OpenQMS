@@ -100,10 +100,12 @@
   - 目标：旧调用点删除，用户无感，可观测性统一（base 审计覆盖）
 - **系统级端到端（E2E）测试套件**（2026-06-30 新增需求）
   - 目标：对所有代码更改进行系统级端到端测试，覆盖每次合并/发版前的回归
+  - 已落地（TDD 计划 14 任务）：
+    - Task 3 `seed_e2e` / `seed-state` endpoint / `backend/tests/test_e2e_endpoints.py`：确定性 E2E 种子（2 工厂 / 1 产品线 / 5 账号 / 1 PFMEA / 1 CAPA）+ `GET /api/e2e/seed-state`
   - 待 brainstorm 的范围：模块覆盖（FMEA / CAPA / IQC / SPC / MSA / 客户质量 / 供应商质量 / Admin / Agent Base）、层次（API 契约 + 浏览器 UI 流 + RBAC 角色矩阵 + 多工厂 `factory_id` 隔离）、运行方式（docker-compose 整栈 vs in-process）
   - 候选工具：后端 pytest + httpx；前端 Playwright（仓库已有 `mcp__plugin_playwright`）；位置建议 `backend/tests/e2e/` + `frontend/e2e/`，或新增顶层 `e2e/`
   - 与现有 `make check`（单元层）分离为独立 target，避免 CI 时长爆炸
-  - 下一步：走 `superpowers:brainstorming` → spec → plan → TDD
+  - 下一步：Task 4 cleanup endpoint + 后续 E2E spec 任务
 
 ### P2 — Copilot（对话式助手）
 - 前端 UI 侧栏（`ProtectedRoute` 接入待做）
