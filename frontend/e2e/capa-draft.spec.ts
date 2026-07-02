@@ -1,8 +1,8 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 test.describe("CAPA AI Draft", () => {
   // Login helper
-  async function login(page, username: string, password: string) {
+  async function login(page: Page, username: string, password: string) {
     await page.goto("http://localhost:5173/login");
     await page.fill('input[placeholder="用户名"]', username);
     await page.fill('input[placeholder="密码"]', password);
