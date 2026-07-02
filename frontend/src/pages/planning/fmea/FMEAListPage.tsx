@@ -120,7 +120,7 @@ export default function FMEAListPage() {
 
   const handleCreate = async (values: { title: string; document_no: string; fmea_type: string; problem_description?: string }) => {
     try {
-      const fmea = await createFMEA(values);
+      const fmea = await createFMEA({ ...values, product_line_code: productLine || undefined });
       message.success(t("messages.createSuccess"));
       setModalOpen(false);
       form.resetFields();
@@ -194,14 +194,7 @@ export default function FMEAListPage() {
       key: "actions",
       width: 160,
       render: (_: unknown, record: FMEADocument) => {
-        // Send incomplete DFMEA/PFMEA drafts back to their respective wizard;
-        // completed drafts open directly in the editor, matching FMEAEditorPage's redirect guard.
-        const isIncompleteDraft = (record.fmea_type === "DFMEA" || record.fmea_type === "PFMEA")
-          && record.status === "draft"
-          && !record.graph_data?.wizardScope?.wizard_completed;
-        const targetPath = isIncompleteDraft
-          ? (record.fmea_type === "PFMEA" ? `/fmea/pfmea-wizard/${record.fmea_id}` : `/fmea/wizard/${record.fmea_id}`)
-          : `/fmea/${record.fmea_id}`;
+        const targetPath = getTargetPath(record);
         // 后端仅允许删除 draft / rework(返工=被拒) 状态的 FMEA
         const canDelete = canEdit('fmea') && (record.status === "draft" || record.status === "rework");
         return (
@@ -226,8 +219,17 @@ export default function FMEAListPage() {
     },
   ];
 
+  const getTargetPath = (record: FMEADocument) => {
+    const isIncompleteDraft = (record.fmea_type === "DFMEA" || record.fmea_type === "PFMEA")
+      && record.status === "draft"
+      && !record.graph_data?.wizardScope?.wizard_completed;
+    return isIncompleteDraft
+      ? (record.fmea_type === "PFMEA" ? `/fmea/pfmea-wizard/${record.fmea_id}` : `/fmea/wizard/${record.fmea_id}`)
+      : `/fmea/${record.fmea_id}`;
+  };
+
   const actions = canEdit('fmea') ? (
-    <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)} data-e2e="fmea-create">
       {t("list.newFMEA")}
     </Button>
   ) : null;
@@ -284,6 +286,11 @@ export default function FMEAListPage() {
         dataSource={data}
         rowKey="fmea_id"
         loading={loading}
+        onRow={(record) => ({
+          'data-e2e': `row-${record.document_no}`,
+          onClick: () => navigate(getTargetPath(record)),
+          style: { cursor: 'pointer' },
+        })}
         pagination={{
           current: page,
           total,
