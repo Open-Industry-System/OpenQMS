@@ -29,6 +29,6 @@ Copy `.env.e2e.example` → `.env.e2e` (gitignored) and fill `LLM_PROVIDER`/`LLM
 ## Add a spec
 
 1. Add input fixtures under `frontend/e2e/fixtures/input/` if needed.
-2. Write `frontend/e2e/specs/<module>/<name>.spec.ts`; `loginAs(page, role)`; use `data-e2e` testids; `track()` created ids; `afterEach` → `cleanupByPrefix("E2E-<module>")`.
+2. Write `frontend/e2e/specs/<module>/<name>.spec.ts`; `loginAs(page, role)`; use `data-e2e` testids; `afterAll` → `cleanupByPrefix("E2E-<module>")`.
 3. Add `data-e2e` attributes to the production component if missing (testability only).
 4. Run `make e2e TEST_ARGS="--grep <name>"` to verify in isolation.
