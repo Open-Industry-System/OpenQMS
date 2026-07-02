@@ -38,3 +38,19 @@ async def test_seed_state_shape():
     assert data["known_docs"]["pfmea"] == ["PFMEA-E2E-001"]
     assert data["known_docs"]["capa"] == ["8D-E2E-001"]
     assert "PFMEA-E2E-001" in data["used_doc_numbers"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_deletes_prefixed_only():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # Seed-state confirms known seed docs exist.
+        before = await ac.get("/api/e2e/seed-state")
+        assert "PFMEA-E2E-001" in before.json()["used_doc_numbers"]
+        # Cleanup a non-existent prefix must be a no-op (and never touch seed).
+        r = await ac.post("/api/e2e/cleanup", params={"prefix": "E2E-NOSUCH"})
+        assert r.status_code == 200
+        assert r.json()["deleted"] == {} or all(v == 0 for v in r.json()["deleted"].values())
+        # Seed still present.
+        after = await ac.get("/api/e2e/seed-state")
+        assert "PFMEA-E2E-001" in after.json()["used_doc_numbers"]
