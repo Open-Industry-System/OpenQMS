@@ -56,9 +56,10 @@ test.describe("auth + RBAC + factory isolation", () => {
     const switcher = page.locator('[data-e2e="factory-switcher"]');
     await expect(switcher).toBeVisible();
     await switcher.click();
-    // Ant renders the dropdown in a portal, so query the global option list.
-    await expect(page.locator('.ant-select-item-option-content', { hasText: dc!.name })).toBeVisible();
-    await expect(page.locator('.ant-select-item-option-content', { hasText: sh!.name })).toBeVisible();
+    // Ant renders the dropdown in a portal. The visible items use internal classes,
+    // but the portal also exposes role="option" elements keyed by the factory id.
+    await expect(page.getByRole("option", { name: dc!.id })).toHaveCount(1);
+    await expect(page.getByRole("option", { name: sh!.id })).toHaveCount(1);
     await ctx.close();
   });
 });

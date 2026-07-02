@@ -125,15 +125,14 @@ interface MenuItem {
   children?: MenuItem[];
 }
 
-function menuTestId(key: string): string {
-  // "/fmea" → "fmea", "/admin/users" → "admin-users"
-  return key.replace(/^\//, "").replace(/\//g, "-");
-}
-
 function stripModuleField(items: MenuItem[]): MenuProps["items"] {
-  return items.map(({ module: _m, adminOnly: _a, ...rest }) => ({
+  return items.map(({ module: _m, ...rest }) => ({
     ...rest,
-    label: <span data-e2e={`menu-${menuTestId(rest.key)}`}>{rest.label}</span>,
+    label: (
+      <span data-e2e={`menu-${rest.key.replace(/^\//, "").replace(/\//g, "-")}`}>
+        {rest.label}
+      </span>
+    ),
     ...(rest.children ? { children: stripModuleField(rest.children) } : {}),
   }));
 }
