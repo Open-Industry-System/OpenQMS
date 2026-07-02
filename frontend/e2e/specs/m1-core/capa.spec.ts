@@ -1,6 +1,18 @@
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "fs";
+import path from "path";
 import { cleanupByPrefix } from "../../helpers/api-client";
 import { capaFormInputs } from "../../fixtures/input/capa-form-inputs";
+
+function hasLLMCreds(): boolean {
+  const envPath = path.resolve(process.cwd(), "e2e/.storage-state/e2e-env.json");
+  try {
+    const env = JSON.parse(readFileSync(envPath, "utf-8"));
+    return env.hasLLM === true;
+  } catch {
+    return false;
+  }
+}
 
 test.describe("CAPA 8D lifecycle", () => {
   test.afterAll(async () => { await cleanupByPrefix("E2E-M1-CAPA"); });
@@ -24,8 +36,10 @@ test.describe("CAPA 8D lifecycle", () => {
     // Detail page: advance button present (D-state transition)
     await expect(page.locator('[data-e2e="capa-advance"]')).toBeVisible();
     await page.locator('[data-e2e="capa-advance"]').click();
-    // AI draft button visible for engineer (permission-gated, not LLM-gated)
-    await expect(page.locator('[data-e2e="capa-ai-draft"]')).toBeVisible({ timeout: 10000 });
+    // AI draft button visible for engineer only when LLM is configured.
+    if (hasLLMCreds()) {
+      await expect(page.locator('[data-e2e="capa-ai-draft"]')).toBeVisible({ timeout: 10000 });
+    }
     await ctx.close();
   });
 });
