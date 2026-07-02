@@ -46,3 +46,33 @@ check-frontend-tsc:
 
 check-frontend-build:
 	cd $(FRONTEND_DIR) && npm run build
+
+# ── E2E (manual; not part of `make check`) ──────────────────────────────────
+DC_E2E := docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e -p openqms-e2e
+# Only pass --env-file if .env.e2e exists, so `make e2e-up` works without copying the
+# template (LLM creds optional → AI specs skip-with-warning). LLM_* have ${VAR:-}
+# defaults in the override, so absence is fine.
+E2E_ENV := $(shell test -f .env.e2e && echo --env-file .env.e2e)
+
+.PHONY: e2e e2e-up e2e-seed e2e-down e2e-reset e2e-run
+
+e2e-up:
+	$(DC_E2E) $(E2E_ENV) up -d db redis backend frontend
+
+e2e-seed:
+	$(DC_E2E) exec backend python -m app.seed_e2e
+
+e2e-run:
+	cd $(FRONTEND_DIR) && if [ -f ../.env.e2e ]; then set -a && . ../.env.e2e && set +a; fi; npx playwright test $(TEST_ARGS)
+
+e2e: e2e-up
+	$(DC_E2E) exec backend alembic upgrade head
+	$(MAKE) e2e-seed
+	$(MAKE) e2e-run
+
+e2e-down:
+	$(DC_E2E) down -v
+
+e2e-reset: e2e-down e2e-up
+	$(DC_E2E) exec backend alembic upgrade head
+	$(MAKE) e2e-seed
