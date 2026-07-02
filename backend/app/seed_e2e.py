@@ -6,12 +6,10 @@ import uuid
 
 from sqlalchemy import select
 
-from app.config import settings
 from app.core.security import hash_password
 from app.database import async_session
 from app.models.factory import Factory, UserFactory
 from app.models.product_line import ProductLine
-from app.models.product_type import ProductType  # noqa: F401 — registers product_types for FK resolution
 from app.models.role import RoleDefinition
 from app.models.user import User
 from app.seed_e2e_constants import (
