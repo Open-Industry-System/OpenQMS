@@ -78,6 +78,15 @@ npm run build                             # tsc --noEmit + vite build
 npm run lint                              # ESLint
 ```
 
+### E2E (manual, not in CI)
+
+```bash
+make e2e            # up + migrate + seed_e2e + playwright test
+make e2e-reset      # full down -v + up + seed (clean slate)
+make e2e TEST_ARGS="--grep m1-core"   # single module
+```
+Requires `.env.e2e` (copy from `.env.e2e.example`) for LLM credentials. See `docs/e2e.md`.
+
 ### Seed accounts
 
 | Username | Password | Role |
