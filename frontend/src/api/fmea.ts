@@ -23,7 +23,6 @@ export async function createFMEA(data: {
   title: string;
   document_no: string;
   fmea_type: string;
-  product_line_code?: string;
 }): Promise<FMEADocument> {
   const resp = await client.post("/fmea", data);
   return resp.data;
