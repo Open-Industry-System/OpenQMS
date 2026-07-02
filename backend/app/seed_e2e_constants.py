@@ -3,6 +3,7 @@
 E2E_FACTORY_DC100 = {"code": "DC-FACT-E2E", "name": "E2E 默认工厂", "location": "Shanghai"}
 E2E_FACTORY_SH = {"code": "SH-FACT-E2E", "name": "E2E 上海分厂", "location": "Shanghai-Pudong"}
 E2E_PRODUCT_LINE = {"code": "DC-DC-100-E2E", "name": "E2E DC-DC 100", "product_type_code": None}
+E2E_PRODUCT_LINE_DEFAULT = {"code": "DC-DC-100", "name": "E2E Default Product Line", "product_type_code": None}
 
 # (username, password, role_key, factory_codes) — factory_codes [] = group user (multi-factory)
 E2E_ACCOUNTS = [

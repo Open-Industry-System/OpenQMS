@@ -10,10 +10,11 @@ from app.core.security import hash_password
 from app.database import async_session
 from app.models.factory import Factory, UserFactory
 from app.models.product_line import ProductLine
+from app.models.product_type import ProductType  # noqa: F401 — registers product_types in metadata
 from app.models.role import RoleDefinition
 from app.models.user import User
 from app.seed_e2e_constants import (
-    E2E_ACCOUNTS, E2E_FACTORY_DC100, E2E_FACTORY_SH, E2E_PRODUCT_LINE,
+    E2E_ACCOUNTS, E2E_FACTORY_DC100, E2E_FACTORY_SH, E2E_PRODUCT_LINE, E2E_PRODUCT_LINE_DEFAULT,
 )
 
 # Fixed UUIDs for idempotency
@@ -40,15 +41,15 @@ async def _seed_factories(db) -> dict:
 
 
 async def _seed_product_line(db, factory_ids):
-    code = E2E_PRODUCT_LINE["code"]
-    existing = (await db.execute(select(ProductLine).where(ProductLine.code == code))).scalar_one_or_none()
-    if not existing:
-        db.add(ProductLine(
-            code=code, name=E2E_PRODUCT_LINE["name"], is_active=True,
-            factory_id=factory_ids[E2E_FACTORY_DC100["code"]],
-            product_type_code=E2E_PRODUCT_LINE["product_type_code"],
-        ))
-        await db.flush()
+    for pl in (E2E_PRODUCT_LINE, E2E_PRODUCT_LINE_DEFAULT):
+        existing = (await db.execute(select(ProductLine).where(ProductLine.code == pl["code"]))).scalar_one_or_none()
+        if not existing:
+            db.add(ProductLine(
+                code=pl["code"], name=pl["name"], is_active=True,
+                factory_id=factory_ids[E2E_FACTORY_DC100["code"]],
+                product_type_code=pl["product_type_code"],
+            ))
+            await db.flush()
 
 
 async def _seed_accounts(db, factory_ids):
@@ -83,8 +84,9 @@ async def _seed_accounts(db, factory_ids):
                     await db.execute(select(UserProductLine).where(UserProductLine.user_id == user.user_id))
                 ).scalars().all()
             }
-            if E2E_PRODUCT_LINE["code"] not in existing_pls:
-                db.add(UserProductLine(user_id=user.user_id, product_line_code=E2E_PRODUCT_LINE["code"]))
+            for pl_code in (E2E_PRODUCT_LINE["code"], E2E_PRODUCT_LINE_DEFAULT["code"]):
+                if pl_code not in existing_pls:
+                    db.add(UserProductLine(user_id=user.user_id, product_line_code=pl_code))
 
 
 async def _seed_known_docs(db, factory_ids):

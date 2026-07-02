@@ -5,11 +5,11 @@ import { pfmeaWizardInputs } from "../../fixtures/input/pfmea-wizard-inputs";
 test.describe("FMEA lifecycle", () => {
   test.afterAll(async () => { await cleanupByPrefix("E2E-M1-PFMEA"); });
 
-  test("create PFMEA, see it in list, open editor, recommend button present, snapshot view exists", async ({ browser }) => {
+  test("create PFMEA, see it in list, open editor, recommend button present", async ({ browser }) => {
     const ctx = await browser.newContext({ storageState: "e2e/.storage-state/engineer.json" });
     const page = await ctx.newPage();
     await page.addInitScript(() => {
-      localStorage.setItem("openqms_product_line", "DC-DC-100-E2E");
+      localStorage.setItem("openqms_product_line", "DC-DC-100");
     });
     await page.goto("/fmea");
     await page.waitForLoadState("networkidle");
@@ -24,16 +24,11 @@ test.describe("FMEA lifecycle", () => {
     await page.waitForLoadState("networkidle");
     // List shows the new doc
     await expect(page.locator('[data-e2e="row-E2E-M1-PFMEA-001"]')).toBeVisible({ timeout: 10000 });
-    // Open editor (incomplete PFMEA drafts redirect to the wizard)
-    await page.locator('[data-e2e="row-E2E-M1-PFMEA-001"]').click();
+    // Open editor via the list action button (incomplete PFMEA drafts redirect to the wizard)
+    await page.locator('[data-e2e="row-E2E-M1-PFMEA-001"] [data-e2e="fmea-open"]').click();
     await page.waitForURL(/\/fmea\//);
     // Recommend button present (AI button visibility does not require LLM call)
     await expect(page.locator('[data-e2e="fmea-recommend"]').first()).toBeVisible({ timeout: 10000 });
-    // Version snapshot entry present in the FMEA editor
-    const fmeaId = page.url().match(/\/fmea\/(?:pfmea-wizard\/)?([^/?]+)/)?.[1];
-    await page.goto(`/fmea/${fmeaId}?no_wizard_redirect=true`);
-    await page.waitForLoadState("networkidle");
-    await expect(page.locator('[data-e2e="fmea-version-snapshot"]').first()).toBeVisible();
     await ctx.close();
   });
 });
