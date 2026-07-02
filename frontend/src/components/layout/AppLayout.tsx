@@ -125,9 +125,15 @@ interface MenuItem {
   children?: MenuItem[];
 }
 
+function menuTestId(key: string): string {
+  // "/fmea" → "fmea", "/admin/users" → "admin-users"
+  return key.replace(/^\//, "").replace(/\//g, "-");
+}
+
 function stripModuleField(items: MenuItem[]): MenuProps["items"] {
-  return items.map(({ module: _m, ...rest }) => ({
+  return items.map(({ module: _m, adminOnly: _a, ...rest }) => ({
     ...rest,
+    label: <span data-e2e={`menu-${menuTestId(rest.key)}`}>{rest.label}</span>,
     ...(rest.children ? { children: stripModuleField(rest.children) } : {}),
   }));
 }
@@ -456,6 +462,7 @@ export default function AppLayout() {
           <Space size="middle">
             {showFactorySwitcher && (
               <Select
+                data-e2e="factory-switcher"
                 style={{ width: 200 }}
                 value={currentFactoryId || undefined}
                 placeholder={t("header.selectFactory")}
