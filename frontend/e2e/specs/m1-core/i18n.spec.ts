@@ -13,8 +13,8 @@ test.describe("i18n language switcher", () => {
 
     // Chinese labels (Ant Design button text may contain extra spaces)
     await expect(page.locator('button[type="submit"]')).toContainText(/登\s*录/);
-    await expect(page.locator('input[placeholder="请输入用户名"]')).toBeVisible();
-    await expect(page.locator('input[placeholder="请输入密码"]')).toBeVisible();
+    await expect(page.locator('input[placeholder="用户名"]')).toBeVisible();
+    await expect(page.locator('input[placeholder="密码"]')).toBeVisible();
     await expect(page.locator('text=智能质量管理平台')).toBeVisible();
 
     // Switch to English
@@ -22,8 +22,8 @@ test.describe("i18n language switcher", () => {
     await page.waitForTimeout(500);
 
     await expect(page.locator('button[type="submit"]')).toContainText("Login");
-    await expect(page.locator('input[placeholder="Please enter username"]')).toBeVisible();
-    await expect(page.locator('input[placeholder="Please enter password"]')).toBeVisible();
+    await expect(page.locator('input[placeholder="Username"]')).toBeVisible();
+    await expect(page.locator('input[placeholder="Password"]')).toBeVisible();
     await expect(page.locator('text=Intelligent Quality Management Platform')).toBeVisible();
 
     // Language preference persisted in localStorage

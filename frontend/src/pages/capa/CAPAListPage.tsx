@@ -73,6 +73,7 @@ export default function CAPAListPage() {
         document_no: values.document_no,
         severity: values.severity,
         due_date: values.due_date?.format("YYYY-MM-DD"),
+        product_line_code: productLine || undefined,
       });
       message.success(tc("messages.operationSuccess", "8D 报告创建成功"));
       setModalOpen(false);
