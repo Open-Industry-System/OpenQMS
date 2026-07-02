@@ -2,6 +2,12 @@
 
 **更新日期**: 2026-07-02
 **当前分支**: `worktree-e2e-spec`（E2E 套件 Task 4 工作树）
+
+### E2E 测试套件 (M0+M1 已落地并验证, worktree-e2e-spec)
+- 浏览器全栈 E2E (Playwright + docker-compose e2e profile) 基建 + 3/4 M1 流程 (auth/FMEA/CAPA) + guards
+- **Task 14 验证完成**: 干净全跑 11 passed / 1 skip(ai-credentials guard), FMEA 单模块迭代通过 + seed 幂等, 生产门控 `/api/e2e` 未加载, backend pytest 680 passed / 276 skipped, 前端 tsc/build + e2e tsc 全部干净
+- 看板下钻 spec 延后: 下钻功能仅实现一半 (KPICard onClick + 列表页 query param 已有; widget→navigate 接线 + dashboardDrilldown.ts 未实现, 设计 spec 待评审)
+- 生产代码改动: 仅 data-e2e testid (CAPAListPage product_line_code 为已批准的 bug 修复例外)
 **最近合并**: `6e3fa9b` feat(e2e): whitelist cleanup endpoint (FK-ordered, single txn)
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
