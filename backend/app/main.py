@@ -446,6 +446,11 @@ app.include_router(supply_chain_risk_map_router)
 app.include_router(group_router)
 app.include_router(platform_router)
 
+# E2E-only endpoints: gated so they never load in production even if E2E_MODE leaks.
+if settings.E2E_MODE and settings.TENANT_MODE != "production":
+    from app.api.e2e import router as e2e_router
+    app.include_router(e2e_router)
+
 
 @app.get("/api/health")
 async def health():
