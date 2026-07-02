@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stand up a browser full-stack E2E test suite (Playwright against a dedicated docker-compose stack) and cover the 4 core M1 user journeys: auth/RBAC/factory-isolation, FMEA lifecycle, CAPA 8D lifecycle, dashboard drilldown.
+**Goal:** Stand up a browser full-stack E2E test suite (Playwright against a dedicated docker-compose stack) and cover the M1 core user journeys: auth/RBAC/factory-isolation, FMEA lifecycle, CAPA 8D lifecycle. (Dashboard drilldown was a 4th planned M1 flow but is **deferred** — the drilldown feature is only half-implemented; see Task 13.)
 
 **Architecture:** A dedicated `docker-compose.e2e.yml` override (project `openqms-e2e`, isolated ports/volume) runs db/redis/backend/frontend. A deterministic idempotent `seed_e2e` populates known records exposed via a gated read-only `/api/e2e/seed-state` endpoint; a gated `/api/e2e/cleanup` deletes `E2E-*`-prefixed test data by a fixed whitelist in a single FK-ordered transaction. Playwright runs serialized (`workers:1`, `fullyParallel:false`), reuses per-role `storageState`, and asserts AI flows against the real LLM (structure/behavior only).
 
@@ -37,7 +37,7 @@
 - `frontend/e2e/fixtures/{auth.ts,seed-state.ts,input/*.ts}`
 - `frontend/e2e/helpers/{api-client.ts,e2e-utils.ts,cleanup-registry.ts}`
 - `frontend/e2e/specs/_guards/{seed.guard.spec.ts,ai-credentials.guard.spec.ts}`
-- `frontend/e2e/specs/m1-core/{auth.spec.ts,fmea.spec.ts,capa.spec.ts,dashboard.spec.ts}`
+- `frontend/e2e/specs/m1-core/{auth.spec.ts,fmea.spec.ts,capa.spec.ts}` (dashboard.spec.ts deferred — Task 13)
 - `frontend/e2e/README.md`, `docs/e2e.md`
 
 **Modified:**
@@ -1508,9 +1508,22 @@ git commit -m "feat(e2e): M1 CAPA 8D lifecycle spec + capa testids"
 
 ---
 
-## Task 13: M1 dashboard drilldown spec
+## Task 13: M1 dashboard drilldown spec — ⚠️ DEFERRED (feature not implemented)
 
-**Files:**
+**Status (2026-07-02):** Deferred. Investigation during implementation found the dashboard
+drilldown is only half-implemented: `KPICard` accepts `onClick` and the list pages read query
+params (`a03363d`), but the widget→navigation wiring was never written — `KpiPendingWidget`/
+`AlertHighRpnWidget` pass no `onClick`, `DashboardPage`→`DashboardGrid` passes no drilldown
+handler, and `dashboardDrilldown.ts` (the permission-mapping file from design spec
+`docs/.../dashboard-drilldown-navigation-design.md`) was never created on any branch. The
+design spec is status "待评审". The Task 13 attempt (commit 71f4367) was reverted.
+
+This task is deferred until the drilldown wiring is implemented (separate spec→plan→impl).
+M0+M1 ships with 3 of the 4 M1 flows (auth/RBAC, FMEA, CAPA 8D) + guards; the dashboard
+drilldown spec is added when the feature lands. A minimal "dashboard loads + widgets render"
+spec could be added later if desired, but is not part of this plan.
+
+**Original (deferred) Files:**
 - Test: `frontend/e2e/specs/m1-core/dashboard.spec.ts`
 - Modify: dashboard widgets (add `data-e2e` to clickable KPI cards / drill targets) — `frontend/src/components/dashboard/widgets/KpiPendingWidget.tsx`, `KpiOverdueWidget.tsx`, etc.
 
@@ -1571,7 +1584,7 @@ git commit -m "feat(e2e): M1 dashboard drilldown spec + widget testids"
 make e2e-reset
 make e2e
 ```
-Expected: guards green; auth/fmea/capa/dashboard green; ai-credentials guard skipped-with-warning; m1-core all green. No `make e2e` failure.
+Expected: guards green; auth/fmea/capa green (dashboard spec deferred — Task 13); ai-credentials guard skipped-with-warning (no LLM creds); m1-core all green. No `make e2e` failure.
 
 - [ ] **Step 2: Single-module iteration**
 
