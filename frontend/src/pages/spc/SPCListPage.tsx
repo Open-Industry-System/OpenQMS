@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../utils/dateTime";
 import {
@@ -35,6 +35,9 @@ export default function SPCListPage() {
   const [createChartType, setCreateChartType] = useState<string>("xbar_r");
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // 仪表盘「SPC 异常」下钻
+  const filterAbnormal = searchParams.get("abnormal") === "true";
 
   const _user = useAuthStore((s) => s.user);
   const { canEdit } = usePermission();
@@ -49,6 +52,7 @@ export default function SPCListPage() {
       page_size: 20,
       product_line: productLine || undefined,
       process_name: searchProcess || undefined,
+      abnormal: filterAbnormal || undefined,
     })
       .then((res) => {
         setData(res.items);
@@ -60,7 +64,7 @@ export default function SPCListPage() {
   useEffect(() => {
     fetchData(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productLine]);
+  }, [productLine, searchParams]);
 
   const handleCreate = async (values: {
     process_name: string;

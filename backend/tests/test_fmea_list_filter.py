@@ -159,3 +159,21 @@ async def test_high_rpn_with_search_filters_first(db, default_factory, admin_use
     )
     assert total == 1
     assert items[0].title == "焊接失效"
+
+
+async def test_pending_filter_returns_draft_and_in_review(db, default_factory, admin_user):
+    """仪表盘「待办事项」下钻：pending=true 只返回 draft + in_review。"""
+    pl = _pl_code()
+    draft = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "draft", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
+    review = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "review", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
+    review.status = "in_review"
+    approved = _make_doc(f"PFMEA-{uuid.uuid4().hex[:8]}", "approved", pl, factory_id=default_factory.id, created_by=admin_user.user_id)
+    approved.status = "approved"
+    db.add_all([draft, review, approved])
+    await db.flush()
+
+    items, total = await list_fmeas(
+        db, 1, 20, product_line=pl, factory_id=default_factory.id, pending=True
+    )
+    assert total == 2
+    assert {i.status for i in items} == {"draft", "in_review"}

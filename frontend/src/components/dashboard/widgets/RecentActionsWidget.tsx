@@ -5,6 +5,7 @@ import type { WidgetProps } from "./types";
 import { useRelativeTime } from "../../../utils/relativeTime";
 
 interface RecentActionRow {
+  log_id: string;
   record_id: string;
   table_name?: string;
   entity_no?: string;
@@ -63,7 +64,7 @@ export default function RecentActionsWidget({ data, loading, error, onRetry }: W
           size="small"
           columns={columns}
           dataSource={items}
-          rowKey="record_id"
+          rowKey="log_id"
           pagination={false}
           scroll={{ y: 200 }}
         />

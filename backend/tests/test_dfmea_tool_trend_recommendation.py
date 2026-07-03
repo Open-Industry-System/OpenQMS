@@ -1,7 +1,7 @@
 import os
+
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
-import pytest
 
 from app.api.fmea import _recommend_anchor
 
@@ -66,7 +66,7 @@ class StubGraphRepo:
 
 class TestBuildPromptForToolTrend:
     def _svc(self):
-        return RecommendationService(db=None, llm_provider=None, graph_repo=StubGraphRepo())
+        return RecommendationService(db=None, graph_repo=StubGraphRepo())
 
     def test_tool_template_fills_placeholders(self):
         prompt = self._svc()._build_prompt("dfmea_tool", {
@@ -110,13 +110,13 @@ class TestBuildPromptForToolTrend:
 # _cache_result）与权限（get_user_permission），直接驱动 recommend() 逻辑。
 # RuleEngine.evaluate 对未知 trigger 返回空、quality="generic"（已核实
 # recommendation_service.py:138-140），不抛异常，故无需 patch rules。
-from unittest.mock import AsyncMock
 import uuid as _uuid
+from unittest.mock import AsyncMock
 
-from app.schemas.recommendation import RecommendRequest
-from app.core.permissions import PermissionLevel
 from app.core.deps import RequestScope
 from app.core.factory_scope import FactoryScope, ProductLineScope
+from app.core.permissions import PermissionLevel
+from app.schemas.recommendation import RecommendRequest
 
 
 class _StubFmea:
@@ -126,16 +126,6 @@ class _StubFmea:
         self.fmea_type = "DFMEA"
         self.title = "DC-DC转换器设计FMEA"
         self.factory_id = _uuid.uuid4()
-
-
-class _OkLlm:
-    async def complete(self, prompt, kwargs):
-        return {"suggestions": [{"name": "边界图", "confidence": 0.85, "explanation": "适合结构分析"}]}
-
-
-class _ThrowLlm:
-    async def complete(self, prompt, kwargs):
-        raise RuntimeError("llm boom")
 
 
 def _stub_request_scope(user):
@@ -151,30 +141,45 @@ def _stub_request_scope(user):
 class TestRecommendIntegrationForToolTrend:
     """dfmea_tool/trend 真正走完 recommend()：规则→（可选）LLM→source 分支。"""
 
-    def _svc(self, llm):
-        return RecommendationService(db=None, llm_provider=llm, graph_repo=StubGraphRepo())
+    def _svc(self):
+        return RecommendationService(db=None, graph_repo=StubGraphRepo())
 
-    def _patch(self, svc, monkeypatch):
+    def _patch(self, svc, monkeypatch, *, build_client, complete_json=None):
         fmea = _StubFmea()
         monkeypatch.setattr(svc, "_get_fmea_or_404", AsyncMock(return_value=fmea))
         monkeypatch.setattr(svc, "_get_cached", AsyncMock(return_value=None))
         monkeypatch.setattr(svc, "_assemble_context", AsyncMock(return_value={}))
         monkeypatch.setattr(svc, "_cache_result", AsyncMock())
+        # DB-free: short-circuit audit so user.user_id / db.flush aren't exercised here.
+        # raising=False because _write_recommend_audit isn't added until Task 3
+        # (the merged build_client+complete_json+audit task). Without raising=False
+        # this AttributeError's at patch time and the no-llm test can't even run.
+        monkeypatch.setattr(svc, "_write_recommend_audit", AsyncMock(), raising=False)
         monkeypatch.setattr(
             "app.core.permissions.get_user_permission",
             AsyncMock(return_value=PermissionLevel.VIEW),
         )
-        # recommend() now resolves scope -> codes via the resolver (Task 6);
-        # patch it so these DB-free tests don't touch a real session.
         monkeypatch.setattr(
             "app.services.recommendation_scope.resolve_product_line_codes",
             AsyncMock(return_value=["DC-DC-100"]),
         )
+        from app.services.agent import provider_adapter
+        monkeypatch.setattr(provider_adapter, "build_client", build_client)
+        if complete_json is not None:
+            monkeypatch.setattr(provider_adapter, "complete_json", complete_json)
         return fmea
 
     async def test_dfmea_tool_with_llm_returns_suggestions(self, monkeypatch):
-        svc = self._svc(_OkLlm())
-        fmea = self._patch(svc, monkeypatch)
+        async def _ok_client(db_arg):
+            class _PC:
+                pass
+            return _PC()
+
+        async def _ok_complete(pc, prompt, schema):
+            return {"suggestions": [{"name": "边界图", "confidence": 0.85, "explanation": "适合结构分析"}]}
+
+        svc = self._svc()
+        fmea = self._patch(svc, monkeypatch, build_client=_ok_client, complete_json=_ok_complete)
         req = RecommendRequest(
             trigger_type="dfmea_tool",
             context={"task": "分析DC-DC转换器", "fmea_title": fmea.title},
@@ -182,13 +187,17 @@ class TestRecommendIntegrationForToolTrend:
             include_graph=False,
         )
         user = object()
-        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user))
+        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user), tenant_schema="public")
         assert any(s.name == "边界图" for s in res.suggestions)
         assert res.source in ("hybrid", "graph_enriched")
 
     async def test_dfmea_tool_no_llm_returns_empty_with_source_rule(self, monkeypatch):
-        svc = self._svc(None)
-        fmea = self._patch(svc, monkeypatch)
+        async def _raise(db_arg):
+            from app.services.agent.provider_adapter import ProviderNotConfiguredError
+            raise ProviderNotConfiguredError("no cfg")
+
+        svc = self._svc()
+        fmea = self._patch(svc, monkeypatch, build_client=_raise)
         req = RecommendRequest(
             trigger_type="dfmea_tool",
             context={"task": "分析DC-DC转换器"},
@@ -196,13 +205,21 @@ class TestRecommendIntegrationForToolTrend:
             include_graph=False,
         )
         user = object()
-        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user))
+        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user), tenant_schema="public")
         assert res.suggestions == []
         assert res.source == "rule"
 
     async def test_dfmea_trend_llm_failure_returns_rule_fallback(self, monkeypatch):
-        svc = self._svc(_ThrowLlm())
-        fmea = self._patch(svc, monkeypatch)
+        async def _ok_client(db_arg):
+            class _PC:
+                pass
+            return _PC()
+
+        async def _boom(pc, prompt, schema):
+            raise RuntimeError("llm boom")
+
+        svc = self._svc()
+        fmea = self._patch(svc, monkeypatch, build_client=_ok_client, complete_json=_boom)
         req = RecommendRequest(
             trigger_type="dfmea_trend",
             context={"task": "分析DC-DC转换器"},
@@ -210,5 +227,5 @@ class TestRecommendIntegrationForToolTrend:
             include_graph=False,
         )
         user = object()
-        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user))
+        res = await svc.recommend(fmea.id, req, user, _stub_request_scope(user), tenant_schema="public")
         assert res.source == "rule_fallback"

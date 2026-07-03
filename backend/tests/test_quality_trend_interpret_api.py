@@ -4,9 +4,11 @@ os.environ.setdefault("SECRET_KEY", "test-non-default-secret-key")
 
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from app.core.deps import get_request_scope, RequestScope
+
+from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.core.permissions import PermissionLevel, get_current_user
 from app.database import get_db
@@ -52,21 +54,23 @@ class FakeLLMProvider:
 
 
 async def _call_interpret(llm_provider):
+    from app.services.agent import provider_adapter
+    from app.services.agent.provider_adapter import ProviderClient
+
     db = MagicMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.flush = AsyncMock()
     db.rollback = AsyncMock()
     db.scalar = AsyncMock(side_effect=[4, 1, 2, 3, 2])
     db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
 
     async def mock_get_db():
         return db
-
     user = _make_user()
 
     async def mock_get_current_user():
         return user
-
     mock_scope = RequestScope(
         factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=user.factory_id),
         effective_factory_id=user.factory_id,
@@ -80,14 +84,28 @@ async def _call_interpret(llm_provider):
     app.dependency_overrides[get_db] = mock_get_db
     app.dependency_overrides[get_current_user] = mock_get_current_user
     app.dependency_overrides[get_request_scope] = mock_get_request_scope
-    app.state.llm_provider = llm_provider
 
     async def mock_get_user_permission(user, module, db):
         return PermissionLevel.VIEW if module.value in {"dashboard", "spc", "capa", "fmea"} else PermissionLevel.NONE
 
+    # Stub the agent-base provider layer. llm_provider is None -> unconfigured (503).
+    # Otherwise treat llm_provider as a legacy .complete() stub and adapt via complete_json.
+    async def _build_client(_db):
+        if llm_provider is None:
+            raise provider_adapter.ProviderNotConfiguredError("none in test")
+        return ProviderClient(provider="openai", client=object(), model="test")
+
+    async def _complete_json(pc, prompt, schema):
+        if llm_provider is None:
+            raise provider_adapter.ProviderNotConfiguredError("none")
+        # delegate to the legacy-style stub: FakeLLMProvider.complete(prompt, schema)
+        return await llm_provider.complete(prompt, schema)
+
     try:
         with patch("app.core.permissions.get_user_permission", new=mock_get_user_permission), \
-             patch("app.api.dashboard.get_user_permission", new=mock_get_user_permission):
+             patch("app.api.dashboard.get_user_permission", new=mock_get_user_permission), \
+             patch("app.services.agent.provider_adapter.build_client", new=_build_client), \
+             patch("app.services.agent.provider_adapter.complete_json", new=_complete_json):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.post(
@@ -96,9 +114,6 @@ async def _call_interpret(llm_provider):
                 )
     finally:
         app.dependency_overrides.clear()
-        if hasattr(app.state, "llm_provider"):
-            delattr(app.state, "llm_provider")
-
     return response, db
 
 
@@ -202,3 +217,29 @@ async def test_interpret_audits_llm_provider_failure():
     audit = next(obj for obj in db.add.call_args_list if isinstance(obj.args[0], AuditLog)).args[0]
     assert audit.new_values["status"] == "llm_failed"
     assert "provider timeout" in audit.new_values["error"]
+
+
+@pytest.mark.anyio
+async def test_interpret_route_passes_factory_and_tenant_not_llm_provider(monkeypatch):
+    """Route must pass factory_id+tenant_schema to the service and NOT pass llm_provider."""
+    from app.services import quality_trend_service
+
+    captured_kwargs = {}
+
+    async def _capture(**kwargs):
+        captured_kwargs.update(kwargs)
+        # raise a known-handled exception so the route returns predictably
+        from app.services.quality_trend_service import LLMNotConfiguredError
+        raise LLMNotConfiguredError("test")
+
+    monkeypatch.setattr("app.api.dashboard.interpret_quality_trend_service", _capture)
+    monkeypatch.setattr(quality_trend_service, "_enforce_rate_limit", lambda uid: None)
+
+    # Use _call_interpret with any non-None provider so it doesn't short-circuit;
+    # _capture above replaces the actual service call entirely.
+    response, _ = await _call_interpret(FakeLLMProvider())
+    assert response.status_code == 503  # LLMNotConfiguredError -> 503
+    assert "llm_provider" not in captured_kwargs
+    assert "factory_id" in captured_kwargs
+    assert "tenant_schema" in captured_kwargs
+    assert isinstance(captured_kwargs["tenant_schema"], str)

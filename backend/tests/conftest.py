@@ -15,23 +15,20 @@ import uuid
 
 import pytest
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
+from app.core.deps import RequestScope, get_current_user, get_db, get_request_scope
+from app.core.factory_scope import FactoryScope, ProductLineScope
+from app.main import app
 from app.models.factory import Factory
 from app.models.plm import PLMConnection
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
 from app.models.user import User
-
-from sqlalchemy.pool import NullPool
-
-from httpx import ASGITransport, AsyncClient
-from app.main import app
-from app.core.deps import RequestScope, get_current_user, get_db, get_request_scope
-from app.core.factory_scope import FactoryScope, ProductLineScope
-
 
 # ── Database availability check ──────────────────────────────────────────────
 
@@ -62,6 +59,7 @@ _test_db_url = os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL)
 # get_tenant_aware_session (e.g. MES concurrency, PLM sync) must not hold
 # pooled connections that outlive the event loop of the test that created them.
 import app.database as _db_mod
+
 _db_mod.engine = create_async_engine(_test_db_url, echo=False, poolclass=NullPool)
 _db_mod.async_session = async_sessionmaker(_db_mod.engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -169,21 +167,34 @@ async def admin_user(db: AsyncSession, default_factory: Factory) -> User:
         ))
         await db.flush()
 
-    # Ensure admin role exists (FK dependency for User)
-    result = await db.execute(
-        select(RoleDefinition).where(RoleDefinition.role_key == "admin")
-    )
-    if result.scalar_one_or_none() is None:
-        db.add(
-            RoleDefinition(
-                role_key="admin",
-                name_zh="管理员",
-                name_en="Admin",
-                is_system=True,
+    # Ensure system roles exist (FK dependency for User). Mirrors app.seed._ROLES
+    # so tests match production: admin gets bypass_row_level_security=True, and
+    # all system roles are present so helpers like test_user_service._make_user
+    # (which default role_key="viewer") resolve a role row on a fresh CI DB.
+    role_result = await db.execute(select(RoleDefinition))
+    existing_roles = {r.role_key for r in role_result.scalars().all()}
+    _SYSTEM_ROLES = [
+        ("admin", "系统管理员", "System Admin", True, False, True, 1),
+        ("manager", "质量经理", "Quality Manager", True, True, False, 2),
+        ("viewer", "只读用户", "Viewer", True, False, False, 3),
+        ("customer_qe", "客户质量工程师", "Customer QE", True, True, False, 4),
+        ("supplier_qe", "供应商质量工程师", "Supplier QE", True, True, False, 5),
+        ("field_qe", "现场质量工程师", "Field QE", True, True, False, 6),
+        ("planning_qe", "前期策划质量工程师", "Planning QE", True, True, False, 7),
+    ]
+    for role_key, name_zh, name_en, is_system, is_editable, bypass, sort in _SYSTEM_ROLES:
+        if role_key not in existing_roles:
+            db.add(RoleDefinition(
+                role_key=role_key,
+                name_zh=name_zh,
+                name_en=name_en,
+                is_system=is_system,
+                is_editable=is_editable,
+                bypass_row_level_security=bypass,
+                sort_order=sort,
                 is_active=True,
-            )
-        )
-        await db.flush()
+            ))
+    await db.flush()
 
     # Fetch the persisted role to get its actual id
     result = await db.execute(
@@ -205,18 +216,25 @@ async def admin_user(db: AsyncSession, default_factory: Factory) -> User:
     await db.flush()
     await db.refresh(user)
 
-    # Ensure admin role has planning module permission (required by CP validation API)
-    from app.models.role import RolePermission
+    # Ensure admin role has full permission matrix (admin = level 5 on every
+    # module). Migration 028 seeds this, but destructive tests that
+    # Base.metadata.drop_all+create_all the shared test DB (test_apqp_service,
+    # test_ppap_service, test_spc_fmea_match) wipe 028's rows mid-suite, leaving
+    # subsequent admin_client tests without CAPA/FMEA/etc. VIEW permission.
+    # Re-seeding here makes the fixture self-sufficient regardless of prior
+    # pollution. Mirrors 028_permission_matrix admin row.
     from sqlalchemy import select as _sel
-    perm_result = await db.execute(
-        _sel(RolePermission).where(
-            RolePermission.role_id == role.id,
-            RolePermission.module == "planning",
-        )
+
+    from app.core.permissions import Module
+    from app.models.role import RolePermission
+    existing_perms = await db.execute(
+        _sel(RolePermission.module).where(RolePermission.role_id == role.id)
     )
-    if perm_result.scalar_one_or_none() is None:
-        db.add(RolePermission(role_id=role.id, module="planning", permission_level=5))
-        await db.flush()
+    have = {row[0] for row in existing_perms.all()}
+    for module in Module:
+        if module.value not in have:
+            db.add(RolePermission(role_id=role.id, module=module.value, permission_level=5))
+    await db.flush()
 
     return user
 
@@ -259,6 +277,27 @@ async def admin_client(db, admin_user, default_factory):
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def other_admin_user(db: AsyncSession, default_factory: Factory) -> User:
+    """Another admin user in the same factory, for ownership-crossing tests."""
+    result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
+    role = result.scalar_one()
+    user = User(
+        user_id=uuid.uuid4(),
+        username=f"test_other_admin_{uuid.uuid4().hex[:8]}",
+        display_name="Other Test Admin",
+        password_hash="hashed",
+        role_id=role.id,
+        legacy_role="admin",
+        is_active=True,
+        factory_id=default_factory.id,
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+    return user
 
 
 @pytest_asyncio.fixture

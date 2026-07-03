@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     SEARCH_VECTOR_WEIGHT: float = 0.7   # weight for vector search in RRF
     SEARCH_FULLTEXT_WEIGHT: float = 0.3 # weight for fulltext search in RRF
 
+    # E2E test mode: enables /api/e2e/* endpoints. NEVER true in production.
+    E2E_MODE: bool = False
+
     # Multi-tenant mode: "single" (default, no tenant resolution),
     # "dev" (X-Tenant-ID header enabled), "production" (subdomain + JWT only)
     TENANT_MODE: str = "single"

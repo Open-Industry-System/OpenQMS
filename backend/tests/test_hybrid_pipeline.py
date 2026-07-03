@@ -1,10 +1,178 @@
 import uuid
+import hashlib
+import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+from sqlalchemy import select
 
+from app.models.audit import AuditLog
+from app.models.user import User
+from app.services.agent import audit as audit_mod
+from app.services.agent import provider_adapter
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline
 from app.services.recommendation_sources import SemanticSearchSource, HistoricalCAPAMeasureSource
 from app.services.recommendation_types import RecommendationContext, RecommendationCandidate
+
+
+def _recommend_kwargs(user_id=None, report_id=None, factory_id=None):
+    return {
+        "user": User(user_id=user_id or uuid.uuid4(), username="u", password_hash="h"),
+        "report_id": report_id or uuid.uuid4(),
+        "factory_id": factory_id or uuid.uuid4(),
+        "tenant_schema": "public",
+    }
+
+
+def _ctx(stage="d4"):
+    return RecommendationContext(
+        capa_data={"d2_description": "x", "fmea_ref_id": None, "fmea_node_id": None,
+                   "product_line_code": "DC-DC-100"},
+        user_product_lines=None, stage=stage, fmea_docs=[], linked_fmea=None,
+    )
+
+
+class _PC:
+    model = "test-model"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_writes_success_audit(db, default_factory, admin_user, monkeypatch):
+    async def _ok(pc, prompt, schema):
+        return [{"candidate_id": 0, "match_reason": "r"}]
+    async def _ok_client(db_arg):
+        return _PC()
+    monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
+    monkeypatch.setattr(provider_adapter, "complete_json", _ok)
+
+    class _NoEmbed:
+        async def embed(self, text):
+            return [0.0] * 8
+        async def search(self, *a, **k):
+            return []
+
+    pipeline = HybridRecommendationPipeline(db=db, pc=_PC(), embedding_provider=_NoEmbed())
+    # Force a 2-item fused list so fallback triggers and we exercise both stages.
+    two = [
+        RecommendationCandidate(source="rule", content="a", category=None, confidence=0.5,
+                                match_reason="r", metadata={}),
+        RecommendationCandidate(source="rule", content="b", category=None, confidence=0.5,
+                                match_reason="r", metadata={}),
+    ]
+    monkeypatch.setattr(pipeline.fusion, "merge", lambda candidates, ctx: two)
+
+    report_id = uuid.uuid4()
+    res = await pipeline.recommend(
+        _ctx("d4"), user=admin_user, report_id=report_id,
+        factory_id=default_factory.id, tenant_schema="public",
+    )
+    await db.commit()
+    rows = (await db.execute(
+        select(AuditLog).where(AuditLog.action == "llm_recommend")
+        .where(AuditLog.record_id == report_id)
+    )).scalars().all()
+    assert any(r.new_values.get("status") == "success" for r in rows), rows
+    assert rows[0].factory_id == default_factory.id
+    assert rows[0].tenant_schema == "public"
+    assert rows[0].correlation_id is not None
+
+
+@pytest.mark.asyncio
+async def test_pipeline_writes_partial_audit(db, default_factory, admin_user, monkeypatch):
+    calls = {"n": 0}
+    async def _partial(pc, prompt, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [{"candidate_id": 0, "match_reason": "r"}]
+        raise RuntimeError("fallback boom")
+    monkeypatch.setattr(provider_adapter, "complete_json", _partial)
+
+    class _NoEmbed:
+        async def embed(self, text):
+            return [0.0] * 8
+        async def search(self, *a, **k):
+            return []
+
+    pipeline = HybridRecommendationPipeline(db=db, pc=_PC(), embedding_provider=_NoEmbed())
+    two = [
+        RecommendationCandidate(source="rule", content="a", category=None, confidence=0.5,
+                                match_reason="r", metadata={}),
+        RecommendationCandidate(source="rule", content="b", category=None, confidence=0.5,
+                                match_reason="r", metadata={}),
+    ]
+    monkeypatch.setattr(pipeline.fusion, "merge", lambda candidates, ctx: two)
+
+    report_id = uuid.uuid4()
+    await pipeline.recommend(
+        _ctx("d4"), user=admin_user, report_id=report_id,
+        factory_id=default_factory.id, tenant_schema="public",
+    )
+    await db.commit()
+    rows = (await db.execute(
+        select(AuditLog).where(AuditLog.action == "llm_recommend")
+        .where(AuditLog.record_id == report_id)
+    )).scalars().all()
+    assert any(r.new_values.get("status") == "partial" for r in rows), rows
+    assert any(r.new_values.get("failed") == 1 for r in rows), rows
+
+
+@pytest.mark.asyncio
+async def test_pipeline_writes_llm_failed_audit(db, default_factory, admin_user, monkeypatch):
+    async def _boom(pc, prompt, schema):
+        raise RuntimeError("llm down")
+    monkeypatch.setattr(provider_adapter, "complete_json", _boom)
+
+    class _NoEmbed:
+        async def embed(self, text):
+            return [0.0] * 8
+        async def search(self, *a, **k):
+            return []
+
+    pipeline = HybridRecommendationPipeline(db=db, pc=_PC(), embedding_provider=_NoEmbed())
+    two = [
+        RecommendationCandidate(source="rule", content="a", category=None, confidence=0.5,
+                                match_reason="r", metadata={}),
+        RecommendationCandidate(source="rule", content="b", category=None, confidence=0.5,
+                                match_reason="r", metadata={}),
+    ]
+    monkeypatch.setattr(pipeline.fusion, "merge", lambda candidates, ctx: two)
+
+    report_id = uuid.uuid4()
+    await pipeline.recommend(
+        _ctx("d4"), user=admin_user, report_id=report_id,
+        factory_id=default_factory.id, tenant_schema="public",
+    )
+    await db.commit()
+    rows = (await db.execute(
+        select(AuditLog).where(AuditLog.action == "llm_recommend")
+        .where(AuditLog.record_id == report_id)
+    )).scalars().all()
+    assert any(r.new_values.get("status") == "llm_failed" for r in rows), rows
+
+
+@pytest.mark.asyncio
+async def test_pipeline_no_audit_when_pc_none(db, default_factory, admin_user, monkeypatch):
+    async def _unconfigured(db_arg):
+        raise provider_adapter.ProviderNotConfiguredError("not configured")
+    monkeypatch.setattr(provider_adapter, "build_client", _unconfigured)
+
+    class _NoEmbed:
+        async def embed(self, text):
+            return [0.0] * 8
+        async def search(self, *a, **k):
+            return []
+
+    pipeline = HybridRecommendationPipeline(db=db, pc=None, embedding_provider=_NoEmbed())
+    report_id = uuid.uuid4()
+    await pipeline.recommend(
+        _ctx("d4"), user=admin_user, report_id=report_id,
+        factory_id=default_factory.id, tenant_schema="public",
+    )
+    await db.commit()
+    rows = (await db.execute(
+        select(AuditLog).where(AuditLog.action == "llm_recommend")
+        .where(AuditLog.record_id == report_id)
+    )).scalars().all()
+    assert len(rows) == 0, rows
 
 
 class TestHybridRecommendationPipeline:
@@ -43,7 +211,10 @@ class TestHybridRecommendationPipeline:
         assert pipeline.d5_control_expander is not None
 
     @pytest.mark.asyncio
-    async def test_recommend_returns_recommendation_result(self):
+    async def test_recommend_returns_recommendation_result(self, monkeypatch):
+        monkeypatch.setattr(provider_adapter, "complete_json", AsyncMock(return_value=[]))
+        monkeypatch.setattr(audit_mod, "write_audit_raw", AsyncMock(return_value=None))
+
         mock_db = MagicMock()
         mock_llm = AsyncMock()
         mock_embedding = AsyncMock()
@@ -57,13 +228,16 @@ class TestHybridRecommendationPipeline:
             fmea_docs=[],
         )
 
-        result = await pipeline.recommend(ctx)
+        result = await pipeline.recommend(ctx, **_recommend_kwargs())
         assert hasattr(result, "items")
         assert isinstance(result.items, list)
 
     @pytest.mark.asyncio
-    async def test_d5_with_cause_candidates_triggers_expansion(self):
+    async def test_d5_with_cause_candidates_triggers_expansion(self, monkeypatch):
         """D5 pipeline with FailureCause candidates should trigger FMEAControlExpander."""
+        monkeypatch.setattr(provider_adapter, "complete_json", AsyncMock(return_value=[]))
+        monkeypatch.setattr(audit_mod, "write_audit_raw", AsyncMock(return_value=None))
+
         mock_db = MagicMock()
         mock_llm = AsyncMock()
         mock_embedding = AsyncMock()
@@ -95,7 +269,7 @@ class TestHybridRecommendationPipeline:
                     fmea_docs=[{"fmea_id": "fmea-123", "graph_data": {"nodes": [], "edges": []}}],
                 )
 
-                result = await pipeline.recommend(ctx)
+                result = await pipeline.recommend(ctx, **_recommend_kwargs())
                 # Expander should have been called because we have cause candidates
                 mock_expand.assert_called_once()
 
@@ -131,7 +305,7 @@ class TestHybridPipelineEndToEnd:
             stage="d4",
         )
 
-        result = await pipeline.recommend(ctx)
+        result = await pipeline.recommend(ctx, **_recommend_kwargs())
         historical = [c for c in result.items if c.source == "historical_capa"]
         assert len(historical) >= 1
         schema = historical[0].to_d4_schema()

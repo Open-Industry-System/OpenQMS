@@ -281,12 +281,14 @@ export default function CAPADetailPage() {
             </Button>
           )}
           {showAIButton && (
-            <AIDraftButton
-              loading={draftLoading}
-              tempUnavailable={tempUnavailable}
-              error={errorLevel === "error" ? draftError : null}
-              onGenerate={(format) => handleGenerate(step, format)}
-            />
+            <span data-e2e="capa-ai-draft">
+              <AIDraftButton
+                loading={draftLoading}
+                tempUnavailable={tempUnavailable}
+                error={errorLevel === "error" ? draftError : null}
+                onGenerate={(format) => handleGenerate(step, format)}
+              />
+            </span>
           )}
         </Space>
       </div>
@@ -361,7 +363,7 @@ export default function CAPADetailPage() {
         </Button>
       )}
       {capa.status !== "ARCHIVED" && capa.status !== "D8_CLOSURE" && (!["D7_PREVENTION", "D8_CLOSURE"].includes(capa.status) || canApprove('capa')) && canEdit('capa') && (
-        <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance}>
+        <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance} data-e2e="capa-advance">
           {t("actions.advance", "推进下一步")}
         </Button>
       )}

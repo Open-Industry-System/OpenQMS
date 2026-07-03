@@ -1981,7 +1981,7 @@ export default function FMEAEditorPage() {
             </Typography.Text>
           )}
         </>},
-        { key: "history", label: <span><HistoryOutlined /> {t("tabs.versionHistory")}</span>, children: <>
+        { key: "history", label: <span data-e2e="fmea-version-snapshot"><HistoryOutlined /> {t("tabs.versionHistory")}</span>, children: <>
           <VersionHistoryTab
             documentId={id!}
             documentType="fmea"

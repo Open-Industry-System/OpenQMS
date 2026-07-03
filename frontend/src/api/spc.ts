@@ -17,6 +17,7 @@ export async function listInspectionCharacteristics(params: {
   page_size?: number;
   product_line?: string;
   process_name?: string;
+  abnormal?: boolean;
 }): Promise<InspectionCharacteristicListResponse> {
   const resp = await client.get("/spc/inspection-characteristics", { params });
   return resp.data;

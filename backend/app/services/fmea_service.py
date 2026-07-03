@@ -12,8 +12,8 @@ from app.models.control_plan import ControlPlan
 from app.models.customer_quality import CustomerComplaint, RMARecord
 from app.models.fmea import FMEADocument
 from app.models.graph_sync_outbox import GraphSyncOutbox
-from app.models.special_characteristic import SpecialCharacteristic
 from app.models.spc import SPCAlarm
+from app.models.special_characteristic import SpecialCharacteristic
 from app.services.embedding_outbox import delete_embeddings_for_entity, enqueue_embedding
 from app.services.product_line_service import validate_product_line
 from app.services.version_service import _create_fmea_version_no_commit
@@ -27,6 +27,7 @@ async def list_fmeas(
     status: str | None = None,
     product_line: str | None = None,
     high_rpn: bool = False,
+    pending: bool = False,
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
     fmea_type: str | None = None,
@@ -38,6 +39,11 @@ async def list_fmeas(
     if status:
         query = query.where(FMEADocument.status == status)
         count_query = count_query.where(FMEADocument.status == status)
+
+    # 仪表盘「待办事项」下钻：草稿 + 评审中
+    if pending:
+        query = query.where(FMEADocument.status.in_(["draft", "in_review"]))
+        count_query = count_query.where(FMEADocument.status.in_(["draft", "in_review"]))
 
     if product_line:
         query = query.where(FMEADocument.product_line_code == product_line)
@@ -179,9 +185,9 @@ async def create_fmea(
     await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code, fmea.factory_id)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
-        raise ValueError(f"FMEA document number '{document_no}' already exists.")
+        raise ValueError(f"FMEA document number '{document_no}' already exists.") from e
 
     await db.refresh(fmea)
     return fmea
@@ -263,7 +269,7 @@ async def update_fmea(
         # Invalidate recommendation cache when graph_data or product_line changes
         if graph_data is not None or product_line_code is not None:
             from app.services.recommendation_service import RecommendationService, _NullGraphRepo
-            rec_service = RecommendationService(db=db, llm_provider=None, graph_repo=_NullGraphRepo())
+            rec_service = RecommendationService(db=db, graph_repo=_NullGraphRepo())
             await rec_service.invalidate_cache_for_fmea(fmea.fmea_id)
 
     await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code, fmea.factory_id)

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import app.services.capa_draft_service as capa_draft_service
 from app.config import settings
 from app.schemas.capa_draft import DraftRequest, STEP_SCHEMA_MAP
+from app.services.agent import provider_adapter
 from app.services.capa_draft_service import (
     generate_draft,
     _render_structured,
@@ -26,6 +27,18 @@ from app.services.capa_draft_service import (
 
 # ---------- 初始化 ----------
 
+class _FakeReq:
+    """Clean request double: avoids MagicMock auto-creating app.state.llm_provider.
+    Timeout intentionally unset so generate_draft falls back to settings.CAPA_DRAFT_LLM_TIMEOUT."""
+    class app:
+        class state:
+            pass
+
+
+class _PC:
+    model = "test-model"
+
+
 @pytest.fixture(autouse=True)
 def clear_state(monkeypatch):
     """每个测试前清理全局状态"""
@@ -34,6 +47,13 @@ def clear_state(monkeypatch):
     _in_flight.clear()
     # 固定超时，避免环境差异
     monkeypatch.setattr(settings, "CAPA_DRAFT_LLM_TIMEOUT", 15)
+    # Default provider_adapter stubs so MagicMock db tests don't crash on build_client.
+    async def _default_client(db_arg):
+        return _PC()
+    monkeypatch.setattr(provider_adapter, "build_client", _default_client)
+    async def _default_complete(pc, prompt, schema):
+        raise RuntimeError("unexpected complete_json call")
+    monkeypatch.setattr(provider_adapter, "complete_json", _default_complete)
 
 
 class TestGenerateDraftSuccess:
@@ -60,25 +80,30 @@ class TestGenerateDraftSuccess:
         user.user_id = uuid.uuid4()
         user.role_definition.bypass_row_level_security = True
 
-        request = MagicMock()
-        llm_provider = MagicMock()
-        llm_provider.model = "test-model"
-        llm_provider.complete = AsyncMock(return_value={
-            "structured_data": {
-                "problem_statement": "陈述", "affected_product": "DC-DC-100",
-                "defect_description": "描述", "occurrence_context": "场景", "impact_scope": "范围",
+        class _PC:
+            model = "test-model"
+
+        async def _build_client(db_arg):
+            return _PC()
+
+        async def _complete_json(pc, prompt, schema):
+            return {
+                "structured_data": {
+                    "problem_statement": "陈述", "affected_product": "DC-DC-100",
+                    "defect_description": "描述", "occurrence_context": "场景", "impact_scope": "范围",
+                }
             }
-        })
-        request.app.state.llm_provider = llm_provider
+
+        monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+        monkeypatch.setattr(provider_adapter, "complete_json", _complete_json)
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
-        resp = await generate_draft(db, capa.report_id, "d2", req, user, request)
+        resp = await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
 
         assert resp["step"] == "d2"
         assert "request_id" in resp
         assert resp["content"].startswith("问题陈述")
         assert resp["structured_data"]["problem_statement"] == "陈述"
-        assert llm_provider.complete.called
 
     @pytest.mark.asyncio
     async def test_paragraph_format(self, monkeypatch):
@@ -101,14 +126,20 @@ class TestGenerateDraftSuccess:
         user.user_id = uuid.uuid4()
         user.role_definition.bypass_row_level_security = True
 
-        request = MagicMock()
-        llm_provider = MagicMock()
-        llm_provider.model = "test-model"
-        llm_provider.complete = AsyncMock(return_value={"content": "这是一段描述"})
-        request.app.state.llm_provider = llm_provider
+        class _PC:
+            model = "test-model"
+
+        async def _build_client(db_arg):
+            return _PC()
+
+        async def _complete_json(pc, prompt, schema):
+            return {"content": "这是一段描述"}
+
+        monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+        monkeypatch.setattr(provider_adapter, "complete_json", _complete_json)
 
         req = DraftRequest(format="paragraph", request_id=str(uuid.uuid4()))
-        resp = await generate_draft(db, capa.report_id, "d2", req, user, request)
+        resp = await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
 
         assert resp["content"] == "这是一段描述"
         assert resp["structured_data"] is None
@@ -136,20 +167,29 @@ class TestGenerateDraftSuccess:
         user.user_id = uuid.uuid4()
         user.role_definition.bypass_row_level_security = True
 
-        request = MagicMock()
-        llm_provider = MagicMock()
-        llm_provider.model = "test-model"
-        llm_provider.complete = AsyncMock(return_value={
-            "structured_data": {"problem_statement": "缓存测试", "affected_product": "A", "defect_description": "B", "occurrence_context": "C", "impact_scope": "D"}
-        })
-        request.app.state.llm_provider = llm_provider
+        class _PC:
+            model = "test-model"
+
+        async def _build_client(db_arg):
+            return _PC()
+
+        call_count = 0
+        async def _complete_json(pc, prompt, schema):
+            nonlocal call_count
+            call_count += 1
+            return {
+                "structured_data": {"problem_statement": "缓存测试", "affected_product": "A", "defect_description": "B", "occurrence_context": "C", "impact_scope": "D"}
+            }
+
+        monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+        monkeypatch.setattr(provider_adapter, "complete_json", _complete_json)
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
-        resp1 = await generate_draft(db, capa.report_id, "d2", req, user, request)
-        resp2 = await generate_draft(db, capa.report_id, "d2", req, user, request)
+        resp1 = await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
+        resp2 = await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
 
         assert resp1["content"] == resp2["content"]
-        assert llm_provider.complete.call_count == 1
+        assert call_count == 1
 
 
 class TestGenerateDraftValidation:
@@ -170,7 +210,7 @@ class TestGenerateDraftValidation:
         user.user_id = uuid.uuid4()
         with patch("app.services.capa_draft_service.get_tenant_aware_session", return_value=audit_cm):
             with pytest.raises(HTTPException) as exc:
-                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, user, MagicMock())
+                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, user, _FakeReq())
         assert exc.value.status_code == 400
         assert "request_id" in exc.value.detail
         assert audit_session.commit.called  # audit written even on 400
@@ -190,7 +230,7 @@ class TestGenerateDraftValidation:
         user.user_id = uuid.uuid4()
         with patch("app.services.capa_draft_service.get_tenant_aware_session", return_value=audit_cm):
             with pytest.raises(HTTPException) as exc:
-                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, user, MagicMock())
+                await generate_draft(MagicMock(), uuid.uuid4(), "d2", req, user, _FakeReq())
         assert exc.value.status_code == 400
         assert "request_id" in exc.value.detail
         assert audit_session.commit.called  # audit written even on 400
@@ -216,7 +256,7 @@ class TestGenerateDraftValidation:
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d9", req, user, MagicMock())
+            await generate_draft(db, capa.report_id, "d9", req, user, _FakeReq())
         assert exc.value.status_code == 400
 
     @pytest.mark.asyncio
@@ -240,7 +280,7 @@ class TestGenerateDraftValidation:
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
+            await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert exc.value.status_code == 409
 
     @pytest.mark.asyncio
@@ -265,7 +305,7 @@ class TestGenerateDraftValidation:
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
+            await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert exc.value.status_code == 409
 
     @pytest.mark.asyncio
@@ -291,7 +331,7 @@ class TestGenerateDraftValidation:
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d3", req, user, MagicMock())
+            await generate_draft(db, capa.report_id, "d3", req, user, _FakeReq())
         assert exc.value.status_code == 409
 
     @pytest.mark.asyncio
@@ -316,7 +356,7 @@ class TestGenerateDraftValidation:
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
+            await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert exc.value.status_code == 409
 
     @pytest.mark.asyncio
@@ -341,7 +381,7 @@ class TestGenerateDraftValidation:
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
+            await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert exc.value.status_code == 409
 
     @pytest.mark.asyncio
@@ -366,7 +406,7 @@ class TestGenerateDraftValidation:
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d8", req, user, MagicMock())
+            await generate_draft(db, capa.report_id, "d8", req, user, _FakeReq())
         assert exc.value.status_code == 409
 
 
@@ -399,7 +439,7 @@ class TestRateLimitAndErrors:
             _rate_limit.setdefault(str(user.user_id), []).append(time.time())
 
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
+            await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert exc.value.status_code == 429
 
     @pytest.mark.asyncio
@@ -421,19 +461,24 @@ class TestRateLimitAndErrors:
         user.user_id = uuid.uuid4()
         user.role_definition.bypass_row_level_security = True
 
-        request = MagicMock()
-        llm_provider = MagicMock()
-        async def slow(*a, **k):
+        class _PC:
+            model = "test-model"
+
+        async def _build_client(db_arg):
+            return _PC()
+
+        async def _slow_complete(pc, prompt, schema):
             await asyncio.sleep(2)
             return {}
-        llm_provider.complete = slow
-        request.app.state.llm_provider = llm_provider
+
+        monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+        monkeypatch.setattr(provider_adapter, "complete_json", _slow_complete)
 
         monkeypatch.setattr(settings, "CAPA_DRAFT_LLM_TIMEOUT", 0.1)
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d2", req, user, request)
+            await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert exc.value.status_code == 504
 
     @pytest.mark.asyncio
@@ -456,15 +501,21 @@ class TestRateLimitAndErrors:
         user.user_id = uuid.uuid4()
         user.role_definition.bypass_row_level_security = True
 
-        request = MagicMock()
-        llm_provider = MagicMock()
-        llm_provider.model = "test-model"
-        llm_provider.complete = AsyncMock(side_effect=Exception("JSON decode error"))
-        request.app.state.llm_provider = llm_provider
+        class _PC:
+            model = "test-model"
+
+        async def _build_client(db_arg):
+            return _PC()
+
+        async def _bad_complete(pc, prompt, schema):
+            raise Exception("JSON decode error")
+
+        monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+        monkeypatch.setattr(provider_adapter, "complete_json", _bad_complete)
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d2", req, user, request)
+            await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert exc.value.status_code == 422
 
 
@@ -568,7 +619,7 @@ class TestProductLineEnforcement:
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         with pytest.raises(HTTPException) as exc:
-            await generate_draft(db, capa.report_id, "d2", req, user, MagicMock())
+            await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert exc.value.status_code == 403
 
     @pytest.mark.asyncio
@@ -598,23 +649,28 @@ class TestProductLineEnforcement:
         mock_result.all.return_value = [("DC-DC-100",)]
         db.execute = AsyncMock(return_value=mock_result)
 
-        # Mock LLM provider
-        llm_provider = MagicMock()
-        llm_provider.model = "test-model"
-        llm_provider.complete = AsyncMock(return_value={
-            "structured_data": {
-                "problem_statement": "问题描述",
-                "affected_product": "产品A",
-                "defect_description": "缺陷",
-                "occurrence_context": "场景",
-                "impact_scope": "范围",
+        class _PC:
+            model = "test-model"
+
+        async def _build_client(db_arg):
+            return _PC()
+
+        async def _complete_json(pc, prompt, schema):
+            return {
+                "structured_data": {
+                    "problem_statement": "问题描述",
+                    "affected_product": "产品A",
+                    "defect_description": "缺陷",
+                    "occurrence_context": "场景",
+                    "impact_scope": "范围",
+                }
             }
-        })
-        request = MagicMock()
-        request.app.state.llm_provider = llm_provider
+
+        monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+        monkeypatch.setattr(provider_adapter, "complete_json", _complete_json)
 
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
-        resp = await generate_draft(db, capa.report_id, "d2", req, user, request)
+        resp = await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert resp["step"] == "d2"
 
     @pytest.mark.asyncio
@@ -641,11 +697,14 @@ class TestProductLineEnforcement:
         user.user_id = uuid.uuid4()
         user.role_definition.bypass_row_level_security = True
 
-        request = MagicMock()
-        llm_provider = MagicMock()
-        call_count = 0
+        class _PC:
+            model = "test-model"
 
-        async def slow_complete(*a, **k):
+        async def _build_client(db_arg):
+            return _PC()
+
+        call_count = 0
+        async def _slow_complete(pc, prompt, schema):
             nonlocal call_count
             call_count += 1
             await asyncio.sleep(0.1)
@@ -655,8 +714,9 @@ class TestProductLineEnforcement:
                     "defect_description": "描述", "occurrence_context": "场景", "impact_scope": "范围",
                 }
             }
-        llm_provider.complete = slow_complete
-        request.app.state.llm_provider = llm_provider
+
+        monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+        monkeypatch.setattr(provider_adapter, "complete_json", _slow_complete)
 
         async def mock_enforce(*a, **k):
             pass
@@ -665,8 +725,8 @@ class TestProductLineEnforcement:
         request_id = str(uuid.uuid4())
         req = DraftRequest(format="structured", request_id=request_id)
 
-        task1 = asyncio.create_task(generate_draft(db, capa.report_id, "d2", req, user, request))
-        task2 = asyncio.create_task(generate_draft(db, capa.report_id, "d2", req, user, request))
+        task1 = asyncio.create_task(generate_draft(db, capa.report_id, "d2", req, user, _FakeReq()))
+        task2 = asyncio.create_task(generate_draft(db, capa.report_id, "d2", req, user, _FakeReq()))
 
         result1, result2 = await asyncio.gather(task1, task2)
         assert result1["content"] == result2["content"]
@@ -694,16 +754,22 @@ class TestProductLineEnforcement:
         user.user_id = uuid.uuid4()
         user.role_definition.bypass_row_level_security = True
 
-        request = MagicMock()
-        llm_provider = MagicMock()
-        llm_provider.model = "test-model"
-        llm_provider.complete = AsyncMock(return_value={
-            "structured_data": {
-                "problem_statement": "审计测试", "affected_product": "A",
-                "defect_description": "B", "occurrence_context": "C", "impact_scope": "D",
+        class _PC:
+            model = "test-model"
+
+        async def _build_client(db_arg):
+            return _PC()
+
+        async def _complete_json(pc, prompt, schema):
+            return {
+                "structured_data": {
+                    "problem_statement": "审计测试", "affected_product": "A",
+                    "defect_description": "B", "occurrence_context": "C", "impact_scope": "D",
+                }
             }
-        })
-        request.app.state.llm_provider = llm_provider
+
+        monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+        monkeypatch.setattr(provider_adapter, "complete_json", _complete_json)
 
         # Mock get_tenant_aware_session for audit log isolation
         audit_session = MagicMock()
@@ -715,5 +781,75 @@ class TestProductLineEnforcement:
         audit_cm.__aexit__ = AsyncMock(return_value=False)
         with patch("app.services.capa_draft_service.get_tenant_aware_session", return_value=audit_cm):
             req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
-            await generate_draft(db, capa.report_id, "d2", req, user, request)
+            await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
             assert audit_session.commit.called
+
+
+# ---------- P1-D provider migration tests ----------
+
+@pytest.mark.asyncio
+async def test_draft_uses_complete_json_and_no_write_audit_raw(
+    db, default_factory, admin_user, monkeypatch
+):
+    """generate_draft calls provider_adapter.complete_json (not llm_provider.complete);
+    does NOT introduce write_audit_raw (keeps existing AI_DRAFT AuditLog audit)."""
+    async def _ok_client(db_arg):
+        return _PC()
+    async def _ok_complete(pc, prompt, schema):
+        # paragraph format validates against ParagraphLLMOutput(content: str)
+        return {"content": "AI 草稿正文"}
+    monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
+    monkeypatch.setattr(provider_adapter, "complete_json", _ok_complete)
+
+    # Spy: write_audit_raw must NOT be called
+    from app.services.agent import audit as audit_mod
+    raw_calls = []
+    async def _spy_raw(*a, **k):
+        raw_calls.append(True)
+        raise AssertionError("write_audit_raw must not be introduced in CAPA draft")
+    monkeypatch.setattr(audit_mod, "write_audit_raw", _spy_raw)
+
+    from app.services.capa_draft_service import generate_draft
+    from app.schemas.capa_draft import DraftRequest
+    from app.models.capa import CAPAEightD
+    # CAPAEightD: document_no (not doc_no) is the field; title is nullable=False.
+    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-902", title="测试标题足够长",
+                      factory_id=default_factory.id, product_line_code="DC-DC-100",
+                      status="D2_DESCRIPTION")
+    db.add(capa); await db.commit()
+
+    # paragraph format -> no structured schema validation; request_id is parsed as
+    # UUID internally, so pass a valid UUID4 string (not "r1").
+    req = DraftRequest(format="paragraph", request_id=str(uuid.uuid4()))
+    # build a fake Request with app.state carrying timeout
+    class _Req:
+        class app:
+            class state:
+                capa_draft_llm_timeout = 30
+    result = await generate_draft(db, capa.report_id, "d2", req, admin_user, _Req())
+    assert raw_calls == []  # no write_audit_raw introduced
+    assert result is not None
+
+
+@pytest.mark.asyncio
+async def test_draft_503_when_pc_none_no_attribute_error(
+    db, default_factory, admin_user, monkeypatch
+):
+    async def _raise(db_arg):
+        raise provider_adapter.ProviderNotConfiguredError("no cfg")
+    monkeypatch.setattr(provider_adapter, "build_client", _raise)
+    from app.services.capa_draft_service import generate_draft
+    from app.schemas.capa_draft import DraftRequest
+    from app.models.capa import CAPAEightD
+    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-903", title="测试标题足够长",
+                      factory_id=default_factory.id, product_line_code="DC-DC-100",
+                      status="D2_DESCRIPTION")
+    db.add(capa); await db.commit()
+    req = DraftRequest(format="paragraph", request_id=str(uuid.uuid4()))
+    class _Req:
+        class app:
+            class state:
+                capa_draft_llm_timeout = 30
+    with pytest.raises(HTTPException) as ei:
+        await generate_draft(db, capa.report_id, "d2", req, admin_user, _Req())
+    assert ei.value.status_code == 503

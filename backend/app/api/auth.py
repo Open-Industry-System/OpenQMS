@@ -1,10 +1,12 @@
 import logging
 import time
+import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
@@ -18,6 +20,7 @@ from app.core.security import (
     verify_password,
 )
 from app.database import get_db
+from app.models.login_audit_log import LoginAuditLog
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
 from app.models.user import User
@@ -28,7 +31,9 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
     UserResponse,
+    UserUpdateRequest,
 )
+from app.services import factory_service, permission_service, user_service
 from app.services.permission_service import get_role_permissions
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -114,9 +119,19 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     user = result.scalar_one_or_none()
     if user is None or not verify_password(req.password, user.password_hash):
         logger.warning("AUTH_LOGIN_FAILED username=%s ip=%s ua=%s", req.username, client_ip, user_agent[:200])
+        db.add(LoginAuditLog(
+            username=req.username, user_id=None, success=False,
+            failure_reason="Invalid credentials", ip_address=client_ip, user_agent=user_agent,
+        ))
+        await db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.is_active:
         logger.warning("AUTH_LOGIN_DEACTIVATED user_id=%s username=%s ip=%s", user.user_id, user.username, client_ip)
+        db.add(LoginAuditLog(
+            username=user.username, user_id=user.user_id, success=False,
+            failure_reason="Account deactivated", ip_address=client_ip, user_agent=user_agent,
+        ))
+        await db.commit()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
     # Build JWT payload — include tenant_id when request has a resolved tenant
     tenant = getattr(request.state, "tenant", None)
@@ -134,6 +149,10 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     )
     user.refresh_token = refresh_token
     user.refresh_token_expires = refresh_expires
+    db.add(LoginAuditLog(
+        username=user.username, user_id=user.user_id, success=True,
+        failure_reason=None, ip_address=client_ip, user_agent=user_agent,
+    ))
     await db.commit()
     logger.info("AUTH_LOGIN_SUCCESS user_id=%s username=%s role=%s ip=%s", user.user_id, user.username, user.role_definition.role_key, client_ip)
     user_resp = await build_user_response(user, db)
@@ -159,6 +178,7 @@ async def register(
         display_name=req.display_name or req.username,
         email=req.email,
         role_id=role_def.id,
+        legacy_role=req.role_key,
     )
     db.add(user)
     await db.commit()
@@ -172,6 +192,70 @@ async def list_users(db: AsyncSession = Depends(get_db), _user: User = Depends(r
     result = await db.execute(select(User))
     users = result.scalars().all()
     return [await build_user_response(u, db) for u in users]
+
+
+@router.patch("/users/{user_id}", response_model=UserResponse)
+async def update_user_endpoint(
+    user_id: uuid.UUID,
+    req: UserUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)),
+):
+    updates = req.model_dump(exclude_unset=True)
+    try:
+        user = await user_service.update_user(db, user_id, updates, _admin.user_id)
+        await db.commit()
+        await db.refresh(user)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    logger.info("AUTH_USER_UPDATE user_id=%s by=%s fields=%s", user_id, _admin.user_id, list(updates.keys()))
+    return await build_user_response(user, db)
+
+
+@router.delete("/users/{user_id}")
+async def delete_user_endpoint(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)),
+):
+    try:
+        await user_service.delete_user(db, user_id, _admin.user_id)
+        await db.commit()
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该用户存在关联业务记录，无法删除；建议改为停用",
+        )
+    logger.info("AUTH_USER_DELETE user_id=%s by=%s", user_id, _admin.user_id)
+    return {"message": "用户已删除"}
+
+
+@router.get("/roles")
+async def list_assignable_roles(
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)),
+):
+    roles = await permission_service.list_roles(db)
+    return [{"role_key": r.role_key, "name_zh": r.name_zh, "name_en": r.name_en} for r in roles]
+
+
+@router.get("/factories")
+async def list_factories_for_admin(
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission(Module.USER_MGMT, PermissionLevel.ADMIN)),
+):
+    factories = await factory_service.list_factories(db, is_active=True)
+    return [
+        {"id": str(f.id), "code": f.code, "name": f.name, "location": f.location, "is_active": f.is_active}
+        for f in factories
+    ]
 
 
 @router.get("/me", response_model=UserResponse)

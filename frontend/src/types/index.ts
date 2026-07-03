@@ -12,6 +12,12 @@ export interface Factory {
   is_active: boolean;
 }
 
+export interface AssignableRoleOption {
+  role_key: string;
+  name_zh: string;
+  name_en: string;
+}
+
 export interface FactoryScope {
   accessible_factory_ids: string[] | null;  // null = all factories
   default_factory_id: string | null;
@@ -1730,4 +1736,64 @@ export interface ComparisonResponse {
 export interface SnapshotGenerateResponse {
   snapshot_count: number;
   period: string;
+}
+
+export interface RegisterRequest {
+  username: string;
+  password: string;
+  display_name?: string | null;
+  email?: string | null;
+  role_key: string;
+}
+
+export interface UserUpdateRequest {
+  display_name?: string | null;
+  email?: string | null;
+  role_key?: string | null;
+  is_active?: boolean | null;
+  password?: string | null;
+  default_factory_id?: string | null;
+  factory_ids?: string[] | null;
+}
+
+export interface RoleOption {
+  id: string;
+  role_key: string;
+  name_zh: string;
+  name_en: string;
+  is_system: boolean;
+  is_editable: boolean;
+}
+
+export interface AuditLogItem {
+  log_id: string;
+  table_name: string;
+  record_id: string;
+  action: string;
+  operated_by: string | null;
+  ip_address: string | null;
+  operated_at: string | null;
+  changed_fields: Record<string, unknown> | null;
+  old_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
+}
+
+export interface LoginLogItem {
+  log_id: string;
+  username: string;
+  user_id: string | null;
+  success: boolean;
+  failure_reason: string | null;
+  ip_address: string | null;
+  occurred_at: string | null;
+}
+
+export interface SystemLogItem {
+  log_id: string;
+  logger_name: string;
+  level: string;
+  message: string;
+  module: string | null;
+  traceback: string | null;
+  occurred_at: string | null;
 }

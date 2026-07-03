@@ -12,6 +12,8 @@ from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.schemas.quality_trend import QualityTrendMetadata, QualityTrendSummary
+from app.services.agent import provider_adapter
+from app.services.agent.audit import write_audit_raw
 from app.utils.fmea_graph import build_rpn_rows
 
 WINDOW_DAYS = 30
@@ -167,7 +169,6 @@ def build_scope_description(product_line_codes: list[str] | None) -> str:
 import time
 import uuid as uuid_mod
 
-from app.models.audit import AuditLog
 from app.schemas.quality_trend import QualityTrendInterpretation
 
 _interpret_cache: dict[str, tuple[QualityTrendInterpretation, float]] = {}
@@ -197,7 +198,8 @@ class LLMResponseParseError(ValueError):
 async def interpret_quality_trend(
     db,
     user_id: str,
-    llm_provider,
+    factory_id: uuid_mod.UUID | None,
+    tenant_schema: str,
     filter_codes: list[str],
     allowed_modules: set[str],
     scope_description: str,
@@ -210,7 +212,7 @@ async def interpret_quality_trend(
         await _write_interpret_audit(db, user_id, "rate_limited", {
             "scope_hash": scope_hash,
             "product_line_codes": filter_codes,
-        })
+        }, factory_id, tenant_schema, scope_hash)
         raise
 
     summary = await build_quality_trend_summary(db, filter_codes, allowed_modules, scope_description, selected_product_line)
@@ -225,40 +227,43 @@ async def interpret_quality_trend(
     }
 
     if summary.risk_level == "insufficient_data":
-        await _write_interpret_audit(db, user_id, "insufficient_data", audit_context)
+        await _write_interpret_audit(db, user_id, "insufficient_data", audit_context, factory_id, tenant_schema, scope_hash)
         raise InsufficientTrendDataError("数据不足，无法生成 AI 解读")
 
-    if llm_provider is None:
-        await _write_interpret_audit(db, user_id, "llm_not_configured", audit_context)
-        raise LLMNotConfiguredError("LLM 未配置")
+    # Config check FIRST — legacy behavior: unconfigured LLM raises even if cache is warm.
+    try:
+        pc = await provider_adapter.build_client(db)
+    except provider_adapter.ProviderNotConfiguredError as exc:
+        await _write_interpret_audit(db, user_id, "llm_not_configured", audit_context, factory_id, tenant_schema, scope_hash)
+        raise LLMNotConfiguredError("LLM 未配置") from exc
 
     cache_key = f"{scope_hash}:{summary.data_window_days}:{summary.evidence_hash}"
     cached = _get_cached_interpretation(cache_key)
     if cached:
-        await _write_interpret_audit(db, user_id, "cache_hit", audit_context)
+        await _write_interpret_audit(db, user_id, "cache_hit", audit_context, factory_id, tenant_schema, scope_hash)
         return cached
 
     prompt = _build_interpret_prompt(summary, allowed_modules, scope_description)
     try:
         raw = await asyncio.wait_for(
-            llm_provider.complete(prompt, _interpret_response_schema()),
+            provider_adapter.complete_json(pc, prompt, _interpret_response_schema()),
             timeout=LLM_TIMEOUT,
         )
     except TimeoutError as exc:
-        await _write_interpret_audit(db, user_id, "llm_failed", audit_context | {"error": f"LLM 调用超时（>{LLM_TIMEOUT}s）"})
+        await _write_interpret_audit(db, user_id, "llm_failed", audit_context | {"error": f"LLM 调用超时（>{LLM_TIMEOUT}s）"}, factory_id, tenant_schema, scope_hash)
         raise LLMNotConfiguredError("AI 解读服务响应超时，请稍后重试") from exc
     except Exception as exc:
-        await _write_interpret_audit(db, user_id, "llm_failed", audit_context | {"error": str(exc)})
+        await _write_interpret_audit(db, user_id, "llm_failed", audit_context | {"error": str(exc)}, factory_id, tenant_schema, scope_hash)
         raise
 
     try:
         result = _parse_interpretation(raw, summary, scope_hash)
     except LLMResponseParseError as exc:
-        await _write_interpret_audit(db, user_id, "parse_failed", audit_context | {"error": str(exc)})
+        await _write_interpret_audit(db, user_id, "parse_failed", audit_context | {"error": str(exc)}, factory_id, tenant_schema, scope_hash)
         raise
 
     _set_cached_interpretation(cache_key, result)
-    await _write_interpret_audit(db, user_id, "success", audit_context | {"model": result.model})
+    await _write_interpret_audit(db, user_id, "success", audit_context | {"model": result.model}, factory_id, tenant_schema, scope_hash)
     return result
 
 
@@ -279,16 +284,23 @@ def _parse_interpretation(raw: dict, summary, scope_hash: str) -> QualityTrendIn
     return QualityTrendInterpretation(**payload)
 
 
-async def _write_interpret_audit(db, user_id: str, status: str, context: dict) -> None:
-    db.add(AuditLog(
+async def _write_interpret_audit(
+    db, user_id: str, status: str, context: dict,
+    factory_id, tenant_schema: str, scope_hash: str,
+) -> None:
+    correlation_id = uuid_mod.uuid5(uuid_mod.NAMESPACE_URL, f"quality_trend:{scope_hash}")
+    await write_audit_raw(
+        db,
+        user_id=uuid_mod.UUID(str(user_id)),
+        factory_id=factory_id,
+        tenant_schema=tenant_schema,
         table_name="quality_trends",
         record_id=uuid_mod.uuid4(),
         action="AI_TREND_INTERPRET",
+        correlation_id=correlation_id,
         changed_fields={"status": status},
-        old_values=None,
         new_values={"status": status, **context},
-        operated_by=uuid_mod.UUID(str(user_id)),
-    ))
+    )
     await db.commit()
 
 

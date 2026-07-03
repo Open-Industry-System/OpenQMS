@@ -7,6 +7,7 @@ from app import schemas
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.core.tenant import tenant_schema
 from app.database import get_db
 from app.services import management_review_report_service as report_service
 from app.services import management_review_service
@@ -423,13 +424,14 @@ async def generate_report(
         raise HTTPException(status_code=404, detail="review not found")
     _check_factory_access(review, scope)
     try:
-        llm_provider = getattr(request.app.state, "llm_provider", None)
         report_llm_timeout = getattr(request.app.state, "report_llm_timeout", None)
         content = await report_service.generate_report(
             db, review, scope.user,
-            llm_provider=llm_provider, use_llm=req.use_llm,
+            use_llm=req.use_llm,
             report_llm_timeout=report_llm_timeout,
+            tenant_schema=tenant_schema(request),
         )
+        # NO db.commit() here — generate_report commits internally (service L264)
         return schemas.management_review.ReportGenerateResponse(
             report_status=review.report_status,
             generated_report=schemas.management_review.ReportContent.model_validate(content),

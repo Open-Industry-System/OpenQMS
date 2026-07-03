@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -5,8 +6,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
-from app.api.admin import permissions as admin_permissions_api
+from app.api import agent as agent_api
 from app.api.admin import ai_config as admin_ai_config_api
+from app.api.admin import logs as admin_logs_api
+from app.api.admin import permissions as admin_permissions_api
 from app.api.apqp import router as apqp_router
 from app.api.audit_finding import router as audit_finding_router
 from app.api.audit_plan import router as audit_plan_router
@@ -52,6 +55,7 @@ from app.api.supplier_risk import router as supplier_risk_router
 from app.api.supply_chain_risk_map import router as supply_chain_risk_map_router
 from app.api.version import router as version_router
 from app.config import settings
+from app.core.logging_handler import DBLogHandler, start_log_drainer
 from app.core.security import hash_password
 from app.core.tenant_context import TenantContextMiddleware
 from app.database import async_session, get_tenant_aware_session, run_for_each_tenant
@@ -59,6 +63,10 @@ from app.models.role import RoleDefinition
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+_log_queue: asyncio.Queue | None = None
+_log_drainer: asyncio.Task | None = None
+_log_handler: logging.Handler | None = None
 
 
 @asynccontextmanager
@@ -296,7 +304,23 @@ async def lifespan(app: FastAPI):
 
     risk_map_snapshot_task = asyncio.create_task(snapshot_loop())
 
+    global _log_queue, _log_drainer, _log_handler
+    _log_queue = asyncio.Queue()
+    _log_drainer = start_log_drainer(_log_queue, async_session)
+    _log_handler = DBLogHandler(_log_queue, asyncio.get_running_loop())
+    logging.getLogger().addHandler(_log_handler)
+
     yield
+
+    if _log_handler is not None:
+        logging.getLogger().removeHandler(_log_handler)
+        _log_handler = None
+    if _log_drainer:
+        _log_drainer.cancel()
+        try:
+            await _log_drainer
+        except asyncio.CancelledError:
+            pass
 
     # Cancel cleanup coroutine
     cleanup_task.cancel()
@@ -409,6 +433,8 @@ app.include_router(shipment_router)
 app.include_router(graph_router)
 app.include_router(admin_permissions_api.router)
 app.include_router(admin_ai_config_api.router)
+app.include_router(admin_logs_api.router)
+app.include_router(agent_api.router)
 app.include_router(search_router)
 app.include_router(change_impact_router)
 app.include_router(collaboration_router)
@@ -419,6 +445,11 @@ app.include_router(supplier_risk_router)
 app.include_router(supply_chain_risk_map_router)
 app.include_router(group_router)
 app.include_router(platform_router)
+
+# E2E-only endpoints: gated so they never load in production even if E2E_MODE leaks.
+if settings.E2E_MODE and settings.TENANT_MODE != "production":
+    from app.api.e2e import router as e2e_router
+    app.include_router(e2e_router)
 
 
 @app.get("/api/health")

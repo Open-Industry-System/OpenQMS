@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.core.tenant import tenant_schema
 from app.database import get_db
 from app.schemas.fmea import (
     FMEACreate,
@@ -29,6 +30,7 @@ async def list_fmeas(
     status: str | None = None,
     product_line: str | None = None,
     high_rpn: bool = Query(False),
+    pending: bool = Query(False),
     fmea_type: Literal["PFMEA", "DFMEA"] | None = None,
     search: str | None = None,
     db: AsyncSession = Depends(get_db),
@@ -49,6 +51,7 @@ async def list_fmeas(
     items, total = await fmea_service.list_fmeas(
         db, page, page_size, status, product_line,
         high_rpn=high_rpn,
+        pending=pending,
         allowed_product_line_codes=allowed_pls,
         factory_id=scope.effective_factory_id,
         fmea_type=fmea_type,
@@ -80,7 +83,7 @@ async def create_fmea(
         )
         await validate_factory_invariant(fmea, db)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return FMEAResponse.model_validate(fmea)
 
 
@@ -144,7 +147,7 @@ async def update_fmea(
                         "latest_lock_version": fmea.lock_version,
                     },
                 },
-            )
+            ) from e
         if error_msg == "lock_version_changed_again":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -156,8 +159,8 @@ async def update_fmea(
                         "latest_lock_version": fmea.lock_version,
                     },
                 },
-            )
-        raise HTTPException(status_code=400, detail=error_msg)
+            ) from e
+        raise HTTPException(status_code=400, detail=error_msg) from e
     return FMEAResponse.model_validate(fmea)
 
 
@@ -210,7 +213,7 @@ async def transition_fmea(
     try:
         fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return FMEAResponse.model_validate(fmea)
 
 
@@ -317,10 +320,11 @@ async def recommend(
             effective_scope=effective_scope,
         )
 
-    llm = getattr(fastapi_request.app.state, "llm_provider", None)
     llm_timeout = getattr(fastapi_request.app.state, "llm_timeout", None)
-    service = RecommendationService(db=db, llm_provider=llm, graph_repo=graph_repo, llm_timeout=llm_timeout)
-    result = await service.recommend(fmea_id, request, scope.user, scope)
+    service = RecommendationService(db=db, graph_repo=graph_repo, llm_timeout=llm_timeout)
+    result = await service.recommend(
+        fmea_id, request, scope.user, scope, tenant_schema=tenant_schema(fastapi_request),
+    )
     await db.commit()
     return result
 

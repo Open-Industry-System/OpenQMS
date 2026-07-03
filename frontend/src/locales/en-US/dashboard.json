@@ -26,6 +26,11 @@
       "ai": "AI / Advanced Analysis"
     }
   },
+  "drilldown": {
+    "pendingFmea": "FMEA Pending",
+    "pendingCapa": "CAPA Pending",
+    "pendingComplaint": "Complaints Pending"
+  },
   "widget": {
     "unknown": "Unknown widget",
     "pendingActions": "Pending Actions",

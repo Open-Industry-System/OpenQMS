@@ -9,6 +9,20 @@ class LoginRequest(BaseModel):
     password: str
 
 
+def validate_password_complexity(v: str) -> str:
+    if len(v) < 8:
+        raise ValueError("密码长度至少为8位")
+    if not re.search(r"[A-Z]", v):
+        raise ValueError("密码必须包含至少一个大写字母")
+    if not re.search(r"[a-z]", v):
+        raise ValueError("密码必须包含至少一个小写字母")
+    if not re.search(r"\d", v):
+        raise ValueError("密码必须包含至少一个数字")
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>_\-+=\[\]\\;'/`~]", v):
+        raise ValueError("密码必须包含至少一个特殊字符")
+    return v
+
+
 class RegisterRequest(BaseModel):
     username: str
     password: str
@@ -18,18 +32,27 @@ class RegisterRequest(BaseModel):
 
     @field_validator("password")
     @classmethod
-    def validate_password_complexity(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("密码长度至少为8位")
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("密码必须包含至少一个大写字母")
-        if not re.search(r"[a-z]", v):
-            raise ValueError("密码必须包含至少一个小写字母")
-        if not re.search(r"\d", v):
-            raise ValueError("密码必须包含至少一个数字")
-        if not re.search(r"[!@#$%^&*(),.?\":{}|<>_\-+=\[\]\\;'/`~]", v):
-            raise ValueError("密码必须包含至少一个特殊字符")
+    def validate_password(cls, v: str) -> str:
+        return validate_password_complexity(v)
+
+
+class UserUpdateRequest(BaseModel):
+    display_name: str | None = None
+    email: EmailStr | None = None
+    role_key: str | None = None
+    is_active: bool | None = None
+    password: str | None = None
+    default_factory_id: uuid.UUID | None = None
+    factory_ids: list[uuid.UUID] | None = None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _empty_email_to_none(cls, v):
+        # 空串/纯空白在 EmailStr 校验前转 None，避免 422（与前端 trim→null 一致）
+        if isinstance(v, str) and v.strip() == "":
+            return None
         return v
+
 
 
 class UserResponse(BaseModel):

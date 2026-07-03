@@ -336,6 +336,12 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
         "overdue_tasks": overdue_tasks,
         "high_risk_items": high_risk_items,
         "month_trend": this_count - last_count,
+        # 分项计数：仪表盘「待办事项」卡下钻菜单按分类显示计数
+        "pending_breakdown": {
+            "fmea": fmea_pending_count,
+            "capa": capa_pending_count,
+            "complaint": complaint_pending_count,
+        },
     }
 
 
@@ -479,6 +485,7 @@ async def get_recent_actions(db: AsyncSession, user_id: str, limit: int = 5) -> 
             entity_no = await db.scalar(q) or ""
 
         actions.append({
+            "log_id": str(log.log_id),
             "record_id": str(log.record_id),
             "table_name": log.table_name,
             "entity_no": entity_no,
@@ -527,6 +534,7 @@ async def get_widgets_data(
                 "overdue_tasks": summary.get("overdue_tasks", 0),
                 "high_risk_items": summary.get("high_risk_items", 0),
                 "month_trend": summary.get("month_trend", 0),
+                "pending_breakdown": summary.get("pending_breakdown", {"fmea": 0, "capa": 0, "complaint": 0}),
             }
         except Exception as e:
             result["errors"]["kpi"] = str(e)

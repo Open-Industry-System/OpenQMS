@@ -73,6 +73,7 @@ export default function CAPAListPage() {
         document_no: values.document_no,
         severity: values.severity,
         due_date: values.due_date?.format("YYYY-MM-DD"),
+        product_line_code: productLine || undefined,
       });
       message.success(tc("messages.operationSuccess", "8D 报告创建成功"));
       setModalOpen(false);
@@ -112,11 +113,12 @@ export default function CAPAListPage() {
       title={t("title", "8D / CAPA")}
       subtitle={t("subtitle", "客诉与质量问题闭环追踪")}
       actions={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>{t("actions.create", "新建 8D")}</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)} data-e2e="capa-create">{t("actions.create", "新建 8D")}</Button>
       }
     >
       <DataCard title={t("listTitle", "8D 报告列表")} noPadding>
         <Table className="qf-table" columns={columns} dataSource={data} rowKey="report_id" loading={loading}
+          onRow={(record) => ({ 'data-e2e': `row-${record.document_no}` } as any)}
           pagination={{ current: page, total, pageSize: 20, onChange: (p) => { setPage(p); fetchData(p); } }}
         />
       </DataCard>
