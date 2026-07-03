@@ -43,7 +43,7 @@ US-E2E-01 故事要求 8D 全程闭环可审计：根因必须经现场验证才
 8. **未保存输入保护接口（Finding 3）**：D4/D5 RecPanel 不直接知道 TextArea 状态（dirty + `handleUpdate` 在 `CAPADetailPage`）。父组件传 `beforeAdopt?: () => Promise<void>`，RecPanel 采纳前 `await beforeAdopt?.()` flush 本地 d-step 字段，再调采纳端点。
 
 9. **D7 改判语义（Finding 5）**：D7 动作按"当前裁决"建模（一行 per capa+fmea+fm+fc，可改判），匹配现有 UI 可在 updated/skipped 间切换的行为：
-   - `record_d7_action`（confirm/skip）= **upsert**：无既有行 → insert + `D7_NODE_CONFIRMED`/`D7_NODE_SKIPPED` audit；有既有行且 `action != "auto_filled"` → 更新 `action`/`reason`/`acted_by`/`acted_at` + `D7_NODE_ACTION_CHANGED` audit（带 `old_action`/`new_action`）；既有行 `action == "auto_filled"` → 400 "已自动回填，不可改判"（前端禁用 confirm/skip 按钮并显示已锁定）。
+   - `record_d7_action`（confirm/skip）= **upsert**：无既有行 → insert + `D7_NODE_CONFIRMED`/`D7_NODE_SKIPPED` audit；有既有行且 `action == "auto_filled"` → 400 "已自动回填，不可改判"（前端禁用 confirm/skip 按钮并显示已锁定）；有既有行且**同 action + reason 不变** → 幂等返回 existing（不写 audit、不 commit）；有既有行且 action 或 reason 变化 → 更新 `action`/`reason`/`acted_by`/`acted_at` + `D7_NODE_ACTION_CHANGED` audit（带 `old_action`/`new_action`/`old_reason`/`new_reason`）。
    - `auto_fill_d7`：无既有行 → insert `auto_filled` + 图改 + audits；既有行 `action == "auto_filled"` → 409 幂等拒绝（前端应禁用 auto-fill 按钮）；既有行 `action in {confirmed, skipped}` → 升级为 `auto_filled`（做图改 + 更新行 + `D7_NODE_ACTION_CHANGED` + `D7_AUTO_FILLED_FMEA` audits）。
    - 唯一索引见数据模型（`COALESCE` 表达式索引）。
 
@@ -144,7 +144,7 @@ op.execute("CREATE UNIQUE INDEX ix_capa_d7_node_unique ON capa_d7_node_action "
 1. `level = await get_user_permission(scope.user, Module.CAPA, db)`；`< EDIT`（或 VIEW）→ 403
 2. `capa = await capa_service.get_capa(db, report_id)`；None → 404
 3. `check_factory_access(capa.factory_id, scope)` → 跨工厂 403
-4. 调服务层；异常映射：`ValueError` → 400；`LookupError` → 404（PATCH 归属不匹配 / verification 不属于该 CAPA / D7 目标 FMEA 不存在 / auto_fill 重复幂等拒绝）；`PermissionError` → 403（D7 目标 FMEA 跨工厂）。D7 端点额外：`d7-node-actions` 需 `Module.FMEA` ≥ VIEW；`d7-auto-fill` 需 `Module.FMEA` ≥ EDIT。
+4. 调服务层；异常映射：`ValueError` → 400；`LookupError` → 404（PATCH 归属不匹配 / verification 不属于该 CAPA / D7 目标 FMEA 不存在）；`PermissionError` → 403（D7 目标 FMEA 跨工厂）；`ConflictError` → 409（D7 auto_fill 重复幂等拒绝，区别于 LookupError→404）。D7 端点额外：`d7-node-actions` 需 `Module.FMEA` ≥ VIEW；`d7-auto-fill` 需 `Module.FMEA` ≥ EDIT。
 
 **`d7-node-actions`（confirm/skip）额外校验（Finding 3）**：`record_d7_action` 也接收 `fmea_id` 并落库，必须 fetch 目标 FMEA，校验：存在（None → 404）、与 CAPA 同工厂（`check_factory_access(fmea.factory_id, scope)` → 跨工厂 403）、用户对该 FMEA 有 VIEW 权限（`Module.FMEA` ≥ VIEW → 403）。防止记录"对不存在 / 跨工厂 FMEA 节点的动作"。
 
@@ -364,6 +364,9 @@ from app.models.capa import CapaD7NodeAction
 from app.models.audit import AuditLog
 from app.services import fmea_service
 
+class ConflictError(Exception):
+    """D7 动作幂等冲突（如已 auto_filled 再 auto-fill）—— handler 映射 409，区别于 LookupError→404。"""
+
 NODE_KEY = lambda r: (r.capa_id, r.fmea_id, r.failure_mode_node_id, r.failure_cause_node_id or "")
 
 async def _fetch_fmea_for_d7(db, capa, fmea_id) -> FMEADocument:
@@ -386,7 +389,11 @@ async def record_d7_action(db, capa, req: D7NodeActionCreate, user) -> CapaD7Nod
     if existing is not None:
         if existing.action == "auto_filled":
             raise ValueError("已自动回填，不可改判")  # → 400
+        # 幂等：同 action 且 reason 不变 → 直接返回 existing，不写 audit、不 commit
+        if existing.action == req.action and (existing.reason or None) == (req.reason or None):
+            return existing
         old_action = existing.action
+        old_reason = existing.reason
         existing.action = req.action
         existing.reason = req.reason
         existing.acted_by = user.user_id
@@ -396,7 +403,8 @@ async def record_d7_action(db, capa, req: D7NodeActionCreate, user) -> CapaD7Nod
                         changed_fields={"fmea_id": str(req.fmea_id),
                                         "failure_mode_node_id": req.failure_mode_node_id,
                                         "failure_cause_node_id": req.failure_cause_node_id,
-                                        "old_action": old_action, "new_action": req.action},
+                                        "old_action": old_action, "new_action": req.action,
+                                        "old_reason": old_reason, "new_reason": req.reason},
                         operated_by=user.user_id))
         await db.commit(); await db.refresh(existing)
         return existing
@@ -453,7 +461,7 @@ async def auto_fill_d7(db, capa, req: D7AutoFillRequest, user) -> tuple[CapaD7No
         CapaD7NodeAction.failure_cause_node_id == req.failure_cause_node_id))
     if existing is not None:
         if existing.action == "auto_filled":
-            raise LookupError("已自动回填")  # → 409 幂等拒绝
+            raise ConflictError("已自动回填")  # → 409 幂等拒绝（区别于 LookupError→404）
         old_action = existing.action
         existing.action = "auto_filled"
         existing.prevention_control_node_id = ctrl_node["id"]
@@ -590,14 +598,14 @@ if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECT
 - `backend/tests/recommendation/test_recommendation_types.py`（新增或既有）：`to_d5_suggestion_schema` 对 `rule_engine_measure` 输出 `match_source="rule"`、对 `historical_capa` 输出 `match_source="historical_capa"`（Finding 5 回归）。
 - `backend/tests/capa/test_capa_d7_action_service.py`（新）：
   - `record_d7_action`：confirmed/skip 各插 `capa_d7_node_action` + 写 D7_NODE_CONFIRMED / D7_NODE_SKIPPED audit。
-  - `record_d7_action` 改判（Finding 5）：confirmed→skip upsert 更新同一行 + D7_NODE_ACTION_CHANGED audit（带 old/new_action）；auto_filled 行 → ValueError。
+  - `record_d7_action` 改判（Finding 5）：confirmed→skip upsert 更新同一行 + D7_NODE_ACTION_CHANGED audit（带 old/new_action/reason）；action 或 reason 变才写 audit；**同 action + reason 不变** → 幂等返回 existing（无 audit、无新行）；auto_filled 行 → ValueError。
   - `record_d7_action` FMEA 校验（Finding 3）：fmea_id 不存在 → LookupError(404)；跨工厂 FMEA → PermissionError(403)。
   - `list_d7_actions`：按 acted_at desc、`capa_id + factory_id` 联合过滤。
   - `auto_fill_d7`：d5_correction 空 → ValueError；目标 FMEA 跨工厂/不存在 → LookupError/PermissionError；既有控制 → `name_before` 捕获、`is_new_control=False`；无既有控制 → 新建节点+边、`is_new_control=True`。
   - `auto_fill_d7` 持久化（Finding 1）：commit 后**重新查询 FMEA**，断言 `graph_data` 已含新控制名（防原地改 JSONB 不持久化）；用 deepcopy 而非原对象引用。
   - `auto_fill_d7` FMEA 副作用（Finding 2）：断言 `fmea.lock_version` 递增、`GraphSyncOutbox` 有 `fmea.updated` 行、推荐缓存失效（或调用 spy）、`document_embeddings` enqueue——与 `update_fmea` 等价。
   - `auto_fill_d7` 原子性：四写（FMEA graph + FMEA UPDATE audit + capa_d7_node_action(auto_filled) + D7_AUTO_FILLED_FMEA audit）单 commit；中途模拟失败 → 全回滚。
-  - `auto_fill_d7` 改判（Finding 5）：既有 confirmed 行 → 升级 auto_filled（图改 + 行更新 + D7_NODE_ACTION_CHANGED + D7_AUTO_FILLED_FMEA）；既有 auto_filled → LookupError(409)。
+  - `auto_fill_d7` 改判（Finding 5）：既有 confirmed 行 → 升级 auto_filled（图改 + 行更新 + D7_NODE_ACTION_CHANGED + D7_AUTO_FILLED_FMEA）；既有 auto_filled → `ConflictError`(409)（非 LookupError，避免误 404）。
   - `factory_id` 隔离：跨工厂 list / auto-fill 拒绝。
 - `backend/tests/fmea/test_fmea_service_update_core.py`（新或既有扩展）：`update_fmea` 公开行为不变（既有测试零改动）；`_apply_fmea_update` 不 commit，调用方可继续追加写入后单 commit。
 
@@ -611,11 +619,11 @@ if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECT
 ## 验收
 
 - `capa_root_cause_verification` + `capa_ai_adoption` + `capa_d7_node_action` 三表通过 Alembic 迁移在干净库建出；`capa_d7_node_action` 的去重用 `COALESCE` 表达式唯一索引（R3-Finding 4）。
-- 7 个新端点按权限矩阵工作；`advance_capa` D4→D5 闸口阻断/放行正确；PATCH 归属不匹配 → 404；`d7-auto-fill` 跨工厂 / d5 空 → 404/400；`d7-node-actions` 目标 FMEA 不存在/跨工厂 → 404/403（R3-Finding 3）。
+- 7 个新端点按权限矩阵工作；`advance_capa` D4→D5 闸口阻断/放行正确；PATCH 归属不匹配 → 404；`d7-auto-fill` 跨工厂 / d5 空 → 404/400，重复 auto-fill → `ConflictError` 409（非 LookupError，避免误 404）；`d7-node-actions` 目标 FMEA 不存在/跨工厂 → 404/403（R3-Finding 3）。
 - 采纳端点**追加**到 d-step 字段（不覆盖，保留已有内容）；单事务原子；服务层返回 `(adoption, new_value)`、handler 组装 `field_value`（R2-Finding 2）；D4/D5 RecPanel 采纳前 `await beforeAdopt()` flush 本地字段（R2-Finding 3）。
 - `to_d5_suggestion_schema` 始终输出 `match_source`（R1-Finding 5）；前端 D4/D5 采纳按映射表填 `source`/`item_ref`。
 - `update_verification` 翻 `is_verified` 时正确设/清 `verified_by`/`verified_at`（R1-Finding 4）。
-- D7 confirm/skip/auto-fill 全部经新端点落 `capa_d7_node_action` + 对应 audit；**改判 upsert**（confirmed↔skip 更新同一行 + D7_NODE_ACTION_CHANGED audit；auto_filled 行锁定不可改判，前端禁用并显锁定态）（R3-Finding 5）。
+- D7 confirm/skip/auto-fill 全部经新端点落 `capa_d7_node_action` + 对应 audit；**改判 upsert**（confirmed↔skip action 或 reason 变化时更新同一行 + D7_NODE_ACTION_CHANGED audit；**同 action + reason 不变幂等返回**不写 audit；auto_filled 行锁定不可改判，前端禁用并显锁定态）（R3-Finding 5）。
 - `auto_fill_d7` **deepcopy graph** 再改，commit 后重查 FMEA graph_data 已变化（持久化，R3-Finding 1）；通过 `_apply_fmea_update` 无提交核心**复用全部 FMEA 更新副作用**（lock_version++ / GraphSyncOutbox / 推荐缓存失效 / enqueue_embedding），且与 D7 写入单 commit 原子（R3-Finding 2）；`fmea_service.update_fmea` 公开行为不变、既有测试零改动。
 - D7RecPanel 状态持久化（修复刷新即丢）；现有 `D7_SKIP_CONFIRMATION` 汇总审计保留不动。
 - 后端新增 pytest 全绿（含 R1/R2/R3 全部 Finding 回归）；现有 capa/fmea 测试不退化；前端 vitest + `tsc --noEmit` + `npm run build` 绿；`make check` 绿。
