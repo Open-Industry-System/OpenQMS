@@ -142,7 +142,16 @@ E2E_ENV := $(shell test -f .env.e2e && echo --env-file .env.e2e)
 .PHONY: e2e e2e-up e2e-seed e2e-down e2e-reset e2e-run
 
 e2e-up:
-	$(DC_E2E) $(E2E_ENV) up -d db redis backend frontend
+	$(DC_E2E) $(E2E_ENV) up -d db redis
+	@echo "Waiting for e2e db healthy..."
+	@for i in $$(seq 1 30); do \
+	  if $(DC_E2E) exec -T db pg_isready -U qms >/dev/null 2>&1; then echo "db healthy after $${i}s"; break; fi; \
+	  sleep 1; \
+	done
+	# Migrate BEFORE starting the backend service — its lifespan queries the users table
+	# (main.py), which doesn't exist on a fresh pgdata_e2e until alembic runs.
+	$(DC_E2E) $(E2E_ENV) run --rm backend alembic upgrade head
+	$(DC_E2E) $(E2E_ENV) up -d backend frontend
 
 e2e-seed:
 	$(DC_E2E) exec backend python -m app.seed_e2e
@@ -151,7 +160,6 @@ e2e-run:
 	cd $(FRONTEND_DIR) && if [ -f ../.env.e2e ]; then set -a && . ../.env.e2e && set +a; fi; npx playwright test $(TEST_ARGS)
 
 e2e: e2e-up
-	$(DC_E2E) exec backend alembic upgrade head
 	$(MAKE) e2e-seed
 	$(MAKE) e2e-run
 
@@ -159,7 +167,6 @@ e2e-down:
 	$(DC_E2E) down -v
 
 e2e-reset: e2e-down e2e-up
-	$(DC_E2E) exec backend alembic upgrade head
 	$(MAKE) e2e-seed
 ```
 
@@ -546,12 +553,11 @@ async def get_seed_state(db: AsyncSession = Depends(get_db)):
 
 - [ ] **Step 6: Run seed + test, verify pass**
 
-Bring up the e2e stack, migrate, and seed first (pytest connects from the host via `TEST_DATABASE_URL` → `localhost:5433/qms_e2e`; seed runs inside the backend container → same e2e DB):
+Bring up the e2e stack (which now migrates before starting the backend), then seed (pytest connects from the host via `TEST_DATABASE_URL` → `localhost:5433/qms_e2e`; seed runs inside the backend container → same e2e DB):
 ```
-make e2e-up
-$(DC_E2E) exec backend alembic upgrade head     # or: make -C . e2e-seed won't migrate; run migrate explicitly
+make e2e-up          # up db/redis → wait healthy → run --rm backend alembic upgrade head → up backend/frontend
 make e2e-seed
-cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5433/qms_e2e PYTHONPATH=. pytest tests/test_e2e_endpoints.py::test_seed_state_shape -v
+cd backend && E2E_MODE=1 SECRET_KEY=test-secret-key-for-pytest-only TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5433/qms_e2e PYTHONPATH=. /Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/pytest tests/test_e2e_endpoints.py::test_seed_state_shape -v
 ```
 (`$(DC_E2E)` = the make variable value; in a shell run the literal `docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e -p openqms-e2e`.)
 Expected: PASS. If model-required columns are missing, the seed errors at flush — fix by adding the column from the model (Step 4 note). If seed-state returns empty, the seed didn't run — re-run `make e2e-seed`.
