@@ -13,7 +13,7 @@
 浏览器全栈 E2E（Playwright + 专用 docker-compose e2e profile），手动 `make e2e`，**不接入 CI**。
 
 - **M0 基建**：`docker-compose.e2e.yml`（独立库 qms_e2e + 卷 pgdata_e2e + 端口 5433/8001/5174，redis 不暴露，AI 服务 `profiles:["ai-infra"]`，`!override` 端口）；`E2E_MODE` config + 生产门控条件路由；确定性幂等 `seed_e2e`（2 工厂/产品线含 DC-DC-100 默认/5 账号 + UserProductLine/已知 PFMEA-E2E-001 + 8D-E2E-001）；`/api/e2e/seed-state` 只读（账号密码单一来源）+ `/api/e2e/cleanup` 白名单 FK 逆序单事务删（禁用 version 触发器）；`make e2e*` 目标（先 db/redis→migrate→backend/frontend）；`tsconfig.e2e.json` + `@types/node`；helpers/fixtures/global.setup（5 角色 UI 登录→storageState）+ guards。
-- **M1 流程**（3/4，④延后）：①登录+RBAC+工厂隔离 ②FMEA 生命周期 ③CAPA 8D 生命周期。④看板下钻 **延后**——下钻功能仅实现一半（`KPICard` 支持 onClick + 列表页读 query param 已有；widget→navigate 接线 + `dashboardDrilldown.ts` 未实现，设计 spec 状态待评审）。
+- **M1 流程**（3/4，④原延后现可解封）：①登录+RBAC+工厂隔离 ②FMEA 生命周期 ③CAPA 8D 生命周期。④看板下钻此前仅实现一半（`KPICard` onClick + 列表页 query param 已有；widget→navigate 接线 + `dashboardDrilldown.ts` 缺失），**本轮已补齐**（见下文「仪表盘下钻」）；E2E Task 13 下钻 spec 可据此解封（follow-up）。
 - **生产代码**：仅 `data-e2e` testid（`CAPAListPage` 的 `product_line_code` 为已批准的 bug 修复例外）。
 - **验证**：M1 套件 9 passed / 1 skipped（无 LLM 凭证时 AI spec skip-with-warning）；backend e2e 端点测试 2 passed；`make check` + e2e tsc 干净；生产门控 `[]`（TENANT_MODE=production 时 `/api/e2e/*` 不载入）。
 - **已知摩擦**：backend 登录限流（`auth.py` 10 次/5min 内存）在反复跑 Playwright 时可能让 `global.setup` 超时——重启 e2e backend 即恢复（未改生产代码）。
@@ -76,10 +76,11 @@
    - 日志管理页（audit / login / system 三 tab 分页）
    - `system_logs` 表 + DBLogHandler（异步队列 + 每租户 drain）
    - `login_audit_logs` 表 + 登录成功/失败捕获
-2. **仪表盘下钻**（2026-06-26 ~ 06-27）
+2. **仪表盘下钻**（设计 2026-06-26；**2026-07-03 补齐实现**）
+   - 注：此前 PROGRESS 误记为已落地（`b82967c` 实为 customer-quality 的 searchParams 修复，非下钻），实际仅 `KPICard` onClick + 列表页 query param 就绪，widget→navigate 接线 + `dashboardDrilldown.ts` 缺失；本轮补齐。
    - KPI 卡片 → 过滤列表/详情页、Alert 行可点击、Pending 聚合 → 类别菜单
-   - 后端：pending_breakdown / pending-filter / SPC-distinct-ic_id / abnormal-filter 端点
-   - 前端：`dashboardDrilldown.ts` 权限映射、KpiPendingWidget 下拉、IQC/SPC/MSA/MES drilldown、a11y 改造
+   - 后端：`pending_breakdown` 分项计数 / FMEA `pending` 过滤 / SPC `abnormal` 过滤（近 7 天 open 告警的 IC 子查询）
+   - 前端：`dashboardDrilldown.ts` 权限映射 + `useDashboardDrilldown` hook、`KpiPendingWidget` 受控 Dropdown、IQC/SPC/MSA/MES drilldown、`AlertRow` a11y（hover/键盘/灰显）、无目标模块权限时灰显禁用
 3. **P0 Agent Base — AI-driven QMS 基座**（2026-06-29 ~ 06-30，合并 `178487b`）
    - 6 张 `agent_*` 表 + `audit_logs` 扩 `factory_id/tenant_schema/correlation_id`
    - `@agent_tool` 注册表 + 三级权限网关（readonly / draft / commit）
@@ -195,7 +196,7 @@
 | P1-C FMEA 推荐迁移 | ✅ 已落地（6 任务 TDD，41 推荐测试绿） | `fix/dashboard-admin-pages` |
 | P1-D 剩余 LLM 消费者迁移 | ✅ 已落地（5 任务 TDD：D4/D5 + RAG + 管理评审 + CAPA draft，948 测试绿） | `fix/dashboard-admin-pages` |
 | Admin 用户/日志/工厂编辑 | ✅ 已落地（`cfde81c` 等） | `fix/dashboard-admin-pages` |
-| 仪表盘下钻 | ✅ 已落地（`b82967c`） | `fix/dashboard-admin-pages` |
+| 仪表盘下钻 | ✅ 已落地（本轮补齐 widget→navigate 接线 + `dashboardDrilldown.ts`；`b82967c` 实为 customer-quality 修复，非下钻） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
 
 ---

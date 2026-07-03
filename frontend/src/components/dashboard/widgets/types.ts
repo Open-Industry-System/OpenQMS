@@ -66,6 +66,7 @@ export interface DashboardWidgetsData {
     overdue_tasks?: number;
     high_risk_items?: number;
     month_trend?: number;
+    pending_breakdown?: { fmea?: number; capa?: number; complaint?: number };
   };
   alerts: {
     high_rpn_fmeas?: Array<{ fmea_id: string; document_no: string; node_name: string; rpn: number }>;

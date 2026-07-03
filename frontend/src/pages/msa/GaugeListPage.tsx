@@ -22,7 +22,7 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { usePermission } from "../../hooks/usePermission";
 import type { Gauge } from "../../types";
 import { listGauges, getExpiringGauges, createGauge, deleteGauge } from "../../api/msa";
@@ -33,6 +33,7 @@ const { Option } = Select;
 
 export default function GaugeListPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t } = useTranslation("msa");
   const { t: tc } = useTranslation("common");
   const { canEdit } = usePermission();
@@ -99,6 +100,14 @@ export default function GaugeListPage() {
       setExpiryLoading(false);
     }
   };
+
+  // 仪表盘「MSA 量具到期」下钻：自动打开到期抽屉
+  useEffect(() => {
+    if (searchParams.get("expiring") === "30d") {
+      handleOpenExpiryDrawer();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDelete = async (id: string) => {
     try {
