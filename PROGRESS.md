@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-02
+**更新日期**: 2026-07-03
 **当前分支**: `fix/dashboard-admin-pages`（领先 `main` 125 个 commit，尚未合并）
-**最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移；P1-D 剩余 4 个 LLM 消费者迁移（5 任务 TDD 已落地，948 backend 测试绿）；**系统级 E2E 测试套件 M0+M1 已落地**（见下）
+**最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移；P1-D 剩余 4 个 LLM 消费者迁移（5 任务 TDD 已落地，948 backend 测试绿）；**系统级 E2E 测试套件 M0+M1 已落地**（见下）；**US-E2E-01 8D 全程闭环特性缺口清单已录入 + 已完成项标注**（见下，6 项已完成 / 11 项待补，可勾选跟踪）
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
 
@@ -18,6 +18,65 @@
 - **验证**：M1 套件 9 passed / 1 skipped（无 LLM 凭证时 AI spec skip-with-warning）；backend e2e 端点测试 2 passed；`make check` + e2e tsc 干净；生产门控 `[]`（TENANT_MODE=production 时 `/api/e2e/*` 不载入）。
 - **已知摩擦**：backend 登录限流（`auth.py` 10 次/5min 内存）在反复跑 Playwright 时可能让 `global.setup` 超时——重启 e2e backend 即恢复（未改生产代码）。
 - spec: `docs/superpowers/specs/2026-07-01-system-e2e-test-suite-design.md`；plan: `docs/superpowers/plans/2026-07-01-system-e2e-test-suite.md`；指南: `docs/e2e.md`。
+
+---
+
+## US-E2E-01 8D 全程闭环 — 特性缺口清单（2026-07-03 审计）
+
+对照 `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md`（v6，定稿）逐条审计当前系统实现的结果。**结论：故事结构上无法端到端通过**，需先补齐以下产品实现，再写故事级 spec `capa-story-closed-loop.spec.ts`。审计口径：代码路径（models/api/services/state_machines + frontend components/e2e），未跑运行时。
+
+**进度**：6 项已完成（约 40%） / 11 项待补（P0×4 / P1×6 / P2×1）
+
+### 已完成 ✅（约 40%）
+
+- [x] **CAPA 8D 状态机 D1→D2→…→D8_CLOSURE 严格顺序** —— `backend/app/state_machines/eightd_state.py`
+- [x] **权限模型**：D1-D6 需编辑权限、D7→D8 需 `canApprove('capa')` —— `backend/app/api/capa.py:189 advance_capa`
+- [x] **建单 + D 步字段 + 状态转换审计** —— `CAPAEightD` 模型 `models/capa.py:11-40`；服务层每次 advance 写 `AuditLog`
+- [x] **D2 AI 草拟按钮** —— `AIDraftButton.tsx` + `useAIDraft.ts`
+- [x] **D4/D5/D7 推荐 API + 面板骨架** —— `api/capa.py:276-461`；`D4RecPanel.tsx` / `D5RecPanel.tsx` / `D7RecPanel.tsx`（⚠️ 有骨架但缺阶段/来源丰富度，见"待补 P0-2/P0-3"）
+- [x] **3 类推荐源实现** —— `FMEAGraphSource`、`SemanticSearchSource`（pgvector + FTS RRF）、`HistoricalCAPASource`（已关闭 8D D2→D2 语义匹配）、`RuleEngineSource` + LLM 融合（`match_source: "llm"`）
+
+### 待补（P0 — 补齐后故事才能落地）
+
+1. [ ] **P0-1 D4 现场根因验证子流程** — 故事验收：「根因必须经现场验证才可确认；验证记录（方法/结果/证据）落库且可追溯；未验证的根因不能推进 D4→D5」
+   - 当前 `d4_root_cause` 只是单个 `Text` 列，**无** 方法/结果/证据字段，**无** 附件表关联，**无** D4→D5 阻断校验
+   - **交付物**：新表 `capa_root_cause_verification`（`capa_id, root_cause_text, method, result, evidence_attachments(JSONB), verified_by, verified_at, is_verified`）+ API（create/list/update） + `D4RecPanel` 增加「候选根因 → 验证卡」子面板（method 输入 / result 选择 / 证据附件上传）+ `advance_capa` 在 `D4_ROOT_CAUSE → D5_CORRECTION` 时校验至少 1 条 `is_verified=true` 记录
+2. [ ] **P0-2 AI 推荐 12 阶段可视化 DAG 面板** — 故事验收：「触发 D4/D5 推荐后，流程编排面板出现，展示 12 阶段（名称/来源/状态 pending·running·done·skipped·error/命中数·摘要）」
+   - 当前 `D4RecPanel.tsx` 仅按 `match_source` 分组（5 组），无 stage/status 概念；后端也无 stage 事件流
+   - **交付物**：新服务 `RecommendationOrchestrator` 把现有 sources 组织成 12 阶段执行图，返回 `{stages: [{name, source, status, hit_count, summary, error?}], items: [...]}`；`D4/D5RecPanel` 增加 `<RecommendationDAG>` 组件（12 节点 + 状态色 + 命中数徽标）；无 LLM 凭证时相关阶段 `status="skipped"` 且带 reason
+3. [ ] **P0-3 AI 推荐来源 provenance 落地到 UI + testid** — 故事验收：「最终推荐列表非空、**每条带来源标签**」
+   - 后端已有 `match_source`（linked/keyword/rule/llm/historical_capa/semantic_search/fmea_graph）但 UI 层无 `data-e2e` 钩子
+   - **交付物**：`<RecItem>` 渲染 `<Tag data-e2e="rec-source-{source}">` + 阶段命中位置徽标；每条推荐 payload 增加 `stage_index` 便于 UI 关联到 DAG 节点
+4. [ ] **P0-4 AI 采纳审计留痕** — 故事验收：「AI 推荐采纳 + 根因验证记录留痕（含来源）」
+   - `grep "adopt_recommendation|recommendation_audit"` = 0 命中；当前采纳只把文本追加到 `d4_root_cause`/`d5_correction`，未记录 which item / from which source / at what stage
+   - **交付物**：新表 `capa_ai_adoption`（`capa_id, d_step, adopted_text, source, stage_index, item_ref, adopted_by, adopted_at`）；D4/D5/D7 采纳按钮点击时 insert 记录并写 `AuditLog(action='ADOPT_RECOMMENDATION', metadata={source, stage})`
+
+### 待补（P1 — 4 类推荐源接入）
+
+5. [ ] **P1-5 SPC 异常关联推荐源**（故事阶段 6）— 已有 SPC 判异算法（`spc_service.py`），需新增 `SPCAnomalySource` 类：查询该产品线近 30 天判异记录 → 关联到候选失效模式 → 输出到 D4 推荐；无 SPC 数据时 `status="skipped"` reason="产品线暂无 SPC 图"
+6. [ ] **P1-6 IQC 来料检验推荐源**（故事阶段 8）— 已有 IQC 模型（`iqc_materials`），新增 `IQCSource`：本批 + 历史来料不良趋势 → D4 推荐；这两个（5、6）由于底层数据已在系统内，接入成本最低，建议先做
+7. [ ] **P1-7 供货历史推荐源**（故事阶段 9）— 已有 `supplier_quality_service`，新增 `SupplierHistorySource`：供应商评级/历史 PPM/SCAR 状态 → D4 推荐
+8. [ ] **P1-8 MES 设备/过程数据推荐源**（故事阶段 7）— `mes_connector.py` 存在但仅为连接骨架；需评估：先做 mock 数据源接入 vs 等真实 MES 集成
+9. [ ] **P1-9 同类型产品 KB 检索**（故事阶段 4）— 需按 `product_types` 主数据聚合跨工厂共享 KB，扩展 `SemanticSearchSource` 增加 `product_type` 过滤维度或新增 `SameTypeProductKBSource`
+10. [ ] **P1-10 经验教训库结构化**（故事阶段 5）— 当前 `HistoricalCAPASource` 只做 D2 语义匹配；建议新增 `capa_lessons_learned` 表（`capa_id, lesson_text, category, tags`）或从 D7/D8 抽取字段，让 lessons 检索更精准
+
+### 待补（P2 — 故事级 E2E）
+
+11. [ ] **P2-11 `capa-story-closed-loop.spec.ts`** — 用 `E2E-STORY-CAPA-001` 前缀（故事主角单号），覆盖 10 步主流程 + 12 阶段 DAG 结构断言（`data-e2e="rec-stage-{n}"` 状态属性）+ 7 条 TRANSITION 审计断言（`GET /api/audit-logs?target_id=...` 断 1 CREATE + 7 TRANSITION，D1-D7 operator=engineer、D7-D8 operator=manager）+ AI 采纳留痕断言（`capa_ai_adoption` 表通过 seed-state 端点回读）+ viewer 只读断言（`/capa` 列表看到关闭 8D、详情打开、`capa-create`/`capa-advance` 隐藏）
+    - LLM 无凭证时 AI 断言 `test.skip` + 核心闭环照跑（沿用 `_guards/ai-credentials.guard.spec.ts` 模式）
+    - 前置：现有 `capa.spec.ts` / `capa-ai-draft.spec.ts` 保持不变（M1 冒烟），故事 spec 与之并行
+
+### 补齐建议顺序
+
+`P0-1 (D4 验证) → P0-4 (采纳审计) → P0-2 (DAG 面板) → P0-3 (provenance UI) → P1-5/6 (SPC/IQC 源) → P2-11 (故事 spec) → P1-7~10 (MES/供货/同类型/lessons，视实际 ROI 决定)`
+
+理由：D4 验证 + 采纳审计是**数据模型缺口**，先落表结构；DAG + provenance 是**观测层缺口**，依赖 orchestrator；4 类源里 SPC/IQC 数据已在库最优先；MES/供货/同类型/lessons 优先级由业务实际数据密度决定。
+
+### 参考
+
+- 故事：`docs/user-stories/US-E2E-01-capa-8d-closed-loop.md`
+- 现有 E2E 覆盖度：`frontend/e2e/specs/m1-core/capa.spec.ts`（~10%，仅 D1→D2）+ `capa-ai-draft.spec.ts`（~5%，仅按钮可见性）
+- 相关既有代码：`backend/app/services/{capa_service,capa_recommendation_service,recommendation_sources}.py`、`frontend/src/components/capa/{D4,D5,D7}RecPanel.tsx`
 
 ---
 
