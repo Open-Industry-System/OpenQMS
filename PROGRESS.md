@@ -1,10 +1,23 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-01
+**更新日期**: 2026-07-02
 **当前分支**: `fix/dashboard-admin-pages`（领先 `main` 125 个 commit，尚未合并）
-**最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移；P1-D 剩余 4 个 LLM 消费者迁移（5 任务 TDD 已落地，948 backend 测试绿）
+**最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移；P1-D 剩余 4 个 LLM 消费者迁移（5 任务 TDD 已落地，948 backend 测试绿）；**系统级 E2E 测试套件 M0+M1 已落地**（见下）
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
+
+---
+
+## 系统级 E2E 测试套件（M0+M1，已落地）
+
+浏览器全栈 E2E（Playwright + 专用 docker-compose e2e profile），手动 `make e2e`，**不接入 CI**。
+
+- **M0 基建**：`docker-compose.e2e.yml`（独立库 qms_e2e + 卷 pgdata_e2e + 端口 5433/8001/5174，redis 不暴露，AI 服务 `profiles:["ai-infra"]`，`!override` 端口）；`E2E_MODE` config + 生产门控条件路由；确定性幂等 `seed_e2e`（2 工厂/产品线含 DC-DC-100 默认/5 账号 + UserProductLine/已知 PFMEA-E2E-001 + 8D-E2E-001）；`/api/e2e/seed-state` 只读（账号密码单一来源）+ `/api/e2e/cleanup` 白名单 FK 逆序单事务删（禁用 version 触发器）；`make e2e*` 目标（先 db/redis→migrate→backend/frontend）；`tsconfig.e2e.json` + `@types/node`；helpers/fixtures/global.setup（5 角色 UI 登录→storageState）+ guards。
+- **M1 流程**（3/4，④延后）：①登录+RBAC+工厂隔离 ②FMEA 生命周期 ③CAPA 8D 生命周期。④看板下钻 **延后**——下钻功能仅实现一半（`KPICard` 支持 onClick + 列表页读 query param 已有；widget→navigate 接线 + `dashboardDrilldown.ts` 未实现，设计 spec 状态待评审）。
+- **生产代码**：仅 `data-e2e` testid（`CAPAListPage` 的 `product_line_code` 为已批准的 bug 修复例外）。
+- **验证**：M1 套件 9 passed / 1 skipped（无 LLM 凭证时 AI spec skip-with-warning）；backend e2e 端点测试 2 passed；`make check` + e2e tsc 干净；生产门控 `[]`（TENANT_MODE=production 时 `/api/e2e/*` 不载入）。
+- **已知摩擦**：backend 登录限流（`auth.py` 10 次/5min 内存）在反复跑 Playwright 时可能让 `global.setup` 超时——重启 e2e backend 即恢复（未改生产代码）。
+- spec: `docs/superpowers/specs/2026-07-01-system-e2e-test-suite-design.md`；plan: `docs/superpowers/plans/2026-07-01-system-e2e-test-suite.md`；指南: `docs/e2e.md`。
 
 ---
 
