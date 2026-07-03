@@ -167,21 +167,34 @@ async def admin_user(db: AsyncSession, default_factory: Factory) -> User:
         ))
         await db.flush()
 
-    # Ensure admin role exists (FK dependency for User)
-    result = await db.execute(
-        select(RoleDefinition).where(RoleDefinition.role_key == "admin")
-    )
-    if result.scalar_one_or_none() is None:
-        db.add(
-            RoleDefinition(
-                role_key="admin",
-                name_zh="管理员",
-                name_en="Admin",
-                is_system=True,
+    # Ensure system roles exist (FK dependency for User). Mirrors app.seed._ROLES
+    # so tests match production: admin gets bypass_row_level_security=True, and
+    # all system roles are present so helpers like test_user_service._make_user
+    # (which default role_key="viewer") resolve a role row on a fresh CI DB.
+    role_result = await db.execute(select(RoleDefinition))
+    existing_roles = {r.role_key for r in role_result.scalars().all()}
+    _SYSTEM_ROLES = [
+        ("admin", "系统管理员", "System Admin", True, False, True, 1),
+        ("manager", "质量经理", "Quality Manager", True, True, False, 2),
+        ("viewer", "只读用户", "Viewer", True, False, False, 3),
+        ("customer_qe", "客户质量工程师", "Customer QE", True, True, False, 4),
+        ("supplier_qe", "供应商质量工程师", "Supplier QE", True, True, False, 5),
+        ("field_qe", "现场质量工程师", "Field QE", True, True, False, 6),
+        ("planning_qe", "前期策划质量工程师", "Planning QE", True, True, False, 7),
+    ]
+    for role_key, name_zh, name_en, is_system, is_editable, bypass, sort in _SYSTEM_ROLES:
+        if role_key not in existing_roles:
+            db.add(RoleDefinition(
+                role_key=role_key,
+                name_zh=name_zh,
+                name_en=name_en,
+                is_system=is_system,
+                is_editable=is_editable,
+                bypass_row_level_security=bypass,
+                sort_order=sort,
                 is_active=True,
-            )
-        )
-        await db.flush()
+            ))
+    await db.flush()
 
     # Fetch the persisted role to get its actual id
     result = await db.execute(
