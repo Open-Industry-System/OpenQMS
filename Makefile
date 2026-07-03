@@ -57,7 +57,14 @@ E2E_ENV := $(shell test -f .env.e2e && echo --env-file .env.e2e)
 .PHONY: e2e e2e-up e2e-seed e2e-down e2e-reset e2e-run
 
 e2e-up:
-	$(DC_E2E) $(E2E_ENV) up -d db redis backend frontend
+	$(DC_E2E) $(E2E_ENV) up -d db redis
+	@echo "Waiting for e2e db healthy..."
+	@for i in $$(seq 1 30); do \
+	  if $(DC_E2E) exec -T db pg_isready -U qms >/dev/null 2>&1; then echo "db healthy after $${i}s"; break; fi; \
+	  sleep 1; \
+	done
+	$(DC_E2E) $(E2E_ENV) run --rm backend alembic upgrade head
+	$(DC_E2E) $(E2E_ENV) up -d backend frontend
 
 e2e-seed:
 	$(DC_E2E) exec backend python -m app.seed_e2e
@@ -66,7 +73,6 @@ e2e-run:
 	cd $(FRONTEND_DIR) && if [ -f ../.env.e2e ]; then set -a && . ../.env.e2e && set +a; fi; npx playwright test $(TEST_ARGS)
 
 e2e: e2e-up
-	$(DC_E2E) exec backend alembic upgrade head
 	$(MAKE) e2e-seed
 	$(MAKE) e2e-run
 
@@ -74,5 +80,4 @@ e2e-down:
 	$(DC_E2E) down -v
 
 e2e-reset: e2e-down e2e-up
-	$(DC_E2E) exec backend alembic upgrade head
 	$(MAKE) e2e-seed

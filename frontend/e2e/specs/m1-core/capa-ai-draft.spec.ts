@@ -1,6 +1,18 @@
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "fs";
+import path from "path";
 import { loginAs } from "../../fixtures/auth";
 import { cleanupByPrefix } from "../../helpers/api-client";
+
+function hasLLMCreds(): boolean {
+  const envPath = path.resolve(process.cwd(), "e2e/.storage-state/e2e-env.json");
+  try {
+    const env = JSON.parse(readFileSync(envPath, "utf-8"));
+    return env.hasLLM === true;
+  } catch {
+    return false;
+  }
+}
 
 test.describe("CAPA AI Draft", () => {
   // Distinct prefix from Task 12 (E2E-M1-CAPA-*) so the two specs never collide on the
@@ -17,7 +29,7 @@ test.describe("CAPA AI Draft", () => {
   });
 
   test("AI draft button visible for engineer", async ({ page }) => {
-    await loginAs(page, "engineer");
+    test.skip(!hasLLMCreds(), "LLM creds not configured — AI draft button hidden w/o LLM");
     await page.evaluate(() => {
       localStorage.setItem("openqms_product_line", "DC-DC-100-E2E");
     });
