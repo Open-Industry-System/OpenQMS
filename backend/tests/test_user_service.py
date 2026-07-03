@@ -13,7 +13,16 @@ pytestmark = pytest.mark.requires_db
 
 
 async def _make_user(db, username, role_key="viewer", factory_id=None):
-    role = (await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == role_key))).scalar_one()
+    role = (await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == role_key))).scalar_one_or_none()
+    if role is None:
+        # Destructive tests (test_apqp_service/test_ppap_service/test_spc_fmea_match)
+        # Base.metadata.drop_all+create_all the shared test DB mid-suite, wiping
+        # 028's seeded roles. The last-admin tests below use only the `db` fixture
+        # (not admin_user, which re-seeds roles), so recreate the role idempotently
+        # to stay self-sufficient.
+        role = RoleDefinition(role_key=role_key, name_zh=role_key, name_en=role_key,
+                              is_system=True, is_active=True)
+        db.add(role); await db.flush()
     u = User(user_id=uuid.uuid4(), username=username, display_name=username,
              password_hash="h", role_id=role.id, legacy_role=role_key, is_active=True,
              factory_id=factory_id)

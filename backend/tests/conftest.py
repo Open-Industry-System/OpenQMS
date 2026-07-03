@@ -216,19 +216,25 @@ async def admin_user(db: AsyncSession, default_factory: Factory) -> User:
     await db.flush()
     await db.refresh(user)
 
-    # Ensure admin role has planning module permission (required by CP validation API)
+    # Ensure admin role has full permission matrix (admin = level 5 on every
+    # module). Migration 028 seeds this, but destructive tests that
+    # Base.metadata.drop_all+create_all the shared test DB (test_apqp_service,
+    # test_ppap_service, test_spc_fmea_match) wipe 028's rows mid-suite, leaving
+    # subsequent admin_client tests without CAPA/FMEA/etc. VIEW permission.
+    # Re-seeding here makes the fixture self-sufficient regardless of prior
+    # pollution. Mirrors 028_permission_matrix admin row.
     from sqlalchemy import select as _sel
 
+    from app.core.permissions import Module
     from app.models.role import RolePermission
-    perm_result = await db.execute(
-        _sel(RolePermission).where(
-            RolePermission.role_id == role.id,
-            RolePermission.module == "planning",
-        )
+    existing_perms = await db.execute(
+        _sel(RolePermission.module).where(RolePermission.role_id == role.id)
     )
-    if perm_result.scalar_one_or_none() is None:
-        db.add(RolePermission(role_id=role.id, module="planning", permission_level=5))
-        await db.flush()
+    have = {row[0] for row in existing_perms.all()}
+    for module in Module:
+        if module.value not in have:
+            db.add(RolePermission(role_id=role.id, module=module.value, permission_level=5))
+    await db.flush()
 
     return user
 
