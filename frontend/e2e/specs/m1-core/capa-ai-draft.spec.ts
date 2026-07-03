@@ -30,6 +30,7 @@ test.describe("CAPA AI Draft", () => {
 
   test("AI draft button visible for engineer", async ({ page }) => {
     test.skip(!hasLLMCreds(), "LLM creds not configured — AI draft button hidden w/o LLM");
+    await loginAs(page, "engineer");
     await page.evaluate(() => {
       localStorage.setItem("openqms_product_line", "DC-DC-100-E2E");
     });
